@@ -1,5 +1,5 @@
 import {
-  projectDisplayRecord,
+  createDisplayRecordProjector,
   type RuntimeEvent,
   reasoningHeadline,
   type ServerFrame,
@@ -34,6 +34,8 @@ export function computeSyncFrames(
   }
   frames.push({ v: 1, type: "sync.started", at, mode, afterRecordId: effectiveAfter });
 
+  const project = createDisplayRecordProjector();
+  for (const record of snapshot.records.slice(0, startIndex)) project(record);
   let representedHead: string | null = mode === "after" ? effectiveAfter : null;
   for (const record of snapshot.records.slice(startIndex)) {
     representedHead = record.id;
@@ -41,7 +43,7 @@ export function computeSyncFrames(
       v: 1,
       type: "history.record",
       at,
-      record: projectDisplayRecord(record),
+      record: project(record),
       retiredBlockIds: [],
       headId: representedHead,
     });

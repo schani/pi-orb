@@ -31,6 +31,8 @@ export interface DockerOrbHostProviderOptions {
   readonly image: string;
   /** Docker network shared by orb containers (and the control plane when containerized). */
   readonly network: string;
+  /** Isolated inventory on a shared daemon; omitted for ordinary local hosts. */
+  readonly inventoryScope?: string;
   /**
    * Control-plane base URL as reachable *from orb containers* (the broker
    * endpoint, docs/credentials.md). When omitted, containers use
@@ -50,6 +52,7 @@ export interface DockerOrbHostProviderOptions {
 }
 
 const ORB_LABEL = "pi-orb.orb-id";
+const INVENTORY_SCOPE_LABEL = "pi-orb.inventory-scope";
 const INCARNATION_LABEL = "pi-orb.host-incarnation";
 const SPEC_FINGERPRINT_LABEL = "pi-orb.host-spec-fingerprint";
 const IMAGE_SKILLS_DIR = "/opt/pi-orb/skills";
@@ -269,6 +272,60 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     );
   }
 
+  private scopeArgs(flag: "--label" | "--filter"): string[] {
+    const scope = this.options.inventoryScope;
+    return scope === undefined
+      ? []
+      : [flag, `${flag === "--filter" ? "label=" : ""}${INVENTORY_SCOPE_LABEL}=${scope}`];
+  }
+
+  private ownsScope(labels: Record<string, unknown>): boolean {
+    return labels[INVENTORY_SCOPE_LABEL] === this.options.inventoryScope;
+  }
+
+  private inspectOwnedVolume(
+    operation: "provision" | "destroy",
+    orbId: string,
+    context: OperationContext,
+  ): ResultAsync<boolean, OrbHostProviderError> {
+    const run = async (): Promise<Result<boolean, OrbHostProviderError>> => {
+      const name = volumeName(orbId);
+      const inspected = await this.exec(operation, ["volume", "inspect", name], context);
+      if (inspected.isErr()) {
+        if (/no such volume/i.test(inspected.error.message)) return ok(false);
+        return err(inspected.error);
+      }
+      const parsed = Result.fromThrowable(
+        () => JSON.parse(inspected.value.stdout) as unknown,
+        () => providerError(operation, "operation_failed", "unparseable volume inspect", false),
+      )();
+      if (parsed.isErr()) return err(parsed.error);
+      const first = Array.isArray(parsed.value) ? parsed.value[0] : undefined;
+      const labels =
+        typeof first === "object" && first !== null
+          ? (first as Record<string, unknown>)["Labels"]
+          : undefined;
+      if (
+        typeof labels !== "object" ||
+        labels === null ||
+        Array.isArray(labels) ||
+        (labels as Record<string, unknown>)[ORB_LABEL] !== orbId ||
+        !this.ownsScope(labels as Record<string, unknown>)
+      ) {
+        return err(
+          providerError(
+            operation,
+            "conflict",
+            `volume ${name} ownership mismatch for orb ${orbId}`,
+            false,
+          ),
+        );
+      }
+      return ok(true);
+    };
+    return new ResultAsync(run());
+  }
+
   private inspect(
     operation: OrbHostProviderError["operation"],
     name: string,
@@ -289,7 +346,16 @@ export class DockerOrbHostProvider implements OrbHostProvider {
       if (parsed.isErr()) return err(parsed.error);
       const first = Array.isArray(parsed.value) ? parsed.value[0] : undefined;
       if (typeof first !== "object" || first === null) return ok(null);
-      return ok(first as Record<string, unknown>);
+      const info = first as Record<string, unknown>;
+      const labels = ((info["Config"] as Record<string, unknown> | undefined)?.["Labels"] ??
+        {}) as Record<string, unknown>;
+      if (!this.ownsScope(labels)) {
+        if (operation === "list" || operation === "observe") return ok(null);
+        return err(
+          providerError(operation, "conflict", `container ${name} inventory scope mismatch`, false),
+        );
+      }
+      return ok(info);
     };
     return new ResultAsync(run());
   }
@@ -393,7 +459,15 @@ export class DockerOrbHostProvider implements OrbHostProvider {
   ): Promise<Result<{ name: string; incarnation: number | null }[], OrbHostProviderError>> {
     const listed = await this.exec(
       operation,
-      ["ps", "--all", "--filter", `label=${ORB_LABEL}=${orbId}`, "--format", "{{.Names}}"],
+      [
+        "ps",
+        "--all",
+        "--filter",
+        `label=${ORB_LABEL}=${orbId}`,
+        ...this.scopeArgs("--filter"),
+        "--format",
+        "{{.Names}}",
+      ],
       context,
     );
     if (listed.isErr()) return err(listed.error);
@@ -491,10 +565,24 @@ export class DockerOrbHostProvider implements OrbHostProvider {
       if (tailscaleEnv.isErr()) return err(tailscaleEnv.error);
       const volume = await this.exec(
         "provision",
-        ["volume", "create", "--label", `${ORB_LABEL}=${request.orbId}`, volumeName(request.orbId)],
+        [
+          "volume",
+          "create",
+          "--label",
+          `${ORB_LABEL}=${request.orbId}`,
+          ...this.scopeArgs("--label"),
+          volumeName(request.orbId),
+        ],
         context,
       );
       if (volume.isErr()) return err(volume.error);
+      const ownedVolume = await this.inspectOwnedVolume("provision", request.orbId, context);
+      if (ownedVolume.isErr()) return err(ownedVolume.error);
+      if (!ownedVolume.value) {
+        return err(
+          providerError("provision", "invalid_state", "volume is absent after create", false),
+        );
+      }
       const runtimeToken = randomBytes(32).toString("hex");
       const created = await this.exec(
         "provision",
@@ -505,6 +593,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
           name,
           "--label",
           `${ORB_LABEL}=${request.orbId}`,
+          ...this.scopeArgs("--label"),
           "--label",
           `${INCARNATION_LABEL}=${request.incarnation}`,
           "--label",
@@ -628,6 +717,9 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError> {
     const run = async (): Promise<Result<void, OrbHostProviderError>> => {
+      const inspected = await this.inspect("stop", ref.resourceId, context);
+      if (inspected.isErr()) return err(inspected.error);
+      if (inspected.value === null) return ok(undefined);
       const stopped = await this.exec("stop", ["stop", "--time", "10", ref.resourceId], context);
       if (stopped.isErr()) {
         // Stopping an absent or already-stopped container is idempotent success.
@@ -679,35 +771,9 @@ export class DockerOrbHostProvider implements OrbHostProvider {
       }
 
       const volumeNameForOrb = volumeName(orbId);
-      const inspectedVolume = await this.exec(
-        "destroy",
-        ["volume", "inspect", volumeNameForOrb],
-        context,
-      );
-      if (inspectedVolume.isErr()) {
-        if (/no such volume/i.test(inspectedVolume.error.message)) return ok(undefined);
-        return err(inspectedVolume.error);
-      }
-      const parsed = Result.fromThrowable(
-        () => JSON.parse(inspectedVolume.value.stdout) as unknown,
-        () => providerError("destroy", "operation_failed", "unparseable volume inspect", false),
-      )();
-      if (parsed.isErr()) return err(parsed.error);
-      const first = Array.isArray(parsed.value) ? parsed.value[0] : undefined;
-      const labels =
-        typeof first === "object" && first !== null
-          ? (((first as Record<string, unknown>)["Labels"] ?? {}) as Record<string, unknown>)
-          : {};
-      if (labels[ORB_LABEL] !== orbId) {
-        return err(
-          providerError(
-            "destroy",
-            "conflict",
-            `volume ${volumeNameForOrb} is not labeled for orb ${orbId}`,
-            false,
-          ),
-        );
-      }
+      const inspectedVolume = await this.inspectOwnedVolume("destroy", orbId, context);
+      if (inspectedVolume.isErr()) return err(inspectedVolume.error);
+      if (!inspectedVolume.value) return ok(undefined);
       const volume = await this.exec(
         "destroy",
         ["volume", "rm", "--force", volumeNameForOrb],
@@ -751,7 +817,15 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     const run = async (): Promise<Result<OrbHostObservation[], OrbHostProviderError>> => {
       const listed = await this.exec(
         "list",
-        ["ps", "--all", "--filter", `label=${ORB_LABEL}`, "--format", "{{.Names}}"],
+        [
+          "ps",
+          "--all",
+          "--filter",
+          `label=${ORB_LABEL}`,
+          ...this.scopeArgs("--filter"),
+          "--format",
+          "{{.Names}}",
+        ],
         context,
       );
       if (listed.isErr()) return err(listed.error);

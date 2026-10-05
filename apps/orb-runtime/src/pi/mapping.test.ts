@@ -1,4 +1,4 @@
-import { HistoryRecordSchema } from "@pi-orb/protocol";
+import { HistoryRecordSchema, projectDisplayRecord, projectRecordDetail } from "@pi-orb/protocol";
 import { Check } from "typebox/value";
 import { describe, expect, it } from "vitest";
 import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
@@ -19,6 +19,39 @@ function expectMapped(entry: unknown, exactNative = true) {
 }
 
 describe("Pi entry mapping", () => {
+  it.each(["", " \n\t "])(
+    "keeps normalized native thinking %j while omitting its public row",
+    (thinking) => {
+      const native = {
+        ...base,
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking, redacted: false },
+            { type: "toolCall", id: "call-1", name: "read", arguments: { path: "/file" } },
+          ],
+        },
+      };
+      const record = expectMapped(native);
+      if (record.type !== "message") throw new Error("expected message");
+      expect(record.content[0]).toEqual({ type: "reasoning", text: thinking, redacted: false });
+      expect(record.overflow.native).toEqual(native);
+      expect(projectDisplayRecord(record)).toMatchObject({
+        id: base.id,
+        parentId: base.parentId,
+        content: [{ type: "tool_call", detailKey: `${base.id}:1` }],
+      });
+      expect(projectRecordDetail(record, `${base.id}:0`)).toEqual({
+        type: "reasoning",
+        text: thinking,
+      });
+      expect(projectRecordDetail(record, `${base.id}:1`)).toEqual({
+        type: "tool_call",
+        arguments: { path: "/file" },
+      });
+    },
+  );
   it("maps a user message with string content", () => {
     const record = expectMapped({
       ...base,

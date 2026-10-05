@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   capHeadline,
+  createDisplayRecordProjector,
   projectDisplayRecord,
+  projectDisplayRecords,
   projectRecordDetail,
   projectRecordImage,
 } from "./display.ts";
@@ -36,6 +38,64 @@ const record: HistoryRecord = {
 };
 
 describe("browser display projection", () => {
+  it.each(["", " \n\t "])(
+    "omits empty public reasoning %j without changing identity or detail indices",
+    (text) => {
+      const source: HistoryRecord = {
+        ...record,
+        content: [
+          { type: "reasoning", text, overflow: { native: { type: "thinking", thinking: text } } },
+          { type: "tool_call", callId: "child", name: "subagent", arguments: { prompt: "task" } },
+        ],
+      };
+      const before = structuredClone(source);
+      expect(projectDisplayRecord(source)).toMatchObject({
+        id: source.id,
+        parentId: source.parentId,
+        content: [{ type: "tool_call", detailKey: "r1:1" }],
+      });
+      expect(projectRecordDetail(source, "r1:0")).toEqual({ type: "reasoning", text });
+      expect(projectRecordDetail(source, "r1:1")).toEqual({
+        type: "tool_call",
+        arguments: { prompt: "task" },
+      });
+      expect(source).toEqual(before);
+      const outcome: HistoryRecord = {
+        ...record,
+        id: "outcome",
+        parentId: "r1",
+        role: "tool",
+        content: [
+          { type: "reasoning", text },
+          { type: "tool_result", callId: "child", content: [{ type: "text", text: "Completed" }] },
+        ],
+      };
+      const batch = projectDisplayRecords([source, outcome]);
+      expect(batch[1]).toMatchObject({
+        content: [{ type: "tool_result", headline: null, detailKey: "outcome:1" }],
+      });
+      const live = createDisplayRecordProjector();
+      expect([live(source), live(outcome)]).toEqual(batch);
+    },
+  );
+
+  it("preserves identity-only records, redacted notices and headingless public bodies", () => {
+    const empty: HistoryRecord = { ...record, content: [{ type: "reasoning", text: "" }] };
+    expect(projectDisplayRecord(empty)).toMatchObject({ id: "r1", parentId: "r0", content: [] });
+    const visible: HistoryRecord = {
+      ...record,
+      content: [
+        { type: "reasoning", text: "Plain public reasoning" },
+        { type: "reasoning", text: "", redacted: true },
+      ],
+    };
+    expect(projectDisplayRecord(visible)).toMatchObject({
+      content: [
+        { type: "reasoning", headline: "", detailKey: "r1:0" },
+        { type: "reasoning", headline: "", detailKey: "r1:1", redacted: true },
+      ],
+    });
+  });
   it("projects only capped reasoning headings and hides redacted headings", () => {
     const source: HistoryRecord = {
       ...record,

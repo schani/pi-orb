@@ -9,7 +9,6 @@ import {
   PROJECT_NAME_MAX_CHARS,
   ProjectSecretNameSchema,
   PutProjectSecretRequestSchema,
-  projectDisplayRecord,
   type SystemView,
   UpdateOrbRequestSchema,
   UpdateProjectRequestSchema,
@@ -20,6 +19,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { Result } from "neverthrow";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
+import { enrichActivityHeadlines } from "../domain/activity-headlines.ts";
 import {
   readDisplayDetail,
   readDisplayImage,
@@ -55,6 +55,7 @@ import {
   publishSigningKey,
   type RotationError,
 } from "../domain/signing-keys.ts";
+import { registerActivityHeadlineRoutes } from "./activity-headline-routes.ts";
 import { requirePrincipal } from "./browser-identity.ts";
 import { sendHistoryStream } from "./history-stream.ts";
 import { registerProjectInstructionsRoutes } from "./project-instructions.ts";
@@ -282,6 +283,7 @@ export function registerRoutes(
   app.get("/api/v1/system", async (_request, reply) => reply.send(system));
 
   registerProjectInstructionsRoutes(app, task, deps.projectInstructions);
+  registerActivityHeadlineRoutes(app, task, deps);
 
   app.get(PERSONAL_INSTRUCTIONS_PATH, async (request, reply) => {
     reply.header("cache-control", "no-store");
@@ -938,7 +940,15 @@ export function registerRoutes(
         cursor: snapshot.value.cursor,
         headId: snapshot.value.headId,
       },
-      snapshot.value.records.map(projectDisplayRecord),
+      (
+        await enrichActivityHeadlines(
+          task,
+          deps,
+          request.params.orbId,
+          snapshot.value.session?.id ?? null,
+          snapshot.value.records,
+        )
+      )._unsafeUnwrap(),
     );
   });
 }

@@ -1,0 +1,221 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { afterEach, test } from "node:test";
+import { applyDependencyPatches } from "./apply-dependency-patches.mjs";
+
+const repository = resolve(import.meta.dirname, "..");
+const directories = [];
+afterEach(() => {
+  for (const root of directories.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function fixture() {
+  const root = mkdtempSync(join(tmpdir(), "pi-orb-dependency-patches-"));
+  directories.push(root);
+  mkdirSync(join(root, "patches"));
+  mkdirSync(join(root, "node_modules/example"), { recursive: true });
+  writeFileSync(join(root, "node_modules/example/index.js"), "before\n");
+  writeFileSync(
+    join(root, "patches/example+1.0.0.patch"),
+    "diff --git a/node_modules/example/index.js b/node_modules/example/index.js\n" +
+      "--- a/node_modules/example/index.js\n+++ b/node_modules/example/index.js\n" +
+      "@@ -1 +1 @@\n-before\n+after\n",
+  );
+  return root;
+}
+
+test("applies patches without a Git repository and accepts already-applied patches", () => {
+  const root = fixture();
+  const first = applyDependencyPatches(root);
+  assert.equal(first.isOk(), true);
+  assert.deepEqual(first.value, [{ patch: "example+1.0.0.patch", status: "applied" }]);
+  assert.equal(readFileSync(join(root, "node_modules/example/index.js"), "utf8"), "after\n");
+  const second = applyDependencyPatches(root);
+  assert.equal(second.isOk(), true);
+  assert.deepEqual(second.value, [{ patch: "example+1.0.0.patch", status: "already_applied" }]);
+});
+
+function nestedFixture() {
+  const ancestor = fixture();
+  assert.equal(spawnSync("git", ["init", "--quiet"], { cwd: ancestor }).status, 0);
+  const root = join(ancestor, "snapshot");
+  mkdirSync(root);
+  cpSync(join(ancestor, "node_modules"), join(root, "node_modules"), { recursive: true });
+  cpSync(join(ancestor, "patches"), join(root, "patches"), { recursive: true });
+  return { ancestor, root };
+}
+
+for (const symlinked of [false, true]) {
+  test(`patches a ${symlinked ? "symlinked " : ""}snapshot beneath an ancestor checkout`, () => {
+    const { ancestor, root } = nestedFixture();
+    const installation = symlinked ? join(ancestor, "snapshot-link") : root;
+    if (symlinked) symlinkSync(root, installation, "dir");
+    const first = applyDependencyPatches(installation);
+    assert.equal(first.isOk(), true, JSON.stringify(first.error));
+    assert.deepEqual(first.value, [{ patch: "example+1.0.0.patch", status: "applied" }]);
+    assert.equal(readFileSync(join(root, "node_modules/example/index.js"), "utf8"), "after\n");
+    assert.equal(readFileSync(join(ancestor, "node_modules/example/index.js"), "utf8"), "before\n");
+    assert.deepEqual(applyDependencyPatches(installation).value, [
+      { patch: "example+1.0.0.patch", status: "already_applied" },
+    ]);
+    writeFileSync(join(root, "node_modules/example/index.js"), "drift\n");
+    assert.equal(applyDependencyPatches(installation).error.type, "patch_not_applicable");
+    assert.equal(readFileSync(join(root, "node_modules/example/index.js"), "utf8"), "drift\n");
+  });
+}
+
+test("CLI ignores inherited repository selection", () => {
+  const { ancestor, root } = nestedFixture();
+  mkdirSync(join(root, "scripts"));
+  cpSync(
+    join(repository, "scripts/apply-dependency-patches.mjs"),
+    join(root, "scripts/apply-dependency-patches.mjs"),
+  );
+  symlinkSync(
+    join(repository, "node_modules/neverthrow"),
+    join(root, "node_modules/neverthrow"),
+    "dir",
+  );
+  const result = spawnSync(process.execPath, [join(root, "scripts/apply-dependency-patches.mjs")], {
+    cwd: root,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_DIR: join(ancestor, ".git"),
+      GIT_WORK_TREE: ancestor,
+      GIT_COMMON_DIR: join(ancestor, ".git"),
+      GIT_INDEX_FILE: join(ancestor, ".git/index"),
+      GIT_PREFIX: "snapshot/",
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readFileSync(join(root, "node_modules/example/index.js"), "utf8"), "after\n");
+  assert.equal(readFileSync(join(ancestor, "node_modules/example/index.js"), "utf8"), "before\n");
+});
+
+test("rejects drift without changing the dependency", () => {
+  const root = fixture();
+  const target = join(root, "node_modules/example/index.js");
+  writeFileSync(target, "unexpected\n");
+  const result = applyDependencyPatches(root);
+  assert.equal(result.isErr(), true);
+  assert.equal(result.error.type, "patch_not_applicable");
+  assert.equal(result.error.patch, "example+1.0.0.patch");
+  assert.match(result.error.message, /patch does not apply/);
+  assert.equal(readFileSync(target, "utf8"), "unexpected\n");
+});
+
+test("rejects missing or empty patch directories", () => {
+  const root = fixture();
+  rmSync(join(root, "patches/example+1.0.0.patch"));
+  assert.equal(applyDependencyPatches(root).error.type, "patches_missing");
+  rmSync(join(root, "patches"), { recursive: true });
+  assert.equal(applyDependencyPatches(root).error.type, "patches_unreadable");
+});
+
+test("CLI resolves its installation root even when launched from a workspace", () => {
+  const root = fixture();
+  mkdirSync(join(root, "scripts"));
+  mkdirSync(join(root, "apps/workspace"), { recursive: true });
+  cpSync(
+    join(repository, "scripts/apply-dependency-patches.mjs"),
+    join(root, "scripts/apply-dependency-patches.mjs"),
+  );
+  symlinkSync(
+    join(repository, "node_modules/neverthrow"),
+    join(root, "node_modules/neverthrow"),
+    "dir",
+  );
+  assert.equal(spawnSync("git", ["init", "--quiet"], { cwd: root }).status, 0);
+  const result = spawnSync(process.execPath, [join(root, "scripts/apply-dependency-patches.mjs")], {
+    cwd: join(root, "apps/workspace"),
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /example\+1\.0\.0\.patch: applied/);
+  assert.equal(readFileSync(join(root, "node_modules/example/index.js"), "utf8"), "after\n");
+  writeFileSync(join(root, "node_modules/example/index.js"), "drift\n");
+  const failure = spawnSync(
+    process.execPath,
+    [join(root, "scripts/apply-dependency-patches.mjs")],
+    {
+      cwd: root,
+      encoding: "utf8",
+    },
+  );
+  assert.equal(failure.status, 1);
+  assert.match(failure.stderr, /example\+1\.0\.0\.patch/);
+});
+
+test("CLI reports a missing Git executable as a typed installation failure", () => {
+  const root = fixture();
+  mkdirSync(join(root, "scripts"));
+  cpSync(
+    join(repository, "scripts/apply-dependency-patches.mjs"),
+    join(root, "scripts/apply-dependency-patches.mjs"),
+  );
+  symlinkSync(
+    join(repository, "node_modules/neverthrow"),
+    join(root, "node_modules/neverthrow"),
+    "dir",
+  );
+  const result = spawnSync(process.execPath, [join(root, "scripts/apply-dependency-patches.mjs")], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, PATH: join(root, "missing-bin") },
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /example\+1\.0\.0\.patch: git apply could not complete/);
+  assert.match(result.stderr, /ENOENT/);
+  assert.equal(readFileSync(join(root, "node_modules/example/index.js"), "utf8"), "before\n");
+});
+
+for (const nested of [false, true]) {
+  test(`preserves all three shipped patches in a ${nested ? "nested" : "standalone"} install`, () => {
+    const root = nested ? nestedFixture().root : fixture();
+    rmSync(join(root, "patches"), { recursive: true });
+    cpSync(join(repository, "patches"), join(root, "patches"), { recursive: true });
+    for (const patch of [
+      "@earendil-works+pi-ai+1.0.0.patch",
+      "@earendil-works+pi-coding-agent+1.0.0.patch",
+      "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
+    ]) {
+      const source = readFileSync(join(root, "patches", patch), "utf8");
+      for (const line of source.split("\n")) {
+        if (!line.startsWith("diff --git ")) continue;
+        const path = line.split(" ")[2].slice(2);
+        mkdirSync(join(root, path, ".."), { recursive: true });
+        cpSync(join(repository, path), join(root, path));
+      }
+      const reversed = spawnSync("git", ["apply", "--reverse", join(root, "patches", patch)], {
+        cwd: root,
+        encoding: "utf8",
+        env: {
+          PATH: process.env.PATH,
+          GIT_CEILING_DIRECTORIES: dirname(root),
+          GIT_CONFIG_NOSYSTEM: "1",
+          GIT_CONFIG_GLOBAL: "/dev/null",
+        },
+      });
+      assert.equal(reversed.status, 0, reversed.stderr);
+    }
+    const result = applyDependencyPatches(root);
+    assert.equal(result.isOk(), true, JSON.stringify(result.error));
+    assert.equal(result.value.length, 3);
+    assert.ok(result.value.every(({ status }) => status === "applied"));
+    assert.ok(
+      applyDependencyPatches(root).value.every(({ status }) => status === "already_applied"),
+    );
+  });
+}

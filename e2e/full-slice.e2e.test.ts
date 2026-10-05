@@ -59,6 +59,7 @@ const PG_CONTAINER = `pi-orb-e2e-pg-${randomUUID()}`;
 const PG_PORT = 5436;
 const CP_PORT = 7144;
 const NETWORK = "pi-orb";
+const DOCKER_INVENTORY_SCOPE = randomUUID();
 const RUNTIME_IMAGE = "pi-orb-runtime:dev";
 const REPOSITORY_URL = "https://github.com/schani/pi-orb";
 const PROCESS_BACKEND = process.env["PI_ORB_E2E_BACKEND"] === "process";
@@ -660,6 +661,7 @@ beforeAll(async () => {
     fake,
     nameFake,
     dockerNetwork: NETWORK,
+    dockerInventoryScope: DOCKER_INVENTORY_SCOPE,
     runtimeImage: RUNTIME_IMAGE,
     launchFailureMarker: ".pi-orb-e2e-launch-failure.json",
     hostSpecGeneration: 1,
@@ -705,6 +707,7 @@ async function restartControlPlaneWithSpec(spec: string, generation: number): Pr
     fake,
     nameFake,
     dockerNetwork: NETWORK,
+    dockerInventoryScope: DOCKER_INVENTORY_SCOPE,
     runtimeImage: RUNTIME_IMAGE,
     launchFailureMarker: ".pi-orb-e2e-launch-failure.json",
     hostSpecGeneration: generation,

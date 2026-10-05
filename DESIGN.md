@@ -114,6 +114,7 @@ Subsystem designs:
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
 - [docs/multi-user.md](docs/multi-user.md) — trusted-company identity, owned projects/settings, per-user credentials, and tailnet options
 - [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
+- [docs/activity-headlines.md](docs/activity-headlines.md) — locally implemented request-owned Luna activity headlines, durable metadata and bounded local qualification
 - [docs/transcript-cache.md](docs/transcript-cache.md) — bounded browser transcript caching, ownership/freshness rules, compact transport measurements and qualification
 - [docs/agent-settings.md](docs/agent-settings.md) — implemented lifecycle-cluster header, model/thinking authority, persistence, mutation and DST qualification
 - [docs/personal-instructions.md](docs/personal-instructions.md) — account-wide `AGENTS.md`, Home gear editor, next-start adoption and test-first qualification
@@ -134,6 +135,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-05-e2e-docker-inventory-isolation.md](docs/postmortems/2026-10-05-e2e-docker-inventory-isolation.md) — fresh fixture inventory crossed the shared daemon's ownership boundary; scoped gate preserves foreign resources
 - [docs/postmortems/2026-10-04-webkit-read-drawer-hit-test.md](docs/postmortems/2026-10-04-webkit-read-drawer-hit-test.md) — visible read summary blocked by markdown pointer interception; root cause unproved
 - [docs/postmortems/2026-10-03-cached-orb-navigation.md](docs/postmortems/2026-10-03-cached-orb-navigation.md) — cached switching still pays metadata, remount, accessibility and 1Password focus costs; investigation only
 - [docs/postmortems/2026-10-02-control-plane-patch-image-build.md](docs/postmortems/2026-10-02-control-plane-patch-image-build.md) — runtime-only patch broke the control-plane image build before apply; restrict its patch set

@@ -88,6 +88,7 @@ DELETE /api/v1/orbs/:orbId
 
 GET  /api/v1/orbs/:orbId/history
 GET  /api/v1/orbs/:orbId/details/:recordId/:detailKey?sessionId=...
+POST /api/v1/orbs/:orbId/headlines/:recordId/:detailKey?sessionId=...
 GET  /api/v1/orbs/:orbId/details/live/:operationId/:blockId?sessionId=...
 GET  /api/v1/orbs/:orbId/images/:recordId/:detailKey/:imageIndex?sessionId=...
 GET  /api/v1/orbs/:orbId/hosted-files
@@ -279,6 +280,10 @@ interface DisplayHistoryView {
 The browser history response and live `history.record` frames carry `DisplayRecord`, not full `HistoryRecord`. `DisplayHistoryView` retains the existing cursor/head envelope with nullable minimal session identity and no version field. The in-orb transcript CLI and runtime replication pull retain complete records. Details and images use the routes above; each requires `sessionId` to fence a replaced session. A committed response is `{v:1,sessionId,recordId,detailKey,state:"committed",body}`; live reads return `{v:1,sessionId,operationId,blockId,state:"running"|"completed"|"unavailable",body?}`. The committed body is a typed reasoning, tool-call, tool-result, image, compaction, or subagent detail. Live bodies are reasoning or tool-result progress. Images return binary bytes with a safe image Content-Type; no base64 enters JSON display responses. Successful responses are private, no-store.
 
 The control plane reads one addressed record from the replica before considering the current runtime. Missing orb/detail returns typed 404, session mismatch 409, unavailable runtime/storage 503; malformed query 400. Errors use `ControlPlaneHttpError` and the detail-read failure is logged as a content-free `display-detail-read-failed` edge with source and reason. A stopped/archived orb never wakes for a detail. See `docs/runtime-protocol.md` for runtime routes and `docs/web-ui.md` for disclosure polling.
+
+### Lazy activity headlines (implemented locally 2026-10-04; full qualification in progress, not deployed)
+
+The headline POST accepts source identity only, no body; success is `{headline: string}`. Authorize before cache/source access, use the project owner's Luna credentials, and never wake compute. Each independent POST owns a 30-second monotonic deadline, with missing replicated-source rereads every 1 second; first-success atomic cache insertion returns the stored winner. Required internal generator context `deadlineAt` preserves the original expiry and guards fresh Luna IO after owner-credential lookup, even with a late abort callback; no wire/global operation-context change. Once the target exists, one internal `atRecordId` snapshot supplies its ancestors, including an earlier inactive branch, without altering default HTTP history. Browser history bulk-enriches cached strings without inference; cache-read failure leaves null and emits no per-read lifecycle event. Only successful POST cache hits are silent; every terminal typed failure, including cache-read failure, emits one content-free outcome. Typed failures, cancellation and the complete contract are in `docs/activity-headlines.md`.
 
 ### Project secrets (decided and implemented 2026-08-28)
 

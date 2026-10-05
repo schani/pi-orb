@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  getActivityHeadline,
   getCommittedImage,
   getSystem,
   listHostedFiles,
@@ -7,6 +8,63 @@ import {
   probeSession,
 } from "./api.ts";
 import { readBrowserSession, resetBrowserSessionForTest } from "./session.ts";
+
+describe("activity headline HTTP", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("posts encoded identity only with the caller's abort signal", async () => {
+    const controller = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string, init?: RequestInit) => {
+        expect(path).toBe(
+          "/api/v1/orbs/orb%2F1/headlines/record%2F1/key%3A0?sessionId=session%2F1",
+        );
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBeUndefined();
+        expect(init?.signal).toBe(controller.signal);
+        expect(new Headers(init?.headers).get("x-requested-with")).toBe("XMLHttpRequest");
+        return new Response(JSON.stringify({ headline: "" }));
+      }),
+    );
+    expect(
+      (
+        await getActivityHeadline("orb/1", "record/1", "key:0", "session/1", controller.signal)
+      )._unsafeUnwrap(),
+    ).toEqual({ headline: "" });
+  });
+  it("keeps typed CP errors and catches rejected transport at the API boundary", async () => {
+    const signal = new AbortController().signal;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: { code: "unavailable", message: "unavailable", retryable: true },
+            }),
+            { status: 503 },
+          ),
+      ),
+    );
+    expect((await getActivityHeadline("o", "r", "k", "s", signal))._unsafeUnwrapErr()).toEqual({
+      type: "http",
+      status: 503,
+      code: "unavailable",
+      message: "unavailable",
+      retryable: true,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new DOMException("aborted", "AbortError");
+      }),
+    );
+    expect((await getActivityHeadline("o", "r", "k", "s", signal))._unsafeUnwrapErr()).toEqual({
+      type: "network",
+      message: "aborted",
+    });
+  });
+});
 
 describe("API session handling", () => {
   beforeEach(resetBrowserSessionForTest);

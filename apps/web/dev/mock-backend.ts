@@ -20,6 +20,7 @@ import {
   type ProjectInstructions,
   type ProjectView,
   projectDisplayRecord,
+  projectDisplayRecords,
   projectRecordDetail,
   projectRecordImage,
   RUNTIME_SUBPROTOCOL,
@@ -40,6 +41,7 @@ const PROJECT_ID = "frontend-fixture-project";
 const ORB_ID = "frontend-fixture-orb";
 const AUTH_ORB_ID = "frontend-auth-copy-test";
 const ARCHIVED_ORB_ID = "frontend-archived-orb";
+const HEADLINE_ORB_ID = "frontend-activity-headlines";
 const NEW_ORB_STARTUP_DELAY_MS = 10_000;
 const now = () => new Date().toISOString();
 
@@ -52,6 +54,14 @@ const failedPreview = fixturePng("failed");
 const attachmentPreview = fixturePng("attachment");
 
 interface MockState {
+  headlines: {
+    cache: Map<string, string>;
+    markers: Map<string, string | null | undefined>;
+    pendingSources: Map<string, HistoryRecord>;
+    waiting: Map<string, Set<ServerResponse>>;
+    fail: boolean;
+    sessionId: string;
+  };
   projects: Map<string, ProjectView>;
   orbs: Map<string, OrbView>;
   histories: Map<string, HistoryRecord[]>;
@@ -683,6 +693,14 @@ function initialState(): MockState {
     ],
   ]);
   return {
+    headlines: {
+      cache: new Map(),
+      markers: new Map(),
+      pendingSources: new Map(),
+      waiting: new Map(),
+      fail: false,
+      sessionId: `fixture-session-${HEADLINE_ORB_ID}`,
+    },
     projects: new Map([
       [project.id, project],
       ...fleetProjects.map((entry): [string, ProjectView] => [entry.id, entry]),
@@ -799,6 +817,262 @@ function updateOrb(orb: OrbView, state: OrbView["state"]): OrbView {
   };
 }
 
+// Opt-in transport fixture: production projection stays canonical; only the control
+// endpoint may inject the artificial marker used to prove generic frontend behavior.
+function fixtureSessionId(state: MockState, orbId: string) {
+  return orbId === HEADLINE_ORB_ID ? state.headlines.sessionId : `fixture-session-${orbId}`;
+}
+function headlineDisplay(state: MockState, orbId: string, record: HistoryRecord, cached: boolean) {
+  if (orbId !== HEADLINE_ORB_ID) return projectDisplayRecord(record);
+  const records = [
+    ...(state.histories.get(orbId) ?? []),
+    ...state.headlines.pendingSources.values(),
+  ];
+  if (!records.some((entry) => entry.id === record.id)) records.push(record);
+  const display =
+    projectDisplayRecords(records).find((entry) => entry.id === record.id) ??
+    projectDisplayRecord(record);
+  if (display.type === "message") {
+    display.content = display.content.map((block) => {
+      if (block.type !== "tool_call" && block.type !== "tool_result") return block;
+      const projected = { ...block };
+      if (state.headlines.markers.has(record.id)) {
+        const marker = state.headlines.markers.get(record.id);
+        if (marker === undefined) delete projected.headline;
+        else projected.headline = marker;
+      }
+      const hit = state.headlines.cache.get(
+        `${state.headlines.sessionId}/${record.id}/${block.detailKey}`,
+      );
+      if (cached && projected.headline === null && hit !== undefined) projected.headline = hit;
+      return projected;
+    });
+  }
+  return display;
+}
+
+function headlineRecord(id: string, name = "codemode", callId = id): HistoryRecord {
+  return {
+    id,
+    parentId: null,
+    timestamp: now(),
+    type: "message",
+    role: "assistant",
+    content: [
+      {
+        type: "tool_call",
+        callId,
+        name,
+        arguments: { code: "HEADLINE_DETAIL_BODY", task: "HEADLINE_DETAIL_BODY" },
+      },
+    ],
+    overflow: {},
+  };
+}
+function headlineResult(id: string, callId: string, parentId: string): HistoryRecord {
+  return {
+    id,
+    parentId,
+    timestamp: now(),
+    type: "message",
+    role: "assistant",
+    content: [
+      { type: "tool_result", callId, content: [{ type: "text", text: "HEADLINE_RESULT_BODY" }] },
+    ],
+    overflow: {},
+  };
+}
+function headlineSeparator(
+  id: string,
+  text = `Fixture checkpoint ${id}.`,
+): Extract<HistoryRecord, { type: "message" }> {
+  return {
+    id: `${id}-separator`,
+    parentId: id,
+    timestamp: now(),
+    type: "message",
+    role: "assistant",
+    content: [{ type: "text", text }],
+    overflow: {},
+  };
+}
+function headlineFrame(state: MockState, record: HistoryRecord) {
+  for (const session of state.liveSessions.get(HEADLINE_ORB_ID) ?? []) {
+    send(session.socket, {
+      v: 1,
+      type: "history.record",
+      at: now(),
+      record: headlineDisplay(state, HEADLINE_ORB_ID, record, false),
+      headId: record.id,
+      retiredBlockIds: [],
+    });
+  }
+}
+function completeFixtureHeadline(
+  state: MockState,
+  response: ServerResponse,
+  recordId: string,
+  detailKey: string,
+) {
+  if (response.destroyed) return;
+  if (state.headlines.fail) {
+    sendJson(response, 503, {
+      error: { code: "unavailable", message: "Fixture summary unavailable", retryable: true },
+    });
+    return;
+  }
+  const key = `${state.headlines.sessionId}/${recordId}/${detailKey}`;
+  const headline = state.headlines.cache.get(key) ?? `Headline ${recordId}`;
+  state.headlines.cache.set(key, headline);
+  sendJson(response, 200, { headline });
+}
+async function handleHeadlineFixture(
+  state: MockState,
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+): Promise<boolean> {
+  const base = `/api/v1/orbs/${HEADLINE_ORB_ID}`;
+  if (request.method === "POST" && url.pathname === `${base}/fixture-headline-control`) {
+    const input = (await readJson(request)) as { action?: string; scenario?: string } | null;
+    const action = input?.action;
+    if (action !== "seed" && !state.histories.has(HEADLINE_ORB_ID)) {
+      notFound(response);
+      return true;
+    }
+    if (action === "seed") {
+      const template = state.orbs.get(ORB_ID);
+      if (!template) {
+        notFound(response);
+        return true;
+      }
+      state.orbs.set(HEADLINE_ORB_ID, {
+        ...template,
+        id: HEADLINE_ORB_ID,
+        name: "Activity headlines",
+      });
+      const scenario = input?.scenario;
+      const records: HistoryRecord[] = [];
+      const add = (id: string, name = "codemode") =>
+        records.push(headlineRecord(id, name), headlineSeparator(id));
+      if (scenario === "first seen") {
+        add("seen-null");
+        add("seen-arbitrary", "arbitrary_fixture_label");
+        add("seen-string", "read");
+        add("seen-empty", "read");
+        add("seen-absent", "unknown_no_marker");
+        records.push(
+          headlineRecord("group-one"),
+          headlineRecord("group-two"),
+          headlineSeparator("group-two"),
+        );
+        state.headlines.markers.set("seen-arbitrary", null);
+        state.headlines.markers.set("seen-string", "Ready from history");
+        state.headlines.markers.set("seen-empty", "");
+      } else if (scenario === "two-request cap") {
+        add("cap-one");
+        add("cap-two");
+        // Ordinary transcript content makes the seen queued header genuinely croppable.
+        records[records.length - 1] = headlineSeparator(
+          "cap-two",
+          Array.from({ length: 30 }, (_, index) => `Queue boundary ${index}.`).join("\n\n"),
+        );
+      } else if (scenario === "scope replay result") add("scope-intent", "subagent");
+      else if (scenario === "failure manual Retry")
+        records.push(
+          headlineRecord("failure-intent"),
+          headlineSeparator(
+            "failure-intent",
+            Array.from({ length: 30 }, (_, index) => `Failure boundary ${index}.`).join("\n\n"),
+          ),
+        );
+      else {
+        notFound(response);
+        return true;
+      }
+      state.histories.set(HEADLINE_ORB_ID, records);
+      state.messages.set(HEADLINE_ORB_ID, []);
+      state.uploads.set(HEADLINE_ORB_ID, []);
+    } else if (action === "new-session") {
+      state.headlines.sessionId = `fixture-session-${HEADLINE_ORB_ID}-new`;
+      state.histories.set(HEADLINE_ORB_ID, [
+        headlineRecord("old-intent"),
+        headlineSeparator("old-intent"),
+      ]);
+    } else if (action === "inspect") {
+      sendJson(response, 200, {
+        waiting: [...state.headlines.waiting]
+          .filter(([, waiting]) => waiting.size > 0)
+          .map(([id]) => id),
+        liveConnections: state.liveSessions.get(HEADLINE_ORB_ID)?.size ?? 0,
+      });
+      return true;
+    } else if (action === "replay") {
+      for (const record of state.histories.get(HEADLINE_ORB_ID) ?? []) headlineFrame(state, record);
+    } else if (action === "replicate") {
+      for (const [id, record] of state.headlines.pendingSources) {
+        state.histories.get(HEADLINE_ORB_ID)?.push(record);
+        for (const waiting of state.headlines.waiting.get(id) ?? [])
+          completeFixtureHeadline(state, waiting, id, `${id}:0`);
+        state.headlines.waiting.delete(id);
+      }
+      state.headlines.pendingSources.clear();
+    } else if (action === "fail" || action === "success") state.headlines.fail = action === "fail";
+    else {
+      let record: HistoryRecord;
+      if (action === "result")
+        record = headlineResult("scope-result", "scope-intent", "scope-intent");
+      else if (action === "late-result")
+        record = headlineResult("late-result", "late-intent", "late-intent");
+      else if (action === "late") record = headlineRecord("late-intent", "subagent");
+      else if (action === "third") record = headlineRecord("cap-three");
+      else if (action === "fourth") record = headlineRecord("cap-four");
+      else if (action === "old") record = headlineRecord("old-intent");
+      else if (action === "live") record = headlineRecord("live-intent");
+      else {
+        notFound(response);
+        return true;
+      }
+      if (action === "live") state.headlines.pendingSources.set(record.id, record);
+      else state.histories.get(HEADLINE_ORB_ID)?.push(record);
+      headlineFrame(state, record);
+      if (action !== "result" && action !== "late-result") {
+        const separator = headlineSeparator(record.id);
+        state.histories.get(HEADLINE_ORB_ID)?.push(separator);
+        headlineFrame(state, separator);
+      }
+    }
+    sendJson(response, 200, { ok: true });
+    return true;
+  }
+  if (request.method === "POST" && url.pathname.startsWith(`${base}/headlines/`)) {
+    const [recordId, detailKey] = url.pathname
+      .slice(`${base}/headlines/`.length)
+      .split("/")
+      .map(decodeURIComponent);
+    if (
+      !recordId ||
+      !detailKey ||
+      url.searchParams.get("sessionId") !== state.headlines.sessionId
+    ) {
+      sendJson(response, 409, {
+        error: { code: "stale_session", message: "Fixture session mismatch", retryable: false },
+      });
+      return true;
+    }
+    if (state.headlines.pendingSources.has(recordId)) {
+      const waiting = state.headlines.waiting.get(recordId) ?? new Set<ServerResponse>();
+      waiting.add(response);
+      state.headlines.waiting.set(recordId, waiting);
+      response.once("close", () => waiting.delete(response));
+    } else if (state.histories.get(HEADLINE_ORB_ID)?.some((record) => record.id === recordId)) {
+      completeFixtureHeadline(state, response, recordId, detailKey);
+    } else notFound(response);
+    return true;
+  }
+  return false;
+}
+
 async function handleApi(
   state: MockState,
   request: IncomingMessage,
@@ -807,6 +1081,8 @@ async function handleApi(
   const url = new URL(request.url ?? "/", "http://fixture.local");
   const path = url.pathname;
   const method = request.method ?? "GET";
+
+  if (await handleHeadlineFixture(state, request, response, url)) return true;
 
   if (method === "GET" && path === "/api/v1/session") {
     sendJson(response, 200, {
@@ -1654,7 +1930,7 @@ async function handleApi(
     const orbId = decodeURIComponent(orbIdRaw ?? "");
     const recordId = decodeURIComponent(recordIdRaw ?? "");
     const detailKey = decodeURIComponent(keyRaw ?? "");
-    if (url.searchParams.get("sessionId") !== `fixture-session-${orbId}`) {
+    if (url.searchParams.get("sessionId") !== fixtureSessionId(state, orbId)) {
       sendJson(response, 409, {
         error: { code: "stale_session", message: "detail session changed", retryable: true },
       });
@@ -1674,7 +1950,7 @@ async function handleApi(
       sendJson(response, 200, {
         v: 1,
         state: "committed",
-        sessionId: `fixture-session-${orbId}`,
+        sessionId: fixtureSessionId(state, orbId),
         recordId,
         detailKey,
         body,
@@ -1744,10 +2020,10 @@ async function handleApi(
       const headId = records.at(-1)?.id ?? null;
       const view = {
         orbId,
-        session: { id: `fixture-session-${orbId}` },
+        session: { id: fixtureSessionId(state, orbId) },
         cursor: headId,
         headId,
-        records: records.map(projectDisplayRecord),
+        records: records.map((record) => headlineDisplay(state, orbId, record, true)),
       };
       sendJson(response, 200, view);
       return true;
@@ -2265,7 +2541,7 @@ function acceptLiveSocket(state: MockState, socket: WebSocket, orbId: string): v
       connectionId: randomUUID(),
       runtimeInstanceId: "frontend-fixture-runtime",
       orbId,
-      sessionId: `fixture-session-${orbId}`,
+      sessionId: fixtureSessionId(state, orbId),
       capabilities: [CAPABILITY_ABORT],
       limits: { maxIncomingFrameBytes: 8 * 1024 * 1024, maxPromptBytes: 6 * 1024 * 1024 },
     });
@@ -2282,7 +2558,7 @@ function acceptLiveSocket(state: MockState, socket: WebSocket, orbId: string): v
         type: "history.record",
         retiredBlockIds: [],
         at: now(),
-        record: projectDisplayRecord(record),
+        record: headlineDisplay(state, orbId, record, false),
         headId: record.id,
       });
     }

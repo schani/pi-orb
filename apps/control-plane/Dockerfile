@@ -15,9 +15,13 @@ COPY apps/web ./apps/web
 RUN npm run build --workspace @pi-orb/web
 
 FROM node:24-bookworm-slim
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git \
+  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY vendor vendor
+COPY scripts/apply-dependency-patches.mjs scripts/apply-dependency-patches.mjs
 COPY patches/@earendil-works+pi-ai+1.0.0.patch patches/@earendil-works+pi-ai+1.0.0.patch
 COPY patches/@earendil-works+pi-coding-agent+1.0.0.patch patches/@earendil-works+pi-coding-agent+1.0.0.patch
 COPY packages/protocol/package.json packages/protocol/
@@ -25,7 +29,7 @@ COPY packages/mock-openai/package.json packages/mock-openai/
 COPY packages/luna/package.json packages/luna/
 COPY apps/control-plane/package.json apps/control-plane/
 RUN npm ci --workspace @pi-orb/control-plane --include-workspace-root=false --ignore-scripts \
-  && npx --no-install patch-package --error-on-fail
+  && node scripts/apply-dependency-patches.mjs
 COPY packages/protocol/src packages/protocol/src
 COPY packages/mock-openai/src packages/mock-openai/src
 COPY packages/luna/src packages/luna/src

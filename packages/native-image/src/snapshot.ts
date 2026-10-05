@@ -17,6 +17,7 @@ export const UPLOADED_SOURCE_PATHS = [
   "packages/luna",
   "packages/mock-openai",
   "scripts/pi-orb-gcp-identity",
+  "scripts/apply-dependency-patches.mjs",
   "infra/native-vm",
 ] as const;
 

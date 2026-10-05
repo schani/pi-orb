@@ -34,6 +34,92 @@ function snapshot(n: number, activity: "idle" | "busy" = "idle"): HarnessSnapsho
 const frameTypes = (frames: ServerFrame[]) => frames.map((frame) => frame.type);
 
 describe("computeSyncFrames", () => {
+  it("projects result markers using calls before the replay cursor", () => {
+    const source = snapshot(0);
+    const records: HistoryRecord[] = [
+      {
+        id: "call",
+        parentId: null,
+        timestamp: "t",
+        overflow: {},
+        type: "message",
+        role: "assistant",
+        content: [
+          { type: "tool_call", callId: "c", name: "subagent", arguments: { prompt: "task" } },
+        ],
+      },
+      {
+        id: "result",
+        parentId: "call",
+        timestamp: "t",
+        overflow: {},
+        type: "message",
+        role: "tool",
+        content: [
+          {
+            type: "tool_result",
+            callId: "c",
+            content: [{ type: "text", text: "Agent completed. Findings" }],
+          },
+        ],
+      },
+    ];
+    const frames = computeSyncFrames({ ...source, records, headId: "result" }, null, "call", "now");
+    expect(frames.filter((frame) => frame.type === "history.record")).toMatchObject([
+      { record: { id: "result", content: [{ headline: null }] } },
+    ]);
+  });
+  it("projects all-branch snapshots causally before slicing the replay cursor", () => {
+    const records: HistoryRecord[] = [
+      ...["read", "subagent"].map(
+        (name): HistoryRecord => ({
+          id: name,
+          parentId: null,
+          timestamp: "t",
+          overflow: {},
+          type: "message",
+          role: "assistant",
+          content: [{ type: "tool_call", callId: "c", name, arguments: {} }],
+        }),
+      ),
+      ...["read", "subagent"].map(
+        (name): HistoryRecord => ({
+          id: `${name}-result`,
+          parentId: name,
+          timestamp: "t",
+          overflow: {},
+          type: "message",
+          role: "tool",
+          content: [
+            {
+              type: "tool_result",
+              callId: "c",
+              content: [{ type: "text", text: name === "read" ? "READ_CANARY" : "done" }],
+            },
+          ],
+        }),
+      ),
+    ];
+    const before = JSON.stringify(records);
+    for (const cursor of [null, "read", "subagent"]) {
+      const frames = computeSyncFrames(
+        { ...snapshot(0), records, headId: "subagent-result" },
+        null,
+        cursor,
+        "now",
+      );
+      const read = frames.find(
+        (frame) => frame.type === "history.record" && frame.record.id === "read-result",
+      );
+      if (read?.type !== "history.record" || read.record.type !== "message")
+        throw new Error("expected read result");
+      expect(read.record.content[0]).not.toHaveProperty("headline");
+      expect(frames.filter((frame) => frame.type === "history.record").at(-1)).toMatchObject({
+        record: { id: "subagent-result", content: [{ headline: null }] },
+      });
+    }
+    expect(JSON.stringify(records)).toBe(before);
+  });
   it("replays everything in full mode for an unknown cursor", () => {
     const frames = computeSyncFrames(snapshot(2), null, "rec-unknown", "now");
     expect(frameTypes(frames)).toEqual([

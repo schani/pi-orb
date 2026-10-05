@@ -1,4 +1,9 @@
 import { type Static, Type } from "typebox";
+import {
+  ActivityHeadlineContext,
+  activityCallEligible,
+  activityResultEligible,
+} from "./activity-headline.ts";
 import { capHeadline } from "./headline.ts";
 import { type ContentBlock, type HistoryRecord, NestedCallsSchema } from "./history.ts";
 import { JsonValueSchema } from "./json.ts";
@@ -30,7 +35,7 @@ const call = Type.Object(
     type: Type.Literal("tool_call"),
     callId: Type.String(),
     name: Type.String(),
-    headline: Type.String(),
+    headline: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     detailKey: Type.String(),
     targetId: Type.Optional(Type.String()),
     offset: Type.Optional(Type.Number()),
@@ -43,6 +48,7 @@ const result = Type.Object(
     type: Type.Literal("tool_result"),
     callId: Type.String(),
     isError: Type.Optional(Type.Boolean()),
+    headline: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     hasImages: Type.Boolean(),
     detailKey: Type.String(),
     added: Type.Optional(Type.Number()),
@@ -83,6 +89,7 @@ const subagent = Type.Object(
     id: Type.Optional(Type.String()),
     description: Type.Optional(Type.String()),
     status: Type.Optional(Type.String()),
+    headline: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     detailKey: Type.String(),
   },
   closed,
@@ -211,7 +218,8 @@ export const LiveDisplayDetailSchema = Type.Object(
 );
 export type LiveDisplayDetail = Static<typeof LiveDisplayDetailSchema>;
 
-function headline(block: Extract<ContentBlock, { type: "tool_call" }>): string {
+function headline(block: Extract<ContentBlock, { type: "tool_call" }>): string | null | undefined {
+  if (activityCallEligible(block)) return null;
   const args = block.arguments;
   if (typeof args === "object" && args !== null && !Array.isArray(args)) {
     const value =
@@ -222,7 +230,7 @@ function headline(block: Extract<ContentBlock, { type: "tool_call" }>): string {
           : undefined;
     if (typeof value === "string") return capHeadline(value);
   }
-  return "";
+  return ["bash", "read", "edit", "write"].includes(block.name) ? "" : undefined;
 }
 
 function targetId(path: string): string {
@@ -277,11 +285,12 @@ function projectBlock(block: ContentBlock, key: string): DisplayBlock {
           ? block.arguments
           : null;
       const path = args?.path;
+      const selectedHeadline = headline(block);
       return {
         type: "tool_call",
         callId: block.callId,
         name: block.name,
-        headline: headline(block),
+        ...(selectedHeadline === undefined ? {} : { headline: selectedHeadline }),
         detailKey: key,
         ...(typeof path === "string" ? { targetId: targetId(path) } : {}),
         ...(typeof args?.offset === "number" ? { offset: args.offset } : {}),
@@ -302,6 +311,14 @@ function projectBlock(block: ContentBlock, key: string): DisplayBlock {
   }
 }
 
+function projectBlocks(blocks: readonly ContentBlock[], recordId: string): DisplayBlock[] {
+  return blocks.flatMap((block, index) =>
+    block.type === "reasoning" && block.redacted !== true && block.text.trim() === ""
+      ? []
+      : [projectBlock(block, `${recordId}:${index}`)],
+  );
+}
+
 export function projectDisplayRecord(record: HistoryRecord): DisplayRecord {
   const base = {
     id: record.id,
@@ -314,7 +331,7 @@ export function projectDisplayRecord(record: HistoryRecord): DisplayRecord {
         ...base,
         type: "message",
         ...(record.role === undefined ? {} : { role: record.role }),
-        content: record.content.map((block, index) => projectBlock(block, `${record.id}:${index}`)),
+        content: projectBlocks(record.content, record.id),
         ...(record.model?.provider === undefined
           ? {}
           : { model: { provider: record.model.provider } }),
@@ -345,9 +362,7 @@ export function projectDisplayRecord(record: HistoryRecord): DisplayRecord {
         (record.custom?.display !== true && record.eventType !== "agent.settings_fallback")
           ? {}
           : {
-              content: record.content.map((block, index) =>
-                projectBlock(block, `${record.id}:${index}`),
-              ),
+              content: projectBlocks(record.content, record.id),
             }),
         ...(record.custom === undefined ? {} : { custom: record.custom }),
         ...(record.subagent === undefined
@@ -355,6 +370,7 @@ export function projectDisplayRecord(record: HistoryRecord): DisplayRecord {
           : {
               subagent: {
                 kind: record.subagent.kind,
+                ...(record.subagent.kind === "notification" ? { headline: null } : {}),
                 detailKey: `${record.id}:subagent`,
                 ...(record.subagent.id === undefined ? {} : { id: record.subagent.id }),
                 ...(record.subagent.description === undefined
@@ -371,6 +387,30 @@ export function projectDisplayRecord(record: HistoryRecord): DisplayRecord {
           : { inboxMessageIds: record.inboxMessageIds }),
       };
   }
+}
+
+/** Incremental ordered projection; seed with the prefix before emitting a cursor suffix. */
+export function createDisplayRecordProjector(): (record: HistoryRecord) => DisplayRecord {
+  const context = new ActivityHeadlineContext();
+  return (record) => {
+    const matches = context.visit(record);
+    const display = projectDisplayRecord(record);
+    if (record.type === "message" && display.type === "message") {
+      display.content = display.content.map((block) => {
+        if (block.type !== "tool_result") return block;
+        const index = Number(block.detailKey.slice(record.id.length + 1));
+        const source = record.content[index];
+        return source?.type === "tool_result" && activityResultEligible(source, matches.get(index))
+          ? { ...block, headline: null }
+          : block;
+      });
+    }
+    return display;
+  };
+}
+
+export function projectDisplayRecords(records: readonly HistoryRecord[]): DisplayRecord[] {
+  return records.map(createDisplayRecordProjector());
 }
 
 /** Returns only renderable detail. Null means the manifest key does not exist. */

@@ -132,6 +132,164 @@ export function storeSemanticsContractTests(
       expect((await store.insertOrb(task, orb)).isOk()).toBe(true);
     }
 
+    async function seedHeadline() {
+      await seed();
+      (
+        await store.commitPullBatch(task, {
+          orbId: orb.id,
+          expectedCursor: null,
+          session,
+          records: [first, second],
+          nextCursor: second.id,
+          nextHeadId: second.id,
+        })
+      )._unsafeUnwrap();
+      return {
+        orbId: orb.id,
+        sessionId: session.id,
+        recordId: first.id,
+        detailKey: "record-1:0",
+        headline: "Inspect configuration",
+        generatedAt: 1234,
+      };
+    }
+
+    it("caches activity headlines separately with isolated keys and unchanged history", async () => {
+      const value = await seedHeadline();
+      const before = (await store.readHistorySnapshot(task, orb.id))._unsafeUnwrap();
+      expect((await store.readActivityHeadline(task, value))._unsafeUnwrap()).toBeNull();
+      expect((await store.readActivityHeadlines(task, orb.id, session.id))._unsafeUnwrap()).toEqual(
+        [],
+      );
+      expect((await store.putActivityHeadlineIfAbsent(task, value))._unsafeUnwrap()).toEqual(value);
+      const other = { ...value, detailKey: "record-1:1", headline: "Other detail" };
+      const record = { ...value, recordId: second.id, headline: "Other record" };
+      const otherOrbId = "00000000-0000-4000-8000-000000000003";
+      (await store.insertOrb(task, { ...orb, id: otherOrbId }))._unsafeUnwrap();
+      (
+        await store.commitPullBatch(task, {
+          orbId: otherOrbId,
+          expectedCursor: null,
+          session,
+          records: [first],
+          nextCursor: first.id,
+          nextHeadId: first.id,
+        })
+      )._unsafeUnwrap();
+      const otherOrb = { ...value, orbId: otherOrbId, headline: "Other orb" };
+      expect((await store.putActivityHeadlineIfAbsent(task, otherOrb))._unsafeUnwrap()).toEqual(
+        otherOrb,
+      );
+      expect((await store.readActivityHeadline(task, otherOrb))._unsafeUnwrap()).toEqual(otherOrb);
+      for (const candidate of [other, record])
+        expect((await store.putActivityHeadlineIfAbsent(task, candidate))._unsafeUnwrap()).toEqual(
+          candidate,
+        );
+      expect((await store.readActivityHeadline(task, value))._unsafeUnwrap()).toEqual(value);
+      expect((await store.readActivityHeadlines(task, orb.id, session.id))._unsafeUnwrap()).toEqual(
+        expect.arrayContaining([value, other, record]),
+      );
+      expect(
+        (await store.readActivityHeadlines(task, orb.id, "other-session"))._unsafeUnwrap(),
+      ).toEqual([]);
+      expect(
+        (await store.readActivityHeadlines(task, project.id, session.id))._unsafeUnwrap(),
+      ).toEqual([]);
+      expect((await store.readHistorySnapshot(task, orb.id))._unsafeUnwrap()).toEqual(before);
+    });
+
+    it("returns the first successful headline and its timestamp to both concurrent writers", async () => {
+      const value = await seedHeadline();
+      const candidate = { ...value, headline: "Competing headline", generatedAt: 9876 };
+      const [firstOutcome, secondOutcome] = await Promise.all([
+        store.putActivityHeadlineIfAbsent(task, value),
+        store.putActivityHeadlineIfAbsent(task, candidate),
+      ]);
+      const winner = firstOutcome._unsafeUnwrap();
+      expect([value, candidate]).toContainEqual(winner);
+      expect(secondOutcome._unsafeUnwrap()).toEqual(winner);
+      expect((await store.readActivityHeadline(task, value))._unsafeUnwrap()).toEqual(winner);
+    });
+
+    it("fences missing sources, stale sessions and deletion even on existing cache keys", async () => {
+      const value = await seedHeadline();
+      for (const invalid of [
+        { ...value, sessionId: "stale" },
+        { ...value, recordId: "missing" },
+        { ...value, orbId: project.id },
+      ])
+        expect((await store.putActivityHeadlineIfAbsent(task, invalid))._unsafeUnwrap()).toBeNull();
+      (await store.putActivityHeadlineIfAbsent(task, value))._unsafeUnwrap();
+      (
+        await store.requestProjectDeletion(task, {
+          projectId: project.id,
+          now: 2000,
+          cleanupAfter: 2000,
+        })
+      )._unsafeUnwrap();
+      expect((await store.putActivityHeadlineIfAbsent(task, value))._unsafeUnwrap()).toBeNull();
+      const current = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+      assert(current !== null);
+      (
+        await store.finalizeOrbDeletion(task, {
+          orbId: orb.id,
+          expectedStateVersion: current.stateVersion,
+        })
+      )._unsafeUnwrap();
+      expect((await store.readActivityHeadlines(task, orb.id, session.id))._unsafeUnwrap()).toEqual(
+        [],
+      );
+      expect((await store.putActivityHeadlineIfAbsent(task, value))._unsafeUnwrap()).toBeNull();
+      const parent = (await store.getProject(task, project.id))._unsafeUnwrap();
+      assert(parent !== null);
+      (
+        await store.finalizeProjectDeletion(task, {
+          projectId: project.id,
+          expectedStateVersion: parent.stateVersion,
+        })
+      )._unsafeUnwrap();
+      expect((await store.putActivityHeadlineIfAbsent(task, value))._unsafeUnwrap()).toBeNull();
+    });
+
+    it("retains cached headlines through archival", async () => {
+      const value = await seedHeadline();
+      (await store.putActivityHeadlineIfAbsent(task, value))._unsafeUnwrap();
+      const requested = (
+        await store.requestOrbArchive(task, {
+          orbId: orb.id,
+          expectedStateVersion: 0,
+          now: 2000,
+          cleanupAfter: 2000,
+        })
+      )._unsafeUnwrap();
+      (
+        await store.sealOrbArchive(task, {
+          orbId: orb.id,
+          expectedStateVersion: requested.stateVersion,
+          now: 2000,
+          cursor: second.id,
+          headId: second.id,
+        })
+      )._unsafeUnwrap();
+      (
+        await store.finalizeOrbArchive(task, {
+          orbId: orb.id,
+          expectedStateVersion: requested.stateVersion,
+          now: 2000,
+        })
+      )._unsafeUnwrap();
+      expect((await store.readActivityHeadline(task, value))._unsafeUnwrap()).toEqual(value);
+      expect(
+        (
+          await store.putActivityHeadlineIfAbsent(task, {
+            ...value,
+            headline: "loser",
+            generatedAt: 9999,
+          })
+        )._unsafeUnwrap(),
+      ).toEqual(value);
+    });
+
     it("keeps the first orb time zone when an ID collides at insertion", async () => {
       expect((await store.insertProject(task, project)).isOk()).toBe(true);
       const first = { ...orb, userTimeZone: "Asia/Tokyo" };
@@ -1591,6 +1749,40 @@ export function storeSemanticsContractTests(
       ).toBeNull();
     });
 
+    it("anchors source history to an inactive branch without changing replica metadata", async () => {
+      await seed();
+      const sibling = { ...second, id: "sibling", parentId: first.id };
+      const latest = { ...first, id: "latest", parentId: sibling.id };
+      expect(
+        (
+          await store.commitPullBatch(task, {
+            orbId: orb.id,
+            expectedCursor: null,
+            session,
+            records: [first, second, sibling, latest],
+            nextCursor: latest.id,
+            nextHeadId: sibling.id,
+          })
+        ).isOk(),
+      ).toBe(true);
+      const current = (await store.readHistorySnapshot(task, orb.id))._unsafeUnwrap();
+      expect(current).toEqual({
+        session,
+        cursor: latest.id,
+        headId: sibling.id,
+        records: [first, sibling, latest],
+      });
+      expect((await store.readHistorySnapshot(task, orb.id, second.id))._unsafeUnwrap()).toEqual({
+        ...current,
+        records: [first, second],
+      });
+      expect((await store.readHistorySnapshot(task, orb.id, "missing"))._unsafeUnwrap()).toEqual({
+        ...current,
+        records: [],
+      });
+      expect((await store.readHistorySnapshot(task, orb.id))._unsafeUnwrap()).toEqual(current);
+    });
+
     it("rejects cursor and immutable-record conflicts without partial advancement", async () => {
       await seed();
       expect(
@@ -2345,6 +2537,153 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
       expect((await store.insertProject(task, project)).isOk()).toBe(true);
       expect((await store.insertOrb(task, orb)).isOk()).toBe(true);
     }
+
+    it
+      .skipIf(!name.startsWith("node-postgres"))
+      .each(["session", "source", "orb", "project"] as const)(
+      "serializes headline publication behind an uncommitted %s fence on real PostgreSQL",
+      async (fence) => {
+        await seed();
+        (
+          await store.commitPullBatch(task, {
+            orbId: orb.id,
+            expectedCursor: null,
+            session,
+            records: [first],
+            nextCursor: first.id,
+            nextHeadId: first.id,
+          })
+        )._unsafeUnwrap();
+        const value = {
+          orbId: orb.id,
+          sessionId: session.id,
+          recordId: first.id,
+          detailKey: "detail",
+          headline: "Candidate",
+          generatedAt: 1234,
+        };
+        if (fence === "source")
+          (
+            await client.query(
+              "UPDATE orbs SET replication_cursor = NULL, replicated_head_id = NULL WHERE id = $1",
+              [orb.id],
+            )
+          )._unsafeUnwrap();
+        let entered!: () => void;
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => {
+          entered = resolve;
+        });
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const mutation = client.transaction(async (query) => {
+          const sql =
+            fence === "project"
+              ? "UPDATE projects SET state = 'deleting' WHERE id = $1"
+              : fence === "orb"
+                ? "UPDATE orbs SET state = 'deleting' WHERE id = $1"
+                : fence === "session"
+                  ? 'UPDATE orbs SET harness_session_id = \'changed\', harness_session_header = \'{"id":"changed","overflow":{}}\'::jsonb WHERE id = $1'
+                  : "DELETE FROM history_records WHERE orb_id = $1";
+          const changed = await query(sql, [fence === "project" ? project.id : orb.id]);
+          entered();
+          await gate;
+          return changed;
+        });
+        await held;
+        const publication = store.putActivityHeadlineIfAbsent(task, value);
+        try {
+          let blocked = false;
+          for (let probe = 0; probe < 200 && !blocked; probe++) {
+            const locks = (
+              await client.query(
+                "SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE '%headline%'",
+              )
+            )._unsafeUnwrap();
+            blocked = locks.rows.length > 0;
+          }
+          expect(blocked, "publication must wait for the uncommitted fence").toBe(true);
+        } finally {
+          release();
+        }
+        (await mutation)._unsafeUnwrap();
+        expect((await publication)._unsafeUnwrap()).toBeNull();
+        expect(
+          (await store.readActivityHeadlines(task, orb.id, session.id))._unsafeUnwrap(),
+        ).toEqual([]);
+      },
+    );
+
+    it("cascades headline source/session deletion and fences subsequent publication", async () => {
+      await seed();
+      (
+        await store.commitPullBatch(task, {
+          orbId: orb.id,
+          expectedCursor: null,
+          session,
+          records: [first],
+          nextCursor: first.id,
+          nextHeadId: first.id,
+        })
+      )._unsafeUnwrap();
+      const value = {
+        orbId: orb.id,
+        sessionId: session.id,
+        recordId: first.id,
+        detailKey: "detail",
+        headline: "Original",
+        generatedAt: 1234,
+      };
+      (await store.putActivityHeadlineIfAbsent(task, value))._unsafeUnwrap();
+      (
+        await client.transaction(async (query) => {
+          const cleared = await query(
+            "UPDATE orbs SET replication_cursor = NULL, replicated_head_id = NULL WHERE id = $1",
+            [orb.id],
+          );
+          if (cleared.isErr()) return err(cleared.error);
+          return query("DELETE FROM history_records WHERE orb_id = $1", [orb.id]);
+        })
+      )._unsafeUnwrap();
+      expect((await store.readActivityHeadline(task, value))._unsafeUnwrap()).toBeNull();
+      expect((await store.putActivityHeadlineIfAbsent(task, value))._unsafeUnwrap()).toBeNull();
+      (
+        await store.commitPullBatch(task, {
+          orbId: orb.id,
+          expectedCursor: null,
+          session,
+          records: [first],
+          nextCursor: first.id,
+          nextHeadId: first.id,
+        })
+      )._unsafeUnwrap();
+      (await store.putActivityHeadlineIfAbsent(task, value))._unsafeUnwrap();
+      (
+        await client.query(
+          "UPDATE orbs SET replication_cursor = NULL, replicated_head_id = NULL WHERE id = $1",
+          [orb.id],
+        )
+      )._unsafeUnwrap();
+      (
+        await store.initOrVerifySession(task, orb.id, { id: "new-session", overflow: {} })
+      )._unsafeUnwrap();
+      expect((await store.readActivityHeadline(task, value))._unsafeUnwrap()).toBeNull();
+      expect((await store.putActivityHeadlineIfAbsent(task, value))._unsafeUnwrap()).toBeNull();
+      expect(
+        (
+          await store.putActivityHeadlineIfAbsent(task, { ...value, sessionId: "new-session" })
+        )._unsafeUnwrap(),
+      ).not.toBeNull();
+      (
+        await client.query("UPDATE projects SET state = 'deleting' WHERE id = $1", [project.id])
+      )._unsafeUnwrap();
+      expect(
+        (
+          await store.putActivityHeadlineIfAbsent(task, { ...value, sessionId: "new-session" })
+        )._unsafeUnwrap(),
+      ).toBeNull();
+    });
 
     it("rolls back partial spawn writes and retains deletion-safe provenance", async () => {
       await seed();

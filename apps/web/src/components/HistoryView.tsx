@@ -1,6 +1,12 @@
-import type { DisplayBlock, DisplayRecord, OrbMessageView } from "@pi-orb/protocol";
+import {
+  type DisplayBlock,
+  type DisplayRecord,
+  type OrbMessageView,
+  ToolResultContext,
+} from "@pi-orb/protocol";
 import {
   createContext,
+  createElement,
   memo,
   type ReactNode,
   type RefObject,
@@ -10,7 +16,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { HeadlineLimiter } from "../lib/activity-headline.ts";
 import { representedInboxMessageIds } from "../lib/queued-messages.ts";
+import { HeadlineSlots } from "../lib/use-activity-headline.tsx";
 import { useHistoryTail } from "../lib/use-history-tail.ts";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
 import { BitRegister } from "./BitRegister.tsx";
@@ -319,23 +327,21 @@ interface ToolPairing {
 }
 
 function pairToolResults(records: readonly DisplayRecord[]): ToolPairing {
-  const pending = new Map<string, ToolCallBlock>();
+  const context = new ToolResultContext<ToolCallBlock>();
   const results = new Map<ToolCallBlock, { block: ToolResultBlock; recordId: string }>();
   const pairedResults = new Set<ToolResultBlock>();
   for (const record of records) {
-    if (record.type === "compaction" || (record.type === "message" && record.role === "user")) {
-      pending.clear();
-    }
+    const matches = context.visit(
+      record,
+      (source, index) => (source as MessageRecord).content[index] as ToolCallBlock,
+    );
     if (record.type !== "message" || record.role === "user") continue;
-    for (const block of record.content) {
-      if (block.type === "tool_call") pending.set(block.callId, block);
-      if (block.type === "tool_result") {
-        const call = pending.get(block.callId);
-        if (call === undefined) continue;
-        results.set(call, { block, recordId: record.id });
-        pairedResults.add(block);
-        pending.delete(block.callId);
-      }
+    for (const [index, block] of record.content.entries()) {
+      if (block.type !== "tool_result") continue;
+      const call = matches.get(index);
+      if (call === undefined) continue;
+      results.set(call, { block, recordId: record.id });
+      pairedResults.add(block);
     }
   }
   return { results, pairedResults };
@@ -613,6 +619,7 @@ export const HistoryView = memo(function HistoryView({
   viewportRef,
   onCompensatedRef,
 }: HistoryViewProps) {
+  const [headlineSlots] = useState(() => new HeadlineLimiter());
   const [openedDetails] = useState(() => new Set<string>());
   const representedMessageIds = useMemo(() => representedInboxMessageIds(records), [records]);
   const pendingMessages = queuedMessages.filter(
@@ -659,7 +666,9 @@ export const HistoryView = memo(function HistoryView({
     blocks: liveBlocks,
     tools: uncommittedTools,
   };
-  return (
+  return createElement(
+    HeadlineSlots.Provider,
+    { value: headlineSlots },
     <DetailContextValue.Provider value={detailContext}>
       <OpenDetailValue.Provider value={openDetailValue}>
         <div className="history" ref={historyRef}>
@@ -719,6 +728,6 @@ export const HistoryView = memo(function HistoryView({
           )}
         </div>
       </OpenDetailValue.Provider>
-    </DetailContextValue.Provider>
+    </DetailContextValue.Provider>,
   );
 });

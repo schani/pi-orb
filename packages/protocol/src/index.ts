@@ -1,3 +1,4 @@
+export * from "./activity-headline.ts";
 export * from "./agent-settings.ts";
 export * from "./broker.ts";
 export * from "./control-plane-api.ts";
@@ -23,5 +24,6 @@ export * from "./runtime-http.ts";
 export * from "./runtime-launch.ts";
 export * from "./tailscale.ts";
 export * from "./terminal.ts";
+export * from "./tool-result-context.ts";
 export * from "./workload-identity.ts";
 export * from "./workspace-upload.ts";

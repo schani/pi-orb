@@ -40,6 +40,7 @@ import {
   OidcTokenSigner,
 } from "./adapters/oidc/signer.ts";
 import { PiAuthGate } from "./adapters/pi-auth/gate.ts";
+import { PiActivityHeadlineGenerator } from "./adapters/pi-headline-generator.ts";
 import { PiOrbNameGenerator } from "./adapters/pi-name-generator.ts";
 import { ProcessOrbHostProvider } from "./adapters/process/provider.ts";
 import { createReleaseActivationReader } from "./adapters/release-activation.ts";
@@ -482,6 +483,9 @@ export async function main(
         : new DockerOrbHostProvider({
             image: runtimeImage,
             network: dockerNetwork,
+            ...(process.env["PI_ORB_DOCKER_INVENTORY_SCOPE"] === undefined
+              ? {}
+              : { inventoryScope: process.env["PI_ORB_DOCKER_INVENTORY_SCOPE"] }),
             controlPlanePort: port,
             ...(process.env["PI_ORB_BROKER_URL"] !== undefined &&
             process.env["PI_ORB_BROKER_URL"] !== ""
@@ -529,6 +533,10 @@ export async function main(
         : new PiAuthGate(authDir, adapters.mockOpenAiForUser ?? mockOpenAi, brokerForUser),
     ),
     nameGenerator,
+    headlineGenerator: new PiActivityHeadlineGenerator(
+      brokerForUser,
+      nameInferenceUrl === "" ? null : nameInferenceUrl,
+    ),
     nameLeaseMs: 60_000,
     control: new ControlState(),
     constants: lifecycleConstantsForHost(hostProvider.kind),

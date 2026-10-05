@@ -1,5 +1,6 @@
 import type { DisplayRecord } from "@pi-orb/protocol";
 import { useState } from "react";
+import { useActivityHeadline } from "../lib/use-activity-headline.tsx";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
 import { PlainChatText } from "./ChatText.tsx";
 import { CommittedBody, type DetailContext } from "./DetailBody.tsx";
@@ -19,6 +20,12 @@ export function SubagentNotice({
 }) {
   const [open, setOpen] = useState(false);
   const notice = record.subagent;
+  const summary = useActivityHeadline(
+    notice?.headline !== undefined
+      ? { recordId: record.id, detailKey: notice.detailKey, headline: notice.headline }
+      : undefined,
+    detailContext,
+  );
   if (notice === undefined) return null;
   const description = text(notice.description) ?? "Subagent";
   const failed = notice.status === "error";
@@ -35,6 +42,8 @@ export function SubagentNotice({
   return (
     <ActivityRailRow
       label={description}
+      headerRef={summary.headerRef}
+      {...(summary.headline !== undefined ? { headline: summary.headline } : {})}
       metric={status}
       state={failed ? "failed" : "neutral"}
       className="subagent-notice"

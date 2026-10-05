@@ -3,7 +3,8 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { generateHostKeyPairs } from "./testkit/host-key-pairs.ts";
 
 const sealPath = new URL("../../../infra/native-vm/seal.sh", import.meta.url);
 const barrierPath = new URL("../../../infra/native-vm/wait-google-host-keys.sh", import.meta.url);
@@ -16,6 +17,12 @@ const verifierPath = new URL(
   import.meta.url,
 );
 const execute = promisify(execFile);
+let keyPairs: ReturnType<typeof generateHostKeyPairs>;
+let keyGenerationCalls = 0;
+beforeAll(() => {
+  keyPairs = generateHostKeyPairs(() => keyGenerationCalls++);
+});
+afterAll(() => keyPairs.dispose());
 
 async function withFixture(run: (fixture: HostKeyFixture) => Promise<void>): Promise<void> {
   const fixture = await HostKeyFixture.create();
@@ -40,18 +47,7 @@ class HostKeyFixture {
     await mkdir(join(root, "etc/ssh"), { recursive: true });
     await mkdir(join(root, "published"));
     await writeFile(join(root, "etc/google_instance_id"), "12345\n");
-    for (const type of ["ecdsa", "ed25519", "rsa"])
-      await execute("ssh-keygen", [
-        "-q",
-        "-t",
-        type,
-        "-N",
-        "",
-        "-C",
-        "host-key-test-comment",
-        "-f",
-        join(root, `etc/ssh/ssh_host_${type}_key`),
-      ]);
+    keyPairs.copyTo(join(root, "etc/ssh"), (type) => `ssh_host_${type}_key`);
     const keys: Record<string, string> = {};
     for (const [algorithm, type] of [
       ["ecdsa-sha2-nistp256", "ecdsa"],
@@ -324,6 +320,21 @@ esac
       await expectClosed(fixture.run({ advancingClock: true }));
     });
   });
+
+  it.each(["ecdsa", "ed25519", "rsa"])(
+    "still validates the real private/public pair for %s",
+    async (type) => {
+      await withFixture(async (fixture) => {
+        const other = type === "rsa" ? "ed25519" : "rsa";
+        await cp(
+          join(fixture.root, `etc/ssh/ssh_host_${other}_key`),
+          join(fixture.root, `etc/ssh/ssh_host_${type}_key`),
+        );
+        await expectClosed(fixture.run({ advancingClock: true }));
+        expect(keyGenerationCalls).toBe(3);
+      });
+    },
+  );
 
   it("does not open when metadata requests consume the deadline", async () => {
     await withFixture(async (fixture) => {

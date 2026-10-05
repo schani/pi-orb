@@ -26,7 +26,6 @@ import {
   type OrbBootContext,
   type OrbBootContextResponse,
   type OrbMessageSystem,
-  projectDisplayRecord,
   projectRecordDetail,
   projectRecordImage,
   type RuntimeAlertRequest,
@@ -908,7 +907,7 @@ export class PiOrbAgent {
         console.error(`Luna summary failed for operation ${operationId}: ${error.message}`);
       },
     });
-    this.liveHistory = new LiveHistoryPublisher(manager, (record, sourceMessage) => {
+    this.liveHistory = new LiveHistoryPublisher(manager, (record, sourceMessage, display) => {
       const batchId = "inboxMessageIds" in record ? record.inboxMessageIds?.[0] : undefined;
       if (batchId !== undefined) this.pendingInboxMessages.delete(batchId);
       const retiredBlockIds =
@@ -921,7 +920,7 @@ export class PiOrbAgent {
         type: "history.record",
         retiredBlockIds,
         at: new Date().toISOString(),
-        record: projectDisplayRecord(record),
+        record: display,
         headId: record.id,
       });
     });

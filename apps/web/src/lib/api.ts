@@ -1,5 +1,6 @@
 import {
   AckOrbAlertResponseSchema,
+  ActivityHeadlineResponseSchema,
   type CommittedDisplayDetail,
   CommittedDisplayDetailSchema,
   ControlPlaneHttpErrorSchema,
@@ -444,6 +445,20 @@ export function listOrbMessages(orbId: string, after = 0, tracked: readonly stri
 
 export function getOrbHistory(orbId: string): Promise<Result<DisplayHistoryView, ApiError>> {
   return apiFetch(DisplayHistoryViewSchema, `/api/v1/orbs/${encodeURIComponent(orbId)}/history`);
+}
+
+export function getActivityHeadline(
+  orbId: string,
+  recordId: string,
+  detailKey: string,
+  sessionId: string,
+  signal: AbortSignal,
+) {
+  return apiFetch(
+    ActivityHeadlineResponseSchema,
+    `/api/v1/orbs/${encodeURIComponent(orbId)}/headlines/${encodeURIComponent(recordId)}/${encodeURIComponent(detailKey)}?sessionId=${encodeURIComponent(sessionId)}`,
+    { method: "POST", cache: "no-store", signal },
+  );
 }
 
 export function getCommittedDetail(
