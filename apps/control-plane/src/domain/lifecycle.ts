@@ -1453,6 +1453,7 @@ async function reconcileStopping(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   orb: OrbRow,
+  maintenance = false,
 ): Promise<ReconcileOutcome> {
   // New live connections are rejected and existing agent/terminal proxies are
   // closed while stopping (docs/lifecycle.md).
@@ -1460,6 +1461,7 @@ async function reconcileStopping(
   deps.control.closeBrowserConnections(orb.id);
 
   if (orb.hostRef === null) {
+    if (maintenance && !hasNeverBeenReady(orb)) return waiting("drain_blocked");
     // Nothing was ever provisioned; nothing to drain or stop.
     return transitionTo(task, deps, orb, "stopped", { reason: "no_host_ref" });
   }
@@ -1473,6 +1475,26 @@ async function reconcileStopping(
   const identityFailure = await failOnObservationMismatch(task, deps, orb, observation);
   if (identityFailure !== null) return identityFailure;
   if (observation === null || observation.state === "stopped" || observation.state === "failed") {
+    if (maintenance && !hasNeverBeenReady(orb)) {
+      if (observation === null) return waiting("drain_blocked");
+      const started = await startHost(
+        task,
+        deps,
+        orb.id,
+        orb.hostRef,
+        orb.hostIncarnation,
+        orb.hostSpecFingerprint,
+        "maintenance_history_repair",
+      );
+      if (started.isErr()) return retryable(started.error);
+      deps.control.resetLivenessBaseline(
+        orb.id,
+        task.monotonicNow(),
+        deps.constants.postRestartGraceMs,
+        task.wallNow(),
+      );
+      return { type: "progressed" };
+    }
     // A host we stopped ourselves as half of an unreachable-runtime restart
     // is not "already stopped": complete the restart so the drain can finish.
     if (observation !== null && deps.control.isRestartPending(orb.id)) {
@@ -2162,6 +2184,35 @@ async function reconcileTerminalBackstop(
 }
 
 // ---------------------------------------------------------------------------
+
+/** Release-owned drain: no sleep processing, message admission, or spec replacement. */
+export async function reconcileMaintenanceOrbOnce(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orbId: string,
+): Promise<ReconcileOutcome> {
+  const read = await deps.store.getOrb(task, orbId);
+  if (read.isErr()) return retryable(read.error);
+  const orb = read.value;
+  if (orb === null) return { type: "noop" };
+  deps.control.noteStateEpisode(orb.id, orb.stateChangedAt);
+  if (
+    orb.hostDiscardThroughIncarnation !== null &&
+    orb.state !== "deleting" &&
+    orb.state !== "archived"
+  )
+    return reconcileHostDiscard(task, deps, orb);
+  switch (orb.state) {
+    case "stopping":
+      return reconcileStopping(task, deps, orb, true);
+    case "archiving":
+      return reconcileArchiving(task, deps, orb);
+    case "deleting":
+      return reconcileDeleting(task, deps, orb);
+    default:
+      return { type: "noop" };
+  }
+}
 
 export async function reconcileOrbOnce(
   task: SimulationTask,
