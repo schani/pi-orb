@@ -41,6 +41,14 @@ function makeFixture(): { root: string; log: string } {
 const fs = require('node:fs');
 const a = process.argv.slice(2);
 fs.appendFileSync(process.env.CALL_LOG, 'record:' + a.join(' ') + '\\n');
+if (a[0] === '-m' && a[1] === 'infra.release_consolidation') {
+ if (a[2] === process.env.MOCK_MAINTENANCE_FAILURE) process.exit(7);
+ if (a[2] === 'migration') {
+  fs.appendFileSync(process.env.CALL_LOG, 'job-receipt:run-requested terminal\\n');
+  process.exit(Number(process.env.MOCK_SCHEMA_STATUS || 0));
+ }
+ process.exit(0);
+}
 if (a[0] !== '-m' || a[1] !== 'infra.release_state') process.exit(0);
 const [action, path, ...rest] = a.slice(2);
 if (action === 'init') fs.writeFileSync(path, JSON.stringify({commit:rest[1],phase:'preflight',artifacts:{control_plane_image:'registry/control@sha256:abc',deploy_generation:201}}));
@@ -96,8 +104,13 @@ if [ "$1" = auth ]; then echo token; exit 0; fi
 if [ "$1 $2" = "storage cp" ]; then exit "\${MOCK_LOCK_STATUS:-0}"; fi
 if [ "$1 $2 $3" = "storage objects describe" ]; then echo 42; exit 0; fi
 if [ "$1 $2" = "storage rm" ]; then exit 0; fi
-if [ "$1 $2 $3" = "secrets versions describe" ]; then echo projects/test/secrets/database/versions/1; exit 0; fi
-if [ "$1 $2 $3" = "run jobs create" ]; then exit "\${MOCK_SCHEMA_STATUS:-0}"; fi
+if [ "$1 $2 $3" = "secrets versions describe" ]; then
+  if [ "$3 $4" = "describe 1" ]; then
+    echo '{"state":"ENABLED","name":"projects/test-project/secrets/pi-orb-google-identity-mappings/versions/1"}'
+  else echo projects/test-project/secrets/database/versions/1; fi
+  exit 0
+fi
+if [ "$1 $2 $3" = "run jobs create" ]; then exit 0; fi
 cat <<'JSON'
 {"spec":{"template":{"spec":{"containers":[{"env":[{"name":"PI_ORB_HOST_SPEC_GENERATION","value":"200"}]}]}}}}
 JSON
@@ -388,8 +401,11 @@ describe("infra/release.sh", () => {
     );
     expect(calls).not.toContain("docker:build");
     expect(calls).toContain(
-      `--set-env-vars=^|^PI_ORB_USER_ID=${userId}|PI_ORB_ORIGINAL_USER_ID=${userId}|PI_ORB_ORIGINAL_IDENTITY_ISSUER=https://issuer.example|PI_ORB_ORIGINAL_IDENTITY_SUBJECT=original-subject|PI_ORB_GOOGLE_IDENTITY_MAPPINGS=[`,
+      `--set-env-vars=^@^PI_ORB_USER_ID=${userId}@PI_ORB_ORIGINAL_USER_ID=${userId}@PI_ORB_ORIGINAL_IDENTITY_ISSUER=https://issuer.example@PI_ORB_ORIGINAL_IDENTITY_SUBJECT=original-subject`,
     );
+    expect(calls).not.toContain("PI_ORB_GOOGLE_IDENTITY_MAPPINGS=");
+    expect(calls).toContain("--args=apps/control-plane/src/migrate.ts");
+    expect(calls).toContain("--set-secrets=DATABASE_URL=pi-orb-database-url:1");
   });
 
   it("validation-only neither builds, migrates nor applies", () => {
@@ -417,27 +433,60 @@ describe("infra/release.sh", () => {
     );
   });
 
-  it("refuses a cutover without explicit mappings and independent execution", () => {
+  it("refuses first consolidation without independent execution", () => {
     const { root, log } = makeFixture();
-    const result = spawnSync(
-      join(root, "infra/release.sh"),
-      ["--yes", "--cutover", "manifest.json"],
-      {
+    const result = spawnSync(join(root, "infra/release.sh"), ["--yes", "--first-consolidation"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_ACTIONS: "false",
+        CALL_LOG: log,
+        PATH: `${join(root, "bin")}:${process.env.PATH}`,
+        PROJECT: "test-project",
+        TMPDIR: join(root, "tmp"),
+      },
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("first cutover requires independent GitHub execution");
+    expect(readFileSync(log, "utf8")).not.toMatch(/npm:|run jobs create|tofu:.* apply/);
+  });
+
+  it.each([undefined, "preflight-final", "resume", "outcome"])(
+    "orders first consolidation phases and retains failed maintenance locks (%s)",
+    (failure) => {
+      const { root, log } = makeFixture();
+      const result = spawnSync(join(root, "infra/release.sh"), ["--yes", "--first-consolidation"], {
         encoding: "utf8",
         env: {
           ...process.env,
-          PI_ORB_GOOGLE_IDENTITY_MAPPINGS: "",
           CALL_LOG: log,
           PATH: `${join(root, "bin")}:${process.env.PATH}`,
           PROJECT: "test-project",
           TMPDIR: join(root, "tmp"),
+          GITHUB_ACTIONS: "true",
+          MOCK_MAINTENANCE_FAILURE: failure ?? "",
         },
-      },
-    );
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("explicit verified identity mappings");
-    expect(readFileSync(log, "utf8")).not.toMatch(/npm:|run jobs create|tofu:.* apply/);
-  });
+      });
+      const calls = readFileSync(log, "utf8");
+      expect(result.status, result.stderr).toBe(failure ? 1 : 0);
+      expect(calls).toMatch(/guard-plan[\s\S]*prepare[\s\S]*drain[\s\S]*preflight-final/);
+      expect(calls).toContain("--if-generation-match=0");
+      if (failure) {
+        expect(result.stderr).toContain("lock retained");
+        expect(calls).not.toContain("gcloud:storage rm");
+        if (failure !== "outcome") expect(calls).not.toMatch(/tofu:.* apply /);
+        if (failure === "preflight-final") expect(calls).not.toContain("run jobs create");
+      } else {
+        expect(calls).toMatch(
+          /preflight-final[\s\S]*run jobs create[\s\S]*infra.release_consolidation migration[\s\S]*job-receipt:[\s\S]*run jobs delete[\s\S]*infra.release_consolidation resume[\s\S]*tofu:.* apply[\s\S]*deploy:[\s\S]*infra.release_retire wait[\s\S]*infra.release_state activate[\s\S]*wif-smoke[\s\S]*infra.release_consolidation outcome[\s\S]*gcloud:storage rm/,
+        );
+        expect(calls).toContain(
+          "--set-secrets=DATABASE_URL=pi-orb-database-url:1,PI_ORB_GOOGLE_IDENTITY_MAPPINGS=pi-orb-google-identity-mappings:1",
+        );
+        expect(calls).toContain("--if-generation-match=42");
+      }
+    },
+  );
 
   it("retains the global lock after an uncertain migration job", () => {
     const { root, log } = makeFixture();
@@ -457,7 +506,9 @@ describe("infra/release.sh", () => {
     const calls = readFileSync(log, "utf8");
     expect(calls).not.toMatch(/tofu:.* apply |gcloud:storage rm|\nwif-smoke/);
     expect(calls).toContain("--max-retries=0");
-    expect(calls).toContain("--wait");
+    expect(calls).toContain("infra.release_consolidation migration");
+    expect(calls).toContain("job-receipt:run-requested terminal");
+    expect(calls).not.toContain("run jobs delete");
   });
 
   it("skips smoke and preserves a failed apply status", () => {
