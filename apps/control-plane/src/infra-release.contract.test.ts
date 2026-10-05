@@ -209,6 +209,10 @@ esac
 }
 
 beforeEach(() => {
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith("GITHUB_")) vi.stubEnv(key, undefined);
+  }
+  vi.stubEnv("GITHUB_ACTIONS", "false");
   vi.stubEnv("PI_ORB_RELEASE_RESULT_DIR", undefined);
   vi.stubEnv("PI_ORB_RELEASE_RECORD", undefined);
   vi.stubEnv("PI_ORB_USER_ID", "00000000-0000-4000-8000-000000000001");
