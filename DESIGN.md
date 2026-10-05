@@ -108,7 +108,7 @@ Subsystem designs:
 - [docs/orb-archival.md](docs/orb-archival.md) — read-only transcript retention after shared deletion-grade resource cleanup
 - [docs/orb-spawning.md](docs/orb-spawning.md) — in-orb CLI creation with an atomically queued prompt and browser URL
 - [docs/runtime-protocol.md](docs/runtime-protocol.md) — the browser↔runtime wire protocol: handshake, display frames, detail HTTP, ordering, backpressure
-- [docs/history-replication.md](docs/history-replication.md) — the harness-agnostic history model, pull-only replication, the PostgreSQL schema
+- [docs/history-replication.md](docs/history-replication.md) — the harness-agnostic history model, pull-only replication, PostgreSQL schema, and implemented explicit offline recovery (2026-10-05, America/Cancun)
 - [docs/pi-adapter.md](docs/pi-adapter.md) — Pi embedding and the Pi→normalized history mapping
 - [docs/subagents.md](docs/subagents.md) — local leaf subagents, minimal gotgenes fork, aggregate activity and DST-first integration/acceptance plan
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
@@ -136,6 +136,7 @@ Subsystem designs:
 Tracking:
 
 - [docs/postmortems/2026-10-05-e2e-docker-inventory-isolation.md](docs/postmortems/2026-10-05-e2e-docker-inventory-isolation.md) — fresh fixture inventory crossed the shared daemon's ownership boundary; scoped gate preserves foreign resources
+- [docs/postmortems/2026-10-04-workspace-full-history-desync.md](docs/postmortems/2026-10-04-workspace-full-history-desync.md) — full workspace followed by cursor-not-found; offline repair and normal replication verified 2026-10-05 (America/Cancun), with all original SQL rows unchanged
 - [docs/postmortems/2026-10-04-webkit-read-drawer-hit-test.md](docs/postmortems/2026-10-04-webkit-read-drawer-hit-test.md) — visible read summary blocked by markdown pointer interception; root cause unproved
 - [docs/postmortems/2026-10-03-cached-orb-navigation.md](docs/postmortems/2026-10-03-cached-orb-navigation.md) — cached switching still pays metadata, remount, accessibility and 1Password focus costs; investigation only
 - [docs/postmortems/2026-10-02-control-plane-patch-image-build.md](docs/postmortems/2026-10-02-control-plane-patch-image-build.md) — runtime-only patch broke the control-plane image build before apply; restrict its patch set

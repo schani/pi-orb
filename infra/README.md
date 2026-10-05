@@ -97,6 +97,8 @@ implementation stages for diagnostics; they are not separate operator steps. The
 
 ## Tooling access
 
+For history desync diagnosis and guarded offline recovery, see [docs/history-replication.md](../docs/history-replication.md#read-only-desync-diagnostic).
+
 Project orbs configure keyless GCP authentication through `.agents/setup` and
 `.agents/resume`. The committed `.pi-orb/gcp-external-account.json` contains no
 secret: its reviewed executable source, `/usr/local/bin/pi-orb-gcp-identity`,
