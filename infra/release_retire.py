@@ -7,6 +7,9 @@ import time
 import urllib.parse
 from infra.release_state import Cloud, Result, fail, load, now, publish, save, utc_epoch as epoch, valid_id, valid_retirement, validate_record
 
+# instance_count samples every 60s and can take 120s to become visible.
+# https://docs.cloud.google.com/monitoring/api/metrics_gcp_p_z
+INSTANCE_COUNT_VISIBILITY_SECONDS = 180
 
 def metrics(cloud, project, region, start, end, services=("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer")):
     result = []
@@ -78,7 +81,7 @@ def unresolved_positive(states):
     return any(value > 0 for points in states.values() for _, value, _ in points) and not latest_zeroes(states)
 
 
-def inventory(cloud, record, wall=now, services=("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer")):
+def revision_resources(cloud, record, services):
     names = set()
     for service in services:
         revisions = cloud.json(["run", "revisions", "list", "--service", service, "--project", record["project"], "--region", record["region"]])
@@ -92,23 +95,27 @@ def inventory(cloud, record, wall=now, services=("pi-orb", "pi-orb-ops", "pi-orb
             if not valid_id(name):
                 return fail("invalid", "invalid revision name")
             names.add(name)
+    return Result(sorted(names))
+
+
+def inventory(cloud, record, wall=now, services=("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer")):
+    resources = revision_resources(cloud, record, services)
+    if resources.error:
+        return resources
     boundary = wall()
     at = epoch(boundary)
     if at is None:
         return fail("invalid", "invalid inventory clock")
     start = datetime.fromtimestamp(at - 900, timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-    observed = metrics(cloud, record["project"], record["region"], start, boundary)
+    observed = metrics(cloud, record["project"], record["region"], start, boundary, services)
     if observed.error:
         return observed
     parsed = samples(observed.value, record["region"], epoch(boundary))
     if parsed.error:
         return parsed
-    admitted = {item['resource']['labels'].get('revision_name') for item in observed.value
-                if isinstance(item['resource'].get('labels'), dict) and item['resource']['labels'].get('service_name') in services}
+    names = set()
     excluded = {}
     for revision, states in parsed.value.items():
-        if revision not in admitted or revision in names:
-            continue
         if unresolved_positive(states):
             names.add(revision)
         elif any(value > 0 for points in states.values() for _, value, _ in points):
@@ -116,7 +123,7 @@ def inventory(cloud, record, wall=now, services=("pi-orb", "pi-orb-ops", "pi-orb
     operations = pending_operations(cloud, record["project"])
     if operations.error:
         return operations
-    record["retirement"] = {"after": boundary, "revisions": sorted(names), "zeroes": {}, "excluded": excluded, "operations": operations.value}
+    record["retirement"] = {"after": boundary, "resources": resources.value, "resourcesRetired": False, "revisions": sorted(names), "zeroes": {}, "excluded": excluded, "operations": operations.value}
     return Result(record)
 
 
@@ -152,6 +159,13 @@ def evidence(record, series, end):
     after = epoch(retirement["after"])
     zeroes = {}
     for revision in sorted(targets):
+        observed = parsed.value.get(revision, {})
+        complete = latest_zeroes(observed)
+        positives = [at for points in observed.values() for at, value, _ in points if value > 0]
+        if complete and positives and any(epoch(stamp) < after for stamp in complete.values()) and all(epoch(stamp) >= max(positives) for stamp in complete.values()):
+            targets.remove(revision)
+            excluded[revision] = complete
+            continue
         states = {}
         for state in ("active", "idle"):
             # A prior explicit zero remains proof for a deleted revision unless
@@ -170,7 +184,7 @@ def evidence(record, series, end):
                     states[state] = stamp
         if len(states) == 2:
             zeroes[revision] = states
-    return Result({"after": retirement["after"], "revisions": sorted(targets), "zeroes": zeroes, "excluded": excluded, "operations": retirement["operations"]})
+    return Result({**retirement, "revisions": sorted(targets), "zeroes": zeroes, "excluded": excluded})
 
 
 def pending_operations(cloud, project):
@@ -196,11 +210,28 @@ def wait_for_retirement(cloud, record, *, wall=now, monotonic=time.monotonic, sl
     if record["retirement"] is None:
         return fail("invalid", "retirement inventory is required")
     deadline = monotonic() + limit
+    visible_after = monotonic() if record['retirement']['resourcesRetired'] else None
     previous = None
     while True:
+        scope_services = services or ("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer")
+        resources = revision_resources(cloud, record, scope_services)
+        if resources.error:
+            return resources
+        current = {item['revision'] for item in record['serving'] or []}
+        remaining = (set(resources.value) - current) | (set(resources.value) & set(record['retirement']['resources']))
+        if remaining:
+            record['retirement']['resourcesRetired'] = False
+            stored = checkpoint(record)
+            if stored.error:
+                return stored
+            return fail("conflict", "old revision resources can still reactivate: " + ", ".join(sorted(remaining)))
+        if visible_after is None:
+            visible_after = monotonic() + INSTANCE_COUNT_VISIBILITY_SECONDS
+        record['retirement']['resourcesRetired'] = monotonic() >= visible_after
         end = wall()
         scope = {} if services is None else {"services": services}
-        observed = metrics(cloud, record["project"], record["region"], record["retirement"]["after"], end, **scope)
+        start = datetime.fromtimestamp(epoch(record['retirement']['after']) - 900, timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
+        observed = metrics(cloud, record["project"], record["region"], start, end, **scope)
         if observed.error:
             return observed
         found = evidence(record, observed.value, end)
@@ -213,7 +244,7 @@ def wait_for_retirement(cloud, record, *, wall=now, monotonic=time.monotonic, sl
             if operations.error:
                 return operations
             record["retirement"]["operations"] = operations.value
-        waiting = (pending, record["retirement"]["operations"])
+        waiting = (pending, record["retirement"]["operations"], record['retirement']['resourcesRetired'])
         if waiting != previous:
             stored = checkpoint(record)
             if stored.error:
@@ -221,8 +252,10 @@ def wait_for_retirement(cloud, record, *, wall=now, monotonic=time.monotonic, sl
             print("release: waiting for old application processes: " + (", ".join(pending) or "none"), flush=True)
             if record["retirement"]["operations"]:
                 print("release: waiting for compute operations: " + ", ".join(record["retirement"]["operations"]), flush=True)
+            if not record['retirement']['resourcesRetired']:
+                print("release: waiting for instance-count metric visibility", flush=True)
             previous = waiting
-        if not pending and not record["retirement"]["operations"]:
+        if not pending and not record["retirement"]["operations"] and record['retirement']['resourcesRetired']:
             return Result(record)
         if monotonic() >= deadline:
             stored = checkpoint(record)

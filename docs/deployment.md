@@ -1,5 +1,7 @@
 # Cloud deployment direction
 
+**First consolidation stalled in maintenance (2026-10-06):** [Deploy 37431686576](https://github.com/schani/pi-orb/actions/runs/37431686576) deleted the three application services, then timed out before migration/apply. The previous issuer remains; browser/API/runtime services are absent. Retirement admitted 158 revision metadata names, but only two emitted postboundary metrics and reached explicit active/idle zeros; the other 156 emitted nothing. The global release lock remains retained. `failed-before-apply` does not imply an untouched application. Retirement must distinguish retained metadata from process evidence before destructive maintenance; missing samples and deletion alone remain insufficient proof. Investigation and recovery constraints: `docs/postmortems/2026-10-06-consolidation-retirement-timeout.md`; work: `TODO.md`.
+
 **Production release validated (2026-10-05, 8:33:32 AM America/Denver):** [Deploy 37316402844](https://github.com/schani/pi-orb/actions/runs/37316402844) deployed exact source `d67de4c6d1b4019b229e75f66610df395ef2256f` as `r-1791206669-915ce6b9-44e7-4470-ad6b-18487064d3bf`, outcome `validated`, exit 0. All twelve gates passed: 2,691 unit/DST tests in 340 files (twelve conditional skips), 407 full Docker/PostgreSQL/Chromium/WebKit E2Es in 42 files (zero skips), fresh native acceptance, migration, rollout, retirement, activation and lifecycle/identity smokes. The same external run continued across the monitoring host restart; no redispatch, retry or separate validation was invoked.
 
 Independent reads verified fresh Ready status and 100% traffic on `pi-orb-00079-2k7`, `pi-orb-ops-00076-4zv`, `pi-orb-runtime-api-00081-kbt` and `pi-orb-issuer-00041-zcl`, all matching control-plane digest `sha256:2bcd07a4cf4bf2dca850ee649ad3fe152db353b33a878e5510524a6fb0f42a07`. Browser/ops/runtime generation is `1791209714` (issuer has none); the active pointer matches that generation and release ID, and the release lock is absent. Browser IAP is enabled with exactly `domain:heyglide.com` as accessor; these verification artifacts do not independently establish the invoker policy or interactive browser login. All four smoke fixtures returned ops GET 404s; temporary native builder/validator instances and disks are absent. Production native image `6210056885185155358` and workspace image `7547658826719039822` remain retained and Ready. The bounded new-revision ERROR-or-higher query since activation returned zero at 8:38:43 AM America/Denver (limit 100), not a global or ongoing error-free guarantee.
@@ -395,13 +397,14 @@ not a per-mutation lease. The supported release must establish retirement before
 publishing authority; out-of-band deployments and late-side-effect compensation
 remain distinct from this operational boundary.
 
-**Retirement sample rule (clarified 2026-10-04):** before apply, inventory includes
-all surviving revision resources and already-deleted revisions with unresolved
-positive Monitoring samples in the existing 15-minute lookback. All pages use
-exact service AND region filters. A deleted revision's positive is resolved only
+**Retirement sample rule (revised 2026-10-06; local, undeployed):** before apply,
+inventory records revision resources separately from observed processes. Process
+targets are revisions with unresolved positive Monitoring samples in the existing
+15-minute lookback, including deleted revisions. All pages use exact service AND
+region filters. A revision's positive is resolved only
 when its latest explicit active AND idle samples are both zero; missing either
 state is unknown, not zero, and positives win timestamp ties. Complete latest
-zeros can exclude a deleted revision even if its series stops before inventory.
+zeros can exclude an observed process even if its series stops before inventory.
 After apply and pruning, newly discovered revisions follow the same distinction.
 Every admitted target needs explicit active and idle zeros **at or after the
 recorded pre-apply inventory boundary** (`>=`, whole-second timestamps and an
@@ -410,20 +413,44 @@ newer positives invalidate the corresponding state. Neither deletion nor missing
 samples prove retirement. Requiring new postboundary emission from an already
 retired, excluded revision is rejected: it adds no unresolved-writer protection
 and can stall permanently when Monitoring stops emitting that deleted series.
-No post-deletion sample condition applies.
+The pre-deletion observation boundary remains fixed, so zeros emitted during
+service deletion qualify. No post-deletion sample condition applies.
 
-The durable release report's `retirement` object contains `after`, `revisions`,
-`zeroes`, `excluded` and `operations`. `excluded` maps previously-positive,
+Before retirement completes, every inventoried revision resource must be absent;
+the only surviving revision resources allowed are the newly serving revisions,
+which must be disjoint from the old resource inventory. A new or surviving old
+resource fails closed. Resource removal prevents future activation; explicit
+metrics resolve observed processes. Retained metadata with no process observations
+does not create a requirement for hypothetical future zeros. The gate retains
+the existing bounded Monitoring-observation assumption, also used to discover
+deleted-but-live processes; it does not establish process absence during an
+unreported prolonged telemetry outage.
+
+After first confirming resource absence, observe for at least 180 seconds: the
+[instance-count metric](https://docs.cloud.google.com/monitoring/api/metrics_gcp_p_z)
+samples every 60 seconds and can take 120 seconds to appear. This closes the
+visibility gap for a cold start just before deletion. Every poll rereads from
+15 minutes before the original boundary, so delayed preboundary positives are
+included. Elapsed time establishes observation coverage, never resolves an
+observed positive. API failures, missing zero states, newer positives and pending
+Compute operations still block retirement. Cause and rejected fresh-zero-per-metadata
+requirement: `docs/postmortems/2026-10-06-consolidation-retirement-timeout.md`.
+
+The durable release report's `retirement` object contains `after`, `resources`,
+`resourcesRetired`, `revisions`, `zeroes`, `excluded` and `operations`.
+`resources` preserves the resource inventory; `resourcesRetired` records successful
+absence and visibility checks and is required for activation. `excluded` maps previously-positive,
 resolved candidates to their latest active/idle zero timestamps (counts are
-implicitly zero); inventory exclusions imply absence from the revision-resource
-list. Zero-only deleted series add no evidence noise. Excluded and admitted
+implicitly zero). Zero-only series add no evidence noise. Excluded and admitted
 revisions are disjoint. Saved exclusions survive absent observations, but a
 positive at or after either state's saved zero removes the exclusion and admits
-the target. Its preboundary exclusion zeros cannot supply postboundary proof:
-both states must independently qualify against `after`. UTC timestamps and
+the target. Saved preboundary exclusion zeros alone cannot resolve that new
+positive. Delayed observations that include complete fresh zeros after every
+observed positive can establish a resolved preboundary process in `excluded`;
+otherwise both zero states must independently qualify against `after`. UTC timestamps and
 conflicting evidence are validated before publication. Cutover verification accepts
-an excluded-only inventory with complete proof, but rejects an inventory with
-neither admitted nor excluded revisions; pending operations and positive rechecks
+an empty process inventory only with completed resource-retirement checks;
+pending operations and positive rechecks
 still block it. Deterministic local
 missing-state regressions do not establish a historical unsafe activation;
 evidence and the rejected broader any-positive rule are retained in

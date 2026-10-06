@@ -29,7 +29,7 @@ def retire(cloud, record, checkpoint, wall=now, monotonic=time.monotonic, sleep=
             return allowed
         if not isinstance(allowed.value, dict) or 'run.services.delete' not in allowed.value.get('permissions', []):
             return fail('conflict', 'missing old-service deletion permission')
-    found = inventory(cloud, record, services=OLD_SERVICES)
+    found = inventory(cloud, record, wall=wall, services=OLD_SERVICES)
     if found.error:
         return found
     stored = checkpoint(record)
@@ -72,12 +72,10 @@ def retire(cloud, record, checkpoint, wall=now, monotonic=time.monotonic, sleep=
             return found
         if found.value is not None:
             return fail('conflict', 'old service can still reactivate')
-    record['retirement']['after'] = wall()
-    record['retirement']['zeroes'] = {}
     stored = checkpoint(record)
     if stored.error:
         return stored
-    return wait_for_retirement(cloud, record, checkpoint=checkpoint, services=OLD_SERVICES)
+    return wait_for_retirement(cloud, record, wall=wall, monotonic=monotonic, sleep=sleep, checkpoint=checkpoint, services=OLD_SERVICES)
 
 
 def main(argv):

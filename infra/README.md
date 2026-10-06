@@ -77,10 +77,14 @@ New autonomous loops wait behind a startup barrier while HTTP remains available;
 only independently observed old-process retirement permits activation. This
 barrier does **not** stop HTTP identity writers. Deleted revisions are excluded
 only with complete latest active/idle zero evidence; missing state blocks exclusion.
-The durable `retirement` contract contains `after`, `revisions`, `zeroes`, `excluded`
-and `operations`. `excluded` stores both zero timestamps, disjoint from admitted
+The durable `retirement` contract contains `after`, `resources`, `resourcesRetired`,
+`revisions`, `zeroes`, `excluded` and `operations`. Resources must be absent except
+for the new serving revisions, disjoint from the old inventory. The gate observes
+180 seconds of metric visibility after resource fencing and rereads the initial
+15-minute lookback. `resourcesRetired` records that fence and is required for
+activation. `excluded` stores both zero timestamps, disjoint from admitted
 `revisions`; new positives readmit targets requiring both zeros at or after `after`.
-Cutover accepts complete excluded-only proof, never empty evidence. See
+An empty process inventory still requires completed resource-retirement checks. See
 `docs/deployment.md` for the sample rule.
 
 The script owns the complete transaction. Native image versions use

@@ -182,6 +182,7 @@ Tracking:
 - [docs/postmortems/2026-09-19-composer-caret-ordering.md](docs/postmortems/2026-09-19-composer-caret-ordering.md) — native caret measurement before React normalization; deterministic selection gate and document-bubble ordering
 - [docs/postmortems/2026-09-19-consolidation-docker-broker-host.md](docs/postmortems/2026-09-19-consolidation-docker-broker-host.md) — Docker callback authority omitted by the consolidated HTTP host guard; runtime-only broker authority and provider-specific E2E
 
+- [docs/postmortems/2026-10-06-consolidation-retirement-timeout.md](docs/postmortems/2026-10-06-consolidation-retirement-timeout.md) — application deletion preceded a retirement timeout on retained, silent revision metadata
 - [docs/postmortems/2026-09-18-image-preview-validation.md](docs/postmortems/2026-09-18-image-preview-validation.md) — mutable-source qualification, subpixel geometry inference, and undrained browser-route teardown failures
 - [docs/postmortems/2026-09-18-hosted-frontend-bootstrap-readiness.md](docs/postmortems/2026-09-18-hosted-frontend-bootstrap-readiness.md) — hosted blank-shell cause remains unresolved; browser assertions now own their fixture-response readiness
 - [docs/postmortems/2026-09-18-boot-context-cold-start.md](docs/postmortems/2026-09-18-boot-context-cold-start.md) — two runtime-API cold starts exhausted a mandatory boot read; bounded retry is implemented locally
