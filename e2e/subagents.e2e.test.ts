@@ -18,6 +18,7 @@ import {
   startControlPlane,
   waitFor,
 } from "./harness.ts";
+import { FailureEvidence } from "./testkit/failure-evidence.ts";
 
 it("keeps delegated work busy through abort, crash recovery and active-child archival without private replication", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-subagents-e2e-"));
@@ -581,7 +582,9 @@ it("rejects unknown profiles and models without child inference, and dispatches 
   const project = randomUUID(),
     orb = randomUUID();
   let failed = false;
-  const history = () => api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`);
+  const evidence = new FailureEvidence(orb);
+  const history = () =>
+    evidence.probe("history", () => api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`));
   const rootEntries = (): { customType?: string; data?: Record<string, unknown> }[] => {
     const directory = join(root, "hosts", orb, "workspace", "pi-sessions");
     const file = readdirSync(directory).find((name) => name.endsWith(".jsonl"));
@@ -605,7 +608,7 @@ it("rejects unknown profiles and models without child inference, and dispatches 
       (await api(cp.baseUrl, "POST", `/api/v1/projects/${project}/orbs`, { id: orb })).status,
     ).toBe(202);
     const code = await waitFor("profile fixture login", async () => {
-      const view = await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}`);
+      const view = await evidence.probe("orb", () => api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}`));
       const action = view.body["actionRequired"] as
         | { userCode?: string; verificationUri?: string }
         | undefined;
@@ -677,12 +680,13 @@ it("rejects unknown profiles and models without child inference, and dispatches 
     }
   } catch (error) {
     failed = true;
-    await writeFile(join(root, "control-plane.log"), cp.logs.join(""));
-    await writeFile(
-      join(root, "requests.json"),
-      JSON.stringify(await fakeControl(fake.sessionKey, "/requests")),
-    );
-    await writeFile(join(root, "history.json"), JSON.stringify((await history()).body));
+    await evidence
+      .probe("orb", () => api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}`))
+      .catch(() => undefined);
+    await history().catch(() => undefined);
+    await evidence
+      .save("profile-login", () => fakeControl(fake.sessionKey, "/requests"))
+      .catch(() => console.error("Failure evidence write failed: profile-login"));
     console.error(`Preserved unknown-profile fixture: ${root}`);
     throw error;
   } finally {

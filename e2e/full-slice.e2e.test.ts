@@ -45,6 +45,7 @@ import {
   waitFor,
   waitForPostgres,
 } from "./harness.ts";
+import { FailureEvidence } from "./testkit/failure-evidence.ts";
 import { restartNoticePattern } from "./testkit/restart-notice-rule.ts";
 
 /**
@@ -722,35 +723,58 @@ async function restartControlPlaneWithSpec(spec: string, generation: number): Pr
   });
 }
 
+let scenarioEvidence: FailureEvidence;
+
 describe("full slice E2E", () => {
   it("runs login, a scripted tool round trip, replication, and drain", async () => {
+    scenarioEvidence = new FailureEvidence(orbId);
     try {
       await runScenario();
     } catch (error) {
-      // Dump every diagnostic surface before failing.
-      console.error("=== original failure ===", error);
-      await dumpOrbDiagnostics(orbId).catch(() => undefined);
-      const requests = await fakeControl(fake.sessionKey, "/requests").catch(() => null);
-      console.error("=== fake inference requests ===", JSON.stringify(requests));
-      if (orbId !== "") {
-        const logs = PROCESS_BACKEND
-          ? (() => {
-              try {
-                return readFileSync(join(processHostDirectory(orbId), "runtime.err.log"), "utf8");
-              } catch (error) {
-                return `unavailable: ${String(error)}`;
-              }
-            })()
-          : await orbContainerNames(orbId)
-              .then((names) => {
-                const [name] = names;
-                return name === undefined
-                  ? "no containers labeled for orb"
-                  : docker(["logs", "--tail", "40", name]);
-              })
-              .catch((error: unknown) => `unavailable: ${String(error)}`);
-        console.error("=== orb runtime logs ===\n", logs);
+      const target = scenarioEvidence.target || orbId;
+      scenarioEvidence.target = target;
+      if (target !== "") {
+        await scenarioEvidence
+          .probe("health", async () => {
+            if (PROCESS_BACKEND) {
+              const metadata = JSON.parse(
+                readFileSync(join(processHostDirectory(target), "host.json"), "utf8"),
+              ) as { port: number };
+              const response = await fetch(`http://127.0.0.1:${metadata.port}/v1/health`, {
+                signal: AbortSignal.timeout(3_000),
+              });
+              return {
+                status: response.status,
+                body: (await response.json()) as Record<string, unknown>,
+              };
+            }
+            const [name] = await orbContainerNames(target);
+            if (name === undefined) return { status: 404, body: {} };
+            const output = await docker(
+              [
+                "exec",
+                name,
+                "node",
+                "-e",
+                'fetch("http://127.0.0.1:8080/v1/health", {signal: AbortSignal.timeout(3000)}).then(async r => console.log(JSON.stringify({status:r.status,body:await r.json()})))',
+              ],
+              5_000,
+            );
+            return JSON.parse(output) as { status: number; body: Record<string, unknown> };
+          })
+          .catch(() => undefined);
+        await scenarioEvidence
+          .probe("orb", () => api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${target}`))
+          .catch(() => undefined);
+        await scenarioEvidence
+          .probe("history", () =>
+            api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${target}/history`),
+          )
+          .catch(() => undefined);
       }
+      await scenarioEvidence
+        .save("full-slice-upload", () => fakeControl(fake.sessionKey, "/requests"))
+        .catch(() => console.error("Failure evidence write failed: full-slice-upload"));
       throw error;
     }
   }, 720_000);
@@ -2097,6 +2121,7 @@ describe("full slice E2E", () => {
     expect(transcriptFromSibling).toContain("The check succeeded: E2E_TOOL_OK.");
 
     const spawnedOrbId = randomUUID();
+    scenarioEvidence.target = spawnedOrbId;
     additionalOrbIds.push(spawnedOrbId);
     const spawnCommand = `pi-orb spawn --id ${spawnedOrbId} --prompt 'Do the spawned E2E task' --name 'Spawned E2E task' --json`;
     const spawned = await terminalRun(
@@ -2280,7 +2305,9 @@ describe("full slice E2E", () => {
       await waitFor(
         "upload reply persisted and operation drained",
         async () => {
-          const history = await api(base, "GET", `/api/v1/orbs/${spawnedOrbId}/history`);
+          const history = await scenarioEvidence.probe("history", () =>
+            api(base, "GET", `/api/v1/orbs/${spawnedOrbId}/history`),
+          );
           const replies = (
             history.body["records"] as { role?: string; content?: unknown }[]
           ).filter(
@@ -2290,7 +2317,9 @@ describe("full slice E2E", () => {
           );
           if (replies.length > 1)
             throw new FatalProbeError("upload verification was inferred twice");
-          const view = await api(base, "GET", `/api/v1/orbs/${spawnedOrbId}`);
+          const view = await scenarioEvidence.probe("orb", () =>
+            api(base, "GET", `/api/v1/orbs/${spawnedOrbId}`),
+          );
           return replies.length === 1 && view.body["activity"] === "idle" ? true : null;
         },
         { timeoutMs: 30_000 },

@@ -8,6 +8,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Diagnose unresolved lifecycle E2E failures** (`docs/testing.md`): run 37390585414 timed out awaiting profile-fixture device challenge before dispatch assertions; run 37389785804 accepted upload model rule 7 with bash-call events but no rule 8 continuation. Exact provider/runtime causes are unknown. Use sanitized failure evidence to distinguish HTTP/provisioning/challenge outcomes and inspect the spawned upload target’s health, tool completion, replication and model ledger. Preserve private originals; no blind retries, weakened assertions or lucky-green resolution.
+
 - [x] **Suppress empty public thinking disclosures.** Committed empty bodies are omitted; canonical indices/detail keys and redacted notices remain. Final qualification: `docs/testing.md`.
 
 - [x] **Pair tool results by parent ancestry.** Backend and frontend matchers cover sibling branches/reused IDs. Final qualification: `docs/testing.md`.

@@ -1,5 +1,11 @@
 # Testing strategy
 
+## Lifecycle failure evidence (decided 2026-10-06)
+
+Profile-login and full-slice upload failures write bounded, allowlisted JSON under `test-failures/profile-login/` and `test-failures/full-slice-upload/`, uploaded by the existing failure-trace step. Record probe timestamps, HTTP status/error category, state/activity, challenge presence, target runtime health, replicated tool-call/result metadata and cursor, and model request IDs/rules/outcome/timing. Never upload raw fixture logs, request/history bodies, prompts, tool arguments or credentials. Upload diagnostics follow the spawned target, not the stopped original. Probe errors still reach the unchanged retry loop; diagnostics cannot replace the original failure.
+
+Runs [37390585414](https://github.com/schani/pi-orb/actions/runs/37390585414) (login challenge absent at timeout) and [37389785804](https://github.com/schani/pi-orb/actions/runs/37389785804) (upload continuation absent) remain unexplained. Historical private originals are preserved; a later pass does not resolve either cause. Follow-up: `TODO.md`.
+
 ## UI release-policy exception (decided 2026-10-05)
 
 **UI exception (user-approved 2026-10-05):** flaky UI tests must still be fixed and validated, but deep investigation of a historical failure is optional once corrective stabilization is evidenced. A passing rerun alone is insufficient; new failing UI tests still require correction. Preserve first-failure evidence. Non-UI failures and DST replay/root-cause requirements are unchanged.
