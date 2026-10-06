@@ -1,6 +1,4 @@
-# Full-slice end-to-end test against the fake OpenAI service
-# (fake-openai.flingit.run). The dependency on the deployed fake is an
-# accepted trade-off. Four isolated runners each execute their shard serially.
+# Four isolated runners execute serial shards against job-owned fake OpenAI.
 name: E2E
 
 on:
@@ -57,7 +55,20 @@ jobs:
           test "$(df -Pk . | awk 'NR == 2 {print $4}')" -ge 15728640
 
       - name: Run end-to-end test
-        run: npm run test:e2e -- --shard=${{ matrix.shard }}/4
+        env:
+          PI_ORB_LOCAL_FAKE_EVIDENCE: ${{ runner.temp }}/local-fake-provider
+        run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --shard=${{ matrix.shard }}/4
+
+      - name: Upload local provider provenance
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: local-fake-docker-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/local-fake-provider/manifest.json
+            ${{ runner.temp }}/local-fake-provider/phases.json
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Report Docker disk use
         if: always()

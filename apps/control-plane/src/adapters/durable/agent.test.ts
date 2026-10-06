@@ -829,9 +829,16 @@ describe("central Durable agent", () => {
       })
     )._unsafeUnwrap({ withStackTrace: true });
     try {
+      const outcomes: string[] = [];
+      const observeOutcome = (frame: ServerFrame) => {
+        if (frame.type === "runtime.event" && frame.event.type === "operation_finished")
+          outcomes.push(frame.event.outcome);
+      };
+      first.subscribe(observeOutcome);
       const receipt = (await first.deliver(input))._unsafeUnwrap();
       await entered.promise;
       expect((await first.close()).isOk()).toBe(true);
+      expect(outcomes).not.toContain("aborted");
       let current = "";
       let resumedRequests = 0;
       const secondModel = fauxProvider();
@@ -860,8 +867,11 @@ describe("central Durable agent", () => {
         })
       )._unsafeUnwrap({ withStackTrace: true });
       try {
+        second.subscribe(observeOutcome);
         expect((await second.deliver(input))._unsafeUnwrap().operationId).toBe(receipt.operationId);
         await second.waitForIdle();
+        expect(outcomes.at(-1)).toBe("completed");
+        expect(outcomes).not.toContain("aborted");
         expect(current).toContain("NEW");
         expect(resumedRequests).toBe(1);
         const records = second.snapshot()._unsafeUnwrap().records;

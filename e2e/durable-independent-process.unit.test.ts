@@ -19,8 +19,20 @@ it("uses valid JavaScript regular expressions for every scripted model matcher",
   }
 });
 
-it("gives an aborted turn its own ordered summary before future input", () => {
-  expect(fixture).toMatch(/\.\.\.\(cancellation === "abort" \? \[summary\] : \[\]\)/);
+it("retires explicit abort with public cancellation and no abort-only summary consumption", () => {
+  expect(fixture).not.toMatch(/\.\.\.\(cancellation === "abort" \? \[summary\] : \[\]\)/);
+  const branch = fixture.split('} else if (cancellation === "abort") {')[1]!.split("} else {")[0]!;
+  expect(branch).toContain('outcome: "aborted"');
+  expect(branch).toContain('outcome: "cancelled"');
+  expect(branch).not.toContain("summarySettled");
+});
+
+it("owns scoped summary, model, backend wait and final commit barriers before UI assertions", () => {
+  expect(fixture).not.toContain('logs.join("").includes("harness.summary_completed")');
+  expect(fixture).not.toContain('split("harness.summary_completed")');
+  expect(fixture).toContain('"model admission for VM_EFFECT"');
+  expect(fixture).toContain('"backend execution wait publication"');
+  expect(fixture).toContain('"ready tool and assistant committed"');
 });
 
 it("preserves all six existing acceptance registrations separately from followups", () => {

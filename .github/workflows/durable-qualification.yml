@@ -37,7 +37,19 @@ jobs:
       - name: Install pinned browser engines and system dependencies
         run: npm run test:e2e:install
       - name: Run central process end-to-end tests
-        run: npm run test:e2e -- --shard=${{ matrix.shard }}/4
+        env:
+          PI_ORB_LOCAL_FAKE_EVIDENCE: ${{ runner.temp }}/local-fake-provider
+        run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --shard=${{ matrix.shard }}/4
+      - name: Upload local provider provenance
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: local-fake-process-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/local-fake-provider/manifest.json
+            ${{ runner.temp }}/local-fake-provider/phases.json
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Upload failure evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
@@ -73,6 +85,7 @@ jobs:
             test-failures/durable-independent-process/*/original-model-requests.json
             test-failures/durable-independent-process/*/model-stream-fence.json
             test-failures/durable-independent-process/*/barrier.json
+            test-failures/durable-independent-process/*/waiting-phases.json
             test-failures/durable-independent-process/*/held-setup-readiness.json
             test-failures/durable-independent-process/*/before-ready-history.json
             test-failures/durable-independent-process/*/resource-ready-history.json

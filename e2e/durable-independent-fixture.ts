@@ -25,6 +25,12 @@ import { runTerminal } from "./terminal-client.ts";
 import { runArtifactRestart } from "./testkit/durable-artifact-restart.ts";
 import { onlyCodemodeCatalog, requestedTools } from "./testkit/durable-model-fixture.ts";
 import { readonlySubscription } from "./testkit/durable-subscription.ts";
+import {
+  committedToolOutput,
+  lifecycleEdge,
+  operationEvent,
+  summaryOutcome,
+} from "./testkit/durable-wait-barriers.ts";
 
 const evidenceRoot =
   process.env["PI_ORB_E2E_EVIDENCE_DIR"] ??
@@ -224,7 +230,6 @@ export function registerIndependentCase(cancellation: IndependentCase) {
               stop,
             ],
           },
-          ...(cancellation === "abort" ? [summary] : []),
           ...(cancellation === "stop"
             ? [
                 {
@@ -644,9 +649,26 @@ export function registerIndependentCase(cancellation: IndependentCase) {
       expect(held?.writableEnded).toBe(false);
       expect(held?.destroyed).toBe(false);
       await page.screenshot({ path: join(evidence, "early-output.png"), fullPage: true });
-      await waitFor("first turn summary settled", async () =>
-        cp!.logs.join("").includes("harness.summary_completed") ? true : null,
+      const barrierEvents: Record<string, unknown>[] = [];
+      const summarySettled = async (operationId: string, after = 0) => {
+        await waitFor(`summary settled for ${operationId}`, async () => {
+          const outcome = summaryOutcome([cp!.logs.join("").slice(after)], orb, operationId);
+          if (outcome === "failed")
+            throw new FatalProbeError(`summary failed for orb=${orb} operation=${operationId}`);
+          return outcome === "completed" ? true : null;
+        });
+        barrierEvents.push({ phase: "summary-completed", orb, operationId });
+        writeFileSync(
+          join(evidence, "waiting-phases.json"),
+          JSON.stringify(barrierEvents, null, 2),
+        );
+      };
+      const firstSummary = await waitFor(
+        "orb first summary queued",
+        async () => lifecycleEdge(cp!.logs, orb, "harness.summary_queued") ?? null,
       );
+      expect(firstSummary["operationId"]).toBeTruthy();
+      await summarySettled(firstSummary["operationId"]!);
       if (cancellation === "artifact-restart") {
         await runArtifactRestart({
           cp,
@@ -678,7 +700,38 @@ export function registerIndependentCase(cancellation: IndependentCase) {
         failed = false;
         return;
       }
+      const requestStart = cp.modelRequests?.length ?? 0;
+      const frameStart = frames.length;
+      const logStart = cp.logs.join("").length;
       await submit("VM_EFFECT");
+      await waitFor("model admission for VM_EFFECT", async () =>
+        cp!.modelRequests
+          ?.slice(requestStart)
+          .some((request) => JSON.stringify(request).includes('"VM_EFFECT"'))
+          ? true
+          : null,
+      );
+      const publishedTool = await waitFor(
+        "model tool publication for VM_EFFECT",
+        async () =>
+          operationEvent(frames.slice(frameStart), undefined, "tool_state", {
+            name: "codemode",
+            state: "running",
+          }) ?? null,
+      );
+      const operationId = String(publishedTool["operationId"]);
+      const callId = String(publishedTool["callId"]);
+      await waitFor("backend execution wait publication", async () =>
+        lifecycleEdge(cp!.logs, orb, "execution.tool_waiting", { call_id: callId }) &&
+        operationEvent(frames.slice(frameStart), operationId, "tool_state", {
+          callId,
+          message: "Waiting for execution.",
+        })
+          ? true
+          : null,
+      );
+      barrierEvents.push({ phase: "execution-wait-acknowledged", orb, operationId, callId });
+      writeFileSync(join(evidence, "waiting-phases.json"), JSON.stringify(barrierEvents, null, 2));
       await expectPage(page.getByText(/waiting.*execution|waiting.*VM/i).first()).toBeVisible({
         timeout: 30_000,
       });
@@ -718,9 +771,7 @@ export function registerIndependentCase(cancellation: IndependentCase) {
           timeout: 30_000,
         });
         expect(released).toBe(false);
-        await waitFor("failure turn summary settled", async () =>
-          cp!.logs.join("").split("harness.summary_completed").length === 3 ? true : null,
-        );
+        await summarySettled(operationId, logStart);
         await submit("FUTURE_CENTRAL");
         await expectPage(page.getByText("FUTURE_CENTRAL_DONE", { exact: true })).toBeVisible({
           timeout: 30_000,
@@ -732,12 +783,56 @@ export function registerIndependentCase(cancellation: IndependentCase) {
           runTerminal(cp.baseUrl, orb, "pi-orb self --json", "SELF_DONE"),
         ).rejects.toThrow(/ready=false.*code=1013/);
         release();
+        await waitFor("execution ready and instructions adopted", async () => {
+          const logs = [cp!.logs.join("").slice(logStart)];
+          return (await api(cp!.baseUrl, "GET", `/api/v1/orbs/${orb}`)).body["state"] ===
+            "running" &&
+            lifecycleEdge(logs, orb, "execution.tool_ready", { call_id: callId }) &&
+            lifecycleEdge(logs, orb, "instructions.host_adopted")
+            ? true
+            : null;
+        });
+        await waitFor("ready tool and assistant committed", async () => {
+          const history = await readReplicatedHistorySnapshot(cp!, orb);
+          const message = (role: string, text: string, exact = false) =>
+            history.records.some(
+              (record) =>
+                record.type === "message" &&
+                record.role === role &&
+                record.content.some(
+                  (block) =>
+                    block.type === "text" &&
+                    (exact ? block.text === text : block.text.includes(text)),
+                ),
+            );
+          return operationEvent(frames.slice(frameStart), operationId, "tool_state", {
+            name: "codemode",
+            state: "completed",
+          }) &&
+            operationEvent(frames.slice(frameStart), operationId, "operation_finished", {
+              outcome: "completed",
+            }) &&
+            committedToolOutput(history.records, "VM_EXECUTED_ONCE") &&
+            message("assistant", "READY_VM_DONE", true) &&
+            message(
+              "assistant",
+              cancellation === "hook-policy"
+                ? "HOOK_POLICY_REEVALUATED"
+                : "READY_POLICY_REEVALUATED",
+              true,
+            )
+            ? true
+            : null;
+        });
+        barrierEvents.push({ phase: "ready-tool-assistant-committed", orb, operationId });
+        writeFileSync(
+          join(evidence, "waiting-phases.json"),
+          JSON.stringify(barrierEvents, null, 2),
+        );
         await expectPage(page.getByText("READY_VM_DONE", { exact: true })).toBeVisible({
           timeout: 30_000,
         });
-        await waitFor("ready turn summary settled", async () =>
-          cp!.logs.join("").split("harness.summary_completed").length === 3 ? true : null,
-        );
+        await summarySettled(operationId, logStart);
         await forceReconcilePass(cp, orb);
         expect((await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}`)).body["state"]).toBe("running");
         expect(existsSync(join(workspace, "MUST_NOT_EXIST"))).toBe(false);
@@ -795,9 +890,19 @@ export function registerIndependentCase(cancellation: IndependentCase) {
           timeout: 5_000,
         });
         expect(released).toBe(false);
-        await waitFor("aborted turn summary settled", async () =>
-          cp!.logs.join("").split("harness.summary_completed").length === 3 ? true : null,
+        await waitFor("cancelled operation retired before setup release", async () =>
+          operationEvent(frames.slice(frameStart), operationId, "operation_finished", {
+            outcome: "aborted",
+          }) &&
+          operationEvent(frames.slice(frameStart), undefined, "status", { activity: "idle" }) &&
+          lifecycleEdge(cp!.logs, orb, "execution.tool_wait_finished", {
+            call_id: callId,
+            outcome: "cancelled",
+          })
+            ? true
+            : null,
         );
+        barrierEvents.push({ phase: "operation-aborted", orb, operationId, callId });
         release();
         await waitFor(
           "execution ready after cancelled wait",

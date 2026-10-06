@@ -13,6 +13,7 @@ import type { McpConfig } from "@pi-orb/protocol";
 import { err, ok, okAsync, Result, ResultAsync } from "neverthrow";
 import { LunaTurnSummarizer } from "../../orb-runtime/src/pi/luna-summarizer.ts";
 import { NativeResourceContext } from "./adapters/durable/context-storage.ts";
+import { executionWaitProgress } from "./adapters/durable/execution-wait-progress.ts";
 import { InstructionReadiness } from "./adapters/durable/instruction-readiness.ts";
 import type { DurableAgentPlaneOptions } from "./adapters/durable/manager.ts";
 import { durableError } from "./adapters/durable/manager.ts";
@@ -624,6 +625,9 @@ export function createProcessAgentContext(
           if (status.status !== "available")
             logOrbEvent(task, orb.id, "durable.mcp_unavailable", {
               server: status.name,
+              status: status.status,
+              stage: "discovery",
+              errorCategory: status.error.code,
               processId: process.pid,
             });
         }
@@ -640,21 +644,16 @@ export function createProcessAgentContext(
               execute: async (args, api, ctx) => {
                 let waited = false;
                 let failed = true;
-                if (api.env instanceof LazyExecutionEnv)
-                  api.env.observeWait((phase) => {
-                    if (phase === "waiting") waited = true;
-                    if (waited || phase === "failed" || phase === "cancelled")
-                      logOrbEvent(task, orb.id, `execution.tool_${phase}`, {
-                        task_id: String(api.taskId),
-                        call_id: api.callId,
-                      });
-                    return ResultAsync.fromPromise(
-                      api.details({ executionWait: phase === "waiting" }, ctx),
-                      () => durableError("execution wait publication failed"),
-                    );
-                  });
+                const progressApi = executionWaitProgress(api, ctx, (phase) => {
+                  if (phase === "waiting") waited = true;
+                  if (waited || phase === "failed" || phase === "cancelled")
+                    logOrbEvent(task, orb.id, `execution.tool_${phase}`, {
+                      task_id: String(api.taskId),
+                      call_id: api.callId,
+                    });
+                });
                 try {
-                  const result = await registration.execute(args, api, ctx);
+                  const result = await registration.execute(args, progressApi, ctx);
                   failed = result.isError === true;
                   return result;
                 } finally {

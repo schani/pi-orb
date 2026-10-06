@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import re
 import unittest
 
@@ -45,6 +46,7 @@ class BrowserEvidenceTest(unittest.TestCase):
             'test-failures/durable-independent-process/*/browser-frames.json',
             'test-failures/durable-independent-process/*/model-requests.json',
             'test-failures/durable-independent-process/*/barrier.json',
+            'test-failures/durable-independent-process/*/waiting-phases.json',
         ):
             self.assertIn(pattern, process)
         for upload in (process, steps('e2e.yml')['Upload Durable failure diagnostics']):
@@ -55,6 +57,31 @@ class BrowserEvidenceTest(unittest.TestCase):
             self.assertNotRegex(upload, r'(?m)^            .*/\\*\\s*$')
         proof = steps('durable-qualification.yml')['Prove packaged worker, Git and skills without network']
         self.assertIn('2>&1 | tee', proof)
+
+    def test_ci_exercises_provider_supervisor_contracts(self):
+        scripts = json.loads((ROOT / 'package.json').read_text())['scripts']
+        self.assertIn('scripts/local-fake-provider.test.mjs', scripts['test:infra'])
+        self.assertNotIn('scripts/local-fake-provider.smoke.test.mjs', scripts['test:infra'])
+
+    def test_acceptance_jobs_own_their_pinned_fake_provider(self):
+        for workflow, step_name in (
+            ('e2e.yml', 'Run end-to-end test'),
+            ('durable-qualification.yml', 'Run central process end-to-end tests'),
+        ):
+            with self.subTest(workflow=workflow):
+                inventory = steps(workflow)
+                run = inventory[step_name]
+                self.assertIn('node scripts/local-fake-provider.mjs -- npm run test:e2e -- --shard=', run)
+                self.assertIn('PI_ORB_LOCAL_FAKE_EVIDENCE:', run)
+                upload = inventory['Upload local provider provenance']
+                self.assertIn('if: always()', upload)
+                paths = re.search(r'^          path: \|\n((?:            [^\n]+\n)+)', upload, re.M)
+                self.assertIsNotNone(paths)
+                self.assertEqual({line.strip() for line in paths.group(1).splitlines()}, {
+                    '${{ runner.temp }}/local-fake-provider/manifest.json',
+                    '${{ runner.temp }}/local-fake-provider/phases.json',
+                })
+                self.assertIn('retention-days: 14', upload)
 
     def test_lazy_return_owns_and_preserves_failure_evidence(self):
         source = (ROOT / 'e2e/lazy-transcript-frontend.e2e.test.ts').read_text()

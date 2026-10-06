@@ -649,7 +649,12 @@ export class DurableAgent implements AgentSessionFacade {
       this.operationOutcome = "completed";
       this.turnStart = this.records.length;
       this.emit({ type: "operation_started", operationId: this.operationId });
-    } else if (!active && this.operationId !== null) {
+    }
+    // Native cancellation is committed on the current run even without an assistant terminal.
+    const run = this.live.run;
+    if (this.operationId !== null && run && this.tasks.tasks[String(run.taskId)]?.abortRequested)
+      this.operationOutcome = "aborted";
+    if (!active && this.operationId !== null) {
       const turn = this.records.slice(this.turnStart);
       if (
         this.summaryCoordinator &&
@@ -718,7 +723,11 @@ export class DurableAgent implements AgentSessionFacade {
         for (const record of records) {
           const display = project(record);
           if (!known.has(record.id)) {
-            if (record.type === "message" && record.role === "assistant")
+            if (
+              record.type === "message" &&
+              record.role === "assistant" &&
+              this.operationOutcome !== "aborted"
+            )
               this.operationOutcome =
                 record.finishReason === "error"
                   ? "failed"

@@ -49,6 +49,7 @@ import {
 import { runTerminal } from "./terminal-client.ts";
 import { FailureEvidence } from "./testkit/failure-evidence.ts";
 import { restartNoticePattern } from "./testkit/restart-notice-rule.ts";
+import { UploadContinuationPhases } from "./testkit/upload-continuation-phases.ts";
 
 /**
  * The full docs/testing.md slice against the real Pi SDK and fake OpenAI
@@ -746,10 +747,13 @@ async function restartControlPlaneWithSpec(spec: string, generation: number): Pr
 }
 
 let scenarioEvidence: FailureEvidence;
+let uploadPhases: UploadContinuationPhases | null = null;
+const currentUploadPhases = () => uploadPhases;
 
 describe("full slice E2E", () => {
   it("runs login, a scripted tool round trip, replication, and drain", async () => {
     scenarioEvidence = new FailureEvidence(orbId);
+    uploadPhases = null;
     try {
       await runScenario();
     } catch (error) {
@@ -793,6 +797,16 @@ describe("full slice E2E", () => {
             api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${target}/history`),
           )
           .catch(() => undefined);
+      }
+      const capturedUploadPhases = currentUploadPhases();
+      if (capturedUploadPhases !== null) {
+        scenarioEvidence.observations.push({
+          resource: "upload-phases",
+          source: "browser-public",
+          sdkProviderHooksInstalled: false,
+          phases: capturedUploadPhases.tail(),
+        });
+        if (scenarioEvidence.observations.length > 80) scenarioEvidence.observations.shift();
       }
       await scenarioEvidence
         .save("full-slice-upload", () => fakeControl(fake.sessionKey, "/requests"))
@@ -2356,6 +2370,7 @@ describe("full slice E2E", () => {
           browserPayloads.push(text);
           const frame = JSON.parse(text);
           if (frame.type === "history.record") appliedCursor = frame.record.id;
+          uploadPhases?.observeFrame(frame);
         });
         transport.on("framesent", ({ payload }) => {
           const frame = JSON.parse(String(payload));
@@ -2386,6 +2401,7 @@ describe("full slice E2E", () => {
       expect(browserPayloads.join("\n")).not.toContain('"arguments"');
       // The following upload submits a real inbox message and completes inference
       // after cached browser→runtime handoff, without another model script rule.
+      uploadPhases = new UploadContinuationPhases();
       const choosing = page.waitForEvent("filechooser");
       await page.getByRole("button", { name: "Upload files", exact: true }).click();
       await (await choosing).setFiles([

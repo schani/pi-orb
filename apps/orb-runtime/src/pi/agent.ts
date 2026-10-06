@@ -217,6 +217,7 @@ export class PiOrbAgent {
   private turnStart: { readonly promise: Promise<void>; readonly resolve: () => void } | null =
     null;
   private summaryStartIndex: number | null = null;
+  private operationStartIndex = 0;
   private summaryCoordinator: TurnSummaryCoordinator | null = null;
   private readonly liveBlocks = new Map<string, LiveBlock>();
   private outputMessageSequence = 0;
@@ -1248,6 +1249,7 @@ export class PiOrbAgent {
     this.operationError = undefined;
     this.activity = "busy";
     this.summaryStartIndex = summaryStartIndex;
+    this.operationStartIndex = this.sessionManager?.getEntries().length ?? 0;
     this.liveBlocks.clear();
     this.liveTools.clear();
     this.liveToolBodies.clear();
@@ -1391,9 +1393,25 @@ export class PiOrbAgent {
       return;
     }
     const operationId = this.operationId;
+    let outcome = this.operationOutcome;
+    let message = this.operationError;
+    const terminalAssistant = this.sessionManager
+      ?.getEntries()
+      .slice(this.operationStartIndex)
+      .findLast((entry) => entry.type === "message" && entry.message.role === "assistant");
+    if (outcome === "completed" && terminalAssistant !== undefined) {
+      const mapped = mapPiEntry(terminalAssistant);
+      if (mapped.isErr()) {
+        this.health = this.failed("history_mapping_failed", mapped.error.message, false);
+        return;
+      }
+      if (mapped.value.type === "message" && mapped.value.finishReason === "error") {
+        outcome = "failed";
+        message = mapped.value.failure?.message;
+      }
+    }
     const summary = this.captureTurnSummaryInput();
-    const outcome = this.operationOutcome;
-    this.finishAgentOperation(operationId, outcome, this.operationError);
+    this.finishAgentOperation(operationId, outcome, message);
     if (outcome === "completed" && operationId !== null && summary !== null)
       this.summaryCoordinator?.enqueue(operationId, summary);
   }

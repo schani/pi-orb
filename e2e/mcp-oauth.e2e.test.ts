@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { DisplayHistoryView } from "@pi-orb/protocol";
 import { chromium, expect as expectPage } from "@playwright/test";
 import { build } from "vite";
 import { expect, it } from "vitest";
@@ -17,6 +18,7 @@ import {
   startControlPlane,
   waitFor,
 } from "./harness.ts";
+import { hasCommittedMcpStatus } from "./testkit/mcp-status-detail.ts";
 
 it("initial auth recovery → two real Pi runtimes reuse the grant → rejection/refresh → reconnect → disconnect", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-oauth-e2e-"));
@@ -382,24 +384,27 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
         await waitFor(
           "completed first unauthenticated turn and durable authorization-required status",
           async () => {
-            const history = (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`)).body;
-            const records = history["records"] as {
-              type: string;
-              role?: string;
-              finishReason?: string;
-              content?: { text?: string }[];
-            }[];
+            const history = (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`))
+              .body as unknown as DisplayHistoryView;
+            const records = history.records;
             const requests = (await fakeControl(fake.sessionKey, "/requests")) as unknown as {
               matchedRuleIndex: number;
               status: number;
             }[];
-            const user = records.some((record) =>
-              record.content?.some((block) => block.text === "OAuth 7"),
+            const user = records.some(
+              (record) =>
+                record.type === "message" &&
+                record.content.some((block) => block.type === "text" && block.text === "OAuth 7"),
             );
             const assistant = records
-              .filter((record) => record.role === "assistant")
-              .map((record) => record.finishReason);
-            const needsAuth = JSON.stringify(history).includes("MCP fixture: needs-auth.");
+              .filter((record) => record.type === "message" && record.role === "assistant")
+              .map((record) => (record.type === "message" ? record.finishReason : undefined));
+            const detail = await hasCommittedMcpStatus(history, "needs-auth", (path) =>
+              api(cp.baseUrl, "GET", path),
+            );
+            if (detail.isErr() && detail.error.type !== "detail_missing")
+              throw new FatalProbeError(`MCP detail ${detail.error.type} (${detail.error.status})`);
+            const needsAuth = detail.isOk() && detail.value;
             const modelRules = requests.map((request) => [
               request.matchedRuleIndex,
               request.status,
@@ -421,10 +426,14 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
         await waitFor(
           "connected recovery history",
           async () => {
-            const history = JSON.stringify(
-              (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`)).body,
+            const history = (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`))
+              .body as unknown as DisplayHistoryView;
+            const detail = await hasCommittedMcpStatus(history, "connected", (path) =>
+              api(cp.baseUrl, "GET", path),
             );
-            return history.includes("MCP fixture: connected.") ? true : null;
+            if (detail.isErr() && detail.error.type !== "detail_missing")
+              throw new FatalProbeError(`MCP detail ${detail.error.type} (${detail.error.status})`);
+            return detail.isOk() && detail.value ? true : null;
           },
           { timeoutMs: 60_000 },
         );
