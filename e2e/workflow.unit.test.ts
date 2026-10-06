@@ -8,5 +8,7 @@ it("reserves setup and serial-suite headroom in the E2E job budget", () => {
 });
 
 it("stops after the first failure so Vitest reports it before job cancellation", () => {
-  expect(workflow).toMatch(/- name: Run end-to-end test\n\s+run: npm run test:e2e -- --bail 1\n/);
+  expect(workflow).toMatch(
+    /- name: Run end-to-end test\n\s+if: env.LIFECYCLE_DIAGNOSTIC != 'true'\n\s+run: npm run test:e2e -- --bail 1\n/,
+  );
 });

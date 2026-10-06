@@ -1,9 +1,11 @@
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
+import { SerializedAuthGate } from "../../domain/auth-gates.ts";
 import { getToken } from "../../domain/broker.ts";
 import { DEFAULT_BROKER_CONSTANTS } from "../../domain/constants.ts";
 import { reconcileOrbOnce } from "../../domain/lifecycle.ts";
 import type { BrokerDeps, StoredCredential } from "../../domain/ports.ts";
+import { orbView } from "../../http/views.ts";
 import { FakePointerStore, FakeSecretStore, FakeUpstream } from "../../testkit/broker.ts";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../../testkit/fixtures.ts";
 import {
@@ -83,6 +85,69 @@ function deps(pointers: BrokerDeps["pointers"], secrets: FakeSecretStore): Broke
 }
 
 describe("Pi auth gate login publication (DST)", () => {
+  it("projects a delayed challenge on the next lifecycle tick without starting a second login", async () => {
+    await runDst({ name: "pi-gate-delayed-challenge-projection", iterations: 10 }, async (sim) => {
+      const runtime = new FakePiRuntime(false);
+      const broker = deps(new FakePointerStore(), new FakeSecretStore());
+      const gate = new SerializedAuthGate(
+        new PiAuthGate(
+          "/tmp/pi-auth-gate-delayed-projection-dst",
+          null,
+          () => broker,
+          async () => runtime.asRuntime(),
+        ),
+      );
+      const harness = makeHarness();
+      const project = { ...makeProjectRow("delayed-login-project"), ownerUserId: USER };
+      const orb = makeOrbRow("delayed-login-orb", project.id, "creating");
+      harness.store.seedProject(project);
+      harness.store.seedOrb(orb);
+      const controlDeps = { ...harness.deps, authGate: gate };
+      const result = await sim.runTasks([
+        {
+          name: "lifecycle-polls",
+          f: async (task) => {
+            const startedAt = task.wallNow();
+            for (let tick = 0; tick <= 12; tick += 1) {
+              if (tick > 0)
+                await task.sleep(
+                  startedAt + tick * 5_000 - task.wallNow(),
+                  "pre-challenge lifecycle poll",
+                );
+              expect(task.wallNow() - startedAt).toBe(tick * 5_000);
+              expect(await reconcileOrbOnce(task, controlDeps, orb.id)).toMatchObject({
+                type: "waiting",
+              });
+              expect(orbView(orb, harness.deps.control, {}, USER).actionRequired).toMatchObject({
+                userCode: "",
+                verificationUri: "",
+              });
+            }
+            expect(runtime.loginCalls).toBe(1);
+            runtime.emitChallenge();
+            expect(orbView(orb, harness.deps.control, {}, USER).actionRequired).toMatchObject({
+              userCode: "",
+            });
+            await task.sleep(5_000, "next lifecycle poll after callback");
+            expect(await reconcileOrbOnce(task, controlDeps, orb.id)).toMatchObject({
+              type: "waiting",
+            });
+            expect(orbView(orb, harness.deps.control, {}, USER).actionRequired).toMatchObject({
+              userCode: "CODE",
+              verificationUri: "https://login.test/device",
+            });
+            expect(orbView(orb, harness.deps.control, {}, "another-owner").actionRequired).toEqual({
+              type: "owner_login_required",
+              provider: "openai-codex",
+            });
+            expect(runtime.loginCalls).toBe(1);
+            expect((await harness.store.getOrb(task, orb.id))._unsafeUnwrap()?.hostRef).toBeNull();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    });
+  });
   it("keeps one live SDK login through challenge delay and canonical credential changes", async () => {
     await runDst({ name: "pi-gate-single-live-login", iterations: 20 }, async (sim) => {
       const secrets = new FakeSecretStore();

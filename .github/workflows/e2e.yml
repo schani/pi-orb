@@ -9,12 +9,20 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      lifecycle_diagnostic:
+        description: Run only the two unresolved lifecycle failure cases (not release qualification)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   e2e:
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.lifecycle_diagnostic == true && 'lifecycle-diagnostic' || 'e2e' }}
+    env:
+      LIFECYCLE_DIAGNOSTIC: ${{ github.event_name == 'workflow_dispatch' && inputs.lifecycle_diagnostic == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -44,7 +52,12 @@ jobs:
         run: npm run test:e2e:install
 
       - name: Run end-to-end test
+        if: env.LIFECYCLE_DIAGNOSTIC != 'true'
         run: npm run test:e2e -- --bail 1
+
+      - name: Run lifecycle diagnostic
+        if: env.LIFECYCLE_DIAGNOSTIC == 'true'
+        run: npm run test:e2e -- --project lifecycle e2e/full-slice.e2e.test.ts e2e/subagents.e2e.test.ts --testNamePattern '^(full slice E2E runs login, a scripted tool round trip, replication, and drain|rejects unknown profiles and models without child inference, and dispatches model sol explicitly)$'
 
       - name: Upload deterministic failure traces
         if: failure()
