@@ -204,8 +204,10 @@ interface OutputPatchEvent {
   operationId: string;
   blockId: string;
   blockType: "text" | "reasoning";
+  contentIndex: number; // original source/native/normalized index, for both block types
   revision: number;
   headline?: string; // reasoning only; complete current capped summary, not a text delta
+  reasoningVisible?: boolean; // present on every reasoning patch, absent on text
   patch: { type: "append"; text: string } | { type: "replace"; text: string };
 }
 
@@ -266,7 +268,7 @@ All schemas will be closed TypeBox schemas. An invalid request receives a reject
 
 Authenticated runtime `GET /v1/details/:recordId/:detailKey?sessionId=<expected>` returns `{v:1,sessionId,recordId,detailKey,state:"committed",body}` and `GET /v1/images/:recordId/:detailKey/:imageIndex?sessionId=<expected>` returns binary image bytes with a safe Content-Type. Session mismatch is rejected with 409 before reading. The detail body union includes reasoning text, tool-call arguments, tool-result content, top-level image, compaction text and subagent fields; image leaves may contain only an HTTP(S) URL and/or `imageRef`, never base64. The binary route handles local image bytes. Missing keys return 404 and unavailable history 503 with typed runtime errors.
 
-`GET /v1/details/live/:operationId/:blockId` returns `{v:1,sessionId,operationId,blockId,state:"running"|"completed"|"unavailable",body?}` for current reasoning or tool-result progress. The runtime retains full active text for coherent snapshots. Reasoning `output_patch` frames carry empty replace text plus the complete current capped `headline` on live send and replay (decided 2026-10-04). Send the initial identity and subsequent headline changes, including an empty headline when titles disappear or become redacted; body-only changes remain HTTP-only. Visible prose patches remain unchanged. Browser disclosures poll live HTTP roughly once per second while open, without subscriptions, revision tokens or a guaranteed gapless transition to committed detail. The WebSocket still carries identity, lifecycle and atomic block retirement; no streamed private reasoning/tool body is required. This is a direct breaking browser/runtime contract: old running orbs are stopped and restarted, with no compatibility path.
+`GET /v1/details/live/:operationId/:blockId` returns `{v:1,sessionId,operationId,blockId,state:"running"|"completed"|"unavailable",body?}` for current reasoning or tool-result progress. The runtime retains full active text for coherent snapshots. **Reasoning visibility (locally qualified 2026-10-06; not deployed; qualification: `docs/testing.md`):** every reasoning `output_patch` carries an empty replace payload, the complete capped `headline` and `reasoningVisible`, true iff `redacted === true` or the actual body has nonempty `trim()`. Private reasoning never enters patch text; full bodies remain in live HTTP detail and canonical history. Required `contentIndex` preserves the original source/native/normalized index for reasoning and text; text patches omit `reasoningVisible`. Pi emits initial identity and subsequent headline or visibility changes, not body-only changes; reconnect replay carries the same fields. Claude uses the same semantics, including a visible initial redacted start. Runtime and browser retain all live identities, including hidden ones, with atomic retirement unchanged; rendering requires `reasoningVisible === true`. Live-to-committed disclosure aliases match `contentIndex` to the committed `detailKey` source index, never the filtered display ordinal. Visible prose patch text remains unchanged. Browser disclosures poll live HTTP roughly once per second while open, without subscriptions, revision tokens or a guaranteed gapless transition to committed detail. The WebSocket still carries identity, lifecycle and atomic block retirement; no streamed private reasoning/tool body is required. This is a direct breaking browser/runtime contract: old running orbs are stopped and restarted, with no compatibility path.
 
 ## Ordering, request identity, and backpressure
 
@@ -318,7 +320,7 @@ That status is a product outcome, not an operator detail, so it is surfaced end 
 
 The existing per-orb reconciler is the dispatcher: inbox commit wakes it immediately, and later ordinary scans recover work after process death. No broker, queue service, or fourth background loop is added. When the orb is running it calls an authenticated, idempotent runtime HTTP operation keyed by the durable batch ID and carrying all constituent message IDs. The runtime serializes it through the same mutation executor as live abort requests, then chooses from its authoritative activity at that instant:
 
-- busy agent operation → call Pi with `deliverAs: "steer"` and associate the message with the existing operation;
+- busy agent operation → call Pi with `deliverAs: "steer"` and associate the message with the existing operation; Pi queues steering until the current model-response boundary, so acceptance is not application/persistence and does not interrupt in-flight inference (unlike explicit abort);
 - idle runtime → trigger an ordinary new agent turn and allocate a new operation ID;
 
 The choice is state-derived, not browser-selected and not based on the control plane's lagging ~10-second activity observation. Consequently the API has one message shape and no `delivery` input enum. The result/status may report the observed delivery mode for explanation.

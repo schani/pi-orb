@@ -158,6 +158,8 @@ type FrameListener = (frame: ServerFrame) => void;
 
 interface LiveBlock {
   blockType: "text" | "reasoning";
+  contentIndex: number;
+  reasoningVisible?: boolean;
   revision: number;
   text: string;
   headline?: string;
@@ -1106,16 +1108,22 @@ export class PiOrbAgent {
             return;
           const headline =
             blockType === "reasoning" ? reasoningHeadline(text, typed.redacted) : undefined;
+          const reasoningVisible = typed.redacted === true || text.trim() !== "";
           const revision = (existing?.revision ?? 0) + 1;
           this.liveBlocks.set(blockId, {
             blockType,
+            contentIndex: index,
+            ...(blockType === "reasoning" ? { reasoningVisible } : {}),
             revision,
             text,
             ...(headline === undefined ? {} : { headline, redacted: typed.redacted }),
           });
           if (
             this.operationId === null ||
-            (blockType === "reasoning" && existing !== undefined && existing.headline === headline)
+            (blockType === "reasoning" &&
+              existing !== undefined &&
+              existing.headline === headline &&
+              existing.reasoningVisible === reasoningVisible)
           )
             return;
           this.broadcastEvent({
@@ -1123,8 +1131,9 @@ export class PiOrbAgent {
             operationId: this.operationId,
             blockId,
             blockType,
+            contentIndex: index,
             revision,
-            ...(headline === undefined ? {} : { headline }),
+            ...(headline === undefined ? {} : { headline, reasoningVisible }),
             patch:
               blockType === "reasoning"
                 ? { type: "replace", text: "" }
@@ -1668,6 +1677,7 @@ export class PiOrbAgent {
       blocks: [...this.liveBlocks.entries()].map(([blockId, block]) => ({
         blockId,
         blockType: block.blockType,
+        contentIndex: block.contentIndex,
         revision: block.revision,
         text: block.text,
         ...(block.redacted === undefined ? {} : { redacted: block.redacted }),

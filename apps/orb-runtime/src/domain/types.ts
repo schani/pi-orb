@@ -25,6 +25,7 @@ export interface HarnessSnapshot {
 export interface LiveBlockState {
   readonly blockId: string;
   readonly blockType: "text" | "reasoning";
+  readonly contentIndex: number;
   readonly revision: number;
   readonly text: string;
   readonly redacted?: boolean;

@@ -8,6 +8,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- [x] **Qualify empty public live thinking suppression** (completed locally 2026-10-06; not deployed; `docs/testing.md`, `docs/postmortems/2026-10-06-empty-live-thinking.md`). Normal release gates remain required. Preserve attribution limits; recurrence evidence must contain only content-free live block IDs/frame order and browser/runtime revisions, never tokens or encrypted payloads.
+
 - **Qualify exact-main Claude continuation fix** (CI37418896284, 2026-10-06; `docs/postmortems/2026-10-06-claude-publication-order.md`). Controlled late-prefix publication defect is fixed locally; original CI ordering remains unknown. Complete parent review and normal release gates before deployment. Preserve first-failure evidence and historical attribution limits; the two unrelated lifecycle waivers remain unchanged.
 
 - **Diagnose unresolved lifecycle E2E failures** (`docs/testing.md`): run 37390585414 timed out awaiting profile-fixture device challenge before dispatch assertions; run 37389785804 accepted upload model rule 7 with bash-call events but no rule 8 continuation. Exact provider/runtime causes are unknown. Use sanitized failure evidence to distinguish HTTP/provisioning/challenge outcomes and inspect the spawned upload target’s health, tool completion, replication and model ledger. Preserve private originals; no blind retries, weakened assertions or lucky-green resolution. Historical forensics are explicitly waived as consolidation release gates (2026-10-06), not resolved.

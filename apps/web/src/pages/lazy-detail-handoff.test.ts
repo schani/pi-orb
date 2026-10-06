@@ -71,6 +71,8 @@ it("retired live reasoning identifies the immutable disclosure to refresh on com
         operationId: "operation",
         blockId: "thinking",
         blockType: "reasoning",
+        contentIndex: 0,
+        reasoningVisible: true,
         revision: 1,
         patch: { type: "replace", text: "" },
       },

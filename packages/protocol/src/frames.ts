@@ -196,6 +196,8 @@ export const OutputPatchEventSchema = Type.Object(
     operationId: Type.String(),
     blockId: Type.String(),
     blockType: Type.Union([Type.Literal("text"), Type.Literal("reasoning")]),
+    contentIndex: Type.Integer({ minimum: 0 }),
+    reasoningVisible: Type.Optional(Type.Boolean()),
     revision: Type.Number(),
     headline: Type.Optional(Type.String()),
     patch: Type.Union([

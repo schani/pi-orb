@@ -28,6 +28,7 @@ import {
   type RuntimeAlertResponse,
   type RuntimeEvent,
   type RuntimeHealth,
+  reasoningHeadline,
   type ServerFrame,
   type SettingsAction,
 } from "@pi-orb/protocol";
@@ -214,7 +215,14 @@ export class ClaudeOrbAgent implements OrbAgent {
   private operationError: string | undefined;
   private readonly blocks = new Map<
     string,
-    { blockId: string; blockType: "text" | "reasoning"; revision: number; text: string }
+    {
+      blockId: string;
+      blockType: "text" | "reasoning";
+      contentIndex: number;
+      revision: number;
+      text: string;
+      redacted?: boolean;
+    }
   >();
   private readonly tools = new Map<
     string,
@@ -974,19 +982,61 @@ export class ClaudeOrbAgent implements OrbAgent {
       this.activity.operationId !== null
     ) {
       const event = message.event;
+      const operationId = this.activity.operationId;
+      const publish = (
+        block: NonNullable<ReturnType<typeof this.blocks.get>>,
+        previous?: typeof block,
+      ) => {
+        const reasoning = block.blockType === "reasoning";
+        const headline = reasoning ? reasoningHeadline(block.text, block.redacted) : "";
+        const reasoningVisible = reasoning && (block.redacted === true || block.text.trim() !== "");
+        if (
+          reasoning &&
+          previous !== undefined &&
+          reasoningHeadline(previous.text, previous.redacted) === headline &&
+          (previous.redacted === true || previous.text.trim() !== "") === reasoningVisible
+        )
+          return;
+        this.event({
+          type: "output_patch",
+          operationId,
+          blockId: block.blockId,
+          blockType: block.blockType,
+          contentIndex: block.contentIndex,
+          revision: block.revision,
+          ...(reasoning ? { headline, reasoningVisible } : {}),
+          patch: reasoning
+            ? { type: "replace", text: "" }
+            : previous === undefined
+              ? { type: "replace", text: block.text }
+              : { type: "append", text: block.text.slice(previous.text.length) },
+        });
+      };
       if (event.type === "message_start") this.streamBlocks.clear();
       if (
         event.type === "content_block_start" &&
-        (event.content_block.type === "text" || event.content_block.type === "thinking")
+        (event.content_block.type === "text" ||
+          event.content_block.type === "thinking" ||
+          event.content_block.type === "redacted_thinking")
       ) {
         const blockId = `${message.uuid}:${event.index}`;
-        this.blocks.set(blockId, {
+        const block = {
           blockId,
-          blockType: event.content_block.type === "text" ? "text" : "reasoning",
+          blockType:
+            event.content_block.type === "text" ? ("text" as const) : ("reasoning" as const),
+          contentIndex: event.index,
           revision: 0,
-          text: "",
-        });
+          text:
+            event.content_block.type === "text"
+              ? event.content_block.text
+              : event.content_block.type === "thinking"
+                ? event.content_block.thinking
+                : "",
+          ...(event.content_block.type === "redacted_thinking" ? { redacted: true } : {}),
+        };
+        this.blocks.set(blockId, block);
         this.streamBlocks.set(event.index, blockId);
+        publish(block);
       }
       if (
         event.type === "content_block_delta" &&
@@ -994,17 +1044,11 @@ export class ClaudeOrbAgent implements OrbAgent {
       ) {
         const block = this.blocks.get(this.streamBlocks.get(event.index) ?? "");
         if (block !== undefined) {
+          const previous = { ...block };
           const text = event.delta.type === "text_delta" ? event.delta.text : event.delta.thinking;
           block.text += text;
           block.revision++;
-          this.event({
-            type: "output_patch",
-            operationId: this.activity.operationId,
-            blockId: block.blockId,
-            blockType: block.blockType,
-            revision: block.revision,
-            patch: { type: "append", text },
-          });
+          publish(block, previous);
         }
       }
     }

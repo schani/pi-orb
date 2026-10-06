@@ -519,6 +519,29 @@ describe("frame schemas", () => {
     ).toBe(true);
   });
 
+  it("accepts content-free reasoning visibility with a source content index", () => {
+    for (const reasoningVisible of [false, true]) {
+      expect(
+        Check(RuntimeEventFrameSchema, {
+          v: 1,
+          type: "runtime.event",
+          at: "now",
+          event: {
+            type: "output_patch",
+            operationId: "op",
+            blockId: "b",
+            blockType: "reasoning",
+            contentIndex: 2,
+            reasoningVisible,
+            headline: "",
+            revision: 1,
+            patch: { type: "replace", text: "" },
+          },
+        }),
+      ).toBe(true);
+    }
+  });
+
   it("accepts runtime events", () => {
     expect(
       Check(RuntimeEventFrameSchema, {
@@ -530,6 +553,7 @@ describe("frame schemas", () => {
           operationId: "op-1",
           blockId: "b1",
           blockType: "text",
+          contentIndex: 0,
           revision: 3,
           patch: { type: "append", text: "more" },
         },
@@ -545,6 +569,7 @@ describe("frame schemas", () => {
           operationId: "op-unsupported",
           blockId: "unsupported-1",
           blockType: "unsupported",
+          contentIndex: 0,
           revision: 2,
           patch: { type: "append", text: "output" },
         },

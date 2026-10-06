@@ -62,9 +62,13 @@ export function computeSyncFrames(
         operationId: live.operationId,
         blockId: block.blockId,
         blockType: block.blockType,
+        contentIndex: block.contentIndex,
         revision: block.revision,
         ...(block.blockType === "reasoning"
-          ? { headline: reasoningHeadline(block.text, block.redacted) }
+          ? {
+              headline: reasoningHeadline(block.text, block.redacted),
+              reasoningVisible: block.redacted === true || block.text.trim() !== "",
+            }
           : {}),
         patch: { type: "replace", text: block.blockType === "reasoning" ? "" : block.text },
       });

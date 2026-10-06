@@ -203,7 +203,15 @@ describe("computeSyncFrames", () => {
     const withHidden = { ...source, records };
     const live: LiveOperationView = {
       operationId: "op",
-      blocks: [{ blockId: "b", blockType: "reasoning", revision: 2, text: "SECRET_CANARY" }],
+      blocks: [
+        {
+          blockId: "b",
+          blockType: "reasoning",
+          contentIndex: 0,
+          revision: 2,
+          text: "SECRET_CANARY",
+        },
+      ],
       tools: [],
       subagents: [],
     };
@@ -225,12 +233,14 @@ describe("computeSyncFrames", () => {
         {
           blockId: "b",
           blockType: "reasoning",
+          contentIndex: 0,
           revision: 2,
           text: "# Inspect\n\nSECRET_CANARY\n\n**Fix**",
         },
         {
           blockId: "redacted",
           blockType: "reasoning",
+          contentIndex: 1,
           revision: 1,
           text: "# REDACTED_HEADING",
           redacted: true,
@@ -248,6 +258,8 @@ describe("computeSyncFrames", () => {
           operationId: "op",
           blockId: "b",
           blockType: "reasoning",
+          contentIndex: 0,
+          reasoningVisible: true,
           revision: 2,
           headline: "Inspect · Fix",
           patch: { type: "replace", text: "" },
@@ -264,6 +276,8 @@ describe("computeSyncFrames", () => {
           operationId: "op",
           blockId: "redacted",
           blockType: "reasoning",
+          contentIndex: 1,
+          reasoningVisible: true,
           revision: 1,
           headline: "",
           patch: { type: "replace", text: "" },
@@ -275,7 +289,9 @@ describe("computeSyncFrames", () => {
   it("reconstructs live operation state with replace patches and tool states", () => {
     const live: LiveOperationView = {
       operationId: "op-1",
-      blocks: [{ blockId: "b1", blockType: "text", revision: 7, text: "partial out" }],
+      blocks: [
+        { blockId: "b1", blockType: "text", contentIndex: 0, revision: 7, text: "partial out" },
+      ],
       tools: [{ callId: "c1", name: "bash", revision: 3, state: "running" }],
       subagents: [{ id: "child", description: "Check deployment", phase: "running" }],
     };
@@ -290,6 +306,7 @@ describe("computeSyncFrames", () => {
         operationId: "op-1",
         blockId: "b1",
         blockType: "text",
+        contentIndex: 0,
         revision: 7,
         patch: { type: "replace", text: "partial out" },
       },
