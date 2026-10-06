@@ -59,6 +59,7 @@ export async function guardStage(stage, root, manifest) {
     sha(join(root, "scripts/native-mcp-exploration/live-qualification/package-lock.json")),
   );
   assert.equal(manifest.hostSourceSha, sha(join(root, "apps/orb-runtime/src/mcp/native.ts")));
+  assert.equal(manifest.patchHelperSha, sha(join(root, "scripts/apply-dependency-patches.mjs")));
   for (const entry of manifest.patches) {
     assert.equal(entry.sourceSha, sha(join(root, entry.source)), `stale patch: ${entry.source}`);
   }
@@ -75,23 +76,13 @@ export async function guardInstalledStage(stage, manifest) {
     sha(join(stage, "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz")),
     manifest.vendorSha,
   );
-  const patchPackage = "vendor/patch-package-8.0.1-orb.1.tgz";
-  assert.equal(
-    manifest.patchPackageSha,
-    "8f29fbb091eefde2bc96a871c540b155afc9e0bfd52f0908d1180e3ee904d41f",
-    "qualified patch-package mismatch",
-  );
-  assert.equal(
-    sha(join(stage, patchPackage)),
-    manifest.patchPackageSha,
-    "patch-package archive mismatch",
-  );
   assert.equal(manifest.bundleSha, sha(join(stage, "initial-auth.mjs")));
+  assert.equal(manifest.patchHelperSha, sha(join(stage, "apply-dependency-patches.mjs")));
   assert.equal(manifest.hostBundleSha, manifest.bundleSha);
   assert.equal(sha(join(stage, "package-lock.json")), manifest.lockSha);
   assert.equal(
     manifest.lockSha,
-    "c926b9531fe1cc4c59269e852bdc79582db339f335228487cd39d1b26a402abe",
+    "ad895afd6cbf53cef4e1385065fe8620e008a3ed3a4cf5bcf15e7ae7e863dcf4",
     "qualified lock mismatch",
   );
   assert.equal(manifest.patches.length, patches.size);

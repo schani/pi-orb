@@ -1,4 +1,10 @@
-import type { MessageInputBlock, OrbState, RuntimeHooks, StopReason } from "@pi-orb/protocol";
+import type {
+  HarnessKind,
+  MessageInputBlock,
+  OrbState,
+  RuntimeHooks,
+  StopReason,
+} from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type { HookFailure, LivenessEntry } from "./control-state.ts";
@@ -276,7 +282,11 @@ async function provisionHost(
     (context) =>
       deps.hostProvider.provision(
         task,
-        { orbId: orb.id, incarnation: orb.hostIncarnation, bootstrap: { repositoryUrl } },
+        {
+          orbId: orb.id,
+          incarnation: orb.hostIncarnation,
+          bootstrap: { repositoryUrl, harness: orb.harness },
+        },
         context,
       ),
   );
@@ -600,6 +610,7 @@ async function reconcileCreateStart(
   const desiredSpecFingerprint = deps.hostProvider.desiredSpecFingerprint({
     orbId: orb.id,
     repositoryUrl: project.repositoryUrl,
+    harness: orb.harness,
   });
   const declinedCondition = `spec-replacement-declined:${orb.id}`;
   const startSpecFingerprint = desiredSpecFingerprint;
@@ -654,8 +665,8 @@ async function reconcileCreateStart(
     deps.control.noteCondition(declinedCondition, false);
   }
 
-  // 1. Codex auth is a prerequisite for host work (docs/credentials.md).
-  const auth = await deps.authGate.ensureAuth(task, project.ownerUserId);
+  // 1. Selected harness auth is a prerequisite for host work (docs/credentials.md).
+  const auth = await deps.authGate.ensureAuth(task, project.ownerUserId, orb.harness);
   if (auth.isErr()) return retryable(auth.error);
   const resolution = auth.value;
   if (resolution.status === "pending") {
@@ -673,8 +684,9 @@ async function reconcileCreateStart(
   }
   if (resolution.status === "failed") {
     const failedProvider =
-      deps.control.getChallenge(project.ownerUserId)?.provider ?? "openai-codex";
-    deps.control.setChallenge(project.ownerUserId, null);
+      deps.control.getAuthBlockedProvider(orb.id) ??
+      (orb.harness === "claude" ? "claude" : "openai-codex");
+    deps.control.setChallenge(project.ownerUserId, null, failedProvider);
     logOrbEvent(task, orb.id, "auth-failed", {
       owner_user_id: project.ownerUserId,
       provider: failedProvider,
@@ -682,6 +694,8 @@ async function reconcileCreateStart(
     const cohort = new Set([...deps.control.getAuthBlockedOrbs(project.ownerUserId), orb.id]);
     let outcome: ReconcileOutcome = { type: "conflict" };
     for (const blockedId of cohort) {
+      if (blockedId !== orb.id && deps.control.getAuthBlockedProvider(blockedId) !== failedProvider)
+        continue;
       const blockedResult = await deps.store.getOrb(task, blockedId);
       if (blockedResult.isErr()) continue;
       const blocked = blockedResult.value;
@@ -694,12 +708,10 @@ async function reconcileCreateStart(
     }
     return outcome;
   }
-  const resolvedProvider =
-    deps.control.getAuthBlockedProvider(orb.id) ??
-    deps.control.getChallenge(project.ownerUserId)?.provider ??
-    "openai-codex";
-  deps.control.setChallenge(project.ownerUserId, null);
+  const resolvedProvider = deps.control.getAuthBlockedProvider(orb.id);
   if (deps.control.isAuthBlocked(orb.id)) {
+    if (resolvedProvider !== null)
+      deps.control.setChallenge(project.ownerUserId, null, resolvedProvider);
     // OAuth completed: re-enter with a fresh state_changed_at so login time
     // never consumes the create/start deadline (docs/lifecycle.md).
     const reentered = await deps.store.casReenterState(task, {
@@ -1992,6 +2004,7 @@ async function reconcileArchiving(
             desiredFingerprint: deps.hostProvider.desiredSpecFingerprint({
               orbId: orb.id,
               repositoryUrl: projectResult.value.repositoryUrl,
+              harness: orb.harness,
             }),
             configuredGeneration: deps.hostProvider.specGeneration,
             force: true,
@@ -2265,7 +2278,13 @@ function mapCasError(error: StoreError | StateConflict): CommandError {
 export function createOrb(
   task: SimulationTask,
   deps: ControlPlaneDeps,
-  params: { orbId: string; projectId: string; name?: string; userTimeZone?: string },
+  params: {
+    orbId: string;
+    projectId: string;
+    name?: string;
+    userTimeZone?: string;
+    harness?: HarnessKind;
+  },
 ): ResultAsync<OrbRow, CommandError> {
   const run = async (): Promise<Result<OrbRow, CommandError>> => {
     const projectResult = await deps.store.getProject(task, params.projectId);
@@ -2283,6 +2302,7 @@ export function createOrb(
         return err(commandError("conflict", "orb is being permanently deleted", false));
       if (
         orb.projectId !== params.projectId ||
+        (params.harness !== undefined && orb.harness !== params.harness) ||
         (params.name !== undefined && orb.name !== params.name) ||
         (params.userTimeZone !== undefined && orb.userTimeZone !== params.userTimeZone)
       )
@@ -2313,7 +2333,7 @@ export function createOrb(
       }
       return err(mapStoreError(inserted.error));
     }
-    logOrbEvent(task, params.orbId, "created", { project: params.projectId });
+    logOrbEvent(task, params.orbId, "created", { project: params.projectId, harness: row.harness });
     return ok(inserted.value);
   };
   return new ResultAsync(run());

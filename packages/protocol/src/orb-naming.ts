@@ -24,6 +24,7 @@ export const OrbNameTriggerResponseSchema = Type.Object(
       Type.Literal("already_named"),
       Type.Literal("in_progress"),
       Type.Literal("backoff"),
+      Type.Literal("skipped"),
     ]),
   },
   closed,

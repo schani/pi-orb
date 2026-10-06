@@ -1,5 +1,6 @@
 import { type Static, type TSchema, Type } from "typebox";
 import { MessageInputBlockSchema } from "./frames.ts";
+import { HarnessKindSchema } from "./harness.ts";
 import { HarnessSessionMetadataSchema, HistoryRecordSchema } from "./history.ts";
 import { ORB_NAME_MAX_CHARS } from "./orb-naming.ts";
 import { OrbMessageSystemSchema } from "./orb-sleep.ts";
@@ -95,6 +96,7 @@ export const CreateOrbRequestSchema = Type.Object(
     // restricted to a DNS-safe alphabet with no spaces: an unconstrained ID
     // could make one orb's exact-match cleanup reach another's resources.
     id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,63}$" }),
+    harness: Type.Optional(HarnessKindSchema),
     name: Type.Optional(Type.String({ maxLength: ORB_NAME_MAX_CHARS })),
     userTimeZone: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })),
   },
@@ -235,6 +237,7 @@ export const OrbActionRequiredSchema = Type.Union([
       type: Type.Union([
         Type.Literal("openai_codex_device_login"),
         Type.Literal("github_device_login"),
+        Type.Literal("claude_subscription_login"),
       ]),
       verificationUri: Type.String(),
       userCode: Type.String(),
@@ -245,7 +248,11 @@ export const OrbActionRequiredSchema = Type.Union([
   Type.Object(
     {
       type: Type.Literal("owner_login_required"),
-      provider: Type.Union([Type.Literal("openai-codex"), Type.Literal("github")]),
+      provider: Type.Union([
+        Type.Literal("openai-codex"),
+        Type.Literal("github"),
+        Type.Literal("claude"),
+      ]),
     },
     closed,
   ),
@@ -267,6 +274,7 @@ export const OrbViewSchema = Type.Object(
   {
     id: Type.String(),
     projectId: Type.String(),
+    harness: HarnessKindSchema,
     name: Type.Union([Type.String(), Type.Null()]),
     state: OrbStateSchema,
     stateVersion: Type.Number(),

@@ -14,6 +14,7 @@ const caller = makeOrbRow("caller", projectId, "running", {
   runtimeTokenHash: "token",
   hostIncarnation: 1,
   userTimeZone: "Europe/Berlin",
+  harness: "claude",
 });
 const params = {
   callerOrbId: caller.id,
@@ -61,6 +62,7 @@ describe("orb spawning (DST)", () => {
         expect(harness.store.orbSnapshot(params.orb.id)).toMatchObject({
           state: "creating",
           userTimeZone: "Europe/Berlin",
+          harness: "claude",
         });
         expect(harness.store.messageSnapshots(params.orb.id)).toMatchObject([
           { messageId: params.orb.id, content: [{ type: "text", text: params.prompt }] },

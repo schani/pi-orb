@@ -1,9 +1,68 @@
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { expect as check, chromium, webkit } from "@playwright/test";
 import { createServer } from "vite";
 import { it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
 import { gotoFrontendFixture } from "./testkit/frontend-fixture.ts";
+
+it.each(["chromium", "webkit"] as const)(
+  "%s: Claude uses native effort levels and /effort without Pi shell prefixes",
+  async (engine) => {
+    const root = join(import.meta.dirname, "../apps/web");
+    const vite = await createServer({
+      root,
+      configFile: join(root, "vite.config.ts"),
+      mode: "frontend",
+      server: { host: "127.0.0.1", port: 0 },
+    });
+    await listenFrontend(vite);
+    const address = vite.httpServer?.address();
+    if (!address || typeof address === "string") throw new Error("No owned fixture port");
+    const browser = await (engine === "chromium" ? chromium : webkit).launch({ headless: true });
+    const page = await browser.newPage();
+    const origin = `http://127.0.0.1:${address.port}`;
+    const id = randomUUID();
+    try {
+      const created = await page.request.post(
+        `${origin}/api/v1/projects/frontend-scratchpad-project/orbs`,
+        { data: { id, harness: "claude", userTimeZone: "America/Los_Angeles" } },
+      );
+      check(created.status()).toBe(202);
+      const started = await page.request.post(`${origin}/api/v1/orbs/${id}/start`, { data: {} });
+      check(started.status()).toBe(202);
+      check((await started.json()).state).toBe("running");
+      await gotoFrontendFixture(page, `${origin}/orbs/${id}`);
+      const effort = page.getByRole("button", { name: "Change effort", exact: true });
+      await check(effort).toBeEnabled();
+      await check(page.getByRole("button", { name: "Change thinking", exact: true })).toHaveCount(
+        0,
+      );
+      const input = page.getByRole("textbox", { name: "Message the orb", exact: true });
+      await input.fill("retain Claude draft");
+      await effort.click();
+      await check(input).toHaveValue("effort ");
+      await check(page.getByRole("option")).toHaveCount(5);
+      for (const level of ["low", "medium", "high", "xhigh", "max"]) {
+        await check(page.getByRole("option", { name: level, exact: true })).toBeVisible();
+      }
+      await page.getByRole("option", { name: "max", exact: true }).click();
+      await check(effort).toHaveText("max");
+      await check(input).toHaveValue("retain Claude draft");
+      await input.fill("/effort ");
+      await page.getByRole("option", { name: "xhigh", exact: true }).click();
+      await check(effort).toHaveText("xhigh");
+      await check(input).toHaveValue("");
+      await input.pressSequentially("!printf fixture");
+      await check(input).toHaveValue("!printf fixture");
+      await check(page.locator(".composer-line .composer-prefix")).toHaveText(">");
+    } finally {
+      await page.request.delete(`${origin}/api/v1/orbs/${id}`);
+      await browser.close();
+      await vite.close();
+    }
+  },
+);
 
 it.each(["chromium", "webkit"] as const)(
   "%s: lifecycle cluster and slash settings preserve drafts and synchronize tabs",

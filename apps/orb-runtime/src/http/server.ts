@@ -19,10 +19,10 @@ import {
 import Fastify, { type FastifyInstance } from "fastify";
 import { Check } from "typebox/value";
 import { computePullHistory } from "../domain/history.ts";
+import type { OrbAgent } from "../domain/orb-agent.ts";
 import { type FrameSink, OutboundWriter } from "../domain/outbound.ts";
 import { decideRequest, RequestRegistry, type RequestResult } from "../domain/requests.ts";
 import { computeSyncFrames } from "../domain/sync.ts";
-import type { PiOrbAgent } from "../pi/agent.ts";
 import type { TerminalManager } from "../terminal/manager.ts";
 import { registerTerminalRoute } from "./terminal-route.ts";
 
@@ -47,7 +47,7 @@ function runtimeError(
  * synchronization. The health server starts before slow initialization.
  */
 export function buildRuntimeServer(
-  agent: PiOrbAgent,
+  agent: OrbAgent,
   terminalManager: TerminalManager,
   alertToken: string | undefined = process.env.PI_ORB_RUNTIME_TOKEN,
 ): FastifyInstance {

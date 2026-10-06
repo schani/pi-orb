@@ -11,7 +11,7 @@ exit 101
 EOF
 chmod 755 /usr/sbin/policy-rc.d
 apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl xz-utils git ripgrep zip unzip sudo python3 python3-venv python-is-python3 build-essential pkg-config
+apt-get install -y --no-install-recommends ca-certificates curl xz-utils git ripgrep zip unzip sudo python3 python3-venv python-is-python3 build-essential pkg-config iproute2 util-linux openssl
 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/github.gpg
 curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg -o /etc/apt/keyrings/tailscale.gpg
 curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg -o /etc/apt/keyrings/google.asc
@@ -34,6 +34,7 @@ for proxy in cargo rustc rustdoc rustfmt cargo-clippy cargo-fmt clippy-driver; d
 cd /app
 npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts
 node scripts/apply-dependency-patches.mjs
+node infra/native-vm/claude-check.mjs | tee /opt/pi-orb/claude-sdk-version
 rm -rf node_modules/node-pty/prebuilds
 npm rebuild node-pty
 chmod 755 node_modules/agent-browser/bin/agent-browser-linux-x64
@@ -82,6 +83,9 @@ npm ls --workspace @pi-orb/orb-runtime --all --json >/opt/pi-orb/npm-tree.json
 node --version >/opt/pi-orb/node-version
 /usr/bin/docker --version >/opt/pi-orb/docker-version
 install -m755 infra/native-vm/acceptance.sh /opt/pi-orb/acceptance.sh
+mkdir -p /opt/pi-orb/claude-qualification
+install -m755 infra/native-vm/claude-acceptance.sh /opt/pi-orb/claude-qualification/
+install -m644 infra/native-vm/claude-worker.mjs infra/native-vm/claude-workload.mjs infra/native-vm/claude-receipt-edge.mjs /opt/pi-orb/claude-qualification/
 du -sx /app /usr /opt >/opt/pi-orb/sizes-kib.tsv
 infra/native-vm/test.sh
 systemd-analyze verify /etc/systemd/system/pi-orb-runtime.service /etc/systemd/system/pi-orb-bootstrap.service /etc/systemd/system/pi-orb-workspace.service /etc/systemd/system/pi-orb-boot-failure@.service /etc/systemd/system/workspace.mount

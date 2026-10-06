@@ -1417,9 +1417,10 @@ export class FakeOrbHostProvider implements OrbHostProvider {
   desiredSpecFingerprint(input: {
     readonly orbId: string;
     readonly repositoryUrl: string;
+    readonly harness?: import("@pi-orb/protocol").HarnessKind;
   }): string {
     const spec = this.desiredSpecOverride ?? this.world.desiredSpec();
-    return `fake-spec-${spec}:${input.repositoryUrl}`;
+    return `fake-spec-${spec}:${input.repositoryUrl}${input.harness === "claude" ? ":claude" : ""}`;
   }
 
   private op<T>(
@@ -1461,6 +1462,7 @@ export class FakeOrbHostProvider implements OrbHostProvider {
       const specFingerprint = this.desiredSpecFingerprint({
         orbId: request.orbId,
         repositoryUrl: request.bootstrap.repositoryUrl,
+        harness: request.bootstrap.harness ?? "pi",
       });
       const host = this.world.provisionHost(
         task,

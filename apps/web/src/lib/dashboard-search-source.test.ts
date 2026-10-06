@@ -16,6 +16,7 @@ const project = (id: string, name: string, repositoryUrl: string): ProjectView =
 const orb = (id: string, name: string | null, state: OrbState): OrbView => ({
   id,
   projectId: "project-1",
+  harness: "pi",
   name,
   state,
   stateVersion: 1,

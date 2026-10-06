@@ -22,6 +22,17 @@ describe("single control-plane composition", () => {
     }
   });
 
+  it("keeps Claude owner management inside browser authentication and grants on runtime routes", () => {
+    const browser = source.indexOf("registerAuthenticatedBrowserRoutes(");
+    const claude = source.indexOf("registerClaudeAuthRoutes(browser,");
+    const runtime = source.indexOf("registerRuntimeRoutes(app,");
+    expect(claude).toBeGreaterThan(browser);
+    expect(claude).toBeLessThan(runtime);
+    expect(source).toContain(
+      "claudeCredential: (task, orb) => claudeAuth.grantForOrb(task, deps.store, orb)",
+    );
+  });
+
   it("keeps signing-key repair before activation and all autonomous loops after it", () => {
     const activation = source.indexOf("await waitForReleaseActivation(");
     expect(activation).toBeGreaterThan(source.indexOf("void ensureSigningKeyInBackground()"));

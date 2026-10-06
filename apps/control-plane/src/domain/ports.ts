@@ -532,7 +532,7 @@ export interface OrbHostObservation {
 export interface ProvisionOrbHostRequest {
   readonly orbId: string;
   readonly incarnation: number;
-  readonly bootstrap: { repositoryUrl: string };
+  readonly bootstrap: { repositoryUrl: string; harness?: import("@pi-orb/protocol").HarnessKind };
 }
 
 export interface StartOrbHostRequest {
@@ -568,7 +568,11 @@ export interface OrbHostProvider {
   /** Deploy-monotone authority used only to fence specification replacement. */
   readonly specGeneration: number;
   /** Pure fingerprint of every non-secret input that fixes an incarnation's launch contract. */
-  desiredSpecFingerprint(input: { readonly orbId: string; readonly repositoryUrl: string }): string;
+  desiredSpecFingerprint(input: {
+    readonly orbId: string;
+    readonly repositoryUrl: string;
+    readonly harness?: import("@pi-orb/protocol").HarnessKind;
+  }): string;
   /** Idempotent by orbId. */
   provision(
     task: SimulationTask,
@@ -691,7 +695,7 @@ export interface OrbRuntimeClient {
 // Auth gate (docs/credentials.md)
 
 /** Which upstream a device challenge belongs to (drives the UI label). */
-export type ChallengeProvider = "openai-codex" | "github";
+export type ChallengeProvider = "openai-codex" | "github" | "claude";
 
 export interface DeviceChallenge {
   readonly provider: ChallengeProvider;
@@ -709,7 +713,11 @@ export type AuthResolution =
 
 export interface AuthGate {
   /** Resolve/refresh credentials for the project's owner. */
-  ensureAuth(task: SimulationTask, userId: string): ResultAsync<AuthResolution, AuthGateError>;
+  ensureAuth(
+    task: SimulationTask,
+    userId: string,
+    harness?: import("@pi-orb/protocol").HarnessKind,
+  ): ResultAsync<AuthResolution, AuthGateError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -834,7 +842,17 @@ export interface StoredSigningKey {
  * of these shapes under its own provider name, so the store itself stays a
  * dumb immutable-version keeper with no idea what a version means.
  */
-export type StoredSecret = StoredCredential | StoredSigningKey | StoredProjectSecretBundle;
+export interface StoredClaudeSubscriptionCredential {
+  readonly kind: "claude_subscription";
+  readonly token: string;
+  readonly createdAt: number;
+}
+
+export type StoredSecret =
+  | StoredCredential
+  | StoredSigningKey
+  | StoredProjectSecretBundle
+  | StoredClaudeSubscriptionCredential;
 
 export interface CredentialSecretStore {
   /** Creates a new immutable version and returns its identifier. */

@@ -105,7 +105,7 @@ export class ControlState {
     { ownerUserId: string; provider: string | null }
   >();
   private readonly drainStatus = new Map<string, DrainStatus>();
-  private readonly challenges = new Map<string, DeviceChallenge>();
+  private readonly challenges = new Map<string, Map<string, DeviceChallenge>>();
   private readonly stoppingOrbs = new Map<string, number>();
 
   /**
@@ -349,7 +349,7 @@ export class ControlState {
       ? null
       : {
           ownerUserId: blocked.ownerUserId,
-          challenge: this.challenges.get(blocked.ownerUserId) ?? null,
+          challenge: this.getChallenge(blocked.ownerUserId, blocked.provider ?? undefined),
         };
   }
 
@@ -363,13 +363,22 @@ export class ControlState {
       .map(([orbId]) => orbId);
   }
 
-  setChallenge(userId: string, challenge: DeviceChallenge | null): void {
-    if (challenge === null) this.challenges.delete(userId);
-    else this.challenges.set(userId, challenge);
+  setChallenge(userId: string, challenge: DeviceChallenge | null, provider?: string): void {
+    if (challenge === null) {
+      if (provider === undefined) this.challenges.delete(userId);
+      else this.challenges.get(userId)?.delete(provider);
+    } else {
+      const challenges = this.challenges.get(userId) ?? new Map<string, DeviceChallenge>();
+      challenges.set(challenge.provider, challenge);
+      this.challenges.set(userId, challenges);
+    }
   }
 
-  getChallenge(userId: string): DeviceChallenge | null {
-    return this.challenges.get(userId) ?? null;
+  getChallenge(userId: string, provider?: string): DeviceChallenge | null {
+    const challenges = this.challenges.get(userId);
+    return provider === undefined
+      ? (challenges?.values().next().value ?? null)
+      : (challenges?.get(provider) ?? null);
   }
 
   // -- boot probing (creating/starting visibility, docs/lifecycle.md) --

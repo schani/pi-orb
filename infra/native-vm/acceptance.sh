@@ -49,3 +49,4 @@ diagnostic=$(curl --fail --silent --show-error -H 'Metadata-Flavor: Google' \
 python3 -c 'import json,sys; value=json.load(sys.stdin); assert value["schemaVersion"] == 1; assert value["phase"] == "runtime"; assert value["status"] == "ready"' <<<"$diagnostic"
 
 echo native_guest_acceptance_passed
+bash /opt/pi-orb/claude-qualification/claude-acceptance.sh /app /workspace

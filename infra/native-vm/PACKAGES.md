@@ -14,6 +14,7 @@ installed size; transitive libraries remain only as dependencies of this baselin
 - build-essential, pkg-config: native addon builds, including project addons.
 - rustup and its proxies: prescribed Rust bootstrap; no toolchain is preinstalled, and explicit installs use durable home.
 - sudo: repository setup hooks; orb UID/GID is fixed at 2000 in this experiment.
+- iproute2, util-linux, OpenSSL: isolated synthetic Claude acceptance namespaces and owned TLS fixture.
 - Tailscale: existing userspace preview support, supervised by the runtime.
 
 The image excludes the inherited OS Config agent, unattended-upgrade package,
@@ -24,7 +25,9 @@ requires for the guest environment and prescribed tools; it does not run a broad
 autoremove over the GCE base image.
 Platform package updates use image rebuilds. Build caches, instance identity,
 SSH keys, runtime credentials, and first-party test/build-only source are removed
-before capture. The installed guest publishes boot edges directly and the image
+before capture. The four synthetic Claude acceptance helpers remain under
+`/opt/pi-orb/claude-qualification`; they import the installed runtime and use only
+test-owned credentials and files. The installed guest publishes boot edges directly and the image
 acceptance test verifies the guest-attribute copy.
 
 The guest validates `/dev/disk/by-id/google-pi-orb-data` before mounting it. It

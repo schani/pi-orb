@@ -100,6 +100,54 @@ it.each(["/", "/orbs/missing-orb"])(
   },
 );
 
+it.each(["schani/pi-orb", "github.com/schani/pi-orb"])(
+  "creates a project from GitHub shorthand %s with a canonical API URL",
+  async (repositoryUrl) => {
+    const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
+    const page = await browser.newPage();
+    const submissions: { id: string; name: string; repositoryUrl: string }[] = [];
+    try {
+      await page.route("**/api/v1/projects", async (route) => {
+        if (route.request().method() === "POST") {
+          const body = route.request().postDataJSON();
+          submissions.push(body);
+          await route.fulfill({
+            status: 201,
+            json: {
+              ...body,
+              state: "active",
+              createdAt: "2026-10-05T00:00:00Z",
+              updatedAt: "2026-10-05T00:00:00Z",
+            },
+          });
+          return;
+        }
+        await route.fulfill({ json: { items: [] } });
+      });
+      const projectsLoaded = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/v1/projects" &&
+          response.request().method() === "GET",
+      );
+      await page.goto(origin);
+      await projectsLoaded;
+      await page.getByRole("textbox", { name: "project name", exact: true }).fill("Pi Orb");
+      const repository = page.getByRole("textbox", { name: "repository URL", exact: true });
+      await repository.fill(repositoryUrl);
+      await page.getByRole("button", { name: "Create project", exact: true }).click();
+      await expectPage(repository).toHaveValue("");
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0]).toMatchObject({
+        name: "Pi Orb",
+        repositoryUrl: "https://github.com/schani/pi-orb",
+      });
+    } finally {
+      await page.unrouteAll({ behavior: "wait" });
+      await page.close();
+    }
+  },
+);
+
 it("boots the production shell and loads its built JS, CSS and favicon on direct deep links and reload", async () => {
   const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
   const page = await browser.newPage();

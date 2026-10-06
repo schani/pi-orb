@@ -4,7 +4,7 @@
 
 An agent can create an independent orb in its own project, provide its initial prompt, and receive its browser URL through `pi-orb spawn`. Implemented as a narrow runtime-authenticated mutation plus the existing lifecycle and durable inbox—no new worker, orchestration loop, or Pi transport.
 
-The new orb gets a fresh default-branch checkout, normal project secrets, boot hooks, and agent configuration. It inherits the caller orb's immutable stored user time zone (including `NULL`), but nothing from its workspace or conversation. The prompt must include needed context and identify any pushed commits/artifacts. The orb continues if the caller stops, exits, is archived, or is deleted. Project deletion removes both.
+The new orb gets a fresh default-branch checkout, normal project secrets, boot hooks, and agent configuration. It inherits the caller orb's immutable harness (`pi | claude`, POC 2026-10-04) and stored user time zone (including `NULL`) from the same transaction-fenced caller row, but nothing from its workspace or conversation. The prompt must include needed context and identify any pushed commits/artifacts. The orb continues if the caller stops, exits, is archived, or is deleted. Project deletion removes both.
 
 This is not a parent/child lifecycle, result callback, worktree handoff, wait/cancel protocol, or scheduler. Cross-project creation, recursive delegation, cost quotas, and TTLs are outside this slice. The broader orchestration question remains in `docs/open-questions.md`, question 29. Agent instructions describe requested delegation, warn about fresh checkouts and compute independence, and prohibit recursive fan-out without user direction.
 

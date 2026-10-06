@@ -169,6 +169,23 @@ const minterFailing = (error: TailscaleError): TailscaleAuthKeyMinter => ({
 const tailnet = { tailnetDnsName: "tailnet.ts.net" };
 
 describe("DockerOrbHostProvider", () => {
+  it.each(["pi", "claude"] as const)(
+    "launches selected %s harness after extra env",
+    async (harness) => {
+      installFreshHost();
+      const provider = makeProvider({ extraEnv: { PI_ORB_HARNESS: "wrong" } });
+      const result = await provider.provision(
+        task,
+        { ...request, bootstrap: { ...request.bootstrap, harness } },
+        context,
+      );
+      expect(result.isOk()).toBe(true);
+      const argv = dockerFake.calls.find((args) => args[0] === "run") ?? [];
+      expect(argv.filter((value) => value.startsWith("PI_ORB_HARNESS=")).at(-1)).toBe(
+        `PI_ORB_HARNESS=${harness}`,
+      );
+    },
+  );
   beforeEach(() => {
     dockerFake.reset();
   });
@@ -688,6 +705,16 @@ describe("DockerOrbHostProvider deletion", () => {
 });
 
 describe("DockerOrbHostProvider host specification", () => {
+  it("includes selected harness in immutable specification", () => {
+    const provider = makeProvider();
+    const input = { orbId: "orb-1", repositoryUrl: "https://github.com/o/r" };
+    expect(provider.desiredSpecFingerprint(input)).toBe(
+      provider.desiredSpecFingerprint({ ...input, harness: "pi" }),
+    );
+    expect(provider.desiredSpecFingerprint({ ...input, harness: "claude" })).not.toBe(
+      provider.desiredSpecFingerprint(input),
+    );
+  });
   beforeEach(() => {
     dockerFake.reset();
   });
@@ -731,6 +758,7 @@ describe("DockerOrbHostProvider host specification", () => {
         controlPlaneUrl: "http://host.docker.internal:3000",
         extraEnv: {},
         skillsDir: "/opt/pi-orb/skills",
+        harness: "pi",
         tailscale: null,
         repositoryUrl: request.bootstrap.repositoryUrl,
       }),

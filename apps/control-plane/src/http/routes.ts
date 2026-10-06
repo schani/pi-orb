@@ -652,6 +652,7 @@ export function registerRoutes(
       }
       const created = await createOrb(task, deps, {
         orbId: body.id,
+        ...(body.harness === undefined ? {} : { harness: body.harness }),
         projectId: request.params.projectId,
         ...(normalizedName?.isOk() ? { name: normalizedName.value } : {}),
         ...(userTimeZone?.isOk() ? { userTimeZone: userTimeZone.value } : {}),

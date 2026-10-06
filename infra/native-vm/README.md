@@ -34,6 +34,10 @@ and dirty-tree state. Git-ignored files, dependencies, and extended macOS metada
 source symlinks are rejected. The uploaded archive is never regenerated during
 the run.
 
+Installation checks the pinned Claude SDK native executable with `--version`,
+without authentication or inference, and records `/opt/pi-orb/claude-sdk-version`.
+This verifies packaging, not subscription login or agent behavior.
+
 The command creates the builder, runs installation and guest contract tests,
 captures inventory, seals the runtime image, and creates a separate empty 50 GiB
 ext4 workspace image. Validation clones that image into a 50 GiB disk, matching

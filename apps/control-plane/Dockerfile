@@ -14,9 +14,9 @@ COPY packages/protocol/src packages/protocol/src
 COPY apps/web ./apps/web
 RUN npm run build --workspace @pi-orb/web
 
-FROM node:24-bookworm-slim
+FROM node:24-bookworm-slim AS dependencies
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git \
+  && apt-get install -y --no-install-recommends python3 build-essential git \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -29,7 +29,15 @@ COPY packages/mock-openai/package.json packages/mock-openai/
 COPY packages/luna/package.json packages/luna/
 COPY apps/control-plane/package.json apps/control-plane/
 RUN npm ci --workspace @pi-orb/control-plane --include-workspace-root=false --ignore-scripts \
-  && node scripts/apply-dependency-patches.mjs
+  && node scripts/apply-dependency-patches.mjs --pi-only \
+  && rm -rf node_modules/node-pty/prebuilds \
+  && npm rebuild node-pty \
+  && node -e "const pty = require('node-pty'); const child = pty.spawn('/bin/sh', ['-c', 'exit 0']); child.onExit(({ exitCode }) => process.exit(exitCode))"
+
+FROM node:24-bookworm-slim
+WORKDIR /app
+COPY --from=dependencies /app /app
+RUN node -e "const pty = require('node-pty'); const child = pty.spawn('/bin/sh', ['-c', 'exit 0']); child.onExit(({ exitCode }) => process.exit(exitCode))"
 COPY packages/protocol/src packages/protocol/src
 COPY packages/mock-openai/src packages/mock-openai/src
 COPY packages/luna/src packages/luna/src

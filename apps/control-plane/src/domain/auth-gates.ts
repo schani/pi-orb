@@ -1,12 +1,12 @@
+import type { HarnessKind } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { ok, type Result, ResultAsync } from "neverthrow";
 import type { AuthGateError } from "./errors.ts";
 import type { AuthGate, AuthResolution } from "./ports.ts";
 
 /**
- * Process-local singleflight boundary for the global login ceremony. Concurrent
- * orb reconciliation is per-orb, but auth state and its displayed challenge are
- * intentionally fleet-global (docs/credentials.md).
+ * Singleflight per owner and selected harness. Provider gates own their shared
+ * login ceremonies (docs/credentials.md).
  */
 export class SerializedAuthGate implements AuthGate {
   private readonly gate: AuthGate;
@@ -16,12 +16,17 @@ export class SerializedAuthGate implements AuthGate {
     this.gate = gate;
   }
 
-  ensureAuth(task: SimulationTask, userId: string): ResultAsync<AuthResolution, AuthGateError> {
-    const active = this.inFlight.get(userId);
+  ensureAuth(
+    task: SimulationTask,
+    userId: string,
+    harness?: HarnessKind,
+  ): ResultAsync<AuthResolution, AuthGateError> {
+    const key = `${userId}:${harness ?? "pi"}`;
+    const active = this.inFlight.get(key);
     if (active !== undefined) return new ResultAsync(active);
 
     const run = async (): Promise<Result<AuthResolution, AuthGateError>> =>
-      await this.gate.ensureAuth(task, userId);
+      await this.gate.ensureAuth(task, userId, harness);
     const operation = Promise.resolve(
       ResultAsync.fromPromise(
         run(),
@@ -32,9 +37,9 @@ export class SerializedAuthGate implements AuthGate {
         }),
       ).andThen((result) => result),
     );
-    this.inFlight.set(userId, operation);
+    this.inFlight.set(key, operation);
     void operation.then(() => {
-      if (this.inFlight.get(userId) === operation) this.inFlight.delete(userId);
+      if (this.inFlight.get(key) === operation) this.inFlight.delete(key);
     });
     return new ResultAsync(operation);
   }
@@ -52,10 +57,14 @@ export class CompositeAuthGate implements AuthGate {
     this.gates = gates;
   }
 
-  ensureAuth(task: SimulationTask, userId: string): ResultAsync<AuthResolution, AuthGateError> {
+  ensureAuth(
+    task: SimulationTask,
+    userId: string,
+    harness?: HarnessKind,
+  ): ResultAsync<AuthResolution, AuthGateError> {
     const run = async (): Promise<Result<AuthResolution, AuthGateError>> => {
       for (const gate of this.gates) {
-        const resolution = await gate.ensureAuth(task, userId);
+        const resolution = await gate.ensureAuth(task, userId, harness);
         if (resolution.isErr() || resolution.value.status !== "ok") return resolution;
       }
       return ok({ status: "ok" });

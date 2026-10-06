@@ -10,7 +10,42 @@ const view = {
   ],
   writable: true,
 };
-it("consumes slash only in message mode", () => {
+it("uses native Claude effort choices without Pi-only levels", () => {
+  const claude = {
+    ...view,
+    models: [
+      {
+        provider: "test",
+        id: "a",
+        name: "Claude",
+        thinkingLevels: [
+          "low" as const,
+          "medium" as const,
+          "high" as const,
+          "xhigh" as const,
+          "max" as const,
+        ],
+      },
+    ],
+  };
+  expect(commandOptions("", claude, "effort").map((option) => option.label)).toEqual([
+    "model",
+    "effort",
+  ]);
+  expect(commandOptions("effort ", claude, "effort").map((option) => option.label)).toEqual([
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+  ]);
+  expect(commandOptions("effort max", claude, "effort")[0]?.action).toEqual({
+    type: "set_thinking",
+    thinkingLevel: "max",
+  });
+  expect(commandOptions("thinking ", claude, "effort")).toEqual([]);
+});
+it("consumes slash only in message mode, with no shell interpretation", () => {
   expect(normalizeComposerChange("message", "/thinking")).toEqual({
     mode: "command",
     text: "thinking",

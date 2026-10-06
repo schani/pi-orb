@@ -153,6 +153,7 @@ export function orbView(
   return {
     id: orb.id,
     projectId: orb.projectId,
+    harness: orb.harness,
     name: orb.name,
     state: orb.state,
     stateVersion: orb.stateVersion,
@@ -176,7 +177,9 @@ export function orbView(
                   type:
                     challenge.provider === "github"
                       ? ("github_device_login" as const)
-                      : ("openai_codex_device_login" as const),
+                      : challenge.provider === "claude"
+                        ? ("claude_subscription_login" as const)
+                        : ("openai_codex_device_login" as const),
                   verificationUri: challenge.verificationUri,
                   userCode: challenge.userCode,
                   expiresAt: iso(challenge.expiresAt),

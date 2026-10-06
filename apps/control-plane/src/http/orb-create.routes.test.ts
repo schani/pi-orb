@@ -83,6 +83,34 @@ describe("orb creation ID validation", () => {
     expect(harness.store.orbSnapshot("zoned")?.userTimeZone).toBe("America/New_York");
   });
 
+  it("persists immutable harness selection and defaults to Pi", async () => {
+    const url = "/api/v1/projects/project-ids/orbs";
+    const pi = await app.inject({ method: "POST", url, payload: { id: "pi" } });
+    expect(pi.json().harness).toBe("pi");
+    const claude = await app.inject({
+      method: "POST",
+      url,
+      payload: { id: "claude", harness: "claude" },
+    });
+    expect(claude.statusCode).toBe(202);
+    expect(claude.json().harness).toBe("claude");
+    expect(harness.store.orbSnapshot("claude")?.harness).toBe("claude");
+    expect(
+      (await app.inject({ method: "POST", url, payload: { id: "invalid", harness: "other" } }))
+        .statusCode,
+    ).toBe(400);
+    expect(
+      (await app.inject({ method: "POST", url, payload: { id: "claude", harness: "pi" } }))
+        .statusCode,
+    ).toBe(409);
+    expect((await app.inject({ method: "POST", url, payload: { id: "claude" } })).statusCode).toBe(
+      202,
+    );
+    expect((await app.inject({ method: "GET", url: "/api/v1/orbs/claude" })).json().harness).toBe(
+      "claude",
+    );
+  });
+
   it("shapes an existing orb without a second project lookup", async () => {
     harness.store.seedOrb(makeOrbRow("orb-existing", "project-ids", "starting"));
     const getProject = vi.spyOn(harness.store, "getProject");

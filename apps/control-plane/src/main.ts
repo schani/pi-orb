@@ -17,6 +17,7 @@ import {
 import { NoSimulationTask, type SimulationTask } from "determined";
 import Fastify from "fastify";
 import { err, ok, okAsync } from "neverthrow";
+import { ClaudePtyAuthTransport } from "./adapters/claude-auth-pty.ts";
 import { openControlPlaneDatabase } from "./adapters/database.ts";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
 import { RestGceApiTransport } from "./adapters/gce/api.ts";
@@ -70,6 +71,7 @@ import {
   GITHUB_PROVIDER,
   type UserBrokerDeps,
 } from "./domain/broker.ts";
+import { ClaudeAuthGate, ClaudeSubscriptionAuth } from "./domain/claude-auth.ts";
 import { DEFAULT_BROKER_CONSTANTS, DEFAULT_ISSUER_CONSTANTS } from "./domain/constants.ts";
 import { ControlState } from "./domain/control-state.ts";
 import { GithubAuthGate } from "./domain/github-auth.ts";
@@ -104,6 +106,7 @@ import {
   type RequestPrincipalResolver,
   registerAuthenticatedBrowserRoutes,
 } from "./http/browser-identity.ts";
+import { registerClaudeAuthRoutes } from "./http/claude-auth-routes.ts";
 import { registerHostingAccessGuard } from "./http/hosting-access.ts";
 import {
   registerBrowserHostingRoutes,
@@ -330,6 +333,17 @@ export async function main(
     constants: DEFAULT_BROKER_CONSTANTS,
   };
   const brokerForUser = (userId: string): BrokerDeps => bindUserBroker(brokerDeps, userId);
+  const claudeAuth = new ClaudeSubscriptionAuth(
+    database.pointers,
+    secrets,
+    new ClaudePtyAuthTransport(),
+  );
+  const piGate = new PiAuthGate(authDir, adapters.mockOpenAiForUser ?? mockOpenAi, brokerForUser);
+  const claudeGate = new ClaudeAuthGate(claudeAuth);
+  const harnessGate: import("./domain/ports.ts").AuthGate = {
+    ensureAuth: (task, userId, harness) =>
+      (harness === "claude" ? claudeGate : piGate).ensureAuth(task, userId),
+  };
   const e2eLaunchFailureMarker = env("PI_ORB_E2E_LAUNCH_FAILURE_MARKER", "");
   const e2eHostSpec = env("PI_ORB_E2E_HOST_SPEC", "");
   const runtimeExtraEnv: Record<string, string> = {
@@ -493,10 +507,10 @@ export async function main(
     authGate: new SerializedAuthGate(
       githubOauth !== null
         ? new CompositeAuthGate([
-            new PiAuthGate(authDir, adapters.mockOpenAiForUser ?? mockOpenAi, brokerForUser),
+            harnessGate,
             new GithubAuthGate(brokerForUser, new GithubOAuthHttpClient(githubOauth)),
           ])
-        : new PiAuthGate(authDir, adapters.mockOpenAiForUser ?? mockOpenAi, brokerForUser),
+        : harnessGate,
     ),
     nameGenerator,
     headlineGenerator: new PiActivityHeadlineGenerator(
@@ -586,6 +600,12 @@ export async function main(
       new SdkMcpOAuth(`${appOrigin}${MCP_OAUTH_CALLBACK}`, oauthNetwork.fetcher),
   );
   app.addHook("onClose", async () => {
+    const drained = await claudeAuth.close(httpTask);
+    if (drained.isErr())
+      logEvent(httpTask, "claude-auth-shutdown-failed", {
+        code: drained.error.code,
+        stage: drained.error.stage,
+      });
     await oauthNetwork.close();
   });
   const httpTask = new ControlPlaneTask("http");
@@ -671,6 +691,7 @@ export async function main(
           : probeMcp(config, snapshot.value.values);
       });
       registerWorkspaceUploadRoutes(browser, httpTask, deps);
+      registerClaudeAuthRoutes(browser, httpTask, claudeAuth, appOrigin);
     },
     applicationAuth === undefined || identityConfig.kind !== "google"
       ? undefined
@@ -700,6 +721,7 @@ export async function main(
     deleteSelf: (task, orbId, caller) => requestOrbDeletion(task, deps, orbId, caller),
     store: deps.store,
     brokerForUser,
+    claudeCredential: (task, orb) => claudeAuth.grantForOrb(task, deps.store, orb),
     nameGenerator: deps.nameGenerator,
     nameLeaseMs: deps.nameLeaseMs,
     projectSecrets: deps.projectSecrets,

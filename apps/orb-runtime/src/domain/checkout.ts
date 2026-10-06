@@ -1,0 +1,66 @@
+import { execFile } from "node:child_process";
+import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { validateRepositoryUrl } from "@pi-orb/protocol";
+import { err, Result, ResultAsync } from "neverthrow";
+
+export interface CheckoutError {
+  readonly code: "invalid_repository_url" | "clone_failed";
+  readonly message: string;
+  readonly retryable: boolean;
+}
+const execGit = (args: string[], cwd: string): ResultAsync<string, { message: string }> =>
+  ResultAsync.fromPromise(
+    new Promise<string>((resolve, reject) => {
+      execFile(
+        "git",
+        args,
+        {
+          cwd,
+          timeout: 10 * 60_000,
+          env: { ...process.env, GIT_ALLOW_PROTOCOL: "https", GIT_TERMINAL_PROMPT: "0" },
+        },
+        (error, stdout, stderr) => {
+          if (error !== null) reject(new Error(stderr || error.message));
+          else resolve(stdout.trim());
+        },
+      );
+    }),
+    (cause) => ({ message: cause instanceof Error ? cause.message : String(cause) }),
+  );
+
+/** Retained checkout is never reset or recloned on resume. */
+export async function prepareCheckout(
+  workDir: string,
+  repositoryUrl: string,
+): Promise<Result<string, CheckoutError>> {
+  const repoDir = join(workDir, "repo");
+  if (!existsSync(repoDir)) {
+    const url = validateRepositoryUrl(repositoryUrl);
+    if (url.isErr())
+      return err({ code: "invalid_repository_url", message: url.error.message, retryable: false });
+    const tmpDir = join(workDir, ".clone-tmp");
+    const cleaned = Result.fromThrowable(
+      () => {
+        rmSync(tmpDir, { recursive: true, force: true });
+        mkdirSync(workDir, { recursive: true });
+      },
+      (cause) => ({ code: "clone_failed" as const, message: String(cause), retryable: true }),
+    )();
+    if (cleaned.isErr()) return err(cleaned.error);
+    const cloned = await execGit(["clone", "--", url.value.url, tmpDir], workDir);
+    if (cloned.isErr())
+      return err({ code: "clone_failed", message: cloned.error.message, retryable: true });
+    const renamed = Result.fromThrowable(
+      () => renameSync(tmpDir, repoDir),
+      (cause) => ({ code: "clone_failed" as const, message: String(cause), retryable: true }),
+    )();
+    if (renamed.isErr()) return err(renamed.error);
+  }
+  const commit = await execGit(["rev-parse", "HEAD"], repoDir);
+  return commit.mapErr((error) => ({
+    code: "clone_failed" as const,
+    message: error.message,
+    retryable: true,
+  }));
+}

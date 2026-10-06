@@ -154,7 +154,8 @@ it.each(["chromium", "webkit"] as const)(
       await expect(history).toContainText("Review 100");
       await expect(composer).toBeEditable();
       await expect(send).toBeDisabled();
-      await expect(ready).toBeDisabled();
+      await expect(ready).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Change model", exact: true })).toHaveCount(0);
       await composer.press("Control+Enter");
       await expect(composer).toHaveValue("draft edited through metadata Retry");
       expect(hellos).toEqual([]);

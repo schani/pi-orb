@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import {
   CONTROL_PLANE_URL_ENV,
+  HARNESS_ENV,
   PREVIEW_HOST_ENV,
   previewHost,
   RUNTIME_TOKEN_ENV,
@@ -200,6 +201,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
   desiredSpecFingerprint(input: {
     readonly orbId: string;
     readonly repositoryUrl: string;
+    readonly harness?: import("@pi-orb/protocol").HarnessKind;
   }): string {
     return specFingerprintOf({
       v: 1,
@@ -216,6 +218,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
               previewHost: previewHost(input.orbId, this.options.tailscale.tailnetDnsName),
             },
       repositoryUrl: input.repositoryUrl,
+      harness: input.harness ?? "pi",
     });
   }
 
@@ -510,6 +513,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     const specFingerprint = this.desiredSpecFingerprint({
       orbId: request.orbId,
       repositoryUrl: request.bootstrap.repositoryUrl,
+      harness: request.bootstrap.harness ?? "pi",
     });
     const run = async (): Promise<Result<ProvisionedOrbHost, OrbHostProviderError>> => {
       const existing = await this.inspect("provision", name, context);
@@ -626,6 +630,8 @@ export class DockerOrbHostProvider implements OrbHostProvider {
             "--env",
             `${key}=${value}`,
           ]),
+          "--env",
+          `${HARNESS_ENV}=${request.bootstrap.harness ?? "pi"}`,
           "--env",
           `${SKILLS_DIR_ENV}=${IMAGE_SKILLS_DIR}`,
           // HOME is part of the durable orb filesystem contract. Keep this

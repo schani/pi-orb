@@ -581,7 +581,8 @@ button.text-action.error-text {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 8px;
+  margin-left: auto;
+  gap: 4px;
 }
 
 .orb-index .project-head-actions {
@@ -608,6 +609,8 @@ a.project-new-orb-icon:focus-visible {
 }
 
 .project-name {
+  min-width: 0;
+  flex: 1;
   overflow: hidden;
   font-size: 18px;
   line-height: 24px;
@@ -619,17 +622,6 @@ a.project-new-orb-icon:focus-visible {
 
 .project-column-deleting .project-name {
   color: var(--g3);
-}
-
-.project-new-orb {
-  text-transform: uppercase;
-  font-weight: 700;
-  border-bottom: 0;
-}
-
-.project-new-orb-row {
-  padding: 0 10px;
-  line-height: var(--row);
 }
 
 .project-progress {
@@ -1020,9 +1012,31 @@ button.personal-instructions-gear {
   color: var(--bad);
 }
 @media (max-width: 600px) {
+  .personal-instructions-dialog .project-config-tabs button,
+  .personal-instructions-dialog .personal-instructions-feedback button,
+  .personal-instructions-dialog .claude-auth-panel button,
+  .personal-instructions-dialog .claude-auth-panel a {
+    min-height: 48px;
+  }
+  .personal-instructions-dialog .claude-auth-panel a {
+    display: flex;
+    align-items: center;
+  }
+  .personal-instructions-dialog .modal-close {
+    width: 48px;
+    height: 48px;
+  }
+  .personal-instructions-dialog .project-secrets-header {
+    min-height: 48px;
+  }
+  .personal-instructions-dialog .claude-auth-panel input {
+    font-size: 16px;
+  }
+}
+@media (max-width: 600px) {
   .dashboard-totals {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr)) 44px;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
     height: 48px;
   }
   .dashboard-total {
@@ -1041,7 +1055,7 @@ button.personal-instructions-gear {
     grid-row: 1 / 3;
     grid-column: 3;
     height: 48px;
-    width: 44px;
+    width: 48px;
   }
   .project-secrets-dialog.personal-instructions-dialog {
     margin-top: 24px;
@@ -1613,11 +1627,6 @@ body:has(.orb-page) {
 .rec-q {
   color: var(--w);
   border-left: 2px dotted var(--w);
-}
-
-.rec-sys > .rec-px {
-  color: var(--g2);
-  font-weight: 400;
 }
 
 .rec-status {
@@ -2336,6 +2345,7 @@ pre,
   border-color: var(--bad);
 }
 
+.orb-notice,
 .orb-failure-banner {
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
@@ -3000,12 +3010,19 @@ button.orb-phone-menu {
   }
   .orb-index .project-head-actions > button,
   .orb-index .project-head-actions > a {
-    width: 28px;
-    height: 23px;
+    width: 24px;
+    height: 24px;
     border-left: 1px solid var(--k);
   }
 }
 @media (max-width: 600px) {
+  .project-head-name {
+    height: 48px;
+  }
+  .project-head-actions > .icon-button {
+    width: 48px;
+    height: 48px;
+  }
   .tool-image-dialog {
     padding-top: 44px;
   }
@@ -3022,4 +3039,30 @@ button.orb-phone-menu {
   .command-picker button {
     min-height: 44px;
   }
+}
+
+.claude-auth-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+}
+.claude-auth-panel form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+.claude-auth-panel input {
+  width: 100%;
+  min-width: 0;
+}
+.claude-auth-panel .text-field-frame {
+  flex: 1;
+  min-width: 120px;
+}
+.claude-auth-panel [role="alert"],
+.claude-auth-panel [role="status"] {
+  width: 100%;
 }

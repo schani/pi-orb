@@ -2,7 +2,7 @@
 
 ## Direction
 
-**Implemented tests first, 2026-09-19; sandbox candidate `0158472` qualified 2026-09-27; not deployed to production.** Existing URLs need not survive. Reuse `pi-orb-issuer` as the one application service: this preserves workload federation without any trust migration, while app, hosted-file and runtime-broker URLs change. No redirects, aliases, dual deployments or compatibility protocol. Production deployment through GitHub Actions is authorized (2026-10-05); exact-source release gates remain required. Reversible preparation and isolated cloud qualification were authorized on 2026-09-20. Work is tracked in `TODO.md`; URL choice is resolved in `docs/open-questions.md`, question 73.
+**Implemented tests first, 2026-09-19; sandbox candidate `0158472` qualified 2026-09-27; not deployed to production.** Existing URLs need not survive. Reuse `pi-orb-issuer` as the one application service: this preserves workload federation without any trust migration, while app, hosted-file and runtime-broker URLs change. No redirects, aliases, dual deployments or compatibility protocol. Production deployment through GitHub Actions is authorized (2026-10-05); exact-source release gates remain required. Reversible preparation and isolated cloud qualification were authorized on 2026-09-20. Work is tracked in `TODO.md`; URL choice is resolved in `docs/open-questions.md`, question 73 (control-plane consolidation).
 
 Keep PostgreSQL, GCS, orb VMs and the existing lifecycle/release machinery. One Cloud Run service serves everything and runs background work. Keep always-allocated CPU, minimum one instance, the current request timeout and private VPC egress. Use the existing control-plane service account; remove the issuer-only account with the other obsolete infrastructure.
 
@@ -108,7 +108,13 @@ Extend the real full-slice flow through Google login → orb start → first mes
 
 Before deployment, run `npm ci`, browser prerequisites, typecheck, lint, the complete unit/infra suite and **`npm run test:e2e`** on unchanged source. Keep required real PostgreSQL, native-image and live-cloud gates. Use owned fixtures and explicit readiness barriers, not sleeps or larger timeouts. Flaky failures block release until root-caused; retain first-failure evidence.
 
-### Current integration, 2026-10-05
+### Current integration, 2026-10-06
+
+Merge pins main `8f4c32f1f7ae9b4e960545840dcc78996caad11f`, retaining Claude harness/protocol and exact-source Actions qualification alongside Google browser/session/machine and incarnation-bearer boundaries. Migration ledger keys are full filenames: `029_orb_harness.sql` coexists with `029_history_record_shape.sql`; Google identity migration remains 031. No migration is renumbered.
+
+**Release-specific user waiver, 2026-10-06:** explaining historical non-UI runs `37390585414` and `37389785804` is not a consolidation release gate. Their causes remain unresolved, with original evidence and `TODO.md` follow-ups retained. This does not waive current-source qualification, new failures or DST replay. Deployment remains Actions-only with monitoring; source integration authorizes neither automatic PR merge nor deployment.
+
+### Earlier integration, 2026-10-05
 
 Production deployment through GitHub Actions is authorized. Merge integration pins main `6b9d76f02142e81851e6f20092b738f80c3f961d`, preserving its activity headlines, bounded provider retries, command-code headers, runtime/protocol changes, lazy UI and dependency-patch runner alongside the authentication boundaries. Google identity migration is `031_google_identities.sql`, after main's `029_history_record_shape.sql` and `030_activity_headlines.sql`; ledger keys are complete filenames. Earlier Sandbox ledgers and frozen `b1135a3` artifacts remain historical evidence, not qualification of this integration or a fresh production build. Current-source checks and fresh Actions release gates remain required. No dispatch or production mutation is part of source integration.
 
@@ -208,4 +214,4 @@ Live acceptance verifies real Google/company admission, unchanged user UUIDs/dat
 
 ## Simplifications and rationale
 
-The earlier plan preserved app/files URLs at the cost of a federation migration and ordered trust cutover. The user removed URL preservation, so retaining the existing issuer eliminates that work. Cookie-carried login state replaces the proposed login-transaction table; Google's single-use code owns replay rejection. Strict mandatory Origin checks replace custom CSRF-token plumbing. The user selected stateless sealed session cookies over database sessions, accepting that logout cannot revoke a copied cookie until expiry (resolved question 74 in `docs/open-questions.md`). This removes session persistence, lookups and cleanup while retaining expiry, origin isolation and DST/browser security coverage. No extra services, compatibility machinery, refresh workers or new lifecycle protocol.
+The earlier plan preserved app/files URLs at the cost of a federation migration and ordered trust cutover. The user removed URL preservation, so retaining the existing issuer eliminates that work. Cookie-carried login state replaces the proposed login-transaction table; Google's single-use code owns replay rejection. Strict mandatory Origin checks replace custom CSRF-token plumbing. The user selected stateless sealed session cookies over database sessions, accepting that logout cannot revoke a copied cookie until expiry (resolved question 74 (control-plane consolidation) in `docs/open-questions.md`). This removes session persistence, lookups and cleanup while retaining expiry, origin isolation and DST/browser security coverage. No extra services, compatibility machinery, refresh workers or new lifecycle protocol.

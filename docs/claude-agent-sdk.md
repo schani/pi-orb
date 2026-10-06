@@ -1,0 +1,220 @@
+# Claude Agent SDK harness POC
+
+**Requirement — user request, 2026-10-03:** plan how pi-orb can also offer Anthropic through the Claude Agent SDK, with subscription pricing as the desired path.
+**Auth UX requirement — 2026-10-04:** initiate and complete connection through pi-orb, without user CLI commands or external token provisioning. One owner connection serves all that owner's orbs; no per-orb login.
+**Decision — 2026-10-04:** implement the co-located POC with one owner-level native subscription connection shared across that owner's orbs. The user accepts guest-readable long-lived model credentials. Local implementation passed automated qualification; deployment and coworker rollout are not authorized. Remaining qualification/product-authorization questions live in `docs/open-questions.md` (questions 3, 4, 72 (Claude SDK) and 73 (Claude SDK)).
+
+## Local POC scope (2026-10-04; not deployed)
+
+Implemented: immutable harness selection/inheritance; owner connection UI/native auth helper/static secret publication; co-located SDK tools, hooks and skills; configured HTTP MCP with request-time OAuth; native root history/provenance and pull replication; model/effort controls; supervised query rotation and aggregate work guards. Pi remains the default. Native consent URL and production adapter metadata initialization/drain were qualified without consent or inference. On 2026-10-04 the owner completed consent through pi-orb and confirmed working model replies; the persisted connection survived a host restart. Real subscription accounting and effective organization effort policy remain unqualified.
+
+Known interrupted input receipts allow manual continuation with a durable notice, never automatic replay. Missing receipts or unreconciled child ownership fail visibly. A background child terminal requires a subsequent native root handoff; absent that edge, work remains busy until explicit interruption. Query rotation changes SessionStart/SessionEnd hook frequency. Native interrupted-turn/sleep-wake automatic inference, always-open-query parity and interactive question UI are not implemented. Scope and guards: `docs/claude-sdk-capabilities.md`.
+
+## Production-readiness review and hardening (2026-10-05; local, undeployed)
+
+**Decision:** query admission requires `queryReady`, not merely an assigned SDK. Metadata/model/settings failures fail closed; initialization and settings guards survive graceful shutdown, native exit, actual stdout EOF, natural public iteration, tracked hooks and final durable native history. SDK/MCP cleanup follows those barriers. Late root/child/task ownership retains busy/child guards, failed health and read-only settings. Failed cleanup/rotation persists a sanitized reason and cannot publish a completed terminal. Initialization failures persist a bounded stage in `claude.initialization_failed` overflow, never SDK text or credentials.
+
+**Native hook drain decision (2026-10-05):** native `hook_started`/`hook_response` markers are distinct from SDK JavaScript callbacks. Match outstanding markers by `hook_id`, not message UUID; a matching response, including `cancelled`, releases only that hook. Setup and SessionStart hooks may run during metadata initialization and shutdown; paired hooks remain healthy. After native exit, stdout EOF, public iteration, callback drain and final history commit, unmatched markers fail attach/settings/rotation/interruption closed. Retain busy ownership and read-only settings; persist only the pending count in the existing visible metadata/rotation failure event, never hook commands or output. Known durable input receipts remain manually continuable after compute recovery, without automatic replay or treating historical paired hooks as uncertain.
+
+**Supervision contract:** every `ClaudeQueryProcess`, including test factories, supplies `exited: Promise<void>`, `stdoutEnded: Promise<Result<void, { message: string }>>` and `requestShutdown(): Result<void, { message: string }>`. Completing the production input `AsyncIterable` lets the pinned SDK writer end stdin gracefully. Nonempty bidirectional input may await native run completion first; a missing edge retains ownership. No direct stdin close, killing-as-success or timeout-to-idle.
+
+**Review evidence and rejected approach:** the initial partial-query review was reproduced by settings-reuse and initialization regressions (`.context/claude-production-hardening/runtime/red*.log`). The installed SDK's `close()` can end its public queue before the transport reader reaches EOF; iterator completion alone is therefore not drain proof. A direct queue/EOF mismatch contract and nine genuine pinned-SDK cases cover attach/settings/normal rotation with late root, child or clean drain before public SDK close. Early-close mutation fails the contracts. Metadata DST failures were retained and replayed before repair. No inference, history loss or corruption in an owner's session is established. Source excerpts/hashes and qualification limits: `.context/claude-production-hardening/runtime/late-metadata-{summary.txt,pinned-source.json}` and `docs/testing.md`. Rebase review reproduced unmatched native hooks in all four paths before repair; the failing composed schedule was replayed before fixing. Focused regression coverage passes 108 tests, including six additional genuine pinned-SDK synthetic-stdout hook cases and two hook DST cases/40 schedules. Evidence: `.context/claude-production-hardening/rebase-hook-drain/`.
+
+**Auth decision:** cancellation is typed request acceptance; awaitable `drain()` proves PTY exit, Unix process-group disappearance and scratch removal. Domain cancellation/shutdown fences new native events and code submission, waits pending acquisition, native drain and admitted publication, and blocks replacement while exit/cleanup is uncertain. Tokens publish only after cleanup. `cancelAccepted` still means acceptance, not termination. Durable sanitized drain/shutdown outcomes and genuine CLI/actual-process evidence: `docs/credentials.md`, `docs/testing.md`.
+
+Composed coverage now includes 16 lifecycle DST cases/380 schedules plus two metadata cases/40 schedules; it is not full boot/cloud/parity proof. Frozen automated qualification, full configured E2E, control-plane image build and supplemental real PostgreSQL contracts pass (`docs/testing.md`); these mixed repository results are not full boot/cloud/parity proof. The user exempted only the two older lost-diagnostic synthetic fixture timeouts on 2026-10-05 (`docs/testing.md`); attribution remains unresolved, not root-caused or passed. Separate explicit user acceptance on 2026-10-05 clears the named WebKit blocker for pinned Ubuntu after three passes, without establishing the Debian segfault cause. Chromium's native-tab fixture now uses full Chromium and passive POST observation: four native controls and two complete both-engine target runs pass with unchanged inputs/assertions and matching scoped host/stage hashes. This mitigates a headless-shell/Playwright first-navigation initialization race; browser internals and original untraced attribution remain unproved. Current scoped browser blockers are cleared (`docs/testing.md`). Cloud IAM/VM/billing remain unverified personal-use risks; question 73 (Claude SDK) in `docs/open-questions.md` remains open. Production source is unchanged from the qualified snapshot; the later two-line test correction and documentation delta are recorded separately in `docs/testing.md`. The port-7100 backend has not adopted this hardening. No commit, push, deployment or new owner authentication/inference occurred.
+
+The typed layers and supervised native SDK composition remain selected. CLI 2.1.289 terminal auth grammar is a fragile pinned adapter, not a structured login API. The accepted one-year model-only guest bearer is not short-lived; clearing its pointer cannot revoke a copied provider token (`docs/credentials.md`). Personal use is the scope, not coworker/commercial rollout; question 72 (Claude SDK) remains partially resolved. Real subscription accounting and effective organization effort policy remain unqualified.
+
+## Research findings (2026-10-03)
+
+- `docs/claude-code-ui-research.md` documents SDK-backed custom UIs. The SDK runs native Claude Code; it is not a raw model API agent loop.
+- The actual runtime HTTP server, `apps/orb-runtime/src/http/server.ts`, imports concrete `PiOrbAgent`; `apps/orb-runtime/src/main.ts` constructs it. A harness-agnostic wire contract alone does not make this composition interchangeable.
+- Official [authentication docs](https://code.claude.com/docs/en/authentication) document `claude setup-token`, a one-year subscription bearer supplied through `CLAUDE_CODE_OAUTH_TOKEN`, and CLI browser login with remote paste-code completion.
+- Those docs also distinguish bare startup: `--bare` does **not** read `CLAUDE_CODE_OAUTH_TOKEN` or subscription login. SDK-recommended bare mode may force API authentication. In `-p` mode, a present `ANTHROPIC_API_KEY` takes precedence over subscription authentication.
+- The [SDK overview](https://code.claude.com/docs/en/agent-sdk/overview) says: “Unless previously approved, Anthropic does not allow third party developers to offer claude.ai login or rate limits for their products, including agents built on the Claude Agent SDK.” This restricts product offerings; it does not explicitly require approval for all personal SDK use. Applicability to pi-orb's personal/internal scope remains unresolved. The [Claude-plan support article](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) separately says subscription billing changes were paused.
+- No documented independent third-party renewable OAuth integration was found. Native login and setup tokens do not establish the short-lived guest-token contract required by `docs/credentials.md`.
+- Inspected [SDK 0.3.276 archive](https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.276.tgz), not yet pinned by pi-orb: `getSessionMessages` reconstructs the postcompaction chain and filters metadata; it is not the complete root log. The [session-storage documentation](https://code.claude.com/docs/en/agent-sdk/session-storage) confirms this behavior.
+- That documentation also describes best-effort `SessionStore` mirroring: a failed batch can be dropped while inference continues after `mirror_error`. It cannot be the sole history authority.
+- Raw native records commonly contain `uuid` and `parentUuid`; append-only identity, relinking and duplicate behavior still require probes. `parent_tool_use_id` identifies a tool parent, not conversation ancestry. Raw transcript format is internal, requiring a version-pinned adapter contract.
+- The [TypeScript options reference](https://code.claude.com/docs/en/agent-sdk/typescript#options) supports remote MCP tools and `toolAliases`, for example `Bash: 'mcp__workspace__bash'`. Inspected SDK 0.3.276 type comments explicitly describe remote-sandbox execution. Aliases redirect model-issued calls, not harness-internal direct calls; the comments require treating aliases and `disallowedTools` as complementary. `tools: []` disables built-in tools.
+
+## Proposed smallest integration
+
+- One immutable per-orb `harness: pi | claude`, selected at creation. Pi remains the default; a normal SQL migration assigns Pi to existing rows. No live switch, session migration or cross-harness history conversion.
+- Propagate selection through creation, launch storage and runtime boot protocol. `pi-orb spawn` inherits the authenticated caller's harness inside its existing fenced creation transaction; no project-default subsystem.
+- Introduce a narrow `OrbAgent` port consumed by the runtime HTTP server, with typed `Result`/`ResultAsync` failures. Pi and Claude adapters implement it; `main.ts` chooses the concrete adapter.
+- Extract only runtime-owned checkout, setup/resume hooks and boot lifecycle code needed by both adapters. No Pi rewrite, generic plugin framework or service locator.
+- Keep browser → control plane → runtime topology, existing lifecycle/services, terminal and pull-only replication. Adapters normalize harness behavior; controllers never call SDK, disk or model clients directly.
+- Claude uses SDK `query()` with `AsyncIterable` prompt input, one retained native root conversation per orb, explicit `sessionId`/`resume`, and native tools. The POC rotates the query process between completed turns only after supervised exit and final history drain; a permanently open query cannot establish the required idle fence through public APIs. No terminal scraping or reimplemented API/tool loop.
+- Pin both SDK and executable in immutable Docker/native-image inputs. No startup npm install. Catch SDK calls, iterator failures and process/disk rejections at their immediate adapter boundaries and map them to typed errors.
+
+## Selected topology (user decision, 2026-10-04)
+
+Run the Claude SDK/harness on the orb host, co-located with its workspace, not in the control plane. The remote split leaves too much native behavior outside the workspace and requires too many adaptations. The same day's implementation approval selects the POC below; deployment and rollout remain separate.
+
+Retained orb filesystem native files remain authoritative for resume; no startup `SessionStore` or separate native-history service is needed. The normalized product replica remains display/replication state, not native restore authority. History qualification remains required.
+
+## Rejected alternative: separate harness and workspace machines
+
+Historical candidate and qualification evidence follow, not work for the selected topology. It kept model credentials outside repository execution, but native tools, hooks, skills, filesystem context and session ownership do not transparently relocate. Worker isolation, remote process contracts and separate history-store/hydration complexity outweigh that benefit.
+
+Aliases can preserve model-issued tool names while routing calls to remote implementations. The host supplies those implementations and their input/output contracts; the SDK does not relocate native tool bodies.
+
+```text
+Trusted harness worker: SDK + Claude Code + credentials + native sessions
+    ↕ authenticated MCP tool calls/results
+Orb runtime: workspace + read/write/edit/search/exec implementations
+```
+
+**Capability audit (research, 2026-10-04):** `docs/claude-sdk-capabilities.md` covers all 46 currently documented names: 22 workspace-sensitive integration candidates, five conditional routing surfaces and 19 harness-state tools. These are not enabled-tool counts or 22 simple replacement callbacks. No finite override list guarantees full native CLI functionality: internal filesystem operations, remote-file checkpointing limits and headless omissions remain. One authenticated remote execution service can expose many methods with shared filesystem/process lifecycle.
+
+- Supply remote [MCP tools](https://code.claude.com/docs/en/agent-sdk/mcp), initially with `tools: []`, and optionally alias native names to them. Select any retained native helpers explicitly. Aliases alone are not isolation. Qualify alias/permission interactions rather than assuming native deny rules cannot affect remote targets; official [Cowork permission behavior](https://code.claude.com/docs/en/permissions#mcp) illustrates that distinction.
+- Qualify remote process/path contracts for `Monitor`, output/stop helpers, worktrees, plan files, skills and file transport. Preserve native Agent/mode/task orchestration rather than blindly overriding entire tools. Native children can retain configured tools; isolated worktrees require adaptation.
+- Project commands execute in the orb without receiving the harness worker's model credentials. Credentials and native sessions stay on the worker, changing their lifecycle/persistence ownership; the original co-located adapter proposal must not be assumed unchanged.
+- Isolate the worker, with no project checkout mounted there, rather than executing project code inside the control-plane service. Explicitly disable untrusted settings sources, hooks/plugins and command-bearing skill expansion; `settingSources: []` alone does not disable every discovery source, and `tools: []` is not an OS sandbox.
+- Public `Options.hooks` async callbacks run on the SDK host and can RPC to orb hooks, returning validated `HookJSONOutput`; remote transport, authentication, path mapping, cancellation/timeouts and failure policy are ours. There is no `remoteHooksHost` option. Settings/plugin command hooks run with the CLI and do not follow aliases. Project setup/resume execution remains in the orb under this candidate.
+- `Options.skills` selects discovered names, not inline content. Local plugin bundles, `additionalDirectories` and `settingSources` can supply materialized skills where the CLI runs; B paths do not automatically resolve on A. Include native `Skill` in an explicit tools list. Command interpolation runs CLI-side before the model; remote wrappers/Skill handling are needed for remote repository semantics.
+- Restart hydration has a public alpha API: `SessionStore.load` supplies full raw native entries before CLI spawn with `resume`, stable cwd/project identity and optional child subkeys. `importSessionToStore` copies existing local transcripts into a store, not arbitrary chat history. `sessionId` alone supplies no history; AsyncIterable prompts start new turns. Best-effort mirror loss and temporary-file deletion prevent assuming durability. The native-disk-authority proposal below is unchanged; normalized display history cannot hydrate native resume.
+- Native settings/CLAUDE.md discovery, Git context and auto-memory remain local like session persistence. Keep trusted runtime/session state on the worker and supply remote workspace context explicitly. Aliases do not relocate arbitrary internal filesystem operations.
+- These paths threaten credential separation only if untrusted project code executes on the worker or local capabilities expose its secrets. Qualify blocked local execution and durable execution-location/error edges, not just remote tool success.
+- Qualify tool schemas/results, filesystem paths, images, cancellation, process ownership, MCP reconnection and history correlation before choosing this topology. Native [file checkpointing](https://code.claude.com/docs/en/agent-sdk/file-checkpointing#limitations) does not track remote/network files. No remote tool implementation or security guarantee has been tested in pi-orb yet. Public implementation evidence is recorded in `docs/claude-code-ui-research.md`.
+- `spawnClaudeCodeProcess` is a different feature: it can put the SDK controller on one machine and the entire Claude Code process on another. Native tools still run with that process. `sandbox` settings restrict local execution; they do not supply a remote backend.
+
+## Proposed first slice and qualification boundary
+
+The first slice targets a working orb, not a chat-only integration. These are qualification requirements, not claims of parity:
+
+- Chat, native tools and image input/output; advertise image capability only after the pinned model and serializers are proven.
+- Durable send-anytime acceptance, reconnect, complete history, stopped/archived views, Start/Stop/Abort, terminal, workspace uploads, platform Bash CLI/instructions and guarded boot notices.
+- Initially retain busy input in the existing durable control-plane inbox and submit only when aggregate idle. Preserve FIFO batching and acceptance-versus-delivery status. SDK queued input is **not** Pi steering; true in-turn steering requires later qualification before advertising it.
+- Native Claude Agent/subagent tools may expose the active rail only after aggregate busy, cancellation, drain and interruption contracts are proven. Otherwise explicitly omit that capability in the preview; do not claim parity.
+- Keep child transcripts local and private; replicate root results/minimal lifecycle facts only. Do not port Pi's gotgenes extension or codemode packages.
+- Use the shared message/command composer and retain the interactive terminal. Native Bash tools remain available.
+- **Decision — 2026-10-04:** new Claude sessions explicitly use the native `opus` alias, in initial query options and every rotated query. The model picker offers SDK-advertised latest Fable, Opus, Sonnet and Haiku aliases only, in that order, without guessed version IDs or context variants. Saved explicit selections remain unchanged; SDK `resolvedModel` metadata can identify their capabilities without replacing their ID. Models advertising no effort levels omit explicit effort; switching to one clears the native overlay. Pi model policy is unchanged. `docs/agent-settings.md` records the settings contract.
+- Conditional omissions are explicit preview proposals. Missing durable inbox, history or boot/cancellation proof blocks a parity rollout; this plan does not authorize production with unsatisfied core contracts.
+
+## Proposed authorization and credential gate
+
+Question 72 (Claude SDK) in `docs/open-questions.md` owns the authorization/security decision.
+
+- Confirm authorization before offering subscription login to other users; clarify personal/internal applicability rather than assuming every SDK experiment requires Anthropic approval. The accepted Claude exception permits a one-year model-only bearer in guests. Pi/GitHub refresh credentials remain control-plane-only.
+- Use one owner-bound Anthropic credential slot, deriving authority from orb → project → owner. Viewers cannot select another credential. Choose the required model prerequisite by harness at create/start; GitHub repository authentication remains independent.
+- A Claude-only owner must not need Codex authentication. Skip optional Luna auto-naming and summaries when Codex is unconfigured; do not block Claude or implicitly make API-billed Anthropic auxiliary calls. Existing Pi auxiliaries remain unchanged.
+- Do not disguise a long-lived setup token as renewable `StoredCredential` with fake refresh. Do not invent an OAuth client, scrape tokens or silently fall back to API billing.
+- The user authorizes the POC's long-lived guest bearer. Subscription issuance requires the owner's browser consent; never mint or substitute a credential without that ceremony. Temporary qualification copies must be removed afterward.
+- API-key support, if desired, requires separate opt-in billing consent; it is not a fallback satisfying subscriptions.
+- Pin and test subscription-compatible startup, including SDK executable flags. Remove competing API-key/auth/profile variables from the SDK child environment and verify project secrets cannot accidentally change the billing source; do not assume bare mode works. Test configured native credential/profile precedence as well as environment precedence.
+- Build hermetic adapter contracts and distinguish them from real subscription qualification. Broader subscription-product rollout still depends on question 72 (Claude SDK); no universal Anthropic-approval requirement for personal experiments has been established.
+
+### Auth options and gateway caveat (2026-10-04)
+
+Selected for the POC (2026-10-04): a trusted backend auth helper runs native `claude setup-token` through a pi-orb-owned ceremony once per owner. The user explicitly accepts the one-year model-only bearer in guests; `docs/credentials.md` records this narrowly scoped exception.
+
+Official [secure-deployment docs](https://code.claude.com/docs/en/agent-sdk/secure-deployment) support `ANTHROPIC_BASE_URL` proxy credential injection generally, and [LLM gateway docs](https://code.claude.com/docs/en/llm-gateway) support `ANTHROPIC_AUTH_TOKEN` as gateway bearer. But [subscriptions and gateways](https://code.claude.com/docs/en/llm-gateway#subscriptions-and-gateways) explicitly says gateway credential variables or `apiKeyHelper` replace saved subscription login: subscription limits do not apply, and upstream credential ownership determines per-token billing. Only `ANTHROPIC_BASE_URL` alone with saved native subscription login preserves subscription limits/billing; that proxy must forward the OAuth capability in `anthropic-beta`. This still needs guest native credentials. Official Claude apps gateway supports API/cloud upstreams, not subscriptions.
+
+A narrow credential-injecting gateway in the control plane or a trusted adjacent service remains an **unproven candidate**, not the recommended supported subscription path. An incarnation `ANTHROPIC_AUTH_TOKEN` plus injected subscription token may select the wrong mode/billing. It requires distinct owner-authorized live validation/confirmation before selection; do not build a gateway before that decision. Candidate constraints:
+
+- Runtime sends an incarnation-scoped bearer; gateway resolves orb → project → owner and injects the owner's centrally stored Anthropic credential into upstream model requests. Revoking the orb bearer must block model access.
+- Potential central credential: official `claude setup-token`, stored in an owner-bound Secret Manager slot. This one-year subscription model-request-only bearer needs manual replacement, not fake refresh/expiry in renewable `StoredCredential`. No custom OAuth client or private credential scraping.
+- Never vend that long-lived token to the orb. Replace the orb's `Authorization` header with the resolved upstream credential; do not forward the orb bearer upstream. No generic upstream proxy: allow only validated methods/paths for bounded model endpoints, with supported SDK request streams, cancellation and timeouts.
+- Preserve structured errors; never log request/response bodies or headers. Persist sanitized auth-source and blocked/resolved/failure edges with user-visible failures as proposed below.
+- Before selecting or implementing, propose an owner-authorized targeted proof of native SDK auth-source flags, headers/query initialization, gateway subscription routing and usage accounting. No `--bare` assumption or ambient API-key/profile config that changes billing. Model-only setup-token access does not establish full native cloud features, Artifacts, Routines, connectors or Remote Control.
+
+### Proposed central connection ceremony
+
+1. Owner clicks **Connect Claude subscription** in pi-orb.
+2. A trusted auth-only backend worker runs pinned `claude setup-token` under a PTY, with an isolated home/config directory and no project checkout. Agent execution stays in the orb.
+3. Pi-orb exposes the CLI-generated Anthropic authorization link. The owner signs in/consents on Anthropic's page.
+4. If the native remote flow returns a completion code, the owner enters it in a pi-orb form; the worker supplies it to the native prompt. No user shell or external CLI installation is required.
+5. Capture the command's documented printed token directly into an owner-bound secret slot. Never stream its raw PTY output, token or private credential files to the browser or logs.
+6. All owner orbs fetch the same credential at startup and supply `CLAUDE_CODE_OAUTH_TOKEN` only to the SDK subprocess. Renew through the same connection UI; no orb runs login itself.
+
+After a completion-code POST succeeds, the open dialog shows **Completing connection…** until polling observes publication or failure; HTTP acceptance is not authentication success. The code is cleared, duplicate submission is disabled, and status-read errors remain visible with explicit retry. The backend clears the challenge on code acceptance and rejects duplicate submissions. A fresh/remounted dialog reading `connecting` without a challenge shows **Connecting…**: this state does not distinguish native startup from accepted completion input. The current dialog retains **Completing connection…** when it observed its own code submission. The helper sends bracketed paste, waits for the native masked redraw, then sends Enter separately; text plus Enter in one PTY chunk is not native submission. Recognized native validation/exchange failures become visible immediately and end the helper. Sanitized lifecycle edges distinguish code acceptance, native input completion and failure stage/reason; timeouts include acceptance/completion facts. Neither `connecting` nor accepted input proves authentication success. The input contract and incident are recorded in `docs/postmortems/2026-10-04-claude-auth-completion-input.md`.
+
+The official [authentication docs](https://code.claude.com/docs/en/authentication#generate-a-long-lived-token) say this token authenticates with the Claude subscription, lasts one year, prints after browser authorization, is not saved by the CLI, and can only make model requests. It is not API-key billing or a renewable refresh credential.
+
+Verified CLI 2.1.276/2.1.289 `setup-token --help` exposes no JSON output or remote-callback flags; public SDK 0.3.289 exposes no token-issuance/login API. The supported primitive is native CLI authorization; PTY prompt/URL/token handling is our version-pinned adapter, not a structured SDK auth API. Prove it with live remote completion, contract tests for split/ANSI output, cancellation, expiry, unexpected output and secret suppression before adoption. No custom OAuth client IDs, token exchanges or private `.credentials` scraping.
+
+Anthropic browser consent remains outside pi-orb like any provider sign-in. The documented remote flow can require pasting a completion code into pi-orb; a seamless callback to our application is not established by these interfaces.
+
+The guest-readable, model-only long-lived bearer is an accepted Claude-specific security exception. Rejection/expiry/replacement must be visible; no API fallback, fake renewable `StoredCredential`, or promise of full native cloud access. Bind ceremonies and credential publication to the owner; viewers receive no code/link/token. Singleflight, interruption/restart and publication-loss behavior should reuse existing auth-gate/secret-storage boundaries, with durable sanitized outcome/version edges.
+
+**Rejected UX alternatives (user requirement, 2026-10-04):** asking the user to run `setup-token` outside pi-orb or making every orb log in. Native `/login` remains technically supported, but stores guest-readable refresh credentials on Linux and would need bootstrap terminal access before agent readiness; it does not satisfy the selected one-owner-connection UX.
+
+**Native auth adapter qualification (2026-10-04; no consent/inference):** CLI 2.1.289 wrapped the 346-character authorization URL at the original 240-column PTY width, truncating PKCE and state. The helper now uses 1024 columns and publishes only complete native fields after the completion-code prompt, including ANSI redraw handling. A real challenge-only probe verified the redirect, subscription scope, S256 and full PKCE/state lengths. Genuine short/long synthetic-code tests now exercise completion through the production helper under kernel denial of all internet destinations, proving native input completion and immediate classified network failure. Neither probe qualifies successful token issuance or billing. Cancellation telemetry records API acceptance, not process exit/drain.
+
+## Proposed instructions, permissions and MCP
+
+- Preserve the existing trusted, unrestricted execution policy rather than creating an approval product. Pin explicit permission defaults so integration does not accidentally grant new unattended authority.
+- `canUseTool`/`AskUserQuestion` must never silently hang. The smallest proof slice visibly declines unsupported asks, persists a diagnostic and tells the model to ask through ordinary chat. Full permission/question UI is a separate proposal, not promised here.
+- Append owner personal/project instructions to the native system prompt while retaining native `CLAUDE.md` discovery. Never rewrite repository `AGENTS.md` or `CLAUDE.md`.
+- Include timezone, environment and `pi-orb` CLI context. Qualify platform skill discovery through a supported `.claude` location/additional path or converted context; do not assume Pi discovery semantics.
+- Persist non-model instruction-adoption facts and alerts in a durable runtime-owned journal, not by editing Claude native JSONL.
+- Existing configured MCP must not silently disappear. Prove static native MCP configuration and request-time OAuth broker integration through public APIs in the pinned SDK.
+- Never freeze access tokens in SDK headers or replicate secrets through the native init record/options. If no supported renewal boundary exists, reject configured unsupported cases visibly and restrict the preview scope.
+- Select the smallest MCP transport only after the spike; no speculative proxy subsystem.
+
+## Proposed native persistence, inbox correlation and replication
+
+Questions 3 and 4 in `docs/open-questions.md` retain the history evidence obligations.
+
+- Native files remain authoritative resume state on the retained filesystem. Persist explicit session binding before prompts; never restore “most recent”, and never invoke inference merely to fetch history.
+- Probe full native precompaction records, attachments and spilled output, including root/child separation under the existing privacy model. `getSessionMessages` and best-effort mirroring alone are insufficient.
+- Use native IDs where available; do not rewrite committed IDs/content or manufacture native ancestry. Probe compaction relinking, duplicate UUIDs, unknown records and partial writes before choosing the normalized mapping.
+- Add only necessary adapter metadata/journal for platform events, durable correlation and immutable committed history. Avoid an unconditional second raw full-copy store if native mapping is sufficient.
+- A journal cannot recover native entries deleted before ingestion. The spike must prove ingestion/retention across compaction and crash, not merely preserve already-observed records.
+- Persist prompt input UUID → frozen inbox batch/constituent IDs privately **before submission**. Prove that the consumed UUID remains identifiable in durable native logs after reopen, crash and compaction.
+- Publish normalized `inboxMessageIds` only after native durable consumption evidence. Control-plane replication commit remains the sole inbox acknowledgement; SDK acceptance/stream events are not delivery proof.
+- Unknown consumption stays visibly blocked pending recovery; never text-match prompts or blindly resubmit. No exactly-once external tool-side-effect guarantee.
+- Fsync required native/journal bytes and directory metadata before publishing committed records or acknowledging alerts. Crash ordering and immutable pull cursors must satisfy `docs/history-replication.md`.
+- Normalize complete root history into existing records/details/images; do not leak tokens, headers, auth URLs/codes, secret configuration, system state or raw SDK options through overflow metadata. Child transcripts remain local only.
+
+## Proposed boot, interruption and stop behavior
+
+**Unresolved idle gate — question 73 (Claude SDK) in `docs/open-questions.md`:** public SDK root results, task inventories and cancellation receipts do not prove aggregate drain or pre-execution fencing of SDK-originated starts/continuations. Preserve existing owned-work policy, synchronous input admission, durable prepare fencing and final history drain; do not substitute an all-background-task count or debounce. Qualification evidence and SessionStore/product-persistence distinctions: `docs/claude-sdk-capabilities.md`.
+
+- Retain runtime-owned guarded boot notices, explicit Abort distinction, resume budget and admission/incarnation fences from `docs/lifecycle.md`, `docs/runtime-protocol.md` and `docs/orb-sleep.md`.
+- Initially disable native automatic continuation so there is one continuation owner. Qualify our resume prompt and native cancellation state before enabling the same boot UX; no proof means no parity rollout, not a silent exactly-once promise.
+- Persist each boot claim/decline before inference and retain human-input-only budget reset semantics. Compose upload/sleep notices with the existing inbox rules rather than adding another scheduler.
+- Whole-operation Abort remains busy/cancelling through root and child cleanup. Stop bounds supervise the entire process tree; a timeout is not proof of cancellation or drain.
+- After loss, unfinished native children produce one interrupted root receipt, with no automatic child replay. Explicit agent-driven new work is distinct from replay.
+
+## Approved POC qualification milestones
+
+### 1. Characterize the pinned SDK without real credentials
+
+First characterize the pinned binary against a fake Anthropic backend; then write failing adapter acceptance contracts before implementation. Keep a small source-controlled probe script and sanitized artifacts:
+
+- Streaming, caller UUID and native persistence before first assistant; explicit session binding/resume without inference.
+- Raw append/parent/duplicate semantics, pre/postcompaction records, unknown records, partial writes, mirror loss and ingestion-before-deletion.
+- Image payload serialization, queue/interrupt/drain and native child cancellation/interruption.
+- Auth source precedence, non-bare subscription-compatible flags, competing variables/profiles, sanitized output/init configuration and public MCP refresh APIs.
+
+Fake tests cannot establish real subscription charging or the cloud credential boundary. These remain unverified risks, not release gates for the current personal rollout.
+
+### 2. Qualify harness selection and runtime composition
+
+Tests first for PostgreSQL/PGlite migration/defaults, creation/launch propagation, immutable selection, fenced spawn inheritance and owner binding. Prove model/GitHub prerequisite independence, optional auxiliary behavior and immutable SDK/image inputs. Keep unchanged Pi regression coverage; then introduce the narrow port/composition.
+
+### 3. Qualify adapter durability and concurrency, then implement
+
+Contract-test journal/native mapping, inbox correlation, boot and cancellation before implementing each behavior. Add one composed production-domain `determined` suite with injected SDK/process/disk/clock/transport boundaries:
+
+- Checkpoints before submit, after native persistence, before journal write, replication commit and Stop; inject crashes and partial disk writes.
+- Duplicate requests/conflicting IDs/concurrent tabs, FIFO busy queue, auth replacement/expiry, settings, guarded boot crash budgets and late interrupt completion.
+- Alerts, idle-stop/archive admission and root/child drain. Assert no lost/duplicate delivered messages, stable committed history, private child boundaries and no secret serialization.
+
+Preserve failing traces; replay before fixing, and root-cause flaky schedules instead of rerunning for green.
+
+### 4. Qualify browser/runtime and automated gates
+
+Use the pinned SDK with fake-model request assertions in browser-runtime handshake E2E: restart midturn, stopped history, reconnect/compaction, images, CLI, uploads, terminal, private children and secret absence. Install with `npm ci`; run repository checks and full `npm run test:e2e` before any future protocol/harness deployment. **Decision (2026-10-05):** the user rejected the proposed cloud canary and requested automated gates with disk monitoring (`docs/testing.md`); no canary will run. The frozen image-build/source-closure gates passed; evidence and subsequent test/docs-only scope are in `docs/testing.md`. Real cloud/IAM, physical VM reboot/retained-disk recovery, subscription accounting and organization effort policy remain unverified, not scheduled hard release gates. This personal-use decision does not accept broader accounting policy or authorize commercial/coworker rollout or deployment.
+
+## Proposed observability
+
+- Persist orb harness, SDK/CLI versions and session binding; journal native-ingestion gaps/conflicts and sanitized process-exit/SDK-result categories.
+- Durable edges include inbox IDs/operation correlation, boot claims/declines, pending-ask declines, interrupt/drain outcomes, auth source **kind**/generation and blocked/resolved/failure transitions.
+- Record model fallback and quota/reset facts only when structured evidence supplies them; never infer them from arbitrary provider text.
+- User-affecting failures must appear in product state/history, not only ephemeral stderr. Apply `docs/lifecycle.md` edge/noise rules: healthy reads emit nothing.
+- Redact at ingestion, including native init/overflow and probe artifacts; no tokens, headers, credential bodies, auth URLs/codes, system state or raw SDK options in replicated diagnostics.

@@ -86,6 +86,26 @@ describe("project deletion HTTP API", () => {
     expect(tooLate.statusCode).toBe(409);
   });
 
+  it("persists canonical GitHub URLs for shorthand updates", async () => {
+    const updated = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/projects/project-http",
+      payload: { name: "Shorthand", repositoryUrl: "schani/pi-orb" },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json().repositoryUrl).toBe("https://github.com/schani/pi-orb");
+
+    const invalid = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/projects/project-http",
+      payload: { name: "must not change", repositoryUrl: "schani/pi-orb/extra" },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(
+      (await app.inject({ method: "GET", url: "/api/v1/projects/project-http" })).json(),
+    ).toMatchObject({ name: "Shorthand", repositoryUrl: "https://github.com/schani/pi-orb" });
+  });
+
   it("keeps a missing project URL missing", async () => {
     const response = await app.inject({ method: "DELETE", url: "/api/v1/projects/missing" });
     expect(response.statusCode).toBe(404);

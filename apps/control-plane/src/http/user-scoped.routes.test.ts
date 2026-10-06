@@ -78,6 +78,100 @@ it("scopes default project creation/listing and idempotency to the signed-in use
   expect(bob.json().items.map((item: { id: string }) => item.id)).toEqual([b.id]);
 });
 
+it.each(["schani/pi-orb", "github.com/schani/pi-orb"])(
+  "persists canonical repository URLs for create and edit shorthand %s",
+  async (repositoryUrl) => {
+    const app = setup();
+    const id = "10000000-0000-4000-8000-000000000004";
+    const created = await inject(app, "alice", {
+      method: "POST",
+      url: "/api/v1/projects",
+      payload: { ...project(id), repositoryUrl },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().repositoryUrl).toBe("https://github.com/schani/pi-orb");
+    const retry = await inject(app, "alice", {
+      method: "POST",
+      url: "/api/v1/projects",
+      payload: { ...project(id), repositoryUrl: "https://github.com/schani/pi-orb" },
+    });
+    expect(retry.statusCode).toBe(201);
+    const edited = await inject(app, "alice", {
+      method: "PATCH",
+      url: `/api/v1/projects/${id}`,
+      payload: { name: "Edited", repositoryUrl: repositoryUrl.replace("pi-orb", "pi-orb.git") },
+    });
+    expect(edited.statusCode).toBe(200);
+    expect(edited.json().repositoryUrl).toBe("https://github.com/schani/pi-orb.git");
+    const stored = await inject(app, "alice", { method: "GET", url: `/api/v1/projects/${id}` });
+    expect(stored.json().repositoryUrl).toBe("https://github.com/schani/pi-orb.git");
+  },
+);
+
+it.each([
+  ["schani/pi-orb", "https://github.com/schani/pi-orb"],
+  ["schani/pi-orb.git", "https://github.com/schani/pi-orb.git"],
+  ["https://GitHub.com/schani/pi-orb", "https://github.com/schani/pi-orb"],
+  ["git@github.com:schani/pi-orb.git", "https://github.com/schani/pi-orb.git"],
+])("persists canonical project creation from %s", async (input, canonical) => {
+  const app = setup();
+  const payload = {
+    id: "10000000-0000-4000-8000-000000000001",
+    name: "Shorthand",
+    repositoryUrl: input,
+  };
+  const created = await inject(app, "alice", {
+    method: "POST",
+    url: "/api/v1/projects",
+    payload,
+  });
+  expect(created.statusCode).toBe(201);
+  expect(created.json().repositoryUrl).toBe(canonical);
+  const read = await inject(app, "alice", {
+    method: "GET",
+    url: `/api/v1/projects/${payload.id}`,
+  });
+  expect(read.statusCode).toBe(200);
+  expect(read.json()).toMatchObject({
+    id: payload.id,
+    name: payload.name,
+    repositoryUrl: canonical,
+  });
+  const repeated = await inject(app, "alice", {
+    method: "POST",
+    url: "/api/v1/projects",
+    payload: { ...payload, repositoryUrl: canonical },
+  });
+  expect(repeated.statusCode).toBe(201);
+  expect(repeated.json()).toEqual(created.json());
+});
+
+it.each([
+  "schani",
+  "schani/pi-orb/extra",
+  "schani/pi-orb?ref=main",
+  "schani/pi-orb#fragment",
+  "schani/..",
+  "git@schani/pi-orb",
+  "https://evil.test/schani/pi-orb",
+])("rejects project creation from %s without persistence", async (repositoryUrl) => {
+  const app = setup();
+  const id = "10000000-0000-4000-8000-000000000001";
+  const rejected = await inject(app, "alice", {
+    method: "POST",
+    url: "/api/v1/projects",
+    payload: { id, name: "Rejected", repositoryUrl },
+  });
+  expect(rejected.statusCode).toBe(400);
+  expect(rejected.json().error.code).toBe("invalid_request");
+  expect(
+    (await inject(app, "alice", { method: "GET", url: `/api/v1/projects/${id}` })).statusCode,
+  ).toBe(404);
+  expect(
+    (await inject(app, "alice", { method: "GET", url: "/api/v1/projects" })).json().items,
+  ).toEqual([]);
+});
+
 it("keeps personal instructions independent", async () => {
   const app = setup();
   for (const [principal, content] of [

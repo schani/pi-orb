@@ -26,6 +26,74 @@ describe("validateRepositoryUrl", () => {
     expectOk("https://github.com/owner/repo.git");
   });
 
+  it.each([
+    ["schani/pi-orb", "schani", "pi-orb"],
+    ["github.com/schani/pi-orb", "schani", "pi-orb"],
+    ["GitHub.com/Owner/Repo.git", "Owner", "Repo.git"],
+    ["Owner/Repo.git", "Owner", "Repo.git"],
+    ["owner/repo_name.v2", "owner", "repo_name.v2"],
+  ])("canonicalizes GitHub shorthand %s to HTTPS", (raw, owner, repo) => {
+    const result = validateRepositoryUrl(raw);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value).toEqual({
+        url: `https://github.com/${owner}/${repo}`,
+        host: "github.com",
+        pathSegments: [owner, repo],
+      });
+    }
+  });
+
+  it.each([
+    "owner",
+    "owner/",
+    "/repo",
+    "owner/re po",
+    " owner/repo",
+    "owner/repo ",
+    "owner/repo..name",
+    "own..er/repo",
+    "owner/%2e%2e",
+    "git@owner/repo",
+    "owner/repo/extra",
+    "owner/repo/",
+    "owner//repo",
+    "../repo",
+    "owner/..",
+    "owner/a..b",
+    "owner/.git",
+    "owner/repo?ref=main",
+    "owner/repo#fragment",
+    "owner/repo%2fextra",
+    "owner\\repo",
+    "/owner/repo",
+    "//github.com/owner/repo",
+    "github.com/owner/../repo",
+    "github.com/owner/repo/extra",
+    "github.com/owner/repo/",
+    "github.com/owner/repo?ref=main",
+    "github.com/owner/repo#fragment",
+    "github.com/owner/repo%2fextra",
+    "github.com\\owner\\repo",
+    "github.com.evil.example/owner/repo",
+    "github.com@evil.example/owner/repo",
+    "user@github.com/owner/repo",
+    "github.com:8443/owner/repo",
+    "gitlab.com/owner/repo",
+    "169.254.169.254/owner/repo",
+  ])("rejects malformed or non-GitHub shorthand %s", (raw) => {
+    expect(validateRepositoryUrl(raw).isErr()).toBe(true);
+  });
+
+  it.each(["owner/repo", "github.com/owner/repo"])(
+    "enforces the configured allowlist for shorthand %s",
+    (raw) => {
+      const result = validateRepositoryUrl(raw, { allowedHosts: ["gitlab.com"] });
+      expect(result.isErr()).toBe(true);
+      if (result.isErr()) expect(result.error.code).toBe("host_not_allowed");
+    },
+  );
+
   it("accepts scp-style Git SSH input and canonicalizes it to HTTPS", () => {
     const result = validateRepositoryUrl("git@github.com:schani/minimacs.git");
     expect(result.isOk()).toBe(true);
@@ -68,7 +136,6 @@ describe("validateRepositoryUrl", () => {
   it("rejects unparseable URLs and non-URL strings", () => {
     expectErr("not a url", "invalid_url");
     expectErr("", "invalid_url");
-    expectErr("github.com/owner/repo", "invalid_url");
   });
 
   it("rejects hosts off the allowlist", () => {

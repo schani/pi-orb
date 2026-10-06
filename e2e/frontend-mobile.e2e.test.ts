@@ -503,15 +503,18 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       await expectPage(config).toBeHidden();
       await expectPage(configOpener).toBeFocused();
 
-      const personalOpener = page.getByRole("button", { name: "Personal instructions" });
+      const personalOpener = page.getByRole("button", { name: "Settings" });
       await personalOpener.click();
-      const personal = page.getByRole("dialog", { name: "~/AGENTS.md" });
-      const personalClose = personal.getByRole("button", { name: "Close personal instructions" });
+      const personal = page.getByRole("dialog", { name: "Settings" });
+      const personalClose = personal.getByRole("button", { name: "Close settings" });
       const personalEditor = personal.getByRole("textbox", { name: "Personal AGENTS.md" });
       await expectPage(personalEditor).toBeEnabled();
       await page.keyboard.press("Tab");
+      await expectPage(personal.getByRole("tab", { name: "Instructions" })).toBeFocused();
+      await page.keyboard.press("Tab");
       await expectPage(personalEditor).toBeFocused();
       await expectCloseColors(personalClose, transparent, black);
+      await page.keyboard.press("Shift+Tab");
       await page.keyboard.press("Shift+Tab");
       await expectPage(personalClose).toBeFocused();
       await expectCloseColors(personalClose, black, white);
@@ -568,8 +571,9 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         expectPage(geometry).not.toBeNull();
         expectPage(geometry?.top).toBeCloseTo((geometry?.dialogTop ?? 0) + 1, 5);
         expectPage(geometry?.right).toBeCloseTo((geometry?.dialogRight ?? 0) - 1, 5);
-        expectPage(geometry?.width).toBe(phone ? 44 : 32);
-        expectPage(geometry?.height).toBe(phone ? 44 : 32);
+        const touchSize = closeName === "Close settings" ? 48 : 44;
+        expectPage(geometry?.width).toBe(phone ? touchSize : 32);
+        expectPage(geometry?.height).toBe(phone ? touchSize : 32);
         expectPage(geometry?.iconWidth).toBe(18);
         expectPage(geometry?.iconHeight).toBe(18);
         expectPage(geometry?.titleRight).toBeLessThanOrEqual(geometry?.left ?? 0);
@@ -610,10 +614,10 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         expectPage(generalHeaderHeight).toBeGreaterThanOrEqual(instructionsHeaderHeight);
         await config.getByRole("button", { name: "Close project config" }).click();
 
-        await page.getByRole("button", { name: "Personal instructions" }).click();
-        const personal = page.getByRole("dialog", { name: "~/AGENTS.md" });
-        await expectModalClose(personal, "Close personal instructions");
-        await personal.getByRole("button", { name: "Close personal instructions" }).click();
+        await page.getByRole("button", { name: "Settings" }).click();
+        const personal = page.getByRole("dialog", { name: "Settings" });
+        await expectModalClose(personal, "Close settings");
+        await personal.getByRole("button", { name: "Close settings" }).click();
 
         await page.keyboard.press("Meta+k");
         const search = page.getByRole("dialog", { name: "Find projects and orbs" });

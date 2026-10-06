@@ -80,6 +80,30 @@ describe("runtime broker routes", () => {
   let projectInstructions: FakeProjectInstructionsStore;
   let brokerUsers: string[];
 
+  it("fences Claude subscription grants by bearer, lifecycle and harness", async () => {
+    store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+    const post = (token = TOKEN) =>
+      app.inject({
+        method: "POST",
+        url: "/runtime/v1/claude-subscription",
+        headers: { authorization: `Bearer ${token}` },
+        payload: {},
+      });
+    expect((await post("wrong")).statusCode).toBe(401);
+    expect((await post()).statusCode).toBe(403);
+    store.seedOrb(
+      makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN), harness: "claude" }),
+    );
+    const accepted = await post();
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.json()).toEqual({ token: "claude-private-token", generation: 1 });
+    expect(accepted.headers["cache-control"]).toBe("no-store");
+    store.seedOrb(
+      makeOrbRow(ORB, PROJECT, "stopped", { runtimeTokenHash: sha256(TOKEN), harness: "claude" }),
+    );
+    expect((await post()).statusCode).toBe(401);
+  });
+
   const nameGenerator: OrbNameGenerator = {
     generate: () => okAsync("Repair Runtime Auth"),
   };
@@ -126,6 +150,10 @@ describe("runtime broker routes", () => {
       deleteSelf: (task, orbId, caller) =>
         requestOrbDeletion(task, { ...makeHarness().deps, store: routeStore }, orbId, caller),
       store: routeStore,
+      claudeCredential: (_task, orb) => {
+        expect(orb.id).toBe(ORB);
+        return okAsync({ token: "claude-private-token", generation: 1 });
+      },
       brokerForUser: (userId) => {
         brokerUsers.push(userId);
         return broker;

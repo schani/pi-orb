@@ -15,6 +15,7 @@ from typing import Any, Literal
 import urllib.error
 import urllib.parse
 import urllib.request
+from infra.ci_qualification import valid_evidence
 
 
 @dataclass(frozen=True)
@@ -248,7 +249,7 @@ def valid_artifacts(value):
 def validate_record(record):
     # Nested data is allowlisted too: a mistakenly supplied plan or environment
     # dump cannot become an artifact just because its filename looks right.
-    if not isinstance(record, dict) or set(record) != FIELDS or type(record.get("schemaVersion")) is not int or record.get("schemaVersion") != 1:
+    if not isinstance(record, dict) or set(record) - {'qualification'} != FIELDS or type(record.get("schemaVersion")) is not int or record.get("schemaVersion") != 1:
         return False
     if not valid_id(record["releaseId"]) or not all(re.fullmatch(r"[a-f0-9]{40}", str(record[key])) for key in ("commit", "runnerCommit")):
         return False
@@ -257,6 +258,8 @@ def validate_record(record):
     if record["phase"] not in PHASES or record["outcome"] not in OUTCOMES:
         return False
     if record["workflowUrl"] is not None and not re.fullmatch(r"https://github.com/schani/pi-orb/actions/runs/[0-9]+", str(record["workflowUrl"])):
+        return False
+    if record.get("qualification") is not None and not valid_evidence(record["qualification"], record["commit"]):
         return False
     if record["validatesRelease"] is not None and not valid_id(record["validatesRelease"]):
         return False
@@ -418,6 +421,8 @@ def recover(cloud, record, release_id):
         return fail("conflict", "deployed revisions changed since the recorded release")
     for key in ("commit", "artifacts", "previousServing", "retirement"):
         record[key] = original[key]
+    if original.get("qualification") is not None:
+        record["qualification"] = original["qualification"]
     record["serving"], record["validatesRelease"] = current.value, release_id
     record["applyAttempted"], record["outcome"] = True, "applied-but-unvalidated"
     return Result(record)
@@ -454,6 +459,13 @@ def main(argv):
                     record["applyAttempted"] = True
                     record["outcome"] = "applied-but-unvalidated"
                 result = save(path, record)
+            elif action == "qualification" and len(args) == 1:
+                evidence = load(args[0])
+                if evidence.error or not valid_evidence(evidence.value, record["commit"]):
+                    result = fail("invalid", "invalid CI qualification evidence")
+                else:
+                    record["qualification"] = evidence.value
+                    result = save(path, record)
             elif action == "vars" and len(args) == 1:
                 try:
                     text = Path(args[0]).read_text()

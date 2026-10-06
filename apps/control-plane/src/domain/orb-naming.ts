@@ -25,7 +25,7 @@ export interface OrbNamingError {
   readonly retryable: boolean;
 }
 
-export type OrbNamingOutcome = "assigned" | "already_named" | "in_progress" | "backoff";
+export type OrbNamingOutcome = "assigned" | "already_named" | "in_progress" | "backoff" | "skipped";
 
 export function normalizeOrbName(value: string): Result<string, OrbNamingError> {
   const normalized = value.normalize("NFKC").trim().replace(/\s+/gu, " ");
@@ -136,6 +136,7 @@ export function generateOrbName(
       });
     }
     if (orb.value.name !== null) return ok("already_named");
+    if (orb.value.harness === "claude") return ok("skipped");
     const project = await deps.store.getProject(task, orb.value.projectId);
     if (project.isErr()) return err(storeError(project.error));
     if (project.value === null) {

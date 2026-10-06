@@ -20,18 +20,34 @@ const json = (
   };
 
 const piVersion = "1.0.0";
-const runner = "scripts/apply-dependency-patches.mjs";
+const helperPath = "scripts/apply-dependency-patches.mjs";
 const patchPath = `patches/@earendil-works+pi-coding-agent+${piVersion}.patch`;
 
 describe("Pi dependency patch installation", () => {
-  it("pins the patched SDK without patch-package in every installing workspace", () => {
-    expect(json("package.json").devDependencies).not.toHaveProperty("patch-package");
+  it("pins the patched SDK without vulnerable patch tooling in every installing workspace", () => {
+    expect(json("package.json").devDependencies?.["patch-package"]).toBeUndefined();
     for (const manifest of ["apps/orb-runtime/package.json", "apps/control-plane/package.json"]) {
       expect(json(manifest).dependencies).toMatchObject({
         "@earendil-works/pi-coding-agent":
           "file:../../vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz",
       });
-      expect(json(manifest).dependencies).not.toHaveProperty("patch-package");
+      expect(json(manifest).dependencies?.["patch-package"]).toBeUndefined();
+    }
+  });
+
+  it("removes the vulnerable patch tooling from root and standalone lock graphs", () => {
+    for (const path of [
+      "package-lock.json",
+      "scripts/native-mcp-exploration/live-qualification/package-lock.json",
+    ]) {
+      const lock = JSON.parse(read(path)) as { packages: Record<string, unknown> };
+      for (const name of ["patch-package", "find-yarn-workspace-root", "micromatch", "braces"]) {
+        expect(
+          Object.keys(lock.packages).filter(
+            (key) => key.endsWith(`/node_modules/${name}`) || key === `node_modules/${name}`,
+          ),
+        ).toEqual([]);
+      }
     }
   });
 
@@ -76,7 +92,7 @@ describe("Pi dependency patch installation", () => {
 
   it("applies exactly the installed patches during root and container installs", () => {
     expect(json("package.json").scripts?.postinstall).toBe(
-      `node ${runner} && node scripts/fix-node-pty-prebuild-permissions.mjs`,
+      `node ${helperPath} && node scripts/fix-node-pty-prebuild-permissions.mjs`,
     );
 
     for (const [path, workspace] of [
@@ -88,15 +104,12 @@ describe("Pi dependency patch installation", () => {
       expect(install).toBeGreaterThan(-1);
       expect(dockerfile.indexOf("COPY vendor vendor")).toBeGreaterThan(-1);
       expect(dockerfile.indexOf("COPY vendor vendor")).toBeLessThan(install);
-      expect(dockerfile.indexOf(`node ${runner}`, install)).toBeGreaterThan(install);
-      expect(dockerfile.indexOf(`COPY ${runner} ${runner}`)).toBeGreaterThan(-1);
-      expect(dockerfile.indexOf(`COPY ${runner} ${runner}`)).toBeLessThan(install);
-      expect(dockerfile.indexOf("apt-get install -y --no-install-recommends git")).toBeGreaterThan(
-        -1,
-      );
-      expect(dockerfile.indexOf("apt-get install -y --no-install-recommends git")).toBeLessThan(
-        install,
-      );
+      expect(dockerfile.indexOf(`COPY ${helperPath} ${helperPath}`)).toBeLessThan(install);
+      expect(dockerfile.indexOf(`COPY ${helperPath} ${helperPath}`)).toBeGreaterThan(-1);
+      const scope = workspace === "@pi-orb/control-plane" ? " --pi-only" : "";
+      expect(dockerfile.indexOf(`node ${helperPath}${scope}`, install)).toBeGreaterThan(install);
+      expect(dockerfile).not.toContain("patch-package");
+      expect(dockerfile).toMatch(/apt-get install -y --no-install-recommends[^\n]*\bgit\b/);
     }
 
     const patchFiles = [
@@ -127,13 +140,25 @@ describe("Pi dependency patch installation", () => {
     );
   });
 
+  it("packages the same sealed helper for standalone archives", () => {
+    const manifest = json("scripts/native-mcp-exploration/live-qualification/package.json");
+    expect(manifest.dependencies?.["patch-package"]).toBeUndefined();
+    expect(manifest.scripts?.postinstall).toBe("node apply-dependency-patches.mjs --pi-only");
+    for (const name of ["stage", "iap-read", "glideos-read"]) {
+      const source = read(`scripts/native-mcp-exploration/live-qualification/${name}-package.mjs`);
+      expect(source).toContain('"apply-dependency-patches.mjs"');
+      expect(source).toContain('"--pi-only"');
+      expect(source).not.toContain("patch-package");
+    }
+  });
+
   it("applies the packaged patch during native-image installation", () => {
     expect(read("packages/native-image/src/snapshot.ts")).toMatch(
       /UPLOADED_SOURCE_PATHS = \[[\s\S]*"patches"/,
     );
     const nativeInstall = read("infra/native-vm/install.sh");
-    expect(read("packages/native-image/src/snapshot.ts")).toContain(`"${runner}"`);
-    expect(nativeInstall.indexOf(`node ${runner}`)).toBeGreaterThan(
+    expect(read("packages/native-image/src/snapshot.ts")).toContain(`"${helperPath}"`);
+    expect(nativeInstall.indexOf(`node ${helperPath}`)).toBeGreaterThan(
       nativeInstall.indexOf("npm ci"),
     );
   });

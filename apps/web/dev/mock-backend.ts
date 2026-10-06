@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import {
   CAPABILITY_ABORT,
+  type ClaudeAuthView,
   type ClientAction,
   ClientFrameSchema,
   EnqueueOrbMessageRequestSchema,
@@ -64,6 +65,7 @@ interface MockState {
     fail: boolean;
     sessionId: string;
   };
+  claudeAuth: ClaudeAuthView;
   projects: Map<string, ProjectView>;
   orbs: Map<string, OrbView>;
   histories: Map<string, HistoryRecord[]>;
@@ -98,6 +100,7 @@ function initialState(timestampChurn: boolean): MockState {
   };
   const orb: OrbView = {
     id: ORB_ID,
+    harness: "pi",
     projectId: PROJECT_ID,
     name: "Frontend Playground",
     state: "running",
@@ -110,6 +113,7 @@ function initialState(timestampChurn: boolean): MockState {
   };
   const authOrb: OrbView = {
     id: AUTH_ORB_ID,
+    harness: "pi",
     projectId: PROJECT_ID,
     name: null,
     state: "starting",
@@ -126,6 +130,7 @@ function initialState(timestampChurn: boolean): MockState {
   };
   const archivedOrb: OrbView = {
     id: ARCHIVED_ORB_ID,
+    harness: "pi",
     projectId: PROJECT_ID,
     name: "Finished design exploration",
     state: "archived",
@@ -704,6 +709,7 @@ function initialState(timestampChurn: boolean): MockState {
       fail: false,
       sessionId: `fixture-session-${HEADLINE_ORB_ID}`,
     },
+    claudeAuth: { status: "disconnected" },
     projects: new Map([
       [project.id, project],
       ...fleetProjects.map((entry): [string, ProjectView] => [entry.id, entry]),
@@ -1110,6 +1116,42 @@ async function handleApi(
   const method = request.method ?? "GET";
 
   if (await handleHeadlineFixture(state, request, response, url)) return true;
+  if (path === "/api/v1/claude/auth" && method === "GET") {
+    sendJson(response, 200, state.claudeAuth);
+    return true;
+  }
+  if (path.startsWith("/api/v1/claude/auth/") && method === "POST") {
+    const action = path.slice("/api/v1/claude/auth/".length);
+    const body = await readJson(request);
+    if (action === "connect")
+      state.claudeAuth = { status: "connecting", challenge: { needsCode: true } };
+    else if (
+      action === "code" &&
+      body !== null &&
+      typeof body === "object" &&
+      "code" in body &&
+      typeof body.code === "string" &&
+      body.code.trim() !== ""
+    )
+      state.claudeAuth = {
+        status: "connected",
+        generation: (state.claudeAuth.generation ?? 0) + 1,
+      };
+    else if (action === "cancel" || action === "disconnect")
+      state.claudeAuth = { status: "disconnected" };
+    else {
+      sendJson(response, 400, {
+        error: {
+          code: "invalid_request",
+          message: "Invalid Claude connection action",
+          retryable: false,
+        },
+      });
+      return true;
+    }
+    sendJson(response, 200, state.claudeAuth);
+    return true;
+  }
 
   if (method === "GET" && path === "/api/v1/session") {
     sendJson(response, 200, {
@@ -1528,10 +1570,17 @@ async function handleApi(
       });
       return true;
     }
+    const repository = validateRepositoryUrl(body.repositoryUrl);
+    if (repository.isErr()) {
+      sendJson(response, 400, {
+        error: { code: "invalid_request", message: repository.error.message, retryable: false },
+      });
+      return true;
+    }
     const project: ProjectView = {
       id: body.id,
       name,
-      repositoryUrl: body.repositoryUrl,
+      repositoryUrl: repository.value.url,
       state: "active",
       createdAt: now(),
       updatedAt: now(),
@@ -1587,9 +1636,11 @@ async function handleApi(
       }
       const existing = state.orbs.get(body.id);
       const requestedName = "name" in body && typeof body.name === "string" ? body.name : undefined;
+      const harness = "harness" in body && body.harness === "claude" ? "claude" : "pi";
       if (existing !== undefined) {
         if (
           existing.projectId !== projectId ||
+          existing.harness !== harness ||
           (requestedName !== undefined && existing.name !== requestedName)
         ) {
           sendJson(response, 409, {
@@ -1608,6 +1659,7 @@ async function handleApi(
       const orb: OrbView = {
         id: body.id,
         projectId,
+        harness,
         name: requestedName ?? null,
         state: "creating",
         stateVersion: 1,
@@ -2222,6 +2274,21 @@ function settingsFor(
       })),
       writable: true,
     };
+    if (state.orbs.get(orbId)?.harness === "claude") {
+      view = {
+        type: "agent_settings",
+        settings: { model: { provider: "anthropic", id: "fixture-claude" }, thinkingLevel: "high" },
+        models: [
+          {
+            provider: "anthropic",
+            id: "fixture-claude",
+            name: "Claude (fixture)",
+            thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
+          },
+        ],
+        writable: true,
+      };
+    }
     map.set(orbId, view);
   }
   return view;

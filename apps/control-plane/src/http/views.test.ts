@@ -8,6 +8,7 @@ import { orbView } from "./views.ts";
 const orb: OrbRow = {
   id: "orb-1",
   projectId: "proj-1",
+  harness: "pi",
   name: "Reconnect Repair",
   userTimeZone: null,
   autoNameLeaseUntil: null,
@@ -275,6 +276,28 @@ describe("orbView credential challenge shaping", () => {
     userCode: "SECRET-CODE",
     expiresAt: 1_700_000_060_000,
   };
+
+  it("shows Claude connection only to the owner without exposing native credentials", () => {
+    const control = new ControlState();
+    control.markAuthBlocked(orb.id, owner, "claude");
+    control.setChallenge(owner, {
+      provider: "claude",
+      verificationUri: "",
+      userCode: "",
+      expiresAt: 1_700_000_060_000,
+    });
+    const row = { ...orb, harness: "claude" as const, state: "starting" as const };
+    const view = orbView(row, control, {}, owner);
+    expect(view.harness).toBe("claude");
+    expect(view.actionRequired?.type).toBe("claude_subscription_login");
+    expect(Check(OrbViewSchema, view)).toBe(true);
+    expect(orbView(row, control, {}, null).actionRequired).toEqual({
+      type: "owner_login_required",
+      provider: "claude",
+    });
+    for (const field of ["runtimeTokenHash", "harnessSessionId", "hostRef"])
+      expect(view).not.toHaveProperty(field);
+  });
 
   it("shows codes only to the project owner", () => {
     const control = new ControlState();

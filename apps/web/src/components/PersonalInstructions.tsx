@@ -2,12 +2,15 @@ import { type PersonalInstructions, validatePersonalInstructions } from "@pi-orb
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { describeApiError, getPersonalInstructions, savePersonalInstructions } from "../lib/api.ts";
+import { ClaudeAuthSettings } from "./ClaudeAuth.tsx";
+import { ConfigTabs } from "./ConfigTabs.tsx";
 import { Icon } from "./Icons.tsx";
 import { TextFieldFrame } from "./TextFieldFrame.tsx";
 
 /** Account scope lives with home, never inside a project header. Drafts stay in memory only. */
 export function PersonalInstructionsButton() {
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState(0);
   const [snapshot, setSnapshot] = useState<PersonalInstructions | null>(null);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
@@ -80,9 +83,10 @@ export function PersonalInstructionsButton() {
         ref={gear}
         className="icon-button personal-instructions-gear"
         type="button"
-        title="Personal instructions"
-        aria-label="Personal instructions"
+        title="Settings"
+        aria-label="Settings"
         onClick={() => {
+          setTab(0);
           setOpen(true);
           if (!dirty) void load();
         }}
@@ -108,9 +112,9 @@ export function PersonalInstructionsButton() {
                 if (event.key !== "Tab") return;
                 const items = Array.from(
                   event.currentTarget.querySelectorAll<HTMLElement>(
-                    "button:not(:disabled), textarea:not(:disabled)",
+                    "button:not(:disabled), input:not(:disabled), textarea:not(:disabled), a[href]",
                   ),
-                ).filter((element) => element.getClientRects().length > 0);
+                ).filter((element) => element.tabIndex >= 0 && element.getClientRects().length > 0);
                 const first = items[0],
                   last = items.at(-1);
                 if (!first) {
@@ -134,13 +138,15 @@ export function PersonalInstructionsButton() {
                 }
               }}
             >
-              <header className="personal-instructions-header">
-                <span id="personal-instructions-title">~/AGENTS.md</span>
+              <header className="project-secrets-header">
+                <div>
+                  <h2 id="personal-instructions-title">Settings</h2>
+                </div>
                 <button
                   ref={closeButton}
                   className="icon-button modal-close"
-                  aria-label="Close personal instructions"
-                  title="Close personal instructions"
+                  aria-label="Close settings"
+                  title="Close settings"
                   type="button"
                   disabled={saving}
                   onClick={close}
@@ -148,61 +154,84 @@ export function PersonalInstructionsButton() {
                   <Icon name="x" />
                 </button>
               </header>
-              <form
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void save();
-                }}
+              <ConfigTabs
+                id="owner-settings"
+                label="Settings"
+                names={["Instructions", "Claude"]}
+                selected={tab}
+                onSelect={setTab}
+                disabled={saving}
+              />
+              <div
+                role="tabpanel"
+                id="owner-settings-panel-0"
+                aria-labelledby="owner-settings-tab-0"
+                hidden={tab !== 0}
               >
-                <TextFieldFrame className="text-field-frame-inset">
-                  <textarea
-                    aria-label="Personal AGENTS.md"
-                    spellCheck={false}
-                    autoComplete="off"
-                    value={draft}
-                    disabled={loading || saving || snapshot === null}
-                    onChange={(event) => {
-                      setDraft(event.target.value);
-                      setSaved(false);
-                      setError(null);
-                    }}
-                  />
-                </TextFieldFrame>
-                <div className="personal-instructions-feedback">
-                  {error !== null ? (
-                    <span role="alert" className="personal-instructions-error">
-                      {error}
-                    </span>
-                  ) : validation.isErr() && snapshot !== null ? (
-                    <span role="alert" className="personal-instructions-error">
-                      {validation.error.message}
-                    </span>
-                  ) : (
-                    <span role="status">
-                      {loading
-                        ? "Loading…"
-                        : saving
-                          ? "Saving…"
-                          : saved
-                            ? "Saved · next orb start"
-                            : dirty
-                              ? "Unsaved"
-                              : ""}
-                    </span>
-                  )}
-                  {snapshot === null && !loading && (
-                    <button type="button" onClick={() => void load()}>
-                      Retry
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void save();
+                  }}
+                >
+                  <TextFieldFrame className="text-field-frame-inset">
+                    <textarea
+                      aria-label="Personal AGENTS.md"
+                      spellCheck={false}
+                      autoComplete="off"
+                      value={draft}
+                      disabled={loading || saving || snapshot === null}
+                      onChange={(event) => {
+                        setDraft(event.target.value);
+                        setSaved(false);
+                        setError(null);
+                      }}
+                    />
+                  </TextFieldFrame>
+                  <div className="personal-instructions-feedback">
+                    {error !== null ? (
+                      <span role="alert" className="personal-instructions-error">
+                        {error}
+                      </span>
+                    ) : validation.isErr() && snapshot !== null ? (
+                      <span role="alert" className="personal-instructions-error">
+                        {validation.error.message}
+                      </span>
+                    ) : (
+                      <span role="status">
+                        {loading
+                          ? "Loading…"
+                          : saving
+                            ? "Saving…"
+                            : saved
+                              ? "Saved · next orb start"
+                              : dirty
+                                ? "Unsaved"
+                                : ""}
+                      </span>
+                    )}
+                    {snapshot === null && !loading && (
+                      <button type="button" onClick={() => void load()}>
+                        Retry
+                      </button>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={loading || saving || !dirty || validation.isErr()}
+                    >
+                      Save
                     </button>
-                  )}
-                  <button
-                    type="submit"
-                    disabled={loading || saving || !dirty || validation.isErr()}
-                  >
-                    Save
-                  </button>
-                </div>
-              </form>
+                  </div>
+                </form>
+              </div>
+              <div
+                role="tabpanel"
+                id="owner-settings-panel-1"
+                aria-labelledby="owner-settings-tab-1"
+                hidden={tab !== 1}
+              >
+                <ClaudeAuthSettings active={tab === 1} />
+              </div>
             </section>
           </div>,
           document.body,

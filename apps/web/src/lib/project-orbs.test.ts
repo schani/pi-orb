@@ -22,6 +22,7 @@ const project = (id: string, state: ProjectView["state"] = "active"): ProjectVie
 const orb = (id: string, state: OrbState, updatedAt = "2026-08-09T00:00:00.000Z"): OrbView => ({
   id,
   projectId: "project",
+  harness: "pi",
   name: id,
   state,
   stateVersion: 1,

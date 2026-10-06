@@ -618,6 +618,7 @@ describe("control-plane API schemas", () => {
         id: "o1",
         projectId: "p1",
         name: "Drain History",
+        harness: "pi",
         state: "stopping",
         stateVersion: 4,
         checkoutCommit: "abc123",
@@ -632,6 +633,7 @@ describe("control-plane API schemas", () => {
         id: "o1",
         projectId: "p1",
         name: null,
+        harness: "pi",
         state: "creating",
         stateVersion: 0,
         actionRequired: {
@@ -650,6 +652,7 @@ describe("control-plane API schemas", () => {
         id: "o2",
         projectId: "p1",
         name: "Busy orb",
+        harness: "claude",
         state: "running",
         stateVersion: 2,
         activity: "busy",

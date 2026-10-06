@@ -2,13 +2,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "postinstall": "patch-package --error-on-fail"
+    "postinstall": "node apply-dependency-patches.mjs --pi-only"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "file:../../../vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz",
     "determined": "0.4.1",
     "neverthrow": "8.2.0",
-    "patch-package": "file:../../../vendor/patch-package-8.0.1-orb.1.tgz",
     "typebox": "1.3.27"
   }
 }

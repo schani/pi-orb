@@ -40,6 +40,7 @@ if (process.env.GROUP_MEMBER_PID_FILE) {
 }
 writeFileSync(process.env.OBSERVED_ENV_FILE, JSON.stringify({
   orbId: process.env.PI_ORB_ID,
+  harness: process.env.PI_ORB_HARNESS,
   repositoryUrl: process.env.PI_ORB_REPOSITORY_URL,
   incarnation: process.env.PI_ORB_HOST_INCARNATION,
   container: process.env.PI_ORB_CONTAINER,
@@ -130,13 +131,18 @@ afterEach(async () => {
 });
 
 describe("ProcessOrbHostProvider", () => {
-  it("uses only its configured state directory and launches a runtime with isolated env", async () => {
+  it.each(["pi", "claude"] as const)("launches %s with isolated env", async (harness) => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
     const { provider, root } = makeProvider({
       OBSERVED_ENV_FILE: observedEnv,
       PI_ORB_CONTAINER: "1",
+      PI_ORB_HARNESS: "wrong",
     });
-    const provisioned = await provider.provision(task, request, context);
+    const provisioned = await provider.provision(
+      task,
+      { ...request, bootstrap: { ...request.bootstrap, harness } },
+      context,
+    );
     expect(provisioned.isOk()).toBe(true);
     if (provisioned.isErr()) return;
 
@@ -148,6 +154,7 @@ describe("ProcessOrbHostProvider", () => {
       }
     });
     expect(values.orbId).toBe(request.orbId);
+    expect(values.harness).toBe(harness);
     expect(values.repositoryUrl).toBe(request.bootstrap.repositoryUrl);
     expect(values.incarnation).toBe(String(request.incarnation));
     expect(values.container).toBe("0");
@@ -235,6 +242,7 @@ describe("ProcessOrbHostProvider", () => {
         orbId: request.orbId,
         repositoryUrl: request.bootstrap.repositoryUrl,
         runtimeToken: "legacy-token",
+        harness: "pi",
         port: 43210,
         supervisorId: "a".repeat(64),
         desiredState: "stopped",
@@ -616,6 +624,16 @@ describe("ProcessOrbHostProvider", () => {
 });
 
 describe("ProcessOrbHostProvider host specification", () => {
+  it("includes selected harness in immutable specification", () => {
+    const provider = makeProvider().provider;
+    const input = { orbId: "orb-1", repositoryUrl: "https://github.com/o/r" };
+    expect(provider.desiredSpecFingerprint(input)).toBe(
+      provider.desiredSpecFingerprint({ ...input, harness: "pi" }),
+    );
+    expect(provider.desiredSpecFingerprint({ ...input, harness: "claude" })).not.toBe(
+      provider.desiredSpecFingerprint(input),
+    );
+  });
   const specInput = { orbId: request.orbId, repositoryUrl: request.bootstrap.repositoryUrl };
 
   /** Metadata predating the host-spec stamp, written straight to disk. */
@@ -629,6 +647,7 @@ describe("ProcessOrbHostProvider host specification", () => {
         orbId: request.orbId,
         repositoryUrl: request.bootstrap.repositoryUrl,
         runtimeToken: "legacy-token",
+        harness: "pi",
         port: 43_210,
         supervisorId: "a".repeat(64),
         desiredState: "stopped",

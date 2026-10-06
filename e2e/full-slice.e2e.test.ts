@@ -1484,7 +1484,7 @@ describe("full slice E2E", () => {
         }
         await route.continue();
       });
-      await page.goto(`${base}/projects/${projectId}/orbs/new`);
+      await page.goto(`${base}/projects/${projectId}/orbs/new?harness=pi`);
       await expectPage(page).toHaveURL(/\/orbs\/[0-9a-f-]+$/);
       expect(page.url()).toBe(`${base}/orbs/${orbId}`);
       expect(postedTimeZone).toBe("Pacific/Auckland");

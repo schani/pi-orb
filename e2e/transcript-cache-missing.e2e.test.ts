@@ -144,9 +144,10 @@ it.each(["chromium", "webkit"] as const)(
       await check(
         page.getByRole("textbox", { name: "Message the orb", exact: true }),
       ).toBeEditable();
-      await check(
-        page.getByRole("button", { name: "Change thinking", exact: true }),
-      ).toBeDisabled();
+      await check(page.getByRole("button", { name: "Change thinking", exact: true })).toHaveCount(
+        0,
+      );
+      await check(page.getByRole("button", { name: "Change model", exact: true })).toHaveCount(0);
       check(sockets.size).toBe(0);
       releaseReturnMetadata();
       await required(returnedMetadata);

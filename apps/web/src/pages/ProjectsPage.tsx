@@ -19,7 +19,6 @@ import { LogoutButton } from "../components/LogoutButton.tsx";
 import { PersonalInstructionsButton } from "../components/PersonalInstructions.tsx";
 import { ProjectConfigModal } from "../components/ProjectConfigModal.tsx";
 import { ProjectHeader } from "../components/ProjectHeader.tsx";
-import { ProjectNewOrbLink } from "../components/ProjectNewOrbLink.tsx";
 import { StateTile } from "../components/StateTile.tsx";
 import { TextFieldFrame } from "../components/TextFieldFrame.tsx";
 import {
@@ -226,7 +225,9 @@ export function ProjectsPage({
   useAppSearchSource(focusedProjectMissing ? null : searchSource);
 
   const refresh = useCallback(async () => {
+    const started = addressedRevision.current;
     const result = await listProjects();
+    if (started !== addressedRevision.current) return;
     if (result.isErr()) {
       setLoadError(result.error);
       return;
@@ -243,6 +244,7 @@ export function ProjectsPage({
     const orbEntries = await Promise.all(
       result.value.items.map(async (project) => [project.id, await listOrbs(project.id)] as const),
     );
+    if (started !== addressedRevision.current) return;
     setOrbLists(
       Object.fromEntries(
         orbEntries.map(([projectId, orbsResult]) => [
@@ -323,7 +325,7 @@ export function ProjectsPage({
     const result = await createProject({
       id: generateUuid(),
       name: trimmedName,
-      repositoryUrl: trimmedUrl,
+      repositoryUrl: validated.value.url,
     });
     setSubmitting(false);
     if (result.isErr()) {
@@ -445,6 +447,25 @@ export function ProjectsPage({
             >
               <ProjectHeader
                 project={project}
+                onCreated={(created) => {
+                  addressedRevision.current += 1;
+                  upsertAddressedOrb(created);
+                  setOrbLists((previous) => {
+                    const list = previous[created.projectId];
+                    return {
+                      ...previous,
+                      [created.projectId]: {
+                        type: "loaded",
+                        items: [
+                          ...(list?.type === "loaded" ? list.items : []).filter(
+                            (entry) => entry.id !== created.id,
+                          ),
+                          created,
+                        ],
+                      },
+                    };
+                  });
+                }}
                 onChanged={async (changed) => {
                   setProjects(
                     (current) =>
@@ -477,9 +498,6 @@ export function ProjectsPage({
                   )}
                 </>
               )}
-              <div className="project-new-orb-row">
-                <ProjectNewOrbLink projectId={project.id} disabled={deleting} />
-              </div>
               {orbCreateError !== null && orbCreateError.projectId === project.id && (
                 <div className="banner banner-error project-column-error">
                   {orbCreateError.message}
