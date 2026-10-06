@@ -13,7 +13,15 @@ import threading
 
 wrapper = Path(sys.argv[1]).resolve()
 parent = Path(sys.argv[2]).resolve()
+candidate = Path(sys.argv[3]).resolve()
+source = Path(sys.argv[4]).resolve()
 foreign_uid = 62000
+source_readable = subprocess.run(
+    ["setpriv", "--reuid=" + str(foreign_uid), "--regid=" + str(foreign_uid),
+     "--clear-groups", "test", "-r", str(source / "infra/native-vm/claude-receipt-edge.mjs")],
+    env={"PATH": "/usr/local/bin:/usr/bin:/bin"}, capture_output=True,
+).returncode == 0
+assert not source_readable, "private checkout unexpectedly readable to foreign caller"
 results = []
 
 for workload_status, cleanup_status in [(0, 0), (37, 0), (37, 73), (0, 73), (137, 0)]:
@@ -24,12 +32,14 @@ for workload_status, cleanup_status in [(0, 0), (37, 0), (37, 73), (0, 73), (137
     retained = directory / "retained"
     for path in [base, helpers, tools, retained]:
         path.mkdir(mode=0o755)
+        path.chmod(0o755)
     directory.chmod(0o755)
     os.chown(base, foreign_uid, foreign_uid)
     os.chown(retained, foreign_uid, foreign_uid)
     sentinel = base / "user-file"
     sentinel.write_text("untouched")
     shutil.copyfile(wrapper, helpers / "claude-acceptance.sh")
+    (helpers / "claude-acceptance.sh").chmod(0o755)
     (helpers / "claude-workload.mjs").write_text('''
 import { mkdirSync, writeFileSync, symlinkSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -51,6 +61,7 @@ if (''' + str(workload_status) + ''' === 137) {
 }
 process.exit(''' + str(workload_status) + ''');
 ''')
+    (helpers / "claude-workload.mjs").chmod(0o644)
     address = str(directory / "privilege.sock")
     server = socket.socket(socket.AF_UNIX)
     server.bind(address)
@@ -85,7 +96,7 @@ sys.exit(reply["status"])
                     assert target.parent == base or target.parent.parent == base, args
                     assert ".pi-orb-claude-acceptance." in str(target), args
                 else:
-                    assert str(helpers) in args and str(wrapper.parent.parent.parent) in args, args
+                    assert str(helpers) in args and str(candidate) in args, args
                     assert "--net" in args and "--pid" in args and "--mount-proc" in args, args
                 operations.append(command)
                 if command == "rm" and cleanup_status:
@@ -107,19 +118,23 @@ sys.exit(reply["status"])
         completed = subprocess.run(
             ["setpriv", "--reuid=" + str(foreign_uid), "--regid=" + str(foreign_uid),
              "--clear-groups", "bash", str(helpers / "claude-acceptance.sh"),
-             str(wrapper.parent.parent.parent), str(base), "accept", str(retained)],
-            env={"PATH": str(tools) + ":/usr/local/bin:/usr/bin:/bin"},
+             str(candidate), str(base), "accept", str(retained)],
+            cwd=candidate, env={"PATH": str(tools) + ":/usr/local/bin:/usr/bin:/bin"},
             capture_output=True, text=True, timeout=20,
         )
         leftovers = [p.name for p in base.iterdir() if p.name != "user-file"]
         traces = list(retained.iterdir())
-        assert len(traces) == (1 if workload_status else 0)
+        assert len(traces) == (1 if workload_status else 0), {
+            "exit": completed.returncode, "traceCount": len(traces),
+            "expectedTraceCount": 1 if workload_status else 0,
+        }
         retained_trace = json.loads(traces[0].read_text()) if traces else None
         results.append({"workloadStatus": workload_status, "cleanupStatus": cleanup_status,
                         "stdout": completed.stdout, "retainedTrace": retained_trace,
                         "exit": completed.returncode, "stderr": completed.stderr,
                         "leftovers": len(leftovers), "sentinel": sentinel.read_text(),
-                        "operations": operations, "callerUid": foreign_uid})
+                        "operations": operations, "callerUid": foreign_uid,
+                        "sourceReadable": source_readable})
     finally:
         stopped.set()
         with socket.socket(socket.AF_UNIX) as client:

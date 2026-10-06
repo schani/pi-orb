@@ -65,7 +65,9 @@ it.each(["chromium", "webkit"] as const)(
       await form.getByRole("button", { name: "Create project", exact: true }).click();
       const response = await createdResponse;
       check(response.status()).toBe(201);
-      check(response.request().postDataJSON()).toMatchObject({ repositoryUrl: "schani/pi-orb" });
+      check(response.request().postDataJSON()).toMatchObject({
+        repositoryUrl: "https://github.com/schani/pi-orb",
+      });
       const created = await response.json();
       check(created.repositoryUrl).toBe("https://github.com/schani/pi-orb");
       check(posts).toHaveLength(1);

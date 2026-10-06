@@ -50,6 +50,7 @@ it.each(["/", "/orbs/missing-orb"])(
     const older = {
       id: "older",
       projectId: project.id,
+      harness: "pi",
       name: "Older",
       state: "running",
       stateVersion: 1,

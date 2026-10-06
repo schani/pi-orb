@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
-import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rm, symlink } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
+import { stageClaudeNativeFixture } from "./testkit/claude-native-fixture.ts";
 
 const execute = promisify(execFile);
 const root = new URL("../../../", import.meta.url).pathname;
@@ -51,11 +52,19 @@ it.skipIf(process.platform !== "linux" || process.arch !== "x64")(
   async () => {
     const directory = await mkdtemp(join(tmpdir(), "claude-acceptance-cleanup-"));
     await chmod(directory, 0o755);
+    const fixture = stageClaudeNativeFixture(root);
     try {
+      expect(fixture.isOk(), fixture.isErr() ? JSON.stringify(fixture.error) : "").toBe(true);
+      if (fixture.isErr()) return;
       const failure = await execute(
         "bash",
-        ["infra/native-vm/claude-acceptance.sh", root, directory, "fail-in-flight"],
-        { env: { PATH: process.env["PATH"] }, timeout: 120_000 },
+        [
+          join(fixture.value.helpers, "claude-acceptance.sh"),
+          fixture.value.root,
+          directory,
+          "fail-in-flight",
+        ],
+        { cwd: fixture.value.root, env: { PATH: process.env["PATH"] }, timeout: 120_000 },
       ).then(
         () => null,
         (error) => error as { code: number; stdout: string; stderr: string },
@@ -63,9 +72,18 @@ it.skipIf(process.platform !== "linux" || process.arch !== "x64")(
       expect(failure?.code).toBe(1);
       const retained = JSON.parse(failure?.stdout ?? "null") as {
         kind: string;
+        phase: string;
+        traceUnavailable?: boolean;
         evidence: Record<string, { nativeRows: unknown[]; streamRows: unknown[] }>;
       };
+      expect(
+        retained.traceUnavailable,
+        "native fixture bootstrap did not retain evidence",
+      ).not.toBe(true);
       expect(retained.kind).toBe("claude_qualification_failure_trace");
+      expect(retained.phase, "native fixture stopped before receipt observation").toBe(
+        "known-receipt-observation",
+      );
       expect(retained.evidence["1"]?.nativeRows.length).toBeGreaterThan(0);
       expect(retained.evidence["1"]?.streamRows.length).toBeGreaterThan(0);
       expect(failure?.stdout).not.toContain("synthetic-subscription-not-a-credential");
@@ -87,6 +105,7 @@ it.skipIf(process.platform !== "linux" || process.arch !== "x64")(
       expect(wrapper).toContain("env -i");
       expect(wrapper).toContain("--bounding-set=-all --no-new-privs");
     } finally {
+      if (fixture.isOk()) expect(fixture.value.dispose().isOk()).toBe(true);
       await rm(directory, { recursive: true, force: true });
     }
   },
@@ -98,27 +117,28 @@ it.skipIf(process.platform !== "linux" || process.arch !== "x64")(
   async () => {
     const directory = await mkdtemp(join(tmpdir(), "claude-sealed-acceptance-"));
     await chmod(directory, 0o755);
-    const candidate = join(directory, "candidate");
-    const helpers = join(directory, "validator");
-    await mkdir(candidate);
-    await mkdir(helpers);
-    for (const path of ["apps", "node_modules", "package.json"])
-      await symlink(join(root, path), join(candidate, path));
-    for (const file of [
-      "claude-acceptance.sh",
-      "claude-worker.mjs",
-      "claude-workload.mjs",
-      "claude-receipt-edge.mjs",
-    ])
-      await copyFile(join(root, "infra/native-vm", file), join(helpers, file));
+    const checkout = join(directory, "private-checkout");
+    await mkdir(checkout, { mode: 0o700 });
+    for (const path of ["apps", "infra", "node_modules", "package.json"])
+      await symlink(join(root, path), join(checkout, path));
+    const fixture = stageClaudeNativeFixture(checkout);
     let result: { stdout: string; stderr: string };
     try {
-      result = await execute("bash", [join(helpers, "claude-acceptance.sh"), candidate], {
-        env: { PATH: process.env["PATH"] },
-        timeout: 120_000,
-        maxBuffer: 512 * 1024,
-      });
+      expect(fixture.isOk(), fixture.isErr() ? JSON.stringify(fixture.error) : "").toBe(true);
+      if (fixture.isErr()) return;
+      expect(await readdir(fixture.value.root)).not.toContain("infra");
+      result = await execute(
+        "bash",
+        [join(fixture.value.helpers, "claude-acceptance.sh"), fixture.value.root],
+        {
+          cwd: fixture.value.root,
+          env: { PATH: process.env["PATH"] },
+          timeout: 120_000,
+          maxBuffer: 512 * 1024,
+        },
+      );
     } finally {
+      if (fixture.isOk()) expect(fixture.value.dispose().isOk()).toBe(true);
       await rm(directory, { recursive: true, force: true });
     }
     expect(result.stderr).toBe("");

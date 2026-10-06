@@ -60,6 +60,7 @@ console.log(JSON.stringify(evidence));
 `,
   );
   try {
+    await chmod(script, 0o644);
     const root = process.getuid?.() === 0;
     if (root) await chown(directory, 62000, 62000);
     const result = await execute(
