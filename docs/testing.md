@@ -1,5 +1,11 @@
 # Testing strategy
 
+## Claude release reconciliation and advisory repair (2026-10-05)
+
+The local Claude integration was committed and rebased onto `974be53`; upstream Luna/activity, stable orb ordering and exact-commit/four-shard release gates are retained. Merge checks passed clean install, typecheck/lint, 282 focused Vitest cases and 47 release Python cases. These do not qualify the new whole tree; exact-commit CI and all four E2E shards must pass before deployment.
+
+A subsequent registry audit reported high advisory [GHSA-68fv-2mgg-jv7q](https://github.com/advisories/GHSA-68fv-2mgg-jv7q). The repair updates only the root lock's dev-only `source-map-js` entry from 1.2.1 to 1.2.2, satisfying PostCSS's existing `^1.2.1` constraint. npm supplied the canonical version, tarball and integrity; manifests, vendor archives, patches and seals are unchanged. Clean installation and root, omit-dev, three standalone and extracted SDK-shrinkwrap audits report zero vulnerabilities. Retained RED audit and repair evidence: `.context/deploy-claude-20261005/advisory-repair/`. No push, deployment, service restart or owner-state change occurred during reconciliation.
+
 ## Repository shorthand and diagnostic prefixes (2026-10-05; local)
 
 Tests-first fixes accept GitHub shorthand and remove decorative diagnostic gutters (`docs/control-plane-api.md`, `docs/web-ui.md`). Typecheck/lint, 85 targeted unit/API/style tests and seven Chromium browser regressions pass. Broader unit and frontend runs hit the tool's 600-second execution limit with no observed test failures; both remain incomplete. No Docker/lifecycle E2E qualification or deployment. Evidence: `.context/repository-shorthand/`, `.context/ui-input-fixes/` and `/tmp/orb-notice-*-*.log`.
