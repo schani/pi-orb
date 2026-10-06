@@ -1,9 +1,10 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { SessionProbe } from "@pi-orb/protocol";
+import { type OrbView, OrbViewSchema, type SessionProbe } from "@pi-orb/protocol";
 import { chromium, expect as expectPage } from "@playwright/test";
 import Fastify from "fastify";
+import { Errors } from "typebox/value";
 import { build } from "vite";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { registerWebAssets } from "../apps/control-plane/src/http/web-assets.ts";
@@ -58,6 +59,7 @@ it.each(["/", "/orbs/missing-orb"])(
     const older = {
       id: "older",
       projectId: project.id,
+      harness: "pi",
       name: "Older",
       state: "running",
       stateVersion: 1,
@@ -65,9 +67,10 @@ it.each(["/", "/orbs/missing-orb"])(
       createdAt: project.createdAt,
       updatedAt: "2026-10-02T00:00:00Z",
       activity: "idle",
-    };
+    } satisfies OrbView;
     const newer = { ...older, id: "newer", name: "Newer", updatedAt: "2026-10-03T00:00:00Z" };
-    let items = [older, newer];
+    let items: OrbView[] = [older, newer];
+    for (const item of items) expect([...Errors(OrbViewSchema, item)]).toEqual([]);
     const rows = path === "/" ? ".orb-entry-link" : ".ix-row .trunc";
     try {
       await page.route("**/api/v1/projects", (route) =>
