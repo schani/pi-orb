@@ -101,6 +101,7 @@ export function googleIdentityMigrationContracts(
         "027_orb_user_time_zone.sql",
         "028_orb_alerts.sql",
         "029_history_record_shape.sql",
+        "029_orb_harness.sql",
         "030_activity_headlines.sql",
         "031_google_identities.sql",
       ]);
@@ -129,6 +130,7 @@ export function googleIdentityMigrationContracts(
           "027_orb_user_time_zone.sql",
           "028_orb_alerts.sql",
           "029_history_record_shape.sql",
+          "029_orb_harness.sql",
           "030_activity_headlines.sql",
           "031_google_identities.sql",
         ]);
@@ -141,6 +143,7 @@ export function googleIdentityMigrationContracts(
             "027_orb_user_time_zone.sql",
             "028_orb_alerts.sql",
             "029_history_record_shape.sql",
+            "029_orb_harness.sql",
             "030_activity_headlines.sql",
             "031_google_identities.sql",
           ].sort(),
@@ -177,6 +180,7 @@ export function googleIdentityMigrationContracts(
         "027_orb_user_time_zone.sql",
         "028_orb_alerts.sql",
         "029_history_record_shape.sql",
+        "029_orb_harness.sql",
         "030_activity_headlines.sql",
         "031_google_identities.sql",
       ]);
@@ -188,6 +192,7 @@ export function googleIdentityMigrationContracts(
           "027_orb_user_time_zone.sql",
           "028_orb_alerts.sql",
           "029_history_record_shape.sql",
+          "029_orb_harness.sql",
           "030_activity_headlines.sql",
           "031_google_identities.sql",
         ].sort(),

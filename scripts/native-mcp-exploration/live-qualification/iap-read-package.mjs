@@ -31,17 +31,13 @@ assert.deepEqual(
 for (const file of ["package.json", "package-lock.json"])
   await cp(join(local, file), join(stage, file));
 const vendor = "pi-coding-agent-1.0.0-brace-5.0.12.tgz";
-const patchPackage = "patch-package-8.0.1-orb.1.tgz";
-for (const archive of [vendor, patchPackage])
-  await cp(join(root, "vendor", archive), join(stage, "vendor", archive));
+await cp(join(root, "vendor", vendor), join(stage, "vendor", vendor));
 for (const file of ["package.json", "package-lock.json"]) {
   const path = join(stage, file);
   let source = await readFile(path, "utf8");
-  for (const archive of [vendor, patchPackage]) {
-    const original = `file:../../../vendor/${archive}`;
-    assert.ok(source.includes(original), `missing vendor reference: ${file}: ${archive}`);
-    source = source.replaceAll(original, `file:./vendor/${archive}`);
-  }
+  const original = `file:../../../vendor/${vendor}`;
+  assert.ok(source.includes(original), `missing vendor reference: ${file}: ${vendor}`);
+  source = source.replaceAll(original, `file:./vendor/${vendor}`);
   await writeFile(path, source);
 }
 for (const file of ["iap-read.test.mjs", "iap-read-guard.mjs", "iap-read-preflight.mjs"])
@@ -89,7 +85,6 @@ const files = [
   "package.json",
   "package-lock.json",
   `vendor/${vendor}`,
-  `vendor/${patchPackage}`,
   "iap-read.mjs",
   "bundle-meta.json",
   "iap-read.test.mjs",

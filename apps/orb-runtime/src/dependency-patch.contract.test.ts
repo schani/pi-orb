@@ -149,7 +149,13 @@ describe("Pi dependency patch installation", () => {
       expect(source).toContain('"apply-dependency-patches.mjs"');
       expect(source).toContain('"--pi-only"');
       expect(source).not.toContain("patch-package");
+      expect(source).toContain('join(root, "scripts/apply-dependency-patches.mjs")');
+      expect(source).toContain('"@earendil-works+pi-ai+1.0.0.patch"');
+      expect(source).toContain('"@earendil-works+pi-coding-agent+1.0.0.patch"');
+      expect(source).toContain('"pi-coding-agent-1.0.0-brace-5.0.12.tgz"');
+      expect(source).not.toContain("patchPackage");
     }
+    expect(manifest.dependencies?.neverthrow).toBe("8.2.0");
   });
 
   it("applies the packaged patch during native-image installation", () => {

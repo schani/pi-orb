@@ -25,7 +25,16 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
     source.match(/name: e2e-.*matrix\.shard.*github\.run_id.*github\.run_attempt/gu),
   ).toHaveLength(2);
   expect(source.match(/if: failure\(\)/gu)).toHaveLength(2);
-  expect(source).toContain("path: test-failures/*.json");
+  const traceUpload = source
+    .split("- name: Upload deterministic failure traces")[1]
+    ?.split("- name:")[0];
+  expect(traceUpload).toBeDefined();
+  const paths = traceUpload?.match(/path: \|\n((?:[ \t]+test-failures\/[^\n]+\n)+)/u)?.[1];
+  expect(paths?.trim().split(/\n\s*/u)).toEqual([
+    "test-failures/*.json",
+    "test-failures/profile-login/failure.json",
+    "test-failures/full-slice-upload/failure.json",
+  ]);
   expect(source).toContain("test-failures/lazy-return-*/trace.zip");
 });
 
@@ -41,8 +50,8 @@ it("the actual Vitest sequencer partitions every E2E file exactly once across fo
     expect(
       ctx.projects.map((project) => [project.name, project.config.sequence.groupOrder]),
     ).toEqual([
-      ["frontend", 0],
-      ["lifecycle", 1],
+      ["frontend", 1],
+      ["lifecycle", 2],
     ]);
     const all = await ctx.globTestSpecifications();
     const key = (spec: (typeof all)[number]) => `${spec.project.name}:${spec.moduleId}`;
@@ -52,6 +61,19 @@ it("the actual Vitest sequencer partitions every E2E file exactly once across fo
         .map((file) => resolve(root, file))
         .sort(),
     );
+    for (const project of ctx.projects) {
+      const excluded = new Set(globSync(project.config.exclude, { cwd: root }));
+      const files = globSync(project.config.include, { cwd: root })
+        .filter((file) => !excluded.has(file))
+        .map((file) => resolve(root, file));
+      expect(files.length).toBeGreaterThan(0);
+      expect(
+        all
+          .filter((spec) => spec.project === project)
+          .map((spec) => spec.moduleId)
+          .sort(),
+      ).toEqual([...new Set(files)].sort());
+    }
     const expected = all.map(key).sort();
     const assigned: string[] = [];
     for (const index of [1, 2, 3, 4]) {
