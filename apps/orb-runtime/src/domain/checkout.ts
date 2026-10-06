@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { validateRepositoryUrl } from "@pi-orb/protocol";
-import { err, Result, ResultAsync } from "neverthrow";
+import { err, ok, Result, ResultAsync } from "neverthrow";
 
 export interface CheckoutError {
   readonly code: "invalid_repository_url" | "clone_failed";
@@ -29,11 +29,14 @@ const execGit = (args: string[], cwd: string): ResultAsync<string, { message: st
     (cause) => ({ message: cause instanceof Error ? cause.message : String(cause) }),
   );
 
-/** Retained checkout is never reset or recloned on resume. */
+/**
+ * Retained checkout is never reset or recloned on resume. Resolves to the HEAD
+ * commit, or null for a repository without commits.
+ */
 export async function prepareCheckout(
   workDir: string,
   repositoryUrl: string,
-): Promise<Result<string, CheckoutError>> {
+): Promise<Result<string | null, CheckoutError>> {
   const repoDir = join(workDir, "repo");
   if (!existsSync(repoDir)) {
     const url = validateRepositoryUrl(repositoryUrl);
@@ -58,9 +61,8 @@ export async function prepareCheckout(
     if (renamed.isErr()) return err(renamed.error);
   }
   const commit = await execGit(["rev-parse", "HEAD"], repoDir);
-  return commit.mapErr((error) => ({
-    code: "clone_failed" as const,
-    message: error.message,
-    retryable: true,
-  }));
+  if (commit.isOk()) return ok(commit.value);
+  const refs = await execGit(["for-each-ref", "--count=1"], repoDir);
+  if (refs.isOk() && refs.value === "") return ok(null);
+  return err({ code: "clone_failed", message: commit.error.message, retryable: true });
 }

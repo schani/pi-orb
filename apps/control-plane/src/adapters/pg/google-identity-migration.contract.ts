@@ -104,6 +104,7 @@ export function googleIdentityMigrationContracts(
         "029_orb_harness.sql",
         "030_activity_headlines.sql",
         "031_google_identities.sql",
+        "032_orb_last_ready_at.sql",
       ]);
       expect((await client.query("SELECT detail FROM mcp_oauth_events LIMIT 0")).isOk()).toBe(true);
       expect((await runMigrations(client))._unsafeUnwrap()).toEqual([]);
@@ -133,6 +134,7 @@ export function googleIdentityMigrationContracts(
           "029_orb_harness.sql",
           "030_activity_headlines.sql",
           "031_google_identities.sql",
+          "032_orb_last_ready_at.sql",
         ]);
         const after = await snapshot(client);
         expect(after.slice(0, 4)).toEqual(before.slice(0, 4));
@@ -146,6 +148,7 @@ export function googleIdentityMigrationContracts(
             "029_orb_harness.sql",
             "030_activity_headlines.sql",
             "031_google_identities.sql",
+            "032_orb_last_ready_at.sql",
           ].sort(),
         );
         expect((await client.query("SELECT detail FROM mcp_oauth_events LIMIT 0")).isOk()).toBe(
@@ -183,6 +186,7 @@ export function googleIdentityMigrationContracts(
         "029_orb_harness.sql",
         "030_activity_headlines.sql",
         "031_google_identities.sql",
+        "032_orb_last_ready_at.sql",
       ]);
       const after = await snapshot(client);
       expect(after.slice(0, 4)).toEqual(before.slice(0, 4));
@@ -195,6 +199,7 @@ export function googleIdentityMigrationContracts(
           "029_orb_harness.sql",
           "030_activity_headlines.sql",
           "031_google_identities.sql",
+          "032_orb_last_ready_at.sql",
         ].sort(),
       );
       expect(

@@ -25,7 +25,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 
 ## Project and environment
 
-11. Partially resolved and implemented 2026-08-09: any returned runtime-health `failed`, including `clone_failed`, is terminal for that host boot and promptly becomes durable/user-visible orb `failed`; retry work exists only while runtime health remains `initializing` (`docs/lifecycle.md`, `docs/postmortems/2026-08-09-private-repo-clone-outside-github-app-installation.md`). Still define repository-access preflight, whether/how the runtime performs bounded clone retries before returning failure, default-branch behavior, and recorded repository metadata.
+11. Partially resolved and implemented 2026-08-09: any returned runtime-health `failed`, including `clone_failed`, is terminal for that host boot and promptly becomes durable/user-visible orb `failed`; retry work exists only while runtime health remains `initializing` (`docs/lifecycle.md`, `docs/postmortems/2026-08-09-private-repo-clone-outside-github-app-installation.md`). Resolved 2026-10-06: a repository without commits boots with `checkoutCommit: null` (`docs/host-provider.md`). Still define repository-access preflight, whether/how the runtime performs bounded clone retries before returning failure, default-branch behavior, and recorded repository metadata.
 12. Choose the Node 24 release/update policy for the native GCE image and local runtime image.
 13. Resolved (2026-08-25): adopt both, as `.agents/setup` and `.agents/resume` with Amp's split — `docs/orb-setup-hook.md`; the general form is question 41.
 14. Decide how setup caching/prebuilt snapshots work after the unoptimized first slice.

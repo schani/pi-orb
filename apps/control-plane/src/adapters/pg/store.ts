@@ -89,6 +89,7 @@ function mapOrbRow(row: PgRow): OrbRow {
     hostDiscardRequestedAt:
       row["host_discard_requested_at"] === null ? null : toMs(row["host_discard_requested_at"]),
     checkoutCommit: row["checkout_commit"] === null ? null : String(row["checkout_commit"]),
+    lastReadyAt: row["last_ready_at"] == null ? null : toMs(row["last_ready_at"]),
     harnessSessionId: row["harness_session_id"] === null ? null : String(row["harness_session_id"]),
     harnessSessionHeader: (row["harness_session_header"] ?? null) as HarnessSessionMetadata | null,
     lastError: row["last_error"] === null ? null : String(row["last_error"]),
@@ -597,8 +598,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            checkout_commit, harness_session_id, harness_session_header, last_error,
            runtime_token_hash, replication_cursor, replicated_head_id, last_busy_at,
            stop_reason, sleep_id, sleep_until, last_mint_at,
-           state_changed_at, created_at, updated_at, user_time_zone, harness)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35)
+           state_changed_at, created_at, updated_at, user_time_zone, harness, last_ready_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36)
          ON CONFLICT (id) DO NOTHING RETURNING *`,
         [
           orb.id,
@@ -636,6 +637,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           new Date(orb.updatedAt),
           orb.userTimeZone,
           orb.harness,
+          orb.lastReadyAt === null ? null : new Date(orb.lastReadyAt),
         ],
       );
       if (inserted.isErr()) return err(inserted.error);
@@ -1727,6 +1729,11 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     if (params.checkoutCommit !== undefined) {
       sets.push(`checkout_commit = $${index}`);
       values.push(params.checkoutCommit);
+      index += 1;
+    }
+    if (params.lastReadyAt !== undefined) {
+      sets.push(`last_ready_at = $${index}`);
+      values.push(new Date(params.lastReadyAt));
       index += 1;
     }
     if (params.runtimeTokenHash !== undefined) {

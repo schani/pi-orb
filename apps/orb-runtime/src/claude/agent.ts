@@ -201,7 +201,7 @@ export class ClaudeOrbAgent implements OrbAgent {
   private token = "";
   private generation = 0;
   private configDir = "";
-  private checkoutCommit = "";
+  private checkoutCommit: string | null = null;
   private prompt = "";
   private plugins: NonNullable<Options["plugins"]> = [];
   private published = 0;
@@ -526,7 +526,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     state: NativeState,
     history: ClaudeHistory,
     configDir: string,
-    checkoutCommit: string,
+    checkoutCommit: string | null,
   ): ResultAsync<void, { message: string }> {
     this.state = state;
     this.history = history;
