@@ -144,7 +144,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 
 71. **Resolved (2026-09-30):** the user selected the flag silhouette without `!` and the red reverse-band transcript treatment, accepted that new alerts while already open remain flagged until reselection/re-entry and that fleet badges follow normal replication latency, and authorized the simplest implementation, DST/tests first. `pi-orb alert "message"` persists a transcript alert and sets a shared unread flag independent of lifecycle state; selection clears only the observed alert. Contract, retained alternatives, and local implementation/qualification (2026-10-01): `docs/orb-alerts.md`. Deployment is not authorized.
 
-**Merged numbering note (2026-10-06):** parallel branches allocated 72/73 to different topics. Preserve both histories; topic qualifiers are required. The next new question is 75.
+**Merged numbering note (2026-10-06):** parallel branches allocated 72/73 to different topics. Preserve both histories; topic qualifiers are required. The next new question is 76.
 
 ## Control-plane service consolidation — 72–74 (control-plane consolidation)
 
@@ -153,6 +153,8 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 73. **(control-plane consolidation) Resolved for the plan (2026-09-19):** the user removed existing-URL preservation and requested simplification. Reuse the issuer service as the single application, preserving its exact issuer identity and federation trust while changing app/files/broker URLs and callback registrations. No redirects, aliases or trust migration. The earlier app-origin-preserving recommendation is rejected because it adds an unnecessary federation cutover. `docs/control-plane-consolidation.md` records the simplified plan. Implementation is authorized. Current authorization (2026-10-06): production deployment through GitHub Actions only, with current-source release gates and monitoring; no separate fleet-maintenance scope.
 
 74. **(control-plane consolidation) Resolved (2026-09-19):** the user selected library-sealed, origin/purpose-bound fixed-expiry session cookies. No session table/store/lookup/cleanup or individual server-side revocation. Logout clears the browser cookie; a copied cookie remains valid until expiry. `docs/control-plane-consolidation.md` records this accepted limitation and the updated DST/library/browser tests. Implementation remains tracked in `TODO.md`; the user subsequently authorized implementation, DST/tests first. Current authorization (2026-10-06): production deployment through GitHub Actions only, with current-source release gates and monitoring.
+
+75. **(application URL) Resolved (2026-10-06):** the user selected keeping `pi-orb-issuer` and restoring `pi-orb` as a browser-only redirect, accepting an unprivileged second service for the smaller change. The alternative whole-application move would require federation trust and OAuth callback cutover, release targeting changes, prior-controller retirement and old-address orb restarts. Decision and primary-source evidence: `docs/control-plane-consolidation.md`. Push, deployment through GitHub Actions and monitoring are authorized.
 
 ## Claude Agent SDK subscription authorization — 72 (Claude SDK)
 
