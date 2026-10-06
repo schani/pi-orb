@@ -21,6 +21,16 @@ it("waits for exact complete native receipts under controlled write ordering", a
   expect(result.stdout).toContain("pass 3");
 });
 
+it("captures native identity after failed health without erasing earlier evidence", async () => {
+  const result = await execute(
+    process.execPath,
+    ["--test", "scripts/claude-production-qualification/capture.test.mjs"],
+    { env: { PATH: process.env["PATH"] } },
+  );
+  expect(result.stderr).toBe("");
+  expect(result.stdout).toContain("pass 1");
+});
+
 it("installs the acceptance helpers outside first-party source removed by sealing", async () => {
   const install = await readFile("infra/native-vm/install.sh", "utf8");
   const seal = await readFile("infra/native-vm/seal.sh", "utf8");

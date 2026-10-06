@@ -1,7 +1,7 @@
 import { closeSync, fsyncSync, openSync, renameSync, watch, writeFileSync } from "node:fs";
-import { open, readFile } from "node:fs/promises";
+import { open, readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 
 const require = createRequire(
   process.argv[2]
@@ -111,6 +111,19 @@ function safeRow(row, stream = false) {
       row?.parentUuid ?? row?.parentUUID ?? row?.parent_uuid ?? row?.parent_tool_use_id,
     ),
     sessionId: safeId(row?.sessionId ?? row?.session_id),
+    sdkMessageId: safeId(row?.message?.id ?? row?.sdkMessageId),
+    sourceToolAssistantUUID: safeId(row?.sourceToolAssistantUUID),
+    isSidechain: typeof row?.isSidechain === "boolean" ? row.isSidechain : null,
+    stopReason: [
+      "end_turn",
+      "tool_use",
+      "max_tokens",
+      "stop_sequence",
+      "refusal",
+      "pause_turn",
+    ].includes(row?.message?.stop_reason ?? row?.stopReason)
+      ? (row.message?.stop_reason ?? row.stopReason)
+      : null,
     ...(stream
       ? {
           sdkMessageId: safeId(row?.message?.id ?? row?.event?.message?.id ?? row?.sdkMessageId),
@@ -178,9 +191,12 @@ export function safeQualificationEvidence(input) {
           : null,
       ]),
     ),
-    sessionId: safeId(input.snapshot?.session?.id),
+    sessionId: safeId(input.sessionId ?? input.snapshot?.session?.id),
     records: (input.snapshot?.records ?? []).slice(-128).map((row) => safeRow(row)),
-    nativeRows: (input.nativeRows ?? []).slice(-128).map((row) => safeRow(row)),
+    nativeRows:
+      input.nativeRows === null
+        ? null
+        : (input.nativeRows ?? []).slice(-128).map((row) => safeRow(row)),
     streamRows: (input.streamRows ?? []).slice(-128).map((row) => safeRow(row, true)),
     pendingBlocks: (input.pendingBlocks ?? []).slice(-64).map((block) => ({
       index:
@@ -245,4 +261,50 @@ export function persistQualificationTrace(path, trace) {
   )().andThen((written) =>
     written ? ok(undefined) : err({ code: "qualification_trace_size_exceeded" }),
   );
+}
+
+async function nativeRoot(directory, sessionId, depth = 0, budget = { remaining: 64 }) {
+  if (
+    budget.remaining <= 0 ||
+    depth > 4 ||
+    typeof sessionId !== "string" ||
+    !/^[a-f0-9-]{36}$/i.test(sessionId)
+  )
+    return null;
+  const entries = (await readdir(directory, { withFileTypes: true })).slice(0, 64);
+  for (const entry of entries) {
+    if (--budget.remaining < 0) return null;
+    if (entry.isFile() && entry.name === `${sessionId}.jsonl`) return join(directory, entry.name);
+    if (entry.isDirectory()) {
+      const found = await nativeRoot(join(directory, entry.name), sessionId, depth + 1, budget);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/** Native identity capture remains available when the public snapshot rejects. */
+export function createNativeEvidenceCapture(agent, directory) {
+  let last = null;
+  return async () => {
+    const sessionId = agent.sessionId();
+    const file = await ResultAsync.fromThrowable(
+      () => nativeRoot(directory, sessionId),
+      () => ({ code: "qualification_native_trace_unavailable" }),
+    )();
+    const native = file.isErr()
+      ? err(file.error)
+      : file.value
+        ? await nativeQualificationRows(file.value)
+        : err({ code: "qualification_native_trace_not_found" });
+    if (native.isOk()) last = { sessionId, rows: native.value };
+    const retained = native.isErr() && last !== null && last.sessionId === sessionId;
+    return {
+      sessionId,
+      nativeRows: native.isOk() ? native.value : retained ? last.rows : null,
+      nativeCapture: native.isOk()
+        ? { status: "captured", retained: false }
+        : { status: "error", code: native.error.code, retained },
+    };
+  };
 }

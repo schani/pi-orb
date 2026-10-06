@@ -1212,7 +1212,19 @@ export class ClaudeOrbAgent implements OrbAgent {
         record.type === "message" &&
         record.role === "assistant" &&
         this.blocks.size > 0 &&
-        !this.messageBlocks.has(record.id)
+        !this.messageBlocks.has(record.id) &&
+        ![...this.blocks.keys()].every((blockId) =>
+          [...this.messageBlocks].some(
+            ([uuid, blockIds]) =>
+              blockIds.includes(blockId) &&
+              scanned.value.some(
+                (candidate) =>
+                  candidate.id === uuid &&
+                  candidate.type === "message" &&
+                  candidate.role === "assistant",
+              ),
+          ),
+        )
       )
         break;
       const retiredBlockIds = this.messageBlocks.get(record.id) ?? [];
