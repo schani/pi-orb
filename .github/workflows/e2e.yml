@@ -75,6 +75,10 @@ jobs:
             test-failures/cross-axis-*/result.json
             test-failures/cross-axis-*/execution-ready.json
             test-failures/cross-axis-*/pin.json
+            test-failures/cross-axis-*/control-plane.log
+            test-failures/cross-axis-*/relay-requests.json
+            test-failures/cross-axis-*/model-requests.json
+            test-failures/cross-axis-*/retained-docker.json
           if-no-files-found: ignore
           retention-days: 14
 

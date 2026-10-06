@@ -32,6 +32,28 @@ class BrowserEvidenceTest(unittest.TestCase):
         for value in ('id-token: write', 'google-github-actions', 'infra/release.sh'):
             self.assertNotIn(value, qualification)
 
+    def test_durable_failure_evidence_is_explicit_and_captures_stderr(self):
+        process = steps('durable-qualification.yml')['Upload failure evidence']
+        for pattern in (
+            'test-failures/durable-process-*/failure.txt',
+            'test-failures/durable-process-*/control-plane.log',
+            'test-failures/durable-process-*/model-requests.json',
+            'test-failures/durable-independent-process/*/failure.txt',
+            'test-failures/durable-independent-process/*/control-plane.log',
+            'test-failures/durable-independent-process/*/browser-frames.json',
+            'test-failures/durable-independent-process/*/model-requests.json',
+            'test-failures/durable-independent-process/*/barrier.json',
+        ):
+            self.assertIn(pattern, process)
+        for upload in (process, steps('e2e.yml')['Upload Durable failure diagnostics']):
+            for filename in ('control-plane.log', 'relay-requests.json', 'model-requests.json',
+                             'retained-docker.json', 'execution-ready.json'):
+                self.assertIn('test-failures/cross-axis-*/' + filename, upload)
+            self.assertNotIn('/**', upload)
+            self.assertNotRegex(upload, r'(?m)^            .*/\\*\\s*$')
+        proof = steps('durable-qualification.yml')['Prove packaged worker, Git and skills without network']
+        self.assertIn('2>&1 | tee', proof)
+
     def test_lazy_return_owns_and_preserves_failure_evidence(self):
         source = (ROOT / 'e2e/lazy-transcript-frontend.e2e.test.ts').read_text()
         self.assertRegex(source, r'mkdtemp\(\s*join\(import\.meta\.dirname, `\.\./test-failures/lazy-return-\$\{engine\}-`\),\s*\)')

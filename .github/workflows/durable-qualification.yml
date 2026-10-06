@@ -54,6 +54,36 @@ jobs:
             test-failures/cross-axis-*/failure.txt
             test-failures/cross-axis-*/result.json
             test-failures/cross-axis-*/pin.json
+            test-failures/cross-axis-*/execution-ready.json
+            test-failures/cross-axis-*/control-plane.log
+            test-failures/cross-axis-*/relay-requests.json
+            test-failures/cross-axis-*/model-requests.json
+            test-failures/cross-axis-*/retained-docker.json
+            test-failures/durable-process-*/failure.txt
+            test-failures/durable-process-*/control-plane.log
+            test-failures/durable-process-*/model-requests.json
+            test-failures/durable-process-*/login-view.json
+            test-failures/durable-process-*/gated-view.json
+            test-failures/durable-process-*/acceptance-history.json
+            test-failures/durable-process-*/teardown.json
+            test-failures/durable-independent-process/*/failure.txt
+            test-failures/durable-independent-process/*/control-plane.log
+            test-failures/durable-independent-process/*/browser-frames.json
+            test-failures/durable-independent-process/*/model-requests.json
+            test-failures/durable-independent-process/*/original-model-requests.json
+            test-failures/durable-independent-process/*/model-stream-fence.json
+            test-failures/durable-independent-process/*/barrier.json
+            test-failures/durable-independent-process/*/held-setup-readiness.json
+            test-failures/durable-independent-process/*/before-ready-history.json
+            test-failures/durable-independent-process/*/resource-ready-history.json
+            test-failures/durable-independent-process/*/final-view.json
+            test-failures/durable-independent-process/*/final-history.json
+            test-failures/durable-independent-process/*/spill-history.json
+            test-failures/durable-independent-process/*/capture-outcomes.json
+            test-failures/durable-independent-process/*/teardown-outcomes.json
+            test-failures/durable-independent-process/*/early-output.png
+            test-failures/durable-independent-process/*/waiting.png
+            test-failures/durable-independent-process/*/final-page.png
           if-no-files-found: ignore
           retention-days: 14
 
@@ -75,7 +105,7 @@ jobs:
           container=$(docker create --network none pi-orb-control-plane:qualification node /app/image-proof.mjs)
           trap 'docker rm -f "$container"' EXIT
           docker cp scripts/control-plane-image-proof.mjs "$container:/app/image-proof.mjs"
-          docker start --attach "$container" | tee "$RUNNER_TEMP/control-plane-image-proof.log"
+          docker start --attach "$container" 2>&1 | tee "$RUNNER_TEMP/control-plane-image-proof.log"
           test "$(docker inspect --format '{{.State.ExitCode}}' "$container")" = 0
       - name: Report image and disk provenance
         if: always()
