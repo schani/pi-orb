@@ -6,6 +6,12 @@
 
 The earlier orb recorded a real-package experiment using unmodified `@gotgenes/pi-subagents` 21.4.2 and Pi 0.85.1: seven explicitly gated scenarios, separate process/HOME/cwd per scenario, real SDK root/child sessions and extension loading, and a scripted in-process model. The `scripts/subagent-liveness/` harness has now been recovered from its transcript and rerun with locked dependencies against both 21.4.2 and 21.7.0. A subsequent targeted source check of the published 21.4.2 tarball verified default cwd, child JSONL persistence, root terminal records and the read-only transcript viewer (see below); this is not a full cancellation/integration audit. That historical audit is distinct from the implementation evidence below. Repository Pi upgrades are permitted; any chosen version must pass fresh contracts.
 
+## Failure evidence (decided 2026-10-06)
+
+Both process-backed subagent E2Es save failure-only metadata before teardown: runtime health/activity/operation ID, the last 30 root-session entries and lifecycle edge names, replicated-history metadata, and the last 30 model-request summaries from the root and naming fixtures. Native reads are capped at 64 KiB; HTTP probes have independent three-second deadlines without retries. Local evidence is written before probes, so an unavailable runtime or provider cannot erase it. Failed history reads retain their HTTP status and are marked unavailable, not empty.
+
+CI retains `test-failures/subagent-*/failure.json` for 14 days. Only allowlisted IDs, types, statuses, timestamps and counts are included—no message contents, tool arguments, child transcripts, credentials or raw logs.
+
 ## Implementation evidence (2026-09-14)
 
 - Selected **21.7.0** (`b3b6159399f541fd0623f65818557dd3e707a34f`) rather than 21.4.2 because it already publishes `subagents:resuming`, which gives the host a synchronous execution-admission boundary for explicit resume. The initial qualification used Pi 0.85.1; Pi 0.87.1 was qualified on 2026-09-23.

@@ -14,11 +14,52 @@ import {
   deleteFakeSession,
   FatalProbeError,
   fakeControl,
+  fakeRequest,
   readReplicatedHistorySnapshot,
   startControlPlane,
   waitFor,
 } from "./harness.ts";
 import { FailureEvidence } from "./testkit/failure-evidence.ts";
+import { captureSubagentFailure, readFailureJson } from "./testkit/subagent-failure-evidence.ts";
+
+async function saveSubagentFailure(
+  root: string,
+  orb: string,
+  phase: Parameters<typeof captureSubagentFailure>[0]["phase"],
+  cp: Awaited<ReturnType<typeof startControlPlane>>,
+  fake: Awaited<ReturnType<typeof createFakeSession>>,
+  names: Awaited<ReturnType<typeof createFakeSession>>,
+  caseName: "subagent-lifecycle" | "subagent-profiles",
+) {
+  const local = async (url: string) => (await readFailureJson(url)).unwrapOr({ unavailable: true });
+  const requests = async (sessionKey: string) => {
+    const response = await fakeRequest("GET", `/api/__mock__/sessions/${sessionKey}/requests`, {
+      retryTransport: false,
+      deadlineMs: 3_000,
+    });
+    return { status: response.status, body: await response.json() };
+  };
+  const saved = await captureSubagentFailure({
+    root,
+    orb,
+    phase,
+    logs: cp.logs,
+    artifact: join(import.meta.dirname, "../test-failures", caseName, "failure.json"),
+    probes: {
+      health: async () => {
+        const metadata = JSON.parse(readFileSync(join(root, "hosts", orb, "host.json"), "utf8"));
+        if (!Number.isInteger(metadata.port) || metadata.port < 1 || metadata.port > 65535)
+          return {};
+        return local(`http://127.0.0.1:${metadata.port}/v1/health`);
+      },
+      orb: () => local(`${cp.baseUrl}/api/v1/orbs/${orb}`),
+      history: () => local(`${cp.baseUrl}/api/v1/orbs/${orb}/history`),
+      model: () => requests(fake.sessionKey),
+      names: () => requests(names.sessionKey),
+    },
+  });
+  if (saved.isErr()) console.error(`Failure evidence write failed: ${caseName}`);
+}
 
 it("keeps delegated work busy through abort, crash recovery and active-child archival without private replication", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-subagents-e2e-"));
@@ -184,6 +225,7 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
   const project = randomUUID(),
     orb = randomUUID();
   let failed = false;
+  let phase: Parameters<typeof captureSubagentFailure>[0]["phase"] = "setup";
   try {
     expect(
       (
@@ -297,6 +339,7 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
         "1 running",
       );
       if (i === 0) {
+        phase = "continuation";
         await writeFile(`${root}/release-${i}`, "release\n");
         await expectPage(page.getByText("DELEGATION_COMPLETE", { exact: true })).toBeVisible({
           timeout: 60_000,
@@ -313,11 +356,13 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
           { timeoutMs: 60_000 },
         );
       } else if (i === 1) {
+        phase = "abort";
         await page.getByRole("button", { name: "abort", exact: true }).click();
         await expectPage(page.getByText("Cancelling delegated work.", { exact: true })).toBeVisible(
           { timeout: 30_000 },
         );
       } else {
+        phase = "recovery";
         const admission = rootEntries()
           .filter((e) => e.customType === "pi-orb.subagent-run" && e.data?.["phase"] === "admitted")
           .at(-1);
@@ -409,6 +454,7 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
     expect(replicated).toContain("interruptedSubagents");
     expect(replicated).not.toContain("PRIVATE_CHILD_TRANSCRIPT_ONLY");
     // Resume the retained workspace, then archive with an actually blocked child.
+    phase = "archive";
     expect((await api(cp.baseUrl, "POST", `/api/v1/orbs/${orb}/start`)).status).toBe(202);
     await waitFor(
       "resume before active archive",
@@ -493,31 +539,8 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
     );
   } catch (error) {
     failed = true;
+    await saveSubagentFailure(root, orb, phase, cp, fake, names, "subagent-lifecycle");
     console.error(`Preserved runtime files: ${root}`);
-    console.error(
-      JSON.stringify((await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`)).body),
-    );
-    console.error(cp.logs.join(""));
-    const requests = (await fakeControl(fake.sessionKey, "/requests")) as unknown as {
-      surface: string;
-      status: number;
-      matchedRuleIndex: number | null;
-      stopReason: string | null;
-      aborted: boolean;
-      finalized: boolean;
-    }[];
-    console.error(
-      JSON.stringify(
-        requests.map(({ surface, status, matchedRuleIndex, stopReason, aborted, finalized }) => ({
-          surface,
-          status,
-          matchedRuleIndex,
-          stopReason,
-          aborted,
-          finalized,
-        })),
-      ),
-    );
     throw error;
   } finally {
     await browser.close();
@@ -680,13 +703,7 @@ it("rejects unknown profiles and models without child inference, and dispatches 
     }
   } catch (error) {
     failed = true;
-    await evidence
-      .probe("orb", () => api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}`))
-      .catch(() => undefined);
-    await history().catch(() => undefined);
-    await evidence
-      .save("profile-login", () => fakeControl(fake.sessionKey, "/requests"))
-      .catch(() => console.error("Failure evidence write failed: profile-login"));
+    await saveSubagentFailure(root, orb, "profiles", cp, fake, names, "subagent-profiles");
     console.error(`Preserved unknown-profile fixture: ${root}`);
     throw error;
   } finally {
