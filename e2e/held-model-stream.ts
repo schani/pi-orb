@@ -21,14 +21,26 @@ export function isModelCompletion(event: string): boolean {
   });
 }
 
-export async function holdModelStream(upstreamBase: string, marker: string) {
+export async function holdModelStream(
+  upstreamBase: string,
+  marker: string,
+  listener: { host: string; advertisedHost: string } = {
+    host: "127.0.0.1",
+    advertisedHost: "127.0.0.1",
+  },
+) {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
   let held = false;
   let failure: unknown;
-  const observations: { targeted: boolean; encoding: string; completionHeld: boolean }[] = [];
+  const observations: {
+    targeted: boolean;
+    encoding: string;
+    reasoningDeltaForwarded: boolean;
+    completionHeld: boolean;
+  }[] = [];
   const upstream = new URL(upstreamBase);
   const server = createServer(async (request, response) => {
     if (request.method !== "POST") {
@@ -45,6 +57,7 @@ export async function holdModelStream(upstreamBase: string, marker: string) {
       const observation = {
         targeted,
         encoding: String(request.headers["content-encoding"] ?? "identity"),
+        reasoningDeltaForwarded: false,
         completionHeld: false,
       };
       observations.push(observation);
@@ -86,6 +99,12 @@ export async function holdModelStream(upstreamBase: string, marker: string) {
             await gate;
           }
           response.write(event);
+          if (
+            targeted &&
+            /"type"\s*:\s*"response\.reasoning(?:_summary)?_text\.delta"/.test(event)
+          ) {
+            observation.reasoningDeltaForwarded = true;
+          }
           boundary = /\r?\n\r?\n/.exec(buffered);
         }
       }
@@ -98,11 +117,11 @@ export async function holdModelStream(upstreamBase: string, marker: string) {
   server.on("upgrade", (_request, socket) => {
     socket.end("HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(0, listener.host, resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("missing model stream listener");
   return {
-    baseUrl: `http://127.0.0.1:${address.port}${upstream.pathname}`,
+    baseUrl: `http://${listener.advertisedHost}:${address.port}${upstream.pathname}`,
     observations,
     held: () => {
       if (failure) throw failure;

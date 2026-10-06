@@ -32,6 +32,12 @@ OAuth catalog entries carry immutable project/URL-bound `oauth: {id}`. Browser `
 
 Initial registration uses advertised dynamic client registration and authorization code + S256 PKCE. Discovery/registration/token requests use public HTTPS, socket-time DNS validation, disabled redirects, ten-second deadline and 1 MiB response cap. Callback headers disable storage/referrers; callback URLs must not reach ingress logs. Migration 018 and deployed logging exclusion are described in `docs/credentials.md` and `docs/postmortems/2026-09-11-release-logging-exclusion-iam.md`. Migration 026 adds safe `mcp_oauth_events.detail`: closed diagnostics (`invalid_grant`, `invalid_client`, `missing_refresh_token`, `unusable_refresh_response`) and bounded lifetime/rotation metadata, never remote bodies or credentials (`docs/postmortems/2026-09-26-provider-auth-failures.md`).
 
+## MCP SDK security (2026-10-06; candidate, undeployed)
+
+**Decision:** pin control-plane and runtime `@modelcontextprotocol/client` to2.2.0, with its exact core2.2.0, for [GHSA-6qxp-vccf-f47h](https://github.com/advisories/GHSA-6qxp-vccf-f47h). No other SDK version or sealed patch changes. Pristine2.0.0 contracts reproduce credential forwarding to an attacker-selected token endpoint and loss of issuer stamps during schema round trips;2.2.0 rejects mismatched stamped credentials before any token request and preserves stamps.
+
+The control plane's direct exchange/refresh is not automatically protected by this upstream fix: persisted issuer, token endpoint and resource remain authoritative, without rediscovery. Regression contracts change discovery after preparation and require typed, sanitized issuer rejection with zero token requests. Production native Pi's tokenless broker transport independently ignores malicious challenge metadata: two original-server requests, two broker generations, zero attacker requests. Automatic SDK credential forwarding is not demonstrated reachable through these production paths; no deployed exposure or rotation conclusion follows. Existing OAuth/status history supplies durable sanitized outcomes; challenge text and credentials remain excluded. Scoped clean-install qualification passes99 MCP/security cases, workspace/E2E types and audit0, with all seals unchanged. Fresh browser/image/whole-source gates remain pending (`docs/testing.md`). Evidence: `/workspace/durable-github-qualification/diagnosis/mcp-upgrade-fix.md`.
+
 ## Native Pi boundary
 
 Pi owns MCP tool-schema validation; pi-orb uses TypeBox for its own protocol and configuration schemas.

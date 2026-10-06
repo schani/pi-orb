@@ -206,6 +206,7 @@ export class DurableAgent implements AgentSessionFacade {
   private live: LiveState = {};
   private inboxCount = 0;
   private tasks: TaskGraph = { tasks: {} };
+  private queuedInput: number | undefined;
   private operationId: string | null = null;
   private readonly operationKind = "agent";
   private closing = false;
@@ -585,8 +586,9 @@ export class DurableAgent implements AgentSessionFacade {
 
   private updateView(value: ConversationView): void {
     this.live = (value.docs["pi.live"] ?? {}) as LiveState;
-    this.inboxCount =
-      (value.docs["pi.inbox"] as { items?: unknown[] } | undefined)?.items?.length ?? 0;
+    const inbox = value.docs["pi.inbox"] as { items?: { id: number; mode: string }[] } | undefined;
+    this.inboxCount = inbox?.items?.length ?? 0;
+    this.queuedInput = inbox?.items?.find((item) => item.mode !== "write")?.id;
     const agent = value.docs["pi.agent"] as
       | {
           model?: { provider: string; modelId: string };
@@ -643,15 +645,22 @@ export class DurableAgent implements AgentSessionFacade {
 
   private updateStatus(): void {
     const active = !this.paused && this.busy();
-    if (active && this.operationId === null) {
-      const input = this.live.run?.inputs[0];
-      this.operationId = `${this.session.id}:submission:${input ?? this.live.run?.taskId ?? "children"}`;
+    const run = this.live.run;
+    const task = run?.taskId ?? Object.values(this.tasks.tasks).find((task) => task.background)?.id;
+    const input = run ? run.inputs[0] : task === undefined ? this.queuedInput : undefined;
+    const operation =
+      input !== undefined
+        ? `${this.session.id}:submission:${input}`
+        : task !== undefined
+          ? `${this.session.id}:task:${task}`
+          : undefined;
+    if (active && this.operationId === null && operation !== undefined) {
+      this.operationId = operation;
       this.operationOutcome = "completed";
       this.turnStart = this.records.length;
       this.emit({ type: "operation_started", operationId: this.operationId });
     }
     // Native cancellation is committed on the current run even without an assistant terminal.
-    const run = this.live.run;
     if (this.operationId !== null && run && this.tasks.tasks[String(run.taskId)]?.abortRequested)
       this.operationOutcome = "aborted";
     if (!active && this.operationId !== null) {
@@ -930,7 +939,7 @@ export class DurableAgent implements AgentSessionFacade {
     const existing = this.receipts[request.messageId];
     if (existing && existing.fingerprint !== fingerprint)
       return err(durableError("message ID conflicts with persisted content"));
-    const delivery = existing?.delivery ?? (this.live.run ? "steer" : "turn");
+    const delivery = existing?.delivery ?? (this.operationId ? "steer" : "turn");
     const wasBusy = this.operationId;
     const content = nativeInputContent(request.content, request.system);
     if (!existing) {

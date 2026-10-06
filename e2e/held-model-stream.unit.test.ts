@@ -7,7 +7,7 @@ it.each([false, true])(
   "forwards model deltas while completion remains held: compressed=%s",
   async (compressed) => {
     const delta =
-      'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"visible"}\n\n';
+      'event: response.reasoning_summary_text.delta\ndata: {"type":"response.reasoning_summary_text.delta","delta":"visible"}\n\n';
     const completed = 'data: {"response":{"id":"reply"},"type":"response.completed"}\r\n\r\n';
     const upstream = createServer((_request, response) => {
       response.writeHead(200, { "content-type": "text/event-stream" });
@@ -40,6 +40,17 @@ it.each([false, true])(
       const first = await reader.read();
       expect(new TextDecoder().decode(first.value)).toBe(delta);
       expect(relay.held()).toBe(true);
+      expect(relay.observations[0]).toMatchObject({
+        targeted: true,
+        reasoningDeltaForwarded: true,
+        completionHeld: true,
+      });
+      const unrelated = await fetch(relay.baseUrl, { method: "POST", body: "SUMMARY_OTHER_TURN" });
+      expect(await unrelated.text()).toBe(delta + completed);
+      expect(relay.observations[1]).toMatchObject({
+        targeted: false,
+        completionHeld: false,
+      });
       relay.release();
       let remaining = "";
       for (;;) {

@@ -20,7 +20,7 @@
     "@fastify/websocket": "^11.0.0",
     "@google-cloud/secret-manager": "^6.3.0",
     "@hapi/iron": "^7.0.1",
-    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/client": "2.2.0",
     "@pi-orb/luna": "*",
     "@pi-orb/mock-openai": "*",
     "@pi-orb/protocol": "*",

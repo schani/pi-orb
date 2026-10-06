@@ -14,13 +14,28 @@ for (const provider of ["cloudflare", "datadog"] as const) {
     it("registers, binds PKCE/resource/issuer, exchanges and preserves omitted refresh replacement", async () => {
       let challenge = "";
       const grants: string[] = [];
+      let changedDiscovery = false;
+      let discoveryRequests = 0;
       const fetcher: typeof fetch = async (input, init) => {
         const url = new URL(String(input));
         const json = (value: unknown) =>
           new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
-        if (url.pathname.startsWith("/.well-known/oauth-protected-resource"))
-          return json({ resource, authorization_servers: [issuer] });
-        if (url.pathname.startsWith("/.well-known/"))
+        if (url.pathname.startsWith("/.well-known/oauth-protected-resource")) {
+          discoveryRequests++;
+          return json({
+            resource,
+            authorization_servers: [changedDiscovery ? "https://attacker.example" : issuer],
+          });
+        }
+        if (url.pathname.startsWith("/.well-known/")) {
+          discoveryRequests++;
+          if (changedDiscovery)
+            return json({
+              issuer: "https://attacker.example",
+              token_endpoint: "https://attacker.example/token",
+              authorization_endpoint: "https://attacker.example/authorize",
+              response_types_supported: ["code"],
+            });
           return json({
             issuer,
             authorization_endpoint: "https://consent.example/authorize",
@@ -33,6 +48,7 @@ for (const provider of ["cloudflare", "datadog"] as const) {
             token_endpoint_auth_methods_supported: ["none"],
             authorization_response_iss_parameter_supported: true,
           });
+        }
         if (url.pathname === "/register") {
           const metadata = JSON.parse(String(init?.body));
           expect(metadata.redirect_uris).toEqual(["https://orb.example/callback"]);
@@ -95,9 +111,20 @@ for (const provider of ["cloudflare", "datadog"] as const) {
       expect(challenge).not.toBe("");
       expect(url.searchParams.get("state")).toBe("opaque-state");
       expect(url.searchParams.get("code_challenge_method")).toBe("S256");
-      expect(
-        (await sdk.exchange(task, prepared.secret, "code", "https://attacker.example")).isErr(),
-      ).toBe(true);
+      const discoveryCount = discoveryRequests;
+      changedDiscovery = true;
+      const mismatched = await sdk.exchange(
+        task,
+        prepared.secret,
+        "code",
+        "https://attacker.example",
+      );
+      expect(mismatched.isErr()).toBe(true);
+      if (mismatched.isErr()) {
+        expect(mismatched.error.type).toBe("mcp_oauth_error");
+        expect(mismatched.error.code).toBe("auth_required");
+        expect(JSON.stringify(mismatched.error)).not.toContain("attacker.example");
+      }
       expect(grants).toEqual([]);
       const credential = (
         await sdk.exchange(task, prepared.secret, "code", issuer)
@@ -147,6 +174,8 @@ for (const provider of ["cloudflare", "datadog"] as const) {
         "refresh_token",
         "authorization_code",
       ]);
+      expect(discoveryRequests).toBe(discoveryCount);
+      expect(prepared.secret.oauth.issuer).toBe(issuer);
       expect(observed).toEqual([
         {
           kind: "authorization_code",

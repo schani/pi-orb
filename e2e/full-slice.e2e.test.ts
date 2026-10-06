@@ -46,6 +46,7 @@ import {
   waitFor,
   waitForPostgres,
 } from "./harness.ts";
+import { holdModelStream } from "./held-model-stream.ts";
 import { runTerminal } from "./terminal-client.ts";
 import { FailureEvidence } from "./testkit/failure-evidence.ts";
 import { restartNoticePattern } from "./testkit/restart-notice-rule.ts";
@@ -626,6 +627,8 @@ async function withOrbDiagnostics(id: () => string, body: () => Promise<void>): 
   }
 }
 
+let reasoningStream: Awaited<ReturnType<typeof holdModelStream>>;
+
 beforeAll(async () => {
   webDistDirectory = mkdtempSync(join(tmpdir(), "pi-orb-e2e-web-"));
   const webRoot = join(import.meta.dirname, "../apps/web");
@@ -638,6 +641,10 @@ beforeAll(async () => {
   hostingRootDirectory = mkdtempSync(join(tmpdir(), "pi-orb-e2e-hosting-"));
   fake = await createFakeSession(`pi-orb-e2e-${Date.now()}`, SCENARIO);
   nameFake = await createFakeSession(`pi-orb-name-e2e-${Date.now()}`, NAME_SCENARIO);
+  reasoningStream = await holdModelStream(fake.inferenceBaseUrl, "please run the e2e tool check", {
+    host: PROCESS_BACKEND ? "127.0.0.1" : "0.0.0.0",
+    advertisedHost: PROCESS_BACKEND ? "127.0.0.1" : "host.docker.internal",
+  });
 
   if (PROCESS_BACKEND) {
     localStateDirectory = mkdtempSync(join(tmpdir(), "pi-orb-e2e-local-"));
@@ -655,6 +662,7 @@ beforeAll(async () => {
       extraEnv: {
         PI_ORB_E2E_RECONCILE_CHECKPOINTS: "1",
         PI_ORB_E2E_HISTORY_INSPECTION: "1",
+        PI_ORB_FAKE_OPENAI_INFERENCE_URL: reasoningStream.baseUrl,
       },
     });
     return;
@@ -695,11 +703,13 @@ beforeAll(async () => {
     extraEnv: {
       PI_ORB_E2E_RECONCILE_CHECKPOINTS: "1",
       PI_ORB_E2E_HISTORY_INSPECTION: "1",
+      PI_ORB_FAKE_OPENAI_INFERENCE_URL: reasoningStream.baseUrl,
     },
   });
 }, 720_000);
 
 afterAll(async () => {
+  await reasoningStream?.close();
   if (!PROCESS_BACKEND) {
     for (const id of [orbId, failedOrbId, specOrbId, ...additionalOrbIds]) {
       if (id === "") continue;
@@ -798,6 +808,10 @@ describe("full slice E2E", () => {
           )
           .catch(() => undefined);
       }
+      scenarioEvidence.observations.push({
+        resource: "reasoning-stream-fence",
+        observations: reasoningStream?.observations ?? [],
+      });
       const capturedUploadPhases = currentUploadPhases();
       if (capturedUploadPhases !== null) {
         scenarioEvidence.observations.push({
@@ -1802,6 +1816,37 @@ describe("full slice E2E", () => {
       frames.find((frame) => frame.type === "request.result" && frame.requestId === requestId),
     );
     expect(result.type === "request.result" && result.result.type).toBe("accepted");
+    if (result.type !== "request.result" || result.result.type !== "accepted") {
+      throw new Error("reasoning turn was not accepted");
+    }
+    const reasoningOperationId = result.result.operationId;
+    try {
+      await waitFor("reasoning provider completion held", async () =>
+        reasoningStream.held() ? true : null,
+      );
+      expect(reasoningStream.observations).toContainEqual(
+        expect.objectContaining({
+          targeted: true,
+          reasoningDeltaForwarded: true,
+          completionHeld: true,
+        }),
+      );
+      await untilFrame("reasoning patch before model completion", () =>
+        frames.find(
+          (frame) =>
+            frame.type === "runtime.event" &&
+            frame.event.type === "output_patch" &&
+            frame.event.operationId === reasoningOperationId &&
+            frame.event.blockType === "reasoning",
+        ),
+      );
+      console.info("reasoning stream fence acknowledged", {
+        operationId: reasoningOperationId,
+        observations: reasoningStream.observations,
+      });
+    } finally {
+      reasoningStream.release();
+    }
 
     await untilFrame(
       "bash tool completed",
@@ -1815,14 +1860,18 @@ describe("full slice E2E", () => {
         ),
       180_000,
     );
-    await untilFrame(
+    const reasoningFinished = await untilFrame(
       "operation finished",
       () =>
         frames.find(
-          (frame) => frame.type === "runtime.event" && frame.event.type === "operation_finished",
+          (frame) =>
+            frame.type === "runtime.event" &&
+            frame.event.type === "operation_finished" &&
+            frame.event.operationId === reasoningOperationId,
         ),
       180_000,
     );
+    expect(reasoningFinished).toMatchObject({ event: { outcome: "completed" } });
     const finalText = await untilFrame(
       "final assistant record",
       () =>

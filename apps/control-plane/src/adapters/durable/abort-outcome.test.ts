@@ -143,16 +143,17 @@ it("publishes Native held-acquisition abort without an assistant terminal or sum
         : [],
     );
   try {
-    (await agent.deliver(input(before)))._unsafeUnwrap();
+    const beforeReceipt = (await agent.deliver(input(before)))._unsafeUnwrap();
     (await agent.waitForIdle())._unsafeUnwrap();
     const checkpoint = frames.length;
-    (await agent.deliver(input(cancelled)))._unsafeUnwrap();
+    const cancelledReceipt = (await agent.deliver(input(cancelled)))._unsafeUnwrap();
     await publicWait.promise;
     const waiting = frames
       .flatMap((frame) =>
         frame.type === "runtime.event" && frame.event.type === "tool_state" ? [frame.event] : [],
       )
       .at(-1)!;
+    expect(waiting.operationId).toBe(cancelledReceipt.operationId);
     expect(effects).toBe(0);
     expect(
       (
@@ -185,7 +186,7 @@ it("publishes Native held-acquisition abort without an assistant terminal or sum
     expect(JSON.stringify(records)).not.toContain("PRIVATE_INSTRUCTION");
     expect(edges.filter((code) => code === "harness.summary_queued")).toHaveLength(1);
     release.resolve();
-    (await agent.deliver(input(later)))._unsafeUnwrap();
+    const laterReceipt = (await agent.deliver(input(later)))._unsafeUnwrap();
     await laterEntered.promise;
     for (const historical of [before, cancelled])
       expect(
@@ -196,12 +197,24 @@ it("publishes Native held-acquisition abort without an assistant terminal or sum
           })
         )._unsafeUnwrap(),
       ).toMatchObject({ type: "rejected", error: { code: "stale_operation" } });
+    for (const receipt of [beforeReceipt, cancelledReceipt])
+      expect(
+        (
+          await agent.request(`old:${receipt.operationId}`, {
+            type: "abort",
+            operationId: receipt.operationId,
+          })
+        )._unsafeUnwrap(),
+      ).toMatchObject({ type: "rejected", error: { code: "stale_operation" } });
     laterRelease.resolve();
     (await agent.waitForIdle())._unsafeUnwrap();
     expect(finished().map((event) => event.outcome)).toEqual(["completed", "aborted", "completed"]);
-    expect(finished().map((event) => event.operationId)).toEqual(
-      Array(3).fill(waiting.operationId),
-    );
+    expect(finished().map((event) => event.operationId)).toEqual([
+      beforeReceipt.operationId,
+      cancelledReceipt.operationId,
+      laterReceipt.operationId,
+    ]);
+    expect(new Set(finished().map((event) => event.operationId)).size).toBe(3);
     expect(edges.filter((code) => code === "harness.summary_queued")).toHaveLength(2);
     expect(JSON.stringify(agent.snapshot()._unsafeUnwrap().records)).toContain("AFTER_DONE");
     expect(effects).toBe(0);

@@ -19,7 +19,9 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
   expect(source).toContain(`name: E2E (\${{ matrix.shard }}/4)`);
   expect(source).toContain("fail-fast: false");
   expect(source).toContain("shard: [1, 2, 3, 4]");
-  expect(source).toContain(`run: npm run test:e2e -- --shard=\${{ matrix.shard }}/4`);
+  expect(source).toContain(
+    `run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --shard=\${{ matrix.shard }}/4`,
+  );
   expect(source).not.toMatch(/--(?:maxWorkers|project|retry|passWithNoTests)/u);
   expect(
     source.match(/name: e2e-.*matrix\.shard.*github\.run_id.*github\.run_attempt/gu),
