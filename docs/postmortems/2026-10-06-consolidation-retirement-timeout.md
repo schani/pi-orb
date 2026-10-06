@@ -4,7 +4,7 @@
 
 On 2026-10-06, [Deploy 37431686576](https://github.com/schani/pi-orb/actions/runs/37431686576) deleted `pi-orb`, `pi-orb-ops` and `pi-orb-runtime-api` during first-consolidation maintenance. Retirement timed out before migration or application apply. Production remained without its browser/API/runtime services; the previous issuer continued serving discovery/JWKS.
 
-Read-only investigation confirmed the three services absent, the old browser URL returning 404, and issuer discovery returning 200. Issuer revision `pi-orb-issuer-00041-zcl` still serves the previous `d67de4c` image digest `sha256:2bcd07a4cf4bf2dca850ee649ad3fe152db353b33a878e5510524a6fb0f42a07`. The newly built application was never deployed.
+Initial read-only investigation confirmed the three services absent, the old browser URL returning 404, and issuer discovery returning 200. Issuer revision `pi-orb-issuer-00041-zcl` then served the previous `d67de4c` image digest `sha256:2bcd07a4cf4bf2dca850ee649ad3fe152db353b33a878e5510524a6fb0f42a07`. That failed run never deployed the newly built application.
 
 ## Evidence and timeline
 
@@ -33,7 +33,7 @@ The cutover unit tests mock both inventory and retirement waiting. Sandbox quali
 
 The Actions-owned cutover change in `8998acf` reused the existing resource-based inventory, then reset its observation boundary after service deletion. The inherited rule already misclassified dormant retained metadata; the reset additionally rejects zeros emitted during deletion. Neither assumption matches sparse process metrics. Read-only inspection also found 41 retained issuer revisions, so fixing only legacy-service deletion would leave the following normal rollover vulnerable.
 
-## Local correction (2026-10-06; undeployed)
+## Correction (2026-10-06)
 
 Revision resources and observed processes now have separate evidence. The record retains every resource name in `resources`; unresolved positive metrics alone admit process targets. Retirement checks that old resources are absent and permits only the new serving revisions, disjoint from the old inventory. `resourcesRetired` durably records that fence plus a 180-second metric-visibility observation, and activation requires it. This uses the existing bounded Monitoring-observation assumption for discovering deleted-but-live instances; it cannot establish absence during a prolonged unreported telemetry outage.
 
@@ -41,12 +41,20 @@ The original pre-deletion boundary remains fixed. Polls reread its 15-minute loo
 
 Tests exercise the real inventory, service deletion and retirement functions together with injected clocks: retained metadata, cold ops, zeros during deletion, delayed cold starts/preboundary positives, surviving resources and Monitoring failure before deletion. The incident cases failed on the original implementation. Replaying captured production data through the correction succeeds with 158 resource identities fenced and the same two explicit-zero process proofs. This replay is historical validation, not a live production-readiness attestation. Private red/green and replay evidence remains in `.context/incident-20261006/`.
 
-Qualification passed: 182 infrastructure tests plus filesystem checks, 21 release-shell contract tests, lint and diff checks. The first infrastructure invocation stopped at the Docker-backed filesystem check because Docker Desktop was not running; its failure log is retained. Starting Docker corrected that environment prerequisite before the complete passing run. Full source CI/E2E qualification and production deployment remain outstanding.
+Qualification passed: 182 infrastructure tests plus filesystem checks, 21 release-shell contract tests, lint and diff checks. The first infrastructure invocation stopped at the Docker-backed filesystem check because Docker Desktop was not running; its failure log is retained. Starting Docker corrected that environment prerequisite before the complete passing run. Exact-main CI subsequently passed 3,218 tests (13 conditional skips), and all four E2E shards passed 470 tests without skips on their first attempts.
 
 ## Recovery constraints
 
 Preserve the failed release record, its two explicit-zero proofs and the retained lock. Qualify and merge the correction, review lock ownership and the original runner's termination, then clear only that exact lock generation before a fresh first-consolidation Actions release. Recheck service absence, current process observations and pending Compute operations before migration. A larger timeout cannot manufacture samples from silent revisions.
 
-Recovery follows the existing main-branch Actions workflow after reviewed lock clearance. Automatic restoration of old controllers, database rollback and bypassing retirement remain rejected under `docs/control-plane-consolidation.md`. This investigation made no production changes and did not establish database/workspace integrity independently. Actionable recovery work lives in `TODO.md`.
+Recovery follows the existing main-branch Actions workflow after reviewed lock clearance. Automatic restoration of old controllers, database rollback and bypassing retirement remain rejected under `docs/control-plane-consolidation.md`. The initial investigation made no production changes and did not establish database/workspace integrity independently.
 
 Private local evidence: `.context/incident-20261006/` contains the authoritative release, failed Actions log, deletion audit receipt, independent service inventory, active pointer, raw Monitoring samples and summaries, and deterministic replay result.
+
+## Recovery (2026-10-06)
+
+[PR 53](https://github.com/schani/pi-orb/pull/53) merged the correction as `7ab8cafc5317d92eb46d5b3e48d2aa473eb15fb9`. After confirming the original runner had finished, the lock owner/generation matched and no migration jobs or pending Compute operations remained, recovery removed only lock generation `1791272809671687`. [Deploy 37459759444](https://github.com/schani/pi-orb/actions/runs/37459759444) ran fresh first consolidation and validated at **12:49:14 UTC**, release `r-1791288814-421b2d8d-5826-4918-ad19-edf8900e5000`.
+
+Legacy-service retirement passed with no resource/process targets after the visibility interval. Post-apply issuer retirement fenced 41 resource identities and required complete explicit zeros for its one observed process; activation followed at 12:39:21 UTC. Migration applied the harness and Google identity migrations, mapping six identities. Native acceptance, lifecycle and real workload federation/STS/impersonation smokes passed; all four fixtures were deleted.
+
+Independent verification confirmed the serving digest/generation, active pointer, endpoint responses, absent legacy services/lock/migration jobs and absent fixture/build resources. The application now uses https://pi-orb-issuer-1077475695242.us-central1.run.app. Browser rendering and Google's sign-in entry passed; interactive user login was not completed. Complete release and verification receipts are in `docs/deployment.md` and `.context/incident-20261006/recovery-verification/`. The GitHub artifact matches the authoritative GCS record. No release was redispatched or rerun.
