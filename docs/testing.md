@@ -1,5 +1,9 @@
 # Testing strategy
 
+## Repository shorthand and diagnostic prefixes (2026-10-05; local)
+
+Tests-first fixes accept GitHub shorthand and remove decorative diagnostic gutters (`docs/control-plane-api.md`, `docs/web-ui.md`). Typecheck/lint, 85 targeted unit/API/style tests and seven Chromium browser regressions pass. Broader unit and frontend runs hit the tool's 600-second execution limit with no observed test failures; both remain incomplete. No Docker/lifecycle E2E qualification or deployment. Evidence: `.context/repository-shorthand/`, `.context/ui-input-fixes/` and `/tmp/orb-notice-*-*.log`.
+
 ## UI release-policy exception (decided 2026-10-05)
 
 **UI exception (user-approved 2026-10-05):** flaky UI tests must still be fixed and validated, but deep investigation of a historical failure is optional once corrective stabilization is evidenced. A passing rerun alone is insufficient; new failing UI tests still require correction. Preserve first-failure evidence. Non-UI failures and DST replay/root-cause requirements are unchanged.

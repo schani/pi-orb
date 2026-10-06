@@ -1615,11 +1615,6 @@ body:has(.orb-page) {
   border-left: 2px dotted var(--w);
 }
 
-.rec-sys > .rec-px {
-  color: var(--g2);
-  font-weight: 400;
-}
-
 .rec-status {
   margin-right: 6px;
   padding: 0 5px;
@@ -2336,6 +2331,7 @@ pre,
   border-color: var(--bad);
 }
 
+.orb-notice,
 .orb-failure-banner {
   grid-template-columns: minmax(0, 1fr);
   gap: 0;

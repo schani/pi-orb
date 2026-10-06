@@ -322,7 +322,7 @@ export function ProjectsPage({
     const result = await createProject({
       id: generateUuid(),
       name: trimmedName,
-      repositoryUrl: trimmedUrl,
+      repositoryUrl: validated.value.url,
     });
     setSubmitting(false);
     if (result.isErr()) {

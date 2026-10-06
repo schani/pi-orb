@@ -41,6 +41,8 @@ const SUBGROUP_HOSTS: ReadonlySet<string> = new Set(["gitlab.com"]);
 const MAX_PATH_SEGMENTS = 10;
 const SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const SCP_STYLE_GIT_PATTERN = /^git@([^/:]+):(.+)$/;
+const GITHUB_SHORTHAND_PATTERN =
+  /^(?:github\.com\/)?([A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*)$/i;
 
 const parseUrl = Result.fromThrowable(
   (raw: string) => new URL(raw),
@@ -83,7 +85,10 @@ export function validateRepositoryUrl(
   const scpPath = scpStyle?.[2];
   const parseable =
     scpHost === undefined || scpPath === undefined ? raw : `https://${scpHost}/${scpPath}`;
-  const parsed = parseUrl(parseable);
+  const githubPath = GITHUB_SHORTHAND_PATTERN.exec(raw)?.[1];
+  const parsed = parseUrl(
+    githubPath === undefined ? parseable : `https://github.com/${githubPath}`,
+  );
   if (parsed.isErr()) return err(parsed.error);
   const url = parsed.value;
 

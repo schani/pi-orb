@@ -461,6 +461,59 @@ describe("frontend-only browser behavior", () => {
     },
   );
 
+  it.each([1280, 390])("renders gutter-free device-login diagnostics at %ipx", async (width) => {
+    const page = await browser.newPage({ viewport: { width, height: 740 } });
+    await page.route("**/api/v1/orbs/frontend-fixture-orb", async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        json: {
+          ...(await response.json()),
+          actionRequired: {
+            type: "openai_codex_device_login",
+            verificationUri: "https://auth.openai.com/codex/device",
+            userCode: "TEST-CODE",
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          },
+        },
+      });
+    });
+    try {
+      await gotoFrontendFixture(page, `${origin}${ORB_PATH}`);
+      const notice = page.locator(".notice", { hasText: "OpenAI device login required." });
+      await expectPage(notice).toBeVisible();
+      await expectPage(notice).toContainText("TEST-CODE");
+      await expectPage(notice).toContainText("expires in");
+      await expectPage(notice.getByRole("link")).toHaveAttribute(
+        "href",
+        "https://auth.openai.com/codex/device",
+      );
+      await expectPage(
+        notice.getByRole("button", { name: "Copy device code", exact: true }),
+      ).toBeVisible();
+      const row = notice.locator("..");
+      await expectPage(row.locator(".rec-px")).toHaveCount(0);
+      await expectPage(row).not.toContainText("···");
+      const layout = await row.evaluate((element) => {
+        const body = element.querySelector(".notice");
+        const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+        const bounds = element.getBoundingClientRect();
+        return {
+          left: bounds.left + Number.parseFloat(style?.paddingLeft ?? "0"),
+          right: bounds.right - Number.parseFloat(style?.paddingRight ?? "0"),
+          noticeLeft: body?.getBoundingClientRect().left,
+          noticeRight: body?.getBoundingClientRect().right,
+        };
+      });
+      expectPage(layout.noticeLeft).toBe(layout.left);
+      expectPage(layout.noticeRight).toBe(layout.right);
+    } finally {
+      await page.unrouteAll({ behavior: "wait" });
+      await page.close();
+    }
+  });
+
   it("renders an inert preparing-login notice before the device challenge arrives", async () => {
     const page = await browser.newPage();
     await page.route("**/api/v1/orbs/frontend-fixture-orb", async (route) => {

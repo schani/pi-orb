@@ -32,12 +32,15 @@ An orb's first checkout clones the project's repository into its filesystem; res
 Repository URL validation is strict allowlisting, decided as follows:
 
 - accepted input is either an `https` URL or Git's common scp-style spelling, `git@host:owner/repo.git` (decided 2026-08-10); scp-style input is normalized to canonical `https` before persistence and cloning rather than enabling SSH transport, and `GIT_ALLOW_PROTOCOL=https` is set for the clone so redirects cannot switch protocols;
+- GitHub shorthand `owner/repo` and `github.com/owner/repo` is accepted (decided 2026-10-05), with optional `.git` and case-insensitive `github.com`. The shared validator expands only these two-segment forms to HTTPS under the same allowlist/path checks. The persisted canonical URL records the accepted repository without new logs;
 - the hostname must be on a fixed allowlist, initially `github.com`, `gitlab.com`, `bitbucket.org`, and `codeberg.org`; extending the list is configuration, not a design change;
 - HTTPS userinfo (credential-bearing URLs), explicit ports, and IP-literal hosts are rejected; the only accepted scp-style user is the conventional literal `git`;
 - the path must match the host's repository shape (for example `/{owner}/{repo}` with an optional `.git`);
 - validation runs at project creation and General-settings updates, and is re-run by the runtime immediately before cloning, because stage 1 identifies callers but does not authorize database resources by owner.
 
-This forecloses local paths, `file://` URLs, credential leakage into the database and logs, and SSRF against internal networks or cloud metadata endpoints.
+This forecloses local paths outside the exact GitHub shorthand shape, `file://` URLs, credential leakage into the database and logs, and SSRF against internal networks or cloud metadata endpoints. Accepted shorthand is always interpreted as GitHub, never as a filesystem path.
+
+**History (2026-10-05):** `0f35069` introduced absolute-URL parsing and explicitly tested rejection of `github.com/owner/repo`; `0990477` changed docs only; `daaae94` added only scp-style input. Available history shows no prior shorthand support: this adds support, not a demonstrated regression fix.
 
 The environment is prescribed initially:
 
