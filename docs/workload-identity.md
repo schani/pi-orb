@@ -1,6 +1,6 @@
 # Orb workload identity requirements
 
-**Implemented 2026-09-19; not deployed, qualification ongoing.** The single `pi-orb-issuer` application uses Google login and stateless sealed cookies. `docs/control-plane-consolidation.md` records decisions and cutover gates; `docs/deployment.md` defines the implemented topology/configuration. Dated live evidence below describes earlier releases, not this implementation.
+**Production validated 2026-10-06.** The single `pi-orb-issuer` application uses Google login and stateless sealed cookies. `pi-orb` is an unprivileged browser redirect to it. `docs/control-plane-consolidation.md` records decisions and cutover gates; `docs/deployment.md` records the current topology and live release evidence. Earlier dated evidence below describes its respective release.
 
 The application preserves the exact issuer `https://pi-orb-issuer-<project-number>.<region>.run.app`, signing-key versions, discovery/JWKS and federation trust. App/API/broker now use that same origin; files use its separate `files` tag hostname. Public handlers share the control-plane account and runtime ingress is public, with incarnation bearer authentication unchanged. This intentionally reduces infrastructure isolation. Google machine ID tokens for the ordinary API are a different credential class from orb workload tokens. Current wiring: `apps/control-plane/src/main.ts`, `infra/{run,oidc,hosting}.tf`; authentication: `docs/credentials.md`.
 

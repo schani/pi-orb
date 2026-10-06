@@ -1,6 +1,6 @@
 # Multi-user company deployment
 
-**Implemented 2026-09-19; local qualification passed 2026-09-20; not deployed.** The single `pi-orb-issuer` application uses Google login and stateless sealed cookies. `docs/control-plane-consolidation.md` records decisions and cutover gates; `docs/deployment.md` defines the implemented topology/configuration. Dated live evidence below describes earlier releases, not this implementation.
+**Production validated 2026-10-06.** The single `pi-orb-issuer` application uses Google login and stateless sealed cookies. `pi-orb` is an unprivileged browser redirect to it. `docs/control-plane-consolidation.md` records decisions and cutover gates; `docs/deployment.md` records the current topology and live release evidence. Earlier dated evidence below describes its respective release.
 
 ## Scope (clarified 2026-09-16)
 
@@ -17,7 +17,7 @@ The initial 2026-09-15 assessment interpreted “customers” as unrelated, mutu
 - Stage 3 on `main` gives each owner independent Codex/GitHub pointers, login gates, challenges, and Pi login artifacts. Its requested production deployment is authorized; coworker onboarding is not.
 - Preview configuration is deployment-wide: one Tailscale OAuth client and tailnet. This already fits a shared company tailnet. See `docs/ports.md`.
 
-## Application identity (implemented 2026-09-19; not deployed)
+## Application identity (production validated 2026-10-06)
 
 `users` has a stable UUID, unique verified `(identity_issuer, identity_subject)` and nullable display email. Google login resolves the user before issuing a stateless twelve-hour sealed session. Email is presentation data, never identity or linking authority. No session table or per-request user lookup is required. Google company admission, cookies, logout's copied-cookie limitation and Origin-only CSRF are specified in `docs/credentials.md`.
 
