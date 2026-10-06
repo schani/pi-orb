@@ -33,7 +33,7 @@ def record():
                       "workspace_image_resource": "projects/test-project/global/images/workspace", "workspace_image_id": "456"},
         "previousServing": None,
         "serving": [{"service": name, "revision": name + "-new", "image": IMAGE, "generation": 42} for name in SERVICES],
-        "retirement": {"excluded": {}, "after": STAMP, "operations": [], "revisions": ["pi-orb-old"], "zeroes": {"pi-orb-old": {"active": STAMP, "idle": STAMP}}},
+        "retirement": {"resources": ["pi-orb-old"], "resourcesRetired": True, "excluded": {}, "after": STAMP, "operations": [], "revisions": ["pi-orb-old"], "zeroes": {"pi-orb-old": {"active": STAMP, "idle": STAMP}}},
         "fixtures": [], "migrationJob": None, "nativeCleanup": [], "qualification": None,
     }
 
@@ -43,7 +43,7 @@ class RetirementSchemaTest(unittest.TestCase):
         value = record()
         value["retirement"]["excluded"] = {"pi-orb-deleted": {"active": "2026-09-09T11:59:00Z", "idle": "2026-09-09T11:59:00.123456789Z"}}
         self.assertTrue(validate_record(value))
-        for change in ("missing", "overlap", "state", "date", "offset", "future", "old-admitted"):
+        for change in ("missing", "overlap", "state", "date", "offset", "future", "old-admitted", "missing-resources", "invalid-resources", "invalid-fence"):
             with self.subTest(change=change):
                 invalid = copy.deepcopy(value)
                 retired = invalid["retirement"]
@@ -54,6 +54,9 @@ class RetirementSchemaTest(unittest.TestCase):
                 if change == "offset": retired["excluded"]["pi-orb-deleted"]["idle"] = "2026-09-09T11:59:00+00:00"
                 if change == "future": retired["after"] = "2026-02-30T12:00:00Z"
                 if change == "old-admitted": retired["zeroes"]["pi-orb-old"]["idle"] = "2026-09-09T11:59:00Z"
+                if change == "missing-resources": del retired['resources']
+                if change == "invalid-resources": retired['resources'] = ['../foreign-resource']
+                if change == "invalid-fence": retired['resourcesRetired'] = 'true'
                 self.assertFalse(validate_record(invalid))
 
 
@@ -203,10 +206,11 @@ class ReleaseStateTest(unittest.TestCase):
             published.assert_called_once()
 
     def test_activation_requires_proof_and_matching_live_artifacts(self):
-        for change in ("missing-proof", "changed-service", "mismatched-artifact", "missing-artifacts", "regression"):
+        for change in ("missing-proof", "missing-resource-fence", "changed-service", "mismatched-artifact", "missing-artifacts", "regression"):
             with self.subTest(change=change):
                 value, cloud = record(), FakeCloud()
                 if change == "missing-proof": value["retirement"]["zeroes"] = {}
+                if change == "missing-resource-fence": value['retirement']['resourcesRetired'] = False
                 if change == "changed-service": cloud.changed = True
                 if change == "mismatched-artifact": value["artifacts"]["deploy_generation"] = 43
                 if change == "missing-artifacts": value["artifacts"] = None
@@ -223,6 +227,16 @@ class ReleaseStateTest(unittest.TestCase):
         cloud.authority["body"]["generation"] = 42
         self.assertIsNone(activate(cloud, record()).error)
         self.assertEqual(cloud.writes, [])
+
+    def test_empty_process_inventory_still_requires_resource_retirement(self):
+        value, cloud = record(), FakeCloud()
+        value['retirement']['revisions'] = []
+        value['retirement']['zeroes'] = {}
+        value['retirement']['resourcesRetired'] = False
+        self.assertIsNotNone(activate(cloud, value).error)
+        self.assertEqual(cloud.writes, [])
+        value['retirement']['resourcesRetired'] = True
+        self.assertIsNone(activate(cloud, value).error)
 
     def test_validation_does_not_overwrite_the_original_failure(self):
         cloud = FakeCloud()

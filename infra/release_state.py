@@ -87,7 +87,9 @@ def utc_epoch(value):
 
 def valid_retirement(retirement):
     if retirement is not None:
-        if not isinstance(retirement, dict) or set(retirement) != {"after", "revisions", "zeroes", "excluded", "operations"}:
+        if not isinstance(retirement, dict) or set(retirement) != {"after", "resources", "resourcesRetired", "revisions", "zeroes", "excluded", "operations"}:
+            return False
+        if not isinstance(retirement['resources'], list) or not all(valid_id(item) for item in retirement['resources']) or not isinstance(retirement['resourcesRetired'], bool):
             return False
         if utc_epoch(retirement["after"]) is None or not isinstance(retirement["revisions"], list) or not all(valid_id(item) for item in retirement["revisions"]):
             return False
@@ -342,7 +344,7 @@ def publish(cloud, record):
 
 
 def activate(cloud, record):
-    if record["artifacts"] is None or record["serving"] is None or record["retirement"] is None or record["retirement"]["operations"] or set(record["retirement"]["zeroes"]) != set(record["retirement"]["revisions"]):
+    if record["artifacts"] is None or record["serving"] is None or record["retirement"] is None or not record["retirement"]["resourcesRetired"] or record["retirement"]["operations"] or set(record["retirement"]["zeroes"]) != set(record["retirement"]["revisions"]):
         return fail("invalid", "retirement proof and serving identity are required before activation")
     current = snapshot(cloud, record["project"], record["region"])
     if current.error:

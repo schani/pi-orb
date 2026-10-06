@@ -31,7 +31,7 @@ class Pages:
     def json(self, args):
         self.json_calls.append(args)
         if args[0] == "compute": return Result([])
-        return Result([{"metadata": {"name": "pi-orb-old"}}])
+        return Result([])
 
 
 class RetirementTest(unittest.TestCase):
@@ -129,9 +129,13 @@ class RetirementTest(unittest.TestCase):
         query = parse_qs(urlsplit(cloud.calls[0][1]).query)
         self.assertEqual(query["interval.startTime"], ["2026-09-09T11:45:00Z"])
         self.assertEqual(query["interval.endTime"], ["2026-09-09T12:00:00Z"])
-        retired = wait_for_retirement(Pages([Result({})]), value, wall=lambda: "2026-09-09T12:03:00Z", limit=0)
+        clock = [0]
+        retired = wait_for_retirement(Pages([Result({})] * 13), value,
+                                      wall=lambda: datetime.fromtimestamp(datetime(2026, 9, 9, 12, 3, tzinfo=timezone.utc).timestamp() + clock[0], timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z'),
+                                      monotonic=lambda: clock[0], sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds), limit=180)
         self.assertIsNone(retired.error)
         self.assertEqual(retired.value["retirement"]["excluded"], result.value["retirement"]["excluded"])
+        self.assertTrue(retired.value['retirement']['resourcesRetired'])
 
     def test_deleted_revision_missing_either_zero_state_remains_unresolved(self):
         for state in ("active", "idle"):
@@ -221,14 +225,16 @@ class RetirementTest(unittest.TestCase):
         self.assertEqual(result.value["revisions"], ["pi-orb-deleted"])
         self.assertEqual(result.value["excluded"], {})
 
-    def test_surviving_revision_cannot_use_preboundary_zeroes(self):
+    def test_surviving_revision_cannot_retire_with_preboundary_zeroes(self):
         points = [series("pi-orb-old", state, "0", "2026-09-09T11:59:00Z") for state in ("active", "idle")]
         value = self.pending_record()
-        result = inventory(Pages([Result({"timeSeries": points})]), value, wall=lambda: "2026-09-09T12:00:00Z")
-        self.assertEqual(result.value["retirement"]["revisions"], ["pi-orb-old"])
-        self.assertEqual(evidence(value, points, "2026-09-09T12:02:00Z").value["zeroes"], {})
-        boundary = [series("pi-orb-old", state, "0", value["retirement"]["after"]) for state in ("active", "idle")]
-        self.assertIn("pi-orb-old", evidence(value, boundary, "2026-09-09T12:02:00Z").value["zeroes"])
+        cloud = Pages([Result({"timeSeries": points})])
+        cloud.json = lambda args: Result([] if args[0] == 'compute' else [{'metadata': {'name': 'pi-orb-old'}}])
+        result = inventory(cloud, value, wall=lambda: "2026-09-09T12:00:00Z")
+        self.assertEqual(result.value['retirement']['resources'], ['pi-orb-old'])
+        self.assertFalse(result.value['retirement']['resourcesRetired'])
+        blocked = wait_for_retirement(cloud, value, wall=lambda: '2026-09-09T12:02:00Z', limit=0)
+        self.assertEqual(blocked.error.kind, 'conflict')
 
     def test_saved_postboundary_proof_survives_missing_series_and_later_positive_refutes_it(self):
         value = self.pending_record()
@@ -270,7 +276,7 @@ class RetirementTest(unittest.TestCase):
     def test_deleted_but_live_revision_is_discovered(self):
         cloud = Pages([Result({"timeSeries": [series("pi-orb-deleted", "active", "1")]})])
         result = inventory(cloud, self.pending_record(), wall=lambda: "2026-09-09T12:02:00Z")
-        self.assertEqual(result.value["retirement"]["revisions"], ["pi-orb-deleted", "pi-orb-old"])
+        self.assertEqual(result.value["retirement"]["revisions"], ["pi-orb-deleted"])
         result = evidence(self.pending_record(), zeroes() + [series("pi-orb-deleted", "active", "1")], "2026-09-09T12:02:00Z")
         self.assertIn("pi-orb-deleted", result.value["revisions"])
         self.assertNotIn("pi-orb-deleted", result.value["zeroes"])
@@ -299,7 +305,7 @@ class RetirementTest(unittest.TestCase):
             Result([{"name": "operation-old", "status": "RUNNING", "targetLink": "https://www.googleapis.com/compute/v1/projects/test-project/zones/us-central1-a/instances/pi-orb-old"}]),
             Result([]),
         ])
-        cloud.json = lambda _args: next(operations)
+        cloud.json = lambda args: next(operations) if args[0] == 'compute' else Result([])
         result = wait_for_retirement(cloud, self.pending_record(), wall=lambda: "2026-09-09T12:02:00Z", monotonic=lambda: clock[0],
                                      sleep=lambda duration: clock.__setitem__(0, clock[0] + duration), limit=15)
         self.assertIsNone(result.error)
