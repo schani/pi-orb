@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   ID_TOKEN_PATH,
   IdTokenErrorSchema,
@@ -19,9 +19,12 @@ import {
 } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
-import { errAsync, okAsync } from "neverthrow";
+import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { composeControlPlaneDatabase } from "../adapters/database.ts";
+import { PGliteClient } from "../adapters/pg/pglite-client.ts";
+import { PgResourceGate } from "../adapters/pg/resource-gate.ts";
 import { DEFAULT_BROKER_CONSTANTS } from "../domain/constants.ts";
 import type { StoreError } from "../domain/errors.ts";
 import {
@@ -85,13 +88,31 @@ describe("runtime broker routes", () => {
   };
 
   it("returns pending then the persisted initial pin only to the current runtime", async () => {
+    await app.close();
+    await startApp(TEST_ISSUER_CONSTANTS, store, null, true);
     store.seedOrb(
       makeOrbRow(ORB, PROJECT, "starting", { runtimeTokenHash: sha256(TOKEN), hostIncarnation: 1 }),
     );
     initialCheckoutCommit
       .mockReturnValueOnce(okAsync(null))
       .mockReturnValueOnce(okAsync("a".repeat(40)));
-    const headers = { authorization: `Bearer ${TOKEN}`, "x-orb-incarnation": "1" };
+    const headers = {
+      host: "host.docker.internal:8443",
+      authorization: `Bearer ${TOKEN}`,
+      "x-orb-incarnation": "1",
+    };
+    for (const authorization of [undefined, "Bearer wrong"]) {
+      expect(
+        (
+          await app.inject({
+            method: "GET",
+            url: "/api/runtime/initial-checkout",
+            headers: { host: headers.host, ...(authorization ? { authorization } : {}) },
+          })
+        ).statusCode,
+      ).toBe(401);
+    }
+    expect(initialCheckoutCommit).not.toHaveBeenCalled();
     const pending = await app.inject({
       method: "GET",
       url: "/api/runtime/initial-checkout",
@@ -112,6 +133,131 @@ describe("runtime broker routes", () => {
       headers: { ...headers, "x-orb-incarnation": "2" },
     });
     expect(stale.statusCode).toBe(401);
+  });
+
+  it("retains PostgreSQL checkout fences across a paused pin read on the runtime authority", async () => {
+    const db = new PGliteClient();
+    const database = composeControlPlaneDatabase(db);
+    const project = makeProjectRow(randomUUID());
+    try {
+      (await database.migrate())._unsafeUnwrap();
+      (
+        await database.users.resolveUser(
+          task,
+          { issuer: "test", subject: "owner", email: null },
+          {
+            id: project.ownerUserId,
+            now: 0,
+          },
+        )
+      )._unsafeUnwrap();
+      (await database.store.insertProject(task, project))._unsafeUnwrap();
+      for (const mutation of [
+        "none",
+        "state-version",
+        "stop",
+        "stop-start",
+        "discard",
+        "incarnation",
+        "bearer",
+      ]) {
+        const token = `${TOKEN}-${mutation}`;
+        const orb = makeOrbRow(randomUUID(), project.id, "starting", {
+          runtimeTokenHash: sha256(token),
+          hostIncarnation: 1,
+        });
+        (await database.store.insertOrb(task, orb))._unsafeUnwrap();
+        const gate = new PgResourceGate(db, {
+          acquire: () =>
+            okAsync({
+              orbId: orb.id,
+              commitSha: "a".repeat(40),
+              instructionPath: null,
+              skillRoot: null,
+              files: [],
+            }),
+        });
+        (await gate.acquire(task, orb, { signal: new AbortController().signal }))._unsafeUnwrap();
+        let entered!: () => void;
+        let release!: () => void;
+        const observing = new Promise<void>((resolve) => {
+          entered = resolve;
+        });
+        const held = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        initialCheckoutCommit.mockImplementation(() => {
+          entered();
+          return ResultAsync.fromSafePromise(held)
+            .andThen(() => gate.initialPin(task, orb))
+            .mapErr(
+              (): StoreError => ({
+                type: "store_error",
+                code: "unavailable",
+                message: "pin",
+                retryable: true,
+              }),
+            );
+        });
+        await app.close();
+        await startApp(TEST_ISSUER_CONSTANTS, database.store, null, true);
+        const response = app.inject({
+          method: "GET",
+          url: "/api/runtime/initial-checkout",
+          headers: {
+            host: "host.docker.internal:8443",
+            authorization: `Bearer ${token}`,
+            "x-orb-incarnation": "1",
+          },
+        });
+        await observing;
+        if (mutation === "stop" || mutation === "stop-start") {
+          const stopped = (
+            await database.store.requestOrbStop(task, {
+              orbId: orb.id,
+              expectedStateVersion: orb.stateVersion,
+              now: 1,
+            })
+          )._unsafeUnwrap().orb;
+          if (mutation === "stop-start")
+            (
+              await database.store.casTransition(task, {
+                orbId: orb.id,
+                expectedStateVersion: stopped.stateVersion,
+                toState: "starting",
+                stopReason: null,
+                now: 2,
+              })
+            )._unsafeUnwrap();
+        } else if (mutation === "discard") {
+          (
+            await database.store.failOrbAndRequestComputeDiscard(task, {
+              orbId: orb.id,
+              expectedStateVersion: orb.stateVersion,
+              now: 1,
+              lastError: "fixture failure",
+            })
+          )._unsafeUnwrap();
+        } else if (mutation !== "none") {
+          const fields = {
+            "state-version": "state_version=state_version+1",
+            incarnation: "host_incarnation=2",
+            bearer: "runtime_token_hash=NULL",
+          }[mutation];
+          (await db.query(`UPDATE orbs SET ${fields} WHERE id=$1`, [orb.id]))._unsafeUnwrap();
+        }
+        release();
+        const result = await response;
+        expect(result.statusCode, mutation).toBe(
+          ["none", "state-version"].includes(mutation) ? 200 : 409,
+        );
+        if (result.statusCode === 200) expect(result.json()).toEqual({ commitSha: "a".repeat(40) });
+      }
+    } finally {
+      initialCheckoutCommit.mockImplementation(() => okAsync(null));
+      await app.close();
+      await database.close();
+    }
   });
 
   it("rejects Claude access to central Pi checkout and alert authority", async () => {
@@ -183,6 +329,7 @@ describe("runtime broker routes", () => {
         createHostingAccessPolicy({
           appOrigin: "https://browser.test",
           filesOrigin: "https://files.test",
+          runtimeOrigin: "http://host.docker.internal:8443",
         })._unsafeUnwrap(),
         "https://browser.test",
       );
@@ -284,11 +431,17 @@ describe("runtime broker routes", () => {
   });
 
   it("routes native runtime alerts through central authority with bearer and incarnation fencing", async () => {
+    await app.close();
+    await startApp(TEST_ISSUER_CONSTANTS, store, null, true);
     store.seedOrb(
       makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN), hostIncarnation: 3 }),
     );
     const payload = { v: 1, requestId: "notice", message: "hello" };
-    const headers = { authorization: `Bearer ${TOKEN}`, "x-orb-incarnation": "3" };
+    const headers = {
+      host: "host.docker.internal:8443",
+      authorization: `Bearer ${TOKEN}`,
+      "x-orb-incarnation": "3",
+    };
     const stale = await app.inject({
       method: "POST",
       url: "/api/runtime/alert",

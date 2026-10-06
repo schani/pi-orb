@@ -186,6 +186,7 @@ Tracking:
 - [docs/postmortems/2026-09-27-monitoring-retirement-filter.md](docs/postmortems/2026-09-27-monitoring-retirement-filter.md) — exact per-service Monitoring queries with fail-closed pagination and retirement proof
 - [docs/postmortems/2026-09-27-vitest4-e2e-ordering.md](docs/postmortems/2026-09-27-vitest4-e2e-ordering.md) — preserve E2E resource ownership across the security-driven runner upgrade
 - [docs/postmortems/2026-09-19-composer-caret-ordering.md](docs/postmortems/2026-09-19-composer-caret-ordering.md) — native caret measurement before React normalization; deterministic selection gate and document-bubble ordering
+- [docs/postmortems/2026-10-06-central-docker-checkout-host.md](docs/postmortems/2026-10-06-central-docker-checkout-host.md) — exact runtime-authority checkout/alert paths and preserved admission fences
 - [docs/postmortems/2026-09-19-consolidation-docker-broker-host.md](docs/postmortems/2026-09-19-consolidation-docker-broker-host.md) — Docker callback authority omitted by the consolidated HTTP host guard; runtime-only broker authority and provider-specific E2E
 
 - [docs/postmortems/2026-10-06-consolidation-retirement-timeout.md](docs/postmortems/2026-10-06-consolidation-retirement-timeout.md) — application deletion preceded a retirement timeout on retained, silent revision metadata

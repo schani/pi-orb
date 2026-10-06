@@ -134,7 +134,7 @@ the response counts and hashes chunks and never reports a clean successful EOF f
 mixed bytes. Missing paths
 preserve the requested URL and return a file-specific `404` with a dashboard link. Rendering
 origin is a separate hostname mapped to this same monolith, using an origin-bound session and a host
-route allowlist containing no browser API routes. The configured broker authority is accepted only for runtime routes, with bearer authentication unchanged; local Docker uses `host.docker.internal:<port>`. It is not another browser/files alias (`docs/postmortems/2026-09-19-consolidation-docker-broker-host.md`). This contains uploaded code by origin without
+route allowlist containing no browser API routes. The configured broker authority accepts `/runtime/...` and the exact `/api/runtime/initial-checkout` and `/api/runtime/alert` endpoints, with bearer authentication unchanged; local Docker uses `host.docker.internal:<port>`. Denials persist HTTP method and fixed route identity, never raw paths/queries/credentials; healthy requests log nothing. The exact-path rule repairs central-Docker boot without weakening admission fences (`docs/postmortems/2026-10-06-central-docker-checkout-host.md`). It is not another browser/files alias (`docs/postmortems/2026-09-19-consolidation-docker-broker-host.md`). This contains uploaded code by origin without
 adding a process; normal cross-origin mutation protection still applies. Rejected: the browser
 origin with a response CSP sandbox excluding `allow-same-origin`; its opaque origin can break
 scripts, modules, and external fetches, and sandboxing alone does not replace CSRF/origin

@@ -780,8 +780,12 @@ export async function main(
     await oauthNetwork.close();
   });
   const httpTask = new ControlPlaneTask("http");
-  registerHostingAccessGuard(app, hostingAccess, appOrigin, ({ reason, surface, requestId }) =>
-    logEvent(httpTask, "auth-hosting-denied", { reason, surface, requestId }),
+  registerHostingAccessGuard(
+    app,
+    hostingAccess,
+    appOrigin,
+    ({ reason, surface, requestId, method, route }) =>
+      logEvent(httpTask, "auth-hosting-denied", { reason, surface, requestId, method, route }),
   );
   app.get("/health", async () => ({ status: "ok" }));
   // Key management dependencies are shared by the boot hook and authenticated rotation routes.
