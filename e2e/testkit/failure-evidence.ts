@@ -28,39 +28,76 @@ function errorCategory(error: unknown) {
           : "unknown";
 }
 
+const stopReason = (value: unknown) =>
+  member(value, ["stop", "length", "toolUse", "error", "aborted"]);
+const present = (value: unknown) => typeof value === "string" && value.length > 0;
+
+function authPathCategory(value: unknown) {
+  if (typeof value !== "string") return null;
+  const path = value.split(/[?#]/, 1)[0] ?? "";
+  if (path.endsWith("/api/accounts/deviceauth/usercode")) return "deviceauth/usercode";
+  if (path.endsWith("/api/accounts/deviceauth/token")) return "deviceauth/token";
+  if (path.endsWith("/oauth/token")) return "oauth/token";
+  return null;
+}
+
 export function failureRequests(value: unknown) {
   return (Array.isArray(value) ? value : [])
-    .filter((row) => object(row)["surface"] === "model")
+    .filter((row) => ["model", "auth"].includes(String(object(row)["surface"])))
     .slice(-80)
     .map((value) => {
       const row = object(value);
+      const events = (Array.isArray(row["events"]) ? row["events"] : []).slice(-80);
       return {
+        surface: member(row["surface"], ["model", "auth"]),
+        method: member(row["method"], ["GET", "POST"]),
+        pathCategory: row["surface"] === "auth" ? authPathCategory(row["path"]) : null,
         id: number(row["id"]),
         status: number(row["status"]),
         matchedRuleIndex: number(row["matchedRuleIndex"]),
         createdAt: timestamp(row["createdAt"]),
-        durationMs: number(row["durationMs"]),
+        stopReason: stopReason(row["stopReason"]),
         aborted: boolean(row["aborted"]),
         finalized: boolean(row["finalized"]),
-        eventTypes: (Array.isArray(row["events"]) ? row["events"] : [])
-          .slice(-80)
-          .map((event) =>
-            member(object(event)["type"] ?? object(event)["kind"], [
-              "response",
-              "response.created",
-              "response.in_progress",
-              "response.output_item.added",
-              "response.output_item.done",
-              "response.content_part.added",
-              "response.content_part.done",
-              "response.output_text.delta",
-              "response.output_text.done",
-              "response.completed",
-              "response.failed",
-              "response.incomplete",
-              "error",
-            ]),
-          ),
+        ...(row["surface"] === "auth"
+          ? {
+              authResponses: events
+                .filter((event) => object(event)["kind"] === "response")
+                .map((event) => {
+                  const response = object(event);
+                  const body = object(response["body"]);
+                  const code = object(body["error"])["code"];
+                  return {
+                    status: number(response["status"]),
+                    deviceAuthIdPresent: present(body["device_auth_id"]),
+                    userCodePresent: present(body["user_code"]),
+                    authorizationCodePresent: present(body["authorization_code"]),
+                    codeVerifierPresent: present(body["code_verifier"]),
+                    accessTokenPresent: present(body["access_token"]),
+                    refreshTokenPresent: present(body["refresh_token"]),
+                    authorizationPending: code === "deviceauth_authorization_pending",
+                    slowDown: code === "slow_down",
+                  };
+                }),
+            }
+          : {}),
+        eventTypes: events.map((event) =>
+          member(object(event)["type"] ?? object(event)["kind"], [
+            "response",
+            "response.created",
+            "response.in_progress",
+            "response.output_item.added",
+            "response.output_item.done",
+            "response.content_part.added",
+            "response.content_part.done",
+            "response.output_text.delta",
+            "response.output_text.done",
+            "response.completed",
+            "response.failed",
+            "response.incomplete",
+            "error",
+          ]),
+        ),
       };
     });
 }
@@ -72,6 +109,21 @@ export function failureHistory(value: unknown) {
     cursor: id(snapshot["cursor"]),
     headId: id(snapshot["headId"]),
     recordCount: records.length,
+    sessionId: id(object(snapshot["session"])["id"]),
+    assistants: records
+      .slice(-80)
+      .filter((value) => {
+        const record = object(value);
+        return record["type"] === "message" && record["role"] === "assistant";
+      })
+      .map((value) => {
+        const record = object(value);
+        return {
+          recordId: id(record["id"]),
+          parentId: id(record["parentId"]),
+          finishReason: stopReason(record["finishReason"]),
+        };
+      }),
     tools: records
       .slice(-80)
       .flatMap((value) => {
@@ -83,6 +135,7 @@ export function failureHistory(value: unknown) {
             const block = object(value);
             return {
               recordId: id(record["id"]),
+              parentId: id(record["parentId"]),
               timestamp: timestamp(record["timestamp"]),
               type: block["type"],
               callId: id(block["callId"]),
@@ -176,11 +229,11 @@ export class FailureEvidence {
   }
 
   async save(caseName: "profile-login" | "full-slice-upload", requests: () => Promise<unknown>) {
-    let modelRequests: unknown;
+    let requestLedger: unknown;
     try {
-      modelRequests = failureRequests(await requests());
+      requestLedger = failureRequests(await requests());
     } catch (error) {
-      modelRequests = { errorCategory: errorCategory(error) };
+      requestLedger = { errorCategory: errorCategory(error) };
     }
     const directory = join(import.meta.dirname, "../../test-failures", caseName);
     await mkdir(directory, { recursive: true });
@@ -191,7 +244,7 @@ export class FailureEvidence {
           capturedAt: new Date().toISOString(),
           target: this.target,
           observations: this.observations,
-          modelRequests,
+          requestLedger,
         },
         null,
         2,
