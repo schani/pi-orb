@@ -23,8 +23,9 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
   expect(source).not.toMatch(/--(?:maxWorkers|project|retry|passWithNoTests)/u);
   expect(
     source.match(/name: e2e-.*matrix\.shard.*github\.run_id.*github\.run_attempt/gu),
-  ).toHaveLength(2);
-  expect(source.match(/if: failure\(\)/gu)).toHaveLength(2);
+  ).toHaveLength(3);
+  expect(source.match(/if: failure\(\)/gu)).toHaveLength(3);
+  expect(source).toContain("name: e2e-durable-");
   const traceUpload = source
     .split("- name: Upload deterministic failure traces")[1]
     ?.split("- name:")[0];
@@ -34,6 +35,7 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
     "test-failures/*.json",
     "test-failures/profile-login/failure.json",
     "test-failures/full-slice-upload/failure.json",
+    "test-failures/subagent-*/failure.json",
   ]);
   expect(source).toContain("test-failures/lazy-return-*/trace.zip");
 });

@@ -55,7 +55,7 @@ jobs:
         run: npm run lint
 
       - name: Test
-        run: npm test
+        run: npx vitest run --maxWorkers=1 --no-file-parallelism && npm run test:infra
 
       - name: Upload deterministic failure traces
         if: failure()

@@ -18,6 +18,8 @@ class BrowserEvidenceTest(unittest.TestCase):
         ci = (ROOT / '.github/workflows/ci.yml').read_text()
         for value in ('postgres:16', 'PI_ORB_TEST_DATABASE_URL:', 'PI_ORB_DURABLE_PG_TEST_URL:'):
             self.assertIn(value, ci)
+        self.assertIn('vitest run --maxWorkers=1 --no-file-parallelism', ci)
+        self.assertIn('npm run test:infra', ci)
         docker = (ROOT / '.github/workflows/e2e.yml').read_text()
         self.assertIn('PI_ORB_E2E_BACKEND: docker', docker)
         self.assertIn('PI_ORB_AGENT_BACKEND: host-pi', docker)
