@@ -281,6 +281,7 @@ export function makeOrbRow(
   return {
     id,
     projectId,
+    harness: "pi",
     name: null,
     userTimeZone: null,
     autoNameLeaseUntil: null,

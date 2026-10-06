@@ -4,6 +4,8 @@ Orb states, reconciliation rules, idle auto-stop, and the orphan-host sweep. The
 
 ## Decisions
 
+- **Incident rule (2026-10-04):** correlate guest shutdown admission, provider audit and durable lifecycle edges before attributing a restart to an extension error. Two scoped Spot preemptions preceded secondary loadout errors; they do not explain every prior restart. Preserve replay/admission fences when restoring services and distinguish interrupted checks from completed qualification. Evidence: `docs/postmortems/2026-10-04-spot-preemption-loadout.md`.
+
 - We will implement stop/start and full restart recovery.
 - We will not implement suspend/resume initially.
 - **Decided 2026-09-17; implementation in progress, DST/tests first:** `pi-orb sleep <duration>` reuses controlled stop/start, the aggregate-work/upload/inbox drain, and a durable deadline. Due stopped sleeps wake through a source-aware system inbox notice combined into the first normal wake inference. Accepted commands and actual human input cancel; delayed upload notifications do not. No RAM suspend or new provider state. Full state, fence, expiry, failure, and cancellation contract: `docs/orb-sleep.md`.
@@ -72,8 +74,8 @@ The database state is desired/reconciliation intent as well as user-visible stat
 
 | Database state | Reconciler behavior                                                                                                                                                                                                                          |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `creating`     | Ensure the project owner's Codex/GitHub auth, provision by orb ID, then wait for runtime ready.                                                                                                                                              |
-| `starting`     | Ensure the project owner's Codex/GitHub auth, observe/start or reprovision the retained host/filesystem, then wait for runtime ready.                                                                                                        |
+| `creating`     | Ensure the project owner's selected harness/GitHub auth, provision by orb ID, then wait for runtime ready.                                                                                                                                              |
+| `starting`     | Ensure the project owner's selected harness/GitHub auth, observe/start or reprovision the retained host/filesystem, then wait for runtime ready.                                                                                                        |
 | `running`      | Observe the provider and derive runtime liveness from the ~10-second history pull; broadcast/replicate normally.                                                                                                                             |
 | `stopping`     | First finish any durable compute discard; otherwise reject new live connections, close existing proxies, perform the final history-pull barrier, stop the provider host, then mark stopped. A non-retryable drain failure atomically fails the orb and requests disposal. |
 | `stopped`      | Start the orb when any outstanding inbox message carries the wake intent; otherwise perform no runtime work and reconcile an unexpectedly running host back to stopped.                                                                       |
@@ -102,7 +104,7 @@ Reconciliation rules:
 - provider absence during `creating`/`starting` calls idempotent `provision(orbId, ...)` rather than assuming Docker/GCE semantics;
 - provider absence or unexpected stop while the database says `running` transitions to `starting` and restores the host around the retained filesystem;
 - a running provider whose runtime remains unreachable for a grace period is restarted with provider `stop`/`start`, without the controlled-stop drain because the runtime is already unhealthy; this rule applies in both `running` and `stopping`, so a pending drain is never stranded behind a dead runtime process inside a live host. What happens after the restart differs by state (decided 2026-08-06, below): `running` re-enters `starting`, while `stopping` stays put under a boot-sized grace and a one-restart cap;
-- auth challenges and blocked cohorts are keyed by owner UUID; completion wakes and CAS-reenters only that owner's blocked `creating`/`starting` rows with a fresh `state_changed_at`, while known terminal expiry/denial fails only that cohort;
+- auth challenges and blocked cohorts are scoped by owner UUID and provider; selected harness auth (`pi` → Codex, `claude` → Claude) precedes independent GitHub auth. Completion CAS-reenters matching blocked `creating`/`starting` rows with a fresh `state_changed_at`; expiry/denial fails only that provider cohort. Same-owner Pi and Claude challenges cannot overwrite or clear each other (POC, 2026-10-04);
 - retryable storage/upstream/publication and opaque Pi SDK errors leave the cohort transitional rather than moving it to `failed`; SDK classification is specified in `docs/credentials.md`;
 - `auth-blocked`, `auth-resolved`, and `auth-failed` edges carry owner UUID and provider, never device codes, URLs, tokens, or credential bodies; Codex→GitHub blocker changes are edges too;
 - an orb becomes `running` only after ready identity/session/commit data have been persisted;

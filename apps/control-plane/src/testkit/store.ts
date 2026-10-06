@@ -749,6 +749,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       this.orbs.set(params.orb.id, {
         ...params.orb,
         userTimeZone: caller.userTimeZone,
+        harness: caller.harness,
         lastBusyAt: params.orb.createdAt,
       });
       this.messages.set(params.orb.id, [

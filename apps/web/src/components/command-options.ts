@@ -5,10 +5,16 @@ export interface CommandOption {
   action?: SettingsAction;
   current?: boolean;
 }
-export function commandOptions(text: string, view: AgentSettingsEvent | null): CommandOption[] {
-  const match = /^(model|thinking)\s+(.*)$/is.exec(text);
+export function commandOptions(
+  text: string,
+  view: AgentSettingsEvent | null,
+  effortLabel: "thinking" | "effort" = "thinking",
+): CommandOption[] {
+  const match = /^(model|thinking|effort)\s+(.*)$/is.exec(text);
+  if (match && match[1]?.toLowerCase() !== "model" && match[1]?.toLowerCase() !== effortLabel)
+    return [];
   if (!match)
-    return ["model", "thinking"]
+    return ["model", effortLabel]
       .filter((name) => name.startsWith(text.toLowerCase()))
       .map((name) => ({ label: name, text: `${name} ` }));
   if (!view) return [];

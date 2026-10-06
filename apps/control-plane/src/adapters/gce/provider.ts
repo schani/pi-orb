@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   CONTROL_PLANE_URL_ENV,
+  HARNESS_ENV,
   PREVIEW_HOST_ENV,
   previewHost,
   RUNTIME_TOKEN_ENV,
@@ -252,6 +253,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
   desiredSpecFingerprint(input: {
     readonly orbId: string;
     readonly repositoryUrl: string;
+    readonly harness?: import("@pi-orb/protocol").HarnessKind;
   }): string {
     // Rendered at incarnation 0 on purpose: the fingerprint describes the
     // desired specification, not which incarnation happens to carry it, so
@@ -262,6 +264,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
         orbId: input.orbId,
         incarnation: 0,
         repositoryUrl: input.repositoryUrl,
+        harness: input.harness ?? "pi",
       }),
     });
   }
@@ -281,11 +284,17 @@ export class GceOrbHostProvider implements OrbHostProvider {
     readonly orbId: string;
     readonly incarnation: number;
     readonly repositoryUrl: string;
+    readonly harness?: import("@pi-orb/protocol").HarnessKind;
   }): GceLaunchSpec {
     return {
       imageResource: this.options.imageResource,
       imageId: this.options.imageId,
-      runtimeConfig: this.expectedConfig(input.orbId, input.incarnation, input.repositoryUrl),
+      runtimeConfig: this.expectedConfig(
+        input.orbId,
+        input.incarnation,
+        input.repositoryUrl,
+        input.harness,
+      ),
       bootImage: this.options.imageResource,
       bootDiskSizeGb: BOOT_DISK_SIZE_GB,
       machineType: this.options.machineType,
@@ -410,12 +419,14 @@ export class GceOrbHostProvider implements OrbHostProvider {
     orbId: string,
     incarnation: number,
     repositoryUrl: string,
+    harness: import("@pi-orb/protocol").HarnessKind = "pi",
   ): Readonly<Record<string, string>> {
     const tailscale = this.options.tailscale;
     return {
       ...(this.options.extraEnv ?? {}),
       [SKILLS_DIR_ENV]: "/opt/pi-orb/skills",
       PI_ORB_ID: orbId,
+      [HARNESS_ENV]: harness,
       PI_ORB_HOST_INCARNATION: String(incarnation),
       PI_ORB_REPOSITORY_URL: repositoryUrl,
       [CONTROL_PLANE_URL_ENV]: this.options.controlPlaneUrl,
@@ -502,11 +513,13 @@ export class GceOrbHostProvider implements OrbHostProvider {
       const specFingerprint = this.desiredSpecFingerprint({
         orbId: request.orbId,
         repositoryUrl: request.bootstrap.repositoryUrl,
+        harness: request.bootstrap.harness ?? "pi",
       });
       const spec = this.launchSpec({
         orbId: request.orbId,
         incarnation: request.incarnation,
         repositoryUrl: request.bootstrap.repositoryUrl,
+        harness: request.bootstrap.harness ?? "pi",
       });
 
       const runtimeImage = await this.verifyImageIdentity(

@@ -127,8 +127,12 @@ describe("shared text fields", () => {
 });
 
 describe("dashboard layout contract", () => {
-  it("uppercases the shared new-orb control", () => {
-    expect(rule(".project-new-orb")).toContain("text-transform: uppercase");
+  it("uses icon-only creation without a bottom text action", () => {
+    expect(css).not.toContain(".project-new-orb-row");
+    expect(rule(".project-name")).toContain("min-width: 0");
+    expect(css).toMatch(
+      /@media \(max-width: 600px\)[\s\S]*?\.project-head-actions > \.icon-button \{[^}]*width: 48px/,
+    );
   });
   it("lays projects out as fixed-width columns that fill rows from the left", () => {
     expect(rule(".dashboard")).toContain("grid-template-columns: repeat(auto-fill, 316px)");

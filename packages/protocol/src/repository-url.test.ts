@@ -31,6 +31,7 @@ describe("validateRepositoryUrl", () => {
     ["github.com/schani/pi-orb", "schani", "pi-orb"],
     ["GitHub.com/Owner/Repo.git", "Owner", "Repo.git"],
     ["Owner/Repo.git", "Owner", "Repo.git"],
+    ["owner/repo_name.v2", "owner", "repo_name.v2"],
   ])("canonicalizes GitHub shorthand %s to HTTPS", (raw, owner, repo) => {
     const result = validateRepositoryUrl(raw);
     expect(result.isOk()).toBe(true);
@@ -44,6 +45,16 @@ describe("validateRepositoryUrl", () => {
   });
 
   it.each([
+    "owner",
+    "owner/",
+    "/repo",
+    "owner/re po",
+    " owner/repo",
+    "owner/repo ",
+    "owner/repo..name",
+    "own..er/repo",
+    "owner/%2e%2e",
+    "git@owner/repo",
     "owner/repo/extra",
     "owner/repo/",
     "owner//repo",

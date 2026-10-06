@@ -1,6 +1,7 @@
 import type { ProjectView } from "@pi-orb/protocol";
 import { type RefObject, useRef, useState } from "react";
 import { useInitialFocus } from "../lib/use-initial-focus.ts";
+import { ConfigTabs } from "./ConfigTabs.tsx";
 import { Icon } from "./Icons.tsx";
 import { ProjectGeneralSettings } from "./ProjectGeneralSettings.tsx";
 import {
@@ -100,40 +101,16 @@ export function ProjectConfigModal({
             <Icon name="x" />
           </button>
         </header>
-        <div className="project-config-tabs" role="tablist" aria-label="Project config">
-          {TABS.map((name, index) => (
-            <button
-              key={name}
-              ref={index === initialTabIndex ? initialTab : undefined}
-              type="button"
-              role="tab"
-              id={`project-config-tab-${index}`}
-              aria-controls={`project-config-panel-${index}`}
-              aria-selected={tab === index}
-              tabIndex={tab === index ? 0 : -1}
-              disabled={saving}
-              onClick={() => setTab(index)}
-              onKeyDown={(event) => {
-                const next =
-                  event.key === "Home"
-                    ? 0
-                    : event.key === "End"
-                      ? TABS.length - 1
-                      : event.key === "ArrowLeft"
-                        ? (index + TABS.length - 1) % TABS.length
-                        : event.key === "ArrowRight"
-                          ? (index + 1) % TABS.length
-                          : null;
-                if (next === null) return;
-                event.preventDefault();
-                setTab(next);
-                document.getElementById(`project-config-tab-${next}`)?.focus();
-              }}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
+        <ConfigTabs
+          id="project-config"
+          label="Project config"
+          names={TABS}
+          selected={tab}
+          onSelect={setTab}
+          disabled={saving}
+          initialIndex={initialTabIndex}
+          initialRef={initialTab}
+        />
         {/* Panels stay mounted: incomplete JSON and write-only secret drafts remain in memory only. */}
         <div
           role="tabpanel"

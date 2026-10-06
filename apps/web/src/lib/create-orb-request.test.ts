@@ -11,6 +11,11 @@ function browserTimeZone(timeZone?: string) {
 }
 
 describe("browser orb creation request", () => {
+  it("sends an explicit selected Claude harness without changing the Pi default", () => {
+    browserTimeZone(undefined);
+    expect(createOrbRequest("new-orb", "claude")).toEqual({ id: "new-orb", harness: "claude" });
+    expect(createOrbRequest("new-orb")).toEqual({ id: "new-orb" });
+  });
   it("sends the browser's zone with the orb ID", async () => {
     browserTimeZone("America/Los_Angeles");
     const fetchMock = vi.fn(async (_path: string, init?: RequestInit) => {

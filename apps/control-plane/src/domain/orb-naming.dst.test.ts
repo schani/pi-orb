@@ -24,6 +24,34 @@ class PausingGenerator implements OrbNameGenerator {
 }
 
 describe("orb auto-naming DST", () => {
+  it("does not require Codex for Claude naming", async () => {
+    await runDst({ name: "claude-name-skipped", iterations: 5 }, async (sim) => {
+      const harness = makeHarness();
+      harness.store.seedProject(makeProjectRow("project"));
+      harness.store.seedOrb(makeOrbRow("orb", "project", "running", { harness: "claude" }));
+      const generator = new PausingGenerator();
+      const result = await sim.runTasks([
+        {
+          name: "name",
+          f: async (task) => {
+            expect(
+              (
+                await generateOrbName(
+                  task,
+                  { store: harness.store, generator, leaseMs: 30_000 },
+                  "orb",
+                  { message: "Work", readme: null },
+                )
+              )._unsafeUnwrap(),
+            ).toBe("skipped");
+          },
+        },
+      ]);
+      expect(result.isOk()).toBe(true);
+      expect(generator.calls).toBe(0);
+      expect(harness.store.orbSnapshot("orb")?.autoNameAttempts).toBe(0);
+    });
+  });
   it("coalesces concurrent triggers and assigns one generated name", async () => {
     await runDst({ name: "auto-name-coalescing", iterations: 20 }, async (sim) => {
       const harness = makeHarness();

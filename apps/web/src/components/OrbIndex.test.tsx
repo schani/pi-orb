@@ -13,6 +13,7 @@ const project: ProjectView = {
 };
 const orb: OrbView = {
   id: "orb-1",
+  harness: "pi",
   projectId: project.id,
   name: "Map tiles",
   state: "running",
@@ -48,9 +49,13 @@ describe("stacked project index", () => {
     const html = renderToStaticMarkup(
       <IndexProject {...props} list={{ items: [], error: null }} />,
     );
-    expect(html).toContain('href="/projects/atlas/orbs/new"');
-    expect(html).toContain('aria-label="New orb in Atlas"');
-    expect(html).toContain('href="#i-plus"');
+    expect(html).toContain('href="/projects/atlas/orbs/new?harness=pi"');
+    expect(html).toContain('href="/projects/atlas/orbs/new?harness=claude"');
+    expect(html).toContain('aria-label="New Pi orb in Atlas"');
+    expect(html).toContain('aria-label="New Claude orb in Atlas"');
+    expect(html).toContain('data-harness="pi"');
+    expect(html).toContain('data-harness="claude"');
+    expect(html).not.toContain('href="#i-plus"');
     expect(html).toContain('class="project-head-actions"');
     expect(html).not.toContain('class="project-new-orb-row"');
     expect(html).not.toContain("new orb</");
@@ -122,7 +127,7 @@ describe("stacked project index", () => {
         list={{ items: [orb], error: null }}
       />,
     );
-    expect(html.match(/disabled=""/g)).toHaveLength(3);
+    expect(html.match(/disabled=""/g)).toHaveLength(4);
     expect(html).not.toContain('href="/projects/atlas/orbs/new"');
     expect(html).not.toContain('href="/orbs/orb-1"');
     expect(html).toContain("deleting project…");

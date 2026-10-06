@@ -52,6 +52,7 @@ interface ComposerProps {
   /** Phone-only operation feedback, beside the initiating control. */
   feedback?: string;
   settings?: AgentSettingsEvent | null;
+  effortLabel?: "thinking" | "effort";
   settingsDisabled?: boolean;
   settingsPending?: boolean;
   onSettingsChange?: (action: SettingsAction) => void;
@@ -73,13 +74,14 @@ export function Composer({
   onAbort,
   feedback,
   settings = null,
+  effortLabel = "thinking",
   settingsDisabled = true,
   settingsPending = false,
   onSettingsChange,
 }: ComposerProps) {
   const isCommand = mode === "command";
   const [commandIndex, setCommandIndex] = useState(0);
-  const choices = commandOptions(text, settings);
+  const choices = commandOptions(text, settings, effortLabel);
   const selectedCommand = Math.min(commandIndex, Math.max(0, choices.length - 1));
   const chooseCommand = (choice: CommandOption | undefined) => {
     if (choice?.text !== undefined) {

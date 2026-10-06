@@ -1,7 +1,9 @@
 import { join } from "node:path";
 import { readMockOpenAiEnv } from "@pi-orb/mock-openai";
-import { SKILLS_DIR_ENV } from "@pi-orb/protocol";
+import { HARNESS_ENV, SKILLS_DIR_ENV } from "@pi-orb/protocol";
 import { readBrokerEnv } from "./broker/endpoint.ts";
+import { ClaudeOrbAgent } from "./claude/agent.ts";
+import type { OrbAgent } from "./domain/orb-agent.ts";
 import { ORB_MARKER_ENV } from "./hooks/env-file.ts";
 import { buildRuntimeServer } from "./http/server.ts";
 import { PiOrbAgent } from "./pi/agent.ts";
@@ -38,7 +40,12 @@ async function main(): Promise<void> {
     );
   }
   const tailscale = readTailscaleEnv(process.env);
-  const agent = new PiOrbAgent({
+  const harness = env(HARNESS_ENV, "pi");
+  if (harness !== "pi" && harness !== "claude") {
+    console.error(`${HARNESS_ENV} must be pi or claude`);
+    process.exit(1);
+  }
+  const agentOptions = {
     orbId: env("PI_ORB_ID"),
     repositoryUrl: env("PI_ORB_REPOSITORY_URL"),
     workDir,
@@ -48,7 +55,9 @@ async function main(): Promise<void> {
     previewHost: tailscale?.previewHost ?? null,
     incarnation: env("PI_ORB_HOST_INCARNATION", "0"),
     testLaunchFailure: launchFailure.inject,
-  });
+  };
+  const agent: OrbAgent =
+    harness === "claude" ? new ClaudeOrbAgent(agentOptions) : new PiOrbAgent(agentOptions);
 
   // The health server starts before slow initialization (docs/host-provider.md).
   // PTYs are admitted only after the checkout is ready, but their manager is

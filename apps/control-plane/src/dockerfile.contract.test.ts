@@ -12,6 +12,27 @@ const rootPackage = JSON.parse(readFileSync(join(repositoryRoot, "package.json")
 const dockerfile = readFileSync(join(repositoryRoot, "apps/control-plane/Dockerfile"), "utf8");
 
 describe("control-plane Dockerfile workspace contract", () => {
+  it("builds and smoke-tests Linux PTYs in a disposable dependency stage", () => {
+    expect(controlPlanePackage.dependencies?.["node-pty"]).toBe("1.1.0");
+    const stages = dockerfile.split(/^FROM /m).slice(1);
+    const dependencies = stages.find((stage) =>
+      stage.startsWith("node:24-bookworm-slim AS dependencies\n"),
+    );
+    expect(dependencies).toBeDefined();
+    expect(dependencies).toMatch(
+      /apt-get install -y --no-install-recommends python3 build-essential/,
+    );
+    expect(dependencies).toContain("--ignore-scripts");
+    expect(dependencies).toContain("rm -rf node_modules/node-pty/prebuilds");
+    expect(dependencies).toContain("npm rebuild node-pty");
+    expect(dependencies).toContain("require('node-pty')");
+    expect(dependencies).toContain("pty.spawn('/bin/sh', ['-c', 'exit 0'])");
+    const runtime = stages.at(-1) ?? "";
+    expect(runtime).toContain("COPY --from=dependencies /app /app");
+    expect(runtime).toContain("pty.spawn('/bin/sh', ['-c', 'exit 0'])");
+    expect(runtime).not.toMatch(/apt-get|build-essential|npm ci|npm rebuild/);
+  });
+
   it("copies every local control-plane dependency's package metadata and source", () => {
     const workspacePaths = rootPackage.workspaces ?? [];
     const localPackages = new Map<string, string>();

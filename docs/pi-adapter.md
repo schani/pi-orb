@@ -1,5 +1,7 @@
 # Pi integration
 
+**Local POC (2026-10-04; not deployed):** HTTP consumes the Result-based `domain/orb-agent.ts` port. `main.ts` selects Pi or co-located Claude from `PI_ORB_HARNESS`; unknown values reject. Pi behavior is unchanged; only retained-checkout preparation is shared. Claude qualification and limits: `docs/claude-agent-sdk.md`.
+
 How Pi is embedded in the orb runtime and how its persisted session maps to the harness-agnostic history model (`docs/history-replication.md`).
 
 **Thinking policy (revised and implemented 2026-09-14).** Fresh sessions default to `high`, clamped by Pi. Resumed sessions restore native model/thinking settings explicitly, including sessions with no assistant messages. Browser changes are per-session, not global Pi defaults. The former unconditional `high` override (2026-09-08) is superseded because it erased user choices. Luna summary/naming calls retain their separate minimal-reasoning policy. Runtime authority, mutation admission and failure semantics: `docs/agent-settings.md`.

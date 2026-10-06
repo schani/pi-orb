@@ -16,6 +16,10 @@ await mkdir(output); // Existing attempts are immutable.
 const stage = join(output, "staging");
 await mkdir(join(stage, "patches"), { recursive: true });
 await mkdir(join(stage, "vendor"));
+await cp(
+  join(root, "scripts/apply-dependency-patches.mjs"),
+  join(stage, "apply-dependency-patches.mjs"),
+);
 const patches = [
   "@earendil-works+pi-coding-agent+1.0.0.patch",
   "@earendil-works+pi-ai+1.0.0.patch",
@@ -66,6 +70,7 @@ await run(
   "bundle.log",
 );
 const files = [
+  "apply-dependency-patches.mjs",
   "package.json",
   "package-lock.json",
   "glideos-read.mjs",
@@ -94,7 +99,7 @@ async function install(dir, prefix) {
   await run("npm", ["ci", "--offline", "--ignore-scripts"], dir, `${prefix}-npm-ci.log`);
   await run(
     "node",
-    [join(dir, "node_modules/patch-package/index.js"), "--error-on-fail"],
+    [join(dir, "apply-dependency-patches.mjs"), "--pi-only"],
     dir,
     `${prefix}-patch.log`,
   );

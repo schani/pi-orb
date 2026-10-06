@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import type { AgentSettingsEvent } from "@pi-orb/protocol";
 import { expect as check, chromium, webkit } from "@playwright/test";
 import { createServer } from "vite";
 import { it } from "vitest";
@@ -29,6 +30,21 @@ it.each(["chromium", "webkit"] as const)(
     const hellos: (string | null)[] = [];
     const committedReplies: string[] = [];
     const mutations: string[] = [];
+    const settingsRequests: string[] = [];
+    let holdCachedSync = false;
+    const cachedSync: {
+      view?: AgentSettingsEvent;
+      snapshot?: { headId: string | null; release: () => void };
+    } = {};
+    let snapshotArrived = () => {};
+    const snapshotReceived = new Promise<void>((resolve) => {
+      snapshotArrived = resolve;
+    });
+    const afterSnapshot: (() => void)[] = [];
+    const releaseIdle = () => {
+      holdCachedSync = false;
+      for (const send of afterSnapshot.splice(0)) send();
+    };
     let heldMetadata = false;
     page.on("request", (request) => {
       if (heldMetadata && request.method() !== "GET" && request.url().includes(`/orbs/${a}/`))
@@ -67,12 +83,36 @@ it.each(["chromium", "webkit"] as const)(
         socket.onMessage((message) => {
           const frame = JSON.parse(String(message));
           if (frame.type === "client.hello") hellos.push(frame.afterRecordId);
+          if (
+            frame.type === "client.request" &&
+            ["set_model", "set_thinking"].includes(frame.action.type)
+          )
+            settingsRequests.push(frame.action.type);
           server.send(message);
         });
         server.onMessage((message) => {
           const frame = JSON.parse(String(message));
-          if (frame.type === "runtime.event" && frame.event.type === "agent_settings")
+          if (frame.type === "runtime.event" && frame.event.type === "agent_settings") {
+            if (holdCachedSync) cachedSync.view = frame.event;
             settingsWaiters.shift()?.();
+          }
+          if (holdCachedSync && frame.type === "sync.completed") {
+            let released = false;
+            cachedSync.snapshot = {
+              headId: frame.headId,
+              release: () => {
+                if (released) return;
+                released = true;
+                socket.send(message);
+              },
+            };
+            snapshotArrived();
+            return;
+          }
+          if (holdCachedSync && cachedSync.snapshot !== undefined) {
+            afterSnapshot.push(() => socket.send(message));
+            return;
+          }
           if (frame.type === "history.record") {
             lastRecord = frame.record.id;
             if (frame.record.role === "assistant")
@@ -128,6 +168,7 @@ it.each(["chromium", "webkit"] as const)(
         }
       });
       const cachedSettings = nextSettings();
+      holdCachedSync = true;
       await page.locator(`.orb-index a[href="/orbs/${a}"]`).click();
       await metadataRequested;
       const history = page.locator(".history");
@@ -145,9 +186,11 @@ it.each(["chromium", "webkit"] as const)(
         await check(
           page.getByRole("button", { name: "Send message", exact: true, includeHidden: true }),
         ).toBeDisabled();
-        for (const name of ["Rename orb", "Archive orb", "Delete orb", "Change model"]) {
+        for (const name of ["Rename orb", "Archive orb", "Delete orb"]) {
           await check(page.getByRole("button", { name, exact: true })).toBeDisabled();
         }
+        // Transcript cache carries no settings; held metadata cannot open the live socket.
+        await check(page.getByRole("button", { name: "Change model", exact: true })).toHaveCount(0);
         await check(
           page.getByRole("button", { name: "Open terminal", exact: true, includeHidden: true }),
         ).toHaveCount(0);
@@ -176,7 +219,7 @@ it.each(["chromium", "webkit"] as const)(
           );
         });
         await check(page.getByRole("button", { name: /^(Start|Stop) orb$/ })).toHaveCount(0);
-        await check(ready).toBeDisabled();
+        await check(ready).toHaveCount(0);
         check(hellos).toEqual([]);
         check(mutations).toEqual([]);
         check(terminalConnections).toEqual([]);
@@ -202,7 +245,56 @@ it.each(["chromium", "webkit"] as const)(
       ).toBe(true);
       check(await scroller.evaluate((pane) => pane.scrollTop)).toBe(heldScroll);
       await check(page.locator(".history")).toContainText("Review 100");
+      await snapshotReceived;
+      const { snapshot: cachedSnapshot, view: cachedView } = cachedSync;
+      if (!cachedSnapshot || !cachedView) throw new Error("Missing cached sync metadata");
+      check(cachedSnapshot.headId).toBe(expectedCursor);
+      check(cachedView.writable).toBe(true);
+      const model = page.getByRole("button", { name: "Change model", exact: true });
+      // Even advertised settings are unavailable until the actual snapshot/head commits.
+      await check(model).toHaveCount(0);
+      await check(ready).toHaveCount(0);
+      await check(composer).toHaveValue("draft typed before metadata");
+      for (const command of ["model", "thinking"]) {
+        await composer.fill(`/${command} `);
+        await check(page.getByRole("option")).toHaveCount(0);
+        await composer.press("Enter");
+        await check(composer).toHaveValue(`${command} `);
+        await composer.press("Escape");
+      }
+      check(settingsRequests).toEqual([]);
+      await composer.fill("draft typed before metadata");
+      cachedSnapshot.release();
+      await check(model).toBeEnabled();
       await check(ready).toBeEnabled();
+      // The synchronized catalog is selectable only after the runtime's idle status.
+      const advertisedModel = cachedView.models.find(
+        (entry) =>
+          entry.provider === cachedView.settings.model.provider &&
+          entry.id === cachedView.settings.model.id,
+      );
+      if (!advertisedModel) throw new Error("Current model was not advertised");
+      check(advertisedModel.thinkingLevels.length).toBeGreaterThan(0);
+      const controls = [
+        [model, cachedView.models.map((entry) => entry.name)],
+        [ready, advertisedModel.thinkingLevels],
+      ] as const;
+      for (const [control, labels] of controls) {
+        await control.click();
+        await check(page.getByRole("option")).toHaveCount(labels.length);
+        for (const label of labels)
+          await check(page.getByRole("option", { name: label, exact: true })).toBeDisabled();
+        await composer.press("Enter");
+        await composer.press("Escape");
+      }
+      check(settingsRequests).toEqual([]);
+      releaseIdle();
+      for (const [control, labels] of controls) {
+        await control.click();
+        for (const label of labels)
+          await check(page.getByRole("option", { name: label, exact: true })).toBeEnabled();
+        await composer.press("Escape");
+      }
       await check(composer).toHaveValue("draft typed before metadata");
       await check(page.locator(".history")).toContainText("cache a completed live record");
       await composer.fill("retain cache draft");
@@ -267,6 +359,8 @@ it.each(["chromium", "webkit"] as const)(
       check(historyReads).toBe(beforeReturn);
       check(unexpectedHistory).toBe(0);
     } finally {
+      cachedSync.snapshot?.release();
+      releaseIdle();
       await page.unrouteAll({ behavior: "wait" });
       await page.close();
       await browser.close();

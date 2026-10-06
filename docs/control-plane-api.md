@@ -1,5 +1,11 @@
 # Projects and the control-plane API
 
+## Harness selection (POC, 2026-10-04)
+
+Creation accepts optional `harness: "pi" | "claude"`, defaulting to Pi. Migration `029_orb_harness.sql` persists the required, checked value; all orb views expose it without credential data. Selection is immutable: a conflicting supplied harness on a same-ID retry returns 409, while omission preserves the accepted selection. Start/Stop and compute replacement retain it. The durable `created` lifecycle edge includes harness. In-orb spawning inherits the fenced caller row; callers cannot select a different harness.
+
+Model authentication follows the selected harness and project owner; GitHub remains independent. Claude auto-naming returns `skipped` without claiming a lease or invoking Luna, preserving Claude-only startup without Codex or API-billed Claude auxiliary inference. Pi naming is unchanged. Connection/security contract: `docs/claude-agent-sdk.md` and `docs/credentials.md`.
+
 ## Additional project instructions (implemented locally, 2026-09-15)
 
 `GET /api/v1/projects/:projectId/instructions` returns `{content, revision}` for that project, initially empty/revision 0. `PUT` accepts only `{content}` and atomically assigns content/increments revision under the project-row lock; deletion conflicts, missing project returns 404, malformed text 400, storage outage 503 and inconsistent storage 500. Replies are no-store. Text shares the personal-instructions validation contract (64 KiB UTF-8, exact whitespace, no NUL/unpaired surrogates). Fleet responses never include instruction bodies. Migration `020_project_instructions.sql` adds the two project-owned columns.
@@ -189,6 +195,7 @@ interface UpdateProjectRequest {
 
 interface CreateOrbRequest {
   id: string;
+  harness?: "pi" | "claude";
   name?: string;
   userTimeZone?: string;
 }
@@ -197,6 +204,8 @@ interface UpdateOrbRequest {
   name: string;
 }
 ```
+
+The dashboard and index call this API directly with the chosen harness; native creation links carry `?harness=pi|claude` as browser intent, not a new API field. Both paths snapshot UUID, harness and browser time zone once; Retry sends the identical body (`docs/web-ui.md`).
 
 This makes a retried create naturally idempotent without an idempotency table: the same ID, owner and identical body returns the existing resource, while a different owner or content returns `409 conflict`. Creating an orb inherits the project's owner, requests its initial start and returns it in `creating` state. `userTimeZone`, when supplied, must be a valid IANA time zone; invalid values return 400. It is a per-orb creation snapshot, not a user preference or live setting. A retry with a different supplied zone returns 409; omitting it preserves the accepted zone. Concurrent same-ID creates preserve the first accepted snapshot. Migration `027_orb_user_time_zone.sql` adds nullable `orbs.user_time_zone TEXT` without backfill; the stored value is durable diagnostic evidence.
 
@@ -218,6 +227,7 @@ interface ProjectView {
 interface OrbView {
   id: string;
   projectId: string;
+  harness: "pi" | "claude";
   name: string | null;
   state: "creating" | "starting" | "running" | "stopping" | "stopped" | "failed" | "deleting"
     | "archiving" | "archived";
@@ -337,7 +347,7 @@ Status behavior:
 - project creation returns `201`;
 - project delete returns `202` with `state: "deleting"`, atomically prevents new child creation, and eventually makes the project and all child orb resources return `404` (`docs/project-deletion.md`);
 - orb creation and start/stop requests return `202` with the current `OrbView`;
-- before creating/starting the host, the backend resolves and refreshes the project owner's Codex/GitHub OAuth; if interaction is required, the orb remains in `creating`/`starting` and `actionRequired` returns an actionable challenge only to that owner;
+- before creating/starting the host, the backend resolves the project owner's selected harness credential and independent GitHub authentication; if interaction is required, the orb remains in `creating`/`starting` and `actionRequired` returns an actionable challenge only to that owner;
 - the browser polls only the normal orb resource, not an auth resource; when login succeeds the backend resumes lifecycle work automatically;
 - lifecycle endpoints are idempotent when already moving toward or in the requested state;
 - delete returns `202` with `state: "deleting"`, conflicts with every other orb mutation once accepted, and eventually makes the orb and history endpoints return `404` (`docs/orb-deletion.md`);

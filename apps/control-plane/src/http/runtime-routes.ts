@@ -72,6 +72,13 @@ import { sendMcpError } from "./mcp-routes.ts";
 import { sendProjectInstructionsError } from "./project-instructions.ts";
 
 export interface RuntimeRouteDeps {
+  readonly claudeCredential?: (
+    task: SimulationTask,
+    orb: OrbRow,
+  ) => ResultAsync<
+    import("@pi-orb/protocol").ClaudeSubscriptionGrant | null,
+    import("../domain/claude-auth.ts").ClaudeAuthError
+  >;
   readonly appOrigin: string;
   readonly tailnetDnsName?: string;
   readonly spawn: (
@@ -268,6 +275,28 @@ export function registerRuntimeRoutes(
     }
     return { kind: "orb", orb };
   };
+
+  app.post("/runtime/v1/claude-subscription", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind === "unavailable") return reply.code(503).send({ error: "unavailable" });
+    if (auth.kind !== "orb") return reply.code(401).send(unauthorized);
+    if (auth.orb.harness !== "claude") return reply.code(403).send({ error: "wrong_harness" });
+    if (
+      typeof request.body !== "object" ||
+      request.body === null ||
+      Array.isArray(request.body) ||
+      Object.keys(request.body).length !== 0
+    )
+      return reply.code(400).send({ error: "invalid_request" });
+    if (!deps.claudeCredential) return reply.code(503).send({ error: "unavailable" });
+    const grant = await deps.claudeCredential(task, auth.orb);
+    return grant.isErr()
+      ? reply.code(503).send({ error: "unavailable" })
+      : grant.value === null
+        ? reply.code(409).send({ error: "auth_required" })
+        : reply.send(grant.value);
+  });
 
   app.put<{ Params: { orbId: string } }>(
     ORB_SPAWN_PATH,

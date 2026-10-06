@@ -5,6 +5,30 @@ import test from "node:test";
 const iam = readFileSync(new URL("./iam.tf", import.meta.url), "utf8");
 const main = readFileSync(new URL("./main.tf", import.meta.url), "utf8");
 
+test("Claude subscription parent grants only control-plane version access", () => {
+  const claude = readFileSync(new URL("../claude-auth.tf", import.meta.url), "utf8");
+  assert.match(claude, /secret_id = "pi-orb-credential-claude-subscription"/);
+  assert.match(claude, /replication \{\s+auto \{\}/);
+  const bindings = [
+    ...claude.matchAll(
+      /resource "google_secret_manager_secret_iam_member" "[^"]+" \{([\s\S]*?)\n\}/g,
+    ),
+  ];
+  assert.equal(bindings.length, 2);
+  assert.deepEqual(bindings.map((binding) => binding[1].match(/role\s+= "([^"]+)"/)?.[1]).sort(), [
+    "roles/secretmanager.secretAccessor",
+    "roles/secretmanager.secretVersionManager",
+  ]);
+  for (const binding of bindings) {
+    assert.match(binding[1], /secret_id = google_secret_manager_secret\.claude_subscription\.id/);
+    assert.match(binding[1], /member\s+= "serviceAccount:\$\{local\.control_plane_email\}"/);
+  }
+  assert.doesNotMatch(
+    claude,
+    /google_secret_manager_secret_version"|secret_data|allUsers|allAuthenticatedUsers|orb_vm|issuer/,
+  );
+});
+
 test("recurring firewall authority excludes the foundation build firewall", () => {
   const block = iam.match(
     /resource "google_project_iam_member" "deployer_application_firewalls" \{[\s\S]*?\n\}/,

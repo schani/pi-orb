@@ -1,30 +1,38 @@
+import type { HarnessKind, ProjectView } from "@pi-orb/protocol";
 import type { MouseEventHandler } from "react";
-import { Icon } from "./Icons.tsx";
+import { HarnessIcon } from "./HarnessIcon.tsx";
 
 export function ProjectNewOrbLink({
-  projectId,
+  project,
+  harness,
   disabled,
-  iconLabel,
   onClick,
 }: {
-  projectId: string;
+  project: Pick<ProjectView, "id" | "name">;
+  harness: HarnessKind;
   disabled: boolean;
-  iconLabel?: string;
-  onClick?: MouseEventHandler<HTMLAnchorElement>;
+  onClick: MouseEventHandler<HTMLAnchorElement>;
 }) {
-  const className =
-    iconLabel === undefined ? "project-new-orb" : "icon-button project-new-orb-icon";
-  const content = iconLabel === undefined ? "new orb" : <Icon name="plus" />;
+  const label = `New ${harness === "pi" ? "Pi" : "Claude"} orb in ${project.name}`;
+  const content = <HarnessIcon harness={harness} />;
   return disabled ? (
-    <button type="button" className={className} aria-label={iconLabel} title={iconLabel} disabled>
+    <button
+      type="button"
+      className="icon-button project-new-orb-icon"
+      data-harness={harness}
+      aria-label={label}
+      title={label}
+      disabled
+    >
       {content}
     </button>
   ) : (
     <a
-      className={className}
-      href={`/projects/${encodeURIComponent(projectId)}/orbs/new`}
-      aria-label={iconLabel}
-      title={iconLabel}
+      className="icon-button project-new-orb-icon"
+      data-harness={harness}
+      href={`/projects/${encodeURIComponent(project.id)}/orbs/new?harness=${harness}`}
+      aria-label={label}
+      title={label}
       onClick={onClick}
     >
       {content}

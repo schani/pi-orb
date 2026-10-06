@@ -1,8 +1,7 @@
 import type { OrbView, ProjectView } from "@pi-orb/protocol";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { type ApiError, createOrb, describeApiError, listOrbs, listProjects } from "../lib/api.ts";
+import { type ApiError, describeApiError, listOrbs, listProjects } from "../lib/api.ts";
 import type { AppSearchItem } from "../lib/app-search.ts";
-import { createOrbRequest } from "../lib/create-orb-request.ts";
 import {
   buildDashboardSearchSource,
   type DashboardOrbListSnapshot,
@@ -18,7 +17,6 @@ import {
   splitProjectOrbs,
 } from "../lib/project-orbs.ts";
 import { useAddressedProject } from "../lib/use-addressed-project.ts";
-import { generateUuid } from "../lib/uuid.ts";
 import { useAppSearchSource } from "./AppSearch.tsx";
 import { ProjectHeader } from "./ProjectHeader.tsx";
 import { StateTile } from "./StateTile.tsx";
@@ -103,45 +101,6 @@ export function IndexProject({
   onCreated: (orb: OrbView) => void;
   onSelect: () => void;
 }) {
-  const [creation, setCreation] = useState<
-    { id: string; type: "pending" } | { id: string; type: "failed"; error: ApiError } | null
-  >(null);
-  const creating = useRef(false);
-  const active = useRef(true);
-  const navigation = useRef(0);
-  useEffect(() => {
-    active.current = project.state !== "deleting";
-    const changedRoute = () => {
-      navigation.current += 1;
-    };
-    window.addEventListener("popstate", changedRoute);
-    window.addEventListener("pi-orb:navigate", changedRoute);
-    return () => {
-      active.current = false;
-      window.removeEventListener("popstate", changedRoute);
-      window.removeEventListener("pi-orb:navigate", changedRoute);
-    };
-  }, [project.state]);
-  const create = async (id: string) => {
-    if (creating.current || !active.current) return;
-    creating.current = true;
-    const intent = navigation.current;
-    const sourcePath = window.location.pathname;
-    setCreation({ id, type: "pending" });
-    const result = await createOrb(project.id, createOrbRequest(id));
-    creating.current = false;
-    if (!active.current) return;
-    if (result.isErr()) {
-      setCreation({ id, type: "failed", error: result.error });
-      return;
-    }
-    setCreation(null);
-    onCreated(result.value);
-    // A later navigation wins over a slow create response, but the new row still appears.
-    if (navigation.current === intent && window.location.pathname === sourcePath) {
-      navigate(`/orbs/${encodeURIComponent(result.value.id)}`);
-    }
-  };
   const shelves = splitProjectOrbs(list?.items ?? [], orbOrder);
   const currentArchived = shelves.archive.some((orb) => orb.id === orbId);
   const [archiveOpen, setArchiveOpen] = useState(currentArchived);
@@ -161,26 +120,7 @@ export function IndexProject({
     ));
   return (
     <section className="ix-project" aria-label={project.name}>
-      <ProjectHeader
-        project={project}
-        orbCreation={{
-          pending: creation?.type === "pending",
-          onClick: (event) => {
-            if (
-              event.defaultPrevented ||
-              event.button !== 0 ||
-              event.metaKey ||
-              event.ctrlKey ||
-              event.shiftKey ||
-              event.altKey
-            )
-              return;
-            event.preventDefault();
-            void create(creation?.id ?? generateUuid());
-          },
-        }}
-        onChanged={onChanged}
-      />
+      <ProjectHeader project={project} onCreated={onCreated} onChanged={onChanged} />
       {project.state === "deleting" ? (
         <div className="project-progress">
           {project.deletionProgress === undefined
@@ -189,23 +129,6 @@ export function IndexProject({
         </div>
       ) : (
         <>
-          {creation?.type === "pending" && (
-            <div className="project-progress" role="status">
-              creating orb…
-            </div>
-          )}
-          {creation?.type === "failed" && (
-            <div className="banner banner-error ix-load-error" role="alert">
-              Failed to create orb: {describeApiError(creation.error)}{" "}
-              <button
-                type="button"
-                className="text-action"
-                onClick={() => void create(creation.id)}
-              >
-                retry
-              </button>
-            </div>
-          )}
           {list?.items == null && list?.error == null && (
             <div className="project-progress" role="status">
               loading…

@@ -326,70 +326,80 @@ describe("GceOrbHostProvider", () => {
     expect(transport.requests).toHaveLength(1);
   });
 
-  it("creates a Spot native instance with composed configuration", async () => {
-    const transport = new FakeTransport([
-      () => notFound, // instance get
-      () => notFound, // disk get
-      () => ok200({ name: "op-disk" }), // disk insert
-      () => done, // op wait
-      () => ok200(currentWorkspaceDisk()), // created disk identity
-      () => ok200({ name: "op-inst" }), // instance insert
-      () => done, // op wait
-    ]);
-    const provider = makeProvider(transport);
-    const result = await provider.provision(task, provisionRequest, context);
-    expect(result.isOk(), JSON.stringify(result)).toBe(true);
-    const insert = transport.requests.find(
-      (request) => request.method === "POST" && request.path.endsWith("/instances"),
-    );
-    expect(insert).toBeDefined();
-    const body = insert?.body ?? {};
-    expect(body["name"]).toBe("pi-orb-orb-1-i0");
-    expect((body["labels"] as Record<string, unknown>)["pi-orb-host-incarnation"]).toBe("0");
-    expect(result.isOk() && result.value.incarnation).toBe(0);
-    expect((body["scheduling"] as Record<string, unknown>)["provisioningModel"]).toBe("SPOT");
-    expect((body["scheduling"] as Record<string, unknown>)["instanceTerminationAction"]).toBe(
-      "STOP",
-    );
-    const disks = body["disks"] as Record<string, unknown>[];
-    expect(disks[1]?.["autoDelete"]).toBe(false);
-    const dataDiskInsert = transport.requests.find(
-      (request) => request.method === "POST" && request.path.endsWith("/disks"),
-    );
-    expect(dataDiskInsert?.body?.["sizeGb"]).toBe("50");
-    expect(dataDiskInsert?.body?.["sourceImage"]).toBe(
-      "projects/projxx/global/images/pi-orb-workspace-20260908",
-    );
-    const items = (body["metadata"] as { items: { key: string; value: string }[] }).items;
-    const token = items.find((item) => item.key === "pi-orb-runtime-token")?.value ?? "";
-    expect(token).not.toBe("");
-    if (result.isOk()) expect(result.value.runtimeTokenHash).toBe(sha256(token));
-    const config = JSON.parse(
-      items.find((item) => item.key === "pi-orb-config")?.value ?? "{}",
-    ) as Record<string, string>;
-    expect(config).toMatchObject({
-      PI_ORB_ID: "orb-1",
-      PI_ORB_HOST_INCARNATION: "0",
-      PI_ORB_REPOSITORY_URL: "https://github.com/o/r",
-      PI_ORB_CONTROL_PLANE_URL: "https://runtime.example",
-      PI_ORB_RUNTIME_TOKEN: token,
-      PI_ORB_SKILLS_DIR: "/opt/pi-orb/skills",
-    });
-    expect(
-      (disks[0]?.["initializeParams"] as Record<string, unknown> | undefined)?.["sourceImage"],
-    ).toBe("projects/projxx/global/images/pi-orb-native-20260905");
-    expect(items.find((item) => item.key === "google-logging-enabled")?.value).toBe("true");
-    expect(items.find((item) => item.key === "enable-guest-attributes")?.value).toBe("TRUE");
-    expect(items.find((item) => item.key === "block-project-ssh-keys")?.value).toBe("TRUE");
-    const spec = items.find((item) => item.key === "pi-orb-host-spec-fingerprint")?.value;
-    expect(spec).toBe(result.isOk() ? result.value.specFingerprint : "");
-    expect(items.some((item) => item.key === "pi-orb-script-sha256")).toBe(false);
-    // Transitional rollover fence: the legacy generation stamp carries the
-    // configured deploy generation so a draining pre-replacement revision
-    // reads new instances as "the future" and never repairs them backward
-    // (docs/compute-replacement.md). It is a stamp only — nothing in the
-    // current adapter reads it back.
-  });
+  it.each(["pi", "claude"] as const)(
+    "creates a Spot native %s instance with composed configuration",
+    async (harness) => {
+      const transport = new FakeTransport([
+        () => notFound, // instance get
+        () => notFound, // disk get
+        () => ok200({ name: "op-disk" }), // disk insert
+        () => done, // op wait
+        () => ok200(currentWorkspaceDisk()), // created disk identity
+        () => ok200({ name: "op-inst" }), // instance insert
+        () => done, // op wait
+      ]);
+      const provider = makeProvider(transport, undefined, undefined, {
+        extraEnv: { PI_ORB_HARNESS: "wrong" },
+      });
+      const result = await provider.provision(
+        task,
+        { ...provisionRequest, bootstrap: { ...provisionRequest.bootstrap, harness } },
+        context,
+      );
+      expect(result.isOk(), JSON.stringify(result)).toBe(true);
+      const insert = transport.requests.find(
+        (request) => request.method === "POST" && request.path.endsWith("/instances"),
+      );
+      expect(insert).toBeDefined();
+      const body = insert?.body ?? {};
+      expect(body["name"]).toBe("pi-orb-orb-1-i0");
+      expect((body["labels"] as Record<string, unknown>)["pi-orb-host-incarnation"]).toBe("0");
+      expect(result.isOk() && result.value.incarnation).toBe(0);
+      expect((body["scheduling"] as Record<string, unknown>)["provisioningModel"]).toBe("SPOT");
+      expect((body["scheduling"] as Record<string, unknown>)["instanceTerminationAction"]).toBe(
+        "STOP",
+      );
+      const disks = body["disks"] as Record<string, unknown>[];
+      expect(disks[1]?.["autoDelete"]).toBe(false);
+      const dataDiskInsert = transport.requests.find(
+        (request) => request.method === "POST" && request.path.endsWith("/disks"),
+      );
+      expect(dataDiskInsert?.body?.["sizeGb"]).toBe("50");
+      expect(dataDiskInsert?.body?.["sourceImage"]).toBe(
+        "projects/projxx/global/images/pi-orb-workspace-20260908",
+      );
+      const items = (body["metadata"] as { items: { key: string; value: string }[] }).items;
+      const token = items.find((item) => item.key === "pi-orb-runtime-token")?.value ?? "";
+      expect(token).not.toBe("");
+      if (result.isOk()) expect(result.value.runtimeTokenHash).toBe(sha256(token));
+      const config = JSON.parse(
+        items.find((item) => item.key === "pi-orb-config")?.value ?? "{}",
+      ) as Record<string, string>;
+      expect(config).toMatchObject({
+        PI_ORB_ID: "orb-1",
+        PI_ORB_HARNESS: harness,
+        PI_ORB_HOST_INCARNATION: "0",
+        PI_ORB_REPOSITORY_URL: "https://github.com/o/r",
+        PI_ORB_CONTROL_PLANE_URL: "https://runtime.example",
+        PI_ORB_RUNTIME_TOKEN: token,
+        PI_ORB_SKILLS_DIR: "/opt/pi-orb/skills",
+      });
+      expect(
+        (disks[0]?.["initializeParams"] as Record<string, unknown> | undefined)?.["sourceImage"],
+      ).toBe("projects/projxx/global/images/pi-orb-native-20260905");
+      expect(items.find((item) => item.key === "google-logging-enabled")?.value).toBe("true");
+      expect(items.find((item) => item.key === "enable-guest-attributes")?.value).toBe("TRUE");
+      expect(items.find((item) => item.key === "block-project-ssh-keys")?.value).toBe("TRUE");
+      const spec = items.find((item) => item.key === "pi-orb-host-spec-fingerprint")?.value;
+      expect(spec).toBe(result.isOk() ? result.value.specFingerprint : "");
+      expect(items.some((item) => item.key === "pi-orb-script-sha256")).toBe(false);
+      // Transitional rollover fence: the legacy generation stamp carries the
+      // configured deploy generation so a draining pre-replacement revision
+      // reads new instances as "the future" and never repairs them backward
+      // (docs/compute-replacement.md). It is a stamp only — nothing in the
+      // current adapter reads it back.
+    },
+  );
 
   it("rejects an unexpected workspace image identity before disk creation", async () => {
     const transport = new FakeTransport([() => notFound, () => notFound]);
@@ -963,6 +973,16 @@ describe("GceOrbHostProvider", () => {
 });
 
 describe("GceOrbHostProvider host specification", () => {
+  it("includes selected harness in immutable specification", () => {
+    const provider = makeProvider(new FakeTransport([]));
+    const input = { orbId: "orb-1", repositoryUrl: "https://github.com/o/r" };
+    expect(provider.desiredSpecFingerprint(input)).toBe(
+      provider.desiredSpecFingerprint({ ...input, harness: "pi" }),
+    );
+    expect(provider.desiredSpecFingerprint({ ...input, harness: "claude" })).not.toBe(
+      provider.desiredSpecFingerprint(input),
+    );
+  });
   const specInput = {
     orbId: provisionRequest.orbId,
     repositoryUrl: provisionRequest.bootstrap.repositoryUrl,

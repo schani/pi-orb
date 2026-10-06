@@ -1,0 +1,162 @@
+{
+  "sdkVersion": "0.3.289",
+  "cliVersion": "2.1.289",
+  "compaction": {
+    "metadataKeys": [
+      "cumulativeDroppedTokens",
+      "durationMs",
+      "postTokens",
+      "preTokens",
+      "preservedMessages",
+      "preservedSegment",
+      "trigger"
+    ],
+    "boundaryKeys": [
+      "compactMetadata",
+      "content",
+      "cwd",
+      "entrypoint",
+      "gitBranch",
+      "isMeta",
+      "isSidechain",
+      "level",
+      "logicalParentUuid",
+      "parentUuid",
+      "sessionId",
+      "slug",
+      "subtype",
+      "timestamp",
+      "type",
+      "userType",
+      "uuid",
+      "version"
+    ],
+    "summaryKeys": [
+      "cwd",
+      "entrypoint",
+      "gitBranch",
+      "isCompactSummary",
+      "isSidechain",
+      "isVisibleInTranscriptOnly",
+      "message",
+      "parentUuid",
+      "promptId",
+      "sessionId",
+      "slug",
+      "timestamp",
+      "turnPosition",
+      "type",
+      "userType",
+      "uuid",
+      "version"
+    ]
+  },
+  "conversationShapes": [
+    {
+      "type": "user",
+      "keys": [
+        "cwd",
+        "entrypoint",
+        "gitBranch",
+        "isSidechain",
+        "message",
+        "parentUuid",
+        "permissionMode",
+        "promptId",
+        "promptSource",
+        "sessionId",
+        "timestamp",
+        "turnOrigin",
+        "turnPosition",
+        "type",
+        "userType",
+        "uuid",
+        "version"
+      ],
+      "messageKeys": ["content", "role"]
+    },
+    {
+      "type": "assistant",
+      "keys": [
+        "apiBlockIndex",
+        "cwd",
+        "effort",
+        "entrypoint",
+        "gitBranch",
+        "isSidechain",
+        "message",
+        "parentUuid",
+        "perTurnEffort",
+        "sessionId",
+        "timestamp",
+        "type",
+        "userType",
+        "uuid",
+        "version"
+      ],
+      "messageKeys": [
+        "content",
+        "id",
+        "model",
+        "role",
+        "stop_details",
+        "stop_reason",
+        "stop_sequence",
+        "type",
+        "usage"
+      ]
+    },
+    {
+      "type": "user",
+      "keys": [
+        "cwd",
+        "entrypoint",
+        "gitBranch",
+        "isSidechain",
+        "message",
+        "parentUuid",
+        "promptId",
+        "sessionId",
+        "sourceToolAssistantUUID",
+        "timestamp",
+        "toolUseResult",
+        "type",
+        "userType",
+        "uuid",
+        "version"
+      ],
+      "messageKeys": ["content", "role"]
+    },
+    {
+      "type": "assistant",
+      "keys": [
+        "apiBlockIndex",
+        "cwd",
+        "effort",
+        "entrypoint",
+        "gitBranch",
+        "isSidechain",
+        "message",
+        "parentUuid",
+        "perTurnEffort",
+        "sessionId",
+        "timestamp",
+        "type",
+        "userType",
+        "uuid",
+        "version"
+      ],
+      "messageKeys": [
+        "content",
+        "id",
+        "model",
+        "role",
+        "stop_details",
+        "stop_reason",
+        "stop_sequence",
+        "type",
+        "usage"
+      ]
+    }
+  ]
+}

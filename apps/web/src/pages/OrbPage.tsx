@@ -21,6 +21,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { ClaudeAuthButton } from "../components/ClaudeAuth.tsx";
 import { Composer, type ComposerHandle, type ComposerImage } from "../components/Composer.tsx";
 import type { ComposerMode } from "../components/composer-mode.ts";
 import type { DetailContext } from "../components/DetailBody.tsx";
@@ -172,7 +173,7 @@ type OrbPageAction =
   | { type: "image_added"; image: ComposerImage }
   | { type: "image_removed"; id: string }
   | { type: "notice"; message: string }
-  | { type: "open_settings"; command: "model" | "thinking" }
+  | { type: "open_settings"; command: "model" | "thinking" | "effort" }
   | {
       type: "request_sent";
       requestId: string;
@@ -717,6 +718,49 @@ function CopyCodeButton({ code }: { code: string }) {
     >
       <Icon name="copy" />
     </button>
+  );
+}
+
+export function OrbHeaderSettings({
+  view,
+  pending,
+  effortLabel,
+  onOpen,
+}: {
+  view: AgentSettingsEvent | null;
+  pending: boolean;
+  effortLabel: "effort" | "thinking";
+  onOpen: (command: "model" | "effort" | "thinking") => void;
+}) {
+  if (view === null) return null;
+  const model = view.models.find(
+    (model) =>
+      model.provider === view.settings.model.provider && model.id === view.settings.model.id,
+  );
+  const effortAvailable = effortLabel === "thinking" || (model?.thinkingLevels.length ?? 0) > 0;
+  return (
+    <div className="orb-settings">
+      <button
+        type="button"
+        title="Change model"
+        aria-label="Change model"
+        disabled={pending}
+        onClick={() => onOpen("model")}
+      >
+        {model?.name ?? view.settings.model.id}
+      </button>
+      {effortAvailable && (
+        <button
+          type="button"
+          title={`Change ${effortLabel}`}
+          aria-label={`Change ${effortLabel}`}
+          disabled={pending}
+          onClick={() => onOpen(effortLabel)}
+        >
+          {view.settings.thinkingLevel}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -1846,32 +1890,12 @@ function OrbConversation({
           >
             <Icon name="more" />
           </button>
-          <div className="orb-settings">
-            <button
-              type="button"
-              title="Change model"
-              aria-label="Change model"
-              disabled={!settingsAvailable || state.pendingRequest !== null}
-              onClick={() => dispatch({ type: "open_settings", command: "model" })}
-            >
-              {settingsAvailable
-                ? (state.settings?.models.find(
-                    (model) =>
-                      model.provider === state.settings?.settings.model.provider &&
-                      model.id === state.settings?.settings.model.id,
-                  )?.name ?? state.settings?.settings.model.id)
-                : "—"}
-            </button>
-            <button
-              type="button"
-              title="Change thinking"
-              aria-label="Change thinking"
-              disabled={!settingsAvailable || state.pendingRequest !== null}
-              onClick={() => dispatch({ type: "open_settings", command: "thinking" })}
-            >
-              {settingsAvailable ? state.settings?.settings.thinkingLevel : "—"}
-            </button>
-          </div>
+          <OrbHeaderSettings
+            view={settingsAvailable ? state.settings : null}
+            pending={state.pendingRequest !== null}
+            effortLabel={orb?.harness === "claude" ? "effort" : "thinking"}
+            onOpen={(command) => dispatch({ type: "open_settings", command })}
+          />
           <div className="orb-header-actions">
             <OrbTerminal
               orbId={orbId}
@@ -2039,6 +2063,8 @@ function OrbConversation({
             <OrbNotice>
               {orb.actionRequired.type === "owner_login_required" ? (
                 <>Project owner login required for {orb.actionRequired.provider}.</>
+              ) : orb.actionRequired.type === "claude_subscription_login" ? (
+                <ClaudeAuthButton />
               ) : orb.actionRequired.verificationUri === "" ||
                 orb.actionRequired.userCode === "" ? (
                 <>
@@ -2121,6 +2147,7 @@ function OrbConversation({
       {orb?.state !== "archived" && orb?.state !== "archiving" && (
         <Composer
           ref={composerRef}
+          effortLabel={orb?.harness === "claude" ? "effort" : "thinking"}
           settings={settingsAvailable ? state.settings : null}
           settingsDisabled={settingsDisabled}
           settingsPending={state.pendingRequest?.kind === "settings"}

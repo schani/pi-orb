@@ -16,7 +16,7 @@ assert.ok(
 await mkdir(output); // Refuse to overwrite evidence.
 const stage = join(output, "staging");
 const lockSha = sha(join(local, "package-lock.json"));
-assert.equal(lockSha, "9a890cc3efd65ff14a142cb6175ab0b46e4d6a0cebea5e66ed4501abdba6c9a8");
+assert.equal(lockSha, "88cb750557e7060e8056f00ed7bf778b8acb8e1f53c4aebd8c60da4c6865749f");
 const names = ["@earendil-works+pi-coding-agent+1.0.0.patch", "@earendil-works+pi-ai+1.0.0.patch"];
 function run(command, args, cwd, log, env = {}) {
   const result = spawnSync(command, args, {
@@ -36,14 +36,13 @@ async function install(dir, prefix) {
   const graph = JSON.parse(await readFile(join(dir, "package-lock.json")));
   const aiPath = "node_modules/@earendil-works/pi-ai";
   assert.equal(graph.packages[aiPath]?.version, "1.0.0");
-  run(
-    "node",
-    [join(dir, "node_modules/patch-package/index.js"), "--error-on-fail"],
-    dir,
-    `${prefix}-patch.log`,
-  );
+  run("node", [join(dir, "apply-dependency-patches.mjs"), "--pi-only"], dir, `${prefix}-patch.log`);
 }
 await mkdir(join(stage, "patches"), { recursive: true });
+await cp(
+  join(root, "scripts/apply-dependency-patches.mjs"),
+  join(stage, "apply-dependency-patches.mjs"),
+);
 for (const file of [
   "package.json",
   "package-lock.json",
@@ -88,6 +87,7 @@ const manifest = {
   hostBundleSha: sha(join(stage, "initial-auth.mjs")),
   bundleSha: sha(join(stage, "initial-auth.mjs")),
   bundleMetaSha: sha(join(stage, "bundle-meta.json")),
+  patchHelperSha: sha(join(stage, "apply-dependency-patches.mjs")),
   sourceLockSha: lockSha,
   lockSha: sha(join(stage, "package-lock.json")),
   vendorSha: sha(join(root, "vendor", vendor)),

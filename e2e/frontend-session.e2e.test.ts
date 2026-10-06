@@ -3,16 +3,18 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { HistoryRecord } from "@pi-orb/protocol";
-import { type Browser, chromium, expect as expectPage, type Page } from "@playwright/test";
+import { type Browser, chromium, expect as expectPage, type Page, webkit } from "@playwright/test";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
+import { mockClaudeOwnerConnection } from "./testkit/claude-auth-fixture.ts";
 import {
   gotoFrontendFixture,
   gotoFrontendHistory,
   observeFrontendBoot,
 } from "./testkit/frontend-fixture.ts";
 import { waitForFixtureMedia } from "./testkit/media-ready.ts";
+import { observeProjectCreates } from "./testkit/project-create-observer.ts";
 import { projectFixtureHistory } from "./testkit/projected-history.ts";
 
 const WEB_ROOT = join(import.meta.dirname, "../apps/web");
@@ -258,6 +260,7 @@ describe("frontend-only browser behavior", () => {
     const configuredExecutable = process.env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"];
     const systemExecutable = existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined;
     browser = await chromium.launch({
+      channel: "chromium",
       ...(configuredExecutable !== undefined
         ? { executablePath: configuredExecutable }
         : systemExecutable !== undefined
@@ -2488,7 +2491,7 @@ describe("frontend-only browser behavior", () => {
           };
         });
         expectPage(geometry.rightGutter).toBe(0);
-        expectPage(geometry.widths).toEqual([28, 28, 28]);
+        expectPage(geometry.widths).toEqual([24, 24, 24, 24]);
       }
     } finally {
       await page.close();
@@ -2548,12 +2551,15 @@ describe("frontend-only browser behavior", () => {
           await header
             .locator("use")
             .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("href"))),
-        ).toEqual(hash === ORB_PATH ? ["#i-plus", "#i-gear", "#i-bin"] : ["#i-gear", "#i-bin"]);
+        ).toEqual(["#i-gear", "#i-bin"]);
         expectPage(
           await header.evaluate((node) =>
             node.parentElement?.lastElementChild?.classList.contains("project-new-orb-row"),
           ),
-        ).toBe(hash !== ORB_PATH);
+        ).toBe(false);
+        await expectPage(
+          header.getByRole("link", { name: /^New (Pi|Claude) orb in / }),
+        ).toHaveCount(2);
         await header.getByRole("button", { name: /^Configure / }).click();
         const dialog = page.getByRole("dialog");
         const general = dialog.getByRole("tabpanel", { name: "General", exact: true });
@@ -2665,10 +2671,10 @@ describe("frontend-only browser behavior", () => {
       await expectTextFieldCropMarks(page, search);
       await page.keyboard.press("Escape");
 
-      await page.getByRole("button", { name: "Personal instructions" }).click();
-      const personal = page.getByRole("dialog", { name: "~/AGENTS.md" });
+      await page.getByRole("button", { name: "Settings" }).click();
+      const personal = page.getByRole("dialog", { name: "Settings" });
       await expectTextFieldCropMarks(page, personal);
-      await personal.getByRole("button", { name: "Close personal instructions" }).click();
+      await personal.getByRole("button", { name: "Close settings" }).click();
 
       await page
         .getByRole("button", { name: /^Configure / })
@@ -2905,8 +2911,8 @@ describe("frontend-only browser behavior", () => {
       expectPage(resized?.frameHeight).toBeCloseTo(resized?.fieldHeight ?? 0, 5);
 
       await config.getByRole("button", { name: "Close project config" }).click();
-      await page.getByRole("button", { name: "Personal instructions" }).click();
-      const personal = page.getByRole("dialog", { name: "~/AGENTS.md" });
+      await page.getByRole("button", { name: "Settings" }).click();
+      const personal = page.getByRole("dialog", { name: "Settings" });
       await expectTextFieldCropMarks(page, personal);
       const personalEditor = personal.getByRole("textbox", { name: "Personal AGENTS.md" });
       const personalBounds = await personalEditor.evaluate((element) => {
@@ -3980,6 +3986,125 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
+  it.each(["chromium", "webkit"] as const)(
+    "%s: reuses one Claude owner connection across immutable harness creation choices",
+    async (engine) => {
+      const ownedBrowser = engine === "webkit" ? await webkit.launch({ headless: true }) : browser;
+      const page = await ownedBrowser.newPage();
+      const fixture = await mockClaudeOwnerConnection(page);
+      const created: string[] = [];
+      const posts: Record<string, unknown>[] = [];
+      const openConnection = async () => {
+        await gotoFrontendFixture(
+          page,
+          `${origin}/`,
+          page.getByRole("button", { name: "Settings", exact: true }),
+        );
+        await page.getByRole("button", { name: "Settings", exact: true }).click();
+        const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
+        await dialog.getByRole("tab", { name: "Claude", exact: true }).click();
+        if (fixture.actions.length === 0)
+          await dialog
+            .getByRole("button", { name: "Connect Claude subscription", exact: true })
+            .click();
+        return dialog;
+      };
+      const closeConnection = async () => {
+        await page.getByRole("button", { name: "Close settings" }).click();
+      };
+      try {
+        await page.route("**/api/v1/projects/frontend-scratchpad-project/orbs", async (route) => {
+          if (route.request().method() === "POST") {
+            const body = route.request().postDataJSON() as Record<string, unknown>;
+            if (!created.includes(body["id"] as string)) {
+              posts.push(body);
+              created.push(body["id"] as string);
+            }
+          }
+          await route.continue();
+        });
+        await page.goto(`${origin}${ORB_PATH}`);
+        const dialog = await openConnection();
+        await expectPage(
+          dialog.getByRole("link", { name: "Sign in with Anthropic" }),
+        ).toHaveAttribute("href", "https://claude.ai/oauth/authorize?fixture=1");
+        await expectPage(dialog.getByLabel("Claude completion code")).toHaveAttribute(
+          "type",
+          "password",
+        );
+        await dialog.getByLabel("Claude completion code").fill("synthetic-completion-code");
+        await dialog.getByRole("button", { name: "Complete connection" }).click();
+        await expectPage(dialog.getByRole("status")).toHaveText("Claude connected");
+        await expectPage(dialog.getByLabel("Claude completion code")).toHaveCount(0);
+        await closeConnection();
+        for (const harness of ["claude", "pi"] as const) {
+          await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb");
+          const index = page.getByRole("navigation", { name: "All project orbs" });
+          const count = posts.length;
+          await index
+            .getByRole("link", {
+              name: `New ${harness === "pi" ? "Pi" : "Claude"} orb in scratchpad`,
+              exact: true,
+            })
+            .click();
+          expectPage(posts[count]?.["harness"]).toBe(harness);
+          const metadata = await page.request.get(`${origin}/api/v1/orbs/${created[count]}`);
+          expectPage((await metadata.json()).harness).toBe(harness);
+          const conflicting = await page.request.post(
+            `${origin}/api/v1/projects/frontend-scratchpad-project/orbs`,
+            {
+              data: { ...posts[count], harness: harness === "pi" ? "claude" : "pi" },
+            },
+          );
+          expectPage(conflicting.status()).toBe(409);
+          const unchanged = await page.request.get(`${origin}/api/v1/orbs/${created[count]}`);
+          expectPage((await unchanged.json()).harness).toBe(harness);
+          await expectPage(page.getByRole("combobox", { name: /^Harness/ })).toHaveCount(0);
+          const connection = await openConnection();
+          await expectPage(connection.getByRole("status")).toHaveText("Claude connected");
+          await closeConnection();
+        }
+        expectPage(fixture.actions).toEqual([
+          { action: "connect", body: {} },
+          { action: "code", body: { code: "synthetic-completion-code" } },
+        ]);
+        expectPage(JSON.stringify(fixture.responses)).not.toMatch(
+          /token|synthetic-completion-code/,
+        );
+        for (const id of created) {
+          const history = await page.request.get(`${origin}/api/v1/orbs/${id}/history`);
+          expectPage(await history.text()).not.toContain("synthetic-completion-code");
+        }
+        await page.reload();
+        const connection = await openConnection();
+        await expectPage(connection.getByRole("status")).toHaveText("Claude connected");
+        await connection.getByRole("button", { name: "Reconnect Claude" }).click();
+        await connection.getByRole("button", { name: "Cancel connection" }).click();
+        await connection
+          .getByRole("button", { name: "Connect Claude subscription", exact: true })
+          .click();
+        await connection.getByLabel("Claude completion code").fill("synthetic-second-code");
+        await connection.getByRole("button", { name: "Complete connection" }).click();
+        await connection.getByRole("button", { name: "Disconnect Claude" }).click();
+        await expectPage(
+          connection.getByRole("button", { name: "Connect Claude subscription", exact: true }),
+        ).toBeVisible();
+        expectPage(fixture.actions.slice(-5)).toEqual([
+          { action: "connect", body: {} },
+          { action: "cancel", body: {} },
+          { action: "connect", body: {} },
+          { action: "code", body: { code: "synthetic-second-code" } },
+          { action: "disconnect", body: {} },
+        ]);
+      } finally {
+        for (const id of created) await removeFixtureOrb(page, id);
+        await page.unrouteAll({ behavior: "wait" });
+        await page.close();
+        if (engine === "webkit") await ownedBrowser.close();
+      }
+    },
+  );
+
   it.each([
     { path: "index", timeZone: "Pacific/Auckland" },
     { path: "dedicated", timeZone: "America/Los_Angeles" },
@@ -4000,13 +4125,14 @@ describe("frontend-only browser behavior", () => {
         await page.goto(`${origin}${ORB_PATH}`);
         await page
           .getByRole("navigation", { name: "All project orbs" })
-          .getByRole("link", { name: "New orb in scratchpad", exact: true })
+          .getByRole("link", { name: "New Pi orb in scratchpad", exact: true })
           .click();
       } else {
         await page.goto(`${origin}/`);
         await page.goto(`${origin}/projects/frontend-scratchpad-project/orbs/new`);
       }
       await expectPage(page).toHaveURL(/\/orbs\/[0-9a-f-]+$/);
+      expectPage(posted?.["harness"]).toBe("pi");
       expectPage(posted?.["userTimeZone"]).toBe(timeZone);
       if (path === "dedicated") {
         await page.goBack();
@@ -4025,16 +4151,12 @@ describe("frontend-only browser behavior", () => {
     const posts: Record<string, unknown>[] = [];
     let firstArrived = () => {};
     let releaseFirst = () => {};
-    let secondArrived = () => {};
     let retryArrived = () => {};
     const firstRequested = new Promise<void>((resolve) => {
       firstArrived = resolve;
     });
     const firstReply = new Promise<void>((resolve) => {
       releaseFirst = resolve;
-    });
-    const secondRequested = new Promise<void>((resolve) => {
-      secondArrived = resolve;
     });
     const retryRequested = new Promise<void>((resolve) => {
       retryArrived = resolve;
@@ -4044,16 +4166,15 @@ describe("frontend-only browser behavior", () => {
         if (route.request().method() !== "POST") return route.continue();
         posts.push(route.request().postDataJSON() as Record<string, unknown>);
         if (posts.length === 1) firstArrived();
-        if (posts.length === 2) secondArrived();
-        if (posts.length <= 2) await firstReply;
+        if (posts.length === 1) await firstReply;
         else retryArrived();
         await route.fulfill({ status: 503, json: { error: "temporary failure" } });
       });
-      await page.goto(`${origin}/projects/frontend-scratchpad-project/orbs/new`);
+      await page.goto(`${origin}/projects/frontend-scratchpad-project/orbs/new?harness=claude`);
       await firstRequested;
-      await secondRequested;
+      expectPage(posts).toHaveLength(1);
+      expectPage(posts[0]?.["harness"]).toBe("claude");
       expectPage(posts[0]?.["userTimeZone"]).toBe("Pacific/Auckland");
-      expectPage(posts[1]).toEqual(posts[0]);
       await page.evaluate(() => {
         const resolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
         Intl.DateTimeFormat.prototype.resolvedOptions = function () {
@@ -4063,8 +4184,8 @@ describe("frontend-only browser behavior", () => {
       releaseFirst();
       await page.getByRole("button", { name: "retry" }).click();
       await retryRequested;
-      expectPage(posts).toHaveLength(3);
-      expectPage(posts[2]).toEqual(posts[0]);
+      expectPage(posts).toHaveLength(2);
+      expectPage(posts[1]).toEqual(posts[0]);
     } finally {
       releaseFirst();
       await page.unrouteAll({ behavior: "wait" });
@@ -4072,7 +4193,7 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
-  it("creates from + without unmounting the workspace or clearing the draft", async () => {
+  it("creates from a harness icon without unmounting the workspace or clearing the draft", async () => {
     const page = await browser.newPage();
     await page.clock.install();
     let createdId: string | undefined;
@@ -4106,7 +4227,7 @@ describe("frontend-only browser behavior", () => {
       const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await composer.fill("keep this draft while creating");
       await expectPage(
-        index.getByRole("link", { name: "New orb in scratchpad", exact: true }),
+        index.getByRole("link", { name: "New Pi orb in scratchpad", exact: true }),
       ).toBeVisible();
       const indexNode = await index.elementHandle();
       const historyNode = await page.locator(".history").elementHandle();
@@ -4133,11 +4254,11 @@ describe("frontend-only browser behavior", () => {
           await route.fulfill({ response });
         } else await route.continue();
       });
-      await index.getByRole("link", { name: "New orb in scratchpad", exact: true }).click();
+      await index.getByRole("link", { name: "New Pi orb in scratchpad", exact: true }).click();
       await createRequested;
       await expectPage(page).toHaveURL(`${origin}${ORB_PATH}`);
       await expectPage(
-        index.getByRole("button", { name: "Creating orb in scratchpad", exact: true }),
+        index.getByRole("button", { name: "New Pi orb in scratchpad", exact: true }),
       ).toBeDisabled();
       await expectPage(index.getByRole("status")).toContainText("creating orb…");
       expectPage(await indexNode?.evaluate((node) => node.isConnected)).toBe(true);
@@ -4217,7 +4338,7 @@ describe("frontend-only browser behavior", () => {
       const index = page.getByRole("navigation", { name: "All project orbs" });
       const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await composer.fill("draft survives failure");
-      await index.getByRole("link", { name: "New orb in scratchpad", exact: true }).click();
+      await index.getByRole("link", { name: "New Pi orb in scratchpad", exact: true }).click();
       await expectPage(index.getByRole("alert")).toContainText("Failed to create orb");
       await expectPage(page).toHaveURL(`${origin}${ORB_PATH}`);
       await expectPage(composer).toHaveValue("draft survives failure");
@@ -4234,7 +4355,7 @@ describe("frontend-only browser behavior", () => {
       await expectPage(page).toHaveURL(`${origin}${ORB_PATH}`);
       await expectPage(index.getByRole("alert")).toHaveCount(0);
       await expectPage(
-        index.getByRole("button", { name: "Creating orb in scratchpad", exact: true }),
+        index.getByRole("button", { name: "New Pi orb in scratchpad", exact: true }),
       ).toHaveCount(0);
     } finally {
       release();
@@ -4243,10 +4364,12 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
-  it("keeps modified + clicks native without navigating the source workspace", async () => {
+  it("keeps modified harness clicks native without navigating the source workspace", async () => {
     const page = await browser.newPage();
     let popup: typeof page | undefined;
     let createdId: string | undefined;
+    const posts: Record<string, unknown>[] = [];
+    const stopObserving = observeProjectCreates(page.context(), posts);
     try {
       await page.goto(`${origin}${ORB_PATH}`);
       const index = page.getByRole("navigation", { name: "All project orbs" });
@@ -4254,21 +4377,32 @@ describe("frontend-only browser behavior", () => {
       // Native modified-link tabs have no opener: observe the context, not window.open/popups.
       const opened = page.context().waitForEvent("page");
       await index
-        .getByRole("link", { name: "New orb in scratchpad", exact: true })
+        .getByRole("link", { name: "New Claude orb in scratchpad", exact: true })
         .click({ modifiers: [process.platform === "darwin" ? "Meta" : "Control"] });
       popup = await opened;
       await expectPage(popup).toHaveURL(/\/orbs\/[0-9a-f-]+$/);
+      expectPage(posts).toHaveLength(1);
+      expectPage(posts[0]?.harness).toBe("claude");
       createdId = popup.url().split("/orbs/")[1];
+      expectPage(posts[0]?.id).toBe(createdId);
       await expectPage(page).toHaveURL(`${origin}${ORB_PATH}`);
       expectPage(await node?.evaluate((element) => element.isConnected)).toBe(true);
+    } catch (error) {
+      console.error("native harness tab failed", {
+        creationRequests: posts.length,
+        contextPages: page.context().pages().length,
+        sourceUnchanged: page.url() === `${origin}${ORB_PATH}`,
+      });
+      throw error;
     } finally {
+      stopObserving();
       if (createdId !== undefined) await removeFixtureOrb(page, createdId);
       await popup?.close();
       await page.close();
     }
   });
 
-  it("keeps the fleet mounted across projects, opens archives, and creates from the title plus", async () => {
+  it("keeps the fleet mounted across projects, opens archives, and creates from a title icon", async () => {
     const page = await browser.newPage();
     let release = () => {};
     let createdId: string | undefined;
@@ -4277,7 +4411,9 @@ describe("frontend-only browser behavior", () => {
       const index = page.getByRole("navigation", { name: "All project orbs" });
       await expectPage(index.locator(".ix-project")).toHaveCount(4);
       await expectPage(index.locator(".project-new-orb-row")).toHaveCount(0);
-      await expectPage(index.getByRole("link", { name: /^New orb in / })).toHaveCount(4);
+      await expectPage(index.getByRole("link", { name: /^New (Pi|Claude) orb in / })).toHaveCount(
+        8,
+      );
       const geometry = await index.locator(".project-head-name").evaluateAll((heads) =>
         heads.map((head) => {
           const actions = head.querySelector(".project-head-actions");
@@ -4345,7 +4481,7 @@ describe("frontend-only browser behavior", () => {
         "href",
         "/orbs/frontend-archived-orb",
       );
-      await index.getByRole("link", { name: "New orb in scratchpad", exact: true }).click();
+      await index.getByRole("link", { name: "New Pi orb in scratchpad", exact: true }).click();
       await expectPage(page).toHaveURL(/\/orbs\/[0-9a-f-]+$/);
       createdId = page.url().split("/orbs/")[1];
       await expectPage(page.locator(".orb-name")).toHaveText("untitled orb");

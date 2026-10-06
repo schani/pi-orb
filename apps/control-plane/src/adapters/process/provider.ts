@@ -16,6 +16,7 @@ import { createServer } from "node:net";
 import { delimiter, join } from "node:path";
 import {
   CONTROL_PLANE_URL_ENV,
+  HARNESS_ENV,
   PREVIEW_HOST_ENV,
   RUNTIME_TOKEN_ENV,
   SKILLS_DIR_ENV,
@@ -65,6 +66,7 @@ interface HostMetadata {
   readonly orbId: string;
   readonly incarnation: number;
   readonly repositoryUrl: string;
+  readonly harness: import("@pi-orb/protocol").HarnessKind;
   readonly specFingerprint: string | null;
   readonly runtimeToken: string;
   readonly port: number;
@@ -145,6 +147,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
   desiredSpecFingerprint(input: {
     readonly orbId: string;
     readonly repositoryUrl: string;
+    readonly harness?: import("@pi-orb/protocol").HarnessKind;
   }): string {
     return specFingerprintOf({
       v: 1,
@@ -155,6 +158,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       commandDirectory: this.options.commandDirectory ?? null,
       extraEnv: this.options.extraEnv ?? {},
       repositoryUrl: input.repositoryUrl,
+      harness: input.harness ?? "pi",
     });
   }
 
@@ -185,6 +189,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
         !Number.isSafeInteger(incarnation) ||
         incarnation < 0 ||
         typeof parsed.repositoryUrl !== "string" ||
+        (parsed.harness !== "pi" && parsed.harness !== "claude") ||
         typeof parsed.runtimeToken !== "string" ||
         typeof parsed.port !== "number" ||
         typeof parsed.supervisorId !== "string" ||
@@ -207,6 +212,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
         orbId,
         incarnation,
         repositoryUrl: parsed.repositoryUrl,
+        harness: parsed.harness,
         specFingerprint: typeof parsed.specFingerprint === "string" ? parsed.specFingerprint : null,
         runtimeToken: parsed.runtimeToken,
         port: parsed.port,
@@ -308,6 +314,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     delete environment[PREVIEW_HOST_ENV];
     Object.assign(environment, this.options.extraEnv ?? {}, {
       PI_ORB_ID: metadata.orbId,
+      [HARNESS_ENV]: metadata.harness,
       PI_ORB_REPOSITORY_URL: metadata.repositoryUrl,
       PI_ORB_HOST_INCARNATION: String(metadata.incarnation),
       // An unsandboxed process host cannot assert container-wide process loss.
@@ -492,6 +499,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       const specFingerprint = this.desiredSpecFingerprint({
         orbId: request.orbId,
         repositoryUrl: request.bootstrap.repositoryUrl,
+        harness: request.bootstrap.harness ?? "pi",
       });
       if (metadata === null) {
         const port = await this.allocatePort(context.signal);
@@ -501,6 +509,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
           orbId: request.orbId,
           incarnation: request.incarnation,
           repositoryUrl: request.bootstrap.repositoryUrl,
+          harness: request.bootstrap.harness ?? "pi",
           specFingerprint,
           runtimeToken: randomBytes(32).toString("hex"),
           port: port.value,

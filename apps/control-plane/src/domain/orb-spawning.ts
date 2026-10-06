@@ -19,6 +19,7 @@ export function spawnOrb(
     {
       orbId,
       projectId: caller.projectId,
+      harness: caller.harness,
       ...(request.name === undefined ? {} : { name: request.name }),
     },
     deps.hostProvider.kind,

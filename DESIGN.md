@@ -6,7 +6,7 @@
 
 pi-orb runs an AI coding agent in an isolated, remotely managed environment called an **orb**. A user should eventually be able to invoke `pi-orb` from a project, get a web-based agent experience backed by an orb, disconnect, and later reconnect from another machine without tying the orb's lifetime to a local process.
 
-Pi is the first agent harness, embedded through the Pi SDK. The host lifecycle, runtime protocol, history model, and replica storage should remain harness-agnostic enough to support another harness, such as Claude Code or Codex, later.
+Pi is the default agent harness, embedded through the Pi SDK. A co-located Claude Agent SDK POC is implemented and running locally (approved 2026-10-04; qualification scope in `docs/testing.md`, not deployed). Host lifecycle, runtime protocol and replica storage use the shared `OrbAgent` boundary; each orb's harness is immutable.
 
 ## Current vertical-slice scope
 
@@ -17,9 +17,9 @@ The first target is deliberately narrow:
 - Let users register a project with a name and public Git repository URL.
 - Clone the repository into a fresh orb without caching or synchronization optimizations.
 - Use a fixed orb runtime image and prescribed base environment; projects may add write-only environment secrets fetched by each orb runtime at boot (`docs/credentials.md`).
-- Embed Pi through its TypeScript SDK.
+- Embed Pi or the Claude Agent SDK, selected at orb creation; spawned orbs inherit the caller's harness.
 - Provide a web UI; no terminal TUI and no tmux-based interaction.
-- Run exactly one Pi session/conversation per orb.
+- Run exactly one native root conversation per orb.
 - Support a linear conversation and compaction. Do not expose branching, session switching, cloning, or forking initially. Durable send-anytime input is implemented: a message steers when delivered to a busy agent and otherwise starts a turn, while submission to a stopped or failed orb durably queues the message and requests startup (`docs/runtime-protocol.md`). Scheduled self-sleep is approved and under DST-first implementation: graceful stop/start with a durable deadline and combined first-wake notification (`docs/orb-sleep.md`).
 - Persist the orb itself only through its filesystem.
 - Replicate the complete conversation history to the control plane database.
@@ -69,10 +69,10 @@ Orb host
    |-- GCE VM later
    |
    `-- Orb runtime (Node.js)
-          |-- Pi SDK session and persistent harness history
-          |-- history pull adapter
+          |-- Pi or Claude SDK and persistent native history
+          |-- shared OrbAgent/runtime boundary
           |-- health and activity reporting
-          `-- Pi history adapter
+          `-- harness-specific normalized history adapter
 ```
 
 The browser talks only to the control plane. In the original first slice, the control plane resolves/starts the orb, loads replicated history, and performs the cursor-aware handoff. It proxies the live WebSocket content-agnostically between browser and runtime. Browser detail/image HTTP reads go through the control plane to one replica record or an already-running runtime, without waking compute. History persistence is a separate control-plane-to-runtime HTTP pull of full records, so the proxy does not need to understand agent messages. Cloud Run WebSocket behavior was validated operationally in 2026-07 (`docs/open-questions.md`, question 2).
@@ -110,6 +110,9 @@ Subsystem designs:
 - [docs/runtime-protocol.md](docs/runtime-protocol.md) — the browser↔runtime wire protocol: handshake, display frames, detail HTTP, ordering, backpressure
 - [docs/history-replication.md](docs/history-replication.md) — the harness-agnostic history model, pull-only replication, PostgreSQL schema, and implemented explicit offline recovery (2026-10-05, America/Cancun)
 - [docs/pi-adapter.md](docs/pi-adapter.md) — Pi embedding and the Pi→normalized history mapping
+- [docs/claude-code-ui-research.md](docs/claude-code-ui-research.md) — research on Claude Code custom UIs, SDK integration, and authentication caveats; no adoption decision
+- [docs/claude-agent-sdk.md](docs/claude-agent-sdk.md) — approved co-located POC, owner-central subscription auth, accepted long-lived guest bearer, native history/idle contracts and qualification
+- [docs/claude-sdk-capabilities.md](docs/claude-sdk-capabilities.md) — remote-tool, hook, skill and restart-history API audit; research only
 - [docs/subagents.md](docs/subagents.md) — local leaf subagents, minimal gotgenes fork, aggregate activity and DST-first integration/acceptance plan
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
 - [docs/multi-user.md](docs/multi-user.md) — trusted-company identity, owned projects/settings, per-user credentials, and tailnet options
@@ -142,6 +145,10 @@ Tracking:
 - [docs/postmortems/2026-10-04-ipad-sidebar-overdraw.md](docs/postmortems/2026-10-04-ipad-sidebar-overdraw.md) — missing/deleted orb view auto-placed beneath the fixed index; confirmed layout fix and superseded paint hypothesis
 
 - [docs/postmortems/2026-10-03-cached-orb-navigation.md](docs/postmortems/2026-10-03-cached-orb-navigation.md) — cached switching still pays metadata, remount, accessibility and 1Password focus costs; investigation only
+- [docs/postmortems/2026-10-04-spot-preemption-loadout.md](docs/postmortems/2026-10-04-spot-preemption-loadout.md) — two audited Spot preemptions preceded secondary loadout errors; bounded frozen-source qualification and missing sanitized exception evidence
+- [docs/postmortems/2026-10-04-claude-management-assets.md](docs/postmortems/2026-10-04-claude-management-assets.md) — atomic index replacement left new assets unregistered; completed immutable build plus process refresh restored the dashboard
+- [docs/postmortems/2026-10-04-claude-poc-validation-source-changes.md](docs/postmortems/2026-10-04-claude-poc-validation-source-changes.md) — protocol formatting triggered Vite reload during qualification; freeze imported source and manifests before browser acceptance
+- [docs/postmortems/2026-10-04-claude-auth-completion-input.md](docs/postmortems/2026-10-04-claude-auth-completion-input.md) — native PTY completion requires paste acknowledgment followed by a separate Enter; distinguish admission from exchange
 - [docs/postmortems/2026-10-02-control-plane-patch-image-build.md](docs/postmortems/2026-10-02-control-plane-patch-image-build.md) — runtime-only patch broke the control-plane image build before apply; restrict its patch set
 - [docs/postmortems/2026-10-02-webkit-lazy-return-gate.md](docs/postmortems/2026-10-02-webkit-lazy-return-gate.md) — captured split-target sidebar click, fixed rail/scroll ownership and diagnostic callback race
 - [docs/postmortems/2026-10-02-expired-metadata-route.md](docs/postmortems/2026-10-02-expired-metadata-route.md) — frontend metadata interception parsed expired-session HTML 401 as JSON; response preservation and owned route drain

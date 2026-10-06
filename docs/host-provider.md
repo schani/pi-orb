@@ -2,6 +2,10 @@
 
 How orb compute is provisioned and managed: the `OrbHostProvider` port, runtime readiness, the Docker and GCE implementations, and evaluated alternatives. The lifecycle state machine that drives these operations is specified in `docs/lifecycle.md`.
 
+## Harness launch selection (POC, 2026-10-04)
+
+The lifecycle passes the stored harness in provision bootstrap and desired-spec inputs. Process, Docker and GCE launch `PI_ORB_HARNESS=pi|claude`; provider-owned selection overrides `extraEnv`. Process metadata retains it for supervised crash relaunch and Stop/Start. The effective harness participates in the immutable fingerprint, including GCE native runtime configuration. No model bearer is added to launch specifications, provider metadata, fingerprints or public orb views.
+
 ## The `OrbHostProvider` port
 
 The abstraction is named `OrbHostProvider`. The control plane and lifecycle state machine depend only on this interface; Docker is one implementation and GCE can be another. No control-plane service or HTTP handler may invoke Docker directly.
@@ -37,6 +41,7 @@ interface ProvisionOrbHostRequest {
   incarnation: number;
   bootstrap: {
     repositoryUrl: string;
+    harness?: "pi" | "claude";
   };
 }
 
@@ -228,7 +233,7 @@ Ready means all of the following:
 - the runtime identity matches the requested orb;
 - the repository exists in the authoritative filesystem at a resolved commit;
 - the Pi session has been created or loaded from that filesystem;
-- the configured Codex credential resolves successfully;
+- the selected harness credential resolves successfully;
 - history-pull and live WebSocket handlers are installed;
 - the runtime can accept a new message when idle.
 
@@ -254,7 +259,7 @@ Expected initialization failures such as clone failure, invalid repository state
 - Boot-failure detection (implemented; born from cloud smoke-testing): while an orb is `creating`/`starting`, the reconciler records a per-probe boot picture (host state, attempts, whether the runtime ever answered, last error) exposed to the UI as a `waiting_for_runtime` state detail. Because the runtime's health server starts before slow initialization, a running host whose runtime has never answered past `unreachableBootDeadlineMs` (12 minutes for native GCE; 3 minutes for Docker/process) fails fast as `runtime_never_answered` instead of burning the 15-minute deadline; the terminal error carries the probes plus provider diagnostics (`OrbHostProvider.diagnose`, reading the GCE guest-attribute startup markers). A transiently failing diagnose defers the failure one poll so evidence is never dropped. Deadline failures carry the same evidence. Covered by DST scenarios including the adversarial-scheduling case where a best-effort host stop is cancelled and repaired by the backstop sweep.
 - The earlier in-place repair fence did not fence lifecycle authority: on 2026-08-11 a deleted stale Cloud Run revision continued reconciling for 7 minutes 42 seconds and could still start compute and fail durable orb state. Drained-revision deletion is cleanup, not correctness. Incident: `docs/postmortems/2026-08-11-release-smoke-restart-registry-timeout.md`.
 - **Immutable-host replacement superseded in-place repair (decided 2026-08-12, implemented 2026-08-16; `docs/compute-replacement.md`).** The preceding incident is history, not the contract. `ensureCurrentScript`, `setMetadata` script/image rewrites, and every `repaired` outcome are gone from the GCE adapter; there is no in-place host-repair path left in the code.
-  - **Immutable spec fingerprints.** Every provider exposes a pure `desiredSpecFingerprint({ orbId, repositoryUrl })` computed through one shared canonical helper (`apps/control-plane/src/adapters/spec-fingerprint.ts`: recursively key-sorted JSON, SHA-256) so two revisions building the same effective specification through different code paths cannot disagree. GCE hashes the native image resource and numeric ID, per-instance configuration, and boot-disk size, machine type, subnetwork, service account and scopes, scheduling, and data-disk size — all read from the single `launchSpec` that also builds the instance-insert body, so a host cannot carry a setting the fingerprint does not cover. The fingerprint is rendered at incarnation 0 on purpose: rotating an incarnation must not read as a specification change. Zone and project ID are deliberately excluded (see `docs/compute-replacement.md`): the data disk is zonal, so a zone move would provision an empty workspace and is an operator migration rather than a replacement.
+  - **Immutable spec fingerprints.** Every provider exposes a pure `desiredSpecFingerprint({ orbId, repositoryUrl, harness })` computed through one shared canonical helper (`apps/control-plane/src/adapters/spec-fingerprint.ts`: recursively key-sorted JSON, SHA-256) so two revisions building the same effective specification through different code paths cannot disagree. GCE hashes the native image resource and numeric ID, per-instance configuration, and boot-disk size, machine type, subnetwork, service account and scopes, scheduling, and data-disk size — all read from the single `launchSpec` that also builds the instance-insert body, so a host cannot carry a setting the fingerprint does not cover. The fingerprint is rendered at incarnation 0 on purpose: rotating an incarnation must not read as a specification change. Zone and project ID are deliberately excluded (see `docs/compute-replacement.md`): the data disk is zonal, so a zone move would provision an empty workspace and is an operator migration rather than a replacement.
   - **The stamp lives on the compute.** GCE writes `pi-orb-host-spec-fingerprint` into instance metadata at insert; Docker writes the `pi-orb.host-spec-fingerprint` label; the process provider records `specFingerprint` in its `host.json`. Provision-reuse and `start` verify the stamp *before any state change* and return a typed `conflict` on mismatch — a stale-spec incarnation is never started, resurrected, or rewritten. `StartOrbHostRequest.expectedSpecFingerprint` is `string | null`; null means a legacy row that predates stamping and matches only unstamped compute, so pre-migration hosts restart in place until their next ordinary Start replaces them.
   - **The deploy generation fences the decision, not the write.** `PI_ORB_HOST_SPEC_GENERATION` (infrastructure: `-var deploy_generation=$(date +%s)`, clamped monotonically by `infra/release.sh`) reaches each adapter as `OrbHostProviderOptions.specGeneration` and is committed alongside the fingerprint as the orb's `host_spec_generation`. Only the ordinary start path compares specifications; a revision configured below the committed generation declines with one edge and starts the existing compute unchanged. A draining revision therefore cannot replace newer-spec compute backward.
   - **The GCE image is pinned by resource and numeric identity.** Composition requires `PI_ORB_GCE_IMAGE_RESOURCE` and `PI_ORB_GCE_IMAGE_ID`. The provider verifies `images.get` before provisioning and fingerprints both values, so deleting and recreating an image under the same name cannot silently change the desired artifact. Local Docker image selection remains independent.

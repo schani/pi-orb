@@ -11,7 +11,7 @@ export async function guard(stage) {
   assert.equal(manifest.projectId, "35f581fb-7bbf-4542-a1e8-0d047657a71d");
   assert.equal(
     manifest.source.lock,
-    "9a890cc3efd65ff14a142cb6175ab0b46e4d6a0cebea5e66ed4501abdba6c9a8",
+    "88cb750557e7060e8056f00ed7bf778b8acb8e1f53c4aebd8c60da4c6865749f",
   );
   assert.equal(
     manifest.source.vendor,

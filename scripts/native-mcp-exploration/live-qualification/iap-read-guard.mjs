@@ -10,11 +10,11 @@ export async function guard(stage) {
   const manifest = JSON.parse(readFileSync(join(stage, "manifest.json")));
   assert.equal(
     manifest.lockSha,
-    "fddf8c7ecb31b0786bcacea89adddc6c45ab097a557e65e8c75dc90a16897694",
+    "ad895afd6cbf53cef4e1385065fe8620e008a3ed3a4cf5bcf15e7ae7e863dcf4",
   );
   assert.equal(
     manifest.sourceLockSha,
-    "9a890cc3efd65ff14a142cb6175ab0b46e4d6a0cebea5e66ed4501abdba6c9a8",
+    "88cb750557e7060e8056f00ed7bf778b8acb8e1f53c4aebd8c60da4c6865749f",
   );
   const vendor = "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz";
   assert.equal(

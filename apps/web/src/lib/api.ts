@@ -1,6 +1,7 @@
 import {
   AckOrbAlertResponseSchema,
   ActivityHeadlineResponseSchema,
+  ClaudeAuthViewSchema,
   type CommittedDisplayDetail,
   CommittedDisplayDetailSchema,
   ControlPlaneHttpErrorSchema,
@@ -107,6 +108,25 @@ export function disconnectMcpOAuth(projectId: string, id: string) {
     `/api/v1/projects/${encodeURIComponent(projectId)}/mcp/${encodeURIComponent(id)}/oauth/disconnect`,
     { method: "POST", headers: jsonHeaders, body: "{}" },
   );
+}
+
+export function getClaudeAuth(signal: AbortSignal) {
+  return apiFetch(ClaudeAuthViewSchema, "/api/v1/claude/auth", {
+    cache: "no-store",
+    signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+  });
+}
+export function claudeAuthAction(
+  action: "connect" | "code" | "cancel" | "disconnect",
+  code: string | undefined,
+  signal: AbortSignal,
+) {
+  return apiFetch(ClaudeAuthViewSchema, `/api/v1/claude/auth/${action}`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(action === "code" ? { code } : {}),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
+  });
 }
 
 export function getPersonalInstructions() {

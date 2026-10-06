@@ -1,6 +1,5 @@
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import {
@@ -38,7 +37,6 @@ import {
   reasoningHeadline,
   type ServerFrame,
   type SettingsAction,
-  validateRepositoryUrl,
 } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { err, errAsync, ok, Result, ResultAsync } from "neverthrow";
@@ -47,6 +45,7 @@ import { type BrokerEnv, HttpBrokerEndpoint } from "../broker/endpoint.ts";
 import { brokerProviderConfig } from "../broker/provider.ts";
 import { AgentSettingsController } from "../domain/agent-settings.ts";
 import { BrokerTokenClient } from "../domain/broker-client.ts";
+import { prepareCheckout } from "../domain/checkout.ts";
 import { readLiveDisplayDetail, toolTextContent } from "../domain/display-detail.ts";
 import { gateUnflushedSnapshot } from "../domain/history.ts";
 import { configurePersistentHome } from "../domain/home.ts";
@@ -172,30 +171,6 @@ interface LiveTool {
   state: "running" | "completed" | "failed";
   message?: string;
 }
-
-const execGit = (args: string[], cwd: string): ResultAsync<string, { message: string }> =>
-  ResultAsync.fromPromise(
-    new Promise<string>((resolve, reject) => {
-      execFile(
-        "git",
-        args,
-        {
-          cwd,
-          timeout: 10 * 60_000,
-          env: {
-            ...process.env,
-            GIT_ALLOW_PROTOCOL: "https",
-            GIT_TERMINAL_PROMPT: "0",
-          },
-        },
-        (error, stdout, stderr) => {
-          if (error !== null) reject(new Error(stderr || error.message));
-          else resolve(stdout.trim());
-        },
-      );
-    }),
-    (error) => ({ message: error instanceof Error ? error.message : String(error) }),
-  );
 
 /**
  * The Pi SDK integration: owns the session, translates Pi events to protocol
@@ -848,32 +823,9 @@ export class PiOrbAgent {
   }
 
   /** Fresh temp clone plus atomic rename, or validation of the reused checkout. */
-  private async prepareCheckout(repoDir: string): Promise<Result<string, RuntimeHealth>> {
-    if (!existsSync(repoDir)) {
-      const url = validateRepositoryUrl(this.options.repositoryUrl);
-      if (url.isErr()) {
-        return err(this.failed("invalid_repository_url", url.error.message, false));
-      }
-      const tmpDir = join(this.options.workDir, ".clone-tmp");
-      const cleaned = Result.fromThrowable(
-        () => {
-          rmSync(tmpDir, { recursive: true, force: true });
-          mkdirSync(this.options.workDir, { recursive: true });
-        },
-        (error) => String(error),
-      )();
-      if (cleaned.isErr()) return err(this.failed("clone_failed", cleaned.error, true));
-      const cloned = await execGit(["clone", "--", url.value.url, tmpDir], this.options.workDir);
-      if (cloned.isErr()) return err(this.failed("clone_failed", cloned.error.message, true));
-      const renamed = Result.fromThrowable(
-        () => renameSync(tmpDir, repoDir),
-        (error) => String(error),
-      )();
-      if (renamed.isErr()) return err(this.failed("clone_failed", renamed.error, true));
-    }
-    const commit = await execGit(["rev-parse", "HEAD"], repoDir);
-    if (commit.isErr()) return err(this.failed("clone_failed", commit.error.message, true));
-    return ok(commit.value);
+  private async prepareCheckout(_repoDir: string): Promise<Result<string, RuntimeHealth>> {
+    const checkout = await prepareCheckout(this.options.workDir, this.options.repositoryUrl);
+    return checkout.mapErr((error) => this.failed(error.code, error.message, error.retryable));
   }
 
   /**

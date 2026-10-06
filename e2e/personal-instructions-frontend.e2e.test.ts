@@ -62,15 +62,15 @@ it.each(["chromium", "webkit"] as const)(
         await route.continue();
       });
       await gotoFrontendFixture(page, url);
-      const gear = page.getByRole("button", { name: "Personal instructions", exact: true });
+      const gear = page.getByRole("button", { name: "Settings", exact: true });
       await check(
-        page.locator(".dashboard-totals").getByRole("button", { name: "Personal instructions" }),
+        page.locator(".dashboard-totals").getByRole("button", { name: "Settings" }),
       ).toBeVisible();
       await gear.click();
-      const dialog = page.getByRole("dialog", { name: "~/AGENTS.md", exact: true });
+      const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
       const input = dialog.getByRole("textbox", { name: "Personal AGENTS.md", exact: true });
       const save = dialog.getByRole("button", { name: "Save", exact: true });
-      const close = dialog.getByRole("button", { name: "Close personal instructions" });
+      const close = dialog.getByRole("button", { name: "Close settings" });
       await check(dialog.getByRole("alert")).toContainText("Cannot load");
       await check(save).toBeDisabled();
       failRead = false;
@@ -82,6 +82,10 @@ it.each(["chromium", "webkit"] as const)(
       releaseRead?.();
       await check(input).toBeEnabled();
       await input.fill("# Personal\nAll projects.\n");
+      await dialog.getByRole("tab", { name: "Claude", exact: true }).click();
+      await check(dialog.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
+      await dialog.getByRole("tab", { name: "Instructions", exact: true }).click();
+      await check(input).toHaveValue("# Personal\nAll projects.\n");
       await save.click();
       await check(dialog.getByRole("alert")).toContainText("Cannot save");
       await check(input).toHaveValue("# Personal\nAll projects.\n");
@@ -96,6 +100,7 @@ it.each(["chromium", "webkit"] as const)(
       });
       await save.click();
       await check(close).toBeDisabled();
+      await check(dialog.getByRole("tab", { name: "Claude", exact: true })).toBeDisabled();
       await check(input).toBeDisabled();
       await page.keyboard.press("Escape");
       await check(dialog).toBeVisible();

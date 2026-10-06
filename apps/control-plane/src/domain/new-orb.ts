@@ -1,13 +1,21 @@
+import type { HarnessKind } from "@pi-orb/protocol";
 import type { OrbRow } from "./orb.ts";
 
 export function newOrbRow(
-  params: { orbId: string; projectId: string; name?: string; userTimeZone?: string },
+  params: {
+    orbId: string;
+    projectId: string;
+    name?: string;
+    userTimeZone?: string;
+    harness?: HarnessKind;
+  },
   hostKind: string,
   now: number,
 ): OrbRow {
   return {
     id: params.orbId,
     projectId: params.projectId,
+    harness: params.harness ?? "pi",
     name: params.name ?? null,
     userTimeZone: params.userTimeZone ?? null,
     autoNameLeaseUntil: null,

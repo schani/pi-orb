@@ -32,6 +32,7 @@ const project: ProjectRow = {
 const orb: OrbRow = {
   id: "00000000-0000-4000-8000-000000000002",
   projectId: project.id,
+  harness: "pi",
   name: null,
   userTimeZone: null,
   autoNameLeaseUntil: null,
@@ -551,6 +552,7 @@ export function storeSemanticsContractTests(
         runtimeTokenHash: "caller-token",
         hostIncarnation: 1,
         userTimeZone: "America/New_York",
+        harness: "claude" as const,
       };
       expect((await store.insertOrb(task, caller)).isOk()).toBe(true);
       const child = { ...orb, id: "00000000-0000-4000-8000-000000000003" };
@@ -567,6 +569,7 @@ export function storeSemanticsContractTests(
       expect((await store.getSpawnCaller(task, caller.id))._unsafeUnwrap()).toBeNull();
       expect((await store.getOrb(task, child.id))._unsafeUnwrap()).toMatchObject({
         state: "creating",
+        harness: "claude",
         userTimeZone: "America/New_York",
       });
       expect((await store.listOrbMessages(task, child.id))._unsafeUnwrap()).toMatchObject([

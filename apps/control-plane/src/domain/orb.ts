@@ -1,4 +1,5 @@
 import type {
+  HarnessKind,
   HarnessSessionMetadata,
   MessageInputBlock,
   OrbMessageStatus,
@@ -20,6 +21,7 @@ export type BootHookFailureReason = "failed" | "timeout" | "hook_not_executable"
 export interface OrbRow {
   readonly id: string;
   readonly projectId: string;
+  readonly harness: HarnessKind;
   readonly name: string | null;
   readonly userTimeZone: string | null;
   readonly autoNameLeaseUntil: number | null;
