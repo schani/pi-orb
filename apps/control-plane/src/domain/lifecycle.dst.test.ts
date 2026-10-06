@@ -2401,6 +2401,50 @@ describe("orb lifecycle (DST)", () => {
     });
   });
 
+  it("an orb of a repository without commits is ready and drains on stop", async () => {
+    const capture = new LogCapture();
+    await runDst(
+      { name: "empty-repository-ready", iterations: 20, logCapture: capture },
+      async (sim) => {
+        const harness = makeHarness();
+        const stop = new AbortController();
+        const result = await sim.runTasks([
+          { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              harness.world.configureOrb(ORB, { checkoutCommit: null });
+              seedCreatingOrb(task, harness);
+              await waitUntil(
+                task,
+                "orb running",
+                () => harness.store.orbSnapshot(ORB)?.state === "running",
+                { timeoutMs: 120_000 },
+              );
+              // No poller: the session is not yet replicated when the stop arrives.
+              harness.world.appendMessage(ORB);
+              const stopResult = await requestOrbStop(task, harness.deps, ORB);
+              expect(stopResult.isOk()).toBe(true);
+              await waitUntil(
+                task,
+                "orb stopped",
+                () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+                { timeoutMs: 300_000 },
+              );
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        const orb = harness.store.orbSnapshot(ORB);
+        expect(orb?.checkoutCommit).toBeNull();
+        expect(orb?.lastReadyAt).not.toBeNull();
+        expect(capture.matching("drain-skipped").length).toBe(0);
+        assertReplicaComplete(harness.world, harness.store, ORB);
+      },
+    );
+  });
+
   it("stopping an orb that never became ready skips the drain", async () => {
     await runDst({ name: "stop-never-ready", iterations: 20 }, async (sim) => {
       const harness = makeHarness();

@@ -188,7 +188,7 @@ export class PiOrbAgent {
   private shutdownExtensions: (() => Promise<void>) | null = null;
   private closingExtensions: Promise<void> | null = null;
   private liveHistory: LiveHistoryPublisher | null = null;
-  private checkoutCommit = "";
+  private checkoutCommit: string | null = null;
   private executionId: string | null = null;
   private supervisorId: string | null = null;
   private idleStopPrepared = false;
@@ -823,7 +823,7 @@ export class PiOrbAgent {
   }
 
   /** Fresh temp clone plus atomic rename, or validation of the reused checkout. */
-  private async prepareCheckout(_repoDir: string): Promise<Result<string, RuntimeHealth>> {
+  private async prepareCheckout(_repoDir: string): Promise<Result<string | null, RuntimeHealth>> {
     const checkout = await prepareCheckout(this.options.workDir, this.options.repositoryUrl);
     return checkout.mapErr((error) => this.failed(error.code, error.message, error.retryable));
   }

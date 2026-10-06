@@ -36,6 +36,7 @@ function seed(
         hostRef: provisioned.ref.resourceId,
         runtimeTokenHash: provisioned.runtimeTokenHash,
         checkoutCommit: "commit-0",
+        lastReadyAt: task.wallNow(),
         stateChangedAt: task.wallNow(),
       }),
     );
@@ -43,6 +44,7 @@ function seed(
   harness.store.seedOrb(
     makeOrbRow(ORBS[2], PROJECT, "archived", {
       checkoutCommit: "commit-0",
+      lastReadyAt: task.wallNow(),
       archivedAt: task.wallNow(),
     }),
   );

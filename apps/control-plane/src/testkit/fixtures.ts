@@ -300,6 +300,7 @@ export function makeOrbRow(
     hostDiscardEvidence: null,
     hostDiscardRequestedAt: null,
     checkoutCommit: null,
+    lastReadyAt: null,
     harnessSessionId: null,
     harnessSessionHeader: null,
     lastError: null,
@@ -391,6 +392,7 @@ export function seedRunningOrb(
       hostSpecFingerprint: provisioned.specFingerprint,
       hostSpecGeneration: legacy ? null : provisioned.specGeneration,
       checkoutCommit: "commit-0",
+      lastReadyAt: task.wallNow(),
       stateChangedAt: task.wallNow(),
     }),
   );
