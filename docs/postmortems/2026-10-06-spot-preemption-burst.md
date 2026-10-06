@@ -17,6 +17,9 @@ The burst was zone-wide: the fleet logged 9, 11 and 7 preemptions in the 13Z, 16
 | 17:20:45 | preempted 17:21:02 | 17:21:21 |
 | 17:45:42 | preempted 17:45:50 | 17:46:06 |
 | 18:10:14 | `stop` by control plane (idle) 18:10:13 | 18:29:26 (user message) |
+| 18:45:32 | **none recorded** | 18:46:36, after `unreachable-restart` |
+
+**Unattributed power-off at 18:45:32.** The guest received a power key and shut down cleanly, but neither the GCE operation list nor any audit log (`activity` or `system_event`) records an operation for it. The six preemptions each logged `system_event` `compute.instances.preempted` 8–16 s after the guest power key. At 18:46:18 the control plane logged `unreachable-restart` (`silent_ms=31543`, `corroboration=health_no_answer`), then stopped and started the instance; the orb was `running` at 18:47:43. The candidate explanation is a preemption whose record was never written because the control-plane stop overtook it. It is unproven.
 
 Every guest journal ends with `systemd-logind: Power key pressed short` followed by an orderly poweroff. There was no OOM, panic, or ENOSPC signature, and memory use was about 2 GB of 16 GB during the interrupted runs.
 
