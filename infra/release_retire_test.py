@@ -40,6 +40,40 @@ class RetirementTest(unittest.TestCase):
         value["retirement"]["zeroes"] = {}
         return value
 
+    def test_normal_release_retires_application_without_waiting_for_browser_redirect(self):
+        class Cloud:
+            def __init__(self):
+                self.before_apply = True
+            def json(self, args):
+                if args[0] == 'compute': return Result([])
+                self.assert_service(args[4])
+                name = 'pi-orb-issuer-old' if self.before_apply else 'pi-orb-issuer-new'
+                return Result([{'metadata': {'name': name}}])
+            def assert_service(self, name):
+                if name != 'pi-orb-issuer':
+                    raise AssertionError('redirect-only service entered controller retirement')
+            def http(self, _method, url):
+                query = parse_qs(urlsplit(url).query)
+                if 'resource.labels.service_name="pi-orb-issuer"' not in query['filter'][0]:
+                    raise AssertionError('redirect-only metrics entered controller retirement')
+                points = [series('pi-orb-issuer-old', 'active', '1', service='pi-orb-issuer')]
+                if not self.before_apply:
+                    points += [series('pi-orb-issuer-old', state, '0', '2026-09-09T12:03:00Z', service='pi-orb-issuer') for state in ('active', 'idle')]
+                return Result({'timeSeries': points})
+        cloud = Cloud()
+        value = self.pending_record()
+        inventoried = inventory(cloud, value, wall=lambda: '2026-09-09T12:02:00Z')
+        self.assertIsNone(inventoried.error)
+        self.assertEqual(value['retirement']['resources'], ['pi-orb-issuer-old'])
+        self.assertEqual(value['retirement']['revisions'], ['pi-orb-issuer-old'])
+        cloud.before_apply = False
+        clock = [0]
+        result = wait_for_retirement(cloud, value, wall=lambda: '2026-09-09T12:05:00Z', monotonic=lambda: clock[0],
+                                     sleep=lambda duration: clock.__setitem__(0, clock[0] + duration), limit=180)
+        self.assertIsNone(result.error)
+        self.assertTrue(value['retirement']['resourcesRetired'])
+        self.assertIn('pi-orb-issuer-old', value['retirement']['zeroes'])
+
     def test_requires_explicit_zero_for_both_states_after_boundary(self):
         for points in ([], zeroes()[:1], [series("pi-orb-old", "active", "1"), zeroes()[1]],
                        [series("pi-orb-old", state, "0", "2026-09-09T11:59:00Z") for state in ("active", "idle")],
@@ -51,7 +85,7 @@ class RetirementTest(unittest.TestCase):
 
     def test_inventory_includes_former_browser_and_all_identity_writers(self):
         cloud = Pages([Result({})])
-        self.assertIsNone(inventory(cloud, self.pending_record(), wall=lambda: "2026-09-09T12:02:00Z").error)
+        self.assertIsNone(inventory(cloud, self.pending_record(), wall=lambda: "2026-09-09T12:02:00Z", services=("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer")).error)
         services = [call[4] for call in cloud.json_calls if call[0] == "run"]
         self.assertEqual(services, ["pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer"])
 
@@ -59,7 +93,7 @@ class RetirementTest(unittest.TestCase):
         clock = [0]
         value = self.pending_record()
         cloud = Pages([Result({"timeSeries": [series("pi-orb-old", "active", "1")]}), Result({"timeSeries": zeroes()})])
-        result = wait_for_retirement(cloud, value, wall=lambda: "2026-09-09T12:02:00Z", monotonic=lambda: clock[0],
+        result = wait_for_retirement(cloud, value, services=("pi-orb",), wall=lambda: "2026-09-09T12:02:00Z", monotonic=lambda: clock[0],
                                      sleep=lambda duration: clock.__setitem__(0, clock[0] + duration), limit=15)
         self.assertIsNone(result.error)
         self.assertEqual(clock[0], 15)
@@ -91,7 +125,7 @@ class RetirementTest(unittest.TestCase):
                     return Result({"timeSeries": [series("pi-orb-ops-old", "idle", "0", service="pi-orb-ops")]})
                 return Result({})
         cloud = StrictCloud()
-        result = metrics(cloud, "project", "us-central1", "start", "end")
+        result = metrics(cloud, "project", "us-central1", "start", "end", services=("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer"))
         self.assertIsNone(result.error)
         self.assertEqual([(service, query.get("pageToken")) for _, service, query in cloud.calls],
                          [("pi-orb", None), ("pi-orb-ops", None), ("pi-orb-ops", ["second"]),
@@ -111,7 +145,7 @@ class RetirementTest(unittest.TestCase):
                     return Result({"nextPageToken": "next"})
                 return Result({"timeSeries": [series("pi-orb-runtime-api-deleted", "active", "1", service="pi-orb-runtime-api")]})
         value = self.pending_record()
-        observed = inventory(Cloud(), value, wall=lambda: "2026-09-09T12:02:00Z")
+        observed = inventory(Cloud(), value, services=("pi-orb-runtime-api",), wall=lambda: "2026-09-09T12:02:00Z")
         self.assertIsNone(observed.error)
         self.assertEqual(observed.value["retirement"]["revisions"], ["pi-orb-runtime-api-deleted"])
         self.assertEqual(evidence(observed.value, [], "2026-09-09T12:03:00Z").value["zeroes"], {})
@@ -122,7 +156,7 @@ class RetirementTest(unittest.TestCase):
         cloud = Pages([Result({"timeSeries": points[:1], "nextPageToken": "zeros"}), Result({"timeSeries": points[1:]})])
         cloud.json = lambda _args: Result([])
         value = self.pending_record()
-        result = inventory(cloud, value, wall=lambda: "2026-09-09T12:00:00Z")
+        result = inventory(cloud, value, services=("pi-orb",), wall=lambda: "2026-09-09T12:00:00Z")
         self.assertIsNone(result.error)
         self.assertEqual(result.value["retirement"]["revisions"], [])
         self.assertEqual(result.value["retirement"]["excluded"], {"pi-orb-deleted": {"active": "2026-09-09T11:59:00Z", "idle": "2026-09-09T11:59:00Z"}})
@@ -130,7 +164,7 @@ class RetirementTest(unittest.TestCase):
         self.assertEqual(query["interval.startTime"], ["2026-09-09T11:45:00Z"])
         self.assertEqual(query["interval.endTime"], ["2026-09-09T12:00:00Z"])
         clock = [0]
-        retired = wait_for_retirement(Pages([Result({})] * 13), value,
+        retired = wait_for_retirement(Pages([Result({})] * 13), value, services=("pi-orb",),
                                       wall=lambda: datetime.fromtimestamp(datetime(2026, 9, 9, 12, 3, tzinfo=timezone.utc).timestamp() + clock[0], timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z'),
                                       monotonic=lambda: clock[0], sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds), limit=180)
         self.assertIsNone(retired.error)
@@ -146,10 +180,10 @@ class RetirementTest(unittest.TestCase):
                 ])
                 cloud.json = lambda _args: Result([])
                 value = self.pending_record()
-                result = inventory(cloud, value, wall=lambda: "2026-09-09T12:00:00Z")
+                result = inventory(cloud, value, services=("pi-orb",), wall=lambda: "2026-09-09T12:00:00Z")
                 self.assertIsNone(result.error)
                 self.assertEqual(result.value["retirement"]["revisions"], ["pi-orb-deleted"])
-                missing = wait_for_retirement(Pages([Result({})]), value, wall=lambda: "2026-09-09T12:03:00Z", limit=0)
+                missing = wait_for_retirement(Pages([Result({})]), value, services=("pi-orb",), wall=lambda: "2026-09-09T12:03:00Z", limit=0)
                 self.assertEqual(missing.error.kind, "timeout")
 
     def test_positive_either_state_and_timestamp_ties_prevent_exclusion(self):
@@ -160,7 +194,7 @@ class RetirementTest(unittest.TestCase):
                     points.append(series("pi-orb-deleted", state, "1", stamp))
                     cloud = Pages([Result({"timeSeries": points})])
                     cloud.json = lambda _args: Result([])
-                    result = inventory(cloud, self.pending_record(), wall=lambda: "2026-09-09T12:00:00Z")
+                    result = inventory(cloud, self.pending_record(), services=("pi-orb",), wall=lambda: "2026-09-09T12:00:00Z")
                     self.assertEqual(result.value["retirement"]["revisions"], ["pi-orb-deleted"])
 
     def test_newly_discovered_positive_then_complete_or_incomplete_zeroes(self):
@@ -204,7 +238,7 @@ class RetirementTest(unittest.TestCase):
                    series("pi-orb-wrong-service", "active", "1", service="unrelated")]
         cloud = Pages([Result({"timeSeries": points})])
         cloud.json = lambda _args: Result([])
-        result = inventory(cloud, self.pending_record(), wall=lambda: "2026-09-09T12:02:00Z")
+        result = inventory(cloud, self.pending_record(), services=("pi-orb",), wall=lambda: "2026-09-09T12:02:00Z")
         self.assertEqual(result.value["retirement"]["revisions"], [])
         self.assertEqual(result.value["retirement"]["excluded"], {})
 
@@ -230,10 +264,10 @@ class RetirementTest(unittest.TestCase):
         value = self.pending_record()
         cloud = Pages([Result({"timeSeries": points})])
         cloud.json = lambda args: Result([] if args[0] == 'compute' else [{'metadata': {'name': 'pi-orb-old'}}])
-        result = inventory(cloud, value, wall=lambda: "2026-09-09T12:00:00Z")
+        result = inventory(cloud, value, services=("pi-orb",), wall=lambda: "2026-09-09T12:00:00Z")
         self.assertEqual(result.value['retirement']['resources'], ['pi-orb-old'])
         self.assertFalse(result.value['retirement']['resourcesRetired'])
-        blocked = wait_for_retirement(cloud, value, wall=lambda: '2026-09-09T12:02:00Z', limit=0)
+        blocked = wait_for_retirement(cloud, value, services=("pi-orb",), wall=lambda: '2026-09-09T12:02:00Z', limit=0)
         self.assertEqual(blocked.error.kind, 'conflict')
 
     def test_saved_postboundary_proof_survives_missing_series_and_later_positive_refutes_it(self):
@@ -246,11 +280,11 @@ class RetirementTest(unittest.TestCase):
         cloud = Pages([Result({"timeSeries": zeroes(), "nextPageToken": "later"}),
                        Result({"timeSeries": [series("pi-orb-old", "idle", "1", "2026-09-09T12:01:30Z")]})])
         checkpoints = []
-        result = wait_for_retirement(cloud, self.pending_record(), wall=lambda: "2026-09-09T12:02:00Z",
+        result = wait_for_retirement(cloud, self.pending_record(), services=("pi-orb",), wall=lambda: "2026-09-09T12:02:00Z",
                                      checkpoint=lambda value: (checkpoints.append(value["retirement"].copy()) or Result()), limit=0)
         self.assertEqual(result.error.kind, "timeout")
         self.assertEqual(checkpoints[-1]["zeroes"], {})
-        self.assertEqual(len(cloud.calls), 5)
+        self.assertEqual(len(cloud.calls), 2)
 
     def test_monitoring_fails_closed_on_error_in_later_service(self):
         class Cloud:
@@ -259,23 +293,23 @@ class RetirementTest(unittest.TestCase):
                 self.calls.append(url)
                 return fail("http", "Monitoring HTTP 400") if len(self.calls) == 4 else Result({})
         cloud = Cloud()
-        result = metrics(cloud, "project", "us-central1", "start", "end")
+        result = metrics(cloud, "project", "us-central1", "start", "end", services=("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer"))
         self.assertEqual(result.error.kind, "http")
         self.assertEqual(len(cloud.calls), 4)
 
     def test_all_pages_are_required_even_after_a_zero_page(self):
         cloud = Pages([Result({"timeSeries": zeroes(), "nextPageToken": "next"}), fail("http", "unavailable")])
-        self.assertIsNotNone(metrics(cloud, "project", "us-central1", "start", "end").error)
+        self.assertIsNotNone(metrics(cloud, "project", "us-central1", "start", "end", services=("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer")).error)
         self.assertEqual(len(cloud.calls), 2)
         self.assertIn("pageToken=next", cloud.calls[1][1])
 
     def test_repeated_and_invalid_page_tokens_fail_closed(self):
         for pages in ([Result({"nextPageToken": "same"}), Result({"nextPageToken": "same"})], [Result({"nextPageToken": None})]):
-            self.assertIsNotNone(metrics(Pages(pages), "project", "region", "start", "end").error)
+            self.assertIsNotNone(metrics(Pages(pages), "project", "region", "start", "end", services=("pi-orb",)).error)
 
     def test_deleted_but_live_revision_is_discovered(self):
         cloud = Pages([Result({"timeSeries": [series("pi-orb-deleted", "active", "1")]})])
-        result = inventory(cloud, self.pending_record(), wall=lambda: "2026-09-09T12:02:00Z")
+        result = inventory(cloud, self.pending_record(), services=("pi-orb",), wall=lambda: "2026-09-09T12:02:00Z")
         self.assertEqual(result.value["retirement"]["revisions"], ["pi-orb-deleted"])
         result = evidence(self.pending_record(), zeroes() + [series("pi-orb-deleted", "active", "1")], "2026-09-09T12:02:00Z")
         self.assertIn("pi-orb-deleted", result.value["revisions"])
@@ -290,7 +324,7 @@ class RetirementTest(unittest.TestCase):
         clock = [0]
         cloud = Pages([Result({"timeSeries": [series("pi-orb-old", "active", "1")]}), Result({"timeSeries": zeroes()})])
         checkpoints = []
-        result = wait_for_retirement(cloud, self.pending_record(), wall=lambda: "2026-09-09T12:02:00Z", monotonic=lambda: clock[0],
+        result = wait_for_retirement(cloud, self.pending_record(), services=("pi-orb",), wall=lambda: "2026-09-09T12:02:00Z", monotonic=lambda: clock[0],
                                      sleep=lambda duration: clock.__setitem__(0, clock[0] + duration),
                                      checkpoint=lambda value: (checkpoints.append(value["retirement"].copy()) or Result()), limit=15)
         self.assertIsNone(result.error)
@@ -306,7 +340,7 @@ class RetirementTest(unittest.TestCase):
             Result([]),
         ])
         cloud.json = lambda args: next(operations) if args[0] == 'compute' else Result([])
-        result = wait_for_retirement(cloud, self.pending_record(), wall=lambda: "2026-09-09T12:02:00Z", monotonic=lambda: clock[0],
+        result = wait_for_retirement(cloud, self.pending_record(), services=("pi-orb",), wall=lambda: "2026-09-09T12:02:00Z", monotonic=lambda: clock[0],
                                      sleep=lambda duration: clock.__setitem__(0, clock[0] + duration), limit=15)
         self.assertIsNone(result.error)
         self.assertEqual(clock[0], 15)
@@ -315,7 +349,7 @@ class RetirementTest(unittest.TestCase):
     def test_timeout_preserves_failure_instead_of_treating_elapsed_time_as_proof(self):
         clock = [0]
         cloud = Pages([Result({}), Result({})])
-        result = wait_for_retirement(cloud, self.pending_record(), wall=lambda: "2026-09-09T12:02:00Z", monotonic=lambda: clock[0],
+        result = wait_for_retirement(cloud, self.pending_record(), services=("pi-orb",), wall=lambda: "2026-09-09T12:02:00Z", monotonic=lambda: clock[0],
                                      sleep=lambda duration: clock.__setitem__(0, clock[0] + duration), limit=15)
         self.assertEqual(result.error.kind, "timeout")
 

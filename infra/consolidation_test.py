@@ -6,6 +6,17 @@ from infra.release_state import SERVICES
 
 
 class ConsolidationTest(unittest.TestCase):
+    def test_browser_redirect_cannot_run_controllers_or_read_application_data(self):
+        source = Path('infra/browser-redirect.tf').read_text()
+        self.assertIn('name                 = "pi-orb"', source)
+        self.assertIn('service_account = local.image_builder_email', source)
+        self.assertIn('args    = ["infra/browser-redirect.mjs"]', source)
+        self.assertIn('min_instance_count = 0', source)
+        self.assertIn('cpu_idle = true', source)
+        self.assertEqual(re.findall(r'name\s+= "(PI_ORB_[^"]+)"', source), ['PI_ORB_REDIRECT_ORIGIN'])
+        for fragment in ('value_source', 'vpc_access', 'local.control_plane_email', 'PI_ORB_HOST_SPEC_GENERATION'):
+            self.assertNotIn(fragment, source)
+
     def test_one_service_preserves_issuer_resource(self):
         source = Path('infra/run.tf').read_text()
         self.assertEqual(re.findall(r'resource "google_cloud_run_v2_service" "([^"]+)"', source), ['issuer'])

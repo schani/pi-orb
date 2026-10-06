@@ -5,13 +5,13 @@ import sys
 import re
 import time
 import urllib.parse
-from infra.release_state import Cloud, Result, fail, load, now, publish, save, utc_epoch as epoch, valid_id, valid_retirement, validate_record
+from infra.release_state import Cloud, Result, SERVICES, fail, load, now, publish, save, utc_epoch as epoch, valid_id, valid_retirement, validate_record
 
 # instance_count samples every 60s and can take 120s to become visible.
 # https://docs.cloud.google.com/monitoring/api/metrics_gcp_p_z
 INSTANCE_COUNT_VISIBILITY_SECONDS = 180
 
-def metrics(cloud, project, region, start, end, services=("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer")):
+def metrics(cloud, project, region, start, end, services=SERVICES):
     result = []
     for service in services:
         query = {
@@ -98,7 +98,7 @@ def revision_resources(cloud, record, services):
     return Result(sorted(names))
 
 
-def inventory(cloud, record, wall=now, services=("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer")):
+def inventory(cloud, record, wall=now, services=SERVICES):
     resources = revision_resources(cloud, record, services)
     if resources.error:
         return resources
@@ -213,7 +213,7 @@ def wait_for_retirement(cloud, record, *, wall=now, monotonic=time.monotonic, sl
     visible_after = monotonic() if record['retirement']['resourcesRetired'] else None
     previous = None
     while True:
-        scope_services = services or ("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer")
+        scope_services = SERVICES if services is None else services
         resources = revision_resources(cloud, record, scope_services)
         if resources.error:
             return resources
