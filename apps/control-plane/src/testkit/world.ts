@@ -86,7 +86,8 @@ export interface FakeOrbConfig {
   /** Time from runtime start until the runtime becomes ready. */
   initDurationMs?: number;
   initOutcome?: InitOutcome;
-  checkoutCommit?: string;
+  /** Null models a repository without commits. */
+  checkoutCommit?: string | null;
   /** The host runs but its container never starts: HTTP stays dark. */
   containerNeverStarts?: boolean;
   /**

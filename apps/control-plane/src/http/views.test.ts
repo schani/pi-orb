@@ -27,6 +27,7 @@ const orb: OrbRow = {
   hostDiscardEvidence: null,
   hostDiscardRequestedAt: null,
   checkoutCommit: "abc123",
+  lastReadyAt: null,
   harnessSessionId: null,
   harnessSessionHeader: null,
   lastError: null,

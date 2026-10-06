@@ -34,6 +34,7 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
     "test-failures/*.json",
     "test-failures/profile-login/failure.json",
     "test-failures/full-slice-upload/failure.json",
+    "test-failures/subagent-*/failure.json",
   ]);
   expect(source).toContain("test-failures/lazy-return-*/trace.zip");
 });

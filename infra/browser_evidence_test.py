@@ -43,6 +43,7 @@ class BrowserEvidenceTest(unittest.TestCase):
             'test-failures/*.json',
             'test-failures/profile-login/failure.json',
             'test-failures/full-slice-upload/failure.json',
+            'test-failures/subagent-*/failure.json',
         })
 
 

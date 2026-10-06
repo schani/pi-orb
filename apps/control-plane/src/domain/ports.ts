@@ -65,6 +65,7 @@ export interface CasUpdateFieldsParams {
   readonly now: number;
   readonly hostRef?: string | null;
   readonly checkoutCommit?: string | null;
+  readonly lastReadyAt?: number;
   readonly lastError?: string | null;
   readonly runtimeTokenHash?: string | null;
   readonly hostSpecFingerprint?: string | null;

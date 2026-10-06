@@ -198,6 +198,7 @@ function seedRunningOnRevision(
       hostSpecFingerprint: provisioned.specFingerprint,
       hostSpecGeneration: provisioned.specGeneration,
       checkoutCommit: "commit-0",
+      lastReadyAt: task.wallNow(),
       stateChangedAt: task.wallNow(),
     }),
   );

@@ -1853,6 +1853,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         ...(params.lastError !== undefined ? { lastError: params.lastError } : {}),
         ...(params.hostRef !== undefined ? { hostRef: params.hostRef } : {}),
         ...(params.checkoutCommit !== undefined ? { checkoutCommit: params.checkoutCommit } : {}),
+        ...(params.lastReadyAt !== undefined ? { lastReadyAt: params.lastReadyAt } : {}),
         ...(params.runtimeTokenHash !== undefined
           ? { runtimeTokenHash: params.runtimeTokenHash }
           : {}),
