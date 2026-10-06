@@ -35,10 +35,15 @@ class BrowserEvidenceTest(unittest.TestCase):
             re.search(r'^          path: (.+)$', steps('deploy.yml')['Upload only the validated release record'], re.M).group(1),
             '${{ runner.temp }}/release-artifact/release.json',
         )
-        self.assertEqual(
-            re.search(r'^          path: (.+)$', steps('e2e.yml')['Upload deterministic failure traces'], re.M).group(1),
+        step = steps('e2e.yml')['Upload deterministic failure traces']
+        self.assertIn('if: failure()', step)
+        path = re.search(r'^          path: \\|\n((?:            [^\n]+\n)+)', step, re.M)
+        self.assertIsNotNone(path)
+        self.assertEqual(set(path.group(1).split()), {
             'test-failures/*.json',
-        )
+            'test-failures/profile-login/failure.json',
+            'test-failures/full-slice-upload/failure.json',
+        })
 
 
 if __name__ == '__main__':

@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: ''
+      first_consolidation:
+        description: 'Retire the three old application services before Google identity migration (downtime)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -109,6 +114,8 @@ jobs:
         id: release
         env:
           VALIDATE_RELEASE: ${{ inputs.validate_release }}
+          FIRST_CONSOLIDATION: ${{ inputs.first_consolidation }}
+          TF_VAR_google_client_id: 1077475695242-hs53alaasigvrurtme2j73ej37vqre63.apps.googleusercontent.com
           GH_TOKEN: ${{ github.token }}
           PI_ORB_CI_QUALIFICATION: ${{ needs.qualify.outputs.evidence }}
           PI_ORB_RELEASE_RESULT_DIR: ${{ runner.temp }}/release-result
@@ -117,6 +124,7 @@ jobs:
           set -euo pipefail
           args=(--yes)
           if [ -n "$VALIDATE_RELEASE" ]; then args+=(--validate "$VALIDATE_RELEASE"); fi
+          if [ "$FIRST_CONSOLIDATION" = true ]; then args+=(--first-consolidation); fi
           exec ./infra/release.sh "${args[@]}"
       - name: Upload lazy-return browser failure evidence
         if: failure()

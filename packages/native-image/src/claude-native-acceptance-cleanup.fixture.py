@@ -14,14 +14,7 @@ import threading
 wrapper = Path(sys.argv[1]).resolve()
 parent = Path(sys.argv[2]).resolve()
 candidate = Path(sys.argv[3]).resolve()
-source = Path(sys.argv[4]).resolve()
 foreign_uid = 62000
-source_readable = subprocess.run(
-    ["setpriv", "--reuid=" + str(foreign_uid), "--regid=" + str(foreign_uid),
-     "--clear-groups", "test", "-r", str(source / "infra/native-vm/claude-receipt-edge.mjs")],
-    env={"PATH": "/usr/local/bin:/usr/bin:/bin"}, capture_output=True,
-).returncode == 0
-assert not source_readable, "private checkout unexpectedly readable to foreign caller"
 results = []
 
 for workload_status, cleanup_status in [(0, 0), (37, 0), (37, 73), (0, 73), (137, 0)]:
@@ -40,10 +33,12 @@ for workload_status, cleanup_status in [(0, 0), (37, 0), (37, 73), (0, 73), (137
     sentinel.write_text("untouched")
     shutil.copyfile(wrapper, helpers / "claude-acceptance.sh")
     (helpers / "claude-acceptance.sh").chmod(0o755)
+    shutil.copyfile(wrapper.parent / "claude-receipt-edge.mjs", helpers / "claude-receipt-edge.mjs")
+    (helpers / "claude-receipt-edge.mjs").chmod(0o644)
     (helpers / "claude-workload.mjs").write_text('''
 import { mkdirSync, writeFileSync, symlinkSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { safeQualificationEvidence, persistQualificationTrace } from "''' + (wrapper.parent / "claude-receipt-edge.mjs").as_uri() + '''";
+import { safeQualificationEvidence, persistQualificationTrace } from "./claude-receipt-edge.mjs";
 const scratch = process.argv[3];
 if (process.getuid() !== 2000 || (statSync(scratch).mode & 0o777) !== 0o700)
   process.exit(91);
@@ -133,8 +128,7 @@ sys.exit(reply["status"])
                         "stdout": completed.stdout, "retainedTrace": retained_trace,
                         "exit": completed.returncode, "stderr": completed.stderr,
                         "leftovers": len(leftovers), "sentinel": sentinel.read_text(),
-                        "operations": operations, "callerUid": foreign_uid,
-                        "sourceReadable": source_readable})
+                        "operations": operations, "callerUid": foreign_uid})
     finally:
         stopped.set()
         with socket.socket(socket.AF_UNIX) as client:

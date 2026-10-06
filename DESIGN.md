@@ -36,7 +36,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 - The user-facing interface is web-based. The runtime image also provides a narrow `pi-orb` CLI for agents to discover sibling orbs, inspect replicated transcripts, launch independent same-project work (`docs/orb-spawning.md`), mint workload-identity tokens, alert the user (`docs/orb-alerts.md`), and archive or delete themselves on user request (`docs/orb-archival.md`, `docs/orb-deletion.md`).
 - The browser communicates only with the control plane, never directly with an orb runtime.
 - The original first slice has no application authentication or authorization: anybody who can reach it can perform every operation. It is local/trusted-development software and must not be exposed publicly.
-- Stages 1–2 application identity, owned projects, and per-user personal instructions are deployed from `ec81e80` for existing single-user use. Stage 2's schema/data cutover is verified; typed-history migration compatibility enforcement remains a follow-up (`docs/postmortems/2026-09-17-typed-history-runtime-fence.md`). Stage 3 per-user credentials is on `main`, qualified, and undeployed; coworker onboarding remains unauthorized. Cloud IAP remains the login boundary; local development uses one explicit fixed developer identity. `docs/multi-user.md`.
+- Stages 1–2 application identity, owned projects, and per-user personal instructions are deployed from `ec81e80` for existing single-user use. Stage 2's schema/data cutover is verified; typed-history migration compatibility enforcement remains a follow-up (`docs/postmortems/2026-09-17-typed-history-runtime-fence.md`). Stage 3 per-user credentials is on `main`, qualified, and undeployed; coworker onboarding remains unauthorized. The single-service Google login/stateless sealed-session implementation (2026-09-19) is not deployed; qualification is ongoing. Local development explicitly selects `PI_ORB_AUTH_MODE=local`. `docs/multi-user.md`.
 - After routing and runtime connection, the control plane proxies one live WebSocket between browser and runtime without interpreting agent content.
 - That WebSocket carries browser commands, visible transient streaming events, compact committed display-record notifications, runtime status, acknowledgements, and errors. Open private-detail disclosures poll control-plane HTTP; the backend is implemented locally, frontend work and validation remain underway (`docs/runtime-protocol.md`).
 - The control plane never uses WebSocket traffic for persistence. Replica persistence happens only through separate control-plane HTTP pulls from the runtime.
@@ -49,6 +49,8 @@ The first version is not intended to be a generic VM configurator or a generic r
 - Multi-user scope is trusted coworkers at one small company (clarified 2026-09-16): default lists are own-user, while existing direct project/orb/file/transcript/settings/lifecycle access stays company-wide. A project and its children have one owner; its Codex/GitHub credentials, login cohort, runtime token grants, naming, and auxiliary inference follow that owner, never the viewer. No coworker switcher, transfers, quotas, security-boundary or roles framework. Stages 1–2 are deployed; stage 3 is on `main`, qualified, and undeployed. Coworker onboarding remains unauthorized. `docs/multi-user.md`.
 
 ## High-level architecture
+
+**Implemented 2026-09-19; local qualification passed 2026-09-20; not deployed:** one `pi-orb-issuer` application serves app/API/broker, public discovery/JWKS and an isolated files hostname. Its exact workload issuer and trust remain unchanged; app/files/broker URLs change. Google login uses twelve-hour stateless sealed cookies; logout cannot revoke copied cookies. Exact-Origin checks protect cookie mutations/WebSockets. Google machine ID tokens authorize the ordinary API; runtime incarnation bearers retain separate authority. The Google identity migration preserves user UUIDs; in the current undeployed tree it is migration 031. Public runtime ingress and shared issuer/application privileges deliberately reduce infrastructure isolation. Configuration: `docs/deployment.md`; authentication: `docs/credentials.md`; cutover/gates: `docs/control-plane-consolidation.md`.
 
 ```text
 Browser
@@ -133,6 +135,7 @@ Subsystem designs:
 - [docs/ports.md](docs/ports.md) — port exposure and preview URLs: tier-1 Tailscale, per-orb auth keys, the preview-host contract
 - [docs/hosting.md](docs/hosting.md) — system-hosted orb files: durable namespaces, object storage, publication, serving, and lifecycle ownership
 - [docs/deployment.md](docs/deployment.md) — Cloud Run/OpenTofu deployment direction (operational workflow: `infra/README.md`)
+- [docs/control-plane-consolidation.md](docs/control-plane-consolidation.md) — single-service application authentication, implementation record and cutover/qualification gates
 - [docs/testing.md](docs/testing.md) — DST strategy, the E2E slice, testing decisions
 - [docs/stack.md](docs/stack.md) — language, repository layout, dependency, and error-handling choices
 
@@ -152,6 +155,8 @@ Tracking:
 - [docs/postmortems/2026-10-02-control-plane-patch-image-build.md](docs/postmortems/2026-10-02-control-plane-patch-image-build.md) — runtime-only patch broke the control-plane image build before apply; restrict its patch set
 - [docs/postmortems/2026-10-02-webkit-lazy-return-gate.md](docs/postmortems/2026-10-02-webkit-lazy-return-gate.md) — captured split-target sidebar click, fixed rail/scroll ownership and diagnostic callback race
 - [docs/postmortems/2026-10-02-expired-metadata-route.md](docs/postmortems/2026-10-02-expired-metadata-route.md) — frontend metadata interception parsed expired-session HTML 401 as JSON; response preservation and owned route drain
+- [docs/postmortems/2026-10-02-frontend-session-fixture-isolation.md](docs/postmortems/2026-10-02-frontend-session-fixture-isolation.md) — frontend session fixture ownership and built-shell probe prerequisites; tree-specific qualification
+- [docs/postmortems/2026-10-02-docker-daemon-umask.md](docs/postmortems/2026-10-02-docker-daemon-umask.md) — private harness umask made fresh-store PostgreSQL entrypoint inaccessible after UID drop
 - [docs/postmortems/2026-10-02-nested-mcp-live-rows.md](docs/postmortems/2026-10-02-nested-mcp-live-rows.md) — nested SDK events created phantom live MCP rows; parent codemode disclosure retains bounded child details
 - [docs/postmortems/2026-10-01-mcp-measurement-fixtures.md](docs/postmortems/2026-10-01-mcp-measurement-fixtures.md) — scope bounds, discarded diagnostics and child-profile measurement assumptions
 - [docs/postmortems/2026-10-01-native-ssh-startup-dependency.md](docs/postmortems/2026-10-01-native-ssh-startup-dependency.md) — first Google manager exit canceled the host-key gate and latched SSH off; corrected dependency and accepted fresh validator
@@ -162,6 +167,7 @@ Tracking:
 - [docs/postmortems/2026-10-02-inbox-poll-payload.md](docs/postmortems/2026-10-02-inbox-poll-payload.md) — repeated delivered inbox/image transfers; insertion deltas with explicit provisional tracking
 - [docs/postmortems/2026-10-02-initial-history-latency.md](docs/postmortems/2026-10-02-initial-history-latency.md) — compact history still reads full source records; ops timing and pruning-query caveats
 - [docs/postmortems/2026-09-27-history-response-size.md](docs/postmortems/2026-09-27-history-response-size.md) — unbounded history response rejected by Cloud Run; browser history has no pagination
+- [docs/postmortems/2026-09-27-sandbox-qualification-harness.md](docs/postmortems/2026-09-27-sandbox-qualification-harness.md) — sandbox artifact, retirement, credential and presence evidence boundaries
 - [docs/postmortems/2026-09-27-webkit-image-fixture-sync.md](docs/postmortems/2026-09-27-webkit-image-fixture-sync.md) — HTTP-only image records raced a running orb's full live sync
 - [docs/postmortems/2026-09-27-restart-notice-e2e-rule.md](docs/postmortems/2026-09-27-restart-notice-e2e-rule.md) — Docker release blocked by a scripted model matcher predating the host notice wording
 - [docs/postmortems/2026-09-27-preemption-delegated-cancellation.md](docs/postmortems/2026-09-27-preemption-delegated-cancellation.md) — graceful Spot preemption persisted delegated cancellation through the shared shutdown/user-abort path; initiator remains unproved
@@ -170,6 +176,12 @@ Tracking:
 - [docs/postmortems/2026-09-23-pi-system-history-replication.md](docs/postmortems/2026-09-23-pi-system-history-replication.md) — Pi 0.87.1 persisted prompt/tool state; the history adapter now retains its identity without replicating execution configuration
 - [docs/postmortems/2026-09-21-workspace-upload-remote-only.md](docs/postmortems/2026-09-21-workspace-upload-remote-only.md) — six upload chunks completed; the later UI had no local file ownership, but the browser cause remains unproved
 - [docs/postmortems/2026-09-20-composer-typing-stalls.md](docs/postmortems/2026-09-20-composer-typing-stalls.md) — browser-parent cycle collection and independent unchanged-transcript rerenders stalled composer input
+- [docs/postmortems/2026-09-27-mcp-audit-generation-driver.md](docs/postmortems/2026-09-27-mcp-audit-generation-driver.md) — explicit audit-query bigint representation across PostgreSQL and PGlite
+- [docs/postmortems/2026-09-27-monitoring-retirement-filter.md](docs/postmortems/2026-09-27-monitoring-retirement-filter.md) — exact per-service Monitoring queries with fail-closed pagination and retirement proof
+- [docs/postmortems/2026-09-27-vitest4-e2e-ordering.md](docs/postmortems/2026-09-27-vitest4-e2e-ordering.md) — preserve E2E resource ownership across the security-driven runner upgrade
+- [docs/postmortems/2026-09-19-composer-caret-ordering.md](docs/postmortems/2026-09-19-composer-caret-ordering.md) — native caret measurement before React normalization; deterministic selection gate and document-bubble ordering
+- [docs/postmortems/2026-09-19-consolidation-docker-broker-host.md](docs/postmortems/2026-09-19-consolidation-docker-broker-host.md) — Docker callback authority omitted by the consolidated HTTP host guard; runtime-only broker authority and provider-specific E2E
+
 - [docs/postmortems/2026-09-18-image-preview-validation.md](docs/postmortems/2026-09-18-image-preview-validation.md) — mutable-source qualification, subpixel geometry inference, and undrained browser-route teardown failures
 - [docs/postmortems/2026-09-18-hosted-frontend-bootstrap-readiness.md](docs/postmortems/2026-09-18-hosted-frontend-bootstrap-readiness.md) — hosted blank-shell cause remains unresolved; browser assertions now own their fixture-response readiness
 - [docs/postmortems/2026-09-18-boot-context-cold-start.md](docs/postmortems/2026-09-18-boot-context-cold-start.md) — two runtime-API cold starts exhausted a mandatory boot read; bounded retry is implemented locally
@@ -243,6 +255,7 @@ Reference material:
 - [docs/postmortems/2026-09-14-webkit-compositor-validation-crash.md](docs/postmortems/2026-09-14-webkit-compositor-validation-crash.md) — native WebKit compositor fault during local qualification; passing isolated probes do not clear it
 - [docs/postmortems/2026-09-09-local-e2e-docker-startup.md](docs/postmortems/2026-09-09-local-e2e-docker-startup.md) — wrong containerd store and interrupted local validation; preserve evidence and owned fixtures
 - [docs/postmortems/2026-09-09-tracked-deployment-credentials.md](docs/postmortems/2026-09-09-tracked-deployment-credentials.md) — live credential confirmed in public plan archives; artifact containment and rotation status
+- [docs/postmortems/2026-10-05-mobile-reader-font-readiness.md](docs/postmortems/2026-10-05-mobile-reader-font-readiness.md) — controlled font swap preserved the reader anchor but invalidated an absolute-scroll assertion
 - [docs/postmortems/2026-09-07-native-build-cancellation-cleanup.md](docs/postmortems/2026-09-07-native-build-cancellation-cleanup.md) — interrupted release exited before builder cleanup
 - [docs/references/amp-orb-lessons.md](docs/references/amp-orb-lessons.md) — lessons from Amp's “Putting an Agent in an Orb”
 - [docs/EXE-DEV.md](docs/EXE-DEV.md) — the full exe.dev host-provider evaluation

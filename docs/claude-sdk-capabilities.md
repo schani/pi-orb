@@ -134,7 +134,7 @@ Detached dev servers intentionally do not prevent idle-stop. Counting all SDK ba
 
 Approved POC qualification boundary (2026-10-04): SDK adapters retain owned holds through native owned tool/child cleanup, persistence and continuation handoff, and claim input synchronously before SDK submission. Co-location does not prove native background gating; remote cleanup is historical split-specific evidence.
 Preserve atomic durable prepare admission fencing and final history drain.
-Public types do **not** establish pre-inference fencing for SDK-originated starts/automatic continuations or cleanup ordering. Question 73 in `docs/open-questions.md` blocks qualification; debounce, Stop hooks and result events do not solve it.
+Public types do **not** establish pre-inference fencing for SDK-originated starts/automatic continuations or cleanup ordering. Question 73 (Claude SDK) in `docs/open-questions.md` blocks qualification; debounce, Stop hooks and result events do not solve it.
 Closing/terminating the query could prevent wakes only with supervised teardown proof and continued history availability; this alternative is not selected. See the stop proposal in `docs/claude-agent-sdk.md`.
 Tests first against the real SDK: blocked child after root result, background terminal → root wake, queued input versus interrupt, hook continuation/errors, reordered inventories/ambient work, late native owned tool cleanup, and prepare/archive admission versus wakes. Compose DST with explicit checkpoints; persist sanitized operation/task/session identities and decision/outcome edges, not healthy ticks.
 

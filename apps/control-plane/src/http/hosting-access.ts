@@ -3,8 +3,10 @@ import { err, ok, Result, type Result as ResultType } from "neverthrow";
 
 export interface HostingAccessConfig {
   readonly filesOrigin: string;
-  /** Explicit browser development origins, such as the Vite server. */
-  readonly trustedBrowserOrigins?: readonly string[];
+  readonly appOrigin: string;
+  readonly runtimeOrigin?: string;
+  readonly trustedLocalOrigins?: readonly string[];
+  readonly trustedLocal?: boolean;
 }
 
 export interface HostingAccessRequest {
@@ -19,7 +21,7 @@ export interface HostingAccessRequest {
 
 export interface HostingAccessConfigError {
   readonly type: "hosting_access_config_error";
-  readonly field: "filesOrigin" | "trustedBrowserOrigins";
+  readonly field: "filesOrigin" | "appOrigin" | "runtimeOrigin";
   readonly message: string;
 }
 
@@ -37,6 +39,15 @@ export type HostingAccessDecision =
         | "unknown_host"
         | "untrusted_origin";
     };
+
+export interface HostingAccessOutcome {
+  readonly event: "hosting_denial";
+  readonly reason: Extract<HostingAccessDecision, { kind: "reject" }>["reason"] | "files_route";
+  readonly surface: "app" | "files" | "unknown";
+  readonly requestId: string;
+}
+
+export type HostingAccessOutcomeSink = (outcome: HostingAccessOutcome) => void;
 
 export interface HostingAccessPolicy {
   decide(request: HostingAccessRequest): HostingAccessDecision;
@@ -109,36 +120,42 @@ function isHostedPath(path: string): boolean {
   return /^\/s\/[^/]+\//u.test(path);
 }
 
-function isProtectedAppRequest(path: string, upgrade: string | undefined): boolean {
-  return (
-    upgrade?.toLowerCase() === "websocket" ||
-    path === "/api" ||
-    path.startsWith("/api/") ||
-    path === "/runtime" ||
-    path.startsWith("/runtime/") ||
-    path.startsWith("/.well-known/")
-  );
-}
-
 export function createHostingAccessPolicy(
   config: HostingAccessConfig,
 ): ResultType<HostingAccessPolicy, HostingAccessConfigError> {
   const files = parseOrigin(config.filesOrigin, "filesOrigin");
   if (files.isErr()) return err(files.error);
-  const trusted = new Set<string>();
-  for (const value of config.trustedBrowserOrigins ?? []) {
-    const parsed = parseOrigin(value, "trustedBrowserOrigins");
-    if (parsed.isErr()) return err(parsed.error);
-    if (parsed.value.hostname === files.value.hostname) {
+  const app = parseOrigin(config.appOrigin, "appOrigin");
+  if (app.isErr()) return err(app.error);
+  if (app.value.hostname === files.value.hostname)
+    return err({
+      type: "hosting_access_config_error",
+      field: "appOrigin",
+      message: "Origins must use separate hostnames",
+    });
+
+  const runtime = parseOrigin(config.runtimeOrigin ?? config.appOrigin, "runtimeOrigin");
+  if (runtime.isErr()) return err(runtime.error);
+  if (runtime.value.hostname === files.value.hostname)
+    return err({
+      type: "hosting_access_config_error",
+      field: "runtimeOrigin",
+      message: "Runtime and files origins must use separate hostnames",
+    });
+
+  const appHosts = new Set([app.value.host]);
+  const appOrigins = new Set([app.value.origin]);
+  for (const value of config.trustedLocalOrigins ?? []) {
+    const local = parseOrigin(value, "appOrigin");
+    if (local.isErr() || !["localhost", "127.0.0.1"].includes(local.value.hostname))
       return err({
         type: "hosting_access_config_error",
-        field: "trustedBrowserOrigins",
-        message: "filesOrigin cannot be a trusted browser origin",
+        field: "appOrigin",
+        message: "Local aliases must be loopback origins",
       });
-    }
-    trusted.add(parsed.value.origin);
+    appHosts.add(local.value.host);
+    appOrigins.add(local.value.origin);
   }
-
   return ok({
     decide(request): HostingAccessDecision {
       const method = request.method.toUpperCase();
@@ -153,33 +170,31 @@ export function createHostingAccessPolicy(
         if (method !== "GET" && method !== "HEAD") {
           return { kind: "reject", reason: "files_method" };
         }
-        return isHostedPath(path)
+        return isHostedPath(path) ||
+          (method === "GET" && (path === "/auth/login" || path === "/auth/callback"))
           ? { kind: "allow", surface: "hosted_read" }
           : { kind: "isolated_not_found" };
       }
 
-      if (host.hostname === files.value.hostname) {
+      const runtimeRequest = /^\/runtime(?:\/|$)/u.test(path);
+      if (!appHosts.has(host.host) && !(runtimeRequest && host.host === runtime.value.host)) {
         return { kind: "reject", reason: "unknown_host" };
       }
       if (path === "/s" || path.startsWith("/s/")) {
         return { kind: "reject", reason: "files_wrong_host" };
       }
 
-      // OAuth returns by cross-site navigation. Only this GET is exempt;
-      // its single-use state, browser cookie and PKCE own authorization.
       const oauthCallback =
-        method === "GET" && path === "/api/v1/mcp/oauth/callback" && request.upgrade === undefined;
-      if (isProtectedAppRequest(path, request.upgrade) && !oauthCallback) {
-        if (request.origin !== undefined) {
-          const origin = parseOrigin(request.origin, "trustedBrowserOrigins");
-          if (origin.isErr()) return { kind: "reject", reason: "untrusted_origin" };
-          const expected = `${files.value.protocol}//${host.host}`;
-          if (origin.value.origin !== expected && !trusted.has(origin.value.origin)) {
-            return { kind: "reject", reason: "untrusted_origin" };
-          }
-        } else if (request.secFetchSite?.toLowerCase() === "cross-site") {
-          return { kind: "reject", reason: "cross_site" };
-        }
+        method === "GET" &&
+        (path === "/api/v1/mcp/oauth/callback" || path === "/auth/callback") &&
+        request.upgrade === undefined;
+      if (
+        config.trustedLocal &&
+        !oauthCallback &&
+        request.origin !== undefined &&
+        !appOrigins.has(request.origin)
+      ) {
+        return { kind: "reject", reason: "untrusted_origin" };
       }
       return { kind: "allow", surface: "app" };
     },
@@ -190,6 +205,7 @@ export function registerHostingAccessGuard(
   app: FastifyInstance,
   policy: HostingAccessPolicy,
   dashboardUrl: string,
+  outcome?: HostingAccessOutcomeSink,
 ): void {
   app.addHook("onRequest", async (request, reply) => {
     const decision = policy.decide({
@@ -203,6 +219,14 @@ export function registerHostingAccessGuard(
       ...(request.headers.upgrade === undefined ? {} : { upgrade: request.headers.upgrade }),
     });
     if (decision.kind === "allow") return;
+    const reason = decision.kind === "isolated_not_found" ? "files_route" : decision.reason;
+    const surface =
+      reason === "invalid_host" || reason === "unknown_host"
+        ? "unknown"
+        : reason === "files_method" || reason === "files_websocket" || reason === "files_route"
+          ? "files"
+          : "app";
+    outcome?.({ event: "hosting_denial", reason, surface, requestId: request.id });
     if (decision.kind === "isolated_not_found") {
       return reply
         .status(404)

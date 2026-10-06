@@ -1,8 +1,10 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { type OrbView, OrbViewSchema, type SessionProbe } from "@pi-orb/protocol";
 import { chromium, expect as expectPage } from "@playwright/test";
 import Fastify from "fastify";
+import { Errors } from "typebox/value";
 import { build } from "vite";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { registerWebAssets } from "../apps/control-plane/src/http/web-assets.ts";
@@ -17,6 +19,13 @@ beforeAll(async () => {
     configFile: join(import.meta.dirname, "../apps/web/vite.config.ts"),
     build: { outDir: root, emptyOutDir: true },
   });
+  app.get(
+    "/api/v1/session",
+    (): SessionProbe => ({
+      status: "ok",
+      principal: { kind: "user", user: { id: "built-shell-user", email: null } },
+    }),
+  );
   await registerWebAssets(app, root);
   await app.listen({ host: "127.0.0.1", port: 0 });
   browser = await chromium.launch({
@@ -58,9 +67,10 @@ it.each(["/", "/orbs/missing-orb"])(
       createdAt: project.createdAt,
       updatedAt: "2026-10-02T00:00:00Z",
       activity: "idle",
-    };
+    } satisfies OrbView;
     const newer = { ...older, id: "newer", name: "Newer", updatedAt: "2026-10-03T00:00:00Z" };
-    let items = [older, newer];
+    let items: OrbView[] = [older, newer];
+    for (const item of items) expect([...Errors(OrbViewSchema, item)]).toEqual([]);
     const rows = path === "/" ? ".orb-entry-link" : ".ix-row .trunc";
     try {
       await page.route("**/api/v1/projects", (route) =>

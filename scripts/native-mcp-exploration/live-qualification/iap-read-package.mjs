@@ -34,10 +34,11 @@ const vendor = "pi-coding-agent-1.0.0-brace-5.0.12.tgz";
 await cp(join(root, "vendor", vendor), join(stage, "vendor", vendor));
 for (const file of ["package.json", "package-lock.json"]) {
   const path = join(stage, file);
-  const source = await readFile(path, "utf8");
+  let source = await readFile(path, "utf8");
   const original = `file:../../../vendor/${vendor}`;
-  assert.ok(source.includes(original), `missing vendor reference: ${file}`);
-  await writeFile(path, source.replaceAll(original, `file:./vendor/${vendor}`));
+  assert.ok(source.includes(original), `missing vendor reference: ${file}: ${vendor}`);
+  source = source.replaceAll(original, `file:./vendor/${vendor}`);
+  await writeFile(path, source);
 }
 for (const file of ["iap-read.test.mjs", "iap-read-guard.mjs", "iap-read-preflight.mjs"])
   await cp(join(local, file), join(stage, file));

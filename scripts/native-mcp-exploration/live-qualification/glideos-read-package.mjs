@@ -33,12 +33,12 @@ for (const file of [
   await cp(join(local, file), join(stage, file));
 for (const name of patches) await cp(join(root, "patches", name), join(stage, "patches", name));
 await cp(join(root, "vendor", vendorName), join(stage, "vendor", vendorName));
-const oldVendor = "file:../../../vendor/" + vendorName;
-const newVendor = "file:./vendor/" + vendorName;
 for (const file of ["package.json", "package-lock.json"]) {
-  const source = await readFile(join(local, file), "utf8");
-  assert.ok(source.includes(oldVendor), `missing source vendor reference: ${file}`);
-  await writeFile(join(stage, file), source.replaceAll(oldVendor, newVendor));
+  let source = await readFile(join(local, file), "utf8");
+  const original = `file:../../../vendor/${vendorName}`;
+  assert.ok(source.includes(original), `missing vendor reference: ${file}: ${vendorName}`);
+  source = source.replaceAll(original, `file:./vendor/${vendorName}`);
+  await writeFile(join(stage, file), source);
 }
 function run(command, args, cwd, log) {
   const result = spawnSync(command, args, {

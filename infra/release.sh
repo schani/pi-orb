@@ -18,17 +18,17 @@ LOCAL_LOCK_HELD=false
 REMOTE_LOCK_HELD=false
 REMOTE_LOCK_GENERATION=""
 KEEP_REMOTE_LOCK=false
-APPLY_ATTEMPTED=false
-IAP_REPAIRED=false
+FIRST_CONSOLIDATION=false
 QUALIFICATION=""
 
 usage() {
-  echo 'Usage: ./infra/release.sh [--yes] [--validate RELEASE_ID|latest]'
+  echo 'Usage: ./infra/release.sh [--yes] [--validate RELEASE_ID|latest] [--first-consolidation]'
   echo 'Deploy clean, freshly fetched main, or explicitly validate a recorded deployment without rebuilding/reapplying.'
 }
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --yes) AUTO_APPROVE=true ;;
+    --first-consolidation) FIRST_CONSOLIDATION=true ;;
     --validate) [ "$#" -ge 2 ] || { usage >&2; exit 2; }; VALIDATE=$2; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
@@ -73,7 +73,6 @@ if [ -z "$VALIDATE" ]; then
     }
     migration_owner_env+="@PI_ORB_ORIGINAL_USER_ID=${original_owner_values[0]}@PI_ORB_ORIGINAL_IDENTITY_ISSUER=${original_owner_values[1]}@PI_ORB_ORIGINAL_IDENTITY_SUBJECT=${original_owner_values[2]}"
   fi
-  migration_owner_args+=("--set-env-vars=${migration_owner_env}")
 fi
 
 state() { python3 -m infra.release_state "$1" "$RECORD" "${@:2}"; }
@@ -83,6 +82,7 @@ release_run_check() {
     -u GH_TOKEN -u PI_ORB_CI_QUALIFICATION \
     -u PI_ORB_USER_ID -u PI_ORB_ORIGINAL_USER_ID \
     -u PI_ORB_ORIGINAL_IDENTITY_ISSUER -u PI_ORB_ORIGINAL_IDENTITY_SUBJECT \
+    -u PI_ORB_GOOGLE_IDENTITY_MAPPINGS -u PI_ORB_APP_ORIGIN \
     "$@"
 }
 stage() {
@@ -90,19 +90,10 @@ stage() {
   state stage "$1"
   state publish
 }
-repair_iap_after_attempt() {
-  if [ "$APPLY_ATTEMPTED" = true ] && [ "$IAP_REPAIRED" != true ]; then
-    if "$INFRA/deploy.sh" --iap-only; then IAP_REPAIRED=true; else
-      echo 'release: IAP repair failed; inspect the browser service before proceeding' >&2
-      return 1
-    fi
-  fi
-}
 cleanup() {
   local status=$?
   trap - EXIT HUP INT TERM
   release_stop_children
-  repair_iap_after_attempt || status=1
   if [ -n "$RECORD" ] && [ -f "$RECORD" ]; then
     state finish "$status" || status=1
     state publish || status=1
@@ -111,7 +102,7 @@ cleanup() {
   fi
   if [ "$REMOTE_LOCK_HELD" = true ]; then
     if [ "$KEEP_REMOTE_LOCK" = true ]; then
-      echo "release: lock retained: migration execution may still be running; inspect the recorded job before unlocking $REMOTE_LOCK_URL" >&2
+      echo "release: lock retained: retirement or migration is uncertain; inspect the recorded stage/job before unlocking $REMOTE_LOCK_URL" >&2
       status=1
     elif [ -z "$REMOTE_LOCK_GENERATION" ] || ! gcloud storage rm "$REMOTE_LOCK_URL" --if-generation-match="$REMOTE_LOCK_GENERATION" --quiet >/dev/null; then
       echo "release: lock cleanup failed: $REMOTE_LOCK_URL; verify ownership before removing it" >&2
@@ -199,17 +190,22 @@ if [ -n "$QUALIFICATION" ]; then
   state qualification "$WORK_DIR/qualification.json"
 fi
 export PI_ORB_RELEASE_RECORD="$RECORD"
-if [ -n "$VALIDATE" ]; then state recover "$VALIDATE"; else state previous; fi
+if [ -n "$VALIDATE" ]; then state recover "$VALIDATE"; elif [ "$FIRST_CONSOLIDATION" = false ]; then state previous; fi
 state publish
+TF_VAR_machine_subject=$(python3 -m infra.release_auth "$PROJECT")
+export TF_VAR_machine_subject
 tofu -chdir="$INFRA" init -input=false -lockfile=readonly -backend-config="bucket=$STATE_BUCKET" -backend-config=prefix=static-plane
-export PI_ORB_OPS_URL=$(tofu -chdir="$INFRA" output -raw ops_url)
-export PI_ORB_ISSUER_URL=$(tofu -chdir="$INFRA" output -raw issuer_url)
-"$INFRA/api.sh" /api/v1/system | jq -e '.hostProvider == "gce"' >/dev/null
-# This read proves both the beta command dependency and scoped policy access
-# before any build, migration or apply—not after changing serving services.
-gcloud beta iap web get-iam-policy --project="$PROJECT" --resource-type=cloud-run \
-  --service=pi-orb --region="$REGION" --format=json > "$WORK_DIR/iap-preflight.json"
-jq -e 'type == "object" and ((.bindings // []) | type == "array")' "$WORK_DIR/iap-preflight.json" >/dev/null
+export PI_ORB_APP_ORIGIN=$(tofu -chdir="$INFRA" output -raw issuer_url)
+export PI_ORB_ISSUER_URL="$PI_ORB_APP_ORIGIN"
+if [ "$FIRST_CONSOLIDATION" = false ]; then
+  "$INFRA/api.sh" /api/v1/system | jq -e '.hostProvider == "gce"' >/dev/null
+else
+  [ -z "$VALIDATE" ] && [ "${GITHUB_ACTIONS:-}" = true ] || {
+    echo 'release: first cutover requires independent GitHub execution' >&2; exit 1;
+  }
+  gcloud secrets versions describe 1 --secret=pi-orb-google-identity-mappings --project="$PROJECT" --format=json |
+    jq -e '.state == "ENABLED" and (.name | endswith("/secrets/pi-orb-google-identity-mappings/versions/1"))' >/dev/null
+fi
 
 plan_and_guard() {
   local vars=$1 plan=$2
@@ -225,9 +221,11 @@ plan_and_guard() {
 if [ -z "$VALIDATE" ]; then
   python3 -m infra.release_preflight "$PROJECT"
   # Real scoped permission reads, including bucket IAM, precede expensive builds.
-  state preflight-vars "$WORK_DIR/current.tfvars"
-  plan_and_guard "$WORK_DIR/current.tfvars" "$WORK_DIR/preflight.tfplan"
-  python3 -m infra.release_retire inventory "$RECORD"
+  if [ "$FIRST_CONSOLIDATION" = false ]; then
+    state preflight-vars "$WORK_DIR/current.tfvars"
+    plan_and_guard "$WORK_DIR/current.tfvars" "$WORK_DIR/preflight.tfplan"
+    python3 -m infra.release_retire inventory "$RECORD"
+  fi
   stage checks
   release_run_check npm ci
   if [ -z "$QUALIFICATION" ]; then
@@ -251,13 +249,28 @@ if [ -z "$VALIDATE" ]; then
     read -r confirmation
     [ "$confirmation" = deploy ] || exit 1
   fi
+  migration_secrets=""
+  if [ "$FIRST_CONSOLIDATION" = true ]; then
+    gcloud secrets add-iam-policy-binding pi-orb-google-identity-mappings --project="$PROJECT" \
+      --member="serviceAccount:$(jq -r '.control_plane_service_account_email.value' <<<"$foundation")" \
+      --role=roles/secretmanager.secretAccessor --quiet >/dev/null
+    migration_secrets=",PI_ORB_GOOGLE_IDENTITY_MAPPINGS=pi-orb-google-identity-mappings:1"
+  fi
+  database_version=$(gcloud secrets versions describe latest --secret=pi-orb-database-url --project="$PROJECT" --format='value(name)')
+  database_version=${database_version##*/}
+  [[ "$database_version" =~ ^[0-9]+$ ]] || { echo 'release: invalid database secret version' >&2; exit 1; }
+  if [ "$FIRST_CONSOLIDATION" = true ]; then
+    git fetch --quiet origin main
+    [ "$head_commit" = "$(git rev-parse origin/main)" ] || { echo 'release refused: main changed before retirement' >&2; exit 1; }
+    stage maintenance
+    KEEP_REMOTE_LOCK=true
+    release_run_child python3 -m infra.release_cutover "$RECORD"
+  fi
+  migration_owner_args=("--set-env-vars=${migration_owner_env}")
   stage schema
   migration_job="pi-orb-migrate-${release_id:0:47}"
   state migration-job "$migration_job"
   state publish
-  database_version=$(gcloud secrets versions describe latest --secret=pi-orb-database-url --project="$PROJECT" --format='value(name)')
-  database_version=${database_version##*/}
-  [[ "$database_version" =~ ^[0-9]+$ ]] || { echo 'release: invalid database secret version' >&2; exit 1; }
   # A cancelled execute request can outlive this shell. Keep the global lock on
   # any uncertain schema execution, and retain its job/record for diagnosis.
   KEEP_REMOTE_LOCK=true
@@ -266,21 +279,20 @@ if [ -z "$VALIDATE" ]; then
     --service-account="$(jq -r '.control_plane_service_account_email.value' <<<"$foundation")" \
     --network="$(jq -r '.pi_orb_network.value' <<<"$foundation")" \
     --subnet="$(jq -r '.run_egress_subnetwork.value' <<<"$foundation")" --vpc-egress=private-ranges-only \
-    --set-secrets="DATABASE_URL=pi-orb-database-url:$database_version" \
+    --set-secrets="DATABASE_URL=pi-orb-database-url:$database_version$migration_secrets" \
     "${migration_owner_args[@]}" \
     --command=node --args=apps/control-plane/src/migrate.ts --tasks=1 --parallelism=1 \
     --max-retries=0 --task-timeout=300s --cpu=1 --memory=512Mi --execute-now --wait --quiet
-  KEEP_REMOTE_LOCK=false
+  if [ "$FIRST_CONSOLIDATION" = false ]; then KEEP_REMOTE_LOCK=false; fi
   gcloud run jobs delete "$migration_job" --project="$PROJECT" --region="$REGION" --quiet
-  state check-previous
+  if [ "$FIRST_CONSOLIDATION" = false ]; then state check-previous; fi
   stage apply
-  APPLY_ATTEMPTED=true
   release_run_child tofu -chdir="$INFRA" apply -input=false "$WORK_DIR/release.tfplan"
+  KEEP_REMOTE_LOCK=false
 fi
 
 stage repair
 "$INFRA/deploy.sh"
-IAP_REPAIRED=true
 if [ -z "$VALIDATE" ]; then state snapshot; else state check; fi
 
 stage retire

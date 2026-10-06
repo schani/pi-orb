@@ -2,14 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getActivityHeadline,
   getCommittedImage,
+  getOrbHistory,
   getSystem,
   listHostedFiles,
   listOrbMessages,
+  logout,
   probeSession,
 } from "./api.ts";
-import { readBrowserSession, resetBrowserSessionForTest } from "./session.ts";
+import { readBrowserSession, readSessionPrincipal, resetBrowserSessionForTest } from "./session.ts";
 
 describe("activity headline HTTP", () => {
+  beforeEach(resetBrowserSessionForTest);
   afterEach(() => vi.unstubAllGlobals());
   it("posts encoded identity only with the caller's abort signal", async () => {
     const controller = new AbortController();
@@ -22,7 +25,7 @@ describe("activity headline HTTP", () => {
         expect(init?.method).toBe("POST");
         expect(init?.body).toBeUndefined();
         expect(init?.signal).toBe(controller.signal);
-        expect(new Headers(init?.headers).get("x-requested-with")).toBe("XMLHttpRequest");
+        expect(new Headers(init?.headers).get("x-requested-with")).toBeNull();
         return new Response(JSON.stringify({ headline: "" }));
       }),
     );
@@ -32,6 +35,37 @@ describe("activity headline HTTP", () => {
       )._unsafeUnwrap(),
     ).toEqual({ headline: "" });
   });
+  it("fences a headline body held across logout", async () => {
+    let release!: (value: unknown) => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const body = new Promise<unknown>((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string) =>
+        path === "/auth/logout"
+          ? new Response(null, { status: 204 })
+          : {
+              status: 200,
+              ok: true,
+              json: () => {
+                entered();
+                return body;
+              },
+            },
+      ),
+    );
+    const headline = getActivityHeadline("o", "r", "k", "s", new AbortController().signal);
+    await started;
+    await logout();
+    release({ headline: "Old principal's headline" });
+    expect((await headline)._unsafeUnwrapErr().type).toBe("auth_required");
+  });
+
   it("keeps typed CP errors and catches rejected transport at the API boundary", async () => {
     const signal = new AbortController().signal;
     vi.stubGlobal(
@@ -70,9 +104,9 @@ describe("API session handling", () => {
   beforeEach(resetBrowserSessionForTest);
   afterEach(() => vi.unstubAllGlobals());
 
-  it("asks IAP for an AJAX 401 and classifies an HTML 401 as expired auth", async () => {
+  it("classifies an HTML 401 as missing auth without provider-specific headers", async () => {
     const fetchMock = vi.fn(async (_path: string, init?: RequestInit) => {
-      expect(new Headers(init?.headers).get("x-requested-with")).toBe("XMLHttpRequest");
+      expect(new Headers(init?.headers).get("x-requested-with")).toBeNull();
       return new Response("<title>Sign in</title>", {
         status: 401,
         headers: { "content-type": "text/html" },
@@ -136,6 +170,132 @@ describe("API session handling", () => {
     });
   });
 
+  it.each([403, 503])("does not recover an expired session on HTTP %i", async (status) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 401 })),
+    );
+    await probeSession();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status })),
+    );
+    await probeSession();
+    expect(readBrowserSession().status).toBe("auth_required");
+  });
+
+  it("keeps the principal on provider failure and forbidden logout", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          status: "ok",
+          principal: { kind: "user", user: { id: "alice", email: null } },
+        }),
+      ),
+    );
+    await probeSession();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 503 })),
+    );
+    await probeSession();
+    expect(readSessionPrincipal()).toBe("user:alice");
+    expect(readBrowserSession().status).toBe("active");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 403 })),
+    );
+    expect((await logout()).isErr()).toBe(true);
+    expect(readSessionPrincipal()).toBe("user:alice");
+  });
+
+  it("cannot restore Alice from a response body held across Bob's login", async () => {
+    let release!: (value: unknown) => void;
+    const body = new Promise((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ status: 200, ok: true, json: () => body })),
+    );
+    const alice = probeSession();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          status: "ok",
+          principal: { kind: "user", user: { id: "bob", email: null } },
+        }),
+      ),
+    );
+    await probeSession();
+    release({ status: "ok", principal: { kind: "user", user: { id: "alice", email: null } } });
+    expect((await alice).isErr()).toBe(true);
+    expect(readSessionPrincipal()).toBe("user:bob");
+  });
+
+  it("fences a response body held across logout", async () => {
+    let release!: (body: unknown) => void;
+    const body = new Promise((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string, init?: RequestInit) => {
+        if (path === "/auth/logout") {
+          expect(init?.method).toBe("POST");
+          return new Response(null, { status: 204 });
+        }
+        return { status: 200, ok: true, json: () => body };
+      }),
+    );
+    const old = getSystem();
+    await logout();
+    release({ hostProvider: "process", databaseKind: "pglite", version: "old" });
+    expect((await old).isErr()).toBe(true);
+    expect(readBrowserSession().status).toBe("auth_required");
+  });
+
+  it("fences streamed history when logout happens after headers", async () => {
+    let release!: () => void;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"orbId":"old","records":'));
+        release = () => {
+          controller.enqueue(new TextEncoder().encode("[]}"));
+          controller.close();
+        };
+      },
+    });
+    let bodyStarted!: () => void;
+    const parsing = new Promise<void>((resolve) => {
+      bodyStarted = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string) =>
+        path === "/auth/logout"
+          ? new Response(null, { status: 204 })
+          : {
+              status: 200,
+              ok: true,
+              json: () => {
+                bodyStarted();
+                return new Response(body).json();
+              },
+            },
+      ),
+    );
+    const history = getOrbHistory("old");
+    await parsing;
+    await logout();
+    release();
+    const result = await history;
+    expect(result.isErr() && result.error.type).toBe("auth_required");
+    expect(readBrowserSession().status).toBe("auth_required");
+  });
+
   it("rejects a system response that does not match the closed schema", async () => {
     vi.stubGlobal(
       "fetch",
@@ -171,14 +331,14 @@ describe("API session handling", () => {
     expect(result.isOk() && result.value).toEqual(system);
   });
 
-  it("reads exact committed image bytes using the encoded private URL and AJAX session header", async () => {
+  it("reads exact committed image bytes using the encoded private URL", async () => {
     const bytes = new Uint8Array([0, 255, 137, 80, 78, 71, 1]);
     vi.stubGlobal(
       "fetch",
       vi.fn(async (path: string, init?: RequestInit) => {
         expect(path).toBe("/api/v1/orbs/orb%2F1/images/record%2F1/key%3A0/2?sessionId=session%2F1");
         expect(init?.cache).toBe("no-store");
-        expect(new Headers(init?.headers).get("x-requested-with")).toBe("XMLHttpRequest");
+        expect(new Headers(init?.headers).has("x-requested-with")).toBe(false);
         return new Response(bytes, { headers: { "content-type": "image/png" } });
       }),
     );
@@ -188,6 +348,68 @@ describe("API session handling", () => {
       expect(result.value.type).toBe("image/png");
       expect(new Uint8Array(await result.value.arrayBuffer())).toEqual(bytes);
     }
+  });
+
+  it.each(["headers", "blob", "error body"])(
+    "fences committed images held across logout at %s",
+    async (boundary) => {
+      let release!: () => void;
+      let entered!: () => void;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (path: string) => {
+          if (path === "/auth/logout") return new Response(null, { status: 204 });
+          if (boundary === "headers") {
+            entered();
+            await held;
+          }
+          return {
+            status: boundary === "error body" ? 404 : 200,
+            ok: boundary !== "error body",
+            headers: new Headers({ "content-type": "image/png" }),
+            blob: async () => {
+              if (boundary === "blob") {
+                entered();
+                await held;
+              }
+              return new Blob(["old"], { type: "image/png" });
+            },
+            json: async () => {
+              entered();
+              await held;
+              return { error: { code: "not_found", message: "old", retryable: false } };
+            },
+          };
+        }),
+      );
+      const image = getCommittedImage("a", "r", "k", 0, "s");
+      await started;
+      await logout();
+      release();
+      const result = await image;
+      expect(result.isErr() && result.error.type).toBe("auth_required");
+      expect(readBrowserSession().status).toBe("auth_required");
+    },
+  );
+
+  it("does not recover an expired session from successful image bytes", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 401 })),
+    );
+    await probeSession();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("image", { headers: { "content-type": "image/png" } })),
+    );
+    expect((await getCommittedImage("a", "r", "k", 0, "s")).isOk()).toBe(true);
+    expect(readBrowserSession().status).toBe("auth_required");
   });
 
   it("accepts only supported image MIME types", async () => {

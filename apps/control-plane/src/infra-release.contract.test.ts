@@ -41,6 +41,7 @@ function makeFixture(): { root: string; log: string } {
 const fs = require('node:fs');
 const a = process.argv.slice(2);
 fs.appendFileSync(process.env.CALL_LOG, 'record:' + a.join(' ') + '\\n');
+if (a[1] === 'infra.release_cutover') process.exit(Number(process.env.MOCK_CUTOVER_STATUS ?? 0));
 if (a[1] === 'infra.ci_qualification') {
  if (process.env.MOCK_QUALIFICATION_STATUS === 'failed') process.exit(1);
  console.log('{}'); process.exit(0);
@@ -89,6 +90,7 @@ test -z "\${PI_ORB_USER_ID:-}"
 test -z "\${PI_ORB_ORIGINAL_USER_ID:-}"
 test -z "\${PI_ORB_ORIGINAL_IDENTITY_ISSUER:-}"
 test -z "\${PI_ORB_ORIGINAL_IDENTITY_SUBJECT:-}"
+test -z "\${PI_ORB_GOOGLE_IDENTITY_MAPPINGS:-}"
 echo "npm:$*" >> "$CALL_LOG"
 `,
   );
@@ -99,8 +101,10 @@ if [ "$1" = auth ]; then echo token; exit 0; fi
 if [ "$1 $2" = "storage cp" ]; then exit "\${MOCK_LOCK_STATUS:-0}"; fi
 if [ "$1 $2 $3" = "storage objects describe" ]; then echo 42; exit 0; fi
 if [ "$1 $2" = "storage rm" ]; then exit 0; fi
-if [ "$1 $2 $3 $4 $5" = "beta iap web get-iam-policy --project=test-project" ]; then echo '{}'; exit "\${MOCK_IAP_PREFLIGHT_STATUS:-0}"; fi
-if [ "$1 $2 $3" = "secrets versions describe" ]; then echo projects/test/secrets/database/versions/1; exit 0; fi
+if [ "$1 $2 $3" = "secrets versions describe" ]; then
+  if [[ "$*" == *"pi-orb-google-identity-mappings"* ]]; then echo '{"name":"projects/test/secrets/pi-orb-google-identity-mappings/versions/1","state":"ENABLED"}'; else echo projects/test/secrets/database/versions/1; fi
+  exit 0
+fi
 if [ "$1 $2 $3" = "run jobs create" ]; then exit "\${MOCK_SCHEMA_STATUS:-0}"; fi
 cat <<'JSON'
 {"spec":{"template":{"spec":{"containers":[{"env":[{"name":"PI_ORB_HOST_SPEC_GENERATION","value":"200"}]}]}}}}
@@ -150,7 +154,6 @@ JSON
     fi
     ;;
   *"output -raw zone"*) echo us-central1-a ;;
-  *"output -raw ops_url"*) echo https://ops.example ;;
   *"output -raw issuer_url"*) echo https://issuer.example ;;
 esac
 `,
@@ -193,16 +196,7 @@ function makeDeployFixture(): { root: string; log: string; policy: string } {
     join(bin, "gcloud"),
     `echo "gcloud:$*" >> "$CALL_LOG"
 case "$1 $2 $3 $4" in
-  "run services update pi-orb") exit 0 ;;
-  "beta iap web get-iam-policy")
-    if [ -f "$POLICY_FILE" ]; then cat "$POLICY_FILE"; else
-      cat <<'JSON'
-{"bindings":[{"role":"roles/iap.httpsResourceAccessor","members":["domain:heyglide.com","serviceAccount:debug@example.com"]},{"role":"roles/viewer","members":["user:operator@example.com"]}],"etag":"etag-1","version":1}
-JSON
-    fi
-    ;;
-  "beta iap web set-iam-policy") cp "$5" "$POLICY_FILE" ;;
-  "run services describe pi-orb")
+  "run services describe pi-orb-issuer")
     if env | grep '^MOCK_SERVICE_STATUS=' >/dev/null; then printenv MOCK_SERVICE_STATUS; else
       cat <<'JSON'
 {"status":{"latestReadyRevisionName":"serving-revision","traffic":[{"tag":"files","latestRevision":true,"percent":100,"revisionName":"serving-revision"}]}}
@@ -219,7 +213,10 @@ esac
 }
 
 beforeEach(() => {
-  vi.stubEnv("GITHUB_ACTIONS", undefined);
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith("GITHUB_")) vi.stubEnv(key, undefined);
+  }
+  vi.stubEnv("GITHUB_ACTIONS", "false");
   vi.stubEnv("PI_ORB_CI_QUALIFICATION", undefined);
   vi.stubEnv("PI_ORB_RELEASE_RESULT_DIR", undefined);
   vi.stubEnv("PI_ORB_RELEASE_RECORD", undefined);
@@ -235,41 +232,24 @@ afterEach(() => {
 });
 
 describe("infra/deploy.sh", () => {
-  it("reconciles the exact IAP accessor allowlist before pruning revisions", () => {
-    const { root, log, policy } = makeDeployFixture();
+  it("checks routing before pruning application revisions", () => {
+    const { root, log } = makeDeployFixture();
     const result = spawnSync(join(root, "deploy.sh"), [], {
       encoding: "utf8",
       env: {
         ...process.env,
         CALL_LOG: log,
         PATH: `${join(root, "bin")}:${process.env.PATH}`,
-        POLICY_FILE: policy,
         TMPDIR: root,
       },
     });
-
     expect(result.status, result.stderr).toBe(0);
-    const applied = JSON.parse(readFileSync(policy, "utf8")) as {
-      bindings: Array<{ members: string[]; role: string }>;
-      etag: string;
-    };
-    expect(
-      applied.bindings.find((binding) => binding.role === "roles/iap.httpsResourceAccessor"),
-    ).toEqual({ members: ["domain:heyglide.com"], role: "roles/iap.httpsResourceAccessor" });
-    expect(applied.bindings.find((binding) => binding.role === "roles/viewer")).toEqual({
-      members: ["user:operator@example.com"],
-      role: "roles/viewer",
-    });
-    expect(applied.etag).toBe("etag-1");
     const calls = readFileSync(log, "utf8");
-    const describe =
-      "gcloud:run services describe pi-orb --project playground-dev-6ae7 --region us-central1 --format=json";
-    expect(calls).toContain(describe);
-    expect(calls.indexOf("beta iap web set-iam-policy")).toBeLessThan(calls.indexOf(describe));
-    expect(calls.lastIndexOf("beta iap web get-iam-policy")).toBeLessThan(calls.indexOf(describe));
-    expect(calls.indexOf(describe)).toBeLessThan(
+    expect(calls).toContain("run services describe pi-orb-issuer");
+    expect(calls.indexOf("run services describe")).toBeLessThan(
       calls.indexOf("run revisions delete old-revision"),
     );
+    expect(calls).not.toContain("iap");
   });
 
   it.each([
@@ -316,24 +296,6 @@ describe("infra/deploy.sh", () => {
     expect(result.stderr).toContain("does not route the files tag");
     expect(readFileSync(log, "utf8")).not.toContain("run revisions delete");
   });
-
-  it("repairs IAP only without requiring the application traffic route", () => {
-    const { root, log, policy } = makeDeployFixture();
-    const result = spawnSync(join(root, "deploy.sh"), ["--iap-only"], {
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        CALL_LOG: log,
-        PATH: `${join(root, "bin")}:${process.env.PATH}`,
-        POLICY_FILE: policy,
-        MOCK_SERVICE_STATUS: "{}",
-        TMPDIR: root,
-      },
-    });
-
-    expect(result.status, result.stderr).toBe(0);
-    expect(readFileSync(log, "utf8")).not.toContain("run services describe");
-  });
 });
 
 describe("workload-identity cloud release configuration", () => {
@@ -341,7 +303,7 @@ describe("workload-identity cloud release configuration", () => {
     const run = readFileSync(resolve("infra/run.tf"), "utf8");
     const outputs = readFileSync(resolve("infra/outputs.tf"), "utf8");
 
-    expect(run).toMatch(/condition\s+=\s+contains\(self\.urls, local\.oidc_issuer_url\)/);
+    expect(run).toMatch(/condition\s+=\s+contains\(self\.urls, local\.app_origin\)/);
     expect(run).not.toContain("self.uri == local.oidc_issuer_url");
     expect(outputs).toMatch(/output "issuer_url"[\s\S]*value\s+=\s+local\.oidc_issuer_url/);
     expect(outputs).not.toMatch(
@@ -459,6 +421,8 @@ describe("infra/release.sh", () => {
         PI_ORB_ORIGINAL_USER_ID: userId,
         PI_ORB_ORIGINAL_IDENTITY_ISSUER: "https://issuer.example",
         PI_ORB_ORIGINAL_IDENTITY_SUBJECT: "original-subject",
+        PI_ORB_GOOGLE_IDENTITY_MAPPINGS:
+          '[{"userId":"00000000-0000-4000-8000-000000000001","oldIssuer":"iap","oldSubject":"old","googleSubject":"123"}]',
       },
     });
 
@@ -471,6 +435,56 @@ describe("infra/release.sh", () => {
     expect(calls).toContain(
       `--set-env-vars=^@^PI_ORB_USER_ID=${userId}@PI_ORB_ORIGINAL_USER_ID=${userId}@PI_ORB_ORIGINAL_IDENTITY_ISSUER=https://issuer.example@PI_ORB_ORIGINAL_IDENTITY_SUBJECT=original-subject`,
     );
+    expect(calls).not.toContain("PI_ORB_GOOGLE_IDENTITY_MAPPINGS=[");
+    expect(calls).not.toContain("pi-orb-google-identity-mappings:1");
+  });
+
+  it("first consolidation qualifies and plans before retirement and secure migration", () => {
+    const { root, log } = makeFixture();
+    const result = spawnSync(join(root, "infra/release.sh"), ["--yes", "--first-consolidation"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CALL_LOG: log,
+        PATH: `${join(root, "bin")}:${process.env.PATH}`,
+        PROJECT: "test-project",
+        TMPDIR: join(root, "tmp"),
+        GITHUB_ACTIONS: "true",
+        GITHUB_SHA: "abc123",
+        PI_ORB_CI_QUALIFICATION: "{}",
+      },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    const calls = readFileSync(log, "utf8");
+    expect(calls).toMatch(
+      /infra.ci_qualification verify[\s\S]*\nbuild[\s\S]*tofu:.* plan[\s\S]*infra.release_cutover[\s\S]*run jobs create[\s\S]*tofu:.* apply[\s\S]*infra.release_retire wait[\s\S]*infra.release_state activate/,
+    );
+    expect(calls).toContain("PI_ORB_GOOGLE_IDENTITY_MAPPINGS=pi-orb-google-identity-mappings:1");
+    expect(calls).not.toContain("PI_ORB_GOOGLE_IDENTITY_MAPPINGS=[");
+  });
+
+  it("holds the global lock and stops before migration when retirement fails", () => {
+    const { root, log } = makeFixture();
+    const result = spawnSync(join(root, "infra/release.sh"), ["--yes", "--first-consolidation"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CALL_LOG: log,
+        PATH: `${join(root, "bin")}:${process.env.PATH}`,
+        PROJECT: "test-project",
+        TMPDIR: join(root, "tmp"),
+        GITHUB_ACTIONS: "true",
+        GITHUB_SHA: "abc123",
+        PI_ORB_CI_QUALIFICATION: "{}",
+        MOCK_CUTOVER_STATUS: "1",
+      },
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("lock retained");
+    const calls = readFileSync(log, "utf8");
+    expect(calls).toContain("infra.release_state stage");
+    expect(calls).toContain(" maintenance");
+    expect(calls).not.toMatch(/run jobs create|tofu:.* apply|gcloud:storage rm/);
   });
 
   it.each(["true", "false"])(
@@ -503,24 +517,22 @@ describe("infra/release.sh", () => {
     },
   );
 
-  it("refuses missing IAP tooling or policy access before checks and builds", () => {
+  it("refuses first consolidation without independent Actions execution", () => {
     const { root, log } = makeFixture();
-    const result = spawnSync(join(root, "infra/release.sh"), ["--yes"], {
+    const result = spawnSync(join(root, "infra/release.sh"), ["--yes", "--first-consolidation"], {
       encoding: "utf8",
       env: {
         ...process.env,
+        PI_ORB_GOOGLE_IDENTITY_MAPPINGS: "",
         CALL_LOG: log,
         PATH: `${join(root, "bin")}:${process.env.PATH}`,
         PROJECT: "test-project",
         TMPDIR: join(root, "tmp"),
-        MOCK_IAP_PREFLIGHT_STATUS: "1",
       },
     });
     expect(result.status).not.toBe(0);
-    const calls = readFileSync(log, "utf8");
-    expect(calls).toContain("beta iap web get-iam-policy");
-    expect(calls).not.toMatch(/npm:|\nbuild\n|run jobs create|tofu:.* apply/);
-    expect(calls).toContain("gcloud:storage rm");
+    expect(result.stderr).toContain("first cutover requires independent GitHub execution");
+    expect(readFileSync(log, "utf8")).not.toMatch(/npm:|run jobs create|tofu:.* apply/);
   });
 
   it("retains the global lock after an uncertain migration job", () => {
@@ -544,7 +556,7 @@ describe("infra/release.sh", () => {
     expect(calls).toContain("--wait");
   });
 
-  it("repairs IAP, skips smoke, and preserves a failed apply status", () => {
+  it("skips smoke and preserves a failed apply status", () => {
     const { root, log } = makeFixture();
     const result = spawnSync(join(root, "infra/release.sh"), ["--yes"], {
       encoding: "utf8",
@@ -560,7 +572,7 @@ describe("infra/release.sh", () => {
 
     expect(result.status).toBe(7);
     const calls = readFileSync(log, "utf8");
-    expect(calls).toContain("deploy:--iap-only");
+    expect(calls).not.toContain("deploy:");
     expect(calls).not.toContain("smoke");
     expect(calls).toContain("gcloud:storage rm");
   });
@@ -586,7 +598,7 @@ describe("infra/release.sh", () => {
     expect(calls).not.toContain("smoke");
   });
 
-  it("repairs IAP and releases the global lock when apply is interrupted", () => {
+  it("releases the global lock when apply is interrupted", () => {
     const { root, log } = makeFixture();
     const result = spawnSync(join(root, "infra/release.sh"), ["--yes"], {
       encoding: "utf8",
@@ -602,7 +614,7 @@ describe("infra/release.sh", () => {
 
     expect(result.status).toBe(143);
     const calls = readFileSync(log, "utf8");
-    expect(calls).toContain("deploy:--iap-only");
+    expect(calls).not.toContain("deploy:");
     expect(calls).not.toContain("smoke");
     expect(calls).toContain("gcloud:storage rm");
   });

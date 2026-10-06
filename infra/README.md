@@ -1,11 +1,12 @@
 # pi-orb cloud deployment
 
 Project `playground-dev-6ae7`, region `us-central1`, zone `us-central1-a`.
-Services: `pi-orb` (browser, IAP: @heyglide.com), `pi-orb-runtime-api`
-(internal broker), `pi-orb-ops` (tooling; invoker-IAM: pi-orb-debug SA),
-`pi-orb-issuer` (public OIDC discovery + JWKS, unauthenticated by design; its own
-service account, which can read no signing key and no brokered credential — but
-does share the one read/write database credential, `docs/deployment.md`).
+One Cloud Run application: `pi-orb-issuer`, using the control-plane service
+account, always-allocated CPU, one minimum/maximum instance, 3600-second requests
+and private VPC egress. App/API/broker use the **exact existing issuer origin**;
+files use its separate `files` traffic-tag origin. `app_url` and `issuer_url` are
+identical; neither substitutes Cloud Run's hashed `.uri`. Compute SSH retains IAP.
+Google browser login and machine token verification happen in the application.
 
 ## Deploy workflow
 
@@ -17,6 +18,8 @@ In GitHub Actions, select **Deploy → Run workflow → main**, leaving
 rejects a dispatched commit that is no longer main, and runs `infra/release.sh`
 under non-cancelled concurrency. Its summary and single allowlisted JSON artifact
 report the actual outcome and retained fixtures; raw plans/state/log bundles are
+never uploaded. The job timeout is 240 minutes. Normal releases retain HTTP availability; the first
+identity cutover requires the maintenance procedure below.
 never uploaded. The release job timeout is 240 minutes; no browser pause is introduced.
 
 CI, E2E and Deploy use `ubuntu-24.04` / Node `24.6.0`; E2E runs four isolated,
@@ -51,7 +54,7 @@ applying. `./infra/release.sh --yes` is the non-interactive form shared with CI.
 
 `./infra/release.sh --validate RELEASE_ID` explicitly validates the recorded
 application without rebuilding, migrating or applying infrastructure. `latest`
-selects the latest recorded attempt. It verifies all four serving image/revision
+selects the latest recorded attempt. It verifies the serving image/revision
 identities and lifecycle generations, preserves the original failure record,
 and creates a separate validation result naming both deployed and runner commits.
 Both deployment and validation require repository/environment variable
@@ -65,28 +68,32 @@ a local release may supply the all-or-none bootstrap tuple
 `PI_ORB_ORIGINAL_IDENTITY_SUBJECT`; its UUID must match `PI_ORB_USER_ID`. Validation
 runs no migration but still creates and cleans up the existing disposable smoke
 fixtures.
-It completes IAP reconciliation and old-revision pruning in a separate `repair`
-phase before retirement, including failures after apply but before the initial
-serving snapshot. The original accepted image/generation must match all four roles.
-The SDK beta component is required; a read-only IAP policy request checks it before
-any build or mutation.
-Do not use it merely to obtain green from an unexplained failure.
+Validation checks routing and prunes old revisions before retirement, including
+failures after apply but before the initial serving snapshot. The accepted image
+and generation must match the application. Do not validate merely to obtain green
+from an unexplained failure.
 
-The unsafe `--quiesce` path is removed. No normal release pauses the browser.
 New autonomous loops wait behind a startup barrier while HTTP remains available;
-only independently observed old-process retirement permits activation.
+only independently observed old-process retirement permits activation. This
+barrier does **not** stop HTTP identity writers. Deleted revisions are excluded
+only with complete latest active/idle zero evidence; missing state blocks exclusion.
+The durable `retirement` contract contains `after`, `revisions`, `zeroes`, `excluded`
+and `operations`. `excluded` stores both zero timestamps, disjoint from admitted
+`revisions`; new positives readmit targets requiring both zeros at or after `after`.
+Cutover accepts complete excluded-only proof, never empty evidence. See
+`docs/deployment.md` for the sample rule.
 
 The script owns the complete transaction. Native image versions use
 `v-<short-commit>` so every Git hash forms a valid GCE resource-name segment.
 
 The stages are:
 
-1. verify tools, Docker, auth, foundation, ops access and a non-mutating application plan; install locked dependencies. GitHub releases reuse the verified CI/E2E qualification; local releases run typecheck/lint/unit checks and E2E, which builds its Docker runtime image, before cloud image builds;
+1. verify tools, Docker, auth, foundation, machine API access and a non-mutating application plan; install locked dependencies. GitHub releases reuse the verified CI/E2E qualification; local releases run typecheck/lint/unit checks and E2E, which builds its Docker runtime image, before cloud image builds;
 2. build/boot-validate native images and push the digest-pinned, source-labelled control-plane image;
 3. clamp generation above serving and published authority, create the exact saved plan, and reject database/credential changes;
 4. run migrations using that image in a one-task Cloud Run job, with retries disabled, before any new service consumes schema;
-5. apply, preserve native IAP, reconcile its exact accessor policy, and delete non-serving browser revision metadata;
-6. require explicit zero active/idle counts for old browser revisions, including deleted-but-live revisions discovered through Monitoring, and no unfinished pi-orb compute mutations; publish activation only after rechecking serving identity;
+5. apply and delete non-serving application revision metadata;
+6. require explicit zero active/idle counts for old application revisions, including deleted-but-live revisions discovered through Monitoring, and no unfinished pi-orb compute mutations; publish activation only after rechecking serving identity;
 7. run lifecycle and identity smokes, mandatory peer-to-peer preview health and actual GCP federation through this repository's admitted project; verify successful fixture deletion and unchanged serving identity.
 
 Generated variables and the binary plan live under `umask 077` in a mode-0700
@@ -117,6 +124,30 @@ directories.
 `build-push.sh`, `deploy.sh`, `smoke.sh`, and `smoke-workload-identity.sh` remain
 implementation stages for diagnostics; they are not separate operator steps. The native build boots a fresh VM and requires runtime readiness, correct ownership/storage, and disabled Docker services before accepting the image. Release validates its manifest against the exact source commit and project. Rebuild an image independently using `infra/native-vm/README.md`; the accepted manifest and logs remain under `.context/native-image-release/`.
 
+## Google authentication provisioning
+
+Register a Google **web application** OAuth client manually. Register both exact
+redirect URIs: `<app_url>/auth/callback` and `<hosting_url>/auth/callback`.
+Configure the Workspace consent screen for `heyglide.com`. Update GitHub/MCP
+callback registrations and provider allowlists to the new app origin; reconnect
+integrations where necessary. No old-URL aliases are deployed.
+
+Supply the public `TF_VAR_google_client_id` to OpenTofu; production Deploy pins the registered web client ID. Before release, stage `pi-orb-google-client-secret` and `pi-orb-cookie-secret` in Secret Manager, version **1** each. Generate the cookie key once with at least 32 random bytes and retain it across releases. IaC reads container metadata only, grants the control-plane identity access and pins version 1 in the revision; it never reads or stores these payloads. Startup configuration and the cookie adapter each reject sealing keys shorter than 32 characters; Terraform validates references, not key values. Do not rotate either secret during cutover.
+
+The release verifies enabled version metadata and derives `TF_VAR_machine_subject` from an IAM read of the existing `pi-orb-debug@<project>.iam.gserviceaccount.com`, checking its exact email, enabled state and numeric immutable `uniqueId`. Machine token audience is the exact app origin. Debug impersonation remains an external bootstrap prerequisite. Request-log exclusions for Google and MCP callbacks precede the app revision; inspect all applicable log routing before public exposure.
+
+## First consolidation: controlled maintenance
+
+**Decision, 2026-10-05:** production mutations run only through the existing main-branch Deploy workflow, under Actions concurrency and the global GCS release lock. The first cutover must qualify and freshly build the dispatched source. Its execution survives stopping the initiating orb. Ordinary backups remain enabled; no extra backup, restore drill or recovery attestation is required.
+
+Stage the six independently verified `{userId,oldIssuer,oldSubject,googleSubject}` mappings privately as `pi-orb-google-identity-mappings`, version **1**. Never submit this JSON as a workflow input or publish it. Actions grants only the migration identity access and the one-shot job uses a secret reference; checks/builds and the application receive no mappings. Retain the protected original tuples for explicit undo. Migration 031 preserves user UUIDs and ownership.
+
+Required ordering: retire only `pi-orb`, `pi-orb-ops` and `pi-orb-runtime-api`; prove old identity writers/controllers have stopped; migrate once without retries; apply the guarded saved plan; retire the prior issuer revision; advance activation by CAS; smoke. Keep the exact issuer URL/resource throughout. Uncertainty fails closed; never automatically restore data or restart old controllers.
+
+**Decision, 2026-10-05:** downtime, backend API breaks and lost queued messages are acceptable. Preserve existing conversation history and persistent workspace data; users can stop/restart old orbs. No fleet drain, maintenance snapshot or automatic resumption is required.
+
+Set Deploy input `first_consolidation: true` for the first release (`--first-consolidation` in the shared shell). Qualification, fresh build, saved-plan/configuration/permission checks and a refreshed main-SHA guard precede deletion. Actions inventories exact service UIDs and deletes with v2 ETag preconditions; issuer and unrelated services remain. All three already absent is allowed, but partial absence requires operator review. Existing active/idle zeroes and pending Compute-operation checks gate migration. Retirement or migration uncertainty retains the global lock and recorded phase for inspection; no automatic rollback or retry. Durable release records and the Actions summary report phase/outcome independently of orb uptime.
+
 ## Tooling access
 
 For history desync diagnosis and guarded offline recovery, see [docs/history-replication.md](../docs/history-replication.md#read-only-desync-diagnostic).
@@ -141,7 +172,7 @@ file. Verify the active identity and project before using the tooling:
     ./infra/api.sh /api/v1/projects
     ./infra/api.sh /api/v1/orbs/<id>/start '{}'
 
-The API helper impersonates `pi-orb-debug@...` against the ops service — no IAP
+The API helper impersonates `pi-orb-debug@...` against the app origin — no IAP
 is involved. That service account and its service-account-level
 `roles/iam.serviceAccountTokenCreator` binding for `pi-orb-amp-deployer` are an
 external bootstrap prerequisite retained by `infra/bootstrap-amp-oidc.sh`; the
@@ -167,15 +198,10 @@ minted tokens against. Its URL is the deployment's trust anchor:
     tofu -chdir=infra output -raw issuer_url
     curl -s "$(tofu -chdir=infra output -raw issuer_url)/.well-known/openid-configuration"
 
-Nothing sets that URL by hand. OpenTofu computes it from the Cloud Run v2
-deterministic URL scheme and hands the identical string to the `runtime` service
-(which mints) and the `issuer` service (which publishes) — so a deploy cannot
-ship one without the other, and there is no release step to forget. The issuer
-service asserts that the computed value appears in its complete `.urls` set on
-every apply; Cloud Run's canonical `.uri` is the separate hashed origin. If that
-postcondition ever fails, stop and reconcile `local.oidc_issuer_url` in
-`infra/oidc.tf` before releasing, because every token in flight names the value
-that failed.
+OpenTofu computes the existing deterministic origin and uses it for issuer, app
+and broker configuration. The service postcondition checks that origin against
+Cloud Run's assigned `.urls`. If it fails, stop: changing it is a trust migration,
+not a harmless URL substitution. This consolidation changes no federation trust.
 
 Federating a cloud account with this issuer is a **separate, one-time
 administrator step**, deliberately outside the recurring plan (same rationale as
@@ -222,19 +248,12 @@ policies, generic OIDC verification rules — is
 
 ## Gotchas (each learned the hard way)
 
-- Every `tofu apply` that touches the browser service detaches IAP. Use
-  `release.sh`: ordinary errors and signals after apply starts invoke
-  `deploy.sh --iap-only`, and success takes the full repair/cleanup path.
-- IAP repair is exact, not additive: it preserves unrelated IAP roles but
-  replaces every `roles/iap.httpsResourceAccessor` binding with the sole
-  `domain:heyglide.com` member and verifies the resulting policy before
-  revision cleanup or smoke.
 - During a revision rollover the draining instance's reconciler keeps running
   with the previous host specification for 12+ minutes — not ~2 — and used to
   fight the new revision over orb VMs (see
   docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md). Two
   defenses now: an apply carrying a larger `deploy_generation` fences host
-  replacement forward-only, and `deploy.sh` deletes drained revisions of the browser
+  replacement forward-only, and `deploy.sh` deletes drained revisions of the application
   service. Neither is a complete lifecycle-authority fence: on 2026-08-11 a
   deleted revision continued reconciling for 7m42s, and although it could not
   repair backward, it could still start the host and fail durable orb state

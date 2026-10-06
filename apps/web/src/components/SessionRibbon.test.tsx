@@ -14,13 +14,13 @@ describe("SessionRibbon", () => {
     expect(renderToStaticMarkup(<SessionRibbon />)).toBe("");
   });
 
-  it("names the expired session and offers reauthentication, nothing more", () => {
+  it("offers explicit sign-in for an unauthenticated public shell", () => {
     reportAuthenticationRequired(beginSessionRequest());
     const html = renderToStaticMarkup(<SessionRibbon />);
 
     expect(html).toContain('class="session-ribbon"');
-    expect(html).toContain("session expired");
-    expect(html).toContain("sign in again");
+    expect(html).toContain("sign in required");
+    expect(html).toContain("sign in</button>");
     expect(html).not.toContain("may be paused");
   });
 });

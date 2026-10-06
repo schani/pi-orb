@@ -58,6 +58,7 @@ import {
   FakeMintIdSource,
   FakeTokenSigner,
 } from "../testkit/workload-identity.ts";
+import { createHostingAccessPolicy, registerHostingAccessGuard } from "./hosting-access.ts";
 import { registerRuntimeRoutes } from "./runtime-routes.ts";
 
 const ORB = "orb-a";
@@ -116,8 +117,18 @@ describe("runtime broker routes", () => {
     issuerConstants = TEST_ISSUER_CONSTANTS,
     routeStore: ControlPlaneStore = store,
     tailnetDnsName: string | null = "tail.test.ts.net",
+    hostingGuard = false,
   ): Promise<void> {
     app = Fastify();
+    if (hostingGuard)
+      registerHostingAccessGuard(
+        app,
+        createHostingAccessPolicy({
+          appOrigin: "https://browser.test",
+          filesOrigin: "https://files.test",
+        })._unsafeUnwrap(),
+        "https://browser.test",
+      );
     registerRuntimeRoutes(app, task, {
       appOrigin: "https://browser.test",
       ...(tailnetDnsName === null ? {} : { tailnetDnsName }),
@@ -214,6 +225,53 @@ describe("runtime broker routes", () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     await app.close();
+  });
+
+  it("keeps registered runtime bearers independent of Origin under the hosting guard", async () => {
+    await app.close();
+    await startApp(TEST_ISSUER_CONSTANTS, store, "tail.test.ts.net", true);
+    store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+    for (const origin of ["null", "https://files.test", "https://arbitrary.test"]) {
+      for (const [authorization, status] of [
+        [`Bearer ${TOKEN}`, 200],
+        ["Bearer machine", 401],
+      ] as const) {
+        expect(
+          (
+            await app.inject({
+              url: "/runtime/v1/personal-instructions",
+              headers: { host: "browser.test", origin, authorization },
+            })
+          ).statusCode,
+        ).toBe(status);
+      }
+      expect(
+        (
+          await app.inject({
+            url: "/runtime/v1/personal-instructions",
+            headers: { host: "browser.test", origin, cookie: "__Host-pi-orb-session=sealed" },
+          })
+        ).statusCode,
+      ).toBe(401);
+      expect(
+        (
+          await app.inject({
+            url: "/runtime/v1/personal-instructions",
+            headers: { host: "files.test", origin, authorization: `Bearer ${TOKEN}` },
+          })
+        ).statusCode,
+      ).toBe(404);
+      expect(
+        (
+          await app.inject({
+            method: "PUT",
+            url: "/runtime/v1/orbs/00000000-0000-4000-8000-000000000003/spawn",
+            headers: { host: "browser.test", origin, authorization: `Bearer ${TOKEN}` },
+            payload: { prompt: "work" },
+          })
+        ).statusCode,
+      ).toBe(202);
+    }
   });
 
   it("serves personal instructions only to current active runtime bearers, never accepts writes", async () => {

@@ -1,0 +1,76 @@
+--- a/index.js
++++ b/index.js
+@@ -1,8 +1,63 @@
+ 'use strict';
+ 
++// Modified by pi-orb: replace micromatch with its primary matcher using picomatch.
++
+ const fs = require('fs');
+-const micromatch = require('micromatch');
++const picomatch = require('picomatch');
+ const path = require('path');
++
++// Matching implementation from micromatch 4.0.8 (MICROMATCH-LICENSE).
++const matchWorkspaces = (list, patterns, options) => {
++  patterns = [].concat(patterns);
++  list = [].concat(list);
++
++  let omit = new Set();
++  let keep = new Set();
++  let items = new Set();
++  let negatives = 0;
++
++  let onResult = state => {
++    items.add(state.output);
++    if (options && options.onResult) {
++      options.onResult(state);
++    }
++  };
++
++  for (let i = 0; i < patterns.length; i++) {
++    let isMatch = picomatch(String(patterns[i]), { ...options, onResult }, true);
++    let negated = isMatch.state.negated || isMatch.state.negatedExtglob;
++    if (negated) negatives++;
++
++    for (let item of list) {
++      let matched = isMatch(item, true);
++
++      let match = negated ? !matched.isMatch : matched.isMatch;
++      if (!match) continue;
++
++      if (negated) {
++        omit.add(matched.output);
++      } else {
++        omit.delete(matched.output);
++        keep.add(matched.output);
++      }
++    }
++  }
++
++  let result = negatives === patterns.length ? [...items] : [...keep];
++  let matches = result.filter(item => !omit.has(item));
++
++  if (options && matches.length === 0) {
++    if (options.failglob === true) {
++      throw new Error(`No matches found for "${patterns.join(', ')}"`);
++    }
++
++    if (options.nonull === true || options.nullglob === true) {
++      return options.unescape ? patterns.map(p => p.replace(/\\/g, '')) : patterns;
++    }
++  }
++
++  return matches;
++};
+ 
+ module.exports = findWorkspaceRoot;
+ 
+@@ -25,7 +80,7 @@
+ 
+     if (workspaces) {
+       const relativePath = path.relative(current, initial);
+-      if (relativePath === '' || micromatch([relativePath], workspaces).length > 0) {
++      if (relativePath === '' || matchWorkspaces([relativePath], workspaces).length > 0) {
+         return current;
+       } else {
+         return null;
