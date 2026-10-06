@@ -222,6 +222,7 @@ Tracking:
 - [docs/postmortems/2026-09-15-postgres-e2e-port-collision.md](docs/postmortems/2026-09-15-postgres-e2e-port-collision.md) — fixed PostgreSQL host-port collision prevented 55 store contracts from running
 - [docs/postmortems/2026-09-15-find-keyboard-navigation.md](docs/postmortems/2026-09-15-find-keyboard-navigation.md) — fleet Find selected a project instead of the expected orb in keyboard-navigation E2E
 - [docs/postmortems/2026-09-15-native-personal-instructions-fixture.md](docs/postmortems/2026-09-15-native-personal-instructions-fixture.md) — mandatory boot read missing from the native validator's strict broker; release stopped before apply
+- [docs/postmortems/2026-10-06-claude-publication-order.md](docs/postmortems/2026-10-06-claude-publication-order.md) — late native-only prefixes blocked exact-identity stream retirement; durable ownership lookahead and attribution limits
 - [docs/postmortems/](docs/postmortems/) — incident forensics; design docs keep the resulting rules and link here
 - [docs/postmortems/2026-09-09-stale-thinking.md](docs/postmortems/2026-09-09-stale-thinking.md) — message-index reuse left stale green thinking below newer commands; explicit streaming retirement
 - [docs/postmortems/2026-09-09-deleted-browser-reconciler.md](docs/postmortems/2026-09-09-deleted-browser-reconciler.md) — deleted browser revision remained active and raced new-generation provisioning
