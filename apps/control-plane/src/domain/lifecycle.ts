@@ -6,7 +6,14 @@ import type {
   StopReason,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { err, ok, type Result, ResultAsync } from "neverthrow";
+import { err, ok, okAsync, type Result, ResultAsync } from "neverthrow";
+import { acceptsCentralAgentCaller } from "./agent-authorization.ts";
+import {
+  agentHealth,
+  deliverAgentMessage,
+  prepareAgentStop,
+  suspendAgent,
+} from "./agent-orchestration.ts";
 import type { HookFailure, LivenessEntry } from "./control-state.ts";
 import { withDeadline } from "./dst.ts";
 import {
@@ -16,13 +23,16 @@ import {
   type StateConflict,
   type StoreError,
 } from "./errors.ts";
+import { agentPlacement } from "./harness-agent-plane.ts";
 import { cleanupHostedFiles } from "./hosting.ts";
 import { logOrbEvent } from "./log.ts";
+import { squashMessageBatch } from "./message-batch.ts";
 import { newOrbRow } from "./new-orb.ts";
 import { hasNeverBeenReady, type OrbMessageRow, type OrbRow } from "./orb.ts";
 import type {
   ArchiveCaller,
   ControlPlaneDeps,
+  GuestAgentCaller,
   OrbHostObservation,
   OrbHostRef,
   ProvisionedOrbHost,
@@ -193,17 +203,21 @@ async function observeHost(
 async function stopHost(
   task: SimulationTask,
   deps: ControlPlaneDeps,
-  orbId: string,
+  orb: OrbRow,
   resourceId: string,
   reason: string,
 ): Promise<Result<void, OrbHostProviderError>> {
+  deps.control.closeBrowserConnections(
+    orb.id,
+    agentPlacement(deps.agentPlane, orb) === "central" ? "execution" : undefined,
+  );
   const result = await withDeadline(
     task,
     deps.constants.providerOperationTimeoutMs,
     "stop host",
     (context) => deps.hostProvider.stop(task, hostRefOf(deps, resourceId), context),
   );
-  logOrbEvent(task, orbId, "host-stop", {
+  logOrbEvent(task, orb.id, "host-stop", {
     host: resourceId,
     reason,
     ...(result.isErr()
@@ -285,7 +299,13 @@ async function provisionHost(
         {
           orbId: orb.id,
           incarnation: orb.hostIncarnation,
-          bootstrap: { repositoryUrl, harness: orb.harness },
+          bootstrap: {
+            repositoryUrl,
+            harness: orb.harness,
+            ...(agentPlacement(deps.agentPlane, orb) === "central"
+              ? { awaitInitialCheckoutCommit: true }
+              : {}),
+          },
         },
         context,
       ),
@@ -434,7 +454,7 @@ async function failOrb(
     reason: "failed",
     failure_code: code,
   });
-  deps.control.clearOrb(orb.id);
+  deps.control.clearOrb(orb.id, agentPlacement(deps.agentPlane, orb) === "central");
   return { type: "transitioned", toState: "failed" };
 }
 
@@ -585,7 +605,13 @@ async function transitionTo(
     reason: extra?.reason,
     stop_reason: extra?.stopReason,
   });
-  if (toState === "stopped" || toState === "failed") deps.control.clearOrb(orb.id);
+  if (toState === "starting" && orb.state === "running")
+    deps.control.closeBrowserConnections(
+      orb.id,
+      agentPlacement(deps.agentPlane, orb) === "central" ? "execution" : undefined,
+    );
+  if (toState === "stopped" || toState === "failed")
+    deps.control.clearOrb(orb.id, agentPlacement(deps.agentPlane, orb) === "central");
   return { type: "transitioned", toState };
 }
 
@@ -1082,6 +1108,28 @@ async function reconcileCreateStart(
       // restated in every health report — so the control plane only caches the
       // latest answer for the orb page (docs/orb-setup-hook.md).
       deps.control.noteHookFailure(orb.id, firstHookFailure(status.hooks));
+      const executionReady = deps.agentPlane?.executionReady?.bind(deps.agentPlane);
+      if (executionReady !== undefined) {
+        const resources = await withDeadline(
+          task,
+          deps.constants.runtimeRequestTimeoutMs,
+          "adopt execution resources",
+          (context) => executionReady(task, orb, context),
+        );
+        if (resources.isErr()) {
+          deps.control.recordBootProbe(orb.id, {
+            ...probeBase,
+            answered: true,
+            lastError: resources.error.message,
+          });
+          if (deps.control.noteCondition(`execution-resources:${orb.id}`, true))
+            logOrbEvent(task, orb.id, "execution-resources-blocked", {
+              message: resources.error.message,
+            });
+          return waiting("readiness");
+        }
+        deps.control.noteCondition(`execution-resources:${orb.id}`, false);
+      }
       // Persist ready identity before the orb becomes running (docs/lifecycle.md).
       const updated = await deps.store.casUpdateFields(task, {
         orbId: orb.id,
@@ -1158,6 +1206,8 @@ async function runtimeSilenceCorroborated(
   baseUrl: string,
   expectedUnansweredSinceAt: number,
 ): Promise<boolean> {
+  const found = await deps.store.getOrb(task, orbId);
+  if (found.isErr() || found.value === null) return false;
   const health = await withDeadline(
     task,
     deps.constants.runtimeRequestTimeoutMs,
@@ -1179,29 +1229,6 @@ async function runtimeSilenceCorroborated(
     reason: "silence_episode_changed",
   });
   return false;
-}
-
-function squashMessageBatch(
-  messages: readonly { content: readonly MessageInputBlock[] }[],
-): MessageInputBlock[] {
-  const content: MessageInputBlock[] = [];
-  for (const [messageIndex, message] of messages.entries()) {
-    if (messageIndex > 0) {
-      const last = content.at(-1);
-      if (last?.type === "text")
-        content[content.length - 1] = { ...last, text: `${last.text}\n\n` };
-      else content.push({ type: "text", text: "\n\n" });
-    }
-    for (const block of message.content) {
-      const last = content.at(-1);
-      if (block.type === "text" && last?.type === "text") {
-        content[content.length - 1] = { ...last, text: last.text + block.text };
-      } else {
-        content.push(block);
-      }
-    }
-  }
-  return content;
 }
 
 async function reconcileRunning(
@@ -1230,6 +1257,29 @@ async function reconcileRunning(
   }
   if (observation.state === "starting" || observation.state === "stopping") {
     return waiting("host_transition");
+  }
+  if (agentPlacement(deps.agentPlane, orb) === "central") {
+    if (deps.control.getLiveness(orb.id) === null)
+      deps.control.resetLivenessBaseline(orb.id, task.monotonicNow());
+    const health =
+      observation.runtimeAddress === undefined
+        ? null
+        : await withDeadline(
+            task,
+            deps.constants.runtimeRequestTimeoutMs,
+            "execution liveness",
+            (context) => {
+              deps.control.noteRuntimeRequestStarted(orb.id, task.monotonicNow());
+              return deps.runtimeClient.health(
+                task,
+                observation.runtimeAddress?.baseUrl ?? "",
+                context,
+              );
+            },
+          );
+    if (health?.isOk() || (health?.isErr() && health.error.answered))
+      deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
+    if (health === null) deps.control.noteRuntimeRequestStarted(orb.id, task.monotonicNow());
   }
   // Host running: derive runtime liveness from the history pull. Liveness is
   // judged on every `running` pass, ahead of any inbox work: a delivery that
@@ -1266,7 +1316,7 @@ async function reconcileRunning(
       corroboration: "health_no_answer",
     });
     deps.control.markRestartPending(orb.id);
-    const stopped = await stopHost(task, deps, orb.id, orb.hostRef, "unreachable_runtime");
+    const stopped = await stopHost(task, deps, orb, orb.hostRef, "unreachable_runtime");
     if (stopped.isErr()) {
       return stopped.error.retryable
         ? retryable(stopped.error)
@@ -1309,89 +1359,14 @@ async function reconcileRunning(
     // Transfer recovery is independent of model activity and cannot request wake.
     await recoverUploads(task, deps.store, deps.workspaceUploadRuntime(task), orb.id);
   }
-  const pendingBatch = await deps.store.claimNextOrbMessageBatch(task, {
-    orbId: orb.id,
-    now: task.wallNow(),
-  });
-  if (pendingBatch.isErr()) return retryable(pendingBatch.error);
-  if (pendingBatch.value.length > 0) {
-    if (observation.runtimeAddress === undefined) return retryable("runtime address unavailable");
-    const messageIds = pendingBatch.value.map((message) => message.messageId);
-    const batchId = pendingBatch.value[0]?.deliveryBatchId ?? messageIds[0] ?? "";
-    const system = pendingBatch.value[0]?.system ?? null;
-    const delivered = await withDeadline(
+  if (agentPlacement(deps.agentPlane, orb) !== "central") {
+    const delivered = await dispatchQueuedMessages(
       task,
-      deps.constants.runtimeRequestTimeoutMs,
-      "deliver queued message batch",
-      (context) => {
-        deps.control.noteRuntimeRequestStarted(orb.id, task.monotonicNow());
-        return deps.runtimeClient.deliverMessage(
-          task,
-          {
-            baseUrl: observation.runtimeAddress?.baseUrl ?? "",
-            messageId: batchId,
-            messageIds,
-            content: squashMessageBatch(pendingBatch.value),
-            ...(system !== null ? { system } : {}),
-          },
-          context,
-        );
-      },
+      deps,
+      orb,
+      observation.runtimeAddress?.baseUrl ?? "",
     );
-    if (delivered.isErr()) {
-      if (delivered.error.answered) {
-        deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
-      }
-      if (delivered.error.retryable) return retryable(delivered.error);
-      // A rejection the runtime will repeat for the same payload (an oversized
-      // or malformed message) is terminal for this batch: redelivering it
-      // forever would wedge every later message behind it. The rows leave the
-      // outstanding set carrying the runtime's reason, which the message
-      // resource and the UI show as a failed message (docs/runtime-protocol.md).
-      const failed = await deps.store.failOrbMessageBatch(task, {
-        orbId: orb.id,
-        messageIds,
-        lastError: delivered.error.message,
-        now: task.wallNow(),
-      });
-      if (failed.isErr()) return retryable(failed.error);
-      logOrbEvent(task, orb.id, "message-batch-failed", {
-        batch_id: batchId,
-        message_count: messageIds.length,
-        code: delivered.error.code,
-        error: delivered.error.message,
-      });
-      return { type: "progressed" };
-    }
-    // The runtime just answered an authenticated request, which is exactly
-    // what liveness measures; without this, an orb whose pulls are lagging can
-    // be restarted in the same second its runtime served a delivery.
-    deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
-    // The idle anchor is when the user's work reached the runtime, not when it
-    // was admitted: a batch can sit in the queue for longer than the whole
-    // idle window (a stopped orb, an unreachable runtime), and then the first
-    // pass after it leaves the outstanding set would idle-stop an orb whose
-    // turn had just begun. Advisory and monotone, like every other
-    // `last_busy_at` write (docs/lifecycle.md).
-    await deps.store.touchLastBusy(task, { orbId: orb.id, now: task.wallNow() });
-    const noted = await deps.store.noteOrbMessageDelivery(task, {
-      orbId: orb.id,
-      messageIds,
-      delivery: delivered.value.delivery,
-      operationId: delivered.value.operationId,
-      now: task.wallNow(),
-    });
-    if (noted.isErr()) return retryable(noted.error);
-    if (!delivered.value.duplicate) {
-      logOrbEvent(task, orb.id, "message-batch-dispatched", {
-        batch_id: batchId,
-        message_count: messageIds.length,
-        delivery: delivered.value.delivery,
-      });
-    }
-    // An undelivered message is user work in flight, so the idle countdown
-    // below is deliberately not reached while a batch is outstanding.
-    return { type: "noop" };
+    if (delivered !== null) return delivered;
   }
 
   // Scheduled sleep ignores browser presence but waits for runtime work,
@@ -1399,8 +1374,23 @@ async function reconcileRunning(
   // returned while any inbox obligation remained.
   const sleepNow = task.wallNow();
   if (orb.sleepId !== null && orb.sleepUntil !== null && sleepNow < orb.sleepUntil) {
+    if (agentPlacement(deps.agentPlane, orb) === "central") {
+      const messages = await deps.store.listOrbMessages(task, orb.id);
+      if (messages.isErr()) return retryable(messages.error);
+      if (
+        messages.value.some(
+          (message) => message.status === "queued" || message.status === "delivering",
+        )
+      )
+        return { type: "noop" };
+    }
     const uploadActive = orb.uploadActiveUntil !== null && orb.uploadActiveUntil > sleepNow;
-    if (liveness.activity === "idle" && !uploadActive) {
+    if (
+      (agentPlacement(deps.agentPlane, orb) === "central"
+        ? !deps.control.hasAgentWork(orb.id)
+        : liveness.activity === "idle") &&
+      !uploadActive
+    ) {
       deps.control.noteCondition(`sleep-wait:${orb.id}`, false);
       await task.checkpoint("sleep.stop-before-cas");
       const transitioned = await transitionTo(task, deps, orb, "stopping", {
@@ -1438,7 +1428,12 @@ async function reconcileRunning(
     orb.stateChangedAt,
     deps.control.getLastVisibleAt(orb.id) ?? 0,
   );
-  if (liveness.activity === "busy" || deps.control.hasVisibleBrowser(orb.id)) {
+  if (
+    (agentPlacement(deps.agentPlane, orb) === "central"
+      ? deps.control.hasAgentWork(orb.id)
+      : liveness.activity === "busy") ||
+    deps.control.hasVisibleBrowser(orb.id)
+  ) {
     if (now - lastActivityAt > deps.constants.idleStopAfterMs / 2) {
       // Keep the persisted timestamp fresh enough that a control-plane
       // restart under a watched orb cannot trigger an immediate idle stop.
@@ -1446,6 +1441,7 @@ async function reconcileRunning(
     }
     return { type: "noop" };
   }
+  if (deps.control.hasExecutionLeases(orb.id)) return { type: "noop" };
   if (now - lastActivityAt > deps.constants.idleStopAfterMs) {
     const transitioned = await transitionTo(task, deps, orb, "stopping", {
       stopReason: "idle",
@@ -1456,6 +1452,120 @@ async function reconcileRunning(
     return transitioned;
   }
   return { type: "noop" };
+}
+
+async function dispatchQueuedMessages(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orb: OrbRow,
+  baseUrl: string,
+): Promise<ReconcileOutcome | null> {
+  const pendingBatch = await deps.store.claimNextOrbMessageBatch(task, {
+    orbId: orb.id,
+    now: task.wallNow(),
+  });
+  if (pendingBatch.isErr()) return retryable(pendingBatch.error);
+  if (pendingBatch.value.length > 0) {
+    if (agentPlacement(deps.agentPlane, orb) === "central") {
+      await task.checkpoint("central.dispatch-before-authority");
+      const current = await deps.store.getOrb(task, orb.id);
+      if (current.isErr()) return retryable(current.error);
+      if (
+        current.value === null ||
+        current.value.agentAdmissionVersion !== orb.agentAdmissionVersion ||
+        current.value.stopReason === "manual" ||
+        current.value.stopReason === "sleep" ||
+        ["archiving", "archived", "deleting"].includes(current.value.state)
+      )
+        return { type: "conflict" };
+      orb = current.value;
+    }
+    if (agentPlacement(deps.agentPlane, orb) !== "central" && baseUrl === "")
+      return retryable("runtime address unavailable");
+    const messageIds = pendingBatch.value.map((message) => message.messageId);
+    const batchId = pendingBatch.value[0]?.deliveryBatchId ?? messageIds[0] ?? "";
+    const system = pendingBatch.value[0]?.system ?? null;
+    const delivered = await withDeadline(
+      task,
+      deps.constants.runtimeRequestTimeoutMs,
+      "deliver queued message batch",
+      (context) => {
+        if (!deps.agentPlane) deps.control.noteRuntimeRequestStarted(orb.id, task.monotonicNow());
+        return deliverAgentMessage(
+          task,
+          deps,
+          orb,
+          {
+            baseUrl: baseUrl,
+            messageId: batchId,
+            messageIds,
+            content: squashMessageBatch(pendingBatch.value),
+            ...(system !== null ? { system } : {}),
+          },
+          context,
+        );
+      },
+    );
+    if (delivered.isErr()) {
+      if (delivered.error.answered) {
+        if (agentPlacement(deps.agentPlane, orb) !== "central")
+          deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
+      }
+      if (delivered.error.retryable) return retryable(delivered.error);
+      // A rejection the runtime will repeat for the same payload (an oversized
+      // or malformed message) is terminal for this batch: redelivering it
+      // forever would wedge every later message behind it. The rows leave the
+      // outstanding set carrying the runtime's reason, which the message
+      // resource and the UI show as a failed message (docs/runtime-protocol.md).
+      const failed = await deps.store.failOrbMessageBatch(task, {
+        orbId: orb.id,
+        messageIds,
+        deliveryBatchId: batchId,
+        lastError: delivered.error.message,
+        now: task.wallNow(),
+      });
+      if (failed.isErr()) return retryable(failed.error);
+      logOrbEvent(task, orb.id, "message-batch-failed", {
+        batch_id: batchId,
+        message_count: messageIds.length,
+        code: delivered.error.code,
+        error: delivered.error.message,
+      });
+      return { type: "progressed" };
+    }
+    // The runtime just answered an authenticated request, which is exactly
+    // what liveness measures; without this, an orb whose pulls are lagging can
+    // be restarted in the same second its runtime served a delivery.
+    if (agentPlacement(deps.agentPlane, orb) !== "central")
+      deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
+    // The idle anchor is when the user's work reached the runtime, not when it
+    // was admitted: a batch can sit in the queue for longer than the whole
+    // idle window (a stopped orb, an unreachable runtime), and then the first
+    // pass after it leaves the outstanding set would idle-stop an orb whose
+    // turn had just begun. Advisory and monotone, like every other
+    // `last_busy_at` write (docs/lifecycle.md).
+    await deps.store.touchLastBusy(task, { orbId: orb.id, now: task.wallNow() });
+    const noted = await deps.store.noteOrbMessageDelivery(task, {
+      orbId: orb.id,
+      messageIds,
+      delivery: delivered.value.delivery,
+      operationId: delivered.value.operationId,
+      now: task.wallNow(),
+    });
+    if (noted.isErr()) return retryable(noted.error);
+    if (!delivered.value.duplicate) {
+      logOrbEvent(task, orb.id, "message-batch-dispatched", {
+        batch_id: batchId,
+        message_count: messageIds.length,
+        delivery: delivered.value.delivery,
+      });
+    }
+    // An undelivered message is user work in flight, so the idle countdown
+    // below is deliberately not reached while a batch is outstanding.
+    return { type: "noop" };
+  }
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1469,7 +1579,10 @@ async function reconcileStopping(
   // New live connections are rejected and existing agent/terminal proxies are
   // closed while stopping (docs/lifecycle.md).
   deps.control.markStopping(orb.id, orb.stateVersion);
-  deps.control.closeBrowserConnections(orb.id);
+  deps.control.closeBrowserConnections(
+    orb.id,
+    agentPlacement(deps.agentPlane, orb) === "central" ? "execution" : undefined,
+  );
 
   if (orb.hostRef === null) {
     // Nothing was ever provisioned; nothing to drain or stop.
@@ -1514,7 +1627,7 @@ async function reconcileStopping(
     // Absent or already-stopped host: no runtime to drain; complete records
     // left on the persistent filesystem are found on the next start (docs/lifecycle.md).
     if (observation !== null && observation.state === "failed") {
-      await stopHost(task, deps, orb.id, orb.hostRef, "host_observed_failed");
+      await stopHost(task, deps, orb, orb.hostRef, "host_observed_failed");
     }
     return transitionTo(task, deps, orb, "stopped", {
       reason: observation === null ? "host_absent" : `host_observed_${observation.state}`,
@@ -1529,7 +1642,7 @@ async function reconcileStopping(
     // Never reached ready and has no session: no user request could have been
     // accepted, so the drain is skipped (docs/lifecycle.md).
     logOrbEvent(task, orb.id, "drain-skipped", { reason: "never_ready" });
-    const stopped = await stopHost(task, deps, orb.id, orb.hostRef, "drain_skipped");
+    const stopped = await stopHost(task, deps, orb, orb.hostRef, "drain_skipped");
     if (stopped.isErr()) {
       return stopped.error.retryable
         ? retryable(stopped.error)
@@ -1630,7 +1743,7 @@ async function reconcileStopping(
       corroboration: "health_no_answer",
     });
     deps.control.markRestartPending(orb.id);
-    const stopped = await stopHost(task, deps, orb.id, orb.hostRef, "unreachable_runtime");
+    const stopped = await stopHost(task, deps, orb, orb.hostRef, "unreachable_runtime");
     if (stopped.isErr()) return retryable(stopped.error);
     const started = await startHost(
       task,
@@ -1658,17 +1771,24 @@ async function reconcileStopping(
 
   // Close runtime admission before the final drain, not after its idle snapshot.
   // Explicit Stop retains whole-host authority and does not require cooperation.
-  if (orb.stopReason === "idle" || orb.stopReason === "sleep") {
+  if (
+    (agentPlacement(deps.agentPlane, orb) !== "central" && orb.stopReason === "idle") ||
+    orb.stopReason === "sleep"
+  ) {
     if (observation.runtimeAddress === undefined) return retryable("runtime address unavailable");
     const baseUrl = observation.runtimeAddress.baseUrl;
     const prepared = await withDeadline(
       task,
       deps.constants.runtimeRequestTimeoutMs,
       "prepare idle stop",
-      (context) => deps.runtimeClient.prepareIdleStop(task, baseUrl, context),
+      (context) => prepareAgentStop(task, deps, orb, baseUrl, context),
     );
     if (prepared.isErr()) {
-      if ("answered" in prepared.error && prepared.error.answered === true)
+      if (
+        agentPlacement(deps.agentPlane, orb) !== "central" &&
+        "answered" in prepared.error &&
+        prepared.error.answered === true
+      )
         deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
       if (deps.control.getDrainStatus(orb.id)?.retrying !== true)
         logOrbEvent(task, orb.id, "idle-stop-prepare-blocked", { message: prepared.error.message });
@@ -1693,7 +1813,8 @@ async function reconcileStopping(
       });
       return retryable(prepared.error);
     }
-    deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
+    if (agentPlacement(deps.agentPlane, orb) !== "central")
+      deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
     if (!prepared.value.prepared) {
       if (orb.stopReason === "sleep") {
         deps.control.setDrainStatus(orb.id, {
@@ -1719,8 +1840,28 @@ async function reconcileStopping(
     }
   }
 
+  if (agentPlacement(deps.agentPlane, orb) === "central" && orb.stopReason === "sleep") {
+    const suspended = await withDeadline(
+      task,
+      deps.constants.runtimeRequestTimeoutMs,
+      "suspend drained sleeping agent",
+      (context) => suspendAgent(task, deps, orb.id, context, orb.agentAdmissionVersion),
+    );
+    if (suspended.isErr()) return retryable(suspended.error);
+  }
+
+  if (
+    agentPlacement(deps.agentPlane, orb) === "central" &&
+    orb.stopReason === "idle" &&
+    deps.control.hasExecutionLeases(orb.id)
+  )
+    return waiting("drain_blocked");
+
   // The controlled-shutdown pull barrier (docs/history-replication.md).
-  const outcome = await pollOrbUntilCaughtUp(task, deps, orb.id);
+  const outcome =
+    agentPlacement(deps.agentPlane, orb) === "central"
+      ? { type: "caught_up" as const, committedRecords: 0 }
+      : await pollOrbUntilCaughtUp(task, deps, orb.id);
   switch (outcome.type) {
     case "caught_up": {
       logOrbEvent(task, orb.id, "drain-caught-up", {
@@ -1730,7 +1871,7 @@ async function reconcileStopping(
         after_retrying: deps.control.getDrainStatus(orb.id)?.retrying === true ? true : undefined,
       });
       const drain = deps.control.getDrainStatus(orb.id);
-      const stopped = await stopHost(task, deps, orb.id, orb.hostRef, "drain_complete");
+      const stopped = await stopHost(task, deps, orb, orb.hostRef, "drain_complete");
       if (stopped.isErr()) {
         if (
           stopped.error.retryable &&
@@ -1813,6 +1954,23 @@ async function reconcileResourceDisposal(
     return retryable(cleaned.error);
   }
 
+  const plane = deps.agentPlane;
+  if (plane) {
+    const disposed = await withDeadline(
+      task,
+      deps.constants.runtimeRequestTimeoutMs,
+      "dispose central agent",
+      (context) => plane.dispose(task, orb.id, orb.state === "deleting", context),
+    );
+    if (disposed.isErr()) {
+      await deps.store.recordOrbDeletionError(task, {
+        orbId: orb.id,
+        message: `agent cleanup: ${disposed.error.message}`,
+        now: task.wallNow(),
+      });
+      return retryable(disposed.error);
+    }
+  }
   const destroyed = await destroyHost(task, deps, orb.id);
   if (destroyed.isErr()) {
     await deps.store.recordOrbDeletionError(task, {
@@ -1885,8 +2043,13 @@ async function reconcileArchiving(
   deps: ControlPlaneDeps,
   orb: OrbRow,
 ): Promise<ReconcileOutcome> {
-  deps.control.markStopping(orb.id, orb.stateVersion);
-  deps.control.closeBrowserConnections(orb.id);
+  if (agentPlacement(deps.agentPlane, orb) !== "central") {
+    deps.control.markStopping(orb.id, orb.stateVersion);
+  }
+  deps.control.closeBrowserConnections(
+    orb.id,
+    agentPlacement(deps.agentPlane, orb) === "central" ? "execution" : undefined,
+  );
   const intent = await deps.store.getOrbDeletion(task, orb.id);
   if (intent.isErr()) return retryable(intent.error);
   if (intent.value === null || intent.value.kind !== "archive") {
@@ -1894,7 +2057,42 @@ async function reconcileArchiving(
   }
 
   if (intent.value.historySealedAt === null) {
-    if (!hasNeverBeenReady(orb)) {
+    if (agentPlacement(deps.agentPlane, orb) === "central") {
+      deps.control.noteAgentWork(orb.id, deps.agentPlane?.session(orb.id)?.workActive?.() === true);
+      const prepared = await withDeadline(
+        task,
+        deps.constants.runtimeRequestTimeoutMs,
+        "prepare central archive",
+        (context) => prepareAgentStop(task, deps, orb, "", context),
+      );
+      if (prepared.isErr()) return retryable(prepared.error);
+      if (!prepared.value.prepared) {
+        if (deps.control.noteCondition(`archive-work:${orb.id}`, true))
+          logOrbEvent(task, orb.id, "archive-waiting-for-work", {});
+        return waiting("drain_blocked");
+      }
+      deps.control.noteCondition(`archive-work:${orb.id}`, false);
+      deps.control.markStopping(orb.id, orb.stateVersion);
+      const suspended = await withDeadline(
+        task,
+        deps.constants.runtimeRequestTimeoutMs,
+        "suspend drained archived agent",
+        (context) => suspendAgent(task, deps, orb.id, context, orb.agentAdmissionVersion),
+      );
+      if (suspended.isErr()) return retryable(suspended.error);
+      const pulled = await pollOrbUntilCaughtUp(task, deps, orb.id);
+      if (pulled.type === "retryable") return retryable(pulled);
+      if (pulled.type === "integrity")
+        return retryable(`archive blocked by central integrity: ${pulled.reason}`);
+      if (pulled.type === "orb_gone") return { type: "conflict" };
+      const readerClosed = await withDeadline(
+        task,
+        deps.constants.runtimeRequestTimeoutMs,
+        "close archived history reader",
+        (context) => suspendAgent(task, deps, orb.id, context, orb.agentAdmissionVersion),
+      );
+      if (readerClosed.isErr()) return retryable(readerClosed.error);
+    } else if (!hasNeverBeenReady(orb)) {
       if (orb.hostRef === null) {
         // Failed-compute disposal intentionally clears the old host ref. An
         // archive still needs a readable authoritative runtime to pull and
@@ -2037,7 +2235,7 @@ async function reconcileArchiving(
         task,
         deps.constants.runtimeRequestTimeoutMs,
         "prepare archive admission fence",
-        (context) => deps.runtimeClient.prepareIdleStop(task, baseUrl, context),
+        (context) => prepareAgentStop(task, deps, orb, baseUrl, context),
       );
       if (prepared.isErr()) {
         if ("answered" in prepared.error && prepared.error.answered === true)
@@ -2140,6 +2338,18 @@ async function reconcileTerminalBackstop(
   // explicitly stopped, which is what makes the wake retryable without a
   // second write to strand.
   //
+  if (
+    agentPlacement(deps.agentPlane, orb) === "central" &&
+    orb.state === "stopped" &&
+    orb.stopReason !== "manual" &&
+    orb.stopReason !== "sleep" &&
+    (deps.control.hasAgentWork(orb.id) || deps.control.hasVisibleBrowser(orb.id))
+  ) {
+    return transitionTo(task, deps, orb, "starting", {
+      stopReason: null,
+      reason: deps.control.hasAgentWork(orb.id) ? "agent_work" : "visible_browser",
+    });
+  }
   // A `failed` orb wakes only for an intent admitted against its current
   // `state_version`, i.e. a send the user made after seeing this failure. The
   // transition bumps that version, so the retry is one-shot: a boot that fails
@@ -2169,22 +2379,128 @@ async function reconcileTerminalBackstop(
   if (identityFailure !== null) return identityFailure;
   if (observation === null || observation.state === "stopped") return { type: "noop" };
   if (observation.state === "stopping") return waiting("host_transition");
-  const stopped = await stopHost(task, deps, orb.id, orb.hostRef, `terminal_backstop:${orb.state}`);
+  const stopped = await stopHost(task, deps, orb, orb.hostRef, `terminal_backstop:${orb.state}`);
   if (stopped.isErr()) return retryable(stopped.error);
   return { type: "progressed" };
 }
 
 // ---------------------------------------------------------------------------
 
+/** Central admission and dispatch never await compute operations. */
+export async function reconcileCentralAgent(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orbId: string,
+): Promise<Result<OrbRow, ReconcileOutcome>> {
+  const orbResult = await deps.store.getOrb(task, orbId);
+  if (orbResult.isErr()) return err(retryable(orbResult.error));
+  let orb = orbResult.value;
+  if (orb === null) return err({ type: "noop" });
+  if (
+    agentPlacement(deps.agentPlane, orb) === "central" &&
+    orb.state !== "archived" &&
+    orb.state !== "archiving" &&
+    orb.state !== "deleting"
+  ) {
+    if (orb.stopReason === "manual" || (orb.stopReason === "sleep" && orb.state === "stopped")) {
+      const throughAdmissionVersion = orb.agentAdmissionVersion;
+      const suspended = await withDeadline(
+        task,
+        deps.constants.runtimeRequestTimeoutMs,
+        "suspend explicitly stopped agent",
+        (context) => suspendAgent(task, deps, orbId, context, throughAdmissionVersion),
+      );
+      if (suspended.isErr()) return err(retryable(suspended.error));
+      deps.control.noteAgentWork(orbId, false);
+    } else {
+      // Reserve fresh failed-state wake authority before central publication can
+      // retire its inbox row. Persistent demand never enters this transaction.
+      if (orb.state === "failed") {
+        const woken = await deps.store.casStartOrbForQueuedMessage(task, {
+          orbId,
+          expectedStateVersion: orb.stateVersion,
+          now: task.wallNow(),
+        });
+        if (woken.isErr())
+          return err(
+            woken.error.type === "state_conflict" ? { type: "conflict" } : retryable(woken.error),
+          );
+        if (woken.value !== null) {
+          logOrbEvent(task, orbId, "transition", {
+            from: "failed",
+            to: "starting",
+            reason: "queued_message",
+          });
+          orb = woken.value;
+        }
+      }
+      const centralOrb = orb;
+      if (
+        orb.state === "stopped" &&
+        !deps.agentPlane?.session(orbId)?.workActive?.() &&
+        !deps.control.hasExecutionLeases(orbId) &&
+        orb.sleepId === null
+      ) {
+        const messages = await deps.store.listOrbMessages(task, orbId);
+        if (messages.isErr()) return err(retryable(messages.error));
+        if (
+          !messages.value.some(
+            (message) => message.status === "queued" || message.status === "delivering",
+          )
+        ) {
+          const unloaded = await withDeadline(
+            task,
+            deps.constants.runtimeRequestTimeoutMs,
+            "unload stopped host agent state",
+            (context) => deps.agentPlane?.unload?.(task, centralOrb, context) ?? okAsync(false),
+          );
+          if (unloaded.isErr()) return err(retryable(unloaded.error));
+          deps.control.noteAgentWork(orbId, false);
+          return ok(orb);
+        }
+      }
+      const health = await withDeadline(
+        task,
+        deps.constants.runtimeRequestTimeoutMs,
+        "central agent activity",
+        (context) => agentHealth(task, deps, centralOrb, "", context),
+      );
+      if (deps.control.noteCondition(`central-health:${orbId}`, health.isErr()) && health.isErr())
+        logOrbEvent(task, orbId, "central-agent-unavailable", { message: health.error.message });
+      const busy = deps.agentPlane?.session(orbId)?.workActive?.() === true;
+      deps.control.noteAgentWork(orbId, busy);
+      if (busy) await deps.store.touchLastBusy(task, { orbId, now: task.wallNow() });
+      if (orb.stopReason !== "sleep") {
+        const delivered = await dispatchQueuedMessages(task, deps, orb, "");
+        const blocked = delivered?.type === "retryable";
+        if (deps.control.noteCondition(`central-delivery:${orbId}`, blocked) && blocked)
+          logOrbEvent(task, orbId, "central-delivery-blocked", { message: delivered.message });
+        if (blocked && delivered.invariant) return err(delivered);
+      }
+    }
+  }
+  return ok(orb);
+}
+
 export async function reconcileOrbOnce(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   orbId: string,
 ): Promise<ReconcileOutcome> {
-  const orbResult = await deps.store.getOrb(task, orbId);
-  if (orbResult.isErr()) return retryable(orbResult.error);
+  return reconcileComputeOnce(task, deps, orbId);
+}
+
+async function reconcileComputeOnce(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orbId: string,
+): Promise<ReconcileOutcome> {
+  const orbResult = (await deps.store.getOrb(task, orbId)).mapErr(retryable);
+  if (orbResult.isErr()) return orbResult.error;
   const orb = orbResult.value;
   if (orb === null) return { type: "noop" };
+  if (agentPlacement(deps.agentPlane, orb) === "central")
+    deps.control.noteAgentWork(orbId, deps.agentPlane?.session(orbId)?.workActive?.() === true);
   if (orb.sleepId !== null && orb.sleepUntil !== null && task.wallNow() >= orb.sleepUntil) {
     await task.checkpoint("sleep.due-observed");
     const due = await deps.store.processDueOrbSleep(task, {
@@ -2214,6 +2530,42 @@ export async function reconcileOrbOnce(
     orb.state !== "archived"
   ) {
     return reconcileHostDiscard(task, deps, orb);
+  }
+  if (
+    agentPlacement(deps.agentPlane, orb) === "central" &&
+    (orb.state === "stopped" || orb.state === "failed") &&
+    orb.sleepId !== null &&
+    orb.sleepUntil !== null &&
+    task.wallNow() < orb.sleepUntil &&
+    orb.stopReason !== "sleep" &&
+    !deps.control.hasAgentWork(orb.id) &&
+    !deps.control.hasExecutionLeases(orb.id) &&
+    (orb.uploadActiveUntil === null || orb.uploadActiveUntil <= task.wallNow())
+  ) {
+    const messages = await deps.store.listOrbMessages(task, orb.id);
+    if (messages.isErr()) return retryable(messages.error);
+    if (
+      messages.value.some(
+        (message) => message.status === "queued" || message.status === "delivering",
+      )
+    )
+      return waiting("drain_blocked");
+    const prepared = await withDeadline(
+      task,
+      deps.constants.runtimeRequestTimeoutMs,
+      "prepare off-VM sleep",
+      (context) => prepareAgentStop(task, deps, orb, "", context),
+    );
+    if (prepared.isErr()) return retryable(prepared.error);
+    if (!prepared.value.prepared) return waiting("drain_blocked");
+    const suspended = await withDeadline(
+      task,
+      deps.constants.runtimeRequestTimeoutMs,
+      "suspend sleeping off-VM agent",
+      (context) => suspendAgent(task, deps, orbId, context, orb.agentAdmissionVersion),
+    );
+    if (suspended.isErr()) return retryable(suspended.error);
+    return transitionTo(task, deps, orb, "stopped", { stopReason: "sleep", reason: "sleep_idle" });
   }
   switch (orb.state) {
     case "creating":
@@ -2343,7 +2695,7 @@ export function readOrbBootContext(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   orbId: string,
-  caller: ArchiveCaller,
+  caller: GuestAgentCaller,
 ): ResultAsync<import("@pi-orb/protocol").OrbBootContext | null, CommandError> {
   return deps.store
     .readOrbBootContext(task, { orbId, caller })
@@ -2488,8 +2840,15 @@ export function requestOrbArchive(
       if (orbResult.isErr()) return err(mapStoreError(orbResult.error));
       const orb = orbResult.value;
       if (orb === null) return err(commandError("not_found", `orb ${orbId} not found`, false));
+      if (caller?.kind === "central") {
+        const project = await deps.store.getProject(task, orb.projectId);
+        if (project.isErr()) return err(mapStoreError(project.error));
+        if (!acceptsCentralAgentCaller(orb, project.value?.ownerUserId, caller))
+          return err(commandError("conflict", "agent authority rejected", false));
+      }
       if (
         caller !== undefined &&
+        caller.kind !== "central" &&
         (orb.runtimeTokenHash !== caller.runtimeTokenHash ||
           orb.hostIncarnation !== caller.hostIncarnation ||
           orb.hostDiscardThroughIncarnation !== null ||
@@ -2510,8 +2869,13 @@ export function requestOrbArchive(
         cleanupAfter: now + deps.constants.deletionQuarantineMs,
       });
       if (requested.isOk()) {
-        deps.control.markStopping(orbId, requested.value.stateVersion);
-        deps.control.closeBrowserConnections(orbId);
+        if (agentPlacement(deps.agentPlane, orb) !== "central") {
+          deps.control.markStopping(orbId, requested.value.stateVersion);
+        }
+        deps.control.closeBrowserConnections(
+          orbId,
+          agentPlacement(deps.agentPlane, orb) === "central" ? "execution" : undefined,
+        );
         logOrbEvent(task, orbId, "transition", {
           from: orb.state,
           to: "archiving",
@@ -2542,8 +2906,15 @@ export function requestOrbDeletion(
       if (orbResult.isErr()) return err(mapStoreError(orbResult.error));
       const orb = orbResult.value;
       if (orb === null) return err(commandError("not_found", `orb ${orbId} not found`, false));
+      if (caller?.kind === "central") {
+        const project = await deps.store.getProject(task, orb.projectId);
+        if (project.isErr()) return err(mapStoreError(project.error));
+        if (!acceptsCentralAgentCaller(orb, project.value?.ownerUserId, caller))
+          return err(commandError("conflict", "agent authority rejected", false));
+      }
       if (
         caller !== undefined &&
+        caller.kind !== "central" &&
         (orb.runtimeTokenHash !== caller.runtimeTokenHash ||
           orb.hostIncarnation !== caller.hostIncarnation ||
           orb.hostDiscardThroughIncarnation !== null ||
@@ -2630,7 +3001,6 @@ export function requestOrbStop(
             : { cancelled_sleep_id: stopped.value.cancelledSleepId }),
         });
         deps.control.markStopping(orbId, stopped.value.orb.stateVersion);
-        deps.control.closeBrowserConnections(orbId);
       } else if (overridesSleepStop) {
         logOrbEvent(task, orbId, "transition", {
           from: "stopping",
@@ -2642,8 +3012,25 @@ export function requestOrbStop(
             : { cancelled_sleep_id: stopped.value.cancelledSleepId }),
         });
         deps.control.markStopping(orbId, stopped.value.orb.stateVersion);
-        deps.control.closeBrowserConnections(orbId);
       }
+      deps.control.closeBrowserConnections(
+        orbId,
+        agentPlacement(deps.agentPlane, orb) === "central" ? "execution" : undefined,
+      );
+      logOrbEvent(task, orbId, "stop-accepted", {
+        state: stopped.value.orb.state,
+        admission_version: stopped.value.orb.agentAdmissionVersion,
+      });
+      const suspended = await withDeadline(
+        task,
+        deps.constants.runtimeRequestTimeoutMs,
+        "suspend stopped agent",
+        (context) =>
+          suspendAgent(task, deps, orbId, context, stopped.value.orb.agentAdmissionVersion),
+      );
+      if (suspended.isErr())
+        return err(commandError("unavailable", suspended.error.message, suspended.error.retryable));
+      deps.control.noteAgentWork(orbId, false);
       return ok(stopped.value.orb);
     }
     return err(commandError("conflict", "concurrent state changes; retry", true));

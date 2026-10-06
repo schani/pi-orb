@@ -12,7 +12,22 @@ permissions:
 jobs:
   checks:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: qualification
+          POSTGRES_PASSWORD: qualification
+          POSTGRES_DB: qualification
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U qualification -d qualification"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PI_ORB_TEST_DATABASE_URL: postgres://qualification:qualification@127.0.0.1:5432/qualification
+      PI_ORB_DURABLE_PG_TEST_URL: postgres://qualification:qualification@127.0.0.1:5432/qualification
 
     steps:
       - name: Check out repository

@@ -8,6 +8,8 @@ Durable authenticated study: https://files---pi-orb-1077475695242.us-central1.ru
 
 ## Selected implementation contract (2026-09-15)
 
+**Central process audit (2026-10-04):** personal/project text is captured at `createProcessAgentContext`; `beforeRequest` injects that snapshot, not fresh database text each generation. Saves do not refresh an open agent. Explicit Stop/Start adopts saved text; execution-only idle-stop/replacement may retain the central context. This is the current limitation, not a new refresh policy. Placement and host-resource adoption are distinguished in `docs/pi-durable-evaluation.md`.
+
 Extend the existing personal-instructions pattern, not the repository filesystem or a new prompt-management framework:
 
 - Store one readable Markdown document and monotonic revision per project in PostgreSQL. Migration `020_project_instructions.sql` adds `instructions_content` (empty by default) and `instructions_revision` (initially 0) to `projects`. Do not include document bodies in fleet/list responses. A separate table is unnecessary for a one-to-one document with the project's lifetime.

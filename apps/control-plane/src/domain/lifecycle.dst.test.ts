@@ -599,9 +599,14 @@ describe("orb lifecycle (DST)", () => {
             for (let i = 0; i < 6; i++) harness.world.appendMessage(ORB);
             harness.world.setActivity(ORB, "busy"); // stop does not wait for idle
             let proxyCloseCalls = 0;
-            harness.deps.control.registerBrowserConnection(ORB, "terminal-1", () => {
-              proxyCloseCalls += 1;
-            });
+            harness.deps.control.registerBrowserConnection(
+              ORB,
+              "terminal-1",
+              () => {
+                proxyCloseCalls += 1;
+              },
+              "execution",
+            );
             const stopResult = await requestOrbStop(task, harness.deps, ORB);
             expect(stopResult.isOk()).toBe(true);
             expect(proxyCloseCalls).toBe(1);

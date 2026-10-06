@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   cpSync,
   mkdirSync,
@@ -54,6 +55,7 @@ function sealedFixture() {
     "@earendil-works+pi-ai+1.0.0.patch",
     "@earendil-works+pi-coding-agent+1.0.0.patch",
     "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
+    "@earendil-works+pi-codemode+1.0.0.patch",
   ]) {
     const source = readFileSync(join(root, "patches", patch), "utf8");
     const paths = [...source.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map((match) => match[1]);
@@ -98,6 +100,52 @@ for (const symlinked of [false, true]) {
     writeFileSync(join(root, "node_modules/example/index.js"), "drift\n");
     assert.equal(applyDependencyPatches(installation).error.type, "patch_not_applicable");
     assert.equal(readFileSync(join(root, "node_modules/example/index.js"), "utf8"), "drift\n");
+  });
+}
+
+for (const scope of [[], ["--pi-only"]]) {
+  test(`CLI seals code-mode's bounded image prelude (${scope.join(" ") || "all"})`, () => {
+    const root = sealedFixture();
+    const target = "node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js";
+    const patch = "@earendil-works+pi-codemode+1.0.0.patch";
+    for (const path of [target, "node_modules/@earendil-works/pi-codemode/package.json"]) {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      cpSync(join(repository, path), join(root, path));
+    }
+    const hash = () =>
+      createHash("sha256")
+        .update(readFileSync(join(root, target)))
+        .digest("hex");
+    if (hash() === "d19de32cbdde1cc7f1aabdf3aa83c36e63776594da1aeae94dd006bbe80d338c") {
+      const reversed = spawnSync("git", ["apply", "--reverse", join(root, "patches", patch)], {
+        cwd: root,
+        encoding: "utf8",
+      });
+      assert.equal(reversed.status, 0, reversed.stderr);
+    }
+    assert.equal(hash(), "68e5505a9ab9e19ffa0fd7bb8f93147927fd27a72cf294bb122a7faca992348d");
+    mkdirSync(join(root, "scripts"));
+    cpSync(
+      join(repository, "scripts/apply-dependency-patches.mjs"),
+      join(root, "scripts/apply-dependency-patches.mjs"),
+    );
+    symlinkSync(
+      join(repository, "node_modules/neverthrow"),
+      join(root, "node_modules/neverthrow"),
+      "dir",
+    );
+    const run = () =>
+      spawnSync(process.execPath, [join(root, "scripts/apply-dependency-patches.mjs"), ...scope], {
+        cwd: root,
+        encoding: "utf8",
+      });
+    const first = run();
+    assert.equal(first.status, 0, first.stderr);
+    assert.match(first.stdout, /pi-codemode\+1\.0\.0\.patch: applied/);
+    assert.equal(hash(), "d19de32cbdde1cc7f1aabdf3aa83c36e63776594da1aeae94dd006bbe80d338c");
+    assert.equal(run().status, 0);
+    writeFileSync(join(root, target), `${readFileSync(join(root, target), "utf8")}\n// drift\n`);
+    assert.equal(run().status, 1);
   });
 }
 
@@ -230,12 +278,13 @@ test("CLI refuses unsealed fixtures without modifying their dependencies", () =>
 });
 
 for (const nested of [false, true]) {
-  test(`preserves all three shipped patches in a ${nested ? "nested" : "standalone"} install`, () => {
+  test(`preserves all four shipped patches in a ${nested ? "nested" : "standalone"} install`, () => {
     const root = nested ? nestedFixture().root : fixture();
     rmSync(join(root, "patches"), { recursive: true });
     cpSync(join(repository, "patches"), join(root, "patches"), { recursive: true });
     for (const patch of [
       "@earendil-works+pi-ai+1.0.0.patch",
+      "@earendil-works+pi-codemode+1.0.0.patch",
       "@earendil-works+pi-coding-agent+1.0.0.patch",
       "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
     ]) {
@@ -260,7 +309,7 @@ for (const nested of [false, true]) {
     }
     const result = applyDependencyPatches(root);
     assert.equal(result.isOk(), true, JSON.stringify(result.error));
-    assert.equal(result.value.length, 3);
+    assert.equal(result.value.length, 4);
     assert.ok(result.value.every(({ status }) => status === "applied"));
     assert.ok(
       applyDependencyPatches(root).value.every(({ status }) => status === "already_applied"),

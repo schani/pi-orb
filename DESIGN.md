@@ -79,6 +79,8 @@ Orb host
 
 The browser talks only to the control plane. In the original first slice, the control plane resolves/starts the orb, loads replicated history, and performs the cursor-aware handoff. It proxies the live WebSocket content-agnostically between browser and runtime. Browser detail/image HTTP reads go through the control plane to one replica record or an already-running runtime, without waking compute. History persistence is a separate control-plane-to-runtime HTTP pull of full records, so the proxy does not need to understand agent messages. Cloud Run WebSocket behavior was validated operationally in 2026-07 (`docs/open-questions.md`, question 2).
 
+**Central Durable candidate (historical process/Docker qualification 2026-10-05; latest-main integration validation underway 2026-10-06; undeployed):** agent backend is independent of process/Docker/GCP. Central authority and separate public history share causal PostgreSQL transactions; immutable Git resources precede the first model turn while execution warms concurrently. Stable metadata handles preserve subscriptions; passive history reads never load a Harness, and stopped-and-quiescent unloading never interrupts work. `PI_ORB_AGENT_BACKEND` defaults to `central-durable`; production Terraform explicitly retains `host-pi` while production adoption (question 72 (Pi Durable)) remains open. Local PostgreSQL/process/Docker qualification does not approve production adoption, live GCP or host-loss/database failover. Contracts/evidence: `docs/pi-durable-evaluation.md`, `docs/lifecycle.md`, `docs/testing.md`.
+
 ## In-orb spawning and deferred suborbs
 
 An orb can launch another orb with a prompt through `pi-orb spawn` and receive its browser URL (implemented 2026-09-08). This creates independent same-project work with atomic durable prompt acceptance; see `docs/orb-spawning.md`.
@@ -115,6 +117,7 @@ Subsystem designs:
 - [docs/claude-code-ui-research.md](docs/claude-code-ui-research.md) — research on Claude Code custom UIs, SDK integration, and authentication caveats; no adoption decision
 - [docs/claude-agent-sdk.md](docs/claude-agent-sdk.md) — approved co-located POC, owner-central subscription auth, accepted long-lived guest bearer, native history/idle contracts and qualification
 - [docs/claude-sdk-capabilities.md](docs/claude-sdk-capabilities.md) — remote-tool, hook, skill and restart-history API audit; research only
+- [docs/pi-durable-evaluation.md](docs/pi-durable-evaluation.md) — Pi Durable research, historical POC and locally qualified PostgreSQL candidate
 - [docs/subagents.md](docs/subagents.md) — local leaf subagents, minimal gotgenes fork, aggregate activity and DST-first integration/acceptance plan
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
 - [docs/multi-user.md](docs/multi-user.md) — trusted-company identity, owned projects/settings, per-user credentials, and tailnet options
@@ -157,6 +160,9 @@ Tracking:
 - [docs/postmortems/2026-10-02-expired-metadata-route.md](docs/postmortems/2026-10-02-expired-metadata-route.md) — frontend metadata interception parsed expired-session HTML 401 as JSON; response preservation and owned route drain
 - [docs/postmortems/2026-10-02-frontend-session-fixture-isolation.md](docs/postmortems/2026-10-02-frontend-session-fixture-isolation.md) — frontend session fixture ownership and built-shell probe prerequisites; tree-specific qualification
 - [docs/postmortems/2026-10-02-docker-daemon-umask.md](docs/postmortems/2026-10-02-docker-daemon-umask.md) — private harness umask made fresh-store PostgreSQL entrypoint inaccessible after UID drop
+- [docs/postmortems/2026-10-04-central-reconcile-task-sharing.md](docs/postmortems/2026-10-04-central-reconcile-task-sharing.md) — shared simulation-task violation, demand races and independent polling/compute repair
+- [docs/postmortems/2026-10-03-durable-process-qualification.md](docs/postmortems/2026-10-03-durable-process-qualification.md) — fixture admission, ordered inference and source ownership failures
+- [docs/postmortems/2026-10-03-codemode-prepare-loadout.md](docs/postmortems/2026-10-03-codemode-prepare-loadout.md) — codemode hook failure; discarded exception and unproved restart relationship
 - [docs/postmortems/2026-10-02-nested-mcp-live-rows.md](docs/postmortems/2026-10-02-nested-mcp-live-rows.md) — nested SDK events created phantom live MCP rows; parent codemode disclosure retains bounded child details
 - [docs/postmortems/2026-10-01-mcp-measurement-fixtures.md](docs/postmortems/2026-10-01-mcp-measurement-fixtures.md) — scope bounds, discarded diagnostics and child-profile measurement assumptions
 - [docs/postmortems/2026-10-01-native-ssh-startup-dependency.md](docs/postmortems/2026-10-01-native-ssh-startup-dependency.md) — first Google manager exit canceled the host-key gate and latched SSH off; corrected dependency and accepted fresh validator

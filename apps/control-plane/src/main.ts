@@ -16,13 +16,16 @@ import {
 } from "@pi-orb/protocol";
 import { NoSimulationTask, type SimulationTask } from "determined";
 import Fastify from "fastify";
-import { err, ok, okAsync } from "neverthrow";
+import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
 import { ClaudePtyAuthTransport } from "./adapters/claude-auth-pty.ts";
 import { openControlPlaneDatabase } from "./adapters/database.ts";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
+import { DurableAgentPlane } from "./adapters/durable/manager.ts";
 import { RestGceApiTransport } from "./adapters/gce/api.ts";
 import { readGceImageIdentity } from "./adapters/gce/image-pin.ts";
 import { GceOrbHostProvider } from "./adapters/gce/provider.ts";
+import { authenticatedGitCredentials } from "./adapters/git-resources/credentials.ts";
+import { GitResourceSource } from "./adapters/git-resources/git.ts";
 import {
   type GithubOAuthConfig,
   GithubOAuthHttpClient,
@@ -49,6 +52,7 @@ import { PiOrbNameGenerator } from "./adapters/pi-name-generator.ts";
 import { ProcessOrbHostProvider } from "./adapters/process/provider.ts";
 import { createReleaseActivationReader } from "./adapters/release-activation.ts";
 import { FetchRuntimeClient } from "./adapters/runtime-client/fetch-client.ts";
+import { SdkAgentPlane } from "./adapters/sdk-agent-plane.ts";
 import { createSealedAuthCookies } from "./adapters/sealed-auth-cookies.ts";
 import { FileSecretStore } from "./adapters/secrets/file-store.ts";
 import { GsmSecretStore } from "./adapters/secrets/gsm-store.ts";
@@ -59,6 +63,7 @@ import {
 } from "./adapters/tailscale/client.ts";
 import { CryptoUserIdSource } from "./adapters/user-id.ts";
 import { uploadRequest } from "./adapters/workspace-upload-http.ts";
+import { agentBackend } from "./agent-backend.ts";
 import {
   type ApplicationAuth,
   createApplicationAuth,
@@ -69,12 +74,14 @@ import {
   bindUserBroker,
   CODEX_PROVIDER,
   GITHUB_PROVIDER,
+  getToken,
   type UserBrokerDeps,
 } from "./domain/broker.ts";
 import { ClaudeAuthGate, ClaudeSubscriptionAuth } from "./domain/claude-auth.ts";
 import { DEFAULT_BROKER_CONSTANTS, DEFAULT_ISSUER_CONSTANTS } from "./domain/constants.ts";
 import { ControlState } from "./domain/control-state.ts";
 import { GithubAuthGate } from "./domain/github-auth.ts";
+import { HarnessAgentPlane } from "./domain/harness-agent-plane.ts";
 import {
   readOrbBootContext,
   requestOrbArchive,
@@ -95,7 +102,9 @@ import { mcpOAuthCleanupLoop } from "./domain/mcp-oauth-garbage.ts";
 import { spawnOrb } from "./domain/orb-spawning.ts";
 import type { BrokerDeps, ControlPlaneDeps, SigningKeyDeps } from "./domain/ports.ts";
 import { getProjectSecretSnapshot } from "./domain/project-secrets.ts";
+import { cancelQueuedUserTurn } from "./domain/queued-turn-cancellation.ts";
 import { waitForReleaseActivation } from "./domain/release-activation.ts";
+import { resourceError } from "./domain/resources.ts";
 import { createSigningKeyBootstrapState, ensureActiveSigningKey } from "./domain/signing-keys.ts";
 import { UserScope } from "./domain/user-scope.ts";
 import { MintDenialLog } from "./domain/workload-identity.ts";
@@ -126,6 +135,7 @@ import {
 } from "./identity-composition.ts";
 import { lifecycleConstantsForHost } from "./lifecycle-config.ts";
 import { migrationOwnerInput } from "./migrate.ts";
+import { createProcessAgentContext } from "./process-agent-composition.ts";
 
 const env = (name: string, fallback: string): string => {
   const value = process.env[name];
@@ -192,9 +202,20 @@ export async function main(
       users: import("./domain/identity.ts").UserStore,
     ) => RequestPrincipalResolver;
     mockOpenAiForUser?: (userId: string) => MockOpenAiConfig | null;
+    resourceSource?: import("./domain/resources.ts").ResourceSource;
+    resourceSourceFactory?: (
+      credentials: import("./adapters/git-resources/git.ts").GitCredentials,
+    ) => import("./domain/resources.ts").ResourceSource;
   } = {},
 ): Promise<void> {
   const bootTask = new NoSimulationTask("boot", true);
+  const selectedAgent = agentBackend(process.env["PI_ORB_AGENT_BACKEND"]);
+  if (selectedAgent.isErr()) {
+    bootTask.error(selectedAgent.error.message);
+    process.exitCode = 1;
+    return;
+  }
+  const runtimeMode = selectedAgent.value === "central-durable" ? "execution" : "pi";
   const databaseUrl = env("DATABASE_URL", "postgres://pi-orb:pi-orb@127.0.0.1:5433/pi_orb");
   const databaseKind = env("PI_ORB_DATABASE_KIND", "postgresql");
   const pglitePath = env(
@@ -431,6 +452,7 @@ export async function main(
           projectId: env("PI_ORB_GCP_PROJECT", ""),
           zone: env("PI_ORB_GCE_ZONE", "us-central1-a"),
           machineType: env("PI_ORB_GCE_MACHINE_TYPE", "n2d-highmem-2"),
+          runtimeMode,
           subnetwork: env(
             "PI_ORB_GCE_SUBNETWORK",
             "regions/us-central1/subnetworks/pi-orb-us-central1",
@@ -452,8 +474,9 @@ export async function main(
               join(homedir(), ".pi-orb", "local", "process-hosts"),
             ),
             runtimeEntryPoint: fileURLToPath(
-              new URL("../../orb-runtime/src/main.ts", import.meta.url),
+              new URL("../../orb-runtime/src/runtime-entry.ts", import.meta.url),
             ),
+            runtimeMode,
             commandDirectory: fileURLToPath(new URL("../../orb-runtime/docker", import.meta.url)),
             skillsDir: fileURLToPath(new URL("../../orb-runtime/skills", import.meta.url)),
             controlPlaneUrl: env("PI_ORB_BROKER_URL", `http://127.0.0.1:${port}`),
@@ -462,6 +485,7 @@ export async function main(
           })
         : new DockerOrbHostProvider({
             image: runtimeImage,
+            runtimeMode,
             network: dockerNetwork,
             ...(process.env["PI_ORB_DOCKER_INVENTORY_SCOPE"] === undefined
               ? {}
@@ -489,7 +513,7 @@ export async function main(
       : createFilesystemHostedByteStore({
           root: hosting.store.root,
         });
-  const deps: ControlPlaneDeps = {
+  let deps: ControlPlaneDeps = {
     workspaceUploadRuntime: (task) => ({
       status: (row) => uploadRequest(task, deps, row, "status"),
       finish: (row) => uploadRequest(task, deps, row, "finish"),
@@ -599,6 +623,153 @@ export async function main(
     adapters.mcpOAuthProtocol?.(`${appOrigin}${MCP_OAUTH_CALLBACK}`) ??
       new SdkMcpOAuth(`${appOrigin}${MCP_OAUTH_CALLBACK}`, oauthNetwork.fetcher),
   );
+  const resourceGate = database.resourceGate(
+    adapters.resourceSource ??
+      (adapters.resourceSourceFactory ?? ((credentials) => new GitResourceSource(credentials)))(
+        authenticatedGitCredentials((orbId, signal) => {
+          if (signal.aborted)
+            return errAsync(resourceError("cancelled", "Git credential request cancelled"));
+          return database.store
+            .getOrb(bootTask, orbId)
+            .mapErr(() => resourceError("storage", "Git owner unavailable"))
+            .andThen((orb) => {
+              if (!orb) return errAsync(resourceError("not_found", "Git owner unavailable"));
+              return database.store
+                .getProject(bootTask, orb.projectId)
+                .mapErr(() => resourceError("storage", "Git owner unavailable"))
+                .andThen((project) =>
+                  project
+                    ? ResultAsync.fromSafePromise(
+                        getToken(bootTask, brokerForUser(project.ownerUserId), GITHUB_PROVIDER, {
+                          reason: "startup",
+                        }),
+                      )
+                        .andThen((result) => result)
+                        .map<string | null>((grant) => grant.accessToken)
+                        .orElse((error) =>
+                          error.type === "auth_required"
+                            ? okAsync(null)
+                            : errAsync(
+                                resourceError("authentication", "Git credential unavailable"),
+                              ),
+                        )
+                    : errAsync(resourceError("not_found", "Git owner unavailable")),
+                );
+            });
+        }),
+      ),
+  );
+  let centralPlane: DurableAgentPlane | undefined;
+  if (selectedAgent.value === "central-durable") {
+    const opened = await DurableAgentPlane.create({
+      persistence: database.agentPersistence,
+      prepare: (task, orb, context) =>
+        resourceGate
+          .acquire(task, orb, context)
+          .map(() => undefined)
+          .mapErr((error) => ({
+            type: "runtime_client_error" as const,
+            code: "initialization_failed" as const,
+            answered: true,
+            retryable: error.code === "storage",
+            message: "Required resource snapshot unavailable",
+            initializationError: {
+              code: "resource_acquisition_failed",
+              message: "Required resource snapshot unavailable",
+              retryable: error.code === "storage",
+            },
+          })),
+      currentOrb: (task, orbId) =>
+        database.store.getOrb(task, orbId).mapErr(() => ({
+          type: "runtime_client_error" as const,
+          code: "history_unavailable" as const,
+          answered: true,
+          retryable: true,
+          message: "Conversation admission unavailable",
+        })),
+      cancelPending: (task, orb, operationId) =>
+        database.store
+          .getProject(task, orb.projectId)
+          .mapErr(() => ({
+            type: "runtime_client_error" as const,
+            code: "history_unavailable" as const,
+            answered: true,
+            retryable: true,
+            message: "Pending admission unavailable",
+          }))
+          .andThen((project) =>
+            project
+              ? cancelQueuedUserTurn(
+                  task,
+                  database.store,
+                  {
+                    kind: "central",
+                    orbId: orb.id,
+                    projectId: orb.projectId,
+                    ownerUserId: project.ownerUserId,
+                    agentAdmissionVersion: orb.agentAdmissionVersion,
+                  },
+                  operationId,
+                )
+              : errAsync({
+                  type: "runtime_client_error" as const,
+                  code: "history_unavailable" as const,
+                  answered: true,
+                  retryable: false,
+                  message: "Pending admission unavailable",
+                }),
+          ),
+      openContext: createProcessAgentContext(deps, {
+        brokerForUser,
+        resources: resourceGate,
+        mcp: database.mcp,
+        mcpOAuth,
+        appOrigin: appOrigin || `http://127.0.0.1:${port}`,
+        ...(tailnetDnsName ? { tailnetDnsName } : {}),
+        inferenceBaseUrl: (userId) =>
+          (adapters.mockOpenAiForUser?.(userId) ?? mockOpenAi)?.inferenceBaseUrl,
+        appendAlert: (orbId, requestId, message, expectedAdmissionVersion) => {
+          if (!centralPlane)
+            return errAsync({ code: "unavailable" as const, message: "central agent unavailable" });
+          return centralPlane
+            .appendAlert(orbId, requestId, message, expectedAdmissionVersion)
+            .mapErr(() => ({
+              code: "unavailable" as const,
+              message: "alert admission unavailable",
+            }));
+        },
+      }),
+    });
+    if (opened.isErr()) {
+      bootTask.error("central agent authority failed:", opened.error.message);
+      if (hostProvider instanceof ProcessOrbHostProvider) await hostProvider.close();
+      await database.close();
+      process.exitCode = 1;
+      return;
+    }
+    centralPlane = opened.value;
+    deps = {
+      ...deps,
+      agentPlane: new HarnessAgentPlane(
+        centralPlane,
+        new SdkAgentPlane({
+          hostProvider,
+          runtimeClient: deps.runtimeClient,
+          control: deps.control,
+        }),
+        deps.store,
+      ),
+    };
+  } else {
+    deps = {
+      ...deps,
+      agentPlane: new SdkAgentPlane({
+        hostProvider,
+        runtimeClient: deps.runtimeClient,
+        control: deps.control,
+      }),
+    };
+  }
   app.addHook("onClose", async () => {
     const drained = await claudeAuth.close(httpTask);
     if (drained.isErr())
@@ -713,6 +884,13 @@ export async function main(
   registerRuntimeRoutes(app, httpTask, {
     appOrigin,
     ...viewConfig,
+    ...(centralPlane
+      ? {
+          alertWriter: centralPlane,
+          initialCheckoutCommit: (task: SimulationTask, orb: import("./domain/orb.ts").OrbRow) =>
+            resourceGate.initialPin(task, orb),
+        }
+      : {}),
     spawn: (task, caller, orbId, request) => spawnOrb(task, deps, caller, orbId, request),
     sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
       requestOrbSleep(task, deps, orbId, caller, durationSeconds, sleepId),
@@ -801,6 +979,10 @@ export async function main(
   const closeResources = (): Promise<void> => {
     resourceClosePromise ??= (async () => {
       await closeApp();
+      if (centralPlane) {
+        const closed = await centralPlane.close();
+        if (closed.isErr()) bootTask.error("central agent close failed:", closed.error.message);
+      }
       if (hostProvider instanceof ProcessOrbHostProvider) await hostProvider.close();
       const closed = await database.close();
       if (closed.isErr()) bootTask.error("database close failed:", closed.error.message);
@@ -819,7 +1001,7 @@ export async function main(
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
-  const listening = await app.listen({ port, host: "0.0.0.0" }).then(
+  const listening = await app.listen({ port, host: env("HOST", "0.0.0.0") }).then(
     (address) => address,
     (error: unknown) => {
       bootTask.error("listen failed:", error);

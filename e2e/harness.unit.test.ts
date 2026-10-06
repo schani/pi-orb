@@ -7,6 +7,7 @@ import {
   effectiveOpenAIResponseInstructions,
   FAKE_ORIGIN,
   fakeRequest,
+  fixtureAuthorityDirectory,
   newModelRequestsById,
   requestIds,
 } from "./harness.ts";
@@ -119,6 +120,18 @@ describe("effective OpenAI response instructions", () => {
     });
 
     expect(effective).toBe("base");
+  });
+});
+
+describe("fixture authority ownership", () => {
+  it("isolates fixtures and preserves explicit restart authority", () => {
+    expect(fixtureAuthorityDirectory("/fixture/a")).toBe("/fixture/a/central-authority");
+    expect(fixtureAuthorityDirectory("/fixture/b")).not.toBe(
+      fixtureAuthorityDirectory("/fixture/a"),
+    );
+    expect(fixtureAuthorityDirectory("/fixture/b", "/restart/authority")).toBe(
+      "/restart/authority",
+    );
   });
 });
 

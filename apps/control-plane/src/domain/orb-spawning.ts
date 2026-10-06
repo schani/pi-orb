@@ -6,7 +6,7 @@ import type { StoreError } from "./errors.ts";
 import { logOrbEvent } from "./log.ts";
 import { newOrbRow } from "./new-orb.ts";
 import type { OrbRow } from "./orb.ts";
-import type { ControlPlaneDeps, SpawnConflict } from "./ports.ts";
+import type { ArchiveCaller, ControlPlaneDeps, SpawnConflict } from "./ports.ts";
 
 export function spawnOrb(
   task: SimulationTask,
@@ -14,6 +14,7 @@ export function spawnOrb(
   caller: OrbRow,
   orbId: string,
   request: OrbSpawnRequest,
+  authority?: ArchiveCaller,
 ): ResultAsync<void, StoreError | SpawnConflict> {
   const orb = newOrbRow(
     {
@@ -31,7 +32,7 @@ export function spawnOrb(
   return deps.store
     .spawnOrb(task, {
       callerOrbId: caller.id,
-      caller: {
+      caller: authority ?? {
         runtimeTokenHash: caller.runtimeTokenHash ?? "",
         hostIncarnation: caller.hostIncarnation,
       },

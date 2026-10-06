@@ -115,7 +115,7 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
 
   it("prepends the personal boot snapshot, preserves native files, and removes only personal context when empty", async () => {
     writeFileSync(join(agentDir, "AGENTS.md"), "guest-local instructions");
-    const native = (await implicitLoader()).getAgentsFiles().agentsFiles;
+    const native = [{ path: join(repoDir, "AGENTS.md"), content: AGENTS_MD }];
     const personalInstructions = { content: "# Personal\nKeep this exact.\n", revision: 7 };
     const loaded = (
       await createOrbResourceLoader({
@@ -144,12 +144,12 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
       })
     )._unsafeUnwrap();
     expect(cleared.getAgentsFiles().agentsFiles).toEqual(native);
-    expect((await implicitLoader()).getAgentsFiles().agentsFiles).toEqual(native);
+    expect((await implicitLoader()).getAgentsFiles().agentsFiles).toContainEqual(native[0]);
   });
 
   it("adds project instructions after native context, preserving personal context and the immutable boot snapshot", async () => {
     writeFileSync(join(agentDir, "AGENTS.md"), "guest-local instructions");
-    const native = (await implicitLoader()).getAgentsFiles().agentsFiles;
+    const native = [{ path: join(repoDir, "AGENTS.md"), content: AGENTS_MD }];
     const personalInstructions = { content: "Personal marker", revision: 1 };
     const projectInstructions = { content: "Project marker", revision: 2 };
     const loaded = (
@@ -180,7 +180,7 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
       })
     )._unsafeUnwrap();
     expect(cleared.getAgentsFiles().agentsFiles).toEqual(expected.slice(0, -1));
-    expect((await implicitLoader()).getAgentsFiles().agentsFiles).toEqual(native);
+    expect((await implicitLoader()).getAgentsFiles().agentsFiles).toContainEqual(native[0]);
   });
 
   it("loads native MCP, tool search and codemode without a catalog, alongside user extensions", async () => {
@@ -367,6 +367,24 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     expect(loader.getAppendSystemPrompt()).toEqual([PROJECT_APPEND, environmentPrompt]);
     expect(composedAppendSection(loader)).not.toContain("## Port exposure");
     expect(composedAppendSection(loader)).not.toContain(PREVIEW_HOST);
+  });
+
+  it("excludes home skills and selects repository fallback without merging or empty-primary fallback", async () => {
+    const skill = (path: string, name: string) => {
+      mkdirSync(path, { recursive: true });
+      writeFileSync(join(path, "SKILL.md"), `---\nname: ${name}\ndescription: fixture\n---\nbody`);
+    };
+    skill(join(agentDir, "skills", "home-skill"), "home-skill");
+    skill(join(repoDir, ".agents", "skills", "fallback-skill"), "fallback-skill");
+    expect((await orbLoader()).getSkills().skills.map((s) => s.name)).toEqual(["fallback-skill"]);
+    mkdirSync(join(repoDir, ".pi", "skills"), { recursive: true });
+    expect((await orbLoader()).getSkills().skills).toEqual([]);
+    skill(join(repoDir, ".pi", "skills", "primary-skill"), "primary-skill");
+    expect((await orbLoader()).getSkills().skills.map((s) => s.name)).toEqual(["primary-skill"]);
+    writeFileSync(join(repoDir, ".pi", "AGENTS.md"), "primary instructions");
+    expect((await orbLoader()).getAgentsFiles().agentsFiles).toEqual([
+      { path: join(repoDir, ".pi", "AGENTS.md"), content: "primary instructions" },
+    ]);
   });
 
   it("discovers the image-baked skills through additionalSkillPaths", async () => {

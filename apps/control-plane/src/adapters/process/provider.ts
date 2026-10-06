@@ -14,6 +14,7 @@ import {
 } from "node:fs";
 import { createServer } from "node:net";
 import { delimiter, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   CONTROL_PLANE_URL_ENV,
   HARNESS_ENV,
@@ -38,6 +39,7 @@ import type {
 import { specFingerprintOf } from "../spec-fingerprint.ts";
 
 export interface ProcessOrbHostProviderOptions {
+  readonly runtimeMode?: "pi" | "execution";
   readonly stateDirectory: string;
   readonly runtimeEntryPoint: string;
   readonly controlPlaneUrl: string;
@@ -67,11 +69,15 @@ interface HostMetadata {
   readonly incarnation: number;
   readonly repositoryUrl: string;
   readonly harness: import("@pi-orb/protocol").HarnessKind;
+  readonly initialCheckoutCommit?: string;
+  readonly awaitInitialCheckoutCommit?: boolean;
   readonly specFingerprint: string | null;
   readonly runtimeToken: string;
   readonly port: number;
   /** Process-group leader PID, persisted so disposal survives provider restart. */
   readonly processGroupId: number | null;
+  readonly processBirth: string | null;
+  readonly drainToken: string | null;
   readonly supervisorId: string;
   readonly desiredState: "running" | "stopped";
 }
@@ -79,6 +85,8 @@ interface HostMetadata {
 interface ManagedChild {
   readonly child: ChildProcess;
   readonly startedAt: number;
+  readonly drainToken: string | null;
+  processBirth: string | null;
   intentional: boolean;
 }
 
@@ -152,6 +160,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     return specFingerprintOf({
       v: 1,
       runtimeEntryPoint: this.options.runtimeEntryPoint,
+      runtimeMode: input.harness === "claude" ? "pi" : (this.options.runtimeMode ?? "execution"),
       nodeExecutable: this.options.nodeExecutable ?? process.execPath,
       controlPlaneUrl: this.options.controlPlaneUrl,
       skillsDir: this.options.skillsDir,
@@ -213,10 +222,16 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
         incarnation,
         repositoryUrl: parsed.repositoryUrl,
         harness: parsed.harness,
+        ...(parsed.awaitInitialCheckoutCommit === true ? { awaitInitialCheckoutCommit: true } : {}),
+        ...(typeof parsed.initialCheckoutCommit === "string"
+          ? { initialCheckoutCommit: parsed.initialCheckoutCommit }
+          : {}),
         specFingerprint: typeof parsed.specFingerprint === "string" ? parsed.specFingerprint : null,
         runtimeToken: parsed.runtimeToken,
         port: parsed.port,
         processGroupId,
+        processBirth: typeof parsed.processBirth === "string" ? parsed.processBirth : null,
+        drainToken: typeof parsed.drainToken === "string" ? parsed.drainToken : null,
         supervisorId: parsed.supervisorId,
         desiredState: parsed.desiredState,
       });
@@ -316,6 +331,10 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       PI_ORB_ID: metadata.orbId,
       [HARNESS_ENV]: metadata.harness,
       PI_ORB_REPOSITORY_URL: metadata.repositoryUrl,
+      PI_ORB_RUNTIME_MODE:
+        metadata.harness === "claude" ? "pi" : (this.options.runtimeMode ?? "execution"),
+      PI_ORB_INITIAL_CHECKOUT_COMMIT: metadata.initialCheckoutCommit ?? "",
+      PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT: metadata.awaitInitialCheckoutCommit ? "1" : "",
       PI_ORB_HOST_INCARNATION: String(metadata.incarnation),
       // An unsandboxed process host cannot assert container-wide process loss.
       PI_ORB_CONTAINER: "0",
@@ -349,6 +368,17 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     operation: OrbHostProviderError["operation"],
     metadata: HostMetadata,
   ): Promise<Result<void, OrbHostProviderError>> {
+    if (process.platform !== "linux")
+      return Promise.resolve(
+        err(
+          hostError(
+            operation,
+            "operation_failed",
+            "process execution host requires Linux with Python 3.9+ and pidfd support (kernel 5.3+)",
+            false,
+          ),
+        ),
+      );
     if (this.closing)
       return Promise.resolve(err(hostError(operation, "cancelled", "provider is closing", true)));
     const existing = this.children.get(metadata.orbId);
@@ -359,23 +389,61 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     ) {
       return Promise.resolve(ok(undefined));
     }
+    if (metadata.drainToken !== null) {
+      const proven = this.drainProven(operation, metadata.orbId, metadata.drainToken);
+      if (proven.isErr()) return Promise.resolve(err(proven.error));
+      if (!proven.value)
+        return Promise.resolve(
+          err(
+            hostError(
+              operation,
+              "unavailable",
+              "execution supervisor loss: descendant cleanup is unknown; refusing relaunch",
+              true,
+            ),
+          ),
+        );
+    }
     try {
       const directory = this.hostDirectory(metadata.orbId);
       mkdirSync(directory, { recursive: true, mode: 0o700 });
       const stdout = openSync(join(directory, "runtime.log"), "a", 0o600);
       const stderr = openSync(join(directory, "runtime.err.log"), "a", 0o600);
+      const supervised = process.platform === "linux";
+      const drainToken = supervised ? randomBytes(32).toString("hex") : null;
+      const registered = this.writeMetadata(operation, {
+        ...metadata,
+        drainToken,
+        processBirth: null,
+      });
+      if (registered.isErr()) return Promise.resolve(err(registered.error));
+      const executable = this.options.nodeExecutable ?? process.execPath;
       const child = spawn(
-        this.options.nodeExecutable ?? process.execPath,
-        [this.options.runtimeEntryPoint],
+        supervised ? "python3" : executable,
+        supervised
+          ? [
+              fileURLToPath(new URL("./supervisor.py", import.meta.url)),
+              join(directory, "drained.json"),
+              drainToken ?? "",
+              executable,
+              this.options.runtimeEntryPoint,
+            ]
+          : [this.options.runtimeEntryPoint],
         {
           env: this.childEnvironment(metadata),
-          detached: process.platform !== "win32",
+          detached: true,
           stdio: ["ignore", stdout, stderr, "ipc"],
         },
       );
       closeSync(stdout);
       closeSync(stderr);
-      const managed: ManagedChild = { child, startedAt: Date.now(), intentional: false };
+      const managed: ManagedChild = {
+        child,
+        startedAt: Date.now(),
+        drainToken,
+        processBirth: null,
+        intentional: false,
+      };
       this.children.set(metadata.orbId, managed);
       child.once("exit", () => {
         if (!this.forgetChild(metadata.orbId, managed)) return;
@@ -408,30 +476,40 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
             resolve(err(hostError(operation, "operation_failed", "child has no pid", true)));
             return;
           }
-          // Every launch runs under the per-orb lock, so a discard cannot
-          // interleave here — but if the metadata is gone anyway, rewriting
-          // it would resurrect a fenced incarnation. Detect, kill what was
-          // just spawned, and report the lost race instead.
+          const birth = supervised ? this.processBirth(child.pid) : ok(null);
+          if (birth.isErr()) {
+            resolve(err(birth.error));
+            return;
+          }
+          managed.processBirth = birth.value;
+          // Never restore removed metadata or destroy the subreaper before
+          // it can prove descendant cleanup. Retain the live ownership handle.
           if (!existsSync(this.metadataPath(metadata.orbId))) {
             managed.intentional = true;
-            if (this.children.get(metadata.orbId) === managed) {
-              this.children.delete(metadata.orbId);
-            }
-            const kill = Result.fromThrowable(
-              (pid: number) => process.kill(pid, "SIGKILL"),
-              (error) => error as NodeJS.ErrnoException,
-            );
-            kill(process.platform === "win32" ? child.pid : -child.pid);
             resolve(
-              err(hostError(operation, "conflict", "host metadata removed during launch", true)),
+              err(
+                hostError(
+                  operation,
+                  "conflict",
+                  "host metadata removed during launch: cleanup is unknown",
+                  true,
+                ),
+              ),
             );
             return;
           }
           const written = this.writeMetadata(operation, {
             ...metadata,
+            drainToken,
+            processBirth: birth.value,
             processGroupId: child.pid,
           });
-          resolve(written.isErr() ? err(written.error) : ok(undefined));
+          if (written.isErr()) resolve(err(written.error));
+          else if (drainToken === null) resolve(ok(undefined));
+          else
+            void this.awaitSupervisorReady(operation, metadata.orbId, managed, drainToken).then(
+              resolve,
+            );
         });
         child.once("error", (error) => {
           if (this.children.get(metadata.orbId) === managed) this.children.delete(metadata.orbId);
@@ -485,6 +563,48 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     return hostError(operation, "conflict", `invalid process host ref ${resourceId}`, false);
   }
 
+  /** Credentials stay behind provider metadata; callers never read guest files. */
+  executionBinding(
+    _task: SimulationTask,
+    ref: OrbHostRef,
+    context: OperationContext,
+  ): ResultAsync<
+    {
+      readonly baseUrl: string;
+      readonly token: string;
+      readonly incarnation: string;
+      readonly cwd: string;
+    },
+    OrbHostProviderError
+  > {
+    const parsed = Result.fromThrowable(
+      () => this.identityFromRef(ref),
+      () => null,
+    )();
+    const identity = parsed.isOk() ? parsed.value : null;
+    if (ref.provider !== "process" || identity === null)
+      return new ResultAsync(Promise.resolve(err(this.invalidRefError("observe", ref.resourceId))));
+    const run = this.withLock(identity.orbId, async () => {
+      if (context.signal.aborted)
+        return err(hostError("observe", "cancelled", "execution binding cancelled", true));
+      const found = this.readMetadata("observe", identity.orbId);
+      if (found.isErr()) return err(found.error);
+      if (
+        found.value === null ||
+        found.value.incarnation !== identity.incarnation ||
+        found.value.desiredState !== "running"
+      )
+        return err(hostError("observe", "conflict", "execution incarnation unavailable", true));
+      return ok({
+        baseUrl: `http://127.0.0.1:${found.value.port}`,
+        token: found.value.runtimeToken,
+        incarnation: String(found.value.incarnation),
+        cwd: join(this.hostDirectory(identity.orbId), "workspace", "repo"),
+      });
+    });
+    return new ResultAsync(run);
+  }
+
   provision(
     task: SimulationTask,
     request: ProvisionOrbHostRequest,
@@ -510,10 +630,18 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
           incarnation: request.incarnation,
           repositoryUrl: request.bootstrap.repositoryUrl,
           harness: request.bootstrap.harness ?? "pi",
+          ...(request.bootstrap.awaitInitialCheckoutCommit
+            ? { awaitInitialCheckoutCommit: true }
+            : {}),
+          ...(request.bootstrap.initialCheckoutCommit
+            ? { initialCheckoutCommit: request.bootstrap.initialCheckoutCommit }
+            : {}),
           specFingerprint,
           runtimeToken: randomBytes(32).toString("hex"),
           port: port.value,
           processGroupId: null,
+          processBirth: null,
+          drainToken: null,
           supervisorId: randomBytes(32).toString("hex"),
           desiredState: "running",
         };
@@ -611,6 +739,123 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
    * report absence on hope. Uncertainty is a retryable error
    * (docs/compute-replacement.md).
    */
+  private processBirth(pid: number): Result<string | null, OrbHostProviderError> {
+    return Result.fromThrowable(
+      () => {
+        const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+        const fields = stat
+          .slice(stat.lastIndexOf(")") + 1)
+          .trim()
+          .split(/\s+/);
+        return fields[0] === "Z" ? null : (fields[19] ?? null);
+      },
+      (error) => error as NodeJS.ErrnoException,
+    )().orElse((error) =>
+      error.code === "ENOENT"
+        ? ok(null)
+        : err(hostError("observe", "unavailable", String(error), true)),
+    );
+  }
+
+  private async awaitSupervisorReady(
+    operation: OrbHostProviderError["operation"],
+    orbId: string,
+    managed: ManagedChild,
+    token: string,
+  ): Promise<Result<void, OrbHostProviderError>> {
+    for (;;) {
+      const ready = this.drainProven(operation, orbId, token, ".ready");
+      if (ready.isErr()) return err(ready.error);
+      if (ready.value) return ok(undefined);
+      if (managed.child.exitCode !== null || managed.child.signalCode !== null)
+        return err(
+          hostError(
+            operation,
+            "operation_failed",
+            "execution supervisor initialization failed; requires Python 3.9+ and Linux pidfd support",
+            false,
+          ),
+        );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+
+  private drainProven(
+    operation: OrbHostProviderError["operation"],
+    orbId: string,
+    token: string,
+    suffix = "",
+  ): Result<boolean, OrbHostProviderError> {
+    return Result.fromThrowable(
+      () => {
+        const path = join(this.hostDirectory(orbId), `drained.json${suffix}`);
+        return (
+          existsSync(path) &&
+          (JSON.parse(readFileSync(path, "utf8")) as { launch?: unknown }).launch === token
+        );
+      },
+      (error) => hostError(operation, "unavailable", String(error), true),
+    )();
+  }
+
+  private async terminateSupervisor(
+    operation: OrbHostProviderError["operation"],
+    orbId: string,
+    pid: number,
+    birth: string | null,
+    token: string | null,
+  ): Promise<Result<void, OrbHostProviderError>> {
+    const current = this.processBirth(pid);
+    if (current.isErr()) return err(current.error);
+    if (current.value === null || current.value !== birth) return ok(undefined);
+    if (token === null)
+      return err(
+        hostError(operation, "unavailable", "execution supervisor has no launch identity", true),
+      );
+    const sent = Result.fromThrowable(
+      () =>
+        spawnSync(
+          "python3",
+          [
+            fileURLToPath(new URL("./supervisor.py", import.meta.url)),
+            "--signal",
+            String(pid),
+            birth ?? "",
+          ],
+          { encoding: "utf8" },
+        ),
+      (error) => hostError(operation, "unavailable", String(error), true),
+    )();
+    if (sent.isErr()) return err(sent.error);
+    if (sent.value.error !== undefined || sent.value.status !== 0)
+      return err(
+        hostError(
+          operation,
+          "unavailable",
+          `execution supervisor signal failed: ${sent.value.stderr}`,
+          true,
+        ),
+      );
+    const deadline = Date.now() + (this.options.terminateGraceMs ?? 2_000);
+    for (;;) {
+      const live = this.processBirth(pid);
+      if (live.isErr()) return err(live.error);
+      const proven = this.drainProven(operation, orbId, token);
+      if (proven.isErr()) return err(proven.error);
+      if (proven.value && live.value !== birth) return ok(undefined);
+      if (Date.now() >= deadline)
+        return err(
+          hostError(
+            operation,
+            "unavailable",
+            "execution supervisor loss: descendant cleanup is unknown",
+            true,
+          ),
+        );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+
   private async killProcessGroup(
     operation: OrbHostProviderError["operation"],
     processGroupId: number,
@@ -715,6 +960,18 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     const goneAfterTerm = await groupGone();
     if (goneAfterTerm.isErr()) return err(goneAfterTerm.error);
     if (goneAfterTerm.value) return ok(undefined);
+    // The Linux subreaper must stay alive until it has reaped detached
+    // descendants. Killing it would erase that ownership evidence.
+    if (process.platform === "linux") {
+      return err(
+        hostError(
+          operation,
+          "unavailable",
+          `execution supervisor ${processGroupId} has not drained`,
+          true,
+        ),
+      );
+    }
     const killed = signalGroup("SIGKILL");
     if (killed.isErr()) return err(killed.error);
     const goneAfterKill = await groupGone();
@@ -753,9 +1010,38 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     const groups = new Set<number>();
     if (recordedProcessGroupId !== null) groups.add(recordedProcessGroupId);
     if (managed?.child.pid !== undefined) groups.add(managed.child.pid);
+    const metadata = this.readMetadata(operation, orbId);
+    if (metadata.isErr()) return err(metadata.error);
     for (const group of groups) {
-      const killed = await this.killProcessGroup(operation, group);
+      const killed =
+        process.platform === "linux"
+          ? await this.terminateSupervisor(
+              operation,
+              orbId,
+              group,
+              group === managed?.child.pid
+                ? managed.processBirth
+                : (metadata.value?.processBirth ?? null),
+              group === managed?.child.pid
+                ? managed.drainToken
+                : (metadata.value?.drainToken ?? null),
+            )
+          : await this.killProcessGroup(operation, group);
       if (killed.isErr()) return killed;
+    }
+    const drainToken = managed?.drainToken ?? metadata.value?.drainToken;
+    if (process.platform === "linux" && drainToken !== null && drainToken !== undefined) {
+      const proven = this.drainProven(operation, orbId, drainToken);
+      if (proven.isErr()) return err(proven.error);
+      if (!proven.value)
+        return err(
+          hostError(
+            operation,
+            "unavailable",
+            "execution supervisor loss: descendant cleanup is unknown",
+            true,
+          ),
+        );
     }
     if (managed !== undefined) this.forgetChild(orbId, managed);
     return ok(undefined);

@@ -20,6 +20,7 @@ const names = [
   "@earendil-works+pi-ai+1.0.0.patch",
   "@earendil-works+pi-coding-agent+1.0.0.patch",
   "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
+  "@earendil-works+pi-codemode+1.0.0.patch",
 ];
 const scratch: string[] = [];
 const sha = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");

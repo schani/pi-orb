@@ -106,6 +106,18 @@ const packages = [
       ],
     },
   },
+  {
+    package: "node_modules/@earendil-works/pi-codemode",
+    version: "1.0.0",
+    patch: "@earendil-works+pi-codemode+1.0.0.patch",
+    sha: "22e2c44d23d239be85ddfc012cc9878c770b1d8453e90cdc60532b2b4ebc8555",
+    files: {
+      "node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js": [
+        "68e5505a9ab9e19ffa0fd7bb8f93147927fd27a72cf294bb122a7faca992348d",
+        "d19de32cbdde1cc7f1aabdf3aa83c36e63776594da1aeae94dd006bbe80d338c",
+      ],
+    },
+  },
 ];
 
 const canonicalRoot = Result.fromThrowable(
@@ -219,7 +231,10 @@ function installSealed(root, args) {
   const canonical = canonicalRoot(root);
   if (canonical.isErr()) return err(canonical.error);
   root = canonical.value;
-  const selected = args.length === 1 ? packages.slice(0, 2) : packages;
+  const selected =
+    args.length === 1
+      ? packages.filter((entry) => entry.package.startsWith("node_modules/@earendil-works/"))
+      : packages;
   const pending = [];
   const outcomes = [];
   for (const entry of selected) {

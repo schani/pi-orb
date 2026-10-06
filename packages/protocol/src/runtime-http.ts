@@ -98,7 +98,7 @@ export const RuntimeHealthSchema = Type.Union([
       runtimeInstanceId: Type.String(),
       status: Type.Literal("ready"),
       sessionId: Type.String(),
-      checkoutCommit: Type.String(),
+      checkoutCommit: Type.Union([Type.String(), Type.Null()]),
       activity: Type.Union([Type.Literal("idle"), Type.Literal("busy")]),
       operationId: Type.Optional(Type.String()),
       turnResume: Type.Optional(RuntimeTurnResumeSchema),

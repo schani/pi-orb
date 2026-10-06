@@ -102,6 +102,7 @@ describe("Pi dependency patch installation", () => {
       const dockerfile = read(path);
       const install = dockerfile.indexOf(`RUN npm ci --workspace ${workspace}`);
       expect(install).toBeGreaterThan(-1);
+
       expect(dockerfile.indexOf("COPY vendor vendor")).toBeGreaterThan(-1);
       expect(dockerfile.indexOf("COPY vendor vendor")).toBeLessThan(install);
       expect(dockerfile.indexOf(`COPY ${helperPath} ${helperPath}`)).toBeLessThan(install);
@@ -114,10 +115,16 @@ describe("Pi dependency patch installation", () => {
 
     const patchFiles = [
       "@earendil-works+pi-ai+1.0.0.patch",
+      "@earendil-works+pi-codemode+1.0.0.patch",
       "@earendil-works+pi-coding-agent+1.0.0.patch",
       "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
     ];
-    expect(readdirSync(join(root, "patches")).sort()).toEqual([...patchFiles].sort());
+    expect(
+      readdirSync(join(root, "patches"))
+        .filter((name) => name.endsWith(".patch"))
+        .sort(),
+    ).toEqual([...patchFiles].sort());
+    expect(read("apps/control-plane/Dockerfile")).toContain("COPY patches/pi-codemode.* patches/");
     const controlPlaneDependencies = json("apps/control-plane/package.json").dependencies;
     expect(controlPlaneDependencies?.["@earendil-works/pi-ai"]).toBe(piVersion);
     expect(controlPlaneDependencies?.["@gotgenes/pi-subagents"]).toBeUndefined();

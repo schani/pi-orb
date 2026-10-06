@@ -1,5 +1,7 @@
 import { errAsync, okAsync } from "neverthrow";
+import { GitResourceSource } from "../apps/control-plane/src/adapters/git-resources/git.ts";
 import { main } from "../apps/control-plane/src/main.ts";
+import { localOwnedGitCredentials } from "./testkit/owned-resource-source.ts";
 
 const identities = {
   alice: {
@@ -21,7 +23,35 @@ const mockFor = (prefix: "ALICE" | "BOB") => ({
   inferenceBaseUrl: process.env[`PI_ORB_E2E_${prefix}_INFERENCE_URL`] ?? "",
 });
 
+const repository = process.env["PI_ORB_E2E_RESOURCE_REPOSITORY"];
+
 void main({
+  ...(repository === undefined
+    ? {}
+    : {
+        resourceSourceFactory: (
+          credentials: import("../apps/control-plane/src/adapters/git-resources/git.ts").GitCredentials,
+        ) =>
+          new GitResourceSource(
+            localOwnedGitCredentials(credentials, repository, (orbId, environment) => {
+              const count = Number(environment.GIT_CONFIG_COUNT ?? "0");
+              const header = Array.from({ length: count }, (_, index) => index).find((index) =>
+                environment[`GIT_CONFIG_KEY_${index}`]?.endsWith(".extraHeader"),
+              );
+              const authorization =
+                header === undefined ? undefined : environment[`GIT_CONFIG_VALUE_${header}`];
+              const owner =
+                authorization === undefined
+                  ? "public"
+                  : ((["alice", "bob"] as const).find(
+                      (candidate) =>
+                        authorization ===
+                        `Authorization: Basic ${Buffer.from(`x-access-token:github-access-${candidate}`).toString("base64")}`,
+                    ) ?? "unknown");
+              console.log(`multi-user-resource-owner orb=${orbId} owner=${owner}`);
+            }),
+          ),
+      }),
   mockOpenAiForUser: (userId) => mockFor(userId === identities.alice.id ? "ALICE" : "BOB"),
   requestPrincipalResolverFactory: (task, users) => (request) => {
     const selected = request.headers["x-pi-orb-e2e-principal"];

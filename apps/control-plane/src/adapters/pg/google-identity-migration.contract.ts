@@ -8,6 +8,14 @@ import { runMigrations } from "./migrate.ts";
 import { PostgreSQLUserStore } from "./users.ts";
 
 const migration = "031_google_identities.sql";
+const followingMigrations = [
+  "032_manual_stop.sql",
+  "033_agent_admission_version.sql",
+  "034_durable_authority.sql",
+  "035_resource_snapshots.sql",
+  "036_agent_artifacts.sql",
+  "037_resource_events.sql",
+];
 const first = {
   userId: "00000000-0000-4000-8000-000000000001",
   oldIssuer: "https://cloud.google.com/iap",
@@ -104,6 +112,7 @@ export function googleIdentityMigrationContracts(
         "029_orb_harness.sql",
         "030_activity_headlines.sql",
         "031_google_identities.sql",
+        ...followingMigrations,
       ]);
       expect((await client.query("SELECT detail FROM mcp_oauth_events LIMIT 0")).isOk()).toBe(true);
       expect((await runMigrations(client))._unsafeUnwrap()).toEqual([]);
@@ -133,6 +142,7 @@ export function googleIdentityMigrationContracts(
           "029_orb_harness.sql",
           "030_activity_headlines.sql",
           "031_google_identities.sql",
+          ...followingMigrations,
         ]);
         const after = await snapshot(client);
         expect(after.slice(0, 4)).toEqual(before.slice(0, 4));
@@ -146,6 +156,7 @@ export function googleIdentityMigrationContracts(
             "029_orb_harness.sql",
             "030_activity_headlines.sql",
             "031_google_identities.sql",
+            ...followingMigrations,
           ].sort(),
         );
         expect((await client.query("SELECT detail FROM mcp_oauth_events LIMIT 0")).isOk()).toBe(
@@ -183,6 +194,7 @@ export function googleIdentityMigrationContracts(
         "029_orb_harness.sql",
         "030_activity_headlines.sql",
         "031_google_identities.sql",
+        ...followingMigrations,
       ]);
       const after = await snapshot(client);
       expect(after.slice(0, 4)).toEqual(before.slice(0, 4));
@@ -195,6 +207,7 @@ export function googleIdentityMigrationContracts(
           "029_orb_harness.sql",
           "030_activity_headlines.sql",
           "031_google_identities.sql",
+          ...followingMigrations,
         ].sort(),
       );
       expect(

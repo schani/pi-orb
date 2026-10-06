@@ -10,7 +10,9 @@ import type { FastifyInstance } from "fastify";
 import { Check } from "typebox/value";
 import { WebSocket } from "ws";
 import { withDeadline } from "../domain/dst.ts";
+import { agentPlacement } from "../domain/harness-agent-plane.ts";
 import type { ControlPlaneDeps } from "../domain/ports.ts";
+import { attachCentralLive } from "./central-live.ts";
 import { type SessionExpiryScheduler, watchSessionExpiry } from "./session-expiry.ts";
 import { monitorWebSocketLiveness } from "./websocket-heartbeat.ts";
 
@@ -58,6 +60,7 @@ export async function registerLiveProxy(
       let upstream: WebSocket | null = null;
       let upstreamOpen = false;
       let browserClosed = false;
+      let centralAttached = false;
       const pendingToUpstream: string[] = [];
       const closeBoth = (code: number, reason: string): void => {
         try {
@@ -119,6 +122,7 @@ export async function registerLiveProxy(
           // Fire-and-forget: the timestamp is advisory (docs/lifecycle.md).
           void deps.store.touchLastBusy(task, { orbId, now: task.wallNow() });
         }
+        if (centralAttached) return;
         if (upstreamOpen && upstream !== null) {
           upstream.send(text);
         } else {
@@ -144,6 +148,49 @@ export async function registerLiveProxy(
       });
 
       const orbResult = await deps.store.getOrb(task, orbId);
+      const agentPlane = deps.agentPlane;
+      if (
+        agentPlane &&
+        orbResult.isOk() &&
+        orbResult.value !== null &&
+        agentPlacement(agentPlane, orbResult.value) === "central"
+      ) {
+        const orb = orbResult.value;
+        if (orb.state === "deleting") {
+          closeBoth(TRY_AGAIN_LATER, "orb is being deleted");
+          return;
+        }
+        const readSession = agentPlane.readSession?.bind(agentPlane);
+        if (readSession === undefined) {
+          closeBoth(TRY_AGAIN_LATER, "central conversation unavailable");
+          return;
+        }
+        const opened = await withDeadline(
+          task,
+          deps.constants.providerOperationTimeoutMs,
+          "read central conversation",
+          (context) => readSession(task, orb, context),
+        );
+        if (opened.isErr()) {
+          request.log.warn(
+            { orbId, connectionId, retryable: opened.error.retryable },
+            "central conversation unavailable",
+          );
+          closeBoth(TRY_AGAIN_LATER, "central agent unavailable");
+          return;
+        }
+        const session = opened.value;
+        if (browserClosed) return;
+        centralAttached = true;
+        attachCentralLive(browserSocket, session, pendingToUpstream, (requestId, retryable) =>
+          request.log.warn(
+            { orbId, connectionId, requestId, retryable },
+            "central agent request failed",
+          ),
+        );
+        pendingToUpstream.length = 0;
+        return;
+      }
       if (
         orbResult.isErr() ||
         orbResult.value === null ||
@@ -257,8 +304,11 @@ export async function registerLiveProxy(
       browserSocket.once("close", session.stop);
       browserSocket.once("error", session.stop);
       if (!session.admit()) return;
-      deps.control.registerBrowserConnection(orbId, connectionId, () =>
-        closeBoth(TRY_AGAIN_LATER, "orb is stopping"),
+      deps.control.registerBrowserConnection(
+        orbId,
+        connectionId,
+        () => closeBoth(TRY_AGAIN_LATER, "orb is stopping"),
+        "execution",
       );
 
       browserSocket.on("message", (data: Buffer, isBinary: boolean) => {
@@ -339,8 +389,43 @@ export async function registerLiveProxy(
       }
       if (browserClosed || !session.admit()) return;
 
+      const executionBinding = deps.hostProvider.executionBinding?.bind(deps.hostProvider);
+      const binding = executionBinding
+        ? await withDeadline(
+            task,
+            deps.constants.providerOperationTimeoutMs,
+            "bind terminal execution",
+            (context) =>
+              executionBinding(
+                task,
+                { provider: deps.hostProvider.kind, resourceId: orbResult.value?.hostRef ?? "" },
+                context,
+              ),
+          )
+        : null;
+      if (
+        binding &&
+        (binding.isErr() ||
+          binding.value.incarnation !== String(orbResult.value.hostIncarnation) ||
+          binding.value.baseUrl !== observed.value.runtimeAddress.baseUrl)
+      ) {
+        closeBoth(TRY_AGAIN_LATER, "execution binding unavailable");
+        return;
+      }
+      if (browserClosed) return;
       const wsUrl = `${observed.value.runtimeAddress.baseUrl.replace(/^http/, "ws")}/v1/terminal`;
-      const runtimeSocket = new WebSocket(wsUrl, [TERMINAL_SUBPROTOCOL]);
+      const runtimeSocket = new WebSocket(
+        wsUrl,
+        [TERMINAL_SUBPROTOCOL],
+        binding?.isOk()
+          ? {
+              headers: {
+                authorization: `Bearer ${binding.value.token}`,
+                "x-orb-incarnation": binding.value.incarnation,
+              },
+            }
+          : {},
+      );
       upstream = runtimeSocket;
       runtimeSocket.on("open", () => {
         if (!session.admit()) {

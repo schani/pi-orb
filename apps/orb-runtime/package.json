@@ -10,6 +10,7 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.289",
     "@earendil-works/pi-coding-agent": "file:../../vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz",
+    "@earendil-works/pi-durable": "1.0.0",
     "@earendil-works/pi-tui": "1.0.0",
     "@fastify/websocket": "^11.0.0",
     "@gotgenes/pi-subagents": "file:../../vendor/gotgenes-pi-subagents-21.7.0-orb.8.tgz",

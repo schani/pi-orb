@@ -61,6 +61,7 @@ const orb: OrbRow = {
   lastBusyAt: null,
   uploadActiveUntil: null,
   stopReason: null,
+  agentAdmissionVersion: 0,
   sleepId: null,
   sleepUntil: null,
   lastMintAt: null,
@@ -1421,7 +1422,10 @@ export function storeSemanticsContractTests(
         messageId,
         secondMessageId,
       ]);
-      expect(batch.isOk() && batch.value[0]?.deliveryBatchId).toBe(messageId);
+      const batchId = batch._unsafeUnwrap()[0]?.deliveryBatchId;
+      expect(batchId).toMatch(/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/);
+      expect(batchId).not.toBe(messageId);
+      expect(batch._unsafeUnwrap().every((row) => row.deliveryBatchId === batchId)).toBe(true);
 
       const nativeRecord: HistoryRecord = {
         id: "inbox-record",
@@ -1499,6 +1503,7 @@ export function storeSemanticsContractTests(
           await store.failOrbMessageBatch(task, {
             orbId: orb.id,
             messageIds: [rejectedId],
+            deliveryBatchId: rejectedId,
             lastError: "400 invalid_request: message payload too large",
             now: 3_000,
           })
@@ -1592,7 +1597,7 @@ export function storeSemanticsContractTests(
       ).toBe(true);
       const notWoken = await store.casStartOrbForQueuedMessage(task, {
         orbId: orb.id,
-        expectedStateVersion: 5,
+        expectedStateVersion: 6,
         now: 2_800,
       });
       expect(notWoken.isOk() && notWoken.value).toBeNull();

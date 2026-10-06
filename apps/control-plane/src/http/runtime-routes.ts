@@ -32,6 +32,7 @@ import {
   PROJECT_SECRETS_RUNTIME_PATH,
   previewHost,
   RUNTIME_TOKENS_PREFIX,
+  RuntimeAlertRequestSchema,
   type TokenErrorBody,
   type TokenGrantBody,
   TokenNameSchema,
@@ -41,6 +42,7 @@ import type { SimulationTask } from "determined";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
+import type { AgentAlertWriter } from "../domain/agent-ports.ts";
 import {
   getToken,
   RUNTIME_TOKEN_STATES,
@@ -58,6 +60,7 @@ import type {
   ArchiveCaller,
   BrokerDeps,
   ControlPlaneStore,
+  GuestAgentCaller,
   MintDeps,
   OrbNameGenerator,
   ProjectSecretsDeps,
@@ -65,6 +68,7 @@ import type {
 } from "../domain/ports.ts";
 import type { ProjectInstructionsStore } from "../domain/project-instructions.ts";
 import { getProjectSecretSnapshot } from "../domain/project-secrets.ts";
+import type { ResourceError } from "../domain/resources.ts";
 import { mintIdToken } from "../domain/workload-identity.ts";
 import { sendHistoryStream } from "./history-stream.ts";
 import { oauthBinding, sendOAuthError } from "./mcp-oauth-routes.ts";
@@ -97,7 +101,7 @@ export interface RuntimeRouteDeps {
   readonly readBootContext: (
     task: SimulationTask,
     orbId: string,
-    caller: ArchiveCaller,
+    caller: GuestAgentCaller,
   ) => ResultAsync<import("@pi-orb/protocol").OrbBootContext | null, CommandError>;
   readonly archiveSelf: (
     task: SimulationTask,
@@ -118,6 +122,11 @@ export interface RuntimeRouteDeps {
   readonly projectSecrets: ProjectSecretsDeps;
   readonly personalInstructions: PersonalInstructionsStore;
   readonly projectInstructions: ProjectInstructionsStore;
+  readonly alertWriter?: AgentAlertWriter;
+  readonly initialCheckoutCommit?: (
+    task: SimulationTask,
+    orb: OrbRow,
+  ) => ResultAsync<string | null, StoreError | ResourceError>;
   readonly mcp?: McpStore;
   readonly mcpOAuth?: McpOAuth;
 }
@@ -296,6 +305,74 @@ export function registerRuntimeRoutes(
       : grant.value === null
         ? reply.code(409).send({ error: "auth_required" })
         : reply.send(grant.value);
+  });
+
+  app.get("/api/runtime/initial-checkout", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind === "unavailable") return reply.status(503).send({ error: "unavailable" });
+    if (
+      auth.kind !== "orb" ||
+      request.headers["x-orb-incarnation"] !== String(auth.orb.hostIncarnation)
+    )
+      return sendUnauthorized(reply);
+    if (auth.orb.harness !== "pi") return reply.code(403).send({ error: "wrong_harness" });
+    if (
+      !deps.initialCheckoutCommit ||
+      !["creating", "starting", "running"].includes(auth.orb.state) ||
+      auth.orb.stopReason === "manual" ||
+      auth.orb.stopReason === "sleep"
+    )
+      return reply.status(409).send({ error: "checkout_admission_revoked" });
+    const pin = await deps.initialCheckoutCommit(task, auth.orb);
+    if (pin.isErr())
+      return reply.status(503).send({
+        error:
+          pin.error.type === "resource_error" && pin.error.code !== "storage"
+            ? "resource_acquisition_failed"
+            : "unavailable",
+      });
+    const current = await authenticate(request.headers.authorization);
+    if (current.kind === "unavailable") return reply.status(503).send({ error: "unavailable" });
+    if (
+      current.kind !== "orb" ||
+      current.orb.hostIncarnation !== auth.orb.hostIncarnation ||
+      current.orb.agentAdmissionVersion !== auth.orb.agentAdmissionVersion ||
+      !["creating", "starting", "running"].includes(current.orb.state) ||
+      current.orb.stopReason === "manual" ||
+      current.orb.stopReason === "sleep"
+    )
+      return reply.status(409).send({ error: "checkout_admission_revoked" });
+    return pin.value === null
+      ? reply.status(202).send({ pending: true })
+      : reply.send({ commitSha: pin.value });
+  });
+
+  app.post("/api/runtime/alert", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind === "unavailable") return reply.status(503).send({ error: "unavailable" });
+    if (
+      auth.kind !== "orb" ||
+      request.headers["x-orb-incarnation"] !== String(auth.orb.hostIncarnation)
+    )
+      return sendUnauthorized(reply);
+    if (auth.orb.harness !== "pi") return reply.code(403).send({ error: "wrong_harness" });
+    if (!Check(RuntimeAlertRequestSchema, request.body))
+      return reply.status(400).send({ error: "invalid_request" });
+    if (!deps.alertWriter) return reply.status(503).send({ error: "unavailable" });
+    const result = await deps.alertWriter.appendAlert(
+      auth.orb.id,
+      request.body.requestId,
+      request.body.message,
+      auth.orb.agentAdmissionVersion,
+    );
+    if (result.isErr()) return reply.status(503).send({ error: "unavailable" });
+    return reply.send({
+      v: 1,
+      id: result.value.recordId,
+      duplicate: result.value.duplicate ?? false,
+    });
   });
 
   app.put<{ Params: { orbId: string } }>(

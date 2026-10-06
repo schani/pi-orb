@@ -37,6 +37,7 @@ const orb: OrbRow = {
   lastBusyAt: null,
   uploadActiveUntil: null,
   stopReason: null,
+  agentAdmissionVersion: 0,
   sleepId: null,
   sleepUntil: null,
   lastMintAt: null,
@@ -65,6 +66,36 @@ describe("orbView failures", () => {
 });
 
 describe("orbView activity", () => {
+  it.each(["creating", "starting", "running", "stopped", "failed"] as const)(
+    "exposes independent central activity during %s",
+    (state) => {
+      const control = new ControlState();
+      control.noteAgentWork(orb.id, true);
+      const view = orbView({ ...orb, state }, control, { centralAgent: true });
+      expect(view.centralAgent).toBe(true);
+      expect(view.activity).toBe("busy");
+      expect(view.state).toBe(state);
+      expect(control.getLiveness(orb.id)).toBeNull();
+      control.recordPullSuccess(orb.id, 123, "busy", "guest");
+      control.noteAgentWork(orb.id, false);
+      expect(orbView({ ...orb, state }, control, { centralAgent: true }).activity).toBe("idle");
+      expect(control.getLiveness(orb.id)?.activity).toBe("busy");
+      expect(Check(OrbViewSchema, view)).toBe(true);
+    },
+  );
+  it("keeps central busy separate from guest idle and archival phase", () => {
+    const control = new ControlState();
+    control.recordPullSuccess(orb.id, 123, "idle", "guest");
+    control.noteAgentWork(orb.id, true);
+    expect(orbView(orb, control, { centralAgent: true })).toMatchObject({
+      state: "running",
+      activity: "busy",
+    });
+    expect(
+      orbView({ ...orb, state: "archiving" }, control, { centralAgent: true }).stateDetail,
+    ).toMatchObject({ phase: "waiting_for_idle" });
+    expect(control.getLiveness(orb.id)?.activity).toBe("idle");
+  });
   it("exposes the latest observed activity for a running orb", () => {
     const control = new ControlState();
     control.recordPullSuccess(orb.id, 123, "busy", "runtime-1");

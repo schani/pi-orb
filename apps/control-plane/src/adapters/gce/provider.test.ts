@@ -141,6 +141,60 @@ const existingInstance = (overrides: Record<string, unknown> = {}): Record<strin
   ...overrides,
 });
 
+describe("execution role bindings", () => {
+  it("captures token/address/incarnation from one observation", async () => {
+    const transport = new FakeTransport([
+      () =>
+        ok200(
+          existingInstance({
+            labels: { "pi-orb-orb-id": "orb-1", "pi-orb-host-incarnation": "9" },
+          }),
+        ),
+    ]);
+    const result = await makeProvider(transport, undefined, undefined, {
+      runtimeMode: "execution",
+    }).executionBinding(task, { provider: "gce", resourceId: "pi-orb-orb-1" }, context);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk())
+      expect(result.value).toEqual({
+        baseUrl: "http://10.10.0.9:8080",
+        token: "tok",
+        incarnation: "9",
+        cwd: "/workspace/repo",
+      });
+  });
+  it("does not grant binding after cancellation", async () => {
+    const controller = new AbortController();
+    const transport = new FakeTransport([
+      () => {
+        controller.abort();
+        return ok200(existingInstance());
+      },
+    ]);
+    expect(
+      (
+        await makeProvider(transport).executionBinding(
+          task,
+          { provider: "gce", resourceId: "pi-orb-orb-1" },
+          { signal: controller.signal },
+        )
+      ).isErr(),
+    ).toBe(true);
+  });
+  it("separates central and guest launch specifications", () => {
+    const input = { orbId: "orb-1", repositoryUrl: "https://github.com/o/r" };
+    expect(
+      makeProvider(new FakeTransport([]), undefined, undefined, {
+        runtimeMode: "pi",
+      }).desiredSpecFingerprint(input),
+    ).not.toBe(
+      makeProvider(new FakeTransport([]), undefined, undefined, {
+        runtimeMode: "execution",
+      }).desiredSpecFingerprint(input),
+    );
+  });
+});
+
 const existingDataDisk = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   name: "pi-orb-data-orb-1",
   labels: { "pi-orb-orb-id": "orb-1" },
@@ -326,9 +380,14 @@ describe("GceOrbHostProvider", () => {
     expect(transport.requests).toHaveLength(1);
   });
 
-  it.each(["pi", "claude"] as const)(
-    "creates a Spot native %s instance with composed configuration",
-    async (harness) => {
+  it.each([
+    { harness: "pi", runtimeMode: "pi" },
+    { harness: "claude", runtimeMode: "pi" },
+    { harness: "pi", runtimeMode: "execution" },
+    { harness: "claude", runtimeMode: "execution" },
+  ] as const)(
+    "creates a Spot native instance with %s configuration",
+    async ({ harness, runtimeMode }) => {
       const transport = new FakeTransport([
         () => notFound, // instance get
         () => notFound, // disk get
@@ -339,11 +398,20 @@ describe("GceOrbHostProvider", () => {
         () => done, // op wait
       ]);
       const provider = makeProvider(transport, undefined, undefined, {
+        runtimeMode,
         extraEnv: { PI_ORB_HARNESS: "wrong" },
       });
       const result = await provider.provision(
         task,
-        { ...provisionRequest, bootstrap: { ...provisionRequest.bootstrap, harness } },
+        {
+          ...provisionRequest,
+          bootstrap: {
+            ...provisionRequest.bootstrap,
+            harness,
+            initialCheckoutCommit: "b".repeat(40),
+            awaitInitialCheckoutCommit: true,
+          },
+        },
         context,
       );
       expect(result.isOk(), JSON.stringify(result)).toBe(true);
@@ -380,6 +448,9 @@ describe("GceOrbHostProvider", () => {
         PI_ORB_HARNESS: harness,
         PI_ORB_HOST_INCARNATION: "0",
         PI_ORB_REPOSITORY_URL: "https://github.com/o/r",
+        PI_ORB_RUNTIME_MODE: harness === "claude" ? "pi" : runtimeMode,
+        PI_ORB_INITIAL_CHECKOUT_COMMIT: "b".repeat(40),
+        PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT: "1",
         PI_ORB_CONTROL_PLANE_URL: "https://runtime.example",
         PI_ORB_RUNTIME_TOKEN: token,
         PI_ORB_SKILLS_DIR: "/opt/pi-orb/skills",

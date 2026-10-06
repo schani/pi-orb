@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { stripTypeScriptTypes } from "node:module";
+import { dirname, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = join(import.meta.dirname, "../../..");
@@ -30,7 +31,71 @@ describe("control-plane Dockerfile workspace contract", () => {
     const runtime = stages.at(-1) ?? "";
     expect(runtime).toContain("COPY --from=dependencies /app /app");
     expect(runtime).toContain("pty.spawn('/bin/sh', ['-c', 'exit 0'])");
-    expect(runtime).not.toMatch(/apt-get|build-essential|npm ci|npm rebuild/);
+    expect(runtime).not.toMatch(/build-essential|npm ci|npm rebuild/);
+  });
+  it("applies only installed package patches and retains code-mode attribution", () => {
+    for (const name of ["pi-ai", "pi-coding-agent", "pi-codemode"]) {
+      const patch = `@earendil-works+${name}+1.0.0.patch`;
+      expect(dockerfile).toContain(`COPY patches/${patch} patches/${patch}`);
+    }
+    expect(dockerfile).toContain(
+      "COPY scripts/apply-dependency-patches.mjs scripts/apply-dependency-patches.mjs",
+    );
+    expect(dockerfile).toContain("COPY patches/pi-codemode.* patches/");
+    expect(dockerfile).not.toContain("COPY patches patches");
+    expect(dockerfile).toContain("node scripts/apply-dependency-patches.mjs");
+    expect(dockerfile).not.toContain("patch-package");
+  });
+  it("ships central Git acquisition, bundled skills and the code-mode worker", () => {
+    const runtime = dockerfile.slice(dockerfile.lastIndexOf("\nFROM "));
+    expect(runtime).toContain("apt-get install -y --no-install-recommends git ca-certificates");
+    expect(dockerfile).toContain("COPY apps/orb-runtime/skills apps/orb-runtime/skills");
+    expect(dockerfile).toContain("COPY apps/control-plane/src apps/control-plane/src");
+    expect(
+      readFileSync(
+        join(repositoryRoot, "apps/control-plane/src/adapters/durable/tools/bounded-worker.js"),
+        "utf8",
+      ),
+    ).toContain("@earendil-works/pi-codemode");
+  });
+  it("ships the entry point's transitive static source imports in the final image", () => {
+    const finalStage = dockerfile.slice(dockerfile.lastIndexOf("\nFROM "));
+    const copies = [...finalStage.matchAll(/^COPY (?!-)(\S+) (\S+)$/gm)].map(
+      ([, source = "", destination = ""]) => ({ source, destination }),
+    );
+    const pending = ["apps/control-plane/src/main.ts"];
+    const visited = new Set<string>();
+    const missing = new Set<string>();
+    const undeclared = new Set<string>();
+    for (const path of pending) {
+      if (visited.has(path)) continue;
+      visited.add(path);
+      const copied = copies.some(({ source, destination }) => {
+        const suffix = relative(source, path);
+        return !suffix.startsWith("..") && join(destination, suffix) === path;
+      });
+      if (!copied) missing.add(path);
+
+      // Erase type-only imports without loading modules or running bootstrap code.
+      const source = stripTypeScriptTypes(readFileSync(join(repositoryRoot, path), "utf8"));
+      const imports = source.matchAll(
+        /\b(?:import|export)\s+(?:[^;"']*?\s+from\s*)?["']([^"']+)["']/g,
+      );
+      for (const [, specifier = ""] of imports) {
+        if (specifier.startsWith(".")) {
+          pending.push(join(dirname(path), specifier));
+        } else if (path.startsWith("apps/orb-runtime/src/") && !specifier.startsWith("node:")) {
+          const packageName = specifier.startsWith("@")
+            ? specifier.split("/").slice(0, 2).join("/")
+            : (specifier.split("/")[0] ?? specifier);
+          if (controlPlanePackage.dependencies?.[packageName] === undefined) {
+            undeclared.add(`${path}: ${packageName}`);
+          }
+        }
+      }
+    }
+    expect([...missing].sort(), "static source imports missing from the final image").toEqual([]);
+    expect([...undeclared].sort(), "shared helpers need control-plane dependencies").toEqual([]);
   });
 
   it("copies every local control-plane dependency's package metadata and source", () => {

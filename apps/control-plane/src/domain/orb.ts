@@ -62,8 +62,10 @@ export interface OrbRow {
   readonly lastBusyAt: number | null;
   /** Transfer lease projection; expiry starts a fresh idle interval. */
   readonly uploadActiveUntil: number | null;
-  /** Why the orb last entered `stopping`; null for explicit stops. */
+  /** Durable stop authority; manual and sleep inhibit autonomous demand. */
   readonly stopReason: StopReason | null;
+  /** Revokes central callers on explicit global stops, never VM phase changes. */
+  readonly agentAdmissionVersion: number;
   readonly sleepId: string | null;
   readonly sleepUntil: number | null;
   /** Durable per-orb mint rate-limit floor; monotone, written outside the CAS. */

@@ -1,5 +1,15 @@
 # Local subagents: integration and DST-first acceptance
 
+## Central candidate (2026-10-04; unqualified)
+
+Generic Durable children inherit ordinary configuration, with no profiles or model selector. Root and children expose only `codemode` while authorized internal catalog functions remain callable. Required resources precede the first turn; bundled skills and managed context are inherited through the candidate resource boundary (`docs/pi-durable-evaluation.md`). Native terminal results distinguish completion, failure and abort. `Harness.close()` suspends unfinished tasks; an admitted explicit root abort can terminally cancel root/child work. Focused real PostgreSQL/PGlite proof does not imply all Stop calls terminally cancel persisted tasks or fabricate assistant-abort transcript records (`docs/testing.md`). The SDK extension design/qualification below applies to `host-pi` and remains historical evidence, not new candidate qualification.
+
+**Central process outcomes (2026-10-03):** generic children inherit ordinary configuration, with no profile types. Results distinguish `completed`, `failed` (with durable failure detail), and `aborted`; steering a terminal child returns an explicit error.
+
+## Central process children (2026-10-03)
+
+The process POC uses Durable-owned child conversations, not gotgenes profiles. `subagent({prompt,description?})` returns `agent_id`; `steer_subagent({agent_id,message})`, `get_subagent_result({agent_id,wait?})`, `list_subagents({})` and `cancel_subagent({agent_id})` expose the required mechanics. Children inherit ordinary configuration and authorized tools; there are no profiles, kinds or model selectors. **Guidance decision (2026-10-03):** the Durable tool description states this directly, rather than making agents search SDK profile documentation. Orb `7bf86acd-acea-4eac-80a5-fc8e3dcf9836` correctly reported that it could not select Sol, but first searched that documentation. Its preceding codemode discovery failed because `const tools` redeclared the sandbox binding; codemode guidance now names the binding and gives a collision-free discovery example. No runtime behavior changes; existing persisted tool results retain failure evidence. They count toward aggregate busy state and whole-operation cancellation; receipts belong to root product history, while private child transcripts do not. The Docker/GCE SDK profile contract and its qualification remain below.
+
 ## Status and provenance
 
 **Planning consolidated 2026-09-13; implementation in progress 2026-09-14, not deployed.** This document combines orb `b18fc524-632d-42cd-ab90-8b2ac55de80d` and the fork/minimal-change discussion in orb `58efed98-b832-4025-a899-7f43fed7ed72`. The executable backlog is in `TODO.md`; product decisions are recorded only in `docs/open-questions.md`: 62–64 are resolved. The earlier orb's provisional question 47 is not a valid reference in this checkout: 47 here concerns archival.

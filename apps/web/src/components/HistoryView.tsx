@@ -351,6 +351,7 @@ function pairToolResults(records: readonly DisplayRecord[]): ToolPairing {
 function renderAgentRecords(
   records: readonly (MessageRecord | EventRecord)[],
   pairing: ToolPairing,
+  tools: readonly ToolChip[],
 ): ReactNode[] {
   const nodes: ReactNode[] = [];
   let runIndex = 0;
@@ -390,6 +391,7 @@ function renderAgentRecords(
         currentCalls.push({
           call: block,
           callRecordId: record.id,
+          live: tools.find((tool) => tool.callId === block.callId),
           ...(match === undefined ? {} : { result: match.block, resultRecordId: match.recordId }),
         });
         continue;
@@ -443,14 +445,17 @@ const AgentRecords = memo(
   function AgentRecords({
     records,
     pairing,
+    tools,
   }: {
     records: readonly (MessageRecord | EventRecord)[];
     pairing: ToolPairing;
+    tools: readonly ToolChip[];
   }) {
-    return renderAgentRecords(records, pairing);
+    return renderAgentRecords(records, pairing, tools);
   },
   (previous, next) => {
     if (
+      previous.tools !== next.tools ||
       previous.records.length !== next.records.length ||
       previous.records.some((record, index) => record !== next.records[index])
     )
@@ -545,6 +550,7 @@ function renderLiveAgentContent(live: LiveAgentContent, busy: boolean): ReactNod
 function renderTurn(
   turn: Turn,
   pairing: ToolPairing,
+  tools: readonly ToolChip[],
   live?: LiveAgentContent,
   busy = false,
 ): ReactNode {
@@ -563,7 +569,7 @@ function renderTurn(
         <article className="rec rec-orb" key={turn.key} data-history-row={turn.key}>
           <span className="visually-hidden">Orb:</span>
           <div className="rec-bd">
-            <AgentRecords records={turn.records} pairing={pairing} />
+            <AgentRecords records={turn.records} pairing={pairing} tools={tools} />
             {live !== undefined && renderLiveAgentContent(live, busy)}
           </div>
         </article>
@@ -677,8 +683,8 @@ export const HistoryView = memo(function HistoryView({
             .slice(firstMounted)
             .map((turn, index) =>
               index + firstMounted === mergedTurnIndex
-                ? renderTurn(turn, pairing, liveAgentContent, busy)
-                : renderTurn(turn, pairing),
+                ? renderTurn(turn, pairing, tools, liveAgentContent, busy)
+                : renderTurn(turn, pairing, tools),
             )}
           {pendingMessages.map((message) => {
             const system = message.system !== undefined;

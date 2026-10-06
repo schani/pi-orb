@@ -17,7 +17,7 @@ import type { ChildExit, Health, SupervisorError, SupervisorPorts } from "./core
 
 const HEALTH_URL = "http://127.0.0.1:8080/v1/health";
 const DIAGNOSTIC = "/usr/local/bin/pi-orb-boot-diagnostic";
-const RUNTIME = ["/usr/local/bin/node", "apps/orb-runtime/src/main.ts"] as const;
+const RUNTIME = ["/usr/local/bin/node", "apps/orb-runtime/src/runtime-entry.ts"] as const;
 const FAILURE_CODE = /^[a-z0-9_]{1,80}$/;
 const execFileAsync = promisify(execFile);
 

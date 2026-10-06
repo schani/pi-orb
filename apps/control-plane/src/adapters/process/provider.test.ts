@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,6 +42,9 @@ writeFileSync(process.env.OBSERVED_ENV_FILE, JSON.stringify({
   orbId: process.env.PI_ORB_ID,
   harness: process.env.PI_ORB_HARNESS,
   repositoryUrl: process.env.PI_ORB_REPOSITORY_URL,
+  runtimeMode: process.env.PI_ORB_RUNTIME_MODE,
+  initialCheckoutCommit: process.env.PI_ORB_INITIAL_CHECKOUT_COMMIT,
+  awaitInitialCheckoutCommit: process.env.PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT,
   incarnation: process.env.PI_ORB_HOST_INCARNATION,
   container: process.env.PI_ORB_CONTAINER,
   supervisorId: process.env.PI_ORB_SUPERVISOR_ID,
@@ -131,6 +134,60 @@ afterEach(async () => {
 });
 
 describe("ProcessOrbHostProvider", () => {
+  it.each([
+    { harness: "pi", runtimeMode: "pi" },
+    { harness: "pi", runtimeMode: "execution" },
+    { harness: "claude", runtimeMode: "execution" },
+  ] as const)(
+    "launches independent %s role and persists initial commit",
+    async ({ harness, runtimeMode }) => {
+      const observedEnv = join(tmpdir(), `pi-orb-role-${crypto.randomUUID()}.json`);
+      const { provider } = makeProvider({ OBSERVED_ENV_FILE: observedEnv }, { runtimeMode });
+      const commit = "b".repeat(40);
+      const provisioned = await provider.provision(
+        task,
+        {
+          ...request,
+          bootstrap: {
+            ...request.bootstrap,
+            harness,
+            initialCheckoutCommit: commit,
+            awaitInitialCheckoutCommit: true,
+          },
+        },
+        context,
+      );
+      expect(provisioned.isOk()).toBe(true);
+      const observed = await eventually(() =>
+        existsSync(observedEnv)
+          ? (JSON.parse(readFileSync(observedEnv, "utf8")) as Record<string, string>)
+          : null,
+      );
+      expect(observed.runtimeMode).toBe(harness === "claude" ? "pi" : runtimeMode);
+      expect(observed.initialCheckoutCommit).toBe(commit);
+      expect(observed.awaitInitialCheckoutCommit).toBe("1");
+      rmSync(observedEnv, { force: true });
+    },
+  );
+  it("exposes execution credentials only for the exact current host incarnation", async () => {
+    const { provider, root } = makeProvider();
+    const provisioned = await provider.provision(task, request, context);
+    expect(provisioned.isOk()).toBe(true);
+    if (provisioned.isErr()) return;
+    const binding = await provider.executionBinding(task, provisioned.value.ref, context);
+    expect(binding.isOk()).toBe(true);
+    if (binding.isErr()) return;
+    expect(binding.value.baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(binding.value.token.length).toBeGreaterThan(20);
+    expect(binding.value.incarnation).toBe("0");
+    expect(binding.value.cwd).toBe(join(root, "configured-state", "orb-1", "workspace", "repo"));
+    const stale = await provider.executionBinding(
+      task,
+      { ...provisioned.value.ref, resourceId: "orb-1-i99" },
+      context,
+    );
+    expect(stale.isErr()).toBe(true);
+  });
   it.each(["pi", "claude"] as const)("launches %s with isolated env", async (harness) => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
     const { provider, root } = makeProvider({
@@ -295,10 +352,17 @@ describe("ProcessOrbHostProvider", () => {
 
   it("a stale discard fence cannot remove a newer incarnation", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
-    const { provider } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
+    const { provider, root } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
     const first = await provider.provision(task, request, context);
     expect(first.isOk()).toBe(true);
     if (first.isErr()) return;
+    const hostDirectory = join(root, "configured-state", request.orbId);
+    const metadata = JSON.parse(readFileSync(join(hostDirectory, "host.json"), "utf8")) as {
+      drainToken: string;
+    };
+    expect(JSON.parse(readFileSync(join(hostDirectory, "drained.json.ready"), "utf8"))).toEqual({
+      launch: metadata.drainToken,
+    });
     expect(
       (
         await provider.discardCompute(
@@ -545,6 +609,38 @@ describe("ProcessOrbHostProvider", () => {
     rmSync(observedEnv, { force: true });
     rmSync(crashFile, { force: true });
   });
+
+  it.skipIf(process.platform !== "linux")(
+    "discard never signals a reused supervisor PID",
+    async () => {
+      const { provider, root } = makeProvider();
+      const provisioned = await provider.provision(task, request, context);
+      expect(provisioned.isOk()).toBe(true);
+      const unrelated = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+        detached: true,
+        stdio: "ignore",
+      });
+      await new Promise<void>((resolve) => unrelated.once("spawn", resolve));
+      const metadataPath = join(root, "configured-state", request.orbId, "host.json");
+      const metadata = JSON.parse(readFileSync(metadataPath, "utf8")) as Record<string, unknown>;
+      writeFileSync(
+        metadataPath,
+        `${JSON.stringify({ ...metadata, processGroupId: unrelated.pid, processBirth: "not-this-birth" })}\n`,
+      );
+      try {
+        const discarded = await provider.discardCompute(
+          task,
+          { orbId: request.orbId, throughIncarnation: 0 },
+          context,
+        );
+        expect(discarded.isOk(), JSON.stringify(discarded)).toBe(true);
+        expect(unrelated.pid).toBeDefined();
+        expect(processExists(Number(unrelated.pid))).toBe(true);
+      } finally {
+        unrelated.kill("SIGKILL");
+      }
+    },
+  );
 
   it("discard kills a live managed child even when no process group is recorded", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);

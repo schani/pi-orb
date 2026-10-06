@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { OrbHistoryView } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
+import { durableFakeRelay } from "./testkit/durable-fake-relay.ts";
+import { centralModelScenario } from "./testkit/durable-model-fixture.ts";
 
 export const FAKE_ORIGIN = process.env["PI_ORB_FAKE_OPENAI"] ?? "https://fake-openai.flingit.run";
 
@@ -78,11 +80,36 @@ export async function fakeRequest(
   }
 }
 
-export async function createFakeSession(name: string, scenario: unknown): Promise<FakeSession> {
+export type FixtureAgentBackend = "central-durable" | "host-pi";
+
+/** Legacy Docker/GCE acceptance keeps SDK behavior; central cases select it explicitly. */
+export function fixtureAgentBackend(override?: FixtureAgentBackend): FixtureAgentBackend {
+  const selected = process.env["PI_ORB_AGENT_BACKEND"];
+  return (
+    override ??
+    (selected === "central-durable" || selected === "host-pi"
+      ? selected
+      : process.env["PI_ORB_E2E_BACKEND"] === "process"
+        ? "central-durable"
+        : "host-pi")
+  );
+}
+
+export async function createFakeSession(
+  name: string,
+  scenario: unknown,
+  agentBackend?: FixtureAgentBackend,
+): Promise<FakeSession> {
   // Retried: a lost response can leak one unreferenced mock session, which
   // costs nothing a per-test session does not already cost.
   const response = await fakeRequest("POST", "/api/__mock__/sessions", {
-    body: { name, scenario },
+    body: {
+      name,
+      scenario: centralModelScenario(
+        scenario,
+        fixtureAgentBackend(agentBackend) === "central-durable",
+      ),
+    },
     retryTransport: true,
   });
   if (!response.ok) throw new Error(`fake session creation failed: HTTP ${response.status}`);
@@ -580,6 +607,7 @@ export interface ControlPlaneHandle {
   authDir: string;
   logs: string[];
   hostingRoot: string;
+  modelRequests?: readonly Record<string, unknown>[];
   stop(): Promise<void>;
 }
 
@@ -717,10 +745,15 @@ export async function waitForOwnedControlPlane(
   return baseUrl;
 }
 
+export function fixtureAuthorityDirectory(authDir: string, explicit?: string): string {
+  return explicit ?? join(authDir, "central-authority");
+}
+
 export async function startControlPlane(options: {
   databaseUrl?: string;
   pglitePath?: string;
   processStateDirectory?: string;
+  durableStateDirectory?: string;
   port: number;
   fake: FakeSession;
   nameFake?: FakeSession;
@@ -734,6 +767,9 @@ export async function startControlPlane(options: {
   hostingRoot?: string;
   webDist?: string;
   entry?: string;
+  agentBackend?: FixtureAgentBackend;
+  resourceRepository?: string;
+  resourceGateUrl?: string;
   readinessHeaders?: Record<string, string>;
   readinessPath?: string;
   extraEnv?: Readonly<Record<string, string>>;
@@ -744,7 +780,18 @@ export async function startControlPlane(options: {
   const ownedHostingRoot = options.hostingRoot === undefined;
   const hostingRoot = options.hostingRoot ?? mkdtempSync(join(tmpdir(), "pi-orb-e2e-hosting-"));
   const logs: string[] = [];
-  const entry = options.entry ?? "apps/control-plane/src/main.ts";
+  const agentBackend = fixtureAgentBackend(options.agentBackend);
+  const relay =
+    agentBackend === "central-durable"
+      ? await durableFakeRelay(
+          options.extraEnv?.["PI_ORB_FAKE_OPENAI_INFERENCE_URL"] ?? options.fake.inferenceBaseUrl,
+        )
+      : undefined;
+  const entry =
+    options.entry ??
+    (options.resourceRepository === undefined
+      ? "apps/control-plane/src/main.ts"
+      : "e2e/resource-control-plane-entry.ts");
   const clockSpec =
     options.controlledClockEpoch === undefined
       ? null
@@ -765,6 +812,7 @@ export async function startControlPlane(options: {
       PORT: String(options.port),
       PI_ORB_AUTH_DIR: authDir,
       PI_ORB_AUTH_MODE: "local",
+      PI_ORB_DURABLE_STATE_DIR: fixtureAuthorityDirectory(authDir, options.durableStateDirectory),
       PI_ORB_RUNTIME_IMAGE: options.runtimeImage,
       PI_ORB_HOSTING_STORE: "filesystem",
       PI_ORB_HOSTING_ROOT: hostingRoot,
@@ -782,6 +830,14 @@ export async function startControlPlane(options: {
         : { PI_ORB_NAME_INFERENCE_URL: options.nameFake.inferenceBaseUrl }),
       ...options.extraEnv,
       PI_ORB_DOCKER_INVENTORY_SCOPE: options.dockerInventoryScope ?? randomUUID(),
+      PI_ORB_AGENT_BACKEND: agentBackend,
+      ...(options.resourceRepository === undefined
+        ? {}
+        : {
+            PI_ORB_E2E_RESOURCE_REPOSITORY: options.resourceRepository,
+            PI_ORB_E2E_RESOURCE_GATE_URL: options.resourceGateUrl,
+          }),
+      ...(relay === undefined ? {} : { PI_ORB_FAKE_OPENAI_INFERENCE_URL: relay.baseUrl }),
     },
     stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
@@ -789,8 +845,9 @@ export async function startControlPlane(options: {
   child.stdout?.on("data", (chunk: Buffer) => logs.push(chunk.toString()));
   child.stderr?.on("data", (chunk: Buffer) => logs.push(chunk.toString()));
 
-  const stop = (): Promise<void> =>
-    new Promise((resolve) => {
+  let stopped: Promise<void> | undefined;
+  const stop = (): Promise<void> => {
+    stopped ??= new Promise<void>((resolve) => {
       const finish = (): void => {
         clearTimeout(deadline);
         clock?.dispose();
@@ -804,7 +861,9 @@ export async function startControlPlane(options: {
         child.once("exit", finish);
         child.kill("SIGTERM");
       }
-    });
+    }).then(() => relay?.close());
+    return stopped;
+  };
   let baseUrl = `http://127.0.0.1:${options.port}`;
   try {
     if (clock !== undefined) {
@@ -825,6 +884,7 @@ export async function startControlPlane(options: {
     if (ownedAuthDir) rmSync(authDir, { recursive: true, force: true });
     throw new Error(`control plane startup failed: ${String(cause)}\n${logs.join("")}`, { cause });
   }
+
   return {
     process: child,
     ...(clock === undefined ? {} : { clock }),
@@ -833,6 +893,7 @@ export async function startControlPlane(options: {
     authDir,
     logs,
     hostingRoot,
+    ...(relay === undefined ? {} : { modelRequests: relay.requests }),
     stop,
   };
 }

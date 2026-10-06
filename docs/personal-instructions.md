@@ -4,6 +4,8 @@
 
 **Status (updated 2026-09-16): Home gear, the user-keyed store and owner-aware runtime read are implemented and qualified.** Stage 2 is not deployed. Question 63 records the UI resolution; `docs/multi-user.md` owns the multi-user boundary.
 
+**Central process audit (2026-10-04):** personal/project text is captured at `createProcessAgentContext`; `beforeRequest` injects that snapshot, not fresh database text each generation. Saves do not refresh an open agent. Explicit Stop/Start adopts saved text; execution-only idle-stop/replacement may retain the central context. This is the current limitation, not a new refresh policy. Placement and host-resource adoption are distinguished in `docs/pi-durable-evaluation.md`.
+
 ## Selected implementation contract
 
 - Dashboard totals-strip gear, outside project columns, opens the single-purpose 560px `~/AGENTS.md` editor. Raw Markdown, explicit Save, an icon-only close control, no settings tabs. Phone editing uses 16px text and touch-sized controls. Keep this first slice dashboard-only; the orb-index entry was an optional exploration, not a second required surface.

@@ -62,10 +62,12 @@ import type { HookEnvSource } from "../hooks/env-file.ts";
 import type { HookSpawner } from "../hooks/ports.ts";
 import { BootHookRunner } from "../hooks/runner.ts";
 import { NodeHookSpawner } from "../hooks/spawner.ts";
+import { initialCheckoutCommands } from "../initial-checkout.ts";
 import { fetchMcpCatalog } from "../mcp/boot.ts";
 import { createOrbMcpExtension } from "../mcp/native.ts";
 import { triggerOrbName } from "../naming/client.ts";
 import { readRootReadme } from "../naming/context.ts";
+import { awaitInitialCheckoutCommit } from "../pending-initial-checkout.ts";
 import { fetchPersonalInstructions } from "../personal-instructions/endpoint.ts";
 import { fetchProjectInstructions } from "../project-instructions/endpoint.ts";
 import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts";
@@ -186,6 +188,7 @@ export class PiOrbAgent {
   private observeSettings: (() => void) | null = null;
   private session: PiSession | null = null;
   private shutdownExtensions: (() => Promise<void>) | null = null;
+  private readonly bootAbort = new AbortController();
   private closingExtensions: Promise<void> | null = null;
   private liveHistory: LiveHistoryPublisher | null = null;
   private checkoutCommit = "";
@@ -299,6 +302,7 @@ export class PiOrbAgent {
   /** Terminates a resume hook that outlived its blocking window. */
   shutdownHooks(): void {
     this.shuttingDown = true;
+    this.bootAbort.abort();
     this.hooks?.shutdown();
   }
 
@@ -824,7 +828,29 @@ export class PiOrbAgent {
 
   /** Fresh temp clone plus atomic rename, or validation of the reused checkout. */
   private async prepareCheckout(_repoDir: string): Promise<Result<string, RuntimeHealth>> {
-    const checkout = await prepareCheckout(this.options.workDir, this.options.repositoryUrl);
+    const checkout = await prepareCheckout(
+      this.options.workDir,
+      this.options.repositoryUrl,
+      async () => {
+        const initial = await awaitInitialCheckoutCommit(
+          process.env,
+          this.options.broker,
+          process.env.PI_ORB_HOST_INCARNATION ?? "0",
+          { signal: this.bootAbort.signal },
+        );
+        if (initial.isErr())
+          return err({
+            code: initial.error.code,
+            message: initial.error.message,
+            retryable: false,
+          });
+        return initialCheckoutCommands(initial.value).mapErr((error) => ({
+          code: "clone_failed" as const,
+          message: error.message,
+          retryable: false,
+        }));
+      },
+    );
     return checkout.mapErr((error) => this.failed(error.code, error.message, error.retryable));
   }
 

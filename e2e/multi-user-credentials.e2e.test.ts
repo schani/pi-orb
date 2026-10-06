@@ -1,5 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,9 +16,12 @@ import {
   deleteFakeSession,
   type FakeSession,
   fakeControl,
+  fakeRequest,
   startControlPlane,
   waitFor,
 } from "./harness.ts";
+import { localGitEnvironment } from "./testkit/cross-axis.ts";
+import { preserveMultiUserEvidence } from "./testkit/multi-user-evidence.ts";
 
 const PORT = 7168;
 const REPOSITORY_URL = "https://github.com/schani/pi-orb";
@@ -66,6 +70,9 @@ let inferenceServer: Server;
 let githubServer: Server;
 let inferenceBaseUrl = "";
 let githubBaseUrl = "";
+let completed = false;
+const orbObservations = new Map<string, Record<string, unknown>>();
+const githubObservations: Record<string, unknown>[] = [];
 const inferenceObservations: InferenceObservation[] = [];
 const approvedGithubCodes = new Set<string>();
 const githubDevices = new Map<string, { userCode: string; owner: "alice" | "bob" }>();
@@ -102,7 +109,9 @@ async function request(
 }
 
 async function orb(principal: Principal, id: string) {
-  return request(principal, "GET", `/api/v1/orbs/${id}`);
+  const response = await request(principal, "GET", `/api/v1/orbs/${id}`);
+  orbObservations.set(`${principal}:${id}`, response.body);
+  return response;
 }
 
 function auth(owner: "alice" | "bob") {
@@ -286,6 +295,7 @@ beforeAll(async () => {
       const deviceCode = `github-device-${owner}`;
       const userCode = `GITHUB-${owner.toUpperCase()}`;
       githubDevices.set(deviceCode, { userCode, owner });
+      githubObservations.push({ path: incoming.url, owner, userCode });
       outgoing.end(
         JSON.stringify({
           device_code: deviceCode,
@@ -299,7 +309,9 @@ beforeAll(async () => {
     }
     if (incoming.url === "/login/oauth/access_token") {
       const device = githubDevices.get(form.get("device_code") ?? "");
-      if (device === undefined || !approvedGithubCodes.has(device.userCode)) {
+      const approved = device !== undefined && approvedGithubCodes.has(device.userCode);
+      githubObservations.push({ path: incoming.url, owner: device?.owner, approved });
+      if (!approved || device === undefined) {
         outgoing.end(JSON.stringify({ error: "authorization_pending" }));
         return;
       }
@@ -314,6 +326,7 @@ beforeAll(async () => {
     }
     if (incoming.url === "/user") {
       const owner = String(incoming.headers.authorization).endsWith("bob") ? "bob" : "alice";
+      githubObservations.push({ path: incoming.url, owner });
       outgoing.end(JSON.stringify({ login: `${owner}-github-account` }));
       return;
     }
@@ -321,6 +334,28 @@ beforeAll(async () => {
   });
   githubBaseUrl = await listen(githubServer);
 
+  const localRepository =
+    process.env["PI_ORB_E2E_BACKEND"] === "process" &&
+    (process.env["PI_ORB_AGENT_BACKEND"] ?? "central-durable") === "central-durable"
+      ? join(root, "repository")
+      : undefined;
+  if (localRepository !== undefined) {
+    mkdirSync(localRepository);
+    execFileSync("git", ["init", "-b", "main", localRepository]);
+    writeFileSync(join(localRepository, "AGENTS.md"), "Use the project owner's credentials.\n");
+    execFileSync("git", ["-C", localRepository, "add", "AGENTS.md"]);
+    execFileSync("git", [
+      "-C",
+      localRepository,
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.test",
+      "commit",
+      "-m",
+      "fixture",
+    ]);
+  }
   control = await startControlPlane({
     pglitePath: join(root, "control-plane.pglite"),
     processStateDirectory: join(root, "process-hosts"),
@@ -332,6 +367,12 @@ beforeAll(async () => {
     entry: "e2e/two-user-control-plane-entry.ts",
     readinessHeaders: { "x-pi-orb-e2e-principal": "alice" },
     extraEnv: {
+      ...(localRepository === undefined
+        ? {}
+        : {
+            ...localGitEnvironment(localRepository, REPOSITORY_URL),
+            PI_ORB_E2E_RESOURCE_REPOSITORY: localRepository,
+          }),
       PI_ORB_E2E_ALICE_OAUTH_URL: fake.oauthBaseUrl,
       PI_ORB_E2E_ALICE_INFERENCE_URL: inferenceBaseUrl,
       PI_ORB_E2E_BOB_OAUTH_URL: bobFake.oauthBaseUrl,
@@ -345,6 +386,38 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(async () => {
+  if (root !== "" && !completed) {
+    const sessions: Record<string, unknown> = {};
+    await Promise.all(
+      (
+        [
+          ["alice", fake],
+          ["bob", bobFake],
+          ["alice-name", aliceNameFake],
+          ["bob-name", bobNameFake],
+        ] as const
+      ).map(async ([owner, session]) => {
+        if (session === undefined) return;
+        sessions[owner] = await fakeRequest(
+          "GET",
+          `/api/__mock__/sessions/${session.sessionKey}/requests`,
+          { retryTransport: false, deadlineMs: 10_000 },
+        )
+          .then(async (response) =>
+            response.ok ? response.json() : { error: `HTTP ${response.status}` },
+          )
+          .catch((error: unknown) => ({ error: String(error) }));
+      }),
+    );
+    preserveMultiUserEvidence(root, {
+      controlPlaneLog: control?.logs.join("") ?? "",
+      inference: inferenceObservations,
+      github: githubObservations,
+      orbs: [...orbObservations.entries()].map(([key, value]) => ({ key, ...value })),
+      sessions,
+    });
+    console.error(`Multi-user E2E evidence: ${root}`);
+  }
   await control?.stop();
   await new Promise<void>((resolve) => inferenceServer?.close(() => resolve()));
   await new Promise<void>((resolve) => githubServer?.close(() => resolve()));
@@ -352,7 +425,7 @@ afterAll(async () => {
   if (bobFake !== undefined) await deleteFakeSession(bobFake.sessionKey);
   if (aliceNameFake !== undefined) await deleteFakeSession(aliceNameFake.sessionKey);
   if (bobNameFake !== undefined) await deleteFakeSession(bobNameFake.sessionKey);
-  if (root !== "") rmSync(root, { recursive: true, force: true });
+  if (root !== "" && completed) rmSync(root, { recursive: true, force: true });
 }, 30_000);
 
 describe("authorized two-user credentials", () => {
@@ -593,6 +666,7 @@ describe("authorized two-user credentials", () => {
     await waitFor(
       "same-project child uses Alice model credential",
       async () => {
+        await orb("alice", child);
         const history = await request("bob", "GET", `/api/v1/orbs/${child}/history`);
         return JSON.stringify(history.body).includes("ALICE_CHILD_COMPLETE") ? true : null;
       },
@@ -608,5 +682,18 @@ describe("authorized two-user credentials", () => {
         (call) => call.owner === "bob" && call.body.includes("ALICE_CHILD_OWNER"),
       ),
     ).toBe(false);
+    if (
+      process.env["PI_ORB_E2E_BACKEND"] === "process" &&
+      (process.env["PI_ORB_AGENT_BACKEND"] ?? "central-durable") === "central-durable"
+    ) {
+      expect(control.logs.join("")).toContain(`multi-user-resource-owner orb=${child} owner=alice`);
+      expect(control.logs.join("")).not.toContain(
+        `multi-user-resource-owner orb=${child} owner=bob`,
+      );
+      expect(control.logs.join("")).not.toContain(
+        `multi-user-resource-owner orb=${child} owner=unknown`,
+      );
+    }
+    completed = true;
   }, 360_000);
 });

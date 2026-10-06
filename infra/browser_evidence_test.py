@@ -14,6 +14,24 @@ def steps(workflow):
 
 
 class BrowserEvidenceTest(unittest.TestCase):
+    def test_durable_qualification_covers_final_source_without_deployment(self):
+        ci = (ROOT / '.github/workflows/ci.yml').read_text()
+        for value in ('postgres:16', 'PI_ORB_TEST_DATABASE_URL:', 'PI_ORB_DURABLE_PG_TEST_URL:'):
+            self.assertIn(value, ci)
+        docker = (ROOT / '.github/workflows/e2e.yml').read_text()
+        self.assertIn('PI_ORB_E2E_BACKEND: docker', docker)
+        self.assertIn('PI_ORB_AGENT_BACKEND: host-pi', docker)
+        qualification = (ROOT / '.github/workflows/durable-qualification.yml').read_text()
+        for value in ('pull_request:', 'contents: read', 'shard: [1, 2, 3, 4]',
+                      'PI_ORB_E2E_BACKEND: process', 'PI_ORB_AGENT_BACKEND: central-durable',
+                      'npm run test:e2e -- --shard=',
+                      'docker build -f apps/control-plane/Dockerfile',
+                      '--network none', 'control-plane-image-proof.mjs',
+                      'retention-days: 14', 'df -h', '15728640'):
+            self.assertIn(value, qualification)
+        for value in ('id-token: write', 'google-github-actions', 'infra/release.sh'):
+            self.assertNotIn(value, qualification)
+
     def test_lazy_return_owns_and_preserves_failure_evidence(self):
         source = (ROOT / 'e2e/lazy-transcript-frontend.e2e.test.ts').read_text()
         self.assertRegex(source, r'mkdtemp\(\s*join\(import\.meta\.dirname, `\.\./test-failures/lazy-return-\$\{engine\}-`\),\s*\)')
@@ -43,6 +61,7 @@ class BrowserEvidenceTest(unittest.TestCase):
             'test-failures/*.json',
             'test-failures/profile-login/failure.json',
             'test-failures/full-slice-upload/failure.json',
+            'test-failures/subagent-*/failure.json',
         })
 
 

@@ -26,6 +26,15 @@ export interface LivenessEntry {
   restartGraceMs: number | null;
 }
 
+export type BrowserConnectionKind = "conversation" | "execution";
+
+interface BrowserConnection {
+  visible: boolean;
+  readonly kind: BrowserConnectionKind;
+  closing: boolean;
+  readonly close: (() => void) | undefined;
+}
+
 export interface DrainStatus {
   retrying: boolean;
   message?: string;
@@ -209,43 +218,72 @@ export class ControlState {
     return this.liveness.get(orbId) ?? null;
   }
 
+  private readonly executionLeases = new Map<string, number>();
+
+  acquireExecutionLease(orbId: string, stateVersion: number): (() => void) | null {
+    if (this.isStopping(orbId, stateVersion)) return null;
+    this.executionLeases.set(orbId, (this.executionLeases.get(orbId) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const count = (this.executionLeases.get(orbId) ?? 1) - 1;
+      if (count === 0) this.executionLeases.delete(orbId);
+      else this.executionLeases.set(orbId, count);
+    };
+  }
+
+  hasExecutionLeases(orbId: string): boolean {
+    return (this.executionLeases.get(orbId) ?? 0) > 0;
+  }
+
+  private readonly agentWork = new Map<string, boolean>();
+
+  noteAgentWork(orbId: string, busy: boolean): void {
+    this.agentWork.set(orbId, busy);
+  }
+
+  hasAgentWork(orbId: string): boolean {
+    return this.agentWork.get(orbId) === true;
+  }
+
   // -- browser presence (idle auto-stop, docs/lifecycle.md) --
 
-  /** orbId → connectionId → tab visible. */
-  private readonly browserVisibility = new Map<string, Map<string, boolean>>();
-  private readonly browserClosers = new Map<string, Map<string, () => void>>();
+  private readonly browserConnections = new Map<string, Map<string, BrowserConnection>>();
   /** Wall ms when the orb last had a visible tab; lost on process restart. */
   private readonly lastVisibleAt = new Map<string, number>();
 
   /** A connection counts as hidden until it affirmatively reports visible. */
-  registerBrowserConnection(orbId: string, connectionId: string, close?: () => void): void {
-    let connections = this.browserVisibility.get(orbId);
+  registerBrowserConnection(
+    orbId: string,
+    connectionId: string,
+    close?: () => void,
+    kind: BrowserConnectionKind = "conversation",
+  ): void {
+    let connections = this.browserConnections.get(orbId);
     if (connections === undefined) {
       connections = new Map();
-      this.browserVisibility.set(orbId, connections);
+      this.browserConnections.set(orbId, connections);
     }
-    connections.set(connectionId, false);
-    if (close !== undefined) {
-      let closers = this.browserClosers.get(orbId);
-      if (closers === undefined) {
-        closers = new Map();
-        this.browserClosers.set(orbId, closers);
-      }
-      closers.set(connectionId, close);
-    }
+    connections.set(connectionId, { visible: false, kind, closing: false, close });
   }
 
-  closeBrowserConnections(orbId: string): void {
-    const closers = this.browserClosers.get(orbId);
-    if (closers === undefined) return;
-    for (const close of closers.values()) close();
+  /** Omitted kind closes all connections; closed sockets cease contributing demand immediately. */
+  closeBrowserConnections(orbId: string, kind?: BrowserConnectionKind): void {
+    const connections = this.browserConnections.get(orbId);
+    if (connections === undefined) return;
+    for (const connection of connections.values()) {
+      if (connection.closing || (kind !== undefined && connection.kind !== kind)) continue;
+      connection.closing = true;
+      connection.close?.();
+    }
   }
 
   setBrowserVisibility(orbId: string, connectionId: string, visible: boolean, at: number): void {
-    const connections = this.browserVisibility.get(orbId);
-    if (connections === undefined || !connections.has(connectionId)) return;
-    const wasVisible = connections.get(connectionId) === true;
-    connections.set(connectionId, visible);
+    const connection = this.browserConnections.get(orbId)?.get(connectionId);
+    if (connection === undefined || connection.closing) return;
+    const wasVisible = connection.visible;
+    connection.visible = visible;
     // Both edges stamp the time: becoming visible marks activity now, and
     // hiding marks the end of a visible stretch so the idle countdown starts
     // from the hide, not from whenever the tab first appeared.
@@ -253,21 +291,18 @@ export class ControlState {
   }
 
   unregisterBrowserConnection(orbId: string, connectionId: string, at: number): void {
-    const connections = this.browserVisibility.get(orbId);
+    const connections = this.browserConnections.get(orbId);
     if (connections === undefined) return;
-    if (connections.get(connectionId) === true) this.lastVisibleAt.set(orbId, at);
+    if (connections.get(connectionId)?.visible === true) this.lastVisibleAt.set(orbId, at);
     connections.delete(connectionId);
-    const closers = this.browserClosers.get(orbId);
-    closers?.delete(connectionId);
-    if (closers?.size === 0) this.browserClosers.delete(orbId);
-    if (connections.size === 0) this.browserVisibility.delete(orbId);
+    if (connections.size === 0) this.browserConnections.delete(orbId);
   }
 
   hasVisibleBrowser(orbId: string): boolean {
-    const connections = this.browserVisibility.get(orbId);
+    const connections = this.browserConnections.get(orbId);
     if (connections === undefined) return false;
-    for (const visible of connections.values()) {
-      if (visible) return true;
+    for (const connection of connections.values()) {
+      if (connection.visible && !connection.closing) return true;
     }
     return false;
   }
@@ -556,7 +591,8 @@ export class ControlState {
   }
 
   /** Drop all per-orb state after a terminal transition. */
-  clearOrb(orbId: string): void {
+  clearOrb(orbId: string, preserveBrowser = false): void {
+    this.closeBrowserConnections(orbId, preserveBrowser ? "execution" : undefined);
     this.bootProbes.delete(orbId);
     this.bootEvidenceSince.delete(orbId);
     this.hookFailures.delete(orbId);
@@ -569,8 +605,9 @@ export class ControlState {
     this.authBlocked.delete(orbId);
     this.drainStatus.delete(orbId);
     this.restartPending.delete(orbId);
-    this.browserVisibility.delete(orbId);
-    this.browserClosers.delete(orbId);
-    this.lastVisibleAt.delete(orbId);
+    if (!preserveBrowser) {
+      this.browserConnections.delete(orbId);
+      this.lastVisibleAt.delete(orbId);
+    }
   }
 }

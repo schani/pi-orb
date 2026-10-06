@@ -79,6 +79,63 @@ describe("runtime broker routes", () => {
   let personalInstructions: FakePersonalInstructionsStore;
   let projectInstructions: FakeProjectInstructionsStore;
   let brokerUsers: string[];
+  const initialCheckoutCommit = vi.fn(() => okAsync<string | null, StoreError>(null));
+  const alertWriter = {
+    appendAlert: vi.fn(() => okAsync({ recordId: "alert-record", duplicate: false })),
+  };
+
+  it("returns pending then the persisted initial pin only to the current runtime", async () => {
+    store.seedOrb(
+      makeOrbRow(ORB, PROJECT, "starting", { runtimeTokenHash: sha256(TOKEN), hostIncarnation: 1 }),
+    );
+    initialCheckoutCommit
+      .mockReturnValueOnce(okAsync(null))
+      .mockReturnValueOnce(okAsync("a".repeat(40)));
+    const headers = { authorization: `Bearer ${TOKEN}`, "x-orb-incarnation": "1" };
+    const pending = await app.inject({
+      method: "GET",
+      url: "/api/runtime/initial-checkout",
+      headers,
+    });
+    expect(pending.statusCode).toBe(202);
+    expect(pending.json()).toEqual({ pending: true });
+    const ready = await app.inject({
+      method: "GET",
+      url: "/api/runtime/initial-checkout",
+      headers,
+    });
+    expect(ready.statusCode).toBe(200);
+    expect(ready.json()).toEqual({ commitSha: "a".repeat(40) });
+    const stale = await app.inject({
+      method: "GET",
+      url: "/api/runtime/initial-checkout",
+      headers: { ...headers, "x-orb-incarnation": "2" },
+    });
+    expect(stale.statusCode).toBe(401);
+  });
+
+  it("rejects Claude access to central Pi checkout and alert authority", async () => {
+    store.seedOrb(
+      makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN), harness: "claude" }),
+    );
+    const headers = { authorization: `Bearer ${TOKEN}`, "x-orb-incarnation": "0" };
+    expect(
+      (await app.inject({ method: "GET", url: "/api/runtime/initial-checkout", headers }))
+        .statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/runtime/alert",
+          headers,
+          payload: { v: 1, requestId: "request", message: "alert" },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(initialCheckoutCommit).not.toHaveBeenCalled();
+    expect(alertWriter.appendAlert).not.toHaveBeenCalled();
+  });
 
   it("fences Claude subscription grants by bearer, lifecycle and harness", async () => {
     store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
@@ -154,6 +211,8 @@ describe("runtime broker routes", () => {
         expect(orb.id).toBe(ORB);
         return okAsync({ token: "claude-private-token", generation: 1 });
       },
+      alertWriter,
+      initialCheckoutCommit,
       brokerForUser: (userId) => {
         brokerUsers.push(userId);
         return broker;
@@ -196,6 +255,8 @@ describe("runtime broker routes", () => {
   }
 
   beforeEach(async () => {
+    initialCheckoutCommit.mockClear();
+    alertWriter.appendAlert.mockClear();
     store = new InMemoryControlPlaneStore(0);
     brokerUsers = [];
     pointers = new FakePointerStore();
@@ -220,6 +281,38 @@ describe("runtime broker routes", () => {
     };
     store.seedProject(makeProjectRow(PROJECT));
     await startApp();
+  });
+
+  it("routes native runtime alerts through central authority with bearer and incarnation fencing", async () => {
+    store.seedOrb(
+      makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN), hostIncarnation: 3 }),
+    );
+    const payload = { v: 1, requestId: "notice", message: "hello" };
+    const headers = { authorization: `Bearer ${TOKEN}`, "x-orb-incarnation": "3" };
+    const stale = await app.inject({
+      method: "POST",
+      url: "/api/runtime/alert",
+      headers: { ...headers, "x-orb-incarnation": "2" },
+      payload,
+    });
+    expect(stale.statusCode).toBe(401);
+    expect(alertWriter.appendAlert).not.toHaveBeenCalled();
+    const invalid = await app.inject({
+      method: "POST",
+      url: "/api/runtime/alert",
+      headers,
+      payload: { ...payload, message: "" },
+    });
+    expect(invalid.statusCode).toBe(400);
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runtime/alert",
+      headers,
+      payload,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ v: 1, id: "alert-record", duplicate: false });
+    expect(alertWriter.appendAlert).toHaveBeenCalledWith(ORB, "notice", "hello", 0);
   });
 
   afterEach(async () => {

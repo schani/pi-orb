@@ -66,7 +66,11 @@ export const OrbStateSchema = Type.Union([
 export type OrbState = Static<typeof OrbStateSchema>;
 
 /** Why an orb last entered `stopping`; absent for explicit stops (docs/lifecycle.md). */
-export const StopReasonSchema = Type.Union([Type.Literal("idle"), Type.Literal("sleep")]);
+export const StopReasonSchema = Type.Union([
+  Type.Literal("idle"),
+  Type.Literal("sleep"),
+  Type.Literal("manual"),
+]);
 export type StopReason = Static<typeof StopReasonSchema>;
 
 export const PROJECT_NAME_MAX_CHARS = 80;
@@ -278,7 +282,8 @@ export const OrbViewSchema = Type.Object(
     name: Type.Union([Type.String(), Type.Null()]),
     state: OrbStateSchema,
     stateVersion: Type.Number(),
-    /** Latest activity observed by the control plane; present only when known for a running orb. */
+    centralAgent: Type.Optional(Type.Boolean()),
+    /** Latest observed agent activity, independent of compute for central agents. */
     activity: Type.Optional(Type.Union([Type.Literal("idle"), Type.Literal("busy")])),
     checkoutCommit: Type.Optional(Type.String()),
     lastError: Type.Optional(Type.String()),

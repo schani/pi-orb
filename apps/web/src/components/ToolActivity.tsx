@@ -14,12 +14,14 @@ export interface PersistedToolCall {
   callRecordId: string;
   result?: ToolResultBlock;
   resultRecordId?: string;
+  live?: LiveToolCall | undefined;
 }
 export interface LiveToolCall {
   callId: string;
   name: string;
   code?: string;
   state: "running" | "completed" | "failed";
+  message?: string | null;
 }
 interface Call {
   id: string;
@@ -35,6 +37,7 @@ interface Call {
   offset?: number;
   limit?: number;
   state: "running" | "completed" | "failed";
+  message?: string | null;
 }
 type Kind = "edit" | "command" | "read" | "other";
 interface Category {
@@ -94,6 +97,12 @@ function uniqueCount(calls: readonly Call[]): number {
   return targets.size || calls.length;
 }
 function metric(category: Category): ReactNode {
+  const progress = category.calls
+    .find((call) => call.state === "running" && call.message?.trim())
+    ?.message?.replace(/\s+/g, " ")
+    .trim();
+  const boundedProgress =
+    progress !== undefined && progress.length > 160 ? `${progress.slice(0, 160)}…` : progress;
   const failures = category.calls.filter((call) => call.state === "failed").length;
   const running = category.calls.some((call) => call.state === "running");
   const added = category.calls.reduce((sum, call) => sum + (call.result?.added ?? 0), 0);
@@ -118,7 +127,7 @@ function metric(category: Category): ReactNode {
   const trail = failures ? (
     <span className="tool-activity-failed">{failures} failed</span>
   ) : running ? (
-    <span className="tool-activity-running">running</span>
+    <span className="tool-activity-running">{boundedProgress ?? "running"}</span>
   ) : null;
   return lead === null ? (
     trail
@@ -441,7 +450,7 @@ export function ToolActivity({
   detailContext: DetailContext;
 }) {
   const calls: Call[] = [
-    ...persisted.map(({ call, callRecordId, result, resultRecordId }) => ({
+    ...persisted.map(({ call, callRecordId, result, resultRecordId, live }) => ({
       id: call.callId,
       name: call.name,
       headline: call.headline ?? "",
@@ -454,9 +463,10 @@ export function ToolActivity({
       callKey: call.detailKey,
       ...(result ? { result } : {}),
       ...(resultRecordId ? { resultRecordId } : {}),
+      message: result === undefined ? (live?.message ?? null) : null,
       state:
         result === undefined
-          ? ("running" as const)
+          ? (live?.state ?? ("running" as const))
           : result.isError
             ? ("failed" as const)
             : ("completed" as const),
@@ -467,6 +477,7 @@ export function ToolActivity({
       headline: call.name,
       ...(call.code === undefined ? {} : { code: call.code }),
       state: call.state,
+      message: call.message ?? null,
     })),
   ];
   if (calls.length === 0) return null;

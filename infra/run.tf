@@ -11,6 +11,7 @@ locals {
       PI_ORB_SECRET_STORE                 = "gsm"
       PI_ORB_GCP_PROJECT                  = var.project
       PI_ORB_HOST_PROVIDER                = "gce"
+      PI_ORB_AGENT_BACKEND                = "host-pi"
       PI_ORB_GCE_ZONE                     = var.zone
       PI_ORB_GCE_MACHINE_TYPE             = "n2d-highmem-2"
       PI_ORB_GCE_SERVICE_ACCOUNT          = local.orb_vm_email

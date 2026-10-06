@@ -123,10 +123,23 @@ export interface RequestOrbDeletionParams {
   readonly cleanupAfter: number;
 }
 
-export interface ArchiveCaller {
+export interface GuestAgentCaller {
+  readonly kind?: "guest";
   readonly runtimeTokenHash: string;
   readonly hostIncarnation: number;
 }
+
+export interface CentralAgentCaller {
+  readonly kind: "central";
+  readonly ownerUserId: string;
+  readonly projectId: string;
+  readonly orbId: string;
+  readonly agentAdmissionVersion: number;
+  readonly runtimeTokenHash?: never;
+  readonly hostIncarnation?: never;
+}
+
+export type ArchiveCaller = GuestAgentCaller | CentralAgentCaller;
 
 export interface SpawnOrbParams {
   readonly callerOrbId: string;
@@ -263,6 +276,10 @@ export interface ControlPlaneStore extends ActivityHeadlineStore {
     orbId: string,
     selector: { afterOrdinal: number; trackedIds: readonly string[] },
   ): ResultAsync<OrbMessagePoll, StoreError>;
+  cancelPendingOrbMessage(
+    task: SimulationTask,
+    params: { orbId: string; messageId: string; caller: CentralAgentCaller; now: number },
+  ): ResultAsync<"cancelled" | "active" | "missing", StoreError | StateConflict>;
   scheduleOrbSleep(
     task: SimulationTask,
     params: { orbId: string; caller: ArchiveCaller; sleepId: string; durationSeconds: number },
@@ -310,6 +327,7 @@ export interface ControlPlaneStore extends ActivityHeadlineStore {
     params: {
       orbId: string;
       messageIds: readonly string[];
+      deliveryBatchId: string;
       lastError: string;
       now: number;
     },
@@ -532,7 +550,12 @@ export interface OrbHostObservation {
 export interface ProvisionOrbHostRequest {
   readonly orbId: string;
   readonly incarnation: number;
-  readonly bootstrap: { repositoryUrl: string; harness?: import("@pi-orb/protocol").HarnessKind };
+  readonly bootstrap: {
+    repositoryUrl: string;
+    harness?: import("@pi-orb/protocol").HarnessKind;
+    initialCheckoutCommit?: string;
+    awaitInitialCheckoutCommit?: boolean;
+  };
 }
 
 export interface StartOrbHostRequest {
@@ -606,6 +629,20 @@ export interface OrbHostProvider {
     orbId: string,
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError>;
+  /** Immutable authenticated binding for execution-only hosts. */
+  executionBinding?(
+    task: SimulationTask,
+    ref: OrbHostRef,
+    context: OperationContext,
+  ): ResultAsync<
+    {
+      readonly baseUrl: string;
+      readonly token: string;
+      readonly incarnation: string;
+      readonly cwd: string;
+    },
+    OrbHostProviderError
+  >;
   /** Returns null only on definitive absence; uncertainty is an Err. */
   observe(
     task: SimulationTask,
@@ -1150,6 +1187,7 @@ export interface ControlPlaneDeps {
   readonly hostProvider: OrbHostProvider;
   readonly resourceCleaner: OrbResourceCleaner;
   readonly runtimeClient: OrbRuntimeClient;
+  readonly agentPlane?: import("./agent-ports.ts").AgentPlane;
   readonly authGate: AuthGate;
   readonly nameGenerator: OrbNameGenerator;
   readonly headlineGenerator: ActivityHeadlineGenerator;

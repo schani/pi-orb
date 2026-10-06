@@ -218,7 +218,7 @@ describe("scheduled sleep lifecycle (DST)", () => {
               const overridden = (await requestOrbStop(task, harness.deps, ORB))._unsafeUnwrap();
               expect(overridden).toMatchObject({
                 state: "stopping",
-                stopReason: null,
+                stopReason: "manual",
                 sleepId: null,
                 sleepUntil: null,
                 stateVersion: running.stateVersion + 2,
@@ -226,7 +226,7 @@ describe("scheduled sleep lifecycle (DST)", () => {
               expect(overridden.stateChangedAt).toBeGreaterThan(sleepAnchor);
               const repeated = (await requestOrbStop(task, harness.deps, ORB))._unsafeUnwrap();
               expect(repeated).toMatchObject({
-                stateVersion: overridden.stateVersion,
+                stateVersion: overridden.stateVersion + 1,
                 stateChangedAt: overridden.stateChangedAt,
               });
 
@@ -242,7 +242,7 @@ describe("scheduled sleep lifecycle (DST)", () => {
               expect(harness.world.hostStateOf(ORB)).toBe("stopped");
               expect(harness.store.orbSnapshot(ORB)).toMatchObject({
                 state: "stopped",
-                stopReason: null,
+                stopReason: "manual",
                 sleepId: null,
                 sleepUntil: null,
               });
@@ -379,7 +379,7 @@ describe("scheduled sleep lifecycle (DST)", () => {
               expect((await requestOrbStop(task, harness.deps, ORB))._unsafeUnwrap()).toMatchObject(
                 {
                   state: "stopping",
-                  stopReason: null,
+                  stopReason: "manual",
                   stateVersion: running.stateVersion + 2,
                 },
               );
