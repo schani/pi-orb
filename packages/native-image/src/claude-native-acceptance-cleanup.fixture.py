@@ -25,13 +25,16 @@ for workload_status, cleanup_status in [(0, 0), (37, 0), (37, 73), (0, 73), (137
     retained = directory / "retained"
     for path in [base, helpers, tools, retained]:
         path.mkdir(mode=0o755)
+        path.chmod(0o755)
     directory.chmod(0o755)
     os.chown(base, foreign_uid, foreign_uid)
     os.chown(retained, foreign_uid, foreign_uid)
     sentinel = base / "user-file"
     sentinel.write_text("untouched")
     shutil.copyfile(wrapper, helpers / "claude-acceptance.sh")
+    (helpers / "claude-acceptance.sh").chmod(0o755)
     shutil.copyfile(wrapper.parent / "claude-receipt-edge.mjs", helpers / "claude-receipt-edge.mjs")
+    (helpers / "claude-receipt-edge.mjs").chmod(0o644)
     (helpers / "claude-workload.mjs").write_text('''
 import { mkdirSync, writeFileSync, symlinkSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -53,6 +56,7 @@ if (''' + str(workload_status) + ''' === 137) {
 }
 process.exit(''' + str(workload_status) + ''');
 ''')
+    (helpers / "claude-workload.mjs").chmod(0o644)
     address = str(directory / "privilege.sock")
     server = socket.socket(socket.AF_UNIX)
     server.bind(address)
@@ -110,12 +114,15 @@ sys.exit(reply["status"])
             ["setpriv", "--reuid=" + str(foreign_uid), "--regid=" + str(foreign_uid),
              "--clear-groups", "bash", str(helpers / "claude-acceptance.sh"),
              str(candidate), str(base), "accept", str(retained)],
-            env={"PATH": str(tools) + ":/usr/local/bin:/usr/bin:/bin"},
+            cwd=candidate, env={"PATH": str(tools) + ":/usr/local/bin:/usr/bin:/bin"},
             capture_output=True, text=True, timeout=20,
         )
         leftovers = [p.name for p in base.iterdir() if p.name != "user-file"]
         traces = list(retained.iterdir())
-        assert len(traces) == (1 if workload_status else 0)
+        assert len(traces) == (1 if workload_status else 0), {
+            "exit": completed.returncode, "traceCount": len(traces),
+            "expectedTraceCount": 1 if workload_status else 0,
+        }
         retained_trace = json.loads(traces[0].read_text()) if traces else None
         results.append({"workloadStatus": workload_status, "cleanupStatus": cleanup_status,
                         "stdout": completed.stdout, "retainedTrace": retained_trace,
