@@ -1131,11 +1131,13 @@ async function reconcileCreateStart(
         deps.control.noteCondition(`execution-resources:${orb.id}`, false);
       }
       // Persist ready identity before the orb becomes running (docs/lifecycle.md).
+      const readyAt = task.wallNow();
       const updated = await deps.store.casUpdateFields(task, {
         orbId: orb.id,
         expectedStateVersion: orb.stateVersion,
-        now: task.wallNow(),
+        now: readyAt,
         checkoutCommit: status.checkoutCommit,
+        lastReadyAt: readyAt,
         hostRef: hostResourceId,
       });
       if (updated.isErr()) {

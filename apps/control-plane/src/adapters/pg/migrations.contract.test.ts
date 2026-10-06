@@ -12,8 +12,9 @@ it("assigns each migration a unique sequence after shipped main migrations", () 
   expect(new Set(sequences).size).toBe(candidate.length);
   expect(files).toContain("029_orb_harness.sql");
   expect(files).toContain("031_google_identities.sql");
-  expect(files).toContain("032_manual_stop.sql");
-  expect(files).toContain("037_resource_events.sql");
+  expect(files).toContain("032_orb_last_ready_at.sql");
+  expect(files).toContain("033_manual_stop.sql");
+  expect(files).toContain("038_resource_events.sql");
   expect(files).toContain("029_history_record_shape.sql");
   expect(files).toContain("030_activity_headlines.sql");
 });

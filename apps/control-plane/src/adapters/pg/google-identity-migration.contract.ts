@@ -9,12 +9,13 @@ import { PostgreSQLUserStore } from "./users.ts";
 
 const migration = "031_google_identities.sql";
 const followingMigrations = [
-  "032_manual_stop.sql",
-  "033_agent_admission_version.sql",
-  "034_durable_authority.sql",
-  "035_resource_snapshots.sql",
-  "036_agent_artifacts.sql",
-  "037_resource_events.sql",
+  "032_orb_last_ready_at.sql",
+  "033_manual_stop.sql",
+  "034_agent_admission_version.sql",
+  "035_durable_authority.sql",
+  "036_resource_snapshots.sql",
+  "037_agent_artifacts.sql",
+  "038_resource_events.sql",
 ];
 const first = {
   userId: "00000000-0000-4000-8000-000000000001",

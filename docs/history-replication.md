@@ -449,6 +449,7 @@ CREATE TABLE orbs (
   host_kind text NOT NULL,
   host_ref text,
   checkout_commit text,
+  last_ready_at timestamptz,
   harness_session_id text,
   harness_session_header jsonb CHECK (
     harness_session_header IS NULL OR jsonb_typeof(harness_session_header) = 'object'

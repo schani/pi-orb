@@ -138,6 +138,7 @@ function seedRunningOnRevision(
       hostSpecFingerprint: provisioned.specFingerprint,
       hostSpecGeneration: provisioned.specGeneration,
       checkoutCommit: "commit-0",
+      lastReadyAt: task.wallNow(),
       stateChangedAt: task.wallNow(),
     }),
   );
@@ -804,6 +805,7 @@ describe("host-spec replacement (DST)", () => {
                   runtimeTokenHash: seeded.runtimeTokenHash,
                   hostDiscardEvidence: evidence,
                   checkoutCommit: "commit-0",
+                  lastReadyAt: task.wallNow(),
                   stateChangedAt: task.wallNow(),
                 }),
               );

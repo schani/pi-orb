@@ -209,7 +209,7 @@ type RuntimeHealth =
       runtimeInstanceId: string;
       status: "ready";
       sessionId: string;
-      checkoutCommit: string;
+      checkoutCommit: string | null; // null: repository without commits
       activity: "idle" | "busy";
       operationId?: string;
       // Present when boot notified an existing conversation or declined
@@ -247,6 +247,8 @@ Ready means all of the following:
 **Restart context (implemented 2026-09-05; native identity completed 2026-09-14).** The image sets `PI_ORB_CONTAINER=1` on Docker; native VM bootstrap also sets it because PID 1 defines that dedicated guest's lifetime. The runtime combines `/proc/sys/kernel/random/boot_id` with PID 1's start time from `/proc/1/stat` to identify the container execution lifetime; the kernel UUID alone would miss retained-container stop/start. `ProcessOrbHostProvider` forces `PI_ORB_CONTAINER=0` so even a containerized control plane cannot accidentally claim its unsandboxed children have a container-wide lifetime. Unknown/process-host execution identity uses conservative runtime-restart wording. The runtime supervisor additionally supplies a fresh `PI_ORB_SUPERVISOR_ID` per supervisor lifetime, stable across its runtime-child restarts. The process provider supervises directly in the control plane rather than through that wrapper: it persists its own `supervisorId` in private host metadata, preserves it through crash relaunch/provider recovery, and rotates it when explicit Start/provision changes desired state from stopped to running. This supplies the same admission-fence env contract without claiming detached descendants died or changing conservative restart wording. The active-child archival E2E caught the initially missing process-provider wiring: busy work was protected, then sealing correctly failed with `admission lifetime is unavailable`. Provider tests cover the env, stable crash identity and fresh Stop/Start identity. No provider port changed. Session-based notification, deduplication, crash-loop guarding, and failure visibility are specified in `docs/lifecycle.md`.
 
 A fresh clone is written to a temporary directory and atomically renamed into place so a process crash cannot make a partial checkout look ready. Restart reuses a complete checkout/session and cleans or retries an incomplete temporary clone.
+
+**Decision 2026-10-06: a repository without commits is a valid checkout.** Its HEAD is unborn, so `git rev-parse HEAD` fails; the runtime then reports `checkoutCommit: null` when the checkout has no refs at all. A checkout that has refs but an unresolvable HEAD still fails with `clone_failed`. Previously every empty repository failed boot with `clone_failed: fatal: ambiguous argument 'HEAD'`.
 
 After configuring the persistent home and Rust state paths, the runtime checks out the repository and then runs `.agents/setup`. The runtime itself performs no Rustup network or toolchain work; a setup hook that needs Rust may install or select its required toolchain before readiness.
 

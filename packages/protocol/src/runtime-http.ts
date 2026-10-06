@@ -98,6 +98,7 @@ export const RuntimeHealthSchema = Type.Union([
       runtimeInstanceId: Type.String(),
       status: Type.Literal("ready"),
       sessionId: Type.String(),
+      /** Null for a repository without commits. */
       checkoutCommit: Type.Union([Type.String(), Type.Null()]),
       activity: Type.Union([Type.Literal("idle"), Type.Literal("busy")]),
       operationId: Type.Optional(Type.String()),

@@ -34,6 +34,7 @@ export function newOrbRow(
     hostDiscardEvidence: null,
     hostDiscardRequestedAt: null,
     checkoutCommit: null,
+    lastReadyAt: null,
     harnessSessionId: null,
     harnessSessionHeader: null,
     lastError: null,

@@ -12,7 +12,7 @@ describe("resource snapshot PostgreSQL persistence", () => {
     await client.query("CREATE TABLE orbs(id uuid PRIMARY KEY)");
     await client.transaction(async (_query, execute) =>
       execute(
-        await readFile(new URL("./migrations/035_resource_snapshots.sql", import.meta.url), "utf8"),
+        await readFile(new URL("./migrations/036_resource_snapshots.sql", import.meta.url), "utf8"),
       ),
     );
     await client.query("INSERT INTO orbs VALUES($1)", [orbId]);
@@ -65,7 +65,7 @@ describe("resource snapshot PostgreSQL persistence", () => {
         await client.transaction(async (_query, execute) =>
           execute(
             await readFile(
-              new URL("./migrations/035_resource_snapshots.sql", import.meta.url),
+              new URL("./migrations/036_resource_snapshots.sql", import.meta.url),
               "utf8",
             ),
           ),
@@ -108,7 +108,7 @@ describe("resource snapshot PostgreSQL persistence", () => {
     await client.query("CREATE TABLE orbs(id uuid PRIMARY KEY)");
     await client.transaction(async (_query, execute) =>
       execute(
-        await readFile(new URL("./migrations/035_resource_snapshots.sql", import.meta.url), "utf8"),
+        await readFile(new URL("./migrations/036_resource_snapshots.sql", import.meta.url), "utf8"),
       ),
     );
     await client.query("INSERT INTO orbs VALUES($1)", [orbId]);

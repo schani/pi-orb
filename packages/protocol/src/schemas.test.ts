@@ -214,6 +214,17 @@ describe("runtime HTTP schemas", () => {
         v: 1,
         orbId: "orb-1",
         runtimeInstanceId: "run-1",
+        status: "ready",
+        sessionId: "session-1",
+        checkoutCommit: null,
+        activity: "idle",
+      }),
+    ).toBe(true);
+    expect(
+      Check(RuntimeHealthSchema, {
+        v: 1,
+        orbId: "orb-1",
+        runtimeInstanceId: "run-1",
         status: "failed",
         error: { code: "session_load_failed", message: "corrupt", retryable: false },
       }),

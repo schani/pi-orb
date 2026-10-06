@@ -107,9 +107,9 @@ WS   /api/v1/orbs/:orbId/live
 WS   /api/v1/orbs/:orbId/terminal
 ```
 
-### Application principal (implementation updated 2026-09-19; not deployed)
+### Application principal (production validated 2026-10-06)
 
-**Implemented 2026-09-19; not deployed, qualification ongoing.** The single application resolves a user from a stateless sealed Google-login session or an ops principal from a verified Google machine ID token on the ordinary API. Local development explicitly selects `PI_ORB_AUTH_MODE=local`; Google mode requires exact configured origins, client credentials, sealing key and immutable machine subject. Cookie sessions have fixed twelve-hour expiry, no database session row and no individual revocation: logout clears the browser cookie, but a copied cookie works until expiry. Full contract: `docs/credentials.md`; UUID-preserving migration 031: `docs/multi-user.md`; composition and cutover: `docs/deployment.md`, `docs/control-plane-consolidation.md`.
+**Production validated 2026-10-06 (`docs/deployment.md`).** The single application resolves a user from a stateless sealed Google-login session or an ops principal from a verified Google machine ID token on the ordinary API. Local development explicitly selects `PI_ORB_AUTH_MODE=local`; Google mode requires exact configured origins, client credentials, sealing key and immutable machine subject. Cookie sessions have fixed twelve-hour expiry, no database session row and no individual revocation: logout clears the browser cookie, but a copied cookie works until expiry. Full contract: `docs/credentials.md`; UUID-preserving migration 031: `docs/multi-user.md`; composition and cutover: `docs/deployment.md`, `docs/control-plane-consolidation.md`.
 
 Cookie-authenticated unsafe requests and browser WebSocket upgrades require the exact configured Origin; absent/null/foreign origins fail. Any foreign Origin on cookie reads also fails. Bound OAuth GET callbacks are narrow exceptions. No separate CSRF-token exchange or credentialed CORS is used. Invalid explicit Authorization never falls back to cookies. Machine tokens require the exact app-origin audience and immutable admitted subject; runtime bearers remain separate and neither bearer class requires browser Origin. Spoofed IAP headers grant no authority.
 

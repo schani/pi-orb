@@ -8,6 +8,8 @@
 
 This decides storage, not production adoption. Question 72 (Pi Durable) in `docs/open-questions.md` remains open for ownership, security, supported-product parity and recovery qualification. No dual-store compatibility phase is required.
 
+**Cutover assessment (2026-10-06):** the global backend selector reroutes every Pi orb, not only newly created orbs; Claude remains host-native. Existing host-SDK private context is not imported into PostgreSQL Native authority. Public transcript and workspace retention do not establish model-context continuity: Native projection rejects a persisted public cursor absent from its own entries. The runtime-mode change also changes the desired compute fingerprint, adopted through ordinary stopped-compute replacement. There is no existing fresh-orbs-only selector or reverse import after central work. Retaining production `host-pi` avoids this unsupported cutover; central activation needs an explicit existing-conversation decision before deployment.
+
 ## Integrated candidate (rebased 2026-10-05; scoped validation passed; undeployed)
 
 The same private-authority/public-projection adapter runs against PostgreSQL and PGlite. Owner leases use the database clock; an instance-bound bounded drain capability permits already-admitted cleanup after admission revocation, never new submission/model/effect dispatch. Archive atomically checks/seals the current public head and purges private native state, repository snapshots and artifacts; delete removes both lifetimes. Stable handles retain metadata only; passive transcript reads query PostgreSQL without loading a Harness. Stopped-and-quiescent unloading is deferred while work remains, rechecks persisted state, and never aborts work or boots compute merely to unload.
