@@ -211,6 +211,8 @@ Preserve failing traces; replay before fixing, and root-cause flaky schedules in
 
 Use the pinned SDK with fake-model request assertions in browser-runtime handshake E2E: restart midturn, stopped history, reconnect/compaction, images, CLI, uploads, terminal, private children and secret absence. Install with `npm ci`; run repository checks and full `npm run test:e2e` before any future protocol/harness deployment. **Decision (2026-10-05):** the user rejected the proposed cloud canary and requested automated gates with disk monitoring (`docs/testing.md`); no canary will run. The frozen image-build/source-closure gates passed; evidence and subsequent test/docs-only scope are in `docs/testing.md`. Real cloud/IAM, physical VM reboot/retained-disk recovery, subscription accounting and organization effort policy remain unverified, not scheduled hard release gates. This personal-use decision does not accept broader accounting policy or authorize commercial/coworker rollout or deployment.
 
+**Publication invariant (2026-10-06):** native-only assistant prefixes may publish past live blocks only when every block has explicit `messageBlocks` ownership by an exact durable assistant UUID in the current scan. Native order and matching-record-only retirement are preserved; missing/mismatched identities, wrong-role matches and unbound blocks fail closed. Evidence and historical attribution limits: [docs/postmortems/2026-10-06-claude-publication-order.md](postmortems/2026-10-06-claude-publication-order.md).
+
 ## Proposed observability
 
 - Persist orb harness, SDK/CLI versions and session binding; journal native-ingestion gaps/conflicts and sanitized process-exit/SDK-result categories.
@@ -218,3 +220,5 @@ Use the pinned SDK with fake-model request assertions in browser-runtime handsha
 - Record model fallback and quota/reset facts only when structured evidence supplies them; never infer them from arbitrary provider text.
 - User-affecting failures must appear in product state/history, not only ephemeral stderr. Apply `docs/lifecycle.md` edge/noise rules: healthy reads emit nothing.
 - Redact at ingestion, including native init/overflow and probe artifacts; no tokens, headers, credential bodies, auth URLs/codes, system state or raw SDK options in replicated diagnostics.
+
+**Publication invariant (2026-10-06):** a native-only assistant prefix may pass live blocks only when every remaining block has exact UUID ownership in `messageBlocks` and that UUID exists as an assistant message in the current durable scan. Publish in native order, retire only each matching record's own blocks. Missing/mismatched UUIDs, non-assistant matches and unbound blocks hold publication and fail terminal drain closed. Already-published retirement is unchanged; no source-order changes, synthesized identities or retries.

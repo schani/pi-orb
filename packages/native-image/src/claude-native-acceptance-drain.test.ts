@@ -34,6 +34,7 @@ export class ClaudeOrbAgent {
   }
   replicationSnapshot() { return ok({ closeRequested: this.closed, session: { id: "00000000-0000-4000-8000-000000000029" }, records: [{ id: "00000000-0000-4000-8000-000000000029", type: "message", content: "PRIVATE_PROVIDER_TOKEN_URL_CODE_ENV_CONTENT" }] }); }
   getHealth() { return this.health; }
+  sessionId() { return "00000000-0000-4000-8000-000000000029"; }
   gateView() { return { activity: "busy" }; }
   subscribe() { return () => {}; }
   deliverInboxMessage() {

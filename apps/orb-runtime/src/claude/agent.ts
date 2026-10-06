@@ -1177,6 +1177,11 @@ export class ClaudeOrbAgent implements OrbAgent {
     if (nativePath.isErr()) return err(nativePath.error);
     const scanned = this.history.scan(nativePath.value);
     if (scanned.isErr()) return err(scanned.error);
+    const assistantUuids = new Set(
+      scanned.value
+        .filter((record) => record.type === "message" && record.role === "assistant")
+        .map((record) => record.id),
+    );
     let compacted = false;
     for (const delivery of Object.values(this.state?.deliveries ?? {})) {
       if (
@@ -1212,7 +1217,12 @@ export class ClaudeOrbAgent implements OrbAgent {
         record.type === "message" &&
         record.role === "assistant" &&
         this.blocks.size > 0 &&
-        !this.messageBlocks.has(record.id)
+        !this.messageBlocks.has(record.id) &&
+        ![...this.blocks.keys()].every((blockId) =>
+          [...this.messageBlocks].some(
+            ([uuid, blockIds]) => blockIds.includes(blockId) && assistantUuids.has(uuid),
+          ),
+        )
       )
         break;
       const retiredBlockIds = this.messageBlocks.get(record.id) ?? [];

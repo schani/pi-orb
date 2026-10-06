@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { nativeQualificationRows, safeQualificationEvidence } from "./claude-receipt-edge.mjs";
+import { createNativeEvidenceCapture, safeQualificationEvidence } from "./claude-receipt-edge.mjs";
 
 const [root, workDir, brokerUrl, modelUrl, incarnation] = process.argv.slice(2);
 const require = createRequire(`${root}/package.json`);
@@ -28,41 +27,15 @@ function sendSafe(message) {
     () => ({ code: "qualification_ipc_unavailable" }),
   )();
 }
-async function nativeRoot(directory, sessionId, depth = 0, budget = { remaining: 64 }) {
-  if (
-    budget.remaining <= 0 ||
-    depth > 4 ||
-    typeof sessionId !== "string" ||
-    !/^[a-f0-9-]{36}$/i.test(sessionId)
-  )
-    return null;
-  const entries = (await readdir(directory, { withFileTypes: true })).slice(0, 64);
-  for (const entry of entries) {
-    if (--budget.remaining < 0) return null;
-    if (entry.isFile() && entry.name === `${sessionId}.jsonl`) return join(directory, entry.name);
-    if (entry.isDirectory()) {
-      const found = await nativeRoot(join(directory, entry.name), sessionId, depth + 1, budget);
-      if (found) return found;
-    }
-  }
-  return null;
-}
 function captureEvidence() {
   traceQueue = traceQueue.then(async () => {
-    const snapshot = agent.replicationSnapshot();
-    const view = snapshot.isOk() ? snapshot.value : null;
-    const file = await ResultAsync.fromThrowable(
-      () => nativeRoot(join(workDir, "claude", "config"), view?.session?.id),
-      () => ({ code: "qualification_native_trace_unavailable" }),
-    )();
-    const native = file.isOk() && file.value ? await nativeQualificationRows(file.value) : null;
+    const captured = await captureNative();
     sendSafe({
       qualificationEvidence: {
         incarnation,
         ...safeQualificationEvidence({
           health: agent.getHealth(),
-          snapshot: view,
-          nativeRows: native?.isOk() ? native.value : [],
+          ...captured,
           streamRows,
           pendingBlocks: [...pendingBlocks.values()],
           operationFailure,
@@ -78,7 +51,8 @@ function captureEvidence() {
             hooksFailed: edgeCounts.get("hook-failed") ?? 0,
           },
         }),
-        nativeTraceUnavailable: native === null || native.isErr(),
+        nativeCapture: captured.nativeCapture,
+        nativeTraceUnavailable: captured.nativeCapture.status !== "captured",
       },
     });
   });
@@ -238,6 +212,8 @@ const agent = new ClaudeOrbAgent({
     }
   },
 });
+
+const captureNative = createNativeEvidenceCapture(agent, join(workDir, "claude", "config"));
 
 function unwrap(result) {
   assert.equal(result.isOk(), true, "runtime API rejected synthetic qualification");
