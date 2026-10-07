@@ -46,6 +46,7 @@ import { brokerProviderConfig } from "../broker/provider.ts";
 import { AgentSettingsController } from "../domain/agent-settings.ts";
 import { BrokerTokenClient } from "../domain/broker-client.ts";
 import { prepareCheckout } from "../domain/checkout.ts";
+import { retiredReasoningAliases } from "../domain/display-aliases.ts";
 import { readLiveDisplayDetail, toolTextContent } from "../domain/display-detail.ts";
 import { gateUnflushedSnapshot } from "../domain/history.ts";
 import { configurePersistentHome } from "../domain/home.ts";
@@ -159,7 +160,6 @@ type FrameListener = (frame: ServerFrame) => void;
 interface LiveBlock {
   blockType: "text" | "reasoning";
   contentIndex: number;
-  reasoningVisible?: boolean;
   revision: number;
   text: string;
   headline?: string;
@@ -868,6 +868,15 @@ export class PiOrbAgent {
       if (batchId !== undefined) this.pendingInboxMessages.delete(batchId);
       const retiredBlockIds =
         sourceMessage === null ? [] : (this.messageBlocks.get(sourceMessage) ?? []);
+      // Pi skips malformed native items; only equal lengths preserve source indices.
+      const sourceContent =
+        sourceMessage !== null && "content" in sourceMessage ? sourceMessage.content : null;
+      const detailAliases =
+        record.type === "message" &&
+        Array.isArray(sourceContent) &&
+        sourceContent.length === record.content.length
+          ? retiredReasoningAliases(display, retiredBlockIds, this.liveBlocks)
+          : [];
       if (sourceMessage !== null) this.messageBlocks.delete(sourceMessage);
       // Update reconnect state before publishing the indivisible browser handoff.
       for (const id of retiredBlockIds) this.liveBlocks.delete(id);
@@ -875,6 +884,7 @@ export class PiOrbAgent {
         v: 1,
         type: "history.record",
         retiredBlockIds,
+        ...(detailAliases.length === 0 ? {} : { detailAliases }),
         at: new Date().toISOString(),
         record: display,
         headId: record.id,
@@ -1108,32 +1118,29 @@ export class PiOrbAgent {
             return;
           const headline =
             blockType === "reasoning" ? reasoningHeadline(text, typed.redacted) : undefined;
-          const reasoningVisible = typed.redacted === true || text.trim() !== "";
+          const reasoning = blockType === "reasoning";
+          const readable = reasoning && (typed.redacted === true || text.trim() !== "");
+          const publishReasoning =
+            readable &&
+            (existing === undefined ||
+              (existing.redacted !== true && existing.text.trim() === "") ||
+              existing.headline !== headline);
           const revision = (existing?.revision ?? 0) + 1;
           this.liveBlocks.set(blockId, {
             blockType,
             contentIndex: index,
-            ...(blockType === "reasoning" ? { reasoningVisible } : {}),
             revision,
             text,
             ...(headline === undefined ? {} : { headline, redacted: typed.redacted }),
           });
-          if (
-            this.operationId === null ||
-            (blockType === "reasoning" &&
-              existing !== undefined &&
-              existing.headline === headline &&
-              existing.reasoningVisible === reasoningVisible)
-          )
-            return;
+          if (this.operationId === null || (reasoning && !publishReasoning)) return;
           this.broadcastEvent({
             type: "output_patch",
             operationId: this.operationId,
             blockId,
             blockType,
-            contentIndex: index,
             revision,
-            ...(headline === undefined ? {} : { headline, reasoningVisible }),
+            ...(headline === undefined ? {} : { headline }),
             patch:
               blockType === "reasoning"
                 ? { type: "replace", text: "" }

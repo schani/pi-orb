@@ -46,8 +46,6 @@ type CompactionRecord = Extract<DisplayRecord, { type: "compaction" }>;
 export interface LiveBlock {
   blockId: string;
   blockType: "text" | "reasoning";
-  contentIndex: number;
-  reasoningVisible?: boolean;
   text: string;
   headline?: string;
   revision: number;
@@ -531,7 +529,6 @@ function renderLiveAgentContent(live: LiveAgentContent, busy: boolean): ReactNod
   const nodes: ReactNode[] = [];
   if (live.tools.length > 0) nodes.push(<LiveActivity calls={live.tools} key="live-tools" />);
   for (const block of live.blocks) {
-    if (block.blockType === "reasoning" && block.reasoningVisible !== true) continue;
     nodes.push(
       block.blockType === "reasoning" ? (
         renderReasoningRail(block.blockId, block.blockId, "live", true, block.headline)

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HistoryRecord, OutputPatchEvent } from "@pi-orb/protocol";
@@ -32,26 +32,20 @@ const committed = {
   overflow: {},
 } satisfies HistoryRecord;
 
-function reasoning(
-  contentIndex: 0 | 1 | 2 | 3,
-  reasoningVisible: boolean,
-  revision = 1,
-): OutputPatchEvent {
+function reasoning(blockId: "headingless" | "redacted"): OutputPatchEvent {
   return {
     type: "output_patch",
     operationId: OPERATION,
-    blockId: BLOCKS[contentIndex],
+    blockId,
     blockType: "reasoning",
-    contentIndex,
-    reasoningVisible,
-    revision,
+    revision: 1,
     headline: "",
     patch: { type: "replace", text: "" },
   };
 }
 
 it.each(["chromium", "webkit"] as const)(
-  "%s: empty live reasoning stays hidden through replay and sparse committed disclosure handoff",
+  "%s: published reasoning stays visible through replay and explicit sparse disclosure handoff",
   async (engine) => {
     const root = join(import.meta.dirname, "../apps/web");
     const cacheDir = await mkdtemp(join(tmpdir(), `pi-orb-empty-reasoning-${engine}-`));
@@ -84,6 +78,9 @@ it.each(["chromium", "webkit"] as const)(
       const emit = (event: object) => send({ type: "runtime.event", event });
       const detailRequests: string[] = [];
       const frames: string[] = [];
+      const replayed: string[] = [];
+      const pageErrors: string[] = [];
+      page.on("pageerror", (error) => pageErrors.push(error.message));
       page.on("request", (request) => {
         const path = decodeURIComponent(new URL(request.url()).pathname);
         if (path.includes(`/orbs/${ORB}/details/`)) detailRequests.push(path);
@@ -120,7 +117,6 @@ it.each(["chromium", "webkit"] as const)(
           operationId: OPERATION,
           blockId: "visible-progress",
           blockType: "text",
-          contentIndex: 4,
           revision,
           patch: { type: "replace", text },
         } satisfies OutputPatchEvent);
@@ -145,11 +141,11 @@ it.each(["chromium", "webkit"] as const)(
           send({ type: "sync.started", mode: "after", afterRecordId: null });
           emit({ type: "operation_started", operationId: OPERATION });
           if (syncs > 0) {
-            emit(reasoning(0, false));
-            emit(reasoning(1, false));
-            emit(reasoning(2, true, 3));
-            emit(reasoning(3, true));
-            progress("Reconnect replay processed.", 4);
+            const beforeReplay = frames.length;
+            emit(reasoning("redacted"));
+            emit(reasoning("headingless"));
+            progress("Reconnect replay processed.", 2);
+            replayed.push(...frames.slice(beforeReplay));
           }
           send({ type: "sync.completed", headId: null });
           syncs++;
@@ -160,16 +156,14 @@ it.each(["chromium", "webkit"] as const)(
         await expect.poll(() => syncs).toBe(1);
         const history = page.locator(".history");
         const rows = page.locator("details.activity-rail-row.reasoning");
-        emit(reasoning(0, false));
-        emit(reasoning(1, false));
-        // A later visible frame is a processing barrier for the hidden patches.
-        progress("Empty patches processed.", 1);
-        await expect(history).toContainText("Empty patches processed.");
+        progress("Initial visible text is preserved.", 1);
+        await expect(history).toContainText("Initial visible text is preserved.");
         await expect(rows).toHaveCount(0);
         expect(detailRequests).toEqual([]);
 
-        emit(reasoning(2, true));
-        emit(reasoning(3, true));
+        // Publication order differs from canonical order; ordinal pairing is wrong.
+        emit(reasoning("redacted"));
+        emit(reasoning("headingless"));
         await expect(rows).toHaveCount(2);
         await expect(rows.locator("summary .activity-rail-label")).toHaveText([
           "thinking",
@@ -179,17 +173,9 @@ it.each(["chromium", "webkit"] as const)(
         expect(detailRequests, "collapsed headingless and redacted rows must not fetch").toEqual(
           [],
         );
-        emit(reasoning(2, false, 2));
-        progress("Reasoning hidden again.", 2);
-        await expect(history).toContainText("Reasoning hidden again.");
-        await expect(rows).toHaveCount(1);
-        emit(reasoning(2, true, 3));
-        progress("Reasoning visible again.", 3);
-        await expect(history).toContainText("Reasoning visible again.");
-        await expect(rows).toHaveCount(2);
-        await rows.first().locator(":scope > summary").click();
-        await expect(rows.first().locator(".reasoning-body")).toHaveText(PRIVATE_TEXT);
-        await expect(rows.last()).not.toHaveAttribute("open", "");
+        await rows.last().locator(":scope > summary").click();
+        await expect(rows.last().locator(".reasoning-body")).toHaveText(PRIVATE_TEXT);
+        await expect(rows.first()).not.toHaveAttribute("open", "");
 
         // Connectivity events replace the transport without a retry-timer race.
         await page.evaluate(() =>
@@ -201,18 +187,37 @@ it.each(["chromium", "webkit"] as const)(
         await expect.poll(() => syncs).toBe(2);
         await expect(history).toContainText("Reconnect replay processed.");
         await expect(rows).toHaveCount(2);
-        await expect(rows.first()).toHaveAttribute("open", "");
-        await expect(rows.first().locator(".reasoning-body")).toHaveText(PRIVATE_TEXT);
-        await expect(rows.last()).not.toHaveAttribute("open", "");
+        await expect(rows.last()).toHaveAttribute("open", "");
+        await expect(rows.last().locator(".reasoning-body")).toHaveText(PRIVATE_TEXT);
+        await expect(rows.first()).not.toHaveAttribute("open", "");
+        expect(replayed.map((payload) => JSON.parse(payload).event.blockId)).toEqual([
+          "redacted",
+          "headingless",
+          "visible-progress",
+        ]);
 
+        emit({
+          type: "output_patch",
+          operationId: OPERATION,
+          blockId: "next-message",
+          blockType: "text",
+          revision: 1,
+          patch: { type: "replace", text: "Next message survives retirement." },
+        } satisfies OutputPatchEvent);
+        await expect(history).toContainText("Next message survives retirement.");
         send({
           type: "history.record",
           headId: committed.id,
           record: projected[0],
           retiredBlockIds: [...BLOCKS, "visible-progress"],
+          detailAliases: [
+            { blockId: "redacted", detailKey: `${committed.id}:3` },
+            { blockId: "headingless", detailKey: `${committed.id}:2` },
+          ],
         });
         await expect(history).toContainText("Reasoning committed.");
         await expect(history).not.toContainText("Reconnect replay processed.");
+        await expect(history).toContainText("Next message survives retirement.");
         await expect(rows).toHaveCount(2);
         await expect(rows.first()).toHaveAttribute("open", "");
         await expect(rows.first().locator(".reasoning-body")).toHaveText(FINAL_TEXT);
@@ -231,9 +236,43 @@ it.each(["chromium", "webkit"] as const)(
         ).toHaveCount(0);
         await expect(rows).toHaveCount(2);
         await expect(rows.first().locator(".reasoning-body")).toHaveText(FINAL_TEXT);
+        const patches = frames
+          .map((payload) => JSON.parse(payload))
+          .filter((frame) => frame.type === "runtime.event" && frame.event.type === "output_patch")
+          .map((frame) => frame.event);
+        expect(patches.filter((patch) => patch.blockType === "reasoning")).toEqual([
+          reasoning("redacted"),
+          reasoning("headingless"),
+          reasoning("redacted"),
+          reasoning("headingless"),
+        ]);
+        expect(patches.some((patch) => BLOCKS.slice(0, 2).includes(patch.blockId))).toBe(false);
+        expect(patches.every((patch) => !("contentIndex" in patch))).toBe(true);
+        expect(patches.every((patch) => !("reasoningVisible" in patch))).toBe(true);
+        expect(pageErrors).toEqual([]);
         expect(frames.join("\n")).not.toContain(PRIVATE_TEXT);
         expect(frames.join("\n")).not.toContain(FINAL_TEXT);
         expect(frames.join("\n")).not.toContain("opaque-fixture-data");
+      } catch (error) {
+        const evidence = join(
+          import.meta.dirname,
+          `../.context/empty-live-reasoning/simplification/${engine}-first-failure`,
+        );
+        if (!existsSync(evidence)) {
+          await mkdir(evidence, { recursive: true });
+          await Promise.all([
+            writeFile(join(evidence, "error.txt"), String(error)),
+            writeFile(join(evidence, "frames.json"), JSON.stringify(frames, null, 2)),
+            writeFile(
+              join(evidence, "detail-requests.json"),
+              JSON.stringify(detailRequests, null, 2),
+            ),
+            writeFile(join(evidence, "page-errors.json"), JSON.stringify(pageErrors, null, 2)),
+            writeFile(join(evidence, "page.html"), await page.content()),
+            page.screenshot({ path: join(evidence, "page.png"), fullPage: true }),
+          ]);
+        }
+        throw error;
       } finally {
         await page.close();
       }

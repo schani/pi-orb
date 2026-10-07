@@ -275,10 +275,6 @@ function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageSta
       liveBlocks.set(event.blockId, {
         blockId: event.blockId,
         blockType: event.blockType,
-        contentIndex: event.contentIndex,
-        ...(event.reasoningVisible === undefined
-          ? {}
-          : { reasoningVisible: event.reasoningVisible }),
         text,
         ...(event.headline === undefined ? {} : { headline: event.headline }),
         revision: event.revision,
@@ -378,21 +374,8 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
       records.set(frame.record.id, frame.record);
       const liveBlocks = new Map(state.liveBlocks);
       const detailAliases = new Map(state.detailAliases);
-      const retiredReasoning = new Map(
-        frame.retiredBlockIds.flatMap((id) => {
-          const block = liveBlocks.get(id);
-          return block?.blockType === "reasoning" ? [[block.contentIndex, id] as const] : [];
-        }),
-      );
-      if (frame.record.type === "message") {
-        for (const block of frame.record.content) {
-          if (block.type !== "reasoning") continue;
-          const oldId = retiredReasoning.get(
-            Number(block.detailKey.slice(frame.record.id.length + 1)),
-          );
-          if (oldId !== undefined) detailAliases.set(block.detailKey, oldId);
-        }
-      }
+      for (const { blockId, detailKey } of frame.detailAliases ?? [])
+        detailAliases.set(detailKey, blockId);
       for (const id of frame.retiredBlockIds) liveBlocks.delete(id);
       return {
         ...state,

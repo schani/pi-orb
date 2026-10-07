@@ -8,7 +8,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- [x] **Qualify empty public live thinking suppression** (completed locally 2026-10-06; not deployed; `docs/testing.md`, `docs/postmortems/2026-10-06-empty-live-thinking.md`). Normal release gates remain required. Preserve attribution limits; recurrence evidence must contain only content-free live block IDs/frame order and browser/runtime revisions, never tokens or encrypted payloads.
+- **Complete GitHub qualification for the empty live thinking simplification** (locally qualified 2026-10-07, America/Cancun; not deployment-ready; `docs/runtime-protocol.md`, `docs/testing.md`, `docs/postmortems/2026-10-06-empty-live-thinking.md`). Reviewed frozen code passes focused unit/component, scoped DST, targeted browser and root typecheck/lint checks. Full suites were not rerun locally; run updated normal GitHub CI/E2E after commit/push, as requested, and complete normal release gates. Historical `2fe696f` CI/E2E qualifies only the initial contract. Preserve attribution limits; recurrence evidence must contain only content-free live block IDs/frame order and browser/runtime revisions, never tokens or encrypted payloads.
 
 - **Qualify exact-main Claude continuation fix** (CI37418896284, 2026-10-06; `docs/postmortems/2026-10-06-claude-publication-order.md`). Controlled late-prefix publication defect is fixed locally; original CI ordering remains unknown. Complete parent review and normal release gates before deployment. Preserve first-failure evidence and historical attribution limits; the two unrelated lifecycle waivers remain unchanged.
 

@@ -111,7 +111,7 @@ it("applies repair side effects without rebuilding an unchanged transcript", () 
         {
           blockId: "live",
           blockType: "text" as const,
-          contentIndex: 0,
+
           text: "partial",
           revision: 1,
         },

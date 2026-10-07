@@ -38,6 +38,7 @@ import { Type } from "typebox";
 import { Check } from "typebox/value";
 import type { BrokerEnv } from "../broker/endpoint.ts";
 import { prepareCheckout } from "../domain/checkout.ts";
+import { retiredReasoningAliases } from "../domain/display-aliases.ts";
 import { readLiveDisplayDetail } from "../domain/display-detail.ts";
 import { configurePersistentHome } from "../domain/home.ts";
 import type { DetailError, OrbAgent, SnapshotError } from "../domain/orb-agent.ts";
@@ -219,6 +220,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       blockId: string;
       blockType: "text" | "reasoning";
       contentIndex: number;
+      headline?: string;
       revision: number;
       text: string;
       redacted?: boolean;
@@ -989,22 +991,24 @@ export class ClaudeOrbAgent implements OrbAgent {
       ) => {
         const reasoning = block.blockType === "reasoning";
         const headline = reasoning ? reasoningHeadline(block.text, block.redacted) : "";
-        const reasoningVisible = reasoning && (block.redacted === true || block.text.trim() !== "");
-        if (
-          reasoning &&
-          previous !== undefined &&
-          reasoningHeadline(previous.text, previous.redacted) === headline &&
-          (previous.redacted === true || previous.text.trim() !== "") === reasoningVisible
-        )
-          return;
+        if (reasoning) {
+          const readable = block.redacted === true || block.text.trim() !== "";
+          block.headline = headline;
+          if (
+            !readable ||
+            (previous !== undefined &&
+              (previous.redacted === true || previous.text.trim() !== "") &&
+              previous.headline === headline)
+          )
+            return;
+        }
         this.event({
           type: "output_patch",
           operationId,
           blockId: block.blockId,
           blockType: block.blockType,
-          contentIndex: block.contentIndex,
           revision: block.revision,
-          ...(reasoning ? { headline, reasoningVisible } : {}),
+          ...(reasoning ? { headline } : {}),
           patch: reasoning
             ? { type: "replace", text: "" }
             : previous === undefined
@@ -1245,14 +1249,17 @@ export class ClaudeOrbAgent implements OrbAgent {
     for (const record of scanned.value.slice(0, this.published)) {
       const retiredBlockIds = this.messageBlocks.get(record.id);
       if (retiredBlockIds === undefined || retiredBlockIds.length === 0) continue;
+      const display = projectDisplayRecord(record);
+      const detailAliases = retiredReasoningAliases(display, retiredBlockIds, this.blocks);
       this.messageBlocks.delete(record.id);
       for (const id of retiredBlockIds) this.blocks.delete(id);
       this.emit({
         v: 1,
         type: "history.record",
         at: new Date().toISOString(),
-        record: projectDisplayRecord(record),
+        record: display,
         retiredBlockIds,
+        ...(detailAliases.length === 0 ? {} : { detailAliases }),
         headId: scanned.value[this.published - 1]?.id ?? null,
       });
     }
@@ -1270,14 +1277,17 @@ export class ClaudeOrbAgent implements OrbAgent {
       )
         break;
       const retiredBlockIds = this.messageBlocks.get(record.id) ?? [];
+      const display = projectDisplayRecord(record);
+      const detailAliases = retiredReasoningAliases(display, retiredBlockIds, this.blocks);
       this.messageBlocks.delete(record.id);
       for (const id of retiredBlockIds) this.blocks.delete(id);
       this.emit({
         v: 1,
         type: "history.record",
         at: new Date().toISOString(),
-        record: projectDisplayRecord(record),
+        record: display,
         retiredBlockIds,
+        ...(detailAliases.length === 0 ? {} : { detailAliases }),
         headId: record.id,
       });
       this.published++;

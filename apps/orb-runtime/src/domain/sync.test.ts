@@ -245,6 +245,21 @@ describe("computeSyncFrames", () => {
           text: "# REDACTED_HEADING",
           redacted: true,
         },
+        { blockId: "empty", blockType: "reasoning", contentIndex: 5, revision: 1, text: "" },
+        {
+          blockId: "whitespace",
+          blockType: "reasoning",
+          contentIndex: 6,
+          revision: 1,
+          text: " \n\t ",
+        },
+        {
+          blockId: "headingless",
+          blockType: "reasoning",
+          contentIndex: 7,
+          revision: 1,
+          text: "PRIVATE_HEADINGLESS",
+        },
       ],
     };
     for (const cursor of [null, "rec-1"]) {
@@ -258,14 +273,19 @@ describe("computeSyncFrames", () => {
           operationId: "op",
           blockId: "b",
           blockType: "reasoning",
-          contentIndex: 0,
-          reasoningVisible: true,
           revision: 2,
           headline: "Inspect · Fix",
           patch: { type: "replace", text: "" },
         },
       });
-      expect(JSON.stringify(frames)).not.toContain("SECRET_CANARY");
+      const patches = frames.flatMap((frame) =>
+        frame.type === "runtime.event" && frame.event.type === "output_patch" ? [frame.event] : [],
+      );
+      expect(patches.map((patch) => patch.blockId)).toEqual(["b", "redacted", "headingless"]);
+      expect(patches.at(-1)).toMatchObject({ headline: "", patch: { type: "replace", text: "" } });
+      expect(JSON.stringify(frames)).not.toMatch(
+        /SECRET_CANARY|PRIVATE_HEADINGLESS|contentIndex|reasoningVisible/,
+      );
       expect(JSON.stringify(frames)).not.toContain("REDACTED_HEADING");
       expect(frames).toContainEqual({
         v: 1,
@@ -276,8 +296,6 @@ describe("computeSyncFrames", () => {
           operationId: "op",
           blockId: "redacted",
           blockType: "reasoning",
-          contentIndex: 1,
-          reasoningVisible: true,
           revision: 1,
           headline: "",
           patch: { type: "replace", text: "" },
@@ -306,7 +324,6 @@ describe("computeSyncFrames", () => {
         operationId: "op-1",
         blockId: "b1",
         blockType: "text",
-        contentIndex: 0,
         revision: 7,
         patch: { type: "replace", text: "partial out" },
       },

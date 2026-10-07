@@ -44,7 +44,6 @@ it("Claude text starts replace and deltas append without parsing reasoning or ad
         operationId: "operation",
         blockId: "00000000-0000-0000-0000-000000000000:4",
         blockType: "text",
-        contentIndex: 4,
         revision: 0,
         patch: { type: "replace", text: "# Initial prose" },
       },
@@ -53,7 +52,6 @@ it("Claude text starts replace and deltas append without parsing reasoning or ad
         operationId: "operation",
         blockId: "00000000-0000-0000-0000-000000000000:4",
         blockType: "text",
-        contentIndex: 4,
         revision: 1,
         patch: { type: "append", text: "\n\nMore prose" },
       },
@@ -68,7 +66,7 @@ it("Claude text starts replace and deltas append without parsing reasoning or ad
   }
 });
 
-it("Claude publishes content-free visibility and source indices from initial, headingless and redacted thinking", () => {
+it("Claude suppresses empty thinking and publishes content-free initial, headingless and redacted thinking", () => {
   const agent = new ClaudeOrbAgent({
     orbId: "orb",
     repositoryUrl: "https://example.com/repo",
@@ -117,22 +115,35 @@ it("Claude publishes content-free visibility and source indices from initial, he
     index: 3,
     content_block: { type: "redacted_thinking", data: "ENCRYPTED_REDACTED" },
   });
+  send({
+    type: "content_block_delta",
+    index: 2,
+    delta: { type: "thinking_delta", thinking: " body grows" },
+  });
+  send({
+    type: "content_block_delta",
+    index: 2,
+    delta: { type: "thinking_delta", thinking: "\n\n# Verify\n\nPRIVATE_VERIFY" },
+  });
   const patches = frames.flatMap((frame) =>
     frame.type === "runtime.event" && frame.event.type === "output_patch" ? [frame.event] : [],
   );
   expect(patches).toMatchObject([
-    { contentIndex: 0, reasoningVisible: false, headline: "" },
-    { contentIndex: 0, reasoningVisible: true, headline: "" },
-    { contentIndex: 2, reasoningVisible: true, headline: "Initial" },
-    { contentIndex: 3, reasoningVisible: true, headline: "" },
+    { blockId: "00000000-0000-0000-0000-000000000000:0", headline: "" },
+    { blockId: "00000000-0000-0000-0000-000000000000:2", headline: "Initial" },
+    { blockId: "00000000-0000-0000-0000-000000000000:3", headline: "" },
+    { blockId: "00000000-0000-0000-0000-000000000000:2", headline: "Initial · Verify" },
   ]);
   expect(patches.every((patch) => patch.patch.type === "replace" && patch.patch.text === "")).toBe(
     true,
   );
-  expect(JSON.stringify(frames)).not.toMatch(/PRIVATE_|ENCRYPTED_/);
+  expect(JSON.stringify(frames)).not.toMatch(/PRIVATE_|ENCRYPTED_|contentIndex|reasoningVisible/);
   expect(agent.liveView()?.blocks).toMatchObject([
     { contentIndex: 0, text: " \nPRIVATE_HEADINGLESS grows" },
-    { contentIndex: 2, text: "# Initial\n\nPRIVATE_INITIAL" },
+    {
+      contentIndex: 2,
+      text: "# Initial\n\nPRIVATE_INITIAL body grows\n\n# Verify\n\nPRIVATE_VERIFY",
+    },
     { contentIndex: 3, text: "", redacted: true },
   ]);
 });

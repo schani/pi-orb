@@ -324,7 +324,7 @@ it.each([false, true])(
           operationId: "operation",
           blockId: "block",
           blockType: "text",
-          contentIndex: 0,
+
           revision,
           patch: { type: "append", text: "SECRET_STREAM_CONTENT" },
         },

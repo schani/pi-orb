@@ -555,8 +555,6 @@ describe("HistoryView turn structure", () => {
           {
             blockId: "live-reasoning",
             blockType: "reasoning",
-            contentIndex: 0,
-            reasoningVisible: true,
             text: "",
             headline: "Live plan",
             revision: 1,
@@ -607,8 +605,6 @@ describe("HistoryView turn structure", () => {
           {
             blockId: "live-reasoning",
             blockType: "reasoning",
-            contentIndex: 0,
-            reasoningVisible: true,
             text: "same reasoning",
             revision: 1,
           },
@@ -650,9 +646,7 @@ describe("HistoryView turn structure", () => {
     const html = renderToStaticMarkup(
       <HistoryView
         records={[message("u1", "user", "go")]}
-        liveBlocks={[
-          { blockId: "b1", blockType: "text", contentIndex: 0, text: "streaming now", revision: 1 },
-        ]}
+        liveBlocks={[{ blockId: "b1", blockType: "text", text: "streaming now", revision: 1 }]}
         tools={[{ callId: "call-1", name: "bash", state: "running", message: null }]}
         busy
       />,
@@ -678,8 +672,6 @@ describe("HistoryView turn structure", () => {
               {
                 blockId: "live",
                 blockType: scenario === "reasoning" ? scenario : ("text" as const),
-                contentIndex: 0,
-                reasoningVisible: true,
                 text: "retained output",
                 revision: 1,
               },
@@ -748,22 +740,18 @@ describe("HistoryView", () => {
           {
             blockId: "text-1",
             blockType: "text",
-            contentIndex: 0,
             text: "First live block",
             revision: 1,
           },
           {
             blockId: "reasoning",
             blockType: "reasoning",
-            contentIndex: 0,
-            reasoningVisible: true,
             text: "thinking",
             revision: 1,
           },
           {
             blockId: "text-2",
             blockType: "text",
-            contentIndex: 0,
             text: "Second live block",
             revision: 1,
           },
@@ -789,9 +777,7 @@ describe("HistoryView", () => {
     const html = renderToStaticMarkup(
       <HistoryView
         records={[message("user", "user", "user source"), emptyAssistant]}
-        liveBlocks={[
-          { blockId: "empty-live", blockType: "text", contentIndex: 0, text: "", revision: 1 },
-        ]}
+        liveBlocks={[{ blockId: "empty-live", blockType: "text", text: "", revision: 1 }]}
         tools={[{ callId: "live-tool", name: "read", state: "running", message: null }]}
         busy
       />,
@@ -812,7 +798,6 @@ describe("HistoryView", () => {
           {
             blockId: "live-1",
             blockType: "text",
-            contentIndex: 0,
             text: "A **streaming** response",
             revision: 1,
           },
@@ -847,7 +832,6 @@ describe("HistoryView", () => {
           {
             blockId: "live-url",
             blockType: "text",
-            contentIndex: 0,
             text: "Docs: www.example.org/docs",
             revision: 1,
           },

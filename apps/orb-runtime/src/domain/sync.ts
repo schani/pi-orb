@@ -57,17 +57,17 @@ export function computeSyncFrames(
   if (live !== null) {
     events.push({ type: "operation_started", operationId: live.operationId });
     for (const block of live.blocks) {
+      if (block.blockType === "reasoning" && block.redacted !== true && block.text.trim() === "")
+        continue;
       events.push({
         type: "output_patch",
         operationId: live.operationId,
         blockId: block.blockId,
         blockType: block.blockType,
-        contentIndex: block.contentIndex,
         revision: block.revision,
         ...(block.blockType === "reasoning"
           ? {
               headline: reasoningHeadline(block.text, block.redacted),
-              reasoningVisible: block.redacted === true || block.text.trim() !== "",
             }
           : {}),
         patch: { type: "replace", text: block.blockType === "reasoning" ? "" : block.text },

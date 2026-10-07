@@ -1224,7 +1224,6 @@ describe("frontend-only browser behavior", () => {
           operationId: "bits-op",
           blockId: "live-text",
           blockType: "text",
-          contentIndex: 0,
           revision: 1,
           patch: { type: "append", text: "Live register output" },
         });
