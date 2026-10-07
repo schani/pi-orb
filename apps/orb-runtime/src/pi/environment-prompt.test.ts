@@ -87,6 +87,12 @@ describe("runtime environment prompt", () => {
     expect(environmentPrompt).toMatch(/returns.*durably accepted/i);
   });
 
+  it("directs deferred sleep to the CLI rather than process-local waits", () => {
+    expect(environmentPrompt).toContain(
+      "`pi-orb sleep 1h` sets an absolute wake deadline, stops after admitted work finishes, and returns once durably accepted. To sleep until later, use this command—not code-mode, timers, or shell sleep.",
+    );
+  });
+
   it("explains browser-owned MCP setup even without configured servers", () => {
     expect(environmentPrompt).toMatch(/MCP servers.*ask.*user.*project.*config gear/i);
     expect(environmentPrompt).toMatch(/MCPs.*OAuth Connect.*Secrets.*static keys/);
