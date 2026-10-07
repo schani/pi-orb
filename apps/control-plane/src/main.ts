@@ -56,11 +56,6 @@ import { SdkAgentPlane } from "./adapters/sdk-agent-plane.ts";
 import { createSealedAuthCookies } from "./adapters/sealed-auth-cookies.ts";
 import { FileSecretStore } from "./adapters/secrets/file-store.ts";
 import { GsmSecretStore } from "./adapters/secrets/gsm-store.ts";
-import {
-  FetchTailscaleApiTransport,
-  HttpTailscaleAuthKeyMinter,
-  type TailscaleHostOptions,
-} from "./adapters/tailscale/client.ts";
 import { CryptoUserIdSource } from "./adapters/user-id.ts";
 import { uploadRequest } from "./adapters/workspace-upload-http.ts";
 import { agentBackend } from "./agent-backend.ts";
@@ -88,7 +83,7 @@ import {
   requestOrbDeletion,
   requestOrbSleep,
 } from "./domain/lifecycle.ts";
-import { logEvent, logOrbEvent } from "./domain/log.ts";
+import { logEvent } from "./domain/log.ts";
 import {
   hostingCleanupLoop,
   orphanSweepLoop,
@@ -395,43 +390,6 @@ export async function main(
   }
   const extraEnvOption =
     Object.keys(runtimeExtraEnv).length === 0 ? {} : { extraEnv: runtimeExtraEnv };
-  // Tailscale tier-1 port exposure (docs/ports.md). All three settings or
-  // none: without the OAuth client there is no key to mint, and without the
-  // tailnet DNS name there is no host to publish. Unset means orbs are
-  // created exactly as before and the browser view carries no preview host.
-  const tailscaleEnvNames = [
-    "PI_ORB_TAILSCALE_OAUTH_CLIENT_ID",
-    "PI_ORB_TAILSCALE_OAUTH_CLIENT_SECRET",
-    "PI_ORB_TAILSCALE_TAILNET_DNS_NAME",
-  ] as const;
-  const [tailscaleClientId, tailscaleClientSecret, tailnetDnsName] = tailscaleEnvNames.map((name) =>
-    env(name, ""),
-  ) as [string, string, string];
-  const tailscaleClient =
-    tailscaleClientId !== "" && tailscaleClientSecret !== "" && tailnetDnsName !== ""
-      ? new HttpTailscaleAuthKeyMinter(new FetchTailscaleApiTransport(), {
-          clientId: tailscaleClientId,
-          clientSecret: tailscaleClientSecret,
-          onKeyEvent: ({ orbId, action, incarnation, keyId }) => {
-            logOrbEvent(bootTask, orbId, `tailscale-key-${action}`, {
-              incarnation,
-              key_id: keyId,
-            });
-          },
-        })
-      : null;
-  const tailscale: TailscaleHostOptions | null =
-    tailscaleClient === null ? null : { minter: tailscaleClient, tailnetDnsName };
-  if (tailscale === null) {
-    const missing = tailscaleEnvNames.filter((name) => env(name, "") === "");
-    bootTask.log(`Tailscale port exposure disabled (${missing.join(", ")} unset)`);
-  }
-  const tailscaleForProvider = tailscale !== null && providerKind !== "process";
-  if (tailscale !== null && !tailscaleForProvider) {
-    bootTask.log("Tailscale port exposure disabled for process host provider");
-  }
-  const tailscaleOption = tailscaleForProvider ? { tailscale } : {};
-  const viewConfig = tailscaleForProvider ? { tailnetDnsName } : {};
   // What the dashboard footer states. The host-provider fallback is the one
   // the composition below takes, so the footer names the provider actually
   // constructed rather than the string that was typed.
@@ -465,7 +423,6 @@ export async function main(
           controlPlaneUrl: env("PI_ORB_BROKER_URL", ""),
           specGeneration,
           ...extraEnvOption,
-          ...tailscaleOption,
         })
       : providerKind === "process"
         ? new ProcessOrbHostProvider({
@@ -497,7 +454,6 @@ export async function main(
               : {}),
             specGeneration,
             ...extraEnvOption,
-            ...tailscaleOption,
           });
   const nameInferenceUrl = env("PI_ORB_NAME_INFERENCE_URL", mockOpenAi?.inferenceBaseUrl ?? "");
   const nameGenerator = new PiOrbNameGenerator(
@@ -521,13 +477,6 @@ export async function main(
     }),
     store: database.store,
     hostProvider,
-    resourceCleaner:
-      tailscaleForProvider && tailscaleClient !== null
-        ? {
-            cleanupOrb: (_task, orbId, context) =>
-              tailscaleClient.cleanupOrb(orbId, context.signal),
-          }
-        : { cleanupOrb: () => okAsync(undefined) },
     runtimeClient: new FetchRuntimeClient(),
     authGate: new SerializedAuthGate(
       githubOauth !== null
@@ -728,7 +677,6 @@ export async function main(
         mcpOAuth,
         modelUsage: database.modelUsage,
         appOrigin: appOrigin || `http://127.0.0.1:${port}`,
-        ...(tailnetDnsName ? { tailnetDnsName } : {}),
         inferenceBaseUrl: (userId) =>
           (adapters.mockOpenAiForUser?.(userId) ?? mockOpenAi)?.inferenceBaseUrl,
         appendAlert: (orbId, requestId, message, expectedAdmissionVersion) => {
@@ -860,7 +808,7 @@ export async function main(
         appOrigin,
       });
       await registerLiveProxy(browser, httpTask, deps);
-      registerRoutes(browser, httpTask, deps, viewConfig, systemView, signingKeyDeps);
+      registerRoutes(browser, httpTask, deps, systemView, signingKeyDeps);
       registerMcpOAuthRoutes(browser, httpTask, database.mcp, mcpOAuth, appOrigin);
       registerMcpRoutes(browser, httpTask, database.mcp, async (projectId, config) => {
         const snapshot = await getProjectSecretSnapshot(httpTask, deps.projectSecrets, projectId);
@@ -890,7 +838,6 @@ export async function main(
   });
   registerRuntimeRoutes(app, httpTask, {
     appOrigin,
-    ...viewConfig,
     ...(centralPlane
       ? {
           alertWriter: centralPlane,

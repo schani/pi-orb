@@ -79,43 +79,4 @@ writeFileSync(
   }),
   { mode: 0o600 },
 );
-const deployed = JSON.parse(
-  execFileSync(
-    "gcloud",
-    [
-      "run",
-      "services",
-      "describe",
-      "pi-orb",
-      "--project=playground-dev-6ae7",
-      "--region=us-central1",
-      "--format=json",
-    ],
-    { encoding: "utf8" },
-  ),
-);
-const env = Object.fromEntries(
-  deployed.spec.template.spec.containers[0].env.map((x) => [x.name, x.value]),
-);
-const tsSecret = execFileSync(
-  "gcloud",
-  [
-    "secrets",
-    "versions",
-    "access",
-    "latest",
-    "--secret=pi-orb-tailscale-oauth-client-secret",
-    "--project=playground-dev-6ae7",
-  ],
-  { encoding: "utf8" },
-).trim();
-writeFileSync(
-  `${root}/tailscale.json`,
-  JSON.stringify({
-    clientId: env.PI_ORB_TAILSCALE_OAUTH_CLIENT_ID,
-    clientSecret: tsSecret,
-    tailnetDnsName: env.PI_ORB_TAILSCALE_TAILNET_DNS_NAME,
-  }),
-  { mode: 0o600 },
-);
 console.log("isolated integration fixture prepared");

@@ -1,16 +1,10 @@
-import { type OrbView, type ProjectView, previewHost } from "@pi-orb/protocol";
+import type { OrbView, ProjectView } from "@pi-orb/protocol";
 import type { ControlState } from "../domain/control-state.ts";
 import type { OrbRow, ProjectDeletionProgress, ProjectRow } from "../domain/orb.ts";
 
-/**
- * Static deployment configuration the view layer derives fields from. It is
- * deliberately separate from `ControlPlaneDeps`: the domain knows nothing
- * about tailscale.
- */
+/** Static deployment configuration the view layer derives fields from. */
 export interface ViewConfig {
   readonly centralAgent?: boolean;
-  /** MagicDNS suffix; absent when tailscale port exposure is not configured. */
-  readonly tailnetDnsName?: string;
 }
 
 const iso = (ms: number): string => new Date(ms).toISOString();
@@ -181,9 +175,6 @@ export function orbView(
     ...(orb.stopReason !== null ? { stopReason: orb.stopReason } : {}),
     stateChangedAt: iso(orb.stateChangedAt),
     ...(orb.archivedAt != null ? { archivedAt: iso(orb.archivedAt) } : {}),
-    ...(config.tailnetDnsName === undefined || orb.state === "archiving" || orb.state === "archived"
-      ? {}
-      : { previewHost: previewHost(orb.id, config.tailnetDnsName) }),
     ...(showChallenge
       ? {
           actionRequired:

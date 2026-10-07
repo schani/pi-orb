@@ -37,7 +37,6 @@ describe.each(["process", "docker", "gce"] as const)("%s browser placement", (pr
           app,
           new NoSimulationTask("browser placement", false),
           { ...h.deps, agentPlane: plane },
-          {},
           TEST_SYSTEM_VIEW,
         );
         const busy = await app.inject({ method: "GET", url: "/api/v1/orbs/busy" });

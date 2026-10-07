@@ -16,7 +16,7 @@ control-plane byte proxy
 orb runtime -> PTY -> /bin/bash in <work-dir>/repo
 ```
 
-This works in Docker, GCE, and the local process provider because all three already run the same Node runtime and expose the same runtime HTTP address to the control plane. The PTY is created inside that runtime process, where the checkout, persistent `$HOME`, prescribed tools, broker environment, and provider-specific filesystem are already present. A future provider that can run the standard runtime image and provide an ordinary Unix PTY gets terminal support automatically. No provider-specific `exec`, SSH path, public port, Tailscale dependency, database row, or control-plane shell process is required.
+This works in Docker, GCE, and the local process provider because all three already run the same Node runtime and expose the same runtime HTTP address to the control plane. The PTY is created inside that runtime process, where the checkout, persistent `$HOME`, prescribed tools, broker environment, and provider-specific filesystem are already present. A future provider that can run the standard runtime image and provide an ordinary Unix PTY gets terminal support automatically. No provider-specific `exec`, SSH path, public port, database row, or control-plane shell process is required.
 
 Putting `exec` on `OrbHostProvider` was rejected for this feature. It would duplicate provider-specific streaming and resize behavior, make the process provider materially different from Docker/GCE, and bypass the runtime boundary that already normalizes the providers.
 
@@ -232,4 +232,4 @@ The frontend-only fixture implements the same terminal WebSocket contract with d
 
 ## Implementation boundaries
 
-The feature consists of shared terminal schemas/constants, a runtime PTY manager and `/v1/terminal` route, a binary-capable control-plane proxy, the wterm header-owned shade, fixture support, and unit/DST/E2E coverage. The provider interface, database schema, history model, lifecycle state machine, Tailscale port exposure, and agent live protocol did not change. The two decisions most likely to expand the scope are choosing detachable/shared terminal persistence and making PTY foreground activity itself a durable lifecycle signal; neither is recommended for the first version.
+The feature consists of shared terminal schemas/constants, a runtime PTY manager and `/v1/terminal` route, a binary-capable control-plane proxy, the wterm header-owned shade, fixture support, and unit/DST/E2E coverage. The provider interface, database schema, history model, lifecycle state machine, and agent live protocol did not change. The two decisions most likely to expand the scope are choosing detachable/shared terminal persistence and making PTY foreground activity itself a durable lifecycle signal; neither is recommended for the first version.

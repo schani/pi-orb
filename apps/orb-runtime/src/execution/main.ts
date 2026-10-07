@@ -4,8 +4,6 @@ import { ResultAsync } from "neverthrow";
 import { readBrokerEnv } from "../broker/endpoint.ts";
 import { ORB_MARKER_ENV } from "../hooks/env-file.ts";
 import { registerTerminalRoute } from "../http/terminal-route.ts";
-import { startTailscale } from "../tailscale/daemon.ts";
-import { readTailscaleEnv } from "../tailscale/env.ts";
 import { TerminalManager } from "../terminal/manager.ts";
 import { registerUploadRoutes } from "../uploads/routes.ts";
 import { forwardExecutionAlert } from "./alert-forwarder.ts";
@@ -68,18 +66,6 @@ const listening = await ResultAsync.fromPromise(
 if (listening.isErr()) {
   console.error(listening.error);
   process.exit(1);
-}
-const tailscale = readTailscaleEnv(process.env);
-if (tailscale !== null) {
-  void startTailscale({ config: tailscale, workDir }).then(
-    (result) => {
-      if (result.isErr())
-        console.error(
-          `tailscale: port exposure unavailable (${result.error.code}): ${result.error.message}`,
-        );
-    },
-    () => console.error("tailscale: unexpected adapter rejection"),
-  );
 }
 const result = await boot.boot();
 if (result.isErr()) console.error(`execution boot failed: ${result.error.code}`);

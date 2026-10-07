@@ -36,7 +36,7 @@ it("streams the browser's display history with session and cursor metadata", asy
   ).toBe(true);
   const app = Fastify({ logger: false });
   try {
-    registerRoutes(app, task, harness.deps, {}, TEST_SYSTEM_VIEW);
+    registerRoutes(app, task, harness.deps, TEST_SYSTEM_VIEW);
     const response = await app.inject({ method: "GET", url: "/api/v1/orbs/orb/history" });
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-length"]).toBeUndefined();

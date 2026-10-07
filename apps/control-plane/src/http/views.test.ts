@@ -380,18 +380,3 @@ describe("orbView credential challenge shaping", () => {
     }
   });
 });
-
-describe("orbView previewHost", () => {
-  it("derives the MagicDNS host when a tailnet is configured", () => {
-    const view = orbView(orb, new ControlState(), { tailnetDnsName: "tailabc123.ts.net" });
-    expect(view.previewHost).toBe("pi-orb-orb-1.tailabc123.ts.net");
-    expect(Check(OrbViewSchema, view)).toBe(true);
-  });
-
-  it("omits the field entirely when port exposure is off", () => {
-    const view = orbView(orb, new ControlState(), {});
-    expect(view.previewHost).toBeUndefined();
-    expect("previewHost" in view).toBe(false);
-    expect(Check(OrbViewSchema, view)).toBe(true);
-  });
-});

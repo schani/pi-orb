@@ -27,7 +27,6 @@ export const OrbSelfSchema = Type.Object(
       Type.Object({ id: Type.String(), url: Type.String() }, closed),
       Type.Null(),
     ]),
-    previewHost: Type.Union([Type.String(), Type.Null()]),
   },
   closed,
 );

@@ -66,7 +66,6 @@ it("bodyless POST survives normal IncomingMessage close; premature response clos
         },
       },
     },
-    {},
     TEST_SYSTEM_VIEW,
   );
   try {

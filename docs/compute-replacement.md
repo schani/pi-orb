@@ -47,7 +47,7 @@ An update does not bounce a healthy running orb. The currently running incarnati
 
 ## Why disposal is not `destroy`
 
-The existing provider `destroy(orbId)` contract is deletion-grade: it removes compute **and authoritative storage**, and the Tailscale cleanup path removes the orb’s tailnet identity. Reusing it here would destroy the checkout and Pi session.
+The existing provider `destroy(orbId)` contract is deletion-grade: it removes compute **and authoritative storage**. Reusing it here would destroy the checkout and Pi session.
 
 Add a separate provider operation with intentionally narrower authority:
 
@@ -62,13 +62,13 @@ discardCompute(
 ): ResultAsync<void, OrbHostProviderError>;
 ```
 
-`discardCompute` is idempotent and resolves only after every managed compute incarnation for that orb at or below `throughIncarnation` is definitively absent. It must preserve authoritative storage and Tailscale state. Uncertainty is an error; absence is success.
+`discardCompute` is idempotent and resolves only after every managed compute incarnation for that orb at or below `throughIncarnation` is definitively absent. It must preserve authoritative storage. Uncertainty is an error; absence is success.
 
 Provider mappings:
 
 - **GCE:** list/verify exact orb ownership; delete matching instances at or below the incarnation fence, including the legacy un-suffixed instance name, which reads as incarnation 0; wait for each operation and verify absence. Instance deletion auto-deletes its boot disk and ephemeral NIC/IP. Never delete `pi-orb-data-<orbId>`. Cloud Logging remains subject to its independent retention policy.
 - **Docker:** force-remove matching incarnation containers at or below the fence. Never remove the fixed workspace volume or shared images/networks. A replacement container is fresh even though the developer machine’s global Docker image store is outside per-orb ownership; the production cache-corruption incident class is specifically isolated by GCE’s replaced boot disk.
-- **Process:** the durable host metadata records the launched child’s process-group ID, so absence stays verifiable after a control-plane restart that lost the in-memory child table. Discard terminates the recorded process group if it still exists, closes its incarnation log handles, and removes only ephemeral host metadata needed to launch that incarnation. Keep the per-orb workspace, Pi state, and Tailscale state. Provision recreates the ephemeral metadata.
+- **Process:** the durable host metadata records the launched child’s process-group ID, so absence stays verifiable after a control-plane restart that lost the in-memory child table. Discard terminates the recorded process group if it still exists, closes its incarnation log handles, and removes only ephemeral host metadata needed to launch that incarnation. Keep the per-orb workspace and Pi state. Provision recreates the ephemeral metadata.
 
 The ordinary orphan sweep remains stop-only. It must not infer destructive authority from a `failed` row alone; the durable incarnation-bounded discard intent described below is the authority to delete compute.
 
@@ -172,15 +172,9 @@ What remains is the pre-existing authority class: a stale revision can still sta
 
 No cleanup path may delete by substring, by stale `host_ref` alone, or without exact provider ownership and incarnation checks.
 
-## Credentials and Tailscale
+## Credentials
 
 Failure and update-replacement intents clear the old runtime-token hash atomically. Broker authorization also rejects any orb carrying a non-null discard fence regardless of lifecycle state. Replacement provision mints a new token and commits its hash using the existing read-back/CAS model; no old incarnation is reauthorized during `failed -> starting`.
-
-Tailscale daemon state lives on the retained workspace, so a replacement resumes the same device identity; the device record is non-ephemeral and survives compute disposal. An auth key delivered through instance metadata dies with its VM, so each newly provisioned incarnation gets a fresh non-reusable, pre-authorized key whose description names the exact orb ID and incarnation. Corrected 2026-09-05: before minting for incarnation N, the adapter revokes only exact-orb keys for strictly older incarnations (and the recognized unsuffixed description). Same/newer-incarnation keys must survive: a competing attempt may already have installed one in the winning VM. The process-local revoke/mint/cleanup queue is not a distributed ownership fence. The previous revoke-all rule and at-most-one-unconsumed-key claim are rejected after composed DST reproduced a losing provisioner invalidating the winner; rationale, surplus-key trade-off, and sanitized key-decision logging are in `docs/ports.md`. Retained state normally resumes the existing node without consuming the key; a lost or corrupt state consumes the current key to re-register. Revocation is idempotent, retryable, and incarnation-fenced; a mint failure remains a retryable provider error. Port exposure stays optional: a replacement that never joins the tailnet still has its keys bounded by expiry or archive/delete, with observed older keys also collected by a higher-incarnation mint, which removes every exact-orb key and device as today (`docs/orb-deletion.md`).
-
-Deliberately out of scope: detecting and deleting the duplicate device record left behind when a state-loss re-registration creates a second exact-hostname node. Doing that safely needs the runtime to report its stable node ID — a protocol extension guarding a rare corner — so both devices simply remain until permanent archive/delete. Tracked in `TODO.md`.
-
-Adapter tests must assert bounded keys and an untouched device record across replacement — including a replacement that fails before readiness, whose unconsumed key the next mint revokes. Live tailnet validation remains with the deletion live smoke in `TODO.md`.
 
 ## Observability
 
@@ -220,9 +214,8 @@ Disposal deliberately trades away post-hoc host forensics. The 2026-08-06 root c
    - Run one shared disposal gate in failed/starting/stopping/stopped and before archival recovery.
    - Preserve one-shot inbox wake and stop/delete/archive priority.
    - Surface durable user detail and edge logs.
-4. **Credentials and Tailscale**
+4. **Credentials**
    - Fence broker authorization on discard intent and mint a fresh runtime token only for committed replacement compute.
-   - Implement per-incarnation non-reusable auth keys with revoke-before-mint across both description formats.
 
 **Stage 2 — host-spec replacement (implemented locally 2026-08-12).**
 
@@ -254,7 +247,7 @@ compute-replacement.replacement-before-commit
 compute-replacement.replacement-committed
 ```
 
-Add one-shot failpoints for provider discard, evidence persistence, discard finalization, replacement provision, and replacement commit. Tailscale was originally excluded from DST; that boundary missed the enrollment race. As of 2026-09-05, the real GCE and Tailscale adapters run together over shared stateful remote-service models, with independent provisioner/minter instances and scheduling at HTTP boundaries. Forced and entropy-driven same-incarnation creation races assert winning-host enrollment and retained identity; a delayed older mint must preserve newer enrollment authority. Scripted-transport tests additionally assert that a failed older-key revoke aborts minting and stays retryable. Process death at a checkpoint is exercised by driving the machine to the durable state that crash leaves behind and restarting the control plane there; adjacent checkpoints that share a durable state share one crash window. DST failures retain their first `determined` trace under `test-failures/` and must be replayed with `DST_REPLAY` before changes; never rerun merely to obtain green.
+Add one-shot failpoints for provider discard, evidence persistence, discard finalization, replacement provision, and replacement commit. Process death at a checkpoint is exercised by driving the machine to the durable state that crash leaves behind and restarting the control plane there; adjacent checkpoints that share a durable state share one crash window. DST failures retain their first `determined` trace under `test-failures/` and must be replayed with `DST_REPLAY` before changes; never rerun merely to obtain green.
 
 **Deterministic GCE model (initial implementation landed 2026-08-12).** The incarnation fence and exact-ownership checks are enforced *inside* each provider adapter, so DST scenarios that assert them execute the real adapter, not a fake’s reimplementation of the rule. The generic `FakeOrbHostProvider` world remains the default for lifecycle scenarios, but the discard/fence scenarios additionally compose the real `GceOrbHostProvider` over a stateful deterministic GCE model implementing the existing `GceApiTransport` seam. Both enablers already exist: the adapter runs on `SimulationTask` (its `waitOperation` polling sleeps through the simulated clock) and all HTTP passes through that one transport interface. The model keeps instances and disks with labels/metadata, completes zone operations asynchronously across later polls, returns 409 on duplicate insert, filters list by label, and models an operation completing after its caller’s process died plus delayed deletion visibility. Injectable preemption/fault controls beyond those first scenarios remain to be added with the rest of the matrix. The modeled surface is deliberately small: instance get/insert/delete/start/stop, disk get/insert/delete, operation wait, guest attributes, label-filtered list. The existing scripted-response transport tests remain only for exact wire-shape assertions; real API behavior drift stays the live GCE validation’s job, which is why that leg is mandatory.
 
@@ -276,7 +269,6 @@ Required DST scenarios:
 - a host-spec change leaves a running orb untouched, replaces it on its next Start, and same-spec stop/start reuses it;
 - repeated deterministic runtime failure creates at most one incarnation per user-authorized start, never an autonomous loop;
 - old runtime authorization stays rejected throughout replacement and the new token works only after commit;
-- Tailscale older-key revocation failure is bounded/retryable; same/newer-incarnation enrollment authority survives competing mints, and surplus attempt keys remain expiry/deletion-bounded;
 - invariants: workspace identity never changes, at most one live compute incarnation exists, and no incarnation at or below a cleared discard fence remains;
 - the discard/fence scenarios above run additionally with the real GCE adapter composed over the deterministic GCE model, including a zone operation that completes after a control-plane crash and a delete whose absence becomes visible only on a later poll.
 
@@ -287,8 +279,7 @@ Provider tests (the GCE ones run against the deterministic model wherever state 
 - GCE provision/start never rewrites metadata on fingerprint mismatch;
 - Docker removes incarnation containers, retains the workspace volume, and reports the actual incarnation-specific container name in observations;
 - process mode kills the recorded process group — including after a provider restart with no in-memory child — and retains workspace/session files;
-- Tailscale bounds exact-orb keys across incarnations and never touches the device record;
-- full `destroy` still removes compute, workspace, keys, and devices for archive/delete.
+- full `destroy` still removes compute and workspace for archive/delete.
 
 ### Local E2E
 
@@ -327,7 +318,7 @@ Every bounded wait prints current orb row, provider inventory, and lifecycle edg
 4. Explicitly Start. Wait for ready and assert `pi-orb-<orbId>-i1` with a different instance ID and boot disk, the same attached persistent disk, the intact sentinel, a different runtime token, exactly one instance, and the old instance still absent.
 5. (Stage 2) Deploy a different desired host-spec fingerprint under a higher deploy generation. Observe a second explicit 65-second window in which the running orb keeps its state, its single instance name, and — checked at both ends of the window — its numeric instance ID, so a same-named recreation inside the window cannot pass. Then stop/start and prove a second replacement: instance `pi-orb-<orbId>-i2` with a different instance ID, a different boot disk, a different spec stamp, the same attached data disk, the sentinel intact, and the incarnation-1 instance absent. The script does not claim to observe "no repair event": the new code contains no repair path to emit one, so what is provable — and what is asserted — is that the identity changed rather than being mutated in place.
 
-Per-step deadlines are named variables derived from one documented outer budget; the two 65-second negative windows are the only deliberate elapsed-time assertions. The script preserves first-failure logs under `test-failures/` and exits nonzero without retrying. Bounded Tailscale keys and device survival across replacement are asserted by the adapter tests; live tailnet validation remains with the deletion live smoke in `TODO.md`.
+Per-step deadlines are named variables derived from one documented outer budget; the two 65-second negative windows are the only deliberate elapsed-time assertions. The script preserves first-failure logs under `test-failures/` and exits nonzero without retrying.
 
 ## Rejected alternatives
 
@@ -342,7 +333,6 @@ Per-step deadlines are named variables derived from one documented outer budget;
 - **Apply only to `runtime_never_answered`.** Other terminal failures can follow host corruption, and a simple failed-state invariant is safer than an incomplete failure-code allowlist. Clean replacement may repeat non-host failures, which is acceptable because it is not automatic.
 - **Retain failed VMs for manual forensics.** Keeping the suspect compute invites exactly the reuse this design forbids and accumulates cost with no owner. Evidence is captured durably before deletion instead; direct disk inspection is knowingly given up.
 - **Gate the plan on the reconciler-lease work in `TODO.md`.** The lease closes a pre-existing stale-authority class this plan neither depends on nor materially worsens — a stale wrong terminal decision now costs a disposable boot disk rather than a stop, while the workspace is unreachable by `discardCompute`. The only *new* cross-revision disagreement, the desired specification, is closed by the forward-only generation fence. Blocking on the lease would delay protection against a recurring incident class.
-- **Report the Tailscale node ID through runtime health/pull status to deduplicate device records.** A protocol extension guarding the rare lost-tailscaled-state corner; keys remain expiry/deletion-bounded without it and a duplicate device is harmless until archive/delete removes both. Deferred to `TODO.md`.
 
 ## Completion criteria
 
@@ -354,7 +344,6 @@ This plan is complete when:
 - host-spec updates never mutate compute in place, leave running orbs untouched, and replace stale compute on next Start, forward-only by deploy generation;
 - replacement uses a higher, uniquely identified incarnation, immutable spec fingerprint, and fresh token;
 - late/stale cleanup cannot delete a newer incarnation, and a stale revision cannot replace newer-spec compute;
-- Tailscale device identity survives; racing same-incarnation create attempts cannot revoke the winning host's enrollment key;
 - original failure, host evidence, and cleanup errors are durable and user-visible without log spam;
 - provider, store, DST, E2E, and live GCE validation pass; and
 - the release smoke completes without weakening or rerunning around a failure.

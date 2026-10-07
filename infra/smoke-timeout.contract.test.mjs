@@ -32,15 +32,6 @@ test("live smoke deadlines cover native lifecycle bounds", () => {
   assert.match(replacement, /^boot_deadline_seconds=900\b/m);
 });
 
-test("preview health is mandatory and uses an owned peer instead of runner tailnet credentials", () => {
-  const smoke = readFileSync(new URL("./smoke-workload-identity.sh", import.meta.url), "utf8");
-  assert.match(smoke, /sudo python3 - \/usr\/bin\/tailscale/);
-  assert.match(smoke, /< "\$DIR\/smoke_preview\.py"/);
-  assert.match(smoke, /preview_deadline=\$\(\( \$\(date \+%s\) \+ 60 \)\)/);
-  assert.match(smoke, /fail "peer-preview"/);
-  assert.match(smoke, /\.status == "ready"/);
-});
-
 test("application API bearer travels through stdin, not curl arguments", () => {
   const api = readFileSync(new URL("./api.sh", import.meta.url), "utf8");
   assert.match(api, /printf 'header = "Authorization: Bearer %s"/);

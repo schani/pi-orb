@@ -72,8 +72,7 @@ function setup(
       request.headers.authorization === "Bearer fixture-owner"
         ? okAsync({ kind: "user" as const, user: { id: TEST_USER_ID, email: null } })
         : errAsync({ type: "unauthenticated" as const, message: "Authentication required" }),
-    (browser) =>
-      registerRoutes(browser, task, { ...h.deps, agentPlane: plane }, {}, TEST_SYSTEM_VIEW),
+    (browser) => registerRoutes(browser, task, { ...h.deps, agentPlane: plane }, TEST_SYSTEM_VIEW),
   );
   return { h, app, checkStartup, cas, cancelSleep, provision, health };
 }

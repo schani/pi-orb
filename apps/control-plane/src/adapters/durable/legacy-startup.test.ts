@@ -592,7 +592,6 @@ it("returns the terminal Start error through authenticated HTTP backed by actual
         browser,
         f.task,
         { ...h.deps, store: f.database.store, agentPlane: plane },
-        {},
         TEST_SYSTEM_VIEW,
       ),
   );

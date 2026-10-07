@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { previewHost } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, ResultAsync } from "neverthrow";
 import { acceptsCentralAgentCaller } from "./agent-authorization.ts";
@@ -37,7 +36,6 @@ export interface OrbAgentOperations {
 }
 export interface OrbAgentOptions {
   readonly appOrigin: string;
-  readonly tailnetDnsName?: string;
   /** Must append a durable transcript alert and update its unread projection atomically/idempotently. */
   readonly appendAlert: (
     orbId: string,
@@ -120,10 +118,6 @@ export function createOrbAgentOperations(
                   spawnedBy.value === null
                     ? null
                     : { id: spawnedBy.value, url: url(spawnedBy.value) },
-                previewHost:
-                  options.tailnetDnsName === undefined
-                    ? null
-                    : previewHost(orb.id, options.tailnetDnsName),
               });
             }
             case "list": {

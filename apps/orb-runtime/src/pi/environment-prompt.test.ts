@@ -38,7 +38,7 @@ describe("runtime environment prompt", () => {
 
   it("documents current-orb identity under runtime tools", () => {
     const line =
-      "`pi-orb self [--json]` returns this orb’s identity, dashboard URL, project/repository, creation time, spawning orb, and preview hostname.";
+      "`pi-orb self [--json]` returns this orb’s identity, dashboard URL, project/repository, creation time, and spawning orb.";
     expect(environmentPrompt).toContain(`## Runtime tools\n\n`);
     expect(environmentPrompt).toContain(line);
     expect(environmentPrompt.indexOf(line)).toBeGreaterThan(

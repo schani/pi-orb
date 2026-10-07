@@ -238,7 +238,6 @@ export function createProcessAgentContext(
     mcpOAuth: McpOAuth;
     modelUsage: ModelUsageLedger;
     appOrigin: string;
-    tailnetDnsName?: string;
     inferenceBaseUrl?: (userId: string) => string | undefined;
     appendAlert: (
       orbId: string,

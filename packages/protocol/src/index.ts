@@ -26,7 +26,6 @@ export * from "./repository-url.ts";
 export * from "./runtime-http.ts";
 export * from "./runtime-launch.ts";
 export * from "./stream-telemetry.ts";
-export * from "./tailscale.ts";
 export * from "./terminal.ts";
 export * from "./tool-result-context.ts";
 export * from "./workload-identity.ts";

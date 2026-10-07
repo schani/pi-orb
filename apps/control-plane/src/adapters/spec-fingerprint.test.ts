@@ -12,10 +12,10 @@ describe("specFingerprintOf", () => {
     const one = specFingerprintOf({
       image: "runtime:1",
       network: "pi-orb",
-      tailscale: { hostname: "pi-orb-orb-1", previewHost: "pi-orb-orb-1.ts.net" },
+      runtime: { hostname: "orb-1", port: 8080 },
     });
     const other = specFingerprintOf({
-      tailscale: { previewHost: "pi-orb-orb-1.ts.net", hostname: "pi-orb-orb-1" },
+      runtime: { port: 8080, hostname: "orb-1" },
       network: "pi-orb",
       image: "runtime:1",
     });
@@ -46,10 +46,10 @@ describe("specFingerprintOf", () => {
   });
 
   it("distinguishes null, absent and empty values", () => {
-    const withNull = specFingerprintOf({ tailscale: null });
+    const withNull = specFingerprintOf({ runtime: null });
     expect(specFingerprintOf({})).not.toBe(withNull);
-    expect(specFingerprintOf({ tailscale: {} })).not.toBe(withNull);
-    expect(specFingerprintOf({ tailscale: "" })).not.toBe(withNull);
+    expect(specFingerprintOf({ runtime: {} })).not.toBe(withNull);
+    expect(specFingerprintOf({ runtime: "" })).not.toBe(withNull);
   });
 
   it("distinguishes a number from its string spelling", () => {
@@ -68,7 +68,7 @@ describe("specFingerprintOf", () => {
   });
 
   it("returns a stable hex digest for identical input", () => {
-    const parts = { v: 1, image: "runtime:1", extraEnv: { A: "1" }, tailscale: null };
+    const parts = { v: 1, image: "runtime:1", extraEnv: { A: "1" }, runtime: null };
     const digest = specFingerprintOf(parts);
     expect(digest).toMatch(/^[0-9a-f]{64}$/);
     expect(specFingerprintOf({ ...parts })).toBe(digest);

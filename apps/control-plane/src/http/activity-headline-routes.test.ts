@@ -52,7 +52,7 @@ it.each([true, false])(
           }),
     );
     const app = Fastify({ logger: false });
-    registerRoutes(app, task, { ...h.deps, headlineGenerator: { generate } }, {}, TEST_SYSTEM_VIEW);
+    registerRoutes(app, task, { ...h.deps, headlineGenerator: { generate } }, TEST_SYSTEM_VIEW);
     try {
       const response = await app.inject({
         method: "POST",
@@ -104,7 +104,7 @@ it("POST accepts only URL identities and returns only headline; history enriches
   });
   const generate = vi.fn(() => okAsync("Inspect project configuration"));
   const app = Fastify({ logger: false });
-  registerRoutes(app, task, { ...h.deps, headlineGenerator: { generate } }, {}, TEST_SYSTEM_VIEW);
+  registerRoutes(app, task, { ...h.deps, headlineGenerator: { generate } }, TEST_SYSTEM_VIEW);
   try {
     const response = await app.inject({
       method: "POST",
@@ -170,7 +170,7 @@ it("an open WS and a null initial harness session do not strand a held source PO
   app.get("/live", { websocket: true }, (socket) => {
     socket.on("message", (message) => socket.send(message));
   });
-  registerRoutes(app, task, { ...h.deps, headlineGenerator: { generate } }, {}, TEST_SYSTEM_VIEW);
+  registerRoutes(app, task, { ...h.deps, headlineGenerator: { generate } }, TEST_SYSTEM_VIEW);
   await app.ready();
   const socket = await app.injectWS("/live");
   try {
@@ -224,7 +224,7 @@ it("authentication rejects before cache or replica access", async () => {
   registerAuthenticatedBrowserRoutes(
     app,
     () => errAsync({ type: "unauthenticated", message: "sign in" }),
-    (scope) => registerRoutes(scope, task, h.deps, {}, TEST_SYSTEM_VIEW),
+    (scope) => registerRoutes(scope, task, h.deps, TEST_SYSTEM_VIEW),
   );
   try {
     const response = await app.inject({

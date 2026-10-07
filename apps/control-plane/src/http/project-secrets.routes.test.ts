@@ -20,7 +20,7 @@ describe("project secret browser routes", () => {
       app,
       task,
       { ...harness.deps, projectSecrets: secrets.deps },
-      {},
+
       TEST_SYSTEM_VIEW,
     );
     await app.ready();

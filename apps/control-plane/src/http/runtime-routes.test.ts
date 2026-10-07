@@ -89,7 +89,7 @@ describe("runtime broker routes", () => {
 
   it("returns pending then the persisted initial pin only to the current runtime", async () => {
     await app.close();
-    await startApp(TEST_ISSUER_CONSTANTS, store, null, true);
+    await startApp(TEST_ISSUER_CONSTANTS, store, true);
     store.seedOrb(
       makeOrbRow(ORB, PROJECT, "starting", { runtimeTokenHash: sha256(TOKEN), hostIncarnation: 1 }),
     );
@@ -200,7 +200,7 @@ describe("runtime broker routes", () => {
             );
         });
         await app.close();
-        await startApp(TEST_ISSUER_CONSTANTS, database.store, null, true);
+        await startApp(TEST_ISSUER_CONSTANTS, database.store, true);
         const response = app.inject({
           method: "GET",
           url: "/api/runtime/initial-checkout",
@@ -319,7 +319,6 @@ describe("runtime broker routes", () => {
   async function startApp(
     issuerConstants = TEST_ISSUER_CONSTANTS,
     routeStore: ControlPlaneStore = store,
-    tailnetDnsName: string | null = "tail.test.ts.net",
     hostingGuard = false,
   ): Promise<void> {
     app = Fastify();
@@ -335,7 +334,6 @@ describe("runtime broker routes", () => {
       );
     registerRuntimeRoutes(app, task, {
       appOrigin: "https://browser.test",
-      ...(tailnetDnsName === null ? {} : { tailnetDnsName }),
       spawn: (task, caller, orbId, request) =>
         spawnOrb(task, { ...makeHarness().deps, store: routeStore }, caller, orbId, request),
       sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
@@ -432,7 +430,7 @@ describe("runtime broker routes", () => {
 
   it("routes native runtime alerts through central authority with bearer and incarnation fencing", async () => {
     await app.close();
-    await startApp(TEST_ISSUER_CONSTANTS, store, null, true);
+    await startApp(TEST_ISSUER_CONSTANTS, store, true);
     store.seedOrb(
       makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN), hostIncarnation: 3 }),
     );
@@ -475,7 +473,7 @@ describe("runtime broker routes", () => {
 
   it("keeps registered runtime bearers independent of Origin under the hosting guard", async () => {
     await app.close();
-    await startApp(TEST_ISSUER_CONSTANTS, store, "tail.test.ts.net", true);
+    await startApp(TEST_ISSUER_CONSTANTS, store, true);
     store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
     for (const origin of ["null", "https://files.test", "https://arbitrary.test"]) {
       for (const [authorization, status] of [
@@ -1458,7 +1456,7 @@ describe("runtime broker routes", () => {
       });
     }
 
-    it("reads only authenticated self metadata, including configured preview and nullable provenance", async () => {
+    it("reads only authenticated self metadata, including nullable provenance", async () => {
       const response = await inspect(ORB_SELF_PATH);
       expect(response.statusCode).toBe(200);
       expect(response.headers["cache-control"]).toBe("no-store");
@@ -1477,16 +1475,12 @@ describe("runtime broker routes", () => {
           repositoryUrl: "https://github.com/owner/repo",
         },
         spawnedBy: null,
-        previewHost: `pi-orb-${ORB}.tail.test.ts.net`,
       });
       expect((await inspect(ORB_SELF_PATH, null)).statusCode).toBe(401);
       expect((await inspect(ORB_SELF_PATH, "wrong")).statusCode).toBe(401);
     });
 
-    it("reports absent preview configuration and sanitized store errors", async () => {
-      await app.close();
-      await startApp(TEST_ISSUER_CONSTANTS, store, null);
-      expect((await inspect(ORB_SELF_PATH)).json().previewHost).toBeNull();
+    it("reports sanitized store errors", async () => {
       await app.close();
       await startApp(
         TEST_ISSUER_CONSTANTS,

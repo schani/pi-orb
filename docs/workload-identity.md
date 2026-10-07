@@ -465,10 +465,6 @@ The implementation must ship reviewed recipes and helpers for at least:
 - examples for project-wide and one-orb authorization;
 - an explicit warning that audience alone is not authorization.
 
-The existing Tailscale control-plane OAuth-key flow in `docs/ports.md` does not change merely
-because OIDC exists. Migrating it to Tailscale trust credentials is separate product work and must
-preserve exact-orb tags, ephemeral nodes, lifecycle cleanup, and current user-visible diagnostics.
-
 ## Policy, abuse bounds, and failures
 
 - Minting is allowed for arbitrary syntactically valid audiences, matching standard OIDC and Amp's
@@ -975,4 +971,4 @@ while implementing it:
 - Automatically granting every project or orb access to a cloud account.
 - Replacing the model/GitHub credential broker: those flows protect renewable user credentials and
   have different semantics.
-- Replacing provider bootstrap identity, host lifecycle fencing, or Tailscale port identity.
+- Replacing provider bootstrap identity or host lifecycle fencing.

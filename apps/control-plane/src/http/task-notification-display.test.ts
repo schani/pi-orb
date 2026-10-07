@@ -43,7 +43,7 @@ it("projects a persisted native task delivery without changing the audit record"
   ).toBe(true);
   const app = Fastify({ logger: false });
   try {
-    registerRoutes(app, task, harness.deps, {}, TEST_SYSTEM_VIEW);
+    registerRoutes(app, task, harness.deps, TEST_SYSTEM_VIEW);
     const response = await app.inject({ method: "GET", url: "/api/v1/orbs/orb/history" });
     const body = response.json();
     expect(response.statusCode).toBe(200);

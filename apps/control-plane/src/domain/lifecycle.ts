@@ -2100,21 +2100,6 @@ async function reconcileResourceDisposal(
   deps: ControlPlaneDeps,
   orb: OrbRow,
 ): Promise<ReconcileOutcome | null> {
-  const cleaned = await withDeadline(
-    task,
-    deps.constants.providerOperationTimeoutMs,
-    "clean orb external resources",
-    (context) => deps.resourceCleaner.cleanupOrb(task, orb.id, context),
-  );
-  if (cleaned.isErr()) {
-    await deps.store.recordOrbDeletionError(task, {
-      orbId: orb.id,
-      message: `resource cleanup: ${cleaned.error.message}`,
-      now: task.wallNow(),
-    });
-    return retryable(cleaned.error);
-  }
-
   const plane = deps.agentPlane;
   if (plane) {
     const disposed = await withDeadline(
@@ -2132,6 +2117,7 @@ async function reconcileResourceDisposal(
       return retryable(disposed.error);
     }
   }
+
   const destroyed = await destroyHost(task, deps, orb.id);
   if (destroyed.isErr()) {
     await deps.store.recordOrbDeletionError(task, {

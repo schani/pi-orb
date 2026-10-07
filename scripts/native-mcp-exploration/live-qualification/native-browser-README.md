@@ -2,7 +2,7 @@
 
 The launcher uses the stock control plane, reconciler, GCE provider, runtime HTTP/WS proxy, PGlite and existing auth. Only the fenced Compute transport substitutes the test VM's ownership label (`pi-orb-orb-id` ↔ `pi-orb-native-browser-orb-id`) and maps the stock logical `pi-orb-<orbId>-iN` to the physical `pi-orb-validator-<orbId>-iN` on Compute requests, reversing names on reads. The production orphan sweeper cannot claim it. All Compute requests are restricted to this fresh orb, its disk, pinned images and one project/zone. `computeLog` records collection, method, status and error code, not bodies or tokens.
 
-This fixture-only mapping uses the existing authorized validator IAM scope; it does not qualify production VM naming, IAM, path rules, or direct private-VPC connectivity. No fixture network tags, firewall rules, service account permissions, credential copies, mock inference, or MCP catalog are required. **This tests browser→control-plane→real guest over an existing IAP SSH tunnel, not direct private-VPC connectivity.** Guest tailnet preview is off; browser WS uses the stock control-plane proxy. Guest broker reaches the stock local control plane through SSH remote forwarding. Model authority stays in the existing local auth directory.
+This fixture-only mapping uses the existing authorized validator IAM scope; it does not qualify production VM naming, IAM, path rules, or direct private-VPC connectivity. No fixture network tags, firewall rules, service account permissions, credential copies, mock inference, or MCP catalog are required. **This tests browser→control-plane→real guest over an existing IAP SSH tunnel, not direct private-VPC connectivity.** Browser WS uses the stock control-plane proxy. Guest broker reaches the stock local control plane through SSH remote forwarding. Model authority stays in the existing local auth directory.
 
 Parent operator:
 
@@ -22,7 +22,7 @@ Parent operator:
   "workspaceImageResource": "projects/playground-dev-6ae7/global/images/<accepted-workspace>",
   "workspaceImageId": "<numeric ID>",
   "brokerUrl": "http://127.0.0.1:7100",
-  "appOrigin": "http://<parent Tailnet DNS>:5173", "computeLog": "/absolute/private/path/compute.jsonl",
+  "appOrigin": "http://127.0.0.1:5173", "computeLog": "/absolute/private/path/compute.jsonl",
   "port": 7100, "generation": 0
 }
 ```
