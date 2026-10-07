@@ -44,6 +44,7 @@ export function readLiveDisplayDetail(
           body: {
             type: "reasoning" as const,
             text: block.text,
+            ...(block.redacted === undefined ? {} : { redacted: block.redacted }),
           },
         }),
   };

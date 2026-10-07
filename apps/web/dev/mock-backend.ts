@@ -2000,6 +2000,9 @@ async function handleApi(
       at: now(),
       record: projectDisplayRecord(record),
       retiredBlockIds: [running.blockId],
+      ...(record.role === "assistant"
+        ? { detailAliases: [{ blockId: running.blockId, detailKey: `${record.id}:0` }] }
+        : {}),
       headId: record.id,
     });
     send(

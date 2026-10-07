@@ -7,7 +7,15 @@ it("DST: active detail snapshots are coherent across mutation, commit and late H
   await runDst({ name: "lazy-active-detail-commit", iterations: 40 }, async (sim) => {
     let live: LiveOperationView | null = {
       operationId: "op",
-      blocks: [{ blockId: "thinking", blockType: "reasoning", revision: 1, text: "hidden-one" }],
+      blocks: [
+        {
+          blockId: "thinking",
+          blockType: "reasoning",
+          contentIndex: 0,
+          revision: 1,
+          text: "hidden-one",
+        },
+      ],
       tools: [],
       subagents: [],
     };
@@ -36,7 +44,13 @@ it("DST: active detail snapshots are coherent across mutation, commit and late H
           live = {
             operationId: "op",
             blocks: [
-              { blockId: "thinking", blockType: "reasoning", revision: 2, text: "hidden-two" },
+              {
+                blockId: "thinking",
+                blockType: "reasoning",
+                contentIndex: 0,
+                revision: 2,
+                text: "hidden-two",
+              },
             ],
             tools: [],
             subagents: [],

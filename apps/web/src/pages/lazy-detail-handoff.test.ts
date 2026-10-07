@@ -71,6 +71,7 @@ it("retired live reasoning identifies the immutable disclosure to refresh on com
         operationId: "operation",
         blockId: "thinking",
         blockType: "reasoning",
+
         revision: 1,
         patch: { type: "replace", text: "" },
       },
@@ -92,6 +93,7 @@ it("retired live reasoning identifies the immutable disclosure to refresh on com
       },
       headId: "committed",
       retiredBlockIds: ["thinking"],
+      detailAliases: [{ blockId: "thinking", detailKey: "committed:0" }],
     },
   });
   expect(next.detailAliases.get("committed:0")).toBe("thinking");

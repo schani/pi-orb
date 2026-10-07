@@ -378,6 +378,20 @@ describe("frame schemas", () => {
     };
     expect(Check(ServerFrameSchema, frame)).toBe(false);
     expect(Check(ServerFrameSchema, { ...frame, retiredBlockIds: ["message-block"] })).toBe(true);
+    expect(
+      Check(ServerFrameSchema, {
+        ...frame,
+        retiredBlockIds: ["message-block"],
+        detailAliases: [{ blockId: "message-block", detailKey: "rec-2:3" }],
+      }),
+    ).toBe(true);
+    expect(
+      Check(ServerFrameSchema, {
+        ...frame,
+        retiredBlockIds: [],
+        detailAliases: [{ blockId: 1, detailKey: "key" }],
+      }),
+    ).toBe(false);
     expect(Check(ServerFrameSchema, { ...frame, retiredBlockIds: [1] })).toBe(false);
     expect(
       Check(ServerFrameSchema, {
@@ -517,6 +531,46 @@ describe("frame schemas", () => {
         headId: "rec-2",
       }),
     ).toBe(true);
+  });
+
+  it("accepts content-free reasoning without source indices or visibility metadata", () => {
+    expect(
+      Check(RuntimeEventFrameSchema, {
+        v: 1,
+        type: "runtime.event",
+        at: "now",
+        event: {
+          type: "output_patch",
+          operationId: "op",
+          blockId: "b",
+          blockType: "reasoning",
+          headline: "",
+          revision: 1,
+          patch: { type: "replace", text: "" },
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects source indices and synthetic reasoning visibility in public patches", () => {
+    const frame = {
+      v: 1,
+      type: "runtime.event",
+      at: "now",
+      event: {
+        type: "output_patch",
+        operationId: "op",
+        blockId: "opaque",
+        blockType: "reasoning",
+        revision: 1,
+        headline: "",
+        patch: { type: "replace", text: "" },
+      },
+    };
+    for (const metadata of [{ contentIndex: 2 }, { reasoningVisible: true }])
+      expect(
+        Check(RuntimeEventFrameSchema, { ...frame, event: { ...frame.event, ...metadata } }),
+      ).toBe(false);
   });
 
   it("accepts runtime events", () => {

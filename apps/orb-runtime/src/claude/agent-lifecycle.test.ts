@@ -474,6 +474,104 @@ it("retires only a committed assistant's own streamed blocks", async () => {
   f.exit();
   await f.agent.closeExtensions();
 });
+it.each(["new", "already-published"] as const)(
+  "aliases only retained reasoning in the UUID-owned group: %s",
+  async (publication) => {
+    const f = fixture();
+    await f.attach();
+    await f.agent.submitMessage([{ type: "text", text: "hello" }], "op");
+    const content = [
+      { type: "thinking", thinking: "" },
+      { type: "text", text: "Answer" },
+      { type: "thinking", thinking: "PRIVATE_HEADINGLESS" },
+      { type: "redacted_thinking", data: "ENCRYPTED_CANARY" },
+    ];
+    const persist = () =>
+      f.persist({
+        type: "assistant",
+        uuid: "owned-assistant",
+        timestamp: f.state.timestamp,
+        message: { role: "assistant", content },
+      });
+    if (publication === "already-published") {
+      persist();
+      expect(f.agent.snapshot().isOk()).toBe(true);
+      const frame = f.frames.find(
+        (frame) => frame.type === "history.record" && frame.record.id === "owned-assistant",
+      );
+      expect(frame).toMatchObject({ retiredBlockIds: [] });
+      expect(frame).not.toHaveProperty("detailAliases");
+    }
+    for (const index of [3, 0, 2, 1])
+      await f.emit({
+        type: "stream_event",
+        parent_tool_use_id: null,
+        uuid: `stream-${index}`,
+        session_id: f.state.id,
+        event: { type: "content_block_start", index, content_block: content[index] },
+      } as unknown as SDKMessage);
+    await f.emit({
+      type: "assistant",
+      parent_tool_use_id: null,
+      uuid: "owned-assistant",
+      session_id: f.state.id,
+      message: { role: "assistant", content },
+    } as unknown as SDKMessage);
+    if (publication === "new") {
+      await f.emit({
+        type: "stream_event",
+        parent_tool_use_id: null,
+        uuid: "next-stream",
+        session_id: f.state.id,
+        event: {
+          type: "content_block_start",
+          index: 2,
+          content_block: { type: "thinking", thinking: "PRIVATE_NEXT" },
+        },
+      } as unknown as SDKMessage);
+      persist();
+      expect(f.agent.snapshot().isOk()).toBe(true);
+      expect(f.agent.liveView()?.blocks.map((block) => block.blockId)).toEqual(["next-stream:2"]);
+    }
+    const handoff = f.frames
+      .filter((frame) => frame.type === "history.record" && frame.record.id === "owned-assistant")
+      .at(-1);
+    expect(handoff).toMatchObject({
+      retiredBlockIds: ["stream-3:3", "stream-0:0", "stream-2:2", "stream-1:1"],
+      detailAliases: [
+        { blockId: "stream-3:3", detailKey: "owned-assistant:3" },
+        { blockId: "stream-2:2", detailKey: "owned-assistant:2" },
+      ],
+    });
+    expect(JSON.stringify(f.frames)).not.toMatch(
+      /PRIVATE_|ENCRYPTED_|contentIndex|reasoningVisible/,
+    );
+    if (publication === "new") {
+      const nextContent = [
+        { type: "text", text: "" },
+        { type: "text", text: "" },
+        { type: "thinking", thinking: "PRIVATE_NEXT" },
+      ];
+      f.persist({
+        type: "assistant",
+        uuid: "next-assistant",
+        timestamp: f.state.timestamp,
+        message: { role: "assistant", content: nextContent },
+      });
+      await f.emit({
+        type: "assistant",
+        parent_tool_use_id: null,
+        uuid: "next-assistant",
+        session_id: f.state.id,
+        message: { role: "assistant", content: nextContent },
+      } as unknown as SDKMessage);
+    }
+    expect(f.agent.liveView()?.blocks).toEqual([]);
+    f.exit();
+    await f.agent.closeExtensions();
+  },
+);
+
 it("keeps busy when late native inference starts race query rotation", async () => {
   const f = fixture();
   await f.attach();
