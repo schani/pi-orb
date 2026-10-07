@@ -151,10 +151,10 @@ Rebased removal `5ae44463` onto upstream `290535cd`. Typecheck and lint pass;
 24 native shell contracts, not live native acceptance). Full unit/E2E qualification
 was not rerun; pre-rebase failures do not imply the current E2E gate is red.
 
-Clean installation's audit reports inherited high advisory
+That installation reported inherited high advisory
 [GHSA-6qxp-vccf-f47h](https://github.com/advisories/GHSA-6qxp-vccf-f47h) for
-`@modelcontextprotocol/client` 2.0.0. No dependencies changed; remediation is in
-`TODO.md`. Evidence: `/tmp/tailscale-rebase-{npm-ci,audit,typecheck-2,lint,focused-2,infra}.*`.
+`@modelcontextprotocol/client` 2.0.0, repaired by upstream PR #65 and qualified
+below. Evidence: `/tmp/tailscale-rebase-{npm-ci,audit,typecheck-2,lint,focused-2,infra}.*`.
 These are scoped merge checks, not release qualification.
 
 ## Cached navigation and automatic mounting (qualified 2026-10-03; deployed 2026-10-04)
@@ -776,10 +776,26 @@ was verified to contain no `tailscale`/`tailscaled` binaries on PATH or in its f
 Evidence: `.context/http-preview/final-npm-ci.log`,
 `.context/http-preview/final-settled-*.log` and
 `.context/http-preview/final-runtime-image-no-tailscale.log`; first failures and replay
-traces remain preserved. The inherited MCP high advisory retains its existing `TODO.md`
-follow-up. No domain was selected, wildcard ingress provisioned, deployment performed or
+traces remain preserved. No domain was selected, wildcard ingress provisioned, deployment performed or
 live GCP/native acceptance run. `PI_ORB_PREVIEW_ORIGIN` remains unset: previews are disabled,
 and actual public exposure is not qualified.
+
+## HTTP preview advisory rebase (2026-10-07; not deployed)
+
+PR #64 rebases onto main `7bedf41`, including PR #65's MCP client/core 2.2.0
+upgrade and removal of the unused runtime client dependency (`8eaa636`). Fresh
+`npm ci` and `npm audit --json` pass with zero vulnerabilities. Typecheck and
+lint pass; focused preview, MCP/OAuth, composition, hosting and migration
+contracts pass 235 tests with one conditional skip; upstream naming and
+Claude/Pi boot-continuation overlap passes 90 tests. Infrastructure passes
+53 Node, 118 Python and 24 native-VM tests. The sole rebase conflict retained
+both Claude boot-continuation and HTTP preview qualification records. Preview
+migration 034 remains free; HTTP preview contracts and Tailscale removal are
+unchanged.
+
+Evidence: `.context/http-preview/advisory-rebase-*`. These are scoped local
+checks, not current-head full CI/E2E or public-ingress qualification. No merge,
+deployment or live-cloud mutation occurred.
 
 ### Scoped rebase validation (2026-10-07; not deployed)
 
