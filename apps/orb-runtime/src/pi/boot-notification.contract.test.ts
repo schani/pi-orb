@@ -55,6 +55,13 @@ it("persists a visible, model-visible user-role notice and deduplicates after re
   const { agent, manager, root } = fixture();
   let turns = 0;
   const pi: PiSession = {
+    pendingMessageCount: 0,
+    cancelQueuedCustomSteer: () => false,
+    compact: async () => {
+      throw new Error("Compaction not used by this fixture");
+    },
+    abortCompaction: () => undefined,
+    waitForIdle: async () => undefined,
     isIdle: true,
     sendUserMessage: async () => undefined,
     abort: async () => undefined,

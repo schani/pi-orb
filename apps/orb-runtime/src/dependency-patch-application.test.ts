@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const root = join(import.meta.dirname, "../../..");
 const helper = join(root, "scripts/apply-dependency-patches.mjs");
 const names = [
+  "@earendil-works+pi-agent-core+1.0.0.patch",
   "@earendil-works+pi-ai+1.0.0.patch",
   "@earendil-works+pi-coding-agent+1.0.0.patch",
   "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
@@ -185,12 +186,45 @@ describe("sealed dependency patch application", () => {
     cpSync(join(root, path), join(dir, path));
     expect(run(dir).status).toBe(1);
   });
-  it("pi-only installs require both Pi packages but not subagents", () => {
+  it("pi-only installs require all three Pi packages but not subagents", () => {
     const dir = fixture();
     rmSync(join(dir, "node_modules/@gotgenes"), { recursive: true });
-    rmSync(join(dir, "patches", names[2] as string));
+    rmSync(join(dir, "patches", names[3] as string));
     expect(run(dir, "--pi-only").status).toBe(0);
     expect(run(dir).status).toBe(1);
+  });
+  it("installs from the control-plane Docker patch COPY inputs without Docker", () => {
+    const dir = fixture();
+    rmSync(join(dir, "patches"), { recursive: true });
+    mkdirSync(join(dir, "patches"));
+    const dockerfile = readFileSync(join(root, "apps/control-plane/Dockerfile"), "utf8");
+    const inputs = [...dockerfile.matchAll(/^COPY patches\/(\S+) patches\/\1$/gm)].map(
+      (match) => match[1] as string,
+    );
+    expect(inputs.sort()).toEqual(names.slice(0, 3).sort());
+    for (const name of inputs) cpSync(join(root, "patches", name), join(dir, "patches", name));
+    const result = run(dir, "--pi-only");
+    expect(result.status, result.stderr).toBe(0);
+    for (const name of inputs)
+      for (const path of files(name)) expect(sha(join(dir, path))).toBe(sha(join(root, path)));
+  });
+  it.each(names.slice(0, 3))("pi-only rejects changed patch bytes: %s", (name) => {
+    const dir = fixture();
+    writeFileSync(join(dir, "patches", name), "changed patch\n");
+    const before = names.flatMap(files).map((path) => sha(join(dir, path)));
+    const result = run(dir, "--pi-only");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("patch checksum mismatch");
+    expect(names.flatMap(files).map((path) => sha(join(dir, path)))).toEqual(before);
+  });
+  it.each(names.slice(0, 3).flatMap(files))("pi-only rejects installed file drift: %s", (path) => {
+    const dir = fixture();
+    writeFileSync(join(dir, path), `${readFileSync(join(dir, path), "utf8")}\n// drift\n`);
+    const before = names.flatMap(files).map((target) => sha(join(dir, target)));
+    const result = run(dir, "--pi-only");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("installed bytes mismatch");
+    expect(names.flatMap(files).map((target) => sha(join(dir, target)))).toEqual(before);
   });
   it("rejects unknown scopes", () => {
     expect(run(fixture(), "--ignore-missing").status).toBe(1);
@@ -216,7 +250,8 @@ describe("sealed dependency patch application", () => {
     const evidence = `d9afae712be5304e09a490f28b0493180c8565fe6585efe173b1daaab3e5cf2a  vendor/gotgenes-pi-subagents-21.7.0-orb.8.tgz
  eb67747b526d862e6bd0c959a330b7897ece86ebed3a21e7cf846730e293e509  vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz
  e503e81db607ca52be72d4f1cc67cc1a52c4321212cf4013f569978d08fb9830  patches/@earendil-works+pi-ai+1.0.0.patch
- c684fe6a6a57426521a6fd822ced3636f2004b29eebff3af489e84f59f84c0cf  patches/@earendil-works+pi-coding-agent+1.0.0.patch
+ 7e2c5e2d68d97419c086ac5d369f6d2b83be2020a3be062e1a1402b37ab0cdb2  patches/@earendil-works+pi-agent-core+1.0.0.patch
+ a7eda2ad337b150f45f2516ee2b77a159cd081f68a16479b61ba48ee68b9fc73  patches/@earendil-works+pi-coding-agent+1.0.0.patch
  adcb859f8c0a0348ae7c745f16f35d2715e948f36542196b3b9c1c7c7c7bf571  patches/@gotgenes+pi-subagents+21.7.0-orb.8.patch`;
     for (const line of evidence.trim().split("\n")) {
       const [hash, path] = line.trim().split(/\s+/);

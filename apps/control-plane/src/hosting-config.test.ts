@@ -1,5 +1,7 @@
+import Fastify from "fastify";
 import { expect, it } from "vitest";
 import { createConfiguredHostingAccessPolicy, readHostingConfiguration } from "./hosting-config.ts";
+import { registerHostingAccessGuard } from "./http/hosting-access.ts";
 
 const env = {
   PI_ORB_AUTH_MODE: "google",
@@ -97,6 +99,56 @@ it("retains the process provider's app authority", () => {
     access.decide({ method: "GET", path: "/runtime/v1/orb/boot-context", host: "127.0.0.1:7100" })
       .kind,
   ).toBe("allow");
+});
+it.each([undefined, "http://broker.test:7100"])(
+  "isolates the local process broker with custom app origin and override %s",
+  async (broker) => {
+    const configuration = readHostingConfiguration(
+      {
+        PI_ORB_AUTH_MODE: "local",
+        PI_ORB_HOST_PROVIDER: "process",
+        PI_ORB_APP_ORIGIN: "http://preview.tailnet.test:5173",
+        PI_ORB_HOSTING_ORIGIN: "http://100.87.202.110:7100",
+        ...(broker === undefined ? {} : { PI_ORB_BROKER_URL: broker }),
+      },
+      7100,
+      "/h",
+    )._unsafeUnwrap();
+    const runtimeHost = new URL(broker ?? "http://127.0.0.1:7100").host;
+    const app = Fastify();
+    registerHostingAccessGuard(
+      app,
+      createConfiguredHostingAccessPolicy(configuration)._unsafeUnwrap(),
+      configuration.appOrigin,
+    );
+    app.get("/runtime/v1/project-secrets", async () => ({}));
+    app.get("/api/v1/orbs", async () => ({}));
+    app.get("/s/orb/index.html", async () => "fixture");
+    try {
+      for (const [host, path, status] of [
+        [runtimeHost, "/runtime/v1/project-secrets", 200],
+        [runtimeHost, "/api/v1/orbs", 403],
+        ["preview.tailnet.test:5173", "/api/v1/orbs", 200],
+        ["100.87.202.110:7100", "/s/orb/index.html", 200],
+        ["100.87.202.110:7100", "/api/v1/orbs", 404],
+        ["100.87.202.110:7100", "/runtime/v1/project-secrets", 404],
+        ...(broker === undefined
+          ? []
+          : [["127.0.0.1:7100", "/runtime/v1/project-secrets", 403] as const]),
+      ] as const)
+        expect((await app.inject({ url: path, headers: { host } })).statusCode).toBe(status);
+    } finally {
+      await app.close();
+    }
+  },
+);
+it("retains the cloud GCE app broker default", () => {
+  const configuration = readHostingConfiguration(
+    { ...env, PI_ORB_HOST_PROVIDER: "gce" },
+    7100,
+    "/h",
+  )._unsafeUnwrap();
+  expect(configuration.runtimeOrigin).toBe(env.PI_ORB_APP_ORIGIN);
 });
 it.each([
   "https://broker.test/path",

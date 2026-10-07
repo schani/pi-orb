@@ -1,7 +1,13 @@
 import { type HistoryRecord, projectRecordDetail } from "@pi-orb/protocol";
+import { NoSimulationTask } from "determined";
 import type { ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { mapPiEntry } from "../../../orb-runtime/src/pi/mapping.ts";
+import {
+  ComposedClaudeFixture,
+  rootResult,
+} from "../../../orb-runtime/src/testkit/claude-composed.ts";
 import { detailContext, displayRecord } from "../testkit/display-fixtures.ts";
 import { DetailContent } from "./DetailBody.tsx";
 import {
@@ -44,6 +50,48 @@ function message(id: string, role: "user" | "assistant", text: string): MessageR
 }
 
 describe("HistoryView turn structure", () => {
+  it("shows compaction immediately in a disclosure without model thinking", () => {
+    const html = renderToStaticMarkup(
+      <HistoryView
+        records={[]}
+        liveBlocks={[]}
+        tools={[]}
+        busy={false}
+        compacting
+        compaction={{ operationId: "compact", afterId: null }}
+      />,
+    );
+    expect(html).toContain("activity-rail-row-running");
+    expect(html).toContain('activity-rail-label">compacting');
+    expect(html).not.toContain("bit-register");
+    expect(html).not.toContain('activity-rail-label">thinking');
+  });
+
+  it("replaces progress with lazy canonical summary before the operation finishes", () => {
+    const html = renderToStaticMarkup(
+      <HistoryView
+        records={[
+          {
+            id: "native-compact",
+            parentId: null,
+            timestamp: "now",
+            overflow: {},
+            type: "compaction",
+            summary: [{ type: "text", text: "private canonical summary" }],
+          },
+        ]}
+        liveBlocks={[]}
+        tools={[]}
+        busy={false}
+        compacting
+        compaction={{ operationId: "compact", afterId: null }}
+      />,
+    );
+    expect(html.match(/activity-rail-row /g)).toHaveLength(1);
+    expect(html).toContain('activity-rail-label">context compacted');
+    expect(html).not.toContain('activity-rail-label">compacting');
+    expect(html).not.toContain("private canonical summary");
+  });
   it("shows nested command and read ranges inside the persisted codemode parent", () => {
     const call: MessageRecord = {
       ...message("codemode-call", "assistant", ""),
@@ -619,7 +667,137 @@ describe("HistoryView turn structure", () => {
     expect(html.match(/class="rec rec-orb"/g)).toHaveLength(1);
   });
 
-  it("renders compaction as a full-width divider outside the prefixed records", () => {
+  it.each([
+    ["failed", "Context compaction failed: summary unavailable", true],
+    ["failed", "Summary unavailable", true],
+    ["failed", "Unable to shorten context", true],
+    ["aborted", "Context compaction failed: cancelled by user", false],
+    ["aborted", "Summary failed to finish before cancellation", false],
+    ["aborted", "Context compaction cancelled.", false],
+    ["aborted", "Compaction aborted", false],
+  ] as const)(
+    "renders mapped %s compaction once with failure-only red ink",
+    (outcome, text, red) => {
+      const mapped = mapPiEntry({
+        id: "compact-outcome",
+        parentId: null,
+        timestamp: "now",
+        type: "custom",
+        customType: "pi-orb.compaction-outcome",
+        data: { operationId: "compact", outcome, message: text },
+      });
+      expect(mapped.isOk()).toBe(true);
+      if (mapped.isErr()) return;
+      const html = renderToStaticMarkup(
+        <HistoryView records={[mapped.value]} liveBlocks={[]} tools={[]} busy={false} />,
+      );
+      expect(html.split(text)).toHaveLength(2);
+      expect(html.includes('class="msg-text error-text"')).toBe(red);
+    },
+  );
+
+  it.each(["failed", "aborted"] as const)(
+    "renders actual Claude %s outcome as one canonical compaction row through handoff/reload",
+    async (outcome) => {
+      const f = new ComposedClaudeFixture();
+      try {
+        await f.attach();
+        const next = f.nextQuery();
+        const compacting = f.agent.compact(undefined, "compact");
+        const query = await next;
+        const command = await query.input.next();
+        if (command.done) throw new Error("missing compact command");
+        f.receipt(command.value);
+        const task = new NoSimulationTask("claude-outcome-render", false);
+        const aborting = outcome === "aborted" ? f.agent.abortOperation() : undefined;
+        if (outcome === "failed")
+          await query.emit(task, {
+            type: "result",
+            subtype: "error_during_execution",
+            is_error: true,
+          } as typeof rootResult);
+        else await query.emit(task, rootResult);
+        query.exit();
+        query.endOutput();
+        await aborting;
+        expect((await compacting).isErr()).toBe(true);
+        const records = f.agent.snapshot()._unsafeUnwrap().records;
+        const text =
+          outcome === "failed" ? "Context compaction failed." : "Context compaction cancelled.";
+        for (const handoff of [true, false]) {
+          const html = renderToStaticMarkup(
+            <HistoryView
+              records={records}
+              liveBlocks={[]}
+              tools={[]}
+              busy={handoff}
+              compacting={handoff}
+              {...(handoff ? { compaction: { operationId: "compact", afterId: null } } : {})}
+            />,
+          );
+          expect(html).toContain("compaction-activity");
+          expect(html).not.toContain('activity-rail-label">compacting');
+          expect(html.match(/class="rec rec-orb"/g)).toHaveLength(1);
+          expect(html.split(text)).toHaveLength(2);
+          expect(html.includes('class="msg-text error-text"')).toBe(outcome === "failed");
+        }
+      } finally {
+        f.dispose();
+      }
+    },
+  );
+
+  it("keeps mapped stream warnings neutral", () => {
+    const mapped = mapPiEntry({
+      id: "stream-warning",
+      parentId: null,
+      timestamp: "now",
+      type: "custom",
+      customType: "pi-orb.stream-audit",
+      data: { edge: "no_event_gap" },
+    });
+    expect(mapped.isOk()).toBe(true);
+    if (mapped.isErr()) return;
+    const html = renderToStaticMarkup(
+      <HistoryView records={[mapped.value]} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+    expect(html).toContain("no decoded event for 60 seconds.");
+    expect(html).not.toContain("error-text");
+  });
+
+  it("renders durable manual-compaction outcomes without exposing hidden events", () => {
+    const html = renderToStaticMarkup(
+      <HistoryView
+        records={[
+          {
+            id: "failed",
+            parentId: null,
+            timestamp: "now",
+            overflow: {},
+            type: "event",
+            eventType: "agent.compaction",
+            content: [{ type: "text", text: "Compaction aborted" }],
+          },
+          {
+            id: "hidden",
+            parentId: "failed",
+            timestamp: "now",
+            overflow: {},
+            type: "event",
+            eventType: "native.hidden",
+            content: [{ type: "text", text: "private event" }],
+          },
+        ]}
+        liveBlocks={[]}
+        tools={[]}
+        busy={false}
+      />,
+    );
+    expect(html).toContain("Compaction aborted");
+    expect(html).not.toContain("private event");
+  });
+
+  it("renders canonical compaction with the shared activity disclosure", () => {
     const records: HistoryRecord[] = [
       message("u1", "user", "hello"),
       {
@@ -637,9 +815,9 @@ describe("HistoryView turn structure", () => {
     );
 
     expect(html).toContain("context compacted");
-    expect(html.match(/class="record-compaction"/g)).toHaveLength(1);
-    // The divider must close the preceding agent grouping context, not live inside a record.
-    expect(html.match(/rec rec-orb/g)).toHaveLength(1);
+    expect(html.match(/class="record-compaction rec rec-orb"/g)).toHaveLength(1);
+    expect(html).toContain("compaction-activity");
+    expect(html.match(/rec rec-orb/g)).toHaveLength(2);
   });
 
   it("renders live streaming output, tool chips, and the bit register as an agent record", () => {

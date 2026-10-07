@@ -18,6 +18,7 @@ import { environmentPrompt } from "./environment-prompt.ts";
 import type { NativeMcpExtensionDeps } from "./extensions/index.ts";
 import { createOrbExtensions } from "./extensions/index.ts";
 import { mcpInventoryPrompt } from "./extensions/mcp.ts";
+import type { StreamTelemetryDeps } from "./extensions/stream-telemetry.ts";
 import type { SubagentHost } from "./extensions/subagents.ts";
 
 type LoaderOptions = ConstructorParameters<typeof DefaultResourceLoader>[0];
@@ -38,6 +39,7 @@ export interface OrbResourceLoaderInput {
   readonly mcp?: NativeMcpExtensionDeps;
   readonly mcpConfigs?: readonly McpConfig[];
   readonly subagents?: SubagentHost;
+  readonly streams?: StreamTelemetryDeps;
   readonly personalInstructions?: PersonalInstructions;
   readonly projectInstructions?: ProjectInstructions;
 }
@@ -70,6 +72,7 @@ export function orbResourceLoaderOptions(input: OrbResourceLoaderInput): LoaderO
       cwd: input.cwd,
       ...(input.mcp ? { mcp: input.mcp } : {}),
       ...(input.subagents ? { subagents: input.subagents } : {}),
+      ...(input.streams ? { streams: input.streams } : {}),
     }),
     agentsFilesOverride: (current) => ({
       agentsFiles: [

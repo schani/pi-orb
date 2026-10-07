@@ -1,4 +1,4 @@
-import type { AgentSettingsEvent, SettingsAction } from "@pi-orb/protocol";
+import type { AgentSettingsEvent } from "@pi-orb/protocol";
 import { Result } from "neverthrow";
 import {
   type ClipboardEvent,
@@ -12,7 +12,11 @@ import {
 } from "react";
 import { usePhoneLayout } from "../lib/use-phone-layout.ts";
 import { ComposerCaret } from "./ComposerCaret.tsx";
-import { type CommandOption, commandOptions } from "./command-options.ts";
+import {
+  type CommandOption,
+  type ComposerCommandAction,
+  commandOptions,
+} from "./command-options.ts";
 import { type ComposerMode, composerModeGlyph, normalizeComposerChange } from "./composer-mode.ts";
 import { Icon } from "./Icons.tsx";
 import { OrbLinkPicker } from "./OrbLinkPicker.tsx";
@@ -55,7 +59,7 @@ interface ComposerProps {
   effortLabel?: "thinking" | "effort";
   settingsDisabled?: boolean;
   settingsPending?: boolean;
-  onSettingsChange?: (action: SettingsAction) => void;
+  onSettingsChange?: (action: ComposerCommandAction) => void;
 }
 
 export function Composer({

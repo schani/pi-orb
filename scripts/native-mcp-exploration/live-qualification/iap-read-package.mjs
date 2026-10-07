@@ -45,11 +45,12 @@ for (const file of ["iap-read.test.mjs", "iap-read-guard.mjs", "iap-read-preflig
 const patches = [
   "@earendil-works+pi-coding-agent+1.0.0.patch",
   "@earendil-works+pi-ai+1.0.0.patch",
+  "@earendil-works+pi-agent-core+1.0.0.patch",
 ];
 for (const name of patches) await cp(join(root, "patches", name), join(stage, "patches", name));
 assert.equal(
   sha(join(stage, "patches", patches[0])),
-  "c684fe6a6a57426521a6fd822ced3636f2004b29eebff3af489e84f59f84c0cf",
+  "a7eda2ad337b150f45f2516ee2b77a159cd081f68a16479b61ba48ee68b9fc73",
 );
 function run(command, args, cwd, log) {
   const result = spawnSync(command, args, {

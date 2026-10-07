@@ -6,7 +6,12 @@ import {
   activityResultEligible,
 } from "./activity-headline.ts";
 import { capHeadline } from "./headline.ts";
-import { type ContentBlock, type HistoryRecord, NestedCallsSchema } from "./history.ts";
+import {
+  type ContentBlock,
+  type HistoryRecord,
+  isClaudeSessionTaskNotification,
+  NestedCallsSchema,
+} from "./history.ts";
 import { JsonValueSchema } from "./json.ts";
 import { reasoningHeadline } from "./reasoning-headline.ts";
 
@@ -52,6 +57,7 @@ const result = Type.Object(
     isError: Type.Optional(Type.Boolean()),
     headline: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     hasImages: Type.Boolean(),
+    asyncLaunch: Type.Optional(Type.Literal(true)),
     detailKey: Type.String(),
     added: Type.Optional(Type.Number()),
     removed: Type.Optional(Type.Number()),
@@ -101,6 +107,7 @@ const event = Type.Object(
     ...base,
     type: Type.Literal("event"),
     eventType: Type.String(),
+    compactionOutcome: Type.Optional(Type.Union([Type.Literal("failed"), Type.Literal("aborted")])),
     content: Type.Optional(Type.Array(DisplayBlockSchema)),
     custom: Type.Optional(
       Type.Object({ customType: Type.String(), display: Type.Boolean() }, closed),
@@ -318,19 +325,91 @@ function projectBlocks(blocks: readonly ContentBlock[], recordId: string): Displ
   );
 }
 
+function nativeClaudeUser(record: HistoryRecord) {
+  const native = record.overflow.native;
+  return record.type === "message" &&
+    record.role === "user" &&
+    record.inboxMessageIds === undefined &&
+    typeof native === "object" &&
+    native !== null &&
+    !Array.isArray(native) &&
+    native.type === "user"
+    ? native
+    : null;
+}
+
+function asyncLaunchCallId(record: HistoryRecord): string | undefined {
+  const native = record.overflow.native;
+  if (
+    record.type !== "message" ||
+    record.role !== "tool" ||
+    record.inboxMessageIds !== undefined ||
+    typeof native !== "object" ||
+    native === null ||
+    Array.isArray(native) ||
+    native.type !== "user"
+  )
+    return undefined;
+  const receipt = native.toolUseResult;
+  const message = native.message;
+  if (
+    typeof receipt !== "object" ||
+    receipt === null ||
+    Array.isArray(receipt) ||
+    receipt.status !== "async_launched" ||
+    receipt.isAsync !== true ||
+    typeof receipt.agentId !== "string" ||
+    receipt.agentId.trim() === "" ||
+    typeof message !== "object" ||
+    message === null ||
+    Array.isArray(message) ||
+    message.role !== "user" ||
+    !Array.isArray(message.content)
+  )
+    return undefined;
+  const results = message.content.filter(
+    (block) =>
+      typeof block === "object" &&
+      block !== null &&
+      !Array.isArray(block) &&
+      block.type === "tool_result",
+  );
+  const result = results[0];
+  return results.length === 1 &&
+    typeof result === "object" &&
+    result !== null &&
+    !Array.isArray(result) &&
+    result.is_error !== true &&
+    typeof result.tool_use_id === "string"
+    ? result.tool_use_id
+    : undefined;
+}
+
 export function projectDisplayRecord(record: HistoryRecord): DisplayRecord {
   const base = {
     id: record.id,
     parentId: record.parentId,
     timestamp: record.timestamp,
   };
+  const asyncLaunchId = asyncLaunchCallId(record);
+  const nativeUser = nativeClaudeUser(record);
+  if (nativeUser !== null && isClaudeSessionTaskNotification(nativeUser))
+    return { ...base, type: "event", eventType: "claude.task_notification" };
+  if (nativeUser?.isMeta === true)
+    return { ...base, type: "event", eventType: "claude.native_metadata" };
+  if (record.type === "event" && record.eventType === "claude.auth")
+    return { ...base, type: "event", eventType: record.eventType };
   switch (record.type) {
     case "message":
       return {
         ...base,
         type: "message",
         ...(record.role === undefined ? {} : { role: record.role }),
-        content: projectBlocks(record.content, record.id),
+        content: projectBlocks(record.content, record.id).map((block) =>
+          block.type === "tool_result" && !block.isError && block.callId === asyncLaunchId
+            ? { ...block, asyncLaunch: true as const }
+            : block,
+        ),
         ...(record.model?.provider === undefined
           ? {}
           : { model: { provider: record.model.provider } }),
@@ -356,9 +435,14 @@ export function projectDisplayRecord(record: HistoryRecord): DisplayRecord {
         ...base,
         type: "event",
         eventType: record.eventType,
+        ...(record.compaction === undefined
+          ? {}
+          : { compactionOutcome: record.compaction.outcome }),
         ...(record.content === undefined ||
         record.subagent !== undefined ||
-        (record.custom?.display !== true && record.eventType !== "agent.settings_fallback")
+        (record.custom?.display !== true &&
+          record.eventType !== "agent.settings_fallback" &&
+          record.eventType !== "agent.compaction")
           ? {}
           : {
               content: projectBlocks(record.content, record.id),
@@ -391,8 +475,30 @@ export function projectDisplayRecord(record: HistoryRecord): DisplayRecord {
 /** Incremental ordered projection; seed with the prefix before emitting a cursor suffix. */
 export function createDisplayRecordProjector(): (record: HistoryRecord) => DisplayRecord {
   const context = new ActivityHeadlineContext();
+  const compactAncestry = new Set<string>();
   return (record) => {
+    const linked = record.parentId !== null && compactAncestry.has(record.parentId);
+    if (linked || (record.type === "event" && record.eventType === "claude.compact_command"))
+      compactAncestry.add(record.id);
     const matches = context.visit(record);
+    const native = nativeClaudeUser(record);
+    const message = native?.message;
+    if (
+      linked &&
+      typeof message === "object" &&
+      message !== null &&
+      !Array.isArray(message) &&
+      message.role === "user" &&
+      typeof message.content === "string" &&
+      /^<local-command-stdout>[\s\S]*<\/local-command-stdout>$/.test(message.content)
+    )
+      return {
+        id: record.id,
+        parentId: record.parentId,
+        timestamp: record.timestamp,
+        type: "event",
+        eventType: "claude.compact_command",
+      };
     const display = projectDisplayRecord(record);
     if (record.type === "message" && display.type === "message") {
       display.content = display.content.map((block) => {

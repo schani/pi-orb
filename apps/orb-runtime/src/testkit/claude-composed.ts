@@ -40,7 +40,10 @@ export class ComposedClaudeFixture {
   readonly agent: ClaudeOrbAgent;
   failCommit = false;
   failSync = false;
-  constructor() {
+  private readonly queryWaiters: ((query: ScheduledClaudeQuery) => void)[] = [];
+  readonly accountReady: Promise<void>;
+  constructor(accountReady: Promise<void> = Promise.resolve()) {
+    this.accountReady = accountReady;
     mkdirSync(join(this.dir, "claude"));
     mkdirSync(this.nativeDir, { recursive: true });
     this.history = new ClaudeHistory(
@@ -69,6 +72,8 @@ export class ComposedClaudeFixture {
       sdkFactory: (input, options) => {
         const query = new ScheduledClaudeQuery(input, options, this.queries.length === 0);
         this.queries.push(query);
+        if (this.queries.length > 1) query.accountReady = this.accountReady;
+        for (const waiter of this.queryWaiters.splice(0)) waiter(query);
         return ok({
           query,
           exited: query.processExit.promise,
@@ -81,6 +86,9 @@ export class ComposedClaudeFixture {
   }
   attach() {
     return this.agent.attachSession(this.state, this.history, this.configDir, "commit-0");
+  }
+  nextQuery(): Promise<ScheduledClaudeQuery> {
+    return new Promise((resolve) => this.queryWaiters.push(resolve));
   }
   get query(): ScheduledClaudeQuery {
     const value = this.queries.at(-1);
@@ -159,11 +167,16 @@ export class ScheduledClaudeQuery implements ClaudeQuery {
     }
     return ok(undefined);
   }
-  interrupt = async () => undefined;
-  accountInfo = async () => ({
-    apiProvider: "firstParty" as const,
-    tokenSource: "CLAUDE_CODE_OAUTH_TOKEN" as const,
-  });
+  accountReady: Promise<void> = Promise.resolve();
+  interruptReceipt: Awaited<ReturnType<ClaudeQuery["interrupt"]>>;
+  interrupt = async () => this.interruptReceipt;
+  accountInfo = async () => {
+    await this.accountReady;
+    return {
+      apiProvider: "firstParty" as const,
+      tokenSource: "CLAUDE_CODE_OAUTH_TOKEN" as const,
+    };
+  };
   supportedModels = async () => [
     {
       value: "opus",

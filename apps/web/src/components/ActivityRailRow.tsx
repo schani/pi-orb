@@ -1,7 +1,7 @@
 import type { ReactNode, Ref } from "react";
 
 interface ActivityRailRowProps {
-  label: string;
+  label: ReactNode;
   headerRef?: Ref<HTMLElement>;
   headline?: ReactNode;
   metric?: ReactNode;

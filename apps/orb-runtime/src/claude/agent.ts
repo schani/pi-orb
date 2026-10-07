@@ -12,6 +12,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import {
   type AgentSettingsEvent,
+  type ClaudeRecoveryProof,
   type CommittedDisplayDetail,
   type DeliverOrbMessageResponse,
   type JsonObject,
@@ -41,7 +42,7 @@ import { prepareCheckout } from "../domain/checkout.ts";
 import { retiredReasoningAliases } from "../domain/display-aliases.ts";
 import { readLiveDisplayDetail } from "../domain/display-detail.ts";
 import { configurePersistentHome } from "../domain/home.ts";
-import type { DetailError, OrbAgent, SnapshotError } from "../domain/orb-agent.ts";
+import type { CompactError, DetailError, OrbAgent, SnapshotError } from "../domain/orb-agent.ts";
 import type { AgentGateView } from "../domain/requests.ts";
 import { configurePersistentRust } from "../domain/rust.ts";
 import type { HarnessSnapshot, LiveOperationView } from "../domain/types.ts";
@@ -65,7 +66,14 @@ import { readClaudeRepositoryInstructions } from "./instructions.ts";
 import { type ClaudeMcpRuntime, createClaudeMcp } from "./mcp.ts";
 import { DEFAULT_CLAUDE_MODEL, findClaudeModel, latestClaudeModels } from "./models.ts";
 import { findNativeClaudeTranscript } from "./native-path.ts";
-import { qualifyClaudeRestart } from "./restore.ts";
+import {
+  type ClaudeHandoffTerminal,
+  claudeRecoveryEpisode,
+  type HandoffRecoveryError,
+  qualifyClaudeRestart,
+  reconcileClaudeComputeOwnership,
+  reconcileClaudeHandoffs,
+} from "./restore.ts";
 
 const NativeStateSchema = Type.Object({
   id: Type.String({ pattern: "^[a-f0-9-]{36}$" }),
@@ -97,7 +105,29 @@ const NativeStateSchema = Type.Object({
   ownedTasks: Type.Optional(Type.Record(Type.String(), Type.String())),
   ownedBackgroundTasks: Type.Optional(Type.Record(Type.String(), Type.String())),
   pendingHandoffs: Type.Optional(Type.Record(Type.String(), Type.String())),
+  handoffTerminals: Type.Optional(
+    Type.Record(
+      Type.String(),
+      Type.Object({
+        queryId: Type.String(),
+        operationId: Type.Union([Type.String(), Type.Null()]),
+        startedId: Type.String(),
+        notificationId: Type.String(),
+        sessionId: Type.String(),
+        status: Type.Union([
+          Type.Literal("completed"),
+          Type.Literal("failed"),
+          Type.Literal("stopped"),
+        ]),
+        phase: Type.Literal("closing"),
+        lifetime: Type.String(),
+      }),
+    ),
+  ),
   guardLifetime: Type.Optional(Type.String()),
+  compaction: Type.Optional(
+    Type.Object({ operationId: Type.String(), commandUuid: Type.String() }),
+  ),
 });
 
 export interface ClaudeOrbAgentOptions {
@@ -108,6 +138,7 @@ export interface ClaudeOrbAgentOptions {
   readonly broker: BrokerEnv | null;
   readonly previewHost?: string | null;
   readonly incarnation?: string;
+  readonly claudeRecoveryProof?: ClaudeRecoveryProof | undefined;
   readonly testLaunchFailure?: boolean;
   readonly sdkFactory?: (
     input: AsyncIterable<SDKUserMessage>,
@@ -140,7 +171,17 @@ interface Delivery {
   system?: OrbMessageSystem;
   submitted: boolean;
 }
+interface ManualCompaction {
+  readonly operationId: string;
+  readonly commandUuid: string;
+  readonly afterId: string | null;
+  readonly startIndex: number;
+  readonly initialized: Promise<void>;
+  readonly finish: (result: Result<void, CompactError>) => void;
+}
+
 export interface NativeState {
+  compaction?: { operationId: string; commandUuid: string };
   id: string;
   timestamp: string;
   cwd: string;
@@ -151,6 +192,7 @@ export interface NativeState {
   ownedTasks?: Record<string, string>;
   ownedBackgroundTasks?: Record<string, string>;
   pendingHandoffs?: Record<string, string>;
+  handoffTerminals?: Record<string, ClaudeHandoffTerminal>;
   guardLifetime?: string;
 }
 class InputQueue implements AsyncIterable<SDKUserMessage> {
@@ -200,6 +242,13 @@ export class ClaudeOrbAgent implements OrbAgent {
   private requestShutdown: (() => Result<void, { message: string }>) | null = null;
   private readonly hookCallbacks = new Set<Promise<unknown>>();
   private closing: Promise<void> | null = null;
+  private queryId = "";
+  private observeContinuation = false;
+  private continuationEdges = 0;
+  private continuationSuppressed = 0;
+  private inventoryObservation = "";
+  private decisionObservation = "";
+  private readonly closingTaskStarts = new Map<string, { uuid: string; sessionId: string }>();
   private token = "";
   private generation = 0;
   private configDir = "";
@@ -210,6 +259,9 @@ export class ClaudeOrbAgent implements OrbAgent {
   private accepting = true;
   private configuring = false;
   private submissionEpoch = 0;
+  private compaction: ManualCompaction | null = null;
+  private queryAbort: AbortController | null = null;
+  private drainingOperation: Promise<void> | null = null;
   private settings: AgentSettingsEvent | null = null;
   private nativeModels: ModelInfo[] = [];
   private outcome: "completed" | "aborted" | "failed" = "completed";
@@ -262,11 +314,26 @@ export class ClaudeOrbAgent implements OrbAgent {
       this.settings = { ...this.settings, writable: false };
       this.event(this.settings);
     }
+    if (this.compaction !== null && this.health.status !== "failed")
+      this.emit({
+        v: 1,
+        type: "server.error",
+        at: new Date().toISOString(),
+        error: {
+          code: "internal",
+          message: "Context compaction could not be safely completed; restart required.",
+          retryable: false,
+        },
+      });
+    this.compaction?.finish(err({ code: "internal", message }));
     this.health = {
       v: 1,
       orbId: this.options.orbId,
       runtimeInstanceId: this.runtimeInstanceId,
       status: "failed",
+      ...(code === "claude_child_recovery_required" && this.state !== null
+        ? { recovery: { episode: claudeRecoveryEpisode(this.state) } }
+        : {}),
       error: { code, message, retryable },
     };
   }
@@ -466,7 +533,22 @@ export class ClaudeOrbAgent implements OrbAgent {
       this.fail("history_unavailable", restored.error.message);
       return;
     }
-    const recovered = qualifyClaudeRestart(this.state, this.history.view, this.lifetime());
+    const handoffs = this.reconcileHandoffs();
+    if (handoffs.isErr()) {
+      this.fail("claude_handoff_recovery_failed", handoffs.error.message);
+      return;
+    }
+    const recovered = qualifyClaudeRestart(
+      this.state,
+      this.history.view,
+      this.lifetime(),
+      this.options.claudeRecoveryProof === undefined
+        ? undefined
+        : {
+            proof: this.options.claudeRecoveryProof,
+            incarnation: Number(this.options.incarnation ?? "0"),
+          },
+    );
     if (recovered.isErr()) {
       this.fail(recovered.error.code, recovered.error.message);
       return;
@@ -486,26 +568,32 @@ export class ClaudeOrbAgent implements OrbAgent {
       }
     }
     if (recovered.value.orphanedChildren.length > 0) {
-      const recorded = this.platformEvent(
-        "claude.children_interrupted",
-        "Previous native background work ended with its compute.",
-        {
-          children: recovered.value.orphanedChildren,
-          previousLifetime: this.state.guardLifetime ?? "",
-          lifetime: this.lifetime(),
-        },
+      const recorded = reconcileClaudeComputeOwnership(
+        this.state,
+        this.history.view,
+        this.lifetime(),
+        (id, overflow) =>
+          this.platformEvent(
+            "claude.children_interrupted",
+            "Previous native background work ended with its compute.",
+            overflow,
+            id,
+          ),
+        () => this.saveState(),
+        this.options.claudeRecoveryProof === undefined
+          ? undefined
+          : {
+              proof: this.options.claudeRecoveryProof,
+              incarnation: Number(this.options.incarnation ?? "0"),
+            },
       );
       if (recorded.isErr()) {
-        this.fail("claude_recovery_publication_failed", recorded.error.message);
-        return;
-      }
-      this.state.ownedChildren = {};
-      this.state.ownedTasks = {};
-      this.state.ownedBackgroundTasks = {};
-      this.state.pendingHandoffs = {};
-      const saved = this.saveState();
-      if (saved.isErr()) {
-        this.fail("claude_recovery_persistence_failed", saved.error.message);
+        this.fail(
+          recorded.error.stage === "publication"
+            ? "claude_recovery_publication_failed"
+            : "claude_recovery_persistence_failed",
+          recorded.error.message,
+        );
         return;
       }
     }
@@ -586,6 +674,29 @@ export class ClaudeOrbAgent implements OrbAgent {
       if (recorded.isErr()) this.fail("claude_metadata_publication_failed", recorded.error.message);
       return err({ message });
     }
+    const retained = this.state?.compaction;
+    if (retained !== undefined) {
+      const settled = this.history?.view.some(
+        (record) =>
+          record.type === "event" &&
+          (record.compaction?.operationId === retained.operationId ||
+            (record.eventType === "claude.operation_finished" &&
+              record.overflow.operationId === retained.operationId)),
+      );
+      if (!settled) {
+        const recorded = this.compactionOutcome(retained.operationId, "aborted");
+        if (recorded.isErr()) {
+          this.fail("claude_compaction_recovery_failed", recorded.error.message);
+          return err(recorded.error);
+        }
+      }
+      if (this.state !== null) delete this.state.compaction;
+      const saved = this.saveState();
+      if (saved.isErr()) {
+        this.fail("claude_compaction_recovery_failed", saved.error.message);
+        return err(saved.error);
+      }
+    }
     return ok(undefined);
   }
   private releaseMetadata(): void {
@@ -620,6 +731,8 @@ export class ClaudeOrbAgent implements OrbAgent {
   private createQuery(): ResultAsync<void, { message: string }> {
     const progress = { stage: "preparation" };
     return this.initializeQuery(progress).orElse(() => {
+      if (this.compaction !== null && this.outcome === "aborted")
+        return errAsync({ message: "Context compaction cancelled during initialization." });
       const code =
         this.health.status === "failed" ? this.health.error.code : "claude_initialization_failed";
       const message =
@@ -639,6 +752,8 @@ export class ClaudeOrbAgent implements OrbAgent {
     });
   }
   private initializeQuery(progress: { stage: string }): ResultAsync<void, { message: string }> {
+    if (this.compaction !== null && this.outcome === "aborted")
+      return errAsync({ message: "Context compaction cancelled before initialization." });
     this.queryReady = false;
     this.closing = null;
     const state = this.state;
@@ -684,6 +799,12 @@ export class ClaudeOrbAgent implements OrbAgent {
     }
     const input = new InputQueue();
     this.input = input;
+    this.queryId = randomUUID();
+    const queryId = this.queryId;
+    this.observeContinuation = false;
+    this.continuationEdges = 0;
+    this.continuationSuppressed = 0;
+    this.closingTaskStarts.clear();
     let resolveExit: () => void = () => undefined;
     let resolveStdout: (result: Result<void, { message: string }>) => void = () => undefined;
     const exited = new Promise<void>((resolve) => {
@@ -692,7 +813,9 @@ export class ClaudeOrbAgent implements OrbAgent {
     const stdoutEnded = new Promise<Result<void, { message: string }>>((resolve) => {
       resolveStdout = resolve;
     });
+    this.queryAbort = new AbortController();
     const options: Options = {
+      abortController: this.queryAbort,
       ...(this.mcp === null ? {} : { mcpServers: this.mcp.mcpServers }),
       cwd: state.cwd,
       env: claudeChildEnvironment(process.env, this.token, this.configDir),
@@ -732,6 +855,13 @@ export class ClaudeOrbAgent implements OrbAgent {
         });
         child.once("exit", resolveExit);
         child.once("error", () => {
+          if (
+            this.compaction !== null &&
+            this.outcome === "aborted" &&
+            this.queryAbort?.signal.aborted
+          ) {
+            return;
+          }
           this.fail("claude_process_failed", "Claude subprocess could not start.", true);
           resolveExit();
           resolveStdout(err({ message: "Claude subprocess could not start." }));
@@ -748,6 +878,49 @@ export class ClaudeOrbAgent implements OrbAgent {
         return child;
       },
       hooks: {
+        PreToolUse: [
+          {
+            matcher: "Agent",
+            hooks: [
+              async (input) => {
+                if (
+                  input.hook_event_name !== "PreToolUse" ||
+                  input.tool_name !== "Agent" ||
+                  !input.agent_id
+                )
+                  return {};
+                const denied = {
+                  hookSpecificOutput: {
+                    hookEventName: "PreToolUse" as const,
+                    permissionDecision: "deny" as const,
+                    permissionDecisionReason:
+                      "Delegate from the root; complete this assignment directly.",
+                  },
+                };
+                if (this.queryId !== queryId || this.activity.operationId === null) return denied;
+                const recorded = this.platformEvent(
+                  "claude.nested_delegation_denied",
+                  "Nested Claude delegation denied: headless parent continuation is unsupported.",
+                  {
+                    sessionId: input.session_id,
+                    queryId: this.queryId,
+                    operationId: this.activity.operationId,
+                    agentId: input.agent_id,
+                    toolUseId: input.tool_use_id,
+                  },
+                  `claude.nested-delegation:${queryId}:${input.tool_use_id}`,
+                  false,
+                );
+                if (recorded.isErr()) {
+                  this.fail("history_unavailable", recorded.error.message);
+                  return denied;
+                }
+                this.observeContinuation = true;
+                return denied;
+              },
+            ],
+          },
+        ],
         SubagentStart: [
           {
             hooks: [
@@ -848,7 +1021,7 @@ export class ClaudeOrbAgent implements OrbAgent {
           };
           this.event(this.settings);
         }
-        this.queryReady = true;
+        this.queryReady = this.closing === null;
         return ok(undefined);
       },
       () => ({ message: "Claude SDK initialization failed." }),
@@ -865,11 +1038,18 @@ export class ClaudeOrbAgent implements OrbAgent {
       },
       () => ({ message: "Claude SDK stream failed; retained native state requires inspection." }),
     )();
-    if (result.isErr()) {
+    if (
+      result.isErr() &&
+      this.compaction !== null &&
+      this.outcome === "aborted" &&
+      this.queryAbort?.signal.aborted
+    ) {
+      this.activity.rootFinished();
+    } else if (result.isErr()) {
       this.outcome = "failed";
       this.operationError = result.error.message;
       this.fail("claude_stream_failed", result.error.message, true);
-    } else if (this.closing === null) {
+    } else if (this.closing === null && !(this.compaction !== null && this.outcome === "aborted")) {
       this.fail(
         "claude_stream_ended",
         "Claude exited unexpectedly; the retained session requires inspection.",
@@ -897,23 +1077,50 @@ export class ClaudeOrbAgent implements OrbAgent {
             ambient: task.ambient === true,
           })),
         );
-      if (message.subtype === "task_started")
+      if (message.subtype === "task_started") {
+        if (this.state !== null) delete this.state.handoffTerminals?.[message.task_id];
         this.activity.taskStart(message.task_id, message.description, message.ambient === true);
+        if (this.closing !== null && message.ambient !== true)
+          this.closingTaskStarts.set(message.task_id, {
+            uuid: message.uuid,
+            sessionId: message.session_id,
+          });
+      }
       if (message.subtype === "task_notification") {
+        const closingStart = this.closingTaskStarts.get(message.task_id);
         if (this.outcome !== "aborted" && this.activity.hasTask(message.task_id)) {
           this.activity.taskHandoff(message.task_id, "Awaiting native result handoff");
-          if (this.state !== null)
+          if (this.state !== null) {
             this.state.pendingHandoffs = {
               ...this.state.pendingHandoffs,
               [message.task_id]: "Awaiting native result handoff",
             };
+            if (
+              this.closing !== null &&
+              this.activity.hasEdgeTask(message.task_id) &&
+              closingStart?.sessionId === message.session_id
+            ) {
+              this.state.handoffTerminals ??= {};
+              this.state.handoffTerminals[message.task_id] = {
+                queryId: this.queryId,
+                operationId: this.activity.operationId,
+                startedId: closingStart.uuid,
+                notificationId: message.uuid,
+                sessionId: message.session_id,
+                status: message.status,
+                phase: "closing",
+                lifetime: this.lifetime(),
+              };
+            }
+          }
         }
+        this.closingTaskStarts.delete(message.task_id);
         this.activity.taskEnd(message.task_id);
-        this.activity.childTerminal(message.task_id);
-        if (this.state !== null) {
-          delete this.state.ownedChildren?.[message.task_id];
-          delete this.state.ownedTasks?.[message.task_id];
+        if (this.closing === null) {
+          this.activity.childTerminal(message.task_id);
+          if (this.state !== null) delete this.state.ownedChildren?.[message.task_id];
         }
+        if (this.state !== null) delete this.state.ownedTasks?.[message.task_id];
       }
       if (
         this.state !== null &&
@@ -939,9 +1146,22 @@ export class ClaudeOrbAgent implements OrbAgent {
       if (message.subtype === "hook_started") this.activity.hookStart(message.hook_id);
       if (message.subtype === "hook_response") this.activity.hookEnd(message.hook_id);
       if (message.subtype === "status" && message.status !== null) this.activity.rootStarted();
+      if (
+        this.compaction !== null &&
+        message.subtype === "status" &&
+        message.compact_result === "failed" &&
+        this.outcome !== "aborted"
+      ) {
+        this.outcome = "failed";
+        this.operationError = "Context compaction failed.";
+      }
       this.publishChildren();
     }
-    if (message.type === "assistant" && message.parent_tool_use_id === null) {
+    if (
+      this.compaction === null &&
+      message.type === "assistant" &&
+      message.parent_tool_use_id === null
+    ) {
       this.activity.rootStarted();
       this.messageBlocks.set(message.uuid, [...this.streamBlocks.values()]);
       this.streamBlocks.clear();
@@ -979,6 +1199,7 @@ export class ClaudeOrbAgent implements OrbAgent {
         }
     }
     if (
+      this.compaction === null &&
       message.type === "stream_event" &&
       message.parent_tool_use_id === null &&
       this.activity.operationId !== null
@@ -1057,15 +1278,57 @@ export class ClaudeOrbAgent implements OrbAgent {
       }
     }
     if (message.type === "result") {
-      this.activity.rootFinished();
-      if (this.state !== null) {
+      if (this.closing === null) this.activity.rootFinished();
+      this.continuationObservation("root_result", {
+        subtype: message.subtype,
+        resultId: message.uuid ?? null,
+        nativeSessionId: message.session_id ?? null,
+        closing: this.closing !== null,
+        pendingHandoffs: Object.keys(this.state?.pendingHandoffs ?? {}).length,
+        ownedChildren: Object.keys(this.state?.ownedChildren ?? {}).length,
+        ownedTasks: Object.keys(this.state?.ownedTasks ?? {}).length,
+        ownedBackgroundTasks: Object.keys(this.state?.ownedBackgroundTasks ?? {}).length,
+      });
+      if (this.state !== null && this.closing === null) {
         this.state.pendingHandoffs = {};
+        this.state.handoffTerminals = {};
         const saved = this.saveState();
         if (saved.isErr()) this.fail("claude_handoff_guard_failed", saved.error.message);
       }
-      if (message.is_error) {
+      if (message.is_error && this.outcome !== "aborted") {
         this.outcome = "failed";
         this.operationError = "Claude turn failed.";
+      }
+    }
+    if (message.type === "system" && message.subtype === "background_tasks_changed") {
+      const tasks = message.tasks
+        .map((task) => ({ taskId: task.task_id, ambient: task.ambient === true }))
+        .sort((a, b) => a.taskId.localeCompare(b.taskId));
+      const signature = JSON.stringify([this.queryId, tasks]);
+      if (signature !== this.inventoryObservation) {
+        this.inventoryObservation = signature;
+        this.continuationObservation("inventory", { nativeSessionId: message.session_id, tasks });
+      }
+    }
+    if (
+      message.type === "system" &&
+      (message.subtype === "task_started" || message.subtype === "task_notification")
+    ) {
+      this.continuationObservation("task_edge", {
+        edge: message.subtype,
+        taskId: message.task_id,
+        nativeSessionId: message.session_id,
+        eventId: message.uuid,
+        ...(message.subtype === "task_notification" ? { status: message.status } : {}),
+      });
+    }
+    if (this.activity.operationId !== null) {
+      const holds = this.activity.drainHolds;
+      const decision = { closing: this.closing !== null, canDrain: this.activity.canDrain, holds };
+      const signature = JSON.stringify([this.queryId, this.activity.operationId, decision]);
+      if (signature !== this.decisionObservation) {
+        this.decisionObservation = signature;
+        this.continuationObservation("decision", decision);
       }
     }
     const flushed = this.flushHistory();
@@ -1093,7 +1356,12 @@ export class ClaudeOrbAgent implements OrbAgent {
       Object.keys(this.state?.pendingHandoffs ?? {}).length > 0
     );
   }
-  private async drainOperation(): Promise<void> {
+  private drainOperation(): Promise<void> {
+    if (this.drainingOperation !== null) return this.drainingOperation;
+    this.drainingOperation = this.drainOperationOwned();
+    return this.drainingOperation;
+  }
+  private async drainOperationOwned(): Promise<void> {
     const operationId = this.activity.operationId;
     if (operationId === null) return;
     this.activity.beginDrain();
@@ -1154,16 +1422,44 @@ export class ClaudeOrbAgent implements OrbAgent {
       return;
     }
     if (this.activity.operationId !== operationId) return;
+    const compaction = this.compaction;
+    if (compaction !== null) {
+      const summary = this.history?.view
+        .slice(compaction.startIndex)
+        .find((record) => record.type === "compaction");
+      if (this.outcome === "completed" && summary === undefined) {
+        this.fail(
+          "claude_compaction_summary_missing",
+          "Claude exited without a durable compaction summary; inspect the retained session.",
+        );
+        return;
+      }
+      if (this.outcome !== "completed") {
+        const recorded = this.compactionOutcome(compaction.operationId, this.outcome);
+        if (recorded.isErr()) {
+          this.fail("claude_compaction_persistence_failed", recorded.error.message);
+          return;
+        }
+      }
+    }
     const terminal = this.platformEvent(
       "claude.operation_finished",
       this.operationError ?? `Claude operation ${this.outcome}.`,
       { operationId, outcome: this.outcome },
       `claude.operation:${operationId}`,
-      this.outcome === "failed",
+      compaction === null && this.outcome === "failed",
     );
     if (terminal.isErr()) {
       this.fail("claude_terminal_persistence_failed", terminal.error.message);
       return;
+    }
+    if (compaction !== null && this.state !== null) {
+      delete this.state.compaction;
+      const saved = this.saveState();
+      if (saved.isErr()) {
+        this.fail("claude_compaction_persistence_failed", saved.error.message);
+        return;
+      }
     }
     this.activity.processExited(true);
     this.blocks.clear();
@@ -1175,6 +1471,15 @@ export class ClaudeOrbAgent implements OrbAgent {
       ...(this.operationError === undefined ? {} : { message: this.operationError }),
     });
     this.event({ type: "status", activity: "idle" });
+    this.compaction = null;
+    compaction?.finish(
+      this.outcome === "completed"
+        ? ok(undefined)
+        : err({
+            code: "internal",
+            message: this.operationError ?? "Context compaction cancelled.",
+          }),
+    );
   }
   closeExtensions(): Promise<void> {
     this.queryReady = false;
@@ -1182,6 +1487,8 @@ export class ClaudeOrbAgent implements OrbAgent {
     const sdk = this.sdk;
     // Start on the next microtask so every native edge sees the closing guard first.
     this.closing = Promise.resolve().then(async () => {
+      if (this.activity.operationId !== null)
+        this.continuationObservation("drain_started", { holds: this.activity.drainHolds });
       this.input?.close();
       const requested = this.requestShutdown?.();
       if (requested?.isErr()) this.cleanupFailed("claude_shutdown_failed");
@@ -1197,6 +1504,16 @@ export class ClaudeOrbAgent implements OrbAgent {
         () => ({ message: "Cannot close Claude SDK after native drain." }),
       )();
       if (closed.isErr()) this.cleanupFailed("claude_shutdown_failed");
+      if (this.activity.operationId !== null)
+        this.continuationObservation("drain_finished", {
+          directProcessExited: true,
+          stdoutEOF: stdout.isOk(),
+          iteratorEnded: true,
+          hooksDrained: this.hookCallbacks.size === 0,
+          historyCommitted: flushed.isOk(),
+          sdkClosed: closed.isOk(),
+          holds: this.activity.drainHolds,
+        });
       const mcpClosed = await this.mcp?.close();
       if (mcpClosed?.isErr()) this.cleanupFailed("claude_mcp_cleanup_failed");
       if (mcpClosed?.isErr() !== true) this.mcp = null;
@@ -1206,12 +1523,40 @@ export class ClaudeOrbAgent implements OrbAgent {
         requested?.isErr() !== true &&
         closed.isOk()
       ) {
+        const handoffs = this.reconcileHandoffs();
+        if (handoffs.isErr()) {
+          this.fail("claude_handoff_recovery_failed", handoffs.error.message);
+          return;
+        }
+        if (handoffs.value.length > 0 && !this.configuring && this.outcome === "completed") {
+          this.outcome = "aborted";
+          this.operationError = "Native task continuation was interrupted during query shutdown.";
+        }
         this.sdk = null;
         this.input = null;
         this.requestShutdown = null;
       }
     });
     return this.closing;
+  }
+  private reconcileHandoffs(): Result<string[], HandoffRecoveryError> {
+    if (this.state === null || this.history === null) return ok([]);
+    return reconcileClaudeHandoffs(
+      this.state,
+      this.history.view,
+      this.lifetime(),
+      (id, overflow) =>
+        this.platformEvent(
+          "claude.handoff_interrupted",
+          "Native task ended during shutdown; its continuation was interrupted.",
+          overflow,
+          id,
+        ),
+      () => this.saveState(),
+    ).map((ids) => {
+      for (const id of ids) this.activity.handoffInterrupted(id);
+      return ids;
+    });
   }
   private cleanupFailed(code: string): void {
     const message = "Claude cleanup failed; inspect the retained session before recovery.";
@@ -1303,6 +1648,9 @@ export class ClaudeOrbAgent implements OrbAgent {
       orbId: this.options.orbId,
       runtimeInstanceId: this.runtimeInstanceId,
       activity: this.activity.busy || this.hasOwnedWork() ? "busy" : "idle",
+      ...(this.compaction === null
+        ? {}
+        : { work: "compaction" as const, compactionAfterId: this.compaction.afterId }),
       session: {
         id: this.state.id,
         timestamp: this.state.timestamp,
@@ -1402,6 +1750,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.outcome = "completed";
     this.operationError = undefined;
     this.closing = null;
+    this.drainingOperation = null;
     this.event({ type: "operation_started", operationId });
     this.event({ type: "status", activity: "busy", operationId });
     return this.startQuery()
@@ -1529,11 +1878,14 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.activity.cancel();
     this.outcome = "aborted";
     this.publishChildren();
+    const compaction = this.compaction;
+    if (compaction !== null) this.queryAbort?.abort();
     const sdk = this.sdk;
-    if (sdk === null) return ResultAsync.fromSafePromise(Promise.resolve());
+    if (sdk === null && compaction === null) return ResultAsync.fromSafePromise(Promise.resolve());
     return ResultAsync.fromThrowable(
       async () => {
-        await sdk.interrupt();
+        await compaction?.initialized;
+        if (compaction === null) await this.sdk?.interrupt();
         this.activity.rootFinished();
         await this.drainOperation();
         return this.health.status === "failed"
@@ -1542,6 +1894,143 @@ export class ClaudeOrbAgent implements OrbAgent {
       },
       () => ({ message: "Claude interrupt failed; cleanup remains busy." }),
     )().andThen((result) => result);
+  }
+  canCompact(): Result<void, { code: "busy" | "unsupported"; message: string }> {
+    if (
+      !this.accepting ||
+      this.health.status !== "ready" ||
+      this.state === null ||
+      this.history === null
+    )
+      return err({ code: "unsupported", message: "Claude compaction is unavailable." });
+    if (this.activity.busy || this.hasOwnedWork() || this.configuring)
+      return err({ code: "busy", message: "Wait for the current operation to finish." });
+    return ok(undefined);
+  }
+  compact(
+    customInstructions: string | undefined,
+    operationId: string,
+  ): ResultAsync<void, CompactError> {
+    const available = this.canCompact();
+    if (available.isErr()) return errAsync(available.error);
+    if (!this.activity.claim(operationId))
+      return errAsync({ code: "busy", message: "Wait for the current operation to finish." });
+    const epoch = ++this.submissionEpoch;
+    let finish: ManualCompaction["finish"] = () => undefined;
+    const completed = new Promise<Result<void, CompactError>>((resolve) => {
+      finish = resolve;
+    });
+    let initializeFinished: () => void = () => undefined;
+    const initialized = new Promise<void>((resolve) => {
+      initializeFinished = resolve;
+    });
+    const commandUuid = randomUUID();
+    const afterId =
+      this.history?.view
+        .slice(0, this.published)
+        .findLast(
+          (record) =>
+            record.type !== "event" ||
+            record.custom?.display === true ||
+            record.compaction !== undefined,
+        )?.id ?? null;
+    this.compaction = {
+      operationId,
+      commandUuid,
+      afterId,
+      startIndex: this.history?.view.length ?? 0,
+      initialized,
+      finish,
+    };
+    this.outcome = "completed";
+    this.operationError = undefined;
+    this.closing = null;
+    this.drainingOperation = null;
+    this.event({ type: "operation_started", operationId });
+    this.event({
+      type: "status",
+      activity: "busy",
+      operationId,
+      work: "compaction",
+      compactionAfterId: afterId,
+    });
+    void this.startQuery().then((started) => {
+      initializeFinished();
+      if (epoch !== this.submissionEpoch || this.outcome === "aborted") return;
+      const state = this.state,
+        history = this.history,
+        input = this.input;
+      if (
+        started.isErr() ||
+        state === null ||
+        history === null ||
+        input === null ||
+        this.closing !== null
+      ) {
+        this.outcome = "failed";
+        this.operationError = "Context compaction could not start.";
+        this.activity.rootFinished();
+        void this.drainOperation();
+        return;
+      }
+      const correlated = history.correlate(commandUuid, {
+        messageIds: [],
+        operationId,
+        compaction: true,
+      });
+      if (correlated.isErr()) {
+        this.fail("claude_compaction_persistence_failed", correlated.error.message);
+        return;
+      }
+      state.compaction = { operationId, commandUuid };
+      const saved = this.saveState();
+      if (saved.isErr()) {
+        this.fail("claude_compaction_persistence_failed", saved.error.message);
+        return;
+      }
+      input.push({
+        type: "user",
+        uuid: commandUuid,
+        session_id: state.id,
+        parent_tool_use_id: null,
+        message: {
+          role: "user",
+          content: customInstructions ? `/compact ${customInstructions}` : "/compact",
+        },
+      });
+    });
+    return ResultAsync.fromSafePromise(completed).andThen((result) => result);
+  }
+  private compactionOutcome(
+    operationId: string,
+    outcome: "failed" | "aborted",
+  ): Result<void, { message: string }> {
+    if (this.history === null) return err({ message: "Claude history unavailable." });
+    return this.history
+      .appendPlatform({
+        id: `claude.compaction:${operationId}`,
+        parentId: this.history.view.at(-1)?.id ?? null,
+        timestamp: new Date().toISOString(),
+        type: "event",
+        eventType: "agent.compaction",
+        content: [
+          {
+            type: "text",
+            text:
+              outcome === "aborted"
+                ? "Context compaction cancelled."
+                : "Context compaction failed.",
+          },
+        ],
+        compaction: {
+          operationId,
+          outcome,
+          message:
+            outcome === "aborted" ? "Context compaction cancelled." : "Context compaction failed.",
+        },
+        overflow: {},
+      })
+      .andThen(() => this.flushHistory());
   }
   triggerAutoName(_content: readonly MessageInputBlock[]): void {}
   changeSettings(
@@ -1649,6 +2138,28 @@ export class ClaudeOrbAgent implements OrbAgent {
           return err(error);
         });
       });
+  }
+  private continuationObservation(edge: string, fields: JsonObject): void {
+    if (this.activity.operationId === null || !this.observeContinuation) return;
+    if (edge !== "drain_finished" && this.continuationEdges >= 32) {
+      this.continuationSuppressed++;
+      return;
+    }
+    this.continuationEdges++;
+    const recorded = this.platformEvent(
+      `claude.continuation.${edge}`,
+      "Claude continuation ownership changed.",
+      {
+        sessionId: this.state?.id ?? null,
+        queryId: this.queryId,
+        operationId: this.activity.operationId,
+        ...fields,
+        ...(edge === "drain_finished" ? { suppressedEdges: this.continuationSuppressed } : {}),
+      },
+      randomUUID(),
+      false,
+    );
+    if (recorded.isErr()) this.fail("history_unavailable", recorded.error.message);
   }
   private platformEvent(
     eventType: string,

@@ -1,5 +1,16 @@
 # Orb lifecycle
 
+## Claude uncertain-worker recovery
+
+**Decided and implemented locally — 2026-10-06; undeployed.** An answered failed pull/delivery triggers a typed health inspection; reachability is not readiness. Only Claude's exact `claude_child_recovery_required` plus a valid opaque ownership episode authorizes one automatic whole-compute replacement. Other failed health remains terminal; local disposition I/O failure grants no recovery authority.
+
+A state-version CAS claims the episode, enters `starting`, revokes the old runtime bearer and creates the existing incarnation-bounded discard intent. The retained `claude_recovery` JSON stores claimed episode identities and current disposed/replacement incarnations. Each episode can be claimed once across controller restarts and later episodes; repeated ownership fails visibly with exhaustion. Sleep and stale deployment generations decline the claim; Stop/archive/delete win through the existing state/version fences.
+
+Shared reconciliation verifies `discardCompute` before finalization marks proof verified and advances incarnation. Provisioning then carries only that episode's verified proof for its replacement incarnation. No normal Stop/history-drain barrier or same-VM restart is used. Docker/GCE advertise whole-compute disposal; an unsandboxed process group cannot prove escaped-worker loss and does not authorize this recovery. Queued inbox UUIDs wait for canonical receipt replication before redelivery.
+
+Lifecycle edges are `claude-recovery-claimed`, `claude-recovery-disposal-failed`, `claude-recovery-disposal-verified`, `claude-recovery-ready` and `claude-recovery-exhausted`, carrying reason, episode and incarnation only. Durable claim/error/proof columns reconstruct crash cuts. Healthy reconciliation is silent; interrupted work remains visible in native history. No automatic inference/tool replay or new UI status is introduced.
+
+
 Orb states, reconciliation rules, idle auto-stop, and the orphan-host sweep. The host operations these rules drive are specified in `docs/host-provider.md`.
 
 ## Decisions

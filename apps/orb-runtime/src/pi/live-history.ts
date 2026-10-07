@@ -35,6 +35,11 @@ export class LiveHistoryPublisher {
   ) => void;
   private readonly knownIds = new Set<string>();
   private flushScheduled = false;
+  private frontier: string | null = null;
+
+  get afterRecordId(): string | null {
+    return this.frontier;
+  }
 
   constructor(
     source: PiEntrySource,
@@ -46,7 +51,10 @@ export class LiveHistoryPublisher {
       const id = this.entryId(entry);
       if (id !== null) this.knownIds.add(id);
       const mapped = mapPiEntry(entry);
-      if (mapped.isOk()) this.project(mapped.value);
+      if (mapped.isOk()) {
+        this.project(mapped.value);
+        this.frontier = mapped.value.id;
+      }
     }
   }
 
@@ -88,6 +96,7 @@ export class LiveHistoryPublisher {
           ? entry.message
           : null;
       this.publish(mapped.value, sourceMessage, this.project(mapped.value));
+      this.frontier = mapped.value.id;
     }
     return ok(undefined);
   }

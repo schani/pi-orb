@@ -50,6 +50,7 @@ import { retiredReasoningAliases } from "../domain/display-aliases.ts";
 import { readLiveDisplayDetail, toolTextContent } from "../domain/display-detail.ts";
 import { gateUnflushedSnapshot } from "../domain/history.ts";
 import { configurePersistentHome } from "../domain/home.ts";
+import type { CompactError } from "../domain/orb-agent.ts";
 import type { AgentGateView } from "../domain/requests.ts";
 import { configurePersistentRust } from "../domain/rust.ts";
 import { type SubagentError, type SubagentRun, SubagentWork } from "../domain/subagent-work.ts";
@@ -90,6 +91,8 @@ import { createOrbResourceLoader } from "./resource-loader.ts";
 import { restoreSessionSettings, settingsFallbackMessage } from "./restore-settings.ts";
 import { sessionFlushed } from "./session-flush.ts";
 import { createPersistentSession, syncSessionFile } from "./settings-persistence.ts";
+import { StreamMonitor } from "./stream-monitor.ts";
+import { type StreamAudit, StreamTelemetry } from "./stream-telemetry.ts";
 import { interruptedSubagents } from "./subagent-recovery.ts";
 
 export interface PiOrbAgentOptions {
@@ -138,7 +141,16 @@ export interface SnapshotError {
  */
 export type PiSession = Pick<
   AgentSession,
-  "subscribe" | "sendUserMessage" | "sendCustomMessage" | "abort" | "isIdle"
+  | "subscribe"
+  | "sendUserMessage"
+  | "sendCustomMessage"
+  | "cancelQueuedCustomSteer"
+  | "abort"
+  | "isIdle"
+  | "compact"
+  | "abortCompaction"
+  | "waitForIdle"
+  | "pendingMessageCount"
 >;
 
 /** The `SessionManager` surface the adapter reads, narrowed for the same reason. */
@@ -189,6 +201,19 @@ export class PiOrbAgent {
   private session: PiSession | null = null;
   private shutdownExtensions: (() => Promise<void>) | null = null;
   private closingExtensions: Promise<void> | null = null;
+  private streamTelemetryError: "persistence_failed" | null = null;
+  private readonly streamTelemetry = new StreamTelemetry(Date.now, () => performance.now());
+  private readonly streamMonitor = new StreamMonitor(
+    this.streamTelemetry,
+    (edge) => {
+      if (this.persistStreamAudit(edge).isErr()) this.streamAuditFailed();
+    },
+    (tick) => {
+      const timer = setInterval(tick, 5_000);
+      timer.unref();
+      return () => clearInterval(timer);
+    },
+  );
   private liveHistory: LiveHistoryPublisher | null = null;
   private checkoutCommit: string | null = null;
   private executionId: string | null = null;
@@ -197,6 +222,8 @@ export class PiOrbAgent {
   private shuttingDown = false;
   private readonly idleStopFence: IdleStopFence;
   private activity: "idle" | "busy" = "idle";
+  private manualCompaction = false;
+  private compactionAfterId: string | null = null;
   /** This boot's interrupted-turn decision, when notable (docs/lifecycle.md). */
   private turnResume: RuntimeTurnResume | null = null;
   private operationId: string | null = null;
@@ -294,6 +321,12 @@ export class PiOrbAgent {
       activity: this.activity,
       ...(this.operationId !== null ? { operationId: this.operationId } : {}),
       ...(this.turnResume !== null ? { turnResume: this.turnResume } : {}),
+      ...(this.streamTelemetryError === null
+        ? {}
+        : { streamTelemetryError: this.streamTelemetryError }),
+      ...(this.streamTelemetry.snapshot().length > 0
+        ? { streams: this.streamTelemetry.snapshot() }
+        : {}),
       ...this.hookReport(),
     };
   }
@@ -305,6 +338,7 @@ export class PiOrbAgent {
   }
 
   closeExtensions(): Promise<void> {
+    this.streamMonitor.stop();
     this.closingExtensions ??= this.shutdownExtensions?.() ?? Promise.resolve();
     return this.closingExtensions;
   }
@@ -595,7 +629,9 @@ export class PiOrbAgent {
     // SSE keeps the first E2E deterministic; the fake refuses the WebSocket
     // transport (docs/PI-CODEX-E2E.md).
     const settingsManager =
-      mockOpenAi !== null ? SettingsManager.inMemory({ transport: "sse" }) : undefined;
+      mockOpenAi !== null
+        ? SettingsManager.inMemory({ transport: "sse", compaction: { keepRecentTokens: 1 } })
+        : undefined;
     // Optional tier-1 port exposure composes through the resource loader.
     const loaderResult = await createOrbResourceLoader({
       cwd: repoDir,
@@ -609,6 +645,13 @@ export class PiOrbAgent {
       mcp,
       mcpConfigs: catalog.value.servers,
       subagents: this,
+      streams: {
+        telemetry: this.streamTelemetry,
+        operationId: () => this.operationId,
+        rootSessionId: () => this.sessionManager?.getSessionId() ?? null,
+        audit: (edge) => this.persistStreamAudit(edge),
+        failed: () => this.streamAuditFailed(),
+      },
       personalInstructions: personalInstructions.value,
       projectInstructions: projectInstructions.value,
     });
@@ -821,6 +864,40 @@ export class PiOrbAgent {
       this.settingsController,
       bootContext.value.context,
     );
+    this.streamMonitor.start();
+    return ok(undefined);
+  }
+
+  private streamAuditFailed(): void {
+    if (this.streamTelemetryError !== null) return;
+    this.streamTelemetryError = "persistence_failed";
+    console.error("stream_telemetry:persistence_failed");
+    this.broadcast({
+      v: 1,
+      type: "server.error",
+      at: new Date().toISOString(),
+      error: {
+        code: "stream_telemetry_persistence_failed",
+        message: "Model stream diagnostics could not be persisted.",
+        retryable: false,
+      },
+    });
+  }
+
+  private persistStreamAudit(edge: StreamAudit): Result<void, { type: "stream_audit_failed" }> {
+    if (this.streamTelemetryError !== null) return err({ type: "stream_audit_failed" });
+    const saved = Result.fromThrowable(
+      () => {
+        const manager = this.sessionManager;
+        if (manager === null) return null;
+        manager.appendCustomEntry("pi-orb.stream-audit", edge);
+        return manager.getSessionFile();
+      },
+      () => ({ type: "stream_audit_failed" as const }),
+    )();
+    if (saved.isErr() || saved.value == null) return err({ type: "stream_audit_failed" });
+    if (syncSessionFile(saved.value).isErr()) return err({ type: "stream_audit_failed" });
+    if (this.liveHistory?.flushPersisted().isErr()) return err({ type: "stream_audit_failed" });
     return ok(undefined);
   }
 
@@ -1053,8 +1130,16 @@ export class PiOrbAgent {
     this.liveHistory?.observe(event.type);
 
     switch (event.type) {
+      case "compaction_start":
+        if (this.manualCompaction && this.operationOutcome === "aborted")
+          this.session?.abortCompaction();
+        break;
+      case "compaction_end":
+        if (this.manualCompaction && event.reason === "manual" && event.aborted)
+          this.operationOutcome = "aborted";
+        break;
       case "agent_start": {
-        if (this.idleStopPrepared || this.operationOutcome === "aborted") {
+        if (this.idleStopPrepared || this.manualCompaction || this.operationOutcome === "aborted") {
           const session = this.session;
           if (session !== null)
             void ResultAsync.fromThrowable(
@@ -1242,7 +1327,14 @@ export class PiOrbAgent {
     this.liveTools.clear();
     this.liveToolBodies.clear();
     this.broadcastEvent({ type: "operation_started", operationId });
-    this.broadcastEvent({ type: "status", activity: "busy", operationId });
+    this.broadcastEvent({
+      type: "status",
+      activity: "busy",
+      operationId,
+      ...(this.manualCompaction
+        ? { work: "compaction" as const, compactionAfterId: this.compactionAfterId }
+        : {}),
+    });
   }
 
   private finishAgentOperation(
@@ -1288,6 +1380,7 @@ export class PiOrbAgent {
     if (
       this.health.status !== "ready" ||
       this.idleStopPrepared ||
+      this.manualCompaction ||
       this.settingsController?.blocksInput ||
       this.operationOutcome === "aborted"
     )
@@ -1372,6 +1465,7 @@ export class PiOrbAgent {
       this.session === null ||
       !this.session.isIdle ||
       this.turnStart !== null ||
+      this.manualCompaction ||
       this.subagentWork.busy
     )
       return;
@@ -1498,6 +1592,9 @@ export class PiOrbAgent {
       records,
       headId: manager.getLeafId(),
       settings: this.settingsController?.view ?? null,
+      ...(this.manualCompaction
+        ? { work: "compaction" as const, compactionAfterId: this.compactionAfterId }
+        : {}),
     });
   }
 
@@ -1663,6 +1760,126 @@ export class PiOrbAgent {
       activeOperationId: this.operationId,
       configuring: this.settingsController?.blocksInput ?? false,
     };
+  }
+
+  canCompact(): Result<void, { code: "busy" | "unsupported"; message: string }> {
+    if (this.session === null || this.health.status !== "ready")
+      return err({ code: "unsupported", message: "Compaction requires a ready runtime." });
+    if (
+      this.idleStopPrepared ||
+      this.activity !== "idle" ||
+      this.turnStart !== null ||
+      this.manualCompaction ||
+      this.subagentWork.busy ||
+      this.settingsController?.blocksInput ||
+      !this.session.isIdle ||
+      this.session.pendingMessageCount > 0
+    )
+      return err({
+        code: "busy",
+        message: "Wait for the current operation to finish before compacting.",
+      });
+    return ok(undefined);
+  }
+
+  compact(
+    customInstructions: string | undefined,
+    operationId: string,
+  ): ResultAsync<void, CompactError> {
+    const admitted = this.canCompact();
+    const session = this.session;
+    if (admitted.isErr()) return errAsync(admitted.error);
+    if (session === null)
+      return errAsync({ code: "unsupported", message: "Session is unavailable." });
+    this.compactionAfterId = this.liveHistory?.afterRecordId ?? null;
+    this.manualCompaction = true;
+    this.startAgentOperation(operationId, null);
+    return ResultAsync.fromSafePromise(
+      this.runManualCompaction(session, customInstructions, operationId),
+    ).andThen((result) => result);
+  }
+
+  private async runManualCompaction(
+    session: PiSession,
+    customInstructions: string | undefined,
+    operationId: string,
+  ): Promise<Result<void, CompactError>> {
+    const compacted = await ResultAsync.fromThrowable(
+      () => session.compact(customInstructions),
+      (error): CompactError => ({
+        code: "internal",
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    )();
+    const settled = await ResultAsync.fromThrowable(
+      () => session.waitForIdle(),
+      (error): CompactError => ({
+        code: "internal",
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    )();
+    if (settled.isErr()) {
+      return this.manualCompactionFailed("compaction_drain_failed", settled.error);
+    }
+    if (this.operationOutcome === "aborted" || compacted.isErr()) {
+      const outcome = this.operationOutcome === "aborted" ? "aborted" : "failed";
+      const message =
+        outcome === "aborted"
+          ? "Context compaction cancelled."
+          : `Context compaction failed: ${compacted.isErr() ? compacted.error.message : "unknown failure"}`;
+      this.operationOutcome = outcome;
+      this.operationError = message;
+      const saved = Result.fromThrowable(
+        () =>
+          this.sessionManager?.appendCustomEntry("pi-orb.compaction-outcome", {
+            operationId,
+            outcome,
+            message,
+          }),
+        (): CompactError => ({ code: "internal", message: "Cannot persist compaction outcome." }),
+      )();
+      if (saved.isErr()) {
+        return this.manualCompactionFailed("compaction_persistence_failed", saved.error);
+      }
+    }
+    const sessionFile = Result.fromThrowable(
+      () => this.sessionManager?.getSessionFile(),
+      (): CompactError => ({ code: "internal", message: "Cannot read compaction session file." }),
+    )();
+    const durable = sessionFile.andThen((file) => (file ? syncSessionFile(file) : ok(undefined)));
+    const published = durable.isOk() ? this.liveHistory?.flushPersisted() : undefined;
+    if (durable.isErr() || published?.isErr()) {
+      const message = durable.isErr()
+        ? durable.error.message
+        : published?.isErr()
+          ? published.error.message
+          : "Compaction persistence failed.";
+      return this.manualCompactionFailed("compaction_persistence_failed", {
+        code: "internal",
+        message,
+      });
+    }
+    this.manualCompaction = false;
+    this.maybeFinishAgentOperation();
+    return compacted.map(() => undefined);
+  }
+
+  private manualCompactionFailed(
+    healthCode: "compaction_drain_failed" | "compaction_persistence_failed",
+    error: CompactError,
+  ): Result<void, CompactError> {
+    this.health = this.failed(healthCode, error.message, false);
+    this.broadcast({
+      v: 1,
+      type: "server.error",
+      at: new Date().toISOString(),
+      error: {
+        code: error.code,
+        message: "Context compaction could not be safely completed; restart required.",
+        retryable: false,
+      },
+    });
+    return err(error);
   }
 
   changeSettings(action: SettingsAction) {
@@ -1880,7 +2097,57 @@ export class PiOrbAgent {
       );
     }
     const pending = this.pendingInboxMessages.get(messageId);
-    if (pending !== undefined) {
+    let recoveredOperationId: string | undefined;
+    if (
+      pending?.delivery === "steer" &&
+      this.operationId === null &&
+      session.isIdle &&
+      !this.manualCompaction &&
+      !this.settingsController?.blocksInput
+    ) {
+      recoveredOperationId = randomUUID();
+      const recovery = Result.fromThrowable(
+        () => {
+          manager.appendCustomMessageEntry(
+            "pi-orb.inbox-recovery",
+            "Retrying queued inbox delivery.",
+            true,
+            {
+              batchId: messageId,
+              oldOperationId: pending.operationId,
+              newOperationId: recoveredOperationId,
+              disposition: "cancel-and-redeliver",
+            },
+          );
+          return manager.getSessionFile();
+        },
+        () => ({ message: "Cannot persist inbox recovery intent", retryable: true }),
+      )();
+      const durable =
+        recovery.isOk() && recovery.value != null
+          ? syncSessionFile(recovery.value)
+          : err({ message: "Inbox recovery persistence is unavailable" });
+      const published = durable.isOk() ? this.liveHistory?.flushPersisted() : undefined;
+      if (recovery.isErr() || durable.isErr() || published?.isErr()) {
+        const message = "Inbox recovery persistence failed; restart required";
+        this.health = this.failed("agent_abort_failed", message, true);
+        return errAsync({ message, retryable: true });
+      }
+      const cancelled = Result.fromThrowable(
+        () =>
+          session.cancelQueuedCustomSteer(
+            system === undefined ? "pi-orb.user-message" : "pi-orb.system-message",
+            { operationId: pending.operationId, messageIds },
+          ),
+        () => ({ message: "Cannot cancel owned inbox steer", retryable: true }),
+      )();
+      if (cancelled.isErr() || !cancelled.value) {
+        const message = "Inbox steer ownership is uncertain; restart required";
+        this.health = this.failed("agent_abort_failed", message, true);
+        return errAsync({ message, retryable: true });
+      }
+      this.pendingInboxMessages.delete(messageId);
+    } else if (pending !== undefined) {
       return ResultAsync.fromSafePromise(
         Promise.resolve({
           v: 1 as const,
@@ -1895,12 +2162,15 @@ export class PiOrbAgent {
       return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
         err({ message: "The previous operation is still cancelling", retryable: true }),
       );
-    if (this.settingsController?.blocksInput)
+    if (this.manualCompaction || this.settingsController?.blocksInput)
       return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
-        err({ message: "Agent settings are changing", retryable: true }),
+        err({
+          message: this.manualCompaction ? "Context is compacting" : "Agent settings are changing",
+          retryable: true,
+        }),
       );
     const delivery: "turn" | "steer" = session.isIdle ? "turn" : "steer";
-    const operationId = this.operationId ?? randomUUID();
+    const operationId = this.operationId ?? recoveredOperationId ?? randomUUID();
     this.pendingInboxMessages.set(messageId, { delivery, operationId });
     if (delivery === "turn") {
       if (this.operationId === null)
@@ -1959,7 +2229,12 @@ export class PiOrbAgent {
     operationId: string,
   ): ResultAsync<void, { message: string }> {
     const session = this.session;
-    if (this.idleStopPrepared || session === null) {
+    if (
+      this.idleStopPrepared ||
+      this.manualCompaction ||
+      this.settingsController?.blocksInput ||
+      session === null
+    ) {
       return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
         err({ message: "session is not accepting work" }),
       );
@@ -2023,6 +2298,7 @@ export class PiOrbAgent {
     // The operation remains busy until root readiness and child holds settle.
     void ResultAsync.fromThrowable(
       async () => {
+        if (this.manualCompaction) session.abortCompaction();
         await session.abort();
       },
       (error) => ({

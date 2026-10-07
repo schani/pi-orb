@@ -14,7 +14,7 @@ import {
 import { runDst } from "../testkit/sim.ts";
 import { ClaudeOrbAgent } from "./agent.ts";
 import { ClaudeHistory } from "./history.ts";
-import { qualifyClaudeRestart } from "./restore.ts";
+import { claudeRecoveryEpisode, qualifyClaudeRestart } from "./restore.ts";
 
 it("native child hooks, independent inventories, process exit, stdout and final history all retain ownership", async () => {
   await runDst({ name: "claude-composed-native-drain", iterations: 30 }, async (sim) => {
@@ -371,11 +371,14 @@ it.each(["receipt", "uncertain", "child"] as const)(
               );
               if (kind === "child")
                 expect(
-                  qualifyClaudeRestart(
-                    journal,
-                    restored.view,
-                    "claude:1:replacement",
-                  )._unsafeUnwrap().orphanedChildren,
+                  qualifyClaudeRestart(journal, restored.view, "claude:1:replacement", {
+                    proof: {
+                      episode: claudeRecoveryEpisode(journal),
+                      disposedIncarnation: 0,
+                      replacementIncarnation: 1,
+                    },
+                    incarnation: 1,
+                  })._unsafeUnwrap().orphanedChildren,
                 ).toEqual(["child"]);
               if (kind === "receipt") {
                 const queries: ScheduledClaudeQuery[] = [];

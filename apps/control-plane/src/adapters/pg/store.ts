@@ -83,6 +83,9 @@ function mapOrbRow(row: PgRow): OrbRow {
       row["host_discard_reason"] === null
         ? null
         : (String(row["host_discard_reason"]) as OrbRow["hostDiscardReason"]),
+    ...(row["claude_recovery"] == null
+      ? {}
+      : { claudeRecovery: row["claude_recovery"] as NonNullable<OrbRow["claudeRecovery"]> }),
     hostDiscardError: row["host_discard_error"] === null ? null : String(row["host_discard_error"]),
     hostDiscardEvidence:
       row["host_discard_evidence"] === null ? null : String(row["host_discard_evidence"]),
@@ -598,8 +601,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            checkout_commit, harness_session_id, harness_session_header, last_error,
            runtime_token_hash, replication_cursor, replicated_head_id, last_busy_at,
            stop_reason, sleep_id, sleep_until, last_mint_at,
-           state_changed_at, created_at, updated_at, user_time_zone, harness, last_ready_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36)
+           state_changed_at, created_at, updated_at, user_time_zone, harness, last_ready_at, claude_recovery)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37::jsonb)
          ON CONFLICT (id) DO NOTHING RETURNING *`,
         [
           orb.id,
@@ -638,6 +641,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           orb.userTimeZone,
           orb.harness,
           orb.lastReadyAt === null ? null : new Date(orb.lastReadyAt),
+          jsonParam(orb.claudeRecovery ?? null),
         ],
       );
       if (inserted.isErr()) return err(inserted.error);
@@ -1514,6 +1518,28 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     _task: SimulationTask,
     params: FailOrbAndRequestComputeDiscardParams,
   ): ResultAsync<OrbRow, StoreError | StateConflict> {
+    if (params.recoveryEpisode !== undefined) {
+      return this.casUpdate(
+        params.orbId,
+        params.expectedStateVersion,
+        [
+          "state = 'starting'",
+          "state_version = state_version + 1",
+          "state_changed_at = $3",
+          "updated_at = $3",
+          "last_error = $4",
+          "runtime_token_hash = NULL",
+          "host_discard_through_incarnation = host_incarnation",
+          "host_discard_reason = 'claude_recovery'",
+          "host_discard_error = NULL",
+          "host_discard_evidence = NULL",
+          "host_discard_requested_at = $3",
+          "claude_recovery = jsonb_build_object('episode', $5::text, 'disposedIncarnation', host_incarnation, 'replacementIncarnation', host_incarnation + 1, 'verified', false, 'claimedEpisodes', COALESCE(claude_recovery->'claimedEpisodes', '[]'::jsonb) || jsonb_build_array($5::text))",
+        ],
+        [new Date(params.now), params.lastError, params.recoveryEpisode],
+        "harness = 'claude' AND state IN ('running', 'starting') AND sleep_id IS NULL AND host_discard_through_incarnation IS NULL AND NOT (COALESCE(claude_recovery->'claimedEpisodes', '[]'::jsonb) ? $5::text)",
+      );
+    }
     return this.casUpdate(
       params.orbId,
       params.expectedStateVersion,
@@ -1567,7 +1593,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       [
         // Replacement disposal fences stale provisioning passes. Failed
         // disposal preserves the failed wake's one-shot state_version.
-        "state_version = state_version + CASE WHEN host_discard_reason = 'host_spec_changed' THEN 1 ELSE 0 END",
+        "state_version = state_version + CASE WHEN host_discard_reason IN ('host_spec_changed', 'claude_recovery') THEN 1 ELSE 0 END",
+        "claude_recovery = CASE WHEN host_discard_reason = 'claude_recovery' THEN jsonb_set(claude_recovery, '{verified}', 'true') ELSE claude_recovery END",
         "updated_at = $3",
         "host_ref = NULL",
         "runtime_token_hash = NULL",

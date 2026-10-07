@@ -40,9 +40,13 @@ it("fails closed on missing input receipt and child ownership without an executi
   ).toBe(true);
   expect(
     qualifyClaudeRestart(
-      { ...state, guardLifetime: "old-host", ownedChildren: { child: "child" } },
+      {
+        ...state,
+        guardLifetime: "claude:1:01234567-89ab-4cde-8fab-0123456789ab:100",
+        ownedChildren: { child: "child" },
+      },
       [receipt],
-      "new-host",
+      "claude:2:01234567-89ab-4cde-8fab-0123456789ab:101",
     )._unsafeUnwrap().orphanedChildren,
   ).toEqual(["child"]);
 });

@@ -70,6 +70,26 @@ class PreflightTest(unittest.TestCase):
             self.assertNotIn("apps/orb-runtime/Dockerfile", workflow)
         self.assertNotIn("apps/orb-runtime/Dockerfile", Path("infra/release.sh").read_text())
 
+    def test_ci_builds_control_plane_without_deployment_authority(self):
+        workflow = Path(".github/workflows/ci.yml").read_text()
+        self.assertIn("permissions:\n  contents: read\n", workflow)
+        build = workflow.split("  control-plane-image:\n", 1)[1]
+        self.assertIn("runs-on: ubuntu-24.04", build)
+        self.assertNotIn("needs:", build)
+        for forbidden in ["secrets.", "id-token:", "google-github-actions/", "docker push", "release.sh", "tofu"]:
+            self.assertNotIn(forbidden, build)
+        guard = build.index("python3 infra/artifact_guard.py")
+        disk = build.index("available >= 15 * 1024 * 1024 * 1024")
+        command = build.index("docker build -f apps/control-plane/Dockerfile")
+        self.assertLess(guard, command)
+        self.assertLess(disk, command)
+        self.assertIn('-t "pi-orb-control-plane:ci-$GITHUB_SHA" .', build)
+        self.assertIn("if: always()", build)
+        self.assertIn("docker system df", build)
+        ignore = Path(".dockerignore").read_text().splitlines()
+        for excluded in [".git", ".context", "**/node_modules", "**/.env*", "**/gha-creds-*.json"]:
+            self.assertIn(excluded, ignore)
+
     def test_check_precedes_checks_build_schema_and_apply(self):
         script = Path("infra/release.sh").read_text()
         check = script.index('python3 -m infra.release_preflight "$PROJECT"')

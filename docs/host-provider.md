@@ -1,5 +1,12 @@
 # Orb host provider
 
+## Verified Claude recovery launch proof
+
+**Decision — 2026-10-06; implemented locally, undeployed.** `ProvisionOrbHostRequest.claudeRecoveryProof?` is `{ episode, disposedIncarnation, replacementIncarnation }`. Lifecycle supplies it only from finalized, verified disposal for the current replacement incarnation. Providers reserve `PI_ORB_CLAUDE_RECOVERY_PROOF` and override inherited/configured values; project secrets and repository hook environment cannot override it. The runtime captures and validates the bounded launch proof before hooks/environment application. It is boot authority, not desired-spec configuration or a new broker capability.
+
+Only providers advertising `verifiesWholeComputeDisposal: true` can authorize automatic uncertain-worker replacement. Docker/GCE verify the disposable container/VM scope; the process provider verifies only recorded groups, not escaped descendants, and remains ineligible. Isolated fake-provider HTTP/WS tests are not evidence of physical cloud disposal.
+
+
 How orb compute is provisioned and managed: the `OrbHostProvider` port, runtime readiness, the Docker and GCE implementations, and evaluated alternatives. The lifecycle state machine that drives these operations is specified in `docs/lifecycle.md`.
 
 ## Harness launch selection (POC, 2026-10-04)

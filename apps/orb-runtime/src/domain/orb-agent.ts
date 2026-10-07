@@ -15,6 +15,11 @@ import type { HookEnvSource } from "../hooks/env-file.ts";
 import type { AgentGateView } from "./requests.ts";
 import type { HarnessSnapshot, LiveOperationView } from "./types.ts";
 
+export interface CompactError {
+  readonly code: "busy" | "unsupported" | "internal";
+  readonly message: string;
+}
+
 export interface SnapshotError {
   readonly type: "snapshot_error";
   readonly message: string;
@@ -68,6 +73,11 @@ export interface OrbAgent {
     content: readonly MessageInputBlock[],
     operationId: string,
   ): ResultAsync<void, { message: string }>;
+  canCompact(): Result<void, { code: "busy" | "unsupported"; message: string }>;
+  compact(
+    customInstructions: string | undefined,
+    operationId: string,
+  ): ResultAsync<void, CompactError>;
   abortOperation(source?: "user" | "shutdown"): ResultAsync<void, { message: string }>;
   triggerAutoName(content: readonly MessageInputBlock[]): void;
 }

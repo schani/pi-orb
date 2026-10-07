@@ -63,6 +63,25 @@ const request = {
   bootstrap: { repositoryUrl: "https://github.com/o/r" },
 };
 
+it("launches only the controller's verified recovery proof, overriding extra environment", async () => {
+  installFreshHost();
+  const proof = { episode: "a".repeat(64), disposedIncarnation: 0, replacementIncarnation: 1 };
+  const provider = makeProvider({ extraEnv: { PI_ORB_CLAUDE_RECOVERY_PROOF: "forged" } });
+  expect(
+    (
+      await provider.provision(
+        task,
+        { ...request, incarnation: 1, claudeRecoveryProof: proof },
+        context,
+      )
+    ).isOk(),
+  ).toBe(true);
+  const env = dockerFake.calls
+    .find((args) => args[0] === "run")
+    ?.filter((value) => value.startsWith("PI_ORB_CLAUDE_RECOVERY_PROOF="));
+  expect(env?.at(-1)).toBe(`PI_ORB_CLAUDE_RECOVERY_PROOF=${JSON.stringify(proof)}`);
+});
+
 interface ProviderOverrides {
   readonly image?: string;
   readonly network?: string;

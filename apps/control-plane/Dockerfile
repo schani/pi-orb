@@ -22,6 +22,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY vendor vendor
 COPY scripts/apply-dependency-patches.mjs scripts/apply-dependency-patches.mjs
+COPY patches/@earendil-works+pi-agent-core+1.0.0.patch patches/@earendil-works+pi-agent-core+1.0.0.patch
 COPY patches/@earendil-works+pi-ai+1.0.0.patch patches/@earendil-works+pi-ai+1.0.0.patch
 COPY patches/@earendil-works+pi-coding-agent+1.0.0.patch patches/@earendil-works+pi-coding-agent+1.0.0.patch
 COPY packages/protocol/package.json packages/protocol/

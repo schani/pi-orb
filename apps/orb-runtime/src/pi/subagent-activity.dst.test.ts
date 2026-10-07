@@ -1,14 +1,26 @@
-import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { type AgentSessionEvent, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { RuntimeEvent } from "@pi-orb/protocol";
 import { okAsync } from "neverthrow";
-import { expect, it } from "vitest";
+import { afterEach, expect, it } from "vitest";
 import { OUTBOUND_CLOSE_CODE_BACKPRESSURE, OutboundWriter } from "../domain/outbound.ts";
 import { decideRequest } from "../domain/requests.ts";
 import { runDst } from "../testkit/sim.ts";
 import { assertSubagentActivity } from "../testkit/subagent-contract.ts";
 import { PiOrbAgent, type PiSession, type PiSessionManager } from "./agent.ts";
 
-function fixture(promptResult?: Promise<void>) {
+const recoveryDirs: string[] = [];
+afterEach(() => {
+  for (const dir of recoveryDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+function fixture(promptResult?: Promise<void>, recoverInbox = false) {
+  const dir = recoverInbox ? mkdtempSync(join(tmpdir(), "subagent-inbox-recovery-")) : null;
+  const persistent = dir === null ? null : SessionManager.create(dir, join(dir, "sessions"));
+  if (dir !== null) recoveryDirs.push(dir);
+  let queued: { customType: string; details?: unknown } | undefined;
   const listeners: ((event: AgentSessionEvent) => void)[] = [];
   let idle = true;
   const events: RuntimeEvent[] = [];
@@ -20,6 +32,23 @@ function fixture(promptResult?: Promise<void>) {
   let abortCalls = 0;
   let failAbortCall: number | undefined;
   const session: PiSession = {
+    pendingMessageCount: 0,
+    cancelQueuedCustomSteer: (customType, identity) => {
+      if (!idle || queued?.customType !== customType) return false;
+      const details = queued.details as { operationId?: string; messageIds?: readonly string[] };
+      if (
+        details.operationId !== identity.operationId ||
+        JSON.stringify(details.messageIds) !== JSON.stringify(identity.messageIds)
+      )
+        return false;
+      queued = undefined;
+      return true;
+    },
+    compact: async () => {
+      throw new Error("Compaction not used by this fixture");
+    },
+    abortCompaction: () => undefined,
+    waitForIdle: async () => undefined,
     get isIdle() {
       return idle;
     },
@@ -28,13 +57,23 @@ function fixture(promptResult?: Promise<void>) {
       return () => undefined;
     },
     sendUserMessage: async () => {
+      persistent?.appendMessage({ role: "user", content: [], timestamp: 0 });
       idle = false;
       emit("agent_start");
       await promptResult;
     },
-    sendCustomMessage: async (_message, options) => {
+    sendCustomMessage: async (message, options) => {
       deliveries.push(options?.deliverAs === "steer" ? "steer" : "turn");
-      if (!idle) return;
+      if (!idle) {
+        queued = message;
+        return;
+      }
+      persistent?.appendCustomMessageEntry(
+        message.customType,
+        message.content,
+        message.display,
+        message.details,
+      );
       idle = false;
       emit("agent_start");
     },
@@ -50,10 +89,11 @@ function fixture(promptResult?: Promise<void>) {
   }
   const manager: PiSessionManager = {
     getEntry: (id) =>
+      persistent?.getEntry(id) ??
       (entries as ReturnType<PiSessionManager["getEntries"]>).find((entry) => entry.id === id),
     getEntries: () => {
       if (failHistoryRead) throw new Error("injected SDK history read failure");
-      return entries as ReturnType<PiSessionManager["getEntries"]>;
+      return persistent?.getEntries() ?? (entries as ReturnType<PiSessionManager["getEntries"]>);
     },
     buildContextEntries: () => [],
     getLeafId: () => null,
@@ -65,14 +105,16 @@ function fixture(promptResult?: Promise<void>) {
       cwd: "/test",
     }),
     getSessionId: () => "session",
-    getSessionFile: () => undefined,
+    getSessionFile: () => persistent?.getSessionFile(),
     appendCustomEntry: (customType, data) => {
       records.push({ customType, data });
       return "baseline";
     },
-    appendCustomMessageEntry: (customType, content) => {
+    appendCustomMessageEntry: (customType, content, display, details) => {
       messages.push({ customType, content });
-      return "message";
+      return (
+        persistent?.appendCustomMessageEntry(customType, content, display, details) ?? "message"
+      );
     },
   };
   const agent = new PiOrbAgent({
@@ -234,13 +276,14 @@ it("does not publish successful completion after a terminal history failure, eve
 
 it("arbitrates simultaneous child terminals, user input and abort without losing operation or inbox identity", async () => {
   await runDst({ name: "subagent-wake-inbox-abort", iterations: 200 }, async (sim) => {
-    const h = fixture();
+    const h = fixture(undefined, true);
     await h.agent.submitMessage([], "op");
     const anchor = h.agent.admitSubagent("cleanup-anchor")._unsafeUnwrap();
     const a = h.agent.admitSubagent("a")._unsafeUnwrap();
     const b = h.agent.admitSubagent("b")._unsafeUnwrap();
     h.settle();
     let inboxRejected = false;
+    let inboxDelivery: "turn" | "steer" | undefined;
     let fenced = false;
     const busy = () => {
       assertSubagentActivity(h.agent, "busy", "op");
@@ -282,7 +325,10 @@ it("arbitrates simultaneous child terminals, user input and abort without losing
           await task.checkpoint("user input races automatic parent wake");
           const delivery = await h.agent.deliverInboxMessage("batch", ["batch"], []);
           inboxRejected = delivery.isErr();
-          if (delivery.isOk()) expect(delivery.value.operationId).toBe("op");
+          if (delivery.isOk()) {
+            inboxDelivery = delivery.value.delivery;
+            expect(delivery.value.operationId).toBe("op");
+          }
           busy();
         },
       },
@@ -305,15 +351,19 @@ it("arbitrates simultaneous child terminals, user input and abort without losing
       { type: "operation_finished", operationId: "op", outcome: "aborted" },
     ]);
     const retried = (await h.agent.deliverInboxMessage("batch", ["batch"], []))._unsafeUnwrap();
-    expect(retried.duplicate).toBe(!inboxRejected);
-    if (inboxRejected) expect(retried.operationId).not.toBe("op");
-    else expect(retried.operationId).toBe("op");
-    expect(h.deliveries).toHaveLength(1);
+    if (inboxDelivery === "turn") {
+      expect(retried).toMatchObject({ duplicate: true, status: "persisted", operationId: "op" });
+      expect(h.deliveries).toHaveLength(1);
+    } else {
+      expect(retried.duplicate).toBe(false);
+      expect(retried.operationId).not.toBe("op");
+      expect(h.deliveries).toHaveLength(inboxRejected ? 1 : 2);
+    }
     // Neither an old terminal nor its withheld wake can affect a fresh operation.
     h.agent.releaseSubagent(a);
     h.agent.releaseSubagent(b);
     expect(h.agent.mayWakeSubagent("a")).toBe(false);
-    if (inboxRejected)
+    if (!retried.duplicate)
       expect(h.agent.getHealth()).toMatchObject({
         activity: "busy",
         operationId: retried.operationId,

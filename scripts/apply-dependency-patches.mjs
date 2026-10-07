@@ -11,6 +11,22 @@ import { err, ok, Result } from "neverthrow";
 // Fixed release inputs: [pristine SHA-256, patched SHA-256] for each changed file.
 const packages = [
   {
+    package: "node_modules/@earendil-works/pi-agent-core",
+    version: "1.0.0",
+    patch: "@earendil-works+pi-agent-core+1.0.0.patch",
+    sha: "7e2c5e2d68d97419c086ac5d369f6d2b83be2020a3be062e1a1402b37ab0cdb2",
+    files: {
+      "node_modules/@earendil-works/pi-agent-core/dist/agent.js": [
+        "163ad28551f1c38b8eb899a5c9dd89cd9d9005fb7dd9c4abeb008ee380e98c51",
+        "d812a39c0e3f446e787a1d395349e95dec32d4622daa9c4223e509b9116b2948",
+      ],
+      "node_modules/@earendil-works/pi-agent-core/dist/agent.d.ts": [
+        "1ae9fb28e132a7d0c545c96b69bca5a69db1374695853d12921bc623709a7589",
+        "04ece9f4511c543a845773e05d2a4126cd0fe7871074120cc4a8c25731f3f959",
+      ],
+    },
+  },
+  {
     package: "node_modules/@earendil-works/pi-ai",
     version: "1.0.0",
     patch: "@earendil-works+pi-ai+1.0.0.patch",
@@ -30,7 +46,7 @@ const packages = [
     package: "node_modules/@earendil-works/pi-coding-agent",
     version: "1.0.0",
     patch: "@earendil-works+pi-coding-agent+1.0.0.patch",
-    sha: "c684fe6a6a57426521a6fd822ced3636f2004b29eebff3af489e84f59f84c0cf",
+    sha: "a7eda2ad337b150f45f2516ee2b77a159cd081f68a16479b61ba48ee68b9fc73",
     files: {
       "node_modules/@earendil-works/pi-coding-agent/dist/index.js": [
         "5482298b995db935f7b96f5d6056fa1c36ac6fc80456be594ef65b83c62b0d30",
@@ -46,11 +62,11 @@ const packages = [
       ],
       "node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.d.ts": [
         "2e50b35a37f9c7149c6297ae554b2d965bd74dbfcb8ccd7be44f13226ce497e7",
-        "530eaa586573e77e61e8dea9362612300691124f0f1b04dfcaf4f50948beabed",
+        "07be0b969ec9283870a1ee3bc365f41df54477104ff3c4cee399e3b5fc7368f2",
       ],
       "node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js": [
         "476722dd363a0347049d450b5a0c67386cf156ecae2b039676962aa00a857161",
-        "4a9fc6db8d7839689db098acc00e5c003f5823781d669515630de4f8b56172f9",
+        "2807891eb2151a95a6c1f418b0122b4f2461c8aacc83f8a6a8b0f40d659d9b58",
       ],
       "node_modules/@earendil-works/pi-coding-agent/dist/core/provider-composer.d.ts": [
         "6e16948b43e3946cd8156ccc4fb59b10a979094b4576cb5352af4f51760e389d",
@@ -219,7 +235,13 @@ function installSealed(root, args) {
   const canonical = canonicalRoot(root);
   if (canonical.isErr()) return err(canonical.error);
   root = canonical.value;
-  const selected = args.length === 1 ? packages.slice(0, 2) : packages;
+  const piPackages = new Set([
+    "node_modules/@earendil-works/pi-agent-core",
+    "node_modules/@earendil-works/pi-ai",
+    "node_modules/@earendil-works/pi-coding-agent",
+  ]);
+  const selected =
+    args.length === 1 ? packages.filter((entry) => piPackages.has(entry.package)) : packages;
   const pending = [];
   const outcomes = [];
   for (const entry of selected) {

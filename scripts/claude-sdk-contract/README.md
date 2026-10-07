@@ -33,3 +33,15 @@ The fixture records field names, not credentials, prompts, request bodies, files
 - Dummy API authentication reports `tokenSource: "none"`, `apiKeySource: "ANTHROPIC_API_KEY"`, `apiProvider: "firstParty"`. The earlier isolated, network-denied metadata-only OAuth probe reported `tokenSource: "CLAUDE_CODE_OAUTH_TOKEN"`, `apiProvider: "firstParty"` and omitted `apiKeySource`.
 
 The local server also answers the native readiness request `HEAD /api/hello`. Unexpected routes fail the probe.
+
+## Nested background continuation
+
+`nested-continuation.mjs` uses the same isolation and network guard. It holds three nested provider responses until their reviewer stops and root consumes that stopped result. Checkpoints retain categories, task IDs, inventory membership and result indices, never provider bodies or result text.
+
+On the pinned SDK/CLI, a stopped background reviewer is not automatically resumed by its nested Agent completions: all three notifications reach root, even with streaming input held open. Closing input at the first result also preserves these deliveries in the controlled schedule. Native stopped-owner dispatch requires interactive terminal mode; SDK stdout is piped, independent of whether stdin remains open.
+
+The project-definition table runs the production `settingSources: ["user", "project", "local"]` and `claude_code` tool preset without registering SDK agents. Owned `.claude/agents/` definitions provide reviewer and leaf markers. `background: false` yields complete foreground nested results and reviewer/root synthesis. `background: true` forces asynchronous execution despite `PreToolUse.updatedInput.run_in_background: false`, with responses fenced until reviewer stop and root consumption; all three completions reach root. Project `general-purpose.md` has the same precedence. These probes qualify native mechanics, not model prompt reliability.
+
+Production qualification injects the actual `ComposedClaudeFixture` attach/submit query's `PreToolUse` callbacks into the native probe. Under `bypassPermissions`, all worker Agent calls are denied for both project names, both definition background settings, and input true/false/absent. The reviewer provider must consume all three exact denial IDs/reasons; complete tool-result blocks must equal the native transcript. No leaf request or descendant file may exist. Ordinary worker Bash still executes; its private content never reaches root. A separate two-root-Agent provider barrier proves parallel asynchronous fanout remains available. Canned reviewer/root finals prove protocol completion, not live inference quality. Set `CLAUDE_ROOT_POLICY_ARTIFACT_DIR` when running the native contract test to retain content-free evidence.
+
+Root can resume a named reviewer through its ordinary native `SendMessage({to: name, message: ...})` tool. The probe verifies a second reviewer result and root synthesis through that public path. This qualifies native routing and continuation, not whether a real model will choose the tool or supply a semantically complete answer.
