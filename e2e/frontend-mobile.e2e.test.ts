@@ -59,6 +59,17 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         isMobile: true,
         hasTouch: true,
       });
+      await page.route("**/api/v1/projects/frontend-fixture-project/orbs", async (route) => {
+        const response = await route.fetch();
+        const body = await response.json();
+        await route.fulfill({
+          response,
+          json: {
+            ...body,
+            items: body.items.filter((orb: { state: string }) => orb.state === "archived"),
+          },
+        });
+      });
       try {
         await gotoFrontendFixture(page, origin, page.locator(".dashboard .project-column").first());
         const columns = page.locator(".dashboard > *");
@@ -76,6 +87,37 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
             return doc.scrollWidth <= doc.clientWidth;
           }),
         ).toBe(true);
+        if (width < 632) {
+          await expectPage(page.locator(".project-progress")).toHaveCount(0);
+          const archiveProject = page.locator("#project-frontend-fixture-project");
+          await expectPage(archiveProject.locator(":scope > .orb-entry")).toHaveCount(0);
+          const archive = archiveProject.locator(".project-archive");
+          await expectPage(archive).toBeVisible();
+          const collapsedHeight = (await archiveProject.boundingBox())?.height;
+          for (const expanded of [false, true]) {
+            if (expanded) {
+              await archive.locator("summary").click();
+              await expectPage(archive.locator(".orb-entry")).toBeVisible();
+              expectPage((await archiveProject.boundingBox())?.height).toBeGreaterThan(
+                collapsedHeight ?? 0,
+              );
+            }
+            const unusedHeights = await page
+              .locator(".dashboard .project-column")
+              .evaluateAll((projects) =>
+                projects.map((project) => {
+                  const bottom = Math.max(
+                    ...[...project.children].map((child) => child.getBoundingClientRect().bottom),
+                  );
+                  return project.getBoundingClientRect().bottom - bottom;
+                }),
+              );
+            for (const unusedHeight of unusedHeights) {
+              // Only the section's 1px bottom rule follows its last visible child.
+              expectPage(unusedHeight).toBeCloseTo(1, 0);
+            }
+          }
+        }
         for (const field of await page.locator(".new-project input").all()) {
           await expectPage(field).toHaveCSS("font-size", "16px");
         }

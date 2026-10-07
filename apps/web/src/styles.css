@@ -532,6 +532,8 @@ button.text-action.error-text {
 @media (width < 632px) {
   .dashboard {
     grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: max-content;
+    align-content: start;
   }
 }
 
