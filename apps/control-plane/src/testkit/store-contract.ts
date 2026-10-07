@@ -676,6 +676,90 @@ export function storeSemanticsContractTests(
       expect(stale.isErr() && stale.error.type).toBe("state_conflict");
     });
 
+    it("claims a Claude ownership episode once and creates proof only at fenced finalization", async () => {
+      await store.insertProject(task, project);
+      await store.insertOrb(task, {
+        ...orb,
+        harness: "claude",
+        state: "running",
+        hostRef: "old",
+        runtimeTokenHash: "old-token",
+        hostDiscardEvidence: "previous compute evidence",
+      });
+      const params = {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        now: 2_000,
+        lastError: "guard",
+        recoveryEpisode: "a".repeat(64),
+      };
+      const claimed = await store.failOrbAndRequestComputeDiscard(task, params);
+      expect(claimed.isOk()).toBe(true);
+      if (claimed.isErr()) return;
+      expect(claimed.value.claudeRecovery).toEqual({
+        episode: params.recoveryEpisode,
+        disposedIncarnation: 0,
+        replacementIncarnation: 1,
+        verified: false,
+        claimedEpisodes: [params.recoveryEpisode],
+      });
+      expect(claimed.value.runtimeTokenHash).toBeNull();
+      expect(claimed.value.hostDiscardEvidence).toBeNull();
+      expect((await store.failOrbAndRequestComputeDiscard(task, params)).isErr()).toBe(true);
+      const stale = await store.finalizeHostDiscard(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        throughIncarnation: 0,
+        now: 3_000,
+      });
+      expect(stale.isErr()).toBe(true);
+      const finalized = await store.finalizeHostDiscard(task, {
+        orbId: orb.id,
+        expectedStateVersion: claimed.value.stateVersion,
+        throughIncarnation: 0,
+        now: 3_000,
+      });
+      expect(finalized.isOk()).toBe(true);
+      if (finalized.isErr()) return;
+      expect(finalized.value.claudeRecovery?.verified).toBe(true);
+      expect(finalized.value.hostIncarnation).toBe(1);
+      const later = await store.failOrbAndRequestComputeDiscard(task, {
+        ...params,
+        expectedStateVersion: finalized.value.stateVersion,
+        recoveryEpisode: "b".repeat(64),
+      });
+      expect(later.isOk()).toBe(true);
+      if (later.isErr()) return;
+      const laterFinalized = await store.finalizeHostDiscard(task, {
+        orbId: orb.id,
+        expectedStateVersion: later.value.stateVersion,
+        throughIncarnation: 1,
+        now: 4_000,
+      });
+      expect(laterFinalized.isOk()).toBe(true);
+      if (laterFinalized.isErr()) return;
+      expect(laterFinalized.value.claudeRecovery?.claimedEpisodes).toEqual([
+        params.recoveryEpisode,
+        "b".repeat(64),
+      ]);
+      expect(
+        (
+          await store.failOrbAndRequestComputeDiscard(task, {
+            ...params,
+            expectedStateVersion: laterFinalized.value.stateVersion,
+          })
+        ).isErr(),
+      ).toBe(true);
+      expect(
+        (
+          await store.failOrbAndRequestComputeDiscard(task, {
+            ...params,
+            expectedStateVersion: finalized.value.stateVersion,
+          })
+        ).isErr(),
+      ).toBe(true);
+    });
+
     it("atomically fails, revokes runtime auth, and fences compute disposal", async () => {
       await seed();
       const hosted = await store.casUpdateFields(task, {

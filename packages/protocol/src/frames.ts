@@ -43,6 +43,10 @@ export type MessageInputBlock = Static<typeof MessageInputBlockSchema>;
 export const ClientActionSchema = Type.Union([
   SettingsActionSchema,
   Type.Object(
+    { type: Type.Literal("compact"), customInstructions: Type.Optional(Type.String()) },
+    closed,
+  ),
+  Type.Object(
     {
       type: Type.Literal("message"),
       expectedHeadId: Type.Union([Type.String(), Type.Null()]),
@@ -157,6 +161,8 @@ export const RuntimeStatusEventSchema = Type.Object(
     type: Type.Literal("status"),
     activity: Type.Union([Type.Literal("idle"), Type.Literal("busy")]),
     operationId: Type.Optional(Type.String()),
+    work: Type.Optional(Type.Literal("compaction")),
+    compactionAfterId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   },
   closed,
 );

@@ -19,7 +19,16 @@ export async function guard(stage) {
   );
   assert.equal(
     manifest.source.patches["@earendil-works+pi-coding-agent+1.0.0.patch"],
-    "c684fe6a6a57426521a6fd822ced3636f2004b29eebff3af489e84f59f84c0cf",
+    "a7eda2ad337b150f45f2516ee2b77a159cd081f68a16479b61ba48ee68b9fc73",
+  );
+  assert.deepEqual(Object.keys(manifest.source.patches).sort(), [
+    "@earendil-works+pi-agent-core+1.0.0.patch",
+    "@earendil-works+pi-ai+1.0.0.patch",
+    "@earendil-works+pi-coding-agent+1.0.0.patch",
+  ]);
+  assert.equal(
+    manifest.source.patches["@earendil-works+pi-agent-core+1.0.0.patch"],
+    "7e2c5e2d68d97419c086ac5d369f6d2b83be2020a3be062e1a1402b37ab0cdb2",
   );
   assert.equal(
     manifest.source.patches["@earendil-works+pi-ai+1.0.0.patch"],
@@ -70,6 +79,7 @@ export async function guard(stage) {
     assert.match(code, /waitForOpening/);
   }
   const publicSdk = await import(pathToFileURL(resolved).href);
+  assert.equal(typeof publicSdk.AgentSession.prototype.cancelQueuedCustomSteer, "function");
   const unbundled = await import(pathToFileURL(join(sdk, "dist/extensions/mcp/index.js")).href);
   const runtime = await import(pathToFileURL(join(sdk, "dist/extensions/mcp/runtime.js")).href);
   const mcpPath = realpathSync(join(stage, "node_modules/@earendil-works/pi-mcp/dist/index.js"));

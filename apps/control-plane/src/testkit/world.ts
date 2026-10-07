@@ -1386,6 +1386,7 @@ const providerError = (
 
 export class FakeOrbHostProvider implements OrbHostProvider {
   readonly kind = "fake";
+  readonly verifiesWholeComputeDisposal = true as const;
   readonly specGeneration: number;
   private readonly world: FakeWorld;
   private readonly maxLatencyMs: number;

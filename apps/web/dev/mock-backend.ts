@@ -1935,6 +1935,24 @@ async function handleApi(
     });
     return true;
   }
+  const compactRoute = /^\/api\/v1\/orbs\/([^/]+)\/fixture-compaction$/.exec(path);
+  if (compactRoute !== null && (method === "GET" || method === "POST")) {
+    const orbId = decodeURIComponent(compactRoute[1] ?? "");
+    if (method === "POST") {
+      const body = (await readJson(request)) as {
+        reject?: boolean;
+        outcome?: "completed" | "failed";
+        deferFinish?: boolean;
+      };
+      if (body.reject) rejectedCompactions(state).add(orbId);
+      if (body.outcome)
+        finishFixtureCompaction(state, orbId, body.outcome, undefined, body.deferFinish);
+    }
+    sendJson(response, 200, {
+      customInstructions: compactions(state).get(orbId)?.customInstructions ?? null,
+    });
+    return true;
+  }
   const releaseRoute = /^\/api\/v1\/orbs\/([^/]+)\/fixture-lazy-release$/.exec(path);
   if (method === "POST" && releaseRoute !== null) {
     const orbId = decodeURIComponent(releaseRoute[1] ?? "");
@@ -2241,6 +2259,96 @@ function completeEcho(
   if (next !== undefined) setTimeout(() => deliverPendingMessage(state, session.orbId, next.id), 0);
 }
 
+interface FixtureCompaction {
+  published?: boolean;
+  afterId?: string | null;
+  operationId: string;
+  customInstructions: string | undefined;
+}
+const fixtureCompactions = new WeakMap<MockState, Map<string, FixtureCompaction>>();
+const fixtureCompactionRejections = new WeakMap<MockState, Set<string>>();
+function compactions(state: MockState) {
+  let map = fixtureCompactions.get(state);
+  if (!map) {
+    map = new Map();
+    fixtureCompactions.set(state, map);
+  }
+  return map;
+}
+function rejectedCompactions(state: MockState) {
+  let set = fixtureCompactionRejections.get(state);
+  if (!set) {
+    set = new Set();
+    fixtureCompactionRejections.set(state, set);
+  }
+  return set;
+}
+function finishFixtureCompaction(
+  state: MockState,
+  orbId: string,
+  outcome: "completed" | "failed" | "aborted",
+  message = "Context compaction failed: Fixture summary failed",
+  deferFinish = false,
+) {
+  const compact = compactions(state).get(orbId);
+  if (!compact) return;
+  if (!deferFinish) compactions(state).delete(orbId);
+  const records = state.histories.get(orbId) ?? [];
+  const base = {
+    id: randomUUID(),
+    parentId: records.at(-1)?.id ?? null,
+    timestamp: now(),
+    overflow: {},
+  };
+  const record: HistoryRecord =
+    outcome === "completed"
+      ? { ...base, type: "compaction", summary: [{ type: "text", text: "Fixture native summary" }] }
+      : {
+          ...base,
+          type: "event",
+          eventType: "agent.compaction",
+          compaction: { operationId: compact.operationId, outcome, message },
+          content: [{ type: "text", text: message }],
+        };
+  if (!compact.published) {
+    records.push(record);
+    state.histories.set(orbId, records);
+    for (const peer of state.liveSessions.get(orbId) ?? []) {
+      send(peer.socket, {
+        v: 1,
+        type: "history.record",
+        at: now(),
+        record: projectDisplayRecord(record),
+        headId: record.id,
+        retiredBlockIds: [],
+      });
+    }
+    compact.published = true;
+  }
+  if (deferFinish) return;
+  for (const peer of state.liveSessions.get(orbId) ?? []) {
+    send(peer.socket, {
+      v: 1,
+      type: "runtime.event",
+      at: now(),
+      event: {
+        type: "operation_finished",
+        operationId: compact.operationId,
+        outcome,
+        ...(outcome === "completed" ? {} : { message }),
+      },
+    });
+    send(peer.socket, {
+      v: 1,
+      type: "runtime.event",
+      at: now(),
+      event: { type: "status", activity: "idle" },
+    });
+  }
+  const next = (state.messages.get(orbId) ?? []).find((message) => message.status === "queued");
+  if (next !== undefined) setTimeout(() => deliverPendingMessage(state, orbId, next.id), 0);
+}
+
 const fixtureSettings = new WeakMap<
   MockState,
   Map<string, import("@pi-orb/protocol").AgentSettingsEvent>
@@ -2302,6 +2410,17 @@ function handleAction(
   inboxMessageIds: readonly string[] = [],
 ) {
   if (action.type === "abort") {
+    if (compactions(state).get(session.orbId)?.operationId === action.operationId) {
+      finishFixtureCompaction(state, session.orbId, "aborted", "Compaction aborted");
+      send(session.socket, {
+        v: 1,
+        type: "request.result",
+        at: now(),
+        requestId,
+        result: { type: "accepted", operationId: action.operationId, duplicate: false },
+      });
+      return;
+    }
     if (session.operation === null || session.operation.id !== action.operationId) {
       send(session.socket, {
         v: 1,
@@ -2345,7 +2464,7 @@ function handleAction(
     return;
   }
 
-  if (session.operation !== null) {
+  if (session.operation !== null || compactions(state).has(session.orbId)) {
     send(session.socket, {
       v: 1,
       type: "request.result",
@@ -2359,6 +2478,49 @@ function handleAction(
     return;
   }
 
+  if (action.type === "compact") {
+    if (rejectedCompactions(state).delete(session.orbId)) {
+      send(session.socket, {
+        v: 1,
+        type: "request.result",
+        at: now(),
+        requestId,
+        result: {
+          type: "rejected",
+          error: { code: "busy", message: "fixture compaction rejected", retryable: true },
+        },
+      });
+      return;
+    }
+    const operationId = randomUUID();
+    compactions(state).set(session.orbId, {
+      afterId: state.histories.get(session.orbId)?.at(-1)?.id ?? null,
+      operationId,
+      customInstructions: action.customInstructions,
+    });
+    for (const peer of state.liveSessions.get(session.orbId) ?? []) {
+      send(peer.socket, {
+        v: 1,
+        type: "runtime.event",
+        at: now(),
+        event: {
+          type: "status",
+          activity: "busy",
+          operationId,
+          work: "compaction",
+          compactionAfterId: compactions(state).get(session.orbId)?.afterId ?? null,
+        },
+      });
+    }
+    send(session.socket, {
+      v: 1,
+      type: "request.result",
+      at: now(),
+      requestId,
+      result: { type: "accepted", operationId, duplicate: false },
+    });
+    return;
+  }
   if (action.type === "set_model" || action.type === "set_thinking") {
     const view = settingsFor(state, session.orbId);
     if (action.type === "set_model") view.settings = { ...view.settings, model: action.model };
@@ -2593,6 +2755,7 @@ function handleAction(
 }
 
 function deliverPendingMessage(state: MockState, orbId: string, messageId: string): void {
+  if (compactions(state).has(orbId)) return;
   const message = (state.messages.get(orbId) ?? []).find(
     (candidate) => candidate.id === messageId && candidate.status === "queued",
   );
@@ -2665,17 +2828,33 @@ function acceptLiveSocket(state: MockState, socket: WebSocket, orbId: string): v
       });
     }
     const headId = records.at(-1)?.id ?? null;
-    send(socket, { v: 1, type: "runtime.event", at: now(), event: settingsFor(state, orbId) });
-    send(socket, { v: 1, type: "sync.completed", at: now(), headId });
-    send(
-      socket,
-      eventFrame({
+    const compact = compactions(state).get(orbId);
+    if (compact) {
+      send(socket, {
         v: 1,
         type: "runtime.event",
         at: now(),
-        event: { type: "status", activity: "idle" },
-      }),
-    );
+        event: {
+          type: "status",
+          activity: "busy",
+          operationId: compact.operationId,
+          work: "compaction",
+          compactionAfterId: compact.afterId ?? null,
+        },
+      });
+    }
+    send(socket, { v: 1, type: "runtime.event", at: now(), event: settingsFor(state, orbId) });
+    send(socket, { v: 1, type: "sync.completed", at: now(), headId });
+    if (!compact)
+      send(
+        socket,
+        eventFrame({
+          v: 1,
+          type: "runtime.event",
+          at: now(),
+          event: { type: "status", activity: "idle" },
+        }),
+      );
     for (const message of state.messages.get(orbId) ?? []) {
       if (message.status === "queued")
         setTimeout(() => deliverPendingMessage(state, orbId, message.id), 0);

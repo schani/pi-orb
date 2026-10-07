@@ -62,6 +62,7 @@ export interface ProcessOrbHostProviderOptions {
 }
 
 interface HostMetadata {
+  readonly claudeRecoveryProof?: import("@pi-orb/protocol").ClaudeRecoveryProof;
   readonly v: 1;
   readonly orbId: string;
   readonly incarnation: number;
@@ -218,6 +219,9 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
         port: parsed.port,
         processGroupId,
         supervisorId: parsed.supervisorId,
+        ...(parsed.claudeRecoveryProof === undefined
+          ? {}
+          : { claudeRecoveryProof: parsed.claudeRecoveryProof }),
         desiredState: parsed.desiredState,
       });
     } catch (error) {
@@ -317,6 +321,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       [HARNESS_ENV]: metadata.harness,
       PI_ORB_REPOSITORY_URL: metadata.repositoryUrl,
       PI_ORB_HOST_INCARNATION: String(metadata.incarnation),
+      PI_ORB_CLAUDE_RECOVERY_PROOF: JSON.stringify(metadata.claudeRecoveryProof ?? null),
       // An unsandboxed process host cannot assert container-wide process loss.
       PI_ORB_CONTAINER: "0",
       PI_ORB_SUPERVISOR_ID: metadata.supervisorId,
@@ -508,6 +513,9 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
           v: 1,
           orbId: request.orbId,
           incarnation: request.incarnation,
+          ...(request.claudeRecoveryProof === undefined
+            ? {}
+            : { claudeRecoveryProof: request.claudeRecoveryProof }),
           repositoryUrl: request.bootstrap.repositoryUrl,
           harness: request.bootstrap.harness ?? "pi",
           specFingerprint,

@@ -14,6 +14,7 @@ import {
   type ContentBlock,
   type HistoryRecord,
   HistoryRecordSchema,
+  isClaudeSessionTaskNotification,
   type JsonObject,
   JsonObjectSchema,
   type JsonValue,
@@ -32,6 +33,7 @@ const ProvenanceSchema = Type.Record(
     messageIds: Type.Array(Type.String()),
     operationId: Type.String(),
     system: Type.Optional(Type.Boolean()),
+    compaction: Type.Optional(Type.Boolean()),
   }),
 );
 
@@ -43,6 +45,7 @@ export interface Provenance {
   readonly messageIds: readonly string[];
   readonly operationId: string;
   readonly system?: boolean;
+  readonly compaction?: boolean;
 }
 export interface HistoryFiles {
   read(path: string): string | null;
@@ -269,8 +272,8 @@ export class ClaudeHistory {
         });
       const next = [...this.records];
       for (let index = this.fingerprints.length; index < lines.length; index++) {
-        const parsed = Result.fromThrowable(
-          () => JSON.parse(lines[index] ?? "") as JsonObject,
+        const parsed: Result<JsonObject, ClaudeHistoryError> = Result.fromThrowable(
+          (): JsonObject => JSON.parse(lines[index] ?? "") as JsonObject,
           (): ClaudeHistoryError => ({
             type: "claude_history_error",
             message: "Malformed native Claude transcript entry.",
@@ -293,10 +296,63 @@ export class ClaudeHistory {
           native.parentUuid === null ? null : (text(native.parentUuid) ?? next.at(-1)?.id ?? null);
         const base = { id, parentId, timestamp: text(native.timestamp) ?? this.timestamp };
         const message = object(native.message);
+        const provenance = this.provenance[id];
+        let compactOutput = false;
+        if (
+          native.type === "user" &&
+          provenance === undefined &&
+          message.role === "user" &&
+          typeof message.content === "string" &&
+          /^<local-command-stdout>[\s\S]*<\/local-command-stdout>$/.test(message.content)
+        ) {
+          const visited = new Set<string>();
+          let ancestor = parentId;
+          while (ancestor !== null && !visited.has(ancestor)) {
+            visited.add(ancestor);
+            if (this.provenance[ancestor]?.compaction === true) {
+              compactOutput = true;
+              break;
+            }
+            ancestor = next.find((item) => item.id === ancestor)?.parentId ?? null;
+          }
+        }
         let record: HistoryRecord;
-        if (native.type === "user" || native.type === "assistant") {
+        if (native.type === "user" && native.isCompactSummary === true) {
+          record = {
+            ...base,
+            type: "compaction",
+            summary: claudeContent(message.content),
+            overflow: { native },
+          };
+        } else if (provenance?.compaction === true || compactOutput) {
+          record = {
+            ...base,
+            type: "event",
+            eventType: "claude.compact_command",
+            overflow: { native: { type: native.type ?? "user", uuid: id } },
+          };
+        } else if (provenance === undefined && isClaudeSessionTaskNotification(native)) {
+          record = {
+            ...base,
+            type: "event",
+            eventType: "claude.task_notification",
+            overflow: {
+              native: {
+                type: "user",
+                uuid: id,
+                origin: { kind: "task-notification", producer: "session-task" },
+              },
+            },
+          };
+        } else if (native.type === "user" && native.isMeta === true && provenance === undefined) {
+          record = {
+            ...base,
+            type: "event",
+            eventType: "claude.native_metadata",
+            overflow: { native: { type: native.type, uuid: id, isMeta: true } },
+          };
+        } else if (native.type === "user" || native.type === "assistant") {
           const content = claudeContent(message.content);
-          const provenance = this.provenance[id];
           const role =
             native.type === "assistant"
               ? "assistant"
@@ -332,8 +388,8 @@ export class ClaudeHistory {
         } else if (native.type === "system" && native.subtype === "compact_boundary") {
           record = {
             ...base,
-            type: "compaction",
-            summary: claudeContent(native.content),
+            type: "event",
+            eventType: "claude.compact_boundary",
             overflow: {
               native: {
                 type: native.type,

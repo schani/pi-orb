@@ -43,6 +43,89 @@ function ToolActivity({ persisted }: { persisted: readonly RawPair[] }) {
   return <BrowserToolActivity persisted={projected} detailContext={detailContext()} />;
 }
 
+describe("background admission labels", () => {
+  it("labels nine admitted workers started, not complete, on cached same-ID replay", () => {
+    const persisted = Array.from({ length: 9 }, (_, index) => ({
+      callRecordId: `call-${index}`,
+      call: {
+        type: "tool_call" as const,
+        callId: `${index}`,
+        name: "Agent",
+        detailKey: `call-${index}:0`,
+        headline: `worker ${index}`,
+      },
+      resultRecordId: `result-${index}`,
+      result: {
+        type: "tool_result" as const,
+        callId: `${index}`,
+        detailKey: `result-${index}:0`,
+        hasImages: false,
+        asyncLaunch: true,
+      },
+    }));
+    for (const calls of [persisted, JSON.parse(JSON.stringify(persisted))]) {
+      const html = renderToStaticMarkup(
+        <BrowserToolActivity persisted={calls} detailContext={detailContext()} />,
+      );
+      expect(html).toContain("9 started");
+      expect(html.match(/>started</g)).toHaveLength(9);
+      expect(html).not.toContain(">complete<");
+      expect(html).not.toContain("tool-call-running");
+    }
+  });
+  it("shows the admission label on a singleton rail without a nested call row", () => {
+    const html = renderToStaticMarkup(
+      <BrowserToolActivity
+        detailContext={detailContext()}
+        persisted={[
+          {
+            callRecordId: "call",
+            call: { type: "tool_call", callId: "one", name: "Agent", detailKey: "call:0" },
+            resultRecordId: "result",
+            result: {
+              type: "tool_result",
+              callId: "one",
+              detailKey: "result:0",
+              hasImages: false,
+              asyncLaunch: true,
+            },
+          },
+        ]}
+      />,
+    );
+    expect(html).toContain('class="activity-rail-metric">started</span>');
+    expect(html).not.toContain('class="tool-activity-call"');
+  });
+  it("keeps foreground completion and failed admission distinct even for Agent", () => {
+    const html = renderToStaticMarkup(
+      <BrowserToolActivity
+        detailContext={detailContext()}
+        persisted={[false, true].map((isError, index) => ({
+          callRecordId: `call-${index}`,
+          call: {
+            type: "tool_call",
+            callId: `${index}`,
+            name: "Agent",
+            detailKey: `call-${index}:0`,
+          },
+          resultRecordId: `result-${index}`,
+          result: {
+            type: "tool_result",
+            callId: `${index}`,
+            detailKey: `result-${index}:0`,
+            hasImages: false,
+            isError,
+            ...(isError ? { asyncLaunch: true } : {}),
+          },
+        }))}
+      />,
+    );
+    expect(html).toContain(">complete<");
+    expect(html).toContain(">failed<");
+    expect(html).not.toContain(">started<");
+  });
+});
+
 describe("code header fallback", () => {
   it.each(["bash", "codemode"])(
     "%s shows live code without details or a summary request",

@@ -8,6 +8,7 @@ import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
 import { mockClaudeOwnerConnection } from "./testkit/claude-auth-fixture.ts";
+import { closeRoutedPage } from "./testkit/close-routed-page.ts";
 import {
   gotoFrontendFixture,
   gotoFrontendHistory,
@@ -1824,7 +1825,7 @@ describe("frontend-only browser behavior", () => {
         expectPage(detailReads).toBe(readsBeforeReopen);
       }
     } finally {
-      await page.close();
+      await closeRoutedPage(page);
     }
   });
 
@@ -3993,8 +3994,19 @@ describe("frontend-only browser behavior", () => {
       const ownedBrowser = engine === "webkit" ? await webkit.launch({ headless: true }) : browser;
       const page = await ownedBrowser.newPage();
       const fixture = await mockClaudeOwnerConnection(page);
+      const barrier = () => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((release) => {
+          resolve = release;
+        });
+        return { promise, resolve };
+      };
       const created: string[] = [];
       const posts: Record<string, unknown>[] = [];
+      let creationResponse: ReturnType<Page["waitForResponse"]> | undefined;
+      let heldPost:
+        | { observed: ReturnType<typeof barrier>; release: ReturnType<typeof barrier> }
+        | undefined;
       const openConnection = async () => {
         await gotoFrontendFixture(
           page,
@@ -4021,6 +4033,11 @@ describe("frontend-only browser behavior", () => {
               posts.push(body);
               created.push(body["id"] as string);
             }
+            const gate = heldPost;
+            if (gate) {
+              gate.observed.resolve();
+              await gate.release.promise;
+            }
           }
           await route.continue();
         });
@@ -4042,15 +4059,56 @@ describe("frontend-only browser behavior", () => {
           await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb");
           const index = page.getByRole("navigation", { name: "All project orbs" });
           const count = posts.length;
+          heldPost = {
+            observed: barrier(),
+            release: barrier(),
+          };
+          creationResponse = page.waitForResponse((response) => {
+            const request = response.request();
+            return (
+              response.url() === `${origin}/api/v1/projects/frontend-scratchpad-project/orbs` &&
+              request.method() === "POST" &&
+              request.postDataJSON().id === created[count] &&
+              request.postDataJSON().harness === harness
+            );
+          });
           await index
             .getByRole("link", {
               name: `New ${harness === "pi" ? "Pi" : "Claude"} orb in scratchpad`,
               exact: true,
             })
             .click();
+          await heldPost.observed.promise;
           expectPage(posts[count]?.["harness"]).toBe(harness);
+          const premature = await page.request.get(`${origin}/api/v1/orbs/${created[count]}`);
+          const prematureBody = await premature.json();
+          console.info("harness creation metadata before POST release", {
+            engine,
+            harness,
+            status: premature.status(),
+            bodyKeys: Object.keys(prematureBody),
+          });
+          expectPage(premature.status()).toBe(404);
+          expectPage(prematureBody.harness).toBeUndefined();
+          heldPost.release.resolve();
+          const accepted = await creationResponse;
+          expectPage(await accepted.finished()).toBeNull();
+          expectPage(accepted.status()).toBe(202);
+          const acceptedBody = await accepted.json();
+          expectPage(acceptedBody.id).toBe(created[count]);
+          expectPage(acceptedBody.harness).toBe(harness);
+          heldPost = undefined;
+          creationResponse = undefined;
           const metadata = await page.request.get(`${origin}/api/v1/orbs/${created[count]}`);
-          expectPage((await metadata.json()).harness).toBe(harness);
+          const metadataBody = await metadata.json();
+          console.info("harness creation metadata after POST completion", {
+            engine,
+            harness,
+            status: metadata.status(),
+            bodyKeys: Object.keys(metadataBody),
+          });
+          expectPage(metadata.status()).toBe(200);
+          expectPage(metadataBody.harness).toBe(harness);
           const conflicting = await page.request.post(
             `${origin}/api/v1/projects/frontend-scratchpad-project/orbs`,
             {
@@ -4098,8 +4156,10 @@ describe("frontend-only browser behavior", () => {
           { action: "disconnect", body: {} },
         ]);
       } finally {
-        for (const id of created) await removeFixtureOrb(page, id);
+        heldPost?.release.resolve();
+        if (creationResponse) await (await creationResponse).finished();
         await page.unrouteAll({ behavior: "wait" });
+        for (const id of created) await removeFixtureOrb(page, id);
         await page.close();
         if (engine === "webkit") await ownedBrowser.close();
       }

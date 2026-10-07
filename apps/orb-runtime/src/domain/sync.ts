@@ -86,7 +86,15 @@ export function computeSyncFrames(
       operationId: live.operationId,
       children: [...live.subagents],
     });
-    events.push({ type: "status", activity: snapshot.activity, operationId: live.operationId });
+    events.push({
+      type: "status",
+      activity: snapshot.activity,
+      operationId: live.operationId,
+      ...(snapshot.work === undefined ? {} : { work: snapshot.work }),
+      ...(snapshot.compactionAfterId === undefined
+        ? {}
+        : { compactionAfterId: snapshot.compactionAfterId }),
+    });
   } else {
     events.push({ type: "status", activity: snapshot.activity });
   }

@@ -58,6 +58,34 @@ describe("computeSyncFrames", () => {
       }),
     );
   });
+  it("reconstructs manual compaction without inventing thinking or tool output", () => {
+    const frames = computeSyncFrames(
+      { ...snapshot(0, "busy"), work: "compaction", compactionAfterId: null },
+      {
+        operationId: "compact",
+        blocks: [],
+        tools: [],
+        subagents: [],
+      },
+      null,
+      "now",
+    );
+    expect(frames).toContainEqual({
+      v: 1,
+      type: "runtime.event",
+      at: "now",
+      event: {
+        type: "status",
+        activity: "busy",
+        operationId: "compact",
+        work: "compaction",
+        compactionAfterId: null,
+      },
+    });
+    expect(
+      frames.some((frame) => frame.type === "runtime.event" && frame.event.type === "output_patch"),
+    ).toBe(false);
+  });
   it("projects result markers using calls before the replay cursor", () => {
     const source = snapshot(0);
     const records: HistoryRecord[] = [

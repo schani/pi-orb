@@ -40,6 +40,27 @@ export async function guard(stage) {
     "vendor reference mismatch",
   );
   assert.equal(sha(join(stage, "package-lock.json")), manifest.lockSha);
+  const patches = {
+    "@earendil-works+pi-agent-core+1.0.0.patch":
+      "7e2c5e2d68d97419c086ac5d369f6d2b83be2020a3be062e1a1402b37ab0cdb2",
+    "@earendil-works+pi-ai+1.0.0.patch":
+      "e503e81db607ca52be72d4f1cc67cc1a52c4321212cf4013f569978d08fb9830",
+    "@earendil-works+pi-coding-agent+1.0.0.patch":
+      "a7eda2ad337b150f45f2516ee2b77a159cd081f68a16479b61ba48ee68b9fc73",
+  };
+  assert.deepEqual(
+    Object.keys(manifest.files)
+      .filter((file) => file.startsWith("patches/"))
+      .sort(),
+    Object.keys(patches)
+      .map((name) => `patches/${name}`)
+      .sort(),
+  );
+  for (const [name, pinned] of Object.entries(patches)) {
+    const file = `patches/${name}`;
+    assert.equal(manifest.files[file], pinned, `qualified patch mismatch: ${name}`);
+    assert.equal(sha(join(stage, file)), pinned, `qualified patch mismatch: ${name}`);
+  }
   for (const [file, hash] of Object.entries(manifest.files))
     assert.equal(sha(join(stage, file)), hash, file);
   const meta = JSON.parse(readFileSync(join(stage, "bundle-meta.json")));
@@ -78,6 +99,7 @@ export async function guard(stage) {
     assert.match(code, /waitForOpening/);
   }
   const publicSdk = await import(pathToFileURL(resolved).href);
+  assert.equal(typeof publicSdk.AgentSession.prototype.cancelQueuedCustomSteer, "function");
   const unbundled = await import(pathToFileURL(join(sdk, "dist/extensions/mcp/index.js")).href);
   const runtime = await import(pathToFileURL(join(sdk, "dist/extensions/mcp/runtime.js")).href);
   const mcpPath = realpathSync(join(stage, "node_modules/@earendil-works/pi-mcp/dist/index.js"));

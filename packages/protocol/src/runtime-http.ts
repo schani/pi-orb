@@ -2,6 +2,7 @@ import { type Static, Type } from "typebox";
 import { MessageInputBlockSchema } from "./frames.ts";
 import { HarnessSessionMetadataSchema, HistoryRecordSchema } from "./history.ts";
 import { OrbMessageSystemSchema } from "./orb-sleep.ts";
+import { RuntimeStreamStatsSchema } from "./stream-telemetry.ts";
 
 const closed = { additionalProperties: false } as const;
 
@@ -69,6 +70,16 @@ export const RuntimeHooksSchema = Type.Object(
 );
 export type RuntimeHooks = Static<typeof RuntimeHooksSchema>;
 
+export const ClaudeRecoveryProofSchema = Type.Object(
+  {
+    episode: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+    disposedIncarnation: Type.Integer({ minimum: 0 }),
+    replacementIncarnation: Type.Integer({ minimum: 1 }),
+  },
+  closed,
+);
+export type ClaudeRecoveryProof = Static<typeof ClaudeRecoveryProofSchema>;
+
 export const RuntimeHealthSchema = Type.Union([
   Type.Object(
     {
@@ -103,6 +114,8 @@ export const RuntimeHealthSchema = Type.Union([
       activity: Type.Union([Type.Literal("idle"), Type.Literal("busy")]),
       operationId: Type.Optional(Type.String()),
       turnResume: Type.Optional(RuntimeTurnResumeSchema),
+      streams: Type.Optional(Type.Array(RuntimeStreamStatsSchema)),
+      streamTelemetryError: Type.Optional(Type.Literal("persistence_failed")),
       hooks: Type.Optional(RuntimeHooksSchema),
     },
     closed,
@@ -113,6 +126,9 @@ export const RuntimeHealthSchema = Type.Union([
       orbId: Type.String(),
       runtimeInstanceId: Type.String(),
       status: Type.Literal("failed"),
+      recovery: Type.Optional(
+        Type.Object({ episode: Type.String({ pattern: "^[a-f0-9]{64}$" }) }, closed),
+      ),
       error: Type.Object(
         {
           code: Type.String(),

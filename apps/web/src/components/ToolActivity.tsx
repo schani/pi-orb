@@ -96,6 +96,9 @@ function uniqueCount(calls: readonly Call[]): number {
 function metric(category: Category): ReactNode {
   const failures = category.calls.filter((call) => call.state === "failed").length;
   const running = category.calls.some((call) => call.state === "running");
+  const started = category.calls.filter(
+    (call) => call.state === "completed" && call.result?.asyncLaunch,
+  ).length;
   const added = category.calls.reduce((sum, call) => sum + (call.result?.added ?? 0), 0);
   const removed = category.calls.reduce((sum, call) => sum + (call.result?.removed ?? 0), 0);
   const diff =
@@ -113,12 +116,18 @@ function metric(category: Category): ReactNode {
       <span className="tool-diff-removed">−{removed}</span>
     </>
   ) : count > 1 ? (
-    `${count} ${category.kind === "command" ? "ran" : category.kind === "other" ? "calls" : "files"}`
+    `${count} ${category.kind === "command" ? "ran" : category.kind === "other" ? (started === count ? "started" : "calls") : "files"}`
   ) : null;
   const trail = failures ? (
     <span className="tool-activity-failed">{failures} failed</span>
   ) : running ? (
     <span className="tool-activity-running">running</span>
+  ) : started && (count === 1 || started !== count) ? (
+    count === 1 ? (
+      "started"
+    ) : (
+      `${started} started`
+    )
   ) : null;
   return lead === null ? (
     trail
@@ -358,7 +367,9 @@ function CallRow({
                 ? "failed"
                 : call.state === "running"
                   ? "running"
-                  : "complete")}
+                  : call.result?.asyncLaunch
+                    ? "started"
+                    : "complete")}
           </span>
         )}
       </summary>

@@ -35,6 +35,19 @@ it("root completion cannot retire an operation before owned children and process
     expect(result.isErr() ? result.error : null).toBeNull();
   });
 });
+it("duplicate root results during drain preserve handoffs and independent child holds", () => {
+  const activity = new ClaudeActivity();
+  activity.claim("operation");
+  activity.rootFinished();
+  activity.beginDrain();
+  activity.childAdmitted("independent", "child");
+  activity.taskHandoff("late", "Awaiting native result handoff");
+  activity.rootFinished();
+  activity.rootFinished();
+  expect(activity.children.map((child) => child.id)).toEqual(["independent", "late"]);
+  activity.handoffInterrupted("late");
+  expect(activity.children.map((child) => child.id)).toEqual(["independent"]);
+});
 it("background levels and task edges cannot release each other's holds", () => {
   const activity = new ClaudeActivity();
   activity.claim("op");

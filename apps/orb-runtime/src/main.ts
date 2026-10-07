@@ -3,6 +3,7 @@ import { readMockOpenAiEnv } from "@pi-orb/mock-openai";
 import { HARNESS_ENV, SKILLS_DIR_ENV } from "@pi-orb/protocol";
 import { readBrokerEnv } from "./broker/endpoint.ts";
 import { ClaudeOrbAgent } from "./claude/agent.ts";
+import { readClaudeRecoveryProof } from "./claude/recovery-proof.ts";
 import type { OrbAgent } from "./domain/orb-agent.ts";
 import { ORB_MARKER_ENV } from "./hooks/env-file.ts";
 import { buildRuntimeServer } from "./http/server.ts";
@@ -54,6 +55,7 @@ async function main(): Promise<void> {
     mockOpenAi: readMockOpenAiEnv(process.env),
     previewHost: tailscale?.previewHost ?? null,
     incarnation: env("PI_ORB_HOST_INCARNATION", "0"),
+    claudeRecoveryProof: readClaudeRecoveryProof(process.env.PI_ORB_CLAUDE_RECOVERY_PROOF),
     testLaunchFailure: launchFailure.inject,
   };
   const agent: OrbAgent =

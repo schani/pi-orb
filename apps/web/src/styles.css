@@ -2242,30 +2242,6 @@ pre,
 
 /* ---------- compaction, custom events ---------- */
 
-.record-compaction {
-  padding: 2px 12px;
-  color: var(--g3);
-}
-
-.record-compaction .compaction-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  user-select: none;
-}
-
-.record-compaction .compaction-line::before,
-.record-compaction .compaction-line::after {
-  content: "";
-  flex: 1;
-  border-top: 1px solid var(--g2);
-}
-
-.record-compaction summary {
-  width: fit-content;
-  cursor: pointer;
-}
-
 .record-custom {
   padding: 0 8px;
   border-left: 2px solid var(--st-start);

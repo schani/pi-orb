@@ -1,8 +1,9 @@
-import type { AgentSettingsEvent, SettingsAction } from "@pi-orb/protocol";
+import type { AgentSettingsEvent, ClientAction, SettingsAction } from "@pi-orb/protocol";
+export type ComposerCommandAction = SettingsAction | Extract<ClientAction, { type: "compact" }>;
 export interface CommandOption {
   label: string;
   text?: string;
-  action?: SettingsAction;
+  action?: ComposerCommandAction;
   current?: boolean;
 }
 export function commandOptions(
@@ -10,13 +11,28 @@ export function commandOptions(
   view: AgentSettingsEvent | null,
   effortLabel: "thinking" | "effort" = "thinking",
 ): CommandOption[] {
+  const compact = /^compact(?:\s+(.*))?$/is.exec(text);
+  if (compact) {
+    const customInstructions = compact[1]?.trim();
+    return [
+      {
+        label: "compact",
+        action: { type: "compact", ...(customInstructions ? { customInstructions } : {}) },
+      },
+    ];
+  }
   const match = /^(model|thinking|effort)\s+(.*)$/is.exec(text);
   if (match && match[1]?.toLowerCase() !== "model" && match[1]?.toLowerCase() !== effortLabel)
     return [];
   if (!match)
-    return ["model", effortLabel]
+    return ["model", effortLabel, "compact"]
       .filter((name) => name.startsWith(text.toLowerCase()))
-      .map((name) => ({ label: name, text: `${name} ` }));
+      .map(
+        (name): CommandOption =>
+          name === "compact"
+            ? { label: name, action: { type: "compact" } }
+            : { label: name, text: `${name} ` },
+      );
   if (!view) return [];
   const query = (match[2] ?? "").toLowerCase();
   if (match[1]?.toLowerCase() === "model")

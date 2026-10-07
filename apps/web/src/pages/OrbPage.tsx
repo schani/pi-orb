@@ -10,7 +10,6 @@ import {
   type OrbView,
   type RuntimeEvent,
   type ServerFrame,
-  type SettingsAction,
 } from "@pi-orb/protocol";
 import {
   useCallback,
@@ -23,6 +22,7 @@ import {
 } from "react";
 import { ClaudeAuthButton } from "../components/ClaudeAuth.tsx";
 import { Composer, type ComposerHandle, type ComposerImage } from "../components/Composer.tsx";
+import type { ComposerCommandAction } from "../components/command-options.ts";
 import type { ComposerMode } from "../components/composer-mode.ts";
 import type { DetailContext } from "../components/DetailBody.tsx";
 import { HistoryView, type LiveBlock, type ToolChip } from "../components/HistoryView.tsx";
@@ -143,11 +143,13 @@ interface OrbPageState {
   composerMode: ComposerMode;
   composerImages: ComposerImage[];
   settings: AgentSettingsEvent | null;
+  compacting: boolean;
+  compaction: { operationId: string; afterId: string | null } | null;
   synced: boolean;
   commandDraft: { text: string } | null;
   pendingRequest: {
     requestId: string;
-    kind: "message" | "abort" | "settings";
+    kind: "message" | "abort" | "settings" | "compact";
     submittedText?: string;
   } | null;
   requestError: { code: string; message: string } | null;
@@ -178,7 +180,7 @@ type OrbPageAction =
   | {
       type: "request_sent";
       requestId: string;
-      kind: "message" | "abort" | "settings";
+      kind: "message" | "abort" | "settings" | "compact";
     }
   | { type: "request_lost"; requestId: string }
   | { type: "message_enqueued"; requestId: string }
@@ -210,6 +212,8 @@ export function initialState(orbId: string): OrbPageState {
     composerMode: draft?.mode ?? "message",
     composerImages: draft?.images ?? [],
     settings: null,
+    compacting: false,
+    compaction: null,
     synced: false,
     commandDraft: null,
     pendingRequest: null,
@@ -249,6 +253,13 @@ function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageSta
       return {
         ...state,
         activity: event.activity,
+        compacting: event.activity === "busy" && event.work === "compaction",
+        compaction:
+          event.work === "compaction" &&
+          operationId !== null &&
+          event.compactionAfterId !== undefined
+            ? { operationId, afterId: event.compactionAfterId }
+            : state.compaction,
         operationId,
         subagents:
           event.activity === "idle" || operationId !== state.operationId ? [] : state.subagents,
@@ -306,9 +317,10 @@ function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageSta
         tools: new Map(),
         operationId: null,
         activity: "idle",
+        compacting: false,
         subagents: [],
         serverError:
-          event.outcome === "failed"
+          event.outcome === "failed" && !state.compacting
             ? {
                 code: "operation_failed",
                 message: event.message ?? "the runtime operation failed",
@@ -354,6 +366,7 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
         activity: null,
         subagents: [],
         settings: null,
+        compacting: false,
         synced: false,
       };
       if (frame.mode === "full") {
@@ -409,7 +422,10 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
       if (state.pendingRequest === null || frame.requestId !== state.pendingRequest.requestId) {
         return state;
       }
-      if (frame.result.type === "settings_applied") {
+      if (
+        frame.result.type === "settings_applied" ||
+        (frame.result.type === "accepted" && state.pendingRequest.kind === "compact")
+      ) {
         const unchangedDraft =
           state.composerMode === "command" &&
           state.composerText === state.pendingRequest.submittedText;
@@ -454,11 +470,44 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
   }
 }
 
+export function canRunComposerCommand(
+  lifecycle: OrbView["state"] | undefined,
+  state: OrbPageState,
+): boolean {
+  return (
+    lifecycle === "running" &&
+    state.connection === "open" &&
+    state.synced &&
+    state.settings?.writable === true &&
+    state.activity === "idle" &&
+    state.subagents.length === 0 &&
+    !state.compacting &&
+    state.pendingRequest === null
+  );
+}
+
 export function isLiveBusy(
   lifecycle: OrbView["state"] | undefined,
-  state: Pick<OrbPageState, "connection" | "activity">,
+  state: Pick<OrbPageState, "connection" | "activity"> & Partial<Pick<OrbPageState, "compacting">>,
 ): boolean {
-  return lifecycle === "running" && state.connection === "open" && state.activity === "busy";
+  return (
+    lifecycle === "running" &&
+    state.connection === "open" &&
+    state.activity === "busy" &&
+    !state.compacting
+  );
+}
+
+export function isLiveCompacting(
+  lifecycle: OrbView["state"] | undefined,
+  state: Pick<OrbPageState, "connection" | "activity" | "compacting">,
+): boolean {
+  return (
+    lifecycle === "running" &&
+    state.connection === "open" &&
+    state.activity === "busy" &&
+    state.compacting
+  );
 }
 
 export function canStopOrb(orb: OrbView): boolean {
@@ -598,6 +647,7 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
               operationId: null,
               subagents: [],
               settings: null,
+              compacting: false,
               synced: false,
             }),
       };
@@ -659,10 +709,12 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
         ...state,
         pendingRequest,
         notice:
-          state.pendingRequest?.kind === "settings"
-            ? "The runtime restarted before acknowledging the change. Check the synchronized settings before trying again."
-            : "The runtime restarted before acknowledging your request; it was not resent. " +
-              "If your message appears in the history it was delivered — otherwise send it again.",
+          state.pendingRequest?.kind === "compact"
+            ? "The runtime restarted before acknowledging compaction; it was not resent. Check the transcript before trying again."
+            : state.pendingRequest?.kind === "settings"
+              ? "The runtime restarted before acknowledging the change. Check the synchronized settings before trying again."
+              : "The runtime restarted before acknowledging your request; it was not resent. " +
+                "If your message appears in the history it was delivered — otherwise send it again.",
       };
     }
     case "message_enqueued":
@@ -1665,7 +1717,12 @@ function OrbConversation({
     const text = state.composerText.trim();
     const images = state.composerImages;
 
-    if (state.composerMode === "command" || state.pendingRequest?.kind === "settings") return;
+    if (
+      state.composerMode === "command" ||
+      state.pendingRequest?.kind === "settings" ||
+      state.pendingRequest?.kind === "compact"
+    )
+      return;
     if (text === "" && images.length === 0) return;
     const content: MessageInputBlock[] = [
       ...images.map(
@@ -1697,17 +1754,16 @@ function OrbConversation({
     });
   };
 
-  const changeSettings = (action: SettingsAction) => {
-    if (
-      !state.synced ||
-      !state.settings?.writable ||
-      state.activity !== "idle" ||
-      state.pendingRequest
-    )
-      return;
+  const changeSettings = (action: ComposerCommandAction) => {
+    if (!canRunComposerCommand(orb?.state, state)) return;
     const requestId = liveRef.current?.sendRequest(action);
     if (!requestId) dispatch({ type: "send_unavailable" });
-    else dispatch({ type: "request_sent", requestId, kind: "settings" });
+    else
+      dispatch({
+        type: "request_sent",
+        requestId,
+        kind: action.type === "compact" ? "compact" : "settings",
+      });
   };
 
   const sendAbort = () => {
@@ -1787,18 +1843,14 @@ function OrbConversation({
     state.connection === "open" &&
     state.synced &&
     state.settings !== null;
-  const settingsDisabled =
-    !settingsAvailable ||
-    !state.settings?.writable ||
-    state.activity !== "idle" ||
-    state.pendingRequest !== null;
+  const settingsDisabled = !canRunComposerCommand(orb?.state, state);
   const canSend =
     state.pendingRequest === null && (state.settings?.writable ?? true) && messageAccepting;
   const canAbort =
     connected &&
     state.activity === "busy" &&
     state.operationId !== null &&
-    state.pendingRequest === null &&
+    (state.pendingRequest === null || state.pendingRequest.kind === "compact") &&
     (state.welcome?.capabilities.includes(CAPABILITY_ABORT) ?? false);
 
   if (orbNotFound)
@@ -2153,6 +2205,8 @@ function OrbConversation({
             liveBlocks={liveBlocks}
             tools={tools}
             busy={isLiveBusy(orb?.state, state)}
+            compacting={isLiveCompacting(orb?.state, state)}
+            compaction={state.compaction}
             queuedMessages={queuedMessages}
           />
         </div>

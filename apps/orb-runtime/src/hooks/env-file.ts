@@ -40,6 +40,7 @@ export const HOOK_ENV_DENIED: readonly string[] = [
   ORB_MARKER_ENV,
   "PI_ORB_ID",
   "PI_ORB_HOST_INCARNATION",
+  "PI_ORB_CLAUDE_RECOVERY_PROOF",
   "PI_ORB_WORK_DIR",
   "PI_CODING_AGENT_DIR",
   "HOME",

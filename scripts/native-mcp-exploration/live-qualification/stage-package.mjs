@@ -17,7 +17,11 @@ await mkdir(output); // Refuse to overwrite evidence.
 const stage = join(output, "staging");
 const lockSha = sha(join(local, "package-lock.json"));
 assert.equal(lockSha, "88cb750557e7060e8056f00ed7bf778b8acb8e1f53c4aebd8c60da4c6865749f");
-const names = ["@earendil-works+pi-coding-agent+1.0.0.patch", "@earendil-works+pi-ai+1.0.0.patch"];
+const names = [
+  "@earendil-works+pi-coding-agent+1.0.0.patch",
+  "@earendil-works+pi-ai+1.0.0.patch",
+  "@earendil-works+pi-agent-core+1.0.0.patch",
+];
 function run(command, args, cwd, log, env = {}) {
   const result = spawnSync(command, args, {
     cwd,

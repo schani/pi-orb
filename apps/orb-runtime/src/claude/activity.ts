@@ -20,6 +20,16 @@ export class ClaudeActivity {
   get hookCount(): number {
     return this.hooks.size;
   }
+  get drainHolds(): string[] {
+    const holds: string[] = [];
+    if (!this.rootDone) holds.push("root");
+    if (this.hooks.size > 0) holds.push("hooks");
+    if (this.admittedChildren.size > 0) holds.push("children");
+    if (this.handoffs.size > 0) holds.push("handoffs");
+    if ([...this.tasks.values()].some((task) => !task.ambient)) holds.push("inventory");
+    if ([...this.edgeTasks.values()].some((task) => !task.ambient)) holds.push("tasks");
+    return holds;
+  }
   get canDrain(): boolean {
     return (
       this.busy &&
@@ -61,7 +71,7 @@ export class ClaudeActivity {
   }
   rootFinished(): void {
     this.rootDone = true;
-    this.handoffs.clear();
+    if (!this.draining) this.handoffs.clear();
   }
   hasTask(id: string): boolean {
     return (
@@ -69,6 +79,12 @@ export class ClaudeActivity {
       this.edgeTasks.get(id)?.ambient === false ||
       this.tasks.get(id)?.ambient === false
     );
+  }
+  hasEdgeTask(id: string): boolean {
+    return this.edgeTasks.get(id)?.ambient === false;
+  }
+  handoffInterrupted(id: string): void {
+    this.handoffs.delete(id);
   }
   taskHandoff(id: string, description: string): void {
     this.handoffs.set(id, description);

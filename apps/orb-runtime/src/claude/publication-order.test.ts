@@ -242,7 +242,13 @@ it.each([
   await f.agent.closeExtensions();
   await f.agent.waitForStream();
   expect(f.nativeReads()).toBeGreaterThan(beforeExitReads);
-  const records = f.frames.filter((frame) => frame.type === "history.record");
+  const published = f.frames.filter((frame) => frame.type === "history.record");
+  const diagnostics = published.filter(
+    (frame) =>
+      frame.record.type === "event" && frame.record.eventType.startsWith("claude.continuation."),
+  );
+  expect(diagnostics.every((frame) => frame.retiredBlockIds.length === 0)).toBe(true);
+  const records = published.filter((frame) => !diagnostics.includes(frame));
   const blocked = [
     "missing-uuid",
     "mismatched-uuid",

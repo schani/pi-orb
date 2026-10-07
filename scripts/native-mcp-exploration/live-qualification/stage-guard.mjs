@@ -10,8 +10,12 @@ const sdk = "node_modules/@earendil-works/pi-coding-agent";
 const ai = "node_modules/@earendil-works/pi-ai";
 const patches = new Map([
   [
+    "@earendil-works+pi-agent-core+1.0.0.patch",
+    "7e2c5e2d68d97419c086ac5d369f6d2b83be2020a3be062e1a1402b37ab0cdb2",
+  ],
+  [
     "@earendil-works+pi-coding-agent+1.0.0.patch",
-    "c684fe6a6a57426521a6fd822ced3636f2004b29eebff3af489e84f59f84c0cf",
+    "a7eda2ad337b150f45f2516ee2b77a159cd081f68a16479b61ba48ee68b9fc73",
   ],
   [
     "@earendil-works+pi-ai+1.0.0.patch",
@@ -114,6 +118,7 @@ export async function guardInstalledStage(stage, manifest) {
   assert.equal(manifest.bundleMetaSha, sha(join(stage, "bundle-meta.json")));
   guardBundle(stage);
   const publicSdk = await import(pathToFileURL(resolved).href);
+  assert.equal(typeof publicSdk.AgentSession.prototype.cancelQueuedCustomSteer, "function");
   const unbundled = await import(
     pathToFileURL(join(stage, sdk, "dist/extensions/mcp/index.js")).href
   );

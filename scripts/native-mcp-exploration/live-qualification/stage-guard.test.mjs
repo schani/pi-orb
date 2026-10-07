@@ -7,7 +7,11 @@ import { test } from "node:test";
 import { guardBundle, guardInstalledStage, guardStage, sha } from "./stage-guard.mjs";
 
 const root = resolve(import.meta.dirname, "../../..");
-const names = ["@earendil-works+pi-coding-agent+1.0.0.patch", "@earendil-works+pi-ai+1.0.0.patch"];
+const names = [
+  "@earendil-works+pi-coding-agent+1.0.0.patch",
+  "@earendil-works+pi-ai+1.0.0.patch",
+  "@earendil-works+pi-agent-core+1.0.0.patch",
+];
 
 async function fixture() {
   const stage = await mkdtemp(join(tmpdir(), "pi-orb-stage-guard-"));
@@ -18,8 +22,8 @@ async function fixture() {
     join(stage, "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz"),
   );
   await cp(
-    join(root, "vendor/patch-package-8.0.1-orb.1.tgz"),
-    join(stage, "vendor/patch-package-8.0.1-orb.1.tgz"),
+    join(root, "scripts/apply-dependency-patches.mjs"),
+    join(stage, "apply-dependency-patches.mjs"),
   );
   await writeFile(join(stage, "initial-auth.mjs"), "export const isolated = true;\n");
   await writeFile(join(stage, "bundle-meta.json"), JSON.stringify({ outputs: {} }));
@@ -42,7 +46,7 @@ async function fixture() {
     hostBundleSha: sha(join(stage, "initial-auth.mjs")),
     bundleMetaSha: sha(join(stage, "bundle-meta.json")),
     vendorSha: sha(join(stage, "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz")),
-    patchPackageSha: sha(join(stage, "vendor/patch-package-8.0.1-orb.1.tgz")),
+    patchHelperSha: sha(join(stage, "apply-dependency-patches.mjs")),
     piAiPath: "node_modules/@earendil-works/pi-ai",
     patches: names.map((name) => ({
       source: `patches/${name}`,
@@ -99,12 +103,13 @@ test("installed stage rejects a substituted lock and matching mutable manifest",
   });
 });
 
-test("stage rejects substituted patch tooling even with an updated manifest", async () => {
+test("stage rejects a substituted core patch even with an updated manifest", async () => {
   await withFixture(async (stage, manifest) => {
-    const file = join(stage, "vendor/patch-package-8.0.1-orb.1.tgz");
-    await writeFile(file, "changed patch tooling");
-    manifest.patchPackageSha = sha(file);
-    await assert.rejects(guardInstalledStage(stage, manifest), /qualified patch-package mismatch/);
+    const file = join(stage, "patches", names[2]);
+    await writeFile(file, "changed core patch");
+    manifest.patches[2].archiveSha = sha(file);
+    manifest.patches[2].sourceSha = sha(file);
+    await assert.rejects(guardInstalledStage(stage, manifest), /qualified patch mismatch/);
   });
 });
 

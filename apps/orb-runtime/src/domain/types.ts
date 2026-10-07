@@ -15,6 +15,8 @@ export interface HarnessSnapshot {
   readonly orbId: string;
   readonly runtimeInstanceId: string;
   readonly activity: "idle" | "busy";
+  readonly work?: "compaction";
+  readonly compactionAfterId?: string | null;
   readonly session: HarnessSessionMetadata;
   readonly records: readonly HistoryRecord[];
   readonly headId: string | null;

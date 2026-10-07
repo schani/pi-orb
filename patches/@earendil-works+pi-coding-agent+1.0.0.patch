@@ -58,6 +58,15 @@ diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-sessio
      private _idleWaitPromise;
      private _resolveIdleWait;
      /** Tracks pending steering messages for UI display. Removed when delivered. */
+@@ -584,6 +585,8 @@
+         deliverAs?: "steer" | "followUp";
+         expandPromptTemplates?: boolean;
+     }): Promise<void>;
++    /** Cancel one idle custom steer with exact ownership; leave all other queues untouched. */
++    cancelQueuedCustomSteer(customType: string, identity: { operationId: string; messageIds: readonly string[] }): boolean;
+     /**
+      * Clear all queued messages and return them.
+      * Useful for restoring to editor when user aborts.
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js
@@ -135,8 +144,7 @@ diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-sessio
          this._recordSelection();
 -        // The run records the loadout in the transcript; restored tools that did not register by now
 -        // are dropped, so a tool that never registers does not stay pending.
--        this._pendingToolNames.clear();
-         this._isAgentRunActive = true;
++        this._isAgentRunActive = true;
 +        const preparationAbortController = new AbortController();
 +        this._agentRunPreparationAbortController = preparationAbortController;
 +        let preparationCompleted = false;
@@ -174,7 +182,8 @@ diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-sessio
 +            this._recordSelection();
 +            this._isAgentRunActive = true;
 +        }
-+        this._pendingToolNames.clear();
+         this._pendingToolNames.clear();
+-        this._isAgentRunActive = true;
          try {
 -            await this.agent.prompt(messages);
 +            if (!this._agentRunAbortRequested)
@@ -260,7 +269,30 @@ diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-sessio
          }
          else if (this.isStreaming) {
              // Appending now would put the message between an assistant tool call and its
-@@ -1874,6 +1912,7 @@
+@@ -1838,6 +1876,22 @@
+             source: "extension",
+         });
+     }
++    /** Cancel one idle custom steer with exact ownership; preserve all unrelated queues. */
++    cancelQueuedCustomSteer(customType, identity) {
++        if (!this.isIdle || identity.messageIds.length === 0)
++            return false;
++        return this.agent.cancelQueuedSteeringMessage((message) => {
++            if (message.role !== "custom" || message.customType !== customType)
++                return false;
++            const details = message.details;
++            return details !== null && typeof details === "object" &&
++                details.operationId === identity.operationId &&
++                details.delivery === "steer" &&
++                Array.isArray(details.messageIds) &&
++                details.messageIds.length === identity.messageIds.length &&
++                details.messageIds.every((id, index) => id === identity.messageIds[index]);
++        });
++    }
+     /**
+      * Clear all queued messages and return them.
+      * Useful for restoring to editor when user aborts.
+@@ -1874,6 +1928,7 @@
          if (this._isAgentRunActive) {
              this._agentRunAbortRequested = true;
          }
@@ -268,7 +300,7 @@ diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-sessio
          this.abortRetry();
          this.abortCompaction();
          this.abortBranchSummary();
-@@ -2717,7 +2756,7 @@
+@@ -2717,7 +2772,7 @@
              getScopedModels: () => this._scopedModels,
              isIdle: () => this.isIdle,
              isProjectTrusted: () => this.settingsManager.isProjectTrusted(),

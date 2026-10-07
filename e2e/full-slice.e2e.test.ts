@@ -112,6 +112,13 @@ const SCENARIO = {
           { type: "stop", status: "completed" },
         ],
       },
+      {
+        match: { userMessage: { regex: "^# Conversation" } },
+        steps: [
+          { type: "text", content: "E2E_COMPACT_SUMMARY: tool check succeeded; retain decisions." },
+          { type: "stop", status: "completed" },
+        ],
+      },
       ...["E2E_RESTART_NOTICE_OK", "E2E_REPLACEMENT_NOTICE_OK"].map((reply) => ({
         match: { userMessage: { regex: restartNoticePattern } },
         steps: [
@@ -1819,7 +1826,7 @@ describe("full slice E2E", () => {
     expect(generatedName).toBe("Run E2E Tool Check");
 
     // Replication lands through the HTTP pull, not the WebSocket (docs/history-replication.md).
-    const replicated = await waitFor(
+    await waitFor(
       "history replicated to database",
       async () => {
         const snapshot = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
@@ -1917,6 +1924,102 @@ describe("full slice E2E", () => {
       { timeoutMs: 30_000, intervalMs: 200 },
     );
 
+    // Manual compaction is a live operation, never an inbox message or Luna turn.
+    const compactStart = frames.length;
+    const compactAfterId = frames
+      .slice(0, compactStart)
+      .flatMap((frame) => (frame.type === "history.record" ? [frame.record.id] : []))
+      .at(-1);
+    expect(compactAfterId).toBeDefined();
+    const compactRequestId = randomUUID();
+    const compactAction = { type: "compact", customInstructions: "E2E_COMPACT_KEEP_DECISIONS" };
+    socket.send(
+      JSON.stringify({
+        v: 1,
+        type: "client.request",
+        requestId: compactRequestId,
+        action: compactAction,
+      }),
+    );
+    const compactAccepted = await untilFrame("compact accepted", () =>
+      frames
+        .slice(compactStart)
+        .find((frame) => frame.type === "request.result" && frame.requestId === compactRequestId),
+    );
+    expect(compactAccepted).toMatchObject({ result: { type: "accepted", duplicate: false } });
+    const compactOperationId =
+      compactAccepted.type === "request.result" && compactAccepted.result.type === "accepted"
+        ? compactAccepted.result.operationId
+        : "";
+    expect(
+      await untilFrame("compact busy", () =>
+        frames
+          .slice(compactStart)
+          .find(
+            (frame) =>
+              frame.type === "runtime.event" &&
+              frame.event.type === "status" &&
+              frame.event.work === "compaction" &&
+              frame.event.operationId === compactOperationId,
+          ),
+      ),
+    ).toMatchObject({
+      event: { activity: "busy", work: "compaction", compactionAfterId: compactAfterId },
+    });
+    await untilFrame("native compaction history", () =>
+      frames
+        .slice(compactStart)
+        .find((frame) => frame.type === "history.record" && frame.record.type === "compaction"),
+    );
+    const compactFinished = await untilFrame("compact finished", () =>
+      frames
+        .slice(compactStart)
+        .find(
+          (frame) =>
+            frame.type === "runtime.event" &&
+            frame.event.type === "operation_finished" &&
+            frame.event.operationId === compactOperationId,
+        ),
+    );
+    expect(compactFinished).toMatchObject({ event: { outcome: "completed" } });
+    expect(
+      frames
+        .slice(compactStart)
+        .some((frame) => frame.type === "runtime.event" && frame.event.type === "output_patch"),
+    ).toBe(false);
+    const compactDuplicateStart = frames.length;
+    socket.send(
+      JSON.stringify({
+        v: 1,
+        type: "client.request",
+        requestId: compactRequestId,
+        action: compactAction,
+      }),
+    );
+    expect(
+      await untilFrame("compact duplicate", () =>
+        frames
+          .slice(compactDuplicateStart)
+          .find((frame) => frame.type === "request.result" && frame.requestId === compactRequestId),
+      ),
+    ).toMatchObject({
+      result: { type: "accepted", operationId: compactOperationId, duplicate: true },
+    });
+    const compactedRecords = await waitFor(
+      "compaction replicated",
+      async () => {
+        const snapshot = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
+        const records = snapshot.body["records"] as { id: string; type: string }[];
+        return records.some((record) => record.type === "compaction") ? records : null;
+      },
+      { timeoutMs: 60_000, intervalMs: 200 },
+    );
+    const compactCalls = await fakeControl(fake.sessionKey, "/requests");
+    expect(
+      Array.isArray(compactCalls)
+        ? compactCalls.filter((call: { matchedRuleIndex?: number }) => call.matchedRuleIndex === 3)
+        : [],
+    ).toHaveLength(1);
     socket.close();
 
     // Controlled stop: drain, then host stop (docs/testing.md step 8).
@@ -1941,8 +2044,11 @@ describe("full slice E2E", () => {
 
     // Stopped-orb history serves from the database alone (docs/testing.md step 9).
     const stopped = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
-    const stoppedRecords = stopped.body["records"] as unknown[];
-    expect(stoppedRecords.length).toBe(replicated);
+    const stoppedRecords = stopped.body["records"] as { id: string }[];
+    expect(stoppedRecords.length).toBe(compactedRecords.length);
+    expect(stoppedRecords.map((record) => record.id)).toEqual(
+      compactedRecords.map((record) => record.id),
+    );
     expect(JSON.stringify(stoppedRecords)).toContain("The check succeeded: E2E_TOOL_OK.");
     expect(await (await fetch(hostedUrl)).text()).toContain("replacement");
 
@@ -2015,7 +2121,7 @@ describe("full slice E2E", () => {
             const effectiveInstructions = effectiveOpenAIResponseInstructions(call.body);
             return (
               call.status === 200 &&
-              call.matchedRuleIndex === index + 3 &&
+              call.matchedRuleIndex === index + 4 &&
               !effectiveInstructions.includes("PROJECT_E2E_FIRST_BOOT") &&
               effectiveInstructions.includes("PROJECT_E2E_NEXT_BOOT") === (index === 0) &&
               !effectiveInstructions.includes("PERSONAL_E2E_FIRST_BOOT") &&
@@ -2137,7 +2243,7 @@ describe("full slice E2E", () => {
         return Array.isArray(calls) &&
           calls.some(
             (call) =>
-              call.matchedRuleIndex === 5 &&
+              call.matchedRuleIndex === 6 &&
               call.status === 200 &&
               effectiveOpenAIResponseInstructions(call.body).includes(timezoneLine),
           )
@@ -2163,7 +2269,7 @@ describe("full slice E2E", () => {
       async () => {
         const recorded: unknown = await fakeControl(fake.sessionKey, "/requests");
         return Array.isArray(recorded) &&
-          recorded.some((call) => call.status === 200 && call.matchedRuleIndex === 6)
+          recorded.some((call) => call.status === 200 && call.matchedRuleIndex === 7)
           ? true
           : null;
       },
@@ -2348,7 +2454,7 @@ describe("full slice E2E", () => {
       async () => {
         const recorded: unknown = await fakeControl(fake.sessionKey, "/requests");
         return Array.isArray(recorded) &&
-          recorded.some((call) => call.status === 200 && call.matchedRuleIndex === 9)
+          recorded.some((call) => call.status === 200 && call.matchedRuleIndex === 10)
           ? true
           : null;
       },

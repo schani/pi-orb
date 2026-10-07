@@ -1608,16 +1608,39 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       if (orb === undefined || orb.stateVersion !== params.expectedStateVersion) {
         return { conflict: true as const, currentState: orb?.state };
       }
+      if (
+        params.recoveryEpisode !== undefined &&
+        (orb.harness !== "claude" ||
+          !["running", "starting"].includes(orb.state) ||
+          orb.sleepId !== null ||
+          orb.hostDiscardThroughIncarnation !== null ||
+          orb.claudeRecovery?.claimedEpisodes.includes(params.recoveryEpisode))
+      )
+        return { conflict: true as const, currentState: orb.state };
       const updated: OrbRow = {
         ...orb,
-        state: "failed",
+        ...(params.recoveryEpisode === undefined
+          ? {}
+          : {
+              claudeRecovery: {
+                episode: params.recoveryEpisode,
+                disposedIncarnation: orb.hostIncarnation,
+                replacementIncarnation: orb.hostIncarnation + 1,
+                verified: false,
+                claimedEpisodes: [
+                  ...(orb.claudeRecovery?.claimedEpisodes ?? []),
+                  params.recoveryEpisode,
+                ],
+              },
+            }),
+        state: params.recoveryEpisode === undefined ? "failed" : "starting",
         stateVersion: orb.stateVersion + 1,
         stateChangedAt: params.now,
         updatedAt: params.now,
         lastError: params.lastError,
         runtimeTokenHash: null,
         hostDiscardThroughIncarnation: orb.hostIncarnation,
-        hostDiscardReason: "failed",
+        hostDiscardReason: params.recoveryEpisode === undefined ? "failed" : "claude_recovery",
         hostDiscardError: null,
         hostDiscardEvidence: params.evidence ?? null,
         hostDiscardRequestedAt: params.now,
@@ -1677,7 +1700,13 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         // A specification replacement fences stale provisioning passes. A
         // failed-compute cleanup preserves the failed wake's one-shot version.
         stateVersion:
-          orb.hostDiscardReason === "host_spec_changed" ? orb.stateVersion + 1 : orb.stateVersion,
+          orb.hostDiscardReason === "host_spec_changed" ||
+          orb.hostDiscardReason === "claude_recovery"
+            ? orb.stateVersion + 1
+            : orb.stateVersion,
+        ...(orb.hostDiscardReason === "claude_recovery" && orb.claudeRecovery !== undefined
+          ? { claudeRecovery: { ...orb.claudeRecovery, verified: true } }
+          : {}),
         updatedAt: params.now,
         hostRef: null,
         runtimeTokenHash: null,

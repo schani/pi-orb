@@ -6,7 +6,7 @@
 
 pi-orb runs an AI coding agent in an isolated, remotely managed environment called an **orb**. A user should eventually be able to invoke `pi-orb` from a project, get a web-based agent experience backed by an orb, disconnect, and later reconnect from another machine without tying the orb's lifetime to a local process.
 
-Pi is the default agent harness, embedded through the Pi SDK. A co-located Claude Agent SDK POC is implemented and running locally (approved 2026-10-04; qualification scope in `docs/testing.md`, not deployed). Host lifecycle, runtime protocol and replica storage use the shared `OrbAgent` boundary; each orb's harness is immutable.
+Pi is the default agent harness, embedded through the Pi SDK. A co-located Claude Agent SDK POC is implemented and running locally (approved 2026-10-04; qualification scope in `docs/testing.md`, not deployed). Host lifecycle, runtime protocol and replica storage use the shared `OrbAgent` boundary; each orb's harness is immutable. Claude's exact uncertain-worker guard has one episode-fenced automatic whole-compute recovery (2026-10-06; local, undeployed), without inference replay; `docs/lifecycle.md` defines disposal proof, attempt and command fences.
 
 ## Current vertical-slice scope
 
@@ -142,6 +142,9 @@ Subsystem designs:
 Tracking:
 
 - [docs/postmortems/2026-10-06-spot-preemption-burst.md](docs/postmortems/2026-10-06-spot-preemption-burst.md) — zone-wide Spot burst preempted one orb six times in 72 minutes; restart attribution requires the GCE operation log
+- [docs/postmortems/2026-10-06-claude-nested-owner-continuation.md](docs/postmortems/2026-10-06-claude-nested-owner-continuation.md) — root-only delegation excludes unsupported headless nested-owner continuation
+- [docs/postmortems/2026-10-05-inbox-abort-wedge.md](docs/postmortems/2026-10-05-inbox-abort-wedge.md) — real-SDK reproduction of an idle runtime retaining an unpersisted steer and blocking FIFO retries
+- [docs/postmortems/2026-10-05-busy-orb-stall.md](docs/postmortems/2026-10-05-busy-orb-stall.md) — aborted response exposed 389,502-character unexecuted tool prompt; orphaned steer suspected, provider/transport cause unproved
 - [docs/postmortems/2026-10-05-offline-online-transcript.md](docs/postmortems/2026-10-05-offline-online-transcript.md) — reported missing transcript after connectivity recovery; reproduced half-open client gap, field cause unproved
 - [docs/postmortems/2026-10-05-e2e-docker-inventory-isolation.md](docs/postmortems/2026-10-05-e2e-docker-inventory-isolation.md) — fresh fixture inventory crossed the shared daemon's ownership boundary; scoped gate preserves foreign resources
 - [docs/postmortems/2026-10-04-workspace-full-history-desync.md](docs/postmortems/2026-10-04-workspace-full-history-desync.md) — full workspace followed by cursor-not-found; offline repair and normal replication verified 2026-10-05 (America/Cancun), with all original SQL rows unchanged

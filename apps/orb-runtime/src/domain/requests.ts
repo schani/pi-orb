@@ -13,6 +13,7 @@ export interface AgentGateView {
 
 export type RequestDecision =
   | { readonly type: "change_settings" }
+  | { readonly type: "compact" }
   | { readonly type: "start_message" }
   | { readonly type: "abort_operation"; readonly operationId: string }
   | {
@@ -42,6 +43,15 @@ export function decideRequest(view: AgentGateView, action: ClientAction): Reques
       retryable: true,
     };
   switch (action.type) {
+    case "compact":
+      return view.activity === "idle"
+        ? { type: "compact" }
+        : {
+            type: "reject",
+            code: "busy",
+            message: "Wait for the current operation to finish before compacting.",
+            retryable: true,
+          };
     case "set_model":
     case "set_thinking":
       return view.activity === "idle"

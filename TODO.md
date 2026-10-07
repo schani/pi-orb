@@ -8,9 +8,12 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Qualify Claude automatic compute recovery** (2026-10-06; `docs/lifecycle.md`, `docs/testing.md`). Complete parent review and frozen-source full repository/process E2E gates before deployment. The isolated HTTP/WS contract now covers complete broker/checkout/hook boot, missing lifetime, repeated guard and Stop races. Preserve the original Pi inbox-abort RED evidence and unknown production 62aa attribution; no operational recovery is authorized by this task.
+
 - **Qualify exact-main Claude continuation fix** (CI37418896284, 2026-10-06; `docs/postmortems/2026-10-06-claude-publication-order.md`). Controlled late-prefix publication defect is fixed locally; original CI ordering remains unknown. Complete parent review and normal release gates before deployment. Preserve first-failure evidence and historical attribution limits; the two unrelated lifecycle waivers remain unchanged.
 
 - **Diagnose unresolved lifecycle E2E failures** (`docs/testing.md`): run 37390585414 timed out awaiting profile-fixture device challenge before dispatch assertions; run 37389785804 accepted upload model rule 7 with bash-call events but no rule 8 continuation. Exact provider/runtime causes are unknown. Use sanitized failure evidence to distinguish HTTP/provisioning/challenge outcomes and inspect the spawned upload target’s health, tool completion, replication and model ledger. Preserve private originals; no blind retries, weakened assertions or lucky-green resolution. Historical forensics are explicitly waived as consolidation release gates (2026-10-06), not resolved.
+- **Qualify the local inbox-abort correction (2026-10-07).** Selective owned-steer cancellation, durable recovery intent and fresh-operation redelivery are implemented locally. Native contract and 80 adapter DST schedules pass; complete upstream/unit/process/PG/image gates and independent review remain before release. No deployment. Evidence/limits: `docs/postmortems/2026-10-05-inbox-abort-wedge.md`.
 
 - [x] **Suppress empty public thinking disclosures.** Committed empty bodies are omitted; canonical indices/detail keys and redacted notices remain. Final qualification: `docs/testing.md`.
 

@@ -240,6 +240,7 @@ export function metadataValue(instance: Record<string, unknown>, key: string): s
  */
 export class GceOrbHostProvider implements OrbHostProvider {
   readonly kind = "gce";
+  readonly verifiesWholeComputeDisposal = true as const;
   readonly specGeneration: number;
   private readonly api: GceApiTransport;
   private readonly options: GceOrbHostProviderOptions;
@@ -428,6 +429,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
       PI_ORB_ID: orbId,
       [HARNESS_ENV]: harness,
       PI_ORB_HOST_INCARNATION: String(incarnation),
+      PI_ORB_CLAUDE_RECOVERY_PROOF: "",
       PI_ORB_REPOSITORY_URL: repositoryUrl,
       [CONTROL_PLANE_URL_ENV]: this.options.controlPlaneUrl,
       ...(tailscale === undefined
@@ -746,6 +748,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
                 key: CONFIG_METADATA_KEY,
                 value: JSON.stringify({
                   ...spec.runtimeConfig,
+                  PI_ORB_CLAUDE_RECOVERY_PROOF: JSON.stringify(request.claudeRecoveryProof ?? null),
                   [RUNTIME_TOKEN_ENV]: runtimeToken,
                   ...(tailscaleKey.value === null
                     ? {}
