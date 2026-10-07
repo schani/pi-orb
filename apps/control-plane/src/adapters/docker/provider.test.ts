@@ -903,6 +903,7 @@ describe("DockerOrbHostProvider environment", () => {
       `PI_ORB_HOST_INCARNATION=${request.incarnation}`,
       expect.stringMatching(/^PI_ORB_RUNTIME_TOKEN=[a-f0-9]{64}$/),
       "PI_ORB_CONTROL_PLANE_URL=http://host.docker.internal:3000",
+      "PI_ORB_CLAUDE_RECOVERY_PROOF=null",
       "PI_ORB_HARNESS=pi",
       "PI_ORB_SKILLS_DIR=/opt/pi-orb/skills",
       "HOME=/workspace/home",

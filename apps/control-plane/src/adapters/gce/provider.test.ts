@@ -904,6 +904,7 @@ describe("GceOrbHostProvider", () => {
       PI_ORB_HOST_INCARNATION: "0",
       PI_ORB_REPOSITORY_URL: "https://github.com/o/r",
       PI_ORB_CONTROL_PLANE_URL: "https://runtime.example",
+      PI_ORB_CLAUDE_RECOVERY_PROOF: "null",
       PI_ORB_HARNESS: "pi",
       PI_ORB_RUNTIME_TOKEN: items.find((item) => item.key === "pi-orb-runtime-token")?.value,
       PI_ORB_SKILLS_DIR: "/opt/pi-orb/skills",

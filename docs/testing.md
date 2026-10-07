@@ -745,9 +745,12 @@ qualifies first navigation, expiry/re-login, assets, HMR/WS, SSE and Authorizati
 through the chosen ingress. Domain selection and deployed acceptance remain pending.
 Runtime proxy changes must pass `npm ci` and `npm run test:e2e` before deployment.
 
-### Final local qualification (2026-10-07; not deployed)
+### Pre-rebase local qualification (2026-10-07; not deployed)
 
-On the settled source, `npm ci` and typecheck passed; lint passed with zero errors,
+These results belong to checkpoint `884003e`, before integration with `6b01f52`.
+They do not qualify the rebased tree.
+
+On that settled source, `npm ci` and typecheck passed; lint passed with zero errors,
 85 warnings and 18 infos. Full unit/DST passed **3,299 tests**, with 13 conditional
 skips: three live GCS, six opt-in PostgreSQL and four PostgreSQL-only locking cases
 under PGlite. Infrastructure passed **182 tests** (49 Node, 109 Python, 24 native-guest
@@ -777,6 +780,23 @@ traces remain preserved. The inherited MCP high advisory retains its existing `T
 follow-up. No domain was selected, wildcard ingress provisioned, deployment performed or
 live GCP/native acceptance run. `PI_ORB_PREVIEW_ORIGIN` remains unset: previews are disabled,
 and actual public exposure is not qualified.
+
+### Scoped rebase validation (2026-10-07; not deployed)
+
+Feature checkpoint `a805415` integrates latest fetched main `6b01f52`.
+Migration `033_claude_compute_recovery.sql` is preserved; previews use
+`034_orb_previews.sql`. Clean installation, typecheck and lint passed (zero
+errors, 117 warnings, 25 infos). Focused unit/DST passed **512 tests**, with six
+conditional skips; upstream-overlap checks passed **293 tests**. Infrastructure
+passed **195 tests** (53 Node, 118 Python, 24 native-guest contracts).
+
+Integration failures were stale fixtures: two route calls retained a removed
+argument, and Docker/GCE environment assertions omitted the upstream recovery
+proof. Only those four test fixtures changed; corrected checks and fixture lint
+passed. Evidence: `.context/http-preview/rebase-latest-*.log` and `.exit`, plus
+`rebase-final-fixture-lint.*`. First-failure logs and existing traces are preserved.
+Full unit/DST and E2E were not rerun on this base; the 483-test E2E result above
+belongs only to `884003e`. No push or deployment occurred.
 
 ## Deterministic simulation testing strategy
 

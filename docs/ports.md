@@ -179,9 +179,10 @@ run under `determined` with task clocks, store/runtime seams and named checkpoin
 registration/revocation, idle CAS, explicit Stop, owner death, stale incarnation and cancellation;
 real socket/parser/backpressure and browser cookie/origin behavior remain adapter/E2E tests.
 First failures and replay logs remain under `.context/http-preview` and `test-failures/`.
-Final local qualification (2026-10-07) passed clean installation, typecheck, lint, full unit/DST,
-infrastructure and the complete Docker/browser E2E suite. Counts, image identity and fixture
-limits are in `docs/testing.md`. This is not deployed ingress or live native/GCE acceptance.
+Pre-rebase qualification (2026-10-07) passed clean installation, typecheck, lint, full unit/DST,
+infrastructure and the complete Docker/browser E2E suite. That result does not qualify the
+rebased tree; scoped rebase results, counts, image identity and fixture limits are in
+`docs/testing.md`. Neither qualifies deployed ingress or live native/GCE acceptance.
 Remaining exposure work is tracked only in `TODO.md`; runtime/server/harness changes require
 `npm run test:e2e` before deploy.
 
