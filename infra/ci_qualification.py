@@ -14,7 +14,7 @@ from typing import Literal
 
 REPOSITORY = 'schani/pi-orb'
 EXPECTED = {
-    'ci.yml': ('CI', ('checks',)),
+    'ci.yml': ('CI', ('checks', 'control-plane-image')),
     'e2e.yml': ('E2E', tuple(f'E2E ({i}/4)' for i in range(1, 5))),
 }
 

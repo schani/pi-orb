@@ -2,7 +2,9 @@ import copy
 import unittest
 import os
 import json
+import re
 import urllib.error
+from pathlib import Path
 from unittest.mock import patch
 from infra.ci_qualification import EXPECTED, REPOSITORY, GitHub, Result, inspect, wait, valid_evidence, main
 
@@ -33,6 +35,53 @@ class FakeAPI:
 
 
 class QualificationTest(unittest.TestCase):
+    def two_job_ci(self):
+        api = FakeAPI()
+        # Independent of EXPECTED: CI 37636936479 had both successful jobs.
+        api.jobs[1] = [{'id': 100 + n, 'name': name, 'run_id': 1,
+                        'run_attempt': 1, 'head_sha': SHA,
+                        'status': 'completed', 'conclusion': 'success'}
+                       for n, name in enumerate(('checks', 'control-plane-image'))]
+        return api
+
+    def test_successful_two_job_ci_run_qualifies(self):
+        result = inspect(self.two_job_ci(), SHA)
+        self.assertIsNone(result.error)
+        self.assertTrue(valid_evidence(result.value, SHA))
+        self.assertEqual([job['name'] for job in result.value['runs'][0]['jobs']],
+                         ['checks', 'control-plane-image'])
+
+    def test_ci_workflow_jobs_match_qualification_inventory(self):
+        workflow = Path('.github/workflows/ci.yml').read_text().split('\njobs:\n', 1)[1]
+        job_ids = re.findall(r'^  ([\w-]+):$', workflow, re.MULTILINE)
+        self.assertCountEqual(job_ids, EXPECTED['ci.yml'][1])
+        # CI uses default job names; explicit display names would change the API contract.
+        self.assertNotRegex(workflow, r'(?m)^    name:')
+
+    def test_ci_image_job_and_exact_inventory_fail_closed(self):
+        for field, values in {
+            'conclusion': ['failure', 'cancelled', 'skipped', 'neutral', 'timed_out', None],
+            'status': ['queued', 'in_progress'],
+            'name': ['foreign'], 'head_sha': ['b' * 40],
+            'run_id': [999], 'run_attempt': [2], 'id': [0, 100],
+        }.items():
+            for value in values:
+                with self.subTest(field=field, value=value):
+                    api = self.two_job_ci()
+                    api.jobs[1][1][field] = value
+                    self.assertIsNotNone(inspect(api, SHA).error)
+        for indices in [(0,), (1,), (0, 0), (0, 1, 1)]:
+            with self.subTest(indices=indices):
+                api = self.two_job_ci()
+                api.jobs[1] = [api.jobs[1][i] for i in indices]
+                self.assertIsNotNone(inspect(api, SHA).error)
+
+    def test_ci_jobs_listing_rejects_incomplete_page(self):
+        api = GitHub('secret')
+        with patch.object(api, 'get', return_value=Result(
+                {'total_count': 2, 'jobs': self.two_job_ci().jobs[1][:1]})):
+            self.assertIsNotNone(api.list_jobs(1).error)
+
     def test_complete_exact_main_push_produces_allowlisted_evidence(self):
         result = inspect(FakeAPI(), SHA)
         self.assertIsNone(result.error)

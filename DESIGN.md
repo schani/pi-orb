@@ -229,6 +229,7 @@ Tracking:
 - [docs/postmortems/2026-09-15-native-personal-instructions-fixture.md](docs/postmortems/2026-09-15-native-personal-instructions-fixture.md) — mandatory boot read missing from the native validator's strict broker; release stopped before apply
 - [docs/postmortems/2026-10-06-claude-publication-order.md](docs/postmortems/2026-10-06-claude-publication-order.md) — late native-only prefixes blocked exact-identity stream retirement; durable ownership lookahead and attribution limits
 - [docs/postmortems/2026-10-06-empty-live-thinking.md](docs/postmortems/2026-10-06-empty-live-thinking.md) — empty live reasoning visibility gap; committed suppression verified, screenshot mechanism unproved
+- [docs/postmortems/2026-10-07-runner-apt-timeout.md](docs/postmortems/2026-10-07-runner-apt-timeout.md) — hosted dependency installation exhausted the E2E budget; signed HTTPS Ubuntu archive before APT
 - [docs/postmortems/](docs/postmortems/) — incident forensics; design docs keep the resulting rules and link here
 - [docs/postmortems/2026-09-09-stale-thinking.md](docs/postmortems/2026-09-09-stale-thinking.md) — message-index reuse left stale green thinking below newer commands; explicit streaming retirement
 - [docs/postmortems/2026-09-09-deleted-browser-reconciler.md](docs/postmortems/2026-09-09-deleted-browser-reconciler.md) — deleted browser revision remained active and raced new-generation provisioning
