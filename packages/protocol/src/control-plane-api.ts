@@ -283,6 +283,7 @@ export const OrbViewSchema = Type.Object(
     centralAgent: Type.Optional(Type.Boolean()),
     /** Latest observed agent activity, independent of compute for central agents. */
     activity: Type.Optional(Type.Union([Type.Literal("idle"), Type.Literal("busy")])),
+    previewActiveUntil: Type.Optional(Type.String()),
     checkoutCommit: Type.Optional(Type.String()),
     lastError: Type.Optional(Type.String()),
     /** Synthesized from in-memory reconciler state; never stored. */

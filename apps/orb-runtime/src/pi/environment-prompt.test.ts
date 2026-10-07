@@ -81,6 +81,15 @@ describe("runtime environment prompt", () => {
     expect(environmentPrompt).not.toMatch(/(?:permission|consent).*alert/i);
   });
 
+  it("documents explicit HTTP preview registration without guessed URLs or readiness claims", () => {
+    expect(environmentPrompt).toContain("pi-orb expose <port>");
+    expect(environmentPrompt).toContain("pi-orb unexpose <port>");
+    expect(environmentPrompt).toContain("pi-orb previews [--json]");
+    expect(environmentPrompt).toMatch(/localhost/);
+    expect(environmentPrompt).toMatch(/returns.*URL.*not.*ready/);
+    expect(environmentPrompt).toMatch(/never guess.*URL/i);
+  });
+
   it("documents scheduled self-sleep", () => {
     expect(environmentPrompt).toContain("pi-orb sleep 1h");
     expect(environmentPrompt).toMatch(/absolute wake deadline.*stop.*admitted work/i);

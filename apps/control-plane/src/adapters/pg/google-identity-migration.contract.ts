@@ -19,6 +19,7 @@ const followingMigrations = [
   "039_resource_events.sql",
   "040_auto_restart_times.sql",
   "041_model_calls.sql",
+  "042_orb_previews.sql",
 ];
 const first = {
   userId: "00000000-0000-4000-8000-000000000001",

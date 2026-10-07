@@ -19,6 +19,16 @@ variable "foundation_state_bucket" {
   default     = "pi-orb-tfstate-playground-dev-6ae7"
 }
 
+variable "preview_origin" {
+  description = "Optional exact HTTPS base origin for a separately operated Host-preserving preview TLS edge; empty disables registration. Registrable-domain separation from app/files is validated by the control plane."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.preview_origin == "" || can(regex("^https://[a-z0-9]+([.-][a-z0-9]+)*$", var.preview_origin))
+    error_message = "preview_origin must be empty or an exact lowercase HTTPS DNS origin without path, query, fragment or port."
+  }
+}
+
 variable "github_client_id" {
   description = "GitHub App client id for the gh/user-token flow (docs/credentials.md); empty disables the integration. Public by nature — it travels in every device-flow request; the client secret lives only in Secret Manager."
   type        = string

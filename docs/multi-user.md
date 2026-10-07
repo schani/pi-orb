@@ -15,7 +15,7 @@ The initial 2026-09-15 assessment interpreted “customers” as unrelated, mutu
 - The deployed service resolves an application principal and makes `/api/v1/session` a no-store principal probe. Stage-1 production evidence remains guarded API traffic rather than a dedicated session-response or two-user test. See `docs/deployment.md` and `docs/control-plane-api.md`.
 - Deployed stage 2 gives projects required owners, per-owner names/default lists, and user-keyed personal instructions. Migration verification found all three projects assigned to the selected owner and the existing personal-instructions row exactly preserved.
 - Stage 3 on `main` gives each owner independent Codex/GitHub pointers, login gates, challenges, and Pi login artifacts. Its requested production deployment is authorized; coworker onboarding is not.
-- HTTP previews are a separate design proposal using the same company-wide resource admission policy; no preview networking is built in. See `docs/ports.md`.
+- HTTP previews use the same company-wide admission policy on a separate registrable origin with app-authenticated stateless handoff. Implementation is authorized, not deployment; domain/TLS selection and ingress acceptance remain pending (`docs/ports.md`).
 
 ## Application identity (production validated 2026-10-06)
 

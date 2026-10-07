@@ -167,6 +167,7 @@ export function orbView(
     stateVersion: orb.stateVersion,
     ...(config.centralAgent ? { centralAgent: true } : {}),
     ...(activity !== undefined ? { activity } : {}),
+    ...(orb.previewActiveUntil != null ? { previewActiveUntil: iso(orb.previewActiveUntil) } : {}),
     ...(orb.checkoutCommit !== null ? { checkoutCommit: orb.checkoutCommit } : {}),
     ...(orb.lastError !== null ? { lastError: orb.lastError } : {}),
     ...(orb.unreadAlertId !== null ? { unreadAlertId: orb.unreadAlertId } : {}),

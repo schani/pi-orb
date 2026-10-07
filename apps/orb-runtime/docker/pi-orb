@@ -37,6 +37,9 @@ case "${1:-}" in
     shift
     exec node "$app_root/apps/orb-runtime/src/hosting/cli.ts" "$@"
     ;;
+  expose|unexpose|previews)
+    exec node "$app_root/apps/orb-runtime/src/previews/cli.ts" "$@"
+    ;;
   self|orbs|transcript)
     exec node "$app_root/apps/orb-runtime/src/inspection/cli.ts" "$@"
     ;;
@@ -50,6 +53,9 @@ case "${1:-}" in
     echo "  pi-orb host <file> [path] [--request-id <uuid>]" >&2
     echo "  pi-orb host ls" >&2
     echo "  pi-orb host rm <path>" >&2
+    echo "  pi-orb expose <port>" >&2
+    echo "  pi-orb unexpose <port>" >&2
+    echo "  pi-orb previews [--json]" >&2
     echo "  pi-orb self [--json]" >&2
     echo "  pi-orb orbs [query] [--json]" >&2
     echo "  pi-orb transcript <orb-id> [--json]" >&2

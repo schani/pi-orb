@@ -1522,11 +1522,13 @@ async function reconcileRunning(
         return { type: "noop" };
     }
     const uploadActive = orb.uploadActiveUntil !== null && orb.uploadActiveUntil > sleepNow;
+    const previewActive = orb.previewActiveUntil !== null && orb.previewActiveUntil > sleepNow;
     if (
       (agentPlacement(deps.agentPlane, orb) === "central"
         ? !deps.control.hasAgentWork(orb.id)
         : liveness.activity === "idle") &&
-      !uploadActive
+      !uploadActive &&
+      !previewActive
     ) {
       deps.control.noteCondition(`sleep-wait:${orb.id}`, false);
       await task.checkpoint("sleep.stop-before-cas");
@@ -1546,7 +1548,7 @@ async function reconcileRunning(
     if (deps.control.noteCondition(`sleep-wait:${orb.id}`, true)) {
       logOrbEvent(task, orb.id, "sleep-waiting", {
         sleep_id: orb.sleepId,
-        reason: uploadActive ? "upload" : "runtime_busy",
+        reason: uploadActive ? "upload" : previewActive ? "preview" : "runtime_busy",
       });
     }
     return { type: "noop" };
@@ -1562,6 +1564,7 @@ async function reconcileRunning(
   const lastActivityAt = Math.max(
     orb.lastBusyAt ?? 0,
     orb.uploadActiveUntil ?? 0,
+    orb.previewActiveUntil ?? 0,
     orb.stateChangedAt,
     deps.control.getLastVisibleAt(orb.id) ?? 0,
   );

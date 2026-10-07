@@ -21,9 +21,11 @@ import { Check } from "typebox/value";
 import { computePullHistory } from "../domain/history.ts";
 import type { OrbAgent } from "../domain/orb-agent.ts";
 import { type FrameSink, OutboundWriter } from "../domain/outbound.ts";
+import type { RuntimePreviewService } from "../domain/preview.ts";
 import { decideRequest, RequestRegistry, type RequestResult } from "../domain/requests.ts";
 import { computeSyncFrames } from "../domain/sync.ts";
 import type { TerminalManager } from "../terminal/manager.ts";
+import { registerPreviewRoutes } from "./preview-route.ts";
 import { registerTerminalRoute } from "./terminal-route.ts";
 
 // Sized for pasted screenshots: base64 inflates ~4/3, so 6 MiB of prompt
@@ -50,6 +52,7 @@ export function buildRuntimeServer(
   agent: OrbAgent,
   terminalManager: TerminalManager,
   alertToken: string | undefined = process.env.PI_ORB_RUNTIME_TOKEN,
+  preview?: RuntimePreviewService,
 ): FastifyInstance {
   const app = Fastify({ logger: false });
   const registry = new RequestRegistry();
@@ -248,16 +251,20 @@ export function buildRuntimeServer(
   void app.register(websocketPlugin, {
     options: {
       maxPayload: MAX_INCOMING_FRAME_BYTES,
-      handleProtocols: (protocols: Set<string>) =>
-        protocols.has(RUNTIME_SUBPROTOCOL)
-          ? RUNTIME_SUBPROTOCOL
-          : protocols.has(TERMINAL_SUBPROTOCOL)
-            ? TERMINAL_SUBPROTOCOL
-            : false,
+      handleProtocols: (protocols: Set<string>, request) =>
+        request.url?.startsWith("/v1/preview/")
+          ? (protocols.values().next().value ?? false)
+          : protocols.has(RUNTIME_SUBPROTOCOL)
+            ? RUNTIME_SUBPROTOCOL
+            : protocols.has(TERMINAL_SUBPROTOCOL)
+              ? TERMINAL_SUBPROTOCOL
+              : false,
     },
   });
 
   void app.register(async (scope) => {
+    if (preview)
+      void scope.register(async (previewScope) => registerPreviewRoutes(previewScope, preview));
     registerTerminalRoute(scope, {
       isReady: () => agent.getHealth().status === "ready",
       manager: terminalManager,
