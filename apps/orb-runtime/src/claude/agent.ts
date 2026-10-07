@@ -28,6 +28,7 @@ import {
   type RuntimeAlertResponse,
   type RuntimeEvent,
   type RuntimeHealth,
+  reasoningHeadline,
   type ServerFrame,
   type SettingsAction,
 } from "@pi-orb/protocol";
@@ -37,6 +38,7 @@ import { Type } from "typebox";
 import { Check } from "typebox/value";
 import type { BrokerEnv } from "../broker/endpoint.ts";
 import { prepareCheckout } from "../domain/checkout.ts";
+import { retiredReasoningAliases } from "../domain/display-aliases.ts";
 import { readLiveDisplayDetail } from "../domain/display-detail.ts";
 import { configurePersistentHome } from "../domain/home.ts";
 import type { DetailError, OrbAgent, SnapshotError } from "../domain/orb-agent.ts";
@@ -214,7 +216,15 @@ export class ClaudeOrbAgent implements OrbAgent {
   private operationError: string | undefined;
   private readonly blocks = new Map<
     string,
-    { blockId: string; blockType: "text" | "reasoning"; revision: number; text: string }
+    {
+      blockId: string;
+      blockType: "text" | "reasoning";
+      contentIndex: number;
+      headline?: string;
+      revision: number;
+      text: string;
+      redacted?: boolean;
+    }
   >();
   private readonly tools = new Map<
     string,
@@ -974,19 +984,63 @@ export class ClaudeOrbAgent implements OrbAgent {
       this.activity.operationId !== null
     ) {
       const event = message.event;
+      const operationId = this.activity.operationId;
+      const publish = (
+        block: NonNullable<ReturnType<typeof this.blocks.get>>,
+        previous?: typeof block,
+      ) => {
+        const reasoning = block.blockType === "reasoning";
+        const headline = reasoning ? reasoningHeadline(block.text, block.redacted) : "";
+        if (reasoning) {
+          const readable = block.redacted === true || block.text.trim() !== "";
+          block.headline = headline;
+          if (
+            !readable ||
+            (previous !== undefined &&
+              (previous.redacted === true || previous.text.trim() !== "") &&
+              previous.headline === headline)
+          )
+            return;
+        }
+        this.event({
+          type: "output_patch",
+          operationId,
+          blockId: block.blockId,
+          blockType: block.blockType,
+          revision: block.revision,
+          ...(reasoning ? { headline } : {}),
+          patch: reasoning
+            ? { type: "replace", text: "" }
+            : previous === undefined
+              ? { type: "replace", text: block.text }
+              : { type: "append", text: block.text.slice(previous.text.length) },
+        });
+      };
       if (event.type === "message_start") this.streamBlocks.clear();
       if (
         event.type === "content_block_start" &&
-        (event.content_block.type === "text" || event.content_block.type === "thinking")
+        (event.content_block.type === "text" ||
+          event.content_block.type === "thinking" ||
+          event.content_block.type === "redacted_thinking")
       ) {
         const blockId = `${message.uuid}:${event.index}`;
-        this.blocks.set(blockId, {
+        const block = {
           blockId,
-          blockType: event.content_block.type === "text" ? "text" : "reasoning",
+          blockType:
+            event.content_block.type === "text" ? ("text" as const) : ("reasoning" as const),
+          contentIndex: event.index,
           revision: 0,
-          text: "",
-        });
+          text:
+            event.content_block.type === "text"
+              ? event.content_block.text
+              : event.content_block.type === "thinking"
+                ? event.content_block.thinking
+                : "",
+          ...(event.content_block.type === "redacted_thinking" ? { redacted: true } : {}),
+        };
+        this.blocks.set(blockId, block);
         this.streamBlocks.set(event.index, blockId);
+        publish(block);
       }
       if (
         event.type === "content_block_delta" &&
@@ -994,17 +1048,11 @@ export class ClaudeOrbAgent implements OrbAgent {
       ) {
         const block = this.blocks.get(this.streamBlocks.get(event.index) ?? "");
         if (block !== undefined) {
+          const previous = { ...block };
           const text = event.delta.type === "text_delta" ? event.delta.text : event.delta.thinking;
           block.text += text;
           block.revision++;
-          this.event({
-            type: "output_patch",
-            operationId: this.activity.operationId,
-            blockId: block.blockId,
-            blockType: block.blockType,
-            revision: block.revision,
-            patch: { type: "append", text },
-          });
+          publish(block, previous);
         }
       }
     }
@@ -1201,14 +1249,17 @@ export class ClaudeOrbAgent implements OrbAgent {
     for (const record of scanned.value.slice(0, this.published)) {
       const retiredBlockIds = this.messageBlocks.get(record.id);
       if (retiredBlockIds === undefined || retiredBlockIds.length === 0) continue;
+      const display = projectDisplayRecord(record);
+      const detailAliases = retiredReasoningAliases(display, retiredBlockIds, this.blocks);
       this.messageBlocks.delete(record.id);
       for (const id of retiredBlockIds) this.blocks.delete(id);
       this.emit({
         v: 1,
         type: "history.record",
         at: new Date().toISOString(),
-        record: projectDisplayRecord(record),
+        record: display,
         retiredBlockIds,
+        ...(detailAliases.length === 0 ? {} : { detailAliases }),
         headId: scanned.value[this.published - 1]?.id ?? null,
       });
     }
@@ -1226,14 +1277,17 @@ export class ClaudeOrbAgent implements OrbAgent {
       )
         break;
       const retiredBlockIds = this.messageBlocks.get(record.id) ?? [];
+      const display = projectDisplayRecord(record);
+      const detailAliases = retiredReasoningAliases(display, retiredBlockIds, this.blocks);
       this.messageBlocks.delete(record.id);
       for (const id of retiredBlockIds) this.blocks.delete(id);
       this.emit({
         v: 1,
         type: "history.record",
         at: new Date().toISOString(),
-        record: projectDisplayRecord(record),
+        record: display,
         retiredBlockIds,
+        ...(detailAliases.length === 0 ? {} : { detailAliases }),
         headId: record.id,
       });
       this.published++;

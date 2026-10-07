@@ -203,7 +203,15 @@ describe("computeSyncFrames", () => {
     const withHidden = { ...source, records };
     const live: LiveOperationView = {
       operationId: "op",
-      blocks: [{ blockId: "b", blockType: "reasoning", revision: 2, text: "SECRET_CANARY" }],
+      blocks: [
+        {
+          blockId: "b",
+          blockType: "reasoning",
+          contentIndex: 0,
+          revision: 2,
+          text: "SECRET_CANARY",
+        },
+      ],
       tools: [],
       subagents: [],
     };
@@ -225,15 +233,32 @@ describe("computeSyncFrames", () => {
         {
           blockId: "b",
           blockType: "reasoning",
+          contentIndex: 0,
           revision: 2,
           text: "# Inspect\n\nSECRET_CANARY\n\n**Fix**",
         },
         {
           blockId: "redacted",
           blockType: "reasoning",
+          contentIndex: 1,
           revision: 1,
           text: "# REDACTED_HEADING",
           redacted: true,
+        },
+        { blockId: "empty", blockType: "reasoning", contentIndex: 5, revision: 1, text: "" },
+        {
+          blockId: "whitespace",
+          blockType: "reasoning",
+          contentIndex: 6,
+          revision: 1,
+          text: " \n\t ",
+        },
+        {
+          blockId: "headingless",
+          blockType: "reasoning",
+          contentIndex: 7,
+          revision: 1,
+          text: "PRIVATE_HEADINGLESS",
         },
       ],
     };
@@ -253,7 +278,14 @@ describe("computeSyncFrames", () => {
           patch: { type: "replace", text: "" },
         },
       });
-      expect(JSON.stringify(frames)).not.toContain("SECRET_CANARY");
+      const patches = frames.flatMap((frame) =>
+        frame.type === "runtime.event" && frame.event.type === "output_patch" ? [frame.event] : [],
+      );
+      expect(patches.map((patch) => patch.blockId)).toEqual(["b", "redacted", "headingless"]);
+      expect(patches.at(-1)).toMatchObject({ headline: "", patch: { type: "replace", text: "" } });
+      expect(JSON.stringify(frames)).not.toMatch(
+        /SECRET_CANARY|PRIVATE_HEADINGLESS|contentIndex|reasoningVisible/,
+      );
       expect(JSON.stringify(frames)).not.toContain("REDACTED_HEADING");
       expect(frames).toContainEqual({
         v: 1,
@@ -275,7 +307,9 @@ describe("computeSyncFrames", () => {
   it("reconstructs live operation state with replace patches and tool states", () => {
     const live: LiveOperationView = {
       operationId: "op-1",
-      blocks: [{ blockId: "b1", blockType: "text", revision: 7, text: "partial out" }],
+      blocks: [
+        { blockId: "b1", blockType: "text", contentIndex: 0, revision: 7, text: "partial out" },
+      ],
       tools: [{ callId: "c1", name: "bash", revision: 3, state: "running" }],
       subagents: [{ id: "child", description: "Check deployment", phase: "running" }],
     };

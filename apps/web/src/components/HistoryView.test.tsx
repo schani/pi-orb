@@ -737,9 +737,24 @@ describe("HistoryView", () => {
       <HistoryView
         records={[]}
         liveBlocks={[
-          { blockId: "text-1", blockType: "text", text: "First live block", revision: 1 },
-          { blockId: "reasoning", blockType: "reasoning", text: "thinking", revision: 1 },
-          { blockId: "text-2", blockType: "text", text: "Second live block", revision: 1 },
+          {
+            blockId: "text-1",
+            blockType: "text",
+            text: "First live block",
+            revision: 1,
+          },
+          {
+            blockId: "reasoning",
+            blockType: "reasoning",
+            text: "thinking",
+            revision: 1,
+          },
+          {
+            blockId: "text-2",
+            blockType: "text",
+            text: "Second live block",
+            revision: 1,
+          },
         ]}
         tools={[]}
         busy

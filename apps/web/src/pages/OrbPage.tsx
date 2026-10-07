@@ -374,16 +374,8 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
       records.set(frame.record.id, frame.record);
       const liveBlocks = new Map(state.liveBlocks);
       const detailAliases = new Map(state.detailAliases);
-      const retiredReasoning = frame.retiredBlockIds.filter(
-        (id) => liveBlocks.get(id)?.blockType === "reasoning",
-      );
-      if (frame.record.type === "message") {
-        for (const block of frame.record.content) {
-          if (block.type !== "reasoning") continue;
-          const oldId = retiredReasoning.shift();
-          if (oldId !== undefined) detailAliases.set(block.detailKey, oldId);
-        }
-      }
+      for (const { blockId, detailKey } of frame.detailAliases ?? [])
+        detailAliases.set(detailKey, blockId);
       for (const id of frame.retiredBlockIds) liveBlocks.delete(id);
       return {
         ...state,

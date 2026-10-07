@@ -135,6 +135,9 @@ export const HistoryRecordFrameSchema = Type.Object(
     at: Type.String(),
     record: DisplayRecordSchema,
     retiredBlockIds: Type.Array(Type.String()),
+    detailAliases: Type.Optional(
+      Type.Array(Type.Object({ blockId: Type.String(), detailKey: Type.String() }, closed)),
+    ),
     headId: Type.Union([Type.String(), Type.Null()]),
   },
   closed,
