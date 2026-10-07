@@ -91,10 +91,8 @@ export type UpdateProjectRequest = Static<typeof UpdateProjectRequestSchema>;
 
 export const CreateOrbRequestSchema = Type.Object(
   {
-    // Orb IDs become provider resource names (`pi-orb-<id>-i<n>`), MagicDNS
-    // labels, and Tailscale key descriptions (`pi-orb <id> i<n>`), so they are
-    // restricted to a DNS-safe alphabet with no spaces: an unconstrained ID
-    // could make one orb's exact-match cleanup reach another's resources.
+    // Orb IDs become provider resource names (`pi-orb-<id>-i<n>`), so they
+    // must use a DNS-safe alphabet.
     id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,63}$" }),
     harness: Type.Optional(HarnessKindSchema),
     name: Type.Optional(Type.String({ maxLength: ORB_NAME_MAX_CHARS })),
@@ -292,12 +290,6 @@ export const OrbViewSchema = Type.Object(
     archivedAt: Type.Optional(Type.String()),
     /** Latest replicated alert not yet acknowledged by explicit orb selection. */
     unreadAlertId: Type.Optional(Type.String()),
-    /**
-     * MagicDNS host every port inside the orb is reachable at (docs/ports.md).
-     * Derived from the orb id and the configured tailnet, never stored;
-     * absent when tailscale port exposure is not configured.
-     */
-    previewHost: Type.Optional(Type.String()),
     /** Synthesized from the in-memory device flow; never stored. */
     actionRequired: Type.Optional(OrbActionRequiredSchema),
     createdAt: Type.String(),

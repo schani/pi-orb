@@ -2,13 +2,8 @@ import { createHash, randomBytes } from "node:crypto";
 import {
   CONTROL_PLANE_URL_ENV,
   HARNESS_ENV,
-  PREVIEW_HOST_ENV,
-  previewHost,
   RUNTIME_TOKEN_ENV,
   SKILLS_DIR_ENV,
-  TAILSCALE_AUTH_KEY_ENV,
-  TAILSCALE_HOSTNAME_ENV,
-  tailscaleHostname,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
@@ -24,7 +19,6 @@ import type {
   StartOrbHostRequest,
 } from "../../domain/ports.ts";
 import { specFingerprintOf } from "../spec-fingerprint.ts";
-import type { TailscaleHostOptions } from "../tailscale/client.ts";
 import type { GceApiTransport, GceResponse } from "./api.ts";
 
 export interface GceOrbHostProviderOptions {
@@ -47,8 +41,6 @@ export interface GceOrbHostProviderOptions {
   /** Broker base URL as reachable from orb VMs (the runtime-role service). */
   readonly controlPlaneUrl: string;
   readonly extraEnv?: Readonly<Record<string, string>>;
-  /** Tailscale port exposure; enabling it changes the immutable specification. */
-  readonly tailscale?: TailscaleHostOptions;
   /** Deploy-monotone generation used to fence replacement decisions. */
   readonly specGeneration?: number;
 }
@@ -57,8 +49,6 @@ const ORB_LABEL = "pi-orb-orb-id";
 const INCARNATION_LABEL = "pi-orb-host-incarnation";
 const SPEC_FINGERPRINT_METADATA_KEY = "pi-orb-host-spec-fingerprint";
 const TOKEN_METADATA_KEY = "pi-orb-runtime-token";
-/** Per-orb secret state, excluded from the host-spec fingerprint. */
-const TAILSCALE_KEY_METADATA_KEY = "pi-orb-tailscale-auth-key";
 /** Guest attributes are off by default. */
 const GUEST_ATTRIBUTES_METADATA_KEY = "enable-guest-attributes";
 const LOGGING_METADATA_KEY = "google-logging-enabled";
@@ -422,7 +412,6 @@ export class GceOrbHostProvider implements OrbHostProvider {
     repositoryUrl: string,
     harness: import("@pi-orb/protocol").HarnessKind = "pi",
   ): Readonly<Record<string, string>> {
-    const tailscale = this.options.tailscale;
     return {
       ...(this.options.extraEnv ?? {}),
       [SKILLS_DIR_ENV]: "/opt/pi-orb/skills",
@@ -432,40 +421,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
       PI_ORB_CLAUDE_RECOVERY_PROOF: "",
       PI_ORB_REPOSITORY_URL: repositoryUrl,
       [CONTROL_PLANE_URL_ENV]: this.options.controlPlaneUrl,
-      ...(tailscale === undefined
-        ? {}
-        : {
-            [TAILSCALE_HOSTNAME_ENV]: tailscaleHostname(orbId),
-            [PREVIEW_HOST_ENV]: previewHost(orbId, tailscale.tailnetDnsName),
-          }),
     };
-  }
-
-  /**
-   * Mint the per-orb tailnet auth key, or nothing when the feature is off. A
-   * mint failure is retryable whatever its cause: the reconciler provisions
-   * again rather than failing the orb over a tailnet hiccup.
-   */
-  private async mintTailscaleKey(
-    operation: OrbHostProviderError["operation"],
-    orbId: string,
-    incarnation: number,
-    context: OperationContext,
-  ): Promise<Result<string | null, OrbHostProviderError>> {
-    const tailscale = this.options.tailscale;
-    if (tailscale === undefined) return ok(null);
-    const key = await tailscale.minter.mintAuthKey(orbId, incarnation, context.signal);
-    if (key.isErr()) {
-      return err(
-        providerError(
-          operation,
-          "operation_failed",
-          `tailscale auth key mint failed: ${key.error.message}`,
-          true,
-        ),
-      );
-    }
-    return ok(key.value);
   }
 
   private toObservation(instance: Record<string, unknown>): OrbHostObservation | null {
@@ -685,15 +641,6 @@ export class GceOrbHostProvider implements OrbHostProvider {
       }
 
       const runtimeToken = randomBytes(32).toString("hex");
-      // Minted only for an instance actually about to be inserted; a reused
-      // one keeps the key it was created with (read-back model).
-      const tailscaleKey = await this.mintTailscaleKey(
-        "provision",
-        request.orbId,
-        request.incarnation,
-        context,
-      );
-      if (tailscaleKey.isErr()) return err(tailscaleKey.error);
       const inserted = await this.request(
         "provision",
         "POST",
@@ -736,23 +683,12 @@ export class GceOrbHostProvider implements OrbHostProvider {
               { key: TOKEN_METADATA_KEY, value: runtimeToken },
               ...observabilityMetadataItems(),
               { key: BLOCK_PROJECT_SSH_KEYS_METADATA_KEY, value: "TRUE" },
-              ...(tailscaleKey.value === null
-                ? []
-                : [
-                    {
-                      key: TAILSCALE_KEY_METADATA_KEY,
-                      value: tailscaleKey.value,
-                    },
-                  ]),
               {
                 key: CONFIG_METADATA_KEY,
                 value: JSON.stringify({
                   ...spec.runtimeConfig,
                   PI_ORB_CLAUDE_RECOVERY_PROOF: JSON.stringify(request.claudeRecoveryProof ?? null),
                   [RUNTIME_TOKEN_ENV]: runtimeToken,
-                  ...(tailscaleKey.value === null
-                    ? {}
-                    : { [TAILSCALE_AUTH_KEY_ENV]: tailscaleKey.value }),
                 }),
               },
               { key: SPEC_FINGERPRINT_METADATA_KEY, value: specFingerprint },

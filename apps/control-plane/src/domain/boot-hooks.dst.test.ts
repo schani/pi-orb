@@ -47,7 +47,7 @@ async function waitForRunning(task: SimulationTask, harness: TestHarness): Promi
 /** The orb as the browser sees it, so assertions read the shipped surface. */
 function view(harness: TestHarness): ReturnType<typeof orbView> | null {
   const row = harness.store.orbSnapshot(ORB);
-  return row === null || row === undefined ? null : orbView(row, harness.deps.control, {});
+  return row === null || row === undefined ? null : orbView(row, harness.deps.control);
 }
 
 /**

@@ -13,7 +13,7 @@ it("project instruction routes isolate scope, preserve missing resources and rep
     app,
     new NoSimulationTask("project instructions routes", false),
     h.deps,
-    {},
+
     TEST_SYSTEM_VIEW,
   );
   try {

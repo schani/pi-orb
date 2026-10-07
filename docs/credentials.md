@@ -62,7 +62,7 @@ There is no standalone frontend auth API or auth-state polling. OAuth is a backe
 
 Pi login runtimes use `<PI_ORB_AUTH_DIR>/users/<user UUID>/auth.json`. This is an ephemeral SDK artifact used only to publish a just-completed login through that user's broker; it is not credential authority or a read fallback. Canonical resolution always calls the bound broker first. There is no shared/global `auth.json` import: migrated broker pointers are authoritative, and importing a stale file could resurrect a credential after `invalid_grant`. Process loss after SDK completion but before canonical publication may require login again; that accepted loss window is safer than a second authority.
 
-The private `broker-secrets/` directory remains the local secret store. Nothing under the auth directory is mounted into an orb: runtimes receive `PI_ORB_CONTROL_PLANE_URL` and `PI_ORB_RUNTIME_TOKEN`—plus the Tailscale variables when enabled—and obtain access tokens from the broker.
+The private `broker-secrets/` directory remains the local secret store. Nothing under the auth directory is mounted into an orb: runtimes receive `PI_ORB_CONTROL_PLANE_URL` and `PI_ORB_RUNTIME_TOKEN` and obtain access tokens from the broker.
 
 Do not write OAuth credentials to PostgreSQL, images, project volumes, Pi session history, logs, or browser responses. Browser schemas permit only owner-actionable public challenges or nonactionable `owner_login_required`; response-schema tests reject serialized `access` or `refresh`.
 
@@ -71,7 +71,7 @@ Decided for the cloud slice: replace the mounted file with a **control-plane cre
 - The broker lives in the control plane next to the owner-keyed Pi auth gate. Per-user `ModelRuntime` login artifacts publish fresh credentials; refresh tokens never leave the control plane.
 - A runtime-facing control-plane endpoint returns a current short-lived access token. It is authenticated by a per-host-incarnation bearer token scoped to that orb only and valid only while the orb is meant to be running.
 - The orb runtime registers a provider config (the same `registerProvider` mechanism the E2E mock uses) whose `getApiKey`/`refreshToken` delegate to that endpoint; from Pi's perspective nothing is unusual.
-- Providers deliver two environment variables for the broker — the control-plane base URL and the orb token — via `--env` on Docker and via instance metadata forwarded into the container on GCE. Together with the Tailscale port-exposure variables (`docs/ports.md`), this env contract is the entire provider-specific surface.
+- Providers deliver two environment variables for the broker — the control-plane base URL and the orb token — via `--env` on Docker and via instance metadata forwarded into the container on GCE. This broker env contract is provider-neutral.
 - Accepted limitation under the trusted-company model (open questions 24 and 26): repository code inside an orb can read the orb token and thus obtain short-lived access tokens. What it cannot obtain is the refresh token.
 - Token lifetime/renewal semantics, refresh coalescing, and the 401-retry path are settled in the detailed design below.
 
@@ -183,7 +183,7 @@ PUT    /api/v1/projects/:projectId/secrets/:name   { "value": string }
 DELETE /api/v1/projects/:projectId/secrets/:name
 ```
 
-`GET` returns only `{ revision, items: [{ name, updatedAt }] }`; it never returns a value or value-derived fingerprint. `PUT` creates or replaces one name and returns the same complete metadata snapshot, as does `DELETE`, so the Sealed card never needs a follow-up read. The UI always presents replacement as entering a new value—there is no reveal action. Names are validated against `[A-Za-z_][A-Za-z0-9_]*`; `PI_ORB_*`, `HOME`, `PATH`, and the broker/Tailscale names are reserved. Admitted coworkers may change project secrets under the company-wide resource-access policy in `docs/multi-user.md`.
+`GET` returns only `{ revision, items: [{ name, updatedAt }] }`; it never returns a value or value-derived fingerprint. `PUT` creates or replaces one name and returns the same complete metadata snapshot, as does `DELETE`, so the Sealed card never needs a follow-up read. The UI always presents replacement as entering a new value—there is no reveal action. Names are validated against `[A-Za-z_][A-Za-z0-9_]*`; `PI_ORB_*`, `HOME`, `PATH`, and the broker names are reserved. Admitted coworkers may change project secrets under the company-wide resource-access policy in `docs/multi-user.md`.
 
 ### Runtime snapshot
 

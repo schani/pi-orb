@@ -59,7 +59,7 @@ import { registerActivityHeadlineRoutes } from "./activity-headline-routes.ts";
 import { requirePrincipal } from "./browser-identity.ts";
 import { sendHistoryStream } from "./history-stream.ts";
 import { registerProjectInstructionsRoutes } from "./project-instructions.ts";
-import { orbView, projectView, type ViewConfig } from "./views.ts";
+import { orbView, projectView } from "./views.ts";
 
 function httpError(
   code: ControlPlaneHttpError["error"]["code"],
@@ -259,7 +259,6 @@ export function registerRoutes(
   app: FastifyInstance,
   task: SimulationTask,
   deps: ControlPlaneDeps,
-  config: ViewConfig,
   system: SystemView,
   signingKeys?: SigningKeyDeps,
 ): void {
@@ -268,7 +267,7 @@ export function registerRoutes(
     return principal.isOk() && principal.value.kind === "user" ? principal.value.user.id : null;
   };
   const viewOrb = (request: FastifyRequest, orb: import("../domain/orb.ts").OrbRow) =>
-    orbView(orb, deps.control, config, viewerUserId(request));
+    orbView(orb, deps.control, viewerUserId(request));
 
   app.get("/api/v1/session", async (request, reply) => {
     reply.header("cache-control", "no-store");
@@ -619,7 +618,7 @@ export function registerRoutes(
         return sendStoreError(reply, orbs.error);
       }
       return reply.send({
-        items: orbs.value.map((orb) => orbView(orb, deps.control, config, viewerUserId(request))),
+        items: orbs.value.map((orb) => orbView(orb, deps.control, viewerUserId(request))),
       });
     },
   );

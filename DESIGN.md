@@ -35,6 +35,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 
 - The user-facing interface is web-based. The runtime image also provides a narrow `pi-orb` CLI for agents to discover sibling orbs, inspect replicated transcripts, launch independent same-project work (`docs/orb-spawning.md`), mint workload-identity tokens, alert the user (`docs/orb-alerts.md`), and archive or delete themselves on user request (`docs/orb-archival.md`, `docs/orb-deletion.md`).
 - The browser communicates only with the control plane, never directly with an orb runtime.
+- Built-in service exposure is absent (decided 2026-10-04). Before preview implementation, architecture orb `e67b1120-393c-41c6-94ed-b354d82c526d` / [PR #51](https://github.com/schani/pi-orb/pull/51) must merge and deploy: consolidate on the unchanged issuer URL with app-managed Google login, not IAP. Selected previews require explicit port registration, activity preventing idle stop (not agent busy or implicit wake), explicit Stop priority and normal HTTP without body rewriting/retries. Ingress/session details and budgets remain open; no implementation authorized. Advanced networking may later be skill-only, with no skill work now (`docs/ports.md`).
 - The original first slice has no application authentication or authorization: anybody who can reach it can perform every operation. It is local/trusted-development software and must not be exposed publicly.
 - Stages 1–2 application identity, owned projects, and per-user personal instructions are deployed from `ec81e80` for existing single-user use. Stage 2's schema/data cutover is verified; typed-history migration compatibility enforcement remains a follow-up (`docs/postmortems/2026-09-17-typed-history-runtime-fence.md`). Stage 3 per-user credentials is on `main`, qualified, and undeployed; coworker onboarding remains unauthorized. The single-application Google login/stateless sealed-session implementation was deployed and release-validated 2026-10-06 (`docs/deployment.md`). Local development explicitly selects `PI_ORB_AUTH_MODE=local`. `docs/multi-user.md`.
 - After routing and runtime connection, the control plane proxies one live WebSocket between browser and runtime without interpreting agent content.
@@ -117,7 +118,7 @@ Subsystem designs:
 - [docs/claude-sdk-capabilities.md](docs/claude-sdk-capabilities.md) — remote-tool, hook, skill and restart-history API audit; research only
 - [docs/subagents.md](docs/subagents.md) — local leaf subagents, minimal gotgenes fork, aggregate activity and DST-first integration/acceptance plan
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
-- [docs/multi-user.md](docs/multi-user.md) — trusted-company identity, owned projects/settings, per-user credentials, and tailnet options
+- [docs/multi-user.md](docs/multi-user.md) — trusted-company identity, owned projects/settings, and per-user credentials
 - [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
 - [docs/activity-headlines.md](docs/activity-headlines.md) — locally implemented request-owned Luna activity headlines, durable metadata and bounded local qualification
 - [docs/transcript-cache.md](docs/transcript-cache.md) — bounded browser transcript caching, ownership/freshness rules, compact transport measurements and qualification
@@ -132,7 +133,7 @@ Subsystem designs:
 - [docs/orb-setup-hook.md](docs/orb-setup-hook.md) — repository-owned `.agents/setup` / `.agents/resume` boot hooks, matched to Amp's convention: triggers per compute incarnation, identity-free setup, user-visible failure
 - [docs/workload-identity.md](docs/workload-identity.md) — requirements for orb-issued OIDC identity and keyless federation with cloud providers and private services
 - [docs/workload-identity-recipes.md](docs/workload-identity-recipes.md) — relying-party integration recipes for that identity: GCP workload identity federation, AWS web-identity roles, and generic OIDC verification
-- [docs/ports.md](docs/ports.md) — port exposure and preview URLs: tier-1 Tailscale, per-orb auth keys, the preview-host contract
+- [docs/ports.md](docs/ports.md) — HTTP preview proposal: isolated origins, authentication, runtime proxy, DST and deployment gates
 - [docs/hosting.md](docs/hosting.md) — system-hosted orb files: durable namespaces, object storage, publication, serving, and lifecycle ownership
 - [docs/deployment.md](docs/deployment.md) — Cloud Run/OpenTofu deployment direction (operational workflow: `infra/README.md`)
 - [docs/control-plane-consolidation.md](docs/control-plane-consolidation.md) — single-service application authentication, implementation record and cutover/qualification gates

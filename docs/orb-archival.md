@@ -23,7 +23,7 @@ Add terminal state `archived` and transitional state `archiving`.
 - Permanent `DELETE` is allowed during `archiving` and after `archived`. During `archiving`, it atomically upgrades the durable cleanup intent to deletion; deletion then skips transcript sealing and eventually removes the retained database records. This is the escape hatch when a complete archive cannot be produced.
 - Project orb lists continue to include archived orbs. Opening one shows the complete retained transcript in read-only mode, with no composer or lifecycle start/stop controls.
 
-The confirmation copy must distinguish the operations: archive deletes the checkout, files, compute, and tailnet identity but retains the conversation; delete also destroys the conversation. While work is in progress, `stateDetail` reports whether archival is waiting for the runtime, sealing history, cleaning resources, quarantining stale provisions, or blocked by a sanitized error.
+The confirmation copy must distinguish the operations: archive deletes the checkout, files, and compute but retains the conversation; delete also destroys the conversation. While work is in progress, `stateDetail` reports whether archival is waiting for the runtime, sealing history, cleaning resources, quarantining stale provisions, or blocked by a sanitized error.
 
 ## Completeness boundary
 
@@ -51,10 +51,9 @@ The deletion tombstone is now a shared durable cleanup intent with a `kind: "arc
 
 Extract one `reconcileResourceDisposal` routine from `reconcileDeleting`. For both intent kinds it must, unchanged:
 
-- revoke exact-match Tailscale keys/devices through `resourceCleaner.cleanupOrb`;
 - invoke the existing idempotent `OrbHostProvider.destroy(orbId, context)` for compute and persistent storage;
 - repeat cleanup through the existing quarantine window to fence in-flight provisions;
-- perform the same final provider/Tailscale absence pass;
+- perform the same final provider absence pass;
 - persist blockers and emit edge-only lifecycle events.
 
 Only the precondition and final database transaction differ:

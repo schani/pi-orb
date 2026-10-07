@@ -19,15 +19,7 @@ export const PROJECT_SECRETS_PROVIDER = "project-secrets";
 const MAX_ATTEMPTS = 12;
 const POINTER_CHANGED = "project secret pointer changed during mutation";
 const NAME = new RegExp(PROJECT_SECRET_NAME_PATTERN);
-const RESERVED = new Set([
-  "HOME",
-  "PATH",
-  "PI_ORB_RUNTIME_TOKEN",
-  "PI_ORB_CONTROL_PLANE_URL",
-  "PI_ORB_TAILSCALE_AUTH_KEY",
-  "PI_ORB_TAILSCALE_HOSTNAME",
-  "PI_ORB_PREVIEW_HOST",
-]);
+const RESERVED = new Set(["HOME", "PATH", "PI_ORB_RUNTIME_TOKEN", "PI_ORB_CONTROL_PLANE_URL"]);
 const allowedName = (name: string): boolean =>
   NAME.test(name) && name.length <= 128 && !name.startsWith("PI_ORB_") && !RESERVED.has(name);
 

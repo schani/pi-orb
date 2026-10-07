@@ -30,7 +30,10 @@ export function validateFixture(f) {
     assert.match(f[key], /^projects\/playground-dev-6ae7\/global\/images\/[a-z][-a-z0-9]+$/);
   for (const key of ["runtimeImageId", "workspaceImageId"]) assert.match(f[key], /^[1-9][0-9]*$/);
   assert.equal(f.brokerUrl, "http://127.0.0.1:7100");
-  assert.match(f.appOrigin, /^http:\/\/pi-orb-[a-z0-9-]+\.tail[0-9a-f]+\.ts\.net:5173$/);
+  const origin = new URL(f.appOrigin);
+  assert.equal(origin.protocol, "http:");
+  assert.equal(origin.port, "5173");
+  assert.equal(origin.origin, f.appOrigin);
   assert.equal(f.port, 7100);
   assert.equal(f.gceServiceAccount, `pi-orb-orb-vm@${f.gcpProject}.iam.gserviceaccount.com`);
   assert.equal(f.subnetwork, "regions/us-central1/subnetworks/pi-orb-us-central1");
@@ -67,9 +70,6 @@ const appConfig = [
   "PI_ORB_GITHUB_API_URL",
   "PI_ORB_GITHUB_CLIENT_ID",
   "PI_ORB_GITHUB_CLIENT_SECRET",
-  "PI_ORB_TAILSCALE_OAUTH_CLIENT_ID",
-  "PI_ORB_TAILSCALE_OAUTH_CLIENT_SECRET",
-  "PI_ORB_TAILSCALE_TAILNET_DNS_NAME",
 ];
 
 export function fixtureEnvironment(inherited, f, state) {

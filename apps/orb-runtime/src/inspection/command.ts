@@ -53,7 +53,6 @@ export function formatSelf(self: OrbSelf): string {
   ];
   if (self.spawnedBy !== null)
     lines.push(`Spawned by: ${self.spawnedBy.id} (${self.spawnedBy.url})`);
-  if (self.previewHost !== null) lines.push(`Preview: ${self.previewHost}`);
   return `${lines.join("\n")}\n`;
 }
 

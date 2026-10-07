@@ -8,8 +8,6 @@ import type { OrbAgent } from "./domain/orb-agent.ts";
 import { ORB_MARKER_ENV } from "./hooks/env-file.ts";
 import { buildRuntimeServer } from "./http/server.ts";
 import { PiOrbAgent } from "./pi/agent.ts";
-import { startTailscale } from "./tailscale/daemon.ts";
-import { readTailscaleEnv } from "./tailscale/env.ts";
 import { TerminalManager } from "./terminal/manager.ts";
 import { checkTestLaunchFailure } from "./test-launch-failure.ts";
 import { registerUploadRoutes } from "./uploads/routes.ts";
@@ -20,11 +18,6 @@ const env = (name: string, fallback?: string): string => {
   if (fallback !== undefined) return fallback;
   console.error(`missing required environment variable ${name}`);
   process.exit(1);
-};
-
-/** `startTailscale` resolves with a typed failure; a rejection is a bug. */
-const unreachableRejection = (error: unknown): void => {
-  console.error("tailscale: unexpected rejection:", error);
 };
 
 async function main(): Promise<void> {
@@ -40,7 +33,6 @@ async function main(): Promise<void> {
       `test launch failure injected for orb=${env("PI_ORB_ID")} incarnation=${env("PI_ORB_HOST_INCARNATION")}`,
     );
   }
-  const tailscale = readTailscaleEnv(process.env);
   const harness = env(HARNESS_ENV, "pi");
   if (harness !== "pi" && harness !== "claude") {
     console.error(`${HARNESS_ENV} must be pi or claude`);
@@ -53,7 +45,6 @@ async function main(): Promise<void> {
     skillsDir: env(SKILLS_DIR_ENV),
     broker: readBrokerEnv(process.env),
     mockOpenAi: readMockOpenAiEnv(process.env),
-    previewHost: tailscale?.previewHost ?? null,
     incarnation: env("PI_ORB_HOST_INCARNATION", "0"),
     claudeRecoveryProof: readClaudeRecoveryProof(process.env.PI_ORB_CLAUDE_RECOVERY_PROOF),
     testLaunchFailure: launchFailure.inject,
@@ -110,20 +101,6 @@ async function main(): Promise<void> {
     },
   );
   console.log(`orb runtime listening on ${listening}`);
-
-  // Tier-1 port exposure (docs/ports.md) is optional and never blocks the
-  // boot: joining the tailnet runs alongside it and only ever logs.
-  if (tailscale !== null) {
-    void startTailscale({ config: tailscale, workDir }).then((result) => {
-      if (result.isErr()) {
-        console.error(
-          `tailscale: port exposure unavailable (${result.error.code}): ${result.error.message}`,
-        );
-        return;
-      }
-      console.log(`tailscale: ports are reachable at http://${tailscale.previewHost}:<port>`);
-    }, unreachableRejection);
-  }
 
   await agent.boot();
   const health = agent.getHealth();

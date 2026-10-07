@@ -8,49 +8,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { nativeMcpConfig } from "../mcp/native.ts";
-import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { environmentPrompt } from "./environment-prompt.ts";
 import { createOrbResourceLoader } from "./resource-loader.ts";
 
-/**
- * Pinned Pi SDK contract test (docs/ports.md): verifies, against the exact
- * installed `@earendil-works/pi-coding-agent` version, that the Tailscale
- * port-exposure prompt really composes through a real `DefaultResourceLoader`
- * — the sibling unit suite (`resource-loader.test.ts`) only checks the pure
- * options builder, so nothing there would notice the SDK changing underneath.
- *
- * The seam being pinned: `AgentSession` reads exactly two prompt accessors off
- * the loader (`agent-session.js`: `getSystemPrompt()` and
- * `getAppendSystemPrompt()`), joins the append array with a blank line, and
- * hands the result to `buildSystemPrompt` as `appendSystemPrompt`. That builder
- * is not re-exported from the package entry point, so `getAppendSystemPrompt()`
- * is the narrowest honest surface reachable without standing up a model
- * runtime; these tests pin it plus the blank-line join the session performs.
- *
- * Pinned contract:
- *  1. `appendSystemPromptOverride` is invoked during `reload()`, and the
- *     port-exposure section — preview host, full example URL —
- *     lands verbatim in `getAppendSystemPrompt()`.
- *  2. Our loader is a strict superset of the implicit loader
- *     `createAgentSession` builds when it gets no `resourceLoader`: the SDK's
- *     own `APPEND_SYSTEM.md` discovery (project `.pi/` and global agent-dir
- *     variants), `SYSTEM.md` discovery, and AGENTS.md context files all still
- *     load, byte-identically to a control loader.
- *  3. Ordering: discovered append content, runtime tools, then optional ports.
- *  4. Without a preview host the runtime-tools section remains present while
- *     the port-exposure section is absent.
- *  5. `reload()` is mandatory: a freshly constructed loader has an empty
- *     append array and has never called the override.
- *  6. `additionalSkillPaths` really discovers the image-baked skills directory
- *     through `getSkills()`, and an absent directory stays harmless.
- *
- * Every control-equality test passes `skillsDir: null` explicitly so it
- * compares the same skill set as the control loader. Production defaults to
- * `/opt/pi-orb/skills` in the image and the trusted runtime-relative source
- * directory for process installs.
- */
-
-const PREVIEW_HOST = "pi-orb-test.tailabc.ts.net";
+/** Pins runtime prompt composition and resource discovery against the installed Pi SDK. */
 /** Repository source of what the Dockerfile bakes at `BAKED_SKILLS_DIR`. */
 const BAKED_SKILLS_SOURCE = join(import.meta.dirname, "../../skills");
 /** `CONFIG_DIR_NAME` in the SDK (`config.js`), i.e. the project-scoped `.pi/`. */
@@ -80,14 +41,10 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     return loader;
   };
 
-  const orbLoader = async (
-    previewHost: string | null = PREVIEW_HOST,
-    skillsDir: string | null = null,
-  ): Promise<ResourceLoader> => {
+  const orbLoader = async (skillsDir: string | null = null): Promise<ResourceLoader> => {
     const result = await createOrbResourceLoader({
       cwd: repoDir,
       agentDir,
-      previewHost,
       skillsDir,
     });
     if (result.isErr()) throw new Error(`loader build failed: ${result.error}`);
@@ -184,7 +141,7 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
   });
 
   it("loads native MCP, tool search and codemode without a catalog, alongside user extensions", async () => {
-    const input = { cwd: repoDir, agentDir, previewHost: null, skillsDir: null };
+    const input = { cwd: repoDir, agentDir, skillsDir: null };
     const loaded = (await createOrbResourceLoader(input))._unsafeUnwrap();
     expect(loaded.getAppendSystemPrompt().join("\n")).not.toContain("Available MCP servers:");
     const names = loaded.getExtensions().extensions.flatMap((e) => [...e.tools.keys()]);
@@ -257,21 +214,6 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     ).not.toContain("mcp_call");
   });
 
-  it("puts the port-exposure section into the prompt the session reads", async () => {
-    const loader = await orbLoader();
-
-    const parts = loader.getAppendSystemPrompt();
-    expect(parts).toContain(portExposurePrompt(PREVIEW_HOST));
-
-    const section = composedAppendSection(loader);
-    expect(section).toBeDefined();
-    expect(section).toContain("## Port exposure");
-    expect(section).toContain(PREVIEW_HOST);
-    expect(section).toContain(`http://${PREVIEW_HOST}:5173`);
-    expect(section).toMatch(/substitute the actual port/i);
-    expect(section?.match(new RegExp(PREVIEW_HOST.replaceAll(".", "\\."), "g"))).toHaveLength(1);
-  });
-
   it("keeps the boot time zone in the SDK append prompt across reload", async () => {
     writeFileSync(join(repoDir, PROJECT_CONFIG_DIR, "APPEND_SYSTEM.md"), PROJECT_APPEND);
     const input = {
@@ -288,7 +230,7 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     await loaded.reload();
     expect(loaded.getAppendSystemPrompt()).toEqual([PROJECT_APPEND, environmentPrompt, expected]);
     expect(composedAppendSection(loaded)).toContain(expected);
-    expect((await orbLoader(null)).getAppendSystemPrompt()).toEqual([
+    expect((await orbLoader()).getAppendSystemPrompt()).toEqual([
       PROJECT_APPEND,
       environmentPrompt,
     ]);
@@ -303,11 +245,7 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     expect(control.getAppendSystemPrompt()).toEqual([PROJECT_APPEND]);
 
     const loader = await orbLoader();
-    expect(loader.getAppendSystemPrompt()).toEqual([
-      PROJECT_APPEND,
-      environmentPrompt,
-      portExposurePrompt(PREVIEW_HOST),
-    ]);
+    expect(loader.getAppendSystemPrompt()).toEqual([PROJECT_APPEND, environmentPrompt]);
   });
 
   it("keeps the agent-dir APPEND_SYSTEM.md the SDK discovers", async () => {
@@ -317,11 +255,7 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     expect(control.getAppendSystemPrompt()).toEqual([GLOBAL_APPEND]);
 
     const loader = await orbLoader();
-    expect(loader.getAppendSystemPrompt()).toEqual([
-      GLOBAL_APPEND,
-      environmentPrompt,
-      portExposurePrompt(PREVIEW_HOST),
-    ]);
+    expect(loader.getAppendSystemPrompt()).toEqual([GLOBAL_APPEND, environmentPrompt]);
   });
 
   it("is a strict superset of the implicit loader, with our section last", async () => {
@@ -336,13 +270,13 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     // Everything the implicit loader found, in order, then our section — we
     // append to `base`, we never reorder or drop it.
     expect(composed.slice(0, discovered.length)).toEqual(discovered);
-    expect(composed).toHaveLength(discovered.length + 2);
-    expect(composed.at(-1)).toBe(portExposurePrompt(PREVIEW_HOST));
+    expect(composed).toHaveLength(discovered.length + 1);
+    expect(composed.at(-1)).toBe(environmentPrompt);
 
     const section = composedAppendSection(loader);
     expect(section).toBeDefined();
     if (section === undefined) throw new Error("unreachable");
-    expect(section.indexOf(PROJECT_APPEND)).toBeLessThan(section.indexOf("## Port exposure"));
+    expect(section.indexOf(PROJECT_APPEND)).toBeLessThan(section.indexOf(environmentPrompt));
 
     // The rest of the loader's surface is untouched: we override only the
     // append array, so SYSTEM.md, AGENTS.md context files, and the discovered
@@ -360,19 +294,10 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     expect(loader.getThemes().themes).toEqual(control.getThemes().themes);
   });
 
-  it("keeps runtime tools but omits port exposure without a preview host", async () => {
-    writeFileSync(join(repoDir, PROJECT_CONFIG_DIR, "APPEND_SYSTEM.md"), PROJECT_APPEND);
-
-    const loader = await orbLoader(null);
-    expect(loader.getAppendSystemPrompt()).toEqual([PROJECT_APPEND, environmentPrompt]);
-    expect(composedAppendSection(loader)).not.toContain("## Port exposure");
-    expect(composedAppendSection(loader)).not.toContain(PREVIEW_HOST);
-  });
-
   it("discovers the image-baked skills through additionalSkillPaths", async () => {
     // The directory the Dockerfile copies to /opt/pi-orb/skills, read from the
     // repository so the shipped SKILL.md is what is actually exercised.
-    const loader = await orbLoader(PREVIEW_HOST, BAKED_SKILLS_SOURCE);
+    const loader = await orbLoader(BAKED_SKILLS_SOURCE);
     const { skills, diagnostics } = loader.getSkills();
 
     for (const name of ["boot-hooks", "cloud-identity"]) {
@@ -405,7 +330,6 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     const result = await createOrbResourceLoader({
       cwd: repoDir,
       agentDir,
-      previewHost: PREVIEW_HOST,
       skillsDir: BAKED_SKILLS_SOURCE,
     });
     if (result.isErr()) throw new Error(`loader build failed: ${result.error}`);
@@ -421,7 +345,6 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     const result = await createOrbResourceLoader({
       cwd: repoDir,
       agentDir,
-      previewHost: PREVIEW_HOST,
       skillsDir: absent,
     });
 
@@ -436,7 +359,6 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     const result = await createOrbResourceLoader({
       cwd: repoDir,
       agentDir,
-      previewHost: PREVIEW_HOST,
       skillsDir: file,
     });
 
@@ -458,7 +380,7 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
       agentDir,
       appendSystemPromptOverride: (base: string[]): string[] => {
         overrideCalls += 1;
-        return [...base, environmentPrompt, portExposurePrompt(PREVIEW_HOST)];
+        return [...base, environmentPrompt];
       },
     });
     expect(unreloaded.getAppendSystemPrompt()).toEqual([]);
@@ -467,10 +389,6 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
 
     await unreloaded.reload();
     expect(overrideCalls).toBe(1);
-    expect(unreloaded.getAppendSystemPrompt()).toEqual([
-      PROJECT_APPEND,
-      environmentPrompt,
-      portExposurePrompt(PREVIEW_HOST),
-    ]);
+    expect(unreloaded.getAppendSystemPrompt()).toEqual([PROJECT_APPEND, environmentPrompt]);
   });
 });

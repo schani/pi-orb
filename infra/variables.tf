@@ -25,18 +25,6 @@ variable "github_client_id" {
   default     = "Iv23liA7Aecbetq28EHv"
 }
 
-variable "tailscale_oauth_client_id" {
-  description = "Tailscale OAuth client id used to mint per-orb auth keys (docs/ports.md); empty disables port exposure. An identifier, not a credential — it grants nothing without the client secret, which lives only in Secret Manager. The client must own tag:pi-orb."
-  type        = string
-  default     = "kcjtdpKcAL11CNTRL"
-}
-
-variable "tailscale_tailnet_dns_name" {
-  description = "MagicDNS suffix of the tailnet; orbs are reachable at pi-orb-<orbId>.<this> by tailnet members only — the name itself grants no access."
-  type        = string
-  default     = "tail8fb2d0.ts.net"
-}
-
 variable "deploy_generation" {
   description = "Monotonic script generation for forward-only repair fencing (docs/host-provider.md); release.sh clamps build-push.sh's candidate above the currently serving generation. An apply that omits it runs at generation 0: such a revision never repairs a host stamped by a real deploy, so a forgotten var delays an upgrade to the next deploy instead of repairing anything backward."
   type        = number

@@ -33,7 +33,7 @@ describe("orb runtime Dockerfile contract", () => {
 
   it("installs agent-browser with a system Chromium executable", () => {
     expect(runtimePackage.dependencies?.["agent-browser"]).toBe("0.33.2");
-    expect(dockerfile).toContain("gh tailscale chromium");
+    expect(dockerfile).toContain("gh chromium");
     expect(dockerfile).toContain(
       "ln -s /app/node_modules/.bin/agent-browser /usr/local/bin/agent-browser",
     );

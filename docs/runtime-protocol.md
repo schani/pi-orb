@@ -59,6 +59,17 @@ Arbitrary browser files use the separate streaming HTTP path in `docs/workspace-
 
 **Claude failed-health recovery (2026-10-06; local, undeployed).** Only `status: "failed"`, exact `error.code: "claude_child_recovery_required"` and optional `recovery: { episode }` can authorize one fenced whole-compute replacement. The episode is an opaque 64-character digest independent of replacement lifetime. `ClaudeRecoveryProof` is `{ episode, disposedIncarnation, replacementIncarnation }`; only durable verified-disposal finalization supplies this boot-scoped provider/runtime contract. It can release unknown-lifetime ownership only for the matching retained episode and replacement incarnation. I/O repair failures, missing receipts, generic health errors, PID/EOF and inventory absence grant no authority. Canonical receipts replicate before retained inbox UUID redelivery; old work is visibly interrupted, not replayed. Details: `docs/lifecycle.md`, `docs/claude-agent-sdk.md`.
 
+## HTTP previews (proposal, 2026-10-04)
+
+`docs/ports.md` proposes a separate authenticated HTTP/WS/SSE transport through the existing
+private runtime connection, not agent live frames or history replication. A candidate runtime
+route is `/v1/preview/:port/*`; it carries the original path/query, exact target identity and
+incarnation fence through the runtime preview service to a literal-loopback HTTP adapter.
+The public hostname selects orb/port, never a caller-supplied upstream URL. Preview routes
+must remain unavailable on application, broker and issuer origins, and runtime platform ports
+must be forbidden targets. Authentication, headers and limits remain proposals in questions
+74–77. No route, protocol schema or preview capability is implemented by this plan.
+
 ## Transport and control-plane handoff
 
 The browser opens `/api/orbs/{orbId}/live` only after the normal control-plane HTTP API reports the orb as running. It offers the WebSocket subprotocol `pi-orb.runtime.v1`.

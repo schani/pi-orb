@@ -24,10 +24,6 @@ locals {
       PI_ORB_HOST_SPEC_GENERATION = tostring(var.deploy_generation)
     },
     var.github_client_id != "" ? { PI_ORB_GITHUB_CLIENT_ID = var.github_client_id } : {},
-    var.tailscale_oauth_client_id != "" ? {
-      PI_ORB_TAILSCALE_OAUTH_CLIENT_ID  = var.tailscale_oauth_client_id
-      PI_ORB_TAILSCALE_TAILNET_DNS_NAME = var.tailscale_tailnet_dns_name
-    } : {},
   )
 }
 
@@ -127,19 +123,6 @@ resource "google_cloud_run_v2_service" "issuer" {
           value_source {
             secret_key_ref {
               secret  = google_secret_manager_secret.github_client_secret.secret_id
-              version = "latest"
-            }
-          }
-        }
-      }
-      # The reconciler mints a per-orb tailnet auth key at host creation.
-      dynamic "env" {
-        for_each = var.tailscale_oauth_client_id != "" ? [1] : []
-        content {
-          name = "PI_ORB_TAILSCALE_OAUTH_CLIENT_SECRET"
-          value_source {
-            secret_key_ref {
-              secret  = google_secret_manager_secret.tailscale_oauth_client_secret.secret_id
               version = "latest"
             }
           }

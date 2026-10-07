@@ -31,7 +31,7 @@ it("validates alert acknowledgement and returns the surviving pointer", async ()
     })
   )._unsafeUnwrap();
   const app = Fastify({ logger: false });
-  registerRoutes(app, task, harness.deps, {}, TEST_SYSTEM_VIEW);
+  registerRoutes(app, task, harness.deps, TEST_SYSTEM_VIEW);
   try {
     const post = (orbId: string, payload: object) =>
       app.inject({ method: "POST", url: `/api/v1/orbs/${orbId}/alerts/ack`, payload });

@@ -56,7 +56,6 @@ describe("orbView failures", () => {
         lastError: "runtime_failed: clone_failed: repository access denied",
       },
       new ControlState(),
-      {},
     );
 
     expect(view.lastError).toBe("runtime_failed: clone_failed: repository access denied");
@@ -70,7 +69,7 @@ describe("orbView activity", () => {
     const control = new ControlState();
     control.recordPullSuccess(orb.id, 123, "busy", "runtime-1");
 
-    const view = orbView(orb, control, {});
+    const view = orbView(orb, control);
 
     expect(view.activity).toBe("busy");
     expect(Check(OrbViewSchema, view)).toBe(true);
@@ -78,10 +77,10 @@ describe("orbView activity", () => {
 
   it("omits activity when it is unknown or the orb is not running", () => {
     const control = new ControlState();
-    expect(orbView(orb, control, {}).activity).toBeUndefined();
+    expect(orbView(orb, control).activity).toBeUndefined();
 
     control.recordPullSuccess(orb.id, 123, "busy", "runtime-1");
-    const stopped = orbView({ ...orb, state: "stopped" }, control, {});
+    const stopped = orbView({ ...orb, state: "stopped" }, control);
     expect(stopped.activity).toBeUndefined();
     expect("activity" in stopped).toBe(false);
   });
@@ -89,11 +88,7 @@ describe("orbView activity", () => {
 
 describe("orbView sleep", () => {
   it("shows the deadline and waiting phase", () => {
-    const view = orbView(
-      { ...orb, sleepId: "sleep-1", sleepUntil: 20_000 },
-      new ControlState(),
-      {},
-    );
+    const view = orbView({ ...orb, sleepId: "sleep-1", sleepUntil: 20_000 }, new ControlState());
     expect(view.sleepUntil).toBe(new Date(20_000).toISOString());
     expect(view.stateDetail).toEqual({
       type: "waiting_for_sleep",
@@ -117,7 +112,6 @@ describe("orbView compute discard", () => {
         hostDiscardRequestedAt: 1_700_000_001_000,
       },
       new ControlState(),
-      {},
     );
 
     expect(view.lastError).toBe("runtime_failed: process exited");
@@ -143,7 +137,6 @@ describe("orbView compute discard", () => {
         hostDiscardRequestedAt: 1_700_000_001_000,
       },
       new ControlState(),
-      {},
     );
 
     expect(view.stateDetail).toEqual({
@@ -164,7 +157,6 @@ describe("orbView compute discard", () => {
         hostDiscardRequestedAt: 1_700_000_001_000,
       },
       new ControlState(),
-      {},
     );
     expect(replacing.stateDetail).toEqual({ type: "replacing_stale_compute", retrying: false });
 
@@ -178,7 +170,6 @@ describe("orbView compute discard", () => {
         hostDiscardRequestedAt: 1_700_000_001_000,
       },
       new ControlState(),
-      {},
     );
     expect(discarding.stateDetail).toEqual({ type: "discarding_failed_compute", retrying: false });
     expect(discarding.lastError).toBe("runtime_failed: process exited");
@@ -199,7 +190,7 @@ describe("orbView boot hooks", () => {
       nowMono: 0,
       nowWall: Date.now() - 30_000,
     });
-    const view = orbView({ ...orb, state: "starting" }, control, {});
+    const view = orbView({ ...orb, state: "starting" }, control);
     expect(view.stateDetail).toMatchObject({ type: "running_setup" });
     expect(Check(OrbViewSchema, view)).toBe(true);
   });
@@ -217,7 +208,7 @@ describe("orbView boot hooks", () => {
         nowWall: Date.now(),
       });
     }
-    const view = orbView({ ...orb, state: "starting" }, control, {});
+    const view = orbView({ ...orb, state: "starting" }, control);
     expect(view.stateDetail).toMatchObject({ type: "waiting_for_runtime" });
   });
 
@@ -228,7 +219,7 @@ describe("orbView boot hooks", () => {
       reason: "timeout",
       logPath: "/workspace/home/.cache/pi-orb/logs/setup.log",
     });
-    const view = orbView(orb, control, {});
+    const view = orbView(orb, control);
     expect(view.stateDetail).toEqual({
       type: "setup_failed",
       hook: "setup",
@@ -241,7 +232,7 @@ describe("orbView boot hooks", () => {
   it("says nothing about hooks that succeeded", () => {
     const control = new ControlState();
     control.noteHookFailure(orb.id, null);
-    expect(orbView(orb, control, {}).stateDetail).toBeUndefined();
+    expect(orbView(orb, control).stateDetail).toBeUndefined();
   });
 
   it("says nothing about a hook failure the orb is no longer running on", () => {
@@ -251,7 +242,7 @@ describe("orbView boot hooks", () => {
       reason: "failed",
       logPath: "/workspace/home/.cache/pi-orb/logs/resume.log",
     });
-    expect(orbView({ ...orb, state: "stopped" }, control, {}).stateDetail).toBeUndefined();
+    expect(orbView({ ...orb, state: "stopped" }, control).stateDetail).toBeUndefined();
   });
 });
 
@@ -261,7 +252,7 @@ describe("orbView workload identity", () => {
     // (docs/workload-identity.md): the party who can act on a denial is the
     // caller inside the orb, which got the typed error, and the operator's
     // record is the deduplicated `identity-mint-denied` log edge.
-    const view = orbView({ ...orb, lastMintAt: 1_700_000_060_000 }, new ControlState(), {});
+    const view = orbView({ ...orb, lastMintAt: 1_700_000_060_000 }, new ControlState());
     expect(Object.keys(view)).not.toContain("identity");
     expect(JSON.stringify(view)).not.toContain("mint");
     expect(Check(OrbViewSchema, view)).toBe(true);
@@ -288,11 +279,11 @@ describe("orbView credential challenge shaping", () => {
       expiresAt: 1_700_000_060_000,
     });
     const row = { ...orb, harness: "claude" as const, state: "starting" as const };
-    const view = orbView(row, control, {}, owner);
+    const view = orbView(row, control, owner);
     expect(view.harness).toBe("claude");
     expect(view.actionRequired?.type).toBe("claude_subscription_login");
     expect(Check(OrbViewSchema, view)).toBe(true);
-    expect(orbView(row, control, {}, null).actionRequired).toEqual({
+    expect(orbView(row, control, null).actionRequired).toEqual({
       type: "owner_login_required",
       provider: "claude",
     });
@@ -304,9 +295,10 @@ describe("orbView credential challenge shaping", () => {
     const control = new ControlState();
     control.markAuthBlocked(orb.id, owner);
     control.setChallenge(owner, challenge);
-    expect(orbView({ ...orb, state: "starting" }, control, {}, owner).actionRequired).toMatchObject(
-      { type: "github_device_login", userCode: "SECRET-CODE" },
-    );
+    expect(orbView({ ...orb, state: "starting" }, control, owner).actionRequired).toMatchObject({
+      type: "github_device_login",
+      userCode: "SECRET-CODE",
+    });
   });
 
   it("shows a nonblocking preparing challenge only to the owner", () => {
@@ -318,14 +310,12 @@ describe("orbView credential challenge shaping", () => {
       userCode: "",
       expiresAt: 1_700_000_000_000,
     });
-    expect(orbView({ ...orb, state: "starting" }, control, {}, owner).actionRequired).toMatchObject(
-      {
-        type: "openai_codex_device_login",
-        verificationUri: "",
-        userCode: "",
-      },
-    );
-    expect(orbView({ ...orb, state: "starting" }, control, {}, coworker).actionRequired).toEqual({
+    expect(orbView({ ...orb, state: "starting" }, control, owner).actionRequired).toMatchObject({
+      type: "openai_codex_device_login",
+      verificationUri: "",
+      userCode: "",
+    });
+    expect(orbView({ ...orb, state: "starting" }, control, coworker).actionRequired).toEqual({
       type: "owner_login_required",
       provider: "openai-codex",
     });
@@ -336,30 +326,10 @@ describe("orbView credential challenge shaping", () => {
     control.markAuthBlocked(orb.id, owner);
     control.setChallenge(owner, challenge);
     for (const viewerUserId of [coworker, null]) {
-      const action = orbView(
-        { ...orb, state: "starting" },
-        control,
-        {},
-        viewerUserId,
-      ).actionRequired;
+      const action = orbView({ ...orb, state: "starting" }, control, viewerUserId).actionRequired;
       expect(action).toEqual({ type: "owner_login_required", provider: "github" });
       expect(JSON.stringify(action)).not.toContain("SECRET-CODE");
       expect(JSON.stringify(action)).not.toContain("github.test");
     }
-  });
-});
-
-describe("orbView previewHost", () => {
-  it("derives the MagicDNS host when a tailnet is configured", () => {
-    const view = orbView(orb, new ControlState(), { tailnetDnsName: "tailabc123.ts.net" });
-    expect(view.previewHost).toBe("pi-orb-orb-1.tailabc123.ts.net");
-    expect(Check(OrbViewSchema, view)).toBe(true);
-  });
-
-  it("omits the field entirely when port exposure is off", () => {
-    const view = orbView(orb, new ControlState(), {});
-    expect(view.previewHost).toBeUndefined();
-    expect("previewHost" in view).toBe(false);
-    expect(Check(OrbViewSchema, view)).toBe(true);
   });
 });

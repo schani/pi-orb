@@ -21,7 +21,7 @@ describe("browser session probe", () => {
         user: { id: "00000000-0000-4000-8000-000000000001", email: "dev@example.test" },
       };
     });
-    registerRoutes(app, task, makeHarness().deps, {}, TEST_SYSTEM_VIEW);
+    registerRoutes(app, task, makeHarness().deps, TEST_SYSTEM_VIEW);
     await app.ready();
   });
 

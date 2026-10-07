@@ -598,7 +598,7 @@ export interface OrbHostProvider {
   ): ResultAsync<void, OrbHostProviderError>;
   /**
    * Removes disposable compute through an incarnation fence while preserving
-   * authoritative workspace and tailnet identity. Absence is success.
+   * authoritative workspace. Absence is success.
    */
   discardCompute(
     task: SimulationTask,
@@ -1141,21 +1141,12 @@ export interface OrbNameGenerator {
   ): ResultAsync<string, OrbNameGeneratorError>;
 }
 
-export interface OrbResourceCleaner {
-  cleanupOrb(
-    task: SimulationTask,
-    orbId: string,
-    context: OperationContext,
-  ): ResultAsync<void, { readonly message: string; readonly retryable: boolean }>;
-}
-
 export interface ControlPlaneDeps {
   readonly workspaceUploadRuntime?: (
     task: SimulationTask,
   ) => import("./workspace-uploads.ts").UploadRuntime;
   readonly store: ControlPlaneStore;
   readonly hostProvider: OrbHostProvider;
-  readonly resourceCleaner: OrbResourceCleaner;
   readonly runtimeClient: OrbRuntimeClient;
   readonly authGate: AuthGate;
   readonly nameGenerator: OrbNameGenerator;

@@ -67,7 +67,6 @@ import { readExecutionIdentity } from "../pi/execution-identity.ts";
 import { FileIdleStopFence } from "../pi/idle-stop-fence.ts";
 import { fetchProjectInstructions } from "../project-instructions/endpoint.ts";
 import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts";
-import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { ClaudeActivity } from "./activity.ts";
 import { claudeChildEnvironment, fetchClaudeSubscription, verifyClaudeAccount } from "./auth.ts";
 import { validateClaudeAuthSettings } from "./auth-settings.ts";
@@ -150,7 +149,6 @@ export interface ClaudeOrbAgentOptions {
   readonly workDir: string;
   readonly skillsDir: string | null;
   readonly broker: BrokerEnv | null;
-  readonly previewHost?: string | null;
   readonly incarnation?: string;
   readonly claudeRecoveryProof?: ClaudeRecoveryProof | undefined;
   readonly testLaunchFailure?: boolean;
@@ -491,7 +489,6 @@ export class ClaudeOrbAgent implements OrbAgent {
       environmentPrompt,
       personal.value.content,
       project.value.content,
-      ...(this.options.previewHost ? [portExposurePrompt(this.options.previewHost)] : []),
       ...(context.value.userTimeZone ? [`User's time zone: ${context.value.userTimeZone}.`] : []),
     ]
       .filter(Boolean)

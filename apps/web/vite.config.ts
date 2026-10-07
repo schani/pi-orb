@@ -14,10 +14,8 @@ export default defineConfig(({ mode }) => ({
       : []),
   ],
   server: {
-    // Reachable over the tailnet (a private, trusted network — the
-    // unauthenticated first slice must never be exposed publicly).
     host: true,
-    allowedHosts: ["vibestation", ".ts.net"],
+    allowedHosts: ["vibestation"],
     proxy:
       mode === "frontend"
         ? {}

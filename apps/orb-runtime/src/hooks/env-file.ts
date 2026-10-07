@@ -1,12 +1,5 @@
 import { join } from "node:path";
-import {
-  CONTROL_PLANE_URL_ENV,
-  PREVIEW_HOST_ENV,
-  RUNTIME_TOKEN_ENV,
-  SKILLS_DIR_ENV,
-  TAILSCALE_AUTH_KEY_ENV,
-  TAILSCALE_HOSTNAME_ENV,
-} from "@pi-orb/protocol";
+import { CONTROL_PLANE_URL_ENV, RUNTIME_TOKEN_ENV, SKILLS_DIR_ENV } from "@pi-orb/protocol";
 
 /** Set in every orb process so a script can branch on the platform (`PI_ORB=1`). */
 export const ORB_MARKER_ENV = "PI_ORB";
@@ -33,9 +26,6 @@ export const hookEnvPath = (home: string): string => join(home, ".pi-orb", "env"
 export const HOOK_ENV_DENIED: readonly string[] = [
   RUNTIME_TOKEN_ENV,
   CONTROL_PLANE_URL_ENV,
-  TAILSCALE_AUTH_KEY_ENV,
-  TAILSCALE_HOSTNAME_ENV,
-  PREVIEW_HOST_ENV,
   SKILLS_DIR_ENV,
   ORB_MARKER_ENV,
   "PI_ORB_ID",

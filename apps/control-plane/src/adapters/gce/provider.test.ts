@@ -1,8 +1,6 @@
 import { createHash } from "node:crypto";
 import { NoSimulationTask } from "determined";
-import { errAsync, okAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
-import type { TailscaleAuthKeyMinter, TailscaleHostOptions } from "../tailscale/client.ts";
 import type { GceApiTransport, GceResponse } from "./api.ts";
 import {
   GceOrbHostProvider,
@@ -70,7 +68,6 @@ class FakeTransport implements GceApiTransport {
 
 function makeProvider(
   transport: GceApiTransport,
-  tailscale?: TailscaleHostOptions,
   specGeneration?: number,
   overrides: Partial<GceOrbHostProviderOptions> = {},
 ): GceOrbHostProvider {
@@ -85,29 +82,10 @@ function makeProvider(
     workspaceImageResource: "projects/projxx/global/images/pi-orb-workspace-20260908",
     workspaceImageId: "223456789",
     controlPlaneUrl: "https://runtime.example",
-    ...(tailscale === undefined ? {} : { tailscale }),
     ...(specGeneration === undefined ? {} : { specGeneration }),
     ...overrides,
   });
 }
-
-const countingMinter = (): TailscaleAuthKeyMinter & {
-  minted: () => number;
-} => {
-  let count = 0;
-  return {
-    mintAuthKey: () => {
-      count += 1;
-      return okAsync(`tskey-auth-${count}`);
-    },
-    minted: () => count,
-  };
-};
-
-const tailscaleOptions = (minter: TailscaleAuthKeyMinter): TailscaleHostOptions => ({
-  minter,
-  tailnetDnsName: "tailnet.ts.net",
-});
 
 const ok200 = (body: Record<string, unknown>): GceResponse => ({
   status: 200,
@@ -338,7 +316,7 @@ describe("GceOrbHostProvider", () => {
         () => ok200({ name: "op-inst" }), // instance insert
         () => done, // op wait
       ]);
-      const provider = makeProvider(transport, undefined, undefined, {
+      const provider = makeProvider(transport, undefined, {
         extraEnv: { PI_ORB_HARNESS: "wrong" },
       });
       const result = await provider.provision(
@@ -403,7 +381,7 @@ describe("GceOrbHostProvider", () => {
 
   it("rejects an unexpected workspace image identity before disk creation", async () => {
     const transport = new FakeTransport([() => notFound, () => notFound]);
-    const result = await makeProvider(transport, undefined, undefined, {
+    const result = await makeProvider(transport, undefined, {
       workspaceImageId: "999",
     }).provision(task, provisionRequest, context);
     expect(result.isErr() && result.error.code).toBe("conflict");
@@ -535,7 +513,7 @@ describe("GceOrbHostProvider", () => {
       () => ok200({ name: "op-inst" }),
       () => done,
     ]);
-    const result = await makeProvider(transport, undefined, undefined, {
+    const result = await makeProvider(transport, undefined, {
       workspaceImageId: "999",
     }).provision(task, provisionRequest, context);
     expect(result.isOk(), JSON.stringify(result)).toBe(true);
@@ -585,8 +563,8 @@ describe("GceOrbHostProvider", () => {
   });
 
   it("fingerprint and generation change only with effective specification", () => {
-    const first = makeProvider(new FakeTransport([]), undefined, 7);
-    const same = makeProvider(new FakeTransport([]), undefined, 8);
+    const first = makeProvider(new FakeTransport([]), 7);
+    const same = makeProvider(new FakeTransport([]), 8);
     const fingerprint = first.desiredSpecFingerprint({
       orbId: provisionRequest.orbId,
       repositoryUrl: provisionRequest.bootstrap.repositoryUrl,
@@ -900,18 +878,17 @@ describe("GceOrbHostProvider", () => {
     expect(found.isOk() && found.value).toBe("boot-status: invalid: not-json");
   });
 
-  it("keeps the auth key out of the script and in metadata on insert", async () => {
-    const minter = countingMinter();
+  it("sets runtime configuration on an existing workspace disk", async () => {
     const transport = new FakeTransport([
       () => notFound, // instance get
       () => ok200(existingInstance()), // disk exists
       () => ok200({ name: "op-inst" }), // instance insert
       () => done,
     ]);
-    const provider = makeProvider(transport, tailscaleOptions(minter));
+    const provider = makeProvider(transport);
     const result = await provider.provision(task, provisionRequest, context);
     expect(result.isOk(), JSON.stringify(result)).toBe(true);
-    expect(minter.minted()).toBe(1);
+    expect(transport.requests).toHaveLength(4);
     const insert = transport.requests.find(
       (request) => request.method === "POST" && request.path.endsWith("/instances"),
     );
@@ -919,50 +896,21 @@ describe("GceOrbHostProvider", () => {
       | { items: { key: string; value: string }[] }
       | undefined;
     const items = metadata?.items ?? [];
-    expect(items.find((item) => item.key === "pi-orb-tailscale-auth-key")?.value).toBe(
-      "tskey-auth-1",
-    );
     const config = JSON.parse(
       items.find((item) => item.key === "pi-orb-config")?.value ?? "{}",
     ) as Record<string, string>;
-    expect(config).toMatchObject({
-      PI_ORB_TAILSCALE_AUTH_KEY: "tskey-auth-1",
-      PI_ORB_TAILSCALE_HOSTNAME: "pi-orb-orb-1",
-      PI_ORB_PREVIEW_HOST: "pi-orb-orb-1.tailnet.ts.net",
+    expect(config).toEqual({
+      PI_ORB_ID: "orb-1",
+      PI_ORB_HOST_INCARNATION: "0",
+      PI_ORB_REPOSITORY_URL: "https://github.com/o/r",
+      PI_ORB_CONTROL_PLANE_URL: "https://runtime.example",
+      PI_ORB_HARNESS: "pi",
+      PI_ORB_RUNTIME_TOKEN: items.find((item) => item.key === "pi-orb-runtime-token")?.value,
+      PI_ORB_SKILLS_DIR: "/opt/pi-orb/skills",
     });
     expect(items.find((item) => item.key === "pi-orb-host-spec-fingerprint")?.value).toBe(
       result.isOk() ? result.value.specFingerprint : "",
     );
-  });
-
-  it("fails provisioning retryably and inserts nothing when minting fails", async () => {
-    const transport = new FakeTransport([
-      () => notFound, // instance get
-      () => ok200(existingInstance()), // disk exists
-    ]);
-    const provider = makeProvider(transport, {
-      minter: {
-        mintAuthKey: () =>
-          errAsync({
-            type: "tailscale_error" as const,
-            code: "rejected" as const,
-            message: "tailnet said no",
-            retryable: false,
-          }),
-      },
-      tailnetDnsName: "tailnet.ts.net",
-    });
-    const result = await provider.provision(task, provisionRequest, context);
-    expect(result.isErr()).toBe(true);
-    if (result.isErr()) {
-      expect(result.error.retryable).toBe(true);
-      expect(result.error.message).toContain("tailnet said no");
-    }
-    expect(
-      transport.requests.some(
-        (request) => request.method === "POST" && request.path.endsWith("/instances"),
-      ),
-    ).toBe(false);
   });
 
   it("reads metadata attributes defensively", () => {

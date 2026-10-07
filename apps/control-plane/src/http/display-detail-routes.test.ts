@@ -51,7 +51,7 @@ it("reads committed detail without compute, distinguishes missing detail from mi
   const snapshot = vi.spyOn(harness.store, "readHistorySnapshot");
   const app = authenticatedApp();
   try {
-    registerRoutes(app, task, harness.deps, {}, TEST_SYSTEM_VIEW);
+    registerRoutes(app, task, harness.deps, TEST_SYSTEM_VIEW);
     const url = "/api/v1/orbs/orb/details/r1/r1%3A0?sessionId=session";
     const result = await app.inject({ method: "GET", url });
     expect(result.statusCode).toBe(200);
@@ -120,7 +120,7 @@ it("allows an authenticated coworker to read company-wide orb detail", async () 
   ).toBe(true);
   const app = authenticatedApp("coworker");
   try {
-    registerRoutes(app, task, harness.deps, {}, TEST_SYSTEM_VIEW);
+    registerRoutes(app, task, harness.deps, TEST_SYSTEM_VIEW);
     const result = await app.inject({
       method: "GET",
       url: "/api/v1/orbs/orb/details/r1/r1%3A0?sessionId=session",
@@ -161,7 +161,7 @@ it("serves separate binary images from the authorized replica session", async ()
   ).toBe(true);
   const app = authenticatedApp();
   try {
-    registerRoutes(app, task, harness.deps, {}, TEST_SYSTEM_VIEW);
+    registerRoutes(app, task, harness.deps, TEST_SYSTEM_VIEW);
     const path = "/api/v1/orbs/orb/images/r1/r1%3A0/0?sessionId=session";
     const result = await app.inject({ method: "GET", url: path });
     expect(result.statusCode).toBe(200);
@@ -211,7 +211,7 @@ it("rejects a runtime detail response after deletion wins the in-flight read", a
   );
   const app = authenticatedApp();
   try {
-    registerRoutes(app, task, harness.deps, {}, TEST_SYSTEM_VIEW);
+    registerRoutes(app, task, harness.deps, TEST_SYSTEM_VIEW);
     const pending = app.inject({
       method: "GET",
       url: "/api/v1/orbs/orb/details/r1/r1%3A0?sessionId=session",
@@ -244,7 +244,7 @@ it("chooses current runtime for an unreplicated running record without wake", as
   );
   const app = authenticatedApp();
   try {
-    registerRoutes(app, task, harness.deps, {}, TEST_SYSTEM_VIEW);
+    registerRoutes(app, task, harness.deps, TEST_SYSTEM_VIEW);
     const result = await app.inject({
       method: "GET",
       url: "/api/v1/orbs/orb/details/r1/r1%3A0?sessionId=session",

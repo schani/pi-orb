@@ -10,7 +10,6 @@ OnFailure=pi-orb-boot-failure@%n.service
 [Service]
 User=orb
 Group=orb
-RuntimeDirectory=tailscale
 RuntimeDirectoryMode=0700
 WorkingDirectory=/app
 EnvironmentFile=/run/pi-orb/environment

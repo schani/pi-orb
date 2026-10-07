@@ -15,7 +15,6 @@ installed size; transitive libraries remain only as dependencies of this baselin
 - rustup and its proxies: prescribed Rust bootstrap; no toolchain is preinstalled, and explicit installs use durable home.
 - sudo: repository setup hooks; orb UID/GID is fixed at 2000 in this experiment.
 - iproute2, util-linux, OpenSSL: isolated synthetic Claude acceptance namespaces and owned TLS fixture.
-- Tailscale: existing userspace preview support, supervised by the runtime.
 
 The image excludes the inherited OS Config agent, unattended-upgrade package,
 Vim, nano, wget, manual-page tools, and agent-browser executables for other

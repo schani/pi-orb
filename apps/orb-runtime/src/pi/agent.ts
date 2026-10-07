@@ -106,11 +106,6 @@ export interface PiOrbAgentOptions {
   readonly broker: BrokerEnv | null;
   /** E2E mode: route inference to the fake OpenAI service. */
   readonly mockOpenAi?: MockOpenAiConfig | null;
-  /**
-   * Tailnet FQDN the orb's ports are reachable at (docs/ports.md), or null
-   * when tier-1 port exposure is off. Only the agent's system prompt uses it.
-   */
-  readonly previewHost?: string | null;
   /** Compute incarnation this boot belongs to; keys the setup hook's stamp. */
   readonly incarnation?: string;
   /** Test seam; production reads the host/container execution identity at boot. */
@@ -632,12 +627,10 @@ export class PiOrbAgent {
       mockOpenAi !== null
         ? SettingsManager.inMemory({ transport: "sse", compaction: { keepRecentTokens: 1 } })
         : undefined;
-    // Optional tier-1 port exposure composes through the resource loader.
     const loaderResult = await createOrbResourceLoader({
       cwd: repoDir,
       agentDir,
       settingsManager,
-      previewHost: this.options.previewHost ?? null,
       userTimeZone: bootContext.value.userTimeZone,
       hooks: this.hooks.report(),
       hookEnv,

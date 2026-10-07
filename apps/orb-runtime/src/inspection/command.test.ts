@@ -86,7 +86,6 @@ describe("orb inspection presentation", () => {
       },
       project: { id: "project-a", name: "App", repositoryUrl: "https://github.com/o/r" },
       spawnedBy: null,
-      previewHost: null,
     };
     const output = formatSelf(self);
     expect(output).toContain("https://browser.test/orbs/orb-a");
@@ -97,9 +96,8 @@ describe("orb inspection presentation", () => {
       formatSelf({
         ...self,
         spawnedBy: { id: "parent", url: "https://browser.test/orbs/parent" },
-        previewHost: "orb.tail.ts.net",
       }),
-    ).toContain("orb.tail.ts.net");
+    ).toContain("https://browser.test/orbs/parent");
   });
   it("searches normalized explicit identity fields but not lifecycle state", () => {
     expect(filterOrbs(items, "RÉSUMÉ").map((item) => item.id)).toEqual(["orb-sibling"]);
