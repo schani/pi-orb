@@ -13,6 +13,9 @@ case "$(getent shadow pi-orb-build | cut -d: -f2)" in
 esac
 sudo -u orb sudo -n true
 
+test -z "$(command -v tailscale || true)"
+test -z "$(command -v tailscaled || true)"
+
 findmnt --noheadings --output SOURCE --target /workspace | grep -q '/dev/'
 workspace_device=$(readlink -f /dev/disk/by-id/google-pi-orb-data)
 filesystem_metadata=$(tune2fs -l "$workspace_device")

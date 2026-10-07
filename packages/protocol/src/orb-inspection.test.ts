@@ -40,7 +40,6 @@ describe("orb inspection schemas", () => {
     },
     project: { id: "project-a", name: "Project", repositoryUrl: "https://github.com/o/r" },
     spawnedBy: null,
-    previewHost: null,
   };
 
   it("accepts nullable and populated self identity", () => {
@@ -50,7 +49,6 @@ describe("orb inspection schemas", () => {
         ...self,
         orb: { ...self.orb, name: "Work" },
         spawnedBy: { id: "parent", url: "https://app.test/orbs/parent" },
-        previewHost: "orb.tail.ts.net",
       }),
     ).toBe(true);
   });
@@ -64,7 +62,7 @@ describe("orb inspection schemas", () => {
       { ...self, orb: { ...self.orb, id: 42 } },
       { ...self, project: { ...self.project, name: null } },
       { ...self, spawnedBy: { id: "parent", url: 42 } },
-      { ...self, previewHost: 42 },
+      { ...self, unexpectedField: "value" },
       { ...self, orb: { id: "orb-a" } },
     ])
       expect(Check(OrbSelfSchema, invalid)).toBe(false);

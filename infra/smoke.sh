@@ -1,6 +1,5 @@
 #!/bin/bash
-# Live create -> running -> stop -> start -> stop. The identity gate tests
-# preview health from a peer orb, so CI needs no additional tailnet identity.
+# Live create -> running -> stop -> start -> stop.
 set -euo pipefail
 DIR=$(cd "$(dirname "$0")" && pwd)
 API="$DIR/api.sh"

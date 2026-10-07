@@ -61,6 +61,7 @@ const orb: OrbRow = {
   unreadAlertId: null,
   lastBusyAt: null,
   uploadActiveUntil: null,
+  previewActiveUntil: null,
   stopReason: null,
   sleepId: null,
   sleepUntil: null,
@@ -133,6 +134,233 @@ export function storeSemanticsContractTests(
       expect((await store.insertProject(task, project)).isOk()).toBe(true);
       expect((await store.insertOrb(task, orb)).isOk()).toBe(true);
     }
+
+    async function seedPreview() {
+      await seed();
+      const running = await store.casTransition(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        toState: "running",
+        now: 2_000,
+      });
+      expect(running.isOk()).toBe(true);
+      const ready = await store.casUpdateFields(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        runtimeTokenHash: "preview-token",
+        hostRef: "preview-host",
+        now: 2_000,
+      });
+      expect(ready.isOk()).toBe(true);
+      return {
+        orbId: orb.id,
+        port: 5173,
+        registrationId: "00000000-0000-4000-8000-000000000050",
+        caller: { runtimeTokenHash: "preview-token", hostIncarnation: 0 },
+        now: 3_000,
+      };
+    }
+
+    it("preview registration is idempotent and re-registration fences old admissions", async () => {
+      const request = await seedPreview();
+      const first = (await store.registerPreview(task, request))._unsafeUnwrap();
+      expect(first.type).toBe("registered");
+      const duplicate = (
+        await store.registerPreview(task, {
+          ...request,
+          registrationId: "00000000-0000-4000-8000-000000000051",
+        })
+      )._unsafeUnwrap();
+      expect(duplicate.type === "registered" && duplicate.registration).toEqual(
+        first.type === "registered" && first.registration,
+      );
+      expect((await store.unregisterPreview(task, request))._unsafeUnwrap().type).toBe("revoked");
+      const next = (
+        await store.registerPreview(task, {
+          ...request,
+          registrationId: "00000000-0000-4000-8000-000000000051",
+        })
+      )._unsafeUnwrap();
+      expect(next.type).toBe("registered");
+      const old = await store.protectPreviewActivity(task, {
+        ...request,
+        ...request.caller,
+        activeUntil: 18_000,
+      });
+      expect(old._unsafeUnwrap().type).toBe("denied");
+      const authority = (await store.readPreviewAuthority(task, request))._unsafeUnwrap();
+      expect(authority?.registration?.registrationId).toBe("00000000-0000-4000-8000-000000000051");
+    });
+
+    it("preview leases are monotone and idle CAS checks current ownership", async () => {
+      const request = await seedPreview();
+      await store.registerPreview(task, request);
+      const original = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+      assert(original);
+      expect(
+        (
+          await store.protectPreviewActivity(task, {
+            ...request,
+            ...request.caller,
+            activeUntil: 18_000,
+          })
+        )._unsafeUnwrap().type,
+      ).toBe("protected");
+      const active = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+      assert(active);
+      expect(active.stateVersion).toBe(original.stateVersion + 1);
+      expect(active.previewActiveUntil).toBe(18_000);
+      await store.protectPreviewActivity(task, {
+        ...request,
+        ...request.caller,
+        now: 2_500,
+        activeUntil: 17_500,
+      });
+      const renewed = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+      assert(renewed);
+      expect(renewed.stateVersion).toBe(active.stateVersion);
+      expect(renewed.previewActiveUntil).toBe(18_000);
+      expect(renewed.lastBusyAt).toBe(3_000);
+      expect(
+        (
+          await store.casTransition(task, {
+            orbId: orb.id,
+            expectedStateVersion: original.stateVersion,
+            toState: "stopping",
+            stopReason: "idle",
+            now: 3_001,
+          })
+        ).isErr(),
+      ).toBe(true);
+      expect(
+        (
+          await store.casTransition(task, {
+            orbId: orb.id,
+            expectedStateVersion: renewed.stateVersion,
+            toState: "stopping",
+            stopReason: "idle",
+            now: 17_999,
+          })
+        ).isErr(),
+      ).toBe(true);
+      expect(
+        (
+          await store.casTransition(task, {
+            orbId: orb.id,
+            expectedStateVersion: renewed.stateVersion,
+            toState: "stopping",
+            stopReason: "idle",
+            now: 18_000,
+          })
+        ).isOk(),
+      ).toBe(true);
+    });
+
+    it("preview registrations survive stop and compute replacement while old callers are fenced", async () => {
+      const request = await seedPreview();
+      await store.registerPreview(task, request);
+      const original = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+      assert(original);
+      const stopped = (
+        await store.casTransition(task, {
+          orbId: orb.id,
+          expectedStateVersion: original.stateVersion,
+          toState: "stopped",
+          now: 4_000,
+        })
+      )._unsafeUnwrap();
+      expect(
+        (await store.readPreviewAuthority(task, request))._unsafeUnwrap()?.registration
+          ?.registrationId,
+      ).toBe(request.registrationId);
+      const restarted = (
+        await store.casTransition(task, {
+          orbId: orb.id,
+          expectedStateVersion: stopped.stateVersion,
+          toState: "running",
+          now: 5_000,
+        })
+      )._unsafeUnwrap();
+      await store.casUpdateFields(task, {
+        orbId: orb.id,
+        expectedStateVersion: restarted.stateVersion,
+        runtimeTokenHash: "replacement-token",
+        hostRef: "replacement-host",
+        now: 5_000,
+      });
+      expect((await store.registerPreview(task, request))._unsafeUnwrap().type).toBe("denied");
+      const inventory = (
+        await store.listPreviews(task, {
+          orbId: orb.id,
+          caller: { ...request.caller, runtimeTokenHash: "replacement-token" },
+        })
+      )._unsafeUnwrap();
+      expect(inventory?.map((row) => row.registrationId)).toEqual([request.registrationId]);
+    });
+
+    it("expired preview lease reactivation bumps the idle decision fence", async () => {
+      const request = await seedPreview();
+      await store.registerPreview(task, request);
+      await store.protectPreviewActivity(task, {
+        ...request,
+        ...request.caller,
+        activeUntil: 18_000,
+      });
+      const before = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+      assert(before);
+      await store.protectPreviewActivity(task, {
+        ...request,
+        ...request.caller,
+        now: 18_000,
+        activeUntil: 33_000,
+      });
+      const after = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+      assert(after);
+      expect(after.stateVersion).toBe(before.stateVersion + 1);
+      expect(after.previewActiveUntil).toBe(33_000);
+      expect(
+        (
+          await store.casTransition(task, {
+            orbId: orb.id,
+            expectedStateVersion: after.stateVersion,
+            toState: "stopping",
+            now: 18_001,
+          })
+        ).isOk(),
+      ).toBe(true);
+    });
+
+    it("preview mutations recheck caller and refuse terminal cleanup", async () => {
+      const request = await seedPreview();
+      expect(
+        (
+          await store.registerPreview(task, {
+            ...request,
+            caller: { ...request.caller, hostIncarnation: 1 },
+          })
+        )._unsafeUnwrap().type,
+      ).toBe("denied");
+      await store.registerPreview(task, request);
+      const current = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+      assert(current);
+      await store.requestOrbDeletion(task, {
+        orbId: orb.id,
+        expectedStateVersion: current.stateVersion,
+        now: 4_000,
+        cleanupAfter: 4_000,
+      });
+      expect((await store.registerPreview(task, request))._unsafeUnwrap().type).toBe("denied");
+      expect((await store.unregisterPreview(task, request))._unsafeUnwrap().type).toBe("denied");
+      expect(
+        (
+          await store.protectPreviewActivity(task, {
+            ...request,
+            ...request.caller,
+            activeUntil: 18_000,
+          })
+        )._unsafeUnwrap().type,
+      ).toBe("denied");
+    });
 
     async function seedHeadline() {
       await seed();
@@ -2574,6 +2802,29 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
 
     afterEach(async () => {
       expect((await database.close()).isOk()).toBe(true);
+    });
+
+    it("preview schema constrains ports and deletes registrations with their orb", async () => {
+      expect((await store.insertProject(task, project)).isOk()).toBe(true);
+      expect((await store.insertOrb(task, orb)).isOk()).toBe(true);
+      expect(
+        (
+          await client.query(
+            "INSERT INTO orb_previews (orb_id,port,registration_id,created_at) VALUES ($1,5173,$2,$3)",
+            [orb.id, "00000000-0000-4000-8000-000000000050", new Date(3_000)],
+          )
+        ).isOk(),
+      ).toBe(true);
+      const invalid = await client.query(
+        "INSERT INTO orb_previews (orb_id,port,registration_id,created_at) VALUES ($1,65536,$2,$3)",
+        [orb.id, "00000000-0000-4000-8000-000000000051", new Date(3_000)],
+      );
+      expect(invalid.isErr() && invalid.error.code).toBe("corruption");
+      expect((await client.query("DELETE FROM orbs WHERE id=$1", [orb.id])).isOk()).toBe(true);
+      expect(
+        (await client.query("SELECT * FROM orb_previews WHERE orb_id=$1", [orb.id]))._unsafeUnwrap()
+          .rows,
+      ).toEqual([]);
     });
 
     it("isolates credential pointer CAS and leases by user", async () => {

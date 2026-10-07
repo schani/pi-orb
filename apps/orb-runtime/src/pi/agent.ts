@@ -51,6 +51,7 @@ import { readLiveDisplayDetail, toolTextContent } from "../domain/display-detail
 import { gateUnflushedSnapshot } from "../domain/history.ts";
 import { configurePersistentHome } from "../domain/home.ts";
 import type { CompactError } from "../domain/orb-agent.ts";
+import { PreviewActivity } from "../domain/preview-activity.ts";
 import type { AgentGateView } from "../domain/requests.ts";
 import { configurePersistentRust } from "../domain/rust.ts";
 import { type SubagentError, type SubagentRun, SubagentWork } from "../domain/subagent-work.ts";
@@ -106,11 +107,6 @@ export interface PiOrbAgentOptions {
   readonly broker: BrokerEnv | null;
   /** E2E mode: route inference to the fake OpenAI service. */
   readonly mockOpenAi?: MockOpenAiConfig | null;
-  /**
-   * Tailnet FQDN the orb's ports are reachable at (docs/ports.md), or null
-   * when tier-1 port exposure is off. Only the agent's system prompt uses it.
-   */
-  readonly previewHost?: string | null;
   /** Compute incarnation this boot belongs to; keys the setup hook's stamp. */
   readonly incarnation?: string;
   /** Test seam; production reads the host/container execution identity at boot. */
@@ -313,12 +309,18 @@ export class PiOrbAgent {
     };
   }
 
+  readonly previewActivity = new PreviewActivity();
+
   getHealth(): RuntimeHealth {
     if (this.health.status === "failed") return this.health;
     if (this.health.status !== "ready") return { ...this.health, ...this.hookReport() };
+    const executionId =
+      this.options.executionId === undefined ? this.executionId : this.options.executionId;
     return {
       ...this.health,
       activity: this.activity,
+      ...(executionId === null ? {} : { executionId }),
+      incarnation: Number(this.options.incarnation ?? "0"),
       ...(this.operationId !== null ? { operationId: this.operationId } : {}),
       ...(this.turnResume !== null ? { turnResume: this.turnResume } : {}),
       ...(this.streamTelemetryError === null
@@ -632,12 +634,10 @@ export class PiOrbAgent {
       mockOpenAi !== null
         ? SettingsManager.inMemory({ transport: "sse", compaction: { keepRecentTokens: 1 } })
         : undefined;
-    // Optional tier-1 port exposure composes through the resource loader.
     const loaderResult = await createOrbResourceLoader({
       cwd: repoDir,
       agentDir,
       settingsManager,
-      previewHost: this.options.previewHost ?? null,
       userTimeZone: bootContext.value.userTimeZone,
       hooks: this.hooks.report(),
       hookEnv,
@@ -1628,6 +1628,7 @@ export class PiOrbAgent {
     if (this.health.status !== "ready" || this.sessionManager === null)
       return err({ message: "session is not ready" });
     if (this.idleStopPrepared) return ok(true);
+    if (this.previewActivity.blocksIdle()) return ok(false);
     if (this.activity === "busy" || this.settingsController?.blocksInput) return ok(false);
     const lifetimeId = this.admissionLifetime();
     if (lifetimeId === null) return err({ message: "admission lifetime is unavailable" });

@@ -100,7 +100,6 @@ describe("pi-orb inspection CLI entry point", () => {
             },
             project: orb.project,
             spawnedBy: null,
-            previewHost: null,
           }),
         );
         return;
@@ -156,7 +155,6 @@ describe("pi-orb inspection CLI entry point", () => {
     expect(JSON.parse(json.stdout)).toMatchObject({
       orb: { id: "orb-current" },
       spawnedBy: null,
-      previewHost: null,
     });
     mode = "unauthorized";
     expect(await runCli(baseUrl, ["self"])).toMatchObject({ code: 3, stdout: "" });

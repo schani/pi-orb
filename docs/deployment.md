@@ -32,6 +32,39 @@ Durable evidence: [authoritative GCS release record](https://storage.googleapis.
 
 **Font release checks blocked before apply (2026-10-04):** [Deploy 37211353362](https://github.com/schani/pi-orb/actions/runs/37211353362) and [E2E 37211353118](https://github.com/schani/pi-orb/actions/runs/37211353118) for `8a80bc7b097ba587ea3d635d0b7f494fad5a7e3d` each passed 313 of 315 E2Es. Both tablet-touch cases in `e2e/frontend-session.e2e.test.ts` still expected 16px rather than the selected 13px composer size. Targeted local reproduction confirmed the same deterministic assertion mismatch; the correction changes only that obsolete expectation. Unit/DST checks passed 2,587 tests (eight conditional skips). No build, migration or apply occurred; the original failed runs remain unchanged.
 
+**Preview prerequisite satisfied (2026-10-06):** architecture orb
+`e67b1120-393c-41c6-94ed-b354d82c526d` / [PR #51](https://github.com/schani/pi-orb/pull/51)
+merged October 5, 10:30 PM PDT as `3c03e4200b8220fa097b97b379cc20c851527103`.
+The validated release above, [Deploy 37469707425](https://github.com/schani/pi-orb/actions/runs/37469707425),
+deployed descendant `404cf7b1d54fff65ca09844e6cd9b2a1af8ff1ca` on October 6,
+7:06 AM PDT. Its [release artifact](https://github.com/schani/pi-orb/actions/runs/37469707425/artifacts/11418743296)
+records `pi-orb-issuer-00043-2k5`, exit 0 and all twelve gates passed, including
+activation, lifecycle and identity. Consolidation preserves the exact issuer URL,
+signing keys, relying-party trust and private VPC connectivity; app-managed Google
+login and an encrypted host-only 12-hour session cookie replace browser IAP. No load
+balancer was added. Historical browser-IAP evidence is not the current preview auth
+contract; preview ingress must not reintroduce IAP.
+
+HTTP preview implementation is authorized, not deployment (2026-10-06); contracts are in
+`docs/ports.md`. Optional Terraform `preview_origin` injects `PI_ORB_PREVIEW_ORIGIN` into this
+same application; empty disables registration. No domain/DNS/TLS/LB is selected or provisioned.
+`run.app` cannot provide user-controlled wildcard DNS/TLS. Operator Host-preserving TLS routing
+configuration is in `infra/README.md`. The optional project `_Default` exclusion removes
+preview-host Cloud Run request-URL logs, not audit logs; custom/ancestor sinks and edge logs
+must also be checked before exposure. Existing lifecycle/identity gates remain mandatory.
+Pending deployed acceptance covers DNS/TLS, consolidated login/stateless preview handoff,
+registered-port admission, HMR/streaming, activity versus idle stop and Stop/replacement fencing.
+Local service success or a generated URL is insufficient.
+
+**Tailscale removal:** owner-managed admin cleanup after retirement is accepted, not a
+pre-apply product-cleanup/live-inventory/evidence gate. Removing `infra/tailscale.tf`
+destroys the GCP OAuth-client-secret container `pi-orb-tailscale-oauth-client-secret`
+and accessor binding during apply; it is not a per-orb join-key store. That removal does
+not revoke upstream OAuth credentials, join keys or devices. After old provisioning stops,
+the owner can independently revoke/delete them in Tailscale admin; no migration orchestration
+or retained product cleaner is required. No live inventory, cleanup, revocation or apply
+was performed by this docs update.
+
 **Production release (2026-10-04, 6:01 AM PDT):** [Deploy 37200573956](https://github.com/schani/pi-orb/actions/runs/37200573956) validated cached-navigation source `303201799f035b7551e765841cf92f152bd9183d` (`r-1791115229-2dc08e1f-f8fa-4a3c-8c48-cee665552b3e`). All twelve gates passed on the first attempt: 2,585 unit/DST tests (eight conditional skips), 112 infrastructure checks, 307 full Docker/PostgreSQL/Chromium/WebKit E2Es, native acceptance, protected plan/migration/apply, repair, retirement, activation and lifecycle/identity smokes. CI and standalone E2E also passed. The monitoring host restarted; the external release continued without redispatch.
 
 Independent reads verified all four serving revisions on digest `sha256:1185b60ff7c83c312c8d9ab92d63203a6d12202853cd118f254e8e451c0699ae`, generation `1791117944` on browser/ops/runtime (none on issuer), exact native browser IAP/accessor and sole IAP-service-agent invoker, matching active pointer, absent release lock, four fixture API 404s and absent temporary native instances/disks. All four services had zero ERROR-or-higher entries during the bounded 5:51:53–6:04:58 AM PDT post-activation log window; later errors and ingestion delay remain possible. Interactive IAP login and field first-paint latency were not independently measured.
@@ -151,7 +184,7 @@ fresh Cloud Run traffic status before revision pruning. See `docs/hosting.md`.
 3. Adopt the current live resources into the two states under the existing global release lock, using an offline, generation-checked state projection that preserves the complete resource-identity inventory without applying cloud changes. Review the subsequent foundation and application plans separately; the application plan intentionally includes the native runtime change. The state bucket's own bootstrap uses an organization-owned state location or an explicit one-time state migration; it cannot recursively create the backend in which its first plan is already stored.
 4. After foundation adoption and its reviewed permission changes, the manual release builds and validates a native image on disposable GCE VMs, then publishes the control-plane container. Its handoff carries the exact VM image resource/ID and container digest. Automatic deployment and remote control-plane container builds remain separate proposals; the release lock, exact-plan apply, retirement/activation, and smoke gates remain mandatory.
 
-A new project should require variables plus one audited foundation apply and the normal release command, not console-created resources. Irreducible external inputs remain: an initial organization/folder/billing authority, a globally unique project ID, and credentials or values owned by external systems such as GitHub OAuth and Tailscale. OpenTofu manages their GCP containers and grants, but cannot safely invent those external authorities or secret values. Implementation is tracked in `TODO.md`.
+A new project should require variables plus one audited foundation apply and the normal release command, not console-created resources. Irreducible external inputs remain: an initial organization/folder/billing authority, a globally unique project ID, and credentials or values owned by external systems such as GitHub OAuth. OpenTofu manages their GCP containers and grants, but cannot safely invent those external authorities or secret values. Implementation is tracked in `TODO.md`.
 
 **Orb-local release finding and correction (2026-09-08):** builder administration uses explicit `pi-orb-build` SSH/SCP identity, separate from runtime `orb` and independent of the invoking workstation username. Releasing `770b6a3` from an orb created `orb` through SSH before image installation, which then failed creating its UID-2000 account. Production was not changed. Preflight now creates a private operation-owned SSH key noninteractively; connections use batch mode, and cleanup removes the key after remote cleanup on success, failure and handled cancellation. Sealing retains the password-locked administrator but stops guest-account reconciliation before scrubbing credentials; image acceptance checks the distinct identities and required runtime home. Reusing an arbitrary existing runtime account is rejected rather than normalizing ownership under a live administrative session. Evidence: `docs/postmortems/2026-09-08-orb-local-release-builder-user.md`.
 
@@ -528,8 +561,6 @@ for diagnosis and cost accounting. An accepted cloud cleanup operation can outli
 its CLI: a command timeout alone does not establish resource state. Reconciliation
 must use the exact operation and resource identities
 (`docs/postmortems/2026-09-16-validator-cleanup-timeout.md`).
-Peer preview health is mandatory through the already-owned minting orb's Tailscale
-daemon, not conditional on runner networking.
 The release's federation leg uses this repository's existing admitted project and
 shared deployer, exercising only read-only APIs. It creates/deletes its own two
 orbs, never that shared project. This does not bootstrap the separate experimental
@@ -829,6 +860,6 @@ Authentication must be keyless: GitHub OIDC to a Google Workload Identity Federa
 
 The initial proposal separated publisher, deployer and smoke identities. The implemented POC instead reuses the existing scoped deployer and admitted repository project, avoiding new authority or another identity bootstrap for recurring deployment. State access is high trust, not clerical: the current state contains the generated database password and complete connection URL. The foundation split now separately owns project APIs, stable IAM/admission and networking. The application root retains Cloud SQL, Secret Manager, Cloud Run and application-resource access policies, so its authority is still high trust. Generic Owner/Editor remains rejected; validate new permissions against real plans and Cloud Audit Logs.
 
-Supply-chain requirements for the workflow: pin every third-party action by immutable commit SHA; pin the OpenTofu CLI and runner versions; use the committed OpenTofu lock files read-only during ordinary deploys; preserve the root `.dockerignore` exclusions for `.git`, generated credentials, state, plans, and unrelated workspace files; and retain digest/generation release metadata. Hosted GitHub runners are not tailnet members. The mandatory preview gate dials through the already-owned smoke orb's Tailscale daemon; it never skips because of runner networking.
+Supply-chain requirements for the workflow: pin every third-party action by immutable commit SHA; pin the OpenTofu CLI and runner versions; use the committed OpenTofu lock files read-only during ordinary deploys; preserve the root `.dockerignore` exclusions for `.git`, generated credentials, state, plans, and unrelated workspace files; and retain digest/generation release metadata.
 
 Rollback cannot mean shifting traffic to an old Cloud Run revision because `infra/deploy.sh` deliberately deletes drained revisions. It is another forward deployment of retained last-known-good image digests with a newer generation, followed by the same repair and smoke sequence. Artifact Registry retention must guarantee those referenced digests survive. Automatic rollback is not proposed for releases containing database migrations or static-plane changes: migrations commit before any new service is applied, but old revisions can overlap the changed schema and a prior image may not understand it. Such a release needs explicit detection and approval/maintenance policy, a verified Cloud SQL recovery point, and a rehearsed forward-fix or migration-specific rollback runbook; the POC deliberately has no backwards-compatibility choreography.

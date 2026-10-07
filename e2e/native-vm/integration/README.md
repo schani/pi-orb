@@ -28,8 +28,8 @@ service account `roles/compute.imageUser` on each test image. Publish only the
 public test signing JWKS for federation; the private key stays in the isolated
 broker. Restrict its temporary WIF provider/account to the fixture orb/project.
 
-`prepare.mjs` creates the model fixtures and private GitHub/Tailscale credential
-copies. Install the source and control-plane dependencies on the test VM; launch
+`prepare.mjs` creates the model fixtures and a private GitHub credential
+copy. Install the source and control-plane dependencies on the test VM; launch
 `main.mjs` as a supervised service. Do not print or package those credential copies
 in an image. `control.mjs admit|stop|start|ready|failed|delete` drives the public API.
 
@@ -59,9 +59,8 @@ and fresh federation. Use two independently built, accepted images for replaceme
 This checks lifecycle selection and retained storage, not a Docker engine upgrade.
 
 Cleanup order: export domain history, API/audit/guest logs; delete the fixture
-project through the API; verify its VM/data disk and Tailscale identity are gone.
+project through the API; verify its VM/data disk are gone.
 Remove the test control plane/builders/images, temporary firewall rules, issuer
 service/container image, WIF pool/provider and service account grants/account.
 Delete model fixtures and local credential copies; stop tunnels/browser sessions.
-Never run a project-wide instance cleanup or revoke the user's GitHub credential
-or the production Tailscale OAuth secret.
+Never run a project-wide instance cleanup or revoke the user's GitHub credential.

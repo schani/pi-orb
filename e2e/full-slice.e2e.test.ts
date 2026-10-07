@@ -2196,7 +2196,6 @@ describe("full slice E2E", () => {
         repositoryUrl: REPOSITORY_URL,
       },
       spawnedBy: null,
-      previewHost: null,
     });
     const selfText = await terminalRun(
       secondOrbId,
@@ -2302,7 +2301,6 @@ describe("full slice E2E", () => {
         repositoryUrl: REPOSITORY_URL,
       },
       spawnedBy: { id: secondOrbId, url: `${base}/orbs/${secondOrbId}` },
-      previewHost: null,
     });
     const retriedSpawn = await terminalRun(
       secondOrbId,

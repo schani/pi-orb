@@ -153,7 +153,7 @@ environment"). Rejected: a `pi-orb` subcommand to re-run hooks — executing the
   `PI_ORB_ID`, `PI_ORB_HOST_INCARNATION`, `PI_ORB_REPOSITORY_URL`, `PATH` with the image's
   toolchain) plus `PI_ORB=1`, `PI_ORB_HOOK=setup|resume`, and `PI_ORB_HOOK_ENV_FILE` (below).
 - Setup additionally has `PI_ORB_RUNTIME_TOKEN` and `PI_ORB_CONTROL_PLANE_URL` removed
-  (decision 3). Resume has them. Neither hook receives Tailscale material.
+  (decision 3). Resume has them.
 - Control-plane-managed project secrets (`docs/credentials.md`, implemented 2026-08-28) are fetched only after setup returns and before resume starts. Setup therefore cannot see them; resume, the Pi session, and terminals can. Their names join the env-file deny-list for that boot, so `$PI_ORB_HOOK_ENV_FILE` cannot accidentally shadow the dashboard-managed value.
 - Network is available to both, subject to whatever egress the host provider allows the orb.
 - Nothing a hook exports persists into the agent's environment by itself: the hook is its own
@@ -178,7 +178,7 @@ environment"). Rejected: a `pi-orb` subcommand to re-run hooks — executing the
     process, and `$(…)` in a file a repository writes must not be a code path.
   - Entries may not override the variables the runtime owns — `PI_ORB_RUNTIME_TOKEN`,
     `PI_ORB_CONTROL_PLANE_URL`, `PI_ORB_ID`, `PI_ORB_HOST_INCARNATION`, `PI_ORB_WORK_DIR`, `PI_CODING_AGENT_DIR`, `HOME`,
-    `PATH`, `PI_ORB`, and the Tailscale variables. Such an entry is ignored, and the runtime logs
+    `PATH`, and `PI_ORB`. Such an entry is ignored, and the runtime logs
     one edge per refused name, because a hook that could rewrite `PATH` would break every later
     boot in a way that looks like a platform bug.
   - A line the runtime cannot use is reported the way a hook failure is — in a status file beside
@@ -305,7 +305,7 @@ Put either file at the root of your repository, make it executable, and give it 
 
 Both hooks get the runtime's environment (`PI_ORB_WORK_DIR`, `HOME`, `PI_ORB_ID`,
 `PI_ORB_HOST_INCARNATION`, `PI_ORB_REPOSITORY_URL`, the image's `PATH`) plus `PI_ORB=1`,
-`PI_ORB_HOOK=setup|resume`, and `PI_ORB_HOOK_ENV_FILE`. Neither gets Tailscale material.
+`PI_ORB_HOOK=setup|resume`, and `PI_ORB_HOOK_ENV_FILE`.
 `PI_ORB=1` is set for every process in the orb, so a script shared with Amp can branch on it;
 `AMP_ORB` is never set.
 `sudo` is installed in the prescribed image (the runtime is root, so it elevates nothing); a
@@ -329,7 +329,7 @@ last value. The runtime merges the file into its own environment immediately bef
 session is created, so both the agent's shells and every terminal inherit it; a line added later
 reaches new terminals immediately and the agent's tool shells at the next start. It cannot override
 `PI_ORB_RUNTIME_TOKEN`, `PI_ORB_CONTROL_PLANE_URL`, `PI_ORB_ID`, `PI_ORB_HOST_INCARNATION`,
-`PI_ORB_WORK_DIR`, `PI_CODING_AGENT_DIR`, `HOME`, `PATH`, `PI_ORB`, or the Tailscale variables; such a line is ignored and
+`PI_ORB_WORK_DIR`, `PI_CODING_AGENT_DIR`, `HOME`, `PATH`, or `PI_ORB`; such a line is ignored and
 logged. An unusable line is skipped and reported by number, and the rest of the file still applies.
 The file is yours to maintain: it is never truncated for you, so rewrite rather than append if a
 value should change, and remember that a resume hook that runs past its 10-second window writes too

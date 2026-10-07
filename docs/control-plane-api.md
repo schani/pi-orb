@@ -1,5 +1,16 @@
 # Projects and the control-plane API
 
+## HTTP preview registration (implemented locally, 2026-10-06)
+
+Runtime bearer identity scopes PUT/DELETE `/runtime/previews/:port` and GET `/runtime/previews`
+to the caller orb. PUT returns `{preview}`, GET `{previews}`, DELETE 204; an unset preview origin
+returns configuration-disabled, not a fabricated URL. The registration service rechecks
+lifecycle/token/incarnation at mutation; persisted generations fence revoke/re-register races.
+Registrations survive stop/start and replacement; deletion cascades them. URLs assert registration,
+not readiness. Preview-host paths execute only preview applications/reserved auth, never these
+CP APIs. `OrbView.previewActiveUntil` supplies activity status without changing agent busy.
+Authentication, runtime admission, limits and pending ingress acceptance: `docs/ports.md`.
+
 ## Harness selection (POC, 2026-10-04)
 
 Creation accepts optional `harness: "pi" | "claude"`, defaulting to Pi. Migration `029_orb_harness.sql` persists the required, checked value; all orb views expose it without credential data. Selection is immutable: a conflicting supplied harness on a same-ID retry returns 409, while omission preserves the accepted selection. Start/Stop and compute replacement retain it. The durable `created` lifecycle edge includes harness. In-orb spawning inherits the fenced caller row; callers cannot select a different harness.
@@ -162,7 +173,7 @@ This is intentionally not implemented by calling `/api/v1/*`: incarnation bearer
 
 ### Current orb identity (decided 2026-10-01)
 
-`pi-orb self [--json]` reads the authenticated caller only, without a fleet list. `GET /runtime/v1/orb/self` returns non-cacheable `{v:1,orb:{id,name,url,createdAt},project:{id,name,repositoryUrl},spawnedBy:{id,url}|null,previewHost:string|null}`. The control plane constructs dashboard URLs from configured `PI_ORB_APP_ORIGIN`, never the runtime origin. Spawn provenance comes from `orb_spawns` and survives deletion of the parent: the historical ID/link remains, even when the parent URL shows a missing resource. Preview is a configured hostname, not verified reachability; it is null without tailnet configuration. The CLI prints a readable summary by default, structured JSON with `--json`, and typed errors on stderr. Reads create no lifecycle event. The earlier scalar `pi-orb url` proposal was rejected in favor of this identity command. The agent environment prompt mentions `pi-orb self [--json]` and its returned identity fields (decided 2026-10-01): a single line makes the command discoverable without duplicating CLI usage.
+`pi-orb self [--json]` reads the authenticated caller only, without a fleet list. `GET /runtime/v1/orb/self` returns non-cacheable `{v:1,orb:{id,name,url,createdAt},project:{id,name,repositoryUrl},spawnedBy:{id,url}|null}`. The control plane constructs dashboard URLs from configured `PI_ORB_APP_ORIGIN`, never the runtime origin. Spawn provenance comes from `orb_spawns` and survives deletion of the parent: the historical ID/link remains, even when the parent URL shows a missing resource. The CLI prints a readable summary by default, structured JSON with `--json`, and typed errors on stderr. Reads create no lifecycle event. The earlier scalar `pi-orb url` proposal was rejected in favor of this identity command. The agent environment prompt mentions `pi-orb self [--json]` and its returned identity fields (decided 2026-10-01): a single line makes the command discoverable without duplicating CLI usage.
 
 ### Orb alerts (2026-09-30)
 
@@ -182,7 +193,7 @@ This is intentionally not implemented by calling `/api/v1/*`: incarnation bearer
 
 `PATCH /api/v1/projects/:projectId` atomically updates an active project's `{ name, repositoryUrl }` (both required; decided 2026-09-09). Project names are NFKC-normalized, trimmed, whitespace-normalized strings of 1–80 characters and unique per owner. Create or rename conflicts within one owner return typed `409`; different owners may use the same normalized name. Repository URLs use the creation allowlist/normalization rules above; invalid input returns 400 before either field changes. Updating a deleting project conflicts. The single SQL update fences both fields against deletion and persists `updatedAt`; DST and storage contracts cover that fence. The prior name-only update and immutable repository decision are superseded by General settings. Name changes appear immediately; the repository change affects future fresh checkouts, never rewriting an existing orb's Git remote or workspace. Permanent project deletion is implemented as specified in `docs/project-deletion.md`: `DELETE /api/v1/projects/:projectId` atomically marks the project deleting and fans permanent deletion out to every child orb before removing the project row. The one orb update is the narrow naming endpoint described below. Permanent orb deletion is the asynchronous `DELETE` operation implemented in `docs/orb-deletion.md`: it removes both the authoritative filesystem and replica rather than retaining history. Read-only archival is implemented as specified in `docs/orb-archival.md`: it uses the same resource destruction but retains metadata and the sealed replica. OAuth is an internal prerequisite of orb creation/start, not a standalone frontend resource.
 
-The browser generates project, orb, and queued-message UUIDs with the shared `generateUuid()` helper and includes them in create requests. The helper uses `crypto.randomUUID()` when available and falls back to `crypto.getRandomValues()` because plain-HTTP tailnet origins are not secure contexts and may not expose `randomUUID`; browser code must not call `crypto.randomUUID()` directly (`docs/postmortems/2026-08-10-send-anytime-plain-http-randomuuid.md`).
+The browser generates project, orb, and queued-message UUIDs with the shared `generateUuid()` helper and includes them in create requests. The helper uses `crypto.randomUUID()` when available and falls back to `crypto.getRandomValues()` because non-localhost plain-HTTP origins are not secure contexts and may not expose `randomUUID`; browser code must not call `crypto.randomUUID()` directly (`docs/postmortems/2026-08-10-send-anytime-plain-http-randomuuid.md`).
 
 ```ts
 interface CreateProjectRequest {

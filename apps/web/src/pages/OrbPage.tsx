@@ -514,8 +514,14 @@ export function orbLifecycleStatus(orb: OrbView, now: number): string {
     return `${orb.state} (idle)`;
   }
   if (orb.stopReason === "sleep" && orb.state === "stopping") return "stopping (sleep)";
+  const activity =
+    orb.activity === "busy"
+      ? " · busy"
+      : orb.state === "running" && Date.parse(orb.previewActiveUntil ?? "") > now
+        ? " · preview"
+        : "";
   if (orb.sleepUntil === undefined) {
-    return orb.activity === "busy" ? `${orb.state} · busy` : orb.state;
+    return `${orb.state}${activity}`;
   }
 
   const parsedDeadline = Date.parse(orb.sleepUntil);
@@ -526,7 +532,6 @@ export function orbLifecycleStatus(orb: OrbView, now: number): string {
   if (orb.state === "running") {
     const remaining = formatTimeRemaining(orb.sleepUntil, now);
     const wake = remaining === null ? "wake due" : `wakes in ${remaining}`;
-    const activity = orb.activity === "busy" ? " · busy" : "";
     return `running${activity} · sleep pending · ${wake}`;
   }
   return orb.state;

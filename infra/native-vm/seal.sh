@@ -3,7 +3,7 @@
 set -euo pipefail
 trap 'status=$?; printf "PI_ORB_SEAL_FAILED=phase=seal,line=%s,status=%s\n" "$LINENO" "$status" >&2' ERR
 fail() { printf 'PI_ORB_SEAL_GUARD_FAILED=%s\n' "$1" >&2; exit 1; }
-systemctl stop docker.service docker.socket containerd.service tailscaled.service
+systemctl stop docker.service docker.socket containerd.service
 # Retain the administrative account, never its credentials. It is separate from
 # the UID-2000 runtime identity and can receive new instance-scoped SSH keys.
 [ "$(id -u pi-orb-build)" != 2000 ] || fail build_admin_uid
@@ -41,7 +41,7 @@ printf '[Unit]\nRequires=pi-orb-host-key-ready.service\nAfter=pi-orb-host-key-re
 systemctl daemon-reload
 /app/infra/native-vm/boot-graph-verifier.sh pi-orb-host-key-ready.service ssh.service
 
-rm -rf /root/.ssh /root/.config /root/.cache /root/.npm /root/.docker /root/.gsutil /var/lib/tailscale/*
+rm -rf /root/.ssh /root/.config /root/.cache /root/.npm /root/.docker /root/.gsutil
 rm -f /root/.npmrc /root/.bash_history
 for user_dir in /home/*; do
   rm -rf "$user_dir/.ssh" "$user_dir/.config" "$user_dir/.cache" "$user_dir/.docker" "$user_dir/.gsutil"

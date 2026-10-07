@@ -62,6 +62,14 @@ Tests preceded implementation and both review corrections: native compaction/met
 
 The initial full unit gate had 3,244 passes, thirteen skips and three failures; both Claude fixture failures were corrected and qualified below. The artifact-allowlist failures in `e2e/sharding.unit.test.ts` and `infra/browser_evidence_test.py` were reproduced before correcting both exact expectations to include the workflow's `test-failures/subagent-*/failure.json`; artifact isolation is unchanged. Targeted validation passes all three sharding tests and both Python browser-evidence tests after `npm ci`. Original full-gate logs remain in `.context/claude-recovery-validation/{unit,infra}.log`; targeted red/green evidence is in `.context/artifact-contract-fix/`. Full root suites were not rerun; no full-suite green, full E2E, physical preemption, cloud canary or deployment is claimed.
 
+## HTTP preview boundary gates (2026-10-06; not deployed)
+
+`e2e/preview-auth-frontend.e2e.test.ts` exercises real Google/session/handoff routes on owned HTTPS origins in Chromium and WebKit. It verifies exact POST Origin, origin-only Referer, host-only cookies, copied-cookie rejection and no second Google login. Browser RED established that `no-referrer` and `same-origin` suppress the cross-site POST Origin; `strict-origin` passes without relaxing callback admission.
+
+`e2e/preview-composed-frontend.e2e.test.ts` composes production gateway, HMAC transport and runtime forwarding with in-memory authority, fake host inventory and a FakeAgent. `e2e/preview-docker.e2e.test.ts` moves the runtime and loopback applications into an owned Docker namespace using image-baked runtime code, a locked Linux dependency image, read-only helper mounts and the image's `pi-orb` CLI. Linux uses `--network none` and owned Unix HTTP/WS bridges. Docker Desktop uses loopback-published TCP and `host.docker.internal`; host Unix sockets cannot cross its VM boundary. Linux is locally qualified; the Docker Desktop adapter remains unverified here. HTTP/assets/redirects, binary application auth/cookies and secret stripping, SSE barriers and real Vite HMR use the public preview origin. Stop/start intents and store CAS are production; lifecycle completion is an explicit fixture boundary, not full OrbAgent reconciliation. Existing full-slice E2E supplies the latter coverage. The seven new browser/fixture cases and the native write regression pass locally. These gates do not replace full-suite qualification.
+
+Fixture listeners are OS-assigned; Vite uses an owned HTTP/HMR server because its `port: 0` selects the default port. Streams and HMR use readiness/events, never test sleeps. Containers have unique test-owned names/labels; cleanup removes only those containers. First-failure evidence and source-image build logs remain in `.context/http-preview/`. Chromium's first Docker-backed run hit `ERR_NETWORK_CHANGED` during bridge attachment; the fixture now creates no host veth/route changes, including during restart. Host/container UID differences require a connectable runtime socket inside a host-owned mode-0700 directory. The real native binary-write regression also caught `ws.send` reporting success as `null`; the adapter accepts both null and undefined success without terminating a delivered frame.
+
 ## CI fixture corrections (decided 2026-10-05; not deployed)
 
 Foreign-UID native acceptance fixtures must stage readable source/helpers and their installed dependency closure outside the caller's checkout, HOME and TMPDIR, without changing caller permissions. Only fixture-internal relative workspace aliases are allowed: Node rejects TypeScript physically inside node_modules. The original UID2000, namespace/capability isolation, real SDK/adapter and cleanup/receipt assertions remain. On `8f4c32f`, [CI 37409095234](https://github.com/schani/pi-orb/actions/runs/37409095234) reported 3,134 passes, twelve skips and three native failures; all three reproduce behind a private checkout ancestor, but GitHub's exact denied ancestor was not logged and remains unestablished. The corrected source passes all fourteen native cases under private ancestry/umask0022 and root/umask0077, without skips. [E2E 37409095227](https://github.com/schani/pi-orb/actions/runs/37409095227) separately reported 457 passes, four failures and zero skips across all 48 files. Pinned Ubuntu reproduced all four; correcting the canonical POST expectation and required harness field passes both complete files (seven cases, zero skips), preserving ordering/persistence assertions. Evidence: `.context/deploy-claude-20261005/{ci-native-failure,ci-native-repair,ci-browser-failure,monitor}/`. Historical RED logs/traces remain; these scoped corrections do not qualify the whole release. New-source first-attempt CI and all four E2E shards must pass before deployment.
@@ -124,6 +132,30 @@ Typecheck, lint and 112 infrastructure checks pass. Unit/DST: 2,594 pass, eight 
 After rebasing onto `c186cd2`, typecheck, lint, 492 web unit tests and ten desktop/phone browser regressions pass.
 
 **Hit-test invariant:** locator visibility/stability does not establish actual WebKit hit testing. The read-summary click was blocked by markdown pointer interception, not fallback rendering or response waiting; root cause remains unproved (`docs/postmortems/2026-10-04-webkit-read-drawer-hit-test.md`). The corrected semantic test is qualified; the 2026-10-05 user exception waives deep historical forensics as a release gate.
+
+## Tailscale removal local qualification (2026-10-04; not deployed)
+
+Removal and current HTTP-preview contracts are recorded in `docs/ports.md`. Historical pre-rebase gates:
+
+- `npm ci`, typecheck and lint pass (20 existing warnings, six infos).
+- Settled `npm test`: **2,549 passed**, eight conditional skips (five PostgreSQL placeholders requiring `PI_ORB_TEST_DATABASE_URL`, three live-GCS cases requiring `PI_ORB_TEST_HOSTING_BUCKET`); **104 infrastructure tests passed** (35 Node, 45 Python, 24 native shell contracts—not live native acceptance).
+- Full Docker/PostgreSQL/browser E2E: **313 passed, two failed, zero skipped**. Both failures are the tablet assertion at `e2e/frontend-session.e2e.test.ts:431`: expected 16px, actual 13px. Commit `8a80bc7` intentionally selected distinct reading/code fonts and matched composer sizing, removing the touch-specific 16px override. This is a preexisting typography/test contract mismatch, not an unexplained intermittent failure or evidence of a removal regression. Upstream `7e407d168537bc8040ac3bcfe46a709d978536dc` corrected the obsolete expectation to 13px; its validated release passed 315 E2Es (`docs/deployment.md`). The original failure evidence remains; it does not establish current rebased E2E status.
+- Built image `sha256:ef156b25b1b532fff08603089f15531e82acf2488128ad8e2aaf1776bf183d1a` was verified to contain neither `tailscale` nor `tailscaled`.
+
+Logs: `/tmp/tailscale-removal-validation-*.log`. The original unit run overlapped source review that deleted an already-discovered test and changed a loaded prompt test; the settled full run above verifies the final source, rather than dismissing an unexplained flake. No live native GCE build, deployment or deployed-resource cleanup was performed.
+
+### Removal rebase qualification (2026-10-06; not deployed)
+
+Rebased removal `5ae44463` onto upstream `290535cd`. Typecheck and lint pass;
+272 focused tests and 178 infrastructure tests pass (49 Node, 105 Python,
+24 native shell contracts, not live native acceptance). Full unit/E2E qualification
+was not rerun; pre-rebase failures do not imply the current E2E gate is red.
+
+That installation reported inherited high advisory
+[GHSA-6qxp-vccf-f47h](https://github.com/advisories/GHSA-6qxp-vccf-f47h) for
+`@modelcontextprotocol/client` 2.0.0, repaired by upstream PR #65 and qualified
+below. Evidence: `/tmp/tailscale-rebase-{npm-ci,audit,typecheck-2,lint,focused-2,infra}.*`.
+These are scoped merge checks, not release qualification.
 
 ## Cached navigation and automatic mounting (qualified 2026-10-03; deployed 2026-10-04)
 
@@ -675,7 +707,7 @@ minutes total. Every smoke that boots an orb therefore allows fifteen minutes
 per boot; its overall deadline covers every sequential boot, stop, and required
 network check. `infra/smoke-timeout.contract.test.mjs` keeps these bounds aligned.
 
-**Orb-local preview smoke (corrected 2026-09-09):** a visible Tailscale peer does not imply that the caller has kernel tailnet routing or MagicDNS in its host resolver. The live smoke reads `TUN` from daemon status: kernel clients use curl, userspace clients dial through `tailscale nc` with `infra/smoke_preview.py`. The helper keeps stdin open until the HTTP response completes, parses content-length/chunked responses, and kills/reaps the subprocess at the existing ten-second attempt deadline. Tests exercise pipe ownership without sleeps, parsing and failure paths, and pin transport selection and unchanged overall bounds. Both transports preserve useful failure diagnostics. This corrects a reproduced harness assumption rather than masking it with a skip or larger timeout. Evidence: `docs/postmortems/2026-09-09-orb-local-tailnet-smoke.md`.
+**Preview validation boundary:** a configured URL and localhost HTTP success do not prove external browser reachability. The historical userspace-networking smoke assumption and first-failure evidence remain in `docs/postmortems/2026-09-09-orb-local-tailnet-smoke.md`. HTTP-preview domain/DST, real parser/stream, browser origin/HMR and deployed consolidated-app-login/session acceptance are defined in `docs/ports.md`; local source evidence does not qualify deployed ingress.
 
 **Failed live-fixture retention (decided 2026-09-09):** the workload-identity smoke deletes successful cloud fixtures but retains failed ones for diagnosis, printing exact IDs and a cost warning. Its exit trap removes local credential scratch for either verdict. `infra/smoke-cleanup.test.mjs` deterministically executes that cleanup against a fake API, covering successful, failed and signal-style exit statuses plus shared/disposable project ownership. This preserves failed workspaces that the earlier unconditional cleanup destroyed before inspection; see `docs/postmortems/2026-09-09-deleted-browser-reconciler.md`.
 
@@ -688,6 +720,99 @@ assertions and timeouts. Raw first-failure and corrected-run logs remain in
 `.context/native-final-unit-dst.log` and
 `.context/native-final-unit-dst-bounded.log`.
 
+
+## HTTP preview verification (implementation authorized, 2026-10-06)
+
+`docs/ports.md` owns the tests-first sequence, forced/entropy DST matrix, named checkpoints,
+registration/lifecycle/activity/cancellation/buffer invariants, mutation checks and trace replay.
+The architecture prerequisite is satisfied: [PR #51](https://github.com/schani/pi-orb/pull/51)
+merged, and [Deploy 37469707425](https://github.com/schani/pi-orb/actions/runs/37469707425)
+validated `404cf7b1` as `pi-orb-issuer-00043-2k5` with all twelve gates passed
+(`docs/deployment.md`). Preview implementation is authorized; deployment is not.
+Production domain code uses existing task clocks/store/runtime-transport seams.
+Force register/revoke/forward races (no unregistered dial and selected bounded termination),
+stop/start/replacement registration persistence, preview activity versus the real idle reaper/explicit
+Stop/replacement, reordered coalesced monotonic activity updates, process death and inactivity.
+Never infer agent working from preview use or leave immortal activity flags. In-flight silent
+HTTP/SSE count; WS application messages renew the lease, silent HMR/heartbeats do not.
+Focused tests-first/DST logs are in `.context/http-preview`; first failure/replay traces remain
+in `test-failures/`. Infra contracts cover optional origin/env wiring and preview request-log
+exclusion without suppressing audit logs.
+
+Real HTTP parsers, Node streams and browser origins remain adapter/E2E tests. Deployed
+acceptance uses consolidated app-managed Google login and preview sessions, not IAP, and
+qualifies first navigation, expiry/re-login, assets, HMR/WS, SSE and Authorization preservation
+through the chosen ingress. Domain selection and deployed acceptance remain pending.
+Runtime proxy changes must pass `npm ci` and `npm run test:e2e` before deployment.
+
+### Pre-rebase local qualification (2026-10-07; not deployed)
+
+These results belong to checkpoint `884003e`, before integration with `6b01f52`.
+They do not qualify the rebased tree.
+
+On that settled source, `npm ci` and typecheck passed; lint passed with zero errors,
+85 warnings and 18 infos. Full unit/DST passed **3,299 tests**, with 13 conditional
+skips: three live GCS, six opt-in PostgreSQL and four PostgreSQL-only locking cases
+under PGlite. Infrastructure passed **182 tests** (49 Node, 109 Python, 24 native-guest
+contracts), plus shell checks. The default infrastructure gate includes all four preview
+contracts, including its own wiring regression. Red/green evidence:
+`.context/http-preview/infra-gate-red.log` and `.context/http-preview/infra-gate-green.log`.
+Native-guest contracts are not live VM acceptance.
+The complete default Docker/browser `npm run test:e2e` passed **483 tests in 54 files**,
+with no skips, in **3,093 seconds**. This was one invocation: the tool attachment timed
+out and reattached to the running process; the suite was not rerun. Subsequent infrastructure
+test-gate wiring changed no production source, so this E2E result remains valid. Real PostgreSQL
+E2E includes the shared preview registration, lease, lifecycle-fencing and schema contracts;
+this does not mean every opt-in PostgreSQL unit suite ran.
+
+Preview coverage includes Chromium/WebKit login, in-process composition and runtime-image
+Docker HTTP/SSE, Vite HMR, binary traffic, immediate WebSocket registration/revocation,
+and actual container restart with stable URLs and no autostart. The preview Docker fixture
+uses a fake agent and in-memory authority; the remaining real OrbAgent E2Es also passed.
+Neither fixture establishes live Google/GCE or native-image acceptance.
+
+Runtime image `sha256:3c708d2c934b727468f7aa53de6105e52d15dbcd0c7d9abda836d7767974d5c0`
+was verified to contain no `tailscale`/`tailscaled` binaries on PATH or in its filesystem.
+Evidence: `.context/http-preview/final-npm-ci.log`,
+`.context/http-preview/final-settled-*.log` and
+`.context/http-preview/final-runtime-image-no-tailscale.log`; first failures and replay
+traces remain preserved. No domain was selected, wildcard ingress provisioned, deployment performed or
+live GCP/native acceptance run. `PI_ORB_PREVIEW_ORIGIN` remains unset: previews are disabled,
+and actual public exposure is not qualified.
+
+## HTTP preview advisory rebase (2026-10-07; not deployed)
+
+PR #64 rebases onto main `7bedf41`, including PR #65's MCP client/core 2.2.0
+upgrade and removal of the unused runtime client dependency (`8eaa636`). Fresh
+`npm ci` and `npm audit --json` pass with zero vulnerabilities. Typecheck and
+lint pass; focused preview, MCP/OAuth, composition, hosting and migration
+contracts pass 235 tests with one conditional skip; upstream naming and
+Claude/Pi boot-continuation overlap passes 90 tests. Infrastructure passes
+53 Node, 118 Python and 24 native-VM tests. The sole rebase conflict retained
+both Claude boot-continuation and HTTP preview qualification records. Preview
+migration 034 remains free; HTTP preview contracts and Tailscale removal are
+unchanged.
+
+Evidence: `.context/http-preview/advisory-rebase-*`. These are scoped local
+checks, not current-head full CI/E2E or public-ingress qualification. No merge,
+deployment or live-cloud mutation occurred.
+
+### Scoped rebase validation (2026-10-07; not deployed)
+
+Feature checkpoint `a805415` integrates latest fetched main `6b01f52`.
+Migration `033_claude_compute_recovery.sql` is preserved; previews use
+`034_orb_previews.sql`. Clean installation, typecheck and lint passed (zero
+errors, 117 warnings, 25 infos). Focused unit/DST passed **512 tests**, with six
+conditional skips; upstream-overlap checks passed **293 tests**. Infrastructure
+passed **195 tests** (53 Node, 118 Python, 24 native-guest contracts).
+
+Integration failures were stale fixtures: two route calls retained a removed
+argument, and Docker/GCE environment assertions omitted the upstream recovery
+proof. Only those four test fixtures changed; corrected checks and fixture lint
+passed. Evidence: `.context/http-preview/rebase-latest-*.log` and `.exit`, plus
+`rebase-final-fixture-lint.*`. First-failure logs and existing traces are preserved.
+Full unit/DST and E2E were not rerun on this base; the 483-test E2E result above
+belongs only to `884003e`. No push or deployment occurred.
 
 ## Deterministic simulation testing strategy
 
@@ -732,7 +857,7 @@ Runtime-internal state is a simulation target too, and the Pi adapter is reachab
 
 **Harness finding (2026-08-12): native promises need an explicit simulated owner until their completion condition.** The operation-correlation DST originally let its fake-Pi task execute a fixed six checkpoints and exit. One schedule exhausted those checkpoints before the submitters' native-Promise continuations installed the modeled Pi prologue, leaving the inbox blocked on a promise outside `determined` with no simulated task able to resolve it. The recorded trace reproduced as a deterministic deadlock, not noise. The fake-Pi task now remains schedulable until the expected submissions have actually landed and all pending prologue/announcement work is complete. This is an explicit state predicate, not a timeout or rerun; simulation helpers must follow the same rule whenever native promises bridge into a modeled scheduler.
 
-**Composed infrastructure DST (implemented 2026-09-05).** `adapters/gce/enrollment.dst.test.ts` runs the real GCE provider and separate real Tailscale minters against shared `DeterministicGceApiModel` and `DeterministicTailscaleApiModel` services. Each worker owns its own task; transport checkpoints expose the absence-check, key-list/revoke/mint, create-conflict, and winner-adoption interleavings. Both a forced delayed-loser schedule and unconstrained entropy reproduced invalid enrollment on the old revocation rule. Assertions model non-reusable key consumption, retained identity, and deletion cleanup; `adapters/tailscale/model.dst.test.ts` covers a delayed older minter against a newer key. Local adapter correctness is insufficient when the user-visible invariant spans two remote services. Details and original traces: `docs/postmortems/2026-09-05-tailscale-invalid-key-at-first-boot.md`.
+**Compose the invariant's boundaries:** isolated adapter tests missed a winning host losing its enrollment authority when competing provisioners touched a second remote service. Preserve separate task owners, shared remote-service state, accepted effects independent of response delivery, and forced critical interleavings. Historical reproduction and traces: `docs/postmortems/2026-09-05-tailscale-invalid-key-at-first-boot.md`. The HTTP-preview plan in `docs/ports.md` applies this rule to lifecycle admission, runtime identity and stream ownership together.
 
 The GCE model must reserve an insert's name and expose its winning metadata at acceptance, independently of operation completion; operation polling advances status rather than creating/overwriting the resource. Its earlier completion-time insertion could accept two same-name creates. An intermediate reservation-only correction then trapped retries after a deadline-abandoned operation behind permanent 404s; replay identified the missing accepted-resource visibility, and model contract tests pin acceptance/read-back/conflict plus cloud completion after caller loss. This is a test-model correction, not relaxed provider assertions. Release-script contract tests require local `jq` (the scripts' real JSON processor); a missing binary is an environment prerequisite failure, not an intermittent test failure.
 
@@ -780,7 +905,7 @@ retaining the cursor attachment check.
 
 **Live IAP edge finding (2026-09-03):** an unauthenticated probe against the deployed Cloud Run browser origin established the load-bearing IAP behavior directly: an ordinary `GET /api/v1/session` returned `302` with an `accounts.google.com` location and HTML, while the same request with `X-Requested-With: XMLHttpRequest` returned HTML `401` with no redirect. The IAP policy still contained exactly the sole `domain:heyglide.com` accessor. This proves the browser adapter's expired-session classification premise without application deployment or a stored identity. It does not prove the authenticated cookie-expiry → ribbon → Google SSO → restored application flow.
 
-**Current proposal for the complete live IAP flow (2026-09-03; not implemented):** run a Playwright smoke against the deployed browser URL in an operator-owned persistent Chromium profile that has an active `heyglide.com` Google session; never commit or upload that profile. Load an orb and draft, clear only cookies scoped to the pi-orb application origin while retaining Google's account session, then issue the ordinary no-store `/api/v1/session` request with `X-Requested-With: XMLHttpRequest`. Require a visible 401-driven Session ribbon and no Google navigation/CORS-flattened network failure. Click same-tab **sign in again**; Google's retained SSO session should complete IAP without human input, and the smoke requires return to the exact path, a cleared ribbon, a successful probe, and the exact draft. This tests the real edge behavior without trying to manufacture or store Google credentials. A service-account/OAuth bearer smoke is insufficient: it proves IAP authorization but not browser-cookie expiry, AJAX 401 behavior, or the top-level redirect. Keep this live check separate from deterministic CI unless a securely managed interactive browser identity with reliable renewal is designed; the fixture browser E2E remains the required per-change gate. The orb's keyless GCP deployment service account cannot complete this test: the sole-accessor policy deliberately admits the `heyglide.com` human domain, not that service account, and bearer authorization would not exercise browser cookies or Google SSO anyway.
+**Legacy live IAP qualification proposal (2026-09-03; not implemented):** applies only to the legacy deployment, not the consolidated app-auth preview prerequisite. The replacement acceptance contract is in `docs/ports.md`. Legacy procedure: run a Playwright smoke against the deployed browser URL in an operator-owned persistent Chromium profile that has an active `heyglide.com` Google session; never commit or upload that profile. Load an orb and draft, clear only cookies scoped to the pi-orb application origin while retaining Google's account session, then issue the ordinary no-store `/api/v1/session` request with `X-Requested-With: XMLHttpRequest`. Require a visible 401-driven Session ribbon and no Google navigation/CORS-flattened network failure. Click same-tab **sign in again**; Google's retained SSO session should complete IAP without human input, and the smoke requires return to the exact path, a cleared ribbon, a successful probe, and the exact draft. This tests the real edge behavior without trying to manufacture or store Google credentials. A service-account/OAuth bearer smoke is insufficient: it proves IAP authorization but not browser-cookie expiry, AJAX 401 behavior, or the top-level redirect. Keep this live check separate from deterministic CI unless a securely managed interactive browser identity with reliable renewal is designed; the fixture browser E2E remains the required per-change gate. The orb's keyless GCP deployment service account cannot complete this test: the sole-accessor policy deliberately admits the `heyglide.com` human domain, not that service account, and bearer authorization would not exercise browser cookies or Google SSO anyway.
 
 Rendered terminal UI behavior must be checked in a real browser, not inferred from SSR, CSS text, or the raw-WebSocket E2E. Learned 2026-08-09: those lower layers all passed while a missing flex direction collapsed the terminal header, an incomplete viewport flex chain left the composer above the bottom, and wterm's automatic resize produced scroll/reflow jumps. The corrective browser check uses Chromium against the process-provider full service and asserts computed composer/terminal geometry, a fresh prompt on visible row zero, and repeated top-left expand/shrink gestures with output present. CSS contract tests retain the static layout invariants; the full-slice test retains the transport/PTY invariants. A fresh macOS `npm ci` can extract node-pty 1.1.0's prebuilt `spawn-helper` without its executable bit, causing the real-PTY unit test and local terminal opens to fail with `posix_spawnp failed`; the root postinstall hook repairs the current-architecture helper.
 
@@ -861,7 +986,7 @@ DST tests must never be flaky; a non-reproducing failure is a schedule the scena
 Decided 2026-08-06 (from `docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md`): **three boundary rules, each closing a gap the rollout incident fell through.**
 
 - **Version skew is part of the model.** The DST target list has always included "multiple reconcilers observing and acting on the same orb", but every simulated reconciler ran identical code; a deploy briefly runs a heterogeneous fleet, and the repair war was emergent behavior of exactly that. Scenarios that model two reconcilers at different configuration/script generations belong in the standing target list, and — the general rule — when a design doc *accepts a residual risk* contingent on an operational assumption ("the drain window is bounded", "the next pass heals it"), that assumption is either measured in the field or modeled adversarially in DST before the acceptance stands. Both prior occurrences of the rollover caveat shipped on an unverified "~2 minutes" folklore number; the real drain exceeded 12 minutes. Implemented the same day as `mixed-generation.dst.test.ts`: one world and store, two deps objects differing only in their fake provider's script generation, each with its own reconcile and poll loop, driven through create → running → stop/start → (old revision drains away) → stop/start. It bought more than the fence it was written for. Against the unfenced repair rule it fails in its first iterations on a backward repair (2 → 1), which 14 of 20 sampled schedules produce, at up to 3 repairs where the fence allows 1; with the fence it also caught two defects that had nothing to do with scripts — a boot probe and a liveness restart-grace surviving into the next episode in the reconciler that had *not* made the transition, each of which failed a healthy orb terminally (`docs/lifecycle.md`, episode-scoped memory). Both were live in production the moment two revisions overlapped, and neither was reachable by any single-reconciler scenario.
-- **Test the artifact you ship.** The E2E exercises a locally built image on the developer's architecture; the deploy ships a cross-built amd64 image that had never been executed anywhere. The build/push path must boot what it pushes (implemented 2026-08-06: the `infra/build-push.sh` gate refuses to push a runtime image that does not answer `/v1/health`, and `infra/smoke.sh` exercises create → running → stop → start → stop plus the tailnet preview leg against the live deployment after every deploy).
+- **Test the artifact you ship.** The E2E exercises a locally built image on the developer's architecture; the deploy ships a cross-built amd64 image that had never been executed anywhere. The build/push path must boot what it pushes (implemented 2026-08-06: the `infra/build-push.sh` gate refuses to push a runtime image that does not answer `/v1/health`, and `infra/smoke.sh` exercises create → running → stop → start → stop against the live deployment after every deploy).
 - **Evidence must outlive the host.** DST cannot reach infrastructure crash-consistency failures (a hard VM stop mid-`docker pull` corrupting the layer cache is outside every simulated boundary), so that class is carried by observability instead — and the incident showed the current channels (serial console, guest attributes, in-VM docker logs) all die with the VM or need interactive access, while the lifecycle machinery aggressively stops failed hosts. Anything the boot-failure path will cite as evidence must flow to durable, queryable storage (Cloud Logging) and into the terminal error itself (implemented 2026-08-06: container-state guest attribute folded into `diagnose`, COS Cloud Logging, typed probe causes — `docs/host-provider.md`).
 
 **Restart notifications (2026-09-05, tests-first).** `pi/boot-notification.test.ts` covers creation, retained-compute restart, replacement, runtime-only/unknown identity, combined interruption context, completed and aborted work, inbox-user guard reset, same-runtime deduplication, and compaction preserving the crash-loop budget. `pi/boot-notification.dst.test.ts` records schedules across identity read, append, and trigger with injected crashes before/after append; at most one unfinished automatic turn may be triggered. `pi/operation-correlation.dst.test.ts` races browser/inbox sends with the boot turn's delayed SDK `agent_start`, proving readiness is independent of inference and that the inbox steers the already-claimed operation. The initial red DST trace is retained at `test-failures/boot-notification-concurrent-send-1788648283595-0.json`; replay confirmed the old settled-tail boot stayed idle before implementation. Pinned-SDK contracts verify disk reopen, model-visible user role/content, and durable visible failure records for immediate SDK throws/rejections. Procfs-adapter tests distinguish container lifetime from kernel lifetime; process-provider tests require the conservative non-container marker even under an inherited container environment.

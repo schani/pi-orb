@@ -3,15 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootHookPrompt } from "../hooks/prompt.ts";
-import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { environmentPrompt } from "./environment-prompt.ts";
 import { orbResourceLoaderOptions } from "./resource-loader.ts";
 
-const host = "pi-orb-abc123.tail1234.ts.net";
 const base = {
   cwd: "/workspace/repo",
   agentDir: "/workspace/pi-agent",
-  previewHost: host,
   skillsDir: null,
 };
 
@@ -33,7 +30,6 @@ describe("orbResourceLoaderOptions", () => {
     expect(override?.(["from APPEND_SYSTEM.md"])).toEqual([
       "from APPEND_SYSTEM.md",
       environmentPrompt,
-      portExposurePrompt(host),
     ]);
   });
 
@@ -45,27 +41,17 @@ describe("orbResourceLoaderOptions", () => {
         ...base,
         userTimeZone: "America/Los_Angeles",
       }).appendSystemPromptOverride?.([]),
-    ).toEqual([environmentPrompt, portExposurePrompt(host), prompt]);
+    ).toEqual([environmentPrompt, prompt]);
     for (const input of [{ ...base, userTimeZone: null }, base]) {
       expect(orbResourceLoaderOptions(input).appendSystemPromptOverride?.([])).toEqual([
         environmentPrompt,
-        portExposurePrompt(host),
       ]);
     }
-  });
-
-  it("appends runtime tools without a preview host", () => {
-    const override = orbResourceLoaderOptions({
-      ...base,
-      previewHost: null,
-    }).appendSystemPromptOverride;
-    expect(override?.([])).toEqual([environmentPrompt]);
   });
 
   it("appends nothing for boot hooks that succeeded", () => {
     const override = orbResourceLoaderOptions({
       ...base,
-      previewHost: null,
       hooks: {
         setup: {
           hook: "setup",
@@ -95,7 +81,6 @@ describe("orbResourceLoaderOptions", () => {
     };
     const override = orbResourceLoaderOptions({
       ...base,
-      previewHost: null,
       hooks,
     }).appendSystemPromptOverride;
     expect(override?.([])).toEqual([environmentPrompt, bootHookPrompt(hooks)]);

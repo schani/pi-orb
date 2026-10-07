@@ -85,6 +85,121 @@ const invariant = (message: string): StoreError => ({
  * from named failpoints, so schedules and outages replay exactly.
  */
 export class InMemoryControlPlaneStore implements ControlPlaneStore {
+  private readonly previewRows = new Map<
+    string,
+    import("../domain/preview-ports.ts").PreviewRegistrationRow
+  >();
+
+  private previewCallerValid(
+    orb: OrbRow | undefined,
+    caller: import("../domain/ports.ts").ArchiveCaller,
+  ): boolean {
+    return (
+      orb !== undefined &&
+      orb.state === "running" &&
+      orb.hostDiscardThroughIncarnation === null &&
+      orb.runtimeTokenHash === caller.runtimeTokenHash &&
+      orb.hostIncarnation === caller.hostIncarnation &&
+      this.projects.get(orb.projectId)?.state === "active" &&
+      !this.deletions.has(orb.id)
+    );
+  }
+
+  readPreviewAuthority(task: SimulationTask, input: { orbId: string; port: number }) {
+    return this.access(task, FAILPOINTS.storeRead, "read preview authority", () => {
+      const orb = this.orbs.get(input.orbId);
+      return orb === undefined
+        ? null
+        : { orb, registration: this.previewRows.get(`${input.orbId}:${input.port}`) ?? null };
+    });
+  }
+
+  listPreviews(
+    task: SimulationTask,
+    input: { orbId: string; caller: import("../domain/ports.ts").ArchiveCaller },
+  ) {
+    return this.access(task, FAILPOINTS.storeRead, "list previews", () =>
+      this.previewCallerValid(this.orbs.get(input.orbId), input.caller)
+        ? [...this.previewRows.entries()]
+            .filter(([key]) => key.startsWith(`${input.orbId}:`))
+            .map(([, row]) => row)
+            .sort((a, b) => a.port - b.port)
+        : null,
+    );
+  }
+
+  registerPreview(
+    task: SimulationTask,
+    input: import("../domain/preview-ports.ts").PreviewMutation & { registrationId: string },
+  ) {
+    return this.access(
+      task,
+      FAILPOINTS.storeWrite,
+      "register preview",
+      (): import("../domain/preview-ports.ts").PreviewRegistrationOutcome => {
+        if (!this.previewCallerValid(this.orbs.get(input.orbId), input.caller))
+          return { type: "denied" };
+        const key = `${input.orbId}:${input.port}`;
+        const old = this.previewRows.get(key);
+        const registration = old ?? {
+          port: input.port,
+          registrationId: input.registrationId,
+          createdAt: input.now,
+        };
+        this.previewRows.set(key, registration);
+        return { type: "registered", registration, created: old === undefined };
+      },
+    );
+  }
+
+  unregisterPreview(
+    task: SimulationTask,
+    input: import("../domain/preview-ports.ts").PreviewMutation,
+  ) {
+    return this.access(
+      task,
+      FAILPOINTS.storeWrite,
+      "revoke preview",
+      (): { type: "revoked"; removed: boolean } | { type: "denied" } => {
+        if (!this.previewCallerValid(this.orbs.get(input.orbId), input.caller))
+          return { type: "denied" };
+        return {
+          type: "revoked",
+          removed: this.previewRows.delete(`${input.orbId}:${input.port}`),
+        };
+      },
+    );
+  }
+
+  protectPreviewActivity(
+    task: SimulationTask,
+    input: Parameters<
+      import("../domain/preview-ports.ts").PreviewStore["protectPreviewActivity"]
+    >[1],
+  ) {
+    return this.access(
+      task,
+      FAILPOINTS.storeWrite,
+      "protect preview activity",
+      (): { type: "protected" } | { type: "denied" } => {
+        const orb = this.orbs.get(input.orbId);
+        if (
+          !this.previewCallerValid(orb, input) ||
+          orb === undefined ||
+          this.previewRows.get(`${input.orbId}:${input.port}`)?.registrationId !==
+            input.registrationId
+        )
+          return { type: "denied" };
+        this.orbs.set(orb.id, {
+          ...orb,
+          previewActiveUntil: Math.max(orb.previewActiveUntil ?? 0, input.activeUntil),
+          lastBusyAt: Math.max(orb.lastBusyAt ?? 0, input.now),
+          stateVersion: orb.stateVersion + ((orb.previewActiveUntil ?? 0) <= input.now ? 1 : 0),
+        });
+        return { type: "protected" };
+      },
+    );
+  }
   private readonly uploadRows = new Map<
     string,
     import("../domain/workspace-uploads.ts").UploadRow
@@ -1585,6 +1700,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       this.deleteActivityHeadlines(params.orbId);
       this.replicas.delete(params.orbId);
       this.orbs.delete(params.orbId);
+      for (const key of this.previewRows.keys())
+        if (key.startsWith(`${params.orbId}:`)) this.previewRows.delete(key);
       this.deletions.delete(params.orbId);
       return { conflict: false as const };
     }).andThen((outcome) =>
@@ -1808,6 +1925,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
           params.now >= orb.sleepUntil);
       if (
         uploading ||
+        (params.stopReason === "idle" && (orb?.previewActiveUntil ?? 0) > params.now) ||
         invalidSleepStop ||
         orb === undefined ||
         orb.stateVersion !== params.expectedStateVersion

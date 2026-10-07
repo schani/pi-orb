@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fenceRequest, fixtureEnvironment, translateResponse } from "./native-browser-fence.mjs";
+import {
+  fenceRequest,
+  fixtureEnvironment,
+  translateResponse,
+  validateFixture,
+} from "./native-browser-fence.mjs";
 
 const fixture = {
   gcpProject: "playground-dev-6ae7",
@@ -12,6 +17,30 @@ const fixture = {
 const prefix = `projects/${fixture.gcpProject}/zones/${fixture.zone}/`;
 const instance = `pi-orb-${fixture.orbId}-i0`;
 const physical = `pi-orb-validator-${fixture.orbId}-i0`;
+
+test("browser fixture accepts a local origin and rejects non-origin URLs", () => {
+  const complete = {
+    ...fixture,
+    projectId: "11111111-2222-4333-8444-555555555556",
+    connectionNonce: "11111111-2222-4333-8444-555555555557",
+    connectionMap: "/private/connections.json",
+    runtimeImageId: "1",
+    workspaceImageId: "2",
+    brokerUrl: "http://127.0.0.1:7100",
+    appOrigin: "http://127.0.0.1:5173",
+    port: 7100,
+    gceServiceAccount: "pi-orb-orb-vm@playground-dev-6ae7.iam.gserviceaccount.com",
+    subnetwork: "regions/us-central1/subnetworks/pi-orb-us-central1",
+    generation: 0,
+  };
+  validateFixture(complete);
+  for (const appOrigin of [
+    "http://127.0.0.1:5173/path",
+    "http://user@127.0.0.1:5173",
+    "http://127.0.0.1:7100",
+  ])
+    assert.throws(() => validateFixture({ ...complete, appOrigin }));
+});
 
 test("fixture env preserves executable workload identity but removes inherited app and fake routing", () => {
   const inherited = {
@@ -29,7 +58,6 @@ test("fixture env preserves executable workload identity but removes inherited a
     PI_ORB_E2E_LAUNCH_FAILURE_MARKER: "failure",
     PI_ORB_ROLE: "browser",
     PI_ORB_SECRET_STORE: "gsm",
-    PI_ORB_TAILSCALE_OAUTH_CLIENT_SECRET: "fake-secret",
     PI_ORB_GCE_MACHINE_TYPE: "bad-type",
     DATABASE_URL: "postgres://wrong",
     PORT: "9999",
@@ -65,7 +93,6 @@ test("fixture env preserves executable workload identity but removes inherited a
     "PI_ORB_GITHUB_API_URL",
     "PI_ORB_E2E_HOST_SPEC",
     "PI_ORB_E2E_LAUNCH_FAILURE_MARKER",
-    "PI_ORB_TAILSCALE_OAUTH_CLIENT_SECRET",
   ])
     assert.equal(plan[key], undefined, key);
   assert.equal(plan.PI_ORB_ROLE, undefined);

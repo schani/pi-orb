@@ -1,16 +1,7 @@
-import {
-  CONTROL_PLANE_URL_ENV,
-  PREVIEW_HOST_ENV,
-  RUNTIME_TOKEN_ENV,
-  TAILSCALE_AUTH_KEY_ENV,
-  TAILSCALE_HOSTNAME_ENV,
-} from "@pi-orb/protocol";
+import { CONTROL_PLANE_URL_ENV, RUNTIME_TOKEN_ENV } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
-import { errAsync, okAsync } from "neverthrow";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { TailscaleError } from "../../domain/errors.ts";
 import { specFingerprintOf } from "../spec-fingerprint.ts";
-import type { TailscaleAuthKeyMinter } from "../tailscale/client.ts";
 import { DockerOrbHostProvider, publishedRuntimePort } from "./provider.ts";
 
 interface DockerReply {
@@ -89,7 +80,6 @@ interface ProviderOverrides {
   readonly controlPlaneUrl?: string;
   readonly extraEnv?: Readonly<Record<string, string>>;
   readonly specGeneration?: number;
-  readonly tailscale?: { minter: TailscaleAuthKeyMinter; tailnetDnsName: string };
 }
 
 function makeProvider(overrides: ProviderOverrides = {}): DockerOrbHostProvider {
@@ -176,16 +166,6 @@ const withoutMapping = {
 const withoutMappingOrIp = { Ports: {}, Networks: { "pi-orb": { IPAddress: "" } } };
 
 const ref = { provider: "docker", resourceId: "pi-orb-orb-1" };
-
-const minterReturning = (key: string): TailscaleAuthKeyMinter => ({
-  mintAuthKey: () => okAsync(key),
-});
-
-const minterFailing = (error: TailscaleError): TailscaleAuthKeyMinter => ({
-  mintAuthKey: () => errAsync(error),
-});
-
-const tailnet = { tailnetDnsName: "tailnet.ts.net" };
 
 describe("DockerOrbHostProvider", () => {
   it.each(["pi", "claude"] as const)(
@@ -778,7 +758,6 @@ describe("DockerOrbHostProvider host specification", () => {
         extraEnv: {},
         skillsDir: "/opt/pi-orb/skills",
         harness: "pi",
-        tailscale: null,
         repositoryUrl: request.bootstrap.repositoryUrl,
       }),
     );
@@ -793,10 +772,6 @@ describe("DockerOrbHostProvider host specification", () => {
     expect(
       makeProvider().desiredSpecFingerprint({ ...specInput, repositoryUrl: "https://other/repo" }),
     ).not.toBe(base);
-    const withTailscale = desired({
-      tailscale: { minter: minterReturning("tskey-auth-abc"), ...tailnet },
-    });
-    expect(withTailscale).not.toBe(base);
   });
 
   it("changes when an extraEnv value changes, not just its key set", () => {
@@ -916,91 +891,22 @@ describe("DockerOrbHostProvider host specification", () => {
   });
 });
 
-describe("DockerOrbHostProvider tailscale env", () => {
-  beforeEach(() => {
-    dockerFake.reset();
-  });
+describe("DockerOrbHostProvider environment", () => {
+  beforeEach(() => dockerFake.reset());
 
-  it("omits the tailscale variables when the feature is not configured", async () => {
+  it("sets the runtime environment", async () => {
     const run = await provisionArgv(makeProvider());
-    expect(envValue(run, TAILSCALE_AUTH_KEY_ENV)).toBeNull();
-    expect(envValue(run, TAILSCALE_HOSTNAME_ENV)).toBeNull();
-    expect(envValue(run, PREVIEW_HOST_ENV)).toBeNull();
-  });
-
-  it("delivers the auth key, hostname and preview host on creation", async () => {
-    const run = await provisionArgv(
-      makeProvider({ tailscale: { minter: minterReturning("tskey-auth-abc"), ...tailnet } }),
-    );
-    expect(envValue(run, TAILSCALE_AUTH_KEY_ENV)).toBe("tskey-auth-abc");
-    expect(envValue(run, TAILSCALE_HOSTNAME_ENV)).toBe("pi-orb-orb-1");
-    expect(envValue(run, PREVIEW_HOST_ENV)).toBe("pi-orb-orb-1.tailnet.ts.net");
-  });
-
-  it("fails provisioning retryably and creates no container when minting fails", async () => {
-    installFreshHost();
-    const provider = makeProvider({
-      tailscale: {
-        minter: minterFailing({
-          type: "tailscale_error",
-          code: "rejected",
-          message: "tailnet said no",
-          retryable: false,
-        }),
-        ...tailnet,
-      },
-    });
-    const result = await provider.provision(task, request, context);
-    expect(result.isErr()).toBe(true);
-    if (result.isErr()) {
-      // Retryable even for a terminal tailscale error: the reconciler
-      // provisions again rather than failing the orb over port exposure.
-      expect(result.error.retryable).toBe(true);
-      expect(result.error.code).toBe("operation_failed");
-      expect(result.error.message).toContain("tailnet said no");
-    }
-    expect(dockerFake.calls.some((args) => args[0] === "run")).toBe(false);
-  });
-
-  it("does not re-mint for a reused container", async () => {
-    let minted = 0;
-    const provider = makeProvider({
-      tailscale: {
-        minter: {
-          mintAuthKey: () => {
-            minted += 1;
-            return okAsync("tskey-auth-new");
-          },
-        },
-        ...tailnet,
-      },
-    });
-    dockerFake.install((args) => {
-      if (args[0] === "inspect") {
-        return {
-          stdout: JSON.stringify([
-            {
-              Config: {
-                Env: [`${RUNTIME_TOKEN_ENV}=tok`, `${TAILSCALE_AUTH_KEY_ENV}=tskey-auth-old`],
-                Labels: {
-                  "pi-orb.orb-id": "orb-1",
-                  "pi-orb.host-spec-fingerprint": provider.desiredSpecFingerprint({
-                    orbId: request.orbId,
-                    repositoryUrl: request.bootstrap.repositoryUrl,
-                  }),
-                },
-              },
-              State: { Status: "running" },
-              NetworkSettings: { Networks: { "pi-orb": { IPAddress: "172.20.0.5" } } },
-            },
-          ]),
-        };
-      }
-      return { stdout: "ok\n" };
-    });
-    const result = await provider.provision(task, request, context);
-    expect(result.isOk(), JSON.stringify(result)).toBe(true);
-    expect(minted).toBe(0);
-    expect(dockerFake.calls.some((args) => args[0] === "run")).toBe(false);
+    const entries = run.flatMap((arg, index) => (arg === "--env" ? [run[index + 1]] : []));
+    expect(entries).toEqual([
+      "PI_ORB_ID=orb-1",
+      `PI_ORB_REPOSITORY_URL=${request.bootstrap.repositoryUrl}`,
+      `PI_ORB_HOST_INCARNATION=${request.incarnation}`,
+      expect.stringMatching(/^PI_ORB_RUNTIME_TOKEN=[a-f0-9]{64}$/),
+      "PI_ORB_CONTROL_PLANE_URL=http://host.docker.internal:3000",
+      "PI_ORB_CLAUDE_RECOVERY_PROOF=null",
+      "PI_ORB_HARNESS=pi",
+      "PI_ORB_SKILLS_DIR=/opt/pi-orb/skills",
+      "HOME=/workspace/home",
+    ]);
   });
 });

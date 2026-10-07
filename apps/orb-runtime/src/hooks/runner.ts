@@ -2,12 +2,9 @@ import { statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   CONTROL_PLANE_URL_ENV,
-  PREVIEW_HOST_ENV,
   RUNTIME_TOKEN_ENV,
   type RuntimeHookStatus,
   type RuntimeHooks,
-  TAILSCALE_AUTH_KEY_ENV,
-  TAILSCALE_HOSTNAME_ENV,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { Result } from "neverthrow";
@@ -48,25 +45,16 @@ export const hookStampPath = (workDir: string): string =>
  * Removed from a hook's environment. `PI_ORB_RUNTIME_TOKEN` and
  * `PI_ORB_CONTROL_PLANE_URL` are removed from setup only, which is what makes
  * "setup has no identity" mechanical rather than advisory: without them the
- * brokered helpers and `pi-orb id-token` fail closed. Tailscale material is
- * removed from both — a hook has no business joining or re-keying the tailnet.
+ * brokered helpers and `pi-orb id-token` fail closed.
  */
 export const SETUP_SCRUBBED_ENV = [CONTROL_PLANE_URL_ENV, RUNTIME_TOKEN_ENV] as const;
-export const HOOK_SCRUBBED_ENV = [
-  TAILSCALE_AUTH_KEY_ENV,
-  TAILSCALE_HOSTNAME_ENV,
-  PREVIEW_HOST_ENV,
-] as const;
 
 export function hookEnvironment(
   base: Readonly<Record<string, string | undefined>>,
   hook: HookName,
   envFile: string,
 ): Record<string, string> {
-  const scrubbed = new Set<string>([
-    ...HOOK_SCRUBBED_ENV,
-    ...(hook === "setup" ? SETUP_SCRUBBED_ENV : []),
-  ]);
+  const scrubbed = new Set<string>(hook === "setup" ? SETUP_SCRUBBED_ENV : []);
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(base)) {
     if (value === undefined || scrubbed.has(key)) continue;

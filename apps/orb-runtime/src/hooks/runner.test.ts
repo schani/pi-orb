@@ -114,20 +114,6 @@ describe("boot hook environment", () => {
     }
   });
 
-  it("never hands Tailscale material to either hook", () => {
-    const base = {
-      PI_ORB_TAILSCALE_AUTH_KEY: "tskey-secret",
-      PI_ORB_TAILSCALE_HOSTNAME: "pi-orb-a",
-      PI_ORB_PREVIEW_HOST: "pi-orb-a.tail.ts.net",
-    };
-    for (const hook of ["setup", "resume"] as const) {
-      const env = hookEnvironment(base, hook, "/home/env");
-      expect(env["PI_ORB_TAILSCALE_AUTH_KEY"]).toBeUndefined();
-      expect(env["PI_ORB_TAILSCALE_HOSTNAME"]).toBeUndefined();
-      expect(env["PI_ORB_PREVIEW_HOST"]).toBeUndefined();
-    }
-  });
-
   it("never sets AMP_ORB", () => {
     expect(hookEnvironment({}, "setup", "/home/env")["AMP_ORB"]).toBeUndefined();
   });

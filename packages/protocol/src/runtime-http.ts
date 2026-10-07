@@ -108,6 +108,8 @@ export const RuntimeHealthSchema = Type.Union([
       orbId: Type.String(),
       runtimeInstanceId: Type.String(),
       status: Type.Literal("ready"),
+      executionId: Type.Optional(Type.String()),
+      incarnation: Type.Optional(Type.Integer({ minimum: 0 })),
       sessionId: Type.String(),
       /** Null for a repository without commits. */
       checkoutCommit: Type.Union([Type.String(), Type.Null()]),

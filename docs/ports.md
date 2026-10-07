@@ -1,83 +1,218 @@
-# Port exposure and preview URLs
+# HTTP previews
 
-How ports inside an orb (dev servers the agent starts) are reached from outside. Decided 2026-08-05 (resolves the ports/preview part of open question 17): **tier-1 Tailscale** — every orb host joins the user's tailnet, and every TCP port a server listens on inside the orb is directly reachable from the user's devices, with no per-port configuration, no proxy code, and no inbound firewall changes on any provider.
+## Decision and implementation (2026-10-06)
 
-## Decision (2026-08-05)
+Authenticated HTTP, WebSocket and SSE previews are authorized for implementation, not
+deployment. Built-in Tailscale and arbitrary TCP/UDP exposure are outside this scope.
+The implementation uses registered plain-HTTP IPv4 loopback ports in isolated GCE/Docker
+compute. The shared-namespace process provider is unsupported. No public domain is selected,
+no preview ingress is provisioned, and local qualification is not deployed acceptance.
+Remaining ingress choices are in `docs/open-questions.md`; acceptance work is in `TODO.md`.
 
-- Each orb host runs `tailscaled` in **userspace-networking mode** (no TUN device or `NET_ADMIN`; it runs in the local Docker container and directly on the native GCE host) and joins the user's tailnet as machine `pi-orb-<orbId>`.
-- Userspace mode forwards inbound tailnet connections to the same port on `127.0.0.1`, so dev servers that bind localhost (Vite, Next defaults) are reachable **without** `--host 0.0.0.0`.
-- The **control plane generates the preview URL**: `http://pi-orb-<orbId>.<tailnet dns name>:<port>`. It is a pure function of orb id + static configuration — no database column, no runtime round-trip.
-- The preview host is surfaced in three places: the orb detail page in the web UI, the browser API (`OrbView.previewHost`, optional field), and **the agent's system prompt**, which shows one full HTTP example URL (port 5173), instructs the agent to substitute the actual port, explains same-port localhost forwarding, and requires full URLs for services the user should open.
-- All connectivity is outbound from the orb (WireGuard to the tailnet), so the GCE deny-all-inbound firewall and the Docker private network are untouched. This also works on macOS Docker Desktop, where bridge IPs are not host-routable.
-- Access control is tailnet membership plus ACLs on `tag:pi-orb`. Traffic is WireGuard-encrypted on the wire but plain `http://` to the browser (see the tier-2 upgrade path below).
+Architecture prerequisite: [PR #51](https://github.com/schani/pi-orb/pull/51) merged as
+`3c03e4200b8220fa097b97b379cc20c851527103` October 5, 10:30 PM PDT.
+[Deploy 37469707425](https://github.com/schani/pi-orb/actions/runs/37469707425)
+validated descendant `404cf7b1d54fff65ca09844e6cd9b2a1af8ff1ca` October 6, 7:06 AM PDT,
+as `pi-orb-issuer-00043-2k5`; its [artifact](https://github.com/schani/pi-orb/actions/runs/37469707425/artifacts/11418743296)
+records all twelve release gates passed. Consolidation preserves the exact issuer URL,
+signing keys, relying-party trust and private VPC connectivity. Preview routing uses this
+same application with app-managed Google login, not IAP; no issuer URL change is allowed.
 
-Scope note: this intentionally serves the current single-user deployment. The user's device must be on the tailnet; there is no in-UI embedded preview and no public sharing yet.
+## Architecture
 
-Field-validated 2026-08-05 on the Docker provider with a real tailnet: provisioning minted a key through the OAuth client, the orb joined as a tagged node, and both the runtime's own port and an ad-hoc localhost-bound server on another port were fetched from a tailnet device via the MagicDNS FQDN — no per-port configuration. The GCE path (metadata key delivery, startup-script fetch, mint-on-repair, tailscaled inside the COS-hosted container) was validated live 2026-08-06 during the first cloud rollout; the rollout itself hit a deploy-rollover repair war plus a corrupted docker layer cache, unrelated to Tailscale — `docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md`.
+```text
+Browser → Host-preserving HTTPS edge → consolidated application preview gateway
+        → domain admission/store → private runtime transport
+        → runtime preview service → HTTP adapter → 127.0.0.1:<registered-port>
+```
 
-## Trusted-company multi-user proposal (2026-09-16)
+`PI_ORB_PREVIEW_ORIGIN` is an optional exact HTTPS base origin, with no trailing slash,
+path, query or fragment. The control plane validates separation from application and hosted
+files using the public suffix list including private domains. Each orb/port has a single-label
+host `p5173-o<canonical-orb-id>.<preview-base-host>`, suitable for wildcard DNS/TLS.
+This isolates cookies, service workers, storage and same-origin access between ports.
+Different subdomains of the application's registrable domain are insufficient: same-site
+and parent-domain cookie interference remain. Local mode alone allows test-owned HTTP
+localhost names and the fixed developer identity; production never falls back to anonymous.
 
-The user clarified that all users are trusted coworkers and cross-user file access is acceptable (`docs/multi-user.md`). Separate networks and a preview proxy are not prerequisites. **Recommendation, not a selected migration:** use one company tailnet, admit employee devices and grant access to `tag:pi-orb`; the current deployment-wide client/DNS configuration already supports that topology. The current tailnet can serve this role if its owner and membership policy are suitable. A different tailnet requires re-enrolling retained nodes and cleaning up their old registrations, not merely changing the configured DNS suffix.
+Previews open separately, not under an application-origin path or in an embedded panel.
+Only preview application traffic and reserved `/__pi_orb/` authentication routes execute on
+preview hosts. Paths such as `/api` and `/runtime` there belong to the preview application,
+never the control plane, issuer or broker. App API/live/terminal origin guards remain intact.
+This is trusted-coworker browser isolation, not hostile-code compute containment.
 
-Per-user tailnets need per-user OAuth client/DNS configuration, secret storage, owner-aware provisioning/preview URLs, and cleanup against the tailnet where each node enrolled. The runtime's supplied-key enrollment contract can remain unchanged. This is more work than a shared company tailnet.
+### Registration and lifetime
 
-The standard Tailscale client has one active account/tailnet at a time, with saved-account switching, not simultaneous connectivity. Separate network-client instances or sharing selected machines are alternatives, not a reason to require two tailnets per orb. See [fast user switching](https://tailscale.com/kb/1225/fast-user-switching) and [machine sharing](https://tailscale.com/kb/1084/sharing), checked 2026-09-16. The topology choice remains in `docs/open-questions.md`, question 26.
+Use `pi-orb expose <port>`, `pi-orb unexpose <port>` and `pi-orb previews`.
+Only `pi-orb previews` supports `--json`.
+The runtime's bearer-authenticated PUT/DELETE `/runtime/previews/:port` and GET
+`/runtime/previews` call the registration service. Unconfigured origin returns an explicit
+configuration-disabled error, not a fabricated URL. Registration does not assert readiness.
 
-## Sandbox shared-tailnet exception (2026-09-21)
+Migration 034 persists an orb/port allowlist with a random registration generation.
+Idempotent registration retains the generation; revoke then re-register changes it.
+Registrations survive stop/start and compute replacement; orb deletion cascades them.
+Mutations recheck parent/orb lifecycle, token and incarnation under store locks. Ports are
+integers 1–65535; the CP excludes runtime port 8080, and runtime admission excludes its actual
+listener/reserved ports. Actual local CP listeners are excluded, not remote HTTPS port 443.
+No URL, DNS name, address or Unix socket is a selectable target.
+Only registered targets are authorized; registration and dial are not a distributed atomic
+transaction. Observed closure rejects admission; later closure cancels through bounded
+revalidation. Already accepted upstream effects and delivered bytes cannot be recalled.
 
-The user authorized consolidation qualification on the existing tailnet with the existing OAuth client, after disclosure that it can manage production-tagged nodes. This shares only Tailscale authority, not GCP identities, app Google OAuth or cookie secrets; rotation/revocation is coupled. Cleanup must remove only exact sandbox orb nodes/keys before deleting its GCP project, never revoke the shared client or delete other devices. Generation 2 activation and enrollment are verified: incarnation replacement preserved the persistent disk and tailnet runtime health returned HTTP 200/ready. All 19 existing devices are unchanged; exactly one sandbox node was added. Arbitrary dev-server ports and remaining lifecycle checks are not yet qualified. Evidence and scope: `docs/control-plane-consolidation.md`.
+### Authentication
 
-## Mechanism
+Existing admitted coworkers can access other coworkers' previews; no owner-only policy is added.
+The application's host-only session does not authenticate a separate preview origin.
+Unauthenticated GET document navigation creates an encrypted host-only Secure HttpOnly
+SameSite=None challenge cookie (ten minutes) and redirects to app `/auth/preview`.
+Application Google login supplies the principal and fixed application session expiry.
+The app returns no-store HTML with nonce CSP and `Referrer-Policy: strict-origin`, auto-POSTing an encrypted
+60-second handoff ticket to the exact preview callback. Tickets are POST bodies, never
+query parameters. Callback requires the exact app Origin, bounded form body (16 KiB),
+and matching sealed challenge purpose/proof/origin; it clears the challenge on failure too.
+Real Chromium rejected both `no-referrer` and `same-origin` on the handoff form: each
+suppressed POST Origin to `null`. `strict-origin` retains the exact Origin and sends only
+the app origin as Referer, never the handoff path/query. Other auth responses remain
+`no-referrer`; callback Origin acceptance is unchanged.
 
-**Auth keys.** The control plane is configured with a Tailscale **OAuth client** (`PI_ORB_TAILSCALE_OAUTH_CLIENT_ID` / `PI_ORB_TAILSCALE_OAUTH_CLIENT_SECRET`, scopes `auth_keys` and `devices:core`, owning `tag:pi-orb`) plus the tailnet DNS name (`PI_ORB_TAILSCALE_TAILNET_DNS_NAME`, e.g. `tailabc123.ts.net`). When any of the three is unset the feature is off: providers inject nothing, the runtime skips tailscaled, `previewHost` is absent, and nothing else changes — the same all-or-none pattern as the GitHub integration. The host provider mints an auth key through the Tailscale API **only on the create-attempt path**, mirroring the runtime-token read-back model: provision-reuse never re-mints, but competing create attempts can each mint before one loses the host-name race. **Corrected 2026-09-05:** minting for incarnation N revokes only exact-orb keys for strictly older incarnations (plus the recognized unsuffixed description). It preserves keys for N and newer incarnations, including when key descriptions require detail reads. Archive/delete still revokes every exact-orb key. The earlier revoke-all-before-mint rule was unsafe: a losing create attempt could revoke the winning VM's enrollment key. The composed DST reproduces that ordering (`docs/postmortems/2026-09-05-tailscale-invalid-key-at-first-boot.md`). A revocation or mint failure is a retryable provider error handled by ordinary reconciliation.
+The preview `__Host-pi-orb-preview` session is Secure, HttpOnly, host-only and SameSite=Lax.
+It inherits the application's fixed 12-hour session expiry, without renewal. Assets, fetches,
+SSE and WS without authentication return 401, not a login redirect; only document navigation
+starts login. Sessions and handoffs are stateless: copied ticket plus challenge can replay
+until expiry. Copied session cookies remain valid until fixed expiry; app logout and Google
+membership changes do not instantly revoke them. No single-use or membership-polling claim.
+Active streams terminate at session/stream expiry, with watcher scheduling granularity.
 
-Key shape and rationale in the current implementation (implemented 2026-08-12 as the first credential leg of `docs/compute-replacement.md`): **pre-authorized** and **tagged `tag:pi-orb`** (no admin interaction; ACL-scoped); **non-reusable**, with a description naming exact orb ID and incarnation (one registration per key, with expiry-bounded outstanding authority); **non-ephemeral** device state (the device record must survive stopped/offline compute). The persistent tailscaled state normally resumes the same node without consuming a replacement key; lost/corrupt state consumes the current key to re-register. Deduplicating the extra device record such a re-registration leaves behind is deferred (`TODO.md`); permanent archive/delete removes every exact-orb key/device. Rejected: ephemeral devices — Tailscale deletes an ephemeral node's device record when it goes offline, which fights stop/start. Rejected: one static shared auth key — it is manually rotated shared authority with no per-orb revocation.
+Platform cookies and known platform identity headers are stripped before upstream delivery;
+ordinary `x-goog-*` application headers are preserved. Ordinary application
+Authorization and host-only cookies remain independent of platform auth. Upstream platform
+cookie collisions and all Domain-bearing Set-Cookie headers are rejected; there is no broad
+parent-domain cookie. Application cookies should be host-only. Preview WS requires its exact
+origin. No credentialed wildcard CORS or generic cross-origin development exception.
 
-**Concurrency trade-off (decided 2026-09-05).** At-most-one outstanding key is no longer claimed: same-incarnation racing/ambiguous create attempts can leave unused keys. Those remain non-reusable, tagged, and subject to the existing 90-day expiry; a later higher-incarnation mint collects observed older keys and archive/delete collects all exact-orb keys. A delayed older attempt can mint after that collection, so only expiry and deletion's repeated fenced cleanup bound that residual. Preserving a potentially installed key takes precedence over counting keys. Rejected: relying on a process-local mutex or adding another pre-insert existence check — neither makes a cross-service create transaction atomic across control-plane instances. Safe surplus-attempt reclamation is tracked in `TODO.md` rather than deleting a key whose ownership is uncertain. Provision/cleanup emits sanitized `lifecycle: orb=<id> tailscale-key-minted|preserved|revoked` edges with requested incarnation and API key ID (never the auth key), making future competing decisions queryable in Cloud Logging; ordinary host reuse emits no key events.
+### Admission, backend identity and activity
 
-**Env contract.** Providers deliver three additional environment variables at host creation (constants and helpers in `packages/protocol/src/tailscale.ts`):
+Every request/upgrade reads current store authority and requires healthy running compute,
+registration, no cleanup/discard/Stop intent and an isolated provider. Host observation and
+runtime health must agree on orb/incarnation; ready health supplies execution ID and runtime
+instance ID. These are mandatory for previews even where health fields are optional for other
+clients. No stale route cache or implicit Start is used.
 
-- `PI_ORB_TAILSCALE_AUTH_KEY` — the per-orb auth key (secret);
-- `PI_ORB_TAILSCALE_HOSTNAME` — `pi-orb-<orbId>`;
-- `PI_ORB_PREVIEW_HOST` — `pi-orb-<orbId>.<tailnet dns name>`; what the system prompt shows the agent. The runtime enables the feature only when all three variables are present — advertising ports to the agent without an auth key would be a lie.
+Private HTTP and WS use fixed `/v1/preview/:port`. Original path/query travels in
+`x-pi-orb-preview-path` as canonical base64url UTF-8 (16,384 encoded characters / 12,288
+decoded bytes maximum), avoiding URL normalization and private-route prefix escapes.
+Both boundaries strip application-spoofed reserved headers. Private platform failures carry
+`x-pi-orb-preview-error`; CP consumes it as a typed error and strips it, while ordinary
+application status codes remain unchanged. Signed admission carries orb, port, registration
+generation, incarnation, execution ID, runtime instance ID, origin and expiry. The signed admission lasts at most
+10 seconds. HMAC-SHA256 uses `runtimeTokenHash` as its key and the purpose prefix
+`pi-orb-preview-admission-v1\n`; the runtime derives the same key from its bearer token.
+Neither the key nor runtime bearer is forwarded to the preview service. Runtime verifies
+signature/expiry and its own exact target identity before opening localhost. It does not
+maintain a second registration database. Application Authorization is never remapped.
 
-On Docker these are ordinary `--env` values. On GCE they are fields in the `pi-orb-config` metadata document. Enabling or changing port-exposure configuration changes the immutable host-spec fingerprint, so a running orb is left alone and its stopped VM is replaced on the next Start with a freshly bounded incarnation key.
+A shared per-orb CP watcher revalidates authority every 5 seconds with a 2-second deadline,
+failing closed on missed validation; target stale-stream closure is within 10 seconds.
+Local lifecycle closure also cancels owned connections. A durable 15-second activity lease
+protects idle-stop CAS. HTTP/SSE in-flight requests count even while silent; actual WS
+application messages renew activity. A silent HMR socket or protocol heartbeat alone does not
+renew it. Admission gets an initial short lease, not indefinite WS busy credit.
+Runtime activity admission also excludes persisted idle-stop preparation without changing
+agent health to working. Explicit Stop overrides previews. Owner death/inactivity lets the
+lease expire; no immortal busy flag. The UI shows `preview` only for a running, unexpired lease
+with no agent busy activity. Scheduled sleep remains visible.
 
-**Runtime.** When the env vars are present, the runtime spawns `tailscaled --tun=userspace-networking` before agent boot and runs `tailscale up --authkey … --hostname …`. The tailscaled state directory lives on the persistent orb volume, so node identity survives container replacement and VM stop/start; the auth key is normally consumed exactly once per orb. Failure policy: port exposure is optional — any Tailscale failure is logged loudly and the runtime boots and reports healthy anyway; a dead tailscaled never takes the orb down. The runtime never parses Tailscale state beyond this; readiness is unaffected.
+### HTTP and resource contract
 
-**Field finding (2026-09-05).** An orb can reject its enrollment key on its first boot yet remain healthy and advertise its configured preview hostname. Configuration is not proof of tailnet reachability; localhost HTTP success is not preview verification. The initial-enrollment incident, suspected competing-provision key-revocation ordering, and workspace-preserving recovery guidance are recorded in `docs/postmortems/2026-09-05-tailscale-invalid-key-at-first-boot.md`; implementation work is in `TODO.md`.
+Method, path/query, streaming body, status and end-to-end headers are preserved. Replace
+spoofed forwarding headers with Host and trusted scheme/host derived from signed admission
+origin; strip
+hop-by-hop and Connection-nominated headers. No HTML/JS/CSP rewriting, redirect following,
+automatic retries or accepted-body/message replay. Relative redirects work; absolute localhost
+redirects, OAuth/public origins, allowed-host lists and HTTPS-only/IPv6-only listeners need
+application configuration. Do not disable development server host checks globally.
 
-**Prompt injection.** The port-exposure section (`apps/orb-runtime/src/tailscale/prompt.ts`) reaches the agent through a `DefaultResourceLoader` the runtime hands to `createAgentSession` (`apps/orb-runtime/src/pi/resource-loader.ts`). The loader mirrors the one the SDK builds implicitly when it gets no `resourceLoader` (`new DefaultResourceLoader({ cwd, agentDir, settingsManager })` plus `reload()`) and adds only `appendSystemPromptOverride: (base) => [...base, prompt]` plus the image-baked skills path (`additionalSkillPaths`, `docs/pi-adapter.md`). The override form is load-bearing: the `appendSystemPrompt` option would *replace* the SDK's own discovery of `APPEND_SYSTEM.md`, whereas the override runs on top of whatever was discovered, so our section is a strict superset of the default prompt rather than a substitute. With no preview host the same loader is used and only the port-exposure section is omitted. Pinned by `apps/orb-runtime/src/pi/resource-loader.contract.test.ts` against the exact installed Pi version: the section lands in `getAppendSystemPrompt()` — the accessor `AgentSession` reads, joining the parts with a blank line before handing them to its prompt builder — after the discovered append content; `SYSTEM.md`, `APPEND_SYSTEM.md` (project `.pi/` and agent-dir variants), AGENTS.md context files, prompts and themes all still resolve identically to a control loader, and the discovered skills are a control loader's plus the baked ones. **Pinned finding (2026-08-05):** the override is applied inside `reload()`, never in the constructor, so an unreloaded loader silently yields an empty append array — which is why the builder awaits `reload()` before handing the loader over.
+HTTP pumps use backpressure and cancellation rather than full-body buffering. Before headers,
+typed failures distinguish missing orb, unavailable compute, unregistered port, auth, stale
+target, refusal and upstream failure. Missing resources preserve the URL and link to the
+dashboard; unavailable orbs never silently redirect or start. After headers, failures interrupt
+the stream/WS, not false EOF or injected HTML in SSE.
 
-**Exposure note** (same accepted class as the orb token, `docs/credentials.md`): repository code inside the orb can read the auth key and could join additional nodes to the tailnet. Those nodes carry `tag:pi-orb` (pre-authorized keys only mint their own tag), so ACLs bound what they can reach; keys expire in 90 days; per-orb keys can be revoked individually. Accepted for the single-user phase.
+CP transport has 5-second connection and 30-second header deadlines, a one-hour maximum stream,
+128 total/16 per-orb owned streams and a 1 MiB preview WS queue/frame bound. The shared browser
+WS parser remains 8 MiB to preserve existing live/runtime prompt admission (6 MiB prompts);
+private CP-to-runtime preview parsing is capped at 1 MiB. Runtime WS buffers are bounded too.
+These implemented caps are not measured deployed memory/throughput guarantees.
+Cloud Run's configured request timeout is one hour; actual upload/stream/WS/drain behavior
+still requires ingress acceptance. Its documented HTTP/1 upload limit is 32 MiB; app settings
+cannot override that ([quotas](https://cloud.google.com/run/quotas),
+[WebSockets](https://cloud.google.com/run/docs/triggering/websockets)).
 
-**Deletion extension implemented 2026-08-08.** Orb deletion revokes every auth key with the orb's exact pi-orb description and removes every exactly matching `tag:pi-orb` device before host destruction; repeated quarantine passes verify all three resource classes remain absent before database finalization. Cleanup is idempotent. The Tailscale adapter and OAuth client therefore need key/device list and delete permissions (`auth_keys` plus `devices:core`), not key creation alone; details and race ordering are in `docs/orb-deletion.md`.
+## Operator ingress contract
 
-## Consolidation and a Tailscale-free preview proxy (2026-09-19; deferred)
+`infra/variables.tf` exposes optional `preview_origin`; `infra/run.tf` injects it only into
+the existing consolidated application. Empty leaves registration disabled. This is configuration,
+not DNS/TLS provisioning or deployment admission. `run.app` only supplies generated exact service
+hosts, not user wildcard DNS/TLS; Cloud Run domain mapping provides no wildcard certificate.
 
-The user explicitly deferred this feature; consolidation does not change Tailscale or preview behavior.
+After selecting an owned separate domain and DNS authority, operate a TLS reverse-proxy edge:
 
-The single-service plan in `docs/control-plane-consolidation.md` is compatible with authenticated HTTP/WebSocket previews without a tailnet client, but does not implement them. The path is browser → application preview proxy → existing private runtime connection → runtime localhost port. Current GCE connectivity already permits the control plane to reach the runtime, so this does not require a new outbound reverse-tunnel protocol. Consolidation is not a prerequisite; application-owned authentication makes preview admission fit the same service.
+1. Route `*.<preview-base-host>` to the existing `pi-orb-issuer` Cloud Run application.
+2. Preserve the original canonical Host, path/query and Upgrade through the backend hop;
+   TLS SNI may use the backend's exact Cloud Run hostname. Do not substitute the issuer Host
+   or rely on a client-supplied forwarding header for routing. Qualify actual Cloud Run handling.
+3. Terminate valid wildcard HTTPS at the edge; no IAP, alternate issuer or extra app service.
+4. Disable URL/query/header/body logging at the edge and audit every downstream sink before
+   exposure. Verify registration, auth and streaming from an external browser.
 
-This remains a separate feature: stream requests/responses and WebSocket upgrades, authenticate preview access, restrict runtime forwarding to permitted localhost ports, and isolate untrusted preview origins from the app and other previews. Hostname routing and TLS still need a design; putting a dev server under an app-origin path is not safe or generally compatible. Cloud Run's request-duration limits still apply. This can replace Tailscale for browser/dev-server access, not transparently expose arbitrary TCP/UDP services to native clients. No Tailscale removal or preview implementation is authorized by the consolidation plan.
+A GCP external application LB/serverless NEG is an ingress candidate, not a provisioned resource.
+For it, select the domain/managed DNS zone, reserve the IP, create wildcard DNS and use
+Certificate Manager DNS authorization plus its validation record; legacy Compute Engine managed
+SSL certificates do not supply wildcard issuance ([DNS authorization](https://cloud.google.com/certificate-manager/docs/deploy-google-managed-dns-auth)).
+No domain, certificate or LB was selected/applied by this implementation.
 
-## Tier model and upgrade path
+## Testing and observability
 
-Evaluated 2026-08-05 during the design conversation:
+Tests precede production changes. Production admission/connection ownership and registration
+run under `determined` with task clocks, store/runtime seams and named checkpoints. DST composes
+registration/revocation, idle CAS, explicit Stop, owner death, stale incarnation and cancellation;
+real socket/parser/backpressure and browser cookie/origin behavior remain adapter/E2E tests.
+First failures and replay logs remain under `.context/http-preview` and `test-failures/`.
+Pre-rebase qualification (2026-10-07) passed clean installation, typecheck, lint, full unit/DST,
+infrastructure and the complete Docker/browser E2E suite. That result does not qualify the
+rebased tree; scoped rebase results, counts, image identity and fixture limits are in
+`docs/testing.md`. Neither qualifies deployed ingress or live native/GCE acceptance.
+Remaining exposure work is tracked only in `TODO.md`; runtime/server/harness changes require
+`npm run test:e2e` before deploy.
 
-- **Tier 1 (this decision):** raw tailnet connectivity. Every port, zero per-port config, plain `http://`. Limitation: no secure context in the browser (service workers, `crypto.subtle`, camera/clipboard APIs fail), and an `https://` control-plane UI cannot embed the preview (mixed content).
-- **Tier 2 (deliberate next step, not built):** `tailscale serve` — tailscaled terminates HTTPS with a real Let's Encrypt cert at `https://pi-orb-<orbId>.<tailnet>.ts.net`, proxying to a chosen localhost port; adds identity headers; limited to three listen ports (443/8443/10000). Everything tier 1 builds (daemon, keys, hostname, persisted state, prompt/UI plumbing) carries over; the delta is enabling HTTPS certs on the tailnet, one `tailscale serve` invocation per promoted port, and the control-plane URL builder emitting the `https` form. Because the control plane owns URL generation, the UI/prompt never hardcode the URL shape.
-- **Tier 3 (available later):** `tailscale funnel` — a genuinely public URL per preview; requires granting the `funnel` node attribute to `tag:pi-orb` in the ACL. Explicit per-preview opt-in only, since public means unauthenticated.
+Selected minimal observability (2026-10-06): the persisted lease and visible `preview` reason,
+plus durable deduplicated registration/revocation, admission, forwarding failure/recovery and
+termination edges. Transport edges carry sanitized orb/port/incarnation/execution/runtime instance,
+phase and reason; after-header failures and browser WS overflow are recorded too. Healthy
+requests and normal connection start/end/EOF/cancellation stay quiet. Application URLs, queries,
+headers, cookies, tickets, bodies and WS payloads are not recorded. Aggregate byte/queue/cancellation
+metrics are not implemented; they are not part of this selected first observability contract.
 
-## Rejected and deferred alternatives (evaluated 2026-08-05)
+Application request logging is disabled. With `preview_origin` set, `infra/preview.tf` excludes
+canonical preview-host Cloud Run **request** logs from project `_Default` before service activation,
+because application OAuth codes/secrets may occur on any path/query. It does not exclude audit
+logs. This exclusion alone does not protect custom/ancestor sinks, LB/proxy access logs or
+upstream application logs. Their configuration and deployed absence evidence are prerequisites
+for exposure; no all-sinks no-query-logging guarantee is claimed from local contracts.
 
-- **Control-plane reverse proxy** (browser → control plane → runtime → localhost port): composes best with the existing architecture (no client install, one identity perimeter behind IAP, multi-tenant-capable) and remains the likely product-endgame answer. Not chosen now because it is strictly more code (runtime proxy route, browser-facing route, URL-shape/subdomain work, wildcard DNS + cert + LB for the cloud) and the single-user deployment gets everything it needs from the tailnet. The path-prefix URL variant additionally breaks absolute-path apps and would serve untrusted preview JS from the control-plane origin; a real deployment needs subdomain isolation on a separate origin.
-- **Direct host exposure** — Docker `-p` publishing (ports fixed at container creation; doesn't cover GCE) and GCE public-IP firewall openings (breaks deny-all-inbound, plain HTTP on a changing IP, unauthenticated): rejected.
-- **Provider-native proxies** (exe.dev per-VM HTTPS proxy, Lambda MicroVM endpoints): not applicable to Docker/GCE, but the reason URL generation is centralized in the control plane is so a provider-supplied preview address could replace the tailnet URL per provider later.
+## Retained decisions and alternatives
 
-## Operational setup (one-time, per tailnet)
+The 2026-10-04 removal decision replaces the 2026-08-05 all-TCP tailnet requirement. Viewer
+enrollment and key/identity/disposal complexity outweighed zero-configuration TCP forwarding;
+the enrollment race also exposed a composed invariant missed by isolated tests
+(`docs/postmortems/2026-09-05-tailscale-invalid-key-at-first-boot.md`). Optional managed access,
+systemd supervision and mint-only enrollment retain that complexity. Future advanced networking
+may be skill-only; no skill is selected now.
 
-1. In the Tailscale admin console: add `tag:pi-orb` to the ACL `tagOwners`; ensure an ACL rule grants the user's devices access to `tag:pi-orb` (default allow-all suffices on a personal tailnet); enable MagicDNS.
-2. Create an OAuth client with `auth_keys` and `devices:core`, allowed to mint keys for `tag:pi-orb`; deletion uses the latter to list and remove the orb's tailnet device.
-3. Configure the control plane: `PI_ORB_TAILSCALE_OAUTH_CLIENT_ID`, `PI_ORB_TAILSCALE_OAUTH_CLIENT_SECRET`, `PI_ORB_TAILSCALE_TAILNET_DNS_NAME` (the `tailXXXX.ts.net` name from the DNS page). In the cloud, the client secret follows the GitHub client-secret Secret Manager pattern (`infra/`).
-4. The user's own devices must be on the same tailnet to open preview URLs.
+Owner-managed Tailscale admin cleanup after retirement is accepted, not a deployment blocker.
+Device/auth-key inventory and upstream revocation were not performed. Removing the GCP OAuth
+secret container during apply does not revoke upstream clients/devices; preserve unrelated
+nodes and retained workspaces. Managed tunnels add another vendor/credential plane;
+provider-native proxies lack a common GCE/Docker contract. A dedicated gateway is justified
+only by measured constraints, not initially. Public unauthenticated sharing is out of scope.

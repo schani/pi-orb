@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
@@ -16,7 +17,7 @@ import {
 } from "@pi-orb/protocol";
 import { NoSimulationTask, type SimulationTask } from "determined";
 import Fastify from "fastify";
-import { err, ok, okAsync } from "neverthrow";
+import { err, ok, ResultAsync } from "neverthrow";
 import { ClaudePtyAuthTransport } from "./adapters/claude-auth-pty.ts";
 import { openControlPlaneDatabase } from "./adapters/database.ts";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
@@ -49,14 +50,11 @@ import { PiOrbNameGenerator } from "./adapters/pi-name-generator.ts";
 import { ProcessOrbHostProvider } from "./adapters/process/provider.ts";
 import { createReleaseActivationReader } from "./adapters/release-activation.ts";
 import { FetchRuntimeClient } from "./adapters/runtime-client/fetch-client.ts";
+import { NodePreviewClient } from "./adapters/runtime-client/preview-client.ts";
 import { createSealedAuthCookies } from "./adapters/sealed-auth-cookies.ts";
+import { createSealedPreviewAuth } from "./adapters/sealed-preview-cookies.ts";
 import { FileSecretStore } from "./adapters/secrets/file-store.ts";
 import { GsmSecretStore } from "./adapters/secrets/gsm-store.ts";
-import {
-  FetchTailscaleApiTransport,
-  HttpTailscaleAuthKeyMinter,
-  type TailscaleHostOptions,
-} from "./adapters/tailscale/client.ts";
 import { CryptoUserIdSource } from "./adapters/user-id.ts";
 import { uploadRequest } from "./adapters/workspace-upload-http.ts";
 import {
@@ -81,7 +79,7 @@ import {
   requestOrbDeletion,
   requestOrbSleep,
 } from "./domain/lifecycle.ts";
-import { logEvent, logOrbEvent } from "./domain/log.ts";
+import { logEvent } from "./domain/log.ts";
 import {
   hostingCleanupLoop,
   orphanSweepLoop,
@@ -94,6 +92,8 @@ import { McpOAuth, type McpOAuthProtocol } from "./domain/mcp-oauth.ts";
 import { mcpOAuthCleanupLoop } from "./domain/mcp-oauth-garbage.ts";
 import { spawnOrb } from "./domain/orb-spawning.ts";
 import type { BrokerDeps, ControlPlaneDeps, SigningKeyDeps } from "./domain/ports.ts";
+import { previewError } from "./domain/preview.ts";
+import { PreviewConnections } from "./domain/preview-connections.ts";
 import { getProjectSecretSnapshot } from "./domain/project-secrets.ts";
 import { waitForReleaseActivation } from "./domain/release-activation.ts";
 import { createSigningKeyBootstrapState, ensureActiveSigningKey } from "./domain/signing-keys.ts";
@@ -116,7 +116,11 @@ import { registerIssuerRoutes } from "./http/issuer-routes.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
 import { MCP_OAUTH_CALLBACK, registerMcpOAuthRoutes } from "./http/mcp-oauth-routes.ts";
 import { registerMcpRoutes } from "./http/mcp-routes.ts";
+import { registerPreviewAuth } from "./http/preview-auth-routes.ts";
+import { previewRoutingUrl, registerPreviewGateway } from "./http/preview-gateway.ts";
+import { createPreviewHosts, type PreviewHosts } from "./http/preview-host.ts";
 import { registerRoutes } from "./http/routes.ts";
+import { registerRuntimePreviewRoutes } from "./http/runtime-preview-routes.ts";
 import { registerRuntimeRoutes } from "./http/runtime-routes.ts";
 import { registerWebAssets } from "./http/web-assets.ts";
 import { registerWorkspaceUploadRoutes } from "./http/workspace-upload-routes.ts";
@@ -229,6 +233,22 @@ export async function main(
   const hosting = hostingConfiguration.value;
   const hostingOrigin = hosting.filesOrigin;
   const appOrigin = hosting.appOrigin;
+  let previewHosts: PreviewHosts | undefined;
+  const previewOrigin = env("PI_ORB_PREVIEW_ORIGIN", "");
+  if (previewOrigin !== "") {
+    const configured = createPreviewHosts({
+      previewOrigin,
+      appOrigin,
+      filesOrigin: hostingOrigin,
+      local: requestIdentity.value.kind === "local",
+    });
+    if (configured.isErr()) {
+      bootTask.error("Invalid preview origin");
+      process.exitCode = 1;
+      return;
+    }
+    previewHosts = configured.value;
+  }
   const hostingAccessResult = createConfiguredHostingAccessPolicy(hosting);
   if (hostingAccessResult.isErr()) {
     bootTask.error(hostingAccessResult.error.message);
@@ -374,43 +394,6 @@ export async function main(
   }
   const extraEnvOption =
     Object.keys(runtimeExtraEnv).length === 0 ? {} : { extraEnv: runtimeExtraEnv };
-  // Tailscale tier-1 port exposure (docs/ports.md). All three settings or
-  // none: without the OAuth client there is no key to mint, and without the
-  // tailnet DNS name there is no host to publish. Unset means orbs are
-  // created exactly as before and the browser view carries no preview host.
-  const tailscaleEnvNames = [
-    "PI_ORB_TAILSCALE_OAUTH_CLIENT_ID",
-    "PI_ORB_TAILSCALE_OAUTH_CLIENT_SECRET",
-    "PI_ORB_TAILSCALE_TAILNET_DNS_NAME",
-  ] as const;
-  const [tailscaleClientId, tailscaleClientSecret, tailnetDnsName] = tailscaleEnvNames.map((name) =>
-    env(name, ""),
-  ) as [string, string, string];
-  const tailscaleClient =
-    tailscaleClientId !== "" && tailscaleClientSecret !== "" && tailnetDnsName !== ""
-      ? new HttpTailscaleAuthKeyMinter(new FetchTailscaleApiTransport(), {
-          clientId: tailscaleClientId,
-          clientSecret: tailscaleClientSecret,
-          onKeyEvent: ({ orbId, action, incarnation, keyId }) => {
-            logOrbEvent(bootTask, orbId, `tailscale-key-${action}`, {
-              incarnation,
-              key_id: keyId,
-            });
-          },
-        })
-      : null;
-  const tailscale: TailscaleHostOptions | null =
-    tailscaleClient === null ? null : { minter: tailscaleClient, tailnetDnsName };
-  if (tailscale === null) {
-    const missing = tailscaleEnvNames.filter((name) => env(name, "") === "");
-    bootTask.log(`Tailscale port exposure disabled (${missing.join(", ")} unset)`);
-  }
-  const tailscaleForProvider = tailscale !== null && providerKind !== "process";
-  if (tailscale !== null && !tailscaleForProvider) {
-    bootTask.log("Tailscale port exposure disabled for process host provider");
-  }
-  const tailscaleOption = tailscaleForProvider ? { tailscale } : {};
-  const viewConfig = tailscaleForProvider ? { tailnetDnsName } : {};
   // What the dashboard footer states. The host-provider fallback is the one
   // the composition below takes, so the footer names the provider actually
   // constructed rather than the string that was typed.
@@ -443,7 +426,6 @@ export async function main(
           controlPlaneUrl: env("PI_ORB_BROKER_URL", ""),
           specGeneration,
           ...extraEnvOption,
-          ...tailscaleOption,
         })
       : providerKind === "process"
         ? new ProcessOrbHostProvider({
@@ -473,7 +455,6 @@ export async function main(
               : {}),
             specGeneration,
             ...extraEnvOption,
-            ...tailscaleOption,
           });
   const nameInferenceUrl = env("PI_ORB_NAME_INFERENCE_URL", mockOpenAi?.inferenceBaseUrl ?? "");
   const nameGenerator = new PiOrbNameGenerator(
@@ -496,13 +477,6 @@ export async function main(
     }),
     store: database.store,
     hostProvider,
-    resourceCleaner:
-      tailscaleForProvider && tailscaleClient !== null
-        ? {
-            cleanupOrb: (_task, orbId, context) =>
-              tailscaleClient.cleanupOrb(orbId, context.signal),
-          }
-        : { cleanupOrb: () => okAsync(undefined) },
     runtimeClient: new FetchRuntimeClient(),
     authGate: new SerializedAuthGate(
       githubOauth !== null
@@ -591,7 +565,10 @@ export async function main(
     process.on("message", e2eHistoryMessageHandler);
   }
 
-  const app = Fastify({ logger: false });
+  const app = Fastify({
+    logger: false,
+    rewriteUrl: (request) => previewRoutingUrl(previewHosts, request),
+  });
   const oauthNetwork = createMcpOAuthFetch();
   const mcpOAuth = new McpOAuth(
     database.mcpOAuth,
@@ -609,8 +586,13 @@ export async function main(
     await oauthNetwork.close();
   });
   const httpTask = new ControlPlaneTask("http");
-  registerHostingAccessGuard(app, hostingAccess, appOrigin, ({ reason, surface, requestId }) =>
-    logEvent(httpTask, "auth-hosting-denied", { reason, surface, requestId }),
+  registerHostingAccessGuard(
+    app,
+    hostingAccess,
+    appOrigin,
+    ({ reason, surface, requestId }) =>
+      logEvent(httpTask, "auth-hosting-denied", { reason, surface, requestId }),
+    previewHosts,
   );
   app.get("/health", async () => ({ status: "ok" }));
   // Key management dependencies are shared by the boot hook and authenticated rotation routes.
@@ -671,6 +653,55 @@ export async function main(
   const principalResolver =
     adapters.requestPrincipalResolverFactory?.(httpTask, database.users) ??
     configuredPrincipalResolver.value;
+  if (previewHosts !== undefined) {
+    if (applicationAuth !== undefined && identityConfig.kind === "google") {
+      const previewAuth = createSealedPreviewAuth(identityConfig.cookieSecret, Date.now);
+      if (previewAuth.isErr()) {
+        bootTask.error("Preview authentication initialization failed");
+        process.exitCode = 1;
+        await database.close();
+        return;
+      }
+      registerPreviewAuth(app, {
+        hosts: previewHosts,
+        appOrigin,
+        applicationAuth,
+        previewAuth: previewAuth.value,
+        outcome: ({ event, outcome, requestId }) =>
+          logEvent(httpTask, `preview-auth-${event}`, { outcome, requestId }),
+      });
+    } else {
+      app.decorateRequest("previewIdentity", undefined);
+      app.addHook("onRequest", async (request, reply) => {
+        if (previewHosts?.parse(request.headers.host) === undefined) return;
+        const principal = await principalResolver(request);
+        if (principal.isErr() || principal.value.kind !== "user")
+          return reply.status(401).send({ error: "Preview authentication required" });
+        request.previewIdentity = {
+          principal: principal.value,
+          expiresAt: httpTask.wallNow() + 60 * 60_000,
+        };
+      });
+    }
+    const connections = new PreviewConnections(deps, (orbId, operation) =>
+      ResultAsync.fromPromise(operation(new ControlPlaneTask(`preview:${orbId}`)), () =>
+        previewError("upstream_failed", "Preview watcher failed"),
+      ),
+    );
+    await registerPreviewGateway(app, httpTask, {
+      deps,
+      hosts: previewHosts,
+      appOrigin,
+      connections,
+      transport: new NodePreviewClient(),
+    });
+  }
+  registerRuntimePreviewRoutes(app, httpTask, {
+    store: deps.store,
+    url: previewHosts?.url ?? null,
+    newId: randomUUID,
+    reservedPort: 8080,
+  });
   registerAuthenticatedBrowserRoutes(
     app,
     principalResolver,
@@ -682,7 +713,7 @@ export async function main(
         appOrigin,
       });
       await registerLiveProxy(browser, httpTask, deps);
-      registerRoutes(browser, httpTask, deps, viewConfig, systemView, signingKeyDeps);
+      registerRoutes(browser, httpTask, deps, systemView, signingKeyDeps);
       registerMcpOAuthRoutes(browser, httpTask, database.mcp, mcpOAuth, appOrigin);
       registerMcpRoutes(browser, httpTask, database.mcp, async (projectId, config) => {
         const snapshot = await getProjectSecretSnapshot(httpTask, deps.projectSecrets, projectId);
@@ -712,7 +743,6 @@ export async function main(
   });
   registerRuntimeRoutes(app, httpTask, {
     appOrigin,
-    ...viewConfig,
     spawn: (task, caller, orbId, request) => spawnOrb(task, deps, caller, orbId, request),
     sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
       requestOrbSleep(task, deps, orbId, caller, durationSeconds, sleepId),

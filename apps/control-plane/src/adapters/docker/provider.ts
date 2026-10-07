@@ -3,13 +3,8 @@ import { createHash, randomBytes } from "node:crypto";
 import {
   CONTROL_PLANE_URL_ENV,
   HARNESS_ENV,
-  PREVIEW_HOST_ENV,
-  previewHost,
   RUNTIME_TOKEN_ENV,
   SKILLS_DIR_ENV,
-  TAILSCALE_AUTH_KEY_ENV,
-  TAILSCALE_HOSTNAME_ENV,
-  tailscaleHostname,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, Result, ResultAsync } from "neverthrow";
@@ -25,7 +20,6 @@ import type {
   StartOrbHostRequest,
 } from "../../domain/ports.ts";
 import { specFingerprintOf } from "../spec-fingerprint.ts";
-import type { TailscaleHostOptions } from "../tailscale/client.ts";
 
 export interface DockerOrbHostProviderOptions {
   /** Orb runtime image, e.g. "pi-orb-runtime:dev". */
@@ -44,11 +38,6 @@ export interface DockerOrbHostProviderOptions {
   readonly controlPlanePort: number;
   /** Extra environment passed to every orb container (e.g. E2E mock-OpenAI URLs). */
   readonly extraEnv?: Readonly<Record<string, string>>;
-  /**
-   * Tailscale port exposure (docs/ports.md). When absent the container is
-   * created exactly as before and the runtime never sees the feature.
-   */
-  readonly tailscale?: TailscaleHostOptions;
   readonly specGeneration?: number;
 }
 
@@ -211,13 +200,6 @@ export class DockerOrbHostProvider implements OrbHostProvider {
       controlPlaneUrl: this.controlPlaneUrl(),
       extraEnv: this.options.extraEnv ?? {},
       skillsDir: IMAGE_SKILLS_DIR,
-      tailscale:
-        this.options.tailscale === undefined
-          ? null
-          : {
-              hostname: tailscaleHostname(input.orbId),
-              previewHost: previewHost(input.orbId, this.options.tailscale.tailnetDnsName),
-            },
       repositoryUrl: input.repositoryUrl,
       harness: input.harness ?? "pi",
     });
@@ -414,40 +396,6 @@ export class DockerOrbHostProvider implements OrbHostProvider {
   }
 
   /**
-   * `docker run` arguments that join the new container to the tailnet, or an
-   * empty list when the feature is off. A mint failure is reported retryable
-   * whatever its cause: the reconciler simply provisions again rather than
-   * failing the orb over a tailnet hiccup.
-   */
-  private async tailscaleEnv(
-    orbId: string,
-    incarnation: number,
-    context: OperationContext,
-  ): Promise<Result<string[], OrbHostProviderError>> {
-    const tailscale = this.options.tailscale;
-    if (tailscale === undefined) return ok([]);
-    const key = await tailscale.minter.mintAuthKey(orbId, incarnation, context.signal);
-    if (key.isErr()) {
-      return err(
-        providerError(
-          "provision",
-          "operation_failed",
-          `tailscale auth key mint failed: ${key.error.message}`,
-          true,
-        ),
-      );
-    }
-    return ok([
-      "--env",
-      `${TAILSCALE_AUTH_KEY_ENV}=${key.value}`,
-      "--env",
-      `${TAILSCALE_HOSTNAME_ENV}=${tailscaleHostname(orbId)}`,
-      "--env",
-      `${PREVIEW_HOST_ENV}=${previewHost(orbId, tailscale.tailnetDnsName)}`,
-    ]);
-  }
-
-  /**
    * Enumerate this orb's containers by exact ownership label. Incarnation
    * strictness differs by caller: the discard fence needs a valid stamp on
    * every container (`"required"` — an unparseable stamp is an error, never a
@@ -563,11 +511,6 @@ export class DockerOrbHostProvider implements OrbHostProvider {
         const removed = await this.exec("provision", ["rm", "--force", name], context);
         if (removed.isErr()) return err(removed.error);
       }
-      // Minted only for a container that is actually about to be created —
-      // the reuse path above keeps whatever env its incarnation was born
-      // with, exactly like the runtime token.
-      const tailscaleEnv = await this.tailscaleEnv(request.orbId, request.incarnation, context);
-      if (tailscaleEnv.isErr()) return err(tailscaleEnv.error);
       const volume = await this.exec(
         "provision",
         [
@@ -626,7 +569,6 @@ export class DockerOrbHostProvider implements OrbHostProvider {
           `${RUNTIME_TOKEN_ENV}=${runtimeToken}`,
           "--env",
           `${CONTROL_PLANE_URL_ENV}=${this.controlPlaneUrl()}`,
-          ...tailscaleEnv.value,
           ...Object.entries(this.options.extraEnv ?? {}).flatMap(([key, value]) => [
             "--env",
             `${key}=${value}`,

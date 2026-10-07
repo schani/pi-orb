@@ -17,11 +17,8 @@ import { delimiter, join } from "node:path";
 import {
   CONTROL_PLANE_URL_ENV,
   HARNESS_ENV,
-  PREVIEW_HOST_ENV,
   RUNTIME_TOKEN_ENV,
   SKILLS_DIR_ENV,
-  TAILSCALE_AUTH_KEY_ENV,
-  TAILSCALE_HOSTNAME_ENV,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, Result, ResultAsync } from "neverthrow";
@@ -313,9 +310,6 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
 
   private childEnvironment(metadata: HostMetadata): NodeJS.ProcessEnv {
     const environment: NodeJS.ProcessEnv = { ...process.env };
-    delete environment[TAILSCALE_AUTH_KEY_ENV];
-    delete environment[TAILSCALE_HOSTNAME_ENV];
-    delete environment[PREVIEW_HOST_ENV];
     Object.assign(environment, this.options.extraEnv ?? {}, {
       PI_ORB_ID: metadata.orbId,
       [HARNESS_ENV]: metadata.harness,
