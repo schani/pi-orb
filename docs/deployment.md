@@ -32,15 +32,18 @@ Durable evidence: [authoritative GCS release record](https://storage.googleapis.
 
 **Font release checks blocked before apply (2026-10-04):** [Deploy 37211353362](https://github.com/schani/pi-orb/actions/runs/37211353362) and [E2E 37211353118](https://github.com/schani/pi-orb/actions/runs/37211353118) for `8a80bc7b097ba587ea3d635d0b7f494fad5a7e3d` each passed 313 of 315 E2Es. Both tablet-touch cases in `e2e/frontend-session.e2e.test.ts` still expected 16px rather than the selected 13px composer size. Targeted local reproduction confirmed the same deterministic assertion mismatch; the correction changes only that obsolete expectation. Unit/DST checks passed 2,587 tests (eight conditional skips). No build, migration or apply occurred; the original failed runs remain unchanged.
 
-**Selected preview prerequisite (2026-10-04):** architecture orb
-`e67b1120-393c-41c6-94ed-b354d82c526d` must merge and deploy before preview
-implementation. [PR #51](https://github.com/schani/pi-orb/pull/51) is open, not a
-completed deployment; consult its live checks/status rather than pinning candidate evidence here.
-It consolidates on `pi-orb-issuer`, preserving the exact issuer URL, signing keys and
-relying-party trust, replaces IAP with app-managed Google login and an encrypted host-only
-12-hour session cookie, and retains private VPC connectivity. It adds no load balancer.
-The release/IAP facts below describe the legacy deployed architecture, not the prerequisite's
-future auth contract. Preview ingress must not reintroduce IAP.
+**Preview prerequisite satisfied (2026-10-06):** architecture orb
+`e67b1120-393c-41c6-94ed-b354d82c526d` / [PR #51](https://github.com/schani/pi-orb/pull/51)
+merged October 5, 10:30 PM PDT as `3c03e4200b8220fa097b97b379cc20c851527103`.
+The validated release above, [Deploy 37469707425](https://github.com/schani/pi-orb/actions/runs/37469707425),
+deployed descendant `404cf7b1d54fff65ca09844e6cd9b2a1af8ff1ca` on October 6,
+7:06 AM PDT. Its [release artifact](https://github.com/schani/pi-orb/actions/runs/37469707425/artifacts/11418743296)
+records `pi-orb-issuer-00043-2k5`, exit 0 and all twelve gates passed, including
+activation, lifecycle and identity. Consolidation preserves the exact issuer URL,
+signing keys, relying-party trust and private VPC connectivity; app-managed Google
+login and an encrypted host-only 12-hour session cookie replace browser IAP. No load
+balancer was added. Historical browser-IAP evidence is not the current preview auth
+contract; preview ingress must not reintroduce IAP.
 
 There is no built-in service exposure. Preview contracts remain in `docs/ports.md`;
 no preview implementation/deployment or new release gate is authorized here. Existing

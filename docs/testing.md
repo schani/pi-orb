@@ -127,14 +127,27 @@ After rebasing onto `c186cd2`, typecheck, lint, 492 web unit tests and ten deskt
 
 ## Tailscale removal local qualification (2026-10-04; not deployed)
 
-The removal and HTTP-preview proposal are recorded in `docs/ports.md`; no proxy was implemented. Final local gates:
+The removal and HTTP-preview proposal are recorded in `docs/ports.md`; no proxy was implemented. Historical pre-rebase gates:
 
 - `npm ci`, typecheck and lint pass (20 existing warnings, six infos).
 - Settled `npm test`: **2,549 passed**, eight conditional skips (five PostgreSQL placeholders requiring `PI_ORB_TEST_DATABASE_URL`, three live-GCS cases requiring `PI_ORB_TEST_HOSTING_BUCKET`); **104 infrastructure tests passed** (35 Node, 45 Python, 24 native shell contracts—not live native acceptance).
-- Full Docker/PostgreSQL/browser E2E: **313 passed, two failed, zero skipped**. Both failures are the tablet assertion at `e2e/frontend-session.e2e.test.ts:431`: expected 16px, actual 13px. Commit `8a80bc7` intentionally selected distinct reading/code fonts and matched composer sizing, removing the touch-specific 16px override. This is a preexisting typography/test contract mismatch, not an unexplained intermittent failure or evidence of a removal regression. Reconciliation is tracked in `TODO.md`; the E2E gate remains failing. No rerun merely to obtain green.
+- Full Docker/PostgreSQL/browser E2E: **313 passed, two failed, zero skipped**. Both failures are the tablet assertion at `e2e/frontend-session.e2e.test.ts:431`: expected 16px, actual 13px. Commit `8a80bc7` intentionally selected distinct reading/code fonts and matched composer sizing, removing the touch-specific 16px override. This is a preexisting typography/test contract mismatch, not an unexplained intermittent failure or evidence of a removal regression. Upstream `7e407d168537bc8040ac3bcfe46a709d978536dc` corrected the obsolete expectation to 13px; its validated release passed 315 E2Es (`docs/deployment.md`). The original failure evidence remains; it does not establish current rebased E2E status.
 - Built image `sha256:ef156b25b1b532fff08603089f15531e82acf2488128ad8e2aaf1776bf183d1a` was verified to contain neither `tailscale` nor `tailscaled`.
 
 Logs: `/tmp/tailscale-removal-validation-*.log`. The original unit run overlapped source review that deleted an already-discovered test and changed a loaded prompt test; the settled full run above verifies the final source, rather than dismissing an unexplained flake. No live native GCE build, deployment or deployed-resource cleanup was performed.
+
+### Removal rebase qualification (2026-10-06; not deployed)
+
+Rebased removal `5ae44463` onto upstream `290535cd`. Typecheck and lint pass;
+272 focused tests and 178 infrastructure tests pass (49 Node, 105 Python,
+24 native shell contracts, not live native acceptance). Full unit/E2E qualification
+was not rerun; pre-rebase failures do not imply the current E2E gate is red.
+
+Clean installation's audit reports inherited high advisory
+[GHSA-6qxp-vccf-f47h](https://github.com/advisories/GHSA-6qxp-vccf-f47h) for
+`@modelcontextprotocol/client` 2.0.0. No dependencies changed; remediation is in
+`TODO.md`. Evidence: `/tmp/tailscale-rebase-{npm-ci,audit,typecheck-2,lint,focused-2,infra}.*`.
+These are scoped merge checks, not release qualification.
 
 ## Cached navigation and automatic mounting (qualified 2026-10-03; deployed 2026-10-04)
 
@@ -704,9 +717,11 @@ assertions and timeouts. Raw first-failure and corrected-run logs remain in
 
 `docs/ports.md` owns the tests-first sequence, forced/entropy DST matrix, named checkpoints,
 registration/lifecycle/activity/cancellation/buffer invariants, mutation checks and trace replay.
-Architecture orb `e67b1120-393c-41c6-94ed-b354d82c526d` /
-[PR #51](https://github.com/schani/pi-orb/pull/51) must merge and deploy before preview
-implementation. Production domain code uses existing task clocks/store/runtime-transport seams.
+The architecture prerequisite is satisfied: [PR #51](https://github.com/schani/pi-orb/pull/51)
+merged, and [Deploy 37469707425](https://github.com/schani/pi-orb/actions/runs/37469707425)
+validated `404cf7b1` as `pi-orb-issuer-00043-2k5` with all twelve gates passed
+(`docs/deployment.md`). Preview implementation/deployment remain unauthorized.
+Production domain code uses existing task clocks/store/runtime-transport seams.
 Force register/revoke/forward races (no unregistered dial and selected bounded termination),
 registration lifetime once selected, preview activity versus the real idle reaper/explicit
 Stop/replacement, reordered coalesced monotonic activity updates, process death and inactivity.

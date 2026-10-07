@@ -19,16 +19,22 @@ not product-managed enrollment. No skill, hook recipe or network integration is 
 Questions 72–73 (browser preview) record the scope decision; remaining choices are in
 `docs/open-questions.md`, questions 74–77 (browser preview). Implementation work lives in `TODO.md`.
 
-## Architecture prerequisite (selected 2026-10-04)
+## Architecture prerequisite (satisfied 2026-10-06)
 
-Architecture orb `e67b1120-393c-41c6-94ed-b354d82c526d` must be **merged and
-deployed before preview implementation**. [PR #51](https://github.com/schani/pi-orb/pull/51)
-is the source of truth for that prerequisite, not evidence of a completed deployment.
-It consolidates serving on `pi-orb-issuer`, preserving the exact issuer URL, signing
-keys and relying-party trust. It removes IAP in favor of application-managed Google
-login with an encrypted, host-only 12-hour session cookie; private VPC connectivity stays.
-Consolidation itself introduces no load balancer. Preview work and deployment are not
-authorized by this document.
+Architecture orb `e67b1120-393c-41c6-94ed-b354d82c526d` had to merge and deploy
+before preview implementation. [PR #51](https://github.com/schani/pi-orb/pull/51)
+merged as `3c03e4200b8220fa097b97b379cc20c851527103` on October 5, 10:30 PM PDT.
+[Deploy 37469707425](https://github.com/schani/pi-orb/actions/runs/37469707425)
+validated its descendant `404cf7b1d54fff65ca09844e6cd9b2a1af8ff1ca` on October 6,
+7:06 AM PDT. The [release artifact](https://github.com/schani/pi-orb/actions/runs/37469707425/artifacts/11418743296)
+records serving revision `pi-orb-issuer-00043-2k5`, exit 0 and all twelve gates passed,
+including activation, lifecycle and identity. Release details: `docs/deployment.md`.
+
+Serving is consolidated on `pi-orb-issuer`, preserving the exact issuer URL, signing
+keys and relying-party trust. Application-managed Google login replaces browser IAP,
+with an encrypted, host-only 12-hour session cookie; private VPC connectivity stays.
+Consolidation adds no load balancer. Preview implementation and deployment remain
+unauthorized.
 
 The earlier LB-IAP preview recommendation is superseded by this app-auth architecture.
 Any wildcard LB would supply TLS/routing only, a separate unresolved ingress decision.
@@ -59,9 +65,9 @@ This is browser isolation for trusted coworkers, not hostile-tenant compute isol
 
 ### Domain provisioning (proposal)
 
-The legacy deployed infrastructure uses Google-assigned `run.app` origins with native
-Cloud Run IAP; the prerequisite above replaces its auth/serving architecture. Neither
-that legacy infrastructure nor consolidation provisions a custom-domain LB.
+The application uses Google-assigned `run.app` origins with app-managed Google login;
+the legacy browser deployment used native Cloud Run IAP. Neither deployment provisions
+a custom-domain LB.
 `run.app` provides exact generated service/tag hosts, not user-controlled wildcard
 DNS/TLS. It cannot supply the proposed orb/port wildcard.
 An owned-domain wildcard is suggested, **not selected**; no available domain is assumed.
@@ -227,8 +233,8 @@ constraints prevent the required previews, not as an initial extra service. Sour
 
 ## Tests-first implementation sequence (proposal)
 
-1. First merge and deploy the architecture prerequisite above. Then settle remaining
-   questions 74–77 (browser preview) and pin contracts with failing tests. Qualify consolidated app login,
+1. The architecture prerequisite above is satisfied. After implementation approval, settle
+   remaining questions 74–77 (browser preview) and pin contracts with failing tests. Qualify consolidated app login,
    preview-session bootstrap and HMR on the chosen ingress before committing to that design.
    No deployment or credential mutation is authorized here.
 2. Write registration/store/runtime-transport contracts and forced DST schedules below before
