@@ -45,13 +45,16 @@ login and an encrypted host-only 12-hour session cookie replace browser IAP. No 
 balancer was added. Historical browser-IAP evidence is not the current preview auth
 contract; preview ingress must not reintroduce IAP.
 
-There is no built-in service exposure. Preview contracts remain in `docs/ports.md`;
-no preview implementation/deployment or new release gate is authorized here. Existing
-lifecycle/identity gates remain mandatory. Future deployed acceptance exercises chosen
-DNS/TLS/routing, consolidated browser login and preview sessions, registered-port admission,
-HMR/streaming, activity versus idle stop, and explicit Stop/replacement fencing. An owned
-wildcard domain/LB is suggested, not selected; `run.app` cannot provide user-controlled
-wildcard DNS/TLS. Local service success or a generated URL is insufficient.
+HTTP preview implementation is authorized, not deployment (2026-10-06); contracts are in
+`docs/ports.md`. Optional Terraform `preview_origin` injects `PI_ORB_PREVIEW_ORIGIN` into this
+same application; empty disables registration. No domain/DNS/TLS/LB is selected or provisioned.
+`run.app` cannot provide user-controlled wildcard DNS/TLS. Operator Host-preserving TLS routing
+configuration is in `infra/README.md`. The optional project `_Default` exclusion removes
+preview-host Cloud Run request-URL logs, not audit logs; custom/ancestor sinks and edge logs
+must also be checked before exposure. Existing lifecycle/identity gates remain mandatory.
+Pending deployed acceptance covers DNS/TLS, consolidated login/stateless preview handoff,
+registered-port admission, HMR/streaming, activity versus idle stop and Stop/replacement fencing.
+Local service success or a generated URL is insufficient.
 
 **Tailscale removal:** owner-managed admin cleanup after retirement is accepted, not a
 pre-apply product-cleanup/live-inventory/evidence gate. Removing `infra/tailscale.tf`

@@ -8,6 +8,59 @@ files use its separate `files` traffic-tag origin. `app_url` and `issuer_url` ar
 identical; neither substitutes Cloud Run's hashed `.uri`. Compute SSH retains IAP.
 Google browser login and machine token verification happen in the application.
 
+## Optional HTTP preview ingress
+
+`TF_VAR_preview_origin` is empty by default: registrations return a disabled error.
+Set it only to the exact HTTPS base origin of an owned domain on a different registrable
+site from app/files (no trailing slash). The CP performs PSL/private-domain validation.
+`run.tf` injects `PI_ORB_PREVIEW_ORIGIN` into the existing application, preserving the
+exact issuer URL. It does not create DNS, certificates or a load balancer.
+
+No domain is selected and no live provisioning/deployment is authorized. Operator contract:
+`docs/ports.md`. A TLS proxy must route wildcard preview hosts to the existing Cloud Run
+backend while preserving Host, path/query and WS Upgrade. For example, the relevant nginx
+routing configuration below requires the operator's DNS/TLS and existing issuer hostname:
+
+```nginx
+map $http_upgrade $preview_connection {
+    default upgrade;
+    ''      '';
+}
+server {
+    listen 443 ssl;
+    server_name *.PREVIEW_BASE_HOST;
+    ssl_certificate     /operator/wildcard/fullchain.pem;
+    ssl_certificate_key /operator/wildcard/key.pem;
+    access_log off;
+    error_log /dev/null;
+    location / {
+        proxy_pass https://EXACT_EXISTING_ISSUER_HOST;
+        proxy_ssl_server_name on;
+        proxy_ssl_name EXACT_EXISTING_ISSUER_HOST;
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $preview_connection;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+```
+
+Replace placeholders; validate backend Host handling over the real deployed hop, not just
+nginx syntax. No IAP or app/issuer origin substitution. A GCP LB requires separate domain,
+DNS-zone and Certificate Manager DNS-authorization selection; no unused resources are created.
+
+`preview.tf` conditionally excludes canonical preview-host **Cloud Run request logs** from
+project `_Default`, before activation. Any preview URL may contain application OAuth secrets.
+Audit logs remain enabled. Inspect custom/ancestor sinks, edge/proxy logging and upstream app
+logging too: the project exclusion alone does not establish no-query retention. External browser
+DNS/TLS/login/HMR/streaming, activity/Stop/replacement and sink checks remain pending acceptance.
+
 ## Deploy workflow
 
 First apply the separately authorized foundation (`infra/foundation/README.md`). The release refuses an unapplied or mismatched foundation. **Status (2026-09-16):** GitHub keyless authentication and the manual workflow are operational. [Release 35104816962](https://github.com/schani/pi-orb/actions/runs/35104816962) deployed project instructions from `7d53024` at generation `1789569278`; all gates passed on the first attempt and the release was validated at 14:52:20 UTC. Smoke fixtures were deleted and the release lock is absent. Exact image identities, the durable record and earlier release/recovery evidence are in `docs/deployment.md`. The user deferred database password rotation; release plans must preserve the existing credential.

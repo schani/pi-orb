@@ -147,6 +147,7 @@ export function orbView(
     state: orb.state,
     stateVersion: orb.stateVersion,
     ...(liveness !== null ? { activity: liveness.activity } : {}),
+    ...(orb.previewActiveUntil != null ? { previewActiveUntil: iso(orb.previewActiveUntil) } : {}),
     ...(orb.checkoutCommit !== null ? { checkoutCommit: orb.checkoutCommit } : {}),
     ...(orb.lastError !== null ? { lastError: orb.lastError } : {}),
     ...(orb.unreadAlertId !== null ? { unreadAlertId: orb.unreadAlertId } : {}),

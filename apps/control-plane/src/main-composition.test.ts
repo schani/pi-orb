@@ -33,6 +33,20 @@ describe("single control-plane composition", () => {
     );
   });
 
+  it("composes preview host guard, authentication and gateway before application routes", () => {
+    expect(source.indexOf("registerPreviewAuth(app,")).toBeGreaterThan(
+      source.indexOf("registerHostingAccessGuard(app,"),
+    );
+    expect(source.indexOf("registerPreviewGateway(app,")).toBeGreaterThan(
+      source.indexOf("registerPreviewAuth(app,"),
+    );
+    expect(source.indexOf("registerPreviewGateway(app,")).toBeLessThan(
+      source.indexOf("registerAuthenticatedBrowserRoutes("),
+    );
+    expect(source).toContain("registerRuntimePreviewRoutes(app,");
+    expect(source).toContain('env("PI_ORB_PREVIEW_ORIGIN", "")');
+  });
+
   it("keeps signing-key repair before activation and all autonomous loops after it", () => {
     const activation = source.indexOf("await waitForReleaseActivation(");
     expect(activation).toBeGreaterThan(source.indexOf("void ensureSigningKeyInBackground()"));

@@ -24,6 +24,7 @@ locals {
       PI_ORB_HOST_SPEC_GENERATION = tostring(var.deploy_generation)
     },
     var.github_client_id != "" ? { PI_ORB_GITHUB_CLIENT_ID = var.github_client_id } : {},
+    var.preview_origin != "" ? { PI_ORB_PREVIEW_ORIGIN = var.preview_origin } : {},
   )
 }
 
@@ -144,6 +145,7 @@ resource "google_cloud_run_v2_service" "issuer" {
   depends_on = [
     google_logging_project_exclusion.mcp_oauth_callback,
     google_logging_project_exclusion.google_callback,
+    google_logging_project_exclusion.preview_requests,
     google_secret_manager_secret_iam_member.cp_auth,
     google_secret_manager_secret_iam_member.cp_mcp_oauth_accessor,
     google_secret_manager_secret_iam_member.cp_mcp_oauth_versions,

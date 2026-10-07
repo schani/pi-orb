@@ -13,6 +13,18 @@ Lifecycle edges are `claude-recovery-claimed`, `claude-recovery-disposal-failed`
 
 Orb states, reconciliation rules, idle auto-stop, and the orphan-host sweep. The host operations these rules drive are specified in `docs/host-provider.md`.
 
+## Preview activity (implemented locally, 2026-10-06)
+
+`docs/ports.md` defines the persisted 15-second `previewActiveUntil` lease. HTTP/SSE in-flight
+work and actual WS application messages renew it; silent HMR/heartbeats do not. Idle-stop CAS
+rechecks expiry, while explicit Stop bypasses preview protection. A shared per-orb watcher
+validates authority every 5 seconds with a 2-second deadline and fails closed; owner loss
+expires the lease. Registration survives stop/start and replacement, but requests never wake
+compute or set agent working. Running-orb UI status exposes the unexpired lease below busy.
+Registration/revocation, admission-denial/recovery, forwarding-failure/recovery and termination
+edges are durable; healthy requests and normal connection start/end stay quiet. Together with
+the persisted visible lease, these are the selected minimal observability contract. External ingress/lifecycle acceptance remains pending.
+
 ## Decisions
 
 - **Incident rule (2026-10-04):** correlate guest shutdown admission, provider audit and durable lifecycle edges before attributing a restart to an extension error. Two scoped Spot preemptions preceded secondary loadout errors; they do not explain every prior restart. Preserve replay/admission fences when restoring services and distinguish interrupted checks from completed qualification. Evidence: `docs/postmortems/2026-10-04-spot-preemption-loadout.md`.

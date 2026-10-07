@@ -51,6 +51,7 @@ import { readLiveDisplayDetail, toolTextContent } from "../domain/display-detail
 import { gateUnflushedSnapshot } from "../domain/history.ts";
 import { configurePersistentHome } from "../domain/home.ts";
 import type { CompactError } from "../domain/orb-agent.ts";
+import { PreviewActivity } from "../domain/preview-activity.ts";
 import type { AgentGateView } from "../domain/requests.ts";
 import { configurePersistentRust } from "../domain/rust.ts";
 import { type SubagentError, type SubagentRun, SubagentWork } from "../domain/subagent-work.ts";
@@ -308,12 +309,18 @@ export class PiOrbAgent {
     };
   }
 
+  readonly previewActivity = new PreviewActivity();
+
   getHealth(): RuntimeHealth {
     if (this.health.status === "failed") return this.health;
     if (this.health.status !== "ready") return { ...this.health, ...this.hookReport() };
+    const executionId =
+      this.options.executionId === undefined ? this.executionId : this.options.executionId;
     return {
       ...this.health,
       activity: this.activity,
+      ...(executionId === null ? {} : { executionId }),
+      incarnation: Number(this.options.incarnation ?? "0"),
       ...(this.operationId !== null ? { operationId: this.operationId } : {}),
       ...(this.turnResume !== null ? { turnResume: this.turnResume } : {}),
       ...(this.streamTelemetryError === null
@@ -1621,6 +1628,7 @@ export class PiOrbAgent {
     if (this.health.status !== "ready" || this.sessionManager === null)
       return err({ message: "session is not ready" });
     if (this.idleStopPrepared) return ok(true);
+    if (this.previewActivity.blocksIdle()) return ok(false);
     if (this.activity === "busy" || this.settingsController?.blocksInput) return ok(false);
     const lifetimeId = this.admissionLifetime();
     if (lifetimeId === null) return err({ message: "admission lifetime is unavailable" });

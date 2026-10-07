@@ -103,6 +103,8 @@ function mapOrbRow(row: PgRow): OrbRow {
     unreadAlertId: row["unread_alert_id"] == null ? null : String(row["unread_alert_id"]),
     lastBusyAt: row["last_busy_at"] == null ? null : toMs(row["last_busy_at"]),
     uploadActiveUntil: row["upload_active_until"] == null ? null : toMs(row["upload_active_until"]),
+    previewActiveUntil:
+      row["preview_active_until"] === null ? null : toMs(row["preview_active_until"]),
     stopReason: row["stop_reason"] == null ? null : (String(row["stop_reason"]) as StopReason),
     sleepId: row["sleep_id"] == null ? null : String(row["sleep_id"]),
     sleepUntil: row["sleep_until"] == null ? null : toMs(row["sleep_until"]),
@@ -111,6 +113,14 @@ function mapOrbRow(row: PgRow): OrbRow {
     archivedAt: row["archived_at"] == null ? null : toMs(row["archived_at"]),
     createdAt: toMs(row["created_at"]),
     updatedAt: toMs(row["updated_at"]),
+  };
+}
+
+function mapPreviewRow(row: PgRow): import("../../domain/preview-ports.ts").PreviewRegistrationRow {
+  return {
+    port: Number(row.port),
+    registrationId: String(row.registration_id),
+    createdAt: toMs(row.created_at),
   };
 }
 
@@ -201,6 +211,154 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   constructor(db: PostgreSQLClient) {
     this.db = db;
     this.uploads = new PgWorkspaceUploads(db);
+  }
+
+  readPreviewAuthority(_task: SimulationTask, input: { orbId: string; port: number }) {
+    return this.db.transaction<
+      {
+        orb: OrbRow;
+        registration: import("../../domain/preview-ports.ts").PreviewRegistrationRow | null;
+      } | null,
+      StoreError
+    >(async (query) => {
+      const found = await query("SELECT * FROM orbs WHERE id=$1 FOR SHARE", [input.orbId]);
+      if (found.isErr()) return err(found.error);
+      if (!found.value.rows[0]) return ok(null);
+      const registration = await query("SELECT * FROM orb_previews WHERE orb_id=$1 AND port=$2", [
+        input.orbId,
+        input.port,
+      ]);
+      if (registration.isErr()) return err(registration.error);
+      return ok({
+        orb: mapOrbRow(found.value.rows[0]),
+        registration: registration.value.rows[0] ? mapPreviewRow(registration.value.rows[0]) : null,
+      });
+    });
+  }
+
+  private previewMutation<T>(
+    input: { orbId: string; caller: import("../../domain/ports.ts").ArchiveCaller },
+    denied: T,
+    mutate: (query: PostgreSQLClient["query"], orb: OrbRow) => Promise<Result<T, StoreError>>,
+  ) {
+    return this.db.transaction<T, StoreError>(async (query) => {
+      const project = await query(
+        "SELECT state FROM projects WHERE id=(SELECT project_id FROM orbs WHERE id=$1) FOR SHARE",
+        [input.orbId],
+      );
+      if (project.isErr()) return err(project.error);
+      if (project.value.rows[0]?.state !== "active") return ok(denied);
+      const locked = await query("SELECT * FROM orbs WHERE id=$1 FOR UPDATE", [input.orbId]);
+      if (locked.isErr()) return err(locked.error);
+      const raw = locked.value.rows[0];
+      if (!raw) return ok(denied);
+      const orb = mapOrbRow(raw);
+      if (
+        orb.state !== "running" ||
+        orb.hostDiscardThroughIncarnation !== null ||
+        orb.runtimeTokenHash !== input.caller.runtimeTokenHash ||
+        orb.hostIncarnation !== input.caller.hostIncarnation
+      )
+        return ok(denied);
+      const deletion = await query("SELECT orb_id FROM orb_deletions WHERE orb_id=$1", [
+        input.orbId,
+      ]);
+      if (deletion.isErr()) return err(deletion.error);
+      return deletion.value.rows.length ? ok(denied) : mutate(query, orb);
+    });
+  }
+
+  listPreviews(
+    _task: SimulationTask,
+    input: { orbId: string; caller: import("../../domain/ports.ts").ArchiveCaller },
+  ) {
+    return this.previewMutation<
+      readonly import("../../domain/preview-ports.ts").PreviewRegistrationRow[] | null
+    >(input, null, async (query) => {
+      const rows = await query("SELECT * FROM orb_previews WHERE orb_id=$1 ORDER BY port", [
+        input.orbId,
+      ]);
+      return rows.map((value) => value.rows.map(mapPreviewRow));
+    });
+  }
+
+  registerPreview(
+    _task: SimulationTask,
+    input: import("../../domain/preview-ports.ts").PreviewMutation & { registrationId: string },
+  ) {
+    return this.previewMutation<import("../../domain/preview-ports.ts").PreviewRegistrationOutcome>(
+      input,
+      { type: "denied" },
+      async (query) => {
+        const inserted = await query(
+          "INSERT INTO orb_previews (orb_id,port,registration_id,created_at) VALUES ($1,$2,$3,$4) ON CONFLICT (orb_id,port) DO NOTHING RETURNING *",
+          [input.orbId, input.port, input.registrationId, new Date(input.now)],
+        );
+        if (inserted.isErr()) return err(inserted.error);
+        const row = inserted.value.rows[0];
+        if (row) return ok({ type: "registered", registration: mapPreviewRow(row), created: true });
+        const existing = await query("SELECT * FROM orb_previews WHERE orb_id=$1 AND port=$2", [
+          input.orbId,
+          input.port,
+        ]);
+        if (existing.isErr()) return err(existing.error);
+        const registered = existing.value.rows[0];
+        if (!registered)
+          return err({
+            type: "store_error",
+            code: "invariant",
+            message: "Preview registration disappeared under orb lock",
+            retryable: false,
+          });
+        return ok({ type: "registered", registration: mapPreviewRow(registered), created: false });
+      },
+    );
+  }
+
+  unregisterPreview(
+    _task: SimulationTask,
+    input: import("../../domain/preview-ports.ts").PreviewMutation,
+  ) {
+    return this.previewMutation<{ type: "revoked"; removed: boolean } | { type: "denied" }>(
+      input,
+      { type: "denied" },
+      async (query) => {
+        const removed = await query(
+          "DELETE FROM orb_previews WHERE orb_id=$1 AND port=$2 RETURNING port",
+          [input.orbId, input.port],
+        );
+        return removed.map((value) => ({
+          type: "revoked" as const,
+          removed: value.rows.length > 0,
+        }));
+      },
+    );
+  }
+
+  protectPreviewActivity(
+    _task: SimulationTask,
+    input: Parameters<
+      import("../../domain/preview-ports.ts").PreviewStore["protectPreviewActivity"]
+    >[1],
+  ) {
+    return this.previewMutation<{ type: "protected" } | { type: "denied" }>(
+      { orbId: input.orbId, caller: input },
+      { type: "denied" },
+      async (query) => {
+        const registration = await query(
+          "SELECT registration_id FROM orb_previews WHERE orb_id=$1 AND port=$2",
+          [input.orbId, input.port],
+        );
+        if (registration.isErr()) return err(registration.error);
+        if (registration.value.rows[0]?.registration_id !== input.registrationId)
+          return ok({ type: "denied" });
+        const touched = await query(
+          `UPDATE orbs SET preview_active_until=GREATEST(COALESCE(preview_active_until,$2),$2), last_busy_at=GREATEST(COALESCE(last_busy_at,$3),$3), state_version=state_version+CASE WHEN preview_active_until IS NULL OR preview_active_until <= $3 THEN 1 ELSE 0 END WHERE id=$1`,
+          [input.orbId, new Date(input.activeUntil), new Date(input.now)],
+        );
+        return touched.isErr() ? err(touched.error) : ok({ type: "protected" });
+      },
+    );
   }
 
   readActivityHeadline(
@@ -601,8 +759,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            checkout_commit, harness_session_id, harness_session_header, last_error,
            runtime_token_hash, replication_cursor, replicated_head_id, last_busy_at,
            stop_reason, sleep_id, sleep_until, last_mint_at,
-           state_changed_at, created_at, updated_at, user_time_zone, harness, last_ready_at, claude_recovery)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37::jsonb)
+           state_changed_at, created_at, updated_at, user_time_zone, harness, last_ready_at, claude_recovery, preview_active_until)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37::jsonb,$38)
          ON CONFLICT (id) DO NOTHING RETURNING *`,
         [
           orb.id,
@@ -642,6 +800,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           orb.harness,
           orb.lastReadyAt === null ? null : new Date(orb.lastReadyAt),
           jsonParam(orb.claudeRecovery ?? null),
+          orb.previewActiveUntil === null ? null : new Date(orb.previewActiveUntil),
         ],
       );
       if (inserted.isErr()) return err(inserted.error);
@@ -1729,7 +1888,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       sets,
       values,
       params.stopReason === "idle"
-        ? "(upload_active_until IS NULL OR upload_active_until <= $4)"
+        ? "(upload_active_until IS NULL OR upload_active_until <= $4) AND (preview_active_until IS NULL OR preview_active_until <= $4)"
         : params.stopReason === "sleep"
           ? "sleep_id IS NOT NULL AND sleep_until > $4 AND (upload_active_until IS NULL OR upload_active_until <= $4)"
           : undefined,

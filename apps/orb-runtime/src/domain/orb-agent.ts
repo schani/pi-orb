@@ -12,6 +12,7 @@ import type {
 } from "@pi-orb/protocol";
 import type { Result, ResultAsync } from "neverthrow";
 import type { HookEnvSource } from "../hooks/env-file.ts";
+import type { PreviewActivity } from "./preview-activity.ts";
 import type { AgentGateView } from "./requests.ts";
 import type { HarnessSnapshot, LiveOperationView } from "./types.ts";
 
@@ -32,6 +33,7 @@ export interface DetailError {
 /** Harness-owned behavior; HTTP never reads native sessions or drives an SDK. */
 export interface OrbAgent {
   readonly runtimeInstanceId: string;
+  readonly previewActivity: PreviewActivity;
   boot(): Promise<void>;
   getHealth(): RuntimeHealth;
   hookEnvSource(): HookEnvSource;

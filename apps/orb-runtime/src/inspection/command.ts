@@ -9,6 +9,9 @@ import { err, ok, type Result } from "neverthrow";
 
 export const INSPECTION_USAGE = `usage:
   pi-orb self [--json]
+  pi-orb expose <port>
+  pi-orb unexpose <port>
+  pi-orb previews [--json]
   pi-orb orbs [query] [--json]
   pi-orb transcript <orb-id> [--json]
   pi-orb alert "message" [--request-id <id>]

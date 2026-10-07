@@ -1,5 +1,20 @@
 # Security and credentials
 
+## Preview credentials (implemented locally, 2026-10-06)
+
+`docs/ports.md` defines a separate registrable origin with app-managed Google admission.
+A sealed challenge binds a 60-second encrypted ticket delivered by auto-POST, not URL query.
+The app form requires `Referrer-Policy: strict-origin`: `no-referrer`/`same-origin` produce
+POST `Origin: null` in real Chromium. Only the app origin is sent as Referer, never path/query.
+The host-only Secure HttpOnly preview session inherits fixed app-session expiry (12 hours),
+without renewal. This is stateless: copied ticket/challenge replay until expiry, and copied
+cookies are not immediately revoked by app logout or Google membership changes. No single-use
+or membership-polling guarantee. Platform cookies are stripped upstream; application Authorization
+is independent. Private runtime admission uses a purpose-separated HMAC keyed by runtime token
+hash, never forwarding the hash/bearer. Project preview request-log exclusion is not an audit-log
+exclusion or an all-sinks privacy guarantee; edge/custom/ancestor sinks require qualification.
+
+
 **Production validated 2026-10-06.** The single `pi-orb-issuer` application uses Google login and stateless sealed cookies. `pi-orb` is an unprivileged browser redirect to it. `docs/control-plane-consolidation.md` records decisions and cutover gates; `docs/deployment.md` records the current topology and live release evidence. Earlier dated evidence below describes its respective release.
 **Claude exception accepted (2026-10-04):** the POC may distribute a one-year, model-only subscription bearer to Claude orbs. One owner-level connection in pi-orb runs native `claude setup-token` in a trusted auth-only backend helper; browser consent/completion code stays owner-scoped, and the resulting token is captured directly into existing secret storage. No external user CLI, per-orb login, private credential scraping, or API-billing fallback. The dashboard gear's Settings → Claude tab manages the signed-in owner's connection (2026-10-04). Entry reads public connection status, never credential material; it neither admits a ceremony nor opens consent. Instructions and Claude share the frame but retain separate actions. Connect Claude admits this ceremony only on an explicit click and opens native consent while retaining the code dialog; active ceremonies are reused and connected credentials are never silently replaced. Popup failures are visible, with a direct allowlisted consent link. `docs/claude-agent-sdk.md`, `docs/web-ui.md`.
 

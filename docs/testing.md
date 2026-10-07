@@ -62,6 +62,14 @@ Tests preceded implementation and both review corrections: native compaction/met
 
 The initial full unit gate had 3,244 passes, thirteen skips and three failures; both Claude fixture failures were corrected and qualified below. The artifact-allowlist failures in `e2e/sharding.unit.test.ts` and `infra/browser_evidence_test.py` were reproduced before correcting both exact expectations to include the workflow's `test-failures/subagent-*/failure.json`; artifact isolation is unchanged. Targeted validation passes all three sharding tests and both Python browser-evidence tests after `npm ci`. Original full-gate logs remain in `.context/claude-recovery-validation/{unit,infra}.log`; targeted red/green evidence is in `.context/artifact-contract-fix/`. Full root suites were not rerun; no full-suite green, full E2E, physical preemption, cloud canary or deployment is claimed.
 
+## HTTP preview boundary gates (2026-10-06; not deployed)
+
+`e2e/preview-auth-frontend.e2e.test.ts` exercises real Google/session/handoff routes on owned HTTPS origins in Chromium and WebKit. It verifies exact POST Origin, origin-only Referer, host-only cookies, copied-cookie rejection and no second Google login. Browser RED established that `no-referrer` and `same-origin` suppress the cross-site POST Origin; `strict-origin` passes without relaxing callback admission.
+
+`e2e/preview-composed-frontend.e2e.test.ts` composes production gateway, HMAC transport and runtime forwarding with in-memory authority, fake host inventory and a FakeAgent. `e2e/preview-docker.e2e.test.ts` moves the runtime and loopback applications into an owned Docker namespace using image-baked runtime code, a locked Linux dependency image, read-only helper mounts and the image's `pi-orb` CLI. Linux uses `--network none` and owned Unix HTTP/WS bridges. Docker Desktop uses loopback-published TCP and `host.docker.internal`; host Unix sockets cannot cross its VM boundary. Linux is locally qualified; the Docker Desktop adapter remains unverified here. HTTP/assets/redirects, binary application auth/cookies and secret stripping, SSE barriers and real Vite HMR use the public preview origin. Stop/start intents and store CAS are production; lifecycle completion is an explicit fixture boundary, not full OrbAgent reconciliation. Existing full-slice E2E supplies the latter coverage. The seven new browser/fixture cases and the native write regression pass locally. These gates do not replace full-suite qualification.
+
+Fixture listeners are OS-assigned; Vite uses an owned HTTP/HMR server because its `port: 0` selects the default port. Streams and HMR use readiness/events, never test sleeps. Containers have unique test-owned names/labels; cleanup removes only those containers. First-failure evidence and source-image build logs remain in `.context/http-preview/`. Chromium's first Docker-backed run hit `ERR_NETWORK_CHANGED` during bridge attachment; the fixture now creates no host veth/route changes, including during restart. Host/container UID differences require a connectable runtime socket inside a host-owned mode-0700 directory. The real native binary-write regression also caught `ws.send` reporting success as `null`; the adapter accepts both null and undefined success without terminating a delivered frame.
+
 ## CI fixture corrections (decided 2026-10-05; not deployed)
 
 Foreign-UID native acceptance fixtures must stage readable source/helpers and their installed dependency closure outside the caller's checkout, HOME and TMPDIR, without changing caller permissions. Only fixture-internal relative workspace aliases are allowed: Node rejects TypeScript physically inside node_modules. The original UID2000, namespace/capability isolation, real SDK/adapter and cleanup/receipt assertions remain. On `8f4c32f`, [CI 37409095234](https://github.com/schani/pi-orb/actions/runs/37409095234) reported 3,134 passes, twelve skips and three native failures; all three reproduce behind a private checkout ancestor, but GitHub's exact denied ancestor was not logged and remains unestablished. The corrected source passes all fourteen native cases under private ancestry/umask0022 and root/umask0077, without skips. [E2E 37409095227](https://github.com/schani/pi-orb/actions/runs/37409095227) separately reported 457 passes, four failures and zero skips across all 48 files. Pinned Ubuntu reproduced all four; correcting the canonical POST expectation and required harness field passes both complete files (seven cases, zero skips), preserving ordering/persistence assertions. Evidence: `.context/deploy-claude-20261005/{ci-native-failure,ci-native-repair,ci-browser-failure,monitor}/`. Historical RED logs/traces remain; these scoped corrections do not qualify the whole release. New-source first-attempt CI and all four E2E shards must pass before deployment.
@@ -127,7 +135,7 @@ After rebasing onto `c186cd2`, typecheck, lint, 492 web unit tests and ten deskt
 
 ## Tailscale removal local qualification (2026-10-04; not deployed)
 
-The removal and HTTP-preview proposal are recorded in `docs/ports.md`; no proxy was implemented. Historical pre-rebase gates:
+Removal and current HTTP-preview contracts are recorded in `docs/ports.md`. Historical pre-rebase gates:
 
 - `npm ci`, typecheck and lint pass (20 existing warnings, six infos).
 - Settled `npm test`: **2,549 passed**, eight conditional skips (five PostgreSQL placeholders requiring `PI_ORB_TEST_DATABASE_URL`, three live-GCS cases requiring `PI_ORB_TEST_HOSTING_BUCKET`); **104 infrastructure tests passed** (35 Node, 45 Python, 24 native shell contracts—not live native acceptance).
@@ -699,7 +707,7 @@ minutes total. Every smoke that boots an orb therefore allows fifteen minutes
 per boot; its overall deadline covers every sequential boot, stop, and required
 network check. `infra/smoke-timeout.contract.test.mjs` keeps these bounds aligned.
 
-**Preview validation boundary:** a configured URL and localhost HTTP success do not prove external browser reachability. The historical userspace-networking smoke assumption and first-failure evidence remain in `docs/postmortems/2026-09-09-orb-local-tailnet-smoke.md`. Required HTTP-preview domain/DST, real parser/stream, browser origin/HMR and deployed consolidated-app-login/session gates are proposals in `docs/ports.md`; no preview gate exists until that capability ships.
+**Preview validation boundary:** a configured URL and localhost HTTP success do not prove external browser reachability. The historical userspace-networking smoke assumption and first-failure evidence remain in `docs/postmortems/2026-09-09-orb-local-tailnet-smoke.md`. HTTP-preview domain/DST, real parser/stream, browser origin/HMR and deployed consolidated-app-login/session acceptance are defined in `docs/ports.md`; local source evidence does not qualify deployed ingress.
 
 **Failed live-fixture retention (decided 2026-09-09):** the workload-identity smoke deletes successful cloud fixtures but retains failed ones for diagnosis, printing exact IDs and a cost warning. Its exit trap removes local credential scratch for either verdict. `infra/smoke-cleanup.test.mjs` deterministically executes that cleanup against a fake API, covering successful, failed and signal-style exit statuses plus shared/disposable project ownership. This preserves failed workspaces that the earlier unconditional cleanup destroyed before inspection; see `docs/postmortems/2026-09-09-deleted-browser-reconciler.md`.
 
@@ -713,26 +721,62 @@ assertions and timeouts. Raw first-failure and corrected-run logs remain in
 `.context/native-final-unit-dst-bounded.log`.
 
 
-## HTTP preview verification (proposal, 2026-10-04)
+## HTTP preview verification (implementation authorized, 2026-10-06)
 
 `docs/ports.md` owns the tests-first sequence, forced/entropy DST matrix, named checkpoints,
 registration/lifecycle/activity/cancellation/buffer invariants, mutation checks and trace replay.
 The architecture prerequisite is satisfied: [PR #51](https://github.com/schani/pi-orb/pull/51)
 merged, and [Deploy 37469707425](https://github.com/schani/pi-orb/actions/runs/37469707425)
 validated `404cf7b1` as `pi-orb-issuer-00043-2k5` with all twelve gates passed
-(`docs/deployment.md`). Preview implementation/deployment remain unauthorized.
+(`docs/deployment.md`). Preview implementation is authorized; deployment is not.
 Production domain code uses existing task clocks/store/runtime-transport seams.
 Force register/revoke/forward races (no unregistered dial and selected bounded termination),
-registration lifetime once selected, preview activity versus the real idle reaper/explicit
+stop/start/replacement registration persistence, preview activity versus the real idle reaper/explicit
 Stop/replacement, reordered coalesced monotonic activity updates, process death and inactivity.
-Never infer agent working from preview use or leave immortal activity flags. Active silent
-requests and idle WS/heartbeat accounting remain unresolved; tests must pin the selected policy.
+Never infer agent working from preview use or leave immortal activity flags. In-flight silent
+HTTP/SSE count; WS application messages renew the lease, silent HMR/heartbeats do not.
+Focused tests-first/DST logs are in `.context/http-preview`; first failure/replay traces remain
+in `test-failures/`. Infra contracts cover optional origin/env wiring and preview request-log
+exclusion without suppressing audit logs.
 
 Real HTTP parsers, Node streams and browser origins remain adapter/E2E tests. Deployed
 acceptance uses consolidated app-managed Google login and preview sessions, not IAP, and
 qualifies first navigation, expiry/re-login, assets, HMR/WS, SSE and Authorization preservation
-through the chosen ingress. No source or tests are implemented or run by this docs update.
+through the chosen ingress. Domain selection and deployed acceptance remain pending.
 Runtime proxy changes must pass `npm ci` and `npm run test:e2e` before deployment.
+
+### Final local qualification (2026-10-07; not deployed)
+
+On the settled source, `npm ci` and typecheck passed; lint passed with zero errors,
+85 warnings and 18 infos. Full unit/DST passed **3,299 tests**, with 13 conditional
+skips: three live GCS, six opt-in PostgreSQL and four PostgreSQL-only locking cases
+under PGlite. Infrastructure passed **182 tests** (49 Node, 109 Python, 24 native-guest
+contracts), plus shell checks. The default infrastructure gate includes all four preview
+contracts, including its own wiring regression. Red/green evidence:
+`.context/http-preview/infra-gate-red.log` and `.context/http-preview/infra-gate-green.log`.
+Native-guest contracts are not live VM acceptance.
+The complete default Docker/browser `npm run test:e2e` passed **483 tests in 54 files**,
+with no skips, in **3,093 seconds**. This was one invocation: the tool attachment timed
+out and reattached to the running process; the suite was not rerun. Subsequent infrastructure
+test-gate wiring changed no production source, so this E2E result remains valid. Real PostgreSQL
+E2E includes the shared preview registration, lease, lifecycle-fencing and schema contracts;
+this does not mean every opt-in PostgreSQL unit suite ran.
+
+Preview coverage includes Chromium/WebKit login, in-process composition and runtime-image
+Docker HTTP/SSE, Vite HMR, binary traffic, immediate WebSocket registration/revocation,
+and actual container restart with stable URLs and no autostart. The preview Docker fixture
+uses a fake agent and in-memory authority; the remaining real OrbAgent E2Es also passed.
+Neither fixture establishes live Google/GCE or native-image acceptance.
+
+Runtime image `sha256:3c708d2c934b727468f7aa53de6105e52d15dbcd0c7d9abda836d7767974d5c0`
+was verified to contain no `tailscale`/`tailscaled` binaries on PATH or in its filesystem.
+Evidence: `.context/http-preview/final-npm-ci.log`,
+`.context/http-preview/final-settled-*.log` and
+`.context/http-preview/final-runtime-image-no-tailscale.log`; first failures and replay
+traces remain preserved. The inherited MCP high advisory retains its existing `TODO.md`
+follow-up. No domain was selected, wildcard ingress provisioned, deployment performed or
+live GCP/native acceptance run. `PI_ORB_PREVIEW_ORIGIN` remains unset: previews are disabled,
+and actual public exposure is not qualified.
 
 ## Deterministic simulation testing strategy
 

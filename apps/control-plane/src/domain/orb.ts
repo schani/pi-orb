@@ -68,6 +68,7 @@ export interface OrbRow {
   readonly lastBusyAt: number | null;
   /** Transfer lease projection; expiry starts a fresh idle interval. */
   readonly uploadActiveUntil: number | null;
+  readonly previewActiveUntil: number | null;
   /** Why the orb last entered `stopping`; null for explicit stops. */
   readonly stopReason: StopReason | null;
   readonly sleepId: string | null;

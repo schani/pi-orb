@@ -18,6 +18,7 @@ export * from "./orb-naming.ts";
 export * from "./orb-sleep.ts";
 export * from "./orb-spawn.ts";
 export * from "./personal-instructions.ts";
+export * from "./preview.ts";
 export * from "./project-instructions.ts";
 export * from "./project-secrets.ts";
 export * from "./reasoning-headline.ts";

@@ -37,16 +37,17 @@ export async function registerLiveProxy(
   deps: ControlPlaneDeps,
   scheduleSessionExpiry?: SessionExpiryScheduler,
 ): Promise<void> {
-  await app.register(websocketPlugin, {
-    options: {
-      handleProtocols: (protocols: Set<string>) =>
-        protocols.has(RUNTIME_SUBPROTOCOL)
-          ? RUNTIME_SUBPROTOCOL
-          : protocols.has(TERMINAL_SUBPROTOCOL)
-            ? TERMINAL_SUBPROTOCOL
-            : false,
-    },
-  });
+  if (!app.hasDecorator("websocketServer"))
+    await app.register(websocketPlugin, {
+      options: {
+        handleProtocols: (protocols: Set<string>) =>
+          protocols.has(RUNTIME_SUBPROTOCOL)
+            ? RUNTIME_SUBPROTOCOL
+            : protocols.has(TERMINAL_SUBPROTOCOL)
+              ? TERMINAL_SUBPROTOCOL
+              : false,
+      },
+    });
 
   app.get<{ Params: { orbId: string } }>(
     "/api/v1/orbs/:orbId/live",

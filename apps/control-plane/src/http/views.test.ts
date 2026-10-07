@@ -37,6 +37,7 @@ const orb: OrbRow = {
   unreadAlertId: null,
   lastBusyAt: null,
   uploadActiveUntil: null,
+  previewActiveUntil: null,
   stopReason: null,
   sleepId: null,
   sleepUntil: null,
@@ -45,6 +46,14 @@ const orb: OrbRow = {
   createdAt: 1_700_000_000_000,
   updatedAt: 1_700_000_000_000,
 };
+
+it("exposes a durable preview lease without agent busy", () => {
+  const until = 1_700_000_015_000;
+  const view = orbView({ ...orb, previewActiveUntil: until }, new ControlState());
+  expect(view.previewActiveUntil).toBe(new Date(until).toISOString());
+  expect(view.activity).toBeUndefined();
+  expect(Check(OrbViewSchema, view)).toBe(true);
+});
 
 describe("orbView failures", () => {
   it("exposes the durable explanation without a transitional readiness detail", () => {

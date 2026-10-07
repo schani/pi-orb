@@ -87,6 +87,38 @@ describe("scheduled sleep lifecycle status", () => {
   });
 });
 
+describe("preview lifecycle activity", () => {
+  const now = Date.parse("2026-10-06T00:00:00Z");
+  const orb = (fields: Partial<OrbView>) => ({ state: "running", ...fields }) as OrbView;
+  const previewActiveUntil = new Date(now + 15_000).toISOString();
+
+  it("distinguishes preview protection from agent work", () => {
+    expect(orbLifecycleStatus(orb({ activity: "idle", previewActiveUntil }), now)).toBe(
+      "running · preview",
+    );
+    expect(orbLifecycleStatus(orb({ activity: "busy", previewActiveUntil }), now)).toBe(
+      "running · busy",
+    );
+  });
+
+  it("expires at the lease boundary and never masks lifecycle state", () => {
+    expect(orbLifecycleStatus(orb({ previewActiveUntil }), now + 15_000)).toBe("running");
+    expect(orbLifecycleStatus(orb({ previewActiveUntil: "invalid" }), now)).toBe("running");
+    for (const state of ["stopping", "stopped", "failed"] as const) {
+      expect(orbLifecycleStatus(orb({ state, previewActiveUntil }), now)).toBe(state);
+    }
+  });
+
+  it("keeps scheduled sleep visible during a preview", () => {
+    expect(
+      orbLifecycleStatus(
+        orb({ previewActiveUntil, sleepUntil: new Date(now + 3_600_000).toISOString() }),
+        now,
+      ),
+    ).toBe("running · preview · sleep pending · wakes in 1h");
+  });
+});
+
 describe("OrbPage stop action", () => {
   const orb = (fields: Partial<OrbView> & { state: OrbView["state"] }) => fields as OrbView;
 

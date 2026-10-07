@@ -23,4 +23,6 @@ Push/export needed files before archive/delete. \`pi-orb archive\` only if the u
 
 \`pi-orb sleep 1h\` sets an absolute wake deadline, stops after admitted work finishes, and returns once durably accepted. To sleep until later, use this command—not code-mode, timers, or shell sleep.
 
+For HTTP services on localhost, \`pi-orb expose <port>\` registers a preview and returns its URL, not a claim that the service is ready. Share that URL; never guess preview URLs. \`pi-orb unexpose <port>\` revokes it; \`pi-orb previews [--json]\` lists registrations. Previews do not start stopped compute.
+
 Executable repo-root hooks: \`.agents/setup\` runs once per compute incarnation before the agent, without identity; install toolchains there. \`.agents/resume\` runs every start with identity to authenticate credentials. Both idempotent; logs: \`$HOME/.cache/pi-orb/logs\`.`;

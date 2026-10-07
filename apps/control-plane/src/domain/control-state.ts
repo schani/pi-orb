@@ -214,6 +214,19 @@ export class ControlState {
   /** orbId → connectionId → tab visible. */
   private readonly browserVisibility = new Map<string, Map<string, boolean>>();
   private readonly browserClosers = new Map<string, Map<string, () => void>>();
+  private readonly lifecycleClosers = new Map<string, Map<string, () => void>>();
+
+  registerLifecycleConnection(orbId: string, id: string, close: () => void): void {
+    const closers = this.lifecycleClosers.get(orbId) ?? new Map<string, () => void>();
+    closers.set(id, close);
+    this.lifecycleClosers.set(orbId, closers);
+  }
+
+  unregisterLifecycleConnection(orbId: string, id: string): void {
+    const closers = this.lifecycleClosers.get(orbId);
+    closers?.delete(id);
+    if (closers?.size === 0) this.lifecycleClosers.delete(orbId);
+  }
   /** Wall ms when the orb last had a visible tab; lost on process restart. */
   private readonly lastVisibleAt = new Map<string, number>();
 
@@ -236,9 +249,11 @@ export class ControlState {
   }
 
   closeBrowserConnections(orbId: string): void {
-    const closers = this.browserClosers.get(orbId);
-    if (closers === undefined) return;
-    for (const close of closers.values()) close();
+    for (const close of [
+      ...(this.browserClosers.get(orbId)?.values() ?? []),
+      ...(this.lifecycleClosers.get(orbId)?.values() ?? []),
+    ])
+      close();
   }
 
   setBrowserVisibility(orbId: string, connectionId: string, visible: boolean, at: number): void {
@@ -571,6 +586,7 @@ export class ControlState {
     this.restartPending.delete(orbId);
     this.browserVisibility.delete(orbId);
     this.browserClosers.delete(orbId);
+    this.lifecycleClosers.delete(orbId);
     this.lastVisibleAt.delete(orbId);
   }
 }

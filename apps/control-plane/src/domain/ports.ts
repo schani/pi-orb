@@ -33,6 +33,7 @@ import type {
   ProjectDeletionProgress,
   ProjectRow,
 } from "./orb.ts";
+import type { PreviewStore } from "./preview-ports.ts";
 import type { WorkspaceUploadStore } from "./workspace-uploads.ts";
 
 /** In-process adapter context; never serialized on the wire. */
@@ -167,7 +168,7 @@ export interface CommitPullBatchParams {
  * `state_version` CAS; replication writes use cursor CAS; the two never touch
  * each other's correctness fields.
  */
-export interface ControlPlaneStore extends ActivityHeadlineStore {
+export interface ControlPlaneStore extends ActivityHeadlineStore, PreviewStore {
   readonly uploads: WorkspaceUploadStore;
   getProject(task: SimulationTask, projectId: string): ResultAsync<ProjectRow | null, StoreError>;
   listProjects(task: SimulationTask): ResultAsync<ProjectRow[], StoreError>;

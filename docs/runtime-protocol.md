@@ -59,16 +59,24 @@ Arbitrary browser files use the separate streaming HTTP path in `docs/workspace-
 
 **Claude failed-health recovery (2026-10-06; local, undeployed).** Only `status: "failed"`, exact `error.code: "claude_child_recovery_required"` and optional `recovery: { episode }` can authorize one fenced whole-compute replacement. The episode is an opaque 64-character digest independent of replacement lifetime. `ClaudeRecoveryProof` is `{ episode, disposedIncarnation, replacementIncarnation }`; only durable verified-disposal finalization supplies this boot-scoped provider/runtime contract. It can release unknown-lifetime ownership only for the matching retained episode and replacement incarnation. I/O repair failures, missing receipts, generic health errors, PID/EOF and inventory absence grant no authority. Canonical receipts replicate before retained inbox UUID redelivery; old work is visibly interrupted, not replayed. Details: `docs/lifecycle.md`, `docs/claude-agent-sdk.md`.
 
-## HTTP previews (proposal, 2026-10-04)
+## HTTP previews (implemented locally, 2026-10-06)
 
-`docs/ports.md` proposes a separate authenticated HTTP/WS/SSE transport through the existing
-private runtime connection, not agent live frames or history replication. A candidate runtime
-route is `/v1/preview/:port/*`; it carries the original path/query, exact target identity and
-incarnation fence through the runtime preview service to a literal-loopback HTTP adapter.
-The public hostname selects orb/port, never a caller-supplied upstream URL. Preview routes
-must remain unavailable on application, broker and issuer origins, and runtime platform ports
-must be forbidden targets. Authentication, headers and limits remain proposals in questions
-74–77. No route, protocol schema or preview capability is implemented by this plan.
+`docs/ports.md` defines separate HTTP/WS/SSE transport through the private runtime connection,
+not agent live frames or history replication. Fixed HTTP/WS `/v1/preview/:port` preserves
+application Authorization; original path/query uses canonical bounded base64url UTF-8
+`x-pi-orb-preview-path` (16,384 encoded / 12,288 decoded maximum), avoiding URL normalization
+and prefix escapes. Reserved `x-pi-orb-preview-error` maps private platform failures to typed
+CP errors and is stripped; ordinary application statuses remain unchanged. A purpose-separated HMAC admission using `runtimeTokenHash`
+as key expires within 10 seconds and binds orb/port/registration/incarnation/execution/runtime
+instance/origin; no runtime key or bearer reaches the application. Runtime validates its own
+identity and reserved listener before dialing literal `127.0.0.1`; upstream Host/forwarding
+headers derive from signed admission origin. Actual local CP listeners are reserved, not remote
+port 443. Shared browser WS parsing remains 8 MiB (existing live prompts up to 6 MiB); preview
+frames/queues and private preview parsing are capped at 1 MiB. Ready health exposes
+execution ID and incarnation; preview admission requires these plus runtime instance ID.
+Only registered isolated GCE/Docker ports are supported. Activity protects idle stop without
+agent-working mutation; explicit Stop wins. No retries or body/message replay. Domain/TLS and
+external ingress acceptance remain pending; source qualification is not deployment.
 
 ## Transport and control-plane handoff
 
