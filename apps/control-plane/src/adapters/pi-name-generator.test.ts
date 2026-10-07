@@ -1,5 +1,5 @@
 import { NoSimulationTask } from "determined";
-import { okAsync } from "neverthrow";
+import { errAsync, okAsync } from "neverthrow";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_BROKER_CONSTANTS } from "../domain/constants.ts";
 import type { BrokerDeps } from "../domain/ports.ts";
@@ -9,6 +9,60 @@ const completeLuna = vi.hoisted(() => vi.fn((_request: unknown) => okAsync("Boun
 vi.mock("@pi-orb/luna", () => ({ completeLuna }));
 
 describe("PiOrbNameGenerator", () => {
+  it.each(["absent", "store_failure"] as const)(
+    "distinguishes %s credentials without inference",
+    async (mode) => {
+      completeLuna.mockClear();
+      const generator = new PiOrbNameGenerator(
+        () =>
+          ({
+            pointers: {
+              casWritePointer: () => {
+                throw new Error("unexpected pointer write");
+              },
+              readPointer: () =>
+                mode === "absent"
+                  ? okAsync(null)
+                  : errAsync({
+                      type: "store_error",
+                      code: "unavailable",
+                      message: "store unavailable",
+                      retryable: true,
+                    }),
+            },
+            secrets: {
+              readSecret: () => {
+                throw new Error("unexpected secret read");
+              },
+              writeSecret: () => {
+                throw new Error("unexpected secret write");
+              },
+              listSecretVersions: () => okAsync([]),
+              destroySecret: () => okAsync(undefined),
+            },
+            upstreams: {},
+            constants: DEFAULT_BROKER_CONSTANTS,
+          }) as BrokerDeps,
+      );
+      const result = await generator.generate(
+        new NoSimulationTask("absent naming", false),
+        {
+          harness: "claude",
+          ownerUserId: "owner",
+          projectName: "Project",
+          repositoryUrl: "repo",
+          message: "Work",
+          readme: null,
+        },
+        { signal: new AbortController().signal },
+      );
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr()).toMatchObject(
+        mode === "absent" ? { code: "credential_absent" } : { message: "store unavailable" },
+      );
+      expect(completeLuna).not.toHaveBeenCalled();
+    },
+  );
   it("binds the owner broker and omits the owner UUID from the model prompt", async () => {
     const ownerUserId = "00000000-0000-4000-8000-00000000000a";
     const boundUsers: string[] = [];
@@ -52,6 +106,7 @@ describe("PiOrbNameGenerator", () => {
     const result = await generator.generate(
       new NoSimulationTask("name binding", false),
       {
+        harness: "pi",
         ownerUserId,
         projectName: "Compiler",
         repositoryUrl: "https://github.com/example/compiler",

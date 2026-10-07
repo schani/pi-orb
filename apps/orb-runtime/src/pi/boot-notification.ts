@@ -138,7 +138,7 @@ export function planBootNotification(
   const head = object(context[context.length - 1]);
   const content =
     !resume.resume && !declined && hostRestarted
-      ? HOST_RESTART_NOTICE
+      ? `${HOST_RESTART_NOTICE} ${SETTLED_INSTRUCTION}`
       : `${restartContext} ${
           resume.resume
             ? "The previous turn was interrupted — resuming it now. Continue from where you left off."

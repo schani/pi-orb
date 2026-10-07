@@ -1121,6 +1121,7 @@ export interface ActivityHeadlineGenerator {
 
 export interface OrbNameGeneratorError {
   readonly type: "orb_name_generation_error";
+  readonly code?: "credential_absent" | "generation";
   readonly message: string;
   readonly retryable: boolean;
 }
@@ -1129,6 +1130,7 @@ export interface OrbNameGenerator {
   generate(
     task: SimulationTask,
     input: {
+      harness: "pi" | "claude";
       ownerUserId: string;
       projectName: string;
       repositoryUrl: string;

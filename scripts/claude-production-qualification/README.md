@@ -34,7 +34,10 @@ export. Cleanup removes only the newly allocated scratch tree, preserves a faile
 workload's exit, and turns otherwise successful execution into failure if removal
 fails. No timeout increase is needed.
 
-The synthetic broker supplies a non-credential subscription bearer. The test
+The synthetic broker supplies a non-credential subscription bearer. Its exact
+`POST /runtime/v1/orb-name-trigger` contract validates authorization, JSON content
+type and the complete first-human-message/README payload, returning `skipped`.
+Unknown broker routes remain fatal; automatic prompts must not trigger naming. The test
 factory calls the genuine pinned SDK, retaining production options except for
 routing/traffic suppression and a supervised subprocess observer. Native
 `accountInfo()` is **not** stubbed: production subscription-source verification
@@ -44,7 +47,8 @@ passed only to test-owned workers. No TLS-verification bypass is used.
 The fake server scripts native Bash and a configured native HTTP MCP tool,
 verifies their results in the next model request, and holds one later request to
 exercise a real in-flight SIGKILL. Repository setup/resume hooks write fixed
-sentinels. Three changed compute incarnations run setup/resume three times.
+sentinels. Three changed compute incarnations run setup/resume three times;
+a fourth boot models submitted human input with no native receipt and fails closed.
 
 ## Assertions
 
@@ -56,16 +60,22 @@ sentinels. Three changed compute incarnations run setup/resume three times.
   iterator completion, tracked hooks and final durable history before SDK/MCP
   cleanup. Completing the input `AsyncIterable` lets the pinned SDK writer end
   stdin gracefully; SDK `close()` queue completion alone is not EOF proof.
-- A normal runtime restart preserves session identity and immutable native/product
-  history, without automatic inference.
+- A settled runtime restart preserves session identity and immutable native/product
+  history, then drains one ordinary restart-notification inference. Observation
+  does not invoke `prepareIdleStop`, which would fence later human admission.
 - Before the in-flight crash, the exact journal UUID is observed in a complete
   native JSONL line and scanned into a durable inbox receipt. Model-request
   arrival alone is not this checkpoint.
-- After SIGKILL, native resume retains that receipt, emits a durable manual
-  continuation notice, and makes no inference until a new message is delivered.
-- Retried completed/interrupted inbox IDs remain duplicate/persisted; the original
-  Bash side effect is not repeated. Manual continuation sees retained native tool
-  and conversation context.
+- After SIGKILL, the actual adapter and genuine SDK retain that receipt and
+  automatically continue without a new human message. One durable `pi-orb.turn-resume`
+  claim identifies the interrupted head; one native boot receipt correlates its
+  operation. The model sees retained native tool/conversation and restart context.
+- Retried completed/interrupted inbox IDs remain duplicate/persisted; every human
+  and automatic native receipt UUID occurs once. The original Bash side effect
+  and MCP call are not repeated; automatic prompts create no human receipts.
+- A submitted human delivery without its native receipt fails visibly with
+  `claude_delivery_uncertain`, launching no native process or model request.
+  Failed health is observed directly, not through an unavailable ready snapshot.
 - Injected `fail-in-flight` exercises owned process and filesystem cleanup.
 
 Successful output contains outcome booleans. Failure output also contains the

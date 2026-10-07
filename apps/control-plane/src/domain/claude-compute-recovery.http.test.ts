@@ -63,6 +63,7 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
     let socket: WebSocket | undefined;
     let replacement: ClaudeOrbAgent | undefined;
     let replacementQuery: ScheduledClaudeQuery | undefined;
+    const replacementQueries: ScheduledClaudeQuery[] = [];
     const serve = async (agent: ClaudeOrbAgent) => {
       const app = buildRuntimeServer(agent, {
         closeAll: () => undefined,
@@ -193,6 +194,7 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
                             options,
                             queries++ === 0,
                           );
+                          replacementQueries.push(replacementQuery);
                           return ok({
                             query: replacementQuery,
                             exited: replacementQuery.processExit.promise,
@@ -292,6 +294,76 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
           )
         )._unsafeUnwrap().duplicate,
       ).toBe(true);
+      expect(replacement!.getHealth()).toMatchObject({
+        status: "ready",
+        activity: "busy",
+        turnResume: { outcome: "resumed" },
+      });
+      expect(replacement!.prepareIdleStop()._unsafeUnwrap()).toBe(false);
+      const claims = h.store
+        .replicaRecords("orb-a")
+        .filter((record) => record.type === "event")
+        .filter((record) => record.eventType === "pi-orb.turn-resume");
+      expect(claims).toHaveLength(1);
+      const health = replacement!.getHealth();
+      const operationId = health.status === "ready" ? health.operationId : undefined;
+      expect(operationId).toEqual(expect.any(String));
+      expect(claims[0]).toMatchObject({ overflow: { operationId, reason: "resumed" } });
+      const blocked = await runtimeClient.deliverMessage(
+        task,
+        {
+          baseUrl: currentUrl,
+          messageId: "next",
+          messageIds: ["next"],
+          content: [{ type: "text", text: "next" }],
+        },
+        context,
+      );
+      expect(blocked._unsafeUnwrapErr()).toMatchObject({
+        code: "http_error",
+        message: "Claude session is not accepting work.",
+      });
+      expect(f.journal().deliveries.next).toBeUndefined();
+      expect(replacementQueries).toHaveLength(2);
+      const bootQuery = replacementQuery!;
+      expect(bootQuery.options.resume).toBe(f.state.id);
+      const continuation = await bootQuery.input.next();
+      expect(continuation.done).toBe(false);
+      expect(continuation.value?.uuid).not.toBe(input.value!.uuid);
+      expect(continuation.value?.message.content).toEqual(claims[0]!.content);
+      f.receipt(continuation.value!);
+      await bootQuery.emit(task, rootResult);
+      expect(bootQuery.closeRequested).toBe(true);
+      expect(replacement!.getHealth()).toMatchObject({ status: "ready", activity: "busy" });
+      expect(replacement!.prepareIdleStop()._unsafeUnwrap()).toBe(false);
+      bootQuery.exit();
+      await bootQuery.processExit.promise;
+      expect(replacement!.getHealth()).toMatchObject({ status: "ready", activity: "busy" });
+      bootQuery.endOutput();
+      await replacement!.closeExtensions();
+      expect(replacement!.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
+      await pollOrbUntilCaughtUp(task, deps, "orb-a", 10);
+      const settled = h.store.replicaRecords("orb-a");
+      expect(settled.filter((record) => record.id === continuation.value!.uuid)).toEqual([
+        expect.objectContaining({
+          type: "event",
+          eventType: "claude.boot_receipt",
+          overflow: { operationId },
+        }),
+      ]);
+      expect(settled).toContainEqual(
+        expect.objectContaining({
+          type: "event",
+          eventType: "claude.operation_finished",
+          overflow: expect.objectContaining({ operationId, outcome: "completed" }),
+        }),
+      );
+      expect(settled.filter((record) => record.id === input.value!.uuid)).toHaveLength(1);
+      expect(
+        settled.filter(
+          (record) => record.type === "event" && record.eventType === "pi-orb.turn-resume",
+        ),
+      ).toHaveLength(1);
       expect(
         (
           await runtimeClient.deliverMessage(
@@ -308,6 +380,18 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
       ).toBe(true);
       const next = await replacementQuery!.input.next();
       expect(next.value?.message.content).toEqual([{ type: "text", text: "next" }]);
+      expect(next.value?.uuid).not.toBe(continuation.value!.uuid);
+      expect(replacementQueries).toHaveLength(3);
+      f.receipt(next.value!);
+      await replacementQuery!.emit(task, rootResult);
+      replacementQuery!.exit();
+      replacementQuery!.endOutput();
+      await replacement!.closeExtensions();
+      expect(replacement!.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
+      await pollOrbUntilCaughtUp(task, deps, "orb-a", 10);
+      expect(
+        h.store.replicaRecords("orb-a").filter((record) => record.id === next.value!.uuid),
+      ).toEqual([expect.objectContaining({ type: "message", inboxMessageIds: ["next"] })]);
       expect(replacements).toBe(1);
     } finally {
       socket?.terminate();

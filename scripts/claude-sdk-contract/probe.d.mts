@@ -21,6 +21,17 @@ export interface NativeCancellationResult {
   };
 }
 export interface NativeProbeResult extends NativeCancellationResult {
+  restart?: {
+    requestCount: number;
+    requestMessages: { role: string; content: unknown }[];
+    prefixPreserved: boolean;
+    childFilesUnchanged: boolean;
+    childMessageCount: number;
+    taskStartedCount: number;
+    toolUseCount: number;
+    continuationCount: number;
+    result: { subtype: string; isError: boolean };
+  };
   requestSettings: { model: string; effort: string | null }[];
   sessionId: string;
   submittedUuid: string;
@@ -70,6 +81,12 @@ export interface NativeProbeOptions {
   withCompact?: boolean;
   compactInstructions?: string;
   cancelAt?: "initialization" | "before-enqueue" | "before-dispatch" | "in-progress" | "queued";
+  withRestart?: (context: {
+    home: string;
+    rootPath: string;
+    sessionId: string;
+    submittedUuid: string;
+  }) => string | Promise<string>;
   onRoot?: (context: {
     home: string;
     rootPath: string;

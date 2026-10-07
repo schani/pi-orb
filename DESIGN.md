@@ -227,6 +227,7 @@ Tracking:
 - [docs/postmortems/2026-09-15-postgres-e2e-port-collision.md](docs/postmortems/2026-09-15-postgres-e2e-port-collision.md) — fixed PostgreSQL host-port collision prevented 55 store contracts from running
 - [docs/postmortems/2026-09-15-find-keyboard-navigation.md](docs/postmortems/2026-09-15-find-keyboard-navigation.md) — fleet Find selected a project instead of the expected orb in keyboard-navigation E2E
 - [docs/postmortems/2026-09-15-native-personal-instructions-fixture.md](docs/postmortems/2026-09-15-native-personal-instructions-fixture.md) — mandatory boot read missing from the native validator's strict broker; release stopped before apply
+- [docs/postmortems/2026-10-06-claude-orb-preemption.md](docs/postmortems/2026-10-06-claude-orb-preemption.md) — two Spot preemptions; Claude recovery restores context without automatic continuation
 - [docs/postmortems/2026-10-06-claude-publication-order.md](docs/postmortems/2026-10-06-claude-publication-order.md) — late native-only prefixes blocked exact-identity stream retirement; durable ownership lookahead and attribution limits
 - [docs/postmortems/2026-10-06-empty-live-thinking.md](docs/postmortems/2026-10-06-empty-live-thinking.md) — empty live reasoning visibility gap; committed suppression verified, screenshot mechanism unproved
 - [docs/postmortems/2026-10-07-runner-apt-timeout.md](docs/postmortems/2026-10-07-runner-apt-timeout.md) — hosted dependency installation exhausted the E2E budget; signed HTTPS Ubuntu archive before APT

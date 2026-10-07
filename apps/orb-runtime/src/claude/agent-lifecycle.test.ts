@@ -10,7 +10,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { ServerFrame } from "@pi-orb/protocol";
 import { err, ok } from "neverthrow";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { nativeHook, nativeHookResponse } from "../testkit/claude-composed.ts";
 import { ClaudeOrbAgent, type ClaudeQuery, type NativeState } from "./agent.ts";
 import { ClaudeHistory, nativeHistoryFiles } from "./history.ts";
@@ -172,7 +172,15 @@ function fixture(
         ? Promise.resolve()
         : new Promise<void>((resolve) => closeWaiters.push({ count, resolve })),
     prompt: () => prompt,
-    attach: () => agent.attachSession(state, history, configDir, "commit"),
+    attach: (notifyRestart = false) =>
+      agent.attachSession(
+        state,
+        history,
+        configDir,
+        "commit",
+        ...(notifyRestart ? ([null] as const) : []),
+      ),
+    nativePath,
     emit: (message: SDKMessage) =>
       new Promise<void>((resolve) => {
         messages.push({ message, processed: resolve });
@@ -205,6 +213,151 @@ function fixture(
     releaseAccount: () => releaseAccount?.(),
   };
 }
+it("records successful subscription diagnostics outside conversation history", async () => {
+  const f = fixture();
+  await f.attach();
+  expect(f.state).toMatchObject({
+    authentication: { source: "CLAUDE_CODE_OAUTH_TOKEN", generation: 0 },
+  });
+  expect(
+    f.history.view.some((record) => record.type === "event" && record.eventType === "claude.auth"),
+  ).toBe(false);
+});
+
+it("persists restart claim and owns admission before query initialization", async () => {
+  const f = fixture();
+  f.persist({ type: "user", uuid: "human", message: { role: "user", content: "continue work" } });
+  await f.attach(true);
+  expect(f.agent.getHealth()).toMatchObject({
+    status: "ready",
+    activity: "busy",
+    turnResume: { outcome: "resumed" },
+  });
+  expect(
+    f.history.view.some(
+      (record) => record.type === "event" && record.eventType === "pi-orb.turn-resume",
+    ),
+  ).toBe(true);
+  expect(
+    (
+      await f.agent.deliverInboxMessage("later", ["later"], [{ type: "text", text: "human later" }])
+    ).isErr(),
+  ).toBe(true);
+  expect(f.agent.prepareIdleStop()._unsafeUnwrap()).toBe(false);
+  f.exit();
+});
+
+it("cancels a restart continuation at the account barrier before native prompt submission", async () => {
+  const f = fixture(undefined, true);
+  f.persist({ type: "user", uuid: "human", message: { role: "user", content: "work" } });
+  const attached = f.attach(true);
+  await f.awaitCloseRequest(1);
+  f.blockAccount();
+  f.exit();
+  expect((await attached).isOk()).toBe(true);
+  const input = f.prompt()?.[Symbol.asyncIterator]();
+  const next = input?.next();
+  const aborted = f.agent.abortOperation();
+  f.releaseAccount();
+  f.exit();
+  await aborted;
+  expect(await next).toMatchObject({ done: true });
+  expect(f.state.deliveries).toEqual({});
+  expect(
+    f.history.view.some(
+      (record) => record.type === "event" && record.eventType === "pi-orb.turn-resume",
+    ),
+  ).toBe(true);
+});
+
+it("a boot prompt without a native receipt preserves retry budget rather than human-delivery uncertainty", async () => {
+  const f = fixture();
+  f.persist({ type: "user", uuid: "human", message: { role: "user", content: "work" } });
+  await f.attach(true);
+  const input = await f.prompt()?.[Symbol.asyncIterator]().next();
+  expect(input?.done).toBe(false);
+  expect(f.state.deliveries).toEqual({});
+  expect(qualifyClaudeRestart(f.state, f.history.view, "after-crash").isOk()).toBe(true);
+  expect(f.history.correlation(input?.value.uuid ?? "")).toMatchObject({ boot: true });
+  f.exit();
+});
+
+it("declines exhausted claims without reopening inference and persists its decision", async () => {
+  const f = fixture();
+  f.persist({ type: "user", uuid: "human", message: { role: "user", content: "work" } });
+  f.history.scan(f.nativePath)._unsafeUnwrap();
+  for (const id of ["a", "b", "c"])
+    f.history
+      .appendPlatform({
+        id,
+        parentId: null,
+        timestamp: f.state.timestamp,
+        type: "event",
+        eventType: "pi-orb.turn-resume",
+        overflow: { runtimeInstanceId: id, executionId: null, incarnation: "0" },
+      })
+      ._unsafeUnwrap();
+  expect((await f.attach(true)).isOk()).toBe(true);
+  expect(f.agent.getHealth()).toMatchObject({
+    status: "ready",
+    activity: "idle",
+    turnResume: { outcome: "declined_already_resumed" },
+  });
+  expect(f.queryOptions).toHaveLength(1);
+  expect(f.history.view.at(-1)).toMatchObject({
+    eventType: "pi-orb.turn-resume-declined",
+    custom: { display: true },
+    overflow: { reason: "declined_already_resumed" },
+  });
+});
+
+it("fails closed before inference when the boot claim cannot be committed", async () => {
+  const f = fixture();
+  f.persist({ type: "user", uuid: "human", message: { role: "user", content: "work" } });
+  vi.spyOn(f.history, "appendPlatform").mockReturnValue(
+    err({ type: "claude_history_error", message: "injected claim persistence failure" }),
+  );
+  expect((await f.attach(true)).isErr()).toBe(true);
+  expect(f.agent.getHealth()).toMatchObject({
+    status: "failed",
+    error: { code: "claude_boot_publication_failed" },
+  });
+  expect(f.queryOptions).toHaveLength(1);
+  expect(f.state.deliveries).toEqual({});
+});
+
+it("combines sleep context and deduplicates inbox retries without another native submission", async () => {
+  const f = fixture();
+  await f.attach();
+  const wake = {
+    messageId: "sleep",
+    messageIds: ["sleep"],
+    content: [{ type: "text" as const, text: "Wake now." }],
+    system: { kind: "sleep_wake" as const, sleepUntil: "2026-10-06T00:00:00Z" },
+  };
+  const attached = await f.agent.attachSession(
+    f.state,
+    f.history,
+    f.nativePath.slice(0, f.nativePath.indexOf("/projects/")),
+    "commit",
+    wake,
+  );
+  expect(attached.isOk()).toBe(true);
+  expect(
+    f.history.view.filter(
+      (record) => record.type === "event" && record.eventType === "pi-orb.sleep-wake",
+    ),
+  ).toHaveLength(1);
+  const duplicate = await f.agent.deliverInboxMessage(
+    wake.messageId,
+    wake.messageIds,
+    wake.content,
+    wake.system,
+  );
+  expect(duplicate._unsafeUnwrap()).toMatchObject({ duplicate: true, status: "persisted" });
+  f.exit();
+});
+
 const result = { type: "result", subtype: "success", is_error: false } as unknown as SDKMessage;
 const task = (subtype: "task_started" | "task_notification") =>
   ({

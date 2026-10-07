@@ -34,6 +34,7 @@ const ProvenanceSchema = Type.Record(
     operationId: Type.String(),
     system: Type.Optional(Type.Boolean()),
     compaction: Type.Optional(Type.Boolean()),
+    boot: Type.Optional(Type.Boolean()),
   }),
 );
 
@@ -46,6 +47,7 @@ export interface Provenance {
   readonly operationId: string;
   readonly system?: boolean;
   readonly compaction?: boolean;
+  readonly boot?: boolean;
 }
 export interface HistoryFiles {
   read(path: string): string | null;
@@ -359,32 +361,39 @@ export class ClaudeHistory {
               : content.every((block) => block.type === "tool_result") && content.length > 0
                 ? "tool"
                 : "user";
-          record = provenance?.system
+          record = provenance?.boot
             ? {
                 ...base,
                 type: "event",
-                eventType: "claude.platform_message",
-                content,
-                inboxMessageIds: [...provenance.messageIds],
-                custom: { customType: "pi-orb.system-message", display: true },
-                overflow: { native },
+                eventType: "claude.boot_receipt",
+                overflow: { operationId: provenance.operationId },
               }
-            : {
-                ...base,
-                type: "message",
-                role,
-                content,
-                overflow: { native },
-                ...(provenance === undefined
-                  ? {}
-                  : { inboxMessageIds: [...provenance.messageIds] }),
-                ...(typeof message.model === "string"
-                  ? { model: { provider: "anthropic", id: message.model } }
-                  : {}),
-                ...(typeof message.stop_reason === "string"
-                  ? { finishReason: message.stop_reason }
-                  : {}),
-              };
+            : provenance?.system
+              ? {
+                  ...base,
+                  type: "event",
+                  eventType: "claude.platform_message",
+                  content,
+                  inboxMessageIds: [...provenance.messageIds],
+                  custom: { customType: "pi-orb.system-message", display: true },
+                  overflow: { native },
+                }
+              : {
+                  ...base,
+                  type: "message",
+                  role,
+                  content,
+                  overflow: { native },
+                  ...(provenance === undefined
+                    ? {}
+                    : { inboxMessageIds: [...provenance.messageIds] }),
+                  ...(typeof message.model === "string"
+                    ? { model: { provider: "anthropic", id: message.model } }
+                    : {}),
+                  ...(typeof message.stop_reason === "string"
+                    ? { finishReason: message.stop_reason }
+                    : {}),
+                };
         } else if (native.type === "system" && native.subtype === "compact_boundary") {
           record = {
             ...base,

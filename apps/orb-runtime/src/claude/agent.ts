@@ -20,6 +20,9 @@ import {
   type McpConfig,
   type MessageInputBlock,
   MessageInputBlockSchema,
+  ORB_NAME_MESSAGE_MAX_BYTES,
+  ORB_NAME_README_MAX_BYTES,
+  type OrbBootContext,
   type OrbMessageSystem,
   OrbMessageSystemSchema,
   projectDisplayRecord,
@@ -50,8 +53,15 @@ import type { HookEnvSource } from "../hooks/env-file.ts";
 import { BootHookRunner } from "../hooks/runner.ts";
 import { NodeHookSpawner } from "../hooks/spawner.ts";
 import { fetchMcpCatalog } from "../mcp/boot.ts";
+import { triggerOrbName } from "../naming/client.ts";
+import { readRootReadme } from "../naming/context.ts";
 import { fetchPersonalInstructions } from "../personal-instructions/endpoint.ts";
 import { fetchBootContext } from "../pi/boot-context.ts";
+import {
+  BOOT_BASELINE_TYPE,
+  planBootNotification,
+  SLEEP_WAKE_TYPE,
+} from "../pi/boot-notification.ts";
 import { environmentPrompt } from "../pi/environment-prompt.ts";
 import { readExecutionIdentity } from "../pi/execution-identity.ts";
 import { FileIdleStopFence } from "../pi/idle-stop-fence.ts";
@@ -61,6 +71,7 @@ import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { ClaudeActivity } from "./activity.ts";
 import { claudeChildEnvironment, fetchClaudeSubscription, verifyClaudeAccount } from "./auth.ts";
 import { validateClaudeAuthSettings } from "./auth-settings.ts";
+import { claudeBootEntries } from "./boot-notification.ts";
 import { ClaudeHistory, nativeHistoryFiles } from "./history.ts";
 import { readClaudeRepositoryInstructions } from "./instructions.ts";
 import { type ClaudeMcpRuntime, createClaudeMcp } from "./mcp.ts";
@@ -128,6 +139,9 @@ const NativeStateSchema = Type.Object({
   compaction: Type.Optional(
     Type.Object({ operationId: Type.String(), commandUuid: Type.String() }),
   ),
+  authentication: Type.Optional(
+    Type.Object({ source: Type.Literal("CLAUDE_CODE_OAUTH_TOKEN"), generation: Type.Number() }),
+  ),
 });
 
 export interface ClaudeOrbAgentOptions {
@@ -194,6 +208,7 @@ export interface NativeState {
   pendingHandoffs?: Record<string, string>;
   handoffTerminals?: Record<string, ClaudeHandoffTerminal>;
   guardLifetime?: string;
+  authentication?: { source: "CLAUDE_CODE_OAUTH_TOKEN"; generation: number };
 }
 class InputQueue implements AsyncIterable<SDKUserMessage> {
   private values: SDKUserMessage[] = [];
@@ -553,20 +568,6 @@ export class ClaudeOrbAgent implements OrbAgent {
       this.fail(recovered.error.code, recovered.error.message);
       return;
     }
-    for (const operationId of recovered.value.interruptedOperations) {
-      const id = `claude.interrupted:${operationId}`;
-      if (this.history.view.some((record) => record.id === id)) continue;
-      const recorded = this.platformEvent(
-        "claude.operation_interrupted",
-        "Previous operation was interrupted. Send a message to continue.",
-        { operationId, automaticReplay: false },
-        id,
-      );
-      if (recorded.isErr()) {
-        this.fail("claude_recovery_publication_failed", recorded.error.message);
-        return;
-      }
-    }
     if (recovered.value.orphanedChildren.length > 0) {
       const recorded = reconcileClaudeComputeOwnership(
         this.state,
@@ -608,16 +609,13 @@ export class ClaudeOrbAgent implements OrbAgent {
       this.history,
       this.configDir,
       this.checkoutCommit,
+      context.value.context,
     );
     if (started.isErr()) {
       if (this.health.status !== "failed")
         this.fail("claude_sdk_unavailable", started.error.message, true);
       return;
     }
-    const recorded = this.platformEvent("claude.auth", "Claude subscription connected.", {
-      generation: this.generation,
-    });
-    if (recorded.isErr()) this.fail("claude_auth_publication_failed", recorded.error.message);
   }
   /** Testable composition boundary around a retained native authority and supervised SDK. */
   attachSession(
@@ -625,6 +623,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     history: ClaudeHistory,
     configDir: string,
     checkoutCommit: string | null,
+    bootContext?: OrbBootContext | null,
   ): ResultAsync<void, { message: string }> {
     this.state = state;
     this.history = history;
@@ -651,11 +650,86 @@ export class ClaudeOrbAgent implements OrbAgent {
         };
         return ok(undefined);
       })
-      .map(() => this.releaseMetadata())
+      .andThen(() => {
+        this.releaseMetadata();
+        return bootContext === undefined ? ok(undefined) : this.notifyRestart(bootContext);
+      })
       .mapErr((error) => {
         this.configuring = false;
         return error;
       });
+  }
+  private notifyRestart(bootContext: OrbBootContext | null): Result<void, { message: string }> {
+    if (!this.accepting || this.history === null) return ok(undefined);
+    const identity = {
+      runtimeInstanceId: this.runtimeInstanceId,
+      executionId: this.executionId,
+      incarnation: this.options.incarnation ?? "0",
+    };
+    const entries = claudeBootEntries(this.history.view);
+    const plan = planBootNotification(entries, entries, identity, bootContext);
+    if (plan.kind === "none") return ok(undefined);
+    if (plan.kind === "baseline") {
+      const saved = this.platformEvent(BOOT_BASELINE_TYPE, "", { ...identity }, undefined, false);
+      if (saved.isErr()) this.fail("claude_boot_publication_failed", saved.error.message);
+      return saved;
+    }
+    const operationId = plan.triggerTurn ? randomUUID() : null;
+    const { messageIds, ...details } = plan.marker.details;
+    const recorded = this.platformEvent(plan.marker.customType, plan.marker.content, {
+      ...details,
+      ...(messageIds === undefined ? {} : { messageIds: [...messageIds] }),
+      ...(operationId === null ? {} : { operationId }),
+      ...(bootContext === null
+        ? {}
+        : {
+            fingerprint: this.deliveryFingerprint(
+              bootContext.content,
+              bootContext.messageIds,
+              bootContext.system,
+            ),
+          }),
+    });
+    if (recorded.isErr()) {
+      this.fail("claude_boot_publication_failed", recorded.error.message);
+      return recorded;
+    }
+    if (this.health.status === "ready")
+      this.health = {
+        ...this.health,
+        turnResume: {
+          outcome:
+            plan.marker.details.reason === "resumed"
+              ? "resumed"
+              : plan.triggerTurn
+                ? "notified_restart"
+                : "declined_already_resumed",
+          ...(plan.marker.details.shape === undefined ? {} : { shape: plan.marker.details.shape }),
+          ...(plan.marker.details.headRecordId === null
+            ? {}
+            : { headRecordId: plan.marker.details.headRecordId }),
+        },
+      };
+    if (operationId !== null) {
+      // submit claims synchronously; its epoch fence also cancels pre-inference recovery.
+      void this.submit(
+        [{ type: "text", text: plan.marker.content }],
+        operationId,
+        [],
+        undefined,
+        true,
+      ).mapErr(() => {
+        if (this.health.status === "ready")
+          this.health = { ...this.health, turnResume: { outcome: "resume_failed" } };
+        const failure = this.platformEvent(
+          "pi-orb.restart-notification-failed",
+          "The runtime could not deliver its restart notification.",
+          { ...identity, operationId, reason: "delivery_failed" },
+        );
+        if (failure.isErr()) this.fail("claude_boot_publication_failed", failure.error.message);
+      });
+    }
+    return ok(undefined);
   }
   private finishMetadata(stage: "attach" | "settings"): Result<void, { message: string }> {
     const flushed = this.flushHistory();
@@ -1004,6 +1078,10 @@ export class ClaudeOrbAgent implements OrbAgent {
           await sdk.setModel(selected);
           progress.stage = "flags";
           if (effort !== undefined) await sdk.applyFlagSettings({ effortLevel: effort });
+          this.state.authentication = {
+            source: "CLAUDE_CODE_OAUTH_TOKEN",
+            generation: this.generation,
+          };
           this.state.model = selected;
           if (effort === undefined) delete this.state.effort;
           else this.state.effort = effort;
@@ -1445,7 +1523,11 @@ export class ClaudeOrbAgent implements OrbAgent {
     const terminal = this.platformEvent(
       "claude.operation_finished",
       this.operationError ?? `Claude operation ${this.outcome}.`,
-      { operationId, outcome: this.outcome },
+      {
+        operationId,
+        outcome: this.outcome,
+        ...(compaction === null ? {} : { work: "compaction" }),
+      },
       `claude.operation:${operationId}`,
       compaction === null && this.outcome === "failed",
     );
@@ -1735,6 +1817,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     operationId: string,
     messageIds: readonly string[],
     system: OrbMessageSystem | undefined,
+    boot = false,
   ): ResultAsync<void, { message: string }> {
     if (
       !this.accepting ||
@@ -1784,16 +1867,19 @@ export class ClaudeOrbAgent implements OrbAgent {
           messageIds,
           operationId,
           ...(system === undefined ? {} : { system: true }),
+          ...(boot ? { boot: true } : {}),
         });
         if (correlated.isErr()) {
           this.fail("claude_input_persistence_failed", correlated.error.message);
           return err(correlated.error);
         }
-        state.deliveries[messageIds[0] ?? uuid] = delivery;
-        const persisted = this.saveState();
-        if (persisted.isErr()) {
-          this.fail("claude_input_persistence_failed", persisted.error.message);
-          return err(persisted.error);
+        if (!boot) {
+          state.deliveries[messageIds[0] ?? uuid] = delivery;
+          const persisted = this.saveState();
+          if (persisted.isErr()) {
+            this.fail("claude_input_persistence_failed", persisted.error.message);
+            return err(persisted.error);
+          }
         }
         input.push({
           type: "user",
@@ -1836,6 +1922,34 @@ export class ClaudeOrbAgent implements OrbAgent {
     content: readonly MessageInputBlock[],
     system?: OrbMessageSystem,
   ): ResultAsync<DeliverOrbMessageResponse, { message: string; retryable: boolean }> {
+    const wake =
+      system?.kind === "sleep_wake"
+        ? this.history?.view.find(
+            (record) =>
+              record.type === "event" &&
+              record.eventType === SLEEP_WAKE_TYPE &&
+              Array.isArray(record.overflow.messageIds) &&
+              record.overflow.messageIds.includes(messageId),
+          )
+        : undefined;
+    if (wake !== undefined) {
+      if (wake.overflow.fingerprint !== this.deliveryFingerprint(content, messageIds, system))
+        return errAsync({
+          message: "Claude sleep notice conflicts with durable acceptance.",
+          retryable: false,
+        });
+      return ResultAsync.fromSafePromise(
+        Promise.resolve({
+          v: 1 as const,
+          messageId,
+          status: "persisted" as const,
+          delivery: "turn" as const,
+          operationId:
+            typeof wake.overflow.operationId === "string" ? wake.overflow.operationId : "unknown",
+          duplicate: true,
+        }),
+      );
+    }
     const existing = this.state?.deliveries[messageId];
     if (existing !== undefined) {
       if (
@@ -1863,14 +1977,17 @@ export class ClaudeOrbAgent implements OrbAgent {
     }
     const operationId = randomUUID();
     return this.submit(content, operationId, messageIds, system)
-      .map(() => ({
-        v: 1 as const,
-        messageId,
-        status: "queued" as const,
-        delivery: "turn" as const,
-        operationId,
-        duplicate: false,
-      }))
+      .map(() => {
+        if (system === undefined) this.triggerAutoName(content);
+        return {
+          v: 1 as const,
+          messageId,
+          status: "queued" as const,
+          delivery: "turn" as const,
+          operationId,
+          duplicate: false,
+        };
+      })
       .mapErr((error) => ({ ...error, retryable: true }));
   }
   abortOperation(): ResultAsync<void, { message: string }> {
@@ -2032,7 +2149,33 @@ export class ClaudeOrbAgent implements OrbAgent {
       })
       .andThen(() => this.flushHistory());
   }
-  triggerAutoName(_content: readonly MessageInputBlock[]): void {}
+  private autoNameTriggered = false;
+
+  triggerAutoName(content: readonly MessageInputBlock[]): void {
+    if (this.autoNameTriggered) return;
+    this.autoNameTriggered = true;
+    const broker = this.options.broker;
+    if (broker === null) return;
+    const text = content
+      .filter(
+        (block): block is Extract<MessageInputBlock, { type: "text" }> => block.type === "text",
+      )
+      .map((block) => block.text)
+      .join("\n");
+    const boundedText = Buffer.from(text).subarray(0, ORB_NAME_MESSAGE_MAX_BYTES).toString("utf8");
+    const imageOnly = boundedText.trim() === "" && content.some((block) => block.type === "image");
+    void readRootReadme(join(this.options.workDir, "repo"), ORB_NAME_README_MAX_BYTES).then(
+      async (readme) => {
+        if (readme.isErr()) console.error(`orb naming README unavailable: ${readme.error.message}`);
+        const sent = await triggerOrbName(broker, {
+          text: boundedText,
+          imageOnly,
+          ...(readme.isOk() && readme.value !== null ? { readme: readme.value } : {}),
+        });
+        if (sent.isErr()) console.error(`orb naming unavailable: ${sent.error.message}`);
+      },
+    );
+  }
   changeSettings(
     action: SettingsAction,
   ): ResultAsync<
@@ -2178,6 +2321,13 @@ export class ClaudeOrbAgent implements OrbAgent {
         eventType,
         content: [{ type: "text", text: message }],
         custom: { customType: eventType, display },
+        ...(eventType === SLEEP_WAKE_TYPE && Array.isArray(overflow.messageIds)
+          ? {
+              inboxMessageIds: overflow.messageIds.filter(
+                (id): id is string => typeof id === "string",
+              ),
+            }
+          : {}),
         overflow,
       })
       .andThen(() => this.flushHistory());

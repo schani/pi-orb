@@ -14,6 +14,27 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 describe("native Claude root authority", () => {
+  it("retains a restart prompt receipt without duplicating its visible journal notice", () => {
+    const dir = fixture();
+    const file = join(dir, "root.jsonl");
+    const history = new ClaudeHistory(dir, "session", "2026-10-06T00:00:00Z");
+    history
+      .correlate("boot-input", { messageIds: [], operationId: "boot-operation", boot: true })
+      ._unsafeUnwrap();
+    writeFileSync(
+      file,
+      `${JSON.stringify({ type: "user", uuid: "boot-input", message: { role: "user", content: "Continue from where you left off." } })}\n`,
+    );
+    const records = history.scan(file)._unsafeUnwrap();
+    expect(records).toMatchObject([
+      { id: "boot-input", type: "event", eventType: "claude.boot_receipt" },
+    ]);
+    expect(records[0]).not.toHaveProperty("content");
+    expect(JSON.stringify(records)).not.toContain("Continue from where");
+    expect(
+      new ClaudeHistory(dir, "session", "2026-10-06T00:00:00Z").scan(file)._unsafeUnwrap(),
+    ).toEqual(records);
+  });
   it("preserves full compaction log, images, tools, native identity, and deterministic UUID-less entries", () => {
     const dir = fixture();
     const file = join(dir, "root.jsonl");

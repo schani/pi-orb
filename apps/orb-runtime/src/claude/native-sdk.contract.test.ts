@@ -7,6 +7,7 @@ import {
   probeNativeSdk,
   probeNetworkGuard,
 } from "../../../../scripts/claude-sdk-contract/probe.mjs";
+import { BOOT_BASELINE_TYPE, planBootNotification } from "../pi/boot-notification.ts";
 import { ComposedClaudeFixture } from "../testkit/claude-composed.ts";
 import { ClaudeHistory } from "./history.ts";
 
@@ -353,6 +354,81 @@ nativeIt(
     expect(result.rootContainsChildAssistant).toBe(false);
   },
   30_000,
+);
+
+nativeIt(
+  "reopens retained native context with shared boot continuation without replaying child work",
+  async () => {
+    let continuation = "";
+    const result = await probeNativeSdk({
+      withSubagent: true,
+      withRestart: ({ home, rootPath, sessionId }) => {
+        const projected = new ClaudeHistory(
+          join(home, "restart-projection"),
+          sessionId,
+          "2026-10-06T00:00:00Z",
+        )
+          .scan(rootPath)
+          ._unsafeUnwrap();
+        const entries = [
+          {
+            type: "custom",
+            customType: BOOT_BASELINE_TYPE,
+            data: { runtimeInstanceId: "before", executionId: "old-host", incarnation: "0" },
+          },
+          ...projected
+            .filter((record) => record.type === "message")
+            .map((record) => ({
+              type: "message",
+              id: record.id,
+              message: {
+                role: record.role,
+                content: record.content,
+                stopReason: record.finishReason === "end_turn" ? "stop" : "toolUse",
+              },
+            })),
+        ];
+        const plan = planBootNotification(entries, entries, {
+          runtimeInstanceId: "after",
+          executionId: "new-host",
+          incarnation: "1",
+        });
+        expect(plan.kind).toBe("message");
+        if (plan.kind !== "message") throw new Error("Expected shared boot continuation.");
+        expect(plan.triggerTurn).toBe(true);
+        expect(plan.marker.details.reason).toBe("host_restarted");
+        continuation = plan.marker.content;
+        return continuation;
+      },
+    });
+    expect(result.sdkVersion).toBe(fixture.sdkVersion);
+    expect(result.cliVersion).toBe(fixture.cliVersion);
+    expect(result.requestCount).toBe(5);
+    expect(result.restart).toMatchObject({
+      requestCount: 1,
+      prefixPreserved: true,
+      childFilesUnchanged: true,
+      result: { subtype: "success", isError: false },
+      childMessageCount: 0,
+      taskStartedCount: 0,
+      toolUseCount: 0,
+      continuationCount: 1,
+    });
+    const messages = result.restart?.requestMessages;
+    expect(messages?.[0]).toMatchObject({ role: "user" });
+    expect(JSON.stringify(messages?.[0]?.content)).toContain(
+      "Run the fixed Bash contract marker, then finish.",
+    );
+    expect(JSON.stringify(messages)).toContain("toolu_contract_agent");
+    expect(JSON.stringify(messages)).toContain("Contract complete.");
+    // The pinned CLI appends a system token-budget message after the user turn.
+    const conversational = messages?.filter((message) => message.role !== "system");
+    expect(conversational?.at(-1)).toEqual({ role: "user", content: continuation });
+    expect(messages?.filter((message) => message.content === continuation)).toHaveLength(1);
+    expect(result.childFiles).toHaveLength(1);
+    expect(result.rootContainsChildAssistant).toBe(false);
+  },
+  60_000,
 );
 
 nativeIt(

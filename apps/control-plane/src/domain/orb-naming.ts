@@ -3,6 +3,7 @@ import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import { withDeadline } from "./dst.ts";
 import type { StoreError } from "./errors.ts";
+import { logOrbEvent } from "./log.ts";
 import type {
   ControlPlaneStore,
   OrbNameGenerator as GeneratorPort,
@@ -136,7 +137,6 @@ export function generateOrbName(
       });
     }
     if (orb.value.name !== null) return ok("already_named");
-    if (orb.value.harness === "claude") return ok("skipped");
     const project = await deps.store.getProject(task, orb.value.projectId);
     if (project.isErr()) return err(storeError(project.error));
     if (project.value === null) {
@@ -148,6 +148,7 @@ export function generateOrbName(
       });
     }
     const projectRow = project.value;
+    const harness = orb.value.harness;
     const now = task.wallNow();
     const claim = await deps.store.claimOrbAutoName(task, {
       orbId,
@@ -165,6 +166,7 @@ export function generateOrbName(
         deps.generator.generate(
           task,
           {
+            harness,
             ownerUserId: projectRow.ownerUserId,
             projectName: projectRow.name,
             repositoryUrl: projectRow.repositoryUrl,
@@ -182,6 +184,12 @@ export function generateOrbName(
         nextAttemptAt: task.wallNow() + retry,
       });
       if (failed.isErr()) return err(storeError(failed.error));
+      if (orb.value.harness === "claude" && generated.error.code === "credential_absent") {
+        if (orb.value.autoNameAttempts === 0) {
+          logOrbEvent(task, orbId, "auto-name-skipped", { reason: "codex_not_connected" });
+        }
+        return ok("skipped");
+      }
       return err(generationError(generated.error));
     }
     const name = normalizeOrbName(generated.value.replace(/^["'`]+|["'`]+$/g, ""));

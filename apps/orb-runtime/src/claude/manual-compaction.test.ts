@@ -2,12 +2,14 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { projectDisplayRecord } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { expect, it } from "vitest";
+import { planBootNotification } from "../pi/boot-notification.ts";
 import {
   ComposedClaudeFixture,
   nativeHook,
   nativeHookResponse,
   rootResult,
 } from "../testkit/claude-composed.ts";
+import { claudeBootEntries } from "./boot-notification.ts";
 
 const task = new NoSimulationTask("claude-compact-test", false);
 function gate() {
@@ -188,6 +190,76 @@ it.each(["failed", "aborted"] as const)(
       });
       expect(JSON.stringify(snapshot.records)).not.toContain("private provider error");
       expect(f.agent.gateView().activity).toBe("idle");
+    } finally {
+      f.dispose();
+    }
+  },
+);
+
+it.each(["completed", "failed", "aborted"] as const)(
+  "%s native compaction cannot settle interrupted root work or renew its boot budget",
+  async (outcome) => {
+    const f = new ComposedClaudeFixture();
+    try {
+      f.append({ type: "user", uuid: "human", message: { role: "user", content: "work" } });
+      await f.attach();
+      for (const id of ["a", "b", "c"])
+        f.history
+          .appendPlatform({
+            id,
+            parentId: f.history.view.at(-1)?.id ?? null,
+            timestamp: f.state.timestamp,
+            type: "event",
+            eventType: "pi-orb.turn-resume",
+            overflow: { runtimeInstanceId: id, executionId: "old", incarnation: "0" },
+          })
+          ._unsafeUnwrap();
+      const next = f.nextQuery();
+      const compacting = f.agent.compact("Private instructions", "compact-op");
+      const query = await next;
+      const command = await query.input.next();
+      f.receipt(command.value!);
+      f.append({
+        type: "user",
+        uuid: "stdout",
+        parentUuid: command.value!.uuid,
+        message: {
+          role: "user",
+          content: "<local-command-stdout>Compacted</local-command-stdout>",
+        },
+      });
+      f.append({
+        type: "user",
+        uuid: "meta",
+        isMeta: true,
+        message: { role: "user", content: "metadata" },
+      });
+      let aborting: ReturnType<typeof f.agent.abortOperation> | undefined;
+      if (outcome === "completed") summary(f);
+      else if (outcome === "aborted") aborting = f.agent.abortOperation();
+      else
+        await query.emit(task, {
+          type: "system",
+          subtype: "status",
+          status: null,
+          compact_result: "failed",
+        } as SDKMessage);
+      await query.emit(task, rootResult);
+      query.exit();
+      query.endOutput();
+      await aborting;
+      expect((await compacting).isOk()).toBe(outcome === "completed");
+      const entries = claudeBootEntries(f.history.view);
+      expect(
+        planBootNotification(entries, entries, {
+          runtimeInstanceId: "replacement",
+          executionId: "new",
+          incarnation: "1",
+        }),
+      ).toMatchObject({
+        triggerTurn: false,
+        marker: { customType: "pi-orb.turn-resume-declined" },
+      });
     } finally {
       f.dispose();
     }

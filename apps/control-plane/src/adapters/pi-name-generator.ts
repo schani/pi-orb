@@ -1,6 +1,6 @@
 import { completeLuna } from "@pi-orb/luna";
 import type { SimulationTask } from "determined";
-import { ResultAsync } from "neverthrow";
+import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { getToken } from "../domain/broker.ts";
 import type {
   BrokerDeps,
@@ -52,6 +52,7 @@ export class PiOrbNameGenerator implements OrbNameGenerator {
   generate(
     task: SimulationTask,
     input: {
+      harness: "pi" | "claude";
       ownerUserId: string;
       projectName: string;
       repositoryUrl: string;
@@ -60,11 +61,29 @@ export class PiOrbNameGenerator implements OrbNameGenerator {
     },
     context: OperationContext,
   ): ResultAsync<string, OrbNameGeneratorError> {
-    return new ResultAsync(
-      getToken(task, this.brokerForUser(input.ownerUserId), "openai-codex", { reason: "startup" }),
-    )
-      .mapErr((error) =>
-        failure(error.type === "auth_required" ? "model authentication required" : error.message),
+    const broker = this.brokerForUser(input.ownerUserId);
+    const connected =
+      input.harness === "claude"
+        ? broker.pointers
+            .readPointer(task, "openai-codex")
+            .mapErr((error) => failure(error.message))
+            .andThen((pointer) =>
+              pointer === null || pointer.secretVersion === null
+                ? errAsync({
+                    ...failure("model authentication required"),
+                    code: "credential_absent" as const,
+                  })
+                : okAsync(undefined),
+            )
+        : okAsync(undefined);
+    return connected
+      .andThen(() =>
+        new ResultAsync(getToken(task, broker, "openai-codex", { reason: "startup" })).mapErr(
+          (error) =>
+            failure(
+              error.type === "auth_required" ? "model authentication required" : error.message,
+            ),
+        ),
       )
       .andThen((grant) =>
         completeLuna({

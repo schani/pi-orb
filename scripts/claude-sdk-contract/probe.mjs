@@ -109,6 +109,7 @@ export async function probeNativeSdk({
   withCompact = false,
   compactInstructions = "",
   cancelAt,
+  withRestart,
   onRoot,
 } = {}) {
   const home = await mkdtemp(join(tmpdir(), "claude-native-contract-"));
@@ -131,8 +132,10 @@ export async function probeNativeSdk({
     drained: false,
     receipt: null,
   };
+  let restarting = false;
+  const restartRequests = [];
   const server = createServer((request, response) => {
-    // Retain settings and content-free qualification facts, never request bodies/headers.
+    // Retain settings and synthetic restart context only; never headers or credentials.
     if (request.method === "POST" && request.url?.split("?")[0] === "/v1/messages") {
       let text = "";
       request.setEncoding("utf8");
@@ -146,6 +149,7 @@ export async function probeNativeSdk({
           model: body.model,
           effort: body.output_config?.effort ?? null,
         });
+        if (restarting) restartRequests.push(body.messages);
         ++requestCount;
         if (compactAdmitted) {
           ++compactProviderRequests;
@@ -281,78 +285,76 @@ export async function probeNativeSdk({
     killOwnedGroup();
   }, 20_000);
   try {
-    sdk = query({
-      prompt: input,
-      options: {
-        cwd,
-        env,
-        sessionId,
-        settingSources: [],
-        tools: withSubagent ? ["Bash", "Agent"] : ["Bash"],
-        plugins: [],
-        ...(cancelAt === "before-dispatch" || cancelAt === "queued"
-          ? {
-              hooks: {
-                PreCompact: [
-                  {
-                    hooks: [
-                      async () => {
-                        if (cancelAt === "queued") {
-                          if (cancellation.requested) await queuedHookHold;
-                          enterCompact();
-                          await queuedWritten;
-                        }
-                        await interrupt();
-                        return {};
-                      },
-                    ],
-                  },
-                ],
-              },
-            }
-          : {}),
-        ...(withSubagent
-          ? {
-              agents: {
-                "contract-child": {
-                  description: "Native contract child",
-                  prompt: "Run the fixed Bash contract marker, then finish.",
-                  tools: ["Bash"],
-                  model: "inherit",
-                  background: false,
+    const options = {
+      cwd,
+      env,
+      sessionId,
+      settingSources: [],
+      tools: withSubagent ? ["Bash", "Agent"] : ["Bash"],
+      plugins: [],
+      ...(cancelAt === "before-dispatch" || cancelAt === "queued"
+        ? {
+            hooks: {
+              PreCompact: [
+                {
+                  hooks: [
+                    async () => {
+                      if (cancelAt === "queued") {
+                        if (cancellation.requested) await queuedHookHold;
+                        enterCompact();
+                        await queuedWritten;
+                      }
+                      await interrupt();
+                      return {};
+                    },
+                  ],
                 },
-              },
-            }
-          : {}),
-        model: "claude-sonnet-5-5",
-        effort: "low",
-        includePartialMessages: true,
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
-        spawnClaudeCodeProcess: (options) => {
-          child = spawn(
-            "/usr/bin/python3",
-            [
-              fileURLToPath(new URL("./network-guard.py", import.meta.url)),
-              options.command,
-              ...options.args,
-            ],
-            {
-              cwd: options.cwd,
-              env: { ...options.env, NATIVE_CONTRACT_PORT: String(port) },
-              detached: true,
-              stdio: ["pipe", "pipe", "pipe"],
+              ],
             },
-          );
-          exited = new Promise((resolve, reject) => {
-            child.once("close", resolve);
-            child.once("error", reject);
-          });
-          child.stderr.resume();
-          return child;
-        },
+          }
+        : {}),
+      ...(withSubagent
+        ? {
+            agents: {
+              "contract-child": {
+                description: "Native contract child",
+                prompt: "Run the fixed Bash contract marker, then finish.",
+                tools: ["Bash"],
+                model: "inherit",
+                background: false,
+              },
+            },
+          }
+        : {}),
+      model: "claude-sonnet-5-5",
+      effort: "low",
+      includePartialMessages: true,
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+      spawnClaudeCodeProcess: (options) => {
+        child = spawn(
+          "/usr/bin/python3",
+          [
+            fileURLToPath(new URL("./network-guard.py", import.meta.url)),
+            options.command,
+            ...options.args,
+          ],
+          {
+            cwd: options.cwd,
+            env: { ...options.env, NATIVE_CONTRACT_PORT: String(port) },
+            detached: true,
+            stdio: ["pipe", "pipe", "pipe"],
+          },
+        );
+        exited = new Promise((resolve, reject) => {
+          child.once("close", resolve);
+          child.once("error", reject);
+        });
+        child.stderr.resume();
+        return child;
       },
-    });
+    };
+    sdk = query({ prompt: input, options });
     interrupt = async () => {
       cancelled = true;
       cancellation.requested = true;
@@ -409,7 +411,7 @@ export async function probeNativeSdk({
     if (interruptError) throw interruptError;
     if (timedOut) throw new Error("Native contract exceeded its owned deadline.");
     if (unexpectedRequest) throw new Error(`Unexpected local request: ${unexpectedRequest}`);
-    const allFiles = await files(config);
+    let allFiles = await files(config);
     const rootPath = allFiles.find((path) => basename(path) === `${sessionId}.jsonl`);
     if (!rootPath)
       throw new Error(
@@ -419,7 +421,81 @@ export async function probeNativeSdk({
     await fd.sync();
     await fd.close();
     await onRoot?.({ home, rootPath, sessionId, submittedUuid, compactUuid });
-    const source = await readFile(rootPath, "utf8");
+    let source = await readFile(rootPath, "utf8");
+    let restart;
+    if (withRestart) {
+      const prefix = source;
+      const childSnapshot = async () =>
+        Promise.all(
+          (await files(config))
+            .filter((path) => path.includes("/subagents/") && path.endsWith(".jsonl"))
+            .sort()
+            .map(async (path) => [path, await readFile(path, "utf8")]),
+        );
+      const beforeChildren = await childSnapshot();
+      const continuation = await withRestart({ home, rootPath, sessionId, submittedUuid });
+      if (typeof continuation !== "string" || continuation.length === 0)
+        throw new Error("Restart requires explicit synthetic continuation content.");
+      const continuationUuid = randomUUID();
+      const restartMessages = [];
+      const restartInput = {
+        async *[Symbol.asyncIterator]() {
+          yield {
+            type: "user",
+            uuid: continuationUuid,
+            session_id: sessionId,
+            parent_tool_use_id: null,
+            message: { role: "user", content: continuation },
+          };
+          await new Promise((resolve) => {
+            release = resolve;
+          });
+        },
+      };
+      const { sessionId: _initialSessionId, ...resumeOptions } = options;
+      restarting = true;
+      sdk = query({ prompt: restartInput, options: { ...resumeOptions, resume: sessionId } });
+      await sdk.accountInfo();
+      for await (const message of sdk) {
+        restartMessages.push(message);
+        if (message.type === "result") break;
+      }
+      release?.();
+      sdk.close();
+      await exited;
+      if (timedOut) throw new Error("Native restart contract exceeded its owned deadline.");
+      if (unexpectedRequest) throw new Error(`Unexpected local request: ${unexpectedRequest}`);
+      source = await readFile(rootPath, "utf8");
+      allFiles = await files(config);
+      const restartResult = restartMessages.find((message) => message.type === "result");
+      restart = {
+        requestCount: restartRequests.length,
+        requestMessages: restartRequests[0],
+        prefixPreserved: source.startsWith(prefix),
+        childFilesUnchanged:
+          JSON.stringify(beforeChildren) === JSON.stringify(await childSnapshot()),
+        childMessageCount: restartMessages.filter((message) => message.parent_tool_use_id != null)
+          .length,
+        taskStartedCount: restartMessages.filter(
+          (message) => message.type === "system" && message.subtype === "task_started",
+        ).length,
+        toolUseCount: restartMessages
+          .filter((message) => message.type === "assistant")
+          .flatMap((message) => message.message.content)
+          .filter((block) => block.type === "tool_use").length,
+        continuationCount: source
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line))
+          .filter(
+            (record) =>
+              record.type === "user" &&
+              record.uuid === continuationUuid &&
+              record.message?.content === continuation,
+          ).length,
+        result: { subtype: restartResult?.subtype, isError: restartResult?.is_error },
+      };
+    }
     const records = source
       .trim()
       .split("\n")
@@ -470,6 +546,7 @@ export async function probeNativeSdk({
     );
     return {
       account,
+      restart,
       requestCount,
       requestSettings,
       sessionId,
