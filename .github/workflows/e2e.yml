@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       webkit_reload_diagnostic:
-        description: Reproduce WebKit delete-active reload (30 iterations, stop on first failure; not qualification)
+        description: Capture first native error in frontend shard 1 cohort (10 independent runs, stop on first failure; not qualification)
         type: boolean
         default: false
 
@@ -62,14 +62,14 @@ jobs:
           DEBUG: pw:browser
         run: npm run test:e2e -- --shard=${{ matrix.shard }}/4
 
-      - name: Diagnose WebKit delete-active reload
+      - name: Diagnose frontend shard 1 cohort
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.webkit_reload_diagnostic && matrix.shard == 1 }}
         env:
           DEBUG: pw:browser
         run: |
-          for iteration in {1..30}; do
-            echo "WebKit reload diagnostic iteration ${iteration}/30"
-            npm run test:e2e -- --project frontend e2e/missing-orb-layout-frontend.e2e.test.ts --testNamePattern='^webkit: delete-active keeps the missing orb outside the sidebar and retains its URL$' || exit "$?"
+          for iteration in {1..10}; do
+            echo "Frontend cohort diagnostic iteration ${iteration}/10"
+            npm run test:e2e -- --project frontend --shard=1/4 || exit "$?"
           done
 
       - name: Capture browser failure host diagnostics

@@ -22,6 +22,7 @@ class BrowserEvidenceTest(unittest.TestCase):
         self.assertIn('  pull_request:\n  push:\n    branches:\n      - main\n', body)
         self.assertIn('  workflow_dispatch:\n    inputs:\n      webkit_reload_diagnostic:\n', body)
         self.assertRegex(body, r'webkit_reload_diagnostic:\n        description: [^\n]+\n        type: boolean\n        default: false\n')
+        self.assertIn('Capture first native error in frontend shard 1 cohort (10 independent runs, stop on first failure; not qualification)', body)
         self.assertIn('    name: E2E (${{ matrix.shard }}/4)', body)
         self.assertIn('    runs-on: ubuntu-24.04', body)
         self.assertIn('    timeout-minutes: 40', body)
@@ -33,16 +34,16 @@ class BrowserEvidenceTest(unittest.TestCase):
         full = workflow_steps['Run end-to-end test']
         self.assertIn("if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.webkit_reload_diagnostic) }}", full)
         self.assertIn('run: npm run test:e2e -- --shard=${{ matrix.shard }}/4', full)
-        diagnostic = workflow_steps['Diagnose WebKit delete-active reload']
+        diagnostic = workflow_steps['Diagnose frontend shard 1 cohort']
         self.assertIn("if: ${{ github.event_name == 'workflow_dispatch' && inputs.webkit_reload_diagnostic && matrix.shard == 1 }}", diagnostic)
         self.assertIn('DEBUG: pw:browser', diagnostic)
         self.assertNotIn('${{', diagnostic.split('run: |', 1)[1])
 
     def test_diagnostic_runs_independent_processes_and_stops_at_first_failure(self):
-        step = steps('e2e.yml')['Diagnose WebKit delete-active reload']
+        step = steps('e2e.yml')['Diagnose frontend shard 1 cohort']
         script = step.split('run: |\n', 1)[1]
         script = '\n'.join(line[10:] for line in script.splitlines())
-        expected = 'test:e2e -- --project frontend e2e/missing-orb-layout-frontend.e2e.test.ts --testNamePattern=^webkit: delete-active keeps the missing orb outside the sidebar and retains its URL$'
+        expected = 'test:e2e -- --project frontend --shard=1/4'
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             npm = root / 'npm'
@@ -51,7 +52,7 @@ class BrowserEvidenceTest(unittest.TestCase):
                            'count=$(wc -l < "$CALLS")\n'
                            'if [[ "$count" == "$FAIL_AT" ]]; then exit 17; fi\n')
             npm.chmod(0o700)
-            for fail_at, count, status in [('0', 30, 0), ('1', 1, 17), ('7', 7, 17)]:
+            for fail_at, count, status in [('0', 10, 0), ('1', 1, 17), ('7', 7, 17)]:
                 with self.subTest(fail_at=fail_at):
                     calls = root / f'calls-{fail_at}'
                     result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script],
@@ -60,7 +61,7 @@ class BrowserEvidenceTest(unittest.TestCase):
                                             capture_output=True, text=True)
                     self.assertEqual(result.returncode, status, result.stderr)
                     self.assertEqual(calls.read_text().splitlines(), ['run ' + expected] * count)
-                    self.assertIn(f'WebKit reload diagnostic iteration {count}/30', result.stdout)
+                    self.assertIn(f'Frontend cohort diagnostic iteration {count}/10', result.stdout)
 
     def test_deploy_uploads_only_sanitized_mcp_failure_summaries(self):
         step = steps('deploy.yml')['Upload MCP failure summaries']
