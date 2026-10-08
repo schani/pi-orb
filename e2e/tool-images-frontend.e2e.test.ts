@@ -221,11 +221,109 @@ describe.each(["chromium", "webkit"] as const)("tool-returned image previews · 
   it("preserves an image drawer collapse across an unrelated metadata poll", async () => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await page.clock.install();
+    // Own collapse/poll semantics, not unrelated media admission or tail scrolling.
+    await page.addInitScript(`(() => {
+      const events = [];
+      Reflect.set(globalThis, "__imageCollapseEvents", events);
+      for (const type of ["pointerdown", "pointerup", "click", "toggle"])
+        document.addEventListener(
+          type,
+          (event) => {
+            if (!(event.target instanceof Element)) return;
+            const drawer = event.target.closest("details.tool-image-activity");
+            if (drawer instanceof HTMLDetailsElement) events.push({ type, open: drawer.open });
+          },
+          true,
+        );
+    })();`);
+    const timestamp = "2026-10-08T12:00:00.000Z";
+    const records: HistoryRecord[] = [
+      {
+        id: "image-collapse-root",
+        parentId: null,
+        timestamp,
+        type: "message",
+        role: "user",
+        content: [{ type: "text", text: "Image collapse." }],
+        overflow: {},
+      },
+      {
+        id: "image-collapse-call",
+        parentId: "image-collapse-root",
+        timestamp,
+        type: "message",
+        role: "assistant",
+        content: [
+          {
+            type: "tool_call",
+            callId: "image-collapse",
+            name: "read",
+            arguments: { path: "artifacts/dashboard-preview.svg" },
+          },
+        ],
+        overflow: {},
+      },
+      {
+        id: "image-collapse-result",
+        parentId: "image-collapse-call",
+        timestamp,
+        type: "message",
+        role: "tool",
+        content: [
+          {
+            type: "tool_result",
+            callId: "image-collapse",
+            content: [
+              { type: "text", text: "Dashboard preview (960 × 540)" },
+              {
+                type: "image",
+                mediaType: "image/png",
+                data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jD1sAAAAASUVORK5CYII=",
+              },
+            ],
+          },
+        ],
+        overflow: {},
+      },
+    ];
+    const projected = await projectFixtureHistory(page, ORB_ID, records);
+    await page.route(`**/api/v1/orbs/${ORB_ID}/history`, async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.records = projected;
+      body.headId = records.at(-1)?.id;
+      body.cursor = body.headId;
+      await route.fulfill({ response, json: body });
+    });
+    let releaseImage!: () => void;
+    const imageGate = new Promise<void>((resolve) => {
+      releaseImage = resolve;
+    });
+    const imageRequested = page.waitForRequest((request) =>
+      new URL(request.url()).pathname.includes(`/orbs/${ORB_ID}/images/`),
+    );
+    await page.route(`**/api/v1/orbs/${ORB_ID}/images/**`, async (route) => {
+      await imageGate;
+      await route.fallback();
+    });
+    let releasePoll!: () => void;
+    const pollGate = new Promise<void>((resolve) => {
+      releasePoll = resolve;
+    });
     let refreshed = false;
+    let markPollRequested!: () => void;
+    const pollRequested = new Promise<void>((resolve) => {
+      markPollRequested = resolve;
+    });
     await page.route(`**/api/v1/orbs/${ORB_ID}`, async (route) => {
       const response = await route.fetch();
       const body = await response.json();
-      if (refreshed) body.name = "Image drawer poll";
+      body.state = "stopped";
+      if (refreshed) {
+        markPollRequested();
+        await pollGate;
+        body.name = "Image drawer poll";
+      }
       await route.fulfill({ response, json: body });
     });
     try {
@@ -233,15 +331,62 @@ describe.each(["chromium", "webkit"] as const)("tool-returned image previews · 
       const read = imageActivity(page, "artifacts/dashboard-preview.svg");
       const image = read.getByRole("img", { name: "Image returned by read", exact: true });
       await expectPage(page.locator(".orb-name")).toBeVisible();
+      await imageRequested;
+      await expectPage(image).toHaveCount(0);
+      releaseImage();
+      await expectPage(image).toBeVisible();
+      await expectPage
+        .poll(() =>
+          image.evaluate(
+            (element) =>
+              Reflect.get(element, "complete") && Reflect.get(element, "naturalWidth") > 0,
+          ),
+        )
+        .toBe(true);
+      await expectPage(
+        read.getByText("Dashboard preview (960 × 540)", { exact: true }),
+      ).toBeVisible();
+      await page.evaluate(() => Reflect.get(globalThis, "document").fonts.ready);
+      expectPage(
+        await page.locator(".orb-transcript-scroll").evaluate((element) => ({
+          overflow: element.scrollHeight > element.clientHeight,
+          scrollTop: element.scrollTop,
+        })),
+      ).toEqual({ overflow: false, scrollTop: 0 });
+      const drawer = await read.elementHandle();
       await read.locator(":scope > summary").click();
+      await expectPage(read).not.toHaveAttribute("open", "");
       await expectPage(image).toBeHidden();
 
       refreshed = true;
       await page.clock.runFor(2100);
+      await pollRequested;
+      await expectPage(read).not.toHaveAttribute("open", "");
+      releasePoll();
       await expectPage(page.locator(".orb-name")).toHaveText("Image drawer poll");
+      expectPage(await read.evaluate((element, previous) => element === previous, drawer)).toBe(
+        true,
+      );
       await expectPage(read).not.toHaveAttribute("open", "");
       await expectPage(image).toBeHidden();
+    } catch (error) {
+      const evidence = await page
+        .evaluate(`({
+          events: Reflect.get(globalThis, "__imageCollapseEvents"),
+          drawers: [...document.querySelectorAll("details.tool-image-activity")].map(element => ({
+            open: element.hasAttribute("open"), connected: element.isConnected,
+          })),
+        })`)
+        .catch(() => ({ unavailable: true }));
+      await mkdir("test-failures", { recursive: true });
+      await writeFile(
+        `test-failures/image-collapse-${engine}-${Date.now()}.json`,
+        JSON.stringify({ replayable: false, engine, refreshed, evidence }, null, 2),
+      );
+      throw error;
     } finally {
+      releaseImage();
+      releasePoll();
       await page.close();
     }
   });

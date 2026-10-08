@@ -90,6 +90,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      - name: Upload subagent native transport success audits
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: subagent-native-transport-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-failures/subagent-*/success.json
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Upload missing-orb navigation failure evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)

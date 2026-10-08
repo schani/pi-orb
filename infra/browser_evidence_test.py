@@ -93,6 +93,18 @@ class BrowserEvidenceTest(unittest.TestCase):
                 self.assertEqual(calls.read_text().splitlines(),
                                  ['run test:e2e -- --shard=2/4'])
 
+    def test_native_transport_success_upload_is_always_and_exactly_safe_projection(self):
+        step = steps('e2e.yml')['Upload subagent native transport success audits']
+        self.assertIn('if: always()', step)
+        self.assertIn('uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a', step)
+        self.assertEqual(re.search(r'^          path: (.+)$', step, re.M).group(1),
+                         'test-failures/subagent-*/success.json')
+        self.assertIn('name: subagent-native-transport-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}', step)
+        self.assertIn('if-no-files-found: ignore', step)
+        self.assertIn('retention-days: 14', step)
+        for forbidden in ('native-audit/', '**', 'node-auth', '.log'):
+            self.assertNotIn(forbidden, step)
+
     def test_deploy_uploads_only_sanitized_mcp_failure_summaries(self):
         step = steps('deploy.yml')['Upload MCP failure summaries']
         self.assertIn('if: failure()', step)

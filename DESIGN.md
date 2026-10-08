@@ -236,6 +236,7 @@ Tracking:
 - [docs/postmortems/2026-10-06-claude-orb-preemption.md](docs/postmortems/2026-10-06-claude-orb-preemption.md) — two Spot preemptions; Claude recovery restores context without automatic continuation
 - [docs/postmortems/2026-10-06-claude-publication-order.md](docs/postmortems/2026-10-06-claude-publication-order.md) — late native-only prefixes blocked exact-identity stream retirement; durable ownership lookahead and attribution limits
 - [docs/postmortems/2026-10-06-empty-live-thinking.md](docs/postmortems/2026-10-06-empty-live-thinking.md) — empty live reasoning visibility gap; committed suppression verified, screenshot mechanism unproved
+- [docs/postmortems/2026-10-08-runtime-apt-size-mismatch.md](docs/postmortems/2026-10-08-runtime-apt-size-mismatch.md) — Debian package size rejection is not covered by APT retries; bounded verified acquisition precedes one offline install
 - [docs/postmortems/2026-10-07-runner-apt-timeout.md](docs/postmortems/2026-10-07-runner-apt-timeout.md) — hosted dependency installation exhausted the E2E budget; signed HTTPS Ubuntu archive before APT
 - [docs/postmortems/](docs/postmortems/) — incident forensics; design docs keep the resulting rules and link here
 - [docs/postmortems/2026-09-09-stale-thinking.md](docs/postmortems/2026-09-09-stale-thinking.md) — message-index reuse left stale green thinking below newer commands; explicit streaming retirement

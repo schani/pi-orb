@@ -38,25 +38,6 @@ it("saves bounded local metadata before independent probes and excludes private 
       phase: "continuation",
       artifact,
       logs: [`lifecycle: orb=${orb} archive-waiting-for-work SECRET`, "SECRET"],
-      inferenceWire: Array.from({ length: 90 }, (_, sequence) => ({
-        sequence,
-        method: "POST",
-        path: "codex_responses",
-        model: "luna",
-        marker: "SECRET",
-        inputCount: 1,
-        bodyBytes: 100,
-        encoding: "zstd",
-        enteredAt: 123,
-        bodyArrivedAt: 124,
-        upstreamEnteredAt: 125,
-        headersAt: null,
-        firstByteAt: null,
-        responseBytes: 0,
-        terminal: null,
-        headers: "SECRET",
-        responseError: sequence === 89 ? "invalid_body" : "SECRET",
-      })),
       probes: {
         health: async () => {
           localSnapshot = JSON.parse(readFileSync(artifact, "utf8"));
@@ -101,14 +82,7 @@ it("saves bounded local metadata before independent probes and excludes private 
     expect(localSnapshot.root.entries).toHaveLength(30);
     expect(localSnapshot.root.truncated).toBe(true);
     expect(localSnapshot.lifecycle).toEqual(["archive-waiting-for-work"]);
-    expect(localSnapshot.inferenceWire).toHaveLength(64);
-    expect(localSnapshot.inferenceWire.at(-1).responseError).toBe("invalid_body");
-    expect(localSnapshot.inferenceWire[0]).toMatchObject({
-      sequence: 26,
-      marker: null,
-      upstreamEnteredAt: 125,
-      responseError: null,
-    });
+    expect(localSnapshot.nativeAudit).toEqual({ state: "audit_missing" });
     expect(seen.sort()).toEqual(["health", "history", "model", "names", "orb"]);
     const text = readFileSync(artifact, "utf8");
     const saved = JSON.parse(text);
