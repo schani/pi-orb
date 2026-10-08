@@ -52,7 +52,18 @@ jobs:
         run: npm run test:e2e:install
 
       - name: Run end-to-end test
+        env:
+          DEBUG: pw:browser
         run: npm run test:e2e -- --shard=${{ matrix.shard }}/4
+
+      - name: Capture browser failure host diagnostics
+        if: failure()
+        run: |
+          df -h
+          free -m
+          ps -eo pid,ppid,comm,rss
+          sudo dmesg --ctime | grep -Ei 'webkit|MiniBrowser|segfault|out of memory|oom-kill|killed process' || true
+          dpkg-query -W 'libglib2.0-*' 'libsoup-*' || true
 
       - name: Upload deterministic failure traces
         if: failure()
@@ -64,6 +75,18 @@ jobs:
             test-failures/profile-login/failure.json
             test-failures/full-slice-upload/failure.json
             test-failures/subagent-*/failure.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload missing-orb navigation failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: e2e-missing-orb-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-failures/missing-orb-*/failure.json
+            test-failures/missing-orb-*/desktop.png
+            test-failures/missing-orb-*/geometry.json
           if-no-files-found: ignore
           retention-days: 14
 

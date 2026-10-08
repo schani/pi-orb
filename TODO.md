@@ -8,6 +8,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Resolve PR 66 WebKit navigation failures before merge/deployment** (`docs/postmortems/2026-10-08-webkit-reload-internal-error.md`). Preserve E2E37729016278 evidence; establish and test a safe synchronization/isolation or native-platform correction. Current changes retain diagnostics only. Reload recovery remains required; no CI rerun, navigation retry or passing local probe clears this blocker.
+
 - **Qualify Claude automatic compute recovery** (2026-10-06; `docs/lifecycle.md`, `docs/testing.md`). Complete parent review and frozen-source full repository/process E2E gates before deployment. The isolated HTTP/WS contract now covers complete broker/checkout/hook boot, missing lifetime, repeated guard and Stop races. Preserve the original Pi inbox-abort RED evidence and unknown production 62aa attribution; no operational recovery is authorized by this task.
 
 - **Complete GitHub qualification for the empty live thinking simplification** (locally qualified 2026-10-07, America/Cancun; not deployment-ready; `docs/runtime-protocol.md`, `docs/testing.md`, `docs/postmortems/2026-10-06-empty-live-thinking.md`). Reviewed frozen code passes focused unit/component, scoped DST, targeted browser and root typecheck/lint checks. Full suites were not rerun locally; run updated normal GitHub CI/E2E after commit/push, as requested, and complete normal release gates. Historical `2fe696f` CI/E2E qualifies only the initial contract. Preserve attribution limits; recurrence evidence must contain only content-free live block IDs/frame order and browser/runtime revisions, never tokens or encrypted payloads.

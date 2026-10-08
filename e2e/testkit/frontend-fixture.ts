@@ -1,4 +1,12 @@
-import type { ConsoleMessage, Frame, Locator, Page, Request, Response } from "@playwright/test";
+import type {
+  ConsoleMessage,
+  Frame,
+  Locator,
+  Page,
+  Request,
+  Response,
+  WebSocket,
+} from "@playwright/test";
 
 const MAX_OBSERVATIONS = 12;
 const MAX_OBSERVATION_LENGTH = 240;
@@ -20,7 +28,7 @@ function sanitizeUrl(value: string): string {
 
 function sanitizeText(value: string): string {
   const sanitized = value
-    .replace(/https?:\/\/[^\s"')]+/gu, (url) => sanitizeUrl(url))
+    .replace(/(?:https?|wss?):\/\/[^\s"')]+/gu, (url) => sanitizeUrl(url))
     .replace(/((?:\/|\.\/|\.\.\/)[^\s"'()?#]+)[?#][^\s"'()]*/gu, "$1")
     .replace(/\b(Bearer)\s+[^\s"']+/giu, "$1 <redacted>")
     .replace(
@@ -54,6 +62,7 @@ function isProjects(request: Request): boolean {
 
 export function observeFrontendBoot(page: Page): {
   checkpoint(name: string): void;
+  dispose(): void;
   wait<T>(pending: Promise<T>): Promise<T>;
 } {
   const checkpoints: string[] = [];
@@ -70,6 +79,13 @@ export function observeFrontendBoot(page: Page): {
   let projectRequests = 0;
   let moduleRequests = 0;
   let disposed = false;
+  const browser = page.context().browser();
+  let disconnections = 0;
+  let crashes = 0;
+  let openedSockets = 0;
+  let closedSockets = 0;
+  let socketErrors = 0;
+  const sockets = new Map<WebSocket, { url: string; dispose(): void }>();
   let mainFrameUrl = sanitizeUrl(page.url());
   const record = (value: string) => {
     observations.push(sanitizeText(value));
@@ -90,7 +106,34 @@ export function observeFrontendBoot(page: Page): {
     finishedRequests += 1;
   };
   const onPageError = (error: Error) => record(`pageerror: ${error.name}: ${error.message}`);
-  const onCrash = () => record("page: crashed");
+  const onCrash = () => {
+    crashes += 1;
+    record("page: crashed");
+  };
+  const onDisconnected = () => {
+    disconnections += 1;
+    record("browser: disconnected");
+  };
+  const onWebSocket = (socket: WebSocket) => {
+    openedSockets += 1;
+    const url = sanitizeUrl(socket.url());
+    const onError = (error: string) => {
+      socketErrors += 1;
+      record(`websocket: ${url}: ${error}`);
+    };
+    const disposeSocket = () => {
+      socket.off("socketerror", onError);
+      socket.off("close", onClose);
+      sockets.delete(socket);
+    };
+    const onClose = () => {
+      closedSockets += 1;
+      disposeSocket();
+    };
+    sockets.set(socket, { url, dispose: disposeSocket });
+    socket.on("socketerror", onError);
+    socket.on("close", onClose);
+  };
   const onConsole = (message: ConsoleMessage) => {
     if (message.type() === "error") record(`console: ${message.text()}`);
   };
@@ -133,6 +176,9 @@ export function observeFrontendBoot(page: Page): {
     page.off("requestfailed", onRequestFailed);
     page.off("response", onResponse);
     page.off("framenavigated", onFrameNavigated);
+    page.off("websocket", onWebSocket);
+    browser?.off("disconnected", onDisconnected);
+    for (const socket of sockets.values()) socket.dispose();
   };
   page.on("request", onRequest);
   page.on("requestfinished", onRequestFinished);
@@ -142,6 +188,8 @@ export function observeFrontendBoot(page: Page): {
   page.on("requestfailed", onRequestFailed);
   page.on("response", onResponse);
   page.on("framenavigated", onFrameNavigated);
+  page.on("websocket", onWebSocket);
+  browser?.on("disconnected", onDisconnected);
 
   const snapshot = async () => {
     let rootTimer: ReturnType<typeof setTimeout> | undefined;
@@ -182,6 +230,14 @@ export function observeFrontendBoot(page: Page): {
       navigations,
       checkpoints,
       root,
+      browser: { connected: browser?.isConnected() ?? false, disconnections },
+      page: { closed: page.isClosed(), crashes },
+      websockets: {
+        opened: openedSockets,
+        closed: closedSockets,
+        errors: socketErrors,
+        pending: [...sockets.values()].slice(-MAX_PENDING_REQUESTS).map(({ url }) => url),
+      },
       requests: {
         started: startedRequests,
         finished: finishedRequests,
@@ -202,6 +258,7 @@ export function observeFrontendBoot(page: Page): {
   const report = async () => JSON.stringify(await snapshot());
 
   return {
+    dispose,
     checkpoint(name: string) {
       checkpoints.push(sanitizeText(name));
     },
