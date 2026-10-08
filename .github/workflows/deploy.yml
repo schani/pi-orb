@@ -86,6 +86,9 @@ jobs:
         with:
           node-version: '24.6.0'
           cache: npm
+      - name: Use the signed Ubuntu archive
+        run: sudo python3 infra/runner_apt.py /etc/apt/sources.list.d/ubuntu.sources
+
       - name: Install release prerequisites and checksum-pinned OpenTofu
         run: |
           set -euo pipefail

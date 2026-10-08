@@ -150,6 +150,12 @@ describe("dashboard layout contract", () => {
     );
   });
 
+  it("sizes single-column project sections to content without stretching into spare height", () => {
+    const singleColumn = /@media \(width < 632px\)\s*\{\s*\.dashboard\s*\{([^}]*)\}/.exec(css)?.[1];
+    expect(singleColumn).toContain("grid-auto-rows: max-content");
+    expect(singleColumn).toContain("align-content: start");
+  });
+
   it("rules the board from the totals strip to the bottom-pinned footer", () => {
     // 24px + 24px of chrome, so a one-orb column still draws full-height rules.
     expect(rule(".dashboard")).toContain("min-height: calc(100dvh - 48px)");

@@ -19,7 +19,7 @@ it.skipIf(!url)("resource snapshot atomicity and admission on real PostgreSQL", 
   try {
     expect((await client.query("CREATE TABLE orbs(id uuid PRIMARY KEY)")).isOk()).toBe(true);
     const migration = await readFile(
-      new URL("./migrations/036_resource_snapshots.sql", import.meta.url),
+      new URL("./migrations/037_resource_snapshots.sql", import.meta.url),
       "utf8",
     );
     expect((await client.transaction(async (_query, execute) => execute(migration))).isOk()).toBe(

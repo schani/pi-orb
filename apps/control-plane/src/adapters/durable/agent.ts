@@ -58,11 +58,13 @@ import {
 import type { AgentLiveView, AgentSessionFacade, AgentSnapshot } from "../../domain/agent-ports.ts";
 import type { RuntimeClientError } from "../../domain/errors.ts";
 import type { DeliverMessageClientRequest } from "../../domain/ports.ts";
+import { storageAuthorityError } from "../durable-pg/storage-boundary.ts";
 import { durableError } from "./manager.ts";
 import { fenceModels } from "./model-fence.ts";
 import { nativeInputContent } from "./native-input.ts";
 import { activeSubagents, type PublicEntryReceipt, projectHistory } from "./projection.ts";
 import { promptExtension } from "./prompt.ts";
+import { startupRuntimeError } from "./startup.ts";
 
 const context = BACKGROUND_CONTEXT;
 type Receipt = {
@@ -478,7 +480,12 @@ export class DurableAgent implements AgentSessionFacade {
         if (options.resume !== false) harness.resume();
         return ok(agent);
       })(),
-      () => durableError(`central Harness initialization failed (${stage})`),
+      (error) => {
+        const terminal = storageAuthorityError(error);
+        return terminal
+          ? startupRuntimeError(terminal)
+          : durableError(`central Harness initialization failed (${stage})`);
+      },
     )
       .andThen((result) => result)
       .orElse((error) => {
@@ -804,6 +811,7 @@ export class DurableAgent implements AgentSessionFacade {
             {
               blockId: `${this.session.id}:generation:${this.live.run?.taskId}:${this.live.generation?.attempt}:${index}`,
               blockType: block.type === "text" ? ("text" as const) : ("reasoning" as const),
+              contentIndex: index,
               revision: this.revision,
               text: block.type === "text" ? block.text : block.thinking,
             },

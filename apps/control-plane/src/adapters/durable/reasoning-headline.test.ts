@@ -133,6 +133,7 @@ it("publishes reasoning headlines through live updates and reconnect without rep
     const block = live.blocks.find((block) => block.blockType === "reasoning");
     if (block === undefined) throw new Error("Held reasoning block disappeared");
     expect(block.text).toBe(thinking + appended);
+    expect.soft(block).toMatchObject({ contentIndex: 0 });
     const h = makeHarness();
     h.store.seedOrb({ ...makeOrbRow("orb", "project", "stopped"), harnessSessionId: sessionId });
     const deps = {

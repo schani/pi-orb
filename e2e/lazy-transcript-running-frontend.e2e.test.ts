@@ -150,6 +150,17 @@ it.each(["chromium", "webkit"] as const)(
         );
         await expect(final.locator(".reasoning-body h2")).toHaveText("Final plan");
         await expect(final.locator(".reasoning-body strong")).toHaveText("Verify fix");
+        const commit = frames
+          .map((payload) => JSON.parse(payload))
+          .find(
+            (frame) => frame.type === "history.record" && frame.retiredBlockIds.includes(blockId),
+          );
+        expect(commit?.detailAliases).toEqual([{ blockId, detailKey: `${commit?.record.id}:0` }]);
+        const patches = frames
+          .map((payload) => JSON.parse(payload))
+          .filter((frame) => frame.type === "runtime.event" && frame.event.type === "output_patch");
+        expect(patches.every((frame) => !("contentIndex" in frame.event))).toBe(true);
+        expect(patches.every((frame) => !("reasoningVisible" in frame.event))).toBe(true);
         const lateResponse = page.waitForResponse(
           (response) =>
             new URL(response.url()).pathname ===

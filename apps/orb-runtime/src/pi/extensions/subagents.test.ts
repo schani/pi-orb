@@ -21,7 +21,53 @@ vi.mock("@gotgenes/pi-subagents/extension", () => ({
 vi.mock("@gotgenes/pi-subagents", () => ({ getSubagentsService: () => undefined }));
 
 import { ok } from "neverthrow";
+import { StreamTelemetry } from "../stream-telemetry.ts";
+import { createOrbExtensions } from "./index.ts";
 import { createSubagentsExtension, type SubagentHost } from "./subagents.ts";
+
+it("inherits isolated stream observers into native children", () => {
+  const telemetry = new StreamTelemetry(() => 100);
+  const root = createOrbExtensions({
+    cwd: "/test",
+    subagents: {} as SubagentHost,
+    streams: {
+      telemetry,
+      operationId: () => "op",
+      rootSessionId: () => "root",
+      audit: () => ok(undefined),
+      failed: () => expect.fail("audit failed"),
+    },
+  });
+  const named = (extensions: InlineExtension[], name: string) => {
+    const extension = extensions.find((item) => typeof item !== "function" && item.name === name);
+    if (!extension || typeof extension === "function") throw new Error(`missing ${name}`);
+    return extension.factory;
+  };
+  named(root, "pi-orb:subagents")({ on: () => {}, events: { on: () => () => {} } } as never);
+  if (!upstream.options) throw new Error("missing child extensions");
+  const child = upstream.options.childExtensions;
+  const invoke = (extensions: InlineExtension[], id: string) => {
+    const handlers = new Map<string, (event: never, context: never) => void>();
+    named(
+      extensions,
+      "pi-orb:stream-telemetry",
+    )({
+      on: (name: string, handler: (event: never, context: never) => void) =>
+        handlers.set(name, handler),
+    } as never);
+    handlers.get("before_provider_request")?.(
+      {} as never,
+      { sessionManager: { getSessionId: () => id } } as never,
+    );
+  };
+  invoke(root, "root");
+  invoke(child, "child");
+  expect(telemetry.snapshot()).toMatchObject([
+    { sessionId: "root" },
+    { sessionId: "child", parentSessionId: "root" },
+  ]);
+  expect(telemetry.snapshot()[0]).not.toHaveProperty("parentSessionId");
+});
 
 type Handler = (data: unknown) => void;
 

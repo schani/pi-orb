@@ -1,5 +1,10 @@
 # Immutable compute replacement
 
+## Claude uncertain-worker exception
+
+**Decision — 2026-10-06; implemented locally, undeployed.** The exact typed uncertain-worker guard may claim one automatic replacement per stable retained ownership episode, rather than requiring a new user wake. It reuses the existing discard intent with reason `claude_recovery`, revokes old authorization atomically, and enters `starting`. Finalization advances the state version and records verified disposal proof before provisioning. All other failures retain the ordinary failed/no-autonomous-replacement rule. Episode ledger, command/generation fences, receipt barrier and edge observability: `docs/lifecycle.md`. Fresh schema applies `033_claude_compute_recovery.sql` after `032_orb_last_ready_at.sql`; recovery remains an undeployed draft.
+
+
 Status: **decided 2026-08-12; implemented locally; release validation remains.** Provider and lifecycle replacement are incarnation-fenced, generation-fenced, deterministic under simulated races, and preserve the authoritative workspace. GCE launches the runtime directly from an exact native Debian image and never repairs compute in place. A terminally failed orb disposes its compute; an explicit Start or queued-message wake provisions a clean incarnation on the retained workspace. A host-specification update replaces stopped compute on its next Start without bouncing a running orb.
 
 Incidents: `docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md` and `docs/postmortems/2026-08-12-spot-preemption-corrupt-entrypoint-layer.md`.

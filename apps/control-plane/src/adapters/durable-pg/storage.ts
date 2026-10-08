@@ -168,6 +168,7 @@ export class PgStorage implements Storage {
       }
       rejectStorage(
         error instanceof StorageRejected ? error.message : "Durable storage open failed",
+        { cause: error instanceof StorageRejected ? error.cause : error },
       );
     }
   }
@@ -867,7 +868,8 @@ export class PgStorage implements Storage {
           }
           content = { kind: "base", version: stored.version, value: stored.value };
         } catch (error) {
-          if (error instanceof StorageRejected) rejectStorage(error.message);
+          if (error instanceof StorageRejected)
+            rejectStorage(error.message, { cause: error.cause });
           rejectStorage(`Document copy ${id} was rejected`, { cause: error });
         }
       }

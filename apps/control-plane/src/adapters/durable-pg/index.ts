@@ -5,15 +5,24 @@ import type { StoreError } from "../../domain/errors.ts";
 import type { PostgreSQLClient } from "../pg/client.ts";
 import { executor, type Query, type SqlDatabase, type SqlExecutor } from "./executor.ts";
 import { PgStorage } from "./storage.ts";
-import { rejectStorage } from "./storage-boundary.ts";
+import { rejectStorage, storageAuthorityError } from "./storage-boundary.ts";
 
 export type AuthorityError = {
   type: "authority_error";
-  code: "unavailable" | "stale_owner" | "busy" | "missing" | "projection" | "closed";
+  code:
+    | "unavailable"
+    | "stale_owner"
+    | "busy"
+    | "missing"
+    | "projection"
+    | "closed"
+    | "legacy_backend"
+    | "history_integrity";
   message: string;
 };
 export type Ownership = { orbId: string; ownerId: string; fence: number; admissionVersion: number };
 export type CommitOptions = {
+  admit?(query: Query): Promise<Result<void, AuthorityError | StoreError>>;
   project(
     query: Query,
     writes: readonly StorageWrite[],
@@ -59,6 +68,7 @@ export class PgDurableAuthority {
     admissionVersion: number,
     now: number,
     leaseUntil: number,
+    admit?: (query: Query) => Promise<Result<void, AuthorityError | StoreError>>,
   ): ResultAsync<Ownership, AuthorityError> {
     return this.db
       .transaction<Ownership, AuthorityError>(async (query) => {
@@ -81,6 +91,9 @@ export class PgDurableAuthority {
         if (row?.archived) return err(failure("closed", "Private authority is archived"));
         if (row && Number(row.lease_until) > clock.value && row.owner_id !== ownerId)
           return err(failure("busy", "Orb agent already owned"));
+        const admitted = await admit?.(query);
+        if (admitted?.isErr())
+          return err(admitted.error.type === "authority_error" ? admitted.error : unavailable());
         const fence = row ? Number(row.fence) + 1 : 1;
         const write = await query(
           `INSERT INTO durable_pg_owners(orb_id,owner_id,fence,admission_version,lease_until)
@@ -268,13 +281,17 @@ export class PgDurableAuthority {
         const result = await this.db.transaction<number, AuthorityError>(async (query) => {
           const guarded = await this.guard(query, ownership, draining);
           if (guarded.isErr()) return err(guarded.error);
+          const admitted = await options?.admit?.(query);
+          if (admitted?.isErr())
+            return err(admitted.error.type === "authority_error" ? admitted.error : unavailable());
           const id = await query(
             "UPDATE durable_pg_durable_metadata SET next_id=(next_id::bigint+1)::text WHERE orb_id=$1 RETURNING (next_id::bigint-1)::text AS id",
             [orbId],
           );
           return id.isErr() ? err(unavailable()) : ok(Number(id.value.rows[0]?.id));
         });
-        if (result.isErr()) rejectStorage("Durable ID allocation rejected");
+        if (result.isErr())
+          rejectStorage("Durable ID allocation rejected", { cause: result.error });
         return result.value;
       },
       transaction: async <T>(callback: (executor: SqlExecutor) => Promise<T>): Promise<T> => {
@@ -282,12 +299,16 @@ export class PgDurableAuthority {
         const result = await this.db.transaction<T, AuthorityError>(async (query) => {
           const guarded = await this.guard(query, ownership, draining);
           if (guarded.isErr()) return err(guarded.error);
+          const admitted = await options.admit?.(query);
+          if (admitted?.isErr())
+            return err(admitted.error.type === "authority_error" ? admitted.error : unavailable());
           const run = await ResultAsync.fromPromise(
             (async () => {
               await options.checkpoint?.("before_native");
               return callback(executor(query, orbId));
             })(),
             (error) =>
+              storageAuthorityError(error) ??
               failure(
                 "projection",
                 error instanceof StorageRejected ? error.message : "Durable transaction rejected",
@@ -300,6 +321,7 @@ export class PgDurableAuthority {
             result.error.type === "authority_error"
               ? result.error.message
               : "Durable commit rejected",
+            { cause: result.error },
           );
         if (typeof result.value === "number") {
           // Notification failure cannot turn an acknowledged database commit into a rollback.
@@ -316,12 +338,14 @@ export class PgDurableAuthority {
         if (!options) rejectStorage("Read-only authority");
         await options.checkpoint?.("after_native");
         const result = await options.project(transaction.query, writes, seq);
-        if (result.isErr()) rejectStorage("Public history projection rejected");
+        if (result.isErr())
+          rejectStorage("Public history projection rejected", { cause: result.error });
         await options.checkpoint?.("after_projection");
       },
     };
-    return ResultAsync.fromPromise(PgStorage.open(database), () =>
-      failure("missing", "Private authority is missing"),
+    return ResultAsync.fromPromise(
+      PgStorage.open(database),
+      (error) => storageAuthorityError(error) ?? failure("missing", "Private authority is missing"),
     ).map((storage) => {
       if (ownership)
         this.drains.set(storage, {

@@ -51,7 +51,7 @@ export function scopedSql(sql: string): string {
 export function executor(query: Query, orbId: string): SqlExecutor {
   const all = async <T>(sql: string, ...values: SqlValue[]): Promise<T[]> => {
     const result = await query(scopedSql(sql), [orbId, ...values]);
-    if (result.isErr()) rejectStorage("Durable database operation failed");
+    if (result.isErr()) rejectStorage("Durable database operation failed", { cause: result.error });
     // bigint is textual in pg but numeric in PGlite; normalize only typed SQL numeric columns.
     return result.value.rows.map((row) =>
       Object.fromEntries(

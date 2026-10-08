@@ -7,6 +7,7 @@ import {
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
 import { err, Result } from "neverthrow";
+import { createStreamTelemetryExtension, type StreamTelemetryDeps } from "./stream-telemetry.ts";
 import { createSubagentsExtension, type SubagentHost } from "./subagents.ts";
 
 export function activateCodemode(
@@ -25,8 +26,14 @@ export function activateCodemode(
 export type NativeMcpExtensionDeps = ExtensionFactory;
 
 /** Each factory binds to its own Pi session; child connections never share root ownership. */
-function nativeExtensions(mcp?: NativeMcpExtensionDeps): InlineExtension[] {
+function nativeExtensions(
+  mcp?: NativeMcpExtensionDeps,
+  streams?: StreamTelemetryDeps,
+): InlineExtension[] {
   return [
+    ...(streams
+      ? [{ name: "pi-orb:stream-telemetry", factory: createStreamTelemetryExtension(streams) }]
+      : []),
     {
       name: "pi-orb:mcp",
       factory: mcp ?? createMcpExtension({ loadConfig: () => ({ servers: [], errors: [] }) }),
@@ -41,16 +48,21 @@ export function createOrbExtensions(deps: {
   cwd: string;
   mcp?: NativeMcpExtensionDeps;
   subagents?: SubagentHost;
+  streams?: StreamTelemetryDeps;
 }): InlineExtension[] {
   return [
     ...(deps.subagents
       ? [
           {
             name: "pi-orb:subagents",
-            factory: createSubagentsExtension(deps.subagents, deps.cwd, nativeExtensions(deps.mcp)),
+            factory: createSubagentsExtension(
+              deps.subagents,
+              deps.cwd,
+              nativeExtensions(deps.mcp, deps.streams),
+            ),
           },
         ]
       : []),
-    ...nativeExtensions(deps.mcp),
+    ...nativeExtensions(deps.mcp, deps.streams),
   ];
 }

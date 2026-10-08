@@ -48,6 +48,7 @@ it("reduces live headline replacements independently of hidden reasoning text", 
           operationId: "op",
           blockId: "b",
           blockType: "reasoning",
+
           revision: 1,
           headline,
           patch: { type: "replace", text: "" },

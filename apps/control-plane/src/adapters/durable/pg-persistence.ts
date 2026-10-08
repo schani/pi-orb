@@ -1,15 +1,16 @@
 import { randomUUID } from "node:crypto";
 import type { SimulationTask } from "determined";
-import { errAsync, okAsync, ResultAsync } from "neverthrow";
+import { err, errAsync, okAsync, ResultAsync } from "neverthrow";
 import type { RuntimeClientError } from "../../domain/errors.ts";
 import { logOrbEvent } from "../../domain/log.ts";
 import type { OrbRow } from "../../domain/orb.ts";
 import type { ControlPlaneStore, OperationContext } from "../../domain/ports.ts";
-import { PgDurableAuthority } from "../durable-pg/index.ts";
+import { type AuthorityError, PgDurableAuthority } from "../durable-pg/index.ts";
 import type { PostgreSQLClient } from "../pg/client.ts";
 import { projectNativeCommit } from "./atomic-history.ts";
 import type { AgentPersistence, AgentStorageLease } from "./persistence.ts";
 import { PgAgentArtifacts } from "./pg-artifacts.ts";
+import { checkNativeStartup, startupRuntimeError } from "./startup.ts";
 
 const leaseMs = 60_000;
 const renewalMs = 20_000;
@@ -33,6 +34,49 @@ export class PgAgentPersistence implements AgentPersistence {
     this.store = store;
   }
 
+  checkStartup(_task: SimulationTask, orb: OrbRow, context: OperationContext) {
+    if (context.signal.aborted) return errAsync(failure("Agent startup check cancelled"));
+    return this.db
+      .transaction<void, AuthorityError | import("../../domain/errors.ts").StoreError>(
+        async (query) => {
+          const current = await query(
+            "SELECT state,agent_admission_version FROM orbs WHERE id=$1 FOR UPDATE",
+            [orb.id],
+          );
+          if (current.isErr()) return err(current.error);
+          const row = current.value.rows[0];
+          if (!row || Number(row.agent_admission_version) !== orb.agentAdmissionVersion)
+            return err<never, AuthorityError>({
+              type: "authority_error",
+              code: "stale_owner",
+              message: "Agent admission changed",
+            });
+          const sealed = await query(
+            "SELECT archived FROM durable_pg_owners WHERE orb_id=$1 FOR UPDATE",
+            [orb.id],
+          );
+          if (sealed.isErr()) return err(sealed.error);
+          if (
+            row.state === "archived" ||
+            row.state === "archiving" ||
+            row.state === "deleting" ||
+            sealed.value.rows[0]?.archived
+          )
+            return err<never, AuthorityError>({
+              type: "authority_error",
+              code: "closed",
+              message: "Agent authority is closed",
+            });
+          return checkNativeStartup(query, orb.id, true);
+        },
+      )
+      .mapErr((error) =>
+        error.type === "authority_error"
+          ? startupRuntimeError(error)
+          : failure("Agent startup check unavailable"),
+      );
+  }
+
   open(
     task: SimulationTask,
     orb: OrbRow,
@@ -42,12 +86,17 @@ export class PgAgentPersistence implements AgentPersistence {
     const authority = new PgDurableAuthority(this.db);
     const now = task.wallNow();
     return authority
-      .acquire(orb.id, this.ownerId, orb.agentAdmissionVersion, now, now + leaseMs)
-      .mapErr(() => failure("Agent ownership unavailable"))
+      .acquire(orb.id, this.ownerId, orb.agentAdmissionVersion, now, now + leaseMs, (query) =>
+        checkNativeStartup(query, orb.id, true),
+      )
+      .mapErr(startupRuntimeError)
       .andThen((owner) =>
         authority
-          .open(owner, { project: (query, writes) => projectNativeCommit(query, orb.id, writes) })
-          .mapErr(() => failure("Agent authority unavailable"))
+          .open(owner, {
+            admit: (query) => checkNativeStartup(query, orb.id),
+            project: (query, writes) => projectNativeCommit(query, orb.id, writes),
+          })
+          .mapErr(startupRuntimeError)
           .map((storage) => {
             logOrbEvent(task, orb.id, "agent.owner_acquired", {
               fence: owner.fence,

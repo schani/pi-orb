@@ -23,6 +23,7 @@ await cp(
 const patches = [
   "@earendil-works+pi-coding-agent+1.0.0.patch",
   "@earendil-works+pi-ai+1.0.0.patch",
+  "@earendil-works+pi-agent-core+1.0.0.patch",
 ];
 const vendorName = "pi-coding-agent-1.0.0-brace-5.0.12.tgz";
 for (const file of [

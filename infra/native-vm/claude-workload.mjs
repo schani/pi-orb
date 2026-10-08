@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readdir, readFile, readlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:https";
@@ -20,6 +21,9 @@ const fixtureFailure = new Promise((_, reject) => {
 let requestCount = 0;
 let grants = 0;
 let mcpCalls = 0;
+let namingCalls = 0;
+let settledNotices = 0;
+let continuations = 0;
 let interrupted;
 const interruptedRequest = new Promise((resolve) => {
   interrupted = resolve;
@@ -157,7 +161,7 @@ function worker(workDir, origin, certificate, incarnation) {
     child.on("message", (reply) => {
       if (reply.qualificationEvidence) {
         const observation = reply.qualificationEvidence;
-        if (["1", "2", "3"].includes(observation.incarnation))
+        if (["1", "2", "3", "4"].includes(observation.incarnation))
           evidence[observation.incarnation] = observation;
         persistProgress();
         return;
@@ -333,6 +337,22 @@ async function run() {
             persistProgress();
             return json(response, 200, { token: syntheticBearer, generation: 1 });
           }
+          if (request.method === "POST" && path === "/runtime/v1/orb-name-trigger") {
+            contractStage = "broker_auto_name";
+            assert.equal(request.headers["content-type"], "application/json");
+            assert.deepEqual(JSON.parse(text), {
+              text:
+                namingCalls === 0
+                  ? "[qualification:completed] Run the fixture tools."
+                  : "[qualification:interrupted] Continue after interruption.",
+              imageOnly: false,
+              readme: "Synthetic Claude acceptance fixture.\n",
+            });
+            namingCalls++;
+            assert(namingCalls <= 2, "automatic recovery triggered human naming");
+            return json(response, 200, { outcome: "skipped" });
+          }
+          contractStage = "broker_unknown_route";
           assert.fail("unrecognized broker route");
         }
         if (path === "/mcp") {
@@ -398,15 +418,15 @@ async function run() {
         let operation;
         for (const item of users) {
           const serialized = JSON.stringify(item.content);
-          for (const candidate of ["completed", "interrupted", "continue"])
+          for (const candidate of ["completed", "interrupted"])
             if (serialized.includes(`[qualification:${candidate}]`)) operation = candidate;
         }
-        if (operation === "interrupted") {
-          interrupted();
-          return;
-        }
-        if (operation === "continue") {
-          contractStage = "continued_history";
+        const lastUser = JSON.stringify(users.at(-1)?.content);
+        if (lastUser.includes("The previous turn was interrupted — resuming it now.")) {
+          contractStage = "automatic_continued_history";
+          assert(lastUser.includes("All processes running before the restart were killed"));
+          assert.equal(operation, "interrupted");
+          assert.equal(++continuations, 1);
           assert(history.includes("[qualification:completed]"));
           assert(history.includes("[qualification:interrupted]"));
           assert(
@@ -415,9 +435,20 @@ async function run() {
           );
           return message(
             response,
-            { type: "text", text: "Manual continuation complete." },
+            { type: "text", text: "Automatic continuation complete." },
             "end_turn",
           );
+        }
+        if (lastUser.includes("Do not repeat completed work. Do not resume aborted work.")) {
+          contractStage = "settled_restart_history";
+          assert(lastUser.includes("All processes running before the restart were killed"));
+          assert.equal(operation, "completed");
+          assert.equal(++settledNotices, 1);
+          return message(response, { type: "text", text: "Restart acknowledged." }, "end_turn");
+        }
+        if (operation === "interrupted") {
+          interrupted();
+          return;
         }
         assert.equal(operation, "completed");
         if (!history.includes("toolu_native_bash"))
@@ -522,7 +553,16 @@ async function run() {
     retained.snapshot.records.slice(0, completed.snapshot.records.length),
     completed.snapshot.records,
   );
-  assert.equal(requestCount, 3, "retained boot replayed previous work");
+  const settled = await runtime.call("drained");
+  advance("settled-restart-drained");
+  assert.equal(requestCount, 4);
+  assert.equal(settledNotices, 1);
+  assert(
+    settled.snapshot.records.some(
+      (record) => record.type === "event" && record.eventType === "pi-orb.host-restarted",
+    ),
+  );
+  checks.settledRestartNotification = true;
   checks.retainedSession = true;
 
   advance("known-receipt-crash");
@@ -534,7 +574,7 @@ async function run() {
   try {
     await runtime.call("deliver", {
       messageId: "inbox-interrupted",
-      content: "[qualification:interrupted] Wait for explicit continuation.",
+      content: "[qualification:interrupted] Continue after interruption.",
     });
     await nativeEdge.inspect();
     await nativeEdge.promise;
@@ -552,38 +592,68 @@ async function run() {
   await runtime.close(true);
   advance("known-receipt-killed");
 
-  advance("manual-recovery");
+  advance("automatic-recovery");
   runtime = worker(workDir, origin, certificate, "3");
   const recovered = await runtime.call("boot");
-  advance("manual-recovery-receipts");
-  assert.equal(requestCount, 4, "interrupted boot automatically replayed work");
+  advance("automatic-recovery-receipts");
   assert.equal(recovered.snapshot.session.id, completed.snapshot.session.id);
   assert.equal(receipt(recovered.snapshot, "inbox-interrupted").id, interruptedReceipt.id);
-  advance("manual-recovery-notice");
+  advance("automatic-recovery-notice");
+  assert.equal(recovered.health.turnResume?.outcome, "resumed");
+  const continued = await runtime.call("idle");
+  advance("automatic-recovery-drained");
+  assert.equal(requestCount, 6);
+  assert.equal(continuations, 1);
+  const claims = continued.snapshot.records.filter(
+    (record) => record.type === "event" && record.eventType === "pi-orb.turn-resume",
+  );
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0].overflow.reason, "resumed");
+  assert.equal(claims[0].overflow.shape, "unanswered_user_message");
+  assert.equal(claims[0].overflow.headRecordId, interruptedReceipt.id);
+  const automaticReceipts = continued.snapshot.records.filter(
+    (record) => record.type === "event" && record.eventType === "claude.boot_receipt",
+  );
+  assert.equal(automaticReceipts.length, 2);
   assert(
-    recovered.snapshot.records.some(
-      (record) => record.type === "event" && record.eventType === "claude.operation_interrupted",
+    automaticReceipts.some(
+      (record) => record.overflow.operationId === claims[0].overflow.operationId,
     ),
   );
-  advance("manual-recovery-dedup");
+  const finalNativeRows = (await readFile(rootPath, "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  for (const nativeReceipt of [firstReceipt, interruptedReceipt, ...automaticReceipts])
+    assert.equal(finalNativeRows.filter((row) => row.uuid === nativeReceipt.id).length, 1);
+  assert(
+    continued.snapshot.records.some(
+      (record) =>
+        record.type === "message" &&
+        record.role === "assistant" &&
+        record.content.some(
+          (block) => block.type === "text" && block.text === "Automatic continuation complete.",
+        ),
+    ),
+  );
+  advance("automatic-recovery-dedup");
   const old = await runtime.call("deliver", {
     messageId: "inbox-interrupted",
-    content: "[qualification:interrupted] Wait for explicit continuation.",
+    content: "[qualification:interrupted] Continue after interruption.",
   });
   assert.equal(old.duplicate, true);
   assert.equal(old.status, "persisted");
-  assert.equal(requestCount, 4);
-  advance("manual-continuation");
-  await runtime.call("deliver", {
-    messageId: "inbox-continue",
-    content: "[qualification:continue] Continue manually.",
-  });
-  const continued = await runtime.call("idle");
+  assert.equal(requestCount, 6);
   advance("continued-receipts");
-  assert.equal(requestCount, 5);
   receipt(continued.snapshot, "inbox-completed");
   receipt(continued.snapshot, "inbox-interrupted");
-  receipt(continued.snapshot, "inbox-continue");
+  assert.equal(
+    continued.snapshot.records.filter(
+      (record) => record.type === "message" && record.role === "user",
+    ).length,
+    2,
+    "automatic prompts became human receipts",
+  );
   assert.deepEqual(
     continued.snapshot.records.slice(0, completed.snapshot.records.length),
     completed.snapshot.records,
@@ -592,14 +662,41 @@ async function run() {
   assert((await readFile(rootPath, "utf8")).startsWith(originalPrefix));
   assert.equal(await readFile(join(workDir, "native-tool-count"), "utf8"), "bash\n");
   assert.equal(grants, 3);
-  checks.manualContinuation = true;
-  checks.noAutomaticReplay = true;
+  assert.equal(namingCalls, 2);
+  checks.namingContract = true;
+  checks.automaticContinuation = true;
+  checks.noHumanInputReplay = true;
   checks.noDuplicateReceipt = true;
   await runtime.close();
   advance("hook-retention");
   assert.equal(await readFile(join(workDir, "setup-count"), "utf8"), "setup\nsetup\nsetup\n");
   assert.equal(await readFile(join(workDir, "resume-count"), "utf8"), "resume\nresume\nresume\n");
   checks.hooks = true;
+
+  advance("uncertain-human-delivery");
+  const statePath = join(workDir, "claude", "session.json");
+  const state = JSON.parse(await readFile(statePath, "utf8"));
+  // Model the durable submission edge before the human input's native receipt.
+  state.deliveries["inbox-uncertain"] = {
+    ...state.deliveries["inbox-interrupted"],
+    uuid: randomUUID(),
+    operationId: randomUUID(),
+    messageIds: ["inbox-uncertain"],
+  };
+  await writeFile(statePath, JSON.stringify(state));
+  runtime = worker(workDir, origin, certificate, "4");
+  const uncertain = await runtime.call("boot-uncertain");
+  assert.equal(uncertain.health.status, "failed");
+  assert.equal(uncertain.health.error.code, "claude_delivery_uncertain");
+  assert.equal(uncertain.nativeProcesses, 0);
+  assert.equal(requestCount, 6);
+  assert.equal(grants, 4);
+  assert.equal(namingCalls, 2);
+  await runtime.close();
+  advance("uncertain-human-delivery-declined");
+  checks.uncertainHumanDeliveryFailClosed = true;
+  assert.equal(mcpCalls, 1, "native MCP tool was replayed after restart");
+  checks.noToolReplay = true;
   assert.equal(fixtureError, undefined);
 }
 let passed = false;

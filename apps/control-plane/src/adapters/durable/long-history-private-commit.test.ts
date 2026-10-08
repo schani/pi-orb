@@ -11,6 +11,7 @@ import { PgDurableAuthority } from "../durable-pg/index.ts";
 import type { PostgreSQLClient } from "../pg/client.ts";
 import { PGliteClient } from "../pg/pglite-client.ts";
 import { projectNativeCommit } from "./atomic-history.ts";
+import { checkNativeStartup } from "./startup.ts";
 
 it("does not scan or republish multi-MiB root history for native private progress commits", async () => {
   const db = new PGliteClient();
@@ -54,6 +55,7 @@ it("does not scan or republish multi-MiB root history for native private progres
     const owner = (await authority.acquire(orb.id, "owner", 0, 0, 1000))._unsafeUnwrap();
     const storage = (
       await authority.open(owner, {
+        admit: (query) => checkNativeStartup(query, orb.id),
         project: (query, writes) => projectNativeCommit(query, orb.id, writes),
       })
     )._unsafeUnwrap();

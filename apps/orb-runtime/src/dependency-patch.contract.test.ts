@@ -114,6 +114,7 @@ describe("Pi dependency patch installation", () => {
     }
 
     const patchFiles = [
+      "@earendil-works+pi-agent-core+1.0.0.patch",
       "@earendil-works+pi-ai+1.0.0.patch",
       "@earendil-works+pi-codemode+1.0.0.patch",
       "@earendil-works+pi-coding-agent+1.0.0.patch",
@@ -157,6 +158,7 @@ describe("Pi dependency patch installation", () => {
       expect(source).toContain('"--pi-only"');
       expect(source).not.toContain("patch-package");
       expect(source).toContain('join(root, "scripts/apply-dependency-patches.mjs")');
+      expect(source).toContain('"@earendil-works+pi-agent-core+1.0.0.patch"');
       expect(source).toContain('"@earendil-works+pi-ai+1.0.0.patch"');
       expect(source).toContain('"@earendil-works+pi-coding-agent+1.0.0.patch"');
       expect(source).toContain('"pi-coding-agent-1.0.0-brace-5.0.12.tgz"');

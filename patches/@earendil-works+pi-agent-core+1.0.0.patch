@@ -1,0 +1,42 @@
+diff --git a/node_modules/@earendil-works/pi-agent-core/dist/agent.js b/node_modules/@earendil-works/pi-agent-core/dist/agent.js
+--- a/node_modules/@earendil-works/pi-agent-core/dist/agent.js
++++ b/node_modules/@earendil-works/pi-agent-core/dist/agent.js
+@@ -80,6 +80,13 @@
+         this.messages = this.messages.slice(drained.length);
+         return drained;
+     }
++    cancelOne(predicate) {
++        const matches = this.messages.map(predicate);
++        if (matches.filter(Boolean).length !== 1)
++            return false;
++        this.messages = this.messages.filter((_, index) => !matches[index]);
++        return true;
++    }
+     clear() {
+         this.messages = [];
+     }
+@@ -188,6 +195,12 @@
+     followUp(message) {
+         this.followUpQueue.enqueue(message);
+     }
++    /** Cancel exactly one queued steer; ambiguous or active ownership is unchanged. */
++    cancelQueuedSteeringMessage(predicate) {
++        if (this.activeRun)
++            return false;
++        return this.steeringQueue.cancelOne(predicate);
++    }
+     /** Remove all queued steering messages. */
+     clearSteeringQueue() {
+         this.steeringQueue.clear();
+diff --git a/node_modules/@earendil-works/pi-agent-core/dist/agent.d.ts b/node_modules/@earendil-works/pi-agent-core/dist/agent.d.ts
+--- a/node_modules/@earendil-works/pi-agent-core/dist/agent.d.ts
++++ b/node_modules/@earendil-works/pi-agent-core/dist/agent.d.ts
+@@ -90,6 +90,8 @@
+     steer(message: AgentMessage): void;
+     /** Queue a message to run only after the agent would otherwise stop. */
+     followUp(message: AgentMessage): void;
++    /** Cancel exactly one queued steer while idle; otherwise leave the queue unchanged. */
++    cancelQueuedSteeringMessage(predicate: (message: AgentMessage) => boolean): boolean;
+     /** Remove all queued steering messages. */
+     clearSteeringQueue(): void;
+     /** Remove all queued follow-up messages. */

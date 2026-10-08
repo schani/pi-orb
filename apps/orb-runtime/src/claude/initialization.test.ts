@@ -775,6 +775,12 @@ if os.environ['HOLD_TAIL'] == '1' and os.fork() == 0:
         if command == 'child':
             send({'type': 'control_request', 'request_id': 'late-hook', 'request': {'subtype': 'hook_callback', 'callback_id': hook, 'input': {'hook_event_name': 'SubagentStart', 'agent_id': 'late-child', 'agent_type': 'general-purpose'}}})
             send({'type': 'system', 'subtype': 'background_tasks_changed', 'tasks': [{'task_id': 'late-task', 'description': 'native background work'}]})
+        if command in ('task-terminal', 'task-terminal-duplicate'):
+            send({'type': 'system', 'subtype': 'task_started', 'task_id': 'late-task', 'description': 'private-task-description', 'ambient': False, 'uuid': 'late-start', 'session_id': 'session'})
+            send({'type': 'system', 'subtype': 'task_notification', 'task_id': 'late-task', 'status': 'completed', 'output_file': '/private/task-output', 'summary': 'private-task-result', 'uuid': 'late-terminal', 'session_id': 'session'})
+        if command == 'task-terminal-duplicate':
+            send({'type': 'result', 'subtype': 'success', 'is_error': False, 'num_turns': 1, 'result': 'done'})
+            send({'type': 'result', 'subtype': 'success', 'is_error': False, 'num_turns': 1, 'result': 'done', 'uuid': 'trailing-result'})
         if command in ('hook', 'hook-paired'):
             send({'type': 'system', 'subtype': 'hook_started', 'hook_id': 'late-hook', 'hook_name': 'private-hook-command', 'hook_event': 'Setup', 'uuid': '11111111-1111-4111-8111-111111111111', 'session_id': 'session'})
             if command == 'hook-paired':
@@ -912,7 +918,16 @@ function pinnedFixture(holdInitial = false) {
       if (current === undefined) throw new Error("Synthetic process was not launched.");
       return current;
     },
-    release: (kind: "root" | "child" | "clean" | "hook" | "hook-paired") => {
+    release: (
+      kind:
+        | "root"
+        | "child"
+        | "clean"
+        | "hook"
+        | "hook-paired"
+        | "task-terminal"
+        | "task-terminal-duplicate",
+    ) => {
       expect(current).toBeDefined();
       if (current === undefined) throw new Error("Synthetic process was not launched.");
       (current.child.stdio[3] as Writable).end(`${kind}\n`);
@@ -1005,6 +1020,56 @@ pinnedIt.each([
   },
   10_000,
 );
+pinnedIt.each(["task-terminal", "task-terminal-duplicate"] as const)(
+  "pinned SDK preserves %s through interrupted handoff disposition",
+  async (command) => {
+    const f = pinnedFixture();
+    expect((await f.attach()).isOk()).toBe(true);
+    f.hold();
+    expect(
+      (
+        await f.agent.submitMessage(
+          [{ type: "text", text: "synthetic input" }],
+          "late-task-operation",
+        )
+      ).isOk(),
+    ).toBe(true);
+    const native = await f.process();
+    await native.exited;
+    expect(native.closes).toBe(0);
+    expect(f.agent.gateView().activity).toBe("busy");
+    f.release(command);
+    await f.agent.closeExtensions();
+    expect((await native.stdoutEnded).isOk()).toBe(true);
+    expect(f.agent.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
+    expect(f.journal().pendingHandoffs).toEqual({});
+    expect(f.journal().handoffTerminals).toEqual({});
+    expect(
+      f.history.view.find(
+        (record) => record.type === "event" && record.eventType === "claude.handoff_interrupted",
+      ),
+    ).toMatchObject({
+      custom: { display: true },
+      overflow: {
+        taskId: "late-task",
+        startedId: "late-start",
+        notificationId: "late-terminal",
+        terminalStatus: "completed",
+        phase: "closing",
+        disposition: "interrupted",
+      },
+    });
+    expect(
+      f.history.view.find(
+        (record) => record.type === "event" && record.eventType === "claude.operation_finished",
+      ),
+    ).toMatchObject({ overflow: { outcome: "aborted" } });
+    const publicOutput = JSON.stringify({ frames: f.frames, records: f.history.view });
+    expect(publicOutput).not.toContain("private-task-result");
+    expect(publicOutput).not.toContain("/private/task-output");
+  },
+);
+
 pinnedIt(
   "pinned SDK close ends public iteration before the owned transport stdout reaches EOF",
   async () => {

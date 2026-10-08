@@ -44,7 +44,7 @@ describe("boot notification decision", () => {
     expect(plan.triggerTurn).toBe(true);
     expect(plan.marker.customType).toBe("pi-orb.host-restarted");
     expect(plan.marker.content).toBe(
-      "The host was restarted involuntarily. Continue whatever you were doing, but note: All processes running before the restart were killed, including servers, background jobs, and shell sessions.",
+      "The host was restarted involuntarily. Continue whatever you were doing, but note: All processes running before the restart were killed, including servers, background jobs, and shell sessions. Reassess any assumptions about running processes; restart only what is still needed for the user's task. Do not repeat completed work. Do not resume aborted work.",
     );
     expect(plan.marker.details).toMatchObject({
       ...boot,
@@ -195,8 +195,8 @@ describe("boot notification decision", () => {
       { ...finished, message: { role: "assistant", stopReason: "aborted", content: [] } },
     ]);
     expect(plan.marker.customType).toBe("pi-orb.host-restarted");
-    expect(plan.marker.content).toBe(
-      "The host was restarted involuntarily. Continue whatever you were doing, but note: All processes running before the restart were killed, including servers, background jobs, and shell sessions.",
-    );
+    expect(plan.marker.content).toContain("Do not repeat completed work.");
+    expect(plan.marker.content).toContain("Do not resume aborted work.");
+    expect(plan.triggerTurn).toBe(true);
   });
 });

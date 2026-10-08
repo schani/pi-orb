@@ -13,7 +13,7 @@ import type {
  * Domain view of an orb row (docs/history-replication.md). Timestamps are wall-clock
  * milliseconds; adapters convert to/from `timestamptz`.
  */
-export type HostDiscardReason = "failed" | "host_spec_changed";
+export type HostDiscardReason = "failed" | "host_spec_changed" | "claude_recovery";
 
 export type BootHook = "setup" | "resume";
 export type BootHookFailureReason = "failed" | "timeout" | "hook_not_executable";
@@ -33,6 +33,10 @@ export interface OrbRow {
   readonly hostRef: string | null;
   /** Monotone identity of disposable compute; workspace identity is not incarnation-scoped. */
   readonly hostIncarnation: number;
+  readonly claudeRecovery?: import("@pi-orb/protocol").ClaudeRecoveryProof & {
+    verified: boolean;
+    claimedEpisodes: readonly string[];
+  };
   /** Immutable launch specification committed for the current compute incarnation. */
   readonly hostSpecFingerprint: string | null;
   readonly hostSpecGeneration: number | null;

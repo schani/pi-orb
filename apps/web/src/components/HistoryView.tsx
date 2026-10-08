@@ -69,6 +69,8 @@ interface HistoryViewProps {
   liveBlocks: readonly LiveBlock[];
   tools: readonly ToolChip[];
   busy: boolean;
+  compacting?: boolean;
+  compaction?: { operationId: string; afterId: string | null } | null;
   queuedMessages?: readonly OrbMessageView[];
 }
 
@@ -150,6 +152,72 @@ function LazyDisclosure({
       <summary>{summary}</summary>
       {open && <LazyLegacyBody recordId={recordId} detailKey={detailKey} />}
     </details>
+  );
+}
+
+function CompactionRail({
+  record,
+  identity,
+}: {
+  record?: CompactionRecord | EventRecord;
+  identity: string;
+}) {
+  const openState = useContext(OpenDetailValue);
+  const [open, setOpen] = useState(
+    () => openState?.opened.has(record?.id ?? identity) || openState?.opened.has(identity) || false,
+  );
+  useLayoutEffect(() => {
+    if (open && record !== undefined) openState?.opened.add(record.id);
+  }, [open, record, openState]);
+  const outcome = record?.type === "event" ? record : undefined;
+  return (
+    <div
+      className={record?.type === "compaction" ? "record-compaction rec rec-orb" : "rec rec-orb"}
+      data-history-row={record?.id ?? identity}
+    >
+      <div className="rec-bd">
+        <ActivityRailRow
+          className="compaction-activity"
+          label={
+            record === undefined ? (
+              "compacting"
+            ) : record.type === "compaction" ? (
+              "context compacted"
+            ) : (
+              <span
+                className={
+                  outcome?.compactionOutcome === "failed" ? "msg-text error-text" : "msg-text"
+                }
+              >
+                <PlainChatText>{blockText(record.content ?? [])}</PlainChatText>
+              </span>
+            )
+          }
+          state={
+            record === undefined
+              ? "running"
+              : outcome?.compactionOutcome === "failed"
+                ? "failed"
+                : "neutral"
+          }
+          defaultOpen={open}
+          onToggle={(value) => {
+            setOpen(value);
+            for (const key of [identity, record?.id]) {
+              if (key === undefined) continue;
+              if (value) openState?.opened.add(key);
+              else openState?.opened.delete(key);
+            }
+          }}
+        >
+          {open && record?.type === "compaction" && (
+            <div className="reasoning-body">
+              <LazyLegacyBody recordId={record.id} detailKey={record.detailKey} />
+            </div>
+          )}
+        </ActivityRailRow>
+      </div>
+    </div>
   );
 }
 
@@ -288,20 +356,20 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
   return nodes;
 }
 
-/**
- * One transcript record: a user turn, a grouped agent turn (all adjacent
- * assistant/tool/event records share one prefix), or a
- * full-width compaction divider.
- */
+/** One transcript row: a user turn, grouped agent turn, alert or compaction. */
 type Turn =
   | { kind: "user"; record: MessageRecord }
   | { kind: "agent"; key: string; records: Array<MessageRecord | EventRecord> }
   | { kind: "alert"; record: EventRecord; message: string }
-  | { kind: "compaction"; record: CompactionRecord };
+  | { kind: "compaction"; record: CompactionRecord | EventRecord };
 
 /** Per docs/pi-adapter.md, only a custom message the harness marked displayed is shown. */
 function isDisplayedCustomMessage(record: EventRecord): boolean {
-  return record.eventType === "agent.settings_fallback" || record.custom?.display === true;
+  return (
+    record.eventType === "agent.settings_fallback" ||
+    record.eventType === "agent.compaction" ||
+    record.custom?.display === true
+  );
 }
 
 function assistantFailure(record: MessageRecord): string | null {
@@ -373,7 +441,7 @@ function renderAgentRecords(
       }
       nodes.push(
         <div className="record-custom" key={record.id}>
-          <p className="msg-text">
+          <p className={record.compactionOutcome === "failed" ? "msg-text error-text" : "msg-text"}>
             <PlainChatText>{blockText(record.content ?? [])}</PlainChatText>
           </p>
         </div>,
@@ -505,6 +573,8 @@ function groupTurns(records: readonly DisplayRecord[]): Turn[] {
       case "event":
         if (record.alert !== undefined) {
           turns.push({ kind: "alert", record, message: record.alert.message });
+        } else if (record.eventType === "agent.compaction") {
+          turns.push({ kind: "compaction", record });
         } else if (isDisplayedCustomMessage(record)) {
           appendAgentPart(record);
         }
@@ -553,6 +623,7 @@ function renderTurn(
   tools: readonly ToolChip[],
   live?: LiveAgentContent,
   busy = false,
+  compactionIdentity?: string,
 ): ReactNode {
   switch (turn.kind) {
     case "user":
@@ -589,15 +660,11 @@ function renderTurn(
       );
     case "compaction":
       return (
-        <div className="record-compaction" key={turn.record.id} data-history-row={turn.record.id}>
-          <span className="compaction-line">context compacted</span>
-          <LazyDisclosure
-            className="record-compaction-details"
-            summary="summary"
-            recordId={turn.record.id}
-            detailKey={turn.record.detailKey}
-          />
-        </div>
+        <CompactionRail
+          key={compactionIdentity ?? turn.record.id}
+          identity={compactionIdentity ?? turn.record.id}
+          record={turn.record}
+        />
       );
   }
 }
@@ -620,6 +687,8 @@ export const HistoryView = memo(function HistoryView({
   liveBlocks,
   tools,
   busy,
+  compacting = false,
+  compaction = null,
   queuedMessages = [],
   detailContext,
   detailAliases = EMPTY_ALIASES,
@@ -663,6 +732,20 @@ export const HistoryView = memo(function HistoryView({
       },
     });
   }, [records, turns.length, firstMounted, derivationMs]);
+  const anchorIndex =
+    compaction?.afterId === null
+      ? -1
+      : records.findIndex((record) => record.id === compaction?.afterId);
+  const compactionResult =
+    compaction !== null && (compaction.afterId === null || anchorIndex !== -1)
+      ? records
+          .slice(anchorIndex + 1)
+          .find(
+            (record) =>
+              record.type === "compaction" ||
+              (record.type === "event" && record.eventType === "agent.compaction"),
+          )
+      : undefined;
   const finalTurn = turns[turns.length - 1];
   const uncommittedTools = tools.filter((tool) => !committedToolCallIds.has(tool.callId));
   const hasAgentLive = liveBlocks.length > 0 || uncommittedTools.length > 0;
@@ -684,7 +767,16 @@ export const HistoryView = memo(function HistoryView({
             .map((turn, index) =>
               index + firstMounted === mergedTurnIndex
                 ? renderTurn(turn, pairing, tools, liveAgentContent, busy)
-                : renderTurn(turn, pairing, tools),
+                : renderTurn(
+                    turn,
+                    pairing,
+                    tools,
+                    undefined,
+                    false,
+                    turn.kind === "compaction" && turn.record.id === compactionResult?.id
+                      ? compaction?.operationId
+                      : undefined,
+                  ),
             )}
           {pendingMessages.map((message) => {
             const system = message.system !== undefined;
@@ -727,6 +819,9 @@ export const HistoryView = memo(function HistoryView({
               <span className="visually-hidden">Orb:</span>
               <div className="rec-bd">{renderLiveAgentContent(liveAgentContent, busy)}</div>
             </article>
+          )}
+          {compacting && compaction !== null && compactionResult === undefined && (
+            <CompactionRail key={compaction.operationId} identity={compaction.operationId} />
           )}
           {busy && !hasAgentLive && (
             <div className="busy-indicator">

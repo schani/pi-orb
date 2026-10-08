@@ -15,6 +15,8 @@ export interface HarnessSnapshot {
   readonly orbId: string;
   readonly runtimeInstanceId: string;
   readonly activity: "idle" | "busy";
+  readonly work?: "compaction";
+  readonly compactionAfterId?: string | null;
   readonly session: HarnessSessionMetadata;
   readonly records: readonly HistoryRecord[];
   readonly headId: string | null;
@@ -25,6 +27,7 @@ export interface HarnessSnapshot {
 export interface LiveBlockState {
   readonly blockId: string;
   readonly blockType: "text" | "reasoning";
+  readonly contentIndex: number;
   readonly revision: number;
   readonly text: string;
   readonly redacted?: boolean;

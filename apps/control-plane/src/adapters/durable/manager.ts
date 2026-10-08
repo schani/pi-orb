@@ -4,6 +4,7 @@ import type { SimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, type Result, ResultAsync } from "neverthrow";
 import type { AgentAlertWriter, AgentPlane, AgentSessionFacade } from "../../domain/agent-ports.ts";
 import type { RuntimeClientError } from "../../domain/errors.ts";
+import { logOrbEvent } from "../../domain/log.ts";
 import type { OrbRow } from "../../domain/orb.ts";
 import type {
   DeliverMessageClientRequest,
@@ -266,6 +267,10 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
     return handle;
   }
 
+  checkStartup(task: SimulationTask, orb: OrbRow, context: OperationContext) {
+    return this.options.persistence.checkStartup?.(task, orb, context) ?? okAsync(undefined);
+  }
+
   private ensure(task: SimulationTask, orb: OrbRow, context: OperationContext, readOnly = false) {
     if (context.signal.aborted)
       return errAsync({ ...durableError("agent open cancelled"), code: "cancelled" as const });
@@ -282,7 +287,8 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
         orb.id,
         orb.agentAdmissionVersion,
         () =>
-          (this.options.prepare?.(task, orb, admittedContext) ?? okAsync(undefined))
+          this.checkStartup(task, orb, admittedContext)
+            .andThen(() => this.options.prepare?.(task, orb, admittedContext) ?? okAsync(undefined))
             .andThen(() => this.options.persistence.open(task, orb, admittedContext))
             .andThen((lease) =>
               this.options
@@ -315,7 +321,19 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
                     return agent;
                   }),
                 )
-                .orElse((error) => lease.release().andThen(() => errAsync(error))),
+                .orElse((error) =>
+                  lease
+                    .release()
+                    .orElse((cleanup) => {
+                      logOrbEvent(task, orb.id, "agent.startup_cleanup_failed", {
+                        code: cleanup.code,
+                        startup_code: error.code,
+                        admission_version: orb.agentAdmissionVersion,
+                      });
+                      return okAsync(undefined);
+                    })
+                    .andThen(() => errAsync(error)),
+                ),
             ),
         true,
       )
@@ -427,7 +445,9 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
       ? handle.admit(() =>
           this.ensure(_task, orb, context).andThen((current) => current.deliver(request)),
         )
-      : errAsync(durableError("central agent is not open", true));
+      : this.checkStartup(_task, orb, context).andThen(() =>
+          errAsync(durableError("central agent is not open", true)),
+        );
   }
 
   prepareIdleStop(_task: SimulationTask, orb: OrbRow, context: OperationContext) {

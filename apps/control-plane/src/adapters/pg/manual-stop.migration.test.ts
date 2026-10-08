@@ -71,12 +71,12 @@ it("migrates legacy manual intent and keeps reopened work and visible compute pa
       "ALTER TABLE orbs DROP COLUMN agent_admission_version",
       "ALTER TABLE orbs DROP CONSTRAINT orbs_stop_reason_check",
       "ALTER TABLE orbs ADD CONSTRAINT orbs_stop_reason_check CHECK (stop_reason IN ('idle', 'sleep'))",
-      "DELETE FROM schema_migrations WHERE name IN ('033_manual_stop.sql', '034_agent_admission_version.sql')",
+      "DELETE FROM schema_migrations WHERE name IN ('034_manual_stop.sql', '035_agent_admission_version.sql')",
     ])
       (await client.query(sql))._unsafeUnwrap();
     expect((await database.migrate())._unsafeUnwrap()).toEqual([
-      "033_manual_stop.sql",
-      "034_agent_admission_version.sql",
+      "034_manual_stop.sql",
+      "035_agent_admission_version.sql",
     ]);
     for (const [index, row] of rows.entries()) {
       expect((await database.store.getOrb(task, row.id))._unsafeUnwrap()?.stopReason).toBe(

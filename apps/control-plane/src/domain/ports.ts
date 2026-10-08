@@ -86,6 +86,7 @@ export interface RecordHostDiscardStatusParams {
 }
 
 export interface FailOrbAndRequestComputeDiscardParams {
+  readonly recoveryEpisode?: string;
   readonly orbId: string;
   readonly expectedStateVersion: number;
   readonly now: number;
@@ -549,6 +550,7 @@ export interface OrbHostObservation {
 }
 
 export interface ProvisionOrbHostRequest {
+  readonly claudeRecoveryProof?: import("@pi-orb/protocol").ClaudeRecoveryProof;
   readonly orbId: string;
   readonly incarnation: number;
   readonly bootstrap: {
@@ -588,6 +590,8 @@ export interface ProvisionedOrbHost {
 }
 
 export interface OrbHostProvider {
+  /** Verified disposal ends the entire worker scope, not only a known process group. */
+  readonly verifiesWholeComputeDisposal?: true;
   readonly kind: string;
   /** Deploy-monotone authority used only to fence specification replacement. */
   readonly specGeneration: number;
@@ -1154,6 +1158,7 @@ export interface ActivityHeadlineGenerator {
 
 export interface OrbNameGeneratorError {
   readonly type: "orb_name_generation_error";
+  readonly code?: "credential_absent" | "generation";
   readonly message: string;
   readonly retryable: boolean;
 }
@@ -1162,6 +1167,7 @@ export interface OrbNameGenerator {
   generate(
     task: SimulationTask,
     input: {
+      harness: "pi" | "claude";
       ownerUserId: string;
       projectName: string;
       repositoryUrl: string;

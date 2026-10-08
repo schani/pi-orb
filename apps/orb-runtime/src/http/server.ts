@@ -374,6 +374,24 @@ export function buildRuntimeServer(
           });
           return;
         }
+        if (frame.action.type === "compact") {
+          const admission = agent.canCompact();
+          if (admission.isErr()) {
+            const result: RequestResult = {
+              type: "rejected",
+              error: { ...admission.error, retryable: admission.error.code === "busy" },
+            };
+            registry.record(frame.requestId, frame.action, result);
+            sendResult(frame.requestId, result);
+            return;
+          }
+          const operationId = randomUUID();
+          const result: RequestResult = { type: "accepted", operationId, duplicate: false };
+          registry.record(frame.requestId, frame.action, result);
+          sendResult(frame.requestId, result);
+          void agent.compact(frame.action.customInstructions, operationId);
+          return;
+        }
         // Acceptance is not completion (docs/runtime-protocol.md).
         const operationId = randomUUID();
         const result: RequestResult = { type: "accepted", operationId, duplicate: false };

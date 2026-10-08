@@ -10,6 +10,35 @@ permissions:
   contents: read
 
 jobs:
+  control-plane-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Reject tracked deployment credentials, plans and state
+        run: python3 infra/artifact_guard.py
+
+      - name: Check image-build disk headroom
+        run: |
+          df -h .
+          available=$(df -PB1 . | awk 'NR == 2 { print $4 }')
+          if ! (( available >= 15 * 1024 * 1024 * 1024 )); then
+            echo 'Control-plane image build requires 15 GiB free disk.' >&2
+            exit 1
+          fi
+
+      - name: Build control-plane image
+        run: docker build -f apps/control-plane/Dockerfile -t "pi-orb-control-plane:ci-$GITHUB_SHA" .
+
+      - name: Report image-build disk usage
+        if: always()
+        run: |
+          df -h .
+          docker system df
+
   checks:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -41,6 +70,9 @@ jobs:
         with:
           node-version: '24.6.0'
           cache: npm
+
+      - name: Use the signed Ubuntu archive
+        run: sudo python3 infra/runner_apt.py /etc/apt/sources.list.d/ubuntu.sources
 
       - name: Install native addon prerequisites
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 build-essential

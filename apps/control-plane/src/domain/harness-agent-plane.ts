@@ -32,6 +32,9 @@ export class HarnessAgentPlane implements AgentPlane {
   placementFor(orb: OrbRow) {
     return this.select(orb).placement;
   }
+  checkStartup(task: SimulationTask, orb: OrbRow, context: OperationContext) {
+    return this.select(orb).checkStartup?.(task, orb, context) ?? okAsync(undefined);
+  }
   health(task: SimulationTask, orb: OrbRow, context: OperationContext) {
     return this.select(orb).health(task, orb, context);
   }

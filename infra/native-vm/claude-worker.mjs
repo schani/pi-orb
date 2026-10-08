@@ -247,16 +247,26 @@ async function idle() {
 process.on("message", async ({ id, method, messageId, content }) => {
   try {
     let result;
-    if (method === "boot") {
+    if (method === "boot" || method === "boot-uncertain") {
       await agent.boot();
-      assert.equal(agent.getHealth().status, "ready", "real Claude boot did not reach ready");
-      accountChecked = true;
-      result = evidence();
+      if (method === "boot-uncertain") {
+        const health = agent.getHealth();
+        assert.equal(health.status, "failed");
+        assert.equal(health.error.code, "claude_delivery_uncertain");
+        assert.equal(started, 0, "uncertain human delivery launched native inference");
+        captureEvidence();
+        await traceQueue;
+        result = { health, started, exited, nativeProcesses: processes.size };
+      } else {
+        assert.equal(agent.getHealth().status, "ready", "real Claude boot did not reach ready");
+        accountChecked = true;
+        result = evidence();
+      }
     } else if (method === "deliver") {
       result = unwrap(
         await agent.deliverInboxMessage(messageId, [messageId], [{ type: "text", text: content }]),
       );
-    } else if (method === "idle") {
+    } else if (method === "idle" || method === "drained") {
       await agent.waitForStream();
       await agent.closeExtensions();
       assert.equal(agent.getHealth().status, "ready", "native drain failed before idle");
@@ -266,7 +276,7 @@ process.on("message", async ({ id, method, messageId, content }) => {
       result = evidence();
       assert.equal(result.nativeProcesses, 0, "idle preceded native process close");
       assert.equal(result.started, result.exited, "idle preceded supervised drain");
-      assert.equal(unwrap(agent.prepareIdleStop()), true);
+      if (method === "idle") assert.equal(unwrap(agent.prepareIdleStop()), true);
     } else if (method === "snapshot") {
       captureEvidence();
       await traceQueue;

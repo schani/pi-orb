@@ -1,7 +1,20 @@
 import { type Static, Type } from "typebox";
-import { JsonObjectSchema, JsonValueSchema } from "./json.ts";
+import { type JsonObject, JsonObjectSchema, JsonValueSchema } from "./json.ts";
 
 const closed = { additionalProperties: false } as const;
+
+export function isClaudeSessionTaskNotification(native: JsonObject): boolean {
+  const origin = native.origin;
+  return (
+    native.type === "user" &&
+    typeof origin === "object" &&
+    origin !== null &&
+    !Array.isArray(origin) &&
+    origin.kind === "task-notification" &&
+    origin.producer === "session-task" &&
+    origin.subkind === undefined
+  );
+}
 
 export const HarnessSessionMetadataSchema = Type.Object(
   {
@@ -255,6 +268,16 @@ export const EventRecordSchema = Type.Object(
     ...recordBase,
     type: Type.Literal("event"),
     eventType: Type.String(),
+    compaction: Type.Optional(
+      Type.Object(
+        {
+          operationId: Type.String(),
+          outcome: Type.Union([Type.Literal("failed"), Type.Literal("aborted")]),
+          message: Type.String(),
+        },
+        closed,
+      ),
+    ),
     content: Type.Optional(Type.Array(ContentBlockSchema)),
     /** Present iff `eventType` is `pi.custom_message`. */
     custom: Type.Optional(CustomMessageSchema),

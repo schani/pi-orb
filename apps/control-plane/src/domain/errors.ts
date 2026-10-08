@@ -48,6 +48,8 @@ export interface RuntimeClientError {
     | "invalid_response"
     | "cursor_not_found"
     | "history_unavailable"
+    | "legacy_backend"
+    | "history_integrity"
     | "initialization_failed"
     | "cancelled";
   readonly initializationError?: Extract<RuntimeHealth, { status: "failed" }>["error"];

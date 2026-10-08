@@ -25,7 +25,13 @@ it("reads central live reasoning before compute readiness without guest transpor
       operationId: "operation",
       operationKind: "agent",
       blocks: [
-        { blockId: "reasoning", blockType: "reasoning", revision: 2, text: "Full live reasoning" },
+        {
+          blockId: "reasoning",
+          blockType: "reasoning",
+          contentIndex: 0,
+          revision: 2,
+          text: "Full live reasoning",
+        },
       ],
       tools: [],
       subagents: [],

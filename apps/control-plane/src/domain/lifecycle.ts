@@ -20,6 +20,7 @@ import {
   formatOrbFailure,
   type OrbFailureCode,
   type OrbHostProviderError,
+  type RuntimeClientError,
   type StateConflict,
   type StoreError,
 } from "./errors.ts";
@@ -38,6 +39,7 @@ import type {
   ProvisionedOrbHost,
 } from "./ports.ts";
 import { pollOrbUntilCaughtUp } from "./replication.ts";
+import { handleFailedRuntime, inspectFailedRuntime } from "./runtime-recovery.ts";
 import { recoverUploads } from "./workspace-uploads.ts";
 
 export type ReconcileOutcome =
@@ -299,6 +301,16 @@ async function provisionHost(
         {
           orbId: orb.id,
           incarnation: orb.hostIncarnation,
+          ...(orb.claudeRecovery?.verified &&
+          orb.claudeRecovery.replacementIncarnation === orb.hostIncarnation
+            ? {
+                claudeRecoveryProof: {
+                  episode: orb.claudeRecovery.episode,
+                  disposedIncarnation: orb.claudeRecovery.disposedIncarnation,
+                  replacementIncarnation: orb.claudeRecovery.replacementIncarnation,
+                },
+              }
+            : {}),
           bootstrap: {
             repositoryUrl,
             harness: orb.harness,
@@ -442,6 +454,15 @@ async function failOrb(
     return cas.error.type === "state_conflict" ? { type: "conflict" } : retryable(cas.error);
   }
   await task.checkpoint("compute-replacement.failure-intent-committed");
+  if (
+    orb.claudeRecovery?.verified &&
+    orb.claudeRecovery.replacementIncarnation === orb.hostIncarnation
+  )
+    logOrbEvent(task, orb.id, "claude-recovery-exhausted", {
+      reason: code,
+      episode: orb.claudeRecovery.episode,
+      incarnation: orb.hostIncarnation,
+    });
   logOrbEvent(task, orb.id, "transition", {
     from: orb.state,
     to: "failed",
@@ -535,6 +556,12 @@ async function reconcileHostDiscard(
     // The durable error column is the edge authority: it survives process
     // restarts and never re-logs the same persisting condition per pass.
     if (orb.hostDiscardError !== message) {
+      if (orb.hostDiscardReason === "claude_recovery")
+        logOrbEvent(task, orb.id, "claude-recovery-disposal-failed", {
+          reason: "provider_failed",
+          episode: orb.claudeRecovery?.episode,
+          incarnation: through,
+        });
       logOrbEvent(task, orb.id, "compute-discard", {
         host: orb.hostRef,
         through_incarnation: through,
@@ -559,6 +586,12 @@ async function reconcileHostDiscard(
       : retryable(finalized.error);
   }
   await task.checkpoint("compute-replacement.discard-finalized");
+  if (orb.hostDiscardReason === "claude_recovery")
+    logOrbEvent(task, orb.id, "claude-recovery-disposal-verified", {
+      reason: "compute_disposed",
+      episode: orb.claudeRecovery?.episode,
+      incarnation: through,
+    });
   // Recovery is an edge only once: finalization clears the durable error, so
   // no later pass can observe it again. Logging recovery before finalization
   // repeated the edge on every finalize retry after a successful discard.
@@ -1086,6 +1119,9 @@ async function reconcileCreateStart(
       if (anchoring) await task.checkpoint("boot-hooks.hold-anchored");
       if (status.status === "initializing") return waiting("readiness");
       if (status.status === "failed") {
+        const handled = await handleFailedRuntime(task, deps, orb, status);
+        if (handled.isErr()) return retryable(handled.error);
+        if (handled.value) return { type: "progressed" };
         return failOrb(
           task,
           deps,
@@ -1157,6 +1193,15 @@ async function reconcileCreateStart(
         reason: "runtime_ready",
       });
       if (transitioned.type === "transitioned") {
+        if (
+          orb.claudeRecovery?.verified &&
+          orb.claudeRecovery.replacementIncarnation === orb.hostIncarnation
+        )
+          logOrbEvent(task, orb.id, "claude-recovery-ready", {
+            reason: "runtime_ready",
+            episode: orb.claudeRecovery.episode,
+            incarnation: orb.hostIncarnation,
+          });
         deps.control.resetLivenessBaseline(orb.id, task.monotonicNow());
         // The runtime's boot resume decision, on the transition that ends the
         // boot episode — one line per boot, never one per health poll
@@ -1353,6 +1398,15 @@ async function reconcileRunning(
     return transitionTo(task, deps, orb, "starting", { reason: "unreachable_restart" });
   }
 
+  // Canonical receipts must commit before any retained inbox UUID is redelivered.
+  if (
+    orb.claudeRecovery?.verified &&
+    orb.claudeRecovery.replacementIncarnation === orb.hostIncarnation
+  ) {
+    const pulled = await pollOrbUntilCaughtUp(task, deps, orb.id, 1);
+    if (pulled.type !== "caught_up") return { type: "noop" };
+  }
+
   // Freeze every currently queued item into one durable FIFO batch. The
   // runtime sees one user message with blank-line separators and one stable
   // batch ID; later arrivals form the next batch rather than changing an
@@ -1456,6 +1510,23 @@ async function reconcileRunning(
   return { type: "noop" };
 }
 
+function noteCentralStartup(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orb: OrbRow,
+  error?: RuntimeClientError,
+): boolean {
+  const rejected = error?.code === "legacy_backend" || error?.code === "history_integrity";
+  if (deps.control.noteCondition(`central-start-rejected:${orb.id}`, rejected) && rejected)
+    logOrbEvent(task, orb.id, "central-agent-start-rejected", {
+      code: error.code,
+      admission_version: orb.agentAdmissionVersion,
+      session_id: orb.harnessSessionId,
+      disposition: error.code === "legacy_backend" ? "create_new_orb" : "repair_history",
+    });
+  return rejected;
+}
+
 async function dispatchQueuedMessages(
   task: SimulationTask,
   deps: ControlPlaneDeps,
@@ -1509,6 +1580,13 @@ async function dispatchQueuedMessages(
       },
     );
     if (delivered.isErr()) {
+      if (agentPlacement(deps.agentPlane, orb) === "central")
+        noteCentralStartup(task, deps, orb, delivered.error);
+      if (delivered.error.answered && agentPlacement(deps.agentPlane, orb) !== "central") {
+        const inspected = await inspectFailedRuntime(task, deps, orb, baseUrl);
+        if (inspected.isErr()) return retryable(inspected.error);
+        if (inspected.value) return { type: "progressed" };
+      }
       if (delivered.error.answered) {
         if (agentPlacement(deps.agentPlane, orb) !== "central")
           deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
@@ -2467,7 +2545,16 @@ export async function reconcileCentralAgent(
         "central agent activity",
         (context) => agentHealth(task, deps, centralOrb, "", context),
       );
-      if (deps.control.noteCondition(`central-health:${orbId}`, health.isErr()) && health.isErr())
+      const rejected = noteCentralStartup(
+        task,
+        deps,
+        centralOrb,
+        health.isErr() ? health.error : undefined,
+      );
+      if (
+        deps.control.noteCondition(`central-health:${orbId}`, health.isErr() && !rejected) &&
+        health.isErr()
+      )
         logOrbEvent(task, orbId, "central-agent-unavailable", { message: health.error.message });
       const busy = deps.agentPlane?.session(orbId)?.workActive?.() === true;
       deps.control.noteAgentWork(orbId, busy);
@@ -2771,6 +2858,20 @@ export function requestOrbStart(
       if (orbResult.isErr()) return err(mapStoreError(orbResult.error));
       const orb = orbResult.value;
       if (orb === null) return err(commandError("not_found", `orb ${orbId} not found`, false));
+      if (
+        agentPlacement(deps.agentPlane, orb) === "central" &&
+        ["creating", "starting", "running", "stopped", "failed"].includes(orb.state)
+      ) {
+        const startup = await withDeadline(
+          task,
+          deps.constants.runtimeRequestTimeoutMs,
+          "check agent startup",
+          (context) => deps.agentPlane?.checkStartup?.(task, orb, context) ?? okAsync(undefined),
+        );
+        noteCentralStartup(task, deps, orb, startup.isErr() ? startup.error : undefined);
+        if (startup.isErr())
+          return err(commandError("conflict", startup.error.message, startup.error.retryable));
+      }
       switch (orb.state) {
         case "creating":
         case "starting":

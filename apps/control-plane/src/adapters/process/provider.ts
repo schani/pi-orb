@@ -64,6 +64,7 @@ export interface ProcessOrbHostProviderOptions {
 }
 
 interface HostMetadata {
+  readonly claudeRecoveryProof?: import("@pi-orb/protocol").ClaudeRecoveryProof;
   readonly v: 1;
   readonly orbId: string;
   readonly incarnation: number;
@@ -233,6 +234,9 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
         processBirth: typeof parsed.processBirth === "string" ? parsed.processBirth : null,
         drainToken: typeof parsed.drainToken === "string" ? parsed.drainToken : null,
         supervisorId: parsed.supervisorId,
+        ...(parsed.claudeRecoveryProof === undefined
+          ? {}
+          : { claudeRecoveryProof: parsed.claudeRecoveryProof }),
         desiredState: parsed.desiredState,
       });
     } catch (error) {
@@ -336,6 +340,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       PI_ORB_INITIAL_CHECKOUT_COMMIT: metadata.initialCheckoutCommit ?? "",
       PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT: metadata.awaitInitialCheckoutCommit ? "1" : "",
       PI_ORB_HOST_INCARNATION: String(metadata.incarnation),
+      PI_ORB_CLAUDE_RECOVERY_PROOF: JSON.stringify(metadata.claudeRecoveryProof ?? null),
       // An unsandboxed process host cannot assert container-wide process loss.
       PI_ORB_CONTAINER: "0",
       PI_ORB_SUPERVISOR_ID: metadata.supervisorId,
@@ -628,6 +633,9 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
           v: 1,
           orbId: request.orbId,
           incarnation: request.incarnation,
+          ...(request.claudeRecoveryProof === undefined
+            ? {}
+            : { claudeRecoveryProof: request.claudeRecoveryProof }),
           repositoryUrl: request.bootstrap.repositoryUrl,
           harness: request.bootstrap.harness ?? "pi",
           ...(request.bootstrap.awaitInitialCheckoutCommit

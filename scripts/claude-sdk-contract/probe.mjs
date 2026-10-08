@@ -10,7 +10,10 @@ import { fileURLToPath } from "node:url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 
 function reply(response, turn, withSubagent) {
-  response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+  response.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+  });
   const emit = (type, data) =>
     response.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
   emit("message_start", {
@@ -28,7 +31,12 @@ function reply(response, turn, withSubagent) {
   if (withSubagent && turn === 1) {
     emit("content_block_start", {
       index: 0,
-      content_block: { type: "tool_use", id: "toolu_contract_agent", name: "Agent", input: {} },
+      content_block: {
+        type: "tool_use",
+        id: "toolu_contract_agent",
+        name: "Agent",
+        input: {},
+      },
     });
     emit("content_block_delta", {
       index: 0,
@@ -44,7 +52,12 @@ function reply(response, turn, withSubagent) {
   } else if (turn === (withSubagent ? 2 : 1)) {
     emit("content_block_start", {
       index: 0,
-      content_block: { type: "tool_use", id: "toolu_contract_bash", name: "Bash", input: {} },
+      content_block: {
+        type: "tool_use",
+        id: "toolu_contract_bash",
+        name: "Bash",
+        input: {},
+      },
     });
     emit("content_block_delta", {
       index: 0,
@@ -57,7 +70,10 @@ function reply(response, turn, withSubagent) {
       },
     });
   } else {
-    emit("content_block_start", { index: 0, content_block: { type: "text", text: "" } });
+    emit("content_block_start", {
+      index: 0,
+      content_block: { type: "text", text: "" },
+    });
     emit("content_block_delta", {
       index: 0,
       delta: { type: "text_delta", text: "Contract complete." },
@@ -88,7 +104,14 @@ async function files(dir) {
 }
 
 /** Only dummy API credentials, isolated native configuration, and a loopback endpoint. */
-export async function probeNativeSdk({ withSubagent = false, withCompact = false, onRoot } = {}) {
+export async function probeNativeSdk({
+  withSubagent = false,
+  withCompact = false,
+  compactInstructions = "",
+  cancelAt,
+  withRestart,
+  onRoot,
+} = {}) {
   const home = await mkdtemp(join(tmpdir(), "claude-native-contract-"));
   const cwd = join(home, "workspace");
   const config = join(home, "config");
@@ -97,8 +120,22 @@ export async function probeNativeSdk({ withSubagent = false, withCompact = false
   let requestCount = 0;
   let unexpectedRequest = null;
   const requestSettings = [];
+  let compactAdmitted = false;
+  let compactProviderRequests = 0;
+  let customInstructionsReachedProvider = false;
+  let interrupt;
+  let interruptTask;
+  let interruptError;
+  const cancellation = {
+    requested: false,
+    accepted: false,
+    drained: false,
+    receipt: null,
+  };
+  let restarting = false;
+  const restartRequests = [];
   const server = createServer((request, response) => {
-    // Retain only model/effort, never headers, prompts, or complete bodies.
+    // Retain settings and synthetic restart context only; never headers or credentials.
     if (request.method === "POST" && request.url?.split("?")[0] === "/v1/messages") {
       let text = "";
       request.setEncoding("utf8");
@@ -108,8 +145,26 @@ export async function probeNativeSdk({ withSubagent = false, withCompact = false
       request.on("end", () => {
         const body = JSON.parse(text);
         text = "";
-        requestSettings.push({ model: body.model, effort: body.output_config?.effort ?? null });
-        reply(response, ++requestCount, withSubagent);
+        requestSettings.push({
+          model: body.model,
+          effort: body.output_config?.effort ?? null,
+        });
+        if (restarting) restartRequests.push(body.messages);
+        ++requestCount;
+        if (compactAdmitted) {
+          ++compactProviderRequests;
+          customInstructionsReachedProvider ||= Boolean(
+            compactInstructions && JSON.stringify(body).includes(compactInstructions),
+          );
+          if (cancelAt === "in-progress") {
+            // The request is dispatched, but no response bytes exist until cancellation.
+            interruptTask = interrupt().catch((error) => {
+              interruptError = error;
+            });
+            return;
+          }
+        }
+        reply(response, requestCount, withSubagent);
       });
     } else if (request.url?.split("?")[0] === "/v1/messages/count_tokens") {
       response.writeHead(200, { "content-type": "application/json" });
@@ -141,29 +196,70 @@ export async function probeNativeSdk({ withSubagent = false, withCompact = false
   };
   const sessionId = randomUUID();
   const submittedUuid = randomUUID();
+  const compactUuid = randomUUID();
   let release;
   let beginCompact;
   let preCompactSource;
+  let preCompactMessageCount = 0;
+  let initialized;
+  let cancelled = false;
+  const initializationFence = new Promise((resolve) => {
+    initialized = resolve;
+  });
+  let enterCompact;
+  let queuedDelivered;
+  let releaseQueuedHook;
+  const queuedHookHold = new Promise((resolve) => {
+    releaseQueuedHook = resolve;
+  });
+  const compactEntered = new Promise((resolve) => {
+    enterCompact = resolve;
+  });
+  const queuedWritten = new Promise((resolve) => {
+    queuedDelivered = resolve;
+  });
   const input = {
     async *[Symbol.asyncIterator]() {
+      if (cancelAt === "initialization") await initializationFence;
+      if (cancelled) return;
       yield {
         type: "user",
         uuid: submittedUuid,
         session_id: sessionId,
         parent_tool_use_id: null,
-        message: { role: "user", content: "Run the fixed Bash contract marker, then finish." },
+        message: {
+          role: "user",
+          content: "Run the fixed Bash contract marker, then finish.",
+        },
       };
       if (withCompact) {
         await new Promise((resolve) => {
           beginCompact = resolve;
         });
+        if (cancelled) return;
         yield {
           type: "user",
-          uuid: randomUUID(),
+          uuid: compactUuid,
           session_id: sessionId,
           parent_tool_use_id: null,
-          message: { role: "user", content: "/compact" },
+          message: {
+            role: "user",
+            content: `/compact${compactInstructions ? ` ${compactInstructions}` : ""}`,
+          },
         };
+        if (cancelAt === "queued") {
+          await compactEntered;
+          cancellation.queuedUuid = randomUUID();
+          yield {
+            type: "user",
+            uuid: cancellation.queuedUuid,
+            session_id: sessionId,
+            parent_tool_use_id: null,
+            message: { role: "user", content: "/compact" },
+          };
+          // SDK asks for the next item only after writing the previous item.
+          queuedDelivered();
+        }
       }
       await new Promise((resolve) => {
         release = resolve;
@@ -189,58 +285,103 @@ export async function probeNativeSdk({ withSubagent = false, withCompact = false
     killOwnedGroup();
   }, 20_000);
   try {
-    sdk = query({
-      prompt: input,
-      options: {
-        cwd,
-        env,
-        sessionId,
-        settingSources: [],
-        tools: withSubagent ? ["Bash", "Agent"] : ["Bash"],
-        plugins: [],
-        ...(withSubagent
-          ? {
-              agents: {
-                "contract-child": {
-                  description: "Native contract child",
-                  prompt: "Run the fixed Bash contract marker, then finish.",
-                  tools: ["Bash"],
-                  model: "inherit",
-                  background: false,
+    const options = {
+      cwd,
+      env,
+      sessionId,
+      settingSources: [],
+      tools: withSubagent ? ["Bash", "Agent"] : ["Bash"],
+      plugins: [],
+      ...(cancelAt === "before-dispatch" || cancelAt === "queued"
+        ? {
+            hooks: {
+              PreCompact: [
+                {
+                  hooks: [
+                    async () => {
+                      if (cancelAt === "queued") {
+                        if (cancellation.requested) await queuedHookHold;
+                        enterCompact();
+                        await queuedWritten;
+                      }
+                      await interrupt();
+                      return {};
+                    },
+                  ],
                 },
-              },
-            }
-          : {}),
-        model: "claude-sonnet-5-5",
-        effort: "low",
-        includePartialMessages: true,
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
-        spawnClaudeCodeProcess: (options) => {
-          child = spawn(
-            "/usr/bin/python3",
-            [
-              fileURLToPath(new URL("./network-guard.py", import.meta.url)),
-              options.command,
-              ...options.args,
-            ],
-            {
-              cwd: options.cwd,
-              env: { ...options.env, NATIVE_CONTRACT_PORT: String(port) },
-              detached: true,
-              stdio: ["pipe", "pipe", "pipe"],
+              ],
             },
-          );
-          exited = new Promise((resolve, reject) => {
-            child.once("close", resolve);
-            child.once("error", reject);
-          });
-          child.stderr.resume();
-          return child;
-        },
+          }
+        : {}),
+      ...(withSubagent
+        ? {
+            agents: {
+              "contract-child": {
+                description: "Native contract child",
+                prompt: "Run the fixed Bash contract marker, then finish.",
+                tools: ["Bash"],
+                model: "inherit",
+                background: false,
+              },
+            },
+          }
+        : {}),
+      model: "claude-sonnet-5-5",
+      effort: "low",
+      includePartialMessages: true,
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+      spawnClaudeCodeProcess: (options) => {
+        child = spawn(
+          "/usr/bin/python3",
+          [
+            fileURLToPath(new URL("./network-guard.py", import.meta.url)),
+            options.command,
+            ...options.args,
+          ],
+          {
+            cwd: options.cwd,
+            env: { ...options.env, NATIVE_CONTRACT_PORT: String(port) },
+            detached: true,
+            stdio: ["pipe", "pipe", "pipe"],
+          },
+        );
+        exited = new Promise((resolve, reject) => {
+          child.once("close", resolve);
+          child.once("error", reject);
+        });
+        child.stderr.resume();
+        return child;
       },
-    });
+    };
+    sdk = query({ prompt: input, options });
+    interrupt = async () => {
+      cancelled = true;
+      cancellation.requested = true;
+      cancellation.receipt = await sdk.interrupt();
+      cancellation.accepted = true;
+    };
     const account = await sdk.accountInfo();
+    if (cancelAt === "initialization") {
+      // Startup-input fence: initialization completes, but no user input was sent.
+      // Adapter cancellation before query construction needs its own epoch guard.
+      await interrupt();
+      sdk.close();
+      initialized();
+      await exited;
+      if (timedOut) throw new Error("Native initialization cancellation exceeded its deadline.");
+      cancellation.drained = true;
+      return {
+        account,
+        cancellation,
+        requestCount,
+        compaction: {
+          hasSummary: false,
+          providerRequests: compactProviderRequests,
+          ordinaryAssistantContinuation: false,
+        },
+      };
+    }
     for await (const message of sdk) {
       messages.push(message);
       if (message.type !== "result") continue;
@@ -252,15 +393,25 @@ export async function probeNativeSdk({ withSubagent = false, withCompact = false
         await fd.sync();
         await fd.close();
         preCompactSource = await readFile(root, "utf8");
+        preCompactMessageCount = messages.length;
+        if (cancelAt === "before-enqueue") {
+          // Caller-side fence: an accepted interrupt cannot revoke future input.
+          await interrupt();
+          break;
+        }
+        compactAdmitted = true;
         beginCompact();
       } else break;
     }
     release?.();
     sdk.close();
     await exited;
+    cancellation.drained = cancellation.requested;
+    await interruptTask;
+    if (interruptError) throw interruptError;
     if (timedOut) throw new Error("Native contract exceeded its owned deadline.");
     if (unexpectedRequest) throw new Error(`Unexpected local request: ${unexpectedRequest}`);
-    const allFiles = await files(config);
+    let allFiles = await files(config);
     const rootPath = allFiles.find((path) => basename(path) === `${sessionId}.jsonl`);
     if (!rootPath)
       throw new Error(
@@ -269,8 +420,82 @@ export async function probeNativeSdk({ withSubagent = false, withCompact = false
     const fd = await open(rootPath, "r");
     await fd.sync();
     await fd.close();
-    await onRoot?.({ home, rootPath, sessionId, submittedUuid });
-    const source = await readFile(rootPath, "utf8");
+    await onRoot?.({ home, rootPath, sessionId, submittedUuid, compactUuid });
+    let source = await readFile(rootPath, "utf8");
+    let restart;
+    if (withRestart) {
+      const prefix = source;
+      const childSnapshot = async () =>
+        Promise.all(
+          (await files(config))
+            .filter((path) => path.includes("/subagents/") && path.endsWith(".jsonl"))
+            .sort()
+            .map(async (path) => [path, await readFile(path, "utf8")]),
+        );
+      const beforeChildren = await childSnapshot();
+      const continuation = await withRestart({ home, rootPath, sessionId, submittedUuid });
+      if (typeof continuation !== "string" || continuation.length === 0)
+        throw new Error("Restart requires explicit synthetic continuation content.");
+      const continuationUuid = randomUUID();
+      const restartMessages = [];
+      const restartInput = {
+        async *[Symbol.asyncIterator]() {
+          yield {
+            type: "user",
+            uuid: continuationUuid,
+            session_id: sessionId,
+            parent_tool_use_id: null,
+            message: { role: "user", content: continuation },
+          };
+          await new Promise((resolve) => {
+            release = resolve;
+          });
+        },
+      };
+      const { sessionId: _initialSessionId, ...resumeOptions } = options;
+      restarting = true;
+      sdk = query({ prompt: restartInput, options: { ...resumeOptions, resume: sessionId } });
+      await sdk.accountInfo();
+      for await (const message of sdk) {
+        restartMessages.push(message);
+        if (message.type === "result") break;
+      }
+      release?.();
+      sdk.close();
+      await exited;
+      if (timedOut) throw new Error("Native restart contract exceeded its owned deadline.");
+      if (unexpectedRequest) throw new Error(`Unexpected local request: ${unexpectedRequest}`);
+      source = await readFile(rootPath, "utf8");
+      allFiles = await files(config);
+      const restartResult = restartMessages.find((message) => message.type === "result");
+      restart = {
+        requestCount: restartRequests.length,
+        requestMessages: restartRequests[0],
+        prefixPreserved: source.startsWith(prefix),
+        childFilesUnchanged:
+          JSON.stringify(beforeChildren) === JSON.stringify(await childSnapshot()),
+        childMessageCount: restartMessages.filter((message) => message.parent_tool_use_id != null)
+          .length,
+        taskStartedCount: restartMessages.filter(
+          (message) => message.type === "system" && message.subtype === "task_started",
+        ).length,
+        toolUseCount: restartMessages
+          .filter((message) => message.type === "assistant")
+          .flatMap((message) => message.message.content)
+          .filter((block) => block.type === "tool_use").length,
+        continuationCount: source
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line))
+          .filter(
+            (record) =>
+              record.type === "user" &&
+              record.uuid === continuationUuid &&
+              record.message?.content === continuation,
+          ).length,
+        result: { subtype: restartResult?.subtype, isError: restartResult?.is_error },
+      };
+    }
     const records = source
       .trim()
       .split("\n")
@@ -321,12 +546,53 @@ export async function probeNativeSdk({ withSubagent = false, withCompact = false
     );
     return {
       account,
+      restart,
       requestCount,
       requestSettings,
       sessionId,
       submittedUuid,
       userUuid: user?.uuid,
+      cancellation,
       compaction: {
+        customInstructionsReachedProvider,
+        statuses: messages
+          .slice(preCompactMessageCount)
+          .filter((message) => message.type === "system" && message.subtype === "status")
+          .map((message) => ({
+            status: message.status,
+            compactResult: message.compact_result ?? null,
+            hasCompactError: Boolean(message.compact_error),
+          })),
+        publicPartialEvents: messages
+          .slice(preCompactMessageCount)
+          .filter((message) => message.type === "stream_event").length,
+        boundaryContentIsSummary: (() => {
+          const boundary = records.find((record) => record.subtype === "compact_boundary");
+          const summary = records.find((record) => record.isCompactSummary === true);
+          return Boolean(boundary && summary && boundary.content === summary.message?.content);
+        })(),
+        providerRequests: compactProviderRequests,
+        ordinaryAssistantContinuation: records.some(
+          (record) =>
+            record.type === "assistant" &&
+            preCompactSource !== undefined &&
+            !preCompactSource.includes(record.uuid),
+        ),
+        commandEchoCount: records.filter(
+          (record) =>
+            record.type === "user" && JSON.stringify(record.message?.content).includes("/compact"),
+        ).length,
+        summary: (() => {
+          const record = records.find((record) => record.isCompactSummary === true);
+          return record
+            ? {
+                type: record.type,
+                isCompactSummary: record.isCompactSummary,
+                isVisibleInTranscriptOnly: record.isVisibleInTranscriptOnly,
+                hasContent: Boolean(record.message?.content?.length),
+              }
+            : null;
+        })(),
         prefixPreserved: preCompactSource !== undefined && source.startsWith(preCompactSource),
         hasBoundary: records.some(
           (record) => record.type === "system" && record.subtype === "compact_boundary",
@@ -407,6 +673,11 @@ export async function probeNativeSdk({ withSubagent = false, withCompact = false
     };
   } finally {
     clearTimeout(timer);
+    cancelled = true;
+    initialized();
+    releaseQueuedHook();
+    enterCompact();
+    queuedDelivered();
     beginCompact?.();
     release?.();
     sdk?.close();
@@ -453,7 +724,11 @@ print(json.dumps(dict(localAllowed=local,externalDenied=external,otherPortDenied
     ],
     {
       cwd: tmpdir(),
-      env: { HOME: "/nonexistent", PATH: "/usr/bin:/bin", NATIVE_CONTRACT_PORT: String(port) },
+      env: {
+        HOME: "/nonexistent",
+        PATH: "/usr/bin:/bin",
+        NATIVE_CONTRACT_PORT: String(port),
+      },
       detached: true,
     },
   );

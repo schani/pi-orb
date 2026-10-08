@@ -191,6 +191,7 @@ function mapContainerState(state: string): OrbHostState {
  */
 export class DockerOrbHostProvider implements OrbHostProvider {
   readonly kind = "docker";
+  readonly verifiesWholeComputeDisposal = true as const;
   readonly specGeneration: number;
   private readonly options: DockerOrbHostProviderOptions;
 
@@ -632,6 +633,8 @@ export class DockerOrbHostProvider implements OrbHostProvider {
             "--env",
             `${key}=${value}`,
           ]),
+          "--env",
+          `PI_ORB_CLAUDE_RECOVERY_PROOF=${JSON.stringify(request.claudeRecoveryProof ?? null)}`,
           "--env",
           `${HARNESS_ENV}=${request.bootstrap.harness ?? "pi"}`,
           "--env",

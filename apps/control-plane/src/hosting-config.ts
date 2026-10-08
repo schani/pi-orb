@@ -59,11 +59,14 @@ export function readHostingConfiguration(
   const appValue = environment["PI_ORB_APP_ORIGIN"] ?? (split ? "" : `http://127.0.0.1:${port}`);
   if (filesValue === "" || appValue === "")
     return invalid("PI_ORB_HOSTING_ORIGIN and PI_ORB_APP_ORIGIN are required");
+  const provider = environment["PI_ORB_HOST_PROVIDER"] ?? "docker";
   const runtimeValue =
     environment["PI_ORB_BROKER_URL"] ||
-    (!split && (environment["PI_ORB_HOST_PROVIDER"] ?? "docker") === "docker"
+    (!split && provider === "docker"
       ? `http://host.docker.internal:${port}`
-      : appValue);
+      : !split && provider === "process"
+        ? `http://127.0.0.1:${port}`
+        : appValue);
   const trustedLocalOrigins = split ? [] : ["http://localhost:5173", "http://127.0.0.1:5173"];
   const trustedLocal = !split;
   const policy = createHostingAccessPolicy({

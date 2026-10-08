@@ -29,6 +29,13 @@ function runtime() {
     for (const listener of listeners) listener({ type } as AgentSessionEvent);
   };
   const session: PiSession = {
+    pendingMessageCount: 0,
+    cancelQueuedCustomSteer: () => false,
+    compact: async () => {
+      throw new Error("Compaction not used by this fixture");
+    },
+    abortCompaction: () => undefined,
+    waitForIdle: async () => undefined,
     get isIdle() {
       return rootIdle;
     },

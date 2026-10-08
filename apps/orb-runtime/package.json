@@ -14,7 +14,6 @@
     "@earendil-works/pi-tui": "1.0.0",
     "@fastify/websocket": "^11.0.0",
     "@gotgenes/pi-subagents": "file:../../vendor/gotgenes-pi-subagents-21.7.0-orb.8.tgz",
-    "@modelcontextprotocol/client": "2.2.0",
     "@modelcontextprotocol/sdk": "1.32.0",
     "@pi-orb/luna": "*",
     "@pi-orb/mock-openai": "*",

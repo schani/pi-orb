@@ -7,6 +7,7 @@ import { agentPlacement } from "./harness-agent-plane.ts";
 import { logOrbEvent } from "./log.ts";
 import { generateOrbName } from "./orb-naming.ts";
 import type { ControlPlaneDeps, OrbHostRef } from "./ports.ts";
+import { inspectFailedRuntime } from "./runtime-recovery.ts";
 
 /**
  * The classified result of pulling one orb until it is caught up
@@ -233,8 +234,14 @@ export async function pollOrbUntilCaughtUp(
     );
     if (pulled.isErr()) {
       const error = pulled.error;
-      if (agentPlacement(deps.agentPlane, orb) !== "central" && error.answered)
+      if (agentPlacement(deps.agentPlane, orb) !== "central" && error.answered) {
+        if (error.code !== "cursor_not_found") {
+          const inspected = await inspectFailedRuntime(task, deps, orb, baseUrl);
+          if (inspected.isErr()) return retryableStore(inspected.error);
+          if (inspected.value) return { type: "orb_gone" };
+        }
         deps.control.noteRuntimeAnswered(orbId, task.monotonicNow());
+      }
       if (error.code === "cursor_not_found") {
         const integrity: ReplicationIntegrityError = {
           type: "replication_integrity",

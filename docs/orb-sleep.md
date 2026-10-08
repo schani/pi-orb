@@ -8,6 +8,8 @@
 
 `pi-orb sleep 1h` schedules a graceful stop/start of this orb, retains its workspace, then gives the first wake-triggered inference one combined restart/sleep notification. It is not RAM suspend and adds no lifecycle state.
 
+**Decision 2026-10-07:** the runtime prompt explicitly directs agents to use this command to sleep until later—not code-mode, timers, or shell sleep.
+
 The deadline is control-plane durable acceptance time plus the requested duration. The CLI prints that absolute deadline. It is not measured from response receipt, drain completion, or host stop. A request may use any positive safe-integer duration in seconds whose resulting date is representable; there is no arbitrary maximum wait.
 
 Sleep waits for aggregate root, child, and handoff work; admitted uploads; and the pending inbox to drain. It then uses the existing prepare-idle-stop admission barrier before final history drain and host stop. Visible browser presence does not postpone sleep. The deadline is accepted even when work may outlast it: expiry while still running cancels the stop rather than killing work.

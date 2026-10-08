@@ -488,6 +488,41 @@ export function mapPiEntry(entry: unknown): Result<HistoryRecord, MappingError> 
           eventType: "agent.settings_fallback",
           content: [textBlock(data["message"])],
         });
+      if (
+        entry["customType"] === "pi-orb.compaction-outcome" &&
+        typeof data?.["operationId"] === "string" &&
+        typeof data["message"] === "string" &&
+        (data["outcome"] === "failed" || data["outcome"] === "aborted")
+      )
+        return ok({
+          ...identity,
+          type: "event",
+          eventType: "agent.compaction",
+          compaction: {
+            operationId: data["operationId"],
+            outcome: data["outcome"],
+            message: data["message"],
+          },
+          content: [textBlock(data["message"])],
+        });
+      if (
+        entry["customType"] === "pi-orb.stream-audit" &&
+        (data?.["edge"] === "no_event_gap" || data?.["edge"] === "large_tool_arguments")
+      ) {
+        const label =
+          typeof data["parentSessionId"] === "string" ? "Child model stream" : "Model stream";
+        return ok({
+          ...identity,
+          type: "event",
+          eventType: "agent.stream_issue",
+          custom: { customType: "pi-orb.stream-audit", display: true },
+          content: [
+            textBlock(
+              `${label}: ${data["edge"] === "no_event_gap" ? "no decoded event for 60 seconds." : "tool arguments reached 64 KiB."}`,
+            ),
+          ],
+        });
+      }
       const alert =
         entry["customType"] === "pi-orb.alert" &&
         typeof data?.["message"] === "string" &&

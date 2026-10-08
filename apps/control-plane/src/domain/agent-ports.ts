@@ -43,6 +43,7 @@ export interface AgentLiveView {
   readonly blocks: readonly {
     blockId: string;
     blockType: "text" | "reasoning";
+    contentIndex: number;
     revision: number;
     text: string;
   }[];
@@ -87,6 +88,12 @@ export interface AgentAlertWriter {
 export interface AgentPlane {
   readonly placement: "central" | "host";
   placementFor?(orb: OrbRow): "central" | "host";
+  /** Read-only compatibility preflight; actual open/mutation admission rechecks authority. */
+  checkStartup?(
+    task: SimulationTask,
+    orb: OrbRow,
+    context: OperationContext,
+  ): ResultAsync<void, RuntimeClientError>;
   health(
     task: SimulationTask,
     orb: OrbRow,

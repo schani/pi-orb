@@ -31,6 +31,7 @@ it("uses native Claude effort choices without Pi-only levels", () => {
   expect(commandOptions("", claude, "effort").map((option) => option.label)).toEqual([
     "model",
     "effort",
+    "compact",
   ]);
   expect(commandOptions("effort ", claude, "effort").map((option) => option.label)).toEqual([
     "low",
@@ -45,6 +46,14 @@ it("uses native Claude effort choices without Pi-only levels", () => {
   });
   expect(commandOptions("thinking ", claude, "effort")).toEqual([]);
 });
+it("compact executes directly and accepts optional instructions without settings values", () => {
+  expect(commandOptions("comp", null)).toEqual([{ label: "compact", action: { type: "compact" } }]);
+  expect(commandOptions("compact", view)[0]?.action).toEqual({ type: "compact" });
+  expect(commandOptions("compact  preserve decisions\n and paths  ", view)[0]?.action).toEqual({
+    type: "compact",
+    customInstructions: "preserve decisions\n and paths",
+  });
+});
 it("consumes slash only in message mode, with no shell interpretation", () => {
   expect(normalizeComposerChange("message", "/thinking")).toEqual({
     mode: "command",
@@ -55,7 +64,7 @@ it("consumes slash only in message mode, with no shell interpretation", () => {
   expect(composerModeGlyph("command")).toBe("/");
 });
 it("offers only supported choices and never converts an unknown command to a prompt", () => {
-  expect(commandOptions("", view).map((x) => x.label)).toEqual(["model", "thinking"]);
+  expect(commandOptions("", view).map((x) => x.label)).toEqual(["model", "thinking", "compact"]);
   expect(commandOptions("thinking ", view).map((x) => x.label)).toEqual(["low", "high"]);
   expect(commandOptions("thinking low", view)[0]?.action).toEqual({
     type: "set_thinking",

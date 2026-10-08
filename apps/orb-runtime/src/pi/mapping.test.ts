@@ -220,6 +220,25 @@ describe("Pi entry mapping", () => {
     });
   });
 
+  it("shows stream anomaly edges without trusting stored content, and keeps terminal audits quiet", () => {
+    const entry = {
+      ...base,
+      type: "custom",
+      customType: "pi-orb.stream-audit",
+      data: { edge: "large_tool_arguments", parentSessionId: "child", message: "SECRET" },
+    };
+    expect(expectMapped(entry)).toMatchObject({
+      custom: { display: true },
+      content: [{ type: "text", text: "Child model stream: tool arguments reached 64 KiB." }],
+    });
+    expect(expectMapped({ ...entry, data: { edge: "no_event_gap" } })).toMatchObject({
+      content: [{ text: "Model stream: no decoded event for 60 seconds." }],
+    });
+    expect(
+      expectMapped({ ...entry, data: { edge: "terminal", terminal: "aborted" } }),
+    ).not.toHaveProperty("content");
+  });
+
   it.each(["failed", "needs-auth", "disconnected", "connected"] as const)(
     "shows a safe MCP %s status from a native custom entry without making it model context",
     (state) => {

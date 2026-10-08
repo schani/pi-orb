@@ -32,7 +32,7 @@ it.skipIf(!connection)(
         )
       )._unsafeUnwrap();
       const migration = await readFile(
-        new URL("../pg/migrations/035_durable_authority.sql", import.meta.url),
+        new URL("../pg/migrations/036_durable_authority.sql", import.meta.url),
         "utf8",
       );
       (await db.transaction(async (_query, execute) => execute(migration)))._unsafeUnwrap();

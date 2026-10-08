@@ -38,6 +38,222 @@ const record: HistoryRecord = {
 };
 
 describe("browser display projection", () => {
+  it("keeps subscription attachment audit identity without transcript prose on live and reconnect projections", () => {
+    const auth: HistoryRecord = {
+      id: "e6903b82-aaa5-408a-9275-c0f516275b2c",
+      parentId: null,
+      timestamp: "2026-10-06T21:00:53.762Z",
+      type: "event",
+      eventType: "claude.auth",
+      custom: { customType: "claude.auth", display: true },
+      content: [{ type: "text", text: "Claude subscription connected." }],
+      overflow: { generation: 1 },
+    };
+    const original = JSON.stringify(auth);
+    const hidden = {
+      id: auth.id,
+      parentId: null,
+      timestamp: auth.timestamp,
+      type: "event",
+      eventType: "claude.auth",
+    };
+    expect(projectDisplayRecord(auth)).toEqual(hidden);
+    expect(createDisplayRecordProjector()(auth)).toEqual(hidden);
+    expect(projectDisplayRecords([auth])).toEqual([hidden]);
+    expect(
+      projectDisplayRecord({ ...auth, content: [{ type: "text", text: "other wording" }] }),
+    ).toEqual(hidden);
+    expect(JSON.stringify(auth)).toBe(original);
+    const user: HistoryRecord = {
+      id: "user",
+      parentId: auth.id,
+      timestamp: "t",
+      type: "message",
+      role: "user",
+      content: [{ type: "text", text: "Claude subscription connected." }],
+      inboxMessageIds: ["inbox"],
+      overflow: {},
+    };
+    expect(projectDisplayRecord(user)).toMatchObject({ type: "message", content: auth.content });
+    const failure: HistoryRecord = { ...auth, eventType: "claude.initialization_failed" };
+    expect(projectDisplayRecord(failure)).toMatchObject({
+      content: auth.content,
+      custom: auth.custom,
+    });
+  });
+  it("projects native metadata and compact stdout as hidden events without mutating immutable history", () => {
+    const command: HistoryRecord = {
+      id: "command",
+      parentId: null,
+      timestamp: "t",
+      type: "event",
+      eventType: "claude.compact_command",
+      overflow: { native: { type: "user", uuid: "command" } },
+    };
+    const summary: HistoryRecord = {
+      id: "summary",
+      parentId: "command",
+      timestamp: "t",
+      type: "compaction",
+      summary: [{ type: "text", text: "canonical native summary" }],
+      overflow: {},
+    };
+    const nativeUser = (
+      id: string,
+      parentId: string | null,
+      content: string,
+      isMeta = false,
+    ): HistoryRecord => ({
+      id,
+      parentId,
+      timestamp: "t",
+      type: "message",
+      role: "user",
+      content: [{ type: "text", text: content }],
+      overflow: {
+        native: {
+          type: "user",
+          uuid: id,
+          parentUuid: parentId,
+          ...(isMeta ? { isMeta: true } : {}),
+          message: { role: "user", content },
+        },
+      },
+    });
+    const stdout = "<local-command-stdout>Compacted </local-command-stdout>";
+    const caveat = nativeUser(
+      "caveat",
+      "summary",
+      "<local-command-caveat>Native command</local-command-caveat>",
+      true,
+    );
+    const output = nativeUser("stdout", "caveat", stdout);
+    const inbox = {
+      ...nativeUser("inbox", "command", stdout, true),
+      inboxMessageIds: ["genuine-inbox"],
+    };
+    const foreign = nativeUser("foreign", null, stdout);
+    const literal = nativeUser("literal", "command", `Discuss ${stdout}`);
+    const pi = {
+      ...nativeUser("pi", "command", stdout, true),
+      overflow: { native: { type: "message", message: { role: "user", content: stdout } } },
+    };
+    const sources = [command, summary, caveat, output, inbox, foreign, literal, pi];
+    const before = JSON.stringify(sources);
+    const projected = projectDisplayRecords(sources);
+    expect(projected[2]).toMatchObject({
+      id: "caveat",
+      parentId: "summary",
+      type: "event",
+      eventType: "claude.native_metadata",
+    });
+    expect(projected[3]).toMatchObject({
+      id: "stdout",
+      parentId: "caveat",
+      type: "event",
+      eventType: "claude.compact_command",
+    });
+    expect(projected.slice(2, 4).every((record) => !("content" in record))).toBe(true);
+    expect(
+      projected.filter((record) => record.type === "message").map((record) => record.id),
+    ).toEqual(["inbox", "foreign", "literal", "pi"]);
+    expect(projected.filter((record) => record.type === "compaction")).toHaveLength(1);
+    expect(projectRecordDetail(summary, "summary:summary")).toEqual({
+      type: "compaction",
+      text: "canonical native summary",
+    });
+    expect(projectDisplayRecord(caveat)).toEqual(projected[2]);
+    const suffix = createDisplayRecordProjector();
+    sources.slice(0, 3).forEach(suffix);
+    expect(suffix(output)).toEqual(projected[3]);
+    expect(JSON.stringify(sources)).toBe(before);
+  });
+  it("hides immutable SDK skill context without hiding Skill activity or human quotations", () => {
+    const body =
+      "Base directory for this skill: /workspace/claude/platform-plugin/skills/boot-hooks\n\n# Boot hooks\n\n| Hook | Purpose |\n| setup | Install dependencies |\n<command-name>/boot-hooks</command-name>";
+    const call: HistoryRecord = {
+      id: "skill-call",
+      parentId: null,
+      timestamp: "t",
+      type: "message",
+      role: "assistant",
+      content: [
+        {
+          type: "tool_call",
+          callId: "skill-tool",
+          name: "Skill",
+          arguments: { skill: "boot-hooks" },
+        },
+      ],
+      overflow: {},
+    };
+    const result: HistoryRecord = {
+      id: "skill-result",
+      parentId: "skill-call",
+      timestamp: "t",
+      type: "message",
+      role: "tool",
+      content: [
+        {
+          type: "tool_result",
+          callId: "skill-tool",
+          content: [{ type: "text", text: "Launching skill: boot-hooks" }],
+        },
+      ],
+      overflow: {},
+    };
+    const injected: HistoryRecord = {
+      id: "skill-context",
+      parentId: "skill-result",
+      timestamp: "t",
+      type: "message",
+      role: "user",
+      content: [{ type: "text", text: body }],
+      overflow: {
+        native: {
+          type: "user",
+          uuid: "skill-context",
+          parentUuid: "skill-result",
+          isMeta: true,
+          turnCompanion: true,
+          sourceToolUseID: "skill-tool",
+          message: { role: "user", content: [{ type: "text", text: body }] },
+        },
+      },
+    };
+    const human: HistoryRecord = {
+      ...injected,
+      id: "human",
+      overflow: { native: { type: "user", message: { role: "user", content: body } } },
+    };
+    const tracked: HistoryRecord = { ...injected, id: "tracked-human", inboxMessageIds: ["inbox"] };
+    const sources = [call, result, injected, human, tracked];
+    const before = JSON.stringify(sources);
+    const projected = projectDisplayRecords(sources);
+    expect(projected[0]).toMatchObject({
+      role: "assistant",
+      content: [{ type: "tool_call", name: "Skill", callId: "skill-tool" }],
+    });
+    expect(projected[1]).toMatchObject({
+      role: "tool",
+      content: [{ type: "tool_result", callId: "skill-tool" }],
+    });
+    expect(projected[2]).toMatchObject({
+      id: "skill-context",
+      parentId: "skill-result",
+      type: "event",
+      eventType: "claude.native_metadata",
+    });
+    expect(JSON.stringify(projected[2])).not.toContain(body);
+    expect(projected.slice(3)).toMatchObject([
+      { role: "user", content: [{ type: "text", text: body }] },
+      { role: "user", content: [{ type: "text", text: body }] },
+    ]);
+    expect(projectDisplayRecord(injected)).toEqual(projected[2]);
+    const project = createDisplayRecordProjector();
+    expect(sources.map(project)).toEqual(projected);
+    expect(JSON.stringify(sources)).toBe(before);
+  });
   it.each(["bash", "codemode"])(
     "projects bounded %s code without fetching or changing detail",
     (name) => {
@@ -105,6 +321,35 @@ describe("browser display projection", () => {
     };
     expect(JSON.stringify(projectDisplayRecord(privateEvent))).not.toContain(secret);
   });
+  it.each(["failed", "aborted"] as const)(
+    "retains typed compaction %s severity without duplicating the message",
+    (outcome) => {
+      const message = "Summary failed to finish";
+      const source: HistoryRecord = {
+        id: "compact-outcome",
+        parentId: null,
+        timestamp: "t",
+        type: "event",
+        eventType: "agent.compaction",
+        overflow: {},
+        compaction: { operationId: "compact", outcome, message },
+        content: [{ type: "text", text: message }],
+      };
+      const projected = projectDisplayRecord(source);
+      expect(projected).toEqual({
+        id: source.id,
+        parentId: null,
+        timestamp: "t",
+        type: "event",
+        eventType: "agent.compaction",
+        compactionOutcome: outcome,
+        content: [{ type: "text", text: message }],
+      });
+      expect(JSON.stringify(projected).split(message)).toHaveLength(2);
+      expect(projectDisplayRecords([source])).toEqual([projected]);
+      expect(createDisplayRecordProjector()(source)).toEqual(projected);
+    },
+  );
   it.each(["", " \n\t "])(
     "omits empty public reasoning %j without changing identity or detail indices",
     (text) => {
@@ -690,5 +935,102 @@ describe("browser display projection", () => {
     expect(capHeadline("a".repeat(1024))).toBe("a".repeat(1024));
     expect(capHeadline("😀".repeat(256) + "x")).toBe("😀".repeat(255) + "…");
     expect(Buffer.byteLength(capHeadline("😀".repeat(300)), "utf8")).toBeLessThanOrEqual(1024);
+  });
+});
+
+function admissionRecord(): Extract<HistoryRecord, { type: "message" }> {
+  return {
+    id: "native-admission",
+    parentId: "native-call",
+    timestamp: "t",
+    type: "message",
+    role: "tool",
+    content: [
+      {
+        type: "tool_result",
+        callId: "toolu_01CVjvzhL1mYcu4aq2e5MvNQ",
+        content: [{ type: "text", text: "background launched" }],
+      },
+    ],
+    overflow: {
+      native: {
+        type: "user",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "toolu_01CVjvzhL1mYcu4aq2e5MvNQ" }],
+        },
+        toolUseResult: { status: "async_launched", isAsync: true, agentId: "abfb7b590821259e0" },
+      },
+    },
+  };
+}
+
+describe("native background admission display", () => {
+  it("reconstructs a safe receipt on live, reconnect and same-ID immutable replay", () => {
+    const record = admissionRecord();
+    const original = JSON.stringify(record);
+    const cached = JSON.parse(original) as HistoryRecord;
+    for (const display of [
+      projectDisplayRecord(record),
+      createDisplayRecordProjector()(record),
+      ...projectDisplayRecords([cached]),
+    ]) {
+      expect(display).toMatchObject({ content: [{ type: "tool_result", asyncLaunch: true }] });
+      expect(JSON.stringify(display)).not.toContain("abfb7b590821259e0");
+      expect(JSON.stringify(display)).not.toContain("toolUseResult");
+    }
+    expect(JSON.stringify(record)).toBe(original);
+  });
+  it.each([
+    "no-native",
+    "wrong-type",
+    "human-receipt",
+    "foreground",
+    "not-async",
+    "empty-id",
+    "wrong-tool-id",
+    "native-failed",
+    "ambiguous-results",
+    "failed",
+    "text-only",
+  ])("does not classify %s", (kind) => {
+    const record = admissionRecord();
+    if (kind === "no-native" || kind === "text-only") record.overflow = {};
+    else if (kind === "human-receipt") record.inboxMessageIds = ["human-inbox"];
+    else if (
+      kind === "failed" &&
+      record.type === "message" &&
+      record.content[0]?.type === "tool_result"
+    )
+      record.content[0].isError = true;
+    else {
+      const native = record.overflow.native as Record<string, unknown>;
+      const meta = native.toolUseResult as Record<string, unknown>;
+      if (kind === "wrong-type") native.type = "assistant";
+      if (kind === "foreground") meta.status = "completed";
+      if (kind === "not-async") meta.isAsync = false;
+      if (kind === "empty-id") meta.agentId = "";
+      if (kind === "native-failed")
+        native.message = {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "toolu_01CVjvzhL1mYcu4aq2e5MvNQ", is_error: true },
+          ],
+        };
+      if (kind === "ambiguous-results")
+        native.message = {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "toolu_01CVjvzhL1mYcu4aq2e5MvNQ" },
+            { type: "tool_result", tool_use_id: "other-call" },
+          ],
+        };
+      if (kind === "wrong-tool-id")
+        native.message = {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "other-call" }],
+        };
+    }
+    expect(JSON.stringify(projectDisplayRecord(record))).not.toContain("asyncLaunch");
   });
 });
