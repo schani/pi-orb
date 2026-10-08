@@ -36,7 +36,7 @@ class BrowserEvidenceTest(unittest.TestCase):
         self.assertIn("if: github.event_name != 'workflow_dispatch' || !inputs.subagent_continuation_diagnostic", full)
         self.assertIn('DEBUG: pw:browser', full)
         self.assertIn('run: npm run test:e2e -- --shard=${{ matrix.shard }}/4', full)
-        self.assertEqual(len(re.findall(r'^        run: npm run test:e2e --', body, re.M)), 1)
+        self.assertEqual(len(re.findall(r'^        run: npm run test:e2e --', body, re.M)), 2)
 
     def test_diagnostic_check_names_cannot_replace_required_checks(self):
         body = (ROOT / '.github/workflows/e2e.yml').read_text()
@@ -56,13 +56,13 @@ class BrowserEvidenceTest(unittest.TestCase):
                         expected += ' diagnostic'
                     self.assertEqual(rendered, expected)
 
-    def test_manual_diagnostic_is_shard_two_only_and_stops_at_first_failure(self):
+    def test_manual_diagnostic_runs_original_shard_two_once_on_every_runner(self):
         workflow_steps = steps('e2e.yml')
         diagnostic = workflow_steps['Diagnose subagent continuation']
         normal = workflow_steps['Run end-to-end test']
         guards = [re.search(r'^        if: (.+)$', step, re.M).group(1)
                   for step in (normal, diagnostic)]
-        self.assertEqual(guards[1], "github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic && matrix.shard == 2")
+        self.assertEqual(guards[1], "github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic")
         for event in ('pull_request', 'push', 'workflow_dispatch'):
             for enabled in (False, True):
                 for shard in range(1, 5):
@@ -74,26 +74,24 @@ class BrowserEvidenceTest(unittest.TestCase):
                         expression = re.sub(r'!(?!=)', 'not ', expression)
                         selected.append(eval(expression, {'__builtins__': {}}))
                     manual = event == 'workflow_dispatch' and enabled
-                    self.assertEqual(selected, [not manual, manual and shard == 2])
+                    self.assertEqual(selected, [not manual, manual])
         self.assertIn('DEBUG: pw:browser', diagnostic)
-        script = diagnostic.split('        run: |\n')[1]
-        script = '\n'.join(line[10:] for line in script.splitlines())
-        self.assertIn('for cycle in 1 2 3 4 5 6; do', script)
-        self.assertIn('npm run test:e2e -- --project lifecycle e2e/subagents.e2e.test.ts || exit "$?"', script)
+        commands = re.findall(r'^        run: (.+)$', diagnostic, re.M)
+        self.assertEqual(commands, ['npm run test:e2e -- --shard=2/4'])
+        script = commands[0]
         with tempfile.TemporaryDirectory() as directory:
             stub = Path(directory) / 'npm'
             stub.write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$CALLS"\n'
-                            'count=$(wc -l < "$CALLS")\n'
-                            'if [ "$count" = "$FAIL_AT" ]; then exit 17; fi\n')
+                            'exit "$STATUS"\n')
             stub.chmod(0o755)
-            for fail_at, count, status in ((0, 6, 0), (1, 1, 17), (3, 3, 17)):
-                calls = Path(directory) / f'calls-{fail_at}'
+            for status in (0, 17):
+                calls = Path(directory) / f'calls-{status}'
                 result = subprocess.run(['bash', '-e', '-c', script], capture_output=True,
                                         env={**os.environ, 'PATH': f'{directory}:{os.environ["PATH"]}',
-                                             'CALLS': str(calls), 'FAIL_AT': str(fail_at)})
+                                             'CALLS': str(calls), 'STATUS': str(status)})
                 self.assertEqual(result.returncode, status, result.stderr)
                 self.assertEqual(calls.read_text().splitlines(),
-                                 ['run test:e2e -- --project lifecycle e2e/subagents.e2e.test.ts'] * count)
+                                 ['run test:e2e -- --shard=2/4'])
 
     def test_deploy_uploads_only_sanitized_mcp_failure_summaries(self):
         step = steps('deploy.yml')['Upload MCP failure summaries']

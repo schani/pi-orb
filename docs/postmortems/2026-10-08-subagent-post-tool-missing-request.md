@@ -1,6 +1,6 @@
 # Subagent E2E post-tool stalls — 2026-10-08
 
-Status: historical hosted stalls remain unattributed; a separately reproduced broker cancellation fault is repaired locally and undeployed.
+Status: historical hosted stalls remain unattributed; a separately reproduced broker cancellation fault is repaired and undeployed.
 
 ## Evidence
 
@@ -36,7 +36,7 @@ Provider login/refresh signals now reach the broker client. Existing 60-second s
 
 Content-free durable native stage edges now cover turn-end, next-turn preparation, projection, context hooks, stream allocation, auth, header hooks and SSE fetch admission (`docs/pi-adapter.md`). Stream allocation returns immediately while auth can remain pending; pair stage/session/sequence edges rather than treating its exit as completed auth. The bounded failure whitelist retains these edges without prompts, credentials, payloads or free-form errors. SSE fetch instrumentation does not observe WebSocket setup, and auth-stage evidence does not isolate credential reload from lock acquisition.
 
-The matching fixture/default fake grants use 3,600-second TTLs, as does a later local ledger; the original hosted captures retained neither actual TTL nor expiry. The profiles case failed before child inference, earlier than expected refresh under that default, not proof of a fresh credential. Clock/expiry state, credential mutation and forced-refresh causality remain unknown. Neither normal expiry-driven refresh nor the reproduced broker fault is established as either hosted stall's cause. Original bundles cannot retrospectively identify the awaited stage. Fresh hosted whole-file stress runs must capture the new stages on an actual failure; local passes and this auth repair do not clear that requirement.
+The matching fixture/default fake grants use 3,600-second TTLs, as does a later local ledger; the original hosted captures retained neither actual TTL nor expiry. The profiles case failed before child inference, earlier than expected refresh under that default, not proof of a fresh credential. Clock/expiry state, credential mutation and forced-refresh causality remain unknown. Neither normal expiry-driven refresh nor the reproduced broker fault is established as either hosted stall's cause. Original bundles cannot retrospectively identify the awaited stage. Fresh hosted diagnostics must capture the new stages on an actual matching failure; local passes and this auth repair do not clear that requirement.
 
 ## Qualification evidence — 2026-10-08
 
@@ -46,4 +46,14 @@ The first full suite (`.context/post-tool-npm-test.log`, 12:58–13:13 UTC / 07:
 - GitHub grant and auth-required DST fixtures assumed short latency timers always precede the budget. Their traces fire the 10-second deadline before the approximately 10–15 ms latency timer; unavailable is correct under that schedule. Both were explicitly replayed before correction (`.context/gh-{grant,auth}-budget-replay-red.log`). Success-only fixtures now select earliest timers; adversarial budget tests retain unrestricted schedules. Corrections postdate suite completion.
 - Sleep-boot's mocked session lacked the public Agent interface required by instrumentation. `.context/boot-agent-stage-fixture-replay-red.log` replays the missing `finishTurn` receiver; the fixture now supplies a real Agent without changing production behavior. Correction postdates suite completion.
 
-The two corrected fixture files passed all ten tests in `.context/post-tool-fixture-corrections.log`. Earlier evidence includes 59 focused passes, nine final HTTP/native contract passes, typecheck/lint passes, both pointed subagent E2Es and a later final-source profiles pass. None attributes the historical hosted stalls. A new frozen full-suite qualification is required; existing completed E2Es are not repeated merely to obtain green.
+The two corrected fixture files passed all ten tests in `.context/post-tool-fixture-corrections.log`. Earlier evidence includes 59 focused passes, nine final HTTP/native contract passes, typecheck/lint passes, both pointed subagent E2Es and a later final-source profiles pass. None attributes the historical hosted stalls. Subsequent frozen-source qualification and the diagnostic's evidence limits are recorded below.
+
+## Hosted first-attempt qualification — 2026-10-08
+
+Exact head `c89ad822ce00d0371c4bcf6a2605d82d278d5246` passed first-attempt [CI 37787839513](https://github.com/schani/pi-orb/actions/runs/37787839513) and all four normal [E2E shards 37787839505](https://github.com/schani/pi-orb/actions/runs/37787839505). Manual [diagnostic 37787839032](https://github.com/schani/pi-orb/actions/runs/37787839032) passed six independent subagent-only Vitest invocations, two tests each. Evidence: `.context/pr66-staged-hosted/outcome.md` and `diagnostic-completed.log`. These are first-attempt results, not reruns. The 12 pointed passes do not attribute or clear either historical non-UI stall.
+
+## Original-cohort hypothesis — 2026-10-08
+
+Those six invocations omitted the preceding original shard-2 files. Environment, resource or state interference from that cohort remains untested. The next authorized diagnostic uses four isolated runners, each executing the entire original shard 2 once, including its preceding test mix, within the unchanged 40-minute job budget. This tests a different exposure, rather than blindly repeating the pointed probe; it is not full four-shard qualification or a causal repair.
+
+Stop at evidence of the first matching staged fault class and identify the actual awaited method; pass counts cannot clear the stalls. Preserve every failure log/artifact and first-attempt source/event/ref/job metadata. Parent decides further work after capture. No assertion weakening, timeout change, retries, speculative runtime fixes, merge or deployment. Normal automatic CI/E2E remain mandatory for the new source; c89's results do not qualify it. Manual-source evidence remains excluded from release qualification. Plan and run IDs: `.context/pr66-original-cohort/{plan.md,runs.json}`. Original TTL/expiry remain unknown; 3,600 seconds is only the fresh-fixture default.

@@ -32,12 +32,15 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
   );
   const diagnostic = source.split("- name: Diagnose subagent continuation")[1]?.split("- name:")[0];
   expect(diagnostic).toContain(
-    "if: github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic && matrix.shard == 2",
+    "if: github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic",
   );
-  expect(diagnostic).toContain("for cycle in 1 2 3 4 5 6; do");
-  expect(diagnostic).toContain(
-    'npm run test:e2e -- --project lifecycle e2e/subagents.e2e.test.ts || exit "$?"',
+  expect(diagnostic?.match(/if: (.+)/u)?.[1]).toBe(
+    "github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic",
   );
+  expect(diagnostic?.match(/run: (.+)/u)?.[1]).toBe("npm run test:e2e -- --shard=2/4");
+  expect(diagnostic?.match(/npm run test:e2e/gu)).toHaveLength(1);
+  expect(diagnostic).not.toMatch(/for |--(?:project|retry|passWithNoTests|testTimeout)/u);
+  expect(source).toContain("timeout-minutes: 40");
   expect(normalRun).toContain(`run: npm run test:e2e -- --shard=\${{ matrix.shard }}/4`);
   expect(normalRun).not.toMatch(/--(?:maxWorkers|project|retry|passWithNoTests)/u);
   expect(

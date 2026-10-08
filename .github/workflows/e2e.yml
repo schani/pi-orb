@@ -63,14 +63,10 @@ jobs:
         run: npm run test:e2e -- --shard=${{ matrix.shard }}/4
 
       - name: Diagnose subagent continuation
-        if: github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic && matrix.shard == 2
+        if: github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic
         env:
           DEBUG: pw:browser
-        run: |
-          for cycle in 1 2 3 4 5 6; do
-            echo "Subagent continuation diagnostic cycle ${cycle}/6 (not qualification)"
-            npm run test:e2e -- --project lifecycle e2e/subagents.e2e.test.ts || exit "$?"
-          done
+        run: npm run test:e2e -- --shard=2/4
 
       - name: Capture browser failure host diagnostics
         if: failure()
