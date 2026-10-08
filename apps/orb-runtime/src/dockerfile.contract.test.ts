@@ -11,7 +11,7 @@ const rootPackage = JSON.parse(readFileSync(join(repositoryRoot, "package.json")
 };
 const dockerfile = readFileSync(join(repositoryRoot, "apps/orb-runtime/Dockerfile"), "utf8");
 const chmodTargets = [...dockerfile.matchAll(/^RUN chmod 755 ([^\n\\]*)/gm)].flatMap((match) =>
-  match[1].trim().split(/\s+/),
+  (match[1] ?? "").trim().split(/\s+/),
 );
 
 describe("orb runtime Dockerfile contract", () => {
