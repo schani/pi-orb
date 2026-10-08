@@ -141,6 +141,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-08-headline-spa-cancellation-fixture.md](docs/postmortems/2026-10-08-headline-spa-cancellation-fixture.md) — hard navigation bypassed same-document stale-reply cancellation; SPA ownership gates qualify the correction
 - [docs/postmortems/2026-10-08-e2e-device-approval-timeout.md](docs/postmortems/2026-10-08-e2e-device-approval-timeout.md) — bounded mock approval recovery now uses a verified replay-safe write contract
 - [docs/postmortems/2026-10-07-sleep-notice-user-turn.md](docs/postmortems/2026-10-07-sleep-notice-user-turn.md) — wake retries lacked pending inbox dedup; HTTP delivery dropped notice provenance
 - [docs/postmortems/2026-10-06-spot-preemption-burst.md](docs/postmortems/2026-10-06-spot-preemption-burst.md) — zone-wide Spot burst preempted one orb six times in 72 minutes; restart attribution requires the GCE operation log

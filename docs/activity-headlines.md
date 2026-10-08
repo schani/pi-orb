@@ -119,7 +119,7 @@ Existing Chromium/WebKit suites, gated transport/clock; no sleeps/timeout increa
 
 1. **First seen.** Only generic null requests, including collapsed headers and artificial names; strings/empty/absent do not. Hidden grouped children never start unseen work. Once started, scroll-away, parent closure while mounted and tab hiding allow completion without another POST.
 2. **Two-request limit.** Hold two POSTs; details and controls remain usable. Another seen header queues, maximum two active; unmounting queued work prevents launch. Previously seen queued work may launch while cropped.
-3. **Scope, replay and result change.** Replay null does not repeat while mounted. Outcome selection cancels intent; late intent cannot overwrite it. Navigation/new session ignores stale responses, even when identities are reused.
+3. **Scope, replay and result change.** Replay null does not repeat while mounted. Outcome selection cancels intent; late intent cannot overwrite it. Navigation/new session ignores stale responses, even when identities are reused. SPA links preserve the document containing old owners; gate transcript unmount/live-socket teardown before returning, and match fresh held replies by session. Return may use enriched history or cached POSTs. Require one document request across scope transitions (decided 2026-10-08; `docs/postmortems/2026-10-08-headline-spa-cancellation-fixture.md`).
 4. **Failure and Retry.** Failure survives scroll/disclosure toggles; only the independent Retry button retries, without toggling or blocking details.
 
 Narrow request-limit helper tests use controlled responses for slots/scope. Browser coverage uses deterministic gates, not a controller framework or another DST matrix.
