@@ -1,6 +1,12 @@
 # Subagent E2E post-tool stalls — 2026-10-08
 
-Status: historical and fresh hosted provider waits remain unattributed; a separately reproduced broker cancellation fault is repaired and undeployed.
+Status: recorded hosted provider waits remain unattributed; the user waived their explanation as a merge/deployment requirement on 2026-10-08. The separately reproduced broker cancellation fault is repaired and undeployed.
+
+## Conclusion — user decision, 2026-10-08
+
+The recorded HTTP POSTs to fake-openai `/codex/responses` remained pending until the 60-second test deadline. Evidence does not establish server receipt or the cause of the root-continuation/child-first-inference waits. The user accepted these historical stalls and the separate truncated APT download as not requiring further explanation. Neither network causality nor elimination of stalls is claimed. Earlier investigation requirements below describe the pre-waiver decisions; they are no longer release blockers.
+
+The agent-owned Unix-socket checkpoint experiment is abandoned under this decision; retain `.context/pr66-checkpoint-*` red/green evidence. Committed bounded audit instrumentation remains. First-attempt CI 37816944042 and all four normal E2E shards 37816943899 passed source `5a059ad796b5f3ed9b1c780250f322ea45931f77`; exact-main qualification and correction of new failures remain mandatory (`docs/testing.md`).
 
 ## Evidence
 
@@ -23,7 +29,7 @@ Naming uses an independent mock session. Neither failing continuation shows a co
 
 Extend only the test failure adapter: retain bounded, explicitly whitelisted active-stream and persisted-audit IDs, numeric timings/counts/status, event categories, phases, transport and issue/terminal categories. Exclude prompts, tokens, payloads, free-form errors and runtime/auth logs. Keep the existing 64 KiB/30-entry local tail and at most 30 active stream rows; missing older audits remain a diagnostic limit. Existing `test-failures/subagent-*/failure.json` artifact retention covers the addition.
 
-Diagnostic stages are not a corrective lifecycle change or release qualification. Do not infer historical repair from a passing local probe, broaden retries, weaken assertions or increase timeouts. The user waived explanation of the separate historical WebKit failures as a merge/deployment requirement on 2026-10-08 (`docs/postmortems/2026-10-08-webkit-reload-internal-error.md`); these non-UI blockers remain. Actionable work is tracked in `TODO.md`.
+Diagnostic stages are not a corrective lifecycle change or release qualification. Do not infer historical repair from a passing local probe, broaden retries, weaken assertions or increase timeouts. The user waived explanation of the separate historical WebKit failures as a merge/deployment requirement on 2026-10-08 (`docs/postmortems/2026-10-08-webkit-reload-internal-error.md`); these non-UI failures remained blockers at that point. The later provider/APT decision above waives their historical explanation.
 
 
 ## Broker fault and repair — 2026-10-08 (local)

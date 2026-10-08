@@ -109,6 +109,14 @@ Clean installation and zero audit findings are not closure proofs: npm 11.5.1's 
 
 After repair, sanitized `npm ci --ignore-scripts`, explicit sealed postinstall steps, 37 focused Vitest contracts and 14 installer/archive checks pass. Root, omit-dev and standalone audits each report zero vulnerabilities. Evidence: `.context/claude-production-hardening/dependency-graph-repair/`. The subsequent frozen full unit/E2E/build qualification below passed.
 
+## PR 66 provider/APT historical explanation exception (2026-10-08)
+
+**PR 66 provider/APT exception (user-approved 2026-10-08):** explaining the recorded hosted Pi provider HTTP stalls and truncated `libproc2-0` download (12,800 of 62,804 bytes) is not a merge/deployment requirement. Preserve first-failure evidence; neither cause is claimed fixed or proven. This covers only those historical failures, separately from the WebKit exception. Normal exact-head qualification, correction of new failures and DST replay remain mandatory. Evidence: `docs/postmortems/2026-10-08-subagent-post-tool-missing-request.md`, `docs/postmortems/2026-10-08-runtime-apt-size-mismatch.md`.
+
+The broker cancellation defect, acquisition-only APT retry and image-collapse readiness correction are independently tested fixes, not attribution of the HTTP stalls or truncated download. Further checkpoint probing is not required under this decision; preserve `.context/pr66-checkpoint-*` red/green evidence. Committed bounded diagnostics remain available for new failures.
+
+Source `5a059ad796b5f3ed9b1c780250f322ea45931f77` passed first-attempt [CI 37816944042](https://github.com/schani/pi-orb/actions/runs/37816944042) and all four normal [E2E shards 37816943899](https://github.com/schani/pi-orb/actions/runs/37816943899). These branch checks do not replace exact-main release qualification or authorize deployment.
+
 ## UI release-policy exception (decided 2026-10-05)
 
 **UI exception (user-approved 2026-10-05):** flaky UI tests must still be fixed and validated, but deep investigation of a historical failure is optional once corrective stabilization is evidenced. A passing rerun alone is insufficient; new failing UI tests still require correction. Preserve first-failure evidence. Non-UI failures and DST replay/root-cause requirements are unchanged.

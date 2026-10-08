@@ -8,7 +8,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Resolve PR 66 subagent post-tool stalls before merge/deployment** (`docs/postmortems/2026-10-08-subagent-post-tool-missing-request.md`). Preserve E2E37734950460 attempt-1 shard-2 evidence; identify the missing continuation boundary using sanitized stream/audit metadata, then demonstrate a tests-first deterministic correction. Passing local baseline and diagnostic capture do not clear these non-UI failures.
+- [x] **Waive historical PR 66 provider-stall/APT explanation (user-approved 2026-10-08).** Historical causes remain unknown; first-failure evidence is preserved in `docs/postmortems/2026-10-08-subagent-post-tool-missing-request.md` and `docs/postmortems/2026-10-08-runtime-apt-size-mismatch.md`. Normal qualification and correction of new failures remain required.
 
 - **Qualify Claude automatic compute recovery** (2026-10-06; `docs/lifecycle.md`, `docs/testing.md`). Complete parent review and frozen-source full repository/process E2E gates before deployment. The isolated HTTP/WS contract now covers complete broker/checkout/hook boot, missing lifetime, repeated guard and Stop races. Preserve the original Pi inbox-abort RED evidence and unknown production 62aa attribution; no operational recovery is authorized by this task.
 

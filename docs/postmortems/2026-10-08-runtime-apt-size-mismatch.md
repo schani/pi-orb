@@ -1,5 +1,7 @@
 # Runtime image APT size rejection — 2026-10-08
 
+Status: acquisition-only recovery is repaired; historical transfer explanation is waived by the user (2026-10-08), not proven. First-failure evidence remains preserved. Normal qualification and correction of new failures remain required (`docs/testing.md`).
+
 [Diagnostic 37803028526, job 113399921073](https://github.com/schani/pi-orb/actions/runs/37803028526/job/113399921073) on source `f236b38` failed before inference. Debian bookworm's `libproc2-0_4.0.2-3_amd64.deb` returned 12,800 bytes against the signed index's expected 62,804 and SHA256 `e82ba5d01929eafb8b9954606a3c38b0332a987c2b3432388b4ee7365e54deae`. APT reported “File has unexpected size”, then exited 100. The preceding `netbase` archive was 12.8 kB; this coincidence does not prove response misassociation. HTTP headers/bodies were not captured: transfer truncation, stale object and intermediary behavior cannot be distinguished. “Mirror sync in progress?” is generic APT text, not a diagnosed mirror cause.
 
 Evidence: `.context/pr66-owned-wire/{first-failure.json,job-113399921073.log,outcome.md,completion.json}`. All nineteen artifact DST traces match tracked baseline bytes; there is no new DST failure to replay. Normal CI/E2E successes do not explain this failure, prior provider-header stalls or the separately owned diagnostic WebKit failure.
