@@ -49,7 +49,9 @@ it.each([false, true])(
       }
 
       const approvedState = await fakeControl(session.sessionKey, "/state");
-      expect(Array.isArray(approvedState["deviceAuths"]) && approvedState["deviceAuths"].length).toBe(1);
+      expect(
+        Array.isArray(approvedState["deviceAuths"]) && approvedState["deviceAuths"].length,
+      ).toBe(1);
       expect(approvedState["tokens"]).toEqual([]);
 
       const poll = await fakeRequest("POST", `${oauth}/api/accounts/deviceauth/token`, {
