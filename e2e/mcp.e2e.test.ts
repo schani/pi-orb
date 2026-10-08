@@ -23,6 +23,7 @@ import {
 } from "./harness.ts";
 import { finishMcpFixture, MCP_FAILURE_DIRECTORY } from "./mcp-artifacts.ts";
 import { mcpFailureHistory, mcpFailureRequests } from "./mcp-diagnostics.ts";
+import { McpInferenceRouter } from "./mcp-inference-router.ts";
 
 it("MCP traverses root, restricted and default general-purpose delegates → authenticated HTTPS; same-project orbs reuse configuration", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-mcp-e2e-"));
@@ -53,9 +54,11 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
     { stdio: "ignore" },
   );
   const calls: { method: string; authorization: string | undefined }[] = [];
+  let inferenceRouter: McpInferenceRouter | undefined;
   const remote = createServer(
     { key: readFileSync(key), cert: readFileSync(cert) },
     async (req, res) => {
+      if (inferenceRouter && (await inferenceRouter.handle(req, res))) return;
       if (req.url === "/unavailable") {
         res.writeHead(503).end();
         return;
@@ -211,17 +214,6 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
                 },
               ]
             : []),
-          {
-            match: {
-              userMessage: {
-                regex: "^Write a single short desktop-notification sentence",
-              },
-            },
-            steps: [
-              { type: "text", content: "Checked MCP capabilities." },
-              { type: "stop", status: "completed" },
-            ],
-          },
         ]),
         {
           match: { userMessage: { regex: "^MCP default delegation$" } },
@@ -268,13 +260,6 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
           ],
         },
         {
-          match: { userMessage: { regex: "^Write a single short desktop-notification sentence" } },
-          steps: [
-            { type: "text", content: "Checked default delegation." },
-            { type: "stop", status: "completed" },
-          ],
-        },
-        {
           match: { userMessage: { regex: "^MCP isolation$" } },
           steps: [
             {
@@ -291,17 +276,6 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
           match: { userMessage: { regex: "^MCP isolation$" } },
           steps: [
             { type: "text", content: "MCP_ISOLATION_COMPLETE" },
-            { type: "stop", status: "completed" },
-          ],
-        },
-        {
-          match: {
-            userMessage: {
-              regex: "^Write a single short desktop-notification sentence",
-            },
-          },
-          steps: [
-            { type: "text", content: "Checked project isolation." },
             { type: "stop", status: "completed" },
           ],
         },
@@ -327,6 +301,7 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
       })),
     },
   });
+  inferenceRouter = new McpInferenceRouter(fake.inferenceBaseUrl);
   const webRoot = join(import.meta.dirname, "../apps/web");
   await build({
     root: webRoot,
@@ -338,7 +313,7 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
   process.env["NODE_EXTRA_CA_CERTS"] = cert;
   const cp = await startControlPlane({
     port: 7169,
-    fake,
+    fake: { ...fake, inferenceBaseUrl: `https://127.0.0.1:${address.port}/inference` },
     nameFake,
     pglitePath: join(root, "db"),
     processStateDirectory: join(root, "hosts"),
@@ -569,19 +544,6 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
     expect(calls.some((call) => call.method === "resources/templates/list")).toBe(true);
     expect(calls.filter((c) => c.method === "tools/call")).toHaveLength(1);
     expect(calls.every((c) => c.authorization === "Bearer synthetic-first")).toBe(true);
-    await waitFor(
-      "first MCP summary consumed its scripted rule",
-      async () => {
-        const requests = (await fakeControl(fake.sessionKey, "/requests")) as unknown as {
-          matchedRuleIndex: number | null;
-          status: number;
-        }[];
-        return requests.some((request) => request.matchedRuleIndex === 3 && request.status === 200)
-          ? true
-          : null;
-      },
-      { timeoutMs: 60_000 },
-    );
     const firstRequests = (await fakeControl(fake.sessionKey, "/requests")) as unknown as {
       body?: { tools?: { name: string; description?: string }[]; instructions?: string };
     }[];
@@ -632,19 +594,6 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
       "Bearer synthetic-first",
       "Bearer synthetic-second",
     ]);
-    await waitFor(
-      "second MCP summary",
-      async () => {
-        const requests = (await fakeControl(fake.sessionKey, "/requests")) as unknown as {
-          matchedRuleIndex: number | null;
-          status: number;
-        }[];
-        return requests.some((request) => request.matchedRuleIndex === 9 && request.status === 200)
-          ? true
-          : null;
-      },
-      { timeoutMs: 60_000 },
-    );
     await page
       .getByRole("textbox", { name: "Message the orb", exact: true })
       .fill("MCP default delegation");
@@ -885,7 +834,7 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
             (value) => mcpFailureHistory(value),
             () => "unavailable",
           );
-        return { requests, history };
+        return { requests, history, inferenceRoutes: inferenceRouter?.snapshot() };
       },
       close: () => browser.close(),
       removeProjects: async () => {
