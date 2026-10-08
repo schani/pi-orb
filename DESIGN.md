@@ -141,6 +141,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-08-e2e-device-approval-timeout.md](docs/postmortems/2026-10-08-e2e-device-approval-timeout.md) — bounded mock approval recovery now uses a verified replay-safe write contract
 - [docs/postmortems/2026-10-07-sleep-notice-user-turn.md](docs/postmortems/2026-10-07-sleep-notice-user-turn.md) — wake retries lacked pending inbox dedup; HTTP delivery dropped notice provenance
 - [docs/postmortems/2026-10-06-spot-preemption-burst.md](docs/postmortems/2026-10-06-spot-preemption-burst.md) — zone-wide Spot burst preempted one orb six times in 72 minutes; restart attribution requires the GCE operation log
 - [docs/postmortems/2026-10-06-claude-nested-owner-continuation.md](docs/postmortems/2026-10-06-claude-nested-owner-continuation.md) — root-only delegation excludes unsupported headless nested-owner continuation

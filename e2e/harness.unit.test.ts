@@ -1,11 +1,12 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   attachControlledClock,
   controlledClockSpawn,
   effectiveOpenAIResponseInstructions,
   FAKE_ORIGIN,
+  fakeControl,
   fakeRequest,
   newModelRequestsById,
   requestIds,
@@ -137,6 +138,64 @@ describe("fake request selection", () => {
     ];
 
     expect(newModelRequestsById(after, requestIds(before))).toEqual([after[3], after[2], after[0]]);
+  });
+});
+
+describe("fakeControl approval recovery", () => {
+  it.each([false, true])("recovers a lost approval response (accepted=%s)", async (accepted) => {
+    let calls = 0;
+    let approved = false;
+    const bodies: unknown[] = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
+      calls += 1;
+      bodies.push(init?.body);
+      if (calls === 1) {
+        approved = accepted;
+        return Promise.reject(new DOMException("lost response", "TimeoutError"));
+      }
+      approved = true;
+      return Promise.resolve(new Response('{"approved":true}'));
+    });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      expect(
+        await fakeControl("owned-session", "/deviceauth/approve", { user_code: "private-code" }),
+      ).toEqual({ approved: true });
+      expect(approved).toBe(true);
+      expect(calls).toBe(2);
+      expect(bodies).toEqual(Array(2).fill('{"user_code":"private-code"}'));
+      expect(warning).toHaveBeenCalledWith(
+        "fake service POST /api/__mock__/sessions/owned-session/deviceauth/approve transport TimeoutError; retry 2/3",
+      );
+      expect(JSON.stringify(warning.mock.calls)).not.toContain("private-code");
+    } finally {
+      fetchMock.mockRestore();
+      warning.mockRestore();
+    }
+  });
+
+  it("does not replay other control writes", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(connectionReset());
+    try {
+      await expect(fakeControl("owned-session", "/reset", {})).rejects.toThrow("1 attempt");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("does not replay an HTTP approval error", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("{}", { status: 404 }));
+    try {
+      await expect(
+        fakeControl("owned-session", "/deviceauth/approve", { user_code: "missing" }),
+      ).rejects.toThrow("HTTP 404");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
 });
 
