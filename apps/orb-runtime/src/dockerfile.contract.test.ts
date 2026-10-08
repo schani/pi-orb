@@ -10,8 +10,23 @@ const rootPackage = JSON.parse(readFileSync(join(repositoryRoot, "package.json")
   workspaces?: string[];
 };
 const dockerfile = readFileSync(join(repositoryRoot, "apps/orb-runtime/Dockerfile"), "utf8");
+const chmodTargets = [...dockerfile.matchAll(/^RUN chmod 755 ([^\n\\]*)/gm)].flatMap((match) =>
+  match[1].trim().split(/\s+/),
+);
 
 describe("orb runtime Dockerfile contract", () => {
+  it("routes both package sets through the executable acquisition helper", () => {
+    const copy = dockerfile.indexOf("COPY infra/runtime_apt.sh /usr/local/bin/runtime-apt");
+    const chmod = dockerfile.indexOf("RUN chmod 755 /usr/local/bin/runtime-apt");
+    const acquisitions = [...dockerfile.matchAll(/&& runtime-apt [^\n]+/g)];
+    expect(copy).toBeGreaterThan(-1);
+    expect(chmod).toBeGreaterThan(copy);
+    expect(acquisitions).toHaveLength(2);
+    for (const acquisition of acquisitions) expect(acquisition.index).toBeGreaterThan(chmod);
+    expect(chmodTargets).toContain("/usr/local/bin/runtime-apt");
+    expect(dockerfile).not.toContain("apt-get install");
+  });
+
   it("installs the prescribed Python environment", () => {
     expect(dockerfile).toContain("python3");
     expect(dockerfile).toContain("python3-venv");
@@ -19,11 +34,11 @@ describe("orb runtime Dockerfile contract", () => {
   });
 
   it("installs zip archive tools", () => {
-    expect(dockerfile).toMatch(/apt-get install[^\n]*\bzip\b[^\n]*\bunzip\b/);
+    expect(dockerfile).toMatch(/&& runtime-apt[^\n]*\bzip\b[^\n]*\bunzip\b/);
   });
 
   it("installs sudo so Amp-style boot hooks run unchanged", () => {
-    expect(dockerfile).toMatch(/apt-get install[^\n]*\bsudo\b/);
+    expect(dockerfile).toMatch(/&& runtime-apt[^\n]*\bsudo\b/);
   });
 
   it("marks every process in the orb with PI_ORB=1 and never sets AMP_ORB", () => {
@@ -40,7 +55,7 @@ describe("orb runtime Dockerfile contract", () => {
   });
 
   it("installs the Google Cloud CLI from Google's apt repository", () => {
-    expect(dockerfile).toMatch(/apt-get install[^\n]*\bgoogle-cloud-cli\b/);
+    expect(dockerfile).toMatch(/&& runtime-apt[^\n]*\bgoogle-cloud-cli\b/);
     expect(dockerfile).toContain(
       "deb [signed-by=/usr/share/keyrings/cloud.google.asc] https://packages.cloud.google.com/apt cloud-sdk main",
     );
@@ -78,8 +93,6 @@ describe("orb runtime Dockerfile contract", () => {
     // prefix of `/usr/local/bin/pi-orb-git-credential`, so a substring check
     // would call the `pi-orb` shim executable on the strength of a different
     // shim's chmod.
-    const chmod = /RUN chmod 755 ([^\n\\]*)/.exec(dockerfile)?.[1] ?? "";
-    const chmodTargets = chmod.trim().split(/\s+/);
     for (const shim of shims) {
       expect(chmodTargets, `${shim} must be made executable`).toContain(`/usr/local/bin/${shim}`);
     }
@@ -122,8 +135,7 @@ describe("orb runtime Dockerfile contract", () => {
     expect(dockerfile).toContain(
       "COPY scripts/pi-orb-gcp-identity /usr/local/bin/pi-orb-gcp-identity",
     );
-    const chmod = /RUN chmod 755 ([^\n\\]*)/.exec(dockerfile)?.[1] ?? "";
-    expect(chmod.trim().split(/\s+/)).toContain("/usr/local/bin/pi-orb-gcp-identity");
+    expect(chmodTargets).toContain("/usr/local/bin/pi-orb-gcp-identity");
   });
 
   it("bakes the agent skills outside the persistent volume", () => {

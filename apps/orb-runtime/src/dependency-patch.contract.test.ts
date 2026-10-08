@@ -109,7 +109,13 @@ describe("Pi dependency patch installation", () => {
       const scope = workspace === "@pi-orb/control-plane" ? " --pi-only" : "";
       expect(dockerfile.indexOf(`node ${helperPath}${scope}`, install)).toBeGreaterThan(install);
       expect(dockerfile).not.toContain("patch-package");
-      expect(dockerfile).toMatch(/apt-get install -y --no-install-recommends[^\n]*\bgit\b/);
+      const gitInstall =
+        workspace === "@pi-orb/orb-runtime"
+          ? /&& runtime-apt[^\n]*\bgit\b/
+          : /apt-get install -y --no-install-recommends[^\n]*\bgit\b/;
+      const acquisition = dockerfile.search(gitInstall);
+      expect(acquisition).toBeGreaterThan(-1);
+      expect(acquisition).toBeLessThan(install);
     }
 
     const patchFiles = [
