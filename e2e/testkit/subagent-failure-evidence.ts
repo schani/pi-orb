@@ -200,8 +200,49 @@ function modelMetadata(value: unknown) {
         aborted: row.aborted,
         finalized: row.finalized,
         eventCounts,
+        modelRequest: row.modelRequest,
+        modelErrors: row.modelErrors,
       };
     });
+}
+
+function wireMetadata(value: unknown) {
+  const markers = ["profile_case", "profile_child", "subagent_e2e", "leaf_e2e"].flatMap((prefix) =>
+    [0, 1, 2, 3].map((index) => `${prefix}_${index}`),
+  );
+  return (Array.isArray(value) ? value : []).slice(-64).map((value) => {
+    const row = object(value);
+    return {
+      sequence: counter(row["sequence"]),
+      method: member(row["method"], ["POST"]),
+      path: member(row["path"], ["codex_responses"]),
+      model: member(row["model"], ["luna", "sol"]),
+      marker: member(row["marker"], markers),
+      encoding: member(row["encoding"], ["zstd", "gzip", "br"]),
+      inputCount: counter(row["inputCount"]),
+      bodyBytes: counter(row["bodyBytes"]),
+      enteredAt: counter(row["enteredAt"]),
+      bodyArrivedAt: counter(row["bodyArrivedAt"]),
+      upstreamEnteredAt: counter(row["upstreamEnteredAt"]),
+      headersAt: counter(row["headersAt"]),
+      status: counter(row["status"]),
+      responseError: member(row["responseError"], [
+        "no_matching_rule",
+        "invalid_body",
+        "unknown_session",
+      ]),
+      firstByteAt: counter(row["firstByteAt"]),
+      responseBytes: counter(row["responseBytes"]),
+      endedAt: counter(row["endedAt"]),
+      terminal: member(row["terminal"], [
+        "complete",
+        "client_cancelled",
+        "fixture_cleanup",
+        "upstream_error",
+        "request_error",
+      ]),
+    };
+  });
 }
 
 type Probe = "health" | "orb" | "history" | "model" | "names";
@@ -225,6 +266,7 @@ export async function captureSubagentFailure(options: {
   phase: "continuation" | "abort" | "recovery" | "archive" | "profiles" | "setup";
   artifact: string;
   logs: string[];
+  inferenceWire?: unknown;
   probes: Partial<Record<Probe, () => Promise<unknown>>>;
 }) {
   const bundle = {
@@ -232,6 +274,9 @@ export async function captureSubagentFailure(options: {
     phase: options.phase,
     capturedAt: new Date().toISOString(),
     root: rootMetadata(options.root, options.orb),
+    ...(options.inferenceWire === undefined
+      ? {}
+      : { inferenceWire: wireMetadata(options.inferenceWire) }),
     lifecycle: options.logs
       .join("")
       .split("\n")

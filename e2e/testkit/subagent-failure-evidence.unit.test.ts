@@ -30,6 +30,7 @@ it("saves bounded local metadata before independent probes and excludes private 
   writeFileSync(join(directory, "children", "private.jsonl"), JSON.stringify({ type: "SECRET" }));
   const artifact = join(root, "evidence", "failure.json");
   const seen: string[] = [];
+  let localSnapshot: ReturnType<typeof JSON.parse>;
   try {
     const result = await captureSubagentFailure({
       root,
@@ -37,12 +38,28 @@ it("saves bounded local metadata before independent probes and excludes private 
       phase: "continuation",
       artifact,
       logs: [`lifecycle: orb=${orb} archive-waiting-for-work SECRET`, "SECRET"],
+      inferenceWire: Array.from({ length: 90 }, (_, sequence) => ({
+        sequence,
+        method: "POST",
+        path: "codex_responses",
+        model: "luna",
+        marker: "SECRET",
+        inputCount: 1,
+        bodyBytes: 100,
+        encoding: "zstd",
+        enteredAt: 123,
+        bodyArrivedAt: 124,
+        upstreamEnteredAt: 125,
+        headersAt: null,
+        firstByteAt: null,
+        responseBytes: 0,
+        terminal: null,
+        headers: "SECRET",
+        responseError: sequence === 89 ? "invalid_body" : "SECRET",
+      })),
       probes: {
         health: async () => {
-          const local = JSON.parse(readFileSync(artifact, "utf8"));
-          expect(local.root.entries).toHaveLength(30);
-          expect(local.root.truncated).toBe(true);
-          expect(local.lifecycle).toEqual(["archive-waiting-for-work"]);
+          localSnapshot = JSON.parse(readFileSync(artifact, "utf8"));
           seen.push("health");
           return {
             status: 200,
@@ -81,6 +98,17 @@ it("saves bounded local metadata before independent probes and excludes private 
       },
     });
     expect(result.isOk()).toBe(true);
+    expect(localSnapshot.root.entries).toHaveLength(30);
+    expect(localSnapshot.root.truncated).toBe(true);
+    expect(localSnapshot.lifecycle).toEqual(["archive-waiting-for-work"]);
+    expect(localSnapshot.inferenceWire).toHaveLength(64);
+    expect(localSnapshot.inferenceWire.at(-1).responseError).toBe("invalid_body");
+    expect(localSnapshot.inferenceWire[0]).toMatchObject({
+      sequence: 26,
+      marker: null,
+      upstreamEnteredAt: 125,
+      responseError: null,
+    });
     expect(seen.sort()).toEqual(["health", "history", "model", "names", "orb"]);
     const text = readFileSync(artifact, "utf8");
     const saved = JSON.parse(text);
@@ -102,7 +130,7 @@ it("saves bounded local metadata before independent probes and excludes private 
     expect(statSync(artifact).mode & 0o777).toBe(0o600);
     expect(saved.probes.names).toHaveLength(30);
     expect(text).not.toContain("SECRET");
-    expect(text.length).toBeLessThan(20000);
+    expect(Buffer.byteLength(text)).toBeLessThan(64 * 1024);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -247,7 +275,18 @@ it("keeps local evidence while a JSON probe is held, then retains independent pr
         history: async () => ({ status: 500, body: { error: "SECRET" } }),
         model: async () => ({
           status: 200,
-          body: [{ surface: "model", id: 1, status: 200, matchedRuleIndex: 4, body: "SECRET" }],
+          body: [
+            {
+              surface: "model",
+              id: 1,
+              status: 400,
+              matchedRuleIndex: null,
+              body: JSON.stringify({ model: "gpt-6-luna", input: [], instructions: "SECRET" }),
+              events: [
+                { kind: "response", body: { error: "no_matching_rule", message: "SECRET" } },
+              ],
+            },
+          ],
         }),
         names: async () => ({ status: 200, body: [] }),
       },
@@ -264,7 +303,13 @@ it("keeps local evidence while a JSON probe is held, then retains independent pr
     expect(final.root).toEqual(local.root);
     expect(final.probes.health).toEqual({ unavailable: true });
     expect(final.probes.history).toEqual({ status: 500, unavailable: true });
-    expect(final.probes.model[0]).toMatchObject({ id: 1, matchedRuleIndex: 4, status: 200 });
+    expect(final.probes.model[0]).toMatchObject({
+      id: 1,
+      matchedRuleIndex: null,
+      status: 400,
+      modelRequest: { model: "luna", inputCount: 0 },
+      modelErrors: ["no_matching_rule"],
+    });
     expect(final.probes.names).toEqual([]);
     expect(fetchProbe).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(final)).not.toContain("SECRET");

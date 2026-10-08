@@ -20,6 +20,10 @@ import {
   waitFor,
 } from "./harness.ts";
 import { FailureEvidence } from "./testkit/failure-evidence.ts";
+import {
+  type InferenceWireProxy,
+  startInferenceWireProxy,
+} from "./testkit/inference-wire-proxy.ts";
 import { captureSubagentFailure, readFailureJson } from "./testkit/subagent-failure-evidence.ts";
 
 async function saveSubagentFailure(
@@ -30,6 +34,7 @@ async function saveSubagentFailure(
   fake: Awaited<ReturnType<typeof createFakeSession>>,
   names: Awaited<ReturnType<typeof createFakeSession>>,
   caseName: "subagent-lifecycle" | "subagent-profiles",
+  wire: InferenceWireProxy,
 ) {
   const local = async (url: string) => (await readFailureJson(url)).unwrapOr({ unavailable: true });
   const requests = async (sessionKey: string) => {
@@ -44,6 +49,7 @@ async function saveSubagentFailure(
     orb,
     phase,
     logs: cp.logs,
+    inferenceWire: wire.snapshot(),
     artifact: join(import.meta.dirname, "../test-failures", caseName, "failure.json"),
     probes: {
       health: async () => {
@@ -209,9 +215,10 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
     logLevel: "silent",
     build: { outDir: join(root, "web"), emptyOutDir: true },
   });
+  const wire = (await startInferenceWireProxy(fake.inferenceBaseUrl))._unsafeUnwrap();
   const cp = await startControlPlane({
     port: 7173,
-    fake,
+    fake: { ...fake, inferenceBaseUrl: wire.baseUrl },
     nameFake: names,
     pglitePath: join(root, "db"),
     processStateDirectory: join(root, "hosts"),
@@ -539,12 +546,13 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
     );
   } catch (error) {
     failed = true;
-    await saveSubagentFailure(root, orb, phase, cp, fake, names, "subagent-lifecycle");
+    await saveSubagentFailure(root, orb, phase, cp, fake, names, "subagent-lifecycle", wire);
     console.error(`Preserved runtime files: ${root}`);
     throw error;
   } finally {
     await browser.close();
     await cp.stop();
+    expect((await wire.close()).isOk()).toBe(true);
     await deleteFakeSession(fake.sessionKey);
     await deleteFakeSession(names.sessionKey);
     if (!failed) rmSync(root, { recursive: true, force: true });
@@ -595,9 +603,10 @@ it("rejects unknown profiles and models without child inference, and dispatches 
       rules: [{ match: { default: true }, steps: [{ type: "text", content: "Profiles" }, stop] }],
     },
   });
+  const wire = (await startInferenceWireProxy(fake.inferenceBaseUrl))._unsafeUnwrap();
   const cp = await startControlPlane({
     port: 7183,
-    fake,
+    fake: { ...fake, inferenceBaseUrl: wire.baseUrl },
     nameFake: names,
     pglitePath: join(root, "db"),
     processStateDirectory: join(root, "hosts"),
@@ -703,11 +712,12 @@ it("rejects unknown profiles and models without child inference, and dispatches 
     }
   } catch (error) {
     failed = true;
-    await saveSubagentFailure(root, orb, "profiles", cp, fake, names, "subagent-profiles");
+    await saveSubagentFailure(root, orb, "profiles", cp, fake, names, "subagent-profiles", wire);
     console.error(`Preserved unknown-profile fixture: ${root}`);
     throw error;
   } finally {
     await cp.stop();
+    expect((await wire.close()).isOk()).toBe(true);
     await deleteFakeSession(fake.sessionKey);
     await deleteFakeSession(names.sessionKey);
     if (!failed) rmSync(root, { recursive: true, force: true });
