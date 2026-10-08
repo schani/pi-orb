@@ -141,6 +141,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-07-sleep-notice-user-turn.md](docs/postmortems/2026-10-07-sleep-notice-user-turn.md) — wake retries lacked pending inbox dedup; HTTP delivery dropped notice provenance
 - [docs/postmortems/2026-10-06-spot-preemption-burst.md](docs/postmortems/2026-10-06-spot-preemption-burst.md) — zone-wide Spot burst preempted one orb six times in 72 minutes; restart attribution requires the GCE operation log
 - [docs/postmortems/2026-10-06-claude-nested-owner-continuation.md](docs/postmortems/2026-10-06-claude-nested-owner-continuation.md) — root-only delegation excludes unsupported headless nested-owner continuation
 - [docs/postmortems/2026-10-05-inbox-abort-wedge.md](docs/postmortems/2026-10-05-inbox-abort-wedge.md) — real-SDK reproduction of an idle runtime retaining an unpersisted steer and blocking FIFO retries

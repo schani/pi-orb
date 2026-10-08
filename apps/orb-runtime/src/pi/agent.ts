@@ -1091,11 +1091,16 @@ export class PiOrbAgent {
         ...(interrupted.length === 0 ? {} : { interruptedSubagents: interrupted }),
       },
     };
+    const wakeMessageId =
+      plan.marker.customType === SLEEP_WAKE_TYPE ? plan.marker.details.messageIds?.[0] : undefined;
+    if (wakeMessageId !== undefined && operationId !== null)
+      this.pendingInboxMessages.set(wakeMessageId, { delivery: "turn", operationId });
     const send = ResultAsync.fromThrowable(
       () => session.sendCustomMessage(marker, { triggerTurn: plan.triggerTurn }),
       toError,
     );
     void send().mapErr((error) => {
+      if (wakeMessageId !== undefined) this.pendingInboxMessages.delete(wakeMessageId);
       this.turnResume = { ...this.turnResume, outcome: "resume_failed" };
       if (operationId !== null) this.abandonAgentOperation(operationId, error.message);
       // A durable, visible failure also covers runtimes that restart without

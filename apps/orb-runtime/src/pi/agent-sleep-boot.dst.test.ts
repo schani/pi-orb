@@ -4,9 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { OrbBootContext } from "@pi-orb/protocol";
-import type { SimulationTask } from "determined";
+import { NoSimulationTask, type SimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { afterEach, expect, it, vi } from "vitest";
+import { FetchRuntimeClient } from "../../../control-plane/src/adapters/runtime-client/fetch-client.ts";
 import { runDst } from "../testkit/sim.ts";
 
 const controls = vi.hoisted(() => ({
@@ -99,7 +100,7 @@ class DeferredPiSession {
   readonly extensionRunner = { emit: async () => undefined };
   private active = false;
   private readonly listeners: ((event: AgentSessionEvent) => void)[] = [];
-  readonly markers: { customType: string; details?: unknown }[] = [];
+  readonly markers: { customType: string; content: unknown; details?: unknown }[] = [];
   private activeTools = ["read"];
 
   getActiveToolNames(): string[] {
@@ -136,14 +137,19 @@ class DeferredPiSession {
     options?: { triggerTurn?: boolean },
   ): Promise<void> {
     this.markers.push(marker);
+    if (options?.triggerTurn) this.active = true;
+    else this.persistMarker(marker);
+    return Promise.resolve();
+  }
+
+  persistMarker(marker = this.markers[0]): void {
+    if (marker === undefined) return;
     controls.manager?.appendCustomMessageEntry(
       marker.customType,
       marker.content,
-      marker.display,
+      true,
       marker.details,
     );
-    if (options?.triggerTurn) this.active = true;
-    return Promise.resolve();
   }
 
   announceAgentStart(): void {
@@ -160,6 +166,7 @@ const originalEnvironment = {
   PI_CODING_AGENT_DIR: process.env["PI_CODING_AGENT_DIR"],
 };
 afterEach(() => {
+  vi.unstubAllGlobals();
   controls.manager = null;
   controls.session = null;
   controls.sessionCreationStarted = false;
@@ -228,7 +235,7 @@ it("actual boot preserves Rust state without spawning an installer", async () =>
   ).toBe(true);
 });
 
-it("actual boot holds readiness through context and turn-start barriers, then deduplicates persisted wake", async () => {
+it("actual boot deduplicates serialized HTTP retries before and after wake persistence", async () => {
   await runDst({ name: "agent-sleep-boot-barriers", iterations: 30 }, async (sim) => {
     const root = mkdtempSync(join(tmpdir(), "pi-orb-sleep-boot-"));
     roots.push(root);
@@ -296,8 +303,24 @@ it("actual boot holds readiness through context and turn-start barriers, then de
             details: { messageIds: ["sleep-1"] },
           });
           let settled = false;
-          const delivery = agent
-            .deliverInboxMessage("sleep-1", ["sleep-1"], wake.content, wake.system)
+          vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+            const request = JSON.parse(String(init.body)) as OrbBootContext;
+            const response = await agent.deliverInboxMessage(
+              request.messageId,
+              request.messageIds,
+              request.content,
+              request.system,
+            );
+            return Response.json(response._unsafeUnwrap(), { status: 202 });
+          });
+          const client = new FetchRuntimeClient();
+          const retry = () =>
+            client.deliverMessage(
+              new NoSimulationTask("boot notice HTTP retry", false),
+              { baseUrl: "http://runtime.test", ...wake },
+              { signal: new AbortController().signal },
+            );
+          const delivery = retry()
             .map((value) => {
               settled = true;
               return value;
@@ -311,6 +334,12 @@ it("actual boot holds readiness through context and turn-start barriers, then de
           controls.session?.announceAgentStart();
           const result = await delivery;
           expect(result._unsafeUnwrap()).toMatchObject({
+            status: "queued",
+            duplicate: true,
+          });
+          expect(controls.session?.markers).toHaveLength(1);
+          controls.session?.persistMarker();
+          expect((await retry())._unsafeUnwrap()).toMatchObject({
             status: "persisted",
             duplicate: true,
           });
