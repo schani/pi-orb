@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -76,6 +77,7 @@ import { BOOT_BASELINE_TYPE, planBootNotification, SLEEP_WAKE_TYPE } from "./boo
 import { readExecutionIdentity } from "./execution-identity.ts";
 import { activateCodemode } from "./extensions/index.ts";
 import { FileIdleStopFence, type IdleStopFence } from "./idle-stop-fence.ts";
+import { type InferenceStageAudit, installInferenceStages } from "./inference-stages.ts";
 import {
   instructionsAdoption,
   PERSONAL_INSTRUCTIONS_ADOPTION,
@@ -227,6 +229,7 @@ export class PiOrbAgent {
   /** This boot's interrupted-turn decision, when notable (docs/lifecycle.md). */
   private turnResume: RuntimeTurnResume | null = null;
   private operationId: string | null = null;
+  private readonly inferenceOperation = new AsyncLocalStorage<string | null>();
   private readonly subagentWork = new SubagentWork();
   private operationOutcome: "completed" | "aborted" | "failed" = "completed";
   private operationError: string | undefined;
@@ -647,9 +650,13 @@ export class PiOrbAgent {
       subagents: this,
       streams: {
         telemetry: this.streamTelemetry,
-        operationId: () => this.operationId,
+        operationId: () => {
+          const owner = this.inferenceOperation.getStore();
+          return owner === undefined ? this.operationId : owner;
+        },
         rootSessionId: () => this.sessionManager?.getSessionId() ?? null,
         audit: (edge) => this.persistStreamAudit(edge),
+        stage: (edge) => this.persistStreamAudit({ ...edge, observedAt: Date.now() }),
         failed: () => this.streamAuditFailed(),
       },
       personalInstructions: personalInstructions.value,
@@ -675,6 +682,20 @@ export class PiOrbAgent {
       return err(this.failed("session_init_failed", sessionResult.error, true));
     }
     const sdkSession = sessionResult.value.session;
+    installInferenceStages(
+      sdkSession.agent,
+      {
+        now: Date.now,
+        identity: () => ({
+          operationId: this.operationId,
+          sessionId: sessionManager.getSessionId(),
+        }),
+        withIdentity: (owner, run) => this.inferenceOperation.run(owner.operationId, run),
+        audit: (edge) => this.persistStreamAudit(edge),
+        failed: () => this.streamAuditFailed(),
+      },
+      modelRuntime,
+    );
 
     this.shutdownExtensions = async () => {
       await ResultAsync.fromPromise(
@@ -884,13 +905,18 @@ export class PiOrbAgent {
     });
   }
 
-  private persistStreamAudit(edge: StreamAudit): Result<void, { type: "stream_audit_failed" }> {
+  private persistStreamAudit(
+    edge: StreamAudit | InferenceStageAudit,
+  ): Result<void, { type: "stream_audit_failed" }> {
     if (this.streamTelemetryError !== null) return err({ type: "stream_audit_failed" });
     const saved = Result.fromThrowable(
       () => {
         const manager = this.sessionManager;
         if (manager === null) return null;
-        manager.appendCustomEntry("pi-orb.stream-audit", edge);
+        manager.appendCustomEntry(
+          "stage" in edge ? "pi-orb.inference-stage" : "pi-orb.stream-audit",
+          edge,
+        );
         return manager.getSessionFile();
       },
       () => ({ type: "stream_audit_failed" as const }),
@@ -1091,11 +1117,16 @@ export class PiOrbAgent {
         ...(interrupted.length === 0 ? {} : { interruptedSubagents: interrupted }),
       },
     };
+    const wakeMessageId =
+      plan.marker.customType === SLEEP_WAKE_TYPE ? plan.marker.details.messageIds?.[0] : undefined;
+    if (wakeMessageId !== undefined && operationId !== null)
+      this.pendingInboxMessages.set(wakeMessageId, { delivery: "turn", operationId });
     const send = ResultAsync.fromThrowable(
       () => session.sendCustomMessage(marker, { triggerTurn: plan.triggerTurn }),
       toError,
     );
     void send().mapErr((error) => {
+      if (wakeMessageId !== undefined) this.pendingInboxMessages.delete(wakeMessageId);
       this.turnResume = { ...this.turnResume, outcome: "resume_failed" };
       if (operationId !== null) this.abandonAgentOperation(operationId, error.message);
       // A durable, visible failure also covers runtimes that restart without

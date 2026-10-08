@@ -48,6 +48,10 @@ No test may be flaky. A failure that does not reproduce on every run is evidence
 
 **UI exception (user-approved 2026-10-05):** flaky UI tests must still be fixed and validated, but deep investigation of a historical failure is optional once corrective stabilization is evidenced. A passing rerun alone is insufficient; new failing UI tests still require correction. Preserve first-failure evidence. Non-UI failures and DST replay/root-cause requirements are unchanged.
 
+**PR 66 WebKit exception (user-approved 2026-10-08):** explaining the historical WebKit navigation failures is not a merge/deployment requirement. Preserve the evidence; no root-cause fix is claimed. Normal qualification, new-failure handling, non-UI blockers and DST requirements remain unchanged.
+
+**PR 66 provider/APT exception (user-approved 2026-10-08):** explaining the recorded hosted Pi provider HTTP stalls and truncated `libproc2-0` download (12,800 of 62,804 bytes) is not a merge/deployment requirement. Preserve first-failure evidence; neither cause is claimed fixed or proven. This covers only those historical failures, separately from the WebKit exception. Normal exact-head qualification, correction of new failures and DST replay remain mandatory. Evidence: `docs/postmortems/2026-10-08-subagent-post-tool-missing-request.md`, `docs/postmortems/2026-10-08-runtime-apt-size-mismatch.md`.
+
 For a DST failure, replay the recorded trace from `test-failures/` (`DST_REPLAY=<trace> npx vitest run …`) before any fix, understand the interleaving, and only then decide whether the defect is in the product or in the scenario's assumptions. Never delete the trace to make the suite pass.
 
 ## Observability

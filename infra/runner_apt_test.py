@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from infra.runtime_apt_test import RuntimeAptTests
+
 
 ROOT = Path(__file__).resolve().parent.parent
 HELPER = ROOT / 'infra/runner_apt.py'

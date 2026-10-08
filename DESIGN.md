@@ -141,6 +141,12 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-08-subagent-post-tool-missing-request.md](docs/postmortems/2026-10-08-subagent-post-tool-missing-request.md) — unresolved hosted post-tool stalls; bounded stream/audit evidence only
+- [docs/postmortems/2026-10-08-mcp-summary-missing-request.md](docs/postmortems/2026-10-08-mcp-summary-missing-request.md) — unresolved hosted summary failure; sanitized artifact retention only
+- [docs/postmortems/2026-10-08-webkit-reload-internal-error.md](docs/postmortems/2026-10-08-webkit-reload-internal-error.md) — unresolved Ubuntu WebKit reload failure; browser/socket/native evidence retention only
+- [docs/postmortems/2026-10-08-headline-spa-cancellation-fixture.md](docs/postmortems/2026-10-08-headline-spa-cancellation-fixture.md) — hard navigation bypassed same-document stale-reply cancellation; SPA ownership gates qualify the correction
+- [docs/postmortems/2026-10-08-e2e-device-approval-timeout.md](docs/postmortems/2026-10-08-e2e-device-approval-timeout.md) — bounded mock approval recovery now uses a verified replay-safe write contract
+- [docs/postmortems/2026-10-07-sleep-notice-user-turn.md](docs/postmortems/2026-10-07-sleep-notice-user-turn.md) — wake retries lacked pending inbox dedup; HTTP delivery dropped notice provenance
 - [docs/postmortems/2026-10-06-spot-preemption-burst.md](docs/postmortems/2026-10-06-spot-preemption-burst.md) — zone-wide Spot burst preempted one orb six times in 72 minutes; restart attribution requires the GCE operation log
 - [docs/postmortems/2026-10-06-claude-nested-owner-continuation.md](docs/postmortems/2026-10-06-claude-nested-owner-continuation.md) — root-only delegation excludes unsupported headless nested-owner continuation
 - [docs/postmortems/2026-10-05-inbox-abort-wedge.md](docs/postmortems/2026-10-05-inbox-abort-wedge.md) — real-SDK reproduction of an idle runtime retaining an unpersisted steer and blocking FIFO retries
@@ -230,6 +236,7 @@ Tracking:
 - [docs/postmortems/2026-10-06-claude-orb-preemption.md](docs/postmortems/2026-10-06-claude-orb-preemption.md) — two Spot preemptions; Claude recovery restores context without automatic continuation
 - [docs/postmortems/2026-10-06-claude-publication-order.md](docs/postmortems/2026-10-06-claude-publication-order.md) — late native-only prefixes blocked exact-identity stream retirement; durable ownership lookahead and attribution limits
 - [docs/postmortems/2026-10-06-empty-live-thinking.md](docs/postmortems/2026-10-06-empty-live-thinking.md) — empty live reasoning visibility gap; committed suppression verified, screenshot mechanism unproved
+- [docs/postmortems/2026-10-08-runtime-apt-size-mismatch.md](docs/postmortems/2026-10-08-runtime-apt-size-mismatch.md) — Debian package size rejection is not covered by APT retries; bounded verified acquisition precedes one offline install
 - [docs/postmortems/2026-10-07-runner-apt-timeout.md](docs/postmortems/2026-10-07-runner-apt-timeout.md) — hosted dependency installation exhausted the E2E budget; signed HTTPS Ubuntu archive before APT
 - [docs/postmortems/](docs/postmortems/) — incident forensics; design docs keep the resulting rules and link here
 - [docs/postmortems/2026-09-09-stale-thinking.md](docs/postmortems/2026-09-09-stale-thinking.md) — message-index reuse left stale green thinking below newer commands; explicit streaming retirement

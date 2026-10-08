@@ -1,7 +1,8 @@
 import type { SimulationTask } from "determined";
 import type { Result } from "neverthrow";
 import { describe, expect, it } from "vitest";
-import { runDst } from "../testkit/sim.ts";
+import { runDst as runWithLateTimers } from "../testkit/sim.ts";
+
 import {
   type BrokerClientConstants,
   type BrokerClientError,
@@ -11,6 +12,10 @@ import {
   type BrokerTokenGrant,
   type TokenRequestBody,
 } from "./broker-client.ts";
+
+// These success scenarios require timely I/O; late deadlines have separate invariant tests.
+const runDst: typeof runWithLateTimers = (options, scenario) =>
+  runWithLateTimers({ ...options, timerOrder: "earliest" }, scenario);
 
 const TEST_CONSTANTS: BrokerClientConstants = {
   bootRetryWindowMs: 10_000,

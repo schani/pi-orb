@@ -6,7 +6,7 @@ import { type Browser, chromium, expect, type Page, type Route, webkit } from "@
 import { createServer } from "vite";
 import { it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
-import { gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
+import { gotoFrontendHistory, observeFrontendBoot } from "./testkit/frontend-fixture.ts";
 
 const ORB = "frontend-activity-headlines";
 const sessionId = `fixture-session-${ORB}`;
@@ -79,10 +79,12 @@ it.each(
       };
       let expectedSession = sessionId;
       const requests: string[] = [];
+      let returning = false;
       let active = 0;
       let maximum = 0;
       const held: {
         key: string;
+        session: string | null;
         route: Route;
         gate: ReturnType<typeof gate>;
         done: ReturnType<typeof gate>;
@@ -92,7 +94,9 @@ it.each(
           const url = new URL(route.request().url());
           expect(route.request().method()).toBe("POST");
           expect(route.request().postData()).toBeNull();
-          expect(url.searchParams.get("sessionId")).toBe(expectedSession);
+          const session = url.searchParams.get("sessionId");
+          // A cached view may briefly request its prior session before the live snapshot.
+          expect(returning ? [sessionId, expectedSession] : [expectedSession]).toContain(session);
           const key = decodeURIComponent(url.pathname.split("/").at(-2) ?? "");
           expect(key).not.toBe("");
           requests.push(key);
@@ -101,7 +105,8 @@ it.each(
           const release = gate();
           const done = gate();
           drains.push(release);
-          held.push({ key, route, gate: release, done });
+          held.push({ key, session, route, gate: release, done });
+          if (returning && key !== "old-intent") release.release();
           await release.promise;
           try {
             if (key === "old-intent" && url.searchParams.get("sessionId") === sessionId) {
@@ -122,6 +127,10 @@ it.each(
         handlers.push(task);
         return task;
       });
+      let documentRequests = 0;
+      page.on("request", (request) => {
+        if (request.resourceType() === "document") documentRequests++;
+      });
       await gotoFrontendHistory(page, `${origin}/orbs/${ORB}`, ORB);
       const rows = page.locator("details.tool-activity-category");
       const summaries = rows.locator(":scope > summary");
@@ -129,7 +138,7 @@ it.each(
         await fixturePage.clock.runFor(100);
       };
       const release = (key: string) => {
-        const request = held.find((item) => item.key === key);
+        const request = held.findLast((item) => item.key === key);
         expect(request, `held ${key}`).toBeDefined();
         request?.gate.release();
       };
@@ -314,21 +323,52 @@ it.each(
         await held.find((item) => item.key === "late-intent")?.done.promise;
         await flush();
         await expect(summaries.last()).toContainText("Headline late-result");
+        const navigate = async (destination: "dashboard" | "orb") => {
+          const boot = observeFrontendBoot(fixturePage);
+          boot.checkpoint(`scope:navigate:${destination}`);
+          await boot.wait(
+            (async () => {
+              await fixturePage
+                .locator(
+                  destination === "dashboard"
+                    ? '.orb-index a[href="/"]'
+                    : `.dashboard a[href="/orbs/${ORB}"]`,
+                )
+                .click();
+              await expect(fixturePage).toHaveURL(
+                destination === "dashboard" ? `${origin}/` : `${origin}/orbs/${ORB}`,
+              );
+              await expect(fixturePage.locator(".history")).toHaveCount(
+                destination === "dashboard" ? 0 : 1,
+              );
+              await expect
+                .poll(async () => (await control("inspect")).liveConnections)
+                .toBe(destination === "dashboard" ? 0 : 1);
+              boot.checkpoint("scope:mounted-and-live-settled");
+            })(),
+          );
+        };
         await control("old");
         await expect.poll(() => requests.at(-1)).toBe("old-intent");
-        await page.goto(`${origin}/`);
-        await gotoFrontendHistory(page, `${origin}/orbs/${ORB}`, ORB);
+        await navigate("dashboard");
+        // Return may use enriched history or POST to the backend cache; hold only stale work.
+        returning = true;
+        await navigate("orb");
         await expect(summaries.first()).toContainText("Headline scope-result");
-        expect(requests.filter((key) => key === "scope-result")).toHaveLength(1);
-        await page.goto(`${origin}/`);
-        const oldCount = requests.filter((key) => key === "old-intent").length;
+        await navigate("dashboard");
         expectedSession = `${sessionId}-new`;
         await control("new-session");
-        await gotoFrontendHistory(page, `${origin}/orbs/${ORB}`, ORB);
+        await navigate("orb");
         await expect
-          .poll(() => requests.filter((key) => key === "old-intent").length)
-          .toBe(oldCount + 1);
-        const fresh = held.filter((item) => item.key === "old-intent").at(-1);
+          .poll(
+            () =>
+              held.filter((item) => item.key === "old-intent" && item.session === expectedSession)
+                .length,
+          )
+          .toBe(1);
+        const fresh = held.find(
+          (item) => item.key === "old-intent" && item.session === expectedSession,
+        );
         expect(fresh).toBeDefined();
         fresh?.gate.release();
         await expect(summaries.first()).toContainText("Headline old-intent");
@@ -340,6 +380,7 @@ it.each(
         await flush();
         await expect(summaries.first()).toContainText("Headline old-intent");
         await expect(page.locator(".history")).not.toContainText("STALE_HEADLINE_MUST_NOT_PUBLISH");
+        expect(documentRequests, "stale responses must settle in the original document").toBe(1);
       } else {
         await expect.poll(() => requests).toEqual(["failure-intent"]);
         const pendingLabel = await summaries.first().textContent();

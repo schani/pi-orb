@@ -124,6 +124,7 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
           messageId: request.messageId,
           messageIds: request.messageIds,
           content: request.content,
+          ...(request.system === undefined ? {} : { system: request.system }),
         }),
       },
     ).andThen(({ status, body }) => {

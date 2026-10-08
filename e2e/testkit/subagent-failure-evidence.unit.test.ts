@@ -30,6 +30,7 @@ it("saves bounded local metadata before independent probes and excludes private 
   writeFileSync(join(directory, "children", "private.jsonl"), JSON.stringify({ type: "SECRET" }));
   const artifact = join(root, "evidence", "failure.json");
   const seen: string[] = [];
+  let localSnapshot: ReturnType<typeof JSON.parse>;
   try {
     const result = await captureSubagentFailure({
       root,
@@ -39,10 +40,7 @@ it("saves bounded local metadata before independent probes and excludes private 
       logs: [`lifecycle: orb=${orb} archive-waiting-for-work SECRET`, "SECRET"],
       probes: {
         health: async () => {
-          const local = JSON.parse(readFileSync(artifact, "utf8"));
-          expect(local.root.entries).toHaveLength(30);
-          expect(local.root.truncated).toBe(true);
-          expect(local.lifecycle).toEqual(["archive-waiting-for-work"]);
+          localSnapshot = JSON.parse(readFileSync(artifact, "utf8"));
           seen.push("health");
           return {
             status: 200,
@@ -81,6 +79,10 @@ it("saves bounded local metadata before independent probes and excludes private 
       },
     });
     expect(result.isOk()).toBe(true);
+    expect(localSnapshot.root.entries).toHaveLength(30);
+    expect(localSnapshot.root.truncated).toBe(true);
+    expect(localSnapshot.lifecycle).toEqual(["archive-waiting-for-work"]);
+    expect(localSnapshot.nativeAudit).toEqual({ state: "audit_missing" });
     expect(seen.sort()).toEqual(["health", "history", "model", "names", "orb"]);
     const text = readFileSync(artifact, "utf8");
     const saved = JSON.parse(text);
@@ -102,7 +104,80 @@ it("saves bounded local metadata before independent probes and excludes private 
     expect(statSync(artifact).mode & 0o777).toBe(0o600);
     expect(saved.probes.names).toHaveLength(30);
     expect(text).not.toContain("SECRET");
-    expect(text.length).toBeLessThan(20000);
+    expect(Buffer.byteLength(text)).toBeLessThan(64 * 1024);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("retains bounded stream and persisted audit metadata without payloads", async () => {
+  const root = mkdtempSync(join(tmpdir(), "subagent-stream-evidence-unit-"));
+  const orb = "c01e5202-cc89-468e-9b96-0123456789ab";
+  const directory = join(root, "hosts", orb, "workspace", "pi-sessions");
+  mkdirSync(directory, { recursive: true });
+  const stream = {
+    requestId: orb,
+    operationId: orb,
+    sessionId: orb,
+    parentSessionId: "SECRET",
+    attempt: 2,
+    startedAt: 100,
+    firstEventAt: null,
+    lastEventAt: 150,
+    lastEventType: "response.completed",
+    events: 4,
+    phase: "waiting",
+    transport: "sse",
+    httpResponses: 1,
+    httpStatus: 200,
+    issues: ["no_event_gap", "SECRET"],
+    edge: "terminal",
+    observedAt: 200,
+    terminal: "failed",
+    prompt: "SECRET",
+    token: "SECRET",
+    error: "SECRET",
+  };
+  writeFileSync(
+    join(directory, "root.jsonl"),
+    JSON.stringify({ type: "custom", customType: "pi-orb.stream-audit", data: stream }),
+  );
+  const artifact = join(root, "failure.json");
+  try {
+    const result = await captureSubagentFailure({
+      root,
+      orb,
+      phase: "profiles",
+      artifact,
+      logs: [],
+      probes: {
+        health: async () => ({
+          status: 200,
+          body: { streams: Array.from({ length: 40 }, () => stream) },
+        }),
+      },
+    });
+    expect(result.isOk()).toBe(true);
+    const text = readFileSync(artifact, "utf8");
+    const saved = JSON.parse(text);
+    expect(saved.root.entries[0]).toMatchObject({
+      customType: "pi-orb.stream-audit",
+      stream: { requestId: orb, edge: "terminal", observedAt: 200, terminal: "failed" },
+    });
+    expect(saved.probes.health.streams).toHaveLength(30);
+    expect(saved.probes.health.streams[0]).toMatchObject({
+      requestId: orb,
+      attempt: 2,
+      startedAt: 100,
+      firstEventAt: null,
+      lastEventAt: 150,
+      lastEventType: "response.completed",
+      phase: "waiting",
+      transport: "sse",
+      httpStatus: 200,
+      issues: ["no_event_gap"],
+    });
+    expect(text).not.toContain("SECRET");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -174,7 +249,18 @@ it("keeps local evidence while a JSON probe is held, then retains independent pr
         history: async () => ({ status: 500, body: { error: "SECRET" } }),
         model: async () => ({
           status: 200,
-          body: [{ surface: "model", id: 1, status: 200, matchedRuleIndex: 4, body: "SECRET" }],
+          body: [
+            {
+              surface: "model",
+              id: 1,
+              status: 400,
+              matchedRuleIndex: null,
+              body: JSON.stringify({ model: "gpt-6-luna", input: [], instructions: "SECRET" }),
+              events: [
+                { kind: "response", body: { error: "no_matching_rule", message: "SECRET" } },
+              ],
+            },
+          ],
         }),
         names: async () => ({ status: 200, body: [] }),
       },
@@ -191,7 +277,13 @@ it("keeps local evidence while a JSON probe is held, then retains independent pr
     expect(final.root).toEqual(local.root);
     expect(final.probes.health).toEqual({ unavailable: true });
     expect(final.probes.history).toEqual({ status: 500, unavailable: true });
-    expect(final.probes.model[0]).toMatchObject({ id: 1, matchedRuleIndex: 4, status: 200 });
+    expect(final.probes.model[0]).toMatchObject({
+      id: 1,
+      matchedRuleIndex: null,
+      status: 400,
+      modelRequest: { model: "luna", inputCount: 0 },
+      modelErrors: ["no_matching_rule"],
+    });
     expect(final.probes.names).toEqual([]);
     expect(fetchProbe).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(final)).not.toContain("SECRET");

@@ -20,6 +20,7 @@ import {
   waitFor,
 } from "./harness.ts";
 import { FailureEvidence } from "./testkit/failure-evidence.ts";
+import { type NativeAudit, startNativeInferenceAudit } from "./testkit/native-inference-audit.ts";
 import { captureSubagentFailure, readFailureJson } from "./testkit/subagent-failure-evidence.ts";
 
 async function saveSubagentFailure(
@@ -30,6 +31,7 @@ async function saveSubagentFailure(
   fake: Awaited<ReturnType<typeof createFakeSession>>,
   names: Awaited<ReturnType<typeof createFakeSession>>,
   caseName: "subagent-lifecycle" | "subagent-profiles",
+  audit: NativeAudit,
 ) {
   const local = async (url: string) => (await readFailureJson(url)).unwrapOr({ unavailable: true });
   const requests = async (sessionKey: string) => {
@@ -44,6 +46,7 @@ async function saveSubagentFailure(
     orb,
     phase,
     logs: cp.logs,
+    nativeAudit: audit,
     artifact: join(import.meta.dirname, "../test-failures", caseName, "failure.json"),
     probes: {
       health: async () => {
@@ -209,6 +212,7 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
     logLevel: "silent",
     build: { outDir: join(root, "web"), emptyOutDir: true },
   });
+  const audit = startNativeInferenceAudit(root, fake.inferenceBaseUrl)._unsafeUnwrap();
   const cp = await startControlPlane({
     port: 7173,
     fake,
@@ -216,7 +220,7 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
     pglitePath: join(root, "db"),
     processStateDirectory: join(root, "hosts"),
     webDist: join(root, "web"),
-    extraEnv: { PI_ORB_E2E_HISTORY_INSPECTION: "1" },
+    extraEnv: { ...audit.extraEnv, PI_ORB_E2E_HISTORY_INSPECTION: "1" },
   });
   const browser = await chromium.launch({
     ...(existsSync("/usr/bin/chromium") ? { executablePath: "/usr/bin/chromium" } : {}),
@@ -307,6 +311,7 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
       process.kill(metadata.processGroupId, "SIGKILL");
     };
     for (const i of [0, 1, 2]) {
+      audit.bracket(i === 0 ? "continuation" : i === 1 ? "abort" : "recovery", i);
       expect(
         (
           await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${randomUUID()}`, {
@@ -340,6 +345,7 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
       );
       if (i === 0) {
         phase = "continuation";
+        audit.bracket(phase);
         await writeFile(`${root}/release-${i}`, "release\n");
         await expectPage(page.getByText("DELEGATION_COMPLETE", { exact: true })).toBeVisible({
           timeout: 60_000,
@@ -357,12 +363,14 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
         );
       } else if (i === 1) {
         phase = "abort";
+        audit.bracket(phase);
         await page.getByRole("button", { name: "abort", exact: true }).click();
         await expectPage(page.getByText("Cancelling delegated work.", { exact: true })).toBeVisible(
           { timeout: 30_000 },
         );
       } else {
         phase = "recovery";
+        audit.bracket(phase);
         const admission = rootEntries()
           .filter((e) => e.customType === "pi-orb.subagent-run" && e.data?.["phase"] === "admitted")
           .at(-1);
@@ -455,6 +463,7 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
     expect(replicated).not.toContain("PRIVATE_CHILD_TRANSCRIPT_ONLY");
     // Resume the retained workspace, then archive with an actually blocked child.
     phase = "archive";
+    audit.bracket(phase);
     expect((await api(cp.baseUrl, "POST", `/api/v1/orbs/${orb}/start`)).status).toBe(202);
     await waitFor(
       "resume before active archive",
@@ -537,9 +546,18 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
     expect(JSON.stringify(await readReplicatedHistorySnapshot(cp, orb))).toContain(
       "interruptedSubagents",
     );
+    expect(
+      (
+        await audit.save(
+          orb,
+          join(import.meta.dirname, "../test-failures/subagent-lifecycle/success.json"),
+          phase,
+        )
+      ).isOk(),
+    ).toBe(true);
   } catch (error) {
     failed = true;
-    await saveSubagentFailure(root, orb, phase, cp, fake, names, "subagent-lifecycle");
+    await saveSubagentFailure(root, orb, phase, cp, fake, names, "subagent-lifecycle", audit);
     console.error(`Preserved runtime files: ${root}`);
     throw error;
   } finally {
@@ -595,12 +613,14 @@ it("rejects unknown profiles and models without child inference, and dispatches 
       rules: [{ match: { default: true }, steps: [{ type: "text", content: "Profiles" }, stop] }],
     },
   });
+  const audit = startNativeInferenceAudit(root, fake.inferenceBaseUrl)._unsafeUnwrap();
   const cp = await startControlPlane({
     port: 7183,
     fake,
     nameFake: names,
     pglitePath: join(root, "db"),
     processStateDirectory: join(root, "hosts"),
+    extraEnv: audit.extraEnv,
   });
   const project = randomUUID(),
     orb = randomUUID();
@@ -648,6 +668,7 @@ it("rejects unknown profiles and models without child inference, and dispatches 
       { timeoutMs: 300_000 },
     );
     for (const [i, item] of cases.entries()) {
+      audit.bracket("profiles", i);
       expect(
         (
           await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${randomUUID()}`, {
@@ -701,9 +722,18 @@ it("rejects unknown profiles and models without child inference, and dispatches 
       );
       expect(admitted).toHaveLength(i < 2 ? 0 : 1);
     }
+    expect(
+      (
+        await audit.save(
+          orb,
+          join(import.meta.dirname, "../test-failures/subagent-profiles/success.json"),
+          "profiles",
+        )
+      ).isOk(),
+    ).toBe(true);
   } catch (error) {
     failed = true;
-    await saveSubagentFailure(root, orb, "profiles", cp, fake, names, "subagent-profiles");
+    await saveSubagentFailure(root, orb, "profiles", cp, fake, names, "subagent-profiles", audit);
     console.error(`Preserved unknown-profile fixture: ${root}`);
     throw error;
   } finally {

@@ -103,6 +103,13 @@ class QualificationTest(unittest.TestCase):
                 api.runs['ci.yml'][0][key] = value
                 self.assertIsNotNone(inspect(api, SHA).error)
 
+    def test_dispatch_e2e_never_qualifies_even_with_four_successful_jobs(self):
+        api = FakeAPI()
+        api.runs['e2e.yml'][0]['event'] = 'workflow_dispatch'
+        self.assertIsNotNone(inspect(api, SHA).error)
+        evidence = inspect(FakeAPI(), SHA).value
+        self.assertFalse(valid_evidence({**evidence, 'event': 'workflow_dispatch'}, SHA))
+
     def test_failed_cancelled_skipped_and_incomplete_jobs_block(self):
         for conclusion in ['failure', 'cancelled', 'skipped', 'neutral', 'timed_out', None]:
             api = FakeAPI()

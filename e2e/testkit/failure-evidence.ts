@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { Result } from "neverthrow";
 
 const object = (value: unknown): Record<string, unknown> =>
   typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
@@ -41,6 +42,23 @@ function authPathCategory(value: unknown) {
   return null;
 }
 
+function modelRequest(row: Record<string, unknown>) {
+  const raw = row["body"];
+  const body = object(
+    typeof raw === "string"
+      ? Result.fromThrowable(
+          () => JSON.parse(raw) as unknown,
+          () => "decode" as const,
+        )().unwrapOr(null)
+      : raw,
+  );
+  return {
+    model: body["model"] === "gpt-6-luna" ? "luna" : body["model"] === "gpt-6.1-sol" ? "sol" : null,
+    encoding: member(object(row["headers"])["content-encoding"], ["zstd", "gzip", "br"]),
+    inputCount: Array.isArray(body["input"]) ? body["input"].length : null,
+  };
+}
+
 export function failureRequests(value: unknown) {
   return (Array.isArray(value) ? value : [])
     .filter((row) => ["model", "auth"].includes(String(object(row)["surface"])))
@@ -59,6 +77,20 @@ export function failureRequests(value: unknown) {
         stopReason: stopReason(row["stopReason"]),
         aborted: boolean(row["aborted"]),
         finalized: boolean(row["finalized"]),
+        ...(row["surface"] === "model"
+          ? {
+              modelRequest: modelRequest(row),
+              modelErrors: events
+                .filter((event) => object(event)["kind"] === "response")
+                .map((event) =>
+                  member(object(object(event)["body"])["error"], [
+                    "no_matching_rule",
+                    "invalid_body",
+                    "unknown_session",
+                  ]),
+                ),
+            }
+          : {}),
         ...(row["surface"] === "auth"
           ? {
               authResponses: events

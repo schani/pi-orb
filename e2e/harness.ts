@@ -39,8 +39,8 @@ export interface FakeRequestOptions {
  * forever (2026-09-16: an ECONNRESET with no deadline consumed the whole job
  * budget and the run lost its vitest summary; see
  * docs/postmortems/2026-09-16-e2e-fake-inference-tls-reset.md). A returned
- * response is never retried, however bad its status: only the request not
- * arriving is transient.
+ * response is never retried, however bad its status. A transport failure can
+ * lose the response after acceptance, so retries require replay safety.
  * Rejects on transport failure, naming method, path and attempts; vitest's
  * contract is exceptions, so this boundary throws instead of returning a Result.
  */
@@ -73,6 +73,11 @@ export async function fakeRequest(
           { cause },
         );
       }
+      const kind =
+        cause instanceof Error && cause.name === "TimeoutError" ? "TimeoutError" : "failure";
+      console.warn(
+        `fake service ${method} ${path} transport ${kind}; retry ${attempt + 1}/${backoff.length + 1}`,
+      );
       await new Promise((resolve) => setTimeout(resolve, backoff[attempt - 1]));
     }
   }
@@ -99,16 +104,16 @@ export async function fakeControl(
   path: string,
   body?: unknown,
 ): Promise<Record<string, unknown>> {
-  // Reads are replayable; a write is not. The mock service is deployed
-  // separately, so nothing here can establish that a second
-  // `/deviceauth/approve` succeeds rather than returning 4xx — writes get the
-  // deadline only.
+  // Approval sets the same session-owned device row to approved; polling and
+  // token exchange retain it. Source and live replay contract verified:
+  // docs/postmortems/2026-10-08-e2e-device-approval-timeout.md.
+  // Other writes remain non-replayable.
   const response = await fakeRequest(
     body === undefined ? "GET" : "POST",
     controlPath(sessionKey, path),
     {
       ...(body === undefined ? {} : { body }),
-      retryTransport: body === undefined,
+      retryTransport: body === undefined || path === "/deviceauth/approve",
     },
   );
   if (!response.ok) {

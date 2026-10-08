@@ -28,9 +28,9 @@ import { brokerProviderConfig } from "./provider.ts";
  *  1. `login("openai-codex", "oauth", …)` drives our oauth `login` callback
  *     and persists the returned credential — with the synthetic refresh
  *     marker, never a real refresh token — to the auth file.
- *  2. While the stored credential is unexpired, auth resolution returns its
- *     access token without calling `refreshToken`.
- *  3. Once `Date.now() >= expires`, auth resolution calls `refreshToken`,
+ *  2. With more than five minutes remaining, auth resolution returns the
+ *     stored access token without calling `refreshToken`.
+ *  3. Once `Date.now() + 300_000 >= expires`, auth resolution calls `refreshToken`,
  *     persists the rotated credential, and serves the new access token;
  *     concurrent resolutions produce exactly one upstream broker request.
  *  4. A failed refresh rejects auth resolution and leaves the stored
@@ -174,7 +174,7 @@ describe("Pi SDK broker provider contract (pinned SDK version)", () => {
     expect(readFileSync(authPath, "utf8")).not.toMatch(/refresh[^"]*":\s*"(?!pi-orb-broker")/);
   });
 
-  it("resolution with an unexpired credential returns its token without refreshing", async () => {
+  it("resolution with over five minutes remaining returns its token without refreshing", async () => {
     const endpoint = new FakeBrokerEndpoint([
       { accessToken: "token-1", expiresAt: Date.now() + 3_600_000 },
     ]);
@@ -187,6 +187,18 @@ describe("Pi SDK broker provider contract (pinned SDK version)", () => {
     }
     // Only the startup login reached the broker.
     expect(endpoint.requests.map((request) => request.reason)).toEqual(["startup"]);
+  });
+
+  it("refreshes a still-valid credential with four minutes remaining", async () => {
+    const endpoint = new FakeBrokerEndpoint([
+      { accessToken: "near-expiry", expiresAt: Date.now() + 240_000 },
+      { accessToken: "renewed", expiresAt: Date.now() + 3_600_000 },
+    ]);
+    const runtime = await createRuntime(endpoint);
+    await runtime.login(PROVIDER, "oauth", loginInteraction);
+    const resolution = await runtime.getAuth(PROVIDER);
+    expect(resolution?.auth.apiKey).toBe("renewed");
+    expect(endpoint.requests.map((request) => request.reason)).toEqual(["startup", "expiring"]);
   });
 
   it("restores safe grant metadata from unexpired auth without contacting the broker", async () => {

@@ -7,8 +7,9 @@
 #   docker build -f apps/orb-runtime/Dockerfile -t pi-orb-runtime:dev .
 FROM node:24-bookworm-slim
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates ripgrep curl zip unzip sudo python3 python3-venv python-is-python3 build-essential pkg-config \
+COPY infra/runtime_apt.sh /usr/local/bin/runtime-apt
+RUN chmod 755 /usr/local/bin/runtime-apt \
+  && runtime-apt git ca-certificates ripgrep curl zip unzip sudo python3 python3-venv python-is-python3 build-essential pkg-config \
   && mkdir -p -m 755 /etc/apt/keyrings \
   && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
        -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
@@ -25,8 +26,7 @@ RUN apt-get update \
   && chmod go+r /usr/share/keyrings/cloud.google.asc \
   && echo "deb [signed-by=/usr/share/keyrings/cloud.google.asc] https://packages.cloud.google.com/apt cloud-sdk main" \
        > /etc/apt/sources.list.d/google-cloud-sdk.list \
-  && apt-get update \
-  && apt-get install -y --no-install-recommends gh tailscale chromium google-cloud-cli \
+  && runtime-apt gh tailscale chromium google-cloud-cli \
   && rm -rf /var/lib/apt/lists/*
 
 # Install only the pinned rustup multiplexer and its proxies in the disposable

@@ -1,16 +1,21 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect as check, chromium, webkit } from "@playwright/test";
 import { createServer } from "vite";
 import { it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
+import { observeFrontendBoot } from "./testkit/frontend-fixture.ts";
 
 for (const engine of ["chromium", "webkit"] as const) {
   for (const scenario of ["missing", "delete-active"] as const) {
     it(`${engine}: ${scenario} keeps the missing orb outside the sidebar and retains its URL`, async () => {
       const root = join(import.meta.dirname, "../apps/web");
       const cacheDir = await mkdtemp(join(tmpdir(), "pi-orb-missing-layout-"));
+      await mkdir(join(import.meta.dirname, "../test-failures"), { recursive: true });
+      const evidence = await mkdtemp(
+        join(import.meta.dirname, `../test-failures/missing-orb-${engine}-${scenario}-`),
+      );
       const vite = await createServer({
         root,
         cacheDir,
@@ -19,6 +24,7 @@ for (const engine of ["chromium", "webkit"] as const) {
         server: { host: "127.0.0.1", port: 0 },
       });
       let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+      let boot: ReturnType<typeof observeFrontendBoot> | undefined;
       const waits: Promise<unknown>[] = [];
       function ownWait<T>(wait: Promise<T>): Promise<T> {
         waits.push(Promise.allSettled([wait]));
@@ -30,6 +36,7 @@ for (const engine of ["chromium", "webkit"] as const) {
         if (!address || typeof address === "string") throw new Error("No fixture port");
         browser = await (engine === "chromium" ? chromium : webkit).launch();
         const page = await browser.newPage({ viewport: { width: 820, height: 1080 } });
+        boot = observeFrontendBoot(page);
         const origin = `http://127.0.0.1:${address.port}`;
         const id = scenario === "missing" ? "missing-layout-orb" : "frontend-fixture-orb";
         let deleted = false;
@@ -94,9 +101,9 @@ for (const engine of ["chromium", "webkit"] as const) {
             link: rect(".simple-page a"),
           };
         });
-        await page.screenshot({ path: join(cacheDir, "desktop.png") });
+        await page.screenshot({ path: join(evidence, "desktop.png") });
         console.log(`${engine} ${scenario} desktop geometry`, geometry);
-        await writeFile(join(cacheDir, "geometry.json"), JSON.stringify(geometry, null, 2));
+        await writeFile(join(evidence, "geometry.json"), JSON.stringify(geometry, null, 2));
         check(geometry.heading.x).toBeGreaterThanOrEqual(geometry.sidebar.right);
         check(geometry.link.x).toBeGreaterThanOrEqual(geometry.sidebar.right);
         check(geometry.heading.hit).toBe(true);
@@ -107,14 +114,23 @@ for (const engine of ["chromium", "webkit"] as const) {
           check(metadata404s).toBe(0);
           console.log(`${engine}: deleting state rendered missing-view geometry before any 404`);
           missingMetadata = true;
+          const reloadBoot = boot;
+          reloadBoot.checkpoint("deleting:rendered; metadata:switch-to-404; reload:start");
           const response = ownWait(
             page.waitForResponse(
               (value) => value.url() === `${origin}/api/v1/orbs/${id}` && value.status() === 404,
             ),
           );
-          await page.reload();
-          await response;
-          await check(heading).toBeVisible();
+          await reloadBoot.wait(
+            (async () => {
+              await page.reload();
+              reloadBoot.checkpoint("reload:load");
+              await response;
+              reloadBoot.checkpoint("metadata:404");
+              await check(heading).toBeVisible();
+              reloadBoot.checkpoint("missing:visible");
+            })(),
+          );
           check(page.url()).toBe(`${origin}/orbs/${id}`);
         }
         await page.setViewportSize({ width: 390, height: 844 });
@@ -130,9 +146,14 @@ for (const engine of ["chromium", "webkit"] as const) {
         await check(page).toHaveURL(`${origin}/`);
         check(errors).toEqual([]);
       } catch (error) {
-        console.error(`Missing-orb layout evidence retained: ${cacheDir}`);
+        await writeFile(
+          join(evidence, "failure.json"),
+          JSON.stringify({ engine, scenario, failure: String(error) }, null, 2),
+        );
+        console.error(`Missing-orb layout evidence retained: ${evidence}`);
         throw error;
       } finally {
+        boot?.dispose();
         try {
           await browser?.close();
         } finally {
@@ -141,6 +162,7 @@ for (const engine of ["chromium", "webkit"] as const) {
         }
       }
       await rm(cacheDir, { recursive: true, force: true });
+      await rm(evidence, { recursive: true, force: true });
     });
   }
 }

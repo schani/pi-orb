@@ -2,7 +2,11 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { finishMcpFixture } from "./mcp-artifacts.ts";
+import { finishMcpFixture, MCP_FAILURE_DIRECTORY } from "./mcp-artifacts.ts";
+
+it("keeps MCP failure evidence in the CI-uploaded failure directory", () => {
+  expect(MCP_FAILURE_DIRECTORY).toBe(join(import.meta.dirname, "../test-failures"));
+});
 
 it.each([false, true])(
   "cleans up after %s failure while retaining only safe evidence on failure",
@@ -41,6 +45,7 @@ it.each([false, true])(
         const { readdirSync } = await import("node:fs");
         const files = readdirSync(artifactDirectory);
         expect(files).toHaveLength(1);
+        expect(files[0]).toMatch(/^mcp-[a-f0-9-]+\.json$/);
         const evidence = readFileSync(join(artifactDirectory, files[0] ?? "missing"), "utf8");
         expect(JSON.parse(evidence)).toEqual({ requests: [{ status: 200 }], history: { orb: [] } });
         expect(evidence).not.toContain("secret-runtime");
