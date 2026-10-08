@@ -9,7 +9,6 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 ## Bugs
 
 - **Resolve PR 66 subagent post-tool stalls before merge/deployment** (`docs/postmortems/2026-10-08-subagent-post-tool-missing-request.md`). Preserve E2E37734950460 attempt-1 shard-2 evidence; identify the missing continuation boundary using sanitized stream/audit metadata, then demonstrate a tests-first deterministic correction. Passing local baseline and diagnostic capture do not clear these non-UI failures.
-- **Resolve PR 66 WebKit navigation failures before merge/deployment** (`docs/postmortems/2026-10-08-webkit-reload-internal-error.md`). Preserve E2E37729016278 evidence; establish and test a safe synchronization/isolation or native-platform correction. Current changes retain diagnostics only. Reload recovery remains required; no CI rerun, navigation retry or passing local probe clears this blocker.
 
 - **Qualify Claude automatic compute recovery** (2026-10-06; `docs/lifecycle.md`, `docs/testing.md`). Complete parent review and frozen-source full repository/process E2E gates before deployment. The isolated HTTP/WS contract now covers complete broker/checkout/hook boot, missing lifetime, repeated guard and Stop races. Preserve the original Pi inbox-abort RED evidence and unknown production 62aa attribution; no operational recovery is authorized by this task.
 

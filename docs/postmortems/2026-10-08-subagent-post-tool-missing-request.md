@@ -1,6 +1,6 @@
 # Subagent E2E post-tool stalls — 2026-10-08
 
-Status: unresolved non-UI release blockers; evidence capture only.
+Status: historical hosted stalls remain unattributed; a separately reproduced broker cancellation fault is repaired locally and undeployed.
 
 ## Evidence
 
@@ -23,4 +23,27 @@ Naming uses an independent mock session. Neither failing continuation shows a co
 
 Extend only the test failure adapter: retain bounded, explicitly whitelisted active-stream and persisted-audit IDs, numeric timings/counts/status, event categories, phases, transport and issue/terminal categories. Exclude prompts, tokens, payloads, free-form errors and runtime/auth logs. Keep the existing 64 KiB/30-entry local tail and at most 30 active stream rows; missing older audits remain a diagnostic limit. Existing `test-failures/subagent-*/failure.json` artifact retention covers the addition.
 
-This is not a corrective lifecycle change or release qualification. Do not infer repair from a passing local probe, broaden retries, weaken assertions or increase timeouts. The separate historical WebKit engine-error gate is unchanged. Actionable work is tracked in `TODO.md`.
+Diagnostic stages are not a corrective lifecycle change or release qualification. Do not infer historical repair from a passing local probe, broaden retries, weaken assertions or increase timeouts. The user waived explanation of the separate historical WebKit failures as a merge/deployment requirement on 2026-10-08 (`docs/postmortems/2026-10-08-webkit-reload-internal-error.md`); these non-UI blockers remain. Actionable work is tracked in `TODO.md`.
+
+
+## Broker fault and repair — 2026-10-08 (local)
+
+The pinned SDK refreshes with five minutes remaining, supplies a cooperative 15-second cancellation signal and holds its credential-file lock across the refresh callback. Our provider discarded that signal. Broker HTTP headers and successful JSON-body consumption had no deadline; the client checked its retry window only after endpoint settlement, and `Retry-After` could exceed it. Native abort could therefore settle the outer run while broker I/O and credential ownership remained active.
+
+A real-SDK fixture executes and persists a tool result, then deliberately moves the credential into the four-minute refresh window. Holding either broker headers or its successful body leaves one inference request, a busy session, an unmatched `auth_resolution` entry and the auth lock. Reintroducing the original dropped signal reproduces the failure in both phases: `.context/native-post-tool-broker-original-signal-red.log`. Corrected forwarding drains I/O and permits subsequent auth with the lock released (`apps/orb-runtime/src/broker/post-tool-refresh.contract.test.ts`). This fixture proves the fault class, not the original stalls' cause.
+
+Provider login/refresh signals now reach the broker client. Existing 60-second startup/30-second refresh budgets cover I/O and backoff; HTTP also owns a 30-second request budget through body consumption. Status-only responses cancel and drain their bodies. Coalesced waiters cancel independently; the last owner aborts and drains shared I/O before credential-lock release, and replacement callers start only after that abandoned flight drains. Monotonic fences prevent late/cancelled grants even with delayed timer callbacks. Retry hints cannot extend the flight budget. No continuation watchdog, replay or retry policy was added. Contracts and DST cover these rules (`docs/credentials.md`).
+
+Content-free durable native stage edges now cover turn-end, next-turn preparation, projection, context hooks, stream allocation, auth, header hooks and SSE fetch admission (`docs/pi-adapter.md`). Stream allocation returns immediately while auth can remain pending; pair stage/session/sequence edges rather than treating its exit as completed auth. The bounded failure whitelist retains these edges without prompts, credentials, payloads or free-form errors. SSE fetch instrumentation does not observe WebSocket setup, and auth-stage evidence does not isolate credential reload from lock acquisition.
+
+The matching fixture/default fake grants use 3,600-second TTLs, as does a later local ledger; the original hosted captures retained neither actual TTL nor expiry. The profiles case failed before child inference, earlier than expected refresh under that default, not proof of a fresh credential. Clock/expiry state, credential mutation and forced-refresh causality remain unknown. Neither normal expiry-driven refresh nor the reproduced broker fault is established as either hosted stall's cause. Original bundles cannot retrospectively identify the awaited stage. Fresh hosted whole-file stress runs must capture the new stages on an actual failure; local passes and this auth repair do not clear that requirement.
+
+## Qualification evidence — 2026-10-08
+
+The first full suite (`.context/post-tool-npm-test.log`, 12:58–13:13 UTC / 07:58–08:13 America/Cancun) overlapped source edits and reported five failures. Preserve it and the traces; it is not frozen-source qualification:
+
+- HTTP late-grant fence and client late-grant DST exposed missing monotonic checks. The client repair at 13:01 UTC and HTTP repair preceding the final adapter checks occurred during that suite; its HTTP report still lists six tests, before the seventh status-drain test. Explicit pre-fix client replay: `.context/broker-late-grant-replay-red.log`; identical first trace passed after correction in `.context/broker-late-grant-replay-fixed.log`. The suite's additional trace remains `test-failures/broker-late-response-grant-fence-1791464800419-0.json`.
+- GitHub grant and auth-required DST fixtures assumed short latency timers always precede the budget. Their traces fire the 10-second deadline before the approximately 10–15 ms latency timer; unavailable is correct under that schedule. Both were explicitly replayed before correction (`.context/gh-{grant,auth}-budget-replay-red.log`). Success-only fixtures now select earliest timers; adversarial budget tests retain unrestricted schedules. Corrections postdate suite completion.
+- Sleep-boot's mocked session lacked the public Agent interface required by instrumentation. `.context/boot-agent-stage-fixture-replay-red.log` replays the missing `finishTurn` receiver; the fixture now supplies a real Agent without changing production behavior. Correction postdates suite completion.
+
+The two corrected fixture files passed all ten tests in `.context/post-tool-fixture-corrections.log`. Earlier evidence includes 59 focused passes, nine final HTTP/native contract passes, typecheck/lint passes, both pointed subagent E2Es and a later final-source profiles pass. None attributes the historical hosted stalls. A new frozen full-suite qualification is required; existing completed E2Es are not repeated merely to obtain green.

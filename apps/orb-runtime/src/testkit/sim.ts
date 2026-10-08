@@ -25,6 +25,8 @@ export interface DstOptions {
   readonly name: string;
   readonly iterations?: number;
   readonly failpointProbabilities?: Readonly<Record<string, number>>;
+  /** Successful bounded-I/O scenarios may require deadlines to fire in order. */
+  readonly timerOrder?: "earliest";
 }
 
 /** Fixed epoch so wall-clock assertions are stable: 2026-01-01T00:00:00Z. */
@@ -64,7 +66,8 @@ function makeSimulation(options: DstOptions, entropy: EntropySource): Simulation
       maxSchedulingSteps: 200_000,
       maxVirtualDurationMs: 24 * 3_600_000,
       failOnLateCompletion: false,
-      pickTimerIndex: pickTimerBiasedEarliest,
+      pickTimerIndex: (timers, now, random) =>
+        pickTimerBiasedEarliest(timers, now, options.timerOrder === "earliest" ? () => 1 : random),
     },
   );
 }

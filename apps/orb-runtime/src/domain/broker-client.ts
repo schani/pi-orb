@@ -30,13 +30,19 @@ export type BrokerEndpointResult =
   | { readonly kind: "auth_required" }
   /** 401: the orb token was not accepted. */
   | { readonly kind: "unauthorized" }
+  | { readonly kind: "cancelled" }
   /** 503/429/network: back off and retry. */
   | { readonly kind: "retryable"; readonly message: string; readonly retryAfterMs?: number }
   /** Anything else (e.g. 400): a bug, not a condition to retry. */
   | { readonly kind: "fatal"; readonly message: string };
 
 export interface BrokerEndpoint {
-  requestToken(task: SimulationTask, body: TokenRequestBody): Promise<BrokerEndpointResult>;
+  /** Honor cancellation through body consumption; settle only after owned I/O drains. */
+  requestToken(
+    task: SimulationTask,
+    body: TokenRequestBody,
+    signal?: AbortSignal,
+  ): Promise<BrokerEndpointResult>;
 }
 
 export interface BrokerClientConstants {
@@ -60,6 +66,7 @@ export const DEFAULT_BROKER_CLIENT_CONSTANTS: BrokerClientConstants = {
 
 export type BrokerClientError =
   | { readonly type: "auth_required" }
+  | { readonly type: "cancelled" }
   | { readonly type: "unauthorized" }
   | { readonly type: "unavailable"; readonly message: string }
   | { readonly type: "fatal"; readonly message: string };
@@ -68,7 +75,11 @@ export class BrokerTokenClient {
   private readonly endpoint: BrokerEndpoint;
   private readonly constants: BrokerClientConstants;
   private lastGrant: BrokerTokenGrant | null = null;
-  private inFlight: Promise<Result<BrokerTokenGrant, BrokerClientError>> | null = null;
+  private inFlight: {
+    controller: AbortController;
+    waiters: number;
+    promise: Promise<Result<BrokerTokenGrant, BrokerClientError>>;
+  } | null = null;
 
   constructor(
     endpoint: BrokerEndpoint,
@@ -91,19 +102,55 @@ export class BrokerTokenClient {
   fetch(
     task: SimulationTask,
     reason: TokenReason,
+    signal?: AbortSignal,
   ): Promise<Result<BrokerTokenGrant, BrokerClientError>> {
-    const running = this.inFlight;
-    if (running !== null) return running;
-    const started = this.run(task, reason).finally(() => {
-      this.inFlight = null;
+    if (signal?.aborted) return Promise.resolve(err({ type: "cancelled" }));
+    let flight = this.inFlight;
+    if (flight?.controller.signal.aborted) {
+      // A new owner must not inherit an abandoned flight's cancellation.
+      return flight.promise.then(() => this.fetch(task, reason, signal));
+    }
+    if (flight === null) {
+      const controller = new AbortController();
+      flight = { controller, waiters: 0, promise: this.run(task, reason, controller.signal) };
+      this.inFlight = flight;
+      const owned = flight;
+      flight.promise = flight.promise.finally(() => {
+        if (this.inFlight === owned) this.inFlight = null;
+      });
+    }
+    const owned = flight;
+    owned.waiters++;
+    return new Promise((resolve) => {
+      let finished = false;
+      const finish = (): boolean => {
+        if (finished) return false;
+        finished = true;
+        signal?.removeEventListener("abort", cancel);
+        owned.waiters--;
+        return true;
+      };
+      const cancel = (): void => {
+        if (!finish()) return;
+        const cancelled = err<BrokerTokenGrant, BrokerClientError>({ type: "cancelled" });
+        if (owned.waiters === 0) {
+          owned.controller.abort();
+          // The final owner waits for I/O cleanup before releasing SDK credential locks.
+          void owned.promise.then(() => resolve(cancelled));
+        } else resolve(cancelled);
+      };
+      signal?.addEventListener("abort", cancel, { once: true });
+      void owned.promise.then((outcome) => {
+        if (finish()) resolve(outcome);
+      });
+      if (signal?.aborted) cancel();
     });
-    this.inFlight = started;
-    return started;
   }
 
   private async run(
     task: SimulationTask,
     reason: TokenReason,
+    cancellation: AbortSignal,
   ): Promise<Result<BrokerTokenGrant, BrokerClientError>> {
     const windowMs =
       reason === "startup" ? this.constants.bootRetryWindowMs : this.constants.retryWindowMs;
@@ -114,36 +161,73 @@ export class BrokerTokenClient {
       ...(staleGeneration !== undefined ? { staleGeneration } : {}),
     };
 
+    const budget = task.createDeadline(windowMs, "broker token retry budget");
+    const controller = new AbortController();
+    const abort = (): void => controller.abort();
+    cancellation.addEventListener("abort", abort, { once: true });
+    budget.signal.addEventListener("abort", abort, { once: true });
+    if (cancellation.aborted || budget.signal.aborted) abort();
+    const signal = controller.signal;
+    let lastUnauthorized = false;
+    const stopped = (): Result<BrokerTokenGrant, BrokerClientError> =>
+      cancellation.aborted
+        ? err({ type: "cancelled" })
+        : lastUnauthorized
+          ? err({ type: "unauthorized" })
+          : err({ type: "unavailable", message: "broker token retry budget exhausted" });
     let attempt = 0;
-    for (;;) {
-      const outcome = await this.endpoint.requestToken(task, body);
-      switch (outcome.kind) {
-        case "grant":
-          this.lastGrant = outcome.grant;
-          return ok(outcome.grant);
-        case "auth_required":
-          return err({ type: "auth_required" });
-        case "fatal":
-          return err({ type: "fatal", message: outcome.message });
-        case "unauthorized":
-          if (task.monotonicNow() >= deadline) return err({ type: "unauthorized" });
-          break;
-        case "retryable":
-          if (task.monotonicNow() >= deadline) {
-            return err({ type: "unavailable", message: outcome.message });
-          }
-          break;
+    try {
+      for (;;) {
+        if (signal.aborted || task.monotonicNow() >= deadline) return stopped();
+        await task.checkpoint("broker token request", reason, attempt);
+        if (signal.aborted || task.monotonicNow() >= deadline) return stopped();
+        const outcome = await this.endpoint.requestToken(task, body, signal);
+        if (signal.aborted || task.monotonicNow() >= deadline) return stopped();
+        lastUnauthorized = outcome.kind === "unauthorized";
+        switch (outcome.kind) {
+          case "grant":
+            this.lastGrant = outcome.grant;
+            return ok(outcome.grant);
+          case "auth_required":
+            return err({ type: "auth_required" });
+          case "cancelled":
+            return err({ type: "cancelled" });
+          case "fatal":
+            return err({ type: "fatal", message: outcome.message });
+          case "unauthorized":
+            if (task.monotonicNow() >= deadline) return err({ type: "unauthorized" });
+            break;
+          case "retryable":
+            if (task.monotonicNow() >= deadline) {
+              return err({ type: "unavailable", message: outcome.message });
+            }
+            break;
+        }
+        attempt += 1;
+        const backoff = Math.min(
+          this.constants.backoffCapMs,
+          this.constants.backoffBaseMs * 2 ** (attempt - 1),
+        );
+        const waitMs =
+          outcome.kind === "retryable" && outcome.retryAfterMs !== undefined
+            ? Math.max(outcome.retryAfterMs, backoff)
+            : backoff;
+        const slept = await task
+          .sleep(
+            Math.min(waitMs, Math.max(0, deadline - task.monotonicNow())),
+            "broker client backoff",
+            { signal },
+          )
+          .then(
+            () => true,
+            () => false,
+          );
+        if (!slept) return stopped();
       }
-      attempt += 1;
-      const backoff = Math.min(
-        this.constants.backoffCapMs,
-        this.constants.backoffBaseMs * 2 ** (attempt - 1),
-      );
-      const waitMs =
-        outcome.kind === "retryable" && outcome.retryAfterMs !== undefined
-          ? Math.max(outcome.retryAfterMs, backoff)
-          : backoff;
-      await task.sleep(waitMs, "broker client backoff");
+    } finally {
+      cancellation.removeEventListener("abort", abort);
+      budget.signal.removeEventListener("abort", abort);
+      budget.cancel();
     }
   }
 }

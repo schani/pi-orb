@@ -10,8 +10,8 @@ on:
       - main
   workflow_dispatch:
     inputs:
-      webkit_reload_diagnostic:
-        description: Capture first native error in frontend shard 1 cohort (10 independent runs, stop on first failure; not qualification)
+      subagent_continuation_diagnostic:
+        description: Capture the first subagent continuation failure (not qualification)
         type: boolean
         default: false
 
@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   e2e:
-    name: E2E (${{ matrix.shard }}/4)
+    name: E2E (${{ matrix.shard }}/4)${{ github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic && ' diagnostic' || '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     strategy:
@@ -57,19 +57,19 @@ jobs:
         run: npm run test:e2e:install
 
       - name: Run end-to-end test
-        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.webkit_reload_diagnostic) }}
+        if: github.event_name != 'workflow_dispatch' || !inputs.subagent_continuation_diagnostic
         env:
           DEBUG: pw:browser
         run: npm run test:e2e -- --shard=${{ matrix.shard }}/4
 
-      - name: Diagnose frontend shard 1 cohort
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.webkit_reload_diagnostic && matrix.shard == 1 }}
+      - name: Diagnose subagent continuation
+        if: github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic && matrix.shard == 2
         env:
           DEBUG: pw:browser
         run: |
-          for iteration in {1..10}; do
-            echo "Frontend cohort diagnostic iteration ${iteration}/10"
-            npm run test:e2e -- --project frontend --shard=1/4 || exit "$?"
+          for cycle in 1 2 3 4 5 6; do
+            echo "Subagent continuation diagnostic cycle ${cycle}/6 (not qualification)"
+            npm run test:e2e -- --project lifecycle e2e/subagents.e2e.test.ts || exit "$?"
           done
 
       - name: Capture browser failure host diagnostics

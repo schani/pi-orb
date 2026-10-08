@@ -22,8 +22,21 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
   expect(source).toContain("  pull_request:\n  push:\n    branches:\n      - main\n");
   const normalRun = source.split("- name: Run end-to-end test")[1]?.split("- name:")[0];
   expect(normalRun).toBeDefined();
+  expect(source).toContain("  workflow_dispatch:\n    inputs:\n");
+  expect(source).toContain("      subagent_continuation_diagnostic:");
+  expect(source).toContain("        type: boolean\n        default: false");
+  expect(source).not.toContain("webkit_reload_diagnostic");
+  expect(source).not.toContain("Diagnose frontend shard");
   expect(normalRun).toContain(
-    `if: \${{ !(github.event_name == 'workflow_dispatch' && inputs.webkit_reload_diagnostic) }}`,
+    "if: github.event_name != 'workflow_dispatch' || !inputs.subagent_continuation_diagnostic",
+  );
+  const diagnostic = source.split("- name: Diagnose subagent continuation")[1]?.split("- name:")[0];
+  expect(diagnostic).toContain(
+    "if: github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic && matrix.shard == 2",
+  );
+  expect(diagnostic).toContain("for cycle in 1 2 3 4 5 6; do");
+  expect(diagnostic).toContain(
+    'npm run test:e2e -- --project lifecycle e2e/subagents.e2e.test.ts || exit "$?"',
   );
   expect(normalRun).toContain(`run: npm run test:e2e -- --shard=\${{ matrix.shard }}/4`);
   expect(normalRun).not.toMatch(/--(?:maxWorkers|project|retry|passWithNoTests)/u);
@@ -49,21 +62,10 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
   expect(source).toContain("test-failures/lazy-return-*/trace.zip");
 });
 
-it("keeps the non-qualifying frontend diagnostic opt-in and dispatch-only", () => {
-  const source = workflow("e2e");
-  const input = source.split("  workflow_dispatch:\n")[1]?.split("\npermissions:")[0];
-  expect(input).toContain("webkit_reload_diagnostic:");
-  expect(input).toContain("type: boolean\n        default: false");
-  expect(input).toContain("not qualification");
-  const diagnostic = source
-    .split("- name: Diagnose frontend shard 1 cohort")[1]
-    ?.split("- name:")[0];
-  expect(diagnostic).toBeDefined();
-  expect(diagnostic).toContain(
-    `if: \${{ github.event_name == 'workflow_dispatch' && inputs.webkit_reload_diagnostic && matrix.shard == 1 }}`,
+it("keeps manual diagnostics distinct from required E2E checks", () => {
+  expect(workflow("e2e").match(/^    name: (.+)$/mu)?.[1]).toBe(
+    "E2E (${{ matrix.shard }}/4)${{ github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic && ' diagnostic' || '' }}",
   );
-  expect(diagnostic).toContain("for iteration in {1..10}; do");
-  expect(diagnostic).toContain('npm run test:e2e -- --project frontend --shard=1/4 || exit "$?"');
 });
 
 it("the actual Vitest sequencer partitions every E2E file exactly once across four shards", async () => {

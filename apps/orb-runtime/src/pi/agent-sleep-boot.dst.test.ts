@@ -2,6 +2,7 @@ import type { ExecFileException } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Agent } from "@earendil-works/pi-agent-core";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { OrbBootContext } from "@pi-orb/protocol";
 import { NoSimulationTask, type SimulationTask } from "determined";
@@ -95,6 +96,11 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 import { PiOrbAgent } from "./agent.ts";
 
 class DeferredPiSession {
+  readonly agent = new Agent({
+    streamFn: () => {
+      throw new Error("unexpected fixture inference");
+    },
+  });
   readonly model = { id: "gpt-6-astra", provider: "openai-codex" };
   readonly thinkingLevel = "medium";
   readonly extensionRunner = { emit: async () => undefined };

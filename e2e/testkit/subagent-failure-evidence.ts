@@ -147,9 +147,31 @@ function rootMetadata(root: string, orb: string) {
             "subagent-notification",
             "subagent-update",
             "pi-orb.stream-audit",
+            "pi-orb.inference-stage",
           ]),
           ...(entry["customType"] === "pi-orb.stream-audit"
             ? { stream: streamMetadata(data) }
+            : {}),
+          ...(entry["customType"] === "pi-orb.inference-stage"
+            ? {
+                inference: {
+                  operationId: uuid(data["operationId"]),
+                  sessionId: uuid(data["sessionId"]),
+                  sequence: counter(data["sequence"]),
+                  observedAt: counter(data["observedAt"]),
+                  stage: member(data["stage"], [
+                    "turn_end_boundary",
+                    "next_turn_preparation",
+                    "request_projection",
+                    "context_hooks",
+                    "provider_preparation",
+                    "auth_resolution",
+                    "provider_headers",
+                    "provider_http",
+                  ]),
+                  edge: member(data["edge"], ["enter", "exit"]),
+                },
+              }
             : {}),
           phase: member(data["phase"], ["admitted", "started", "terminal", "wake_suppressed"]),
           childId: childId(data["childId"] ?? data["id"]),

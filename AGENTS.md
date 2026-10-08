@@ -48,6 +48,8 @@ No test may be flaky. A failure that does not reproduce on every run is evidence
 
 **UI exception (user-approved 2026-10-05):** flaky UI tests must still be fixed and validated, but deep investigation of a historical failure is optional once corrective stabilization is evidenced. A passing rerun alone is insufficient; new failing UI tests still require correction. Preserve first-failure evidence. Non-UI failures and DST replay/root-cause requirements are unchanged.
 
+**PR 66 WebKit exception (user-approved 2026-10-08):** explaining the historical WebKit navigation failures is not a merge/deployment requirement. Preserve the evidence; no root-cause fix is claimed. Normal qualification, new-failure handling, non-UI blockers and DST requirements remain unchanged.
+
 For a DST failure, replay the recorded trace from `test-failures/` (`DST_REPLAY=<trace> npx vitest run …`) before any fix, understand the interleaving, and only then decide whether the defect is in the product or in the scenario's assumptions. Never delete the trace to make the suite pass.
 
 ## Observability

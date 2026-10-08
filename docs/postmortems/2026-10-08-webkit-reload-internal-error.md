@@ -1,6 +1,8 @@
 # WebKit reload internal error — PR 66
 
-**Status: unresolved; merge/deployment blocked. Diagnostics only, not a corrective stabilization.**
+**Status: historical cause unresolved; explanation waived as a merge/deployment requirement by the user on 2026-10-08. Diagnostics only, not a corrective stabilization.**
+
+The user explicitly declined further explanation of these past WebKit failures. Evidence remains preserved; no root-cause fix is claimed. Normal release qualification, new-failure handling and the separate non-UI subagent blockers remain required.
 
 ## First failure
 
@@ -25,7 +27,7 @@ Tests first reproduced two missing-observability assertions and missing workflow
 
 Missing-orb failure metadata, pre-reload desktop PNG and geometry now live under an explicitly allowlisted `test-failures/missing-orb-*` directory; successful cases delete those files. CI retains browser launch/exit/stderr logs through `DEBUG=pw:browser`. Its failure-only host step records filtered kernel faults/OOMs, process names/RSS without arguments, disk/memory and GLib/libsoup package versions. Resource samples occur after failure, not at its onset; absence of a fault report is not proof of browser health. No protocol payloads, native cores or optimizer caches are uploaded.
 
-Reload, its default load wait, 404 recovery, URL, geometry and phone assertions are unchanged. No product correction or crash fix is claimed. Remaining work is tracked in `TODO.md`.
+Reload, its default load wait, 404 recovery, URL, geometry and phone assertions are unchanged. No product correction or crash fix is claimed.
 
 ## Validation
 
@@ -53,8 +55,8 @@ Twelve unchanged, isolated WebKit delete-active cases passed on Debian, each wit
 
 [Dispatch 37733867215](https://github.com/schani/pi-orb/actions/runs/37733867215) passed all 30 independent, isolated WebKit delete-active invocations on Ubuntu. Alongside the twelve passing Debian probes, this failed to reproduce the historical full-frontend-cohort failures; it clears nothing. Evidence: `.context/pr66-webkit-ubuntu-diagnostic/`. The controlled network-process kill reproduced the exact localized error and caller stderr with zero page-crash/browser-disconnect counters, but establishes no historical root cause.
 
-**Next experiment (2026-10-08; prepared, not dispatched):** retain the existing optional `webkit_reload_diagnostic` (default false), but run `npm run test:e2e -- --project frontend --shard=1/4` in ten independent Vitest processes, serially, stopping at the first failed invocation. This preserves the complete frontend shard 1 sequence and ambient native preconditions instead of selecting one case. Only shard 1 runs diagnostic tests; other shards skip tests. Historical shard 1 frontend files total 101.8 seconds of test time (activity headlines 55.0, missing-orb layout 40.8, lazy pairing 6.0); ten cycles plus startup/prerequisites fit the unchanged 40-minute job budget. This is an estimate, not a timeout increase or completion guarantee.
+[Full-cohort dispatch 37734945038](https://github.com/schani/pi-orb/actions/runs/37734945038) executed ten independent frontend shard-1 Vitest processes on source `db261fae2fe134cf0d657c4d728ad2247b3f65b0`. All **330 tests passed** (33 per invocation); no native error was captured. Ubuntu 24.04, Node 24.6.0, browser prerequisites, assertions, reload/load waiting, timeouts and failure diagnostics were unchanged. Evidence: `.context/pr66-webkit-cohort-diagnostic/37734945038-job-113172249046.log` and `37734945038-status.json` in the same directory.
 
-Ubuntu 24.04, Node 24.6.0, npm/engine prerequisites, assertions, reload/load waiting, timeouts, `DEBUG=pw:browser`, failure-only host diagnostics and artifact retention remain unchanged. Each cycle is numbered in the hosted log. PR, main push and default dispatch remain full four-shard runs; release qualification still requires exact-SHA `push`/`main` evidence. Offline contracts reject the previous targeted command and verify the exact cohort invocation, ten-process bound and first/seventh-failure exit propagation.
+This experiment preserved the complete frontend shard-1 sequence rather than selecting one case. Shards 2–4 skipped tests; this was diagnostic capture, not normal full-suite qualification or proof of the historical cause. The user's 2026-10-08 exception removes historical explanation as a merge/deployment requirement. The temporary reproduction dispatch configuration was removed under that decision; durable browser/native-fault diagnostics and ordinary four-shard qualification remain.
 
-This deliberately seeks the first native error, not a green rerun or qualification. A passing cohort cannot clear the original failure. Merge/deployment remain blocked until safe corrective stabilization is validated or the user explicitly grants an exception. The caller line decides the next branch: loader IPC/loss requires native child/kernel evidence; session or buffer failures require their own resource-lifetime evidence. No navigation retries or removed reload coverage.
+Cleanup validation: tests-first Python and sharding contracts failed against the optional mode, then passed after removal. Clean `npm ci`, full `npm run test:infra`, all three sharding unit cases, scoped Biome and E2E typecheck pass. The full four-shard sequencer inventory and failure-artifact allowlists are preserved. Logs: `.context/webkit-waiver-cleanup/`. No browser/full E2E rerun, commit, push or deployment.

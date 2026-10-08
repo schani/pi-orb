@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { Result } from "neverthrow";
+import type { InferenceStageAudit } from "../inference-stages.ts";
 import type { StreamAudit, StreamTelemetry, StreamTerminal } from "../stream-telemetry.ts";
 
 export interface StreamTelemetryDeps {
@@ -8,6 +9,9 @@ export interface StreamTelemetryDeps {
   operationId(): string | null;
   rootSessionId(): string | null;
   audit(edge: StreamAudit): Result<void, { type: "stream_audit_failed" }>;
+  stage?(
+    edge: Omit<InferenceStageAudit, "observedAt">,
+  ): Result<void, { type: "stream_audit_failed" }>;
   failed(): void;
 }
 
@@ -18,6 +22,11 @@ export function createStreamTelemetryExtension(deps: StreamTelemetryDeps): Exten
     let closed = false;
     let attempt = 0;
     let operation: string | null = null;
+    let headerSequence = 0;
+    let headers: Omit<InferenceStageAudit, "edge" | "observedAt"> | null = null;
+    const saveHeaders = (edge: InferenceStageAudit["edge"]): void => {
+      if (headers !== null && deps.stage?.({ ...headers, edge }).isErr()) deps.failed();
+    };
     const save = (edge: StreamAudit | null): void => {
       if (edge !== null && deps.audit(edge).isErr()) deps.failed();
     };
@@ -26,8 +35,20 @@ export function createStreamTelemetryExtension(deps: StreamTelemetryDeps): Exten
       save(deps.telemetry.finish(current, terminal));
       current = null;
     };
+    pi.on("before_provider_headers", (_event, context) => {
+      if (closed || deps.stage === undefined) return;
+      headers = {
+        operationId: deps.operationId(),
+        sessionId: context.sessionManager.getSessionId(),
+        sequence: ++headerSequence,
+        stage: "provider_headers",
+      };
+      saveHeaders("enter");
+    });
     pi.on("before_provider_request", (_event, context) => {
       if (closed) return;
+      saveHeaders("exit");
+      headers = null;
       finish("failed");
       const nextOperation = deps.operationId();
       if (nextOperation !== operation) attempt = 0;

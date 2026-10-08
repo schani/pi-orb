@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { ok } from "neverthrow";
 import { expect, it } from "vitest";
+import type { InferenceStageAudit } from "../inference-stages.ts";
 import { StreamTelemetry } from "../stream-telemetry.ts";
 import { createStreamTelemetryExtension } from "./stream-telemetry.ts";
 
@@ -8,12 +9,17 @@ it("measures hidden provider args before normalization and audits anomalous term
   const telemetry = new StreamTelemetry(() => 100);
   const handlers = new Map<string, (event: never, context: never) => void>();
   const audits: unknown[] = [];
+  const stages: Omit<InferenceStageAudit, "observedAt">[] = [];
   const extension = createStreamTelemetryExtension({
     telemetry,
     operationId: () => "op",
     rootSessionId: () => "root",
     audit: (edge) => {
       audits.push(edge);
+      return ok(undefined);
+    },
+    stage: (edge) => {
+      stages.push(edge);
       return ok(undefined);
     },
     failed: () => {
@@ -29,7 +35,14 @@ it("measures hidden provider args before normalization and audits anomalous term
       event as never,
       { sessionManager: { getSessionId: () => "child" } } as never,
     );
+  emit("before_provider_headers", { headers: { authorization: "SECRET" } });
+  expect(stages).toMatchObject([{ stage: "provider_headers", edge: "enter", sessionId: "child" }]);
   emit("before_provider_request", { payload: { prompt: "SECRET" } });
+  expect(stages).toMatchObject([
+    { edge: "enter" },
+    { edge: "exit", sequence: stages[0]?.sequence },
+  ]);
+  expect(JSON.stringify(stages)).not.toContain("SECRET");
   emit("provider_stream_event", {
     data: { type: "response.function_call_arguments.delta", delta: "x".repeat(1_048_576) },
   });
