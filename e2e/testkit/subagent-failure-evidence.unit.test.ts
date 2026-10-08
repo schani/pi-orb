@@ -108,6 +108,79 @@ it("saves bounded local metadata before independent probes and excludes private 
   }
 });
 
+it("retains bounded stream and persisted audit metadata without payloads", async () => {
+  const root = mkdtempSync(join(tmpdir(), "subagent-stream-evidence-unit-"));
+  const orb = "c01e5202-cc89-468e-9b96-0123456789ab";
+  const directory = join(root, "hosts", orb, "workspace", "pi-sessions");
+  mkdirSync(directory, { recursive: true });
+  const stream = {
+    requestId: orb,
+    operationId: orb,
+    sessionId: orb,
+    parentSessionId: "SECRET",
+    attempt: 2,
+    startedAt: 100,
+    firstEventAt: null,
+    lastEventAt: 150,
+    lastEventType: "response.completed",
+    events: 4,
+    phase: "waiting",
+    transport: "sse",
+    httpResponses: 1,
+    httpStatus: 200,
+    issues: ["no_event_gap", "SECRET"],
+    edge: "terminal",
+    observedAt: 200,
+    terminal: "failed",
+    prompt: "SECRET",
+    token: "SECRET",
+    error: "SECRET",
+  };
+  writeFileSync(
+    join(directory, "root.jsonl"),
+    JSON.stringify({ type: "custom", customType: "pi-orb.stream-audit", data: stream }),
+  );
+  const artifact = join(root, "failure.json");
+  try {
+    const result = await captureSubagentFailure({
+      root,
+      orb,
+      phase: "profiles",
+      artifact,
+      logs: [],
+      probes: {
+        health: async () => ({
+          status: 200,
+          body: { streams: Array.from({ length: 40 }, () => stream) },
+        }),
+      },
+    });
+    expect(result.isOk()).toBe(true);
+    const text = readFileSync(artifact, "utf8");
+    const saved = JSON.parse(text);
+    expect(saved.root.entries[0]).toMatchObject({
+      customType: "pi-orb.stream-audit",
+      stream: { requestId: orb, edge: "terminal", observedAt: 200, terminal: "failed" },
+    });
+    expect(saved.probes.health.streams).toHaveLength(30);
+    expect(saved.probes.health.streams[0]).toMatchObject({
+      requestId: orb,
+      attempt: 2,
+      startedAt: 100,
+      firstEventAt: null,
+      lastEventAt: 150,
+      lastEventType: "response.completed",
+      phase: "waiting",
+      transport: "sse",
+      httpStatus: 200,
+      issues: ["no_event_gap"],
+    });
+    expect(text).not.toContain("SECRET");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 it("reports an artifact write failure without issuing probes", async () => {
   let called = false;
   const result = await captureSubagentFailure({

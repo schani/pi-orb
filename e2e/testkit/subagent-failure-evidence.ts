@@ -23,6 +23,73 @@ const timestamp = (value: unknown) =>
     ? value
     : null;
 const unavailable = () => ({ unavailable: true });
+const counter = (value: unknown) =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+
+function streamMetadata(value: unknown) {
+  const row = object(value);
+  return {
+    requestId: uuid(row["requestId"]),
+    operationId: uuid(row["operationId"]),
+    sessionId: uuid(row["sessionId"]),
+    parentSessionId: uuid(row["parentSessionId"]),
+    ...Object.fromEntries(
+      [
+        "attempt",
+        "startedAt",
+        "firstEventAt",
+        "lastEventAt",
+        "lastNormalizedAt",
+        "events",
+        "normalizedEvents",
+        "normalizedToolArgumentEvents",
+        "toolArgumentEvents",
+        "textBytes",
+        "reasoningBytes",
+        "toolArgumentBytes",
+        "httpResponses",
+        "httpStatus",
+      ].map((key) => [key, counter(row[key])]),
+    ),
+    lastEventType: member(row["lastEventType"], [
+      "response.created",
+      "response.in_progress",
+      "response.completed",
+      "response.done",
+      "response.failed",
+      "response.incomplete",
+      "response.output_item.added",
+      "response.output_item.done",
+      "response.content_part.added",
+      "response.content_part.done",
+      "response.output_text.delta",
+      "response.output_text.done",
+      "response.reasoning_summary_text.delta",
+      "response.reasoning_summary_text.done",
+      "response.reasoning_text.delta",
+      "response.function_call_arguments.delta",
+      "response.function_call_arguments.done",
+      "response.custom_tool_call_input.delta",
+      "response.custom_tool_call_input.done",
+      "error",
+    ]),
+    phase: member(row["phase"], [
+      "waiting",
+      "streaming",
+      "text",
+      "reasoning",
+      "tool_arguments",
+      "terminal",
+    ]),
+    transport: member(row["transport"], ["unknown", "sse"]),
+    issues: (Array.isArray(row["issues"]) ? row["issues"] : [])
+      .filter((issue) => ["no_event_gap", "large_tool_arguments"].includes(issue))
+      .slice(0, 2),
+    edge: member(row["edge"], ["no_event_gap", "large_tool_arguments", "terminal"]),
+    observedAt: counter(row["observedAt"]),
+    terminal: member(row["terminal"], ["completed", "aborted", "failed"]),
+  };
+}
 
 function rootMetadata(root: string, orb: string) {
   return Result.fromThrowable(() => {
@@ -79,7 +146,11 @@ function rootMetadata(root: string, orb: string) {
             "subagents:record",
             "subagent-notification",
             "subagent-update",
+            "pi-orb.stream-audit",
           ]),
+          ...(entry["customType"] === "pi-orb.stream-audit"
+            ? { stream: streamMetadata(data) }
+            : {}),
           phase: member(data["phase"], ["admitted", "started", "terminal", "wake_suppressed"]),
           childId: childId(data["childId"] ?? data["id"]),
           operationId: uuid(data["operationId"]),
@@ -213,6 +284,13 @@ export async function captureSubagentFailure(options: {
           ...evidence.observations[0],
           activity: member(body["activity"], ["idle", "busy"]),
           operationId: uuid(body["operationId"]),
+          ...(key === "health"
+            ? {
+                streams: (Array.isArray(body["streams"]) ? body["streams"] : [])
+                  .slice(-30)
+                  .map(streamMetadata),
+              }
+            : {}),
         };
       }
     }),

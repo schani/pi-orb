@@ -141,6 +141,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-08-subagent-post-tool-missing-request.md](docs/postmortems/2026-10-08-subagent-post-tool-missing-request.md) — unresolved hosted post-tool stalls; bounded stream/audit evidence only
 - [docs/postmortems/2026-10-08-mcp-summary-missing-request.md](docs/postmortems/2026-10-08-mcp-summary-missing-request.md) — unresolved hosted summary failure; sanitized artifact retention only
 - [docs/postmortems/2026-10-08-webkit-reload-internal-error.md](docs/postmortems/2026-10-08-webkit-reload-internal-error.md) — unresolved Ubuntu WebKit reload failure; browser/socket/native evidence retention only
 - [docs/postmortems/2026-10-08-headline-spa-cancellation-fixture.md](docs/postmortems/2026-10-08-headline-spa-cancellation-fixture.md) — hard navigation bypassed same-document stale-reply cancellation; SPA ownership gates qualify the correction
