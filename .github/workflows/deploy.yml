@@ -153,6 +153,14 @@ jobs:
             test-failures/lazy-return-*/trace.zip
           if-no-files-found: ignore
           retention-days: 14
+      - name: Upload MCP failure summaries
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: release-mcp-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-failures/mcp-*.json
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Prepare allowlisted result and job summary
         if: always()
         env:

@@ -21,7 +21,7 @@ import {
   startControlPlane,
   waitFor,
 } from "./harness.ts";
-import { finishMcpFixture } from "./mcp-artifacts.ts";
+import { finishMcpFixture, MCP_FAILURE_DIRECTORY } from "./mcp-artifacts.ts";
 import { mcpFailureHistory, mcpFailureRequests } from "./mcp-diagnostics.ts";
 
 it("MCP traverses root, restricted and default general-purpose delegates → authenticated HTTPS; same-project orbs reuse configuration", async () => {
@@ -871,7 +871,7 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
     await finishMcpFixture({
       failed,
       root,
-      artifactDirectory: join(import.meta.dirname, "../.context/mcp-failures"),
+      artifactDirectory: MCP_FAILURE_DIRECTORY,
       sessions: [fake.sessionKey, nameFake.sessionKey],
       mockOrigin: FAKE_ORIGIN,
       capture: async () => {

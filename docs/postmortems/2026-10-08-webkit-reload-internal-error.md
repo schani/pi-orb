@@ -38,3 +38,21 @@ Evidence: `.context/pr66-webkit-navigation/`.
 - Root typecheck/lint and E2E typecheck pass. No CI rerun, commit, push, merge or deployment.
 
 Neither passing diagnostic nor instrumentation validation resolves the original navigation failure. A safe corrective fix is not established.
+
+## Error mapping and controlled network-process loss (2026-10-08)
+
+Playwright 1.63.0's WebKit patch forwards the provisional load's `ResourceError.localizedDescription()`; the JavaScript adapter forwards it to aborted navigation. The pinned upstream base is [`4d05d732`](https://github.com/WebKit/WebKit/blob/4d05d732e5a84f32675bef4cc135a2e7a9269a87/Source/WebCore/platform/network/ResourceErrorBase.cpp#L97-L105). `internalError` returns `WebKitErrorDomain` code 300 and the exact observed text. Before returning, it **always writes its caller's source file, line and function to stderr**. The new `DEBUG=pw:browser` capture can therefore distinguish callers without a core.
+
+`WebLoaderStrategy::networkProcessCrashed` fails pending resource loaders through `internallyFailedLoadTimerFired`; failed network IPC scheduling uses that path too. Other callers include a missing network session and failure to map a shared resource buffer. The exception alone does not establish a native crash.
+
+Owned local controls held a main-document request, then sent SIGKILL only to that script's `WPENetworkProcess`. They reproduced both the exact `page.reload` and `page.goto` internal errors, waiting for `load`. Both stderr captures identified `WebLoaderStrategy.cpp(704)::internallyFailedLoadTimerFired`; page-crash and browser-disconnect counters both remained zero, and MiniBrowser later closed with exit code zero. This establishes a network-process-loss signature, **not the cause of either historical CI failure**. A clean browser-parent exit and zero observer counters cannot exclude child-process loss.
+
+Twelve unchanged, isolated WebKit delete-active cases passed on Debian, each with fresh browser/Vite ownership, `DEBUG=pw:browser` and private core collection enabled. No internal error or native fault was captured. Debian supplies GLib 2.74.6-2+deb12u9 and libsoup 3.2.3-0+deb12u2, unlike the previously documented Noble experiment. Kernel access is denied on this guest. No Docker daemon or workflow was changed. Evidence: `.context/pr66-webkit-root-cause/` (`probe-results`, `probe-*.log`, `network-loss-{control,goto-control}.log`, pinned source copies).
+
+## Hosted reproduction mode (2026-10-08)
+
+The existing E2E dispatch now accepts optional `webkit_reload_diagnostic` (default false). True selects only shard 1's unchanged WebKit delete-active case for 30 independent Vitest processes, serially, stopping at the first failure. Other shards skip tests. It preserves Ubuntu 24.04, Node 24.6.0, npm/engine prerequisites, assertions, reload/load waiting, timeouts, browser stderr and existing failure diagnostics/artifacts. Each iteration is numbered in the hosted log. PR, main push and default dispatch remain full four-shard runs; dispatch never supplies push/main release qualification.
+
+This is an explicit Ubuntu stress reproduction after twelve unchanged Debian probes passed, not a corrective stabilization or retry-to-green. A passing diagnostic cannot clear the defect. Offline contracts verify the exact invocation, 30-process bound, first-failure exit propagation and unchanged qualification boundary. No hosted dispatch was performed as part of implementation.
+
+The current first-attempt CI on `65e6761` is diagnostic evidence, not historical clearance. If its original path does not fail, the smallest next experiment is repeated unchanged delete-active cases on the same Ubuntu runner/build, serial fresh fixtures, retaining stderr and stopping at the first failure. The caller line decides the next branch: loader IPC/loss requires native child/kernel evidence; session or buffer failures require their own resource-lifetime evidence. Do not substitute navigation retries or remove reload coverage.

@@ -1,5 +1,8 @@
 from pathlib import Path
+import os
 import re
+import subprocess
+import tempfile
 import unittest
 
 
@@ -14,6 +17,61 @@ def steps(workflow):
 
 
 class BrowserEvidenceTest(unittest.TestCase):
+    def test_dispatch_diagnostic_preserves_default_full_matrix_and_prerequisites(self):
+        body = (ROOT / '.github/workflows/e2e.yml').read_text()
+        self.assertIn('  pull_request:\n  push:\n    branches:\n      - main\n', body)
+        self.assertIn('  workflow_dispatch:\n    inputs:\n      webkit_reload_diagnostic:\n', body)
+        self.assertRegex(body, r'webkit_reload_diagnostic:\n        description: [^\n]+\n        type: boolean\n        default: false\n')
+        self.assertIn('    name: E2E (${{ matrix.shard }}/4)', body)
+        self.assertIn('    runs-on: ubuntu-24.04', body)
+        self.assertIn('    timeout-minutes: 40', body)
+        self.assertIn('        shard: [1, 2, 3, 4]', body)
+        workflow_steps = steps('e2e.yml')
+        self.assertIn("node-version: '24.6.0'", workflow_steps['Set up Node.js'])
+        self.assertIn('run: npm ci', workflow_steps['Install dependencies'])
+        self.assertIn('run: npm run test:e2e:install', workflow_steps['Install pinned browser engines and system dependencies'])
+        full = workflow_steps['Run end-to-end test']
+        self.assertIn("if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.webkit_reload_diagnostic) }}", full)
+        self.assertIn('run: npm run test:e2e -- --shard=${{ matrix.shard }}/4', full)
+        diagnostic = workflow_steps['Diagnose WebKit delete-active reload']
+        self.assertIn("if: ${{ github.event_name == 'workflow_dispatch' && inputs.webkit_reload_diagnostic && matrix.shard == 1 }}", diagnostic)
+        self.assertIn('DEBUG: pw:browser', diagnostic)
+        self.assertNotIn('${{', diagnostic.split('run: |', 1)[1])
+
+    def test_diagnostic_runs_independent_processes_and_stops_at_first_failure(self):
+        step = steps('e2e.yml')['Diagnose WebKit delete-active reload']
+        script = step.split('run: |\n', 1)[1]
+        script = '\n'.join(line[10:] for line in script.splitlines())
+        expected = 'test:e2e -- --project frontend e2e/missing-orb-layout-frontend.e2e.test.ts --testNamePattern=^webkit: delete-active keeps the missing orb outside the sidebar and retains its URL$'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            npm = root / 'npm'
+            npm.write_text('#!/bin/bash\n'
+                           'echo "$*" >> "$CALLS"\n'
+                           'count=$(wc -l < "$CALLS")\n'
+                           'if [[ "$count" == "$FAIL_AT" ]]; then exit 17; fi\n')
+            npm.chmod(0o700)
+            for fail_at, count, status in [('0', 30, 0), ('1', 1, 17), ('7', 7, 17)]:
+                with self.subTest(fail_at=fail_at):
+                    calls = root / f'calls-{fail_at}'
+                    result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script],
+                                            env={**os.environ, 'PATH': f'{root}:{os.environ["PATH"]}',
+                                                 'CALLS': str(calls), 'FAIL_AT': fail_at},
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode, status, result.stderr)
+                    self.assertEqual(calls.read_text().splitlines(), ['run ' + expected] * count)
+                    self.assertIn(f'WebKit reload diagnostic iteration {count}/30', result.stdout)
+
+    def test_deploy_uploads_only_sanitized_mcp_failure_summaries(self):
+        step = steps('deploy.yml')['Upload MCP failure summaries']
+        self.assertIn('if: failure()', step)
+        self.assertIn('uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a', step)
+        self.assertEqual(re.search(r'^          path: (.+)$', step, re.M).group(1),
+                         'test-failures/mcp-*.json')
+        self.assertIn('name: release-mcp-${{ github.run_id }}-${{ github.run_attempt }}', step)
+        self.assertIn('if-no-files-found: ignore', step)
+        self.assertIn('retention-days: 14', step)
+
     def test_lazy_return_owns_and_preserves_failure_evidence(self):
         source = (ROOT / 'e2e/lazy-transcript-frontend.e2e.test.ts').read_text()
         self.assertRegex(source, r'mkdtemp\(\s*join\(import\.meta\.dirname, `\.\./test-failures/lazy-return-\$\{engine\}-`\),\s*\)')

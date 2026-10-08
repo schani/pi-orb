@@ -9,6 +9,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      webkit_reload_diagnostic:
+        description: Reproduce WebKit delete-active reload (30 iterations, stop on first failure; not qualification)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -52,9 +57,20 @@ jobs:
         run: npm run test:e2e:install
 
       - name: Run end-to-end test
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.webkit_reload_diagnostic) }}
         env:
           DEBUG: pw:browser
         run: npm run test:e2e -- --shard=${{ matrix.shard }}/4
+
+      - name: Diagnose WebKit delete-active reload
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.webkit_reload_diagnostic && matrix.shard == 1 }}
+        env:
+          DEBUG: pw:browser
+        run: |
+          for iteration in {1..30}; do
+            echo "WebKit reload diagnostic iteration ${iteration}/30"
+            npm run test:e2e -- --project frontend e2e/missing-orb-layout-frontend.e2e.test.ts --testNamePattern='^webkit: delete-active keeps the missing orb outside the sidebar and retains its URL$' || exit "$?"
+          done
 
       - name: Capture browser failure host diagnostics
         if: failure()
