@@ -246,7 +246,7 @@ export class PiOrbAgent {
   private turnStart: { readonly promise: Promise<void>; readonly resolve: () => void } | null =
     null;
   private summaryStartIndex: number | null = null;
-  private operationStartIndex = 0;
+  private operationStartIndex: number | null = null;
   private summaryCoordinator: TurnSummaryCoordinator | null = null;
   private readonly liveBlocks = new Map<string, LiveBlock>();
   private outputMessageSequence = 0;
@@ -1351,7 +1351,9 @@ export class PiOrbAgent {
     this.operationError = undefined;
     this.activity = "busy";
     this.summaryStartIndex = summaryStartIndex;
-    this.operationStartIndex = this.sessionManager?.getEntries().length ?? 0;
+    this.operationStartIndex = this.manualCompaction
+      ? null
+      : (this.sessionManager?.getEntries().length ?? 0);
     this.liveBlocks.clear();
     this.liveTools.clear();
     this.liveToolBodies.clear();
@@ -1506,10 +1508,13 @@ export class PiOrbAgent {
     const operationId = this.operationId;
     let outcome = this.operationOutcome;
     let message = this.operationError;
-    const terminalAssistant = this.sessionManager
-      ?.getEntries()
-      .slice(this.operationStartIndex)
-      .findLast((entry) => entry.type === "message" && entry.message.role === "assistant");
+    const terminalAssistant =
+      this.operationStartIndex === null
+        ? undefined
+        : this.sessionManager
+            ?.getEntries()
+            .slice(this.operationStartIndex)
+            .findLast((entry) => entry.type === "message" && entry.message.role === "assistant");
     if (outcome === "completed" && terminalAssistant !== undefined) {
       const mapped = mapPiEntry(terminalAssistant);
       if (mapped.isErr()) {

@@ -33,8 +33,8 @@ export function startupRuntimeError(error: AuthorityError): RuntimeClientError {
   };
 }
 
-/** Caller holds the orb/owner fence. Mutation checks never scan transcript entries. */
-export async function checkNativeStartup(query: Query, orbId: string, validateCursor = false) {
+/** Caller holds the orb/owner fence. Mutation checks preserve owned drain and never scan entries. */
+export async function checkNativeStartup(query: Query, orbId: string, startup = false) {
   const publicState = await query(
     "SELECT state,harness_session_id,harness_session_header,replication_cursor,replicated_head_id, EXISTS(SELECT 1 FROM history_records WHERE orb_id=$1) AS has_history FROM orbs WHERE id=$1",
     [orbId],
@@ -47,7 +47,10 @@ export async function checkNativeStartup(query: Query, orbId: string, validateCu
       code: "missing",
       message: "Orb does not exist",
     });
-  if (row.state === "archived" || row.state === "archiving" || row.state === "deleting")
+  if (
+    row.state === "archived" ||
+    (startup && (row.state === "archiving" || row.state === "deleting"))
+  )
     return err<never, AuthorityError>({
       type: "authority_error",
       code: "closed",
@@ -116,7 +119,7 @@ export async function checkNativeStartup(query: Query, orbId: string, validateCu
           return err(integrity());
         if (row.replication_cursor == null && (row.replicated_head_id != null || row.has_history))
           return err(integrity());
-        if (validateCursor && row.replication_cursor != null) {
+        if (startup && row.replication_cursor != null) {
           const entries: EntryRecord[] = [];
           let cursor: Cursor | undefined;
           do {

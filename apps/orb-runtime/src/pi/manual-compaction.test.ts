@@ -1,3 +1,4 @@
+import { fauxAssistantMessage } from "@earendil-works/pi-ai/providers/faux";
 import { type AgentSessionEvent, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { ServerFrame } from "@pi-orb/protocol";
 import { expect, it } from "vitest";
@@ -94,6 +95,19 @@ it("claims busy synchronously, fences every ingress and stays busy while Pi appe
     }),
   );
 });
+it("does not use an earlier assistant failure as the outcome of successful compaction", async () => {
+  const f = fixture();
+  f.manager.appendMessage(fauxAssistantMessage("old failure", { stopReason: "error" }));
+  const completion = f.agent.compact(undefined, "compaction");
+  f.resolve();
+  expect((await completion).isOk()).toBe(true);
+  expect(f.frames).toContainEqual(
+    expect.objectContaining({
+      event: { type: "operation_finished", operationId: "compaction", outcome: "completed" },
+    }),
+  );
+});
+
 it("captures the published transcript frontier once at admission", async () => {
   const f = fixture();
   const before = f.manager.appendMessage({ role: "user", content: "before", timestamp: 1 });

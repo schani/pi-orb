@@ -552,13 +552,11 @@ export function canSendComposer(
   state: Pick<
     OrbPageState,
     "pendingRequest" | "settings" | "connection" | "synced" | "activity" | "historyLoaded"
-  > &
-    Partial<Pick<OrbPageState, "compacting">>,
+  >,
 ): boolean {
   if (orb === null || ["deleting", "archiving", "archived"].includes(orb.state)) return false;
   return (
     state.pendingRequest === null &&
-    !state.compacting &&
     (orb.centralAgent || (state.settings?.writable ?? true)) &&
     state.historyLoaded
   );

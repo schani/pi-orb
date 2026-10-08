@@ -380,6 +380,68 @@ it.each(["malformed", "header-conflict", "head-without-cursor", "custom-session"
   },
 );
 
+it.each(["archiving", "deleting"] as const)(
+  "permits already-owned Native cleanup while %s without reopening startup",
+  async (state) => {
+    const f = await fixture();
+    const lease = (
+      await f.database.agentPersistence.open(f.task, f.orb, operation)
+    )._unsafeUnwrap();
+    const harness = await Harness.open(
+      lease.storage,
+      { models: createModels(), registry: createRegistry() },
+      context,
+    );
+    try {
+      const root = await harness.root(context);
+      const progress = defineDoc({
+        kind: "orb.private-progress",
+        version: 1,
+        scope: "conversation",
+        history: "latest",
+        fork: "initial",
+        initial: () => ({ ticks: 0 }),
+      });
+      await root.commit(async (tx) => {
+        await tx.doc(progress, root.id);
+      }, context);
+      (
+        await f.db.query(
+          "UPDATE orbs SET state=$2,agent_admission_version=agent_admission_version+1 WHERE id=$1",
+          [f.orb.id, state],
+        )
+      )._unsafeUnwrap();
+      (await lease.beginDrain())._unsafeUnwrap();
+      const publicBefore = (await f.snapshot()).slice(0, 2);
+      await expect(
+        root.commit(async (tx) => {
+          (await tx.doc(progress, root.id)).ticks++;
+        }, context),
+      ).resolves.toBeUndefined();
+      expect((await f.snapshot()).slice(0, 2)).toEqual(publicBefore);
+      const current = (await f.database.store.getOrb(f.task, f.orb.id))._unsafeUnwrap()!;
+      const opening = await f.database.agentPersistence.open(f.task, current, operation);
+      if (opening.isOk()) await opening.value.release();
+      expect(opening.isErr()).toBe(true);
+      (
+        await f.db.query("UPDATE orbs SET state='archived' WHERE id=$1", [f.orb.id])
+      )._unsafeUnwrap();
+      const sealed = await f.snapshot();
+      await expect(
+        root.commit(async (tx) => {
+          (await tx.doc(progress, root.id)).ticks++;
+        }, context),
+      ).rejects.toMatchObject({ cause: { type: "authority_error", code: "closed" } });
+      expect(await f.snapshot()).toEqual(sealed);
+    } finally {
+      await harness.close(context);
+      await lease.release();
+      await f.database.agentPersistence.close();
+      await f.database.close();
+    }
+  },
+);
+
 it("keeps Native-read outages retryable instead of terminalizing history", async () => {
   const f = await fixture();
   let failReads = false;

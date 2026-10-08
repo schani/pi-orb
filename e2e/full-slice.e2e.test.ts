@@ -2020,6 +2020,11 @@ describe("full slice E2E", () => {
     );
 
     // Manual compaction is a live operation, never an inbox message or Luna turn.
+    const compactOrb = await api(base, "GET", `/api/v1/orbs/${orbId}`);
+    const centralCompaction = compactOrb.body["centralAgent"] === true;
+    let compactedRecords = (await api(base, "GET", `/api/v1/orbs/${orbId}/history`)).body[
+      "records"
+    ] as { id: string; type: string }[];
     const compactStart = frames.length;
     const compactAfterId = frames
       .slice(0, compactStart)
@@ -2041,80 +2046,101 @@ describe("full slice E2E", () => {
         .slice(compactStart)
         .find((frame) => frame.type === "request.result" && frame.requestId === compactRequestId),
     );
-    expect(compactAccepted).toMatchObject({ result: { type: "accepted", duplicate: false } });
-    const compactOperationId =
-      compactAccepted.type === "request.result" && compactAccepted.result.type === "accepted"
-        ? compactAccepted.result.operationId
-        : "";
-    expect(
-      await untilFrame("compact busy", () =>
+    if (centralCompaction) {
+      expect(compactAccepted).toMatchObject({
+        result: { type: "rejected", error: { code: "unsupported", retryable: false } },
+      });
+      expect(
+        frames
+          .slice(compactStart)
+          .some(
+            (frame) =>
+              frame.type === "runtime.event" &&
+              (frame.event.type === "operation_started" ||
+                frame.event.type === "operation_finished"),
+          ),
+      ).toBe(false);
+      expect((await api(base, "GET", `/api/v1/orbs/${orbId}/history`)).body["records"]).toEqual(
+        compactedRecords,
+      );
+    } else {
+      expect(compactAccepted).toMatchObject({ result: { type: "accepted", duplicate: false } });
+      const compactOperationId =
+        compactAccepted.type === "request.result" && compactAccepted.result.type === "accepted"
+          ? compactAccepted.result.operationId
+          : "";
+      expect(
+        await untilFrame("compact busy", () =>
+          frames
+            .slice(compactStart)
+            .find(
+              (frame) =>
+                frame.type === "runtime.event" &&
+                frame.event.type === "status" &&
+                frame.event.work === "compaction" &&
+                frame.event.operationId === compactOperationId,
+            ),
+        ),
+      ).toMatchObject({
+        event: { activity: "busy", work: "compaction", compactionAfterId: compactAfterId },
+      });
+      await untilFrame("native compaction history", () =>
+        frames
+          .slice(compactStart)
+          .find((frame) => frame.type === "history.record" && frame.record.type === "compaction"),
+      );
+      const compactFinished = await untilFrame("compact finished", () =>
         frames
           .slice(compactStart)
           .find(
             (frame) =>
               frame.type === "runtime.event" &&
-              frame.event.type === "status" &&
-              frame.event.work === "compaction" &&
+              frame.event.type === "operation_finished" &&
               frame.event.operationId === compactOperationId,
           ),
-      ),
-    ).toMatchObject({
-      event: { activity: "busy", work: "compaction", compactionAfterId: compactAfterId },
-    });
-    await untilFrame("native compaction history", () =>
-      frames
-        .slice(compactStart)
-        .find((frame) => frame.type === "history.record" && frame.record.type === "compaction"),
-    );
-    const compactFinished = await untilFrame("compact finished", () =>
-      frames
-        .slice(compactStart)
-        .find(
-          (frame) =>
-            frame.type === "runtime.event" &&
-            frame.event.type === "operation_finished" &&
-            frame.event.operationId === compactOperationId,
-        ),
-    );
-    expect(compactFinished).toMatchObject({ event: { outcome: "completed" } });
-    expect(
-      frames
-        .slice(compactStart)
-        .some((frame) => frame.type === "runtime.event" && frame.event.type === "output_patch"),
-    ).toBe(false);
-    const compactDuplicateStart = frames.length;
-    socket.send(
-      JSON.stringify({
-        v: 1,
-        type: "client.request",
-        requestId: compactRequestId,
-        action: compactAction,
-      }),
-    );
-    expect(
-      await untilFrame("compact duplicate", () =>
+      );
+      expect(compactFinished).toMatchObject({ event: { outcome: "completed" } });
+      expect(
         frames
-          .slice(compactDuplicateStart)
-          .find((frame) => frame.type === "request.result" && frame.requestId === compactRequestId),
-      ),
-    ).toMatchObject({
-      result: { type: "accepted", operationId: compactOperationId, duplicate: true },
-    });
-    const compactedRecords = await waitFor(
-      "compaction replicated",
-      async () => {
-        const snapshot = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
-        const records = snapshot.body["records"] as { id: string; type: string }[];
-        return records.some((record) => record.type === "compaction") ? records : null;
-      },
-      { timeoutMs: 60_000, intervalMs: 200 },
-    );
+          .slice(compactStart)
+          .some((frame) => frame.type === "runtime.event" && frame.event.type === "output_patch"),
+      ).toBe(false);
+      const compactDuplicateStart = frames.length;
+      socket.send(
+        JSON.stringify({
+          v: 1,
+          type: "client.request",
+          requestId: compactRequestId,
+          action: compactAction,
+        }),
+      );
+      expect(
+        await untilFrame("compact duplicate", () =>
+          frames
+            .slice(compactDuplicateStart)
+            .find(
+              (frame) => frame.type === "request.result" && frame.requestId === compactRequestId,
+            ),
+        ),
+      ).toMatchObject({
+        result: { type: "accepted", operationId: compactOperationId, duplicate: true },
+      });
+      compactedRecords = await waitFor(
+        "compaction replicated",
+        async () => {
+          const snapshot = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
+          const records = snapshot.body["records"] as { id: string; type: string }[];
+          return records.some((record) => record.type === "compaction") ? records : null;
+        },
+        { timeoutMs: 60_000, intervalMs: 200 },
+      );
+    }
     const compactCalls = await fakeControl(fake.sessionKey, "/requests");
     expect(
       Array.isArray(compactCalls)
         ? compactCalls.filter((call: { matchedRuleIndex?: number }) => call.matchedRuleIndex === 3)
         : [],
-    ).toHaveLength(1);
+    ).toHaveLength(centralCompaction ? 0 : 1);
     socket.close();
 
     // Controlled stop: drain, then host stop (docs/testing.md step 8).
