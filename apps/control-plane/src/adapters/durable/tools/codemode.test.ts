@@ -54,7 +54,10 @@ describe("Durable code-mode store", () => {
       const root = await harness.root(ctx);
       const invocation = { ...api(root), taskId: 42, callId: "outer" } as ToolExecutionApi;
       const code = 'await tools.orb_spawn({prompt:"one"}); await tools.orb_spawn({prompt:"two"});';
-      expect((await tool.execute({ code }, invocation, ctx)).isError).toBe(false);
+      const result = await tool.execute({ code }, invocation, ctx);
+      expect(result.isError).toBe(false);
+      expect(result.details).toMatchObject({ cpu: { budgetCores: 1 } });
+      expect(Number((result.details as { cpu: { cpuMs: number } }).cpu.cpuMs)).toBeGreaterThan(0);
       expect((await tool.execute({ code }, invocation, ctx)).isError).toBe(false);
       expect(requests).toEqual([
         '[42,"outer:nested:0"]',

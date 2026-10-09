@@ -8,6 +8,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Release and verify central code-mode CPU headroom** (2026-10-09; `docs/postmortems/2026-10-09-control-plane-cpu-429.md`, `docs/pi-adapter.md`, `docs/deployment.md`). The shared one-core worker budget, durable CPU/wait counters and rollout CPU/ingress-429 evidence are implemented locally. Complete normal exact-source Linux/PostgreSQL CI and E2E gates, then qualify the independently managed two-vCPU Cloud Run revision under sustained multi-worker load. Cooperative checkpoints exclude main-thread/compiler CPU and can overshoot in native operations; confirm actual serving headroom and ingress admission. Preserve central authority and first-failure evidence.
+
 - [x] **Waive historical PR 66 provider-stall/APT explanation (user-approved 2026-10-08).** Historical causes remain unknown; first-failure evidence is preserved in `docs/postmortems/2026-10-08-subagent-post-tool-missing-request.md` and `docs/postmortems/2026-10-08-runtime-apt-size-mismatch.md`. Normal qualification and correction of new failures remain required.
 
 - **Qualify Claude automatic compute recovery** (2026-10-06; `docs/lifecycle.md`, `docs/testing.md`). Complete parent review and frozen-source full repository/process E2E gates before deployment. The isolated HTTP/WS contract now covers complete broker/checkout/hook boot, missing lifetime, repeated guard and Stop races. Preserve the original Pi inbox-abort RED evidence and unknown production 62aa attribution; no operational recovery is authorized by this task.

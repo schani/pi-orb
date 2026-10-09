@@ -20,6 +20,7 @@ import {
   MAX_CALLBACK_REPLY_BYTES,
 } from "./callback-limits.js";
 import { type CallableCatalog, errorResult } from "./catalog.ts";
+import { codeModeCpuBudget } from "./cpu-budget.js";
 import type { AgentToolFiles } from "./files.ts";
 import { createCodemodeDescription, DEFAULT_CODEMODE_INLINE_BUDGET } from "./vendor/description.ts";
 import { createDiscoveryGlobals } from "./vendor/discovery.ts";
@@ -189,11 +190,13 @@ export function codemodeTool(
             message: published.error.message,
           });
       };
+      const cpu = codeModeCpuBudget.acquire();
       const created = Result.fromThrowable(
         () =>
           new CodemodeSandbox({
             memoryLimitBytes: MEMORY_LIMIT_BYTES,
             workerUrl: new URL("./bounded-worker.js", import.meta.url),
+            workerData: cpu.workerData,
             tools: catalog
               .definitions()
               .map(
@@ -340,7 +343,10 @@ export function codemodeTool(
           }),
         () => ({ code: "unavailable" as const, message: "Sandbox initialization failed" }),
       )();
-      if (created.isErr()) return errorResult(created.error);
+      if (created.isErr()) {
+        cpu.release();
+        return errorResult(created.error);
+      }
       const sandbox = created.value;
       running.add(sandbox);
       const run = await ResultAsync.fromPromise(
@@ -358,6 +364,8 @@ export function codemodeTool(
         message: "Sandbox cleanup failed",
       }));
       running.delete(sandbox);
+      cpu.release();
+      const cpuStats = cpu.snapshot();
       if (run.isErr()) return errorResult(run.error);
       if (closed.isErr()) return errorResult(closed.error);
       const value = run.value;
@@ -412,7 +420,7 @@ export function codemodeTool(
         content: [
           {
             type: "text",
-            text: `${value.ok ? "Script completed" : "Script failed"}\nWall time ${((performance.now() - started) / 1000).toFixed(1)} seconds\nOutput:\n`,
+            text: `${value.ok ? "Script completed" : "Script failed"}\nWall time ${((performance.now() - started) / 1000).toFixed(1)} seconds${cpuStats.throttledMs >= 100 ? `\nCPU budget wait ${(cpuStats.throttledMs / 1000).toFixed(1)} seconds` : ""}\nOutput:\n`,
           },
           ...items,
         ],
@@ -430,6 +438,7 @@ export function codemodeTool(
           : {}),
         ...(usage ? { usage } : {}),
         details: {
+          cpu: cpuStats,
           calls: calls.map((c) => ({ ...c })),
           omittedCalls: Math.max(0, invocation - calls.length),
           executionWait: false,

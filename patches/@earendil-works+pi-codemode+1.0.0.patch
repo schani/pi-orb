@@ -30,3 +30,62 @@ diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-sourc
  			throw new TypeErrorCtor("invalid image output. The image data is not valid base64 (truncated or corrupted?)");
  		}
  		const head = data.slice(0, 16);
+diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js b/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js
+--- a/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js
++++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js
+@@ -105,6 +105,7 @@
+             memoryLimitBytes: options.memoryLimitBytes,
+             store: options.store,
+             interrupt: this.interrupt,
++            extension: options.workerData,
+         };
+         let worker;
+         try {
+@@ -242,6 +243,7 @@
+     memoryLimitBytes;
+     wasm;
+     workerUrl;
++    workerData;
+     running = new Set();
+     closed = false;
+     constructor(options = {}) {
+@@ -249,6 +251,7 @@
+         this.memoryLimitBytes = options.memoryLimitBytes;
+         this.wasm = options.wasm;
+         this.workerUrl = options.workerUrl ?? defaultWorkerUrl();
++        this.workerData = options.workerData;
+         for (const tool of options.tools ?? [])
+             this.registerTool(tool);
+         const namespaces = new Set();
+@@ -301,6 +304,7 @@
+             store: serializeStore(options.store),
+             wasm: this.wasm === undefined ? loadQuickJSWasm() : Promise.resolve(this.wasm),
+             workerUrl: this.workerUrl,
++            workerData: this.workerData,
+         });
+         this.running.add(execution);
+         return execution.promise.finally(() => this.running.delete(execution));
+diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js b/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
+--- a/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
++++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
+@@ -52,7 +52,7 @@
+         // Without a guard, deep recursion overflows the wasm stack and traps instead of throwing a
+         // catchable RangeError.
+         maxStackSize: MAX_STACK_SIZE,
+-        interruptHandler: () => Atomics.load(interrupt, 0) !== 0,
++        interruptHandler: () => data.checkpoint?.() || Atomics.load(interrupt, 0) !== 0,
+         wasi: discardOutput,
+     });
+     // Called from the prelude with primitives only.
+diff --git a/node_modules/@earendil-works/pi-codemode/dist/types.d.ts b/node_modules/@earendil-works/pi-codemode/dist/types.d.ts
+--- a/node_modules/@earendil-works/pi-codemode/dist/types.d.ts
++++ b/node_modules/@earendil-works/pi-codemode/dist/types.d.ts
+@@ -123,6 +123,8 @@
+      * specifier of an embedded build entrypoint; other hosts usually use a URL.
+      */
+     workerUrl?: string | URL;
++    /** Structured-cloneable data for a custom worker entry, exposed as workerData.extension. */
++    workerData?: unknown;
+ }
+ export interface CodemodeExecuteOptions {
+     signal?: AbortSignal;

@@ -34,6 +34,7 @@ def placement(service, image):
 
 def log_counts(rows):
     return {'errors': sum(row.get('severity') in ('ERROR', 'CRITICAL', 'ALERT', 'EMERGENCY') for row in rows),
+            'http429': sum(row.get('httpRequest', {}).get('status') == 429 for row in rows),
             'http5xx': sum(type(row.get('httpRequest', {}).get('status')) is int and
                           row['httpRequest']['status'] >= 500 for row in rows),
             'legacyBackend': sum(row.get('jsonPayload', {}).get('code') == 'legacy_backend' for row in rows)}
@@ -211,7 +212,7 @@ def sample(cloud, record, start):
     if baseline and baseline.get('ownerUserId') != fleet.value['ownerUserId']:
         return fail('conflict', 'monitor owner differs from preflight')
     logs = cloud.json(['logging', 'read',
-        f'resource.type="cloud_run_revision" AND resource.labels.service_name="pi-orb-issuer" AND resource.labels.location="{record["region"]}" AND resource.labels.revision_name="{selected.value["revision"]}" AND timestamp>="{start}" AND (severity>=ERROR OR httpRequest.status>=500 OR textPayload:"lifecycle:" OR jsonPayload.code="legacy_backend")',
+        f'resource.type="cloud_run_revision" AND resource.labels.service_name="pi-orb-issuer" AND resource.labels.location="{record["region"]}" AND resource.labels.revision_name="{selected.value["revision"]}" AND timestamp>="{start}" AND (severity>=ERROR OR httpRequest.status>=500 OR httpRequest.status=429 OR textPayload:"lifecycle:" OR jsonPayload.code="legacy_backend")',
         '--project', record['project'], '--limit=1000'])
     if logs.error:
         return logs
@@ -231,6 +232,7 @@ def sample(cloud, record, start):
             ('sqlDisk', 'cloudsql_database', 'cloudsql.googleapis.com/database/disk/utilization', True),
             ('sqlConnections', 'cloudsql_database', 'cloudsql.googleapis.com/database/postgresql/num_backends', True),
             ('runInstances', 'cloud_run_revision', 'run.googleapis.com/container/instance_count', True),
+            ('runCpu', 'cloud_run_revision', 'run.googleapis.com/container/cpu/utilizations', True),
             ('runMemory', 'cloud_run_revision', 'run.googleapis.com/container/memory/utilizations', True),
             ('runStarts', 'cloud_run_revision', 'run.googleapis.com/container/startup_latencies', False)):
         coverage = metric_coverage(cloud, record['project'], resource, metric, metric_start, metric_end,
@@ -260,7 +262,8 @@ def observe(record, output, cloud=None, clock=time.monotonic, sleep=time.sleep):
         if captured.error is None:
             observed = captured.value
             regression = regression or observed.get('logs', {}).get('http5xx', 0) > 0 or (
-                observed.get('logs', {}).get('errors', 0) > 0) or any(
+                observed.get('logs', {}).get('errors', 0) > 0) or (
+                observed.get('logs', {}).get('http429', 0) > 0) or any(
                 observed.get('lifecycle', {}).get(code, 0) > 0 for code in (
                     'history_integrity', 'drain-integrity', 'drain-restart-cap',
                     'central-agent-unavailable', 'central-delivery-blocked',

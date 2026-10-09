@@ -20,7 +20,7 @@ class MonitorTest(unittest.TestCase):
                  'jsonPayload': {'code': 'legacy_backend', 'prompt': 'secret'},
                  'httpRequest': {'status': 503, 'requestUrl': 'secret'}}]
         self.assertEqual(monitor.log_counts(rows),
-                         {'errors': 1, 'http5xx': 1, 'legacyBackend': 1})
+                         {'errors': 1, 'http429': 0, 'http5xx': 1, 'legacyBackend': 1})
         self.assertNotIn('secret', json.dumps(monitor.log_counts(rows)))
 
     def test_window_cannot_finish_early_and_first_fault_is_not_erased(self):
@@ -94,6 +94,16 @@ class MonitorTest(unittest.TestCase):
                 self.assertIsNotNone(monitor.observe({}, output, clock=lambda: next(clock)).error)
             self.assertEqual(json.loads(output.read_text())['outcome'], 'regression')
 
+    def test_ingress_429_is_retained_even_when_application_probes_succeed(self):
+        self.assertEqual(monitor.log_counts([{'httpRequest': {'status': 429}}])['http429'], 1)
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'monitor.json'
+            clock = iter([0, 1080])
+            with patch.object(monitor, 'sample', return_value=Result({
+                    'health': 'ok', 'logs': {'http429': 1}})):
+                self.assertIsNotNone(monitor.observe({}, output, clock=lambda: next(clock)).error)
+            self.assertEqual(json.loads(output.read_text())['outcome'], 'regression')
+
     def test_owner_inventory_cannot_succeed_with_an_unexpected_empty_fleet(self):
         with patch.object(monitor, 'api', return_value=Result({'items': []})):
             self.assertIsNotNone(monitor.fleet_inventory(object(), False).error)
@@ -129,9 +139,11 @@ class MonitorTest(unittest.TestCase):
             result = monitor.sample(cloud, record, 'start')
         self.assertIsNone(result.error)
         self.assertEqual(result.value['metrics']['sqlCpu']['maximum'], 1)
+        self.assertEqual(result.value['metrics']['runCpu']['maximum'], 1)
         queries = str(cloud.calls)
         self.assertIn('resource.labels.revision_name', queries)
         self.assertIn('resource.labels.location', queries)
+        self.assertIn('httpRequest.status=429', queries)
         self.assertNotIn('delete', queries)
 
     def test_effective_setting_rejects_wrong_backend_and_image(self):

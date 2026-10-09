@@ -191,7 +191,13 @@ for (const scope of [[], ["--pi-only"]]) {
     const root = sealedFixture();
     const target = "node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js";
     const patch = "@earendil-works+pi-codemode+1.0.0.patch";
-    for (const path of [target, "node_modules/@earendil-works/pi-codemode/package.json"]) {
+    for (const path of [
+      target,
+      "node_modules/@earendil-works/pi-codemode/package.json",
+      "node_modules/@earendil-works/pi-codemode/dist/runtime/host.js",
+      "node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js",
+      "node_modules/@earendil-works/pi-codemode/dist/types.d.ts",
+    ]) {
       mkdirSync(dirname(join(root, path)), { recursive: true });
       cpSync(join(repository, path), join(root, path));
     }
