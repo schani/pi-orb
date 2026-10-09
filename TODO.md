@@ -8,6 +8,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Bound Central Durable recovery/subagent memory and expose OOM diagnosis** (2026-10-09; `docs/postmortems/2026-10-09-central-durable-oom-recovery.md`). Attribute shared-process memory with task-kind/ownership, heap/RSS and worker evidence; qualify bounded code-mode invocation/fanout/recovery under the service memory limit without replaying unsafe effects. Code-mode currently has no global invocation cap; its eight-callback limit is per script. The user-approved live 2 vCPU / 4 GiB resize is capacity mitigation, not a growth-driver fix. Persist sanitized, user-visible confirmed OOM/interruption diagnosis, distinct from an unproven memory driver. Shared 1 GiB OOM is confirmed; no fix or deployment is authorized by this investigation.
+
 - [x] **Waive historical PR 66 provider-stall/APT explanation (user-approved 2026-10-08).** Historical causes remain unknown; first-failure evidence is preserved in `docs/postmortems/2026-10-08-subagent-post-tool-missing-request.md` and `docs/postmortems/2026-10-08-runtime-apt-size-mismatch.md`. Normal qualification and correction of new failures remain required.
 
 - **Qualify Claude automatic compute recovery** (2026-10-06; `docs/lifecycle.md`, `docs/testing.md`). Complete parent review and frozen-source full repository/process E2E gates before deployment. The isolated HTTP/WS contract now covers complete broker/checkout/hook boot, missing lifetime, repeated guard and Stop races. Preserve the original Pi inbox-abort RED evidence and unknown production 62aa attribution; no operational recovery is authorized by this task.
