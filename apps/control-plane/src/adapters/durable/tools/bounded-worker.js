@@ -5,6 +5,13 @@ import {
   MAX_CALLBACK_CALLS,
   MAX_CALLBACK_CONCURRENCY,
 } from "./callback-limits.js";
+import { createCpuCheckpoint } from "./cpu-checkpoint.js";
+
+workerData.checkpoint = createCpuCheckpoint({
+  ...workerData.extension,
+  interrupt: workerData.interrupt,
+});
+workerData.checkpoint();
 
 // The public worker entry uses this port for output. Bound the pipe before the
 // upstream host collects messages; the QuickJS heap limit alone cannot do that.
@@ -22,9 +29,11 @@ let argumentBytes = 0;
 const outstanding = new Set();
 // Release only when the worker receives a reply, not when the host sends it.
 parentPort.on("message", (message) => {
+  workerData.checkpoint();
   if (message.type === "result") outstanding.delete(message.id);
 });
 parentPort.postMessage = (message, ...args) => {
+  workerData.checkpoint();
   if (stopped) return;
   if (message.type === "call") {
     calls++;

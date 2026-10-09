@@ -212,6 +212,7 @@ describe("release child ownership", () => {
       const child = join(root, "child.sh");
       const runner = join(root, "runner.sh");
       const log = join(root, "calls");
+      writeFileSync(log, "");
       copyFileSync(resolve("infra/release-child.sh"), helper);
       writeFileSync(
         child,

@@ -126,8 +126,20 @@ const packages = [
     package: "node_modules/@earendil-works/pi-codemode",
     version: "1.0.0",
     patch: "@earendil-works+pi-codemode+1.0.0.patch",
-    sha: "22e2c44d23d239be85ddfc012cc9878c770b1d8453e90cdc60532b2b4ebc8555",
+    sha: "5bb14afcf86b4030433ef030274e917287f169f3f7a0cae3130d2b46142f987d",
     files: {
+      "node_modules/@earendil-works/pi-codemode/dist/types.d.ts": [
+        "11f97b7999314660abd2ff1c2a69d1d6465ca772b36c551a22b490b6dc69e2cd",
+        "f0c60242775b01b2e9215440d50c56d82d0717dc0f87463a14cafa8192f4cfbc",
+      ],
+      "node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js": [
+        "5682c50454fe32b17541be91c2e29e1bf592958bf08698f02801c5e26ef30717",
+        "c6fe0c5146a098ec1eb85187213c193b82167d335665ac917aab8f04553f015d",
+      ],
+      "node_modules/@earendil-works/pi-codemode/dist/runtime/host.js": [
+        "c495f622a093638b6f93e95c1656ebe75ce6769308ba16fbb3d85dbba36566dd",
+        "9d5a207051a045bc7b8a99da40d91bea625b9f978b97fa0c417d3e5a909a3f41",
+      ],
       "node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js": [
         "68e5505a9ab9e19ffa0fd7bb8f93147927fd27a72cf294bb122a7faca992348d",
         "d19de32cbdde1cc7f1aabdf3aa83c36e63776594da1aeae94dd006bbe80d338c",

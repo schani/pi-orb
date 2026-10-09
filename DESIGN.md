@@ -282,6 +282,7 @@ Reference material:
 - [docs/postmortems/2026-10-05-mobile-reader-font-readiness.md](docs/postmortems/2026-10-05-mobile-reader-font-readiness.md) — controlled font swap preserved the reader anchor but invalidated an absolute-scroll assertion
 - [docs/postmortems/2026-09-07-native-build-cancellation-cleanup.md](docs/postmortems/2026-09-07-native-build-cancellation-cleanup.md) — interrupted release exited before builder cleanup
 - [docs/postmortems/2026-10-09-native-runtime-entry-acceptance.md](docs/postmortems/2026-10-09-native-runtime-entry-acceptance.md) — stale child-process matcher blocked native acceptance before apply
+- [docs/postmortems/2026-10-09-control-plane-cpu-429.md](docs/postmortems/2026-10-09-control-plane-cpu-429.md) — saturated shared control-plane CPU coincided with Cloud Run ingress refusals below configured concurrency
 - [docs/references/amp-orb-lessons.md](docs/references/amp-orb-lessons.md) — lessons from Amp's “Putting an Agent in an Orb”
 - [docs/EXE-DEV.md](docs/EXE-DEV.md) — the full exe.dev host-provider evaluation
 - [docs/AWS-MICROVMS.md](docs/AWS-MICROVMS.md) — the full AWS Lambda MicroVMs host-provider evaluation
