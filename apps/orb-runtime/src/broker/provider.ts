@@ -27,8 +27,11 @@ export interface BrokerProviderConfig {
   ): { brokerGeneration?: number; tokenExpiresAt: number } | undefined;
   readonly oauth: {
     readonly name: string;
-    login(callbacks?: unknown): Promise<OAuthCredentialsShape>;
-    refreshToken(credentials: OAuthCredentialsShape): Promise<OAuthCredentialsShape>;
+    login(callbacks?: { signal?: AbortSignal }): Promise<OAuthCredentialsShape>;
+    refreshToken(
+      credentials: OAuthCredentialsShape,
+      signal?: AbortSignal,
+    ): Promise<OAuthCredentialsShape>;
     getApiKey(credentials: OAuthCredentialsShape): string;
   };
 }
@@ -73,8 +76,9 @@ export function brokerProviderConfig(
   };
   const fetchCredentials = async (
     reason: "startup" | "expiring",
+    signal?: AbortSignal,
   ): Promise<OAuthCredentialsShape> => {
-    const outcome = await client.fetch(task, reason);
+    const outcome = await client.fetch(task, reason, signal);
     if (outcome.isErr()) {
       return Promise.reject(new Error(`broker token fetch failed: ${outcome.error.type}`));
     }
@@ -88,8 +92,8 @@ export function brokerProviderConfig(
     ...(options.inferenceBaseUrl !== undefined ? { baseUrl: options.inferenceBaseUrl } : {}),
     oauth: {
       name: "pi-orb broker",
-      login: () => fetchCredentials("startup"),
-      refreshToken: () => fetchCredentials("expiring"),
+      login: (callbacks) => fetchCredentials("startup", callbacks?.signal),
+      refreshToken: (_credentials, signal) => fetchCredentials("expiring", signal),
       getApiKey: (credentials) => {
         bind(credentials);
         return credentials.access;

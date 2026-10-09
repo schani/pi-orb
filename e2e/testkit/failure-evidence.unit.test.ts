@@ -61,6 +61,51 @@ describe("failure evidence", () => {
     });
     expect(JSON.stringify(requests)).not.toMatch(/FORBIDDEN|deviceauth_authorization_pending/);
   });
+  it("distinguishes model matcher and codec errors without retaining bodies", () => {
+    const requests = failureRequests([
+      {
+        surface: "model",
+        body: JSON.stringify({
+          model: "gpt-6-luna",
+          input: [{ type: "message", role: "user", content: "FORBIDDEN" }],
+        }),
+        headers: { "content-encoding": "zstd", authorization: "FORBIDDEN" },
+        events: [
+          {
+            kind: "response",
+            status: 400,
+            body: { error: "no_matching_rule", message: "FORBIDDEN" },
+          },
+        ],
+      },
+      {
+        surface: "model",
+        body: null,
+        events: [
+          {
+            kind: "response",
+            status: 400,
+            body: { error: "invalid_body", message: "FORBIDDEN" },
+          },
+        ],
+      },
+      {
+        surface: "model",
+        body: "FORBIDDEN",
+        events: [{ kind: "response", body: { error: "FORBIDDEN" } }],
+      },
+    ]);
+    expect(requests[0]).toMatchObject({
+      modelRequest: { model: "luna", encoding: "zstd", inputCount: 1 },
+      modelErrors: ["no_matching_rule"],
+    });
+    expect(requests[1]).toMatchObject({
+      modelRequest: { model: null, inputCount: null },
+      modelErrors: ["invalid_body"],
+    });
+    expect(requests[2]).toMatchObject({ modelErrors: [null] });
+    expect(JSON.stringify(requests)).not.toContain("FORBIDDEN");
+  });
   it("bounds mixed ledgers and rejects unknown metadata", () => {
     const requests = failureRequests(
       Array.from({ length: 90 }, (_, id) => ({

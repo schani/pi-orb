@@ -59,42 +59,48 @@ describe("git credential request parsing", () => {
 
 describe("github token fetch (DST)", () => {
   it("returns the granted access token", async () => {
-    await runDst({ name: "gh-token-grant", iterations: 10 }, async (sim) => {
-      const endpoint = new ScriptedEndpoint([
-        {
-          kind: "grant",
-          grant: { accessToken: "gh-tok", expiresAt: 9_999_999_999_999, generation: 1 },
-        },
-      ]);
-      const result = await sim.runTasks([
-        {
-          name: "cli",
-          f: async (task) => {
-            const token = await fetchGithubToken(task, endpoint);
-            expect(token.isOk()).toBe(true);
-            if (token.isOk()) expect(token.value).toBe("gh-tok");
+    await runDst(
+      { name: "gh-token-grant", iterations: 10, timerOrder: "earliest" },
+      async (sim) => {
+        const endpoint = new ScriptedEndpoint([
+          {
+            kind: "grant",
+            grant: { accessToken: "gh-tok", expiresAt: 9_999_999_999_999, generation: 1 },
           },
-        },
-      ]);
-      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-    });
+        ]);
+        const result = await sim.runTasks([
+          {
+            name: "cli",
+            f: async (task) => {
+              const token = await fetchGithubToken(task, endpoint);
+              expect(token.isOk()).toBe(true);
+              if (token.isOk()) expect(token.value).toBe("gh-tok");
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      },
+    );
   });
 
   it("maps auth_required to a connect-GitHub message", async () => {
-    await runDst({ name: "gh-token-auth-required", iterations: 10 }, async (sim) => {
-      const endpoint = new ScriptedEndpoint([{ kind: "auth_required" }]);
-      const result = await sim.runTasks([
-        {
-          name: "cli",
-          f: async (task) => {
-            const token = await fetchGithubToken(task, endpoint);
-            expect(token.isErr()).toBe(true);
-            if (token.isErr()) expect(token.error).toContain("device login");
+    await runDst(
+      { name: "gh-token-auth-required", iterations: 10, timerOrder: "earliest" },
+      async (sim) => {
+        const endpoint = new ScriptedEndpoint([{ kind: "auth_required" }]);
+        const result = await sim.runTasks([
+          {
+            name: "cli",
+            f: async (task) => {
+              const token = await fetchGithubToken(task, endpoint);
+              expect(token.isErr()).toBe(true);
+              if (token.isErr()) expect(token.error).toContain("device login");
+            },
           },
-        },
-      ]);
-      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-    });
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      },
+    );
   });
 
   it("gives up on persistent failures within the bounded window", async () => {

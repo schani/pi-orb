@@ -456,11 +456,25 @@ export function createProcessAgentContext(
       if (catalog.isErr()) return err(durableError(catalog.error.message, true));
       const inferenceBaseUrl = options.inferenceBaseUrl?.(ownerUserId);
       const models = await createDurableModels({
-        token: () =>
+        signal: operation.signal,
+        token: (signal) =>
           ResultAsync.fromSafePromise(
-            getToken(task, options.brokerForUser(ownerUserId), CODEX_PROVIDER, {
-              reason: "startup",
-            }),
+            getToken(
+              task,
+              options.brokerForUser(ownerUserId),
+              CODEX_PROVIDER,
+              {
+                reason: "startup",
+              },
+              signal === undefined
+                ? undefined
+                : {
+                    signal,
+                    deadlineAt:
+                      task.monotonicNow() +
+                      options.brokerForUser(ownerUserId).constants.requestDeadlineMs,
+                  },
+            ),
           )
             .andThen((result) => result)
             .mapErr(() => durableError("owner model credential unavailable", true)),

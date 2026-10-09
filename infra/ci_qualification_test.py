@@ -82,11 +82,37 @@ class QualificationTest(unittest.TestCase):
                 {'total_count': 2, 'jobs': self.two_job_ci().jobs[1][:1]})):
             self.assertIsNotNone(api.list_jobs(1).error)
 
+    def test_every_required_workflow_runs_on_exact_main_push(self):
+        for path in EXPECTED:
+            with self.subTest(workflow=path):
+                source = Path('.github/workflows/' + path).read_text()
+                self.assertRegex(source, r'(?m)^  push:\n    branches:\n      - main$')
+        source = Path('.github/workflows/durable-qualification.yml').read_text()
+        self.assertIn('  workflow_dispatch:', source)
+        self.assertIn('  control-plane-image:', source)
+        self.assertIn('name: Central process (${{ matrix.shard }}/4)', source)
+        self.assertIn('shard: [1, 2, 3, 4]', source)
+
+    def test_missing_central_image_cannot_be_substituted_by_ci_image(self):
+        api = FakeAPI()
+        central_run = api.runs['durable-qualification.yml'][0]['id']
+        api.jobs[central_run] = [job for job in api.jobs[central_run]
+                                 if job['name'] != 'control-plane-image']
+        self.assertIsNotNone(inspect(api, SHA).error)
+
+    def test_central_qualification_is_required_for_production(self):
+        self.assertEqual(EXPECTED.get('durable-qualification.yml'),
+                         ('Durable qualification', ('control-plane-image',
+                          *(f'Central process ({i}/4)' for i in range(1, 5)))))
+        api = FakeAPI()
+        api.runs['durable-qualification.yml'] = []
+        self.assertEqual(inspect(api, SHA).error.kind, 'pending')
+
     def test_complete_exact_main_push_produces_allowlisted_evidence(self):
         result = inspect(FakeAPI(), SHA)
         self.assertIsNone(result.error)
         self.assertTrue(valid_evidence(result.value, SHA))
-        self.assertEqual(len(result.value['runs']), 2)
+        self.assertEqual(len(result.value['runs']), 3)
         self.assertEqual(len(result.value['runs'][1]['jobs']), 4)
         self.assertFalse(valid_evidence({**result.value, 'token': 'secret'}, SHA))
         self.assertFalse(valid_evidence(result.value, 'b' * 40))
@@ -102,6 +128,13 @@ class QualificationTest(unittest.TestCase):
                 api = FakeAPI()
                 api.runs['ci.yml'][0][key] = value
                 self.assertIsNotNone(inspect(api, SHA).error)
+
+    def test_dispatch_e2e_never_qualifies_even_with_four_successful_jobs(self):
+        api = FakeAPI()
+        api.runs['e2e.yml'][0]['event'] = 'workflow_dispatch'
+        self.assertIsNotNone(inspect(api, SHA).error)
+        evidence = inspect(FakeAPI(), SHA).value
+        self.assertFalse(valid_evidence({**evidence, 'event': 'workflow_dispatch'}, SHA))
 
     def test_failed_cancelled_skipped_and_incomplete_jobs_block(self):
         for conclusion in ['failure', 'cancelled', 'skipped', 'neutral', 'timed_out', None]:

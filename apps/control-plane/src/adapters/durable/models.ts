@@ -10,7 +10,8 @@ export interface DurableModelToken {
   readonly expiresAt: number;
 }
 export interface DurableModelsOptions {
-  readonly token: () => ResultAsync<DurableModelToken, RuntimeClientError>;
+  readonly token: (signal?: AbortSignal) => ResultAsync<DurableModelToken, RuntimeClientError>;
+  readonly signal?: AbortSignal;
   readonly inferenceBaseUrl?: string;
 }
 
@@ -19,8 +20,8 @@ export function createDurableModels(
   options: DurableModelsOptions,
 ): ResultAsync<ModelRuntime, RuntimeClientError> {
   const diagnostics = new Map<string, { brokerGeneration?: number; tokenExpiresAt: number }>();
-  const resolve = async () => {
-    const result = await options.token();
+  const resolve = async (signal?: AbortSignal) => {
+    const result = await options.token(signal);
     // The provider OAuth callback requires rejection on failure; neverthrow is restored at our outer boundary.
     if (result.isErr()) return Promise.reject(new Error("owner model credential unavailable"));
     const grant = result.value;
@@ -39,7 +40,7 @@ export function createDurableModels(
   return ResultAsync.fromPromise(
     (async () => {
       const credentials = new InMemoryCredentialStore();
-      await credentials.modify("openai-codex", resolve);
+      await credentials.modify("openai-codex", () => resolve(options.signal));
       const runtime = await ModelRuntime.create({
         credentials,
         modelsPath: null,
@@ -51,12 +52,15 @@ export function createDurableModels(
         getRequestDiagnostics: (bearer) => diagnostics.get(bearer),
         oauth: {
           name: "pi-orb broker",
-          login: resolve,
-          refreshToken: resolve,
+          login: (callbacks) => resolve(callbacks.signal),
+          refreshToken: (_credential, signal) => resolve(signal),
           getApiKey: (credential) => credential.access,
         },
       });
-      await runtime.getAvailable("openai-codex");
+      await runtime.getAvailable(
+        "openai-codex",
+        options.signal === undefined ? {} : { signal: options.signal },
+      );
       return runtime;
     })(),
     () => durableError("owner model runtime initialization failed", true),

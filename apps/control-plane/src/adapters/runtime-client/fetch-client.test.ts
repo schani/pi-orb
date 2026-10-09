@@ -73,6 +73,52 @@ describe("describeFetchError", () => {
 });
 
 describe("FetchRuntimeClient response evidence", () => {
+  it.each([
+    undefined,
+    { kind: "sleep_wake" as const, sleepUntil: "2026-10-08T00:00:00.000Z" },
+    { kind: "sleep_expired" as const, sleepUntil: "2026-10-08T00:00:00.000Z" },
+  ])("preserves inbox provenance over HTTP: %j", async (system) => {
+    const fetch = vi.fn(async () =>
+      Response.json(
+        {
+          v: 1,
+          messageId: "notice-1",
+          status: "queued",
+          delivery: "turn",
+          operationId: "operation-1",
+          duplicate: false,
+        },
+        { status: 202 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const content = [{ type: "text" as const, text: "Scheduled sleep finished." }];
+    const result = await new FetchRuntimeClient().deliverMessage(
+      task,
+      {
+        baseUrl: "http://runtime.test",
+        messageId: "notice-1",
+        messageIds: ["notice-1"],
+        content,
+        ...(system === undefined ? {} : { system }),
+      },
+      { signal: new AbortController().signal },
+    );
+    expect(result.isOk()).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(
+      "http://runtime.test/v1/messages/notice-1",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          v: 1,
+          messageId: "notice-1",
+          messageIds: ["notice-1"],
+          content,
+          ...(system === undefined ? {} : { system }),
+        }),
+      }),
+    );
+  });
   it("binds detail and binary image reads to the requested session", async () => {
     const fetch = vi.fn(async (url: string) =>
       url.includes("/images/")

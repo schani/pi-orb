@@ -141,9 +141,57 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn('git checkout -B main "$GITHUB_SHA"', workflow)
         self.assertIn('test "$GITHUB_SHA" = "$(git rev-parse origin/main)"', workflow)
         self.assertLess(workflow.index('python3 infra/artifact_guard.py'), workflow.index('google-github-actions/auth@'))
-        actions = re.findall(r'uses: ([^\s]+)', workflow)
-        self.assertEqual(len(actions), 7)
-        self.assertTrue(all(re.fullmatch(r'[A-Za-z0-9_./-]+@[a-f0-9]{40}', action) for action in actions))
+        steps = re.findall(r'      - name: ([^\n]+)\n(.*?)(?=      - name: |\Z)', workflow, re.S)
+        checkout = 'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09'
+        upload = 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
+        actions = [(name, action) for name, body in steps for action in re.findall(r'uses: ([^\s]+)', body)]
+        self.assertEqual(re.findall(r'uses: ([^\s]+)', workflow), [action for _, action in actions])
+        self.assertEqual(
+            actions,
+            [
+                ('Check out the dispatched commit', checkout),
+                ('Check out the dispatched commit', checkout),
+                ('Set up Node.js', 'actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444'),
+                ('Authenticate the GitHub deployment identity', 'google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093'),
+                ('Set up Google Cloud SDK', 'google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db'),
+                ('Upload rollout monitor', upload),
+                ('Upload missing-orb navigation failure evidence', upload),
+                ('Upload lazy-return browser failure evidence', upload),
+                ('Upload MCP failure summaries', upload),
+                ('Upload only the validated release record', upload),
+            ],
+        )
+        uploads = {
+            'Upload rollout monitor': (
+                'always()', 'rollout-monitor', 30, ['path: ${{ runner.temp }}/rollout-monitor.json'],
+            ),
+            'Upload missing-orb navigation failure evidence': (
+                'failure()', 'e2e-missing-orb', 14,
+                ['path: |', '  test-failures/missing-orb-*/failure.json',
+                 '  test-failures/missing-orb-*/desktop.png', '  test-failures/missing-orb-*/geometry.json'],
+            ),
+            'Upload lazy-return browser failure evidence': (
+                'failure()', 'release-lazy-return', 14,
+                ['path: |', '  test-failures/lazy-return-*/failure.json',
+                 '  test-failures/lazy-return-*/failure.png', '  test-failures/lazy-return-*/trace.zip'],
+            ),
+            'Upload MCP failure summaries': (
+                'failure()', 'release-mcp', 14, ['path: test-failures/mcp-*.json'],
+            ),
+            'Upload only the validated release record': (
+                'always()', 'release', 30, ['path: ${{ runner.temp }}/release-artifact/release.json'],
+            ),
+        }
+        for name, (condition, artifact, retention, paths) in uploads.items():
+            with self.subTest(upload=name):
+                body = dict(steps)[name]
+                lines = [line[8:].split(' #', 1)[0] for line in body.splitlines() if line.strip()]
+                self.assertEqual(lines, [
+                    f'if: {condition}', f'uses: {upload}', 'with:',
+                    f'  name: {artifact}-${{{{ github.run_id }}}}-${{{{ github.run_attempt }}}}',
+                    *['  ' + path for path in paths],
+                    '  if-no-files-found: ignore', f'  retention-days: {retention}',
+                ])
         self.assertIn('cache: npm', workflow)
         self.assertNotIn('Cache Playwright browsers', workflow)
         self.assertEqual(workflow.count('./infra/release.sh'), 1)

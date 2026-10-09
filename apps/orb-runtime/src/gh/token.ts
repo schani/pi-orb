@@ -46,6 +46,8 @@ export function credentialOutput(token: string): string {
 
 export function describeTokenFailure(error: BrokerClientError): string {
   switch (error.type) {
+    case "cancelled":
+      return "credential broker request cancelled";
     case "auth_required":
       return "GitHub is not connected: start an orb and complete the GitHub device login.";
     case "unauthorized":

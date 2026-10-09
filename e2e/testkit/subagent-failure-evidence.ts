@@ -3,6 +3,7 @@ import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Result, ResultAsync } from "neverthrow";
 import { FailureEvidence, failureHistory, failureRequests } from "./failure-evidence.ts";
+import type { NativeAudit } from "./native-inference-audit.ts";
 
 const object = (value: unknown): Record<string, unknown> =>
   typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
@@ -23,6 +24,73 @@ const timestamp = (value: unknown) =>
     ? value
     : null;
 const unavailable = () => ({ unavailable: true });
+const counter = (value: unknown) =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+
+function streamMetadata(value: unknown) {
+  const row = object(value);
+  return {
+    requestId: uuid(row["requestId"]),
+    operationId: uuid(row["operationId"]),
+    sessionId: uuid(row["sessionId"]),
+    parentSessionId: uuid(row["parentSessionId"]),
+    ...Object.fromEntries(
+      [
+        "attempt",
+        "startedAt",
+        "firstEventAt",
+        "lastEventAt",
+        "lastNormalizedAt",
+        "events",
+        "normalizedEvents",
+        "normalizedToolArgumentEvents",
+        "toolArgumentEvents",
+        "textBytes",
+        "reasoningBytes",
+        "toolArgumentBytes",
+        "httpResponses",
+        "httpStatus",
+      ].map((key) => [key, counter(row[key])]),
+    ),
+    lastEventType: member(row["lastEventType"], [
+      "response.created",
+      "response.in_progress",
+      "response.completed",
+      "response.done",
+      "response.failed",
+      "response.incomplete",
+      "response.output_item.added",
+      "response.output_item.done",
+      "response.content_part.added",
+      "response.content_part.done",
+      "response.output_text.delta",
+      "response.output_text.done",
+      "response.reasoning_summary_text.delta",
+      "response.reasoning_summary_text.done",
+      "response.reasoning_text.delta",
+      "response.function_call_arguments.delta",
+      "response.function_call_arguments.done",
+      "response.custom_tool_call_input.delta",
+      "response.custom_tool_call_input.done",
+      "error",
+    ]),
+    phase: member(row["phase"], [
+      "waiting",
+      "streaming",
+      "text",
+      "reasoning",
+      "tool_arguments",
+      "terminal",
+    ]),
+    transport: member(row["transport"], ["unknown", "sse"]),
+    issues: (Array.isArray(row["issues"]) ? row["issues"] : [])
+      .filter((issue) => ["no_event_gap", "large_tool_arguments"].includes(issue))
+      .slice(0, 2),
+    edge: member(row["edge"], ["no_event_gap", "large_tool_arguments", "terminal"]),
+    observedAt: counter(row["observedAt"]),
+    terminal: member(row["terminal"], ["completed", "aborted", "failed"]),
+  };
+}
 
 function rootMetadata(root: string, orb: string) {
   return Result.fromThrowable(() => {
@@ -79,7 +147,33 @@ function rootMetadata(root: string, orb: string) {
             "subagents:record",
             "subagent-notification",
             "subagent-update",
+            "pi-orb.stream-audit",
+            "pi-orb.inference-stage",
           ]),
+          ...(entry["customType"] === "pi-orb.stream-audit"
+            ? { stream: streamMetadata(data) }
+            : {}),
+          ...(entry["customType"] === "pi-orb.inference-stage"
+            ? {
+                inference: {
+                  operationId: uuid(data["operationId"]),
+                  sessionId: uuid(data["sessionId"]),
+                  sequence: counter(data["sequence"]),
+                  observedAt: counter(data["observedAt"]),
+                  stage: member(data["stage"], [
+                    "turn_end_boundary",
+                    "next_turn_preparation",
+                    "request_projection",
+                    "context_hooks",
+                    "provider_preparation",
+                    "auth_resolution",
+                    "provider_headers",
+                    "provider_http",
+                  ]),
+                  edge: member(data["edge"], ["enter", "exit"]),
+                },
+              }
+            : {}),
           phase: member(data["phase"], ["admitted", "started", "terminal", "wake_suppressed"]),
           childId: childId(data["childId"] ?? data["id"]),
           operationId: uuid(data["operationId"]),
@@ -107,6 +201,8 @@ function modelMetadata(value: unknown) {
         aborted: row.aborted,
         finalized: row.finalized,
         eventCounts,
+        modelRequest: row.modelRequest,
+        modelErrors: row.modelErrors,
       };
     });
 }
@@ -132,6 +228,7 @@ export async function captureSubagentFailure(options: {
   phase: "continuation" | "abort" | "recovery" | "archive" | "profiles" | "setup";
   artifact: string;
   logs: string[];
+  nativeAudit?: NativeAudit;
   probes: Partial<Record<Probe, () => Promise<unknown>>>;
 }) {
   const bundle = {
@@ -139,6 +236,13 @@ export async function captureSubagentFailure(options: {
     phase: options.phase,
     capturedAt: new Date().toISOString(),
     root: rootMetadata(options.root, options.orb),
+    temporalBrackets: options.nativeAudit?.brackets() ?? [],
+    nativeAudit: (() => {
+      const evidence = options.nativeAudit?.read(options.orb);
+      if (!evidence) return { state: "audit_missing" };
+      if (evidence.isErr()) return { state: evidence.error.type };
+      return { state: "available", processes: evidence.value };
+    })(),
     lifecycle: options.logs
       .join("")
       .split("\n")
@@ -213,6 +317,13 @@ export async function captureSubagentFailure(options: {
           ...evidence.observations[0],
           activity: member(body["activity"], ["idle", "busy"]),
           operationId: uuid(body["operationId"]),
+          ...(key === "health"
+            ? {
+                streams: (Array.isArray(body["streams"]) ? body["streams"] : [])
+                  .slice(-30)
+                  .map(streamMetadata),
+              }
+            : {}),
         };
       }
     }),

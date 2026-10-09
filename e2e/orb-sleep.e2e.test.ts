@@ -295,6 +295,10 @@ it("retains a real sleep CLI turn, stops, and wakes with one combined system not
     );
     expect(sleepRecords).toHaveLength(1);
     expect(sleepRecords[0]?.inboxMessageIds).toHaveLength(1);
+    const wakeMessageId = sleepRecords[0]?.inboxMessageIds?.[0];
+    expect(
+      records.filter((record) => record.inboxMessageIds?.includes(wakeMessageId ?? "")),
+    ).toEqual(sleepRecords);
     const messages = await api(cp.baseUrl, "POST", `/api/v1/orbs/${orbId}/messages/poll`, {
       after: 0,
       tracked: [],

@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+export const MCP_FAILURE_DIRECTORY = join(import.meta.dirname, "../test-failures");
+
 type Fixture = {
   failed: boolean;
   root: string;
@@ -31,7 +33,7 @@ export async function finishMcpFixture(fixture: Fixture): Promise<void> {
     await attempt("diagnostics", async () => {
       const summary = await fixture.capture();
       mkdirSync(fixture.artifactDirectory, { recursive: true, mode: 0o700 });
-      const path = join(fixture.artifactDirectory, `${randomUUID()}.json`);
+      const path = join(fixture.artifactDirectory, `mcp-${randomUUID()}.json`);
       writeFileSync(path, JSON.stringify(summary, null, 2), { mode: 0o600 });
       console.error(`MCP failure summary: ${path}`);
     });

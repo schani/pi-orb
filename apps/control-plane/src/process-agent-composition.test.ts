@@ -8,6 +8,7 @@ import { DurableAgent } from "./adapters/durable/agent.ts";
 import { durableError } from "./adapters/durable/manager.ts";
 import * as durableModels from "./adapters/durable/models.ts";
 import { RemoteExecutionEnv } from "./adapters/execution-client/env.ts";
+import * as brokerDomain from "./domain/broker.ts";
 import {
   closeProcessAgentResources,
   discoverProcessTools,
@@ -19,7 +20,7 @@ import {
   scopedMcpHeaders,
   snapshotSkills,
 } from "./process-agent-composition.ts";
-import { makeHarness, makeOrbRow, makeProjectRow } from "./testkit/fixtures.ts";
+import { makeHarness, makeOrbRow, makeProjectRow, TEST_USER_ID } from "./testkit/fixtures.ts";
 
 function createProcessAgentContext(
   ...args: Parameters<typeof productionCreateProcessAgentContext>
@@ -55,6 +56,52 @@ function createProcessAgentContext(
 }
 
 describe("process agent composition", () => {
+  it("uses fresh SDK auth admission after the opening operation is cancelled", async () => {
+    const harness = makeHarness();
+    const orb = makeOrbRow("central", "project", "starting", { hostRef: "executor" });
+    harness.store.seedProject(makeProjectRow("project"));
+    harness.store.seedOrb(orb);
+    const opening = new AbortController();
+    const renewal = new AbortController();
+    const task = new NoSimulationTask("central-auth-context", false);
+    const clock = vi.spyOn(task, "monotonicNow").mockReturnValue(1000);
+    const broker = { constants: { requestDeadlineMs: 123 } };
+    const brokerForUser = vi.fn((_ownerUserId: string) => broker);
+    const token = vi.spyOn(brokerDomain, "getToken").mockResolvedValue(
+      ok({
+        accessToken: "owner-grant",
+        expiresAt: 9999999999999,
+        generation: 1,
+      } as never),
+    );
+    const models = vi
+      .spyOn(durableModels, "createDurableModels")
+      .mockReturnValue(okAsync({ getModel: () => undefined } as never));
+    try {
+      const open = createProcessAgentContext(harness.deps, {
+        mcp: { read: () => okAsync({ servers: [] }) },
+        brokerForUser,
+      } as never);
+      const result = await open(task, orb, { signal: opening.signal });
+      expect(result.isOk()).toBe(true);
+      const options = models.mock.calls[0]?.[0];
+      expect(options).toBeDefined();
+      await options?.token(options.signal);
+      expect(token.mock.calls[0]?.[4]).toMatchObject({ deadlineAt: 1123 });
+      opening.abort();
+      clock.mockReturnValue(10000);
+      await options?.token(renewal.signal);
+      expect(token.mock.calls[1]?.[4]).toEqual({ signal: renewal.signal, deadlineAt: 10123 });
+      expect(renewal.signal.aborted).toBe(false);
+      expect(brokerForUser).toHaveBeenCalledWith(TEST_USER_ID);
+      expect(brokerForUser.mock.calls.every(([owner]) => owner === TEST_USER_ID)).toBe(true);
+      if (result.isOk()) await result.value.closeResources?.();
+    } finally {
+      clock.mockRestore();
+      token.mockRestore();
+      models.mockRestore();
+    }
+  });
   it("opens CP models and tools while execution readiness is held", async () => {
     const harness = makeHarness();
     const orb = makeOrbRow("central", "project", "starting", { hostRef: "executor" });
