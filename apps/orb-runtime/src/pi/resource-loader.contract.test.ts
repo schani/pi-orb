@@ -415,6 +415,8 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
       ...controlNames,
       "boot-hooks",
       "cloud-identity",
+      "codemode-manual",
+      "codemode-quick-reference",
       "hosting",
     ]);
   });
