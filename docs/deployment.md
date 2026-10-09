@@ -543,6 +543,8 @@ shared deployer, exercising only read-only APIs. It creates/deletes its own two
 orbs, never that shared project. This does not bootstrap the separate experimental
 STS tier or add identity authority.
 
+**Native entry acceptance invariant (2026-10-09):** native acceptance must identify the supervisor's declared runtime entry argv, not a dynamically imported role module. The owned-child regression keeps this cross-file contract synchronized; a missing child emits `native_runtime_entry_missing`, and other failed assertions export only `native_acceptance_failed` plus their source line. The first central activation release failed before apply; this stale gate was reproduced afterward. Production was unchanged. Evidence and limits: `docs/postmortems/2026-10-09-native-runtime-entry-acceptance.md`.
+
 ## Central Pi activation (approved 2026-10-09)
 
 Production Terraform selects `central-durable` for every Pi orb; Claude remains host-native. Existing host-Pi conversations refuse initialization/new messages with `legacy_backend`, retaining readable public history and the retained workspace disk. No private-context import or adoption flag. Ordinary compute replacement deletes the disposable instance, not its `autoDelete:false` workspace; existing repository checkout is not reset. Existing owned drain still obeys its original fences. Adoption decision: `docs/pi-durable-evaluation.md`, question 72 (Pi Durable) in `docs/open-questions.md`.
