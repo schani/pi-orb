@@ -26,6 +26,13 @@ class ConsolidationTest(unittest.TestCase):
         self.assertNotIn('iap_enabled', source)
         self.assertEqual(SERVICES, ('pi-orb-issuer',))
 
+    def test_issuer_resource_sizing(self):
+        source = Path('infra/run.tf').read_text().split('resource "google_cloud_run_v2_service" "issuer" {', 1)[1]
+        self.assertRegex(source, r'limits\s+= \{ cpu = "2", memory = "4Gi" \}')
+        self.assertRegex(source, r'cpu_idle\s+= false\b')
+        self.assertRegex(source, r'min_instance_count\s+= 1\b')
+        self.assertRegex(source, r'max_instance_count\s+= 1\b')
+
     def test_origins_and_secret_boundaries(self):
         self.assertRegex(Path('infra/hosting.tf').read_text(), r'app_origin\s+= local\.oidc_issuer_url')
         source = Path('infra/auth.tf').read_text()

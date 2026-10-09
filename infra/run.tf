@@ -147,7 +147,7 @@ resource "google_cloud_run_v2_service" "issuer" {
         }
       }
       resources {
-        limits            = { cpu = "1", memory = "1Gi" }
+        limits            = { cpu = "2", memory = "4Gi" }
         cpu_idle          = false # always-allocated CPU: the poller/reconciler run here
         startup_cpu_boost = true
       }
