@@ -1,59 +1,46 @@
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { err, ok } from "neverthrow";
+import { expect, it, vi } from "vitest";
 import { prepareCheckout } from "./checkout.ts";
 
-const roots: string[] = [];
-
-afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+vi.mock("node:child_process", () => ({ execFile: vi.fn() }));
+it("pins fresh checkout before publishing it and bypasses admission on resume", async () => {
+  const root = mkdtempSync(join(tmpdir(), "checkout-pin-"));
+  const commands: string[][] = [];
+  vi.mocked(execFile).mockImplementation(((
+    command: string,
+    args: string[],
+    options: { cwd: string },
+    callback: (error: null, stdout: string, stderr: string) => void,
+  ) => {
+    expect(command).toBe("git");
+    commands.push(args);
+    if (args[0] === "clone") mkdirSync(join(root, ".clone-tmp"));
+    callback(null, "a".repeat(40), "");
+  }) as never);
+  const pin = vi.fn(async () => ok([["checkout", "--detach", "b".repeat(40)]]));
+  try {
+    expect((await prepareCheckout(root, "https://github.com/o/r", pin)).isOk()).toBe(true);
+    expect(commands.map((args) => args[0])).toEqual(["clone", "checkout", "rev-parse"]);
+    expect((await prepareCheckout(root, "https://github.com/o/r", pin)).isOk()).toBe(true);
+    expect(pin).toHaveBeenCalledTimes(1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
-
-function retainedRepo(): { workDir: string; repoDir: string } {
-  const workDir = mkdtempSync(join(tmpdir(), "pi-orb-checkout-"));
-  roots.push(workDir);
-  const repoDir = join(workDir, "repo");
-  mkdirSync(repoDir);
-  return { workDir, repoDir };
-}
-
-const git = (cwd: string, ...args: string[]) =>
-  execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd }).toString();
-
-describe("retained checkout", () => {
-  it("reports the HEAD commit", async () => {
-    const { workDir, repoDir } = retainedRepo();
-    git(repoDir, "init", "-q");
-    writeFileSync(join(repoDir, "a"), "a");
-    git(repoDir, "add", "a");
-    git(repoDir, "commit", "-qm", "a");
-
-    const result = await prepareCheckout(workDir, "https://example.invalid/r.git");
-
-    expect(result._unsafeUnwrap()).toBe(git(repoDir, "rev-parse", "HEAD").trim());
-  });
-
-  it("reports no commit for a repository without commits", async () => {
-    const { workDir, repoDir } = retainedRepo();
-    git(repoDir, "init", "-q");
-
-    const result = await prepareCheckout(workDir, "https://example.invalid/r.git");
-
-    expect(result._unsafeUnwrap()).toBeNull();
-  });
-
-  it("fails when refs exist but HEAD does not resolve", async () => {
-    const { workDir, repoDir } = retainedRepo();
-    git(repoDir, "init", "-q");
-    writeFileSync(join(repoDir, "a"), "a");
-    git(repoDir, "add", "a");
-    git(repoDir, "commit", "-qm", "a");
-    git(repoDir, "symbolic-ref", "HEAD", "refs/heads/missing");
-
-    const result = await prepareCheckout(workDir, "https://example.invalid/r.git");
-
-    expect(result._unsafeUnwrapErr().code).toBe("clone_failed");
-  });
+it("fails closed before cloning if initial admission fails", async () => {
+  const root = mkdtempSync(join(tmpdir(), "checkout-revoked-"));
+  vi.mocked(execFile).mockClear();
+  try {
+    const result = await prepareCheckout(root, "https://github.com/o/r", async () =>
+      err({ code: "clone_failed", message: "revoked", retryable: false }),
+    );
+    expect(result.isErr()).toBe(true);
+    expect(execFile).not.toHaveBeenCalled();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

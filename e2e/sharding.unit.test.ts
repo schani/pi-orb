@@ -41,16 +41,19 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
   expect(diagnostic?.match(/npm run test:e2e/gu)).toHaveLength(1);
   expect(diagnostic).not.toMatch(/for |--(?:project|retry|passWithNoTests|testTimeout)/u);
   expect(source).toContain("timeout-minutes: 40");
-  expect(normalRun).toContain(`run: npm run test:e2e -- --shard=\${{ matrix.shard }}/4`);
+  expect(normalRun).toContain(
+    `run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --shard=\${{ matrix.shard }}/4`,
+  );
   expect(normalRun).not.toMatch(/--(?:maxWorkers|project|retry|passWithNoTests)/u);
   expect(
     source.match(/name: e2e-.*matrix\.shard.*github\.run_id.*github\.run_attempt[^\n]*/gu),
   ).toEqual([
+    `name: e2e-durable-\${{ matrix.shard }}-\${{ github.run_id }}-\${{ github.run_attempt }}`,
     `name: e2e-dst-failure-traces-\${{ matrix.shard }}-\${{ github.run_id }}-\${{ github.run_attempt }}`,
     `name: e2e-missing-orb-\${{ matrix.shard }}-\${{ github.run_id }}-\${{ github.run_attempt }}`,
     `name: e2e-lazy-return-\${{ matrix.shard }}-\${{ github.run_id }}-\${{ github.run_attempt }}`,
   ]);
-  expect(source.match(/if: failure\(\)/gu)).toHaveLength(4);
+  expect(source.match(/if: failure\(\)/gu)).toHaveLength(5);
   const traceUpload = source
     .split("- name: Upload deterministic failure traces")[1]
     ?.split("- name:")[0];
@@ -66,7 +69,7 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
 });
 
 it("keeps manual diagnostics distinct from required E2E checks", () => {
-  expect(workflow("e2e").match(/^    name: (.+)$/mu)?.[1]).toBe(
+  expect(workflow("e2e").match(/^ {4}name: (.+)$/mu)?.[1]).toBe(
     "E2E (${{ matrix.shard }}/4)${{ github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic && ' diagnostic' || '' }}",
   );
 });

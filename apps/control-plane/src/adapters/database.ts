@@ -14,6 +14,9 @@ import type {
   SigningKeyStore,
 } from "../domain/ports.ts";
 import type { ProjectInstructionsStore } from "../domain/project-instructions.ts";
+import type { ResourceSource } from "../domain/resources.ts";
+import type { AgentPersistence } from "./durable/persistence.ts";
+import { PgAgentPersistence } from "./durable/pg-persistence.ts";
 import { PgClient, type PostgreSQLClient } from "./pg/client.ts";
 import { PostgreSQLCredentialPointerStore } from "./pg/credential-pointers.ts";
 import { PostgreSQLHostingStore } from "./pg/hosting.ts";
@@ -24,12 +27,15 @@ import { PostgreSQLPersonalInstructionsStore } from "./pg/personal-instructions.
 import { PGliteClient } from "./pg/pglite-client.ts";
 import { PostgreSQLProjectInstructionsStore } from "./pg/project-instructions.ts";
 import { PostgreSQLProjectSecretPointerStore } from "./pg/project-secrets.ts";
+import { PgResourceGate } from "./pg/resource-gate.ts";
 import { PostgreSQLSigningKeyStore } from "./pg/signing-keys.ts";
 import { PostgreSQLControlPlaneStore } from "./pg/store.ts";
 import { PostgreSQLUserStore } from "./pg/users.ts";
 
 export interface ControlPlaneDatabase {
   readonly store: ControlPlaneStore;
+  readonly agentPersistence: AgentPersistence;
+  resourceGate(source: ResourceSource): PgResourceGate;
   readonly pointers: CredentialPointerStoreFactory;
   readonly projectSecrets: ProjectSecretPointerStore;
   readonly personalInstructions: PersonalInstructionsStore;
@@ -49,8 +55,12 @@ export type DatabaseOptions =
 
 /** Compose the stores over an already-built client (also the test seam for a raw client). */
 export function composeControlPlaneDatabase(client: PostgreSQLClient): ControlPlaneDatabase {
+  const store = new PostgreSQLControlPlaneStore(client);
+  const agentPersistence = new PgAgentPersistence(client, store);
   return {
-    store: new PostgreSQLControlPlaneStore(client),
+    store,
+    agentPersistence,
+    resourceGate: (source) => new PgResourceGate(client, source),
     pointers: new PostgreSQLCredentialPointerStore(client),
     projectSecrets: new PostgreSQLProjectSecretPointerStore(client),
     personalInstructions: new PostgreSQLPersonalInstructionsStore(client),
@@ -61,7 +71,18 @@ export function composeControlPlaneDatabase(client: PostgreSQLClient): ControlPl
     mcpOAuth: new PostgreSQLMcpOAuthStore(client),
     users: new PostgreSQLUserStore(client),
     migrate: (options) => runMigrations(client, options),
-    close: () => client.end(),
+    close: () =>
+      agentPersistence
+        .close()
+        .mapErr(
+          (error): StoreError => ({
+            type: "store_error",
+            code: "unavailable",
+            message: error.message,
+            retryable: error.retryable,
+          }),
+        )
+        .andThen(() => client.end()),
   };
 }
 

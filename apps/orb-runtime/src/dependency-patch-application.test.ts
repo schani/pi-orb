@@ -21,7 +21,9 @@ const names = [
   "@earendil-works+pi-ai+1.0.0.patch",
   "@earendil-works+pi-coding-agent+1.0.0.patch",
   "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
+  "@earendil-works+pi-codemode+1.0.0.patch",
 ];
+const piNames = names.filter((name) => name.startsWith("@earendil-works+"));
 const scratch: string[] = [];
 const sha = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
 const files = (name: string) =>
@@ -186,7 +188,7 @@ describe("sealed dependency patch application", () => {
     cpSync(join(root, path), join(dir, path));
     expect(run(dir).status).toBe(1);
   });
-  it("pi-only installs require all three Pi packages but not subagents", () => {
+  it("pi-only installs require all four Pi packages but not subagents", () => {
     const dir = fixture();
     rmSync(join(dir, "node_modules/@gotgenes"), { recursive: true });
     rmSync(join(dir, "patches", names[3] as string));
@@ -201,14 +203,14 @@ describe("sealed dependency patch application", () => {
     const inputs = [...dockerfile.matchAll(/^COPY patches\/(\S+) patches\/\1$/gm)].map(
       (match) => match[1] as string,
     );
-    expect(inputs.sort()).toEqual(names.slice(0, 3).sort());
+    expect(inputs.sort()).toEqual(piNames.toSorted());
     for (const name of inputs) cpSync(join(root, "patches", name), join(dir, "patches", name));
     const result = run(dir, "--pi-only");
     expect(result.status, result.stderr).toBe(0);
     for (const name of inputs)
       for (const path of files(name)) expect(sha(join(dir, path))).toBe(sha(join(root, path)));
   });
-  it.each(names.slice(0, 3))("pi-only rejects changed patch bytes: %s", (name) => {
+  it.each(piNames)("pi-only rejects changed patch bytes: %s", (name) => {
     const dir = fixture();
     writeFileSync(join(dir, "patches", name), "changed patch\n");
     const before = names.flatMap(files).map((path) => sha(join(dir, path)));
@@ -217,7 +219,7 @@ describe("sealed dependency patch application", () => {
     expect(result.stderr).toContain("patch checksum mismatch");
     expect(names.flatMap(files).map((path) => sha(join(dir, path)))).toEqual(before);
   });
-  it.each(names.slice(0, 3).flatMap(files))("pi-only rejects installed file drift: %s", (path) => {
+  it.each(piNames.flatMap(files))("pi-only rejects installed file drift: %s", (path) => {
     const dir = fixture();
     writeFileSync(join(dir, path), `${readFileSync(join(dir, path), "utf8")}\n// drift\n`);
     const before = names.flatMap(files).map((target) => sha(join(dir, target)));

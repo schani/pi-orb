@@ -5,6 +5,7 @@ import type {
   ActivityHeadlineRef,
   StoredActivityHeadline,
 } from "../../domain/activity-headline-store.ts";
+import { acceptsOrbAgentCaller } from "../../domain/agent-authorization.ts";
 import type {
   CommitPullError,
   ProjectConflict,
@@ -14,6 +15,7 @@ import type {
 } from "../../domain/errors.ts";
 import { jsonEqual } from "../../domain/json-equal.ts";
 import { logOrbEvent } from "../../domain/log.ts";
+import { messageBatchId } from "../../domain/message-batch.ts";
 import type {
   OrbDeletionRow,
   OrbMessageMetadataRow,
@@ -37,6 +39,8 @@ import type {
   SpawnConflict,
   SpawnOrbParams,
 } from "../../domain/ports.ts";
+import { hasNativeInboxAdmission } from "../durable-pg/inbox-admission.ts";
+import { removePrivateAgentState } from "./archive-private-state.ts";
 import { arrayParam, jsonParam, type PgRow, type PostgreSQLClient } from "./client.ts";
 import { PgWorkspaceUploads } from "./workspace-uploads.ts";
 
@@ -104,6 +108,7 @@ function mapOrbRow(row: PgRow): OrbRow {
     lastBusyAt: row["last_busy_at"] == null ? null : toMs(row["last_busy_at"]),
     uploadActiveUntil: row["upload_active_until"] == null ? null : toMs(row["upload_active_until"]),
     stopReason: row["stop_reason"] == null ? null : (String(row["stop_reason"]) as StopReason),
+    agentAdmissionVersion: Number(row["agent_admission_version"] ?? 0),
     sleepId: row["sleep_id"] == null ? null : String(row["sleep_id"]),
     sleepUntil: row["sleep_until"] == null ? null : toMs(row["sleep_until"]),
     lastMintAt: row["last_mint_at"] == null ? null : toMs(row["last_mint_at"]),
@@ -192,6 +197,124 @@ const stateConflict = (currentState?: OrbState): StateConflict => ({
   type: "state_conflict",
   ...(currentState !== undefined ? { currentState } : {}),
 });
+
+export type HistoryTransactionQuery = PostgreSQLClient["query"];
+
+/** Shared transaction body: central native commits and guest replication use the same integrity rules. */
+export async function commitHistoryTransaction(
+  query: HistoryTransactionQuery,
+  params: Omit<CommitPullBatchParams, "nextCursor"> & { readonly nextCursor: string | null },
+): Promise<Result<{ row: OrbRow; publishedAlertId: string | null }, CommitPullError>> {
+  // Serialize competing committers on the row; the cursor check below
+  // still implements the optimistic CAS semantics.
+  const orbResult = await query(
+    "SELECT harness_session_id, harness_session_header, replication_cursor FROM orbs WHERE id = $1 FOR UPDATE",
+    [params.orbId],
+  );
+  if (orbResult.isErr()) return err(orbResult.error);
+  const orbRow = orbResult.value.rows[0];
+  if (orbRow === undefined) {
+    return err<{ row: OrbRow; publishedAlertId: string | null }, ReplicationIntegrityError>({
+      type: "replication_integrity",
+      reason: "mapping_failure",
+      message: `orb ${params.orbId} does not exist`,
+    });
+  }
+  const currentCursor =
+    orbRow["replication_cursor"] === null ? null : String(orbRow["replication_cursor"]);
+  if (currentCursor !== params.expectedCursor) {
+    return err<{ row: OrbRow; publishedAlertId: string | null }, CommitPullError>({
+      type: "cursor_conflict",
+    });
+  }
+  const storedSessionId =
+    orbRow["harness_session_id"] === null ? null : String(orbRow["harness_session_id"]);
+  let initializeSession = false;
+  if (storedSessionId === null) {
+    initializeSession = true;
+  } else if (
+    storedSessionId !== params.session.id ||
+    !jsonEqual(orbRow["harness_session_header"], params.session)
+  ) {
+    if (currentCursor === null) {
+      // An empty replica pins nothing (docs/history-replication.md): with no
+      // committed cursor a changed session identity is legitimate
+      // rotation — a runtime that never flushed starts a fresh session
+      // on reboot. Re-initialize instead of failing the orb.
+      initializeSession = true;
+    } else {
+      return err<{ row: OrbRow; publishedAlertId: string | null }, ReplicationIntegrityError>({
+        type: "replication_integrity",
+        reason: "session_mismatch",
+        message: `stored session ${storedSessionId}, pulled session ${params.session.id}`,
+      });
+    }
+  }
+  let newestAlertId: string | null = null;
+  for (const record of params.records) {
+    const inserted = await query(
+      `INSERT INTO history_records (orb_id, record_id, parent_id, record)
+     VALUES ($1, $2, $3, $4::jsonb)
+     ON CONFLICT (orb_id, record_id) DO NOTHING
+     RETURNING record_id`,
+      [params.orbId, record.id, record.parentId, jsonParam(record)],
+    );
+    if (inserted.isErr()) return err(inserted.error);
+    if (inserted.value.rowCount > 0 && record.type === "event" && record.alert !== undefined) {
+      newestAlertId = record.id;
+    }
+    if (inserted.value.rowCount === 0) {
+      // Existing row: identical content is an idempotent repeat,
+      // different content is an integrity error (docs/history-replication.md).
+      const existing = await query(
+        "SELECT record FROM history_records WHERE orb_id = $1 AND record_id = $2",
+        [params.orbId, record.id],
+      );
+      if (existing.isErr()) return err(existing.error);
+      const stored = existing.value.rows[0]?.["record"];
+      if (!jsonEqual(stored, JSON.parse(JSON.stringify(record)))) {
+        return err<{ row: OrbRow; publishedAlertId: string | null }, ReplicationIntegrityError>({
+          type: "replication_integrity",
+          reason: "record_conflict",
+          message: `record ${record.id} already exists with different content`,
+        });
+      }
+    }
+  }
+  const deliveredMessageIds = params.records.flatMap(inboxMessageIds);
+  for (const messageId of deliveredMessageIds) {
+    const delivered = await query(
+      `UPDATE orb_messages SET status = 'delivered', auto_start = false,
+       last_error = NULL, updated_at = now()
+     WHERE orb_id = $1 AND message_id = $2`,
+      [params.orbId, messageId],
+    );
+    if (delivered.isErr()) return err(delivered.error);
+  }
+  const sessionSets = initializeSession
+    ? ", harness_session_id = $4, harness_session_header = $5::jsonb"
+    : "";
+  const values: unknown[] = [params.orbId, params.nextCursor, params.nextHeadId];
+  if (initializeSession) values.push(params.session.id, jsonParam(params.session));
+  values.push(newestAlertId);
+  const updated = await query(
+    `UPDATE orbs SET replication_cursor = $2, replicated_head_id = $3,
+     unread_alert_id = COALESCE($${initializeSession ? 6 : 4}, unread_alert_id),
+     updated_at = now()${sessionSets}
+   WHERE id = $1 RETURNING *`,
+    values,
+  );
+  if (updated.isErr()) return err(updated.error);
+  const row = updated.value.rows[0];
+  if (row === undefined) {
+    return err<{ row: OrbRow; publishedAlertId: string | null }, ReplicationIntegrityError>({
+      type: "replication_integrity",
+      reason: "mapping_failure",
+      message: "orb row disappeared during commit",
+    });
+  }
+  return ok({ row: mapOrbRow(row), publishedAlertId: newestAlertId });
+}
 
 /** PostgreSQL `ControlPlaneStore` (docs/history-replication.md/docs/stack.md). */
 export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
@@ -438,6 +561,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       if (repairCount.isErr()) return err(repairCount.error);
       const transitioned = await query(
         `UPDATE orbs SET state = 'deleting', state_version = state_version + 1,
+           agent_admission_version = agent_admission_version + 1,
            state_changed_at = $2, updated_at = $2, last_error = NULL, stop_reason = NULL,
            sleep_id = NULL, sleep_until = NULL,
            auto_name_lease_until = NULL, auto_name_next_attempt_at = NULL
@@ -601,8 +725,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            checkout_commit, harness_session_id, harness_session_header, last_error,
            runtime_token_hash, replication_cursor, replicated_head_id, last_busy_at,
            stop_reason, sleep_id, sleep_until, last_mint_at,
-           state_changed_at, created_at, updated_at, user_time_zone, harness, last_ready_at, claude_recovery)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37::jsonb)
+           state_changed_at, created_at, updated_at, user_time_zone, harness, agent_admission_version, last_ready_at, claude_recovery)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb)
          ON CONFLICT (id) DO NOTHING RETURNING *`,
         [
           orb.id,
@@ -640,6 +764,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           new Date(orb.updatedAt),
           orb.userTimeZone,
           orb.harness,
+          orb.agentAdmissionVersion,
           orb.lastReadyAt === null ? null : new Date(orb.lastReadyAt),
           jsonParam(orb.claudeRecovery ?? null),
         ],
@@ -664,9 +789,10 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     return this.db.transaction<{ duplicate: boolean }, StoreError | SpawnConflict>(
       async (query) => {
         // Project first matches deletion's lock order. It also serializes same-project retries.
-        const project = await query("SELECT state FROM projects WHERE id = $1 FOR UPDATE", [
-          params.orb.projectId,
-        ]);
+        const project = await query(
+          "SELECT state, owner_user_id FROM projects WHERE id = $1 FOR UPDATE",
+          [params.orb.projectId],
+        );
         if (project.isErr()) return err(project.error);
         if (project.value.rows[0]?.["state"] !== "active")
           return err({ type: "spawn_conflict", reason: "conflict" });
@@ -677,10 +803,11 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         const source = caller.value.rows[0];
         if (
           source === undefined ||
-          source["state"] !== "running" ||
-          source["runtime_token_hash"] !== params.caller.runtimeTokenHash ||
-          Number(source["host_incarnation"]) !== params.caller.hostIncarnation ||
-          source["host_discard_through_incarnation"] !== null
+          !acceptsOrbAgentCaller(
+            mapOrbRow(source),
+            project.value.rows[0]?.["owner_user_id"] as string | undefined,
+            params.caller,
+          )
         )
           return err({ type: "spawn_conflict", reason: "unauthorized" });
         if (source["project_id"] !== params.orb.projectId)
@@ -733,7 +860,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
             params.orb.id,
             params.orb.projectId,
             params.callerOrbId,
-            params.caller.hostIncarnation,
+            Number(source["host_incarnation"]),
             params.requestHash,
             now,
           ],
@@ -846,9 +973,16 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         if (!jsonEqual(existingRow["content"], params.content)) return err(stateConflict(state));
         return ok({ message: mapMessageRow(existingRow), orb: mapOrbRow(orbRow), duplicate: true });
       }
-      if (params.cancelSleep !== false && orbRow["sleep_id"] !== null) {
+      if (
+        params.cancelSleep !== false &&
+        (orbRow["sleep_id"] !== null ||
+          (params.wake !== false &&
+            (orbRow["stop_reason"] === "manual" || orbRow["stop_reason"] === "sleep")))
+      ) {
         const cancelled = await query(
           `UPDATE orbs SET sleep_id = NULL, sleep_until = NULL,
+             stop_reason = CASE WHEN stop_reason IN ('manual', 'sleep') THEN NULL ELSE stop_reason END,
+             agent_admission_version = agent_admission_version + CASE WHEN stop_reason IN ('manual', 'sleep') THEN 1 ELSE 0 END,
              state_version = state_version + 1, updated_at = $2
            WHERE id = $1 RETURNING *`,
           [params.orbId, new Date(params.now)],
@@ -947,13 +1081,18 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       const locked = await query("SELECT * FROM orbs WHERE id = $1 FOR UPDATE", [params.orbId]);
       if (locked.isErr()) return err(locked.error);
       const row = locked.value.rows[0];
+      if (row === undefined) return err(stateConflict());
+      const project = await query("SELECT owner_user_id FROM projects WHERE id = $1", [
+        row["project_id"],
+      ]);
+      if (project.isErr()) return err(project.error);
       if (
-        row === undefined ||
-        row["state"] !== "running" ||
         row["sleep_id"] !== null ||
-        row["runtime_token_hash"] !== params.caller.runtimeTokenHash ||
-        Number(row["host_incarnation"]) !== params.caller.hostIncarnation ||
-        row["host_discard_through_incarnation"] !== null
+        !acceptsOrbAgentCaller(
+          mapOrbRow(row),
+          project.value.rows[0]?.["owner_user_id"] as string | undefined,
+          params.caller,
+        )
       )
         return err(stateConflict());
       const now = task.wallNow();
@@ -979,6 +1118,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       .query(
         `UPDATE orbs SET sleep_id = NULL, sleep_until = NULL,
          state_version = state_version + CASE WHEN sleep_id IS NULL THEN 0 ELSE 1 END,
+         agent_admission_version = agent_admission_version + CASE WHEN stop_reason = 'sleep' THEN 1 ELSE 0 END,
+         stop_reason = CASE WHEN stop_reason = 'sleep' THEN NULL ELSE stop_reason END,
          updated_at = $3 WHERE id = $1 AND state_version = $2 RETURNING *`,
         [params.orbId, params.expectedStateVersion, new Date(params.now)],
       )
@@ -1113,17 +1254,29 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
             .map(mapMessageRow),
         );
       }
-      const batchId = String(first["message_id"]);
       const firstSystem = first["system"] !== null;
+      const eligible = firstSystem
+        ? [first]
+        : outstanding.value.rows.slice(
+            0,
+            outstanding.value.rows.findIndex((row) => row["system"] !== null) < 0
+              ? undefined
+              : outstanding.value.rows.findIndex((row) => row["system"] !== null),
+          );
+      const batchId = messageBatchId(
+        eligible
+          .filter((row) => row["status"] === "queued" && row["delivery_batch_id"] === null)
+          .map((row) => String(row["message_id"])),
+      );
       const claimed = await query(
         `UPDATE orb_messages m SET delivery_batch_id = $2, status = 'delivering', updated_at = $3
          WHERE m.orb_id = $1 AND m.status = 'queued' AND m.delivery_batch_id IS NULL
-           AND ($4::boolean AND m.message_id = $2::uuid OR NOT $4::boolean AND m.system IS NULL
+           AND ($4::boolean AND m.message_id = $5::uuid OR NOT $4::boolean AND m.system IS NULL
              AND NOT EXISTS (SELECT 1 FROM orb_messages earlier
                WHERE earlier.orb_id = m.orb_id AND earlier.ordinal < m.ordinal
                  AND earlier.system IS NOT NULL AND earlier.status IN ('queued', 'delivering')))
          RETURNING m.*`,
-        [params.orbId, batchId, new Date(params.now), firstSystem],
+        [params.orbId, batchId, new Date(params.now), firstSystem, first["message_id"]],
       );
       if (claimed.isErr()) return err(claimed.error);
       return ok(claimed.value.rows.map(mapMessageRow).sort((a, b) => a.ordinal - b.ordinal));
@@ -1161,17 +1314,91 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       .map(() => undefined);
   }
 
+  cancelPendingOrbMessage(
+    _task: SimulationTask,
+    params: {
+      orbId: string;
+      messageId: string;
+      caller: import("../../domain/ports.ts").CentralAgentCaller;
+      now: number;
+    },
+  ): ResultAsync<"cancelled" | "active" | "missing", StoreError | StateConflict> {
+    return this.db.transaction<"cancelled" | "active" | "missing", StoreError | StateConflict>(
+      async (query) => {
+        const locked = await query(
+          `SELECT o.*, p.owner_user_id FROM orbs o JOIN projects p ON p.id = o.project_id
+         WHERE o.id = $1 FOR UPDATE OF o`,
+          [params.orbId],
+        );
+        if (locked.isErr()) return err(locked.error);
+        const orb = locked.value.rows[0];
+        if (
+          !orb ||
+          params.caller.orbId !== params.orbId ||
+          orb["project_id"] !== params.caller.projectId ||
+          orb["owner_user_id"] !== params.caller.ownerUserId ||
+          Number(orb["agent_admission_version"]) !== params.caller.agentAdmissionVersion ||
+          ["deleting", "archiving", "archived"].includes(String(orb["state"]))
+        )
+          return err(stateConflict());
+        const selected = await query(
+          "SELECT * FROM orb_messages WHERE orb_id = $1 AND message_id = $2 FOR UPDATE",
+          [params.orbId, params.messageId],
+        );
+        if (selected.isErr()) return err(selected.error);
+        const message = selected.value.rows[0];
+        if (!message || message["system"] !== null) return ok("missing");
+        if (message["status"] === "failed")
+          return ok(
+            message["last_error"] === "Cancelled before agent admission" ? "cancelled" : "missing",
+          );
+        if (message["status"] === "delivered" || message["operation_id"] !== null)
+          return ok("active");
+        const native = await hasNativeInboxAdmission(query, params.orbId, params.messageId);
+        if (native.isErr()) return err(native.error);
+        if (native.value) return ok("active");
+        const cancelled = await query(
+          `UPDATE orb_messages SET status = 'failed', last_error = 'Cancelled before agent admission',
+         auto_start = false, updated_at = $3 WHERE orb_id = $1 AND message_id = $2`,
+          [params.orbId, params.messageId, new Date(params.now)],
+        );
+        if (cancelled.isErr()) return err(cancelled.error);
+        if (message["delivery_batch_id"] !== null) {
+          const detached = await query(
+            `UPDATE orb_messages SET status = 'queued', delivery_batch_id = NULL, updated_at = $3
+            WHERE orb_id = $1 AND delivery_batch_id = $2 AND operation_id IS NULL AND status IN ('queued','delivering')`,
+            [params.orbId, message["delivery_batch_id"], new Date(params.now)],
+          );
+          if (detached.isErr()) return err(detached.error);
+        }
+        return ok("cancelled");
+      },
+    );
+  }
+
   failOrbMessageBatch(
     _task: SimulationTask,
-    params: { orbId: string; messageIds: readonly string[]; lastError: string; now: number },
+    params: {
+      orbId: string;
+      messageIds: readonly string[];
+      deliveryBatchId: string;
+      lastError: string;
+      now: number;
+    },
   ): ResultAsync<void, StoreError> {
     return this.db
       .query(
         `UPDATE orb_messages SET status = 'failed', last_error = $3,
            auto_start = false, updated_at = $4
          WHERE orb_id = $1 AND message_id = ANY($2::uuid[])
-           AND status IN ('queued', 'delivering')`,
-        [params.orbId, arrayParam(params.messageIds), params.lastError, new Date(params.now)],
+           AND status IN ('queued', 'delivering') AND delivery_batch_id = $5`,
+        [
+          params.orbId,
+          arrayParam(params.messageIds),
+          params.lastError,
+          new Date(params.now),
+          params.deliveryBatchId,
+        ],
       )
       .map(() => undefined);
   }
@@ -1204,13 +1431,12 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           : String(row["sleep_id"]);
       const state = String(row["state"]);
       const transitions = state !== "stopping" && state !== "stopped";
-      const overridesSleepStop = state === "stopping" && row["stop_reason"] === "sleep";
-      const startsStopEpisode = transitions || overridesSleepStop;
+      const startsStopEpisode = transitions || row["stop_reason"] !== "manual";
       const updated = await query(
         `UPDATE orbs SET state = CASE WHEN $4 THEN 'stopping' ELSE state END,
-           stop_reason = CASE WHEN $5 THEN NULL ELSE stop_reason END,
+           stop_reason = 'manual', agent_admission_version = agent_admission_version + 1,
            sleep_id = NULL, sleep_until = NULL,
-           state_version = state_version + CASE WHEN $5 OR sleep_id IS NOT NULL THEN 1 ELSE 0 END,
+           state_version = state_version + 1,
            state_changed_at = CASE WHEN $5 THEN $3 ELSE state_changed_at END,
            updated_at = $3 WHERE id = $1 AND state_version = $2 RETURNING *`,
         [
@@ -1269,6 +1495,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       if (intent.value.rows[0] === undefined) return ok(null);
       const started = await query(
         `UPDATE orbs SET state = 'starting', state_version = state_version + 1,
+           agent_admission_version = agent_admission_version + CASE WHEN stop_reason IN ('manual', 'sleep') THEN 1 ELSE 0 END,
            state_changed_at = $3, updated_at = $3, last_error = NULL, stop_reason = NULL
          WHERE id = $1 AND state_version = $2 AND state IN ('stopped', 'failed') RETURNING *`,
         [params.orbId, params.expectedStateVersion, new Date(params.now)],
@@ -1290,8 +1517,12 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            sleep_id = NULL, sleep_until = NULL,
            auto_name_lease_until = NULL, auto_name_next_attempt_at = NULL
          WHERE id = $1 AND state_version = $2
-           AND ($4::text IS NULL OR (runtime_token_hash = $4 AND host_incarnation = $5
-             AND host_discard_through_incarnation IS NULL AND state = 'running'))
+           AND (($6::uuid IS NULL AND ($4::text IS NULL OR (runtime_token_hash = $4 AND host_incarnation = $5
+             AND state = 'running' AND host_discard_through_incarnation IS NULL)))
+             OR ($6::uuid IS NOT NULL AND id = $9 AND project_id = $7 AND agent_admission_version = $8
+               AND stop_reason IS DISTINCT FROM 'manual' AND stop_reason IS DISTINCT FROM 'sleep' AND sleep_id IS NULL
+               AND state NOT IN ('archiving', 'archived', 'deleting')
+               AND EXISTS (SELECT 1 FROM projects p WHERE p.id = orbs.project_id AND p.owner_user_id = $6)))
          RETURNING *`,
         [
           params.orbId,
@@ -1299,6 +1530,10 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           new Date(params.now),
           params.caller?.runtimeTokenHash ?? null,
           params.caller?.hostIncarnation ?? null,
+          params.caller?.kind === "central" ? params.caller.ownerUserId : null,
+          params.caller?.kind === "central" ? params.caller.projectId : null,
+          params.caller?.kind === "central" ? params.caller.agentAdmissionVersion : null,
+          params.caller?.kind === "central" ? params.caller.orbId : null,
         ],
       );
       if (updated.isErr()) return err(updated.error);
@@ -1337,14 +1572,16 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   ): ResultAsync<void, StoreError | StateConflict> {
     return this.db.transaction<void, StoreError | StateConflict>(async (query) => {
       const current = await query(
-        "SELECT state, state_version FROM orbs WHERE id = $1 FOR UPDATE",
+        "SELECT state, state_version, replication_cursor, replicated_head_id FROM orbs WHERE id = $1 FOR UPDATE",
         [params.orbId],
       );
       if (current.isErr()) return err(current.error);
       const row = current.value.rows[0];
       if (
         row?.["state"] !== "archiving" ||
-        Number(row["state_version"]) !== params.expectedStateVersion
+        Number(row["state_version"]) !== params.expectedStateVersion ||
+        (row["replication_cursor"] ?? null) !== params.cursor ||
+        (row["replicated_head_id"] ?? null) !== params.headId
       ) {
         return err(
           stateConflict(
@@ -1360,7 +1597,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       );
       if (sealed.isErr()) return err(sealed.error);
       if (sealed.value.rowCount !== 1) return err(stateConflict("archiving"));
-      return ok(undefined);
+      return await removePrivateAgentState(query, params.orbId, params.now);
     });
   }
 
@@ -1371,6 +1608,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     return this.db.transaction<OrbRow, StoreError | StateConflict>(async (query) => {
       const updated = await query(
         `UPDATE orbs SET state = 'archived', state_version = state_version + 1,
+           agent_admission_version = agent_admission_version + 1,
            state_changed_at = $3, updated_at = $3, archived_at = $3,
            host_ref = NULL, runtime_token_hash = NULL, last_busy_at = NULL,
            stop_reason = NULL, last_error = NULL, auto_name_lease_until = NULL,
@@ -1397,11 +1635,16 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     return this.db.transaction<OrbRow, StoreError | StateConflict>(async (query) => {
       const updated = await query(
         `UPDATE orbs SET state = 'deleting', state_version = state_version + 1,
+           agent_admission_version = agent_admission_version + 1,
            state_changed_at = $3, updated_at = $3, last_error = NULL, stop_reason = NULL,
            sleep_id = NULL, sleep_until = NULL
          WHERE id = $1 AND state_version = $2
-           AND ($4::text IS NULL OR (runtime_token_hash = $4 AND host_incarnation = $5
-             AND state = 'running' AND host_discard_through_incarnation IS NULL))
+           AND (($6::uuid IS NULL AND ($4::text IS NULL OR (runtime_token_hash = $4 AND host_incarnation = $5
+             AND state = 'running' AND host_discard_through_incarnation IS NULL)))
+             OR ($6::uuid IS NOT NULL AND id = $9 AND project_id = $7 AND agent_admission_version = $8
+               AND stop_reason IS DISTINCT FROM 'manual' AND stop_reason IS DISTINCT FROM 'sleep' AND sleep_id IS NULL
+               AND state NOT IN ('archiving', 'archived', 'deleting')
+               AND EXISTS (SELECT 1 FROM projects p WHERE p.id = orbs.project_id AND p.owner_user_id = $6)))
          RETURNING *`,
         [
           params.orbId,
@@ -1409,6 +1652,10 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           new Date(params.now),
           params.caller?.runtimeTokenHash ?? null,
           params.caller?.hostIncarnation ?? null,
+          params.caller?.kind === "central" ? params.caller.ownerUserId : null,
+          params.caller?.kind === "central" ? params.caller.projectId : null,
+          params.caller?.kind === "central" ? params.caller.agentAdmissionVersion : null,
+          params.caller?.kind === "central" ? params.caller.orbId : null,
         ],
       );
       if (updated.isErr()) return err(updated.error);
@@ -1721,7 +1968,11 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       index += 1;
     }
     if (params.cancelSleep === true) {
-      sets.push("sleep_id = NULL", "sleep_until = NULL");
+      sets.push(
+        "sleep_id = NULL",
+        "sleep_until = NULL",
+        "agent_admission_version = agent_admission_version + CASE WHEN stop_reason IN ('manual', 'sleep') THEN 1 ELSE 0 END",
+      );
     }
     return this.casUpdate(
       params.orbId,
@@ -1897,132 +2148,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     params: CommitPullBatchParams,
   ): ResultAsync<OrbRow, CommitPullError> {
     return this.db
-      .transaction<{ row: OrbRow; publishedAlertId: string | null }, CommitPullError>(
-        async (query) => {
-          // Serialize competing committers on the row; the cursor check below
-          // still implements the optimistic CAS semantics.
-          const orbResult = await query(
-            "SELECT harness_session_id, harness_session_header, replication_cursor FROM orbs WHERE id = $1 FOR UPDATE",
-            [params.orbId],
-          );
-          if (orbResult.isErr()) return err(orbResult.error);
-          const orbRow = orbResult.value.rows[0];
-          if (orbRow === undefined) {
-            return err<{ row: OrbRow; publishedAlertId: string | null }, ReplicationIntegrityError>(
-              {
-                type: "replication_integrity",
-                reason: "mapping_failure",
-                message: `orb ${params.orbId} does not exist`,
-              },
-            );
-          }
-          const currentCursor =
-            orbRow["replication_cursor"] === null ? null : String(orbRow["replication_cursor"]);
-          if (currentCursor !== params.expectedCursor) {
-            return err<{ row: OrbRow; publishedAlertId: string | null }, CommitPullError>({
-              type: "cursor_conflict",
-            });
-          }
-          const storedSessionId =
-            orbRow["harness_session_id"] === null ? null : String(orbRow["harness_session_id"]);
-          let initializeSession = false;
-          if (storedSessionId === null) {
-            initializeSession = true;
-          } else if (
-            storedSessionId !== params.session.id ||
-            !jsonEqual(orbRow["harness_session_header"], params.session)
-          ) {
-            if (currentCursor === null) {
-              // An empty replica pins nothing (docs/history-replication.md): with no
-              // committed cursor a changed session identity is legitimate
-              // rotation — a runtime that never flushed starts a fresh session
-              // on reboot. Re-initialize instead of failing the orb.
-              initializeSession = true;
-            } else {
-              return err<
-                { row: OrbRow; publishedAlertId: string | null },
-                ReplicationIntegrityError
-              >({
-                type: "replication_integrity",
-                reason: "session_mismatch",
-                message: `stored session ${storedSessionId}, pulled session ${params.session.id}`,
-              });
-            }
-          }
-          let newestAlertId: string | null = null;
-          for (const record of params.records) {
-            const inserted = await query(
-              `INSERT INTO history_records (orb_id, record_id, parent_id, record)
-             VALUES ($1, $2, $3, $4::jsonb)
-             ON CONFLICT (orb_id, record_id) DO NOTHING
-             RETURNING record_id`,
-              [params.orbId, record.id, record.parentId, jsonParam(record)],
-            );
-            if (inserted.isErr()) return err(inserted.error);
-            if (
-              inserted.value.rowCount > 0 &&
-              record.type === "event" &&
-              record.alert !== undefined
-            ) {
-              newestAlertId = record.id;
-            }
-            if (inserted.value.rowCount === 0) {
-              // Existing row: identical content is an idempotent repeat,
-              // different content is an integrity error (docs/history-replication.md).
-              const existing = await query(
-                "SELECT record FROM history_records WHERE orb_id = $1 AND record_id = $2",
-                [params.orbId, record.id],
-              );
-              if (existing.isErr()) return err(existing.error);
-              const stored = existing.value.rows[0]?.["record"];
-              if (!jsonEqual(stored, JSON.parse(JSON.stringify(record)))) {
-                return err<
-                  { row: OrbRow; publishedAlertId: string | null },
-                  ReplicationIntegrityError
-                >({
-                  type: "replication_integrity",
-                  reason: "record_conflict",
-                  message: `record ${record.id} already exists with different content`,
-                });
-              }
-            }
-          }
-          const deliveredMessageIds = params.records.flatMap(inboxMessageIds);
-          for (const messageId of deliveredMessageIds) {
-            const delivered = await query(
-              `UPDATE orb_messages SET status = 'delivered', auto_start = false,
-               last_error = NULL, updated_at = now()
-             WHERE orb_id = $1 AND message_id = $2`,
-              [params.orbId, messageId],
-            );
-            if (delivered.isErr()) return err(delivered.error);
-          }
-          const sessionSets = initializeSession
-            ? ", harness_session_id = $4, harness_session_header = $5::jsonb"
-            : "";
-          const values: unknown[] = [params.orbId, params.nextCursor, params.nextHeadId];
-          if (initializeSession) values.push(params.session.id, jsonParam(params.session));
-          values.push(newestAlertId);
-          const updated = await query(
-            `UPDATE orbs SET replication_cursor = $2, replicated_head_id = $3,
-             unread_alert_id = COALESCE($${initializeSession ? 6 : 4}, unread_alert_id),
-             updated_at = now()${sessionSets}
-           WHERE id = $1 RETURNING *`,
-            values,
-          );
-          if (updated.isErr()) return err(updated.error);
-          const row = updated.value.rows[0];
-          if (row === undefined) {
-            return err<{ row: OrbRow; publishedAlertId: string | null }, ReplicationIntegrityError>(
-              {
-                type: "replication_integrity",
-                reason: "mapping_failure",
-                message: "orb row disappeared during commit",
-              },
-            );
-          }
-          return ok({ row: mapOrbRow(row), publishedAlertId: newestAlertId });
-        },
+      .transaction<{ row: OrbRow; publishedAlertId: string | null }, CommitPullError>((query) =>
+        commitHistoryTransaction(query, params),
       )
       .map(({ row, publishedAlertId }) => {
         if (publishedAlertId !== null)

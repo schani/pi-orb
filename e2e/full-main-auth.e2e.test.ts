@@ -19,6 +19,7 @@ import {
   type FakeSession,
   FatalProbeError,
   fakeControl,
+  fixtureAgentBackend,
   startControlPlane,
   waitFor,
 } from "./harness.ts";
@@ -386,14 +387,15 @@ it("main Google mode authenticates public/private/files surfaces and proxies a r
       null,
   );
   expect(accepted).toMatchObject({ result: { type: "accepted" } });
+  const completedToolName = fixtureAgentBackend() === "central-durable" ? "codemode" : "bash";
   await waitFor(
-    "real bash tool completion",
+    "real shell tool completion",
     async () =>
       frames.find(
         (frame) =>
           frame.type === "runtime.event" &&
           frame.event.type === "tool_state" &&
-          frame.event.name === "bash" &&
+          frame.event.name === completedToolName &&
           frame.event.state === "completed",
       ) ?? null,
     { timeoutMs: 120_000 },

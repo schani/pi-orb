@@ -16,6 +16,8 @@ REPOSITORY = 'schani/pi-orb'
 EXPECTED = {
     'ci.yml': ('CI', ('checks', 'control-plane-image')),
     'e2e.yml': ('E2E', tuple(f'E2E ({i}/4)' for i in range(1, 5))),
+    'durable-qualification.yml': ('Durable qualification', ('control-plane-image',
+                                *(f'Central process ({i}/4)' for i in range(1, 5)))),
 }
 
 

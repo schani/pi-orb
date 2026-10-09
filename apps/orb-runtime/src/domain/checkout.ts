@@ -5,7 +5,13 @@ import { validateRepositoryUrl } from "@pi-orb/protocol";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 
 export interface CheckoutError {
-  readonly code: "invalid_repository_url" | "clone_failed";
+  readonly code:
+    | "invalid_repository_url"
+    | "clone_failed"
+    | "checkout_admission_revoked"
+    | "resource_acquisition_failed"
+    | "checkout_unavailable"
+    | "checkout_cancelled";
   readonly message: string;
   readonly retryable: boolean;
 }
@@ -36,6 +42,7 @@ const execGit = (args: string[], cwd: string): ResultAsync<string, { message: st
 export async function prepareCheckout(
   workDir: string,
   repositoryUrl: string,
+  initialCommands?: () => Promise<Result<readonly string[][], CheckoutError>>,
 ): Promise<Result<string | null, CheckoutError>> {
   const repoDir = join(workDir, "repo");
   if (!existsSync(repoDir)) {
@@ -51,9 +58,16 @@ export async function prepareCheckout(
       (cause) => ({ code: "clone_failed" as const, message: String(cause), retryable: true }),
     )();
     if (cleaned.isErr()) return err(cleaned.error);
+    const commands = initialCommands ? await initialCommands() : undefined;
+    if (commands && commands.isErr()) return err(commands.error);
     const cloned = await execGit(["clone", "--", url.value.url, tmpDir], workDir);
     if (cloned.isErr())
       return err({ code: "clone_failed", message: cloned.error.message, retryable: true });
+    for (const command of commands?.value ?? []) {
+      const pinned = await execGit(command, tmpDir);
+      if (pinned.isErr())
+        return err({ code: "clone_failed", message: pinned.error.message, retryable: true });
+    }
     const renamed = Result.fromThrowable(
       () => renameSync(tmpDir, repoDir),
       (cause) => ({ code: "clone_failed" as const, message: String(cause), retryable: true }),

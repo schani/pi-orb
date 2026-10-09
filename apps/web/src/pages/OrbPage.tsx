@@ -465,9 +465,12 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
 export function canRunComposerCommand(
   lifecycle: OrbView["state"] | undefined,
   state: OrbPageState,
+  centralAgent = false,
 ): boolean {
   return (
-    lifecycle === "running" &&
+    lifecycle !== undefined &&
+    !["deleting", "archiving", "archived"].includes(lifecycle) &&
+    (centralAgent || lifecycle === "running") &&
     state.connection === "open" &&
     state.synced &&
     state.settings?.writable === true &&
@@ -481,35 +484,99 @@ export function canRunComposerCommand(
 export function isLiveBusy(
   lifecycle: OrbView["state"] | undefined,
   state: Pick<OrbPageState, "connection" | "activity"> & Partial<Pick<OrbPageState, "compacting">>,
+  centralAgent = false,
 ): boolean {
   return (
-    lifecycle === "running" &&
+    (centralAgent || lifecycle === "running") &&
     state.connection === "open" &&
     state.activity === "busy" &&
     !state.compacting
   );
 }
 
+export function pendingAbortOperation(
+  operationId: string | null,
+  messages: readonly OrbMessageView[],
+  centralAgent: boolean,
+): string | null {
+  if (operationId !== null) return operationId;
+  if (!centralAgent) return null;
+  const pending = messages.find(
+    (message) =>
+      !message.system && (message.status === "queued" || message.status === "delivering"),
+  );
+  return pending ? `inbox:${pending.id}` : null;
+}
+
+export function canAbortComposer(
+  state: Pick<
+    OrbPageState,
+    "connection" | "activity" | "operationId" | "pendingRequest" | "welcome"
+  >,
+  messages: readonly OrbMessageView[],
+  centralAgent: boolean,
+): boolean {
+  return (
+    state.connection === "open" &&
+    (state.activity === "busy" ||
+      (centralAgent &&
+        messages.some(
+          (message) =>
+            !message.system && (message.status === "queued" || message.status === "delivering"),
+        ))) &&
+    pendingAbortOperation(state.operationId, messages, centralAgent) !== null &&
+    (state.pendingRequest === null || state.pendingRequest.kind === "compact") &&
+    (state.welcome?.capabilities.includes(CAPABILITY_ABORT) ?? false)
+  );
+}
+
 export function isLiveCompacting(
   lifecycle: OrbView["state"] | undefined,
   state: Pick<OrbPageState, "connection" | "activity" | "compacting">,
+  centralAgent = false,
 ): boolean {
   return (
-    lifecycle === "running" &&
+    (centralAgent || lifecycle === "running") &&
     state.connection === "open" &&
     state.activity === "busy" &&
     state.compacting
   );
 }
 
+export function canConnectLive(orb: OrbView | null): boolean {
+  return orb !== null && (orb.centralAgent ? orb.state !== "deleting" : orb.state === "running");
+}
+
+export function canSendComposer(
+  orb: OrbView | null,
+  state: Pick<
+    OrbPageState,
+    "pendingRequest" | "settings" | "connection" | "synced" | "activity" | "historyLoaded"
+  >,
+): boolean {
+  if (orb === null || ["deleting", "archiving", "archived"].includes(orb.state)) return false;
+  return (
+    state.pendingRequest === null &&
+    (orb.centralAgent || (state.settings?.writable ?? true)) &&
+    state.historyLoaded
+  );
+}
+
 export function canStopOrb(orb: OrbView): boolean {
+  if (
+    orb.centralAgent &&
+    orb.activity === "busy" &&
+    !["archiving", "archived", "deleting"].includes(orb.state)
+  )
+    return true;
   if (orb.state === "creating" || orb.state === "starting" || orb.state === "running") return true;
   if (orb.state === "stopping") return orb.stopReason === "sleep";
   return (orb.state === "stopped" || orb.state === "failed") && orb.sleepUntil !== undefined;
 }
 
 export function orbLifecycleStatus(orb: OrbView, now: number): string {
-  if (orb.state === "failed") return "failed";
+  if (orb.state === "failed")
+    return orb.centralAgent && orb.activity === "busy" ? "failed · busy" : "failed";
   if (orb.stopReason === "idle" && (orb.state === "stopping" || orb.state === "stopped")) {
     return `${orb.state} (idle)`;
   }
@@ -1627,7 +1694,7 @@ function OrbConversation({
   }, [state.afterRecordId]);
 
   const liveRef = useRef<LiveConnection | null>(null);
-  const shouldConnect = !orbNotFound && orb?.state === "running" && state.historyLoaded;
+  const shouldConnect = !orbNotFound && canConnectLive(orb) && state.historyLoaded;
   useEffect(() => {
     if (!shouldConnect) return;
     let active = true;
@@ -1747,7 +1814,7 @@ function OrbConversation({
   };
 
   const changeSettings = (action: ComposerCommandAction) => {
-    if (!canRunComposerCommand(orb?.state, state)) return;
+    if (!canRunComposerCommand(orb?.state, state, orb?.centralAgent)) return;
     const requestId = liveRef.current?.sendRequest(action);
     if (!requestId) dispatch({ type: "send_unavailable" });
     else
@@ -1760,7 +1827,11 @@ function OrbConversation({
 
   const sendAbort = () => {
     const connection = liveRef.current;
-    const operationId = state.operationId;
+    const operationId = pendingAbortOperation(
+      state.operationId,
+      queuedMessages,
+      orb?.centralAgent ?? false,
+    );
     if (connection === null || operationId === null) return;
     const requestId = connection.sendRequest({ type: "abort", operationId });
     if (requestId === null) dispatch({ type: "send_unavailable" });
@@ -1826,24 +1897,16 @@ function OrbConversation({
   const canStart = orb !== null && (orb.state === "stopped" || orb.state === "failed");
   const canStop = orb !== null && canStopOrb(orb);
   const connected = state.connection === "open";
-  const messageAccepting =
+  const settingsAvailable =
     orb !== null &&
     !["deleting", "archiving", "archived"].includes(orb.state) &&
-    state.historyLoaded;
-  const settingsAvailable =
-    orb?.state === "running" &&
+    canConnectLive(orb) &&
     state.connection === "open" &&
     state.synced &&
     state.settings !== null;
-  const settingsDisabled = !canRunComposerCommand(orb?.state, state);
-  const canSend =
-    state.pendingRequest === null && (state.settings?.writable ?? true) && messageAccepting;
-  const canAbort =
-    connected &&
-    state.activity === "busy" &&
-    state.operationId !== null &&
-    (state.pendingRequest === null || state.pendingRequest.kind === "compact") &&
-    (state.welcome?.capabilities.includes(CAPABILITY_ABORT) ?? false);
+  const settingsDisabled = !canRunComposerCommand(orb?.state, state, orb?.centralAgent);
+  const canSend = canSendComposer(orb, state);
+  const canAbort = canAbortComposer(state, queuedMessages, orb?.centralAgent ?? false);
 
   if (orbNotFound)
     return (
@@ -2010,7 +2073,7 @@ function OrbConversation({
           </div>
         </header>
         <div className="orb-header-scroll">
-          {orb?.state === "running" && connected && state.subagents.length > 0 && (
+          {canConnectLive(orb) && connected && state.subagents.length > 0 && (
             <SubagentRail agents={state.subagents} />
           )}
           {uploads.progress}
@@ -2196,8 +2259,8 @@ function OrbConversation({
             records={historyRecords}
             liveBlocks={liveBlocks}
             tools={tools}
-            busy={isLiveBusy(orb?.state, state)}
-            compacting={isLiveCompacting(orb?.state, state)}
+            busy={isLiveBusy(orb?.state, state, orb?.centralAgent)}
+            compacting={isLiveCompacting(orb?.state, state, orb?.centralAgent)}
             compaction={state.compaction}
             queuedMessages={queuedMessages}
           />

@@ -154,6 +154,7 @@ class WorkflowContractTest(unittest.TestCase):
                 ('Set up Node.js', 'actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444'),
                 ('Authenticate the GitHub deployment identity', 'google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093'),
                 ('Set up Google Cloud SDK', 'google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db'),
+                ('Upload rollout monitor', upload),
                 ('Upload missing-orb navigation failure evidence', upload),
                 ('Upload lazy-return browser failure evidence', upload),
                 ('Upload MCP failure summaries', upload),
@@ -161,6 +162,9 @@ class WorkflowContractTest(unittest.TestCase):
             ],
         )
         uploads = {
+            'Upload rollout monitor': (
+                'always()', 'rollout-monitor', 30, ['path: ${{ runner.temp }}/rollout-monitor.json'],
+            ),
             'Upload missing-orb navigation failure evidence': (
                 'failure()', 'e2e-missing-orb', 14,
                 ['path: |', '  test-failures/missing-orb-*/failure.json',

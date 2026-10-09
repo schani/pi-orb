@@ -6,11 +6,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, expect as expectPage } from "@playwright/test";
 import { build } from "vite";
-import { expect, it } from "vitest";
+import { it as baseIt, expect } from "vitest";
 import { DEFAULT_LIFECYCLE_CONSTANTS } from "../apps/control-plane/src/domain/constants.ts";
 import {
   api,
-  createFakeSession,
+  createFakeSession as createHostPiSession,
   deleteFakeSession,
   FatalProbeError,
   fakeControl,
@@ -63,6 +63,11 @@ async function saveSubagentFailure(
   });
   if (saved.isErr()) console.error(`Failure evidence write failed: ${caseName}`);
 }
+
+const createFakeSession = (name: string, scenario: unknown) =>
+  createHostPiSession(name, scenario, "host-pi");
+
+const it = baseIt.skipIf(process.env["PI_ORB_E2E_BACKEND"] === "process");
 
 it("keeps delegated work busy through abort, crash recovery and active-child archival without private replication", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-subagents-e2e-"));
@@ -214,6 +219,7 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
   });
   const audit = startNativeInferenceAudit(root, fake.inferenceBaseUrl)._unsafeUnwrap();
   const cp = await startControlPlane({
+    agentBackend: "host-pi",
     port: 7173,
     fake,
     nameFake: names,
@@ -307,8 +313,20 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
       };
       if (metadata.processGroupId === null || metadata.processGroupId <= 0)
         throw new FatalProbeError("fixture runtime has no owned process");
-      // Kill only this fixture's runtime. The process provider owns its relaunch.
-      process.kill(metadata.processGroupId, "SIGKILL");
+      const children = readFileSync(
+        `/proc/${metadata.processGroupId}/task/${metadata.processGroupId}/children`,
+        "utf8",
+      )
+        .trim()
+        .split(/\s+/)
+        .map(Number);
+      expect(children).toHaveLength(1);
+      const runtimePid = children[0];
+      if (runtimePid === undefined || !Number.isSafeInteger(runtimePid) || runtimePid <= 0)
+        throw new FatalProbeError("fixture supervisor has no runtime child");
+      expect(readFileSync(`/proc/${runtimePid}/cmdline`, "utf8")).toContain("/runtime-entry.ts");
+      // Preserve the supervisor so it can drain descendants before relaunch.
+      process.kill(runtimePid, "SIGKILL");
     };
     for (const i of [0, 1, 2]) {
       audit.bracket(i === 0 ? "continuation" : i === 1 ? "abort" : "recovery", i);

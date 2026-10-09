@@ -1,8 +1,9 @@
 import type { OrbState } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { sleepResult, withDeadline } from "./dst.ts";
+import { agentPlacement } from "./harness-agent-plane.ts";
 import { cleanupRetiredHostedFiles } from "./hosting.ts";
-import { type ReconcileOutcome, reconcileOrbOnce } from "./lifecycle.ts";
+import { type ReconcileOutcome, reconcileCentralAgent, reconcileOrbOnce } from "./lifecycle.ts";
 import { logEvent, logOrbEvent, logProjectEvent } from "./log.ts";
 import type { OrbRow } from "./orb.ts";
 import type { ControlPlaneDeps } from "./ports.ts";
@@ -37,6 +38,14 @@ export type ReconcileOne = (
 const PARKED_FOREVER = Number.POSITIVE_INFINITY;
 
 const POLLABLE_STATES: readonly OrbState[] = ["running"];
+const CENTRAL_POLLABLE_STATES: readonly OrbState[] = [
+  "creating",
+  "starting",
+  "running",
+  "stopping",
+  "stopped",
+  "failed",
+];
 const RECONCILABLE_STATES: readonly OrbState[] = [
   "creating",
   "starting",
@@ -54,7 +63,10 @@ const isTerminal = (state: OrbState): boolean =>
 
 /** One sweep: pull every due running orb until caught up. */
 export async function pollAllOnce(task: SimulationTask, deps: ControlPlaneDeps): Promise<void> {
-  const orbsResult = await deps.store.listOrbsInStates(task, POLLABLE_STATES);
+  const orbsResult = await deps.store.listOrbsInStates(
+    task,
+    deps.agentPlane?.placement === "central" ? CENTRAL_POLLABLE_STATES : POLLABLE_STATES,
+  );
   if (orbsResult.isErr()) {
     // Store outage: retry on the next tick. Logged on the edge only — the tick
     // is ~10s and an outage lasts minutes.
@@ -68,6 +80,26 @@ export async function pollAllOnce(task: SimulationTask, deps: ControlPlaneDeps):
   }
   const now = task.monotonicNow();
   for (const orb of orbsResult.value) {
+    if (agentPlacement(deps.agentPlane, orb) !== "central" && orb.state !== "running") continue;
+    // Central input follows the dispatcher tick, not guest work or history cadence.
+    if (
+      agentPlacement(deps.agentPlane, orb) === "central" &&
+      deps.control.getNextAttemptAt(`central:${orb.id}`) !== PARKED_FOREVER
+    ) {
+      const agent = await reconcileCentralAgent(task, deps, orb.id);
+      const failure = agent.isErr() && agent.error.type === "retryable" ? agent.error : null;
+      if (deps.control.noteCondition(`central-reconcile:${orb.id}`, failure !== null) && failure)
+        logOrbEvent(task, orb.id, "central-reconcile-blocked", { message: failure.message });
+      if (failure?.invariant) deps.control.setNextAttemptAt(`central:${orb.id}`, PARKED_FOREVER);
+      if (
+        agent.isOk() &&
+        agent.value.state === "stopped" &&
+        deps.control.hasAgentWork(orb.id) &&
+        agent.value.stopReason !== "manual" &&
+        agent.value.stopReason !== "sleep"
+      )
+        deps.control.nudgeNextAttemptAt(`reconcile:${orb.id}`);
+    }
     const key = `poll:${orb.id}`;
     if (deps.control.getNextAttemptAt(key) > now) continue;
     const outcome = await pollOrbUntilCaughtUp(task, deps, orb.id);

@@ -8,6 +8,7 @@ import type { OrbRow, ProjectDeletionProgress, ProjectRow } from "../domain/orb.
  * about tailscale.
  */
 export interface ViewConfig {
+  readonly centralAgent?: boolean;
   /** MagicDNS suffix; absent when tailscale port exposure is not configured. */
   readonly tailnetDnsName?: string;
 }
@@ -35,6 +36,7 @@ function stateDetailOf(
   control: ControlState,
   drain: ReturnType<ControlState["getDrainStatus"]>,
   bootProbe: ReturnType<ControlState["getBootProbe"]>,
+  centralAgent: boolean,
 ): OrbView["stateDetail"] {
   if (orb.state === "deleting") {
     return {
@@ -58,8 +60,13 @@ function stateDetailOf(
   if (orb.state === "archiving") {
     return {
       type: "archiving_orb",
-      phase:
-        control.getLiveness(orb.id)?.activity === "busy" ? "waiting_for_idle" : "sealing_history",
+      phase: (
+        centralAgent
+          ? control.hasAgentWork(orb.id)
+          : control.getLiveness(orb.id)?.activity === "busy"
+      )
+        ? "waiting_for_idle"
+        : "sealing_history",
       retrying: orb.lastError !== null,
       ...(orb.lastError !== null ? { message: orb.lastError } : {}),
     };
@@ -144,12 +151,19 @@ export function orbView(
   const showChallenge =
     challenge !== null && (orb.state === "creating" || orb.state === "starting");
   const drain = orb.state === "stopping" ? control.getDrainStatus(orb.id) : null;
-  const liveness = orb.state === "running" ? control.getLiveness(orb.id) : null;
+  config = { ...config, centralAgent: config.centralAgent === true && orb.harness === "pi" };
+  const activity = config.centralAgent
+    ? control.hasAgentWork(orb.id)
+      ? "busy"
+      : "idle"
+    : orb.state === "running"
+      ? control.getLiveness(orb.id)?.activity
+      : undefined;
   const bootProbe =
     (orb.state === "creating" || orb.state === "starting") && !showChallenge
       ? control.getBootProbe(orb.id)
       : null;
-  const stateDetail = stateDetailOf(orb, control, drain, bootProbe);
+  const stateDetail = stateDetailOf(orb, control, drain, bootProbe, config.centralAgent === true);
   return {
     id: orb.id,
     projectId: orb.projectId,
@@ -157,7 +171,8 @@ export function orbView(
     name: orb.name,
     state: orb.state,
     stateVersion: orb.stateVersion,
-    ...(liveness !== null ? { activity: liveness.activity } : {}),
+    ...(config.centralAgent ? { centralAgent: true } : {}),
+    ...(activity !== undefined ? { activity } : {}),
     ...(orb.checkoutCommit !== null ? { checkoutCommit: orb.checkoutCommit } : {}),
     ...(orb.lastError !== null ? { lastError: orb.lastError } : {}),
     ...(orb.unreadAlertId !== null ? { unreadAlertId: orb.unreadAlertId } : {}),

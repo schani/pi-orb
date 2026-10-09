@@ -36,12 +36,27 @@ export function uploadRequest(
       { signal },
     );
     if (host.isErr() || !host.value?.runtimeAddress) return err(failure("runtime unavailable"));
+    const binding = deps.hostProvider.executionBinding
+      ? await deps.hostProvider.executionBinding(
+          task,
+          { provider: deps.hostProvider.kind, resourceId: orb.value.hostRef },
+          { signal },
+        )
+      : null;
+    if (
+      binding &&
+      (binding.isErr() ||
+        binding.value.incarnation !== String(row.incarnation) ||
+        binding.value.baseUrl !== host.value.runtimeAddress.baseUrl)
+    )
+      return err(failure("execution binding unavailable"));
     const query = new URLSearchParams({
       name: row.name,
       size: String(row.size),
       offset: String(options.offset ?? 0),
     });
     const headers: Record<string, string> = { "x-orb-incarnation": String(row.incarnation) };
+    if (binding?.isOk()) headers["authorization"] = `Bearer ${binding.value.token}`;
     if (options.source) {
       headers["content-type"] = "application/octet-stream";
       headers["content-length"] = String(options.length);

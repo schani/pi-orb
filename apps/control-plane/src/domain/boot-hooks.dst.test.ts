@@ -110,6 +110,10 @@ describe("orb boot hooks (DST)", () => {
               },
               { timeoutMs: CONVERGE_MS },
             );
+            expect(harness.deps.control.getBootProbe(ORB)).toMatchObject({
+              everAnswered: true,
+              setupRunning: true,
+            });
             await waitUntil(
               task,
               "orb running",

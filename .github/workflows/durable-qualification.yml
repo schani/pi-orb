@@ -1,0 +1,136 @@
+name: Durable qualification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  process:
+    name: Central process (${{ matrix.shard }}/4)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      PI_ORB_E2E_BACKEND: process
+      PI_ORB_AGENT_BACKEND: central-durable
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24.6.0'
+          cache: npm
+      - name: Install native addon prerequisites
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 build-essential
+      - name: Install dependencies
+        run: npm ci
+      - name: Install pinned browser engines and system dependencies
+        run: npm run test:e2e:install
+      - name: Run central process end-to-end tests
+        env:
+          PI_ORB_LOCAL_FAKE_EVIDENCE: ${{ runner.temp }}/local-fake-provider
+        run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --shard=${{ matrix.shard }}/4
+      - name: Upload local provider provenance
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: local-fake-process-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/local-fake-provider/manifest.json
+            ${{ runner.temp }}/local-fake-provider/phases.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: central-process-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-failures/*.json
+            test-failures/profile-login/failure.json
+            test-failures/full-slice-upload/failure.json
+            test-failures/subagent-*/failure.json
+            test-failures/lazy-return-*/failure.json
+            test-failures/lazy-return-*/failure.png
+            test-failures/lazy-return-*/trace.zip
+            test-failures/cross-axis-*/failure.txt
+            test-failures/cross-axis-*/result.json
+            test-failures/cross-axis-*/pin.json
+            test-failures/cross-axis-*/execution-ready.json
+            test-failures/cross-axis-*/control-plane.log
+            test-failures/cross-axis-*/relay-requests.json
+            test-failures/cross-axis-*/model-requests.json
+            test-failures/cross-axis-*/retained-docker.json
+            test-failures/durable-process-*/failure.txt
+            test-failures/durable-process-*/control-plane.log
+            test-failures/durable-process-*/model-requests.json
+            test-failures/durable-process-*/login-view.json
+            test-failures/durable-process-*/gated-view.json
+            test-failures/durable-process-*/acceptance-history.json
+            test-failures/durable-process-*/teardown.json
+            test-failures/durable-independent-process/*/failure.txt
+            test-failures/durable-independent-process/*/control-plane.log
+            test-failures/durable-independent-process/*/browser-frames.json
+            test-failures/durable-independent-process/*/model-requests.json
+            test-failures/durable-independent-process/*/original-model-requests.json
+            test-failures/durable-independent-process/*/model-stream-fence.json
+            test-failures/durable-independent-process/*/barrier.json
+            test-failures/durable-independent-process/*/waiting-phases.json
+            test-failures/durable-independent-process/*/held-setup-readiness.json
+            test-failures/durable-independent-process/*/before-ready-history.json
+            test-failures/durable-independent-process/*/resource-ready-history.json
+            test-failures/durable-independent-process/*/final-view.json
+            test-failures/durable-independent-process/*/final-history.json
+            test-failures/durable-independent-process/*/spill-history.json
+            test-failures/durable-independent-process/*/capture-outcomes.json
+            test-failures/durable-independent-process/*/teardown-outcomes.json
+            test-failures/durable-independent-process/*/early-output.png
+            test-failures/durable-independent-process/*/waiting.png
+            test-failures/durable-independent-process/*/final-page.png
+          if-no-files-found: ignore
+          retention-days: 14
+
+  control-plane-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Check Docker disk budget
+        run: |
+          df -h
+          test "$(df -Pk . | awk 'NR == 2 {print $4}')" -ge 15728640
+      - name: Build control-plane image
+        run: docker build -f apps/control-plane/Dockerfile -t pi-orb-control-plane:qualification .
+      - name: Prove packaged worker, Git and skills without network
+        run: |
+          set -euo pipefail
+          container=$(docker create --network none pi-orb-control-plane:qualification node /app/image-proof.mjs)
+          trap 'docker rm -f "$container"' EXIT
+          docker cp scripts/control-plane-image-proof.mjs "$container:/app/image-proof.mjs"
+          docker start --attach "$container" 2>&1 | tee "$RUNNER_TEMP/control-plane-image-proof.log"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$container")" = 0
+      - name: Report image and disk provenance
+        if: always()
+        run: |
+          df -h
+          docker system df
+          docker image inspect pi-orb-control-plane:qualification --format '{{.Id}} {{.Size}}' || true
+      - name: Upload image proof
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: control-plane-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/control-plane-image-proof.log
+          if-no-files-found: ignore
+          retention-days: 14

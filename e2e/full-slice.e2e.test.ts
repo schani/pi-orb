@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -45,8 +46,11 @@ import {
   waitFor,
   waitForPostgres,
 } from "./harness.ts";
+import { holdModelStream } from "./held-model-stream.ts";
+import { runTerminal } from "./terminal-client.ts";
 import { FailureEvidence } from "./testkit/failure-evidence.ts";
 import { restartNoticePattern } from "./testkit/restart-notice-rule.ts";
+import { UploadContinuationPhases } from "./testkit/upload-continuation-phases.ts";
 
 /**
  * The full docs/testing.md slice against the real Pi SDK and fake OpenAI
@@ -119,13 +123,32 @@ const SCENARIO = {
           { type: "stop", status: "completed" },
         ],
       },
-      ...["E2E_RESTART_NOTICE_OK", "E2E_REPLACEMENT_NOTICE_OK"].map((reply) => ({
-        match: { userMessage: { regex: restartNoticePattern } },
-        steps: [
-          { type: "text", content: reply },
-          { type: "stop", status: "completed" },
-        ],
-      })),
+      ...["E2E_RESTART_NOTICE_OK", "E2E_REPLACEMENT_NOTICE_OK"].flatMap((reply) => [
+        {
+          match: {
+            userMessage: {
+              regex: PROCESS_BACKEND ? "^Check the E2E restarted session$" : restartNoticePattern,
+            },
+          },
+          steps: [
+            { type: "text", content: reply },
+            { type: "stop", status: "completed" },
+          ],
+        },
+        ...(PROCESS_BACKEND
+          ? [
+              {
+                match: {
+                  userMessage: { regex: "^Write a single short desktop-notification sentence" },
+                },
+                steps: [
+                  { type: "text", content: "Checked the restarted session." },
+                  { type: "stop", status: "completed" },
+                ],
+              },
+            ]
+          : []),
+      ]),
       {
         match: { userMessage: { regex: "^Do the spawned E2E task$" } },
         steps: [
@@ -460,47 +483,48 @@ const RESUME_HOOK = [
  * PTY echoes what it is sent.
  */
 async function terminalRun(orbId: string, command: string, until: string): Promise<string> {
-  const socket = new WebSocket(`ws://127.0.0.1:${CP_PORT}/api/v1/orbs/${orbId}/terminal`, [
-    TERMINAL_SUBPROTOCOL,
-  ]);
   try {
-    await new Promise<void>((resolve, reject) => {
-      socket.once("open", resolve);
-      socket.once("error", reject);
-    });
-    let output = "";
-    const complete = new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(
-        () => reject(new Error(`terminal command timed out: ${command}`)),
-        30_000,
-      );
-      socket.on("message", (data, isBinary) => {
-        if (isBinary) {
-          output += data.toString();
-          if (output.includes(until)) {
-            clearTimeout(timer);
-            resolve();
-          }
-          return;
-        }
-        const control = JSON.parse(data.toString()) as {
-          type?: string;
-          error?: { message?: string };
-        };
-        if (control.type === "terminal.ready") {
-          socket.send(Buffer.from(`${command}\r`));
-        } else if (control.type === "terminal.error") {
-          clearTimeout(timer);
-          reject(new Error(control.error?.message ?? "terminal error"));
-        }
-      });
-    });
-    socket.send(JSON.stringify({ v: 1, type: "terminal.open", cols: 200, rows: 30 }));
-    await complete;
-    return output;
-  } finally {
-    socket.close();
+    return await runTerminal(`http://127.0.0.1:${CP_PORT}`, orbId, command, until);
+  } catch (error) {
+    await captureOrbFailure(orbId, error);
+    throw error;
   }
+}
+
+async function captureOrbFailure(orbId: string, error: unknown): Promise<void> {
+  const evidence = join(
+    import.meta.dirname,
+    "../test-failures",
+    `full-slice-orb-${orbId}-${randomUUID()}`,
+  );
+  mkdirSync(evidence, { recursive: true });
+  writeFileSync(join(evidence, "failure.txt"), String(error));
+  writeFileSync(join(evidence, "control-plane.log"), controlPlane.logs.join(""));
+  const outcomes = await Promise.allSettled([
+    api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${orbId}`).then((view) =>
+      writeFileSync(join(evidence, "failing-orb.json"), JSON.stringify(view, null, 2)),
+    ),
+    api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${orbId}/history`).then((history) =>
+      writeFileSync(join(evidence, "failing-history.json"), JSON.stringify(history, null, 2)),
+    ),
+    dumpOrbDiagnostics(orbId),
+    Promise.resolve().then(() => {
+      if (localStateDirectory)
+        cpSync(localStateDirectory, join(evidence, "fixture"), { recursive: true });
+    }),
+  ]);
+  writeFileSync(
+    join(evidence, "capture-outcomes.json"),
+    JSON.stringify(
+      outcomes.map((outcome) =>
+        outcome.status === "fulfilled"
+          ? { status: outcome.status }
+          : { status: outcome.status, error: String(outcome.reason) },
+      ),
+      null,
+      2,
+    ),
+  );
 }
 
 /** Where the runtime writes a hook's log, in the orb's own filesystem terms. */
@@ -610,6 +634,8 @@ async function withOrbDiagnostics(id: () => string, body: () => Promise<void>): 
   }
 }
 
+let reasoningStream: Awaited<ReturnType<typeof holdModelStream>>;
+
 beforeAll(async () => {
   webDistDirectory = mkdtempSync(join(tmpdir(), "pi-orb-e2e-web-"));
   const webRoot = join(import.meta.dirname, "../apps/web");
@@ -622,6 +648,10 @@ beforeAll(async () => {
   hostingRootDirectory = mkdtempSync(join(tmpdir(), "pi-orb-e2e-hosting-"));
   fake = await createFakeSession(`pi-orb-e2e-${Date.now()}`, SCENARIO);
   nameFake = await createFakeSession(`pi-orb-name-e2e-${Date.now()}`, NAME_SCENARIO);
+  reasoningStream = await holdModelStream(fake.inferenceBaseUrl, "please run the e2e tool check", {
+    host: PROCESS_BACKEND ? "127.0.0.1" : "0.0.0.0",
+    advertisedHost: PROCESS_BACKEND ? "127.0.0.1" : "host.docker.internal",
+  });
 
   if (PROCESS_BACKEND) {
     localStateDirectory = mkdtempSync(join(tmpdir(), "pi-orb-e2e-local-"));
@@ -639,6 +669,7 @@ beforeAll(async () => {
       extraEnv: {
         PI_ORB_E2E_RECONCILE_CHECKPOINTS: "1",
         PI_ORB_E2E_HISTORY_INSPECTION: "1",
+        PI_ORB_FAKE_OPENAI_INFERENCE_URL: reasoningStream.baseUrl,
       },
     });
     return;
@@ -679,11 +710,13 @@ beforeAll(async () => {
     extraEnv: {
       PI_ORB_E2E_RECONCILE_CHECKPOINTS: "1",
       PI_ORB_E2E_HISTORY_INSPECTION: "1",
+      PI_ORB_FAKE_OPENAI_INFERENCE_URL: reasoningStream.baseUrl,
     },
   });
 }, 720_000);
 
 afterAll(async () => {
+  await reasoningStream?.close();
   if (!PROCESS_BACKEND) {
     for (const id of [orbId, failedOrbId, specOrbId, ...additionalOrbIds]) {
       if (id === "") continue;
@@ -731,10 +764,13 @@ async function restartControlPlaneWithSpec(spec: string, generation: number): Pr
 }
 
 let scenarioEvidence: FailureEvidence;
+let uploadPhases: UploadContinuationPhases | null = null;
+const currentUploadPhases = () => uploadPhases;
 
 describe("full slice E2E", () => {
   it("runs login, a scripted tool round trip, replication, and drain", async () => {
     scenarioEvidence = new FailureEvidence(orbId);
+    uploadPhases = null;
     try {
       await runScenario();
     } catch (error) {
@@ -778,6 +814,20 @@ describe("full slice E2E", () => {
             api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${target}/history`),
           )
           .catch(() => undefined);
+      }
+      scenarioEvidence.observations.push({
+        resource: "reasoning-stream-fence",
+        observations: reasoningStream?.observations ?? [],
+      });
+      const capturedUploadPhases = currentUploadPhases();
+      if (capturedUploadPhases !== null) {
+        scenarioEvidence.observations.push({
+          resource: "upload-phases",
+          source: "browser-public",
+          sdkProviderHooksInstalled: false,
+          phases: capturedUploadPhases.tail(),
+        });
+        if (scenarioEvidence.observations.length > 80) scenarioEvidence.observations.shift();
       }
       await scenarioEvidence
         .save("full-slice-upload", () => fakeControl(fake.sessionKey, "/requests"))
@@ -1416,7 +1466,11 @@ describe("full slice E2E", () => {
         );
         expect(Date.now() - createdAt).toBeLessThan(120_000);
         expect(failed["lastError"]).toEqual(
-          expect.stringContaining("runtime_failed: clone_failed:"),
+          expect.stringContaining(
+            failed["centralAgent"] === true
+              ? "runtime_failed: resource_acquisition_failed:"
+              : "runtime_failed: clone_failed:",
+          ),
         );
         expect(failed["lastError"]).not.toEqual(expect.stringContaining("deadline_exceeded"));
 
@@ -1652,10 +1706,10 @@ describe("full slice E2E", () => {
       timeoutMs = 120_000,
     ): Promise<T> =>
       new Promise((resolve, reject) => {
-        const deadline = setTimeout(
-          () => reject(new Error(`timed out waiting for frame: ${what}`)),
-          timeoutMs,
-        );
+        const deadline = setTimeout(() => {
+          console.error(`=== browser frames at timeout: ${what} ===`, JSON.stringify(frames));
+          reject(new Error(`timed out waiting for frame: ${what}`));
+        }, timeoutMs);
         const check = (): void => {
           const found = find();
           if (found !== undefined) {
@@ -1710,11 +1764,17 @@ describe("full slice E2E", () => {
       );
       expect(applied.type === "request.result" && applied.result.type).toBe("settings_applied");
     }
-    expect(
-      frames
-        .filter((frame) => frame.type === "runtime.event" && frame.event.type === "agent_settings")
-        .at(-1),
-    ).toMatchObject({
+    const settledSettings = await untilFrame("settings projection settled", () =>
+      frames.findLast(
+        (frame) =>
+          frame.type === "runtime.event" &&
+          frame.event.type === "agent_settings" &&
+          frame.event.settings.model.id === "gpt-6.1-sol" &&
+          frame.event.settings.thinkingLevel === "low" &&
+          frame.event.writable,
+      ),
+    );
+    expect(settledSettings).toMatchObject({
       event: { settings: { model: { id: "gpt-6.1-sol" }, thinkingLevel: "low" }, writable: true },
     });
 
@@ -1763,6 +1823,37 @@ describe("full slice E2E", () => {
       frames.find((frame) => frame.type === "request.result" && frame.requestId === requestId),
     );
     expect(result.type === "request.result" && result.result.type).toBe("accepted");
+    if (result.type !== "request.result" || result.result.type !== "accepted") {
+      throw new Error("reasoning turn was not accepted");
+    }
+    const reasoningOperationId = result.result.operationId;
+    try {
+      await waitFor("reasoning provider completion held", async () =>
+        reasoningStream.held() ? true : null,
+      );
+      expect(reasoningStream.observations).toContainEqual(
+        expect.objectContaining({
+          targeted: true,
+          reasoningDeltaForwarded: true,
+          completionHeld: true,
+        }),
+      );
+      await untilFrame("reasoning patch before model completion", () =>
+        frames.find(
+          (frame) =>
+            frame.type === "runtime.event" &&
+            frame.event.type === "output_patch" &&
+            frame.event.operationId === reasoningOperationId &&
+            frame.event.blockType === "reasoning",
+        ),
+      );
+      console.info("reasoning stream fence acknowledged", {
+        operationId: reasoningOperationId,
+        observations: reasoningStream.observations,
+      });
+    } finally {
+      reasoningStream.release();
+    }
 
     await untilFrame(
       "bash tool completed",
@@ -1771,19 +1862,23 @@ describe("full slice E2E", () => {
           (frame) =>
             frame.type === "runtime.event" &&
             frame.event.type === "tool_state" &&
-            frame.event.name === "bash" &&
+            frame.event.name === (PROCESS_BACKEND ? "codemode" : "bash") &&
             frame.event.state === "completed",
         ),
       180_000,
     );
-    await untilFrame(
+    const reasoningFinished = await untilFrame(
       "operation finished",
       () =>
         frames.find(
-          (frame) => frame.type === "runtime.event" && frame.event.type === "operation_finished",
+          (frame) =>
+            frame.type === "runtime.event" &&
+            frame.event.type === "operation_finished" &&
+            frame.event.operationId === reasoningOperationId,
         ),
       180_000,
     );
+    expect(reasoningFinished).toMatchObject({ event: { outcome: "completed" } });
     const finalText = await untilFrame(
       "final assistant record",
       () =>
@@ -1925,6 +2020,11 @@ describe("full slice E2E", () => {
     );
 
     // Manual compaction is a live operation, never an inbox message or Luna turn.
+    const compactOrb = await api(base, "GET", `/api/v1/orbs/${orbId}`);
+    const centralCompaction = compactOrb.body["centralAgent"] === true;
+    let compactedRecords = (await api(base, "GET", `/api/v1/orbs/${orbId}/history`)).body[
+      "records"
+    ] as { id: string; type: string }[];
     const compactStart = frames.length;
     const compactAfterId = frames
       .slice(0, compactStart)
@@ -1946,80 +2046,101 @@ describe("full slice E2E", () => {
         .slice(compactStart)
         .find((frame) => frame.type === "request.result" && frame.requestId === compactRequestId),
     );
-    expect(compactAccepted).toMatchObject({ result: { type: "accepted", duplicate: false } });
-    const compactOperationId =
-      compactAccepted.type === "request.result" && compactAccepted.result.type === "accepted"
-        ? compactAccepted.result.operationId
-        : "";
-    expect(
-      await untilFrame("compact busy", () =>
+    if (centralCompaction) {
+      expect(compactAccepted).toMatchObject({
+        result: { type: "rejected", error: { code: "unsupported", retryable: false } },
+      });
+      expect(
+        frames
+          .slice(compactStart)
+          .some(
+            (frame) =>
+              frame.type === "runtime.event" &&
+              (frame.event.type === "operation_started" ||
+                frame.event.type === "operation_finished"),
+          ),
+      ).toBe(false);
+      expect((await api(base, "GET", `/api/v1/orbs/${orbId}/history`)).body["records"]).toEqual(
+        compactedRecords,
+      );
+    } else {
+      expect(compactAccepted).toMatchObject({ result: { type: "accepted", duplicate: false } });
+      const compactOperationId =
+        compactAccepted.type === "request.result" && compactAccepted.result.type === "accepted"
+          ? compactAccepted.result.operationId
+          : "";
+      expect(
+        await untilFrame("compact busy", () =>
+          frames
+            .slice(compactStart)
+            .find(
+              (frame) =>
+                frame.type === "runtime.event" &&
+                frame.event.type === "status" &&
+                frame.event.work === "compaction" &&
+                frame.event.operationId === compactOperationId,
+            ),
+        ),
+      ).toMatchObject({
+        event: { activity: "busy", work: "compaction", compactionAfterId: compactAfterId },
+      });
+      await untilFrame("native compaction history", () =>
+        frames
+          .slice(compactStart)
+          .find((frame) => frame.type === "history.record" && frame.record.type === "compaction"),
+      );
+      const compactFinished = await untilFrame("compact finished", () =>
         frames
           .slice(compactStart)
           .find(
             (frame) =>
               frame.type === "runtime.event" &&
-              frame.event.type === "status" &&
-              frame.event.work === "compaction" &&
+              frame.event.type === "operation_finished" &&
               frame.event.operationId === compactOperationId,
           ),
-      ),
-    ).toMatchObject({
-      event: { activity: "busy", work: "compaction", compactionAfterId: compactAfterId },
-    });
-    await untilFrame("native compaction history", () =>
-      frames
-        .slice(compactStart)
-        .find((frame) => frame.type === "history.record" && frame.record.type === "compaction"),
-    );
-    const compactFinished = await untilFrame("compact finished", () =>
-      frames
-        .slice(compactStart)
-        .find(
-          (frame) =>
-            frame.type === "runtime.event" &&
-            frame.event.type === "operation_finished" &&
-            frame.event.operationId === compactOperationId,
-        ),
-    );
-    expect(compactFinished).toMatchObject({ event: { outcome: "completed" } });
-    expect(
-      frames
-        .slice(compactStart)
-        .some((frame) => frame.type === "runtime.event" && frame.event.type === "output_patch"),
-    ).toBe(false);
-    const compactDuplicateStart = frames.length;
-    socket.send(
-      JSON.stringify({
-        v: 1,
-        type: "client.request",
-        requestId: compactRequestId,
-        action: compactAction,
-      }),
-    );
-    expect(
-      await untilFrame("compact duplicate", () =>
+      );
+      expect(compactFinished).toMatchObject({ event: { outcome: "completed" } });
+      expect(
         frames
-          .slice(compactDuplicateStart)
-          .find((frame) => frame.type === "request.result" && frame.requestId === compactRequestId),
-      ),
-    ).toMatchObject({
-      result: { type: "accepted", operationId: compactOperationId, duplicate: true },
-    });
-    const compactedRecords = await waitFor(
-      "compaction replicated",
-      async () => {
-        const snapshot = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
-        const records = snapshot.body["records"] as { id: string; type: string }[];
-        return records.some((record) => record.type === "compaction") ? records : null;
-      },
-      { timeoutMs: 60_000, intervalMs: 200 },
-    );
+          .slice(compactStart)
+          .some((frame) => frame.type === "runtime.event" && frame.event.type === "output_patch"),
+      ).toBe(false);
+      const compactDuplicateStart = frames.length;
+      socket.send(
+        JSON.stringify({
+          v: 1,
+          type: "client.request",
+          requestId: compactRequestId,
+          action: compactAction,
+        }),
+      );
+      expect(
+        await untilFrame("compact duplicate", () =>
+          frames
+            .slice(compactDuplicateStart)
+            .find(
+              (frame) => frame.type === "request.result" && frame.requestId === compactRequestId,
+            ),
+        ),
+      ).toMatchObject({
+        result: { type: "accepted", operationId: compactOperationId, duplicate: true },
+      });
+      compactedRecords = await waitFor(
+        "compaction replicated",
+        async () => {
+          const snapshot = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
+          const records = snapshot.body["records"] as { id: string; type: string }[];
+          return records.some((record) => record.type === "compaction") ? records : null;
+        },
+        { timeoutMs: 60_000, intervalMs: 200 },
+      );
+    }
     const compactCalls = await fakeControl(fake.sessionKey, "/requests");
     expect(
       Array.isArray(compactCalls)
         ? compactCalls.filter((call: { matchedRuleIndex?: number }) => call.matchedRuleIndex === 3)
         : [],
-    ).toHaveLength(1);
+    ).toHaveLength(centralCompaction ? 0 : 1);
     socket.close();
 
     // Controlled stop: drain, then host stop (docs/testing.md step 8).
@@ -2052,9 +2173,8 @@ describe("full slice E2E", () => {
     expect(JSON.stringify(stoppedRecords)).toContain("The check succeeded: E2E_TOOL_OK.");
     expect(await (await fetch(hostedUrl)).text()).toContain("replacement");
 
-    // No human message is sent in either restart leg. The runtime must wake
-    // Pi itself, and the new request must carry the restart context as user
-    // role (a Pi custom message), not mutate the system prompt.
+    // SDK restarts infer from a custom user-role notice. Central process
+    // restarts preserve the conversation; a real user turn checks fresh instructions.
     for (const [index, reply] of ["E2E_RESTART_NOTICE_OK", "E2E_REPLACEMENT_NOTICE_OK"].entries()) {
       if (index === 1) {
         expect(
@@ -2080,7 +2200,40 @@ describe("full slice E2E", () => {
           await restartControlPlaneWithSpec("restart-notice-spec", 1);
         }
       }
+      const restartHistoryBefore = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
+      const restartCallsBefore = await fakeControl(fake.sessionKey, "/requests");
+      const restartCallCount = Array.isArray(restartCallsBefore) ? restartCallsBefore.length : -1;
+      expect(restartCallCount).toBeGreaterThanOrEqual(0);
       expect((await api(base, "POST", `/api/v1/orbs/${orbId}/start`)).status).toBe(202);
+      if (PROCESS_BACKEND) {
+        await waitFor(
+          "restarted conversation ready",
+          async () => {
+            const view = await api(base, "GET", `/api/v1/orbs/${orbId}`);
+            if (view.body["state"] === "failed")
+              throw new FatalProbeError(String(view.body["lastError"]));
+            return view.body["state"] === "running" && view.body["activity"] === "idle"
+              ? true
+              : null;
+          },
+          { timeoutMs: 300_000, intervalMs: 1_000 },
+        );
+        const restartedHistory = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
+        const beforeRecords = restartHistoryBefore.body["records"] as DisplayRecord[];
+        expect(
+          (restartedHistory.body["records"] as DisplayRecord[]).slice(0, beforeRecords.length),
+        ).toEqual(beforeRecords);
+        expect(restartedHistory.body["session"]).toEqual(restartHistoryBefore.body["session"]);
+        expect(JSON.stringify(restartedHistory.body["records"])).not.toContain(reply);
+        expect(await fakeControl(fake.sessionKey, "/requests")).toHaveLength(restartCallCount);
+        expect(
+          (
+            await api(base, "PUT", `/api/v1/orbs/${orbId}/messages/${randomUUID()}`, {
+              content: [{ type: "text", text: "Check the E2E restarted session" }],
+            })
+          ).status,
+        ).toBe(202);
+      }
       await waitFor(
         reply,
         async () => {
@@ -2094,12 +2247,10 @@ describe("full slice E2E", () => {
       );
       expect(await computeIncarnation(orbId)).toBe(index);
       expect(await (await fetch(hostedUrl)).text()).toContain("replacement");
-      const warning = PROCESS_BACKEND
-        ? "Other processes may still be running"
-        : "All processes running before the restart were killed";
+      const warning = "All processes running before the restart were killed";
       const history = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
       const serialized = JSON.stringify(history.body["records"]);
-      expect(serialized).toContain(warning);
+      if (!PROCESS_BACKEND) expect(serialized).toContain(warning);
       const replica = JSON.stringify(
         (await readReplicatedHistorySnapshot(controlPlane, orbId)).records,
       );
@@ -2108,12 +2259,13 @@ describe("full slice E2E", () => {
       expect(serialized).not.toContain("PERSONAL_E2E_");
       expect(serialized).not.toContain("PROJECT_E2E_");
       const records = history.body["records"] as DisplayRecord[];
-      expect(
-        records.filter(
-          (record) =>
-            record.type === "event" && record.custom?.customType === "pi-orb.host-restarted",
-        ),
-      ).toHaveLength(index + 1);
+      if (!PROCESS_BACKEND)
+        expect(
+          records.filter(
+            (record) =>
+              record.type === "event" && record.custom?.customType === "pi-orb.host-restarted",
+          ),
+        ).toHaveLength(index + 1);
       const calls: unknown = await fakeControl(fake.sessionKey, "/requests");
       expect(
         Array.isArray(calls) &&
@@ -2121,20 +2273,43 @@ describe("full slice E2E", () => {
             const effectiveInstructions = effectiveOpenAIResponseInstructions(call.body);
             return (
               call.status === 200 &&
-              call.matchedRuleIndex === index + 4 &&
+              call.matchedRuleIndex === 4 + index * (PROCESS_BACKEND ? 2 : 1) &&
               !effectiveInstructions.includes("PROJECT_E2E_FIRST_BOOT") &&
               effectiveInstructions.includes("PROJECT_E2E_NEXT_BOOT") === (index === 0) &&
               !effectiveInstructions.includes("PERSONAL_E2E_FIRST_BOOT") &&
               effectiveInstructions.includes("PERSONAL_E2E_NEXT_BOOT") === (index === 0) &&
               call.body?.model === "gpt-6.1-sol" &&
               call.body?.reasoning?.effort === "low" &&
-              call.body?.input?.some(
-                (message: { role?: string; content?: unknown }) =>
-                  message.role === "user" && JSON.stringify(message.content).includes(warning),
-              )
+              (PROCESS_BACKEND
+                ? call.body?.input?.some(
+                    (message: { role?: string; content?: unknown }) =>
+                      message.role === "user" &&
+                      JSON.stringify(message.content).includes("Check the E2E restarted session"),
+                  ) &&
+                  !JSON.stringify(call.body?.input).includes("pi-orb.host-restarted") &&
+                  !JSON.stringify(call.body?.input).includes(warning)
+                : call.body?.input?.some(
+                    (message: { role?: string; content?: unknown }) =>
+                      message.role === "user" && JSON.stringify(message.content).includes(warning),
+                  ))
             );
           }),
       ).toBe(true);
+      if (PROCESS_BACKEND) {
+        await waitFor(
+          "restart verification notification inference recorded",
+          async () => {
+            const recorded: unknown = await fakeControl(fake.sessionKey, "/requests");
+            return Array.isArray(recorded) &&
+              recorded.some(
+                (call) => call.status === 200 && call.matchedRuleIndex === 5 + index * 2,
+              )
+              ? true
+              : null;
+          },
+          { timeoutMs: 30_000, intervalMs: 200 },
+        );
+      }
       expect((await api(base, "POST", `/api/v1/orbs/${orbId}/stop`)).status).toBe(202);
       await waitFor(
         "notified orb stopped",
@@ -2144,6 +2319,9 @@ describe("full slice E2E", () => {
             : null,
         { timeoutMs: 120_000, intervalMs: 1_000 },
       );
+      if (PROCESS_BACKEND) {
+        expect(await fakeControl(fake.sessionKey, "/requests")).toHaveLength(restartCallCount + 2);
+      }
     }
 
     // Whole-project deletion fans out through the same deletion-grade cleanup.
@@ -2243,7 +2421,7 @@ describe("full slice E2E", () => {
         return Array.isArray(calls) &&
           calls.some(
             (call) =>
-              call.matchedRuleIndex === 6 &&
+              call.matchedRuleIndex === (PROCESS_BACKEND ? 8 : 6) &&
               call.status === 200 &&
               effectiveOpenAIResponseInstructions(call.body).includes(timezoneLine),
           )
@@ -2269,11 +2447,23 @@ describe("full slice E2E", () => {
       async () => {
         const recorded: unknown = await fakeControl(fake.sessionKey, "/requests");
         return Array.isArray(recorded) &&
-          recorded.some((call) => call.status === 200 && call.matchedRuleIndex === 7)
+          recorded.some(
+            (call) => call.status === 200 && call.matchedRuleIndex === (PROCESS_BACKEND ? 9 : 7),
+          )
           ? true
           : null;
       },
       { timeoutMs: 30_000, intervalMs: 200 },
+    );
+    await waitFor(
+      "spawned execution ready for terminal",
+      async () => {
+        const view = await api(base, "GET", `/api/v1/orbs/${spawnedOrbId}`);
+        if (view.body["state"] === "failed")
+          throw new FatalProbeError(`spawned execution failed: ${JSON.stringify(view.body)}`);
+        return view.body["state"] === "running" ? true : null;
+      },
+      { timeoutMs: 300_000, intervalMs: 1_000 },
     );
     const spawnedView = await api(base, "GET", `/api/v1/orbs/${spawnedOrbId}`);
     const spawnedSelf = await terminalRun(
@@ -2361,6 +2551,7 @@ describe("full slice E2E", () => {
           browserPayloads.push(text);
           const frame = JSON.parse(text);
           if (frame.type === "history.record") appliedCursor = frame.record.id;
+          uploadPhases?.observeFrame(frame);
         });
         transport.on("framesent", ({ payload }) => {
           const frame = JSON.parse(String(payload));
@@ -2391,6 +2582,7 @@ describe("full slice E2E", () => {
       expect(browserPayloads.join("\n")).not.toContain('"arguments"');
       // The following upload submits a real inbox message and completes inference
       // after cached browser→runtime handoff, without another model script rule.
+      uploadPhases = new UploadContinuationPhases();
       const choosing = page.waitForEvent("filechooser");
       await page.getByRole("button", { name: "Upload files", exact: true }).click();
       await (await choosing).setFiles([
@@ -2454,7 +2646,9 @@ describe("full slice E2E", () => {
       async () => {
         const recorded: unknown = await fakeControl(fake.sessionKey, "/requests");
         return Array.isArray(recorded) &&
-          recorded.some((call) => call.status === 200 && call.matchedRuleIndex === 10)
+          recorded.some(
+            (call) => call.status === 200 && call.matchedRuleIndex === (PROCESS_BACKEND ? 12 : 10),
+          )
           ? true
           : null;
       },
@@ -2550,14 +2744,19 @@ describe("full slice E2E", () => {
       },
     );
     expect(archiveMessage.status).toBe(202);
-    await waitFor(
-      "self-archive complete",
-      async () => {
-        const view = await api(base, "GET", `/api/v1/orbs/${secondOrbId}`);
-        return view.body["state"] === "archived" ? true : null;
-      },
-      { timeoutMs: 240_000, intervalMs: 1_000 },
-    );
+    try {
+      await waitFor(
+        "self-archive complete",
+        async () => {
+          const view = await api(base, "GET", `/api/v1/orbs/${secondOrbId}`);
+          return view.body["state"] === "archived" ? true : null;
+        },
+        { timeoutMs: 240_000, intervalMs: 1_000 },
+      );
+    } catch (error) {
+      await captureOrbFailure(secondOrbId, error);
+      throw error;
+    }
     const archiveHistory = await api(base, "GET", `/api/v1/orbs/${secondOrbId}/history`);
     expect(
       JSON.stringify((await readReplicatedHistorySnapshot(controlPlane, secondOrbId)).records),

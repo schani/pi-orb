@@ -5,7 +5,7 @@ import WebSocket from "ws";
 import {
   api,
   type ControlPlaneHandle,
-  createFakeSession,
+  createFakeSession as createHostPiSession,
   deleteFakeSession,
   docker,
   type FakeSession,
@@ -17,6 +17,9 @@ import {
   waitFor,
   waitForPostgres,
 } from "./harness.ts";
+
+const createFakeSession = (name: string, scenario: unknown) =>
+  createHostPiSession(name, scenario, "host-pi");
 
 /**
  * Interrupted-turn resume against a real host kill (docs/lifecycle.md,
@@ -181,6 +184,7 @@ beforeAll(async () => {
   await waitForPostgres(PG_CONTAINER, "pi-orb", "pi_orb");
 
   controlPlane = await startControlPlane({
+    agentBackend: "host-pi",
     databaseUrl: `postgres://pi-orb:pi-orb@127.0.0.1:${PG_PORT}/pi_orb`,
     port: CP_PORT,
     fake,

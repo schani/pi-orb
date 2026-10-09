@@ -9,8 +9,12 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-code": "2.1.289",
+    "@earendil-works/chord": "1.0.0",
     "@earendil-works/pi-ai": "1.0.0",
+    "@earendil-works/pi-codemode": "1.0.0",
     "@earendil-works/pi-coding-agent": "file:../../vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz",
+    "@earendil-works/pi-durable": "1.0.0",
+    "@earendil-works/pi-mcp": "1.0.0",
     "@electric-sql/pglite": "^0.5.4",
     "@fastify/static": "^10.1.2",
     "@fastify/websocket": "^11.0.0",

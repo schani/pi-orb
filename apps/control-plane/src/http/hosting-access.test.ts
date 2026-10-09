@@ -23,6 +23,8 @@ it("limits the configured runtime authority to runtime routes", () => {
     "/runtime",
     "/runtime/v1/orb/boot-context",
     "/runtime/v1/model-token?scope=test",
+    "/api/runtime/initial-checkout?poll=1",
+    "/api/runtime/alert",
   ])
     expect(access.decide({ method: "POST", path, host: "broker.test:8443" }).kind).toBe("allow");
   for (const path of [
@@ -32,12 +34,19 @@ it("limits the configured runtime authority to runtime routes", () => {
     "/s/orb/index.html",
     "/runtime-other",
     "/runtimeevil",
+    "/api/runtime/initial-checkout/extra",
+    "/api/runtime/initial-checkout-other",
+    "/api/runtime/alert/extra",
+    "/api/runtime/alerts",
   ])
     expect(access.decide({ method: "GET", path, host: "broker.test:8443" }).kind).toBe("reject");
-  for (const host of ["broker.test", "unknown.test", "broker.test:8444"])
-    expect(access.decide({ method: "POST", path: "/runtime/v1/model-token", host }).kind).toBe(
-      "reject",
-    );
+  for (const path of [
+    "/runtime/v1/model-token",
+    "/api/runtime/initial-checkout",
+    "/api/runtime/alert",
+  ])
+    for (const host of ["broker.test", "unknown.test", "broker.test:8444", "files.test"])
+      expect(access.decide({ method: "POST", path, host }).kind).toBe("reject");
   expect(
     access.decide({ method: "GET", path: "/runtime/v1/orb/boot-context", host: "files.test" }).kind,
   ).toBe("isolated_not_found");
@@ -190,6 +199,23 @@ it("records sanitized host and route denials, never accepted requests", async ()
   const cases = [
     {
       host: "secret.evil.test",
+      url: "/api/runtime/initial-checkout?token=secret",
+      reason: "unknown_host",
+      surface: "unknown",
+      route: "initial_checkout",
+      status: 403,
+    },
+    {
+      host: "secret.evil.test",
+      url: "/api/runtime/alert?token=secret",
+      method: "POST" as const,
+      reason: "unknown_host",
+      surface: "unknown",
+      route: "runtime_alert",
+      status: 403,
+    },
+    {
+      host: "secret.evil.test",
       url: "/?code=secret",
       reason: "unknown_host",
       surface: "unknown",
@@ -251,6 +277,8 @@ it("records sanitized host and route denials, never accepted requests", async ()
       reason: test.reason,
       surface: test.surface,
       requestId: expect.any(String),
+      method: test.method ?? "GET",
+      route: test.route ?? "other",
     });
   }
   expect(calls).toBe(0);

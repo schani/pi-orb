@@ -3,9 +3,10 @@ import type { AddressInfo } from "node:net";
 import { RUNTIME_SUBPROTOCOL, TERMINAL_SUBPROTOCOL } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
-import { ResultAsync } from "neverthrow";
+import { ok, okAsync, ResultAsync } from "neverthrow";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
+import type { AgentPlane } from "../domain/agent-ports.ts";
 import type { OrbHostProvider } from "../domain/ports.ts";
 import { makeHarness, makeOrbRow } from "../testkit/fixtures.ts";
 import { registerLiveProxy } from "./live-proxy.ts";
@@ -98,6 +99,71 @@ describe("live proxy", () => {
     }
   });
 
+  it.each(["creating", "starting", "stopped", "failed"] as const)(
+    "attaches central conversation and visible presence while compute is %s without a host",
+    async (state) => {
+      const harness = makeHarness();
+      const orbId = "central-orb";
+      harness.store.seedOrb(makeOrbRow(orbId, "project-a", state, { hostRef: null }));
+      const session = {
+        runtimeInstanceId: "central",
+        snapshot: () =>
+          ok({
+            orbId,
+            runtimeInstanceId: "central",
+            activity: "idle" as const,
+            session: { id: "session", overflow: { harness: "pi-durable" } },
+            records: [],
+            headId: null,
+          }),
+        liveView: () => null,
+        subscribe: () => () => undefined,
+        request: () => okAsync({ type: "accepted" as const, operationId: "op", duplicate: false }),
+      };
+      let opened = false;
+      const plane = {
+        placement: "central",
+        session: () => (opened ? session : null),
+        readSession: () => {
+          opened = true;
+          return okAsync(session);
+        },
+        health: () => {
+          throw new Error("passive attachment must not open Harness");
+        },
+      } as unknown as AgentPlane;
+      const app = Fastify({ logger: false });
+      openServers.push({ close: () => app.close() });
+      await registerLiveProxy(app, new NoSimulationTask("central attach", false), {
+        ...harness.deps,
+        agentPlane: plane,
+      });
+      await app.listen({ host: "127.0.0.1", port: 0 });
+      const address = app.server.address() as AddressInfo;
+      const browser = new WebSocket(
+        `ws://127.0.0.1:${address.port}/api/v1/orbs/${orbId}/live`,
+        RUNTIME_SUBPROTOCOL,
+      );
+      openServers.push({ close: async () => browser.terminate() });
+      const first = Promise.race([
+        once(browser, "message").then(([data]) => JSON.parse(data.toString()).type),
+        once(browser, "close").then(() => "closed"),
+      ]);
+      await once(browser, "open");
+      browser.send(
+        JSON.stringify({
+          v: 1,
+          type: "client.hello",
+          clientInstanceId: "tab",
+          afterRecordId: null,
+        }),
+      );
+      browser.send(JSON.stringify({ v: 1, type: "client.presence", visible: true }));
+      expect(await first).toBe("server.welcome");
+      expect(opened).toBe(true);
+      await until(() => harness.deps.control.hasVisibleBrowser(orbId));
+    },
+  );
   it("rejects a connection covered by a concurrent stopping marker", async () => {
     const harness = makeHarness();
     const orbId = "orb-concurrent-stop";
@@ -182,6 +248,13 @@ describe("live proxy", () => {
     await registerLiveProxy(app, new NoSimulationTask("live proxy test", false), {
       ...harness.deps,
       hostProvider,
+      agentPlane: {
+        placement: "host",
+        session: () => null,
+        health: () => {
+          throw new Error("guest transport required");
+        },
+      } as unknown as AgentPlane,
     });
     await app.listen({ host: "127.0.0.1", port: 0 });
     const proxyAddress = app.server.address() as AddressInfo;
@@ -216,7 +289,9 @@ describe("live proxy", () => {
     openServers.push({ close: () => closeWebSocketServer(runtime) });
     await once(runtime, "listening");
     const runtimeAddress = runtime.address() as AddressInfo;
-    runtime.on("connection", (socket) => {
+    let forwardedHeaders: Record<string, unknown> = {};
+    runtime.on("connection", (socket, request) => {
+      forwardedHeaders = request.headers;
       socket.on("message", (data, isBinary) => socket.send(data, { binary: isBinary }));
     });
 
@@ -252,6 +327,15 @@ describe("live proxy", () => {
           runtimeAddress: { baseUrl: `http://127.0.0.1:${runtimeAddress.port}` },
         })),
     };
+    hostProvider.executionBinding = () =>
+      ResultAsync.fromSafePromise(
+        Promise.resolve({
+          baseUrl: `http://127.0.0.1:${runtimeAddress.port}`,
+          token: "scoped-secret",
+          incarnation: "0",
+          cwd: "/workspace",
+        }),
+      );
     const app = Fastify({ logger: false });
     openServers.push({ close: () => app.close() });
     await registerLiveProxy(app, new NoSimulationTask("terminal proxy test", false), {
@@ -270,12 +354,20 @@ describe("live proxy", () => {
     const echoed = once(browser, "message");
     browser.send(Buffer.from([0, 1, 2, 255]));
     const [data, isBinary] = await echoed;
+    expect(forwardedHeaders["authorization"]).toBe("Bearer scoped-secret");
+    expect(forwardedHeaders["x-orb-incarnation"]).toBe("0");
     expect(isBinary).toBe(true);
     expect([...Buffer.from(data as Buffer)]).toEqual([0, 1, 2, 255]);
 
     const closed = once(browser, "close");
-    harness.deps.control.closeBrowserConnections(orbId);
+    let conversationClosed = false;
+    harness.deps.control.registerBrowserConnection(orbId, "conversation", () => {
+      conversationClosed = true;
+    });
+    harness.deps.control.closeBrowserConnections(orbId, "execution");
     await closed;
+    expect(conversationClosed).toBe(false);
+    await until(() => runtime.clients.size === 0);
   });
 
   it("consumes presence frames, tracks visibility, and touches last_busy_at on requests", async () => {

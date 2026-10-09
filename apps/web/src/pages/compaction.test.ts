@@ -1,6 +1,8 @@
+import type { OrbView } from "@pi-orb/protocol";
 import { expect, it } from "vitest";
 import {
   canRunComposerCommand,
+  canSendComposer,
   initialState,
   isLiveBusy,
   isLiveCompacting,
@@ -33,6 +35,18 @@ it("admits compact only on a synchronized running idle aggregate without mutatio
     { subagents: [{ id: "c", description: "child", phase: "running" as const }] },
   ])
     expect(canRunComposerCommand("running", { ...state, ...patch })).toBe(false);
+});
+
+it("queues ordinary inbox input while native compaction holds live command admission", () => {
+  const state = {
+    ...initialState("compact"),
+    historyLoaded: true,
+    compacting: true,
+    activity: "busy" as const,
+    pendingRequest: null,
+  };
+  expect(canSendComposer({ state: "running", centralAgent: false } as OrbView, state)).toBe(true);
+  expect(canRunComposerCommand("running", state)).toBe(false);
 });
 
 it.each([

@@ -95,9 +95,16 @@ describe("inbox incremental reads", () => {
           now: task.wallNow(),
         })
       )._unsafeUnwrap();
+    const batch = (
+      await harness.store.claimNextOrbMessageBatch(task, {
+        orbId: "orb-inbox",
+        now: task.wallNow(),
+      })
+    )._unsafeUnwrap();
     (
       await harness.store.failOrbMessageBatch(task, {
         orbId: "orb-inbox",
+        deliveryBatchId: batch[0]!.deliveryBatchId!,
         messageIds: ids,
         lastError: "rejected",
         now: task.wallNow(),

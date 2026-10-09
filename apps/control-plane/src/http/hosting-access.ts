@@ -45,6 +45,8 @@ export interface HostingAccessOutcome {
   readonly reason: Extract<HostingAccessDecision, { kind: "reject" }>["reason"] | "files_route";
   readonly surface: "app" | "files" | "unknown";
   readonly requestId: string;
+  readonly method: string;
+  readonly route: "initial_checkout" | "runtime_alert" | "runtime" | "other";
 }
 
 export type HostingAccessOutcomeSink = (outcome: HostingAccessOutcome) => void;
@@ -116,6 +118,12 @@ function requestPath(path: string): string {
   return path.slice(0, end);
 }
 
+function runtimeRoute(path: string): HostingAccessOutcome["route"] {
+  if (path === "/api/runtime/initial-checkout") return "initial_checkout";
+  if (path === "/api/runtime/alert") return "runtime_alert";
+  return /^\/runtime(?:\/|$)/u.test(path) ? "runtime" : "other";
+}
+
 function isHostedPath(path: string): boolean {
   return /^\/s\/[^/]+\//u.test(path);
 }
@@ -176,7 +184,7 @@ export function createHostingAccessPolicy(
           : { kind: "isolated_not_found" };
       }
 
-      const runtimeRequest = /^\/runtime(?:\/|$)/u.test(path);
+      const runtimeRequest = runtimeRoute(path) !== "other";
       if (!appHosts.has(host.host) && !(runtimeRequest && host.host === runtime.value.host)) {
         return { kind: "reject", reason: "unknown_host" };
       }
@@ -226,7 +234,14 @@ export function registerHostingAccessGuard(
         : reason === "files_method" || reason === "files_websocket" || reason === "files_route"
           ? "files"
           : "app";
-    outcome?.({ event: "hosting_denial", reason, surface, requestId: request.id });
+    outcome?.({
+      event: "hosting_denial",
+      reason,
+      surface,
+      requestId: request.id,
+      method: request.method,
+      route: runtimeRoute(requestPath(request.raw.url ?? request.url)),
+    });
     if (decision.kind === "isolated_not_found") {
       return reply
         .status(404)

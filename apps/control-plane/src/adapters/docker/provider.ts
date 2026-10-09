@@ -28,6 +28,7 @@ import { specFingerprintOf } from "../spec-fingerprint.ts";
 import type { TailscaleHostOptions } from "../tailscale/client.ts";
 
 export interface DockerOrbHostProviderOptions {
+  readonly runtimeMode?: "pi" | "execution";
   /** Orb runtime image, e.g. "pi-orb-runtime:dev". */
   readonly image: string;
   /** Docker network shared by orb containers (and the control plane when containerized). */
@@ -210,6 +211,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
       network: this.options.network,
       controlPlaneUrl: this.controlPlaneUrl(),
       extraEnv: this.options.extraEnv ?? {},
+      runtimeMode: input.harness === "claude" ? "pi" : (this.options.runtimeMode ?? "pi"),
       skillsDir: IMAGE_SKILLS_DIR,
       tailscale:
         this.options.tailscale === undefined
@@ -637,6 +639,12 @@ export class DockerOrbHostProvider implements OrbHostProvider {
           `${HARNESS_ENV}=${request.bootstrap.harness ?? "pi"}`,
           "--env",
           `${SKILLS_DIR_ENV}=${IMAGE_SKILLS_DIR}`,
+          "--env",
+          `PI_ORB_RUNTIME_MODE=${request.bootstrap.harness === "claude" ? "pi" : (this.options.runtimeMode ?? "pi")}`,
+          "--env",
+          `PI_ORB_INITIAL_CHECKOUT_COMMIT=${request.bootstrap.initialCheckoutCommit ?? ""}`,
+          "--env",
+          `PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT=${request.bootstrap.awaitInitialCheckoutCommit ? "1" : ""}`,
           // HOME is part of the durable orb filesystem contract. Keep this
           // after extraEnv so composition cannot redirect home to the
           // disposable container layer.
@@ -802,6 +810,25 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     return this.inspect("observe", ref.resourceId, context).map((info) =>
       info === null ? null : this.toObservation(info),
     );
+  }
+
+  executionBinding(_task: SimulationTask, ref: OrbHostRef, context: OperationContext) {
+    return this.inspect("observe", ref.resourceId, context).andThen((info) => {
+      if (context.signal.aborted)
+        return err(providerError("observe", "cancelled", "execution binding cancelled", true));
+      if (info === null)
+        return err(providerError("observe", "unavailable", "execution host unavailable", true));
+      const host = this.toObservation(info);
+      const token = tokenFromInspect(info);
+      if (!host || host.state !== "running" || !host.runtimeAddress || !token)
+        return err(providerError("observe", "unavailable", "execution binding unavailable", true));
+      return ok({
+        baseUrl: host.runtimeAddress.baseUrl,
+        token,
+        incarnation: String(host.incarnation),
+        cwd: "/workspace/repo",
+      });
+    });
   }
 
   diagnose(

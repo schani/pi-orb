@@ -3,13 +3,19 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { detailContext, displayRecord } from "../testkit/display-fixtures.ts";
 import { DetailContent } from "./DetailBody.tsx";
-import { ToolActivity as BrowserToolActivity } from "./ToolActivity.tsx";
+import { ToolActivity as BrowserToolActivity, type LiveToolCall } from "./ToolActivity.tsx";
 
 type RawPair = {
   call: Extract<ContentBlock, { type: "tool_call" }>;
   result?: Extract<ContentBlock, { type: "tool_result" }>;
 };
-function ToolActivity({ persisted }: { persisted: readonly RawPair[] }) {
+function ToolActivity({
+  persisted = [],
+  live = [],
+}: {
+  persisted?: readonly RawPair[];
+  live?: readonly LiveToolCall[];
+}) {
   const projected = persisted.map(({ call, result }, index) => {
     const callRecordId = `call-${index}`;
     const callRecord = displayRecord({
@@ -40,7 +46,7 @@ function ToolActivity({ persisted }: { persisted: readonly RawPair[] }) {
     if (displayResult?.type !== "tool_result") throw new Error("expected result projection");
     return { call: displayCall, callRecordId, result: displayResult, resultRecordId };
   });
-  return <BrowserToolActivity persisted={projected} detailContext={detailContext()} />;
+  return <BrowserToolActivity persisted={projected} live={live} detailContext={detailContext()} />;
 }
 
 describe("background admission labels", () => {
@@ -320,6 +326,37 @@ describe("single-call categories", () => {
       expect(grouped.match(/<details\b/g)).toHaveLength(3);
     },
   );
+});
+
+describe("live tool progress", () => {
+  it("shows waiting in a single live MCP row without another disclosure", () => {
+    const html = renderToStaticMarkup(
+      <ToolActivity
+        live={[
+          {
+            callId: "mcp",
+            name: "mcp__fixture__echo",
+            state: "running",
+            message: "Waiting for execution.",
+          },
+        ]}
+      />,
+    );
+    expect(html).toContain("Waiting for execution.");
+    expect(html.match(/<details\b/g)).toHaveLength(1);
+  });
+
+  it("bounds generic progress in the header and does not expose the full output", () => {
+    const message = `Downloading\n${"x".repeat(10000)}END_OF_OUTPUT`;
+    const html = renderToStaticMarkup(
+      <ToolActivity live={[{ callId: "progress", name: "bash", state: "running", message }]} />,
+    );
+    const metric = html.match(/tool-activity-running">([^<]*)</)?.[1];
+    expect(metric).toContain("Downloading ");
+    expect(metric?.length).toBeLessThanOrEqual(161);
+    expect(metric).toContain("…");
+    expect(html).not.toContain("END_OF_OUTPUT");
+  });
 });
 
 describe("edit diff stats", () => {

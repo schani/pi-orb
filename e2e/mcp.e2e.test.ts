@@ -8,10 +8,10 @@ import { join } from "node:path";
 import type { CommittedDisplayDetail, DisplayHistoryView } from "@pi-orb/protocol";
 import { chromium, expect as expectPage } from "@playwright/test";
 import { build } from "vite";
-import { expect, it } from "vitest";
+import { it as baseIt, expect } from "vitest";
 import {
   api,
-  createFakeSession,
+  createFakeSession as createHostPiSession,
   FAKE_ORIGIN,
   FatalProbeError,
   fakeControl,
@@ -24,6 +24,11 @@ import {
 import { finishMcpFixture, MCP_FAILURE_DIRECTORY } from "./mcp-artifacts.ts";
 import { mcpFailureHistory, mcpFailureRequests } from "./mcp-diagnostics.ts";
 import { McpInferenceRouter } from "./mcp-inference-router.ts";
+
+const createFakeSession = (name: string, scenario: unknown) =>
+  createHostPiSession(name, scenario, "host-pi");
+
+const it = baseIt.skipIf(process.env["PI_ORB_E2E_BACKEND"] === "process");
 
 it("MCP traverses root, restricted and default general-purpose delegates → authenticated HTTPS; same-project orbs reuse configuration", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-mcp-e2e-"));
@@ -312,6 +317,7 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
   const oldCert = process.env["NODE_EXTRA_CA_CERTS"];
   process.env["NODE_EXTRA_CA_CERTS"] = cert;
   const cp = await startControlPlane({
+    agentBackend: "host-pi",
     port: 7169,
     fake: { ...fake, inferenceBaseUrl: `https://127.0.0.1:${address.port}/inference` },
     nameFake,

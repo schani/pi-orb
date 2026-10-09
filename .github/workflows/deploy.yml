@@ -113,6 +113,11 @@ jobs:
           install_components: beta
       - name: Configure keyless registry access
         run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+      - name: Verify monitor owner fleet before rollout
+        if: inputs.validate_release == ''
+        env:
+          PI_ORB_USER_ID: ${{ vars.PI_ORB_USER_ID }}
+        run: python3 -m infra.rollout_monitor --preflight "$RUNNER_TEMP/rollout-baseline.json"
       - name: Run the authoritative release transaction
         id: release
         env:
@@ -129,6 +134,21 @@ jobs:
           if [ -n "$VALIDATE_RELEASE" ]; then args+=(--validate "$VALIDATE_RELEASE"); fi
           if [ "$FIRST_CONSOLIDATION" = true ]; then args+=(--first-consolidation); fi
           exec ./infra/release.sh "${args[@]}"
+
+      - name: Observe central rollout independently for fifteen minutes
+        if: inputs.validate_release == ''
+        timeout-minutes: 25
+        env:
+          PI_ORB_USER_ID: ${{ vars.PI_ORB_USER_ID }}
+        run: python3 -m infra.rollout_monitor "$RUNNER_TEMP/release-result/release.json" "$RUNNER_TEMP/rollout-monitor.json" "$RUNNER_TEMP/rollout-baseline.json"
+      - name: Upload rollout monitor
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: rollout-monitor-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rollout-monitor.json
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Upload missing-orb navigation failure evidence
         if: failure()

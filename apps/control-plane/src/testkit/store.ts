@@ -10,6 +10,7 @@ import type {
   ActivityHeadlineRef,
   StoredActivityHeadline,
 } from "../domain/activity-headline-store.ts";
+import { acceptsOrbAgentCaller } from "../domain/agent-authorization.ts";
 import type {
   CommitPullError,
   ProjectConflict,
@@ -19,6 +20,7 @@ import type {
 } from "../domain/errors.ts";
 import { jsonEqual } from "../domain/json-equal.ts";
 import { logOrbEvent } from "../domain/log.ts";
+import { messageBatchId } from "../domain/message-batch.ts";
 import type {
   OrbDeletionRow,
   OrbMessagePoll,
@@ -564,6 +566,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
                 ...orb,
                 state: "deleting",
                 stateVersion: orb.stateVersion + 1,
+                agentAdmissionVersion: orb.agentAdmissionVersion + 1,
                 stateChangedAt: params.now,
                 updatedAt: params.now,
                 lastError: null,
@@ -724,10 +727,11 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       const caller = this.orbs.get(params.callerOrbId);
       if (
         caller === undefined ||
-        caller.state !== "running" ||
-        caller.runtimeTokenHash !== params.caller.runtimeTokenHash ||
-        caller.hostIncarnation !== params.caller.hostIncarnation ||
-        caller.hostDiscardThroughIncarnation !== null
+        !acceptsOrbAgentCaller(
+          caller,
+          this.projects.get(caller.projectId)?.ownerUserId,
+          params.caller,
+        )
       )
         return { reason: "unauthorized" as const };
       const project = this.projects.get(params.orb.projectId);
@@ -891,9 +895,21 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       // delivery now, a wake intent — never a lifecycle transition; the
       // reconciler's backstop owns that (docs/lifecycle.md, 2026-08-11).
       const cancelledSleep = params.cancelSleep !== false && orb.sleepId !== null;
-      const admittedOrb: OrbRow = cancelledSleep
-        ? { ...orb, sleepId: null, sleepUntil: null, stateVersion: orb.stateVersion + 1 }
-        : orb;
+      const clearsManual =
+        params.wake !== false &&
+        params.cancelSleep !== false &&
+        (orb.stopReason === "manual" || orb.stopReason === "sleep");
+      const admittedOrb: OrbRow =
+        cancelledSleep || clearsManual
+          ? {
+              ...orb,
+              sleepId: null,
+              sleepUntil: null,
+              stopReason: clearsManual ? null : orb.stopReason,
+              stateVersion: orb.stateVersion + 1,
+              agentAdmissionVersion: orb.agentAdmissionVersion + (clearsManual ? 1 : 0),
+            }
+          : orb;
       const autoStart =
         params.wake !== false &&
         (admittedOrb.state === "stopping" ||
@@ -1005,11 +1021,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       const orb = this.orbs.get(params.orbId);
       if (
         orb === undefined ||
-        orb.state !== "running" ||
         orb.sleepId !== null ||
-        orb.runtimeTokenHash !== params.caller.runtimeTokenHash ||
-        orb.hostIncarnation !== params.caller.hostIncarnation ||
-        orb.hostDiscardThroughIncarnation !== null ||
+        !acceptsOrbAgentCaller(orb, this.projects.get(orb.projectId)?.ownerUserId, params.caller) ||
         !Number.isFinite(sleepUntil) ||
         sleepUntil > 8_640_000_000_000_000
       )
@@ -1040,6 +1053,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         ...orb,
         sleepId: null,
         sleepUntil: null,
+        stopReason: orb.stopReason === "sleep" ? null : orb.stopReason,
+        agentAdmissionVersion: orb.agentAdmissionVersion + (orb.stopReason === "sleep" ? 1 : 0),
         stateVersion: orb.stateVersion + 1,
         updatedAt: params.now,
       };
@@ -1156,15 +1171,17 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       if (first.deliveryBatchId !== null) {
         return outstanding.filter((row) => row.deliveryBatchId === first.deliveryBatchId);
       }
-      const batchId = first.messageId;
       const systemIndex = outstanding.findIndex((row) => row.system !== null);
       const batch =
         first.system !== null
           ? [first]
           : outstanding.slice(0, systemIndex < 0 ? undefined : systemIndex);
       const claimedIds = new Set(
-        batch.filter((row) => row.status === "queued").map((row) => row.messageId),
+        batch
+          .filter((row) => row.status === "queued" && row.deliveryBatchId === null)
+          .map((row) => row.messageId),
       );
+      const batchId = messageBatchId([...claimedIds]);
       const updated = rows.map((row) =>
         claimedIds.has(row.messageId)
           ? {
@@ -1221,9 +1238,69 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     );
   }
 
+  cancelPendingOrbMessage(
+    task: SimulationTask,
+    params: {
+      orbId: string;
+      messageId: string;
+      caller: import("../domain/ports.ts").CentralAgentCaller;
+      now: number;
+    },
+  ): ResultAsync<"cancelled" | "active" | "missing", StoreError | StateConflict> {
+    return this.access(task, FAILPOINTS.storeWrite, "cancel pending orb message", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (
+        !orb ||
+        params.caller.orbId !== params.orbId ||
+        orb.projectId !== params.caller.projectId ||
+        this.projects.get(orb.projectId)?.ownerUserId !== params.caller.ownerUserId ||
+        orb.agentAdmissionVersion !== params.caller.agentAdmissionVersion ||
+        ["deleting", "archiving", "archived"].includes(orb.state)
+      )
+        return null;
+      const message = (this.messages.get(params.orbId) ?? []).find(
+        (row) => row.messageId === params.messageId,
+      );
+      if (!message || message.system !== null) return "missing" as const;
+      if (message.status === "failed")
+        return message.lastError === "Cancelled before agent admission"
+          ? ("cancelled" as const)
+          : ("missing" as const);
+      if (message.status === "delivered" || message.operationId !== null) return "active" as const;
+      this.messages.set(
+        params.orbId,
+        (this.messages.get(params.orbId) ?? []).map((row) =>
+          row.messageId === params.messageId
+            ? {
+                ...row,
+                status: "failed" as const,
+                lastError: "Cancelled before agent admission",
+                autoStart: false,
+                updatedAt: params.now,
+              }
+            : message.deliveryBatchId !== null &&
+                row.deliveryBatchId === message.deliveryBatchId &&
+                row.operationId === null &&
+                (row.status === "queued" || row.status === "delivering")
+              ? { ...row, status: "queued" as const, deliveryBatchId: null, updatedAt: params.now }
+              : row,
+        ),
+      );
+      return "cancelled" as const;
+    }).andThen((result) =>
+      result === null ? errAsync({ type: "state_conflict" as const }) : okAsync(result),
+    );
+  }
+
   failOrbMessageBatch(
     task: SimulationTask,
-    params: { orbId: string; messageIds: readonly string[]; lastError: string; now: number },
+    params: {
+      orbId: string;
+      messageIds: readonly string[];
+      deliveryBatchId: string;
+      lastError: string;
+      now: number;
+    },
   ): ResultAsync<void, StoreError> {
     return this.access(task, FAILPOINTS.storeWrite, "fail orb message batch", () => {
       const messageIds = new Set(params.messageIds);
@@ -1231,7 +1308,9 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       this.messages.set(
         params.orbId,
         rows.map((row) =>
-          messageIds.has(row.messageId) && (row.status === "queued" || row.status === "delivering")
+          messageIds.has(row.messageId) &&
+          row.deliveryBatchId === params.deliveryBatchId &&
+          (row.status === "queued" || row.status === "delivering")
             ? {
                 ...row,
                 status: "failed" as const,
@@ -1265,16 +1344,15 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       );
       const cancelledSleepId = orb.sleepId ?? wake?.messageId ?? null;
       const transitions = orb.state !== "stopping" && orb.state !== "stopped";
-      const overridesSleepStop = orb.state === "stopping" && orb.stopReason === "sleep";
-      const startsStopEpisode = transitions || overridesSleepStop;
-      const clearsSleep = orb.sleepId !== null;
+      const startsStopEpisode = transitions || orb.stopReason !== "manual";
       const updated: OrbRow = {
         ...orb,
         state: transitions ? "stopping" : orb.state,
-        stopReason: startsStopEpisode ? null : orb.stopReason,
+        stopReason: "manual",
+        agentAdmissionVersion: orb.agentAdmissionVersion + 1,
         sleepId: null,
         sleepUntil: null,
-        stateVersion: orb.stateVersion + (startsStopEpisode || clearsSleep ? 1 : 0),
+        stateVersion: orb.stateVersion + 1,
         stateChangedAt: startsStopEpisode ? params.now : orb.stateChangedAt,
         updatedAt: params.now,
       };
@@ -1331,6 +1409,9 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         updatedAt: params.now,
         lastError: null,
         stopReason: null,
+        agentAdmissionVersion:
+          orb.agentAdmissionVersion +
+          (orb.stopReason === "manual" || orb.stopReason === "sleep" ? 1 : 0),
       };
       this.orbs.set(orb.id, updated);
       return { outcome: "started" as const, orb: updated };
@@ -1354,10 +1435,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         orb === undefined ||
         orb.stateVersion !== params.expectedStateVersion ||
         (params.caller !== undefined &&
-          (orb.runtimeTokenHash !== params.caller.runtimeTokenHash ||
-            orb.hostIncarnation !== params.caller.hostIncarnation ||
-            orb.hostDiscardThroughIncarnation !== null ||
-            orb.state !== "running"))
+          !acceptsOrbAgentCaller(orb, this.projects.get(orb.projectId)?.ownerUserId, params.caller))
       ) {
         return { conflict: true as const, currentState: orb?.state };
       }
@@ -1456,6 +1534,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         ...orb,
         state: "archived",
         stateVersion: orb.stateVersion + 1,
+        agentAdmissionVersion: orb.agentAdmissionVersion + 1,
         stateChangedAt: params.now,
         updatedAt: params.now,
         archivedAt: params.now,
@@ -1490,10 +1569,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         orb === undefined ||
         orb.stateVersion !== params.expectedStateVersion ||
         (params.caller !== undefined &&
-          (orb.runtimeTokenHash !== params.caller.runtimeTokenHash ||
-            orb.hostIncarnation !== params.caller.hostIncarnation ||
-            orb.hostDiscardThroughIncarnation !== null ||
-            orb.state !== "running"))
+          !acceptsOrbAgentCaller(orb, this.projects.get(orb.projectId)?.ownerUserId, params.caller))
       ) {
         return { conflict: true as const, currentState: orb?.state };
       }
@@ -1501,6 +1577,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         ...orb,
         state: "deleting",
         stateVersion: orb.stateVersion + 1,
+        agentAdmissionVersion: orb.agentAdmissionVersion + 1,
         stateChangedAt: params.now,
         updatedAt: params.now,
         lastError: null,
@@ -1824,7 +1901,15 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         ...(params.hostRef !== undefined ? { hostRef: params.hostRef } : {}),
         ...(params.checkoutCommit !== undefined ? { checkoutCommit: params.checkoutCommit } : {}),
         ...(params.stopReason !== undefined ? { stopReason: params.stopReason } : {}),
-        ...(params.cancelSleep === true ? { sleepId: null, sleepUntil: null } : {}),
+        ...(params.cancelSleep === true
+          ? {
+              sleepId: null,
+              sleepUntil: null,
+              agentAdmissionVersion:
+                orb.agentAdmissionVersion +
+                (orb.stopReason === "manual" || orb.stopReason === "sleep" ? 1 : 0),
+            }
+          : {}),
       };
       this.orbs.set(orb.id, updated);
       return { conflict: false as const, row: updated };

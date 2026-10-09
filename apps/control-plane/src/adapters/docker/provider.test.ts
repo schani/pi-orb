@@ -83,6 +83,7 @@ it("launches only the controller's verified recovery proof, overriding extra env
 });
 
 interface ProviderOverrides {
+  readonly runtimeMode?: "pi" | "execution";
   readonly image?: string;
   readonly network?: string;
   readonly inventoryScope?: string;
@@ -102,6 +103,68 @@ function makeProvider(overrides: ProviderOverrides = {}): DockerOrbHostProvider 
 }
 
 /** Scripts a fresh (no existing container) provision against the CLI fake. */
+describe("execution bindings", () => {
+  beforeEach(() => dockerFake.reset());
+  it("returns authenticated immutable container binding", async () => {
+    dockerFake.install(() => ({
+      stdout: JSON.stringify([
+        {
+          Config: {
+            Env: [`${RUNTIME_TOKEN_ENV}=secret`],
+            Labels: { "pi-orb.orb-id": "orb-1", "pi-orb.host-incarnation": "9" },
+          },
+          Name: "/pi-orb-orb-1",
+          State: { Status: "running" },
+          NetworkSettings: { Ports: { "8080/tcp": [{ HostIp: "127.0.0.1", HostPort: "5555" }] } },
+        },
+      ]),
+    }));
+    const result = await makeProvider({ runtimeMode: "execution" }).executionBinding(
+      task,
+      { provider: "docker", resourceId: "pi-orb-orb-1" },
+      context,
+    );
+    expect(result.isOk()).toBe(true);
+    if (result.isOk())
+      expect(result.value).toEqual({
+        baseUrl: "http://127.0.0.1:5555",
+        token: "secret",
+        incarnation: "9",
+        cwd: "/workspace/repo",
+      });
+  });
+  it.each([
+    { harness: "pi", runtimeMode: "pi" },
+    { harness: "pi", runtimeMode: "execution" },
+    { harness: "claude", runtimeMode: "execution" },
+  ] as const)("launches selected %s role with pinned commit", async ({ harness, runtimeMode }) => {
+    installFreshHost();
+    const result = await makeProvider({ runtimeMode }).provision(
+      task,
+      {
+        ...request,
+        bootstrap: {
+          ...request.bootstrap,
+          harness,
+          initialCheckoutCommit: "a".repeat(40),
+          awaitInitialCheckoutCommit: true,
+        },
+      },
+      context,
+    );
+    expect(result.isOk()).toBe(true);
+    const launch = dockerFake.calls.find((args) => args[0] === "run") ?? [];
+    expect(envValue(launch, "PI_ORB_RUNTIME_MODE")).toBe(harness === "claude" ? "pi" : runtimeMode);
+    expect(envValue(launch, "PI_ORB_INITIAL_CHECKOUT_COMMIT")).toBe("a".repeat(40));
+    expect(envValue(launch, "PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT")).toBe("1");
+  });
+  it("passes the disabled initial-checkout barrier as an environment option", async () => {
+    const launch = await provisionArgv(makeProvider());
+    expect(envValue(launch, "PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT")).toBe("");
+    expect(launch.at(-1)).toBe("pi-orb-runtime:dev");
+  });
+});
+
 function installFreshHost(): void {
   let labels: Record<string, string> = {};
   dockerFake.install((args) => {
@@ -776,6 +839,7 @@ describe("DockerOrbHostProvider host specification", () => {
         network: "pi-orb",
         controlPlaneUrl: "http://host.docker.internal:3000",
         extraEnv: {},
+        runtimeMode: "pi",
         skillsDir: "/opt/pi-orb/skills",
         harness: "pi",
         tailscale: null,

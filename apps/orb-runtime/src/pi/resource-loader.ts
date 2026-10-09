@@ -1,6 +1,7 @@
 import { statSync } from "node:fs";
 import {
   DefaultResourceLoader,
+  loadSkills,
   type ResourceLoader,
   type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -13,6 +14,7 @@ import type {
 import { err, errAsync, ok, Result, ResultAsync } from "neverthrow";
 import type { HookEnvReport } from "../hooks/env-file.ts";
 import { bootHookPrompt } from "../hooks/prompt.ts";
+import { repositoryResources } from "../repository-resources.ts";
 import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { environmentPrompt } from "./environment-prompt.ts";
 import type { NativeMcpExtensionDeps } from "./extensions/index.ts";
@@ -44,17 +46,9 @@ export interface OrbResourceLoaderInput {
   readonly projectInstructions?: ProjectInstructions;
 }
 
-/**
- * Mirrors what `createAgentSession` builds when no `resourceLoader` is passed
- * (`new DefaultResourceLoader({ cwd, agentDir, settingsManager })` followed by
- * `reload()`), so supplying one loses none of the implicit behavior — AGENTS.md
- * context files, skills, prompts, themes, extensions all still load.
- *
- * The prompt is appended through `appendSystemPromptOverride`, not
- * `appendSystemPrompt`: the latter *replaces* the loader's discovery of
- * `APPEND_SYSTEM.md`, while the override runs on top of whatever was
- * discovered. `additionalSkillPaths` is likewise additive — it merges with the
- * user and project skill directories the SDK finds on its own.
+/** Managed prompts surround selected repository instructions. Skills use the
+ * repository root policy plus trusted bundled assets; SDK extension wiring is retained.
+ * Append overrides preserve SDK APPEND_SYSTEM.md discovery.
  */
 export function orbResourceLoaderOptions(input: OrbResourceLoaderInput): LoaderOptions {
   const previewHost = input.previewHost ?? null;
@@ -74,12 +68,33 @@ export function orbResourceLoaderOptions(input: OrbResourceLoaderInput): LoaderO
       ...(input.subagents ? { subagents: input.subagents } : {}),
       ...(input.streams ? { streams: input.streams } : {}),
     }),
-    agentsFilesOverride: (current) => ({
+    noContextFiles: true,
+    noSkills: true,
+    skillsOverride: () => {
+      const resources = repositoryResources(input.cwd);
+      if (resources.isErr())
+        return {
+          skills: [],
+          diagnostics: [{ type: "error" as const, path: input.cwd, message: resources.error }],
+        };
+      return loadSkills({
+        cwd: input.cwd,
+        agentDir: input.agentDir,
+        includeDefaults: false,
+        skillPaths: [
+          ...resources.value.skills,
+          ...(input.skillsDir === null ? [] : [input.skillsDir]),
+        ],
+      });
+    },
+    agentsFilesOverride: () => ({
       agentsFiles: [
         ...(personalContent === ""
           ? []
           : [{ path: "pi-orb:personal/AGENTS.md", content: personalContent }]),
-        ...current.agentsFiles,
+        ...repositoryResources(input.cwd)
+          .map((resources) => resources.instructions)
+          .unwrapOr([]),
         ...(projectContent === ""
           ? []
           : [{ path: "pi-orb:project/AGENTS.md", content: projectContent }]),
@@ -107,6 +122,8 @@ export function createOrbResourceLoader(
 ): ResultAsync<ResourceLoader, string> {
   const toMessage = (error: unknown): string =>
     error instanceof Error ? error.message : String(error);
+  const repository = repositoryResources(input.cwd);
+  if (repository.isErr()) return errAsync(repository.error);
   if (input.skillsDir !== null) {
     const skillsDir = input.skillsDir;
     const directory = Result.fromThrowable(

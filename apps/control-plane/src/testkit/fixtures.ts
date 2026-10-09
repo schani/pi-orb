@@ -311,6 +311,7 @@ export function makeOrbRow(
     lastBusyAt: null,
     uploadActiveUntil: null,
     stopReason: null,
+    agentAdmissionVersion: 0,
     sleepId: null,
     sleepUntil: null,
     lastMintAt: null,

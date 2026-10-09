@@ -7,11 +7,12 @@ import {
 import type { SimulationTask } from "determined";
 import { err, ok, type Result } from "neverthrow";
 import { withDeadline } from "./dst.ts";
+import { agentPlacement } from "./harness-agent-plane.ts";
 import type { ControlPlaneDeps } from "./ports.ts";
 
 type DetailError = {
   readonly type: "orb_missing" | "detail_missing" | "unavailable" | "invalid_session";
-  readonly source: "replica" | "runtime" | "orb";
+  readonly source: "replica" | "runtime" | "orb" | "agent";
 };
 type DetailRef = { orbId: string; sessionId: string; recordId: string; detailKey: string };
 
@@ -70,9 +71,10 @@ export async function readDisplayDetail(
         });
   }
   if (
-    orb.value.state !== "running" &&
-    orb.value.state !== "stopping" &&
-    orb.value.state !== "archiving"
+    agentPlacement(deps.agentPlane, orb.value) === "central" ||
+    (orb.value.state !== "running" &&
+      orb.value.state !== "stopping" &&
+      orb.value.state !== "archiving")
   )
     return err({
       type: orb.value.harnessSessionId === ref.sessionId ? "detail_missing" : "invalid_session",
@@ -130,6 +132,26 @@ export async function readLiveDisplayDetail(
   if (orb.isErr()) return err({ type: "unavailable", source: "orb" });
   if (orb.value === null || orb.value.state === "deleting")
     return err({ type: "orb_missing", source: "orb" });
+  if (agentPlacement(deps.agentPlane, orb.value) === "central") {
+    const session = deps.agentPlane?.session(ref.orbId) ?? null;
+    if (session === null) return err({ type: "unavailable", source: "agent" });
+    const snapshot = session.snapshot();
+    if (snapshot.isErr()) return err({ type: "unavailable", source: "agent" });
+    if (snapshot.value.session.id !== ref.sessionId)
+      return err({ type: "invalid_session", source: "agent" });
+    const live = session.liveView();
+    const block = live?.blocks.find((block) => block.blockId === ref.blockId);
+    if (live?.operationId !== ref.operationId || block?.blockType !== "reasoning")
+      return err({ type: "detail_missing", source: "agent" });
+    return ok({
+      v: 1,
+      sessionId: ref.sessionId,
+      operationId: ref.operationId,
+      blockId: ref.blockId,
+      state: "running",
+      body: { type: "reasoning", text: block.text },
+    });
+  }
   if (orb.value.state !== "running" || orb.value.hostRef === null)
     return err({ type: "unavailable", source: "runtime" });
   const address = await runtimeAddress(task, deps, orb.value.hostRef);
@@ -191,9 +213,10 @@ export async function readDisplayImage(
     return ok({ mediaType: image.mediaType, data: Buffer.from(image.data, "base64") });
   }
   if (
-    orb.value.state !== "running" &&
-    orb.value.state !== "stopping" &&
-    orb.value.state !== "archiving"
+    agentPlacement(deps.agentPlane, orb.value) === "central" ||
+    (orb.value.state !== "running" &&
+      orb.value.state !== "stopping" &&
+      orb.value.state !== "archiving")
   )
     return err({
       type: orb.value.harnessSessionId === ref.sessionId ? "detail_missing" : "invalid_session",

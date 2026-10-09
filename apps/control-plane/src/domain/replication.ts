@@ -1,7 +1,9 @@
 import type { PullHistoryResponse } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
+import { agentHistory } from "./agent-orchestration.ts";
 import { sleepResult, withDeadline } from "./dst.ts";
 import { formatOrbFailure, type ReplicationIntegrityError, type StoreError } from "./errors.ts";
+import { agentPlacement } from "./harness-agent-plane.ts";
 import { logOrbEvent } from "./log.ts";
 import { generateOrbName } from "./orb-naming.ts";
 import type { ControlPlaneDeps, OrbHostRef } from "./ports.ts";
@@ -123,7 +125,7 @@ export async function failOrbForIntegrity(
       reason: "failed",
       failure_code: "replication_integrity",
     });
-    deps.control.clearOrb(orbId);
+    deps.control.clearOrb(orbId, agentPlacement(deps.agentPlane, orb) === "central");
     return true;
   }
   return false;
@@ -183,39 +185,48 @@ export async function pollOrbUntilCaughtUp(
     const orb = orbResult.value;
     if (
       orb === null ||
-      (orb.state !== "running" && orb.state !== "stopping" && orb.state !== "archiving")
+      (agentPlacement(deps.agentPlane, orb) === "central"
+        ? orb.state === "deleting" || orb.state === "archived"
+        : orb.state !== "running" && orb.state !== "stopping" && orb.state !== "archiving")
     ) {
       return { type: "orb_gone" };
     }
-    const hostRef = orb.hostRef;
-    if (hostRef === null) return { type: "retryable", message: "orb has no host yet" };
-    const ref: OrbHostRef = { provider: deps.hostProvider.kind, resourceId: hostRef };
+    let baseUrl = "";
+    let hostStartedAt: number | null = null;
+    if (agentPlacement(deps.agentPlane, orb) !== "central") {
+      const hostRef = orb.hostRef;
+      if (hostRef === null) return { type: "retryable", message: "orb has no host yet" };
+      const ref: OrbHostRef = { provider: deps.hostProvider.kind, resourceId: hostRef };
 
-    const observed = await withDeadline(
-      task,
-      deps.constants.providerOperationTimeoutMs,
-      "observe host for pull",
-      (context) => deps.hostProvider.observe(task, ref, context),
-    );
-    if (observed.isErr()) return { type: "retryable", message: observed.error.message };
-    const observation = observed.value;
-    if (
-      observation === null ||
-      observation.state !== "running" ||
-      observation.runtimeAddress === undefined
-    ) {
-      return { type: "retryable", message: "host is not running" };
+      const observed = await withDeadline(
+        task,
+        deps.constants.providerOperationTimeoutMs,
+        "observe host for pull",
+        (context) => deps.hostProvider.observe(task, ref, context),
+      );
+      if (observed.isErr()) return { type: "retryable", message: observed.error.message };
+      const observation = observed.value;
+      if (
+        observation === null ||
+        observation.state !== "running" ||
+        observation.runtimeAddress === undefined
+      ) {
+        return { type: "retryable", message: "host is not running" };
+      }
+      baseUrl = observation.runtimeAddress.baseUrl;
+      hostStartedAt = observation.lastStartedAt ?? null;
     }
-    const baseUrl = observation.runtimeAddress.baseUrl;
 
     const pulled = await withDeadline(
       task,
       deps.constants.runtimeRequestTimeoutMs,
       "history pull request",
       (context) => {
-        deps.control.noteRuntimeRequestStarted(orbId, task.monotonicNow());
-        return deps.runtimeClient.pullHistory(
+        if (!deps.agentPlane) deps.control.noteRuntimeRequestStarted(orbId, task.monotonicNow());
+        return agentHistory(
           task,
+          deps,
+          orb,
           { baseUrl, after: orb.replicationCursor, limit: deps.constants.pullLimit },
           context,
         );
@@ -223,12 +234,14 @@ export async function pollOrbUntilCaughtUp(
     );
     if (pulled.isErr()) {
       const error = pulled.error;
-      if (error.answered && error.code !== "cursor_not_found") {
-        const inspected = await inspectFailedRuntime(task, deps, orb, baseUrl);
-        if (inspected.isErr()) return retryableStore(inspected.error);
-        if (inspected.value) return { type: "orb_gone" };
+      if (agentPlacement(deps.agentPlane, orb) !== "central" && error.answered) {
+        if (error.code !== "cursor_not_found") {
+          const inspected = await inspectFailedRuntime(task, deps, orb, baseUrl);
+          if (inspected.isErr()) return retryableStore(inspected.error);
+          if (inspected.value) return { type: "orb_gone" };
+        }
+        deps.control.noteRuntimeAnswered(orbId, task.monotonicNow());
       }
-      if (error.answered) deps.control.noteRuntimeAnswered(orbId, task.monotonicNow());
       if (error.code === "cursor_not_found") {
         const integrity: ReplicationIntegrityError = {
           type: "replication_integrity",
@@ -278,14 +291,15 @@ export async function pollOrbUntilCaughtUp(
     }
 
     // A successful pull is the running-orb liveness/activity signal.
-    deps.control.recordPullSuccess(
-      orbId,
-      task.monotonicNow(),
-      response.activity,
-      response.runtimeInstanceId,
-      observation.lastStartedAt ?? null,
-    );
-    if (response.activity === "busy") {
+    if (agentPlacement(deps.agentPlane, orb) !== "central")
+      deps.control.recordPullSuccess(
+        orbId,
+        task.monotonicNow(),
+        response.activity,
+        response.runtimeInstanceId,
+        hostStartedAt,
+      );
+    if (agentPlacement(deps.agentPlane, orb) !== "central" && response.activity === "busy") {
       // Advisory idle-auto-stop timestamp (docs/lifecycle.md); a failure is ignored — the
       // next busy pull refreshes it again.
       await deps.store.touchLastBusy(task, { orbId, now: task.wallNow() });

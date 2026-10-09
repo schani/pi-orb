@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import re
 import os
 import subprocess
@@ -17,6 +18,73 @@ def steps(workflow):
 
 
 class BrowserEvidenceTest(unittest.TestCase):
+    def test_durable_qualification_covers_final_source_without_deployment(self):
+        ci = (ROOT / '.github/workflows/ci.yml').read_text()
+        for value in ('postgres:16', 'PI_ORB_TEST_DATABASE_URL:', 'PI_ORB_DURABLE_PG_TEST_URL:'):
+            self.assertIn(value, ci)
+        self.assertIn('vitest run --maxWorkers=1 --no-file-parallelism', ci)
+        self.assertIn('npm run test:infra', ci)
+        docker = (ROOT / '.github/workflows/e2e.yml').read_text()
+        self.assertIn('PI_ORB_E2E_BACKEND: docker', docker)
+        self.assertIn('PI_ORB_AGENT_BACKEND: host-pi', docker)
+        qualification = (ROOT / '.github/workflows/durable-qualification.yml').read_text()
+        for value in ('pull_request:', 'contents: read', 'shard: [1, 2, 3, 4]',
+                      'PI_ORB_E2E_BACKEND: process', 'PI_ORB_AGENT_BACKEND: central-durable',
+                      'npm run test:e2e -- --shard=',
+                      'docker build -f apps/control-plane/Dockerfile',
+                      '--network none', 'control-plane-image-proof.mjs',
+                      'retention-days: 14', 'df -h', '15728640'):
+            self.assertIn(value, qualification)
+        for value in ('id-token: write', 'google-github-actions', 'infra/release.sh'):
+            self.assertNotIn(value, qualification)
+
+    def test_durable_failure_evidence_is_explicit_and_captures_stderr(self):
+        process = steps('durable-qualification.yml')['Upload failure evidence']
+        for pattern in (
+            'test-failures/durable-process-*/failure.txt',
+            'test-failures/durable-process-*/control-plane.log',
+            'test-failures/durable-process-*/model-requests.json',
+            'test-failures/durable-independent-process/*/failure.txt',
+            'test-failures/durable-independent-process/*/control-plane.log',
+            'test-failures/durable-independent-process/*/browser-frames.json',
+            'test-failures/durable-independent-process/*/model-requests.json',
+            'test-failures/durable-independent-process/*/barrier.json',
+            'test-failures/durable-independent-process/*/waiting-phases.json',
+        ):
+            self.assertIn(pattern, process)
+        for upload in (process, steps('e2e.yml')['Upload Durable failure diagnostics']):
+            for filename in ('control-plane.log', 'relay-requests.json', 'model-requests.json',
+                             'retained-docker.json', 'execution-ready.json'):
+                self.assertIn('test-failures/cross-axis-*/' + filename, upload)
+            self.assertNotIn('/**', upload)
+            self.assertNotRegex(upload, r'(?m)^            .*/\\*\\s*$')
+        proof = steps('durable-qualification.yml')['Prove packaged worker, Git and skills without network']
+        self.assertIn('2>&1 | tee', proof)
+
+    def test_ci_exercises_provider_supervisor_contracts(self):
+        scripts = json.loads((ROOT / 'package.json').read_text())['scripts']
+        self.assertIn('scripts/local-fake-provider.test.mjs', scripts['test:infra'])
+        self.assertNotIn('scripts/local-fake-provider.smoke.test.mjs', scripts['test:infra'])
+
+    def test_acceptance_jobs_own_their_pinned_fake_provider(self):
+        for workflow, step_name in (
+            ('e2e.yml', 'Run end-to-end test'),
+            ('durable-qualification.yml', 'Run central process end-to-end tests'),
+        ):
+            with self.subTest(workflow=workflow):
+                inventory = steps(workflow)
+                run = inventory[step_name]
+                self.assertIn('node scripts/local-fake-provider.mjs -- npm run test:e2e -- --shard=', run)
+                self.assertIn('PI_ORB_LOCAL_FAKE_EVIDENCE:', run)
+                upload = inventory['Upload local provider provenance']
+                self.assertIn('if: always()', upload)
+                paths = re.search(r'^          path: \|\n((?:            [^\n]+\n)+)', upload, re.M)
+                self.assertIsNotNone(paths)
+                self.assertEqual({line.strip() for line in paths.group(1).splitlines()}, {
+                    '${{ runner.temp }}/local-fake-provider/manifest.json',
+                    '${{ runner.temp }}/local-fake-provider/phases.json',
+                })
+                self.assertIn('retention-days: 14', upload)
     def test_all_triggers_run_full_matrix_with_prerequisites(self):
         body = (ROOT / '.github/workflows/e2e.yml').read_text()
         self.assertIn('  pull_request:\n  push:\n    branches:\n      - main\n  workflow_dispatch:\n', body)
@@ -35,8 +103,8 @@ class BrowserEvidenceTest(unittest.TestCase):
         full = workflow_steps['Run end-to-end test']
         self.assertIn("if: github.event_name != 'workflow_dispatch' || !inputs.subagent_continuation_diagnostic", full)
         self.assertIn('DEBUG: pw:browser', full)
-        self.assertIn('run: npm run test:e2e -- --shard=${{ matrix.shard }}/4', full)
-        self.assertEqual(len(re.findall(r'^        run: npm run test:e2e --', body, re.M)), 2)
+        self.assertIn('run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --shard=${{ matrix.shard }}/4', full)
+        self.assertEqual(len(re.findall(r'^        run: (?:node scripts/local-fake-provider.mjs -- )?npm run test:e2e --', body, re.M)), 2)
 
     def test_diagnostic_check_names_cannot_replace_required_checks(self):
         body = (ROOT / '.github/workflows/e2e.yml').read_text()

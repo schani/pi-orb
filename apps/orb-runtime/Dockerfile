@@ -106,4 +106,4 @@ ENV CARGO_HOME=/workspace/home/.cargo
 ENV PATH=/workspace/home/.cargo/bin:$PATH
 
 # Node 24 strips types natively; no build step.
-CMD ["node", "apps/orb-runtime/src/main.ts"]
+CMD ["node", "apps/orb-runtime/src/runtime-entry.ts"]

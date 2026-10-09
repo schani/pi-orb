@@ -65,10 +65,12 @@ import type { HookEnvSource } from "../hooks/env-file.ts";
 import type { HookSpawner } from "../hooks/ports.ts";
 import { BootHookRunner } from "../hooks/runner.ts";
 import { NodeHookSpawner } from "../hooks/spawner.ts";
+import { initialCheckoutCommands } from "../initial-checkout.ts";
 import { fetchMcpCatalog } from "../mcp/boot.ts";
 import { createOrbMcpExtension } from "../mcp/native.ts";
 import { triggerOrbName } from "../naming/client.ts";
 import { readRootReadme } from "../naming/context.ts";
+import { awaitInitialCheckoutCommit } from "../pending-initial-checkout.ts";
 import { fetchPersonalInstructions } from "../personal-instructions/endpoint.ts";
 import { fetchProjectInstructions } from "../project-instructions/endpoint.ts";
 import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts";
@@ -202,6 +204,7 @@ export class PiOrbAgent {
   private observeSettings: (() => void) | null = null;
   private session: PiSession | null = null;
   private shutdownExtensions: (() => Promise<void>) | null = null;
+  private readonly bootAbort = new AbortController();
   private closingExtensions: Promise<void> | null = null;
   private streamTelemetryError: "persistence_failed" | null = null;
   private readonly streamTelemetry = new StreamTelemetry(Date.now, () => performance.now());
@@ -246,6 +249,7 @@ export class PiOrbAgent {
   private turnStart: { readonly promise: Promise<void>; readonly resolve: () => void } | null =
     null;
   private summaryStartIndex: number | null = null;
+  private operationStartIndex: number | null = null;
   private summaryCoordinator: TurnSummaryCoordinator | null = null;
   private readonly liveBlocks = new Map<string, LiveBlock>();
   private outputMessageSequence = 0;
@@ -337,6 +341,7 @@ export class PiOrbAgent {
   /** Terminates a resume hook that outlived its blocking window. */
   shutdownHooks(): void {
     this.shuttingDown = true;
+    this.bootAbort.abort();
     this.hooks?.shutdown();
   }
 
@@ -929,7 +934,30 @@ export class PiOrbAgent {
 
   /** Fresh temp clone plus atomic rename, or validation of the reused checkout. */
   private async prepareCheckout(_repoDir: string): Promise<Result<string | null, RuntimeHealth>> {
-    const checkout = await prepareCheckout(this.options.workDir, this.options.repositoryUrl);
+    const checkout = await prepareCheckout(
+      this.options.workDir,
+      this.options.repositoryUrl,
+      async () => {
+        const initial = await awaitInitialCheckoutCommit(
+          process.env,
+          this.options.broker,
+          process.env.PI_ORB_HOST_INCARNATION ?? "0",
+          { signal: this.bootAbort.signal },
+        );
+        if (initial.isErr())
+          return err({
+            code: initial.error.code,
+            message: initial.error.message,
+            retryable: false,
+          });
+        return initialCheckoutCommands(initial.value).mapErr((error) => ({
+          code: "clone_failed" as const,
+          message: error.message,
+          retryable: false,
+        }));
+      },
+    );
+
     return checkout.mapErr((error) => this.failed(error.code, error.message, error.retryable));
   }
 
@@ -1354,6 +1382,9 @@ export class PiOrbAgent {
     this.operationError = undefined;
     this.activity = "busy";
     this.summaryStartIndex = summaryStartIndex;
+    this.operationStartIndex = this.manualCompaction
+      ? null
+      : (this.sessionManager?.getEntries().length ?? 0);
     this.liveBlocks.clear();
     this.liveTools.clear();
     this.liveToolBodies.clear();
@@ -1506,9 +1537,28 @@ export class PiOrbAgent {
       return;
     }
     const operationId = this.operationId;
+    let outcome = this.operationOutcome;
+    let message = this.operationError;
+    const terminalAssistant =
+      this.operationStartIndex === null
+        ? undefined
+        : this.sessionManager
+            ?.getEntries()
+            .slice(this.operationStartIndex)
+            .findLast((entry) => entry.type === "message" && entry.message.role === "assistant");
+    if (outcome === "completed" && terminalAssistant !== undefined) {
+      const mapped = mapPiEntry(terminalAssistant);
+      if (mapped.isErr()) {
+        this.health = this.failed("history_mapping_failed", mapped.error.message, false);
+        return;
+      }
+      if (mapped.value.type === "message" && mapped.value.finishReason === "error") {
+        outcome = "failed";
+        message = mapped.value.failure?.message;
+      }
+    }
     const summary = this.captureTurnSummaryInput();
-    const outcome = this.operationOutcome;
-    this.finishAgentOperation(operationId, outcome, this.operationError);
+    this.finishAgentOperation(operationId, outcome, message);
     if (outcome === "completed" && operationId !== null && summary !== null)
       this.summaryCoordinator?.enqueue(operationId, summary);
   }

@@ -1,6 +1,4 @@
-# Full-slice end-to-end test against the fake OpenAI service
-# (fake-openai.flingit.run). The dependency on the deployed fake is an
-# accepted trade-off. Four isolated runners each execute their shard serially.
+# Four isolated runners execute serial shards against job-owned fake OpenAI.
 name: E2E
 
 on:
@@ -23,6 +21,9 @@ jobs:
     name: E2E (${{ matrix.shard }}/4)${{ github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic && ' diagnostic' || '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    env:
+      PI_ORB_E2E_BACKEND: docker
+      PI_ORB_AGENT_BACKEND: host-pi
     strategy:
       fail-fast: false
       matrix:
@@ -56,12 +57,51 @@ jobs:
       - name: Install pinned browser engines and system dependencies
         run: npm run test:e2e:install
 
+      - name: Check Docker disk budget
+        run: |
+          df -h
+          test "$(df -Pk . | awk 'NR == 2 {print $4}')" -ge 15728640
+
       - name: Run end-to-end test
         if: github.event_name != 'workflow_dispatch' || !inputs.subagent_continuation_diagnostic
         env:
           DEBUG: pw:browser
-        run: npm run test:e2e -- --shard=${{ matrix.shard }}/4
+          PI_ORB_LOCAL_FAKE_EVIDENCE: ${{ runner.temp }}/local-fake-provider
+        run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --shard=${{ matrix.shard }}/4
 
+      - name: Upload local provider provenance
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: local-fake-docker-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/local-fake-provider/manifest.json
+            ${{ runner.temp }}/local-fake-provider/phases.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Report Docker disk use
+        if: always()
+        run: |
+          df -h
+          docker system df
+
+      - name: Upload Durable failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: e2e-durable-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-failures/cross-axis-*/failure.txt
+            test-failures/cross-axis-*/result.json
+            test-failures/cross-axis-*/execution-ready.json
+            test-failures/cross-axis-*/pin.json
+            test-failures/cross-axis-*/control-plane.log
+            test-failures/cross-axis-*/relay-requests.json
+            test-failures/cross-axis-*/model-requests.json
+            test-failures/cross-axis-*/retained-docker.json
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Diagnose subagent continuation
         if: github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic
         env:

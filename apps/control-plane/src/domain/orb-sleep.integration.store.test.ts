@@ -45,7 +45,14 @@ function contract(name: string, open: () => Promise<Subject>): void {
       });
       expect(stopped._unsafeUnwrap()).toMatchObject({
         cancelledSleepId: SLEEP,
-        orb: { state: "stopped", sleepId: null, sleepUntil: null, stateVersion: 1 },
+        orb: {
+          state: "stopped",
+          stopReason: "manual",
+          sleepId: null,
+          sleepUntil: null,
+          stateVersion: 1,
+          agentAdmissionVersion: 1,
+        },
       });
     });
 
@@ -68,10 +75,11 @@ function contract(name: string, open: () => Promise<Subject>): void {
         cancelledSleepId: SLEEP,
         orb: {
           state: "stopping",
-          stopReason: null,
+          stopReason: "manual",
           sleepId: null,
           sleepUntil: null,
           stateVersion: 2,
+          agentAdmissionVersion: 1,
           stateChangedAt: DEADLINE,
         },
       });
@@ -85,16 +93,17 @@ function contract(name: string, open: () => Promise<Subject>): void {
         cancelledSleepId: null,
         orb: {
           state: "stopping",
-          stopReason: null,
+          stopReason: "manual",
           sleepId: null,
           sleepUntil: null,
-          stateVersion: 2,
+          stateVersion: 3,
+          agentAdmissionVersion: 2,
           stateChangedAt: DEADLINE,
         },
       });
     });
 
-    it("keeps an explicit stop idempotent after cancelling its sleep timer", async () => {
+    it("revokes again without starting a new stop episode after cancelling sleep", async () => {
       const sleeping = await subject.store.casTransition(task, {
         orbId: ORB,
         expectedStateVersion: 0,
@@ -125,10 +134,11 @@ function contract(name: string, open: () => Promise<Subject>): void {
         cancelledSleepId: null,
         orb: {
           state: "stopping",
-          stopReason: null,
+          stopReason: "manual",
           sleepId: null,
           sleepUntil: null,
-          stateVersion: 2,
+          stateVersion: 3,
+          agentAdmissionVersion: 2,
           stateChangedAt: 2_500,
         },
       });

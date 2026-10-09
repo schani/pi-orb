@@ -1,6 +1,8 @@
 import type { OrbView } from "@pi-orb/protocol";
 import { describe, expect, it } from "vitest";
 import {
+  canConnectLive,
+  canSendComposer,
   canStopOrb,
   initialState,
   isLiveBusy,
@@ -84,6 +86,58 @@ describe("scheduled sleep lifecycle status", () => {
         message: "Waiting for 2 pending uploads.",
       }),
     ).toBe("Sleep pending: Waiting for 2 pending uploads.");
+  });
+});
+
+describe("central live admission", () => {
+  it.each(["creating", "starting", "stopped", "failed"] as const)(
+    "connects while compute is %s",
+    (state) => {
+      expect(canConnectLive({ state, centralAgent: true } as OrbView)).toBe(true);
+      expect(canConnectLive({ state } as OrbView)).toBe(false);
+    },
+  );
+  it("shows central busy activity before compute readiness and permits Stop", () => {
+    const state = busyState();
+    expect(isLiveBusy("creating", state, true)).toBe(true);
+    expect(isLiveBusy("failed", state, true)).toBe(true);
+    expect(isLiveBusy("failed", state)).toBe(false);
+    expect(canStopOrb({ state: "failed", centralAgent: true, activity: "busy" } as OrbView)).toBe(
+      true,
+    );
+    expect(
+      orbLifecycleStatus({ state: "failed", centralAgent: true, activity: "busy" } as OrbView, 0),
+    ).toBe("failed · busy");
+  });
+  it.each(["creating", "starting", "stopped", "failed"] as const)(
+    "admits central inbox while compute is %s without treating settings mutability as input permission",
+    (phase) => {
+      const orb = { state: phase, centralAgent: true } as OrbView;
+      const state = {
+        ...initialState("orb"),
+        connection: "open" as const,
+        activity: "idle" as const,
+        historyLoaded: true,
+        synced: true,
+      };
+      expect(canSendComposer(orb, state)).toBe(true);
+      expect(
+        canSendComposer(orb, {
+          ...state,
+          settings: { writable: false } as NonNullable<typeof state.settings>,
+        }),
+      ).toBe(true);
+      expect(
+        canSendComposer(
+          { ...orb, centralAgent: false },
+          { ...state, settings: { writable: false } as NonNullable<typeof state.settings> },
+        ),
+      ).toBe(false);
+      expect(canSendComposer({ ...orb, state: "archived" }, state)).toBe(false);
+    },
+  );
+  it("does not connect a deleted orb", () => {
+    expect(canConnectLive({ state: "deleting", centralAgent: true } as OrbView)).toBe(false);
   });
 });
 

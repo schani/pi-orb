@@ -13,6 +13,7 @@ import { DetailContent } from "./DetailBody.tsx";
 import {
   HistoryView as BrowserHistoryView,
   assistantResponseMarkdown as browserAssistantResponseMarkdown,
+  type ToolChip,
 } from "./HistoryView.tsx";
 
 function HistoryView({
@@ -48,6 +49,71 @@ function message(id: string, role: "user" | "assistant", text: string): MessageR
     content: [{ type: "text", text }],
   };
 }
+
+describe("HistoryView live tool status", () => {
+  const call: MessageRecord = {
+    ...message("execution-call", "assistant", ""),
+    content: [
+      { type: "tool_call", callId: "execution", name: "bash", arguments: { command: "pwd" } },
+    ],
+  };
+  const waiting: ToolChip = {
+    callId: "execution",
+    name: "bash",
+    state: "running",
+    message: "Waiting for execution.",
+  };
+  const render = (records: HistoryRecord[], tool?: ToolChip) =>
+    renderToStaticMarkup(
+      <HistoryView records={records} liveBlocks={[]} tools={tool ? [tool] : []} busy={true} />,
+    );
+
+  it("updates the committed assistant call's one card when waiting arrives, then clears on ready", () => {
+    const before = render([call]);
+    expect(before).not.toContain("Waiting for execution.");
+    const held = render([call], waiting);
+    expect(held).toMatch(/<summary>[\s\S]*Waiting for execution\.[\s\S]*<\/summary>/);
+    expect(held.match(/class="activity-rail-row/g)).toHaveLength(1);
+    expect(held.match(/Waiting for execution\./g)).toHaveLength(1);
+    expect(held).toContain("pwd");
+    const ready = render([call], { ...waiting, message: null });
+    expect(ready).not.toContain("Waiting for execution.");
+    expect(ready).toContain("running");
+    expect(ready.match(/class="activity-rail-row/g)).toHaveLength(1);
+  });
+
+  it.each([false, true])("committed outcome wins over stale waiting (isError=%s)", (isError) => {
+    const result: MessageRecord = {
+      ...message("execution-result", "assistant", ""),
+      parentId: call.id,
+      role: "tool",
+      content: [
+        {
+          type: "tool_result",
+          callId: "execution",
+          content: [{ type: "text", text: "outcome" }],
+          isError,
+        },
+      ],
+    };
+    const html = render([call, result], waiting);
+    expect(html).not.toContain("Waiting for execution.");
+    expect(html).not.toContain("running");
+    expect(html).toContain(isError ? "activity-rail-row-failed" : "activity-rail-row-completed");
+    expect(html).not.toContain("outcome");
+    expect(
+      renderToStaticMarkup(
+        <DetailContent
+          context={detailContext()}
+          recordId={result.id}
+          detailKey={`${result.id}:0`}
+          body={{ type: "tool_result", content: [{ type: "text", text: "outcome" }] }}
+        />,
+      ),
+    ).toContain("outcome");
+    expect(html.match(/class="activity-rail-row/g)).toHaveLength(1);
+  });
+});
 
 describe("HistoryView turn structure", () => {
   it("shows compaction immediately in a disclosure without model thinking", () => {
@@ -1130,7 +1196,7 @@ describe("HistoryView", () => {
             callId: "live-call",
             name: "read",
             state: "running",
-            message: "live-tool-secret",
+            message: "Waiting for execution.",
           },
         ]}
         busy
@@ -1167,7 +1233,7 @@ describe("HistoryView", () => {
       ),
     ).toContain("tool-output");
     expect(html).not.toMatch(/<details[^>]*\sopen(?:=|>)/);
-    expect(html).not.toContain("live-tool-secret");
+    expect(html).toContain("Waiting for execution.");
   });
 
   it("shows a singleton read's path instead of a count", () => {

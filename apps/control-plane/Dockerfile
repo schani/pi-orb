@@ -16,7 +16,7 @@ RUN npm run build --workspace @pi-orb/web
 
 FROM node:24-bookworm-slim AS dependencies
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 build-essential git \
+  && apt-get install -y --no-install-recommends python3 build-essential git ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -25,6 +25,8 @@ COPY scripts/apply-dependency-patches.mjs scripts/apply-dependency-patches.mjs
 COPY patches/@earendil-works+pi-agent-core+1.0.0.patch patches/@earendil-works+pi-agent-core+1.0.0.patch
 COPY patches/@earendil-works+pi-ai+1.0.0.patch patches/@earendil-works+pi-ai+1.0.0.patch
 COPY patches/@earendil-works+pi-coding-agent+1.0.0.patch patches/@earendil-works+pi-coding-agent+1.0.0.patch
+COPY patches/@earendil-works+pi-codemode+1.0.0.patch patches/@earendil-works+pi-codemode+1.0.0.patch
+COPY patches/pi-codemode.* patches/
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/mock-openai/package.json packages/mock-openai/
 COPY packages/luna/package.json packages/luna/
@@ -36,6 +38,9 @@ RUN npm ci --workspace @pi-orb/control-plane --include-workspace-root=false --ig
   && node -e "const pty = require('node-pty'); const child = pty.spawn('/bin/sh', ['-c', 'exit 0']); child.onExit(({ exitCode }) => process.exit(exitCode))"
 
 FROM node:24-bookworm-slim
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=dependencies /app /app
 RUN node -e "const pty = require('node-pty'); const child = pty.spawn('/bin/sh', ['-c', 'exit 0']); child.onExit(({ exitCode }) => process.exit(exitCode))"
@@ -44,6 +49,8 @@ COPY packages/mock-openai/src packages/mock-openai/src
 COPY packages/luna/src packages/luna/src
 COPY apps/control-plane/src apps/control-plane/src
 COPY infra/browser-redirect.mjs infra/browser-redirect.mjs
+COPY apps/orb-runtime/src apps/orb-runtime/src
+COPY apps/orb-runtime/skills apps/orb-runtime/skills
 COPY --from=web-build /app/apps/web/dist apps/web/dist
 
 ENV PI_ORB_WEB_DIST=/app/apps/web/dist

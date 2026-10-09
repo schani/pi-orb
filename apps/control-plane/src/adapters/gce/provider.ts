@@ -28,6 +28,7 @@ import type { TailscaleHostOptions } from "../tailscale/client.ts";
 import type { GceApiTransport, GceResponse } from "./api.ts";
 
 export interface GceOrbHostProviderOptions {
+  readonly runtimeMode?: "pi" | "execution";
   readonly projectId: string;
   readonly zone: string;
   /** e.g. "n2d-highmem-2"; provisioned as Spot with STOP on preemption. */
@@ -431,6 +432,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
       PI_ORB_HOST_INCARNATION: String(incarnation),
       PI_ORB_CLAUDE_RECOVERY_PROOF: "",
       PI_ORB_REPOSITORY_URL: repositoryUrl,
+      PI_ORB_RUNTIME_MODE: harness === "claude" ? "pi" : (this.options.runtimeMode ?? "pi"),
       [CONTROL_PLANE_URL_ENV]: this.options.controlPlaneUrl,
       ...(tailscale === undefined
         ? {}
@@ -748,6 +750,10 @@ export class GceOrbHostProvider implements OrbHostProvider {
                 key: CONFIG_METADATA_KEY,
                 value: JSON.stringify({
                   ...spec.runtimeConfig,
+                  PI_ORB_INITIAL_CHECKOUT_COMMIT: request.bootstrap.initialCheckoutCommit ?? "",
+                  PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT: request.bootstrap.awaitInitialCheckoutCommit
+                    ? "1"
+                    : "",
                   PI_ORB_CLAUDE_RECOVERY_PROOF: JSON.stringify(request.claudeRecoveryProof ?? null),
                   [RUNTIME_TOKEN_ENV]: runtimeToken,
                   ...(tailscaleKey.value === null
@@ -1150,6 +1156,30 @@ export class GceOrbHostProvider implements OrbHostProvider {
         );
       }
       return ok(this.toObservation(response.body));
+    });
+  }
+
+  executionBinding(_task: SimulationTask, ref: OrbHostRef, context: OperationContext) {
+    return this.request(
+      "observe",
+      "GET",
+      this.zonePath(`instances/${ref.resourceId}`),
+      context,
+    ).andThen((response) => {
+      if (context.signal.aborted)
+        return err(providerError("observe", "cancelled", "execution binding cancelled", true));
+      if (response.status !== 200)
+        return err(providerError("observe", "unavailable", "execution host unavailable", true));
+      const host = this.toObservation(response.body);
+      const token = metadataValue(response.body, TOKEN_METADATA_KEY);
+      if (!host || host.state !== "running" || !host.runtimeAddress || !token)
+        return err(providerError("observe", "unavailable", "execution binding unavailable", true));
+      return ok({
+        baseUrl: host.runtimeAddress.baseUrl,
+        token,
+        incarnation: String(host.incarnation),
+        cwd: "/workspace/repo",
+      });
     });
   }
 
