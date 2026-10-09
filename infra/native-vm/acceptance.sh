@@ -1,6 +1,7 @@
 #!/bin/bash
 # Run as root on a newly booted production-image candidate with its data disk attached.
 set -euo pipefail
+trap 'printf "native_acceptance_failed line=%s\n" "$LINENO" >&2' ERR
 
 test "$(id -u orb)" = 2000
 test "$(id -g orb)" = 2000
@@ -30,7 +31,10 @@ systemctl is-active --quiet pi-orb-bootstrap.service
 systemctl is-active --quiet pi-orb-runtime.service
 runtime_supervisor_pid=$(systemctl show pi-orb-runtime.service --property=MainPID --value)
 python3 -c 'import sys; assert open("/proc/" + sys.argv[1] + "/cmdline", "rb").read().split(b"\0")[:-1] == [b"/usr/local/bin/node", b"/app/apps/orb-runtime/src/supervisor/main.ts"]' "$runtime_supervisor_pid"
-runtime_pid=$(pgrep --parent "$runtime_supervisor_pid" --full '/usr/local/bin/node apps/orb-runtime/src/main.ts')
+runtime_pid=$(pgrep --parent "$runtime_supervisor_pid" --full '/usr/local/bin/node apps/orb-runtime/src/runtime-entry.ts') || {
+  echo native_runtime_entry_missing >&2
+  exit 1
+}
 test "$(printf '%s\n' "$runtime_pid" | wc -l)" = 1
 curl --fail --silent --show-error http://127.0.0.1:8080/v1/health | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "ready"'
 
