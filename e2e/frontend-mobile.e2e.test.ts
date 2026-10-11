@@ -1094,6 +1094,54 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     },
   );
 
+  it("keeps tail when a stationary pointer precedes the auto-scroll event", async () => {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    try {
+      await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb");
+      await waitForFixtureMedia(page);
+      const scroller = page.locator(".orb-transcript-scroll");
+      const distance = () =>
+        scroller.evaluate((pane) => pane.scrollHeight - pane.clientHeight - pane.scrollTop);
+      await expectPage.poll(distance).toBeLessThanOrEqual(1);
+      await scroller.evaluate(
+        (pane) =>
+          new Promise<void>((resolve) => {
+            const content = pane.querySelector(".orb-transcript-content");
+            const div = (height: string) => {
+              const element = pane.ownerDocument.createElement("div");
+              element.style.height = height;
+              return element;
+            };
+            let armed = false;
+            // Registered after the page's observer, so it runs after the tail
+            // write and before that write's scroll event in the next frame.
+            const observer = new (Reflect.get(globalThis, "ResizeObserver"))(() => {
+              if (!armed) {
+                armed = true;
+                setTimeout(() => content?.append(div("100px")));
+                return;
+              }
+              observer.disconnect();
+              pane.dispatchEvent(
+                new (Reflect.get(globalThis, "PointerEvent"))("pointerdown", { bubbles: true }),
+              );
+              content?.append(div("800px"));
+              resolve();
+            });
+            observer.observe(content);
+          }),
+      );
+      await expectPage.poll(distance).toBeLessThanOrEqual(1);
+      await scroller.evaluate((pane) =>
+        pane.dispatchEvent(
+          new (Reflect.get(globalThis, "PointerEvent"))("pointerup", { bubbles: true }),
+        ),
+      );
+    } finally {
+      await page.close();
+    }
+  });
+
   it.each([
     [390, 0, 500],
     [1280, 0, 500],

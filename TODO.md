@@ -8,8 +8,6 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Fix flaky phone Chromium tail-pinning E2E** (2026-10-10, macOS Docker Desktop). `e2e/frontend-mobile.e2e.test.ts` "keeps tail during a stationary pointer with inside release" fails its 5-second tail poll (`distance` 940, expected ≤ 1) on unmodified `origin/main` 630e29c in 5 of 8 isolated runs, and in 1 of 5 runs plus a full-suite run on the restart-budget branch. Root-cause the schedule before any timeout change.
-
 - **Make the suite pass or skip cleanly on macOS** (2026-10-11; evidence `.context/diag-*`, `.context/unit-*.log`, `.context/e2e-*.log` in workspace `los-angeles-v1`). All reproduce on clean `main`; CI passes them.
   - `process/provider.test.ts` (21): `ProcessOrbHostProvider.launch()` is Linux-only (pidfd) since d403635; tests are not gated. Decide macOS support and update `docs/host-provider.md`.
   - `durable-pg/{clock.postgres,drain.postgres,native-inbox-abort,pg-composed-drain}` (5): fail instead of skipping without `PI_ORB_DURABLE_PG_TEST_URL`; drop the `127.0.0.1:55432` fallback and skip like `stores.postgres.test.ts`.

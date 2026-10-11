@@ -1600,7 +1600,6 @@ function OrbConversation({
     };
     const pointerIntent = () => {
       pointerActive = true;
-      autoScrollYRef.current = null;
     };
     const pointerSettled = () => {
       if (!pointerActive) return;
