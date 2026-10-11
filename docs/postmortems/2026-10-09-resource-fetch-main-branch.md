@@ -11,3 +11,5 @@
 ## Correction and invariant
 
 The fetch takes the remote's `HEAD`, matching the guest clone and `docs/control-plane-api.md` (initial checkout uses the default branch). The resource-acquisition regression test now uses a `master`-only repository; it failed before the change.
+
+`resources.failed` now also carries a fixed Git failure `reason` (`missing_ref`, `authentication`, `repository_not_found`, `network`, `unknown`) classified from bounded stderr inside the adapter; raw Git output never leaves it (2026-10-11).

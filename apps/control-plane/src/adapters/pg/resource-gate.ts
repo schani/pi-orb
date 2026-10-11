@@ -75,7 +75,7 @@ export class PgResourceGate {
           logOrbEvent(task, orb.id, `resources.${status.phase}`, {
             admission_version: orb.agentAdmissionVersion,
             ...(status.phase === "failed"
-              ? { code: status.code }
+              ? { code: status.code, ...(status.reason ? { reason: status.reason } : {}) }
               : status.phase === "ready"
                 ? { commit_sha: status.commitSha, files: status.fileCount, bytes: status.byteCount }
                 : {}),

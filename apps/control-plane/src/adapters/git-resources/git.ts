@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 import {
+  type GitFailureReason,
   type ResourceError,
   type ResourceSnapshot,
   type ResourceSource,
@@ -113,7 +114,12 @@ export function command(
         terminate();
       } else chunks.push(chunk);
     });
-    child.stderr.resume();
+    const errors: Buffer[] = [];
+    let errorBytes = 0;
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (errorBytes < 64 * 1024) errors.push(chunk);
+      errorBytes += chunk.length;
+    });
     child.on("error", () => {
       failure ??= resourceError("fetch", `Git resource operation failed (${stage}; spawn)`);
       terminate();
@@ -144,12 +150,13 @@ export function command(
           failure
             ? err(failure)
             : code !== 0
-              ? err(
-                  resourceError(
+              ? err({
+                  ...resourceError(
                     "fetch",
                     `Git resource operation failed (${stage}; ${exitSignal ? `signal=${exitSignal}` : `exit=${code}`})`,
                   ),
-                )
+                  reason: classifyGitFailure(Buffer.concat(errors).toString("utf8")),
+                })
               : ok(Buffer.concat(chunks)),
         );
       };
@@ -162,6 +169,25 @@ export function command(
   return ResultAsync.fromPromise(promise, () =>
     resourceError("fetch", `Git resource operation failed (${stage}; adapter)`),
   ).andThen((result) => result);
+}
+/** Maps Git stderr to a fixed reason so no repository output reaches logs. */
+export function classifyGitFailure(stderr: string): GitFailureReason {
+  if (/couldn't find remote ref/i.test(stderr)) return "missing_ref";
+  if (
+    /authentication failed|could not read (username|password)|terminal prompts disabled|permission denied|error: 40[13]/i.test(
+      stderr,
+    )
+  )
+    return "authentication";
+  if (/repository not found|does not appear to be a git repository|error: 404/i.test(stderr))
+    return "repository_not_found";
+  if (
+    /could not resolve host|failed to connect|connection (timed out|refused|reset)|operation timed out|rpc failed|early eof|ssl|tls/i.test(
+      stderr,
+    )
+  )
+    return "network";
+  return "unknown";
 }
 export class GitResourceSource implements ResourceSource {
   private readonly credentials: GitCredentials;

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NoSimulationTask } from "determined";
 import { errAsync, okAsync } from "neverthrow";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { resourceError } from "../../domain/resources.ts";
 import { makeOrbRow, makeProjectRow } from "../../testkit/fixtures.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
@@ -66,9 +66,13 @@ it("publishes the pin once, restores without Git, and fences Stop before late pu
     ).toBe(0);
     const current = { ...orb, agentAdmissionVersion: 1 };
     const failed = new PgResourceGate(db, {
-      acquire: () => errAsync(resourceError("fetch", "sanitized")),
+      acquire: () => errAsync({ ...resourceError("fetch", "sanitized"), reason: "missing_ref" }),
     });
+    const log = vi.spyOn(task, "log");
     expect((await failed.acquire(task, current, context)).isErr()).toBe(true);
+    expect(log.mock.calls.map(([line]) => String(line))).toContainEqual(
+      expect.stringMatching(/resources\.failed .*code=fetch reason=missing_ref/),
+    );
     expect((await failed.initialPin(task, current)).isErr()).toBe(true);
   } finally {
     await database.close();

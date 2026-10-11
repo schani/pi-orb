@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import { errAsync, okAsync } from "neverthrow";
 import { expect, it, vi } from "vitest";
 import { resourceError } from "../../domain/resources.ts";
-import { command, GitResourceSource } from "./git.ts";
+import { classifyGitFailure, command, GitResourceSource } from "./git.ts";
 
 it("cancels the Git process group and waits for helper pipe closure", async () => {
   const dir = await mkdtemp(join(tmpdir(), "resource-command-"));
@@ -208,6 +208,39 @@ it("acquires the default-branch commit and follows skill-directory symlinks with
         Buffer.from([0, 255]),
       );
     }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+it.each([
+  ["fatal: couldn't find remote ref HEAD", "missing_ref"],
+  [
+    "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+    "authentication",
+  ],
+  [
+    "remote: Repository not found.\nfatal: repository 'https://github.com/a/b/' not found",
+    "repository_not_found",
+  ],
+  ["fatal: unable to access 'https://x/': Could not resolve host: x", "network"],
+  ["fatal: something new", "unknown"],
+] as const)("classifies Git failure %j as %s", (stderr, reason) => {
+  expect(classifyGitFailure(stderr)).toBe(reason);
+});
+it("reports a missing default branch as a classified fetch failure", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "resource-fixture-"));
+  try {
+    execFileSync("git", ["init", "-b", "unborn"], { cwd: dir, stdio: "pipe" });
+    const source = new GitResourceSource({ environment: () => okAsync({}) }, true);
+    const r = await source.acquire({
+      orbId: "orb",
+      url: pathToFileURL(dir).href,
+      signal: new AbortController().signal,
+    });
+    expect(r.isErr() && { code: r.error.code, reason: r.error.reason }).toEqual({
+      code: "fetch",
+      reason: "missing_ref",
+    });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

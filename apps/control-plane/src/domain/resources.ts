@@ -13,7 +13,15 @@ export type ResourceError = {
     | "conflict"
     | "not_found";
   message: string;
+  /** Fixed classification of a failed Git command; never raw Git output. */
+  reason?: GitFailureReason;
 };
+export type GitFailureReason =
+  | "missing_ref"
+  | "authentication"
+  | "repository_not_found"
+  | "network"
+  | "unknown";
 export const resourceError = (code: ResourceError["code"], message: string): ResourceError => ({
   type: "resource_error",
   code,
@@ -46,7 +54,7 @@ export interface ResourceSource {
 export type ResourceStatus =
   | { phase: "acquiring" }
   | { phase: "ready"; commitSha: string; fileCount: number; byteCount: number }
-  | { phase: "failed"; code: ResourceError["code"] };
+  | { phase: "failed"; code: ResourceError["code"]; reason?: GitFailureReason };
 export interface ResourceStatusPort {
   record(orbId: string, status: ResourceStatus): ResultAsync<void, ResourceError>;
 }
@@ -95,8 +103,11 @@ export class ResourceAcquisition {
       )
       .orElse((error) =>
         (
-          this.status?.record(input.orbId, { phase: "failed", code: error.code }) ??
-          okAsync(undefined)
+          this.status?.record(input.orbId, {
+            phase: "failed",
+            code: error.code,
+            ...(error.reason ? { reason: error.reason } : {}),
+          }) ?? okAsync(undefined)
         ).andThen(() => errAsync(error)),
       );
     const wait = new Promise<Result<ResourceSnapshot, ResourceError>>((resolve) => {
