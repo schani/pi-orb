@@ -4072,12 +4072,14 @@ describe("frontend-only browser behavior", () => {
               request.postDataJSON().harness === harness
             );
           });
-          await index
-            .getByRole("link", {
-              name: `New ${harness === "pi" ? "Pi" : "Claude"} orb in scratchpad`,
-              exact: true,
-            })
-            .click();
+          const link = index.getByRole("link", {
+            name: `New ${harness === "pi" ? "Pi" : "Claude"} orb in scratchpad`,
+            exact: true,
+          });
+          await expectPage(link).toBeVisible();
+          // An orb list landing between pointerdown and pointerup moves the link; WebKit drops the click.
+          await expectPage(index.getByRole("status")).toHaveCount(0);
+          await link.click();
           await heldPost.observed.promise;
           expectPage(posts[count]?.["harness"]).toBe(harness);
           const premature = await page.request.get(`${origin}/api/v1/orbs/${created[count]}`);

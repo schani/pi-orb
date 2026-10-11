@@ -8,6 +8,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Reserve orb index layout while project lists load** (2026-10-11; `docs/postmortems/2026-10-11-webkit-index-click-layout-shift.md`). Each arriving project list moves later headers, so a user click can land on a different link or be dropped.
+
 - **Make the suite pass or skip cleanly on macOS** (2026-10-11; evidence `.context/diag-*`, `.context/unit-*.log`, `.context/e2e-*.log` in workspace `los-angeles-v1`). All reproduce on clean `main`; CI passes them.
   - `process/provider.test.ts` (21): `ProcessOrbHostProvider.launch()` is Linux-only (pidfd) since d403635; tests are not gated. Decide macOS support and update `docs/host-provider.md`.
   - `durable-pg/{clock.postgres,drain.postgres,native-inbox-abort,pg-composed-drain}` (5): fail instead of skipping without `PI_ORB_DURABLE_PG_TEST_URL`; drop the `127.0.0.1:55432` fallback and skip like `stores.postgres.test.ts`.
@@ -16,6 +18,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
   - `claude-composed-lifecycle.dst.test.ts`: now runs alone after the parallel suite (`vitest.config.ts`), but still does real fsync under a 30 s wall-clock timeout, and a timed-out run is not cancelled. Bound journal I/O through a simulation-friendly boundary or an explicit budget.
   - WebKit phone "keeps modal close contrast…": macOS WebKit Tab skips buttons/links (system keyboard-navigation setting); use Alt+Tab on darwin.
   - WebKit phone "preserves reader position after ArrowUp…": macOS WebKit drops ArrowUp during animated scroll (40 px vs 120 px); wait for movement between presses.
+  - WebKit `harness-icons-frontend` "shared project headers create the selected harness…": Meta/middle-click opens no popup on macOS (`browserContext.waitForEvent("page")` times out; 2/2 on clean `main`, `.context/e2e-harness-icons-baseline-*.log`).
   - The first frontend E2E run had a fourth, unidentified failure (output not retained); not reproduced in two further runs.
 
 - **Release and verify central code-mode CPU headroom** (2026-10-09; `docs/postmortems/2026-10-09-control-plane-cpu-429.md`, `docs/pi-adapter.md`, `docs/deployment.md`). The shared one-core worker budget, durable CPU/wait counters and rollout CPU/ingress-429 evidence are implemented locally. Complete normal exact-source Linux/PostgreSQL CI and E2E gates, then qualify the independently managed two-vCPU Cloud Run revision under sustained multi-worker load. Cooperative checkpoints exclude main-thread/compiler CPU and can overshoot in native operations; confirm actual serving headroom and ingress admission. Preserve central authority and first-failure evidence.
