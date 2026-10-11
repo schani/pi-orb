@@ -802,12 +802,14 @@ async function reconcileCreateStart(
   // The hold is anchored at the first `setup_running` report of the episode
   // and covers the hook plus the boot that follows it; it survives a single
   // cancelled probe, and ends on its own bound or on a runtime that has gone
-  // properly silent. See `holdingForSetupHook`.
-  if (
-    !holdingForSetupHook(task, deps, orb.id) &&
-    !awaitingBootEvidence(task, deps, orb.id) &&
-    task.wallNow() - orb.stateChangedAt > deps.constants.createStartDeadlineMs
-  ) {
+  // properly silent. See `holdingForSetupHook`. Both holds are process memory
+  // that restarts renew, so the durable age bounds them
+  // (docs/postmortems/2026-10-10-starting-deadline-restarts.md).
+  const age = task.wallNow() - orb.stateChangedAt;
+  const held =
+    age <= deps.constants.createStartDeadlineMs + deps.constants.setupHookHoldMs &&
+    (holdingForSetupHook(task, deps, orb.id) || awaitingBootEvidence(task, deps, orb.id));
+  if (!held && age > deps.constants.createStartDeadlineMs) {
     return failOrb(
       task,
       deps,

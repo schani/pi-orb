@@ -391,7 +391,9 @@ Three defects the coverage found, all fixed on the same branch:
    probe is not evidence either — the first fix, which waited only for any recorded probe, still
    failed under a schedule where a late-firing operation deadline cancelled the first health call),
    bounded by `unreachableBootDeadlineMs` so an orb whose runtime is genuinely gone still fails on
-   its own deadlines.
+   its own deadlines. Restarts renew that in-memory bound, so the hold also ends at
+   `createStartDeadlineMs + setupHookHoldMs` from `state_changed_at`
+   (`docs/postmortems/2026-10-10-starting-deadline-restarts.md`).
 2. **A backgrounded resume's late verdict had no owner.** The continuation that records the outcome
    of a resume hook that outlived its blocking window was a detached `void promise.then(...)`
    writing files after the boot coroutine had ended — the native-promise hazard in `docs/testing.md`.

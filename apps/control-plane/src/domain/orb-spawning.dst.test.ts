@@ -6,7 +6,7 @@ import {
   makeProjectRow,
   restartControlPlane,
 } from "../testkit/fixtures.ts";
-import { runDst, waitUntil } from "../testkit/sim.ts";
+import { runDst, TEST_WALL_EPOCH, waitUntil } from "../testkit/sim.ts";
 import { pollLoop, reconcileLoop } from "./loops.ts";
 
 const projectId = "spawn-project";
@@ -19,7 +19,7 @@ const caller = makeOrbRow("caller", projectId, "running", {
 const params = {
   callerOrbId: caller.id,
   caller: { runtimeTokenHash: "token", hostIncarnation: 1 },
-  orb: makeOrbRow("spawned", projectId, "creating"),
+  orb: makeOrbRow("spawned", projectId, "creating", { stateChangedAt: TEST_WALL_EPOCH }),
   prompt: "Do the work",
   requestHash: "same-request",
 };

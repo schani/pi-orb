@@ -4,7 +4,7 @@ import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { orbView } from "../http/views.ts";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
-import { runDst, waitUntil } from "../testkit/sim.ts";
+import { runDst, TEST_WALL_EPOCH, waitUntil } from "../testkit/sim.ts";
 import { commitAgentHistory } from "./agent-history.ts";
 import type { AgentPlane } from "./agent-ports.ts";
 import { reconcileCentralAgent, reconcileOrbOnce, requestOrbStop } from "./lifecycle.ts";
@@ -230,7 +230,9 @@ describe("independent central dispatcher", () => {
         const deps = { ...h.deps, agentPlane: plane };
         const stop = new AbortController();
         h.store.seedProject(makeProjectRow("project"));
-        h.store.seedOrb(makeOrbRow("orb", "project", "creating"));
+        h.store.seedOrb(
+          makeOrbRow("orb", "project", "creating", { stateChangedAt: TEST_WALL_EPOCH }),
+        );
         const result = await sim.runTasks([
           {
             name: "vm",
