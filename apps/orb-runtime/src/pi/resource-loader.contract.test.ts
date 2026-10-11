@@ -63,6 +63,7 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
   let workDir: string;
   let repoDir: string;
   let agentDir: string;
+  const home = process.env.HOME;
 
   /**
    * The control: byte-for-byte what `createAgentSession` constructs when no
@@ -104,12 +105,15 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     workDir = mkdtempSync(join(tmpdir(), "pi-orb-loader-contract-"));
     repoDir = join(workDir, "repo");
     agentDir = join(workDir, "pi-agent");
+    // The SDK loads `$HOME/.agents/skills`; keep the developer's skills out.
+    process.env.HOME = workDir;
     mkdirSync(join(repoDir, PROJECT_CONFIG_DIR), { recursive: true });
     mkdirSync(agentDir, { recursive: true });
     writeFileSync(join(repoDir, "AGENTS.md"), AGENTS_MD);
   });
 
   afterEach(() => {
+    process.env.HOME = home;
     rmSync(workDir, { recursive: true, force: true });
   });
 
