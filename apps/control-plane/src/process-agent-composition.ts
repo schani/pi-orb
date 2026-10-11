@@ -504,6 +504,7 @@ export function createProcessAgentContext(
             .mapErr((): ToolError => ({ code: "forbidden", message: "Agent ownership revoked" })),
       });
       const tools = createDurableTools({
+        orb: { id: orb.id, task },
         files: {
           read: (request, api, ctx) =>
             deps.store

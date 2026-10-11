@@ -3,6 +3,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import { defineExtension, type ToolRegistration } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
+import type { SimulationTask } from "determined";
 import { ResultAsync } from "neverthrow";
 import { type AuthorizeTool, CallableCatalog, type ToolError } from "./catalog.ts";
 import { codemodeTool } from "./codemode.ts";
@@ -28,6 +29,7 @@ export interface DurableToolsOptions {
   mcp?: readonly McpEndpoint[];
   additionalTools?: readonly ToolRegistration[];
   files?: AgentToolFiles;
+  orb?: { id: string; task: SimulationTask };
 }
 export function createDurableTools(options: DurableToolsOptions = {}) {
   const catalog = new CallableCatalog(
@@ -74,7 +76,7 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
   const running = new Set<CodemodeSandbox>();
   const mcp = new McpTools(options.mcp ?? [], catalog);
   catalog.add(mcp.statusTool());
-  let code = codemodeTool(catalog, running, options.files);
+  let code = codemodeTool(catalog, running, options.files, options.orb);
   const bundle = {
     extension: defineExtension({
       name: "orb.tools",
@@ -88,7 +90,7 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
       ResultAsync.fromSafePromise(mcp.discover(context))
         .andThen((result) => result)
         .map((statuses) => {
-          code = codemodeTool(catalog, running, options.files);
+          code = codemodeTool(catalog, running, options.files, options.orb);
           bundle.modelTools = [code];
           bundle.extension = defineExtension({
             name: "orb.tools",

@@ -6,3 +6,5 @@ export const MAX_CALLBACK_ARGUMENT_BYTES = 8 * 1024 * 1024;
 export const MAX_CALLBACK_REPLY_BYTES = 64 * 1024 * 1024;
 export const CALLBACK_LIMIT_MESSAGE =
   "Code-mode resource limit exceeded (8 outstanding callbacks / 256 calls / 8 MiB arguments / 64 MiB replies). Reduce batch size or callback output.";
+export const OUTPUT_LIMIT_MESSAGE =
+  "Code-mode output limit exceeded (1 MiB text / 32 MiB aggregate / 4096 items)";

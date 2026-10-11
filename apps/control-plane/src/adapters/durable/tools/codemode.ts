@@ -2,6 +2,7 @@ import type { JsonValue } from "@earendil-works/chord";
 import { withAbortSignal } from "@earendil-works/chord/context";
 import { Type, type Usage } from "@earendil-works/pi-ai";
 import {
+  type CodemodeError,
   CodemodeSandbox,
   type CodemodeTool,
   parseCodemodeSource,
@@ -13,13 +14,17 @@ import {
   type ToolExecutionApi,
   type ToolExecutionResult,
 } from "@earendil-works/pi-durable";
+import type { SimulationTask } from "determined";
 import { err, Result, ResultAsync } from "neverthrow";
+import { logOrbEvent } from "../../../domain/log.ts";
 import {
   CALLBACK_LIMIT_MESSAGE,
   MAX_CALLBACK_CONCURRENCY,
   MAX_CALLBACK_REPLY_BYTES,
+  OUTPUT_LIMIT_MESSAGE,
 } from "./callback-limits.js";
 import { type CallableCatalog, errorResult } from "./catalog.ts";
+import { codeModeMemory } from "./codemode-memory.ts";
 import { codeModeCpuBudget } from "./cpu-budget.js";
 import type { AgentToolFiles } from "./files.ts";
 import { createCodemodeDescription, DEFAULT_CODEMODE_INLINE_BUDGET } from "./vendor/description.ts";
@@ -61,11 +66,21 @@ function appendBounded(current: string, chunk: string) {
   while ((bytes[tailStart]! & 0xc0) === 0x80) tailStart++;
   return bytes.toString("utf8", 0, headEnd) + marker + bytes.toString("utf8", tailStart);
 }
+function resourceFailure(error: CodemodeError) {
+  if (error.message === OUTPUT_LIMIT_MESSAGE) return "output_limit";
+  if (error.kind === "script")
+    return error.name === "InternalError" && error.message === "out of memory"
+      ? "out_of_memory"
+      : undefined;
+  if (error.kind !== "sandbox") return undefined;
+  return error.message.includes("out of memory") ? "out_of_memory" : "sandbox_exit";
+}
 
 export function codemodeTool(
   catalog: CallableCatalog,
   running: Set<CodemodeSandbox>,
   files: AgentToolFiles = {},
+  orb?: { id: string; task: SimulationTask },
 ) {
   return defineTool({
     name: "codemode",
@@ -191,12 +206,13 @@ export function codemodeTool(
           });
       };
       const cpu = codeModeCpuBudget.acquire();
+      const memory = codeModeMemory.acquire(orb?.id);
       const created = Result.fromThrowable(
         () =>
           new CodemodeSandbox({
             memoryLimitBytes: MEMORY_LIMIT_BYTES,
             workerUrl: new URL("./bounded-worker.js", import.meta.url),
-            workerData: cpu.workerData,
+            workerData: { ...cpu.workerData, ...memory.workerData },
             tools: catalog
               .definitions()
               .map(
@@ -345,6 +361,7 @@ export function codemodeTool(
       )();
       if (created.isErr()) {
         cpu.release();
+        memory.release();
         return errorResult(created.error);
       }
       const sandbox = created.value;
@@ -365,12 +382,26 @@ export function codemodeTool(
       }));
       running.delete(sandbox);
       cpu.release();
+      memory.release();
       const cpuStats = cpu.snapshot();
+      const peakBytes = memory.peakBytes();
       if (run.isErr()) return errorResult(run.error);
       if (closed.isErr()) return errorResult(closed.error);
       const value = run.value;
       const resourceLimit =
         callbackLimit || (!value.ok && value.error.message === CALLBACK_LIMIT_MESSAGE);
+      const failure = resourceLimit
+        ? "callback_limit"
+        : value.ok
+          ? undefined
+          : resourceFailure(value.error);
+      if (failure && orb)
+        logOrbEvent(orb.task, orb.id, "codemode.resource_failed", {
+          kind: failure,
+          peak_mib: Math.round(peakBytes / 1024 / 1024),
+          conversation: api.conversationId,
+          call: api.callId,
+        });
       for (const call of calls) if (call.status === "running") call.status = "cancelled";
       if (
         value.ok &&
@@ -439,6 +470,7 @@ export function codemodeTool(
         ...(usage ? { usage } : {}),
         details: {
           cpu: cpuStats,
+          memory: { peakBytes },
           calls: calls.map((c) => ({ ...c })),
           omittedCalls: Math.max(0, invocation - calls.length),
           executionWait: false,

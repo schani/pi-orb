@@ -8,11 +8,13 @@ import {
   Harness,
   type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
+import { NoSimulationTask } from "determined";
 import { okAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { MemoryAgentPersistence } from "../memory-persistence.testkit.ts";
 import { CallableCatalog } from "./catalog.ts";
 import { codemodeTool } from "./codemode.ts";
+import { codeModeMemory } from "./codemode-memory.ts";
 import { createOrbTools } from "./orb-tools.ts";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -185,6 +187,83 @@ describe("Durable code-mode store", () => {
         ctx,
       );
       expect(result.content).toContainEqual({ type: "text", text: "[2,1]" });
+    } finally {
+      release.resolve();
+      await harness.close(ctx);
+    }
+  });
+
+  it("tracks live workers and peak memory across concurrent success and resource failures", async () => {
+    const { MemoryStorage } = await import("@earendil-works/pi-durable");
+    const harness = await Harness.open(
+      new MemoryStorage(),
+      { models: createModels(), registry: createRegistry() },
+      ctx,
+    );
+    const lines: string[] = [];
+    const task = new (class extends NoSimulationTask {
+      override log(...parts: readonly unknown[]) {
+        lines.push(parts.join(" "));
+      }
+    })("codemode", false);
+    let arrivals = 0;
+    const arrived = latch();
+    const release = latch();
+    const tool = codemodeTool(
+      new CallableCatalog([
+        defineTool({
+          name: "hold",
+          description: "hold",
+          parameters: Type.Object({}),
+          execute: async () => {
+            if (++arrivals === 2) arrived.resolve();
+            await release.promise;
+            return { content: [] };
+          },
+        }),
+      ]),
+      new Set(),
+      {},
+      { id: "orb-1", task },
+    );
+    const MiB = 1024 * 1024;
+    const peak = (result: { details?: unknown }) =>
+      (result.details as { memory: { peakBytes: number } }).memory.peakBytes;
+    const baseline = codeModeMemory.active;
+    try {
+      const root = await harness.root(ctx);
+      const holding = tool.execute(
+        { code: "const b = new Uint8Array(32 * 1024 * 1024).fill(1); await tools.hold({});" },
+        { ...api(root), callId: "holding" },
+        ctx,
+      );
+      const exhausting = tool.execute(
+        {
+          code: "await tools.hold({}); const a = []; for (;;) a.push(new Uint8Array(16 * 1024 * 1024).fill(1));",
+        },
+        { ...api(root), callId: "exhausting" },
+        ctx,
+      );
+      await arrived.promise;
+      expect(codeModeMemory.active).toBe(baseline + 2);
+      release.resolve();
+      const [held, exhausted] = await Promise.all([holding, exhausting]);
+      expect(codeModeMemory.active).toBe(baseline);
+      expect(held.isError).toBe(false);
+      expect(peak(held)).toBeGreaterThan(32 * MiB);
+      expect(exhausted.isError).toBe(true);
+      expect(peak(exhausted)).toBeGreaterThan(200 * MiB);
+      const flooded = await tool.execute(
+        { code: 'const s = "x".repeat(600 * 1024); text(s); text(s);' },
+        { ...api(root), callId: "flooded" },
+        ctx,
+      );
+      expect(flooded.isError).toBe(true);
+      expect(codeModeMemory.active).toBe(baseline);
+      expect(lines.map((line) => line.replace(/peak_mib=\d+/, "peak_mib=N"))).toEqual([
+        `lifecycle: orb=orb-1 codemode.resource_failed kind=out_of_memory peak_mib=N conversation=${root.id} call=exhausting`,
+        `lifecycle: orb=orb-1 codemode.resource_failed kind=output_limit peak_mib=N conversation=${root.id} call=flooded`,
+      ]);
     } finally {
       release.resolve();
       await harness.close(ctx);
