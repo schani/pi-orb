@@ -2,7 +2,7 @@
 
 ## Code-mode guides: local qualification limits
 
-Frozen `622e507` partial full-run failures remain at `/workspace/.context/codemode-main-validation-622e507-logs/`. No full-suite green/counts claimed. Stale skills inventory is corrected. PGlite passed; PostgreSQL connections were unavailable (unconditional/fallback55432 tests). Cancellation checkpoints were missing; occupied fixed3210/5173 ports imply expected preflight collisions, but teardown deleted child stderr: historical `port_in_use` is unproven. Installer SIGXFSZ: launcher RLIMIT_FSIZE32MiB capped every file; log-only bounds allowed isolated `npm ci` to pass with identical lockfile. No additional product defect established. Full PostgreSQL/Docker/browser qualification remains mandatory in CI after authorized main push. No deployment.
+Frozen `622e507`: 4,218 tests passed, six failed, 19 skipped; logs: `/workspace/.context/codemode-main-validation-622e507-logs/`. The stale skill inventory is corrected; five failures require unavailable PostgreSQL (unconditional/fallback-port tests). Cancellation fixtures missed checkpoints with fixed ports 3210/5173 occupied; teardown deleted child stderr, so historical `port_in_use` is unproven. Installer SIGXFSZ came from the launcher's 32 MiB file-size limit; bounding only captured logs allowed `npm ci` to pass. Full PostgreSQL/Docker/browser qualification remains required in CI; no full local pass or deployment is claimed.
 
 ## Legacy Pi startup guard (2026-10-08; local qualification, undeployed)
 

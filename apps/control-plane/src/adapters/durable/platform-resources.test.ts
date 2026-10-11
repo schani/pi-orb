@@ -105,6 +105,7 @@ it("provides a bounded example, relevant caps and stable bundled-manual guidance
     /tools\.read[\s\S]*package\.json[\s\S]*JSON\.parse[\s\S]*store\(/,
     /262144[\s\S]*1048576[\s\S]*keys/i,
     /256\s*MiB[\s\S]*heap/i,
+    /CPU:[\s\S]*1 core[\s\S]*shared[\s\S]*20 ms[\s\S]*deadlines/i,
     /5\s*min[\s\S]*@options/,
     /10000[\s\S]*estimated tokens[\s\S]*4 characters\/token/i,
     /timeout_ms[\s\S]*positive integer[\s\S]*2147483647/i,
