@@ -5,20 +5,43 @@ import os
 from pathlib import Path
 import re
 import stat
+import subprocess
 import sys
+import time
+import urllib.error
 import urllib.request
 
 METADATA_CONFIG_URL = 'http://metadata.google.internal/computeMetadata/v1/instance/attributes/pi-orb-config'
+METADATA_RETRY_BUDGET_SECONDS = 60
+DIAGNOSTIC = '/usr/local/bin/pi-orb-boot-diagnostic'
 REQUIRED_KEYS = (
     'PI_ORB_ID', 'PI_ORB_RUNTIME_TOKEN', 'PI_ORB_CONTROL_PLANE_URL',
     'PI_ORB_HOST_INCARNATION', 'PI_ORB_REPOSITORY_URL', 'PI_ORB_SKILLS_DIR',
 )
 
 
-def load_config(urlopen=urllib.request.urlopen):
+def fetch_config(urlopen, sleep, monotonic):
+    # The guest agent briefly tears down networking at boot:
+    # docs/postmortems/2026-10-10-bootstrap-metadata-network-race.md
     request = urllib.request.Request(METADATA_CONFIG_URL, headers={'Metadata-Flavor': 'Google'})
-    with urlopen(request, timeout=15) as response:
-        config = json.load(response)
+    deadline = monotonic() + METADATA_RETRY_BUDGET_SECONDS
+    delay = 0.5
+    retries = []
+    while True:
+        try:
+            with urlopen(request, timeout=15) as response:
+                return json.load(response), retries
+        except OSError as error:
+            if (isinstance(error, urllib.error.HTTPError) and error.code < 500) or monotonic() + delay > deadline:
+                raise
+            retries.append(str(error).replace('\n', ' '))
+            print('metadata_retry ' + str(len(retries)) + ': ' + retries[-1], file=sys.stderr, flush=True)
+        sleep(delay)
+        delay = min(delay * 2, 8)
+
+
+def load_config(urlopen=urllib.request.urlopen, sleep=time.sleep, monotonic=time.monotonic):
+    config, retries = fetch_config(urlopen, sleep, monotonic)
     if not isinstance(config, dict):
         raise ValueError('configuration is not an object')
     for key, value in config.items():
@@ -27,7 +50,7 @@ def load_config(urlopen=urllib.request.urlopen):
     for required in REQUIRED_KEYS:
         if not config.get(required):
             raise ValueError('missing instance configuration: ' + required)
-    return config
+    return config, retries
 
 
 def write_environment(config, workspace=Path('/workspace'), runtime_directory=Path('/run/pi-orb'), chown=os.chown):
@@ -73,17 +96,24 @@ def write_environment(config, workspace=Path('/workspace'), runtime_directory=Pa
     os.chmod(path, 0o600)
 
 
-def main(urlopen=urllib.request.urlopen, workspace=Path('/workspace'), runtime_directory=Path('/run/pi-orb'), ismount=os.path.ismount, chown=os.chown):
+def main(urlopen=urllib.request.urlopen, workspace=Path('/workspace'), runtime_directory=Path('/run/pi-orb'), ismount=os.path.ismount, chown=os.chown, sleep=time.sleep, monotonic=time.monotonic, command=subprocess.run):
     if not ismount(workspace):
         print('workspace_not_mounted', file=sys.stderr)
         return 1
     try:
-        write_environment(load_config(urlopen), workspace, runtime_directory, chown)
+        config, retries = load_config(urlopen, sleep, monotonic)
+        write_environment(config, workspace, runtime_directory, chown)
         print('instance_configuration_loaded')
-        return 0
     except (OSError, ValueError, TypeError) as error:
         print(str(error).replace('\n', ' ') or 'instance_configuration_unavailable', file=sys.stderr)
         return 1
+    if retries:
+        # Record recovered retries durably; guest journals are not queryable.
+        try:
+            command([DIAGNOSTIC, 'bootstrap', 'starting', 'metadata_retried', retries[-1], json.dumps({'metadataRetries': len(retries)})], check=False)
+        except OSError:
+            pass
+    return 0
 
 
 if __name__ == '__main__':
