@@ -3606,6 +3606,51 @@ describe("idle auto-stop (DST)", () => {
     );
   });
 
+  // docs/postmortems/2026-10-10-starting-deadline-restarts.md: a control plane
+  // dying faster than its in-memory boot holds must still fail a dead boot.
+  it("a never-answering boot fails although the control plane keeps restarting", async () => {
+    await runDst({ name: "starting-deadline-restarts", iterations: 5 }, async (sim) => {
+      const { createStartDeadlineMs, setupHookHoldMs, unreachableBootDeadlineMs } = TEST_CONSTANTS;
+      let harness = makeHarness();
+      let current = sim;
+      let stateChangedAt = 0;
+      let wall = 0;
+      for (let phase = 0; ; phase++) {
+        const stop = new AbortController();
+        const h = harness;
+        const result = await current.runTasks([
+          { name: "reconciler", f: (task) => reconcileLoop(task, h.deps, stop.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              if (phase === 0) {
+                h.world.configureOrb(ORB, { containerNeverStarts: true });
+                h.store.seedProject(makeProjectRow(PROJECT));
+                stateChangedAt = task.wallNow();
+                h.store.seedOrb(makeOrbRow(ORB, PROJECT, "starting", { stateChangedAt }));
+              }
+              // Each process dies before its own boot-evidence budget runs out.
+              await task.sleep(unreachableBootDeadlineMs - 20_000, "process lifetime");
+              wall = task.wallNow();
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        if (harness.store.orbSnapshot(ORB)?.state !== "starting") break;
+        expect(wall - stateChangedAt).toBeLessThan(
+          createStartDeadlineMs + setupHookHoldMs + unreachableBootDeadlineMs,
+        );
+        harness = restartControlPlane(harness);
+        current = makeRecordingSimulation({
+          name: `starting-deadline-restarts-${phase + 1}`,
+          wallClockEpoch: wall + 10_000,
+        });
+      }
+      expect(harness.store.orbSnapshot(ORB)?.lastError).toMatch(/^deadline_exceeded/);
+    });
+  });
+
   it("survives a control-plane restart on persisted state alone", async () => {
     await runDst({ name: "idle-stop-across-restart", iterations: 10 }, async (sim) => {
       const before = makeHarness();

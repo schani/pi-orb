@@ -9,7 +9,7 @@ it("allocates execution while central resource preparation is held", async () =>
   const h = makeHarness();
   const task = new NoSimulationTask("overlap", false);
   const project = makeProjectRow("project");
-  const orb = makeOrbRow("orb", project.id, "starting");
+  const orb = makeOrbRow("orb", project.id, "starting", { stateChangedAt: task.wallNow() });
   h.store.seedProject(project);
   h.store.seedOrb(orb);
   let release!: () => void;
