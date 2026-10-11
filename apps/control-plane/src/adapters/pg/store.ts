@@ -112,6 +112,7 @@ function mapOrbRow(row: PgRow): OrbRow {
     sleepId: row["sleep_id"] == null ? null : String(row["sleep_id"]),
     sleepUntil: row["sleep_until"] == null ? null : toMs(row["sleep_until"]),
     lastMintAt: row["last_mint_at"] == null ? null : toMs(row["last_mint_at"]),
+    autoRestartTimes: ((row["auto_restart_times"] ?? []) as unknown[]).map(toMs),
     stateChangedAt: toMs(row["state_changed_at"]),
     archivedAt: row["archived_at"] == null ? null : toMs(row["archived_at"]),
     createdAt: toMs(row["created_at"]),
@@ -725,8 +726,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            checkout_commit, harness_session_id, harness_session_header, last_error,
            runtime_token_hash, replication_cursor, replicated_head_id, last_busy_at,
            stop_reason, sleep_id, sleep_until, last_mint_at,
-           state_changed_at, created_at, updated_at, user_time_zone, harness, agent_admission_version, last_ready_at, claude_recovery)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb)
+           state_changed_at, created_at, updated_at, user_time_zone, harness, agent_admission_version, last_ready_at, claude_recovery, auto_restart_times)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb,$39)
          ON CONFLICT (id) DO NOTHING RETURNING *`,
         [
           orb.id,
@@ -767,6 +768,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           orb.agentAdmissionVersion,
           orb.lastReadyAt === null ? null : new Date(orb.lastReadyAt),
           jsonParam(orb.claudeRecovery ?? null),
+          arrayParam(orb.autoRestartTimes.map((at) => new Date(at))),
         ],
       );
       if (inserted.isErr()) return err(inserted.error);
@@ -1496,7 +1498,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       const started = await query(
         `UPDATE orbs SET state = 'starting', state_version = state_version + 1,
            agent_admission_version = agent_admission_version + CASE WHEN stop_reason IN ('manual', 'sleep') THEN 1 ELSE 0 END,
-           state_changed_at = $3, updated_at = $3, last_error = NULL, stop_reason = NULL
+           state_changed_at = $3, updated_at = $3, last_error = NULL, stop_reason = NULL,
+           auto_restart_times = '{}'
          WHERE id = $1 AND state_version = $2 AND state IN ('stopped', 'failed') RETURNING *`,
         [params.orbId, params.expectedStateVersion, new Date(params.now)],
       );
@@ -1802,6 +1805,9 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         "host_discard_error = NULL",
         "host_discard_evidence = $5",
         "host_discard_requested_at = $3",
+        ...(params.suspendAgent === true
+          ? ["stop_reason = 'manual'", "agent_admission_version = agent_admission_version + 1"]
+          : []),
       ],
       [new Date(params.now), params.lastError, params.evidence ?? null],
     );
@@ -1967,6 +1973,11 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       values.push(params.stopReason);
       index += 1;
     }
+    if (params.autoRestartTimes !== undefined) {
+      sets.push(`auto_restart_times = $${index}`);
+      values.push(arrayParam(params.autoRestartTimes.map((at) => new Date(at))));
+      index += 1;
+    }
     if (params.cancelSleep === true) {
       sets.push(
         "sleep_id = NULL",
@@ -2012,6 +2023,11 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     if (params.lastReadyAt !== undefined) {
       sets.push(`last_ready_at = $${index}`);
       values.push(new Date(params.lastReadyAt));
+      index += 1;
+    }
+    if (params.autoRestartTimes !== undefined) {
+      sets.push(`auto_restart_times = $${index}`);
+      values.push(arrayParam(params.autoRestartTimes.map((at) => new Date(at))));
       index += 1;
     }
     if (params.runtimeTokenHash !== undefined) {

@@ -54,6 +54,8 @@ export interface CasTransitionParams {
   readonly checkoutCommit?: string | null;
   /** Set entering `stopping` (idle) and cleared on explicit stops/starts (docs/lifecycle.md). */
   readonly stopReason?: StopReason | null;
+  /** Replaces the rolling automatic-restart record (docs/lifecycle.md). */
+  readonly autoRestartTimes?: readonly number[];
   readonly cancelSleep?: boolean;
 }
 
@@ -66,6 +68,7 @@ export interface CasUpdateFieldsParams {
   readonly hostRef?: string | null;
   readonly checkoutCommit?: string | null;
   readonly lastReadyAt?: number;
+  readonly autoRestartTimes?: readonly number[];
   readonly lastError?: string | null;
   readonly runtimeTokenHash?: string | null;
   readonly hostSpecFingerprint?: string | null;
@@ -93,6 +96,8 @@ export interface FailOrbAndRequestComputeDiscardParams {
   readonly lastError: string;
   /** Sanitized, size-bounded host evidence already available at the terminal decision. */
   readonly evidence?: string | null;
+  /** Also revoke central agent admission, as an explicit Stop does (docs/lifecycle.md). */
+  readonly suspendAgent?: boolean;
 }
 
 export interface FinalizeHostDiscardParams {

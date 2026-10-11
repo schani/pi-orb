@@ -8,6 +8,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Fix flaky phone Chromium tail-pinning E2E** (2026-10-10, macOS Docker Desktop). `e2e/frontend-mobile.e2e.test.ts` "keeps tail during a stationary pointer with inside release" fails its 5-second tail poll (`distance` 940, expected ≤ 1) on unmodified `origin/main` 630e29c in 5 of 8 isolated runs, and in 1 of 5 runs plus a full-suite run on the restart-budget branch. Root-cause the schedule before any timeout change.
+
 - **Retain a sanitized Git failure class on `resources.failed`** (2026-10-09; `docs/postmortems/2026-10-09-resource-fetch-main-branch.md`). Central resource fetch drops Git stderr, so a missing ref, auth failure and network error all log only `code=fetch`.
 
 - **Release and verify central code-mode CPU headroom** (2026-10-09; `docs/postmortems/2026-10-09-control-plane-cpu-429.md`, `docs/pi-adapter.md`, `docs/deployment.md`). The shared one-core worker budget, durable CPU/wait counters and rollout CPU/ingress-429 evidence are implemented locally. Complete normal exact-source Linux/PostgreSQL CI and E2E gates, then qualify the independently managed two-vCPU Cloud Run revision under sustained multi-worker load. Cooperative checkpoints exclude main-thread/compiler CPU and can overshoot in native operations; confirm actual serving headroom and ingress admission. Preserve central authority and first-failure evidence.

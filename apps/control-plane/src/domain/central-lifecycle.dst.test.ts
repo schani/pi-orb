@@ -8,6 +8,7 @@ import { runDst, waitUntil } from "../testkit/sim.ts";
 import type { AgentPlane } from "./agent-ports.ts";
 import { awaitExecutionBinding } from "./execution-admission.ts";
 import {
+  admitAgentRecovery,
   reconcileCentralAgent,
   reconcileOrbOnce,
   requestOrbStart,
@@ -454,6 +455,67 @@ describe("independent central lifecycle", () => {
             deps.control.setBrowserVisibility("orb", "tab", true, task.wallNow());
             await reconcileOrbOnce(task, deps, "orb");
             expect(harness.store.orbSnapshot("orb")?.state).toBe("failed");
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    });
+  });
+  it("agent recoveries share the restart budget; exhaustion fails and suspends the agent", async () => {
+    await runDst({ name: "central-recovery-budget", iterations: 5 }, async (sim) => {
+      const harness = makeHarness();
+      let suspensions = 0;
+      const deps = {
+        ...harness.deps,
+        agentPlane: {
+          ...plane(() => undefined),
+          suspend: () => {
+            suspensions++;
+            return okAsync(undefined);
+          },
+        },
+      };
+      const result = await sim.runTasks([
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, "orb");
+            const seeded = harness.store.orbSnapshot("orb");
+            if (seeded === null) throw new Error("orb not seeded");
+            const now = task.wallNow();
+            harness.store.seedOrb({
+              ...seeded,
+              autoRestartTimes: [
+                now - 2 * 3_600_000,
+                now - 4_000,
+                now - 3_000,
+                now - 2_000,
+                now - 1_000,
+              ],
+            });
+            expect((await admitAgentRecovery(task, deps, "orb")).isOk()).toBe(true);
+            expect(harness.store.orbSnapshot("orb")?.autoRestartTimes).toHaveLength(5);
+
+            const refused = await admitAgentRecovery(task, deps, "orb");
+            expect(refused.isErr() && refused.error.message).toBe("restart budget exhausted");
+            const failed = harness.store.orbSnapshot("orb");
+            expect(failed).toMatchObject({
+              state: "failed",
+              stopReason: "manual",
+              agentAdmissionVersion: seeded.agentAdmissionVersion + 1,
+            });
+            expect(failed?.lastError).toMatch(
+              /^restart_budget_exhausted: 5 automatic restarts within an hour; next was agent_recovery/,
+            );
+            expect((await reconcileCentralAgent(task, deps, "orb")).isOk()).toBe(true);
+            expect(suspensions).toBe(1);
+
+            expect((await requestOrbStart(task, deps, "orb")).isOk()).toBe(true);
+            expect(harness.store.orbSnapshot("orb")).toMatchObject({
+              state: "starting",
+              stopReason: null,
+              autoRestartTimes: [],
+            });
           },
         },
       ]);

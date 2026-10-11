@@ -66,6 +66,7 @@ const orb: OrbRow = {
   sleepId: null,
   sleepUntil: null,
   lastMintAt: null,
+  autoRestartTimes: [],
   stateChangedAt: 1_000,
   createdAt: 1_000,
   updatedAt: 1_000,
@@ -675,6 +676,30 @@ export function storeSemanticsContractTests(
         now: 3_000,
       });
       expect(stale.isErr() && stale.error.type).toBe("state_conflict");
+    });
+
+    it("charges restarts and fails a budget-exhausted orb with its agent suspended", async () => {
+      await seed();
+      const charged = await store.casUpdateFields(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        now: 2_000,
+        autoRestartTimes: [1_000, 2_000],
+      });
+      expect(charged.isOk() && charged.value.autoRestartTimes).toEqual([1_000, 2_000]);
+      const failed = await store.failOrbAndRequestComputeDiscard(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        now: 3_000,
+        lastError: "restart_budget_exhausted: budget",
+        suspendAgent: true,
+      });
+      expect(failed.isOk() && failed.value).toMatchObject({
+        state: "failed",
+        stopReason: "manual",
+        agentAdmissionVersion: orb.agentAdmissionVersion + 1,
+        autoRestartTimes: [1_000, 2_000],
+      });
     });
 
     it("claims a Claude ownership episode once and creates proof only at fenced finalization", async () => {
@@ -1697,8 +1722,12 @@ export function storeSemanticsContractTests(
         toState: "failed",
         now: 2_000,
         lastError: "provider_failed: boom",
+        autoRestartTimes: [1_000, 1_500],
       });
       expect(failed.isOk() && failed.value.stateVersion).toBe(1);
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.autoRestartTimes).toEqual([
+        1_000, 1_500,
+      ]);
       const messageId = "00000000-0000-4000-8000-000000000106";
       const queued = await store.enqueueOrbMessage(task, {
         orbId: orb.id,
@@ -1716,6 +1745,8 @@ export function storeSemanticsContractTests(
       });
       expect(woken.isOk() && woken.value?.state).toBe("starting");
       expect(woken.isOk() && woken.value?.lastError).toBeNull();
+      // Human input renews the automatic-restart budget (docs/lifecycle.md).
+      expect(woken.isOk() && woken.value?.autoRestartTimes).toEqual([]);
 
       // The boot fails again. The same intent is now stranded: it names a
       // failure two versions old, so it must not provision forever.
