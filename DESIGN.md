@@ -144,6 +144,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-10-bootstrap-metadata-network-race.md](docs/postmortems/2026-10-10-bootstrap-metadata-network-race.md) — single metadata read lost a boot-time guest-agent network reload; bootstrap now retries transient failures
 - [docs/postmortems/2026-10-10-starting-deadline-restarts.md](docs/postmortems/2026-10-10-starting-deadline-restarts.md) — restarting control plane renewed the create/start deadline hold
 - [docs/postmortems/2026-10-08-subagent-post-tool-missing-request.md](docs/postmortems/2026-10-08-subagent-post-tool-missing-request.md) — unresolved hosted post-tool stalls; bounded stream/audit evidence only
 - [docs/postmortems/2026-10-08-mcp-summary-missing-request.md](docs/postmortems/2026-10-08-mcp-summary-missing-request.md) — unresolved hosted summary failure; sanitized artifact retention only

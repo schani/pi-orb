@@ -5,7 +5,7 @@ Orb `e8836220-358d-4480-84aa-ae07068a7864` (GCE Spot VM) stayed `starting` from 
 ## Timeline (UTC)
 
 - 00:02:07 GCE preempted the VM; 00:02:20 `running` → `starting` (`host_observed_stopped`); 00:02:30 `host-start outcome=ok`.
-- The runtime never answered. Discard evidence at 06:19:59: `boot-status: bootstrap failed: bootstrap_exit_code execMainStatus=1`. The guest cause is unknown; no guest logs survived.
+- The runtime never answered. Discard evidence at 06:19:59: `boot-status: bootstrap failed: bootstrap_exit_code execMainStatus=1`. Guest cause: `docs/postmortems/2026-10-10-bootstrap-metadata-network-race.md`.
 - `pi-orb-issuer` OOM-restarted 85 times between 23:53 and 06:24 (`docs/postmortems/2026-10-09-central-durable-oom-recovery.md`). Until 06:03:52 no process lived longer than 10m17s.
 - The 06:03:52 replacement process lived 20.5 minutes and failed the orb at 06:19:36: `deadline_exceeded … 120 probes; runtime never answered; last probe error: fetch failed (ECONNREFUSED)`.
 - The reconciler logged nothing for the orb between 00:02:30 and 06:19:36.

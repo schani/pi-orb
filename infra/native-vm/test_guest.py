@@ -60,6 +60,71 @@ class BootstrapTest(unittest.TestCase):
             self.assertIn('HOME="' + str(root / 'workspace/home') + '"', environment.read_text())
             self.assertEqual((root / 'workspace/home').stat().st_mode & 0o777, 0o700)
 
+    def fake_clock(self):
+        now = [0.0]
+        sleeps = []
+
+        def sleep(seconds):
+            sleeps.append(seconds)
+            now[0] += seconds
+        return sleeps, sleep, lambda: now[0]
+
+    def test_retries_transient_metadata_failure_and_records_it(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'workspace').mkdir()
+            failures = [bootstrap.urllib.error.URLError(OSError(101, 'Network is unreachable')), bootstrap.urllib.error.HTTPError(bootstrap.METADATA_CONFIG_URL, 503, 'Service Unavailable', {}, io.BytesIO())]
+
+            def opened(request, timeout):
+                if failures:
+                    raise failures.pop(0)
+                return Response(json.dumps(self.config()).encode())
+            sleeps, sleep, monotonic = self.fake_clock()
+            commands = []
+            with patch('sys.stderr', new_callable=io.StringIO) as stderr:
+                result = bootstrap.main(opened, root / 'workspace', root / 'run', lambda _: True, lambda *_: None, sleep, monotonic, lambda argv, **_: commands.append(argv))
+            self.assertEqual(result, 0)
+            self.assertEqual(sleeps, [0.5, 1])
+            self.assertIn('metadata_retry 1: <urlopen error [Errno 101] Network is unreachable>', stderr.getvalue())
+            self.assertIn('metadata_retry 2: HTTP Error 503: Service Unavailable', stderr.getvalue())
+            self.assertEqual(commands, [[bootstrap.DIAGNOSTIC, 'bootstrap', 'starting', 'metadata_retried', 'HTTP Error 503: Service Unavailable', '{"metadataRetries": 2}']])
+            self.assertTrue((root / 'run/environment').exists())
+            records = []
+            with patch.object(diagnostic, 'publish', records.append):
+                self.assertEqual(diagnostic.main(commands[0][1:]), 0)
+            self.assertEqual((records[0]['code'], records[0]['details']['metadataRetries']), ('metadata_retried', 2))
+
+    def test_gives_up_on_persistent_transient_failure_within_budget(self):
+        attempts = []
+
+        def opened(request, timeout):
+            attempts.append(request.full_url)
+            raise bootstrap.urllib.error.URLError(OSError(101, 'Network is unreachable'))
+        sleeps, sleep, monotonic = self.fake_clock()
+        commands = []
+        with patch('sys.stderr', new_callable=io.StringIO) as stderr:
+            result = bootstrap.main(opened, Path('/workspace'), Path('/run/pi-orb'), lambda _: True, lambda *_: None, sleep, monotonic, lambda argv, **_: commands.append(argv))
+        self.assertEqual(result, 1)
+        self.assertEqual(sleeps, [0.5, 1, 2, 4, 8, 8, 8, 8, 8, 8])
+        self.assertLessEqual(sum(sleeps), bootstrap.METADATA_RETRY_BUDGET_SECONDS)
+        self.assertEqual(len(attempts), 11)
+        self.assertEqual(commands, [])
+        self.assertTrue(stderr.getvalue().endswith('<urlopen error [Errno 101] Network is unreachable>\n'))
+
+    def test_missing_configuration_fails_without_retry(self):
+        attempts = []
+
+        def opened(request, timeout):
+            attempts.append(request.full_url)
+            raise bootstrap.urllib.error.HTTPError(bootstrap.METADATA_CONFIG_URL, 404, 'Not Found', {}, io.BytesIO())
+        sleeps, sleep, monotonic = self.fake_clock()
+        with patch('sys.stderr', new_callable=io.StringIO) as stderr:
+            result = bootstrap.main(opened, Path('/workspace'), Path('/run/pi-orb'), lambda _: True, lambda *_: None, sleep, monotonic, lambda *_: self.fail('no retry edge'))
+        self.assertEqual(result, 1)
+        self.assertEqual((len(attempts), sleeps), (1, []))
+        self.assertTrue(stderr.getvalue().startswith('HTTP Error 404: Not Found\n'))
+        self.assertNotIn('metadata_retry', stderr.getvalue())
+
     def test_rejects_missing_disk_before_fetching_metadata(self):
         opened = lambda *_: self.fail('metadata must not be read')
         self.assertEqual(bootstrap.main(opened, Path('/workspace'), Path('/run/pi-orb'), lambda _: False), 1)
