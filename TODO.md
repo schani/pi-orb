@@ -13,7 +13,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
   - `durable-pg/{clock.postgres,drain.postgres,native-inbox-abort,pg-composed-drain}` (5): fail instead of skipping without `PI_ORB_DURABLE_PG_TEST_URL`; drop the `127.0.0.1:55432` fallback and skip like `stores.postgres.test.ts`.
   - `execution-client/env.test.ts` and `e2e/frontend-listen.e2e.test.ts` "rejects old-document readiness…": `mkdtemp(tmpdir())` returns `/var/…`, which resolves to `/private/var/…`; `realpath` the fixture directories.
   - `e2e/terminal-client.unit.test.ts`: waits on server `close`, whose order relative to client close is OS-dependent; await the outcome directly.
-  - `claude-composed-lifecycle.dst.test.ts` (5): 30 s timeouts under parallel `npm test` from fsync contention (7/7 pass alone; reproduced on clean `main`). Non-UI flake: stop timed-out runs and bound journal I/O through a simulation-friendly boundary or an explicit budget.
+  - `claude-composed-lifecycle.dst.test.ts`: now runs alone after the parallel suite (`vitest.config.ts`), but still does real fsync under a 30 s wall-clock timeout, and a timed-out run is not cancelled. Bound journal I/O through a simulation-friendly boundary or an explicit budget.
   - WebKit phone "keeps modal close contrast…": macOS WebKit Tab skips buttons/links (system keyboard-navigation setting); use Alt+Tab on darwin.
   - WebKit phone "preserves reader position after ArrowUp…": macOS WebKit drops ArrowUp during animated scroll (40 px vs 120 px); wait for movement between presses.
   - The first frontend E2E run had a fourth, unidentified failure (output not retained); not reproduced in two further runs.
