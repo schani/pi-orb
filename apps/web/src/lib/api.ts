@@ -43,6 +43,7 @@ import { type Static, type TSchema, Type } from "typebox";
 import { Check } from "typebox/value";
 import {
   beginSessionRequest,
+  readBrowserSession,
   readSessionGeneration,
   reportAuthenticationRequired,
   reportLoggedOut,
@@ -197,6 +198,8 @@ async function apiFetch<S extends TSchema>(
   path: string,
   init?: RequestInit,
 ): Promise<Result<Static<S>, ApiError>> {
+  if (path !== "/api/v1/session" && readBrowserSession().status === "auth_required")
+    return err({ type: "auth_required", message: "Sign in to continue." });
   const sequence = beginSessionRequest();
   const generation = readSessionGeneration();
   const stale = () => generation !== readSessionGeneration();

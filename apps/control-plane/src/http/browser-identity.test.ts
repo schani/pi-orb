@@ -112,6 +112,35 @@ describe("authenticated browser route scope", () => {
     ).toBe(401);
   });
 
+  it("records admission outcomes except routine unauthenticated requests", async () => {
+    const app = Fastify();
+    apps.push(app);
+    const outcomes: string[] = [];
+    registerAuthenticatedBrowserRoutes(
+      app,
+      (request) =>
+        errAsync(
+          request.url === "/api/forbidden"
+            ? { type: "forbidden" as const, message: "denied" }
+            : { type: "unauthenticated" as const, message: "denied" },
+        ),
+      (scope) => {
+        scope.get("/api/private", async () => ({}));
+        scope.get("/api/forbidden", async () => ({}));
+      },
+      {
+        origins: { appOrigin: "https://app.test", filesOrigin: "https://files.test" },
+        auth: {
+          startLogin: () => errAsync({ type: "identity_unavailable" as const, message: "unused" }),
+        },
+        outcome: (entry) => outcomes.push(`${entry.event}:${entry.outcome}`),
+      },
+    );
+    expect((await app.inject({ url: "/api/private" })).statusCode).toBe(401);
+    expect((await app.inject({ url: "/api/forbidden" })).statusCode).toBe(403);
+    expect(outcomes).toEqual(["admission:forbidden"]);
+  });
+
   it("keeps concurrent principals request-local with explicit scheduling", async () => {
     const app = Fastify();
     apps.push(app);

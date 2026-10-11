@@ -52,11 +52,12 @@ export function registerAuthenticatedBrowserRoutes(
         return;
       }
       reply.header("cache-control", "no-store").header("referrer-policy", "no-referrer");
-      filesLogin?.outcome?.({
-        event: "admission",
-        outcome: principal.error.type,
-        requestId: request.id,
-      });
+      if (principal.error.type !== "unauthenticated")
+        filesLogin?.outcome?.({
+          event: "admission",
+          outcome: principal.error.type,
+          requestId: request.id,
+        });
       if (principal.error.type === "forbidden") {
         return reply.status(403).send({
           error: { code: "forbidden", message: "Authentication forbidden", retryable: false },

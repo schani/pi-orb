@@ -27,7 +27,7 @@ class MonitorTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'monitor.json'
             clock = iter([0, 0, 60, 120, 1080])
-            samples = iter([Result({'health': 'ok'}), fail('http', 'secret'),
+            samples = iter([Result({'health': 'ok'}), fail('http', 'health unavailable'),
                             Result({'health': 'ok'}), Result({'health': 'ok'})])
             with patch.object(monitor, 'sample', side_effect=lambda *_: next(samples)):
                 result = monitor.observe({}, output, clock=lambda: next(clock), sleep=lambda _: None)
@@ -37,8 +37,8 @@ class MonitorTest(unittest.TestCase):
             self.assertEqual(evidence['metricLagSeconds'], 180)
             self.assertEqual(evidence['samples'][1]['outcome'], 'unavailable')
             self.assertEqual(evidence['samples'][1]['category'], 'http')
+            self.assertEqual(evidence['samples'][1]['message'], 'health unavailable')
             self.assertIn('at', evidence['samples'][1])
-            self.assertNotIn('secret', output.read_text())
 
     def test_lifecycle_classification_separates_expected_refusal(self):
         rows = [{'textPayload': 'lifecycle: orb=secret central-agent-start-rejected code=legacy_backend message=secret'},

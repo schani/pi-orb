@@ -268,7 +268,8 @@ def observe(record, output, cloud=None, clock=time.monotonic, sleep=time.sleep):
                     'history_integrity', 'drain-integrity', 'drain-restart-cap',
                     'central-agent-unavailable', 'central-delivery-blocked',
                     'agent.startup_cleanup_failed', 'agent.owner_lost'))
-        evidence['samples'].append({'at': now(), 'outcome': 'unavailable', 'category': captured.error.kind}
+        evidence['samples'].append({'at': now(), 'outcome': 'unavailable', 'category': captured.error.kind,
+                                    'message': captured.error.message}
                                    if captured.error else {'at': now(), 'outcome': 'observed', **captured.value})
         evidence['durationSeconds'] = int(clock() - began)
         if evidence['durationSeconds'] >= WINDOW_SECONDS + METRIC_LAG_SECONDS:

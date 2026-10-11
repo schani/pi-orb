@@ -398,6 +398,19 @@ describe("API session handling", () => {
     },
   );
 
+  it("stops API requests other than the session probe while sign-in is required", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await probeSession();
+
+    const result = await listHostedFiles("orb-1");
+
+    expect(result.isErr() && result.error.type).toBe("auth_required");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await probeSession();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("does not recover an expired session from successful image bytes", async () => {
     vi.stubGlobal(
       "fetch",
