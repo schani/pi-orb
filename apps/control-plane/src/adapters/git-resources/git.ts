@@ -265,7 +265,7 @@ export class GitResourceSource implements ResourceSource {
           "--no-tags",
           "--no-write-fetch-head",
           input.url,
-          "refs/heads/main:refs/resources/target",
+          "HEAD:refs/resources/target",
         ]);
         if (fetch.isErr()) return err(fetch.error);
         const sha = await git(["rev-parse", "--verify", "refs/resources/target^{commit}"]);

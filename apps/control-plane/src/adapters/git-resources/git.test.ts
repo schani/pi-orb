@@ -170,7 +170,7 @@ it("preserves authentication failure and cancels before invoking credentials", a
   expect(cancelled.isErr() && cancelled.error.code).toBe("cancelled");
   expect(environment).toHaveBeenCalledTimes(1);
 });
-it("acquires a pinned local commit and follows skill-directory symlinks without checkout", async () => {
+it("acquires the default-branch commit and follows skill-directory symlinks without checkout", async () => {
   const dir = await mkdtemp(join(tmpdir(), "resource-fixture-"));
   try {
     const git = (...args: string[]) =>
@@ -179,7 +179,7 @@ it("acquires a pinned local commit and follows skill-directory symlinks without 
         env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" },
         stdio: "pipe",
       });
-    git("init", "-b", "main");
+    git("init", "-b", "master");
     git("config", "user.name", "fixture");
     git("config", "user.email", "fixture@example.invalid");
     await mkdir(join(dir, ".claude/skills/a"), { recursive: true });
