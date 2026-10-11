@@ -35,6 +35,7 @@ import type { PgResourceGate } from "./adapters/pg/resource-gate.ts";
 import { CODEX_PROVIDER, getToken, type TokenGrant, type TokenRequest } from "./domain/broker.ts";
 import type { RuntimeClientError } from "./domain/errors.ts";
 import { awaitExecutionBinding, type ExecutionBinding } from "./domain/execution-admission.ts";
+import { admitAgentRecovery } from "./domain/lifecycle.ts";
 import { logOrbEvent } from "./domain/log.ts";
 import type { McpStore } from "./domain/mcp.ts";
 import type { McpOAuth } from "./domain/mcp-oauth.ts";
@@ -718,6 +719,7 @@ export function createProcessAgentContext(
         executionActive: () => env.active(),
         resume: !readOnly && orb.stopReason !== "manual" && orb.stopReason !== "sleep",
         openSignal: operation.signal,
+        admitRecovery: () => admitAgentRecovery(task, deps, orb.id),
         checkAdmission: () =>
           deps.store
             .getOrb(task, orb.id)

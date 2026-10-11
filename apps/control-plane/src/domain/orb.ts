@@ -76,6 +76,8 @@ export interface OrbRow {
   readonly sleepUntil: number | null;
   /** Durable per-orb mint rate-limit floor; monotone, written outside the CAS. */
   readonly lastMintAt: number | null;
+  /** Wall-clock ms of recent automatic running → starting restarts (docs/lifecycle.md). */
+  readonly autoRestartTimes: readonly number[];
   readonly stateChangedAt: number;
   readonly archivedAt?: number | null;
   readonly createdAt: number;

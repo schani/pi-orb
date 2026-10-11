@@ -153,6 +153,8 @@ export interface DurableAgentOptions {
   readonly prompt?: (conversationId: string, generationId?: string) => string;
   readonly resume?: boolean;
   readonly checkAdmission?: () => ResultAsync<void, RuntimeClientError>;
+  /** Consulted before resuming unfinished work; an error leaves it suspended. */
+  readonly admitRecovery?: () => ResultAsync<void, RuntimeClientError>;
   readonly beginDrain?: () => ResultAsync<void, RuntimeClientError>;
   readonly openSignal?: AbortSignal;
   readonly ownershipSignal?: AbortSignal;
@@ -443,6 +445,12 @@ export class DurableAgent implements AgentSessionFacade {
         });
         const recoveredTasks = Object.keys(agent.tasks.tasks);
         if (recoveredTasks.length > 0 && options.resume !== false) {
+          stage = "recovery budget";
+          const admitted = await options.admitRecovery?.();
+          if (admitted?.isErr()) {
+            await agent.close();
+            return err(admitted.error);
+          }
           stage = "restart notice";
           await root.commit(
             (tx) =>

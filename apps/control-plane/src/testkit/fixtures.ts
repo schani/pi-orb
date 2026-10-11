@@ -315,6 +315,7 @@ export function makeOrbRow(
     sleepId: null,
     sleepUntil: null,
     lastMintAt: null,
+    autoRestartTimes: [],
     stateChangedAt: 0,
     createdAt: 0,
     updatedAt: 0,

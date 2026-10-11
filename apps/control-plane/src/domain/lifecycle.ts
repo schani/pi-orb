@@ -449,6 +449,9 @@ async function failOrb(
     now: task.wallNow(),
     lastError: formatOrbFailure(code, failureMessage),
     evidence: boundedEvidence,
+    // `failed` alone leaves a central agent running; a budget failure must
+    // also stop its recovery loop until fresh human intent.
+    ...(code === "restart_budget_exhausted" ? { suspendAgent: true } : {}),
   });
   if (cas.isErr()) {
     return cas.error.type === "state_conflict" ? { type: "conflict" } : retryable(cas.error);
@@ -617,6 +620,7 @@ async function transitionTo(
   extra?: {
     lastError?: string | null;
     stopReason?: StopReason | null;
+    autoRestartTimes?: readonly number[];
     /** Log-only: why the reconciler decided on this transition. */
     reason?: string;
   },
@@ -628,6 +632,7 @@ async function transitionTo(
     now: task.wallNow(),
     ...(extra?.lastError !== undefined ? { lastError: extra.lastError } : {}),
     ...(extra?.stopReason !== undefined ? { stopReason: extra.stopReason } : {}),
+    ...(extra?.autoRestartTimes !== undefined ? { autoRestartTimes: extra.autoRestartTimes } : {}),
   });
   if (cas.isErr()) {
     return cas.error.type === "state_conflict" ? { type: "conflict" } : retryable(cas.error);
@@ -1278,14 +1283,85 @@ async function runtimeSilenceCorroborated(
   return false;
 }
 
+const AUTO_RESTART_BUDGET = 5;
+const AUTO_RESTART_WINDOW_MS = 60 * 60_000;
+
+/**
+ * The orb's restart times including one more automatic restart, or null once
+ * the rolling budget is exhausted (docs/lifecycle.md).
+ */
+function chargeAutoRestart(task: SimulationTask, orb: OrbRow): number[] | null {
+  const now = task.wallNow();
+  const recent = orb.autoRestartTimes.filter((at) => at > now - AUTO_RESTART_WINDOW_MS);
+  return recent.length < AUTO_RESTART_BUDGET ? [...recent, now] : null;
+}
+
+function failRestartBudget(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orb: OrbRow,
+  reason: string,
+): Promise<ReconcileOutcome> {
+  return failOrb(
+    task,
+    deps,
+    orb,
+    "restart_budget_exhausted",
+    `${AUTO_RESTART_BUDGET} automatic restarts within an hour; next was ${reason}`,
+  );
+}
+
+function autoRestart(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orb: OrbRow,
+  reason: string,
+): Promise<ReconcileOutcome> {
+  const restarts = chargeAutoRestart(task, orb);
+  return restarts === null
+    ? failRestartBudget(task, deps, orb, reason)
+    : transitionTo(task, deps, orb, "starting", { reason, autoRestartTimes: restarts });
+}
+
+/** Charges a central agent's crash recovery to the restart budget before it resumes. */
+export function admitAgentRecovery(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orbId: string,
+): ResultAsync<void, RuntimeClientError> {
+  const refused = (message: string): RuntimeClientError => ({
+    type: "runtime_client_error",
+    code: "history_unavailable",
+    answered: true,
+    retryable: true,
+    message,
+  });
+  const run = async (): Promise<Result<void, RuntimeClientError>> => {
+    const current = await deps.store.getOrb(task, orbId);
+    const orb = current.isOk() ? current.value : null;
+    if (orb === null) return err(refused("restart budget unavailable"));
+    const restarts = chargeAutoRestart(task, orb);
+    if (restarts === null) {
+      await failRestartBudget(task, deps, orb, "agent_recovery");
+      return err(refused("restart budget exhausted"));
+    }
+    const charged = await deps.store.casUpdateFields(task, {
+      orbId,
+      expectedStateVersion: orb.stateVersion,
+      now: task.wallNow(),
+      autoRestartTimes: restarts,
+    });
+    return charged.isOk() ? ok(undefined) : err(refused("restart budget unavailable"));
+  };
+  return new ResultAsync(run());
+}
+
 async function reconcileRunning(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   orb: OrbRow,
 ): Promise<ReconcileOutcome> {
-  if (orb.hostRef === null) {
-    return transitionTo(task, deps, orb, "starting", { reason: "no_host_ref" });
-  }
+  if (orb.hostRef === null) return autoRestart(task, deps, orb, "no_host_ref");
   const observed = await observeHost(task, deps, orb.hostRef);
   if (observed.isErr()) {
     return observed.error.retryable
@@ -1298,9 +1374,12 @@ async function reconcileRunning(
   if (observation === null || observation.state === "stopped" || observation.state === "failed") {
     // Unexpected absence/stop: restore the host around the retained
     // filesystem (docs/lifecycle.md).
-    return transitionTo(task, deps, orb, "starting", {
-      reason: observation === null ? "host_absent" : `host_observed_${observation.state}`,
-    });
+    return autoRestart(
+      task,
+      deps,
+      orb,
+      observation === null ? "host_absent" : `host_observed_${observation.state}`,
+    );
   }
   if (observation.state === "starting" || observation.state === "stopping") {
     return waiting("host_transition");
@@ -1395,7 +1474,7 @@ async function reconcileRunning(
       deps.constants.postRestartGraceMs,
       task.wallNow(),
     );
-    return transitionTo(task, deps, orb, "starting", { reason: "unreachable_restart" });
+    return autoRestart(task, deps, orb, "unreachable_restart");
   }
 
   // Canonical receipts must commit before any retained inbox UUID is redelivered.
@@ -2908,6 +2987,7 @@ export function requestOrbStart(
             now: task.wallNow(),
             lastError: null,
             stopReason: null,
+            autoRestartTimes: [],
             cancelSleep: true,
           });
           if (cas.isOk()) {

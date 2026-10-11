@@ -42,6 +42,7 @@ const orb: OrbRow = {
   sleepId: null,
   sleepUntil: null,
   lastMintAt: null,
+  autoRestartTimes: [],
   stateChangedAt: 1_700_000_000_000,
   createdAt: 1_700_000_000_000,
   updatedAt: 1_700_000_000_000,

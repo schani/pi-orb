@@ -49,6 +49,7 @@ export function newOrbRow(
     sleepId: null,
     sleepUntil: null,
     lastMintAt: null,
+    autoRestartTimes: [],
     stateChangedAt: now,
     createdAt: now,
     updatedAt: now,

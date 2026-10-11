@@ -1409,6 +1409,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         updatedAt: params.now,
         lastError: null,
         stopReason: null,
+        autoRestartTimes: [],
         agentAdmissionVersion:
           orb.agentAdmissionVersion +
           (orb.stopReason === "manual" || orb.stopReason === "sleep" ? 1 : 0),
@@ -1721,6 +1722,9 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         hostDiscardError: null,
         hostDiscardEvidence: params.evidence ?? null,
         hostDiscardRequestedAt: params.now,
+        ...(params.suspendAgent === true
+          ? { stopReason: "manual", agentAdmissionVersion: orb.agentAdmissionVersion + 1 }
+          : {}),
       };
       this.orbs.set(orb.id, updated);
       return { conflict: false as const, row: updated };
@@ -1901,6 +1905,9 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         ...(params.hostRef !== undefined ? { hostRef: params.hostRef } : {}),
         ...(params.checkoutCommit !== undefined ? { checkoutCommit: params.checkoutCommit } : {}),
         ...(params.stopReason !== undefined ? { stopReason: params.stopReason } : {}),
+        ...(params.autoRestartTimes !== undefined
+          ? { autoRestartTimes: params.autoRestartTimes }
+          : {}),
         ...(params.cancelSleep === true
           ? {
               sleepId: null,
@@ -1968,6 +1975,9 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         ...(params.hostRef !== undefined ? { hostRef: params.hostRef } : {}),
         ...(params.checkoutCommit !== undefined ? { checkoutCommit: params.checkoutCommit } : {}),
         ...(params.lastReadyAt !== undefined ? { lastReadyAt: params.lastReadyAt } : {}),
+        ...(params.autoRestartTimes !== undefined
+          ? { autoRestartTimes: params.autoRestartTimes }
+          : {}),
         ...(params.runtimeTokenHash !== undefined
           ? { runtimeTokenHash: params.runtimeTokenHash }
           : {}),

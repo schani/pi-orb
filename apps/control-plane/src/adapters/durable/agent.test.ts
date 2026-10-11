@@ -854,6 +854,19 @@ describe("central Durable agent", () => {
       ]);
       const secondModels = createModels();
       secondModels.setProvider(secondModel.provider);
+      const refused = await DurableAgent.open({
+        orbId: "orb",
+        storage: (await authority.openOrb("orb", true))._unsafeUnwrap().storage,
+        models: secondModels,
+        registry: createRegistry(),
+        env: new NodeExecutionEnv({ cwd: directory }),
+        checkoutCommit: "commit",
+        instructions: "NEW",
+        initialSettings,
+        admitRecovery: () => errAsync(durableError("restart budget exhausted")),
+      });
+      expect(refused.isErr() && refused.error.message).toBe("restart budget exhausted");
+      let recoveriesAdmitted = 0;
       const second = (
         await DurableAgent.open({
           orbId: "orb",
@@ -864,8 +877,13 @@ describe("central Durable agent", () => {
           checkoutCommit: "commit",
           instructions: "NEW",
           initialSettings,
+          admitRecovery: () => {
+            recoveriesAdmitted++;
+            return okAsync(undefined);
+          },
         })
       )._unsafeUnwrap({ withStackTrace: true });
+      expect(recoveriesAdmitted).toBe(1);
       try {
         second.subscribe(observeOutcome);
         expect((await second.deliver(input))._unsafeUnwrap().operationId).toBe(receipt.operationId);

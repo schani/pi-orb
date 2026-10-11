@@ -94,7 +94,8 @@ export type OrbFailureCode =
   | "runtime_never_answered"
   | "provider_failed"
   | "auth_failed"
-  | "drain_runtime_unrecoverable";
+  | "drain_runtime_unrecoverable"
+  | "restart_budget_exhausted";
 
 export function formatOrbFailure(code: OrbFailureCode, message: string): string {
   return `${code}: ${message}`;

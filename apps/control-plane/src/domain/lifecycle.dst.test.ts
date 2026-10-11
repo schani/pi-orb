@@ -2896,6 +2896,59 @@ describe("orb lifecycle (DST)", () => {
     );
   });
 
+  // An orb that keeps dying must not restart forever (docs/lifecycle.md).
+  it("repeated preemptions exhaust the restart budget; Start renews it", async () => {
+    await runDst({ name: "restart-budget", iterations: 5 }, async (sim) => {
+      const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+      const stop = new AbortController();
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            const state = () => harness.store.orbSnapshot(ORB)?.state;
+            const restarts = () => harness.store.orbSnapshot(ORB)?.autoRestartTimes.length;
+            const preempt = async (label: string): Promise<void> => {
+              harness.world.preemptHost(task, ORB);
+              await waitUntil(task, `${label}: left running`, () => state() !== "running", {
+                timeoutMs: 10 * 60_000,
+              });
+            };
+            const recover = (label: string): Promise<void> =>
+              waitUntil(
+                task,
+                `${label}: recovered`,
+                () => state() === "running" && harness.world.isRuntimeServing(task, ORB),
+                { timeoutMs: 20 * 60_000 },
+              );
+            for (let i = 1; i <= 5; i++) {
+              await preempt(`preemption ${i}`);
+              await recover(`preemption ${i}`);
+            }
+            expect(restarts()).toBe(5);
+            await preempt("over budget");
+            await waitUntil(task, "budget exhausted", () => state() === "failed");
+            expect(harness.store.orbSnapshot(ORB)?.lastError).toMatch(
+              /^restart_budget_exhausted: 5 automatic restarts within an hour; next was /,
+            );
+
+            expect((await requestOrbStart(task, harness.deps, ORB)).isOk()).toBe(true);
+            expect(restarts()).toBe(0);
+            await recover("explicit start");
+            await preempt("after start");
+            await recover("after start");
+            expect(restarts()).toBe(1);
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      assertAtMostOneHost(harness.world, ORB);
+    });
+  });
+
   // The compounding failure of docs/postmortems/2026-08-07-preemption-lost-turn.md,
   // from the control plane's side: recovery worked (96s, no storm), but the
   // runtime came back idle with a truncated turn and the idle reaper — working
