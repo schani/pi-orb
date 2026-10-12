@@ -119,6 +119,45 @@ describe("FetchRuntimeClient response evidence", () => {
       }),
     );
   });
+  it("addresses a multi-message batch by its first message id", async () => {
+    const fetch = vi.fn(async () =>
+      Response.json(
+        {
+          v: 1,
+          messageId: "first",
+          status: "queued",
+          delivery: "turn",
+          operationId: "operation-1",
+          duplicate: false,
+        },
+        { status: 202 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const content = [{ type: "text" as const, text: "one\n\ntwo" }];
+    const result = await new FetchRuntimeClient().deliverMessage(
+      task,
+      {
+        baseUrl: "http://runtime.test",
+        messageId: "hashed-batch-id",
+        messageIds: ["first", "second"],
+        content,
+      },
+      { signal: new AbortController().signal },
+    );
+    expect(result.isOk()).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(
+      "http://runtime.test/v1/messages/first",
+      expect.objectContaining({
+        body: JSON.stringify({
+          v: 1,
+          messageId: "first",
+          messageIds: ["first", "second"],
+          content,
+        }),
+      }),
+    );
+  });
   it("binds detail and binary image reads to the requested session", async () => {
     const fetch = vi.fn(async (url: string) =>
       url.includes("/images/")
