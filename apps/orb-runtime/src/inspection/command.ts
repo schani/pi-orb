@@ -9,6 +9,9 @@ import { err, ok, type Result } from "neverthrow";
 
 export const INSPECTION_USAGE = `usage:
   pi-orb self [--json]
+  pi-orb expose <port>
+  pi-orb unexpose <port>
+  pi-orb previews [--json]
   pi-orb orbs [query] [--json]
   pi-orb transcript <orb-id> [--json]
   pi-orb alert "message" [--request-id <id>]
@@ -53,7 +56,6 @@ export function formatSelf(self: OrbSelf): string {
   ];
   if (self.spawnedBy !== null)
     lines.push(`Spawned by: ${self.spawnedBy.id} (${self.spawnedBy.url})`);
-  if (self.previewHost !== null) lines.push(`Preview: ${self.previewHost}`);
   return `${lines.join("\n")}\n`;
 }
 

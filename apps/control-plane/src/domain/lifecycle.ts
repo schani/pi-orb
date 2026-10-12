@@ -1522,11 +1522,13 @@ async function reconcileRunning(
         return { type: "noop" };
     }
     const uploadActive = orb.uploadActiveUntil !== null && orb.uploadActiveUntil > sleepNow;
+    const previewActive = orb.previewActiveUntil !== null && orb.previewActiveUntil > sleepNow;
     if (
       (agentPlacement(deps.agentPlane, orb) === "central"
         ? !deps.control.hasAgentWork(orb.id)
         : liveness.activity === "idle") &&
-      !uploadActive
+      !uploadActive &&
+      !previewActive
     ) {
       deps.control.noteCondition(`sleep-wait:${orb.id}`, false);
       await task.checkpoint("sleep.stop-before-cas");
@@ -1546,7 +1548,7 @@ async function reconcileRunning(
     if (deps.control.noteCondition(`sleep-wait:${orb.id}`, true)) {
       logOrbEvent(task, orb.id, "sleep-waiting", {
         sleep_id: orb.sleepId,
-        reason: uploadActive ? "upload" : "runtime_busy",
+        reason: uploadActive ? "upload" : previewActive ? "preview" : "runtime_busy",
       });
     }
     return { type: "noop" };
@@ -1562,6 +1564,7 @@ async function reconcileRunning(
   const lastActivityAt = Math.max(
     orb.lastBusyAt ?? 0,
     orb.uploadActiveUntil ?? 0,
+    orb.previewActiveUntil ?? 0,
     orb.stateChangedAt,
     deps.control.getLastVisibleAt(orb.id) ?? 0,
   );
@@ -2100,21 +2103,6 @@ async function reconcileResourceDisposal(
   deps: ControlPlaneDeps,
   orb: OrbRow,
 ): Promise<ReconcileOutcome | null> {
-  const cleaned = await withDeadline(
-    task,
-    deps.constants.providerOperationTimeoutMs,
-    "clean orb external resources",
-    (context) => deps.resourceCleaner.cleanupOrb(task, orb.id, context),
-  );
-  if (cleaned.isErr()) {
-    await deps.store.recordOrbDeletionError(task, {
-      orbId: orb.id,
-      message: `resource cleanup: ${cleaned.error.message}`,
-      now: task.wallNow(),
-    });
-    return retryable(cleaned.error);
-  }
-
   const plane = deps.agentPlane;
   if (plane) {
     const disposed = await withDeadline(
@@ -2132,6 +2120,7 @@ async function reconcileResourceDisposal(
       return retryable(disposed.error);
     }
   }
+
   const destroyed = await destroyHost(task, deps, orb.id);
   if (destroyed.isErr()) {
     await deps.store.recordOrbDeletionError(task, {

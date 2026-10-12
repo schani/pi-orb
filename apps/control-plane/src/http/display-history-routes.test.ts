@@ -47,7 +47,7 @@ it("serves compact browser history while retaining full persisted records", asyn
   ).toBe(true);
   const app = Fastify({ logger: false });
   try {
-    registerRoutes(app, task, harness.deps, {}, TEST_SYSTEM_VIEW);
+    registerRoutes(app, task, harness.deps, TEST_SYSTEM_VIEW);
     const response = await app.inject({ method: "GET", url: "/api/v1/orbs/orb/history" });
     expect(response.statusCode).toBe(200);
     const body = response.json();

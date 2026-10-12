@@ -15,7 +15,6 @@ import { err, errAsync, ok, Result, ResultAsync } from "neverthrow";
 import type { HookEnvReport } from "../hooks/env-file.ts";
 import { bootHookPrompt } from "../hooks/prompt.ts";
 import { repositoryResources } from "../repository-resources.ts";
-import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { environmentPrompt } from "./environment-prompt.ts";
 import type { NativeMcpExtensionDeps } from "./extensions/index.ts";
 import { createOrbExtensions } from "./extensions/index.ts";
@@ -30,7 +29,6 @@ export interface OrbResourceLoaderInput {
   readonly agentDir: string;
   /** Shared with `createAgentSession`; omitted where the SDK default is used. */
   readonly settingsManager?: SettingsManager | undefined;
-  readonly previewHost?: string | null;
   readonly userTimeZone?: string | null;
   /** Latest boot-hook outcomes; only failures reach the prompt. */
   readonly hooks?: RuntimeHooks;
@@ -51,7 +49,6 @@ export interface OrbResourceLoaderInput {
  * Append overrides preserve SDK APPEND_SYSTEM.md discovery.
  */
 export function orbResourceLoaderOptions(input: OrbResourceLoaderInput): LoaderOptions {
-  const previewHost = input.previewHost ?? null;
   const userTimeZone = input.userTimeZone ?? null;
   // Capture the boot value: an SDK reload must not adopt a later account edit.
   const personalContent = input.personalInstructions?.content ?? "";
@@ -104,7 +101,6 @@ export function orbResourceLoaderOptions(input: OrbResourceLoaderInput): LoaderO
     appendSystemPromptOverride: (base: string[]): string[] => [
       ...base,
       environmentPrompt,
-      ...(previewHost !== null ? [portExposurePrompt(previewHost)] : []),
       ...(userTimeZone !== null
         ? [
             `User’s time zone: ${userTimeZone}. Present dates and times in this time zone unless they request another.`,

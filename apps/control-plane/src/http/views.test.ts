@@ -37,6 +37,7 @@ const orb: OrbRow = {
   unreadAlertId: null,
   lastBusyAt: null,
   uploadActiveUntil: null,
+  previewActiveUntil: null,
   stopReason: null,
   agentAdmissionVersion: 0,
   sleepId: null,
@@ -47,6 +48,14 @@ const orb: OrbRow = {
   createdAt: 1_700_000_000_000,
   updatedAt: 1_700_000_000_000,
 };
+
+it("exposes a durable preview lease without agent busy", () => {
+  const until = 1_700_000_015_000;
+  const view = orbView({ ...orb, previewActiveUntil: until }, new ControlState(), {});
+  expect(view.previewActiveUntil).toBe(new Date(until).toISOString());
+  expect(view.activity).toBeUndefined();
+  expect(Check(OrbViewSchema, view)).toBe(true);
+});
 
 describe("orbView failures", () => {
   it("exposes the durable explanation without a transitional readiness detail", () => {
@@ -378,20 +387,5 @@ describe("orbView credential challenge shaping", () => {
       expect(JSON.stringify(action)).not.toContain("SECRET-CODE");
       expect(JSON.stringify(action)).not.toContain("github.test");
     }
-  });
-});
-
-describe("orbView previewHost", () => {
-  it("derives the MagicDNS host when a tailnet is configured", () => {
-    const view = orbView(orb, new ControlState(), { tailnetDnsName: "tailabc123.ts.net" });
-    expect(view.previewHost).toBe("pi-orb-orb-1.tailabc123.ts.net");
-    expect(Check(OrbViewSchema, view)).toBe(true);
-  });
-
-  it("omits the field entirely when port exposure is off", () => {
-    const view = orbView(orb, new ControlState(), {});
-    expect(view.previewHost).toBeUndefined();
-    expect("previewHost" in view).toBe(false);
-    expect(Check(OrbViewSchema, view)).toBe(true);
   });
 });

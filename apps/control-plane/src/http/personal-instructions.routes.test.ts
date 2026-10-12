@@ -12,7 +12,7 @@ it("browser routes read/save one document without project scope, reject invalid 
   app.addHook("onRequest", async (request) => {
     request.principal = { kind: "user", user: { id: TEST_USER_ID, email: null } };
   });
-  registerRoutes(app, new NoSimulationTask("personal routes", false), h.deps, {}, TEST_SYSTEM_VIEW);
+  registerRoutes(app, new NoSimulationTask("personal routes", false), h.deps, TEST_SYSTEM_VIEW);
   try {
     const initial = await app.inject({ method: "GET", url: "/api/v1/personal-instructions" });
     expect(initial.statusCode).toBe(200);

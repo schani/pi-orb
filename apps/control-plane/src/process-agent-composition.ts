@@ -45,6 +45,7 @@ import type { ModelCallUse, ModelUsageLedger } from "./domain/model-usage.ts";
 import {
   createCentralOrbAgentOperations,
   type OrbAgentError,
+  type OrbAgentOptions,
 } from "./domain/orb-agent-operations.ts";
 import type { BrokerDeps, ControlPlaneDeps } from "./domain/ports.ts";
 import { getProjectSecretSnapshot } from "./domain/project-secrets.ts";
@@ -117,6 +118,7 @@ export function processAgentSystemContext(
 ): string {
   return [
     "Use orb_self, orb_list, orb_transcript, orb_spawn, orb_sleep, orb_alert, orb_archive and orb_delete for control-plane operations. Use codemode to compose tool calls. Subagents support start, steer, observe, wait and cancel.",
+    "For HTTP services on localhost, orb_expose_port returns the URL to share; it does not mean the service is ready. Never guess preview URLs. orb_unexpose_port revokes and orb_list_previews lists registrations. Previews never start stopped compute.",
     ...(userTimeZone
       ? [
           `User’s time zone: ${userTimeZone}. Present dates and times in this time zone unless they request another.`,
@@ -238,7 +240,7 @@ export function createProcessAgentContext(
     mcpOAuth: McpOAuth;
     modelUsage: ModelUsageLedger;
     appOrigin: string;
-    tailnetDnsName?: string;
+    previews?: NonNullable<OrbAgentOptions["previews"]>;
     inferenceBaseUrl?: (userId: string) => string | undefined;
     appendAlert: (
       orbId: string,

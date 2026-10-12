@@ -250,6 +250,20 @@ export class ControlState {
   // -- browser presence (idle auto-stop, docs/lifecycle.md) --
 
   private readonly browserConnections = new Map<string, Map<string, BrowserConnection>>();
+  private readonly lifecycleClosers = new Map<string, Map<string, () => void>>();
+
+  registerLifecycleConnection(orbId: string, id: string, close: () => void): void {
+    const closers = this.lifecycleClosers.get(orbId) ?? new Map<string, () => void>();
+    closers.set(id, close);
+    this.lifecycleClosers.set(orbId, closers);
+  }
+
+  unregisterLifecycleConnection(orbId: string, id: string): void {
+    const closers = this.lifecycleClosers.get(orbId);
+    closers?.delete(id);
+    if (closers?.size === 0) this.lifecycleClosers.delete(orbId);
+  }
+
   /** Wall ms when the orb last had a visible tab; lost on process restart. */
   private readonly lastVisibleAt = new Map<string, number>();
 
@@ -271,12 +285,13 @@ export class ControlState {
   /** Omitted kind closes all connections; closed sockets cease contributing demand immediately. */
   closeBrowserConnections(orbId: string, kind?: BrowserConnectionKind): void {
     const connections = this.browserConnections.get(orbId);
-    if (connections === undefined) return;
-    for (const connection of connections.values()) {
+    for (const connection of connections?.values() ?? []) {
       if (connection.closing || (kind !== undefined && connection.kind !== kind)) continue;
       connection.closing = true;
       connection.close?.();
     }
+    if (kind === "conversation") return;
+    for (const close of [...(this.lifecycleClosers.get(orbId)?.values() ?? [])]) close();
   }
 
   setBrowserVisibility(orbId: string, connectionId: string, visible: boolean, at: number): void {
@@ -605,6 +620,7 @@ export class ControlState {
     this.authBlocked.delete(orbId);
     this.drainStatus.delete(orbId);
     this.restartPending.delete(orbId);
+    this.lifecycleClosers.delete(orbId);
     if (!preserveBrowser) {
       this.browserConnections.delete(orbId);
       this.lastVisibleAt.delete(orbId);

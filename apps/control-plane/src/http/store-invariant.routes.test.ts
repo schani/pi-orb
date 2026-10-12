@@ -23,7 +23,7 @@ describe("store invariant HTTP mapping", () => {
     app = Fastify();
     harness.store.seedProject(makeProjectRow("project-invariant"));
     harness.store.seedOrb(makeOrbRow("orb-invariant", "project-invariant", "stopped"));
-    registerRoutes(app, task, harness.deps, {}, TEST_SYSTEM_VIEW);
+    registerRoutes(app, task, harness.deps, TEST_SYSTEM_VIEW);
     await app.ready();
   });
 

@@ -492,6 +492,8 @@ describe("process agent composition", () => {
     expect(system).toContain("User’s time zone: Asia/Tokyo");
     expect(system).toContain("Repository environment context");
     expect(system).toContain("orb_self");
+    expect(system).toContain("orb_expose_port returns the URL to share");
+    expect(system).not.toContain("pi-orb expose");
     expect(system).not.toContain("Do not inject this resource");
     expect(system).not.toContain("profiles");
   });

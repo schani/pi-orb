@@ -33,6 +33,7 @@ import type {
   ProjectDeletionProgress,
   ProjectRow,
 } from "./orb.ts";
+import type { PreviewStore } from "./preview-ports.ts";
 import type { WorkspaceUploadStore } from "./workspace-uploads.ts";
 
 /** In-process adapter context; never serialized on the wire. */
@@ -185,7 +186,7 @@ export interface CommitPullBatchParams {
  * `state_version` CAS; replication writes use cursor CAS; the two never touch
  * each other's correctness fields.
  */
-export interface ControlPlaneStore extends ActivityHeadlineStore {
+export interface ControlPlaneStore extends ActivityHeadlineStore, PreviewStore {
   readonly uploads: WorkspaceUploadStore;
   getProject(task: SimulationTask, projectId: string): ResultAsync<ProjectRow | null, StoreError>;
   listProjects(task: SimulationTask): ResultAsync<ProjectRow[], StoreError>;
@@ -626,7 +627,7 @@ export interface OrbHostProvider {
   ): ResultAsync<void, OrbHostProviderError>;
   /**
    * Removes disposable compute through an incarnation fence while preserving
-   * authoritative workspace and tailnet identity. Absence is success.
+   * authoritative workspace. Absence is success.
    */
   discardCompute(
     task: SimulationTask,
@@ -1188,21 +1189,12 @@ export interface OrbNameGenerator {
   ): ResultAsync<string, OrbNameGeneratorError>;
 }
 
-export interface OrbResourceCleaner {
-  cleanupOrb(
-    task: SimulationTask,
-    orbId: string,
-    context: OperationContext,
-  ): ResultAsync<void, { readonly message: string; readonly retryable: boolean }>;
-}
-
 export interface ControlPlaneDeps {
   readonly workspaceUploadRuntime?: (
     task: SimulationTask,
   ) => import("./workspace-uploads.ts").UploadRuntime;
   readonly store: ControlPlaneStore;
   readonly hostProvider: OrbHostProvider;
-  readonly resourceCleaner: OrbResourceCleaner;
   readonly runtimeClient: OrbRuntimeClient;
   readonly agentPlane?: import("./agent-ports.ts").AgentPlane;
   readonly authGate: AuthGate;

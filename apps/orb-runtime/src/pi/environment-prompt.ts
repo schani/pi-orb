@@ -11,7 +11,7 @@ Chromium and \`agent-browser\` are installed: \`agent-browser open <url>\`, then
 
 \`pi-orb orbs [query]\` lists/searches this account's orbs; \`pi-orb transcript <orb-id>\` reads an orb's conversation. Transcripts may be very long; \`--json\` gives lossless structured output. Active orbs' replicated snapshots may briefly lag live output.
 
-\`pi-orb self [--json]\` returns this orb’s identity, dashboard URL, project/repository, creation time, spawning orb, and preview hostname.
+\`pi-orb self [--json]\` returns this orb’s identity, dashboard URL, project/repository, creation time, and spawning orb.
 
 \`pi-orb spawn --prompt "task"\` creates an independent same-project orb: fresh default-branch checkout, own conversation; unlike local subagents, no shared checkout, and keeps running if this orb stops. Do not use subagents to start processes that the user interacts with, because it's too finicky.
 
@@ -22,5 +22,7 @@ Push/export needed files before archive/delete. \`pi-orb archive\` only if the u
 \`pi-orb alert "message"\` adds a transcript alert and flags the orb until the user opens it.
 
 \`pi-orb sleep 1h\` sets an absolute wake deadline, stops after admitted work finishes, and returns once durably accepted. To sleep until later, use this command—not code-mode, timers, or shell sleep.
+
+For HTTP services on localhost, \`pi-orb expose <port>\` registers a preview and returns its URL, not a claim that the service is ready. Share that URL; never guess preview URLs. \`pi-orb unexpose <port>\` revokes it; \`pi-orb previews [--json]\` lists registrations. Previews do not start stopped compute.
 
 Executable repo-root hooks: \`.agents/setup\` runs once per compute incarnation before the agent, without identity; install toolchains there. \`.agents/resume\` runs every start with identity to authenticate credentials. Both idempotent; logs: \`$HOME/.cache/pi-orb/logs\`.`;

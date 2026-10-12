@@ -276,7 +276,7 @@ The runtime loads that file into the agent's and the terminal's environment: a
 new terminal picks it up immediately, your own tool shells from the next start.
 It is deny-listed against the orb's contract variables — `PI_ORB_RUNTIME_TOKEN`,
 `PI_ORB_CONTROL_PLANE_URL`, `PI_ORB_ID`, `PI_ORB_HOST_INCARNATION`,
-`PI_ORB_WORK_DIR`, `HOME`, `PATH`, `PI_ORB`, and the Tailscale names are ignored
+`PI_ORB_WORK_DIR`, `HOME`, `PATH`, and `PI_ORB` are ignored
 if you write them — and it is **the only sanctioned persistence** for these
 three.
 

@@ -259,11 +259,10 @@ export function registerRoutes(
   app: FastifyInstance,
   task: SimulationTask,
   deps: ControlPlaneDeps,
-  config: ViewConfig,
   system: SystemView,
   signingKeys?: SigningKeyDeps,
 ): void {
-  config = { ...config, centralAgent: deps.agentPlane?.placement === "central" };
+  const config: ViewConfig = { centralAgent: deps.agentPlane?.placement === "central" };
   const viewerUserId = (request: FastifyRequest): string | null => {
     const principal = requirePrincipal(request);
     return principal.isOk() && principal.value.kind === "user" ? principal.value.user.id : null;

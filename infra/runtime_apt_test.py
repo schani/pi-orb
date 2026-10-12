@@ -222,5 +222,5 @@ exec /usr/bin/apt-get "$@"
         text = (ROOT / 'apps/orb-runtime/Dockerfile').read_text()
         self.assertIn('COPY infra/runtime_apt.sh /usr/local/bin/runtime-apt', text)
         self.assertEqual(text.count('runtime-apt git ca-certificates'), 1)
-        self.assertEqual(text.count('runtime-apt gh tailscale chromium google-cloud-cli'), 1)
+        self.assertEqual(text.count('runtime-apt gh chromium google-cloud-cli'), 1)
         self.assertNotIn('apt-get install', text)

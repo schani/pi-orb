@@ -7,10 +7,8 @@ import { registerRoutes } from "./routes.ts";
 const task = new NoSimulationTask("orb create routes", false);
 
 /**
- * Orb IDs become provider resource names, MagicDNS labels, and Tailscale key
- * descriptions (`pi-orb <id> i<n>`). An unconstrained ID containing a space
- * could make one orb's exact-match key cleanup match another orb's resources,
- * so the API rejects anything outside the DNS-safe alphabet.
+ * Orb IDs become provider resource names, so the API rejects anything
+ * outside the DNS-safe alphabet.
  */
 describe("orb creation ID validation", () => {
   let harness: ReturnType<typeof makeHarness>;
@@ -20,7 +18,7 @@ describe("orb creation ID validation", () => {
     harness = makeHarness();
     app = Fastify();
     harness.store.seedProject(makeProjectRow("project-ids"));
-    registerRoutes(app, task, harness.deps, {}, TEST_SYSTEM_VIEW);
+    registerRoutes(app, task, harness.deps, TEST_SYSTEM_VIEW);
     await app.ready();
   });
 

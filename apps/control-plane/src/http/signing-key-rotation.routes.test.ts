@@ -57,7 +57,7 @@ describe("staged signing-key rotation routes", () => {
     keys = keyHarness.keys;
     signingKeys = keyHarness.deps;
     app = Fastify();
-    registerRoutes(app, task, makeHarness().deps, {}, TEST_SYSTEM_VIEW, signingKeys);
+    registerRoutes(app, task, makeHarness().deps, TEST_SYSTEM_VIEW, signingKeys);
     await app.ready();
     // The steady state an operator rotates *from*.
     expect((await ensureActiveSigningKey(task, signingKeys, { now: task.wallNow() })).isOk()).toBe(
@@ -161,7 +161,7 @@ describe("staged signing-key rotation routes", () => {
       retryable: true,
     };
     const broken = Fastify();
-    registerRoutes(broken, task, makeHarness().deps, {}, TEST_SYSTEM_VIEW, {
+    registerRoutes(broken, task, makeHarness().deps, TEST_SYSTEM_VIEW, {
       ...signingKeys,
       keys: {
         listSigningKeys: () => errAsync(outage),
@@ -183,7 +183,7 @@ describe("staged signing-key rotation routes", () => {
 
   it("does not exist on a role that was not given key management", async () => {
     const withoutKeys = Fastify();
-    registerRoutes(withoutKeys, task, makeHarness().deps, {}, TEST_SYSTEM_VIEW);
+    registerRoutes(withoutKeys, task, makeHarness().deps, TEST_SYSTEM_VIEW);
     await withoutKeys.ready();
     // The public issuer role serves JWKS; it must not be able to change what
     // it publishes, and a route it never registers cannot be reached at all.

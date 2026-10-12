@@ -17,6 +17,10 @@ export function createOrbTools(service: OrbAgentOperations) {
     };
   };
   const empty = Type.Object({}, { additionalProperties: false });
+  const port = Type.Object(
+    { port: Type.Integer({ minimum: 1, maximum: 65535 }) },
+    { additionalProperties: false },
+  );
   return [
     defineTool({
       name: "orb_self",
@@ -79,6 +83,28 @@ export function createOrbTools(service: OrbAgentOperations) {
       parameters: empty,
       replay: "unsafe",
       execute: async (_args, api) => output({ kind: "delete" }, api),
+    }),
+    defineTool({
+      name: "orb_expose_port",
+      description:
+        "Register a localhost HTTP port as an authenticated preview and return its URL. Registration does not check that the service is running.",
+      parameters: port,
+      replay: "safe",
+      execute: async (args, api) => output({ kind: "expose_port", ...args }, api),
+    }),
+    defineTool({
+      name: "orb_unexpose_port",
+      description: "Revoke a port's preview registration.",
+      parameters: port,
+      replay: "safe",
+      execute: async (args, api) => output({ kind: "unexpose_port", ...args }, api),
+    }),
+    defineTool({
+      name: "orb_list_previews",
+      description: "List this orb's registered preview ports and URLs.",
+      parameters: empty,
+      replay: "safe",
+      execute: async (_args, api) => output({ kind: "list_previews" }, api),
     }),
   ];
 }

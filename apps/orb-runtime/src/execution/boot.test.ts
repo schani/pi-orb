@@ -143,6 +143,7 @@ test.each([0, 3])(
           ...process.env,
           PI_ORB_INITIAL_CHECKOUT_COMMIT: exitCode === 0 ? "a".repeat(40) : "",
           PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT: "1",
+          PI_ORB_CONTAINER: process.platform === "linux" ? "1" : "0",
         },
         broker: null,
       });
@@ -151,6 +152,9 @@ test.each([0, 3])(
       const hooks = boot.health();
       expect(hooks.status).toBe("ready");
       if (hooks.status !== "ready") return;
+      // Preview admission fences on the exact compute incarnation and container lifetime.
+      expect(hooks.incarnation).toBe(3);
+      if (process.platform === "linux") expect(hooks.executionId).toMatch(/^[0-9a-f-]+:\d+$/);
       expect(boot.snapshot).toMatchObject({
         hooks: {
           setup: { outcome: exitCode === 0 ? "ok" : "failed", exitCode, incarnation: "3" },
