@@ -1,5 +1,5 @@
 diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js b/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
-index 40014b3..6d7aad5 100644
+index 6ee63ec..d06e2a0 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
 +++ b/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
 @@ -1,7 +1,7 @@
@@ -222,11 +222,25 @@ index 40014b3..6d7aad5 100644
  }
  // ============================================================================
  // Auth & Headers
+diff --git a/node_modules/@earendil-works/pi-ai/dist/auth/resolve.js b/node_modules/@earendil-works/pi-ai/dist/auth/resolve.js
+index fca09b1..d65c86c 100644
+--- a/node_modules/@earendil-works/pi-ai/dist/auth/resolve.js
++++ b/node_modules/@earendil-works/pi-ai/dist/auth/resolve.js
+@@ -75,7 +75,8 @@ export async function refreshStoredOAuthCredential(credentials, providerId, oaut
+             if (!needsRefresh(current))
+                 return undefined; // another process/request refreshed
+             try {
+-                return await oauth.refresh(current, AbortSignal.timeout(DEFAULT_OAUTH_REFRESH_TIMEOUT_MS));
++                // pi-orb: refresh only asks its own broker for a grant; the broker owns rotation, so cancellation is safe.
++                return await oauth.refresh(current, AbortSignal.any([signal, AbortSignal.timeout(DEFAULT_OAUTH_REFRESH_TIMEOUT_MS)]));
+             }
+             catch (error) {
+                 throw new ModelsError("oauth", `OAuth refresh failed for ${providerId}`, { cause: error });
 diff --git a/node_modules/@earendil-works/pi-ai/dist/types.d.ts b/node_modules/@earendil-works/pi-ai/dist/types.d.ts
-index 68aa055..14b278f 100644
+index b01603b..33efd15 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/types.d.ts
 +++ b/node_modules/@earendil-works/pi-ai/dist/types.d.ts
-@@ -109,6 +109,8 @@ export interface ProviderRequestOptions<TModel = Model<Api>> {
+@@ -111,6 +111,8 @@ export interface ProviderRequestOptions<TModel = Model<Api>> {
      maxRetryDelayMs?: number;
  }
  export interface StreamOptions extends ProviderRequestOptions<Model<Api>> {

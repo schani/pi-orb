@@ -1,7 +1,21 @@
+diff --git a/node_modules/@earendil-works/pi-agent-core/dist/agent.d.ts b/node_modules/@earendil-works/pi-agent-core/dist/agent.d.ts
+index 2429a21..053ad64 100644
+--- a/node_modules/@earendil-works/pi-agent-core/dist/agent.d.ts
++++ b/node_modules/@earendil-works/pi-agent-core/dist/agent.d.ts
+@@ -90,6 +90,8 @@ export declare class Agent {
+     steer(message: AgentMessage): void;
+     /** Queue a message to run only after the agent would otherwise stop. */
+     followUp(message: AgentMessage): void;
++    /** Cancel exactly one queued steer while idle; otherwise leave the queue unchanged. */
++    cancelQueuedSteeringMessage(predicate: (message: AgentMessage) => boolean): boolean;
+     /** Remove all queued steering messages. */
+     clearSteeringQueue(): void;
+     /** Remove all queued follow-up messages. */
 diff --git a/node_modules/@earendil-works/pi-agent-core/dist/agent.js b/node_modules/@earendil-works/pi-agent-core/dist/agent.js
+index a8ccfc0..fc4d273 100644
 --- a/node_modules/@earendil-works/pi-agent-core/dist/agent.js
 +++ b/node_modules/@earendil-works/pi-agent-core/dist/agent.js
-@@ -80,6 +80,13 @@
+@@ -80,6 +80,13 @@ class PendingMessageQueue {
          this.messages = this.messages.slice(drained.length);
          return drained;
      }
@@ -15,7 +29,7 @@ diff --git a/node_modules/@earendil-works/pi-agent-core/dist/agent.js b/node_mod
      clear() {
          this.messages = [];
      }
-@@ -188,6 +195,12 @@
+@@ -188,6 +195,12 @@ export class Agent {
      followUp(message) {
          this.followUpQueue.enqueue(message);
      }
@@ -28,15 +42,3 @@ diff --git a/node_modules/@earendil-works/pi-agent-core/dist/agent.js b/node_mod
      /** Remove all queued steering messages. */
      clearSteeringQueue() {
          this.steeringQueue.clear();
-diff --git a/node_modules/@earendil-works/pi-agent-core/dist/agent.d.ts b/node_modules/@earendil-works/pi-agent-core/dist/agent.d.ts
---- a/node_modules/@earendil-works/pi-agent-core/dist/agent.d.ts
-+++ b/node_modules/@earendil-works/pi-agent-core/dist/agent.d.ts
-@@ -90,6 +90,8 @@
-     steer(message: AgentMessage): void;
-     /** Queue a message to run only after the agent would otherwise stop. */
-     followUp(message: AgentMessage): void;
-+    /** Cancel exactly one queued steer while idle; otherwise leave the queue unchanged. */
-+    cancelQueuedSteeringMessage(predicate: (message: AgentMessage) => boolean): boolean;
-     /** Remove all queued steering messages. */
-     clearSteeringQueue(): void;
-     /** Remove all queued follow-up messages. */

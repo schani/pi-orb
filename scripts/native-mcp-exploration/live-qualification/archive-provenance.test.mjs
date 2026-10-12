@@ -8,9 +8,9 @@ import { test } from "node:test";
 import { guard as guardGlideos, sha as hash } from "./glideos-read-guard.mjs";
 import { guard as guardIap } from "./iap-read-guard.mjs";
 
-const lock = "88cb750557e7060e8056f00ed7bf778b8acb8e1f53c4aebd8c60da4c6865749f";
-const patch = "@earendil-works+pi-coding-agent+1.0.0.patch";
-const patchHash = "a7eda2ad337b150f45f2516ee2b77a159cd081f68a16479b61ba48ee68b9fc73";
+const lock = "42714b5e7e7bc4536d4ede553726961c11367012127dbcac18586c22b0ef5ea8";
+const patch = "@earendil-works+pi-coding-agent+1.1.0.patch";
+const patchHash = "f1d54d120d0de92a0ae119e6588f43fb40114f66a3508fb57547034eddf0161e";
 
 function run(cwd, command, args) {
   const result = spawnSync(command, args, {
@@ -31,8 +31,8 @@ test("shipped Pi-only helper applies and reapplies in checkout staging and extra
   const extracted = join(pristine, "extracted");
   const names = [
     patch,
-    "@earendil-works+pi-ai+1.0.0.patch",
-    "@earendil-works+pi-agent-core+1.0.0.patch",
+    "@earendil-works+pi-ai+1.1.0.patch",
+    "@earendil-works+pi-agent-core+1.1.0.patch",
   ];
   const targets = [];
   const gitFiles = ["config", "index"].map((file) => {
@@ -101,8 +101,8 @@ test("Glideos rejects a substituted shipped patch even with updated file manifes
     await writeFile(join(dir, "patches", patch), "altered patch");
     const root = resolve(import.meta.dirname, "../../..");
     await cp(
-      join(root, "patches/@earendil-works+pi-agent-core+1.0.0.patch"),
-      join(dir, "patches/@earendil-works+pi-agent-core+1.0.0.patch"),
+      join(root, "patches/@earendil-works+pi-agent-core+1.1.0.patch"),
+      join(dir, "patches/@earendil-works+pi-agent-core+1.1.0.patch"),
     );
     await writeFile(
       join(dir, "manifest.json"),
@@ -110,13 +110,12 @@ test("Glideos rejects a substituted shipped patch even with updated file manifes
         projectId: "35f581fb-7bbf-4542-a1e8-0d047657a71d",
         source: {
           lock,
-          vendor: "eb67747b526d862e6bd0c959a330b7897ece86ebed3a21e7cf846730e293e509",
           patches: {
-            "@earendil-works+pi-agent-core+1.0.0.patch":
-              "7e2c5e2d68d97419c086ac5d369f6d2b83be2020a3be062e1a1402b37ab0cdb2",
+            "@earendil-works+pi-agent-core+1.1.0.patch":
+              "e817628f707f1d5ea2a3d0d27702919862b23303ba656dea8d30c6412da3e8e1",
             [patch]: patchHash,
-            "@earendil-works+pi-ai+1.0.0.patch":
-              "e503e81db607ca52be72d4f1cc67cc1a52c4321212cf4013f569978d08fb9830",
+            "@earendil-works+pi-ai+1.1.0.patch":
+              "00c77c3ef2de00b331886971cac1c84f7efd8c68a494b48c7db9128418027a58",
           },
         },
         files: { [`patches/${patch}`]: hash(join(dir, "patches", patch)) },
@@ -129,27 +128,21 @@ test("Glideos rejects a substituted shipped patch even with updated file manifes
 });
 
 for (const patch of [
-  "@earendil-works+pi-agent-core+1.0.0.patch",
-  "@earendil-works+pi-ai+1.0.0.patch",
-  "@earendil-works+pi-coding-agent+1.0.0.patch",
+  "@earendil-works+pi-agent-core+1.1.0.patch",
+  "@earendil-works+pi-ai+1.1.0.patch",
+  "@earendil-works+pi-coding-agent+1.1.0.patch",
 ]) {
   test(`IAP rejects substituted ${patch} with a matching mutable manifest`, async () => {
     const root = resolve(import.meta.dirname, "../../..");
     const dir = await mkdtemp(join(tmpdir(), "iap-patch-seal-"));
     try {
-      await mkdir(join(dir, "vendor"));
       await mkdir(join(dir, "patches"));
-      const vendor = "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz";
-      await cp(join(root, vendor), join(dir, vendor));
-      const lockText = (
-        await readFile(join(import.meta.dirname, "package-lock.json"), "utf8")
-      ).replaceAll("file:../../../vendor/", "file:./vendor/");
-      await writeFile(join(dir, "package-lock.json"), lockText);
-      const files = { [vendor]: hash(join(dir, vendor)) };
+      await cp(join(import.meta.dirname, "package-lock.json"), join(dir, "package-lock.json"));
+      const files = {};
       for (const name of [
-        "@earendil-works+pi-agent-core+1.0.0.patch",
-        "@earendil-works+pi-ai+1.0.0.patch",
-        "@earendil-works+pi-coding-agent+1.0.0.patch",
+        "@earendil-works+pi-agent-core+1.1.0.patch",
+        "@earendil-works+pi-ai+1.1.0.patch",
+        "@earendil-works+pi-coding-agent+1.1.0.patch",
       ]) {
         const file = `patches/${name}`;
         await cp(join(root, file), join(dir, file));
@@ -170,30 +163,3 @@ for (const patch of [
     }
   });
 }
-
-test("IAP extracted lock resolves the included vendor archive", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "iap-vendor-"));
-  try {
-    await cp(join(import.meta.dirname, "package-lock.json"), join(dir, "package-lock.json"));
-    await writeFile(
-      join(dir, "package-lock.json"),
-      (await readFile(join(dir, "package-lock.json"), "utf8")).replaceAll(
-        "file:../../../vendor/",
-        "file:./vendor/",
-      ),
-    );
-    await mkdir(join(dir, "vendor"));
-    await writeFile(join(dir, "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz"), "altered vendor");
-    await writeFile(
-      join(dir, "manifest.json"),
-      JSON.stringify({
-        sourceLockSha: lock,
-        lockSha: "ad895afd6cbf53cef4e1385065fe8620e008a3ed3a4cf5bcf15e7ae7e863dcf4",
-        files: {},
-      }),
-    );
-    await assert.rejects(guardIap(dir), /vendor archive mismatch/);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});

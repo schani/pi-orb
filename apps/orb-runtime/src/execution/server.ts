@@ -1,8 +1,9 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { Context } from "@earendil-works/chord";
-import type { TextLineReader } from "@earendil-works/pi-durable/env";
+import type { BinaryReader, TextLineReader } from "@earendil-works/pi-durable/env";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import {
+  EXECUTION_BINARY_READ_MAX_BYTES,
   EXECUTION_CANCEL_PATH,
   EXECUTION_EXEC_PATH,
   EXECUTION_READY_PATH,
@@ -72,6 +73,7 @@ export function buildExecutionServer(options: ExecutionServerOptions) {
   const app = Fastify({ bodyLimit: 16 * 1024 * 1024 });
   const env = new NodeExecutionEnv({ cwd: options.cwd });
   const readers = new Map<string, TextLineReader>();
+  const binaryReaders = new Map<string, BinaryReader>();
   const calls = new Map<string, { controller: AbortController; done: Promise<void> }>();
   app.addHook("onRequest", async (request, reply) => {
     if (request.url === "/v1/health") return;
@@ -138,6 +140,45 @@ export function buildExecutionServer(options: ExecutionServerOptions) {
           return { ok: true };
         }
         return wire(await reader.readLine(context));
+      }
+      if (
+        operation === "binaryInfo" ||
+        operation === "binaryRead" ||
+        operation === "binaryScanLines" ||
+        operation === "binaryClose"
+      ) {
+        const id = String(args[0]);
+        const reader = binaryReaders.get(id);
+        if (!reader) return failure("invalid", "unknown binary reader");
+        if (operation === "binaryClose") {
+          binaryReaders.delete(id);
+          await reader.close(context);
+          return { ok: true };
+        }
+        if (operation === "binaryInfo") return wire(await reader.info(context));
+        if (operation === "binaryScanLines")
+          return wire(
+            await reader.scanLines(args[1] as Parameters<BinaryReader["scanLines"]>[0], context),
+          );
+        const length = Number(args[2]);
+        if (!Number.isSafeInteger(length) || length < 0 || length > EXECUTION_BINARY_READ_MAX_BYTES)
+          return failure(
+            "invalid",
+            `binary reads are limited to ${EXECUTION_BINARY_READ_MAX_BYTES} bytes`,
+          );
+        return wire(await reader.read(Number(args[1]), length, context));
+      }
+      if (operation === "openBinaryReader") {
+        if (binaryReaders.size >= 128) return failure("invalid", "too many open binary readers");
+        const opened = await callEnv.openBinaryReader(
+          String(args[0]),
+          args[1] as { noFollow?: boolean } | undefined,
+          context,
+        );
+        if (!opened.ok) return wire(opened);
+        const id = randomUUID();
+        binaryReaders.set(id, opened.value);
+        return { ok: true, value: id };
       }
       if (operation === "openTextLineReader") {
         if (readers.size >= 128) return failure("invalid", "too many open readers");
@@ -251,9 +292,9 @@ export function buildExecutionServer(options: ExecutionServerOptions) {
       request.body.command,
       {
         ...request.body.options,
-        onOutput: (text) => {
+        onOutput: (text, _context, info) => {
           if (!reply.raw.destroyed) {
-            reply.raw.write(`${JSON.stringify({ type: "output", text })}\n`);
+            reply.raw.write(`${JSON.stringify({ type: "output", text, stream: info.stream })}\n`);
             // Slow clients must not cause unbounded host buffering.
             if (reply.raw.writableLength > 1024 * 1024) call.abort();
           }
@@ -272,8 +313,10 @@ export function buildExecutionServer(options: ExecutionServerOptions) {
     await Promise.all([...calls.values()].map((call) => call.done));
   });
   app.addHook("onClose", async () => {
-    for (const reader of readers.values()) await reader.close(executionContext());
+    for (const reader of [...readers.values(), ...binaryReaders.values()])
+      await reader.close(executionContext());
     readers.clear();
+    binaryReaders.clear();
     await env.cleanup(executionContext());
   });
   return app;

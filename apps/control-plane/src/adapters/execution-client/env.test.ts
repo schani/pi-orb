@@ -111,6 +111,56 @@ test("command failure preserves both output streams and exit status, unlike tran
   }
 });
 
+test("binary and directory readers page remotely; argv exec reports each output stream", async () => {
+  const env = await start();
+  const ctx = context();
+  // Larger than one host response, so reads page and still return exactly the requested range.
+  const large = new Uint8Array(1024 * 1024 + 5000).map((_, index) => index % 251);
+  await env.writeFile("large.bin", large, ctx);
+  await env.writeFile("lines.txt", "one\ntwo\nthree", ctx);
+  const opened = await env.openBinaryReader("large.bin", undefined, ctx);
+  if (!opened.ok) throw opened.error;
+  expect(await opened.value.info(ctx)).toMatchObject({ ok: true, value: { size: large.length } });
+  expect(await opened.value.read(10, large.length, ctx)).toEqual({
+    ok: true,
+    value: large.subarray(10),
+  });
+  await opened.value.close(ctx);
+  expect((await opened.value.info(ctx)).ok).toBe(false);
+  const lines = await env.openBinaryReader("lines.txt", { noFollow: true }, ctx);
+  if (!lines.ok) throw lines.error;
+  expect(await lines.value.scanLines({ startLine: 1, endLine: 2 }, ctx)).toMatchObject({
+    ok: true,
+    value: { newlines: 2, start: 4, end: 7 },
+  });
+  await lines.value.close(ctx);
+  expect(await env.openBinaryReader(".", undefined, ctx)).toMatchObject({
+    ok: false,
+    error: { code: "is_directory" },
+  });
+  const dir = await env.openDirReader(".", ctx);
+  if (!dir.ok) throw dir.error;
+  const first = await dir.value.next(1, ctx);
+  const rest = await dir.value.next(10, ctx);
+  expect(first).toMatchObject({ ok: true, value: { done: false } });
+  expect(rest).toMatchObject({ ok: true, value: { done: true } });
+  expect(
+    [first, rest].flatMap((page) => (page.ok ? page.value.entries.map((e) => e.name) : [])).sort(),
+  ).toEqual(["large.bin", "lines.txt"]);
+  expect(await env.watch([{ path: "." }], () => {}, ctx)).toMatchObject({
+    ok: false,
+    error: { code: "not_supported" },
+  });
+  const streams: string[] = [];
+  const result = await env.exec(
+    ["sh", "-c", "printf out; printf err >&2", "ignored"],
+    { onOutput: (text, _ctx, info) => streams.push(`${info.stream}:${text}`) },
+    ctx,
+  );
+  expect(result).toEqual({ ok: true, value: { exitCode: 0 } });
+  expect(streams.sort()).toEqual(["stderr:err", "stdout:out"]);
+});
+
 test("filesystem capability includes metadata, mutation and temporary files", async () => {
   const env = await start();
   const ctx = context();

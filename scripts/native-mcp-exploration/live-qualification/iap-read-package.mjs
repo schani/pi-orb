@@ -12,7 +12,6 @@ assert.ok(output.startsWith(join(root, ".context/iap-consent-20261001") + sep));
 await mkdir(output); // Immutable output: existing artifacts cannot be replaced.
 const stage = join(output, "staging");
 await mkdir(join(stage, "patches"), { recursive: true });
-await mkdir(join(stage, "vendor"));
 await cp(
   join(root, "scripts/apply-dependency-patches.mjs"),
   join(stage, "apply-dependency-patches.mjs"),
@@ -30,27 +29,17 @@ assert.deepEqual(
 );
 for (const file of ["package.json", "package-lock.json"])
   await cp(join(local, file), join(stage, file));
-const vendor = "pi-coding-agent-1.0.0-brace-5.0.12.tgz";
-await cp(join(root, "vendor", vendor), join(stage, "vendor", vendor));
-for (const file of ["package.json", "package-lock.json"]) {
-  const path = join(stage, file);
-  let source = await readFile(path, "utf8");
-  const original = `file:../../../vendor/${vendor}`;
-  assert.ok(source.includes(original), `missing vendor reference: ${file}: ${vendor}`);
-  source = source.replaceAll(original, `file:./vendor/${vendor}`);
-  await writeFile(path, source);
-}
 for (const file of ["iap-read.test.mjs", "iap-read-guard.mjs", "iap-read-preflight.mjs"])
   await cp(join(local, file), join(stage, file));
 const patches = [
-  "@earendil-works+pi-coding-agent+1.0.0.patch",
-  "@earendil-works+pi-ai+1.0.0.patch",
-  "@earendil-works+pi-agent-core+1.0.0.patch",
+  "@earendil-works+pi-coding-agent+1.1.0.patch",
+  "@earendil-works+pi-ai+1.1.0.patch",
+  "@earendil-works+pi-agent-core+1.1.0.patch",
 ];
 for (const name of patches) await cp(join(root, "patches", name), join(stage, "patches", name));
 assert.equal(
   sha(join(stage, "patches", patches[0])),
-  "a7eda2ad337b150f45f2516ee2b77a159cd081f68a16479b61ba48ee68b9fc73",
+  "f1d54d120d0de92a0ae119e6588f43fb40114f66a3508fb57547034eddf0161e",
 );
 function run(command, args, cwd, log) {
   const result = spawnSync(command, args, {
@@ -85,7 +74,6 @@ const files = [
   "apply-dependency-patches.mjs",
   "package.json",
   "package-lock.json",
-  `vendor/${vendor}`,
   "iap-read.mjs",
   "bundle-meta.json",
   "iap-read.test.mjs",

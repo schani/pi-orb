@@ -140,7 +140,7 @@ it("Abort explicitly cancels compaction but does not release ownership before it
   // SDK compact() allocates its abort controller after its initial abort await.
   f.emit({ type: "compaction_start", reason: "manual" });
   expect(f.aborts()).toBe(2);
-  f.emit({ type: "agent_settled" });
+  f.emit({ type: "agent_settled", aborted: true });
   await Promise.resolve();
   expect(f.agent.gateView().activity).toBe("busy");
   f.reject();

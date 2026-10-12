@@ -11,37 +11,29 @@ export async function guard(stage) {
   assert.equal(manifest.projectId, "35f581fb-7bbf-4542-a1e8-0d047657a71d");
   assert.equal(
     manifest.source.lock,
-    "88cb750557e7060e8056f00ed7bf778b8acb8e1f53c4aebd8c60da4c6865749f",
+    "42714b5e7e7bc4536d4ede553726961c11367012127dbcac18586c22b0ef5ea8",
   );
   assert.equal(
-    manifest.source.vendor,
-    "eb67747b526d862e6bd0c959a330b7897ece86ebed3a21e7cf846730e293e509",
-  );
-  assert.equal(
-    manifest.source.patches["@earendil-works+pi-coding-agent+1.0.0.patch"],
-    "a7eda2ad337b150f45f2516ee2b77a159cd081f68a16479b61ba48ee68b9fc73",
+    manifest.source.patches["@earendil-works+pi-coding-agent+1.1.0.patch"],
+    "f1d54d120d0de92a0ae119e6588f43fb40114f66a3508fb57547034eddf0161e",
   );
   assert.deepEqual(Object.keys(manifest.source.patches).sort(), [
-    "@earendil-works+pi-agent-core+1.0.0.patch",
-    "@earendil-works+pi-ai+1.0.0.patch",
-    "@earendil-works+pi-coding-agent+1.0.0.patch",
+    "@earendil-works+pi-agent-core+1.1.0.patch",
+    "@earendil-works+pi-ai+1.1.0.patch",
+    "@earendil-works+pi-coding-agent+1.1.0.patch",
   ]);
   assert.equal(
-    manifest.source.patches["@earendil-works+pi-agent-core+1.0.0.patch"],
-    "7e2c5e2d68d97419c086ac5d369f6d2b83be2020a3be062e1a1402b37ab0cdb2",
+    manifest.source.patches["@earendil-works+pi-agent-core+1.1.0.patch"],
+    "e817628f707f1d5ea2a3d0d27702919862b23303ba656dea8d30c6412da3e8e1",
   );
   assert.equal(
-    manifest.source.patches["@earendil-works+pi-ai+1.0.0.patch"],
-    "e503e81db607ca52be72d4f1cc67cc1a52c4321212cf4013f569978d08fb9830",
+    manifest.source.patches["@earendil-works+pi-ai+1.1.0.patch"],
+    "00c77c3ef2de00b331886971cac1c84f7efd8c68a494b48c7db9128418027a58",
   );
   for (const [name, pinned] of Object.entries(manifest.source.patches))
     assert.equal(sha(join(stage, "patches", name)), pinned, `qualified patch mismatch: ${name}`);
   for (const [file, hash] of Object.entries(manifest.files))
     assert.equal(sha(join(stage, file)), hash, file);
-  const lock = JSON.parse(readFileSync(join(stage, "package-lock.json")));
-  const vendor = "file:./vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz";
-  assert.equal(lock.packages[""].dependencies["@earendil-works/pi-coding-agent"], vendor);
-  assert.equal(lock.packages["node_modules/@earendil-works/pi-coding-agent"].resolved, vendor);
   const meta = JSON.parse(readFileSync(join(stage, "bundle-meta.json")));
   const entries = Object.values(meta.outputs).filter((x) => x.entryPoint);
   assert.equal(entries.length, 1);
@@ -67,11 +59,11 @@ export async function guard(stage) {
   const sdk = join(stage, "node_modules/@earendil-works/pi-coding-agent");
   const resolved = realpathSync(join(sdk, "dist/index.js"));
   assert.ok(resolved.startsWith(realpathSync(stage) + sep), "SDK escaped stage");
-  assert.equal(JSON.parse(readFileSync(join(sdk, "package.json"))).version, "1.0.0");
+  assert.equal(JSON.parse(readFileSync(join(sdk, "package.json"))).version, "1.1.0");
   assert.equal(
     JSON.parse(readFileSync(join(stage, "node_modules/@earendil-works/pi-ai/package.json")))
       .version,
-    "1.0.0",
+    "1.1.0",
   );
   for (const file of ["dist/extensions/mcp/index.js"]) {
     const code = readFileSync(join(sdk, file), "utf8");
@@ -91,5 +83,5 @@ export async function guard(stage) {
   assert.equal(typeof publicSdk.createAgentSession, "function");
   assert.equal(typeof publicSdk.DefaultResourceLoader, "function");
   assert.equal(typeof publicSdk.createCodemodeExtension, "function");
-  return { status: "pass", sdkVersion: "1.0.0", vendorSha: manifest.source.vendor };
+  return { status: "pass", sdkVersion: "1.1.0" };
 }

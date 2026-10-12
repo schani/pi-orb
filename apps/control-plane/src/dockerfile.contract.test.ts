@@ -35,7 +35,7 @@ describe("control-plane Dockerfile workspace contract", () => {
   });
   it("applies only installed package patches and retains code-mode attribution", () => {
     for (const name of ["pi-ai", "pi-coding-agent", "pi-codemode"]) {
-      const patch = `@earendil-works+${name}+1.0.0.patch`;
+      const patch = `@earendil-works+${name}+1.1.0.patch`;
       expect(dockerfile).toContain(`COPY patches/${patch} patches/${patch}`);
     }
     expect(dockerfile).toContain(

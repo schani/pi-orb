@@ -1,17 +1,22 @@
 import { randomUUID } from "node:crypto";
 import type { Context } from "@earendil-works/chord";
 import {
+  type BinaryReader,
+  type DirReader,
   type Result as EnvResult,
   type ExecutionEnv,
   ExecutionError,
   FileError,
   type FileInfo,
+  type FileWatcher,
+  type LineScan,
   type ShellExecOptions,
   type ShellExecResult,
   type TextLine,
   type TextLineReader,
 } from "@earendil-works/pi-durable/env";
 import {
+  EXECUTION_BINARY_READ_MAX_BYTES,
   EXECUTION_CANCEL_PATH,
   EXECUTION_EXEC_PATH,
   EXECUTION_READY_PATH,
@@ -49,6 +54,7 @@ export class RemoteExecutionEnv implements ExecutionEnv {
   cwd: string;
   private readonly headers: Readonly<Record<string, string>>;
   private readonly readers = new Set<string>();
+  private readonly binaryReaders = new Set<string>();
   private readonly activeCancels = new Set<() => Promise<void>>();
   constructor(options: RemoteExecutionOptions) {
     this.baseUrl = options.baseUrl;
@@ -267,8 +273,89 @@ export class RemoteExecutionEnv implements ExecutionEnv {
       },
     };
   }
+  async openBinaryReader(
+    path: string,
+    options: { noFollow?: boolean } | undefined,
+    context: Context,
+  ): Promise<EnvResult<BinaryReader, FileError>> {
+    const result = await this.rpc<string>("openBinaryReader", [path, options], context);
+    if (!result.ok) return result;
+    const id = result.value;
+    this.binaryReaders.add(id);
+    return {
+      ok: true,
+      value: {
+        info: (ctx) => this.rpc<FileInfo>("binaryInfo", [id], ctx),
+        read: async (offset, length, ctx) => {
+          // The server bounds each response; page until the request or end of file is reached.
+          const chunks: Uint8Array[] = [];
+          let total = 0;
+          // At least one request, so the host validates the arguments.
+          do {
+            const want = Math.min(length - total, EXECUTION_BINARY_READ_MAX_BYTES);
+            const page = await this.rpc<{ binary: string }>(
+              "binaryRead",
+              [id, offset + total, want],
+              ctx,
+            );
+            if (!page.ok) return page;
+            const bytes = new Uint8Array(Buffer.from(page.value.binary, "base64"));
+            chunks.push(bytes);
+            total += bytes.length;
+            if (bytes.length < want) break;
+          } while (total < length);
+          return { ok: true, value: new Uint8Array(Buffer.concat(chunks)) };
+        },
+        scanLines: (scan, ctx) => this.rpc<LineScan>("binaryScanLines", [id, scan], ctx),
+        close: async (ctx) => {
+          this.binaryReaders.delete(id);
+          await this.rpc<void>("binaryClose", [id], this.releaseContext(ctx));
+        },
+      },
+    };
+  }
+  /** Pages one listing; the execution host has no streaming directory cursor. */
+  async openDirReader(path: string, context: Context): Promise<EnvResult<DirReader, FileError>> {
+    const listed = await this.listDir(path, context);
+    if (!listed.ok) return listed;
+    let remaining = listed.value;
+    let closed = false;
+    return {
+      ok: true,
+      value: {
+        next: async (maxEntries, ctx) => {
+          if (ctx.abortSignal?.aborted)
+            return { ok: false, error: new FileError("aborted", "directory read aborted", path) };
+          if (closed)
+            return { ok: false, error: new FileError("invalid", "directory reader closed", path) };
+          if (!Number.isSafeInteger(maxEntries) || maxEntries <= 0)
+            return {
+              ok: false,
+              error: new FileError("invalid", "maxEntries must be a positive safe integer", path),
+            };
+          const entries = remaining.slice(0, maxEntries);
+          remaining = remaining.slice(maxEntries);
+          return { ok: true, value: { entries, done: remaining.length === 0 } };
+        },
+        close: async () => {
+          closed = true;
+        },
+      },
+    };
+  }
+  /** No pi-orb path watches the remote workspace; the execution host exposes no change feed. */
+  async watch(
+    _targets: Parameters<ExecutionEnv["watch"]>[0],
+    _onChange: Parameters<ExecutionEnv["watch"]>[1],
+    _context: Context,
+  ): Promise<EnvResult<FileWatcher, FileError>> {
+    return {
+      ok: false,
+      error: new FileError("not_supported", "remote execution does not support file watching"),
+    };
+  }
   async exec(
-    command: string,
+    command: string | readonly string[],
     options: ShellExecOptions | undefined,
     context: Context,
   ): Promise<EnvResult<ShellExecResult, ExecutionError>> {
@@ -315,7 +402,8 @@ export class RemoteExecutionEnv implements ExecutionEnv {
     };
     const result = await ResultAsync.fromPromise(
       (async (): Promise<EnvResult<ShellExecResult, ExecutionError>> => {
-        const { onOutput, ...wireOptions } = options ?? {};
+        // Without a forwarded window the host delivers every chunk, so no omission needs reporting.
+        const { onOutput, window: _window, ...wireOptions } = options ?? {};
         const response = await fetch(`${this.baseUrl}${EXECUTION_EXEC_PATH}`, {
           method: "POST",
           headers,
@@ -357,7 +445,7 @@ export class RemoteExecutionEnv implements ExecutionEnv {
               pending = pending.slice(end + 1);
               if (frame.type === "output") {
                 const emitted = Result.fromThrowable(
-                  () => onOutput?.(frame.text, context),
+                  () => onOutput?.(frame.text, context, { stream: frame.stream }),
                   () => new ExecutionError("callback_error", "execution output callback failed"),
                 )();
                 if (emitted.isErr()) {
@@ -431,7 +519,12 @@ export class RemoteExecutionEnv implements ExecutionEnv {
     await Promise.all([...this.activeCancels].map((cancel) => cancel()));
     const release = this.releaseContext(context);
     const ids = [...this.readers];
+    const binaryIds = [...this.binaryReaders];
     this.readers.clear();
-    await Promise.all(ids.map((id) => this.rpc<void>("readerClose", [id], release)));
+    this.binaryReaders.clear();
+    await Promise.all([
+      ...ids.map((id) => this.rpc<void>("readerClose", [id], release)),
+      ...binaryIds.map((id) => this.rpc<void>("binaryClose", [id], release)),
+    ]);
   }
 }

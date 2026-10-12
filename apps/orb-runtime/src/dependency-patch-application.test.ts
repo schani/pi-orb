@@ -17,11 +17,11 @@ import { afterEach, describe, expect, it } from "vitest";
 const root = join(import.meta.dirname, "../../..");
 const helper = join(root, "scripts/apply-dependency-patches.mjs");
 const names = [
-  "@earendil-works+pi-agent-core+1.0.0.patch",
-  "@earendil-works+pi-ai+1.0.0.patch",
-  "@earendil-works+pi-coding-agent+1.0.0.patch",
+  "@earendil-works+pi-agent-core+1.1.0.patch",
+  "@earendil-works+pi-ai+1.1.0.patch",
+  "@earendil-works+pi-coding-agent+1.1.0.patch",
   "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
-  "@earendil-works+pi-codemode+1.0.0.patch",
+  "@earendil-works+pi-codemode+1.1.0.patch",
 ];
 const piNames = names.filter((name) => name.startsWith("@earendil-works+"));
 const scratch: string[] = [];
@@ -250,11 +250,11 @@ describe("sealed dependency patch application", () => {
   });
   it("preserves every vendor archive and shipped patch checksum", () => {
     const evidence = `d9afae712be5304e09a490f28b0493180c8565fe6585efe173b1daaab3e5cf2a  vendor/gotgenes-pi-subagents-21.7.0-orb.8.tgz
- eb67747b526d862e6bd0c959a330b7897ece86ebed3a21e7cf846730e293e509  vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz
- e503e81db607ca52be72d4f1cc67cc1a52c4321212cf4013f569978d08fb9830  patches/@earendil-works+pi-ai+1.0.0.patch
- 7e2c5e2d68d97419c086ac5d369f6d2b83be2020a3be062e1a1402b37ab0cdb2  patches/@earendil-works+pi-agent-core+1.0.0.patch
- a7eda2ad337b150f45f2516ee2b77a159cd081f68a16479b61ba48ee68b9fc73  patches/@earendil-works+pi-coding-agent+1.0.0.patch
- adcb859f8c0a0348ae7c745f16f35d2715e948f36542196b3b9c1c7c7c7bf571  patches/@gotgenes+pi-subagents+21.7.0-orb.8.patch`;
+ 00c77c3ef2de00b331886971cac1c84f7efd8c68a494b48c7db9128418027a58  patches/@earendil-works+pi-ai+1.1.0.patch
+ e817628f707f1d5ea2a3d0d27702919862b23303ba656dea8d30c6412da3e8e1  patches/@earendil-works+pi-agent-core+1.1.0.patch
+ f1d54d120d0de92a0ae119e6588f43fb40114f66a3508fb57547034eddf0161e  patches/@earendil-works+pi-coding-agent+1.1.0.patch
+ 698bac6a2644dd02f58961cfac801c30453eb6264306996ed25fec4388a44a84  patches/@earendil-works+pi-codemode+1.1.0.patch
+ b3e48bde4e53ead071abf15eae78b26dc5ea01441d8946782ba2284f1da06f9a  patches/@gotgenes+pi-subagents+21.7.0-orb.8.patch`;
     for (const line of evidence.trim().split("\n")) {
       const [hash, path] = line.trim().split(/\s+/);
       expect(sha(join(root, path as string))).toBe(hash);

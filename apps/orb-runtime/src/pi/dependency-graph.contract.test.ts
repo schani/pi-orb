@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -12,12 +11,6 @@ const root = join(import.meta.dirname, "../../../..");
 type Entry = { version?: string; dependencies?: Record<string, string> };
 type Lock = { packages: Record<string, Entry> };
 const json = (path: string): Lock => JSON.parse(readFileSync(join(root, path), "utf8")) as Lock;
-const vendor = "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz";
-const shrinkwrap = JSON.parse(
-  execFileSync("tar", ["xOzf", join(root, vendor), "package/npm-shrinkwrap.json"], {
-    encoding: "utf8",
-  }),
-) as Lock;
 
 function resolved(
   packages: Record<string, Entry>,
@@ -67,10 +60,6 @@ describe("Pi package dependency contracts", () => {
     );
   });
 
-  it("resolves every declared SDK shrinkwrap dependency", () => {
-    expect(checkGraph(shrinkwrap)).toEqual([]);
-  });
-
   it.each([
     "package-lock.json",
     "scripts/subagent-liveness/package-lock.json",
@@ -78,23 +67,6 @@ describe("Pi package dependency contracts", () => {
     "scripts/native-mcp-exploration/live-qualification/package-lock.json",
   ])("resolves every installed dependency in %s", (path) => {
     expect(checkGraph(json(path))).toEqual([]);
-  });
-
-  it("matches installed package manifests for every available SDK shrinkwrap entry", () => {
-    for (const [path, entry] of Object.entries(shrinkwrap.packages)) {
-      if (!path) continue;
-      const candidates = [
-        join(root, "node_modules/@earendil-works/pi-coding-agent", path, "package.json"),
-        join(root, path, "package.json"),
-      ];
-      const manifestPath = candidates.find((candidate) => {
-        if (!existsSync(candidate)) return false;
-        return (JSON.parse(readFileSync(candidate, "utf8")) as Entry).version === entry.version;
-      });
-      if (!manifestPath) continue;
-      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Entry;
-      expect(entry.dependencies ?? {}, path).toEqual(manifest.dependencies ?? {});
-    }
   });
 
   it("installs a proxy version satisfying installed Pi AI's actual manifest", () => {
@@ -110,12 +82,12 @@ describe("Pi package dependency contracts", () => {
     expect(semver.satisfies(version, range)).toBe(true);
   });
 
-  it("matches the installed Pi AI published manifest, not merely shrinkwrap claims", () => {
+  it("locks the installed Pi AI published manifest", () => {
     const piAi = "node_modules/@earendil-works/pi-ai";
     const manifest = JSON.parse(readFileSync(join(root, piAi, "package.json"), "utf8")) as Entry;
-    const published = shrinkwrap.packages["node_modules/@earendil-works/pi-ai"];
-    assert.ok(published);
-    expect(manifest.dependencies).toEqual(published.dependencies);
+    const locked = json("package-lock.json").packages[piAi];
+    assert.ok(locked);
+    expect(manifest.dependencies).toEqual(locked.dependencies);
     expect(checkGraph(json("package-lock.json"))).not.toContain(
       `${piAi}: http-proxy-agent@${manifest.dependencies?.["http-proxy-agent"]} resolves to 7.0.2`,
     );

@@ -5,6 +5,8 @@ export const EXECUTION_RPC_PATH = "/execution/rpc";
 export const EXECUTION_EXEC_PATH = "/execution/exec";
 export const EXECUTION_CANCEL_PATH = "/execution/cancel";
 export const EXECUTION_READY_PATH = "/execution/ready";
+/** Bound on one binary-reader response; clients page larger reads. */
+export const EXECUTION_BINARY_READ_MAX_BYTES = 1024 * 1024;
 export const ExecutionOperationSchema = Type.Union([
   ...[
     "absolutePath",
@@ -28,6 +30,11 @@ export const ExecutionOperationSchema = Type.Union([
     "openTextLineReader",
     "readerRead",
     "readerClose",
+    "openBinaryReader",
+    "binaryInfo",
+    "binaryRead",
+    "binaryScanLines",
+    "binaryClose",
   ].map((value) => Type.Literal(value)),
 ]);
 export type ExecutionOperation = Static<typeof ExecutionOperationSchema>;
@@ -38,7 +45,7 @@ export const ExecutionRpcSchema = Type.Object({
 });
 export const ExecutionExecSchema = Type.Object({
   id: Type.String({ minLength: 1, maxLength: 128 }),
-  command: Type.String(),
+  command: Type.Union([Type.String(), Type.Array(Type.String(), { minItems: 1 })]),
   cwd: Type.String(),
   options: Type.Optional(
     Type.Object({
@@ -88,7 +95,11 @@ export const ExecutionWireResultSchema = Type.Union([
   }),
 ]);
 export const ExecutionStreamFrameSchema = Type.Union([
-  Type.Object({ type: Type.Literal("output"), text: Type.String() }),
+  Type.Object({
+    type: Type.Literal("output"),
+    text: Type.String(),
+    stream: Type.Union([Type.Literal("stdout"), Type.Literal("stderr")]),
+  }),
   Type.Object({ type: Type.Literal("result"), result: ExecutionWireResultSchema }),
 ]);
 export interface ExecutionWireError {
@@ -101,5 +112,5 @@ export type ExecutionWireResult =
   | { readonly ok: true; readonly value?: unknown }
   | { readonly ok: false; readonly error: ExecutionWireError };
 export type ExecutionStreamFrame =
-  | { readonly type: "output"; readonly text: string }
+  | { readonly type: "output"; readonly text: string; readonly stream: "stdout" | "stderr" }
   | { readonly type: "result"; readonly result: ExecutionWireResult };

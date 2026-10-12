@@ -18,22 +18,30 @@ export function imageReadTool(files: AgentToolFiles = {}): ToolRegistration {
         if (resource.value !== undefined) return resource.value;
       }
       if (!api.env) return read.execute(args, api, ctx);
-      let loaded: Uint8Array | undefined;
+      // Upstream sniffs the type through a binary reader; keep its resolved path for the image bytes.
+      let opened: string | undefined;
       const env = new Proxy(api.env, {
         get(target, key) {
-          if (key === "readBinaryFile")
-            return async (path: string, context: Context) => {
-              const result = await target.readBinaryFile(path, context);
-              if (result.ok) loaded = result.value;
-              return result;
+          if (key === "openBinaryReader")
+            return (
+              path: string,
+              options: { noFollow?: boolean } | undefined,
+              context: Context,
+            ) => {
+              opened = path;
+              return target.openBinaryReader(path, options, context);
             };
           const value = Reflect.get(target, key);
           return typeof value === "function" ? value.bind(target) : value;
         },
       });
       const result = await read.execute(args, { ...api, env }, ctx);
-      if (!result.diagnostics?.some((d) => d.code === "unsupported_image") || !loaded)
+      if (!result.diagnostics?.some((d) => d.code === "unsupported_image") || opened === undefined)
         return result;
+      const bytesRead = await api.env.readBinaryFile(opened, ctx);
+      if (!bytesRead.ok)
+        return { isError: true, content: [{ type: "text", text: bytesRead.error.message }] };
+      const loaded = bytesRead.value;
       if (loaded.length > 20 * 1024 * 1024)
         return { isError: true, content: [{ type: "text", text: "Image exceeds 20 MiB" }] };
       const bytes = Buffer.from(loaded);

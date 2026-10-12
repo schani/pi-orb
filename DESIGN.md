@@ -144,6 +144,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-12-durable-codex-prompt-cache.md](docs/postmortems/2026-10-12-durable-codex-prompt-cache.md) — pi-durable 1.0.0 sent Codex no `prompt_cache_key`; a request-body regression test guards the 1.1.0 fix
 - [docs/postmortems/2026-10-11-phone-tail-pointer-race.md](docs/postmortems/2026-10-11-phone-tail-pointer-race.md) — pointer press discarded the pending tail write's offset; its delayed scroll event released following
 - [docs/postmortems/2026-10-10-bootstrap-metadata-network-race.md](docs/postmortems/2026-10-10-bootstrap-metadata-network-race.md) — single metadata read lost a boot-time guest-agent network reload; bootstrap now retries transient failures
 - [docs/postmortems/2026-10-10-starting-deadline-restarts.md](docs/postmortems/2026-10-10-starting-deadline-restarts.md) — restarting control plane renewed the create/start deadline hold

@@ -1,4 +1,4 @@
-// Vendored from @earendil-works/pi-durable 1.0.0 src/storage/sqlite/storage.ts, MIT.
+// Vendored from @earendil-works/pi-durable 1.1.0 src/storage/sqlite/storage.ts and src/storage/scan.ts, MIT.
 // Adapted executor, PostgreSQL allocation and atomic public publication.
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { apply, type Op } from "@earendil-works/chord/delta";
@@ -29,6 +29,7 @@ import type {
   Id,
   JsonObject,
   Page,
+  ScanOrder,
   Seq,
   Storage,
   StorageWrite,
@@ -79,13 +80,39 @@ const cursorId = <I extends Id<string>>(cursor: Cursor | undefined): I | undefin
   return idFromNumber<I>(after);
 };
 
+type ScanStart = { readonly order: ScanOrder; readonly after: number | undefined };
+/** A cursor continues in the order it was created with; an orderless cursor uses the scan's default. */
+const scanStart = (
+  requested: ScanOrder | undefined,
+  cursor: Cursor | undefined,
+  fallback: ScanOrder,
+): ScanStart => {
+  if (requested !== undefined && requested !== "ascending" && requested !== "descending")
+    rejectStorage(`Invalid scan order: ${String(requested)}`);
+  if (cursor === undefined) return { order: requested ?? fallback, after: undefined };
+  const after = cursorId(cursor);
+  const stored = cursor.order;
+  if (stored !== undefined && stored !== "ascending" && stored !== "descending")
+    rejectStorage("Invalid storage cursor");
+  const order = stored ?? fallback;
+  if (requested !== undefined && requested !== order)
+    rejectStorage(`The cursor continues a ${order} scan; the query asks for ${requested}`);
+  return { order, after };
+};
+/** The ID condition, its parameter, and the `ORDER BY` direction of a table scan. */
+const scanSql = (start: ScanStart) =>
+  start.order === "ascending"
+    ? { clause: "id > ?", param: start.after ?? -1, direction: "ASC" }
+    : { clause: "id < ?", param: start.after ?? Number.MAX_SAFE_INTEGER, direction: "DESC" };
+
 const page = <T extends { readonly id: Id<string> }>(
   values: readonly T[],
   limit: number,
+  order: ScanOrder = "ascending",
 ): Page<T, Cursor> => {
   const items = values.slice(0, limit);
   if (values.length <= limit) return { items };
-  return { items, next: { after: items.at(-1)!.id } };
+  return { items, next: { after: items.at(-1)!.id, order } };
 };
 
 const scopeColumns = (scope: DocumentRecord["scope"]): ScopeColumns => {
@@ -223,8 +250,10 @@ export class PgStorage implements Storage {
     _context: Context,
   ): Promise<Page<ConversationRecord, Cursor>> {
     this.assertOpen();
-    const clauses = ["id > ?"];
-    const params: SqlValue[] = [cursorId(cursor) ?? -1];
+    const start = scanStart(query.order, cursor, "ascending");
+    const scan = scanSql(start);
+    const clauses = [scan.clause];
+    const params: SqlValue[] = [scan.param];
     if (query.ownerConversationId !== undefined) {
       clauses.push("owner_conversation_id = ?");
       params.push(query.ownerConversationId);
@@ -235,12 +264,13 @@ export class PgStorage implements Storage {
     }
     params.push(limit + 1);
     const rows = await this.db.all<JsonRow>(
-      `SELECT record FROM conversations WHERE ${clauses.join(" AND ")} ORDER BY id LIMIT ?`,
+      `SELECT record FROM conversations WHERE ${clauses.join(" AND ")} ORDER BY id ${scan.direction} LIMIT ?`,
       ...params,
     );
     return page(
       rows.map((row) => parseJson<ConversationRecord>(row.record)),
       limit,
+      start.order,
     );
   }
 
@@ -346,9 +376,10 @@ export class PgStorage implements Storage {
     limit: number,
     cursor: Cursor | undefined,
   ): Promise<Page<EntryRecord, Cursor>> {
+    const { order, after } = scanStart(query.order, cursor, "descending");
+    if (order === "ascending") return this.readEntriesAscending(query, limit, after);
     let conversation = await this.readConversation(query.conversationId);
     if (conversation === undefined) rejectStorage(`Unknown conversation: ${query.conversationId}`);
-    const after = cursorId(cursor);
     let upper: number | undefined = query.maxEntryId;
     if (after !== undefined) upper = Math.min(upper ?? Number.MAX_SAFE_INTEGER, after - 1);
     const values: EntryRecord[] = [];
@@ -375,7 +406,53 @@ export class PgStorage implements Storage {
       if (query.minEntryId !== undefined && upper < query.minEntryId) break;
       conversation = (await this.readConversation(conversation.parent.conversationId))!;
     }
-    return page(values, limit);
+    return page(values, limit, "descending");
+  }
+
+  /** Oldest first: the fork chain's segments from the root conversation forward, each up to its fork point. */
+  private async readEntriesAscending(
+    query: EntryQuery,
+    limit: number,
+    after: number | undefined,
+  ): Promise<Page<EntryRecord, Cursor>> {
+    const segments: { conversationId: ConversationId; upper: number | undefined }[] = [];
+    let conversation = await this.readConversation(query.conversationId);
+    if (conversation === undefined) rejectStorage(`Unknown conversation: ${query.conversationId}`);
+    let upper: number | undefined = query.maxEntryId;
+    while (true) {
+      segments.push({ conversationId: conversation.id, upper });
+      if (conversation.parent === undefined) break;
+      upper =
+        upper === undefined ? conversation.parent.at : Math.min(upper, conversation.parent.at);
+      if (query.minEntryId !== undefined && upper < query.minEntryId) break;
+      const parent = await this.readConversation(conversation.parent.conversationId);
+      if (parent === undefined)
+        rejectStorage(`Unknown conversation: ${conversation.parent.conversationId}`);
+      conversation = parent;
+    }
+    let lower: number | undefined = query.minEntryId;
+    if (after !== undefined) lower = Math.max(lower ?? after + 1, after + 1);
+    const values: EntryRecord[] = [];
+    for (const segment of segments.reverse()) {
+      const clauses = ["conversation_id = ?"];
+      const params: SqlValue[] = [segment.conversationId];
+      if (lower !== undefined) {
+        clauses.push("id >= ?");
+        params.push(lower);
+      }
+      if (segment.upper !== undefined) {
+        clauses.push("id <= ?");
+        params.push(segment.upper);
+      }
+      params.push(limit + 1 - values.length);
+      const rows = await this.db.all<JsonRow>(
+        `SELECT record FROM entries WHERE ${clauses.join(" AND ")} ORDER BY id ASC LIMIT ?`,
+        ...params,
+      );
+      values.push(...rows.map((row) => parseJson<EntryRecord>(row.record)));
+      if (values.length > limit) break;
+    }
+    return page(values, limit, "ascending");
   }
 
   async task(id: TaskId, _context: Context): Promise<StoredTask | undefined> {
@@ -391,8 +468,10 @@ export class PgStorage implements Storage {
     _context: Context,
   ): Promise<Page<StoredTask, Cursor>> {
     this.assertOpen();
-    const clauses = ["id > ?"];
-    const params: SqlValue[] = [cursorId(cursor) ?? -1];
+    const start = scanStart(query.order, cursor, "ascending");
+    const scan = scanSql(start);
+    const clauses = [scan.clause];
+    const params: SqlValue[] = [scan.param];
     if (query.conversationId !== undefined) {
       clauses.push("conversation_id = ?");
       params.push(query.conversationId);
@@ -415,12 +494,13 @@ export class PgStorage implements Storage {
     }
     params.push(limit + 1);
     const rows = await this.db.all<JsonRow>(
-      `SELECT record FROM tasks WHERE ${clauses.join(" AND ")} ORDER BY id LIMIT ?`,
+      `SELECT record FROM tasks WHERE ${clauses.join(" AND ")} ORDER BY id ${scan.direction} LIMIT ?`,
       ...params,
     );
     return page(
       rows.map((row) => parseJson<StoredTask>(row.record)),
       limit,
+      start.order,
     );
   }
 
@@ -437,8 +517,10 @@ export class PgStorage implements Storage {
     _context: Context,
   ): Promise<Page<SubmissionRecord, Cursor>> {
     this.assertOpen();
-    const clauses = ["id > ?"];
-    const params: SqlValue[] = [cursorId(cursor) ?? -1];
+    const start = scanStart(query.order, cursor, "ascending");
+    const scan = scanSql(start);
+    const clauses = [scan.clause];
+    const params: SqlValue[] = [scan.param];
     if (query.conversationId !== undefined) {
       clauses.push("conversation_id = ?");
       params.push(query.conversationId);
@@ -449,12 +531,13 @@ export class PgStorage implements Storage {
     }
     params.push(limit + 1);
     const rows = await this.db.all<JsonRow>(
-      `SELECT record FROM submissions WHERE ${clauses.join(" AND ")} ORDER BY id LIMIT ?`,
+      `SELECT record FROM submissions WHERE ${clauses.join(" AND ")} ORDER BY id ${scan.direction} LIMIT ?`,
       ...params,
     );
     return page(
       rows.map((row) => parseJson<SubmissionRecord>(row.record)),
       limit,
+      start.order,
     );
   }
 
