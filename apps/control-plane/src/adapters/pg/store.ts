@@ -99,6 +99,7 @@ function mapOrbRow(row: PgRow): OrbRow {
     lastReadyAt: row["last_ready_at"] == null ? null : toMs(row["last_ready_at"]),
     harnessSessionId: row["harness_session_id"] === null ? null : String(row["harness_session_id"]),
     harnessSessionHeader: (row["harness_session_header"] ?? null) as HarnessSessionMetadata | null,
+    resourceWarnings: (row["resource_warnings"] ?? []) as OrbRow["resourceWarnings"],
     lastError: row["last_error"] === null ? null : String(row["last_error"]),
     runtimeTokenHash: row["runtime_token_hash"] === null ? null : String(row["runtime_token_hash"]),
     replicationCursor:
@@ -1497,7 +1498,12 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       if (intent.value.rows[0] === undefined) return ok(null);
       const started = await query(
         `UPDATE orbs SET state = 'starting', state_version = state_version + 1,
-           agent_admission_version = agent_admission_version + CASE WHEN stop_reason IN ('manual', 'sleep') THEN 1 ELSE 0 END,
+           agent_admission_version = agent_admission_version + CASE WHEN stop_reason IN ('manual', 'sleep')
+             OR (state = 'failed'
+               AND EXISTS (SELECT 1 FROM orb_resource_events e
+                 WHERE e.orb_id = orbs.id AND e.admission_version = orbs.agent_admission_version AND e.phase = 'failed')
+               AND NOT EXISTS (SELECT 1 FROM orb_resource_snapshots s WHERE s.orb_id = orbs.id))
+             THEN 1 ELSE 0 END,
            state_changed_at = $3, updated_at = $3, last_error = NULL, stop_reason = NULL,
            auto_restart_times = '{}'
          WHERE id = $1 AND state_version = $2 AND state IN ('stopped', 'failed') RETURNING *`,
@@ -1979,23 +1985,49 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       index += 1;
     }
     if (params.cancelSleep === true) {
-      sets.push(
-        "sleep_id = NULL",
-        "sleep_until = NULL",
-        "agent_admission_version = agent_admission_version + CASE WHEN stop_reason IN ('manual', 'sleep') THEN 1 ELSE 0 END",
-      );
+      sets.push("sleep_id = NULL", "sleep_until = NULL");
     }
-    return this.casUpdate(
-      params.orbId,
-      params.expectedStateVersion,
-      sets,
-      values,
+    const additionalWhere =
       params.stopReason === "idle"
         ? "(upload_active_until IS NULL OR upload_active_until <= $4)"
         : params.stopReason === "sleep"
           ? "sleep_id IS NOT NULL AND sleep_until > $4 AND (upload_active_until IS NULL OR upload_active_until <= $4)"
-          : undefined,
-    );
+          : undefined;
+    if (params.toState === "starting") {
+      // One renewal even when manual/sleep reopening overlaps a resource retry.
+      sets.push(`agent_admission_version = agent_admission_version + CASE WHEN
+        (${params.cancelSleep === true ? "stop_reason IN ('manual', 'sleep')" : "false"})
+        OR (state = 'failed'
+          AND EXISTS (SELECT 1 FROM orb_resource_events e
+            WHERE e.orb_id = orbs.id AND e.admission_version = orbs.agent_admission_version AND e.phase = 'failed')
+          AND NOT EXISTS (SELECT 1 FROM orb_resource_snapshots s WHERE s.orb_id = orbs.id))
+        THEN 1 ELSE 0 END`);
+      return this.db.transaction<OrbRow, StoreError | StateConflict>(async (query) => {
+        // A separate statement after this lock sees publication's committed
+        // snapshot under READ COMMITTED; a single waiting UPDATE may not.
+        const locked = await query(
+          "SELECT state, state_version FROM orbs WHERE id = $1 FOR UPDATE",
+          [params.orbId],
+        );
+        if (locked.isErr()) return err(locked.error);
+        const current = locked.value.rows[0];
+        if (!current || Number(current["state_version"]) !== params.expectedStateVersion)
+          return err(stateConflict(current ? (String(current["state"]) as OrbState) : undefined));
+        const updated = await query(
+          `UPDATE orbs SET ${sets.join(", ")} WHERE id = $1 AND state_version = $2${additionalWhere === undefined ? "" : ` AND ${additionalWhere}`} RETURNING *`,
+          [params.orbId, params.expectedStateVersion, ...values],
+        );
+        if (updated.isErr()) return err(updated.error);
+        const row = updated.value.rows[0];
+        return row === undefined ? err(stateConflict()) : ok(mapOrbRow(row));
+      });
+    }
+    if (params.cancelSleep === true) {
+      sets.push(
+        "agent_admission_version = agent_admission_version + CASE WHEN stop_reason IN ('manual', 'sleep') THEN 1 ELSE 0 END",
+      );
+    }
+    return this.casUpdate(params.orbId, params.expectedStateVersion, sets, values, additionalWhere);
   }
 
   casUpdateFields(

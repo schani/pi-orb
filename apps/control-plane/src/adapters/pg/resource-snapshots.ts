@@ -10,19 +10,49 @@ import {
 } from "../../domain/resources.ts";
 import { jsonParam, type PgQueryResult, type PostgreSQLClient } from "./client.ts";
 
-const resourceManifest = z.object({
-  instructionPath: z.string().nullable(),
-  skillRoot: z.string().nullable(),
-  files: z
-    .array(
-      z.object({
-        path: z.string().min(1).max(1024),
-        sha256: z.string().regex(/^[a-f0-9]{64}$/),
-        byteCount: z.number().int().nonnegative(),
-      }),
-    )
-    .max(5000),
-});
+const resourcePath = z
+  .string()
+  .min(1)
+  .max(1024)
+  .refine(
+    (path) =>
+      !path.startsWith("/") &&
+      !path.includes("\0") &&
+      !path.split("/").some((part) => part === "." || part === ".." || !part),
+  );
+const resourceWarnings = z
+  .array(
+    z.object({
+      path: z.string().min(1).max(1024),
+      code: z.enum(["invalid_utf8", "invalid_yaml", "invalid_metadata", "duplicate_name"]),
+    }),
+  )
+  .max(5000);
+
+const resourceManifest = z
+  .object({
+    warnings: resourceWarnings.default([]),
+    instructionPath: resourcePath.nullable(),
+    skillRoot: resourcePath.nullable(),
+    files: z
+      .array(
+        z.object({
+          path: resourcePath,
+          sha256: z.string().regex(/^[a-f0-9]{64}$/),
+          byteCount: z
+            .number()
+            .int()
+            .nonnegative()
+            .max(32 * 1024 * 1024),
+        }),
+      )
+      .max(5000),
+  })
+  .refine(
+    ({ files }) =>
+      new Set(files.map((file) => file.path)).size === files.length &&
+      files.reduce((sum, file) => sum + file.byteCount, 0) <= 32 * 1024 * 1024,
+  );
 function invalidSnapshot(): StoreError {
   return {
     type: "store_error",
@@ -87,6 +117,7 @@ function load(
         instructionPath: manifest.instructionPath,
         skillRoot: manifest.skillRoot,
         files: decoded,
+        warnings: manifest.warnings,
       });
     });
   });
@@ -123,7 +154,8 @@ export class PgResourceSnapshots implements ResourceSnapshotStore {
         const existing = await load(query, snapshot.orbId);
         if (existing.isErr()) return err(existing.error);
         if (existing.value) return ok(existing.value);
-        const manifest = {
+        const parsed = resourceManifest.safeParse({
+          warnings: snapshot.warnings ?? [],
           instructionPath: snapshot.instructionPath,
           skillRoot: snapshot.skillRoot,
           files: snapshot.files.map((file) => ({
@@ -131,7 +163,16 @@ export class PgResourceSnapshots implements ResourceSnapshotStore {
             sha256: file.sha256,
             byteCount: file.bytes.byteLength,
           })),
-        };
+        });
+        if (
+          !parsed.success ||
+          !/^[a-f0-9]{40}$/.test(snapshot.commitSha) ||
+          snapshot.files.some(
+            (file) => createHash("sha256").update(file.bytes).digest("hex") !== file.sha256,
+          )
+        )
+          return err(invalidSnapshot());
+        const manifest = parsed.data;
         const inserted = await query(
           "INSERT INTO orb_resource_snapshots(orb_id,commit_sha,manifest) VALUES($1,$2,$3)",
           [snapshot.orbId, snapshot.commitSha, jsonParam(manifest)],
@@ -148,7 +189,7 @@ export class PgResourceSnapshots implements ResourceSnapshotStore {
           const admitted = await this.publicationGuard(query, snapshot.orbId);
           if (admitted.isErr()) return err(admitted.error);
         }
-        return ok(snapshot);
+        return ok({ ...snapshot, warnings: manifest.warnings });
       })
       .mapErr(() => resourceError("storage", "Resource snapshot commit failed"));
   }

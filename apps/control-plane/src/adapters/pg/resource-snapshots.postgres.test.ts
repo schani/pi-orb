@@ -1,7 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { errAsync } from "neverthrow";
 import { expect, it } from "vitest";
+import type { ResourceSnapshot } from "../../domain/resources.ts";
 import { PgClient } from "./client.ts";
 import { PgResourceSnapshots } from "./resource-snapshots.ts";
 
@@ -47,14 +48,61 @@ it.skipIf(!url)("resource snapshot atomicity and admission on real PostgreSQL", 
     );
     expect((await guard.put({ ...snapshot, files: [] })).isErr()).toBe(true);
     expect((await reopened.get(orbId))._unsafeUnwrap()).toBe(null);
+    const candidates: [ResourceSnapshot, ResourceSnapshot] = [
+      {
+        ...snapshot,
+        instructionPath: "AGENTS.md",
+        files: [
+          {
+            path: "AGENTS.md",
+            bytes: Buffer.from([0, 255, 1]),
+            sha256: createHash("sha256")
+              .update(Buffer.from([0, 255, 1]))
+              .digest("hex"),
+          },
+        ],
+        warnings: [{ path: ".pi/skills/first/SKILL.md", code: "invalid_yaml" as const }],
+      },
+      {
+        ...snapshot,
+        commitSha: "b".repeat(40),
+        instructionPath: "SECOND.md",
+        files: [
+          {
+            path: "SECOND.md",
+            bytes: Buffer.from([2, 254, 3]),
+            sha256: createHash("sha256")
+              .update(Buffer.from([2, 254, 3]))
+              .digest("hex"),
+          },
+        ],
+        warnings: [{ path: ".pi/skills/second/SKILL.md", code: "invalid_metadata" as const }],
+      },
+    ];
     const [a, b] = await Promise.all([
-      store.put({ ...snapshot, files: [] }),
-      new PgResourceSnapshots(reader).put({ ...snapshot, commitSha: "b".repeat(40), files: [] }),
+      store.put(candidates[0]),
+      new PgResourceSnapshots(reader).put(candidates[1]),
     ]);
-    expect(a.isOk() && b.isOk() && a.value.commitSha === b.value.commitSha).toBe(true);
-    expect((await reopened.get(orbId))._unsafeUnwrap()?.commitSha).toBe(
-      a._unsafeUnwrap().commitSha,
-    );
+    const first = a._unsafeUnwrap();
+    const second = b._unsafeUnwrap();
+    expect(first.commitSha).toBe(second.commitSha);
+    for (const result of [first, second]) {
+      const candidate = candidates.find((entry) => entry.commitSha === result.commitSha);
+      expect(candidate).toBeDefined();
+      expect(result).toEqual(candidate);
+      expect(result.warnings).toEqual(candidate?.warnings);
+    }
+    const winner = candidates.find((entry) => entry.commitSha === first.commitSha);
+    const reloaded = (await reopened.get(orbId))._unsafeUnwrap();
+    expect(reloaded).toEqual(winner);
+    expect(reloaded?.warnings).toEqual(winner?.warnings);
+    const projected = (
+      await reader.query(
+        "SELECT commit_sha,manifest->'warnings' AS warnings FROM orb_resource_snapshots WHERE orb_id=$1",
+        [orbId],
+      )
+    )._unsafeUnwrap();
+    expect(projected.rows).toEqual([{ commit_sha: first.commitSha, warnings: winner?.warnings }]);
     await store.remove(orbId);
     expect((await reopened.get(orbId))._unsafeUnwrap()).toBe(null);
   } finally {

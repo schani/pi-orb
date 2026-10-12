@@ -6,6 +6,7 @@ import type {
   OrbMessageSystem,
   OrbState,
   ProjectState,
+  ResourceWarning,
   StopReason,
 } from "@pi-orb/protocol";
 
@@ -52,6 +53,7 @@ export interface OrbRow {
   readonly lastReadyAt: number | null;
   readonly harnessSessionId: string | null;
   readonly harnessSessionHeader: HarnessSessionMetadata | null;
+  readonly resourceWarnings: ResourceWarning[];
   readonly lastError: string | null;
   /**
    * SHA-256 of the per-host-incarnation runtime token (docs/credentials.md);

@@ -1160,6 +1160,19 @@ async function reconcileCreateStart(
           (context) => executionReady(task, orb, context),
         );
         if (resources.isErr()) {
+          if (
+            resources.error.answered &&
+            !resources.error.retryable &&
+            resources.error.code === "initialization_failed" &&
+            resources.error.initializationError !== undefined
+          )
+            return failOrb(
+              task,
+              deps,
+              orb,
+              "runtime_failed",
+              `${resources.error.initializationError.code}: ${resources.error.initializationError.message}`,
+            );
           deps.control.recordBootProbe(orb.id, {
             ...probeBase,
             answered: true,

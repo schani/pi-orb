@@ -2,6 +2,7 @@ import {
   type DisplayBlock,
   type DisplayRecord,
   type OrbMessageView,
+  type OrbView,
   ToolResultContext,
 } from "@pi-orb/protocol";
 import {
@@ -72,6 +73,7 @@ interface HistoryViewProps {
   compacting?: boolean;
   compaction?: { operationId: string; afterId: string | null } | null;
   queuedMessages?: readonly OrbMessageView[];
+  orbState?: OrbView["state"] | undefined;
 }
 
 const DetailContextValue = createContext<DetailContext | null>(null);
@@ -707,6 +709,21 @@ function persistedToolCallIds(records: readonly DisplayRecord[]): Set<string> {
   return ids;
 }
 
+/** Lifecycle labels are presentation only; delivered and failed rows stay terminal. */
+function inboxStatusLabel(message: OrbMessageView, orbState: OrbView["state"] | undefined): string {
+  if (message.status === "failed" || message.status === "delivered") return message.status;
+  if (orbState === "failed") return "blocked";
+  if (
+    orbState === "stopping" ||
+    orbState === "stopped" ||
+    orbState === "archiving" ||
+    orbState === "archived" ||
+    orbState === "deleting"
+  )
+    return "paused";
+  return message.delivery === "steer" ? "steering" : message.status;
+}
+
 const EMPTY_ALIASES: ReadonlyMap<string, string> = new Map();
 
 export const HistoryView = memo(function HistoryView({
@@ -717,6 +734,7 @@ export const HistoryView = memo(function HistoryView({
   compacting = false,
   compaction = null,
   queuedMessages = [],
+  orbState,
   detailContext,
   detailAliases = EMPTY_ALIASES,
   viewportRef,
@@ -807,12 +825,7 @@ export const HistoryView = memo(function HistoryView({
             )}
           {pendingMessages.map((message) => {
             const system = message.system !== undefined;
-            const status =
-              message.status === "failed"
-                ? "failed"
-                : message.delivery === "steer"
-                  ? "steering"
-                  : message.status;
+            const status = inboxStatusLabel(message, orbState);
             // A message the runtime refused for good is terminal: say so where the
             // message is, with the reason, rather than leaving it looking pending
             // forever (docs/runtime-protocol.md).

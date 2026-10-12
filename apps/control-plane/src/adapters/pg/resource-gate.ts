@@ -11,8 +11,23 @@ import {
   type ResourceStatus,
   resourceError,
 } from "../../domain/resources.ts";
-import type { PostgreSQLClient } from "./client.ts";
+import { jsonParam, type PostgreSQLClient } from "./client.ts";
 import { PgResourceSnapshots, type ResourceQuery } from "./resource-snapshots.ts";
+
+const resourceErrorCodes: ResourceError["code"][] = [
+  "cancelled",
+  "authentication",
+  "fetch",
+  "invalid",
+  "limit",
+  "storage",
+  "conflict",
+  "not_found",
+];
+const safeStoredMessage = (message: unknown): string =>
+  typeof message === "string" && message.length > 0 && message.length <= 1536
+    ? message
+    : "Resource acquisition failed";
 
 const revoked = (): StoreError => ({
   type: "store_error",
@@ -51,12 +66,23 @@ export class PgResourceGate {
     context: OperationContext,
     status: ResourceStatus,
   ) {
+    const warnings =
+      status.phase === "ready"
+        ? (status.warnings ?? []).map(({ path, code }) => ({ path, code }))
+        : [];
     return this.db
       .transaction(async (query) => {
         const admitted = await this.guard(query, orb, context.signal);
         if (admitted.isErr()) return err(admitted.error);
+        if (status.phase === "ready") {
+          const updated = await query("UPDATE orbs SET resource_warnings=$2 WHERE id=$1", [
+            orb.id,
+            jsonParam(warnings),
+          ]);
+          if (updated.isErr()) return err(updated.error);
+        }
         const recorded = await query(
-          "INSERT INTO orb_resource_events(orb_id,admission_version,phase,error_code,commit_sha,file_count,byte_count) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING RETURNING id",
+          "INSERT INTO orb_resource_events(orb_id,admission_version,phase,error_code,commit_sha,file_count,byte_count,warnings,error_message) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING RETURNING id",
           [
             orb.id,
             orb.agentAdmissionVersion,
@@ -65,21 +91,40 @@ export class PgResourceGate {
             status.phase === "ready" ? status.commitSha : null,
             status.phase === "ready" ? status.fileCount : null,
             status.phase === "ready" ? status.byteCount : null,
+            jsonParam(warnings),
+            status.phase === "failed" && status.message !== undefined
+              ? safeStoredMessage(status.message)
+              : null,
           ],
         );
-        return recorded.map((result) => result.rowCount > 0);
+        if (recorded.isErr()) return err(recorded.error);
+        const stillAdmitted = await this.guard(query, orb, context.signal);
+        if (stillAdmitted.isErr()) return err(stillAdmitted.error);
+        return ok(recorded.value.rowCount > 0);
       })
       .mapErr(() => resourceError("storage", "Resource status unavailable"))
       .map((recorded) => {
-        if (recorded)
+        if (recorded) {
           logOrbEvent(task, orb.id, `resources.${status.phase}`, {
             admission_version: orb.agentAdmissionVersion,
             ...(status.phase === "failed"
               ? { code: status.code, ...(status.reason ? { reason: status.reason } : {}) }
               : status.phase === "ready"
-                ? { commit_sha: status.commitSha, files: status.fileCount, bytes: status.byteCount }
+                ? {
+                    commit_sha: status.commitSha,
+                    files: status.fileCount,
+                    bytes: status.byteCount,
+                    warning_count: warnings.length,
+                  }
                 : {}),
           });
+          for (const warning of warnings)
+            logOrbEvent(task, orb.id, "resources.warning", {
+              code: warning.code,
+              path: warning.path,
+              warning_count: warnings.length,
+            });
+        }
         return undefined;
       });
   }
@@ -88,13 +133,18 @@ export class PgResourceGate {
       if (snapshot) return okAsync(snapshot.commitSha);
       return this.db
         .query(
-          "SELECT phase,error_code FROM orb_resource_events WHERE orb_id=$1 AND admission_version=$2 ORDER BY id DESC LIMIT 1",
+          "SELECT phase,error_code,error_message FROM orb_resource_events WHERE orb_id=$1 AND admission_version=$2 ORDER BY id DESC LIMIT 1",
           [orb.id, orb.agentAdmissionVersion],
         )
         .mapErr(() => resourceError("storage", "Resource status unavailable"))
         .andThen((result) =>
           result.rows[0]?.phase === "failed" && result.rows[0]?.error_code !== "storage"
-            ? errAsync(resourceError("fetch", "Resource acquisition failed"))
+            ? errAsync(
+                resourceError(
+                  resourceErrorCodes.find((code) => code === result.rows[0]?.error_code) ?? "fetch",
+                  safeStoredMessage(result.rows[0]?.error_message),
+                ),
+              )
             : okAsync(null),
         );
     });
@@ -106,7 +156,14 @@ export class PgResourceGate {
     return store.get(orb.id).andThen((existing) => {
       if (context.signal.aborted)
         return errAsync(resourceError("cancelled", "Resource acquisition cancelled"));
-      if (existing) return okAsync(existing);
+      if (existing)
+        return this.status(task, orb, context, {
+          phase: "ready",
+          commitSha: existing.commitSha,
+          fileCount: existing.files.length,
+          byteCount: existing.files.reduce((sum, file) => sum + file.bytes.byteLength, 0),
+          warnings: existing.warnings ?? [],
+        }).map(() => existing);
       return this.initialPin(task, orb)
         .andThen(() =>
           this.db

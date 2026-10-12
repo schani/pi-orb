@@ -133,7 +133,7 @@ export function prepareResourceContext(options: {
           })
           .andThen((platformFiles) =>
             check().andThen(() => {
-              const project = snapshotPromptResources(repository);
+              const project = snapshotPromptResources(repository, { invalidSkills: "warn" });
               if (project.isErr()) return errAsync(project.error);
               const platform = snapshotPromptResources({
                 orbId: options.orbId,

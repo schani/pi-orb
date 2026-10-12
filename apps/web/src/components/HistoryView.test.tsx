@@ -615,7 +615,7 @@ describe("HistoryView turn structure", () => {
             id: "00000000-0000-4000-8000-000000000125",
             orbId: "orb-1",
             content: [{ type: "text", text: "Please check the phone layout too." }],
-            status: "delivered",
+            status: "delivering",
             delivery: "steer",
             operationId: "operation-1",
             createdAt: "2026-08-10T00:00:00.000Z",

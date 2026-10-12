@@ -175,6 +175,7 @@ export function orbView(
     ...(activity !== undefined ? { activity } : {}),
     ...(orb.checkoutCommit !== null ? { checkoutCommit: orb.checkoutCommit } : {}),
     ...(orb.lastError !== null ? { lastError: orb.lastError } : {}),
+    ...(orb.resourceWarnings?.length ? { resourceWarnings: orb.resourceWarnings } : {}),
     ...(orb.unreadAlertId !== null ? { unreadAlertId: orb.unreadAlertId } : {}),
     ...(stateDetail !== undefined ? { stateDetail } : {}),
     ...(orb.sleepUntil !== null ? { sleepUntil: iso(orb.sleepUntil) } : {}),

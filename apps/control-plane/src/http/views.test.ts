@@ -30,6 +30,7 @@ const orb: OrbRow = {
   lastReadyAt: null,
   harnessSessionId: null,
   harnessSessionHeader: null,
+  resourceWarnings: [],
   lastError: null,
   runtimeTokenHash: null,
   replicationCursor: null,
@@ -47,6 +48,26 @@ const orb: OrbRow = {
   createdAt: 1_700_000_000_000,
   updatedAt: 1_700_000_000_000,
 };
+
+describe("orbView resource warnings", () => {
+  it("exposes durable path/code warnings on every metadata read", () => {
+    const resourceWarnings = [
+      { path: ".agents/skills/broken/SKILL.md", code: "invalid_yaml" as const },
+    ];
+    const row = { ...orb, resourceWarnings };
+    const first = orbView(row, new ControlState(), {});
+    const reloaded = orbView(row, new ControlState(), {});
+    expect(first.resourceWarnings).toEqual(resourceWarnings);
+    expect(reloaded.resourceWarnings).toEqual(resourceWarnings);
+    expect(Check(OrbViewSchema, reloaded)).toBe(true);
+  });
+
+  it("omits an empty warning list", () => {
+    expect(orbView({ ...orb, resourceWarnings: [] }, new ControlState(), {})).not.toHaveProperty(
+      "resourceWarnings",
+    );
+  });
+});
 
 describe("orbView failures", () => {
   it("exposes the durable explanation without a transitional readiness detail", () => {

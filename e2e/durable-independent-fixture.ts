@@ -4,9 +4,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer as httpServer, type ServerResponse } from "node:http";
 import { createServer as httpsServer } from "node:https";
 import { join } from "node:path";
+import { OrbMessageListViewSchema, OrbViewSchema } from "@pi-orb/protocol";
 import { type Browser, chromium, expect as expectPage, type Page } from "@playwright/test";
+import { Check } from "typebox/value";
 import { build } from "vite";
 import { expect, it as test } from "vitest";
+import { PGliteClient } from "../apps/control-plane/src/adapters/pg/pglite-client.ts";
 import {
   api,
   createFakeSession,
@@ -56,7 +59,9 @@ export type IndependentCase =
   | "git-stop"
   | "hook-policy"
   | "git-abort"
-  | "artifact-restart";
+  | "artifact-restart"
+  | "resource-warnings"
+  | "resource-retry";
 
 export function registerIndependentCase(cancellation: IndependentCase) {
   it(`central inference, MCP and native tools precede execution readiness: ${cancellation}`, async () => {
@@ -94,6 +99,13 @@ export function registerIndependentCase(cancellation: IndependentCase) {
       "---\nname: pinned\ndescription: Pinned resource fixture\n---\nRead asset.txt.\n",
     );
     writeFileSync(join(workspace, ".agents/skills/pinned/asset.txt"), "PINNED_RESOURCE_ASSET");
+    if (cancellation === "resource-warnings") {
+      mkdirSync(join(workspace, ".agents/skills/broken"), { recursive: true });
+      writeFileSync(
+        join(workspace, ".agents/skills/broken/SKILL.md"),
+        "---\nname: [unterminated\ndescription: Broken YAML\n---\nBROKEN_SKILL_MUST_NOT_BE_ADVERTISED\n",
+      );
+    }
     execFileSync("git", ["init", "-q", "-b", "main", workspace]);
     execFileSync("git", ["-C", workspace, "add", "."]);
     execFileSync("git", [
@@ -114,6 +126,7 @@ export function registerIndependentCase(cancellation: IndependentCase) {
     let resourceReleased = false;
     let resourcesOffline = false;
     let resourceAcquisitions = 0;
+    let rejectResources = cancellation === "resource-retry";
     const resourceOutcomes: string[] = [];
     const resourceGate = httpServer((req, res) => {
       const request = new URL(req.url ?? "/", "http://fixture");
@@ -124,6 +137,10 @@ export function registerIndependentCase(cancellation: IndependentCase) {
       }
       resourceAcquisitions++;
       resourceHeld = res;
+      if (rejectResources) {
+        res.writeHead(503).end("resource fixture unavailable");
+        return;
+      }
       if (resourceReleased && !resourcesOffline) res.end("resources released");
     });
     await new Promise<void>((resolve) => resourceGate.listen(0, "127.0.0.1", resolve));
@@ -212,6 +229,15 @@ export function registerIndependentCase(cancellation: IndependentCase) {
               stop,
             ],
           },
+          ...(cancellation === "resource-retry"
+            ? [
+                {
+                  // The queued sibling may steer the first turn after Start.
+                  match: { userMessage: { regex: "^FUTURE_CENTRAL$" } },
+                  steps: [{ type: "text", content: "FUTURE_CENTRAL_DONE" }, stop],
+                },
+              ]
+            : []),
           {
             match: { toolResultContains: { regex: "CP_TOOLS_DONE" } },
             steps: [{ type: "text", content: "CENTRAL_FIRST_DONE" }, stop],
@@ -338,7 +364,7 @@ export function registerIndependentCase(cancellation: IndependentCase) {
       },
     });
     const modelStream =
-      cancellation === "stop"
+      cancellation === "stop" || cancellation === "resource-warnings"
         ? await holdModelStream(fake.inferenceBaseUrl, "RESUME_STREAM")
         : undefined;
     let cp: Awaited<ReturnType<typeof startControlPlane>> | undefined;
@@ -356,6 +382,13 @@ export function registerIndependentCase(cancellation: IndependentCase) {
       released = true;
       gateEvents.push("setup-readiness-released");
       held?.end("released");
+    };
+    const readOrbView = async () => {
+      if (!cp) throw new FatalProbeError("Control plane not started");
+      const response = await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}`);
+      expect(response.status).toBe(200);
+      if (!Check(OrbViewSchema, response.body)) throw new FatalProbeError("Invalid orb view");
+      return response.body;
     };
     try {
       // Reserve an ephemeral listener before selecting the CP port; no fixed-port fixture collision.
@@ -423,10 +456,7 @@ export function registerIndependentCase(cancellation: IndependentCase) {
         "central Codex login",
         async () => {
           if (loginAbort.signal.aborted) throw new FatalProbeError("login fixture cancelled");
-          const view = await api(cp!.baseUrl, "GET", `/api/v1/orbs/${orb}`);
-          const action = view.body["actionRequired"] as
-            | { type?: string; userCode?: string }
-            | undefined;
+          const action = (await readOrbView()).actionRequired;
           return action?.type === "openai_codex_device_login" && action.userCode
             ? action.userCode
             : null;
@@ -566,6 +596,287 @@ export function registerIndependentCase(cancellation: IndependentCase) {
         failed = false;
         return;
       }
+      if (cancellation === "resource-retry") {
+        const resourceFailure = await waitFor(
+          "durable resource failure recorded before compute readiness",
+          async () =>
+            lifecycleEdge(cp!.logs, orb, "resources.failed", {
+              admission_version: "0",
+              code: "fetch",
+            }) ?? null,
+        );
+        await waitFor("setup hook held after resource acquisition failed", async () =>
+          held ? true : null,
+        );
+        expect(released).toBe(false);
+        expect(cp.modelRequests).toHaveLength(0);
+        const heldView = await readOrbView();
+        expect(heldView.state).toBe("creating");
+        writeFileSync(
+          join(evidence, "resource-failure-before-setup-release.json"),
+          JSON.stringify({ resourceFailure, view: heldView, gateEvents }, null, 2),
+        );
+        // Enqueue while creating: new input in failed state would itself retry admission.
+        const secondMessage = randomUUID();
+        expect(
+          (
+            await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${secondMessage}`, {
+              content: [{ type: "text", text: "FUTURE_CENTRAL" }],
+            })
+          ).status,
+        ).toBe(202);
+        const poll = async () => {
+          const response = await api(cp!.baseUrl, "POST", `/api/v1/orbs/${orb}/messages/poll`, {
+            after: 0,
+            tracked: [],
+          });
+          expect(response.status).toBe(200);
+          if (!Check(OrbMessageListViewSchema, response.body))
+            throw new FatalProbeError("Invalid message poll response");
+          return response.body.items;
+        };
+        // The first row was claimed before resource acquisition; neither row has an operation.
+        const pendingItems = await waitFor(
+          "original first delivering and second queued behind cached resource failure",
+          async () => {
+            const items = await poll();
+            return items.length === 2 &&
+              items.some((item) => item.id === firstMessage && item.status === "delivering") &&
+              items.some((item) => item.id === secondMessage && item.status === "queued")
+              ? items
+              : null;
+          },
+        );
+        for (const item of pendingItems) {
+          expect(item.error).toBeUndefined();
+          expect(item.operationId).toBeUndefined();
+        }
+        expect((await readOrbView()).state).toBe("creating");
+        expect(released).toBe(false);
+        expect(held?.writableEnded).toBe(false);
+        expect(held?.destroyed).toBe(false);
+        expect(cp.modelRequests).toHaveLength(0);
+        writeFileSync(
+          join(evidence, "pending-before-setup-release.json"),
+          JSON.stringify(pendingItems, null, 2),
+        );
+        // The retained checkout reaches the setup gate before terminal resource failure.
+        release();
+        const failedView = await waitFor(
+          "resource failure becomes terminal after setup release",
+          async () => {
+            const view = await readOrbView();
+            return view.state === "failed" ? view : null;
+          },
+        );
+        writeFileSync(
+          join(evidence, "resource-failed-view.json"),
+          JSON.stringify(failedView, null, 2),
+        );
+        expect(failedView.lastError).toBe(
+          "runtime_failed: resource_acquisition_failed: Fixture resource gate failed",
+        );
+        expect(await poll()).toEqual(pendingItems);
+        expect(cp.modelRequests).toHaveLength(0);
+        const failedAcquisitions = resourceAcquisitions;
+        expect(failedAcquisitions).toBe(1);
+        for (let pass = 0; pass < 3; pass++) {
+          await forceReconcilePass(cp, orb);
+          expect(resourceAcquisitions).toBe(failedAcquisitions);
+          expect(cp.modelRequests).toHaveLength(0);
+          expect((await readOrbView()).state).toBe("failed");
+          expect(await poll()).toEqual(pendingItems);
+        }
+        writeFileSync(
+          join(evidence, "pending-before-start.json"),
+          JSON.stringify(await poll(), null, 2),
+        );
+        // Inspect durable rows only after their live database owner has exited.
+        await cp.stop();
+        priorLogs.push(...cp.logs);
+        priorRequests.push(...(cp.modelRequests ?? []));
+        const database = new PGliteClient(join(root, "db"));
+        try {
+          const row = (
+            await database.query(
+              "SELECT state,last_error,agent_admission_version,resource_warnings FROM orbs WHERE id=$1",
+              [orb],
+            )
+          )._unsafeUnwrap().rows;
+          const events = (
+            await database.query(
+              "SELECT admission_version,phase,error_code,error_message,commit_sha FROM orb_resource_events WHERE orb_id=$1 ORDER BY id",
+              [orb],
+            )
+          )._unsafeUnwrap().rows;
+          const inbox = (
+            await database.query(
+              "SELECT message_id,status,operation_id,last_error FROM orb_messages WHERE orb_id=$1 ORDER BY ordinal",
+              [orb],
+            )
+          )._unsafeUnwrap().rows;
+          writeFileSync(
+            join(evidence, "failed-durable-rows.json"),
+            JSON.stringify({ row, events, inbox }, null, 2),
+          );
+          expect(row).toEqual([
+            expect.objectContaining({
+              state: "failed",
+              last_error: failedView.lastError,
+              resource_warnings: [],
+            }),
+          ]);
+          expect(Number(row[0]?.agent_admission_version)).toBe(0);
+          expect(events.map((event) => [Number(event.admission_version), event.phase])).toEqual([
+            [0, "acquiring"],
+            [0, "failed"],
+          ]);
+          expect(events[1]).toMatchObject({
+            error_code: "fetch",
+            error_message: "Fixture resource gate failed",
+            commit_sha: null,
+          });
+          expect(inbox).toEqual([
+            {
+              message_id: firstMessage,
+              status: "delivering",
+              operation_id: null,
+              last_error: null,
+            },
+            { message_id: secondMessage, status: "queued", operation_id: null, last_error: null },
+          ]);
+        } finally {
+          (await database.end())._unsafeUnwrap();
+        }
+        cp = await startControlPlane(cpOptions);
+        browser = await chromium.launch({
+          ...(existsSync("/usr/bin/chromium") ? { executablePath: "/usr/bin/chromium" } : {}),
+          args: ["--no-sandbox"],
+        });
+        page = await browser.newPage();
+        await page.goto(`${cp.baseUrl}/orbs/${orb}`);
+        const assertFailedPage = async (phase: string) => {
+          const view = await readOrbView();
+          expect(view.state).toBe("failed");
+          expect(view.lastError).toBe(failedView.lastError);
+          expect(await poll()).toEqual(pendingItems);
+          await expectPage(page!.locator(".orb-main .orb-life-word")).toHaveText("failed");
+          await expectPage(page!.locator(".orb-main .orb-failure-banner")).toHaveText(
+            failedView.lastError!,
+          );
+          await expectPage(page!.locator(".orb-main .rec-q")).toHaveCount(2);
+          await expectPage(page!.locator(".orb-main .rec-q .rec-status")).toHaveText([
+            "blocked",
+            "blocked",
+          ]);
+          await expectPage(page!.locator(".orb-main .rec-q .error-text")).toHaveCount(0);
+          writeFileSync(join(evidence, `${phase}-view.json`), JSON.stringify(view, null, 2));
+          writeFileSync(join(evidence, `${phase}-page.html`), await page!.content());
+          await page!.screenshot({ path: join(evidence, `${phase}-page.png`), fullPage: true });
+        };
+        await assertFailedPage("failed-before-reload");
+        await page.reload();
+        await assertFailedPage("failed-after-reload");
+        expect(resourceAcquisitions).toBe(failedAcquisitions);
+        expect(cp.modelRequests).toHaveLength(0);
+        // Repair the real source before Start; no message is resubmitted.
+        writeFileSync(
+          join(workspace, ".agents/skills/pinned/asset.txt"),
+          "REPAIRED_RESOURCE_ASSET",
+        );
+        execFileSync("git", ["-C", workspace, "add", "."]);
+        execFileSync("git", [
+          "-C",
+          workspace,
+          "-c",
+          "user.name=Fixture",
+          "-c",
+          "user.email=fixture@example.test",
+          "commit",
+          "-qm",
+          "repair resource source",
+        ]);
+        const repairedSha = execFileSync("git", ["-C", workspace, "rev-parse", "HEAD"], {
+          encoding: "utf8",
+        }).trim();
+        expect(repairedSha).not.toBe(pinnedSha);
+        writeFileSync(
+          join(evidence, "resource-repair-commits.json"),
+          JSON.stringify({ pinnedSha, repairedSha }, null, 2),
+        );
+        rejectResources = false;
+        resourceReleased = true;
+        expect((await api(cp.baseUrl, "POST", `/api/v1/orbs/${orb}/start`)).status).toBe(202);
+        const approval = await loginApproval;
+        if (!approval.ok) throw approval.cause;
+        await waitFor("Start delivers the same pending IDs", async () => {
+          const items = await poll();
+          return [firstMessage, secondMessage].every((id) =>
+            items.some((item) => item.id === id && item.status === "delivered"),
+          )
+            ? true
+            : null;
+        });
+        await waitFor("retried central operation committed", async () => {
+          const history = await readReplicatedHistorySnapshot(cp!, orb);
+          return JSON.stringify(history).includes("FUTURE_CENTRAL_DONE") ? true : null;
+        });
+        for (let pass = 0; pass < 3; pass++) await forceReconcilePass(cp, orb);
+        expect(resourceAcquisitions).toBe(failedAcquisitions + 1);
+        const readyEvent = await waitFor(
+          "Start pins repaired Git commit",
+          async () =>
+            lifecycleEdge(cp!.logs, orb, "resources.ready", {
+              admission_version: "1",
+              commit_sha: repairedSha,
+            }) ?? null,
+        );
+        writeFileSync(
+          join(evidence, "resource-retry-ready-event.json"),
+          JSON.stringify(readyEvent, null, 2),
+        );
+        const history = await readReplicatedHistorySnapshot(cp, orb);
+        writeFileSync(
+          join(evidence, "resource-retry-canonical-history.json"),
+          JSON.stringify(history, null, 2),
+        );
+        for (const id of [firstMessage, secondMessage]) {
+          expect(
+            history.records.filter(
+              (record) => record.type !== "compaction" && record.inboxMessageIds?.includes(id),
+            ),
+          ).toHaveLength(1);
+        }
+        expect(committedToolOutput(history.records, "REPAIRED_RESOURCE_ASSET")).toBe(true);
+        for (const text of ["CENTRAL_FIRST", "FUTURE_CENTRAL"]) {
+          expect(
+            history.records.filter(
+              (record) =>
+                record.type === "message" &&
+                record.role === "user" &&
+                record.content.some((block) => block.type === "text" && block.text === text),
+            ),
+          ).toHaveLength(1);
+        }
+        expect(JSON.stringify(history)).not.toContain("PINNED_RESOURCE_ASSET");
+        expect(
+          effectiveOpenAIResponseInstructions(
+            cp.modelRequests!.find((request) => JSON.stringify(request).includes("FUTURE_CENTRAL")),
+          ),
+        ).toContain(privatePolicy);
+        const finalItems = await poll();
+        writeFileSync(
+          join(evidence, "delivered-after-start.json"),
+          JSON.stringify(finalItems, null, 2),
+        );
+        expect(finalItems.map((item) => item.id).sort()).toEqual(
+          [firstMessage, secondMessage].sort(),
+        );
+        expect(finalItems.every((item) => item.status === "delivered")).toBe(true);
+        release();
+        failed = false;
+        return;
+      }
       resourceReleased = true;
       resourceHeld?.end("resources released");
       const approval = await loginApproval;
@@ -669,6 +980,87 @@ export function registerIndependentCase(cancellation: IndependentCase) {
       );
       expect(firstSummary["operationId"]).toBeTruthy();
       await summarySettled(firstSummary["operationId"]!);
+      if (cancellation === "resource-warnings") {
+        const warningPage = page;
+        const assertWarnings = async (phase: string) => {
+          const view = await readOrbView();
+          expect(view.resourceWarnings).toEqual([
+            { path: ".agents/skills/broken/SKILL.md", code: "invalid_yaml" },
+          ]);
+          const notice = warningPage.getByText(
+            "Skipped repository skill .agents/skills/broken/SKILL.md: invalid YAML.",
+            { exact: true },
+          );
+          await expectPage(notice).toHaveCount(1);
+          await expectPage(notice).toBeVisible();
+          writeFileSync(join(evidence, `${phase}-view.json`), JSON.stringify(view, null, 2));
+          writeFileSync(join(evidence, `${phase}-page.html`), await warningPage.content());
+          await warningPage.screenshot({
+            path: join(evidence, `${phase}-page.png`),
+            fullPage: true,
+          });
+          return view;
+        };
+        expect((await assertWarnings("warnings-before-reload")).lastError).toBeUndefined();
+        const instructions = effectiveOpenAIResponseInstructions(cp.modelRequests![0]);
+        expect(instructions).toContain("Pinned resource fixture");
+        expect(instructions).not.toContain("BROKEN_SKILL_MUST_NOT_BE_ADVERTISED");
+        await page.reload();
+        await expectPage(page.getByText("CENTRAL_FIRST_DONE", { exact: true })).toBeVisible();
+        expect((await assertWarnings("warnings-after-reload")).lastError).toBeUndefined();
+        expect(resourceAcquisitions).toBe(1);
+        // A compute failure must not revoke an unrelated central operation.
+        const frameStart = frames.length;
+        await submit("RESUME_STREAM");
+        await waitFor("central stream held while compute is unrelated", async () =>
+          modelStream!.held() ? true : null,
+        );
+        await expectPage(
+          page.getByText("RESUMED_STREAM_BEFORE_COMPLETION", { exact: true }),
+        ).toBeVisible();
+        const metadata = JSON.parse(readFileSync(join(root, "hosts", orb, "host.json"), "utf8"));
+        writeFileSync(
+          join(workspace, "..", "armed.json"),
+          JSON.stringify({ orbId: orb, incarnation: metadata.incarnation }),
+        );
+        const children = readFileSync(
+          `/proc/${metadata.processGroupId}/task/${metadata.processGroupId}/children`,
+          "utf8",
+        )
+          .trim()
+          .split(/\s+/)
+          .map(Number);
+        expect(children).toHaveLength(1);
+        expect(readFileSync(`/proc/${children[0]}/environ`, "utf8").split("\0")).toContain(
+          "PI_ORB_RUNTIME_MODE=execution",
+        );
+        process.kill(children[0]!, "SIGKILL");
+        await waitFor("unrelated compute failed with central stream held", async () =>
+          (await readOrbView()).state === "failed" ? true : null,
+        );
+        await forceReconcilePass(cp, orb);
+        expect(
+          frames
+            .slice(frameStart)
+            .some(
+              (frame) =>
+                frame.direction === "received" &&
+                frame.payload.includes('"type":"operation_finished"'),
+            ),
+        ).toBe(false);
+        modelStream!.release();
+        await expectPage(page.getByText("RESUMED_SNAPSHOT_READ_DONE", { exact: true })).toBeVisible(
+          { timeout: 30_000 },
+        );
+        const history = await readReplicatedHistorySnapshot(cp, orb);
+        expect(JSON.stringify(history)).toContain("SNAPSHOT_REOPEN:PINNED_RESOURCE_ASSET");
+        expect(JSON.stringify(history)).not.toContain("agent identity rejected");
+        expect((await assertWarnings("warnings-after-compute-failure")).state).toBe("failed");
+        expect(resourceAcquisitions).toBe(1);
+        release();
+        failed = false;
+        return;
+      }
       if (cancellation === "artifact-restart") {
         await runArtifactRestart({
           cp,
