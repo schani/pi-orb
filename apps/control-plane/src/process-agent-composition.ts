@@ -746,12 +746,11 @@ export function createProcessAgentContext(
             ),
         envFor: (target: EnvTarget) =>
           env.invocation(instructions.admission(String(target.conversationId))),
-        prompt: (conversationId: string, generationId?: string) =>
+        prompt: (conversationId: string) =>
           instructions.prompt(conversationId, (revision) =>
             logOrbEvent(task, orb.id, "instructions.host_adopted", {
               revision,
               conversation_id: conversationId,
-              ...(generationId ? { generation_id: generationId } : {}),
               admission_version: orb.agentAdmissionVersion,
             }),
           ),

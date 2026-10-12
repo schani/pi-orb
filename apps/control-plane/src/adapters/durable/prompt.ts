@@ -7,6 +7,8 @@ import {
   section,
 } from "@earendil-works/pi-durable";
 
+const SECTION = "orb-instructions";
+
 export interface PromptSnapshot {
   readonly cwd: string;
   readonly personal?: string;
@@ -37,31 +39,33 @@ export function renderPrompt(snapshot: PromptSnapshot): string {
 }
 
 export function promptExtension(
-  instructions: string | ((conversationId: string, generationId?: string) => string),
+  instructions: string | ((conversationId: string) => string),
 ): Extension {
-  const render = (conversationId: string, generationId?: string) =>
-    typeof instructions === "string" ? instructions : instructions(conversationId, generationId);
+  const render = (conversationId: string) =>
+    typeof instructions === "string" ? instructions : instructions(conversationId);
+  // Tagged so a later "Updated system prompt section" names a delimited part of the instructions.
+  const tagged = (text: string) => `<${SECTION}>\n${text}\n</${SECTION}>`;
+  // The persisted section becomes the request's instructions and is re-sent only when it changes,
+  // so each request extends the previous one (prompt cache). The hook covers a request prepared
+  // before the prompt changed, such as one resumed after reopen.
   return defineExtension({
     name: "orb.prompt",
-    sections:
-      typeof instructions === "string"
-        ? [section("orb-instructions", () => instructions, { tag: false })]
-        : [],
+    sections: [section(SECTION, ({ conversationId }) => render(String(conversationId)))],
     hooks: [
       hook(GenerationTask, {
-        beforeRequest: ({ messages }, api) => ({
-          messages: [
-            ...messages,
-            {
-              role: "system",
-              content: "",
-              sections: {
-                "orb-instructions": render(String(api.conversationId), String(api.taskId)),
-              },
-              timestamp: 0,
-            },
-          ],
-        }),
+        beforeRequest: ({ messages }, api) => {
+          const current = tagged(render(String(api.conversationId)));
+          const shown = messages.findLast(
+            (message) => message.role === "system" && message.sections?.[SECTION] !== undefined,
+          );
+          if (shown?.role === "system" && shown.sections?.[SECTION] === current) return undefined;
+          return {
+            messages: [
+              ...messages,
+              { role: "system", content: "", sections: { [SECTION]: current }, timestamp: 0 },
+            ],
+          };
+        },
       }),
     ],
   });

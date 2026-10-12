@@ -157,7 +157,7 @@ export interface DurableAgentOptions {
   readonly storage: Storage;
   readonly env: ExecutionEnv;
   readonly envFor?: (target: EnvTarget) => ExecutionEnv;
-  readonly prompt?: (conversationId: string, generationId?: string) => string;
+  readonly prompt?: (conversationId: string) => string;
   readonly resume?: boolean;
   readonly checkAdmission?: () => ResultAsync<void, RuntimeClientError>;
   /** Consulted before resuming unfinished work; an error leaves it suspended. */
