@@ -898,12 +898,35 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
             first?.setAttribute("tabindex", "0");
             first?.focus();
           });
+        } else if (intent === "ArrowUp") {
+          // macOS WebKit animates keyboard scrolls: a release before movement
+          // cancels one and a press during one is dropped.
+          const scrollSettled = () =>
+            scroller.evaluate(
+              (pane) =>
+                new Promise<void>((resolve) => {
+                  const view = pane.ownerDocument.defaultView;
+                  if (!view) throw new Error("Transcript viewport window missing");
+                  let previous = pane.scrollTop;
+                  let stillFrames = 0;
+                  const frame = () => {
+                    stillFrames = pane.scrollTop === previous ? stillFrames + 1 : 0;
+                    previous = pane.scrollTop;
+                    if (stillFrames === 3) resolve();
+                    else view.requestAnimationFrame(frame);
+                  };
+                  view.requestAnimationFrame(frame);
+                }),
+            );
+          for (let press = 0; press < 3; press++) {
+            const before = await distance();
+            await page.keyboard.down(intent);
+            await expectPage.poll(distance).toBeGreaterThan(before);
+            await page.keyboard.up(intent);
+            await scrollSettled();
+          }
         } else {
           await page.keyboard.press(intent);
-          if (intent === "ArrowUp") {
-            await page.keyboard.press(intent);
-            await page.keyboard.press(intent);
-          }
         }
         await expectPage.poll(distance).toBeGreaterThan(48);
         await scroller.evaluate((pane) => {
