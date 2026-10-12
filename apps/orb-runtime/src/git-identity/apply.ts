@@ -16,9 +16,15 @@ const failure = (message: string): GitIdentityError => ({
 });
 
 /** Exit 5 is `git config --unset-all` finding nothing to remove. */
-const gitConfig = (environment: NodeJS.ProcessEnv, args: string[], allowedExit?: number) =>
+/** `cwd` is the orb home: git 2.55 aborts when the inherited working directory is unreadable. */
+const gitConfig = (
+  environment: NodeJS.ProcessEnv,
+  home: string,
+  args: string[],
+  allowedExit?: number,
+) =>
   ResultAsync.fromPromise(
-    promisify(execFile)("git", ["config", ...args], { env: environment }),
+    promisify(execFile)("git", ["config", ...args], { env: environment, cwd: home }),
     (error) => (error as { code?: unknown }).code,
   ).orElse((code) =>
     code === allowedExit ? ok(undefined) : err(failure(`git config exited ${String(code)}`)),
@@ -56,13 +62,19 @@ export function applyGitIdentity(
     .andThen((body) => validateGitIdentity(body).mapErr(() => failure("invalid identity")))
     .andThen((identity) =>
       fsStep(() => mkdirSync(dirname(file), { recursive: true }))
-        .asyncAndThen(() => setOrUnset(environment, file, "user.name", identity.name))
-        .andThen(() => setOrUnset(environment, file, "user.email", identity.email)),
+        .asyncAndThen(() => setOrUnset(environment, home, file, "user.name", identity.name))
+        .andThen(() => setOrUnset(environment, home, file, "user.email", identity.email)),
     )
     .andThen(() => fsStep(() => writeFileSync(join(home, ".gitconfig"), "", { flag: "a" })));
 }
 
-const setOrUnset = (environment: NodeJS.ProcessEnv, file: string, key: string, value: string) =>
+const setOrUnset = (
+  environment: NodeJS.ProcessEnv,
+  home: string,
+  file: string,
+  key: string,
+  value: string,
+) =>
   value === ""
-    ? gitConfig(environment, ["--file", file, "--unset-all", key], 5)
-    : gitConfig(environment, ["--file", file, "--replace-all", key, value]);
+    ? gitConfig(environment, home, ["--file", file, "--unset-all", key], 5)
+    : gitConfig(environment, home, ["--file", file, "--replace-all", key, value]);
