@@ -377,7 +377,7 @@ describe("independent central lifecycle", () => {
     });
   });
   for (const demand of ["visible", "work", "hidden", "grace"] as const) {
-    it(`wakes stopped compute only for actual ${demand} demand`, async () => {
+    it(`wakes stopped compute only for agent work, not ${demand} demand`, async () => {
       await runDst({ name: `central-demand-${demand}`, iterations: 5 }, async (sim) => {
         const harness = makeHarness();
         const deps = { ...harness.deps, agentPlane: plane(() => undefined, demand === "work") };
@@ -396,7 +396,7 @@ describe("independent central lifecycle", () => {
               deps.control.setBrowserVisibility("orb", "tab", demand === "visible", task.wallNow());
               await reconcileOrbOnce(task, deps, "orb");
               expect(harness.store.orbSnapshot("orb")?.state).toBe(
-                demand === "visible" || demand === "work" ? "starting" : "stopped",
+                demand === "work" ? "starting" : "stopped",
               );
             },
           },
