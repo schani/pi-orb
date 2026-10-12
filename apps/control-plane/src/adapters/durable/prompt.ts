@@ -43,20 +43,18 @@ export function promptExtension(
 ): Extension {
   const render = (conversationId: string) =>
     typeof instructions === "string" ? instructions : instructions(conversationId);
+  // Tagged so a later "Updated system prompt section" names a delimited part of the instructions.
+  const tagged = (text: string) => `<${SECTION}>\n${text}\n</${SECTION}>`;
   // The persisted section becomes the request's instructions and is re-sent only when it changes,
   // so each request extends the previous one (prompt cache). The hook covers a request prepared
   // before the prompt changed, such as one resumed after reopen.
   return defineExtension({
     name: "orb.prompt",
-    sections: [
-      section(SECTION, ({ conversationId }) => render(String(conversationId)), {
-        tag: false,
-      }),
-    ],
+    sections: [section(SECTION, ({ conversationId }) => render(String(conversationId)))],
     hooks: [
       hook(GenerationTask, {
         beforeRequest: ({ messages }, api) => {
-          const current = render(String(api.conversationId));
+          const current = tagged(render(String(api.conversationId)));
           const shown = messages.findLast(
             (message) => message.role === "system" && message.sections?.[SECTION] !== undefined,
           );
