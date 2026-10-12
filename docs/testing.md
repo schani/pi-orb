@@ -958,6 +958,20 @@ passed. Evidence: `.context/http-preview/rebase-latest-*.log` and `.exit`, plus
 Full unit/DST and E2E were not rerun on this base; the 483-test E2E result above
 belongs only to `884003e`. No push or deployment occurred.
 
+## HTTP preview rebase onto central Pi (2026-10-12; not deployed)
+
+PR #64 rebases onto main `67d881c` (65 commits, including central Durable Pi). Main's
+new Tailscale call sites were removed: central self inspection `previewHost`, the
+execution runtime's tailscaled start and the `runtime-apt` package. `ViewConfig` keeps
+only `centralAgent`. Preview stream closers fire with execution connections, not
+conversation-only closes. The preview migration is renumbered to 041 because main took
+034. The PR's exact runtime-environment assertions were updated for main's
+`PI_ORB_RUNTIME_MODE` and initial-checkout variables; their first failure is preserved.
+Typecheck and lint pass; unit/DST pass 4,319 tests (24 skipped); infrastructure passes
+94 Node, 156 Python and 27 native-VM tests. Central-Pi orbs cannot yet forward previews
+(`TODO.md`). Evidence: `.context/http-preview/rebase-20261012-*`. No local E2E,
+deployment or live-cloud mutation.
+
 ## Deterministic simulation testing strategy
 
 The [`determined`](https://www.npmjs.com/package/determined) package provides cooperative deterministic scheduling, reproducible entropy, failpoints, blocking primitives, deadlock detection, and exact record/replay of failing schedules. pi-orb does not require timed mutex or condition-variable APIs: it coordinates with database compare-and-swap, explicit lifecycle state, serialized in-process mutation queues, and cancellable adapter operations. Virtual sleep/deadline timers only need to participate correctly in scheduler quiescence and cancellation.

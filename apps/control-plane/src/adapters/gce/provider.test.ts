@@ -979,6 +979,9 @@ describe("GceOrbHostProvider", () => {
       PI_ORB_HARNESS: "pi",
       PI_ORB_RUNTIME_TOKEN: items.find((item) => item.key === "pi-orb-runtime-token")?.value,
       PI_ORB_SKILLS_DIR: "/opt/pi-orb/skills",
+      PI_ORB_RUNTIME_MODE: "pi",
+      PI_ORB_INITIAL_CHECKOUT_COMMIT: "",
+      PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT: "",
     });
     expect(items.find((item) => item.key === "pi-orb-host-spec-fingerprint")?.value).toBe(
       result.isOk() ? result.value.specFingerprint : "",

@@ -970,6 +970,9 @@ describe("DockerOrbHostProvider environment", () => {
       "PI_ORB_CLAUDE_RECOVERY_PROOF=null",
       "PI_ORB_HARNESS=pi",
       "PI_ORB_SKILLS_DIR=/opt/pi-orb/skills",
+      "PI_ORB_RUNTIME_MODE=pi",
+      "PI_ORB_INITIAL_CHECKOUT_COMMIT=",
+      "PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT=",
       "HOME=/workspace/home",
     ]);
   });

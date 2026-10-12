@@ -49,7 +49,7 @@ The runtime's bearer-authenticated PUT/DELETE `/runtime/previews/:port` and GET
 `/runtime/previews` call the registration service. Unconfigured origin returns an explicit
 configuration-disabled error, not a fabricated URL. Registration does not assert readiness.
 
-Migration 034 persists an orb/port allowlist with a random registration generation.
+Migration 041 persists an orb/port allowlist with a random registration generation.
 Idempotent registration retains the generation; revoke then re-register changes it.
 Registrations survive stop/start and compute replacement; orb deletion cascades them.
 Mutations recheck parent/orb lifecycle, token and incarnation under store locks. Ports are
