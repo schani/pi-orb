@@ -1,7 +1,9 @@
 import { type Browser, chromium } from "@playwright/test";
-import { expect, it } from "vitest";
+import { it as baseIt, expect } from "vitest";
 import { startPreviewComposition } from "./testkit/preview-composition.ts";
 import { startPreviewDockerRuntime } from "./testkit/preview-docker.ts";
+
+const it = baseIt.skipIf(process.env["PI_ORB_E2E_BACKEND"] === "process");
 
 it("forwards authenticated previews into the image-baked runtime's Docker namespace and retains registrations across stop/start", async () => {
   const runtime = await startPreviewDockerRuntime();
