@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import {
+  GIT_IDENTITY_RUNTIME_PATH,
   MCP_RUNTIME_PATH,
   ORB_BOOT_CONTEXT_PATH,
   PERSONAL_INSTRUCTIONS_RUNTIME_PATH,
@@ -42,6 +43,7 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
     const brokerRequests: string[] = [];
     const brokerBodies: Record<string, unknown> = {
       [PROJECT_SECRETS_RUNTIME_PATH]: { revision: 0, values: {} },
+      [GIT_IDENTITY_RUNTIME_PATH]: { name: "", email: "" },
       [MCP_RUNTIME_PATH]: { revision: 0, servers: [] },
       [PERSONAL_INSTRUCTIONS_RUNTIME_PATH]: { revision: 0, content: "" },
       [PROJECT_INSTRUCTIONS_RUNTIME_PATH]: { revision: 0, content: "" },

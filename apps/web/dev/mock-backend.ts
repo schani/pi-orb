@@ -8,6 +8,8 @@ import {
   type ClientAction,
   ClientFrameSchema,
   EnqueueOrbMessageRequestSchema,
+  GIT_IDENTITY_PATH,
+  type GitIdentity,
   type HistoryRecord,
   type McpCatalog,
   McpCatalogSchema,
@@ -29,6 +31,7 @@ import {
   TERMINAL_SUBPROTOCOL,
   TerminalClientControlSchema,
   UploadBatchSchema,
+  validateGitIdentity,
   validatePersonalInstructions,
   validateProjectInstructions,
   validateRepositoryUrl,
@@ -82,6 +85,7 @@ interface MockState {
   projectMcp: Map<string, McpCatalog>;
   mcpGrants: Set<string>;
   personalInstructions: PersonalInstructions;
+  gitIdentity: GitIdentity;
   projectInstructions: Map<string, ProjectInstructions>;
 }
 
@@ -785,6 +789,7 @@ function initialState(timestampChurn: boolean): MockState {
       ],
     ]),
     personalInstructions: { content: "", revision: 0 },
+    gitIdentity: { name: "", email: "" },
     projectInstructions: new Map(),
     mcpGrants: new Set([
       `${PROJECT_ID}/10000000-0000-4000-8000-000000000001`,
@@ -1277,6 +1282,22 @@ async function handleApi(
       };
     }
     sendJson(response, 200, state.personalInstructions);
+    return true;
+  }
+
+  if (path === GIT_IDENTITY_PATH && (method === "GET" || method === "PUT")) {
+    response.setHeader("cache-control", "no-store");
+    if (method === "PUT") {
+      const identity = validateGitIdentity(await readJson(request));
+      if (identity.isErr()) {
+        sendJson(response, 400, {
+          error: { code: "invalid_request", message: identity.error.message, retryable: false },
+        });
+        return true;
+      }
+      state.gitIdentity = identity.value;
+    }
+    sendJson(response, 200, state.gitIdentity);
     return true;
   }
 

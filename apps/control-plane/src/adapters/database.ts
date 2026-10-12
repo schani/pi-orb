@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { err, ok, type Result, type ResultAsync } from "neverthrow";
 import type { StoreError } from "../domain/errors.ts";
+import type { GitIdentityStore } from "../domain/git-identity.ts";
 import type { HostingStore } from "../domain/hosting-ports.ts";
 import type { UserStore } from "../domain/identity.ts";
 import type { McpStore } from "../domain/mcp.ts";
@@ -20,6 +21,7 @@ import type { AgentPersistence } from "./durable/persistence.ts";
 import { PgAgentPersistence } from "./durable/pg-persistence.ts";
 import { PgClient, type PostgreSQLClient } from "./pg/client.ts";
 import { PostgreSQLCredentialPointerStore } from "./pg/credential-pointers.ts";
+import { PostgreSQLGitIdentityStore } from "./pg/git-identity.ts";
 import { PostgreSQLHostingStore } from "./pg/hosting.ts";
 import { PostgreSQLMcpStore } from "./pg/mcp.ts";
 import { PostgreSQLMcpOAuthStore } from "./pg/mcp-oauth.ts";
@@ -41,6 +43,7 @@ export interface ControlPlaneDatabase {
   readonly pointers: CredentialPointerStoreFactory;
   readonly projectSecrets: ProjectSecretPointerStore;
   readonly personalInstructions: PersonalInstructionsStore;
+  readonly gitIdentity: GitIdentityStore;
   readonly projectInstructions: ProjectInstructionsStore;
   readonly signingKeys: SigningKeyStore;
   readonly hosting: HostingStore;
@@ -68,6 +71,7 @@ export function composeControlPlaneDatabase(client: PostgreSQLClient): ControlPl
     pointers: new PostgreSQLCredentialPointerStore(client),
     projectSecrets: new PostgreSQLProjectSecretPointerStore(client),
     personalInstructions: new PostgreSQLPersonalInstructionsStore(client),
+    gitIdentity: new PostgreSQLGitIdentityStore(client),
     projectInstructions: new PostgreSQLProjectInstructionsStore(client),
     signingKeys: new PostgreSQLSigningKeyStore(client),
     hosting: new PostgreSQLHostingStore(client),

@@ -178,3 +178,126 @@ test.each([0, 3])(
     }
   },
 );
+
+async function gitIdentityBoot(
+  serve: (url: string | undefined) => { status: number; body: unknown },
+  run: (
+    boot: (environment?: NodeJS.ProcessEnv) => Promise<ExecutionBoot>,
+    root: string,
+  ) => Promise<void>,
+) {
+  const root = await mkdtemp(join(tmpdir(), "execution-git-identity-"));
+  const requests: string[] = [];
+  const server = createServer((request, response) => {
+    requests.push(request.url ?? "");
+    expect(request.headers.authorization).toBe("Bearer private");
+    const reply =
+      request.url === "/runtime/v1/project-secrets"
+        ? { status: 200, body: { revision: 0, values: {} } }
+        : serve(request.url);
+    response.writeHead(reply.status, { "content-type": "application/json" });
+    response.end(JSON.stringify(reply.body));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("test port unavailable");
+  try {
+    const repo = join(root, "repo");
+    execFileSync("git", ["init", "-q", repo]);
+    execFileSync("git", [
+      "-C",
+      repo,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.com",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "initial",
+    ]);
+    const { XDG_CONFIG_HOME: _xdg, ...inherited } = process.env;
+    await run(async (environment = { ...inherited, GIT_CONFIG_NOSYSTEM: "1" }) => {
+      const boot = new ExecutionBoot({
+        orbId: "test",
+        workDir: root,
+        repositoryUrl: "https://github.com/test/test",
+        incarnation: "3",
+        skillsDir: "",
+        environment,
+        broker: { controlPlaneUrl: `http://127.0.0.1:${address.port}`, runtimeToken: "private" },
+      });
+      const fetches = () => requests.filter((url) => url === "/runtime/v1/git-identity").length;
+      const before = fetches();
+      await boot.boot();
+      boot.shutdown();
+      expect(fetches() - before).toBe(1);
+      return boot;
+    }, root);
+  } finally {
+    server.close();
+    await once(server, "close");
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+test("boot applies the owner's git identity to the XDG file and leaves ~/.gitconfig to the orb", async () => {
+  let identity = { name: "Ada Lovelace", email: "ada@example.com" };
+  await gitIdentityBoot(
+    () => ({ status: 200, body: identity }),
+    async (boot, root) => {
+      const home = join(root, "home");
+      const xdg = join(home, ".config", "git", "config");
+      const env = { PATH: process.env.PATH, HOME: home, GIT_CONFIG_NOSYSTEM: "1" };
+      const config = (...args: string[]) =>
+        execFileSync("git", ["config", ...args], { cwd: home, env, encoding: "utf8" }).trim();
+      await mkdir(join(home, ".config", "git"), { recursive: true });
+      await writeFile(xdg, "[core]\n\teditor = vi\n[user]\n\tname = Old\n");
+      expect((await boot()).health().status).toBe("ready");
+      expect(config("--file", xdg, "user.name")).toBe("Ada Lovelace");
+      expect(config("--file", xdg, "user.email")).toBe("ada@example.com");
+      expect(config("--file", xdg, "core.editor")).toBe("vi");
+      expect(await readFile(join(home, ".gitconfig"), "utf8")).toBe("");
+      expect(config("--get", "user.name")).toBe("Ada Lovelace");
+
+      config("--global", "user.name", "Orb Override");
+      identity = { name: "Grace Hopper", email: "grace@example.com" };
+      expect((await boot()).health().status).toBe("ready");
+      expect(config("--file", xdg, "user.name")).toBe("Grace Hopper");
+      expect(config("--get", "user.name")).toBe("Orb Override");
+      expect(config("--get", "user.email")).toBe("grace@example.com");
+      expect(await readFile(join(home, ".gitconfig"), "utf8")).toContain("Orb Override");
+
+      identity = { name: "", email: "" };
+      expect((await boot()).health().status).toBe("ready");
+      expect(await readFile(xdg, "utf8")).not.toContain("Grace");
+      expect(config("--file", xdg, "core.editor")).toBe("vi");
+      expect((await boot()).health().status).toBe("ready");
+
+      const custom = join(root, "xdg");
+      identity = { name: "Custom", email: "custom@example.com" };
+      expect(
+        (await boot({ ...process.env, GIT_CONFIG_NOSYSTEM: "1", XDG_CONFIG_HOME: custom })).health()
+          .status,
+      ).toBe("ready");
+      expect(config("--file", join(custom, "git", "config"), "user.name")).toBe("Custom");
+    },
+  );
+});
+
+test("boot fails with git_identity_unavailable when the identity cannot be read", async () => {
+  await gitIdentityBoot(
+    () => ({ status: 503, body: { error: { code: "unavailable" } } }),
+    async (boot, root) => {
+      const booted = await boot();
+      expect(booted.health()).toMatchObject({
+        status: "failed",
+        error: { code: "git_identity_unavailable" },
+      });
+      expect(booted.snapshot).toBeNull();
+      await expect(readFile(join(root, "home", ".gitconfig"), "utf8")).rejects.toThrow();
+    },
+  );
+});

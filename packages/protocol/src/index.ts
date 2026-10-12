@@ -6,6 +6,7 @@ export * from "./control-plane-api.ts";
 export * from "./display.ts";
 export * from "./execution.ts";
 export * from "./frames.ts";
+export * from "./git-identity.ts";
 export * from "./harness.ts";
 export * from "./history.ts";
 export * from "./hosting.ts";

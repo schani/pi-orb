@@ -16,6 +16,8 @@ Model authentication follows the selected harness and project owner; GitHub rema
 
 `GET /api/v1/personal-instructions` returns `{content: string, revision: number}` for the signed-in user. A valid user with no row reads `{content: "", revision: 0}` until first write. `PUT` accepts only `{content}` and atomically updates that user's independent revision. Last-applied-wins, no automatic retries/CAS or per-project override. Empty content clears the managed instructions. Text preserves whitespace and is limited to 64 KiB UTF-8; NUL and unpaired surrogates are invalid. Both replies are `no-store`; invalid input returns 400, unavailable storage 503, inconsistent storage 500. Saving never changes lifecycle state or messages.
 
+`GET`/`PUT /api/v1/git-identity` read and replace the signed-in user's `{name, email}` (both empty when unset; last-write-wins, `no-store`, invalid 400, unavailable 503, inconsistent 500). `GET /runtime/v1/git-identity` returns the orb project owner's identity. Contract: `docs/git-identity.md`.
+
 Ops GET/PUT requires `X-Pi-Orb-User-Id` containing a known UUID; user principals cannot override themselves with it. `GET /runtime/v1/personal-instructions` derives the owner through the active incarnation's orb and project, not a viewer or request selector. There is no runtime write. Adoption remains next runtime start. Migration 023 replaces the `019_personal_instructions.sql` singleton while preserving legacy content, revision and timestamp. UI, migration and observability: `docs/personal-instructions.md`, `docs/multi-user.md`.
 
 ## Workspace file uploads (implemented 2026-09-09)
@@ -126,9 +128,9 @@ Issuer and subject are never browser response fields. Principal resolution prece
 
 ### Stage-2 ownership selection (deployed 2026-09-17)
 
-Browser `GET /api/v1/projects`, `POST /api/v1/projects`, and personal-instructions GET/PUT use the signed-in user. Default project/orb lists therefore show only that user's resources. Existing direct project, orb, history, hosted-file, settings and lifecycle routes remain accessible to any authenticated coworker; resource-specific services derive the addressed project's owner when owner context is needed. There is no user selector in the browser.
+Browser `GET /api/v1/projects`, `POST /api/v1/projects`, and personal-instructions and git-identity GET/PUT use the signed-in user. Default project/orb lists therefore show only that user's resources. Existing direct project, orb, history, hosted-file, settings and lifecycle routes remain accessible to any authenticated coworker; resource-specific services derive the addressed project's owner when owner context is needed. There is no user selector in the browser.
 
-The machine ops principal requires `X-Pi-Orb-User-Id` with a known UUID for exactly those four user-context operations: project list, project create, personal-instructions GET and PUT. Missing, malformed or unknown selection fails explicitly. User principals cannot override their identity with this header. Owner IDs and typed failures may be logged for correlation; identity assertions, instruction bodies and secrets may not.
+The machine ops principal requires `X-Pi-Orb-User-Id` with a known UUID for exactly those six user-context operations: project list, project create, personal-instructions GET and PUT, git-identity GET and PUT. Missing, malformed or unknown selection fails explicitly. User principals cannot override their identity with this header. Owner IDs and typed failures may be logged for correlation; identity assertions, instruction bodies and secrets may not.
 
 ### Hosted files (decided 2026-09-07)
 

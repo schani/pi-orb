@@ -49,6 +49,7 @@ import type { CompactError, DetailError, OrbAgent, SnapshotError } from "../doma
 import type { AgentGateView } from "../domain/requests.ts";
 import { configurePersistentRust } from "../domain/rust.ts";
 import type { HarnessSnapshot, LiveOperationView } from "../domain/types.ts";
+import { applyGitIdentity } from "../git-identity/apply.ts";
 import type { HookEnvSource } from "../hooks/env-file.ts";
 import { BootHookRunner } from "../hooks/runner.ts";
 import { NodeHookSpawner } from "../hooks/spawner.ts";
@@ -454,6 +455,11 @@ export class ClaudeOrbAgent implements OrbAgent {
     }
     this.hooks.addManagedEnvironmentNames(Object.keys(secrets.value.values));
     Object.assign(process.env, secrets.value.values);
+    const gitIdentity = await applyGitIdentity(broker, home.value, process.env);
+    if (gitIdentity.isErr()) {
+      this.fail("git_identity_unavailable", gitIdentity.error.message, true);
+      return;
+    }
     const mcp = await fetchMcpCatalog(broker);
     if (mcp.isErr()) {
       this.fail("mcp_unavailable", mcp.error.message, true);

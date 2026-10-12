@@ -4,6 +4,7 @@ import {
   CreateOrbRequestSchema,
   CreateProjectRequestSchema,
   EnqueueOrbMessageRequestSchema,
+  GIT_IDENTITY_PATH,
   PERSONAL_INSTRUCTIONS_PATH,
   PollOrbMessagesRequestSchema,
   PROJECT_NAME_MAX_CHARS,
@@ -26,6 +27,7 @@ import {
   readLiveDisplayDetail,
 } from "../domain/display-detail.ts";
 import type { ProjectConflict, ProjectSecretError, StoreError } from "../domain/errors.ts";
+import { saveGitIdentity } from "../domain/git-identity.ts";
 import {
   type CommandError,
   createOrb,
@@ -57,6 +59,7 @@ import {
 } from "../domain/signing-keys.ts";
 import { registerActivityHeadlineRoutes } from "./activity-headline-routes.ts";
 import { requirePrincipal } from "./browser-identity.ts";
+import { sendGitIdentity } from "./git-identity.ts";
 import { sendHistoryStream } from "./history-stream.ts";
 import { registerProjectInstructionsRoutes } from "./project-instructions.ts";
 import { orbView, projectView, type ViewConfig } from "./views.ts";
@@ -330,6 +333,17 @@ export function registerRoutes(
           ),
         );
     return reply.send(result.value);
+  });
+  app.get(GIT_IDENTITY_PATH, async (request, reply) => {
+    const user = await selectedUser(request, reply, task, deps);
+    if (user === null) return;
+    return sendGitIdentity(reply, await deps.gitIdentity.read(task, user.id));
+  });
+  app.put(GIT_IDENTITY_PATH, async (request, reply) => {
+    const user = await selectedUser(request, reply, task, deps);
+    if (user === null) return;
+    const result = await saveGitIdentity(task, deps.gitIdentity, user.id, request.body);
+    return sendGitIdentity(reply, result);
   });
 
   if (signingKeys !== undefined) {

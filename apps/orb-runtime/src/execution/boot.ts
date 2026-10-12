@@ -15,6 +15,7 @@ import { err, ok, Result, ResultAsync } from "neverthrow";
 import type { BrokerEnv } from "../broker/endpoint.ts";
 import { configurePersistentHome } from "../domain/home.ts";
 import { configurePersistentRust } from "../domain/rust.ts";
+import { applyGitIdentity } from "../git-identity/apply.ts";
 import { BootHookRunner } from "../hooks/runner.ts";
 import { NodeHookSpawner } from "../hooks/spawner.ts";
 import { initialCheckoutCommands } from "../initial-checkout.ts";
@@ -195,6 +196,13 @@ export class ExecutionBoot {
         });
       this.hooks.addManagedEnvironmentNames(Object.keys(secrets.value.values));
       Object.assign(o.environment, secrets.value.values);
+      const identity = await applyGitIdentity(o.broker, home.value, o.environment);
+      if (identity.isErr())
+        return err({
+          type: "execution_boot_error",
+          code: "git_identity_unavailable",
+          message: identity.error.message,
+        });
     }
     await this.hooks.runResume();
     await this.hooks.applyHookEnv(o.environment);
