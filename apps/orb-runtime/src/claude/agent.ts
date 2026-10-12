@@ -72,7 +72,7 @@ import { ClaudeActivity } from "./activity.ts";
 import { claudeChildEnvironment, fetchClaudeSubscription, verifyClaudeAccount } from "./auth.ts";
 import { validateClaudeAuthSettings } from "./auth-settings.ts";
 import { claudeBootEntries } from "./boot-notification.ts";
-import { ClaudeHistory, nativeHistoryFiles } from "./history.ts";
+import { ClaudeHistory, type HistoryFiles, nativeHistoryFiles } from "./history.ts";
 import { readClaudeRepositoryInstructions } from "./instructions.ts";
 import { type ClaudeMcpRuntime, createClaudeMcp } from "./mcp.ts";
 import { DEFAULT_CLAUDE_MODEL, findClaudeModel, latestClaudeModels } from "./models.ts";
@@ -154,6 +154,7 @@ export interface ClaudeOrbAgentOptions {
   readonly incarnation?: string;
   readonly claudeRecoveryProof?: ClaudeRecoveryProof | undefined;
   readonly testLaunchFailure?: boolean;
+  readonly files?: HistoryFiles;
   readonly sdkFactory?: (
     input: AsyncIterable<SDKUserMessage>,
     options: Options,
@@ -305,8 +306,10 @@ export class ClaudeOrbAgent implements OrbAgent {
   private projectSecrets: Readonly<Record<string, string>> = {};
   private mcp: ClaudeMcpRuntime | null = null;
   private readonly options: ClaudeOrbAgentOptions;
+  private readonly files: HistoryFiles;
   constructor(options: ClaudeOrbAgentOptions) {
     this.options = options;
+    this.files = options.files ?? nativeHistoryFiles;
     this.fence = new FileIdleStopFence(options.workDir);
     this.health = this.initializing("booting");
   }
@@ -363,7 +366,7 @@ export class ClaudeOrbAgent implements OrbAgent {
   }
   private saveState(): Result<void, { message: string }> {
     return Result.fromThrowable(
-      () => nativeHistoryFiles.commit(this.statePath(), JSON.stringify(this.state)),
+      () => this.files.commit(this.statePath(), JSON.stringify(this.state)),
       () => ({ message: "Cannot commit Claude session pointer/input journal." }),
     )();
   }
@@ -501,7 +504,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     const loaded = Result.fromThrowable(
       () => {
         mkdirSync(this.configDir, { recursive: true, mode: 0o700 });
-        const saved = nativeHistoryFiles.read(this.statePath());
+        const saved = this.files.read(this.statePath());
         const value: unknown =
           saved === null
             ? { id: randomUUID(), timestamp: new Date().toISOString(), cwd, deliveries: {} }
@@ -510,7 +513,7 @@ export class ClaudeOrbAgent implements OrbAgent {
         if (this.options.skillsDir !== null) {
           const plugin = join(this.options.workDir, "claude", "platform-plugin");
           mkdirSync(join(plugin, ".claude-plugin"), { recursive: true });
-          nativeHistoryFiles.commit(
+          this.files.commit(
             join(plugin, ".claude-plugin", "plugin.json"),
             JSON.stringify({ name: "pi-orb" }),
           );

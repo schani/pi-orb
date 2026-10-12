@@ -1,4 +1,13 @@
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -12,7 +21,7 @@ import type { ServerFrame } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { ok } from "neverthrow";
 import { ClaudeOrbAgent, type ClaudeQuery, type NativeState } from "../claude/agent.ts";
-import { ClaudeHistory, nativeHistoryFiles } from "../claude/history.ts";
+import { ClaudeHistory, type HistoryFiles, nativeHistoryFiles } from "../claude/history.ts";
 
 function latch() {
   let release: () => void = () => undefined;
@@ -22,7 +31,21 @@ function latch() {
   return { promise, release: () => release() };
 }
 
-/** Only the SDK process is fake: journals, fsync, normalization and admission are production code. */
+/**
+ * Real files and atomic renames, no fsync: in-process restarts cannot lose page cache, and contended
+ * fsync latency exceeded wall-clock test timeouts. `history.test.ts` covers production fsync.
+ */
+export const unsyncedHistoryFiles: HistoryFiles = {
+  read: nativeHistoryFiles.read,
+  commit: (path, text) => {
+    const temporary = `${path}.${randomUUID()}.new`;
+    writeFileSync(temporary, text, { flag: "wx", mode: 0o600 });
+    renameSync(temporary, path);
+  },
+  sync: () => undefined,
+};
+
+/** Only the SDK process is fake: journals, normalization and admission are production code. */
 export class ComposedClaudeFixture {
   readonly dir = mkdtempSync(join(tmpdir(), "claude-composed-dst-"));
   readonly configDir = join(this.dir, "config");
@@ -51,14 +74,14 @@ export class ComposedClaudeFixture {
       this.state.id,
       this.state.timestamp,
       {
-        ...nativeHistoryFiles,
+        ...unsyncedHistoryFiles,
         commit: (path, text) => {
           if (this.failCommit) throw new Error("injected history commit failure");
-          nativeHistoryFiles.commit(path, text);
+          unsyncedHistoryFiles.commit(path, text);
         },
         sync: (path) => {
           if (this.failSync) throw new Error("injected native fsync failure");
-          nativeHistoryFiles.sync(path);
+          unsyncedHistoryFiles.sync(path);
         },
       },
     );
@@ -69,6 +92,7 @@ export class ComposedClaudeFixture {
       skillsDir: null,
       broker: null,
       incarnation: "0",
+      files: unsyncedHistoryFiles,
       sdkFactory: (input, options) => {
         const query = new ScheduledClaudeQuery(input, options, this.queries.length === 0);
         this.queries.push(query);
