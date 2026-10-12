@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +19,8 @@ const request = {
 };
 const roots: string[] = [];
 const providers: ProcessOrbHostProvider[] = [];
+/** `launch()` requires the Linux pidfd supervisor (docs/host-provider.md). */
+const launchIt = it.skipIf(process.platform !== "linux");
 
 function fixture(root: string): string {
   const path = join(root, "runtime.mjs");
@@ -96,23 +98,14 @@ function makeProvider(
 /**
  * Liveness excluding zombies, matching what the provider's own group probe
  * counts as live: `kill(pid, 0)` keeps answering for an exited-but-unreaped
- * child, so on both supported platforms the process state decides.
+ * child, so the process state decides.
  */
 function processExists(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    if (process.platform === "linux") {
-      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-      const state = /^\d+ \(.*\) ([A-Z]) /.exec(stat)?.[1];
-      return state !== "Z";
-    }
-    if (process.platform === "darwin") {
-      const probe = spawnSync("ps", ["-o", "pid=,pgid=,stat=", "-p", String(pid)], {
-        encoding: "utf8",
-      });
-      return liveProcessRows(probe.stdout ?? "").some((row) => row.pid === pid);
-    }
-    return true;
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const state = /^\d+ \(.*\) ([A-Z]) /.exec(stat)?.[1];
+    return state !== "Z";
   } catch {
     return false;
   }
@@ -134,7 +127,7 @@ afterEach(async () => {
 });
 
 describe("ProcessOrbHostProvider", () => {
-  it.each([
+  launchIt.each([
     { harness: "pi", runtimeMode: "pi" },
     { harness: "pi", runtimeMode: "execution" },
     { harness: "claude", runtimeMode: "execution" },
@@ -169,26 +162,29 @@ describe("ProcessOrbHostProvider", () => {
       rmSync(observedEnv, { force: true });
     },
   );
-  it("exposes execution credentials only for the exact current host incarnation", async () => {
-    const { provider, root } = makeProvider();
-    const provisioned = await provider.provision(task, request, context);
-    expect(provisioned.isOk()).toBe(true);
-    if (provisioned.isErr()) return;
-    const binding = await provider.executionBinding(task, provisioned.value.ref, context);
-    expect(binding.isOk()).toBe(true);
-    if (binding.isErr()) return;
-    expect(binding.value.baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
-    expect(binding.value.token.length).toBeGreaterThan(20);
-    expect(binding.value.incarnation).toBe("0");
-    expect(binding.value.cwd).toBe(join(root, "configured-state", "orb-1", "workspace", "repo"));
-    const stale = await provider.executionBinding(
-      task,
-      { ...provisioned.value.ref, resourceId: "orb-1-i99" },
-      context,
-    );
-    expect(stale.isErr()).toBe(true);
-  });
-  it.each(["pi", "claude"] as const)("launches %s with isolated env", async (harness) => {
+  launchIt(
+    "exposes execution credentials only for the exact current host incarnation",
+    async () => {
+      const { provider, root } = makeProvider();
+      const provisioned = await provider.provision(task, request, context);
+      expect(provisioned.isOk()).toBe(true);
+      if (provisioned.isErr()) return;
+      const binding = await provider.executionBinding(task, provisioned.value.ref, context);
+      expect(binding.isOk()).toBe(true);
+      if (binding.isErr()) return;
+      expect(binding.value.baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+      expect(binding.value.token.length).toBeGreaterThan(20);
+      expect(binding.value.incarnation).toBe("0");
+      expect(binding.value.cwd).toBe(join(root, "configured-state", "orb-1", "workspace", "repo"));
+      const stale = await provider.executionBinding(
+        task,
+        { ...provisioned.value.ref, resourceId: "orb-1-i99" },
+        context,
+      );
+      expect(stale.isErr()).toBe(true);
+    },
+  );
+  launchIt.each(["pi", "claude"] as const)("launches %s with isolated env", async (harness) => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
     const { provider, root } = makeProvider({
       OBSERVED_ENV_FILE: observedEnv,
@@ -233,7 +229,7 @@ describe("ProcessOrbHostProvider", () => {
     rmSync(observedEnv, { force: true });
   });
 
-  it("prepends an explicitly configured in-orb command directory to PATH", async () => {
+  launchIt("prepends an explicitly configured in-orb command directory to PATH", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
     const commandDirectory = join(tmpdir(), `pi-orb-commands-${crypto.randomUUID()}`);
     const { provider } = makeProvider({ OBSERVED_ENV_FILE: observedEnv }, { commandDirectory });
@@ -255,7 +251,7 @@ describe("ProcessOrbHostProvider", () => {
     rmSync(observedEnv, { force: true });
   });
 
-  it("appends the credential helper after inherited git configuration entries", async () => {
+  launchIt("appends the credential helper after inherited git configuration entries", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
     const commandDirectory = join(tmpdir(), `pi-orb-commands-${crypto.randomUUID()}`);
     const { provider } = makeProvider(
@@ -316,7 +312,7 @@ describe("ProcessOrbHostProvider", () => {
     expect(readFileSync(sentinel, "utf8")).toBe("legacy workspace");
   });
 
-  it("discards runtime metadata while retaining the workspace", async () => {
+  launchIt("discards runtime metadata while retaining the workspace", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
     const { provider, root } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
     const provisioned = await provider.provision(task, request, context);
@@ -350,7 +346,7 @@ describe("ProcessOrbHostProvider", () => {
     rmSync(observedEnv, { force: true });
   });
 
-  it("a stale discard fence cannot remove a newer incarnation", async () => {
+  launchIt("a stale discard fence cannot remove a newer incarnation", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
     const { provider, root } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
     const first = await provider.provision(task, request, context);
@@ -392,7 +388,7 @@ describe("ProcessOrbHostProvider", () => {
     rmSync(observedEnv, { force: true });
   });
 
-  it("terminates the runtime and removes its complete state directory", async () => {
+  launchIt("terminates the runtime and removes its complete state directory", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
     const { provider, root } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
     const provisioned = await provider.provision(task, request, context);
@@ -411,7 +407,7 @@ describe("ProcessOrbHostProvider", () => {
     rmSync(observedEnv, { force: true });
   });
 
-  it("retains token and workspace metadata across stop and start", async () => {
+  launchIt("retains token and workspace metadata across stop and start", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
     const { provider, root } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
     const first = await provider.provision(task, request, context);
@@ -451,7 +447,7 @@ describe("ProcessOrbHostProvider", () => {
     rmSync(observedEnv, { force: true });
   });
 
-  it("discards the persisted process group after a provider restart", async () => {
+  launchIt("discards the persisted process group after a provider restart", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
     const { provider, root } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
     const provisioned = await provider.provision(task, request, context);
@@ -486,7 +482,7 @@ describe("ProcessOrbHostProvider", () => {
     rmSync(observedEnv, { force: true });
   });
 
-  it("reuses durable metadata after the owning control-plane process restarts", async () => {
+  launchIt("reuses durable metadata after the owning control-plane process restarts", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
     const { provider, root } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
     const first = await provider.provision(task, request, context);
@@ -518,7 +514,7 @@ describe("ProcessOrbHostProvider", () => {
     rmSync(observedEnv, { force: true });
   });
 
-  it("supervises an unexpectedly exited runtime in the control-plane process", async () => {
+  launchIt("supervises an unexpectedly exited runtime in the control-plane process", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
     const crashFile = join(tmpdir(), `pi-orb-crash-${crypto.randomUUID()}`);
     let releaseRelaunch: () => void = () => undefined;
@@ -556,7 +552,7 @@ describe("ProcessOrbHostProvider", () => {
     rmSync(crashFile, { force: true });
   });
 
-  it("a discard racing the crash relaunch cannot resurrect fenced metadata", async () => {
+  launchIt("a discard racing the crash relaunch cannot resurrect fenced metadata", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
     const crashFile = join(tmpdir(), `pi-orb-crash-${crypto.randomUUID()}`);
     let signalRelaunch: () => void = () => undefined;
@@ -642,38 +638,41 @@ describe("ProcessOrbHostProvider", () => {
     },
   );
 
-  it("discard kills a live managed child even when no process group is recorded", async () => {
-    const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
-    const { provider, root } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
-    const provisioned = await provider.provision(task, request, context);
-    expect(provisioned.isOk()).toBe(true);
-    const values = await eventually(() => {
-      try {
-        return JSON.parse(readFileSync(observedEnv, "utf8")) as { pid: number };
-      } catch {
-        return null;
-      }
-    });
-    expect(processExists(values.pid)).toBe(true);
+  launchIt(
+    "discard kills a live managed child even when no process group is recorded",
+    async () => {
+      const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
+      const { provider, root } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
+      const provisioned = await provider.provision(task, request, context);
+      expect(provisioned.isOk()).toBe(true);
+      const values = await eventually(() => {
+        try {
+          return JSON.parse(readFileSync(observedEnv, "utf8")) as { pid: number };
+        } catch {
+          return null;
+        }
+      });
+      expect(processExists(values.pid)).toBe(true);
 
-    // Simulate metadata that lost its process group (e.g. written around a
-    // crash window): absence verification must fall back to the live child.
-    const metadataPath = join(root, "configured-state", request.orbId, "host.json");
-    const metadata = JSON.parse(readFileSync(metadataPath, "utf8")) as Record<string, unknown>;
-    writeFileSync(metadataPath, `${JSON.stringify({ ...metadata, processGroupId: null })}\n`);
+      // Simulate metadata that lost its process group (e.g. written around a
+      // crash window): absence verification must fall back to the live child.
+      const metadataPath = join(root, "configured-state", request.orbId, "host.json");
+      const metadata = JSON.parse(readFileSync(metadataPath, "utf8")) as Record<string, unknown>;
+      writeFileSync(metadataPath, `${JSON.stringify({ ...metadata, processGroupId: null })}\n`);
 
-    const discarded = await provider.discardCompute(
-      task,
-      { orbId: request.orbId, throughIncarnation: 0 },
-      context,
-    );
-    expect(discarded.isOk(), JSON.stringify(discarded)).toBe(true);
-    expect(processExists(values.pid)).toBe(false);
-    expect(existsSync(metadataPath)).toBe(false);
-    rmSync(observedEnv, { force: true });
-  });
+      const discarded = await provider.discardCompute(
+        task,
+        { orbId: request.orbId, throughIncarnation: 0 },
+        context,
+      );
+      expect(discarded.isOk(), JSON.stringify(discarded)).toBe(true);
+      expect(processExists(values.pid)).toBe(false);
+      expect(existsSync(metadataPath)).toBe(false);
+      rmSync(observedEnv, { force: true });
+    },
+  );
 
-  it("discard kills group members that outlive the leader", async () => {
+  launchIt("discard kills group members that outlive the leader", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
     const memberPidFile = join(tmpdir(), `pi-orb-member-${crypto.randomUUID()}`);
     const { provider, root } = makeProvider(
@@ -786,7 +785,7 @@ describe("ProcessOrbHostProvider host specification", () => {
     expect(fingerprint({ specGeneration: 9 })).toBe(original);
   });
 
-  it("keeps the committed stamp while the live configuration moves on", async () => {
+  launchIt("keeps the committed stamp while the live configuration moves on", async () => {
     // The SIGHUP contract at unit level: reloading configuration changes what
     // the provider *desires*, never what the running incarnation was born
     // with. Replacement happens on the next start, not underneath the orb.
@@ -853,7 +852,7 @@ describe("ProcessOrbHostProvider host specification", () => {
     expect(result.isErr() && result.error.retryable).toBe(false);
   });
 
-  it("start accepts legacy unstamped metadata when no stamp is expected", async () => {
+  launchIt("start accepts legacy unstamped metadata when no stamp is expected", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
     const { provider, root } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
     const first = await provider.provision(task, request, context);
@@ -884,7 +883,7 @@ describe("ProcessOrbHostProvider host specification", () => {
     rmSync(observedEnv, { force: true });
   });
 
-  it("provision refuses metadata carrying a different stamp", async () => {
+  launchIt("provision refuses metadata carrying a different stamp", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
     const { provider, root } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
     const first = await provider.provision(task, request, context);

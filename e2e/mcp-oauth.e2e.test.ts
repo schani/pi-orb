@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { DisplayHistoryView } from "@pi-orb/protocol";
 import { chromium, expect as expectPage } from "@playwright/test";
 import { build } from "vite";
-import { expect, it } from "vitest";
+import { it as baseIt, expect } from "vitest";
 import {
   api,
   createFakeSession,
@@ -19,6 +19,8 @@ import {
   waitFor,
 } from "./harness.ts";
 import { hasCommittedMcpStatus } from "./testkit/mcp-status-detail.ts";
+
+const it = baseIt.skipIf(process.platform !== "linux");
 
 it("initial auth recovery → two real Pi runtimes reuse the grant → rejection/refresh → reconnect → disconnect", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-oauth-e2e-"));

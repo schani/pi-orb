@@ -28,7 +28,9 @@ import { McpInferenceRouter } from "./mcp-inference-router.ts";
 const createFakeSession = (name: string, scenario: unknown) =>
   createHostPiSession(name, scenario, "host-pi");
 
-const it = baseIt.skipIf(process.env["PI_ORB_E2E_BACKEND"] === "process");
+const it = baseIt.skipIf(
+  process.env["PI_ORB_E2E_BACKEND"] === "process" || process.platform !== "linux",
+);
 
 it("MCP traverses root, restricted and default general-purpose delegates → authenticated HTTPS; same-project orbs reuse configuration", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-mcp-e2e-"));

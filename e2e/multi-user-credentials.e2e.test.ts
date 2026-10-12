@@ -428,7 +428,7 @@ afterAll(async () => {
   if (root !== "" && completed) rmSync(root, { recursive: true, force: true });
 }, 30_000);
 
-describe("authorized two-user credentials", () => {
+describe.skipIf(process.platform !== "linux")("authorized two-user credentials", () => {
   it("uses each project owner's model, GitHub, naming, summary, and child credentials", async () => {
     const aliceProject = randomUUID();
     const bobProject = randomUUID();

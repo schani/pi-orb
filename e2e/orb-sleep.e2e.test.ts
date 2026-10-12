@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { build } from "vite";
-import { expect, it } from "vitest";
+import { it as baseIt, expect } from "vitest";
 import {
   api,
   type ControlPlaneHandle,
@@ -39,6 +39,8 @@ const NAME_SCENARIO = {
     ],
   },
 };
+
+const it = baseIt.skipIf(process.platform !== "linux");
 
 it("retains a real sleep CLI turn, stops, and wakes with one combined system notice", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-sleep-e2e-"));

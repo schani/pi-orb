@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, expect as expectPage } from "@playwright/test";
 import { build } from "vite";
-import { expect, it } from "vitest";
+import { it as baseIt, expect } from "vitest";
 import {
   api,
   type ControlPlaneHandle,
@@ -21,6 +21,8 @@ import {
 
 const stop = { type: "stop", status: "completed" } as const;
 const message = "CLI ALERT INSIDE BUSY TOOL";
+
+const it = baseIt.skipIf(process.platform !== "linux");
 
 it("persists a real CLI alert while the Pi bash tool is active, replicates and acknowledges without another turn", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-alert-e2e-"));

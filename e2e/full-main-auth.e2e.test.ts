@@ -7,7 +7,7 @@ import { request as httpsRequest } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RUNTIME_SUBPROTOCOL, type ServerFrame, TERMINAL_SUBPROTOCOL } from "@pi-orb/protocol";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, it as baseIt, expect } from "vitest";
 import WebSocket from "ws";
 import { openControlPlaneDatabase } from "../apps/control-plane/src/adapters/database.ts";
 import { SESSION_COOKIE_NAME } from "../apps/control-plane/src/domain/application-auth.ts";
@@ -50,6 +50,8 @@ afterEach(async () => {
   if (nameFake) await deleteFakeSession(nameFake.sessionKey);
   if (directory) rmSync(directory, { recursive: true, force: true });
 });
+
+const it = baseIt.skipIf(process.platform !== "linux");
 
 it("main Google mode authenticates public/private/files surfaces and proxies a real runtime tool turn and PTY", async () => {
   directory = mkdtempSync(join(tmpdir(), "pi-orb-full-main-"));

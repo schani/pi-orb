@@ -67,7 +67,9 @@ async function saveSubagentFailure(
 const createFakeSession = (name: string, scenario: unknown) =>
   createHostPiSession(name, scenario, "host-pi");
 
-const it = baseIt.skipIf(process.env["PI_ORB_E2E_BACKEND"] === "process");
+const it = baseIt.skipIf(
+  process.env["PI_ORB_E2E_BACKEND"] === "process" || process.platform !== "linux",
+);
 
 it("keeps delegated work busy through abort, crash recovery and active-child archival without private replication", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-subagents-e2e-"));
