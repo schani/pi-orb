@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok, Result } from "neverthrow";
-import type { ClaudeAuthError } from "./auth.ts";
+import { CLAUDE_AUTH_ENV, type ClaudeAuthError } from "./auth.ts";
 
 /** Native settings remain enabled, but cannot replace the owner-selected billing credential. */
 export function validateClaudeAuthSettings(
@@ -33,11 +33,7 @@ export function validateClaudeAuthSettings(
     const overrides =
       env !== null &&
       typeof env === "object" &&
-      Object.keys(env).some((name) =>
-        /^(ANTHROPIC_|CLAUDE_CODE_|CLAUDE_CONFIG_DIR$|AWS_|GOOGLE_APPLICATION_CREDENTIALS$|CLOUD_ML_|BASH_ENV$|ENV$)/.test(
-          name,
-        ),
-      );
+      Object.keys(env).some((name) => CLAUDE_AUTH_ENV.test(name));
     if (overrides || ("apiKeyHelper" in settings && settings.apiKeyHelper !== ""))
       return err({
         code: "claude_auth_required",

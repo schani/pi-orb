@@ -13,6 +13,7 @@ it("rejects native project auth overrides without exposing their values", () => 
       { env: { ANTHROPIC_API_KEY: "secret" } },
       { env: { CLAUDE_CODE_OAUTH_TOKEN: "other-owner-secret" } },
       { env: { CLAUDE_CONFIG_DIR: "/profile" } },
+      { env: { CLAUDE_CODE_USE_VERTEX: "1" } },
       { apiKeyHelper: "cat secret" },
     ]) {
       writeFileSync(path, JSON.stringify(settings));
@@ -20,7 +21,13 @@ it("rejects native project auth overrides without exposing their values", () => 
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().message).not.toContain("secret");
     }
-    writeFileSync(path, JSON.stringify({ env: { PROJECT_TEST: "value" }, hooks: {} }));
+    writeFileSync(
+      path,
+      JSON.stringify({
+        env: { PROJECT_TEST: "value", AWS_PROFILE: "dev", GOOGLE_APPLICATION_CREDENTIALS: "/a" },
+        hooks: {},
+      }),
+    );
     expect(validateClaudeAuthSettings(dir, join(dir, "config")).isOk()).toBe(true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
