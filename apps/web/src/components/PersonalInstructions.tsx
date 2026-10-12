@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { describeApiError, getPersonalInstructions, savePersonalInstructions } from "../lib/api.ts";
 import { ClaudeAuthSettings } from "./ClaudeAuth.tsx";
 import { ConfigTabs } from "./ConfigTabs.tsx";
+import { GitIdentityPane, useGitIdentity } from "./GitIdentitySettings.tsx";
 import { Icon } from "./Icons.tsx";
 import { TextFieldFrame } from "./TextFieldFrame.tsx";
 
@@ -20,6 +21,7 @@ export function PersonalInstructionsButton() {
   const gear = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
+  const git = useGitIdentity(dialog);
   const epoch = useRef(0);
   const writePending = useRef(false);
   useEffect(
@@ -51,8 +53,9 @@ export function PersonalInstructionsButton() {
     setDraft(result.value.content);
   };
   const close = () => {
-    if (writePending.current) return;
+    if (writePending.current || git.writePending.current) return;
     epoch.current++;
+    git.cancel();
     setOpen(false);
     setLoading(false);
     gear.current?.focus();
@@ -89,6 +92,7 @@ export function PersonalInstructionsButton() {
           setTab(0);
           setOpen(true);
           if (!dirty) void load();
+          if (!git.dirty) void git.load();
         }}
       >
         <Icon name="gear" />
@@ -148,7 +152,7 @@ export function PersonalInstructionsButton() {
                   aria-label="Close settings"
                   title="Close settings"
                   type="button"
-                  disabled={saving}
+                  disabled={saving || git.saving}
                   onClick={close}
                 >
                   <Icon name="x" />
@@ -157,10 +161,10 @@ export function PersonalInstructionsButton() {
               <ConfigTabs
                 id="owner-settings"
                 label="Settings"
-                names={["Instructions", "Claude"]}
+                names={["Instructions", "Git", "Claude"]}
                 selected={tab}
                 onSelect={setTab}
-                disabled={saving}
+                disabled={saving || git.saving}
               />
               <div
                 role="tabpanel"
@@ -230,7 +234,15 @@ export function PersonalInstructionsButton() {
                 aria-labelledby="owner-settings-tab-1"
                 hidden={tab !== 1}
               >
-                <ClaudeAuthSettings active={tab === 1} />
+                <GitIdentityPane git={git} />
+              </div>
+              <div
+                role="tabpanel"
+                id="owner-settings-panel-2"
+                aria-labelledby="owner-settings-tab-2"
+                hidden={tab !== 2}
+              >
+                <ClaudeAuthSettings active={tab === 2} />
               </div>
             </section>
           </div>,

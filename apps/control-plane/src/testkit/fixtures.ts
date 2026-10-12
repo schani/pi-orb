@@ -23,6 +23,7 @@ import { MintDenialLog } from "../domain/workload-identity.ts";
 import { FakeAuthGate, type FakeAuthMode } from "./auth.ts";
 import { FakeSecretStore } from "./broker.ts";
 import { FAILPOINTS } from "./failpoints.ts";
+import { FakeGitIdentityStore } from "./git-identity.ts";
 import { makeHostingHarness } from "./hosting.ts";
 import { FakePersonalInstructionsStore } from "./personal-instructions.ts";
 import { FakeProjectInstructionsStore } from "./project-instructions.ts";
@@ -129,6 +130,7 @@ export function makeHarness(options?: {
     projectSecrets: { pointers: projectSecretPointers, secrets: new FakeSecretStore() },
     hosting: hosting.deps,
     personalInstructions: new FakePersonalInstructionsStore([TEST_USER_ID]),
+    gitIdentity: new FakeGitIdentityStore(),
     projectInstructions: new FakeProjectInstructionsStore(
       (id) => store.projectSnapshot(id)?.state ?? null,
     ),

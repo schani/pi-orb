@@ -5,6 +5,7 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  GIT_IDENTITY_RUNTIME_PATH,
   MCP_RUNTIME_PATH,
   McpCatalogSchema,
   ORB_BOOT_CONTEXT_PATH,
@@ -76,6 +77,9 @@ describe("validation broker", () => {
     const projectInstructions = await request("/runtime/v1/project-instructions");
     expect(projectInstructions.status).toBe(200);
     expect(await projectInstructions.json()).toEqual({ content: "", revision: 0 });
+    const gitIdentity = await request(GIT_IDENTITY_RUNTIME_PATH);
+    expect(gitIdentity.status).toBe(200);
+    expect(await gitIdentity.json()).toEqual({ name: "", email: "" });
     expect((await fetch(`http://127.0.0.1:${port}/runtime/v1/project-instructions`)).status).toBe(
       401,
     );

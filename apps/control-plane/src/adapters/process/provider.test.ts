@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NoSimulationTask } from "determined";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   liveProcessRows,
   ProcessOrbHostProvider,
@@ -52,6 +52,7 @@ writeFileSync(process.env.OBSERVED_ENV_FILE, JSON.stringify({
   supervisorId: process.env.PI_ORB_SUPERVISOR_ID,
   workDir: process.env.PI_ORB_WORK_DIR,
   home: process.env.HOME,
+  xdgConfigHome: process.env.XDG_CONFIG_HOME,
   controlPlaneUrl: process.env.PI_ORB_CONTROL_PLANE_URL,
   skillsDir: process.env.PI_ORB_SKILLS_DIR,
   port: process.env.PI_ORB_RUNTIME_PORT,
@@ -122,6 +123,7 @@ async function eventually<T>(read: () => T | null, timeoutMs = 3_000): Promise<T
 }
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(providers.splice(0).map((provider) => provider.close()));
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -186,6 +188,7 @@ describe("ProcessOrbHostProvider", () => {
   );
   launchIt.each(["pi", "claude"] as const)("launches %s with isolated env", async (harness) => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
+    vi.stubEnv("XDG_CONFIG_HOME", join(tmpdir(), "developer-config"));
     const { provider, root } = makeProvider({
       OBSERVED_ENV_FILE: observedEnv,
       PI_ORB_CONTAINER: "1",
@@ -217,6 +220,8 @@ describe("ProcessOrbHostProvider", () => {
     const expectedWorkDir = join(root, "configured-state", request.orbId, "workspace");
     expect(values.workDir).toBe(expectedWorkDir);
     expect(values.home).toBe(join(expectedWorkDir, "home"));
+    // Boot writes git's XDG file; it must never be the developer's.
+    expect(values.xdgConfigHome).toBeUndefined();
     expect(existsSync(join(expectedWorkDir, "home"))).toBe(true);
     expect(Number(values.port)).toBeGreaterThan(0);
 

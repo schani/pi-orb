@@ -331,6 +331,8 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     delete environment[TAILSCALE_AUTH_KEY_ENV];
     delete environment[TAILSCALE_HOSTNAME_ENV];
     delete environment[PREVIEW_HOST_ENV];
+    // Boot writes git's XDG config file (docs/git-identity.md): never the developer's.
+    delete environment.XDG_CONFIG_HOME;
     Object.assign(environment, this.options.extraEnv ?? {}, {
       PI_ORB_ID: metadata.orbId,
       [HARNESS_ENV]: metadata.harness,

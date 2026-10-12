@@ -10,6 +10,9 @@ import {
   type DisplayHistoryView,
   DisplayHistoryViewSchema,
   type EnqueueOrbMessageRequest,
+  GIT_IDENTITY_PATH,
+  type GitIdentity,
+  GitIdentitySchema,
   type HostedFilesResponse,
   HostedFilesResponseSchema,
   ListResponseSchema,
@@ -143,6 +146,21 @@ export function savePersonalInstructions(content: string) {
     method: "PUT",
     headers: jsonHeaders,
     body: JSON.stringify({ content }),
+    signal: AbortSignal.timeout(15_000),
+  });
+}
+
+export function getGitIdentity() {
+  return apiFetch(GitIdentitySchema, GIT_IDENTITY_PATH, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
+  });
+}
+export function saveGitIdentity(identity: GitIdentity) {
+  return apiFetch(GitIdentitySchema, GIT_IDENTITY_PATH, {
+    method: "PUT",
+    headers: jsonHeaders,
+    body: JSON.stringify(identity),
     signal: AbortSignal.timeout(15_000),
   });
 }

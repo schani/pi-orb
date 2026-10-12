@@ -51,6 +51,7 @@ import {
   TEST_ISSUER_URL,
   TEST_USER_ID,
 } from "../testkit/fixtures.ts";
+import { FakeGitIdentityStore } from "../testkit/git-identity.ts";
 import { FakePersonalInstructionsStore } from "../testkit/personal-instructions.ts";
 import { FakeProjectInstructionsStore } from "../testkit/project-instructions.ts";
 import { FakeProjectSecretPointerStore } from "../testkit/project-secrets.ts";
@@ -80,6 +81,7 @@ describe("runtime broker routes", () => {
   let signer: FakeTokenSigner;
   let projectSecretPointers: FakeProjectSecretPointerStore;
   let personalInstructions: FakePersonalInstructionsStore;
+  let gitIdentity: FakeGitIdentityStore;
   let projectInstructions: FakeProjectInstructionsStore;
   let brokerUsers: string[];
   const initialCheckoutCommit = vi.fn(() => okAsync<string | null, StoreError>(null));
@@ -368,6 +370,7 @@ describe("runtime broker routes", () => {
       nameLeaseMs: 30_000,
       projectSecrets: { pointers: projectSecretPointers, secrets },
       personalInstructions,
+      gitIdentity,
       projectInstructions,
       mcp: {
         read: (_task, projectId) =>
@@ -414,6 +417,7 @@ describe("runtime broker routes", () => {
       TEST_USER_ID,
       "00000000-0000-4000-8000-000000000002",
     ]);
+    gitIdentity = new FakeGitIdentityStore();
     projectInstructions = new FakeProjectInstructionsStore(
       (id) => store.projectSnapshot(id)?.state ?? null,
     );
@@ -551,6 +555,47 @@ describe("runtime broker routes", () => {
           url: "/runtime/v1/personal-instructions",
           headers: { authorization: `Bearer ${TOKEN}` },
           payload: { content: "no" },
+        })
+      ).statusCode,
+    ).toBe(404);
+    store.seedOrb(makeOrbRow(ORB, PROJECT, "stopped", { runtimeTokenHash: sha256(TOKEN) }));
+    expect((await request()).statusCode).toBe(401);
+  });
+
+  it("serves the project owner's git identity only to current active runtime bearers", async () => {
+    const request = (token = TOKEN) =>
+      app.inject({
+        method: "GET",
+        url: "/runtime/v1/git-identity",
+        headers: { authorization: `Bearer ${token}` },
+      });
+    expect((await request()).statusCode).toBe(401);
+    store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+    expect((await request()).json()).toEqual({ name: "", email: "" });
+    gitIdentity.identities.set(TEST_USER_ID, { name: "Ada", email: "ada@example.com" });
+    const otherOwner = "00000000-0000-4000-8000-000000000002";
+    gitIdentity.identities.set(otherOwner, { name: "Grace", email: "grace@example.com" });
+    store.seedProject({ ...makeProjectRow("other-project"), ownerUserId: otherOwner });
+    store.seedOrb(
+      makeOrbRow("other-orb", "other-project", "running", {
+        runtimeTokenHash: sha256("other-token"),
+      }),
+    );
+    const read = await request();
+    expect(read.json()).toEqual({ name: "Ada", email: "ada@example.com" });
+    expect(read.headers["cache-control"]).toBe("no-store");
+    expect((await request("other-token")).json()).toEqual({
+      name: "Grace",
+      email: "grace@example.com",
+    });
+    expect((await request("stale-token")).statusCode).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: "/runtime/v1/git-identity",
+          headers: { authorization: `Bearer ${TOKEN}` },
+          payload: { name: "", email: "" },
         })
       ).statusCode,
     ).toBe(404);

@@ -1,5 +1,6 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import {
+  GIT_IDENTITY_RUNTIME_PATH,
   ID_TOKEN_PATH,
   type IdTokenErrorBody,
   IdTokenRequestSchema,
@@ -40,7 +41,7 @@ import {
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import type { FastifyInstance, FastifyReply } from "fastify";
-import type { ResultAsync } from "neverthrow";
+import { err, type ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
 import type { AgentAlertWriter } from "../domain/agent-ports.ts";
 import {
@@ -50,6 +51,7 @@ import {
   type TokenRequest,
 } from "../domain/broker.ts";
 import type { MintError, StoreError } from "../domain/errors.ts";
+import type { GitIdentityStore } from "../domain/git-identity.ts";
 import type { CommandError } from "../domain/lifecycle.ts";
 import type { McpStore } from "../domain/mcp.ts";
 import type { McpOAuth } from "../domain/mcp-oauth.ts";
@@ -70,6 +72,7 @@ import type { ProjectInstructionsStore } from "../domain/project-instructions.ts
 import { getProjectSecretSnapshot } from "../domain/project-secrets.ts";
 import type { ResourceError } from "../domain/resources.ts";
 import { mintIdToken } from "../domain/workload-identity.ts";
+import { sendGitIdentity } from "./git-identity.ts";
 import { sendHistoryStream } from "./history-stream.ts";
 import { oauthBinding, sendOAuthError } from "./mcp-oauth-routes.ts";
 import { sendMcpError } from "./mcp-routes.ts";
@@ -121,6 +124,7 @@ export interface RuntimeRouteDeps {
   readonly mint: MintDeps;
   readonly projectSecrets: ProjectSecretsDeps;
   readonly personalInstructions: PersonalInstructionsStore;
+  readonly gitIdentity: GitIdentityStore;
   readonly projectInstructions: ProjectInstructionsStore;
   readonly alertWriter?: AgentAlertWriter;
   readonly initialCheckoutCommit?: (
@@ -726,6 +730,27 @@ export function registerRuntimeRoutes(
         },
       });
     return reply.send(result.value);
+  });
+
+  app.get(GIT_IDENTITY_RUNTIME_PATH, async (request, reply) => {
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind === "unavailable")
+      return sendGitIdentity(
+        reply,
+        err({
+          type: "git_identity_error",
+          code: "unavailable",
+          message: "Git identity unavailable",
+        }),
+      );
+    if (auth.kind !== "orb") return sendUnauthorized(reply);
+    const project = await deps.store.getProject(task, auth.orb.projectId);
+    if (project.isErr()) return sendInspectionStoreError(reply, project.error);
+    if (project.value === null)
+      return reply.status(500).send({
+        error: { code: "internal", message: "orb project is missing", retryable: false },
+      });
+    return sendGitIdentity(reply, await deps.gitIdentity.read(task, project.value.ownerUserId));
   });
 
   app.get(PROJECT_SECRETS_RUNTIME_PATH, async (request, reply) => {

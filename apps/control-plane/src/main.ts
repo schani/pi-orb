@@ -548,6 +548,7 @@ export async function main(
     constants: lifecycleConstantsForHost(hostProvider.kind),
     projectSecrets: { pointers: database.projectSecrets, secrets },
     personalInstructions: database.personalInstructions,
+    gitIdentity: database.gitIdentity,
     projectInstructions: database.projectInstructions,
     userScope: new UserScope(database.users),
     hosting: {
@@ -911,6 +912,7 @@ export async function main(
     nameLeaseMs: deps.nameLeaseMs,
     projectSecrets: deps.projectSecrets,
     personalInstructions: deps.personalInstructions,
+    gitIdentity: deps.gitIdentity,
     projectInstructions: deps.projectInstructions,
     mcp: database.mcp,
     mcpOAuth,
