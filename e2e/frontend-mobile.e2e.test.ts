@@ -509,6 +509,8 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
 
   it("keeps modal close contrast through keyboard and hover focus", async () => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 844 } });
+    // macOS WebKit Tab skips buttons unless full keyboard access is on; Option+Tab does not.
+    const tabModifier = engine === "webkit" && process.platform === "darwin" ? "Alt+" : "";
     const expectCloseColors = async (
       close: ReturnType<typeof page.getByRole>,
       background: string,
@@ -531,15 +533,15 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       const config = page.getByRole("dialog");
       const configClose = config.getByRole("button", { name: "Close project config" });
       await expectCloseColors(configClose, transparent, black);
-      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press(`${tabModifier}Shift+Tab`);
       await expectPage(configClose).toBeFocused();
       await expectCloseColors(configClose, black, white);
-      await page.keyboard.press("Tab");
+      await page.keyboard.press(`${tabModifier}Tab`);
       await configClose.hover();
       await expectCloseColors(configClose, black, white);
       await page.mouse.move(0, 0);
       await expectCloseColors(configClose, transparent, black);
-      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press(`${tabModifier}Shift+Tab`);
       await expectPage(configClose).toBeFocused();
       await page.keyboard.press("Enter");
       await expectPage(config).toBeHidden();
@@ -551,21 +553,21 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       const personalClose = personal.getByRole("button", { name: "Close settings" });
       const personalEditor = personal.getByRole("textbox", { name: "Personal AGENTS.md" });
       await expectPage(personalEditor).toBeEnabled();
-      await page.keyboard.press("Tab");
+      await page.keyboard.press(`${tabModifier}Tab`);
       await expectPage(personal.getByRole("tab", { name: "Instructions" })).toBeFocused();
-      await page.keyboard.press("Tab");
+      await page.keyboard.press(`${tabModifier}Tab`);
       await expectPage(personalEditor).toBeFocused();
       await expectCloseColors(personalClose, transparent, black);
-      await page.keyboard.press("Shift+Tab");
-      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press(`${tabModifier}Shift+Tab`);
+      await page.keyboard.press(`${tabModifier}Shift+Tab`);
       await expectPage(personalClose).toBeFocused();
       await expectCloseColors(personalClose, black, white);
-      await page.keyboard.press("Tab");
+      await page.keyboard.press(`${tabModifier}Tab`);
       await personalClose.hover();
       await expectCloseColors(personalClose, black, white);
       await page.mouse.move(0, 0);
       await expectCloseColors(personalClose, transparent, black);
-      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press(`${tabModifier}Shift+Tab`);
       await expectPage(personalClose).toBeFocused();
       await page.keyboard.press("Enter");
       await expectPage(personal).toBeHidden();
