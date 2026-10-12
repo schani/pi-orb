@@ -203,7 +203,12 @@ it.each(["chromium", "webkit"] as const)(
       await page.exposeFunction("recordNativeActivation", (event: unknown) => {
         nativeEvidence.at(-1)?.events.push(event);
       });
-      for (const activation of ["modified", "middle"] as const) {
+      // Playwright's macOS WebKit follows a middle-clicked link in place; it opens no page.
+      const activations =
+        engine === "webkit" && process.platform === "darwin"
+          ? (["modified"] as const)
+          : (["modified", "middle"] as const);
+      for (const activation of activations) {
         const evidence = {
           activation,
           stage: "loading",
