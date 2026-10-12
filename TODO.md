@@ -11,15 +11,10 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 - **Reserve orb index layout while project lists load** (2026-10-11; `docs/postmortems/2026-10-11-webkit-index-click-layout-shift.md`). Each arriving project list moves later headers, so a user click can land on a different link or be dropped.
 
 - **Make the suite pass or skip cleanly on macOS** (2026-10-11; evidence `.context/diag-*`, `.context/unit-*.log`, `.context/e2e-*.log` in workspace `los-angeles-v1`). All reproduce on clean `main`; CI passes them.
-  - `process/provider.test.ts` (21): `ProcessOrbHostProvider.launch()` is Linux-only (pidfd) since d403635; tests are not gated. Decide macOS support and update `docs/host-provider.md`.
-  - `durable-pg/{clock.postgres,drain.postgres,native-inbox-abort,pg-composed-drain}` (5): fail instead of skipping without `PI_ORB_DURABLE_PG_TEST_URL`; drop the `127.0.0.1:55432` fallback and skip like `stores.postgres.test.ts`.
-  - `execution-client/env.test.ts` and `e2e/frontend-listen.e2e.test.ts` "rejects old-document readiness…": `mkdtemp(tmpdir())` returns `/var/…`, which resolves to `/private/var/…`; `realpath` the fixture directories.
-  - `e2e/terminal-client.unit.test.ts`: waits on server `close`, whose order relative to client close is OS-dependent; await the outcome directly.
   - `claude-composed-lifecycle.dst.test.ts`: now runs alone after the parallel suite (`vitest.config.ts`), but still does real fsync under a 30 s wall-clock timeout, and a timed-out run is not cancelled. Bound journal I/O through a simulation-friendly boundary or an explicit budget.
-  - WebKit phone "keeps modal close contrast…": macOS WebKit Tab skips buttons/links (system keyboard-navigation setting); use Alt+Tab on darwin.
-  - WebKit phone "preserves reader position after ArrowUp…": macOS WebKit drops ArrowUp during animated scroll (40 px vs 120 px); wait for movement between presses.
-  - WebKit `harness-icons-frontend` "shared project headers create the selected harness…": Meta/middle-click opens no popup on macOS (`browserContext.waitForEvent("page")` times out; 2/2 on clean `main`, `.context/e2e-harness-icons-baseline-*.log`).
   - The first frontend E2E run had a fourth, unidentified failure (output not retained); not reproduced in two further runs.
+  - `scripts/local-fake-provider.test.mjs` (`npm run test:infra`): nine real-process cases fail on macOS (Linux `/proc`; missing `ready` checkpoints), then the file does not exit (killed after 900 s). Gate them to Linux. Evidence `.context/infra-local-fake-provider-macos.log`.
+  - Under concurrent Docker load, `host-key-boot.dst.test.ts` (120 s) and both `continuation-observation.dst.test.ts` cases (30 s) hit wall-clock timeouts; no trace was written and an unloaded rerun passed. Same wall-clock class as the `claude-composed-lifecycle` item. Evidence `.context/unit-macos-fixes-loaded.log`.
 
 - **Release and verify central code-mode CPU headroom** (2026-10-09; `docs/postmortems/2026-10-09-control-plane-cpu-429.md`, `docs/pi-adapter.md`, `docs/deployment.md`). The shared one-core worker budget, durable CPU/wait counters and rollout CPU/ingress-429 evidence are implemented locally. Complete normal exact-source Linux/PostgreSQL CI and E2E gates, then qualify the independently managed two-vCPU Cloud Run revision under sustained multi-worker load. Cooperative checkpoints exclude main-thread/compiler CPU and can overshoot in native operations; confirm actual serving headroom and ingress admission. Preserve central authority and first-failure evidence.
 
@@ -113,6 +108,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 - **Corroborate a suspected control-plane egress partition across orbs before an unreachable-runtime restart** (`docs/postmortems/2026-08-05-egress-blip-false-unreachable-restart.md`). Since 2026-09-07 provider delay alone cannot trigger a restart and a fresh health request is required before restart. The remaining ambiguity is a partition where provider access succeeds while both runtime requests receive no response. Use bounded fleet-level evidence without turning healthy polling into log noise.
 
 ## Follow-ups
+
+- **Remove unreachable non-Linux process-host paths** (2026-10-11; `docs/host-provider.md`). `launch()` refuses non-Linux hosts, so `process/provider.ts`'s unsupervised spawn, `ps`-based zombie probe (`liveProcessRows`) and non-Linux termination ladder can no longer run.
 
 - [x] **Implement native codemode, native MCP and GPT-6.1 Sol locally** (`docs/mcp.md`, `docs/pi-adapter.md`, `docs/agent-settings.md`; 2026-09-29). Pi 0.99.1 now activates native tool search/codemode with or without catalog entries, child profiles restrict direct and nested calls, and Sol selects `openai-codex/gpt-6.1-sol`; Astra, Terra and Luna are unchanged. The child patch is applied to the existing pinned vendor artifact without replacing it. Clean install, typecheck/lint, 2,309 unit/DST tests, 110 infrastructure tests and all 230 Docker/PostgreSQL/browser E2Es passed (2026-09-30; `docs/testing.md`). No deployment.
 

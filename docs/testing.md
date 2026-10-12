@@ -1,5 +1,18 @@
 # Testing
 
+## macOS local suite (2026-10-11)
+
+Local macOS fixes; CI/Linux paths unchanged:
+
+- The process host is Linux-only (`docs/host-provider.md`). Launch-dependent `process/provider.test.ts` cases and the PGlite/process E2E files (`orb-alerts`, `orb-sleep`, `full-main-auth`, `mcp`, `mcp-oauth`, `subagents`, `multi-user-credentials`) skip elsewhere.
+- Real-PostgreSQL durable cases skip without `PI_ORB_DURABLE_PG_TEST_URL`; with it (PostgreSQL 16) all eight pass.
+- Temporary fixture directories are `realpath`ed (`/var` resolves to `/private/var`).
+- The refused-terminal unit test awaits its outcome (6/10 failures before, 20/20 passes after).
+- macOS WebKit: Tab skips buttons, so the modal-contrast test uses Option+Tab there. Keyboard scrolling is animated: releasing before movement cancels a scroll and a press during one is dropped, so each ArrowUp is held until the transcript moves, then waits for three still frames. Playwright's macOS WebKit follows a middle-clicked link in place, so only that popup step is skipped on darwin WebKit.
+- The phone-viewport override removal is polled: React clears it in an effect cleanup after the media query applies (one stale `844px` read on Chromium).
+
+A Linux Playwright 1.63 container passed the changed browser, `env` and terminal tests, including the WebKit middle-click step. Final macOS result: Vitest 4,160 passed, 107 skipped; Python infrastructure 159 and native-VM 27 pass; frontend E2E 209/209 and `harness-icons-frontend` 2/2. `node --test` infrastructure fails nine `scripts/local-fake-provider.test.mjs` cases and does not exit; an `npm test` under concurrent Docker load timed out three DST cases (both in `TODO.md`). Closed-lid sleep invalidated one frontend run: two `frontend-session` timeouts (921 s, 1,968 s) match `pmset` sleeps (920 s, 1,969 s), and both pass awake. Run long local suites under `caffeinate -s`.
+
 ## Code-mode guides: local qualification limits
 
 Frozen `622e507`: 4,218 tests passed, six failed, 19 skipped; logs: `/workspace/.context/codemode-main-validation-622e507-logs/`. The stale skill inventory is corrected; five failures require unavailable PostgreSQL (unconditional/fallback-port tests). Cancellation fixtures missed checkpoints with fixed ports 3210/5173 occupied; teardown deleted child stderr, so historical `port_in_use` is unproven. Installer SIGXFSZ came from the launcher's 32 MiB file-size limit; bounding only captured logs allowed `npm ci` to pass. Full PostgreSQL/Docker/browser qualification remains required in CI; no full local pass or deployment is claimed.
