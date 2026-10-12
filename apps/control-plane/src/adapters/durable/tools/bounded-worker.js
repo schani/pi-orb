@@ -1,16 +1,26 @@
+import { getHeapStatistics } from "node:v8";
 import { parentPort, workerData } from "node:worker_threads";
 import {
   CALLBACK_LIMIT_MESSAGE,
   MAX_CALLBACK_ARGUMENT_BYTES,
   MAX_CALLBACK_CALLS,
   MAX_CALLBACK_CONCURRENCY,
+  OUTPUT_LIMIT_MESSAGE,
 } from "./callback-limits.js";
 import { createCpuCheckpoint } from "./cpu-checkpoint.js";
 
-workerData.checkpoint = createCpuCheckpoint({
+const cpuCheckpoint = createCpuCheckpoint({
   ...workerData.extension,
   interrupt: workerData.interrupt,
 });
+// [current, peak] bytes of this isolate. External memory includes QuickJS's wasm memory.
+const memory = new Float64Array(workerData.extension?.memoryStats ?? new SharedArrayBuffer(16));
+workerData.checkpoint = () => {
+  const heap = getHeapStatistics();
+  memory[0] = heap.used_heap_size + heap.external_memory;
+  if (memory[0] > memory[1]) memory[1] = memory[0];
+  return cpuCheckpoint();
+};
 workerData.checkpoint();
 
 // The public worker entry uses this port for output. Bound the pipe before the
@@ -59,10 +69,7 @@ parentPort.postMessage = (message, ...args) => {
     if (textBytes > MAX_TEXT_BYTES || bytes > MAX_OUTPUT_BYTES || items > MAX_OUTPUT_ITEMS) {
       stopped = true;
       Atomics.store(new Int32Array(workerData.interrupt), 0, 1);
-      post({
-        type: "crash",
-        message: "Code-mode output limit exceeded (1 MiB text / 32 MiB aggregate / 4096 items)",
-      });
+      post({ type: "crash", message: OUTPUT_LIMIT_MESSAGE });
       return;
     }
   }

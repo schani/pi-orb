@@ -15,6 +15,43 @@ Each terminal tool result durably retains `details.cpu`: `budgetCores`, `cpuMs`,
 
 Local production-worker Linux/two-CPU load with 1/2/4 busy workers measured 1.00/0.99/1.01 process cores and HTTP p99 of 6.2/3.4/3.9 ms over eight-second windows after warmup. This emulated Docker test establishes aggregate throttling and main-thread responsiveness, not Cloud Run admission or a historical hotspot. Deterministic schedules cover shared credit, overshoot, delayed refill, cancellation/reentry and cleanup; real workers cover callback/job/store preservation and parked abort/timeout/close. Evidence and release qualification: `docs/postmortems/2026-10-09-control-plane-cpu-429.md`, `TODO.md`.
 
+## Code-mode memory observability (2026-10-11; implemented locally, not deployed)
+
+Purpose: attribute the shared control-plane OOMs (`docs/postmortems/2026-10-09-central-durable-oom-recovery.md`). Cloud Profiler cannot see worker threads (evaluation in `docs/deployment.md`), so code-mode workers report their own memory. Profiling the main isolate with it is deferred (2026-10-11): `@google-cloud/profiler` 8.1.0 adds two high and eight moderate audit advisories, and forcing fixed `protobufjs`/`uuid` versions breaks its install.
+
+**Per worker.** At every CPU checkpoint (startup, QuickJS interrupts, messages) the bounded worker writes its isolate's `used_heap_size + external_memory` and the running peak into a shared buffer. QuickJS's wasm memory is part of the worker isolate's `external_memory` (measured: external = wasm + 4–5 MiB), so the sum counts it once. `v8.getHeapStatistics()` costs about 0.5 µs, below the existing `threadCpuUsage()` checkpoint call (about 3 µs). Rejected: hooking `QuickJS.create` to read wasm memory (patches a transitive dependency and misses callback replies held in the worker heap); host-side `worker.getHeapStatistics()` (the sandbox does not expose its `Worker`).
+
+**Per invocation.** Each terminal tool result retains `details.memory.peakBytes` next to `details.cpu`. An invocation that fails for resources emits one `lifecycle: orb=<id> codemode.resource_failed kind=<out_of_memory|output_limit|callback_limit|sandbox_exit> peak_mib=<n> conversation=<id> call=<id>`. Timeouts and aborts are not resource failures.
+
+**Per process.** `tools/codemode-memory.ts` tracks live workers. While at least one is live, every 10 s it writes one stdout JSON line:
+
+```json
+{"message":"codemode.memory","workers":4,"worker_sum_mib":377.7,"worker_max_mib":210.9,"worker_max_orb":"<orb id>","rss_mib":511.7,"heap_used_mib":17,"heap_total_mib":34.2,"external_mib":8.5,"array_buffers_mib":0.1}
+```
+
+The timer starts with the first worker and stops at the first tick without one, so an idle process logs nothing and short scripts keep the cadence. Node writes stdout pipes and files synchronously on Linux, so the last sample before an OOM kill (at most 10 s old) is not lost in a buffer. Sampling is a deliberate level, not an edge: the kill is a SIGKILL without warning, and threshold edges would miss growth between crossings (`docs/lifecycle.md`).
+
+**Local measurement (2026-10-11).** Four concurrent workers held at a callback through the real `codemodeTool` (`.context/memprobe.ts`). Linux Node 24.21.0 (2 CPU / 4 GiB container): worker sum 377.7 MiB against a process RSS increase of 376.1 MiB; per worker idle 11.8, 400k objects 93.1, 50 MiB buffer 61.9, 200 MiB allocated then freed 210.9 (wasm memory never shrinks during a run), QuickJS out of memory 250.9 MiB. macOS Node 24.6.0: 375.3 against 372.5 MiB.
+
+**Usage.** Samples:
+
+```
+resource.type="cloud_run_revision"
+resource.labels.service_name="pi-orb-issuer"
+jsonPayload.message="codemode.memory"
+```
+
+The sample before a kill: add `timestamp<="<kill time>"` and take the newest entry; kills appear as `"Memory limit"` platform entries. Resource failures: `textPayload:"codemode.resource_failed"`. Suggested log-based metric for live workers, charted against `run.googleapis.com/container/memory/utilizations` (`gcloud logging metrics create codemode_live_workers --config-from-file=metric.yaml`):
+
+```yaml
+filter: resource.type="cloud_run_revision" AND resource.labels.service_name="pi-orb-issuer" AND jsonPayload.message="codemode.memory"
+valueExtractor: EXTRACT(jsonPayload.workers)
+metricDescriptor: {metricKind: DELTA, valueType: DISTRIBUTION, unit: "1"}
+bucketOptions: {linearBuckets: {numFiniteBuckets: 32, width: 1, offset: 0}}
+```
+
+The same shape with `EXTRACT(jsonPayload.worker_sum_mib)` charts code-mode memory.
+
 ## Central candidate and historical POC
 
 The locally process/Docker qualified, undeployed candidate selects `central-durable` or `host-pi` independently of process/Docker/GCP through `PI_ORB_AGENT_BACKEND`. Central Harnesses run as asynchronous objects in the control plane with PostgreSQL authority; execution-only guests supply workspace operations and hooks. Code defaults to central; production Terraform explicitly retains host Pi while question 72 (Pi Durable) remains open. Fresh conversations retain Astra/high defaults; resumed settings remain per orb. Central manual compaction returns typed `unsupported` without allocating an operation, changing history or invoking a model; host-Pi manual compaction retains its native operation/deduplication contract. Ordinary inbox input can queue while native compaction holds command admission. The SDK integration below applies to `host-pi`, not a particular provider.
