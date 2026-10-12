@@ -334,6 +334,8 @@ test("worker replacement during initial startup is allowed before ready", async 
   assert.equal((await supervise(f.p, settings)).code, 7);
 });
 
+// Real process ownership reads Linux /proc.
+const linux = process.platform === "linux";
 const pause = () => new Promise((resolve) => setTimeout(resolve, 20));
 async function checkpoint(path) {
   for (let n = 0; n < 500; n++) {
@@ -378,6 +380,7 @@ async function ownedFixture(t) {
   return { root, start };
 }
 test("real executable failure and missing executable remain typed nonzero", async (t) => {
+  if (!linux) return t.skip("needs Linux /proc");
   const { root } = await ownedFixture(t);
   const result = await runTool(
     process.execPath,
@@ -391,6 +394,7 @@ test("real executable failure and missing executable remain typed nonzero", asyn
   assert.deepEqual(missing.error, { type: "spawn_failed" });
 });
 test("real leader exit reaps live descendant and preserves failing status; foreign group survives", async (t) => {
+  if (!linux) return t.skip("needs Linux /proc");
   const f = await ownedFixture(t);
   const foreign = await f.start("setInterval(() => {}, 1000)");
   const checkpointPath = join(f.root, "descendant");
@@ -407,6 +411,7 @@ test("real leader exit reaps live descendant and preserves failing status; forei
 });
 for (const signal of ["SIGINT", "SIGTERM"])
   test(`actual wrapper ${signal} cancels preparation and cleans owned descendant`, async (t) => {
+    if (!linux) return t.skip("needs Linux /proc");
     const f = await ownedFixture(t);
     const bin = join(f.root, "bin");
     await fs.mkdir(bin);
@@ -441,6 +446,7 @@ for (const signal of ["SIGINT", "SIGTERM"])
 
 for (const status of [0, 37])
   test(`actual supervised command exit ${status} cleans both groups`, async (t) => {
+    if (!linux) return t.skip("needs Linux /proc");
     const f = await ownedFixture(t);
     const service = await f.start("setInterval(()=>{},1000)");
     const command = await f.start(`process.exit(${status})`);
@@ -459,6 +465,7 @@ for (const status of [0, 37])
       assert.equal((await ownershipPorts.alive(child.pid)).value, false);
   });
 test("actual TERM-ignoring owned group escalates at injected deadline; unrelated group survives", async (t) => {
+  if (!linux) return t.skip("needs Linux /proc");
   const f = await ownedFixture(t);
   const marker = join(f.root, "ignoring");
   const service = await f.start(
@@ -501,6 +508,7 @@ test("actual TERM-ignoring owned group escalates at injected deadline; unrelated
 
 for (const signal of ["SIGINT", "SIGTERM"])
   test(`actual cancelled command exiting zero cannot erase ${signal}`, async (t) => {
+    if (!linux) return t.skip("needs Linux /proc");
     const f = await ownedFixture(t);
     const service = await f.start("setInterval(()=>{},1000)");
     const marker = join(f.root, "command-ready");
