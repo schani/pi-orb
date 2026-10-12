@@ -33,7 +33,8 @@ test("applies the identity when the runtime's working directory is unreadable", 
     const { stdout } = await promisify(execFile)(
       process.execPath,
       ["--input-type=module", "-e", script],
-      { cwd: root },
+      // CI runners set XDG_CONFIG_HOME; the identity must land in this test's home.
+      { cwd: root, env: { ...process.env, XDG_CONFIG_HOME: undefined } },
     );
     expect(JSON.parse(stdout)).toBe("ok");
     expect(
