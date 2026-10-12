@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { setImmediate } from "node:timers";
 import { expect, it } from "vitest";
 import { LogCapture, runDst } from "./sim.ts";
@@ -67,4 +67,19 @@ it("retains the original error and lifecycle evidence in a replay-compatible DST
       if (entry.startsWith(`${name}-`)) unlinkSync(`test-failures/${entry}`);
     }
   }
+});
+
+it("stops before the next iteration once the signal aborts, without a failure trace", async () => {
+  const name = `aborted-${process.pid}-${Date.now()}`;
+  const controller = new AbortController();
+  let calls = 0;
+  await expect(
+    runDst({ name, iterations: 3, signal: controller.signal }, async () => {
+      calls++;
+      controller.abort();
+    }),
+  ).rejects.toMatchObject({ name: "AbortError" });
+  expect(calls).toBe(1);
+  const traces = existsSync("test-failures") ? readdirSync("test-failures") : [];
+  expect(traces.filter((entry) => entry.startsWith(`${name}-`))).toEqual([]);
 });

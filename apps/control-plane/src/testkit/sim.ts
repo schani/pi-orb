@@ -71,6 +71,8 @@ export interface DstOptions {
   readonly lateTimerProbability?: number;
   /** Collects the app-level log lines of every iteration (reset per iteration). */
   readonly logCapture?: LogCapture;
+  /** Stops before the next iteration once aborted (pass Vitest's test `signal`). */
+  readonly signal?: AbortSignal;
 }
 
 /** Fixed epoch so wall-clock assertions are stable: 2026-01-01T00:00:00Z. */
@@ -149,6 +151,7 @@ export async function runDst(
 
   const iterations = options.iterations ?? 30;
   for (let i = 0; i < iterations; i++) {
+    options.signal?.throwIfAborted();
     const recording = new RecordingTraceSource(new SimpleEntropySource());
     options.logCapture?.reset();
     const sim = makeSimulation(options, recording);

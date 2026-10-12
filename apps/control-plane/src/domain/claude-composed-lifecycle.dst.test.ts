@@ -95,13 +95,16 @@ function seedClaudeOrb(task: SimulationTask, harness: TestHarness) {
 
 const fuzz = { [FAILPOINTS.runtimePull]: 0.03, [FAILPOINTS.storeCommitAfter]: 0.03 };
 
-it("archive seals real normalized root history only after child handoff, native exit, stdout EOF and final replication commit", async () => {
+it("archive seals real normalized root history only after child handoff, native exit, stdout EOF and final replication commit", async ({
+  signal,
+}) => {
   await runDst(
     {
       name: "claude-composed-cp-archive",
       iterations: 40,
       lateTimerProbability: 0,
       failpointProbabilities: fuzz,
+      signal,
     },
     async (sim) => {
       const f = new ComposedClaudeFixture();
@@ -206,13 +209,16 @@ it("archive seals real normalized root history only after child handoff, native 
   );
 });
 
-it("real child-only activity survives CP restart, stale pulls and wall-clock jumps until process/history drain", async () => {
+it("real child-only activity survives CP restart, stale pulls and wall-clock jumps until process/history drain", async ({
+  signal,
+}) => {
   await runDst(
     {
       name: "claude-composed-cp-restart-clock",
       iterations: 30,
       lateTimerProbability: 0,
       failpointProbabilities: fuzz,
+      signal,
     },
     async (sim) => {
       const f = new ComposedClaudeFixture();
@@ -303,11 +309,16 @@ it("real child-only activity survives CP restart, stale pulls and wall-clock jum
   );
 });
 
-it.each(["before", "after"] as const)(
+it.for(["before", "after"] as const)(
   "continuation %s real prepare is protected or rejected during archive",
-  async (timing) => {
+  async (timing, { signal }) => {
     await runDst(
-      { name: `claude-composed-cp-prepare-${timing}`, iterations: 20, lateTimerProbability: 0 },
+      {
+        name: `claude-composed-cp-prepare-${timing}`,
+        iterations: 20,
+        lateTimerProbability: 0,
+        signal,
+      },
       async (sim) => {
         const f = new ComposedClaudeFixture();
         const harness = makeHarness({ constants: { deletionQuarantineMs: 2_000 } });
@@ -380,9 +391,16 @@ it.each(["before", "after"] as const)(
   },
 );
 
-it("archive cannot seal or destroy retained native files after final history commit failure", async () => {
+it("archive cannot seal or destroy retained native files after final history commit failure", async ({
+  signal,
+}) => {
   await runDst(
-    { name: "claude-composed-cp-final-commit-failure", iterations: 20, lateTimerProbability: 0 },
+    {
+      name: "claude-composed-cp-final-commit-failure",
+      iterations: 20,
+      lateTimerProbability: 0,
+      signal,
+    },
     async (sim) => {
       const f = new ComposedClaudeFixture();
       const harness = makeHarness({ constants: { deletionQuarantineMs: 2_000 } });
@@ -438,9 +456,16 @@ it("archive cannot seal or destroy retained native files after final history com
   );
 });
 
-it("incarnation-bounded compute disposal drains the old native process without destroying retained session files", async () => {
+it("incarnation-bounded compute disposal drains the old native process without destroying retained session files", async ({
+  signal,
+}) => {
   await runDst(
-    { name: "claude-composed-cp-incarnation-discard", iterations: 20, lateTimerProbability: 0 },
+    {
+      name: "claude-composed-cp-incarnation-discard",
+      iterations: 20,
+      lateTimerProbability: 0,
+      signal,
+    },
     async (sim) => {
       const f = new ComposedClaudeFixture();
       const harness = makeHarness();
@@ -523,9 +548,11 @@ it("incarnation-bounded compute disposal drains the old native process without d
   );
 });
 
-it("explicit deletion retains whole-host authority over an uncooperative real native child", async () => {
+it("explicit deletion retains whole-host authority over an uncooperative real native child", async ({
+  signal,
+}) => {
   await runDst(
-    { name: "claude-composed-cp-explicit-delete", iterations: 20, lateTimerProbability: 0 },
+    { name: "claude-composed-cp-explicit-delete", iterations: 20, lateTimerProbability: 0, signal },
     async (sim) => {
       const f = new ComposedClaudeFixture();
       const harness = makeHarness({ constants: { deletionQuarantineMs: 2_000 } });
