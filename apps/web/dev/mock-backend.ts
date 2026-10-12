@@ -562,6 +562,48 @@ function initialState(timestampChurn: boolean): MockState {
       overflow: { native: { message: { errorMessage: example.error } } },
     });
   }
+  const mixedOrb: OrbView = {
+    ...orb,
+    id: "frontend-mixed-tool-states",
+    name: "Mixed tool states",
+  };
+  const mixedRecords: HistoryRecord[] = [
+    {
+      id: "mixed-calls",
+      parentId: null,
+      timestamp: createdAt,
+      type: "message",
+      role: "assistant",
+      content: ["completed", "failed", "running"].map((state) => ({
+        type: "tool_call" as const,
+        callId: `mixed-${state}`,
+        name: "codemode",
+        arguments: { code: `await inspect("${state}");` },
+      })),
+      overflow: {},
+    },
+    {
+      id: "mixed-results",
+      parentId: "mixed-calls",
+      timestamp: createdAt,
+      type: "message",
+      role: "tool",
+      content: [
+        {
+          type: "tool_result",
+          callId: "mixed-completed",
+          content: [{ type: "text", text: "Inspection complete." }],
+        },
+        {
+          type: "tool_result",
+          callId: "mixed-failed",
+          isError: true,
+          content: [{ type: "text", text: "Inspection failed." }],
+        },
+      ],
+      overflow: {},
+    },
+  ];
   const longOrb: OrbView = {
     ...orb,
     id: "frontend-long-history",
@@ -723,6 +765,7 @@ function initialState(timestampChurn: boolean): MockState {
       [orb.id, orb],
       [longOrb.id, longOrb],
       [lazyOrb.id, lazyOrb],
+      [mixedOrb.id, mixedOrb],
       [authOrb.id, authOrb],
       [archivedOrb.id, archivedOrb],
     ]),
@@ -731,6 +774,7 @@ function initialState(timestampChurn: boolean): MockState {
       [orb.id, records],
       [longOrb.id, longRecords],
       [lazyOrb.id, lazyRecords],
+      [mixedOrb.id, mixedRecords],
       [authOrb.id, []],
       [archivedOrb.id, []],
     ]),
@@ -837,6 +881,15 @@ function fixtureSessionId(state: MockState, orbId: string) {
   return orbId === HEADLINE_ORB_ID ? state.headlines.sessionId : `fixture-session-${orbId}`;
 }
 function headlineDisplay(state: MockState, orbId: string, record: HistoryRecord, cached: boolean) {
+  if (orbId === "frontend-mixed-tool-states") {
+    const display = projectDisplayRecord(record);
+    if (display.type === "message") {
+      for (const block of display.content) {
+        if (block.type === "tool_call" || block.type === "tool_result") delete block.headline;
+      }
+    }
+    return display;
+  }
   if (orbId !== HEADLINE_ORB_ID) return projectDisplayRecord(record);
   const records = [
     ...(state.histories.get(orbId) ?? []),

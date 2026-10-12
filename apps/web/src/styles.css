@@ -1999,11 +1999,23 @@ pre,
 
 .tool-activity-call:not(details),
 .tool-activity-call > summary {
-  color: var(--g3);
+  color: var(--k);
 }
 
 .tool-call-marker {
   color: var(--k);
+}
+
+.tool-activity-call.tool-call-running > summary,
+.tool-activity-call.tool-call-running > summary > .tool-call-marker,
+.tool-activity-call.tool-call-running > summary > .tool-call-status {
+  color: var(--ok);
+}
+
+.tool-activity-call.tool-call-failed > summary,
+.tool-activity-call.tool-call-failed > summary > .tool-call-marker,
+.tool-activity-call.tool-call-failed > summary > .tool-call-status {
+  color: var(--bad);
 }
 
 .tool-details > summary {

@@ -49,6 +49,28 @@ function ToolActivity({
   return <BrowserToolActivity persisted={projected} live={live} detailContext={detailContext()} />;
 }
 
+describe("expanded call state colors", () => {
+  it.each(["codemode", "bash", "read"])(
+    "%s gives every child its own state class in a failed group",
+    (name) => {
+      const html = renderToStaticMarkup(
+        <BrowserToolActivity
+          detailContext={detailContext()}
+          live={["completed", "failed", "running"].map((state, index) => ({
+            callId: `mixed-${index}`,
+            name,
+            state: state as LiveToolCall["state"],
+          }))}
+        />,
+      );
+      expect(html).toContain("activity-rail-row-failed");
+      for (const state of ["completed", "failed", "running"]) {
+        expect(html).toContain(`class="tool-activity-call tool-call-${state}"`);
+      }
+    },
+  );
+});
+
 describe("background admission labels", () => {
   it("labels nine admitted workers started, not complete, on cached same-ID replay", () => {
     const persisted = Array.from({ length: 9 }, (_, index) => ({
@@ -100,7 +122,7 @@ describe("background admission labels", () => {
       />,
     );
     expect(html).toContain('class="activity-rail-metric">started</span>');
-    expect(html).not.toContain('class="tool-activity-call"');
+    expect(html).not.toMatch(/class="[^"]*\btool-activity-call\b/);
   });
   it("keeps foreground completion and failed admission distinct even for Agent", () => {
     const html = renderToStaticMarkup(
@@ -315,7 +337,7 @@ describe("single-call categories", () => {
       ]) {
         const html = renderToStaticMarkup(element);
         expect(html.match(/<details\b/g)).toHaveLength(1);
-        expect(html).not.toContain('class="tool-activity-call"');
+        expect(html).not.toMatch(/class="[^"]*\btool-activity-call\b/);
         expect(html).not.toContain("private output");
         expect(html).not.toContain("Loading…");
         expect(html).not.toMatch(/<details[^>]*\sopen(?:=|>)/);
@@ -466,7 +488,7 @@ describe("tool image previews", () => {
     );
     expect(sparse).toContain("Loading…");
     expect(sparse).not.toContain("/images/");
-    expect(html).not.toContain('class="tool-activity-call"');
+    expect(html).not.toMatch(/class="[^"]*\btool-activity-call\b/);
     expect(html).not.toContain("image/png Zmlyc3Q=");
   });
 

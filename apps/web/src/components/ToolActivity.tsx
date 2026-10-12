@@ -357,7 +357,7 @@ function CallRow({
     );
   return (
     <details
-      className="tool-activity-call"
+      className={`tool-activity-call tool-call-${call.state}`}
       open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >

@@ -14,6 +14,23 @@ it("renders reasoning Markdown without inheriting literal pre-wrap whitespace", 
   expect(rule(".reasoning-body > .chat-markdown")).toContain("white-space: normal");
 });
 
+it("colors only the owning child header by state, leaving completion neutral", () => {
+  for (const [state, hue] of [
+    ["running", "--ok"],
+    ["failed", "--bad"],
+  ]) {
+    const selector = `.tool-activity-call.tool-call-${state} > summary,\n.tool-activity-call.tool-call-${state} > summary > .tool-call-marker,\n.tool-activity-call.tool-call-${state} > summary > .tool-call-status`;
+    expect(rule(selector)).toContain(`color: var(${hue})`);
+  }
+  expect(css).toContain(
+    ".tool-activity-call:not(details),\n.tool-activity-call > summary {\n  color: var(--k);",
+  );
+  expect(rule(".tool-call-marker")).toContain("color: var(--k)");
+  expect(rule(".activity-rail-headline,\n.activity-rail-metric,\n.tool-call-status")).toContain(
+    "color: var(--g3)",
+  );
+});
+
 it("uses the error signal for activity headline failure and manual Retry", () => {
   expect(rule(".error-text")).toContain("color: var(--bad)");
   const retry = rule("button.text-action.error-text");
