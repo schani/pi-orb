@@ -2504,12 +2504,9 @@ async function reconcileTerminalBackstop(
     orb.state === "stopped" &&
     orb.stopReason !== "manual" &&
     orb.stopReason !== "sleep" &&
-    (deps.control.hasAgentWork(orb.id) || deps.control.hasVisibleBrowser(orb.id))
+    deps.control.hasAgentWork(orb.id)
   ) {
-    return transitionTo(task, deps, orb, "starting", {
-      stopReason: null,
-      reason: deps.control.hasAgentWork(orb.id) ? "agent_work" : "visible_browser",
-    });
+    return transitionTo(task, deps, orb, "starting", { stopReason: null, reason: "agent_work" });
   }
   // A `failed` orb wakes only for an intent admitted against its current
   // `state_version`, i.e. a send the user made after seeing this failure. The
