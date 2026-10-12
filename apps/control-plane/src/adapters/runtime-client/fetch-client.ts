@@ -113,15 +113,17 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
     request: DeliverMessageClientRequest,
     context: OperationContext,
   ): ResultAsync<import("@pi-orb/protocol").DeliverOrbMessageResponse, RuntimeClientError> {
+    // The runtime keys a batch by its first message id, not the control plane's batch id.
+    const messageId = request.messageIds[0] ?? request.messageId;
     return this.request(
-      `${request.baseUrl}/v1/messages/${encodeURIComponent(request.messageId)}`,
+      `${request.baseUrl}/v1/messages/${encodeURIComponent(messageId)}`,
       context,
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           v: 1,
-          messageId: request.messageId,
+          messageId,
           messageIds: request.messageIds,
           content: request.content,
           ...(request.system === undefined ? {} : { system: request.system }),
