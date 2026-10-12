@@ -4,8 +4,11 @@ import { expect, it } from "vitest";
 import { PgClient } from "../pg/client.ts";
 import { PgDurableAuthority } from "./index.ts";
 
-it("uses locked database time, not skewed caller clocks, for acquisition and renewal", async () => {
-  const connection = process.env.PI_ORB_DURABLE_PG_TEST_URL!;
+it("uses locked database time, not skewed caller clocks, for acquisition and renewal", async ({
+  skip,
+}) => {
+  const connection = process.env.PI_ORB_DURABLE_PG_TEST_URL;
+  if (!connection) return skip("needs PI_ORB_DURABLE_PG_TEST_URL");
   const admin = new PgClient(connection);
   const schema = `durable_clock_${randomUUID().replaceAll("-", "")}`;
   (await admin.query(`CREATE SCHEMA ${schema}`))._unsafeUnwrap();

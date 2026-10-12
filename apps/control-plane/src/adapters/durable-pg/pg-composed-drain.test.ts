@@ -35,22 +35,21 @@ function barrier() {
   return { promise, resolve };
 }
 
-it.each([
+it.for([
   { kind: "pglite", admittedAbort: true },
   { kind: "postgres", admittedAbort: true },
   { kind: "pglite", admittedAbort: false },
   { kind: "postgres", admittedAbort: false },
 ] as const)(
   "$kind live native root/child Stop drain (admittedAbort=$admittedAbort) and new owner Start",
-  async ({ kind, admittedAbort: abortBeforeStop }) => {
+  async ({ kind, admittedAbort: abortBeforeStop }, { skip }) => {
     const schema = `composed_drain_${randomUUID().replaceAll("-", "")}`;
     let admin: PgClient | undefined;
     let db: PostgreSQLClient;
     if (kind === "pglite") db = new PGliteClient();
     else {
-      const connection =
-        process.env.PI_ORB_DURABLE_PG_TEST_URL ??
-        "postgres://durable_test:durable_local_test_only@127.0.0.1:55432/durable_test";
+      const connection = process.env.PI_ORB_DURABLE_PG_TEST_URL;
+      if (!connection) return skip("needs PI_ORB_DURABLE_PG_TEST_URL");
       admin = new PgClient(connection);
       (await admin.query(`CREATE SCHEMA ${schema}`))._unsafeUnwrap();
       const url = new URL(connection);

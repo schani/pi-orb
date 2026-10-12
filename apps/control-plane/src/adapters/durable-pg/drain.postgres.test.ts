@@ -7,11 +7,15 @@ import { expect, it } from "vitest";
 import { PgClient } from "../pg/client.ts";
 import { PgDurableAuthority } from "./index.ts";
 
-it("real PostgreSQL bounds stop cleanup to its storage while fencing admission, release and archive", async () => {
-  const admin = new PgClient(process.env.PI_ORB_DURABLE_PG_TEST_URL!);
+it("real PostgreSQL bounds stop cleanup to its storage while fencing admission, release and archive", async ({
+  skip,
+}) => {
+  const connection = process.env.PI_ORB_DURABLE_PG_TEST_URL;
+  if (!connection) return skip("needs PI_ORB_DURABLE_PG_TEST_URL");
+  const admin = new PgClient(connection);
   const schema = `durable_drain_${randomUUID().replaceAll("-", "")}`;
   (await admin.query(`CREATE SCHEMA ${schema}`))._unsafeUnwrap();
-  const url = new URL(process.env.PI_ORB_DURABLE_PG_TEST_URL!);
+  const url = new URL(connection);
   url.searchParams.set("options", `-c search_path=${schema}`);
   const db = new PgClient(url.toString());
   const orb = "00000000-0000-4000-8000-000000000001";
