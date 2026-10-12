@@ -35,16 +35,11 @@ it("rejects a refused terminal immediately without sending a command", async () 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("missing fixture port");
-  let closed!: () => void;
-  const closing = new Promise<void>((resolve) => {
-    closed = resolve;
-  });
   let commands = 0;
   sockets.on("connection", (socket) => {
     socket.on("message", (_data, binary) => {
       if (binary) commands++;
     });
-    socket.once("close", closed);
     socket.close(1013, "orb is not running");
   });
   vi.useFakeTimers();
@@ -58,8 +53,8 @@ it("rejects a refused terminal immediately without sending a command", async () 
       () => "resolved",
       (error) => String(error),
     );
-    await closing;
-    const result = await Promise.race([outcome, Promise.resolve("pending")]);
+    // Fake timers hold the 30 s client timeout, so only the close can settle this.
+    const result = await outcome;
     expect(result).toContain("1013");
     expect(result).toContain("orb is not running");
     expect(result).toContain("child");
