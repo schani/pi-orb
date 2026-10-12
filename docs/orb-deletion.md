@@ -34,6 +34,7 @@ Resources explicitly not owned by one orb and therefore retained:
 - GCP project/VPC/subnet/firewall/service accounts, Artifact Registry images, Cloud SQL, and control-plane services;
 - Tailscale OAuth client, tailnet ACLs, and `tag:pi-orb` definition;
 - provider audit logs, Cloud Logging entries, database backups/PITR, and third-party billing records governed by their own retention systems. These are retained records, not live orb resources, and deletion must not claim cryptographic erasure from backups.
+- `model_calls` rows (decided 2026-10-12): content-free per-call token accounting keyed by orb and owner ID, deliberately without foreign keys so archival, orb deletion and project deletion leave them intact (`docs/model-usage.md`).
 
 ## API and user experience
 

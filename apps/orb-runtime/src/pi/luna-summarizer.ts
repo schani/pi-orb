@@ -1,3 +1,4 @@
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { completeLuna } from "@pi-orb/luna";
 import { err, ResultAsync } from "neverthrow";
@@ -24,10 +25,16 @@ const summaryPrompt = (input: TurnSummaryInput): string =>
 export class LunaTurnSummarizer implements TurnSummarizer {
   private readonly runtime: ModelRuntime;
   private readonly modelTemplate: Parameters<ModelRuntime["completeSimple"]>[0];
+  private readonly onResponse: ((response: AssistantMessage) => void) | undefined;
 
-  constructor(runtime: ModelRuntime, modelTemplate: Parameters<ModelRuntime["completeSimple"]>[0]) {
+  constructor(
+    runtime: ModelRuntime,
+    modelTemplate: Parameters<ModelRuntime["completeSimple"]>[0],
+    onResponse?: (response: AssistantMessage) => void,
+  ) {
     this.runtime = runtime;
     this.modelTemplate = modelTemplate;
+    this.onResponse = onResponse;
   }
 
   summarize(
@@ -54,6 +61,7 @@ export class LunaTurnSummarizer implements TurnSummarizer {
           sessionPrefix: "pi-orb-turn-summary",
           signal: context.signal,
           modelTemplate: this.modelTemplate,
+          ...(this.onResponse ? { onResponse: this.onResponse } : {}),
           auth: {
             ...auth.auth,
             ...(auth.env !== undefined ? { env: auth.env } : {}),

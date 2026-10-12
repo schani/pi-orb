@@ -18,6 +18,7 @@ const followingMigrations = [
   "038_agent_artifacts.sql",
   "039_resource_events.sql",
   "040_auto_restart_times.sql",
+  "041_model_calls.sql",
 ];
 const first = {
   userId: "00000000-0000-4000-8000-000000000001",

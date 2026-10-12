@@ -172,7 +172,7 @@ export function generateActivityHeadline(
         attempts++;
         generated = await deps.headlineGenerator.generate(
           task,
-          { ownerUserId: current.value.ownerUserId, source },
+          { ownerUserId: current.value.ownerUserId, orbId: ref.orbId, source },
           { signal, deadlineAt: expires },
         );
         if (generated.isErr()) {
