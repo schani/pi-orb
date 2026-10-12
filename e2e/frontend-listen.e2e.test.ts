@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,7 +24,7 @@ it("reports listen failures through the test framework and releases its error li
 });
 
 it("reports bounded browser request progress when application boot stalls", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-orb-frontend-diagnostic-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "pi-orb-frontend-diagnostic-")));
   await writeFile(
     join(root, "index.html"),
     `<body><main id="root"></main><p>static shell</p><script>
@@ -113,7 +113,7 @@ it("reports bounded browser request progress when application boot stalls", asyn
 });
 
 it("rejects old-document readiness and diagnoses missing application UI", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-orb-frontend-ui-diagnostic-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "pi-orb-frontend-ui-diagnostic-")));
   await writeFile(
     join(root, "index.html"),
     `<main id="root"><p>mounted without expected control</p></main>
@@ -155,7 +155,7 @@ it("rejects old-document readiness and diagnoses missing application UI", async 
 });
 
 it("asks the owned Node server for an ephemeral port, never Vite's preview-port fallback", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-orb-frontend-port-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "pi-orb-frontend-port-")));
   const vite = await createServer({
     root,
     configFile: false,

@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
@@ -22,7 +22,7 @@ afterEach(async () => {
   if (directory) await rm(directory, { recursive: true, force: true });
 });
 async function start() {
-  directory = await mkdtemp(join(tmpdir(), "orb-execution-test-"));
+  directory = await realpath(await mkdtemp(join(tmpdir(), "orb-execution-test-")));
   child = spawn(process.execPath, ["apps/orb-runtime/src/execution/test-host.ts"], {
     cwd: process.cwd(),
     env: { ...process.env, EXECUTION_TEST_CWD: directory },
