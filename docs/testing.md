@@ -969,8 +969,11 @@ conversation-only closes. The preview migration is renumbered to 041 because mai
 `PI_ORB_RUNTIME_MODE` and initial-checkout variables; their first failure is preserved.
 Typecheck and lint pass; unit/DST pass 4,319 tests (24 skipped); infrastructure passes
 94 Node, 156 Python and 27 native-VM tests. Central-Pi orbs cannot yet forward previews
-(`TODO.md`). Evidence: `.context/http-preview/rebase-20261012-*`. No local E2E,
-deployment or live-cloud mutation.
+(`TODO.md`). First CI run failed deterministically in `Central process (2/4)`: main's
+process-backend job builds no Docker images, so `pi-orb-preview-fixture:dev` was absent.
+`e2e/preview-docker.e2e.test.ts` now skips on the process backend, like other
+Docker-image E2Es; the Docker E2E job still runs it. Evidence:
+`.context/http-preview/rebase-20261012-*`. No local E2E, deployment or live-cloud mutation.
 
 ## Deterministic simulation testing strategy
 
