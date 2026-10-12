@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { setImmediate } from "node:timers/promises";
 import {
   type EntropySource,
   type Logger,
@@ -27,6 +28,8 @@ export interface DstOptions {
   readonly failpointProbabilities?: Readonly<Record<string, number>>;
   /** Successful bounded-I/O scenarios may require deadlines to fire in order. */
   readonly timerOrder?: "earliest";
+  /** Stops before the next iteration once aborted (pass Vitest's test `signal`). */
+  readonly signal?: AbortSignal;
 }
 
 /** Fixed epoch so wall-clock assertions are stable: 2026-01-01T00:00:00Z. */
@@ -91,6 +94,7 @@ export async function runDst(
 
   const iterations = options.iterations ?? 30;
   for (let i = 0; i < iterations; i++) {
+    options.signal?.throwIfAborted();
     const recording = new RecordingTraceSource(new SimpleEntropySource());
     const sim = makeSimulation(options, recording);
     try {
@@ -120,5 +124,6 @@ export async function runDst(
         { cause: error },
       );
     }
+    if (i + 1 < iterations) await setImmediate();
   }
 }
