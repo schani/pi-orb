@@ -92,7 +92,7 @@ export function IndexProject({
   onSelect,
 }: {
   project: ProjectView;
-  list: OrbList | undefined;
+  list: OrbList;
   orbOrder: OrbOrderCache;
   orbId: string;
   pending: boolean;
@@ -101,7 +101,7 @@ export function IndexProject({
   onCreated: (orb: OrbView) => void;
   onSelect: () => void;
 }) {
-  const shelves = splitProjectOrbs(list?.items ?? [], orbOrder);
+  const shelves = splitProjectOrbs(list.items ?? [], orbOrder);
   const currentArchived = shelves.archive.some((orb) => orb.id === orbId);
   const [archiveOpen, setArchiveOpen] = useState(currentArchived);
   useEffect(() => {
@@ -129,12 +129,7 @@ export function IndexProject({
         </div>
       ) : (
         <>
-          {list?.items == null && list?.error == null && (
-            <div className="project-progress" role="status">
-              loading…
-            </div>
-          )}
-          {list?.error != null && (
+          {list.error !== null && (
             <div className="banner banner-error ix-load-error" role="alert">
               {list.items === null ? "Failed to load orbs" : "Orb list is stale"}:{" "}
               {describeApiError(list.error)}
@@ -267,19 +262,23 @@ export function OrbIndex({
           ]),
         ),
       );
-      await Promise.all(
-        incoming.map(async (project) => {
-          const orbs = await listOrbs(project.id);
-          if (cancelled || started !== revision.current) return;
-          setLists((previous) => ({
-            ...previous,
-            [project.id]: orbs.isOk()
-              ? { items: orbs.value.items, error: null }
-              : { items: previous[project.id]?.items ?? null, error: orbs.error },
-          }));
-        }),
+      // One commit for all lists: a list landing alone would move every later header.
+      const results = await Promise.all(
+        incoming.map(async (project) => [project.id, await listOrbs(project.id)] as const),
       );
       inFlight = false;
+      if (cancelled || started !== revision.current) return;
+      setLists((previous) => ({
+        ...previous,
+        ...Object.fromEntries(
+          results.map(([id, orbs]) => [
+            id,
+            orbs.isOk()
+              ? { items: orbs.value.items, error: null }
+              : { items: previous[id]?.items ?? null, error: orbs.error },
+          ]),
+        ),
+      }));
     };
     void poll();
     const timer = window.setInterval(() => void poll(), 2000);
@@ -288,6 +287,15 @@ export function OrbIndex({
       window.clearInterval(timer);
     };
   }, []);
+  // A project appears only with its list, so it never pushes down a header already shown.
+  const shown =
+    visibleProjects?.flatMap((project) => {
+      const list = visibleLists[project.id];
+      return list === undefined || (list.items === null && list.error === null)
+        ? []
+        : [{ project, list }];
+    }) ?? [];
+  const loading = visibleProjects === null ? error === null : shown.length < visibleProjects.length;
   const currentName = visibleProjects?.find((project) => project.id === projectId)?.name ?? null;
   useEffect(() => {
     onProjectChange(
@@ -304,11 +312,6 @@ export function OrbIndex({
         <img src={FAVICON_HREFS.neutral} width={16} height={16} alt="" />
         pi-orb
       </a>
-      {projects === null && error === null && (
-        <div className="project-progress" role="status">
-          loading projects…
-        </div>
-      )}
       {error !== null && (
         <div className="banner banner-error ix-load-error" role="alert">
           {projects === null ? "Failed to load projects" : "Project list is stale"}:{" "}
@@ -320,11 +323,11 @@ export function OrbIndex({
           Failed to load project: {describeApiError(addressed.error)}
         </div>
       )}
-      {visibleProjects?.map((project) => (
+      {shown.map(({ project, list }) => (
         <IndexProject
           key={project.id}
           project={project}
-          list={visibleLists[project.id]}
+          list={list}
           orbOrder={orbOrder}
           orbId={orbId}
           pending={pending}
@@ -357,6 +360,11 @@ export function OrbIndex({
           }}
         />
       ))}
+      {loading && (
+        <div className="project-progress" role="status">
+          loading projects…
+        </div>
+      )}
     </nav>
   );
 }

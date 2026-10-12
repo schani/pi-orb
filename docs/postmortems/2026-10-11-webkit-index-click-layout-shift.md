@@ -10,4 +10,4 @@ The unmodified test did not fail locally. Delaying earlier list responses by 60â
 
 ## Correction and invariant
 
-Index create clicks wait until per-project loading has finished (`frontend-session`: no `role="status"` in the index; `harness-icons-frontend`: no `.project-progress`). With the wait, 0/600 clicks were lost and the real test passed 20/20 and 5/5. Product-side layout reservation is tracked in `TODO.md`.
+Index create clicks wait until per-project loading has finished (`frontend-session`: no `role="status"` in the index; `harness-icons-frontend`: no `.project-progress`). With the wait, 0/600 clicks were lost and the real test passed 20/20 and 5/5. Product fix (2026-10-11): the index and dashboard render a project only once its orb list has settled, and the index publishes each poll's lists together, so a visible header no longer moves while lists load (`docs/web-ui.md`); the test waits were removed.

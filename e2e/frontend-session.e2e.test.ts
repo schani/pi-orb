@@ -4072,14 +4072,12 @@ describe("frontend-only browser behavior", () => {
               request.postDataJSON().harness === harness
             );
           });
-          const link = index.getByRole("link", {
-            name: `New ${harness === "pi" ? "Pi" : "Claude"} orb in scratchpad`,
-            exact: true,
-          });
-          await expectPage(link).toBeVisible();
-          // An orb list landing between pointerdown and pointerup moves the link; WebKit drops the click.
-          await expectPage(index.getByRole("status")).toHaveCount(0);
-          await link.click();
+          await index
+            .getByRole("link", {
+              name: `New ${harness === "pi" ? "Pi" : "Claude"} orb in scratchpad`,
+              exact: true,
+            })
+            .click();
           await heldPost.observed.promise;
           expectPage(posts[count]?.["harness"]).toBe(harness);
           const premature = await page.request.get(`${origin}/api/v1/orbs/${created[count]}`);
@@ -4556,6 +4554,70 @@ describe("frontend-only browser behavior", () => {
       await page.close();
     }
   });
+
+  it.each([
+    ["index", ORB_PATH, 1280],
+    ["dashboard", "/", 390],
+  ] as const)(
+    "keeps the last %s project header still while earlier orb lists load",
+    async (_surface, path, width) => {
+      const page = await browser.newPage({ viewport: { width, height: 900 } });
+      // Every committed DOM change records where the scratchpad create link sits.
+      await page.addInitScript(`
+      window.__scratchpadLinkPositions = [];
+      new MutationObserver(() => {
+        const link = document.querySelector('a[aria-label="New Pi orb in scratchpad"]');
+        if (link === null) return;
+        const box = link.getBoundingClientRect();
+        const position = box.x + "," + box.y;
+        if (window.__scratchpadLinkPositions.at(-1) !== position)
+          window.__scratchpadLinkPositions.push(position);
+      }).observe(document, { childList: true, subtree: true, characterData: true, attributes: true });
+    `);
+      let release = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await page.route(
+        /\/api\/v1\/projects\/frontend-(fixture|fieldnotes|homelab)-project\/orbs$/,
+        async (route) => {
+          if (route.request().method() !== "GET") return route.continue();
+          const response = await route.fetch();
+          await gate;
+          await route.fulfill({ response });
+        },
+      );
+      try {
+        const lastList = page.waitForResponse(
+          (response) =>
+            response.request().method() === "GET" &&
+            new URL(response.url()).pathname ===
+              "/api/v1/projects/frontend-scratchpad-project/orbs",
+        );
+        await page.goto(`${origin}${path}`);
+        await (await lastList).finished();
+        // Load every font face first so only list arrival can move the link afterwards.
+        await page.evaluate(() =>
+          Promise.all(
+            [...Reflect.get(globalThis, "document").fonts].map(
+              (face: { load(): Promise<unknown> }) => face.load(),
+            ),
+          ),
+        );
+        release();
+        await expectPage(page.locator('a[href="/orbs/frontend-offline-sync"]')).toBeVisible();
+        await expectPage(
+          page.getByRole("link", { name: "New Pi orb in scratchpad", exact: true }),
+        ).toBeVisible();
+        expectPage(
+          await page.evaluate(() => Reflect.get(globalThis, "__scratchpadLinkPositions")),
+        ).toHaveLength(1);
+      } finally {
+        release();
+        await page.close();
+      }
+    },
+  );
 
   it("retains stale fleet rows, recovers partial failures, and fences old polls after config saves", async () => {
     const page = await browser.newPage();

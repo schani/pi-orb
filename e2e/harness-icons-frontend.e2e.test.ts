@@ -174,8 +174,6 @@ it.each(["chromium", "webkit"] as const)(
           const header = scope
             .locator(".project-head")
             .filter({ has: page.getByRole("heading", { name: "scratchpad", exact: true }) });
-          // A project list landing mid-click moves the link; WebKit drops the click.
-          await check(scope.locator(".project-progress")).toHaveCount(0);
           await header.getByRole("link", { name, exact: true }).click();
           await requested;
           check(posts[0]).toMatchObject({ harness });
@@ -217,27 +215,11 @@ it.each(["chromium", "webkit"] as const)(
           before: undefined as unknown,
         };
         nativeEvidence.push(evidence);
-        // Headers precede orb-list hydration, which changes their pointer coordinates.
-        const lists = ["fixture", "fieldnotes", "homelab", "scratchpad"].map((name) =>
-          page
-            .waitForResponse(
-              (response) =>
-                response.request().method() === "GET" &&
-                new URL(response.url()).pathname ===
-                  `/api/v1/projects/frontend-${name}-project/orbs`,
-            )
-            .then(async (response) => {
-              check(response.ok()).toBe(true);
-              await response.finished();
-            }),
-        );
         await gotoFrontendFixture(
           page,
           `${origin}/orbs/frontend-fixture-orb`,
           page.locator(".orb-index .project-head").first(),
         );
-        await Promise.all(lists);
-        await check(page.locator(".orb-index .project-progress")).toHaveCount(0);
         await page.evaluate(() =>
           (globalThis as unknown as NativeBrowser).document.fonts.ready.then(() => undefined),
         );
@@ -336,7 +318,6 @@ it.each(["chromium", "webkit"] as const)(
           await gate;
           await route.continue();
         });
-        await check(page.locator(".orb-index .project-progress")).toHaveCount(0);
         await page.getByRole("link", { name: "New Pi orb in scratchpad", exact: true }).click();
         await requested;
         if (fence === "unmount") {

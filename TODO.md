@@ -8,8 +8,6 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Reserve orb index layout while project lists load** (2026-10-11; `docs/postmortems/2026-10-11-webkit-index-click-layout-shift.md`). Each arriving project list moves later headers, so a user click can land on a different link or be dropped.
-
 - **Make the suite pass or skip cleanly on macOS** (2026-10-11; evidence `.context/diag-*`, `.context/unit-*.log`, `.context/e2e-*.log` in workspace `los-angeles-v1`). All reproduce on clean `main`; CI passes them.
   - `claude-composed-lifecycle.dst.test.ts`: now runs alone after the parallel suite (`vitest.config.ts`), but still does real fsync under a 30 s wall-clock timeout, and a timed-out run is not cancelled. Bound journal I/O through a simulation-friendly boundary or an explicit budget.
   - The first frontend E2E run had a fourth, unidentified failure (output not retained); not reproduced in two further runs.

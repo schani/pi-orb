@@ -210,6 +210,14 @@ export function ProjectsPage({
         : { ...orbLists, [addressedId]: addressedOrbList },
     [addressedId, addressedOrbList, orbLists],
   );
+  // A project appears only with its list, so loading never moves a column already shown.
+  const settledProjects = useMemo(
+    () =>
+      visibleProjects?.filter(
+        (project) => (visibleOrbLists[project.id]?.type ?? "loading") !== "loading",
+      ) ?? null,
+    [visibleOrbLists, visibleProjects],
+  );
   const searchSource = useMemo(
     () =>
       buildDashboardSearchSource({
@@ -288,8 +296,8 @@ export function ProjectsPage({
       return;
     }
     if (
-      visibleProjects === null ||
-      !visibleProjects.some((project) => project.id === focusedProjectId) ||
+      settledProjects === null ||
+      !settledProjects.some((project) => project.id === focusedProjectId) ||
       lastFocusedProjectIdRef.current === focusedProjectId
     ) {
       return;
@@ -298,7 +306,7 @@ export function ProjectsPage({
     focusedProjectRef.current?.scrollIntoView({ block: "center" });
     if (!mcpConfigOpen)
       focusedProjectRef.current?.querySelector<HTMLElement>("[data-project-heading]")?.focus();
-  }, [focusedProjectId, visibleProjects, mcpConfigOpen]);
+  }, [focusedProjectId, settledProjects, mcpConfigOpen]);
 
   // Keep names and activity current, including when no lifecycle work is pending.
   useEffect(() => {
@@ -386,7 +394,7 @@ export function ProjectsPage({
       list?.type === "loaded" ? list.items : [],
     ]),
   );
-  const ordered = visibleProjects === null ? [] : orderProjects(visibleProjects, loadedOrbs);
+  const ordered = settledProjects === null ? [] : orderProjects(settledProjects, loadedOrbs);
   const totals = dashboardTotals(visibleProjects ?? [], loadedOrbs);
   const configProject = mcpConfigOpen
     ? visibleProjects?.find((project) => project.id === focusedProjectId)
@@ -484,7 +492,6 @@ export function ProjectsPage({
                 </div>
               ) : (
                 <>
-                  {orbList.type === "loading" && <div className="project-progress">loading…</div>}
                   {orbList.type === "failed" && (
                     <div className="banner banner-error project-column-error">
                       failed to load orbs: {describeApiError(orbList.error)}

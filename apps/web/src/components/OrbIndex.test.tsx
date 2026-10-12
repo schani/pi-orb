@@ -115,8 +115,6 @@ describe("stacked project index", () => {
     expect(stale).toContain('href="/orbs/orb-1"');
     const failed = renderToStaticMarkup(<IndexProject {...props} list={{ items: null, error }} />);
     expect(failed).toContain("Failed to load orbs");
-    const loading = renderToStaticMarkup(<IndexProject {...props} list={undefined} />);
-    expect(loading).toContain("loading…");
   });
 
   it("disables creation/config/delete and shows project deletion progress", () => {
