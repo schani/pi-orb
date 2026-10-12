@@ -960,14 +960,14 @@ belongs only to `884003e`. No push or deployment occurred.
 
 ## HTTP preview rebase onto central Pi (2026-10-12; not deployed)
 
-PR #64 rebases onto main `67d881c` (65 commits, including central Durable Pi). Main's
+PR #64 rebases onto main `86266ae` (71 commits, including central Durable Pi and Pi 1.1.0). Main's
 new Tailscale call sites were removed: central self inspection `previewHost`, the
 execution runtime's tailscaled start and the `runtime-apt` package. `ViewConfig` keeps
 only `centralAgent`. Preview stream closers fire with execution connections, not
-conversation-only closes. The preview migration is renumbered to 041 because main took
-034. The PR's exact runtime-environment assertions were updated for main's
+conversation-only closes. The preview migration is renumbered to 042 because main took
+034 and 041. The PR's exact runtime-environment assertions were updated for main's
 `PI_ORB_RUNTIME_MODE` and initial-checkout variables; their first failure is preserved.
-Typecheck and lint pass; unit/DST pass 4,319 tests (24 skipped); infrastructure passes
+Typecheck and lint pass; unit/DST pass 4,330 tests (25 skipped); infrastructure passes
 94 Node, 156 Python and 27 native-VM tests. Central-Pi orbs cannot yet forward previews
 (`TODO.md`). First CI run failed deterministically in `Central process (2/4)`: main's
 process-backend job builds no Docker images, so `pi-orb-preview-fixture:dev` was absent.
