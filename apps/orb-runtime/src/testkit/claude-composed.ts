@@ -1,13 +1,4 @@
-import { randomUUID } from "node:crypto";
-import {
-  appendFileSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -32,18 +23,21 @@ function latch() {
 }
 
 /**
- * Real files and atomic renames, no fsync: in-process restarts cannot lose page cache, and contended
- * fsync latency exceeded wall-clock test timeouts. `history.test.ts` covers production fsync.
+ * Runtime journals live in memory: in-process restarts cannot lose them, and contended file
+ * metadata I/O exceeded wall-clock test timeouts. `history.test.ts` covers production files. The
+ * CLI-owned `.jsonl` transcripts stay real files, which `findNativeClaudeTranscript` lists.
  */
-export const unsyncedHistoryFiles: HistoryFiles = {
-  read: nativeHistoryFiles.read,
-  commit: (path, text) => {
-    const temporary = `${path}.${randomUUID()}.new`;
-    writeFileSync(temporary, text, { flag: "wx", mode: 0o600 });
-    renameSync(temporary, path);
-  },
-  sync: () => undefined,
-};
+export function memoryHistoryFiles(): HistoryFiles {
+  const journals = new Map<string, string>();
+  return {
+    read: (path) =>
+      journals.get(path) ?? (path.endsWith(".jsonl") ? nativeHistoryFiles.read(path) : null),
+    commit: (path, text) => {
+      journals.set(path, text);
+    },
+    sync: () => undefined,
+  };
+}
 
 /** Only the SDK process is fake: journals, normalization and admission are production code. */
 export class ComposedClaudeFixture {
@@ -59,6 +53,7 @@ export class ComposedClaudeFixture {
   readonly nativePath = join(this.nativeDir, `${this.state.id}.jsonl`);
   readonly frames: ServerFrame[] = [];
   readonly queries: ScheduledClaudeQuery[] = [];
+  readonly files = memoryHistoryFiles();
   readonly history: ClaudeHistory;
   readonly agent: ClaudeOrbAgent;
   failCommit = false;
@@ -74,14 +69,14 @@ export class ComposedClaudeFixture {
       this.state.id,
       this.state.timestamp,
       {
-        ...unsyncedHistoryFiles,
+        ...this.files,
         commit: (path, text) => {
           if (this.failCommit) throw new Error("injected history commit failure");
-          unsyncedHistoryFiles.commit(path, text);
+          this.files.commit(path, text);
         },
         sync: (path) => {
           if (this.failSync) throw new Error("injected native fsync failure");
-          unsyncedHistoryFiles.sync(path);
+          this.files.sync(path);
         },
       },
     );
@@ -92,7 +87,7 @@ export class ComposedClaudeFixture {
       skillsDir: null,
       broker: null,
       incarnation: "0",
-      files: unsyncedHistoryFiles,
+      files: this.files,
       sdkFactory: (input, options) => {
         const query = new ScheduledClaudeQuery(input, options, this.queries.length === 0);
         this.queries.push(query);
@@ -135,7 +130,9 @@ export class ComposedClaudeFixture {
     );
   }
   journal(): NativeState {
-    return JSON.parse(readFileSync(join(this.dir, "claude", "session.json"), "utf8"));
+    const text = this.files.read(join(this.dir, "claude", "session.json"));
+    if (text === null) throw new Error("fixture session journal not committed");
+    return JSON.parse(text);
   }
   receipt(message: SDKUserMessage) {
     this.append({

@@ -1,18 +1,18 @@
-import fs, { existsSync } from "node:fs";
+import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { nativeHistoryFiles } from "../claude/history.ts";
 import { ComposedClaudeFixture } from "./claude-composed.ts";
 
-it("commits agent and history journals to real files without fsync", async () => {
-  const fsync = vi.spyOn(fs, "fsyncSync");
-  syncBuiltinESMExports();
+it("keeps agent and history journals in memory, off disk and without fsync", async () => {
   const f = new ComposedClaudeFixture();
+  const writes = [vi.spyOn(fs, "renameSync"), vi.spyOn(fs, "fsyncSync")];
+  syncBuiltinESMExports();
   try {
     nativeHistoryFiles.commit(join(f.dir, "control.json"), "{}");
-    expect(fsync).toHaveBeenCalled();
-    fsync.mockClear();
+    for (const write of writes) expect(write).toHaveBeenCalled();
+    for (const write of writes) write.mockClear();
 
     expect((await f.attach()).isOk()).toBe(true);
     expect(
@@ -20,13 +20,15 @@ it("commits agent and history journals to real files without fsync", async () =>
     ).toBe(true);
     f.append({ type: "user", uuid: "native", message: { content: "hello" } });
     expect(f.history.scan(f.nativePath).isOk()).toBe(true);
+    expect(f.history.view.map((record) => record.id)).toContain("native");
 
     expect(f.journal().id).toBe(f.state.id);
-    expect(existsSync(join(f.dir, "claude", "provenance.json"))).toBe(true);
-    expect(fsync).not.toHaveBeenCalled();
+    expect(f.files.read(join(f.dir, "claude", "provenance.json"))).not.toBeNull();
+    expect(fs.readdirSync(join(f.dir, "claude"))).toEqual([]);
+    for (const write of writes) expect(write).not.toHaveBeenCalled();
   } finally {
-    f.dispose();
-    fsync.mockRestore();
+    for (const write of writes) write.mockRestore();
     syncBuiltinESMExports();
+    f.dispose();
   }
 });

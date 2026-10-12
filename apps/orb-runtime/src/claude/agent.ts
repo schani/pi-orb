@@ -545,6 +545,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       join(this.options.workDir, "claude"),
       this.state.id,
       this.state.timestamp,
+      this.files,
     );
     const restored = this.flushHistory();
     if (restored.isErr()) {

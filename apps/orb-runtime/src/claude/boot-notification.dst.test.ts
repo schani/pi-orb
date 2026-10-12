@@ -22,6 +22,7 @@ it("a crash or abort after the durable boot claim cancels admission before the n
       workDir: f.dir,
       skillsDir: null,
       broker: null,
+      files: f.files,
       sdkFactory: (input, options) => {
         const query = new ScheduledClaudeQuery(input, options, queries.length === 0);
         if (queries.length > 0)
@@ -54,7 +55,7 @@ it("a crash or abort after the durable boot claim cancels admission before the n
             expect(agent.gateView().activity).toBe("busy");
             expect(agent.prepareIdleStop()._unsafeUnwrap()).toBe(false);
             const entries = claudeBootEntries(
-              new ClaudeHistory(join(f.dir, "claude"), f.state.id, f.state.timestamp).view,
+              new ClaudeHistory(join(f.dir, "claude"), f.state.id, f.state.timestamp, f.files).view,
             );
             const next = planBootNotification(entries, entries, {
               runtimeInstanceId: "after-crash",

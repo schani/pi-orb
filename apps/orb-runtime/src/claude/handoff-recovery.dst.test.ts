@@ -9,7 +9,7 @@ import {
   submitReceipt,
 } from "../testkit/claude-composed.ts";
 import { runDst } from "../testkit/sim.ts";
-import { ClaudeHistory, nativeHistoryFiles } from "./history.ts";
+import { ClaudeHistory } from "./history.ts";
 import { qualifyClaudeRestart, reconcileClaudeHandoffs } from "./restore.ts";
 
 it.each(["terminal", "disposition"] as const)(
@@ -50,6 +50,7 @@ it.each(["terminal", "disposition"] as const)(
                 join(f.dir, "claude"),
                 journal.id,
                 journal.timestamp,
+                f.files,
               );
               expect(history.scan(f.nativePath).isOk()).toBe(true);
               const publish = (id: string, overflow: JsonObject) =>
@@ -81,6 +82,7 @@ it.each(["terminal", "disposition"] as const)(
                 join(f.dir, "claude"),
                 reopened.id,
                 reopened.timestamp,
+                f.files,
               );
               expect(reopenedHistory.scan(f.nativePath).isOk()).toBe(true);
               let duplicates = 0;
@@ -104,10 +106,7 @@ it.each(["terminal", "disposition"] as const)(
                 },
                 Result.fromThrowable(
                   () =>
-                    nativeHistoryFiles.commit(
-                      join(f.dir, "claude", "session.json"),
-                      JSON.stringify(reopened),
-                    ),
+                    f.files.commit(join(f.dir, "claude", "session.json"), JSON.stringify(reopened)),
                   () => ({ message: "sidecar persistence failed" }),
                 ),
               );
@@ -121,6 +120,7 @@ it.each(["terminal", "disposition"] as const)(
                 join(f.dir, "claude"),
                 final.id,
                 final.timestamp,
+                f.files,
               );
               expect(finalHistory.scan(f.nativePath).isOk()).toBe(true);
               expect(final.pendingHandoffs).toEqual({});

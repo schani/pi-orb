@@ -336,7 +336,12 @@ it.each(["receipt", "uncertain", "child"] as const)(
               await f.agent.waitForStream();
               await f.agent.closeExtensions();
               const journal = f.journal();
-              const restored = new ClaudeHistory(`${f.dir}/claude`, journal.id, journal.timestamp);
+              const restored = new ClaudeHistory(
+                `${f.dir}/claude`,
+                journal.id,
+                journal.timestamp,
+                f.files,
+              );
               expect(restored.scan(f.nativePath).isOk()).toBe(true);
               const qualified = qualifyClaudeRestart(
                 journal,
@@ -389,6 +394,7 @@ it.each(["receipt", "uncertain", "child"] as const)(
                   skillsDir: null,
                   broker: null,
                   incarnation: "1",
+                  files: f.files,
                   sdkFactory: (prompt, options) => {
                     const query = new ScheduledClaudeQuery(prompt, options, queries.length === 0);
                     queries.push(query);

@@ -148,7 +148,7 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
       if (scenario === "missing-lifetime") {
         const retained = f.journal();
         delete retained.guardLifetime;
-        writeFileSync(join(f.dir, "claude", "session.json"), JSON.stringify(retained));
+        f.files.commit(join(f.dir, "claude", "session.json"), JSON.stringify(retained));
       }
       let currentUrl = oldUrl;
       let replacements = 0;
@@ -184,6 +184,7 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
                         skillsDir: null,
                         broker: { controlPlaneUrl: brokerUrl, runtimeToken: "synthetic-runtime" },
                         incarnation: "1",
+                        files: f.files,
                         claudeRecoveryProof:
                           scenario === "repeated-guard"
                             ? undefined
