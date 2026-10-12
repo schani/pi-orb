@@ -43,16 +43,20 @@ This is trusted-coworker browser isolation, not hostile-code compute containment
 
 ### Registration and lifetime
 
-Use `pi-orb expose <port>`, `pi-orb unexpose <port>` and `pi-orb previews`.
-Only `pi-orb previews` supports `--json`.
+Host-runtime (Claude) orbs use `pi-orb expose <port>`, `pi-orb unexpose <port>` and
+`pi-orb previews`. Only `pi-orb previews` supports `--json`.
 The runtime's bearer-authenticated PUT/DELETE `/runtime/previews/:port` and GET
-`/runtime/previews` call the registration service. Unconfigured origin returns an explicit
+`/runtime/previews` call the registration service. Central-Pi orbs use the
+`orb_expose_port`, `orb_unexpose_port` and `orb_list_previews` tools, which call the same
+service in-process (decided 2026-10-12: Pi agents use control-plane tools, not the CLI). Unconfigured origin returns an explicit
 configuration-disabled error, not a fabricated URL. Registration does not assert readiness.
 
 Migration 042 persists an orb/port allowlist with a random registration generation.
 Idempotent registration retains the generation; revoke then re-register changes it.
 Registrations survive stop/start and compute replacement; orb deletion cascades them.
-Mutations recheck parent/orb lifecycle, token and incarnation under store locks. Ports are
+Mutations recheck parent/orb lifecycle and caller authority under store locks: runtime
+callers by token and incarnation on running compute; central callers by owner and agent
+admission version, so they may register while compute is stopped. Ports are
 integers 1–65535; the CP excludes runtime port 8080, and runtime admission excludes its actual
 listener/reserved ports. Actual local CP listeners are excluded, not remote HTTPS port 443.
 No URL, DNS name, address or Unix socket is a selectable target.
@@ -109,7 +113,9 @@ generation, incarnation, execution ID, runtime instance ID, origin and expiry. T
 10 seconds. HMAC-SHA256 uses `runtimeTokenHash` as its key and the purpose prefix
 `pi-orb-preview-admission-v1\n`; the runtime derives the same key from its bearer token.
 Neither the key nor runtime bearer is forwarded to the preview service. Runtime verifies
-signature/expiry and its own exact target identity before opening localhost. It does not
+signature/expiry and its own exact target identity before opening localhost. The Pi/Claude
+runtime and the central-Pi execution runtime serve the same route; the execution runtime
+exempts it from its bearer check because the admission authenticates each request. It does not
 maintain a second registration database. Application Authorization is never remapped.
 
 A shared per-orb CP watcher revalidates authority every 5 seconds with a 2-second deadline,

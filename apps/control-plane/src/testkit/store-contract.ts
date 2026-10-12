@@ -364,6 +364,41 @@ export function storeSemanticsContractTests(
       ).toBe("denied");
     });
 
+    it("central callers manage previews by admission authority without compute", async () => {
+      await seed();
+      const central = {
+        kind: "central" as const,
+        ownerUserId: OWNER,
+        projectId: project.id,
+        orbId: orb.id,
+        agentAdmissionVersion: orb.agentAdmissionVersion,
+      };
+      const request = {
+        orbId: orb.id,
+        port: 5173,
+        registrationId: "00000000-0000-4000-8000-000000000052",
+        caller: central,
+        now: 3_000,
+      };
+      expect((await store.registerPreview(task, request))._unsafeUnwrap().type).toBe("registered");
+      expect(
+        (await store.listPreviews(task, request))._unsafeUnwrap()?.map((row) => row.port),
+      ).toEqual([5173]);
+      for (const caller of [
+        { ...central, agentAdmissionVersion: central.agentAdmissionVersion + 1 },
+        { ...central, ownerUserId: "00000000-0000-4000-8000-000000000098" },
+      ]) {
+        expect((await store.registerPreview(task, { ...request, caller }))._unsafeUnwrap()).toEqual(
+          { type: "denied" },
+        );
+        expect((await store.listPreviews(task, { ...request, caller }))._unsafeUnwrap()).toBeNull();
+      }
+      expect((await store.unregisterPreview(task, request))._unsafeUnwrap()).toEqual({
+        type: "revoked",
+        removed: true,
+      });
+    });
+
     async function seedHeadline() {
       await seed();
       (

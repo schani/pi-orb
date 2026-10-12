@@ -5,6 +5,8 @@ import Fastify from "fastify";
 import type { OrbAgent } from "../../apps/orb-runtime/src/domain/orb-agent.ts";
 import { RuntimePreviewService } from "../../apps/orb-runtime/src/domain/preview.ts";
 import { PreviewActivity } from "../../apps/orb-runtime/src/domain/preview-activity.ts";
+import { createExecutionPreview } from "../../apps/orb-runtime/src/execution/preview.ts";
+import { buildExecutionServer } from "../../apps/orb-runtime/src/execution/server.ts";
 import { registerPreviewRoutes } from "../../apps/orb-runtime/src/http/preview-route.ts";
 import { HmacPreviewVerifier } from "../../apps/orb-runtime/src/preview/admission.ts";
 import { startPreviewApplication } from "./preview-application.ts";
@@ -38,15 +40,32 @@ const agent = {
   getHealth: () => health,
   gateView: () => ({ acceptingWork: true }),
 } as unknown as OrbAgent;
-const app = Fastify();
-await app.register(websocket);
+// The execution mode is the image's central-Pi server; fixture routes then need its bearer.
+const execution = process.env["PREVIEW_FIXTURE_EXECUTION"] === "1";
+const app = execution
+  ? buildExecutionServer({
+      token,
+      incarnation: "0",
+      cwd: "/tmp",
+      health: () => health,
+      preview: createExecutionPreview({
+        boot: { runtimeInstanceId, health: () => health, accepting: () => true },
+        orbId,
+        token,
+        reservedPorts: () => [8080, 8081],
+      }),
+    })
+  : Fastify();
 const service = new RuntimePreviewService({
   agent,
   orbId,
   verifier: new HmacPreviewVerifier(token),
   reservedPorts: () => [8080, 8081],
 });
-app.get("/v1/health", () => health);
+if (!execution) {
+  await app.register(websocket);
+  app.get("/v1/health", () => health);
+}
 app.get("/__fixture/info", () => ({
   ports: [application.port, wrong.port, vite.port],
   requests: application.requests,
@@ -68,7 +87,7 @@ app.post<{ Body: { value: string } }>("/__fixture/vite", async (request) => {
   await vite.update(request.body.value);
   return { ok: true };
 });
-await app.register(async (scope) => registerPreviewRoutes(scope, service));
+if (!execution) await app.register(async (scope) => registerPreviewRoutes(scope, service));
 if (process.env["PREVIEW_FIXTURE_UNIX"] === "1") {
   await startPreviewSocketBridge("/fixture/broker.sock", 8081);
   await rm("/fixture/runtime.sock", { force: true });

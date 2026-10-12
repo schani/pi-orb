@@ -975,6 +975,19 @@ process-backend job builds no Docker images, so `pi-orb-preview-fixture:dev` was
 Docker-image E2Es; the Docker E2E job still runs it. Evidence:
 `.context/http-preview/rebase-20261012-*`. No local E2E, deployment or live-cloud mutation.
 
+## Central-Pi preview tools (2026-10-12; not deployed)
+
+Tests first: store contract (in-memory, PGlite), central operations DST, tool mapping,
+central prompt, execution boot identity and execution-server preview routing failed before
+implementation (`.context/central-preview/red.log`). Central callers register by owner and
+admission version without compute; the execution runtime serves HMAC-admitted
+`/v1/preview/:port`. `e2e/preview-central.e2e.test.ts` registers through the real tool and
+forwards HTTP and WebSocket traffic through the image's execution server. Its first run
+failed on a test-ordering error: an API probe preceded the preview-origin login handoff
+(`e2e-1.log`); navigation now runs first. Unit/DST pass 4,335 tests (25 skipped);
+infrastructure passes 94 Node, 156 Python and 27 native-VM tests; the four other preview
+E2E files pass on Chromium and WebKit. No deployment.
+
 ## Deterministic simulation testing strategy
 
 The [`determined`](https://www.npmjs.com/package/determined) package provides cooperative deterministic scheduling, reproducible entropy, failpoints, blocking primitives, deadlock detection, and exact record/replay of failing schedules. pi-orb does not require timed mutex or condition-variable APIs: it coordinates with database compare-and-swap, explicit lifecycle state, serialized in-process mutation queues, and cancellable adapter operations. Virtual sleep/deadline timers only need to participate correctly in scheduler quiescence and cancellation.

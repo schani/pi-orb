@@ -8,7 +8,7 @@ import { parseDockerLoopbackPort } from "../docker-port.ts";
 import { docker } from "../harness.ts";
 import { startPreviewSocketBridge } from "./preview-socket-bridge.ts";
 
-export async function startPreviewDockerRuntime() {
+export async function startPreviewDockerRuntime(options: { execution?: boolean } = {}) {
   const name = `pi-orb-preview-fixture-${randomUUID()}`;
   const orbId = randomUUID();
   const token = randomUUID();
@@ -42,6 +42,7 @@ export async function startPreviewDockerRuntime() {
     `PREVIEW_FIXTURE_ORB=${orbId}`,
     "--env",
     `PREVIEW_FIXTURE_TOKEN=${token}`,
+    ...(options.execution ? ["--env", "PREVIEW_FIXTURE_EXECUTION=1"] : []),
     "--entrypoint",
     "node",
     "pi-orb-preview-fixture:dev",
@@ -84,7 +85,17 @@ export async function startPreviewDockerRuntime() {
     const publishedOrigin = async () =>
       `http://127.0.0.1:${parseDockerLoopbackPort(await docker(["port", name, "8080/tcp"]))._unsafeUnwrap()}`;
     let baseUrl = bridge?.origin ?? (await publishedOrigin());
-    const info = (await (await fetch(`${baseUrl}/__fixture/info`)).json()) as { ports: number[] };
+    // The execution server authenticates every non-preview route, fixture controls included.
+    const fixture = (path: string, init: RequestInit = {}) =>
+      fetch(`${baseUrl}${path}`, {
+        ...init,
+        headers: {
+          ...(init.headers as Record<string, string> | undefined),
+          authorization: `Bearer ${token}`,
+          "x-orb-incarnation": "0",
+        },
+      });
+    const info = (await (await fixture("/__fixture/info")).json()) as { ports: number[] };
     return {
       name,
       orbId,
@@ -96,7 +107,7 @@ export async function startPreviewDockerRuntime() {
       ports: info.ports,
       logs: () => logs,
       info: async () =>
-        (await fetch(`${baseUrl}/__fixture/info`)).json() as Promise<{
+        (await fixture("/__fixture/info")).json() as Promise<{
           requests: { path: string; headers: Record<string, string> }[];
           wrongRequests: number;
           frames: unknown[];
@@ -104,15 +115,15 @@ export async function startPreviewDockerRuntime() {
           runtimeInstanceId: string;
           executionId: string;
         }>,
-      finishBinary: () => fetch(`${baseUrl}/__fixture/binary`, { method: "POST" }),
+      finishBinary: () => fixture("/__fixture/binary", { method: "POST" }),
       event: (data: string) =>
-        fetch(`${baseUrl}/__fixture/event`, {
+        fixture("/__fixture/event", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ data }),
         }),
       update: (value: string) =>
-        fetch(`${baseUrl}/__fixture/vite`, {
+        fixture("/__fixture/vite", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ value }),

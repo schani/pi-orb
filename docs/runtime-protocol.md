@@ -86,6 +86,7 @@ headers derive from signed admission origin. Actual local CP listeners are reser
 port 443. Shared browser WS parsing remains 8 MiB (existing live prompts up to 6 MiB); preview
 frames/queues and private preview parsing are capped at 1 MiB. Ready health exposes
 execution ID and incarnation; preview admission requires these plus runtime instance ID.
+The central-Pi execution runtime serves the same route and reports the same identity fields.
 Only registered isolated GCE/Docker ports are supported. Activity protects idle stop without
 agent-working mutation; explicit Stop wins. No retries or body/message replay. Domain/TLS and
 external ingress acceptance remain pending; source qualification is not deployment.

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { PreviewError } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, ResultAsync } from "neverthrow";
 import { acceptsCentralAgentCaller } from "./agent-authorization.ts";
@@ -7,6 +8,12 @@ import type { OrbRow } from "./orb.ts";
 import { normalizeOrbName } from "./orb-naming.ts";
 import { spawnOrb } from "./orb-spawning.ts";
 import type { CentralAgentCaller, ControlPlaneDeps } from "./ports.ts";
+import {
+  exposePreview,
+  listRegisteredPreviews,
+  type PreviewRegistrationDeps,
+  unexposePreview,
+} from "./preview-registration.ts";
 
 export interface OrbAgentIdentity {
   readonly ownerUserId: string;
@@ -16,7 +23,8 @@ export interface OrbAgentIdentity {
   readonly runtimeTokenHash: string;
 }
 export type OrbAgentRequest =
-  | { kind: "self" | "list" | "archive" | "delete" }
+  | { kind: "self" | "list" | "archive" | "delete" | "list_previews" }
+  | { kind: "expose_port" | "unexpose_port"; port: number }
   | { kind: "transcript"; orbId: string }
   | { kind: "spawn"; prompt: string; name?: string }
   | { kind: "alert"; message: string }
@@ -43,6 +51,8 @@ export interface OrbAgentOptions {
     message: string,
     expectedAdmissionVersion: number,
   ) => ResultAsync<{ recordId: string }, OrbAgentError>;
+  /** Absent when HTTP previews are not configured. */
+  readonly previews?: Omit<PreviewRegistrationDeps, "store">;
 }
 const failure = (code: OrbAgentError["code"], message: string): OrbAgentError => ({
   code,
@@ -69,6 +79,19 @@ export function createOrbAgentOperations(
     hostIncarnation: (identity as OrbAgentIdentity).incarnation,
   };
   const unavailable = () => failure("unavailable", "orb operation unavailable");
+  const previews: PreviewRegistrationDeps | null = options.previews
+    ? { store: deps.store, ...options.previews }
+    : null;
+  const previewsDisabled = () => failure("unavailable", "HTTP previews are not configured");
+  const previewFailure = (error: PreviewError): OrbAgentError =>
+    failure(
+      error.code === "unauthenticated"
+        ? "unauthorized"
+        : error.code === "invalid_request" || error.code === "reserved_port"
+          ? "invalid_request"
+          : "unavailable",
+      error.message,
+    );
   const item = (orb: OrbRow, project: { id: string; name: string; repositoryUrl: string }) => ({
     id: orb.id,
     name: orb.name,
@@ -206,6 +229,23 @@ export function createOrbAgentOperations(
               return await requestOrbDeletion(task, deps, orb.id, caller)
                 .map((row) => ({ orbId: row.id, state: row.state }))
                 .mapErr((e) => failure(e.code, e.message));
+            case "expose_port":
+              if (previews === null) return err(previewsDisabled());
+              return (
+                await exposePreview(task, previews, { orbId: orb.id, port: request.port, caller })
+              ).mapErr(previewFailure);
+            case "unexpose_port":
+              if (previews === null) return err(previewsDisabled());
+              return (
+                await unexposePreview(task, previews, { orbId: orb.id, port: request.port, caller })
+              )
+                .map(() => ({ port: request.port, revoked: true }))
+                .mapErr(previewFailure);
+            case "list_previews":
+              if (previews === null) return err(previewsDisabled());
+              return (
+                await listRegisteredPreviews(task, previews, { orbId: orb.id, caller })
+              ).mapErr(previewFailure);
           }
         })(),
       );

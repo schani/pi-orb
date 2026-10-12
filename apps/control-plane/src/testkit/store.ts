@@ -96,13 +96,11 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     orb: OrbRow | undefined,
     caller: import("../domain/ports.ts").ArchiveCaller,
   ): boolean {
+    const project = orb === undefined ? undefined : this.projects.get(orb.projectId);
     return (
       orb !== undefined &&
-      orb.state === "running" &&
-      orb.hostDiscardThroughIncarnation === null &&
-      orb.runtimeTokenHash === caller.runtimeTokenHash &&
-      orb.hostIncarnation === caller.hostIncarnation &&
-      this.projects.get(orb.projectId)?.state === "active" &&
+      acceptsOrbAgentCaller(orb, project?.ownerUserId, caller) &&
+      project?.state === "active" &&
       !this.deletions.has(orb.id)
     );
   }

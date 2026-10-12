@@ -21,6 +21,7 @@ interface Request {
 interface PortRequest extends Request {
   readonly port: number;
 }
+const callerKind = (caller: ArchiveCaller) => (caller.kind === "central" ? "central" : "runtime");
 const denied = () => previewError("unauthenticated", "Runtime identity is retired or unavailable");
 const unavailable = () => previewError("store_unavailable", "Preview registration unavailable");
 export async function authenticatePreviewRegistration(
@@ -61,6 +62,7 @@ export async function exposePreview(
   if (result.isErr()) {
     logOrbEvent(task, request.orbId, "preview-registration-failed", {
       port: request.port,
+      caller: callerKind(request.caller),
       reason: result.error.code,
     });
     return err(unavailable());
@@ -69,6 +71,7 @@ export async function exposePreview(
   if (result.value.created)
     logOrbEvent(task, request.orbId, "preview-registered", {
       port: request.port,
+      caller: callerKind(request.caller),
       registrationId: result.value.registration.registrationId,
     });
   return ok({
@@ -88,13 +91,17 @@ export async function unexposePreview(
   if (result.isErr()) {
     logOrbEvent(task, request.orbId, "preview-revocation-failed", {
       port: request.port,
+      caller: callerKind(request.caller),
       reason: result.error.code,
     });
     return err(unavailable());
   }
   if (result.value.type === "denied") return err(denied());
   if (result.value.removed)
-    logOrbEvent(task, request.orbId, "preview-revoked", { port: request.port });
+    logOrbEvent(task, request.orbId, "preview-revoked", {
+      port: request.port,
+      caller: callerKind(request.caller),
+    });
   return ok(undefined);
 }
 export async function listRegisteredPreviews(

@@ -19,6 +19,7 @@ import { BootHookRunner } from "../hooks/runner.ts";
 import { NodeHookSpawner } from "../hooks/spawner.ts";
 import { initialCheckoutCommands } from "../initial-checkout.ts";
 import { awaitInitialCheckoutCommit } from "../pending-initial-checkout.ts";
+import { readExecutionIdentity } from "../pi/execution-identity.ts";
 import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts";
 import { repositoryResources } from "../repository-resources.ts";
 import { checkTestLaunchFailure } from "../test-launch-failure.ts";
@@ -51,7 +52,8 @@ const git = (args: string[], cwd: string) =>
 export class ExecutionBoot {
   snapshot: ExecutionReady | null = null;
   private hooks: BootHookRunner | null = null;
-  private readonly runtimeInstanceId = randomUUID();
+  readonly runtimeInstanceId = randomUUID();
+  private executionId: string | null = null;
   private readonly bootAbort = new AbortController();
   private phase: "booting" | "cloning" | "setup_running" | "checking_project_secrets" = "booting";
   private error: BootError | null = null;
@@ -75,6 +77,8 @@ export class ExecutionBoot {
       return {
         ...base,
         status: "ready",
+        incarnation: Number(this.options.incarnation),
+        ...(this.executionId === null ? {} : { executionId: this.executionId }),
         sessionId: `execution-${this.options.orbId}`,
         checkoutCommit: this.snapshot.checkoutCommit,
         activity: "idle",
@@ -98,6 +102,14 @@ export class ExecutionBoot {
   }
   private async steps(): Promise<Result<void, BootError>> {
     const o = this.options;
+    const identity = readExecutionIdentity(o.environment);
+    if (identity.isErr())
+      return err({
+        type: "execution_boot_error",
+        code: "execution_identity_failed",
+        message: identity.error.message,
+      });
+    this.executionId = identity.value;
     const launchFailure = checkTestLaunchFailure(o.environment, o.workDir);
     if (launchFailure.error !== undefined) console.error(launchFailure.error);
     if (launchFailure.inject)

@@ -705,6 +705,7 @@ export async function main(
         mcpOAuth,
         modelUsage: database.modelUsage,
         appOrigin: appOrigin || `http://127.0.0.1:${port}`,
+        previews: { url: previewHosts?.url ?? null, newId: randomUUID, reservedPort: 8080 },
         inferenceBaseUrl: (userId) =>
           (adapters.mockOpenAiForUser?.(userId) ?? mockOpenAi)?.inferenceBaseUrl,
         appendAlert: (orbId, requestId, message, expectedAdmissionVersion) => {

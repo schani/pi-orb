@@ -3,19 +3,27 @@ import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import websocket from "@fastify/websocket";
 import { CONTROL_PLANE_URL_ENV, RUNTIME_TOKEN_ENV } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
 import { okAsync, ResultAsync } from "neverthrow";
+import { createOrbTools } from "../../apps/control-plane/src/adapters/durable/tools/orb-tools.ts";
 import { FetchRuntimeClient } from "../../apps/control-plane/src/adapters/runtime-client/fetch-client.ts";
 import { NodePreviewClient } from "../../apps/control-plane/src/adapters/runtime-client/preview-client.ts";
 import { requestOrbStart, requestOrbStop } from "../../apps/control-plane/src/domain/lifecycle.ts";
+import { createCentralOrbAgentOperations } from "../../apps/control-plane/src/domain/orb-agent-operations.ts";
 import { previewError } from "../../apps/control-plane/src/domain/preview.ts";
 import { PreviewConnections } from "../../apps/control-plane/src/domain/preview-connections.ts";
 import { registerPreviewGateway } from "../../apps/control-plane/src/http/preview-gateway.ts";
+import type { PreviewHosts } from "../../apps/control-plane/src/http/preview-host.ts";
 import { registerRuntimePreviewRoutes } from "../../apps/control-plane/src/http/runtime-preview-routes.ts";
-import { makeHarness, seedRunningOrb } from "../../apps/control-plane/src/testkit/fixtures.ts";
+import {
+  makeHarness,
+  seedRunningOrb,
+  TEST_USER_ID,
+} from "../../apps/control-plane/src/testkit/fixtures.ts";
 import type { OrbAgent } from "../../apps/orb-runtime/src/domain/orb-agent.ts";
 import { RuntimePreviewService } from "../../apps/orb-runtime/src/domain/preview.ts";
 import { PreviewActivity } from "../../apps/orb-runtime/src/domain/preview-activity.ts";
@@ -99,11 +107,13 @@ export async function startPreviewComposition(
       previewError("cancelled", "Fixture watcher closed"),
     ),
   );
+  let previewUrl: PreviewHosts["url"] | undefined;
   const auth = await startApplicationAuthFixture({
     previews: true,
     orbId,
     previewPorts: ports,
     configurePreviews: async ({ app, hosts, appOrigin }) => {
+      previewUrl = (id, port) => hosts.url(id, port);
       registerRuntimePreviewRoutes(app, task, {
         store: h.store,
         url: (id, port) => hosts.url(id, port),
@@ -159,6 +169,36 @@ export async function startPreviewComposition(
     orbId,
     activity,
     observed: () => observed,
+    /** Runs a central-Pi orb tool with the orb's real admission identity; returns its JSON text. */
+    tool: async (name: string, args: Record<string, unknown>) => {
+      const url = previewUrl;
+      if (!url) throw new Error("Preview hosts unavailable");
+      const service = createCentralOrbAgentOperations(
+        task,
+        deps,
+        {
+          ownerUserId: TEST_USER_ID,
+          projectId: seeded.projectId,
+          orbId,
+          agentAdmissionVersion: seeded.agentAdmissionVersion,
+        },
+        {
+          appOrigin: auth.appOrigin,
+          appendAlert: () => okAsync({ recordId: "unused" }),
+          previews: { url, newId: randomUUID, reservedPort: 8080 },
+        },
+      );
+      const tool = createOrbTools(service).find((candidate) => candidate.name === name);
+      if (!tool) throw new Error(`Unknown orb tool ${name}`);
+      const result = await tool.execute(
+        args as never,
+        { taskId: 1, callId: randomUUID() } as never,
+        BACKGROUND_CONTEXT,
+      );
+      const content = result.content?.[0];
+      if (content?.type !== "text") throw new Error("Orb tool returned no text");
+      return JSON.parse(content.text) as unknown;
+    },
     stopOrb: () => requestOrbStop(task, deps, orbId),
     startOrb: () => requestOrbStart(task, deps, orbId),
     cli: (args: string[]) =>

@@ -1,13 +1,14 @@
 import { join } from "node:path";
-import websocket from "@fastify/websocket";
 import { ResultAsync } from "neverthrow";
 import { readBrokerEnv } from "../broker/endpoint.ts";
 import { ORB_MARKER_ENV } from "../hooks/env-file.ts";
 import { registerTerminalRoute } from "../http/terminal-route.ts";
+import { runtimeReservedPorts } from "../preview/reserved-ports.ts";
 import { TerminalManager } from "../terminal/manager.ts";
 import { registerUploadRoutes } from "../uploads/routes.ts";
 import { forwardExecutionAlert } from "./alert-forwarder.ts";
 import { ExecutionBoot } from "./boot.ts";
+import { createExecutionPreview } from "./preview.ts";
 import { buildExecutionServer } from "./server.ts";
 
 const env = (name: string): string => {
@@ -37,9 +38,25 @@ const app = buildExecutionServer({
   cwd: join(workDir, "repo"),
   ready: () => boot.snapshot,
   health: () => boot.health(),
+  preview: createExecutionPreview({
+    boot: {
+      runtimeInstanceId: boot.runtimeInstanceId,
+      health: () => boot.health(),
+      accepting: () => boot.snapshot !== null,
+    },
+    orbId: env("PI_ORB_ID"),
+    token,
+    reservedPorts: () => {
+      const address = app.server.address();
+      return runtimeReservedPorts(
+        address !== null && typeof address !== "string" ? address.port : 0,
+        process.env,
+      );
+    },
+  }),
 });
 const terminals = new TerminalManager({ cwd: join(workDir, "repo") });
-await app.register(websocket);
+await app.after();
 registerTerminalRoute(app, { manager: terminals, isReady: () => boot.snapshot !== null });
 await registerUploadRoutes(app, { workDir, incarnation, ready: () => boot.snapshot !== null });
 app.addHook("onClose", async () => {

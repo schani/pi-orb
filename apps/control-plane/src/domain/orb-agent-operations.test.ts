@@ -1,8 +1,8 @@
 import { NoSimulationTask } from "determined";
-import { okAsync } from "neverthrow";
+import { ok, okAsync } from "neverthrow";
 import { describe, expect, it, vi } from "vitest";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
-import { runDst } from "../testkit/sim.ts";
+import { LogCapture, runDst } from "../testkit/sim.ts";
 import {
   createCentralOrbAgentOperations,
   createOrbAgentOperations,
@@ -310,6 +310,82 @@ describe("central orb operations", () => {
           caller: { runtimeTokenHash: "token", hostIncarnation: 1 },
         });
       }
+    });
+  });
+  it("registers, lists and revokes central previews without running compute", async () => {
+    const logs = new LogCapture();
+    await runDst({ name: "central-previews", iterations: 5, logCapture: logs }, async (sim) => {
+      const h = seed();
+      h.store.seedOrb(
+        makeOrbRow("caller", "project", "stopped", { hostRef: null, runtimeTokenHash: null }),
+      );
+      const central = {
+        ownerUserId: "owner",
+        projectId: "project",
+        orbId: "caller",
+        agentAdmissionVersion: 0,
+      };
+      const previews = {
+        url: (orbId: string, port: number) => ok(`https://${port}-${orbId}.preview.test`),
+        newId: () => "registration-1",
+        reservedPort: 8080,
+      };
+      const options = { appOrigin: "http://app", appendAlert: () => okAsync({ recordId: "a" }) };
+      const result = await sim.runTasks([
+        {
+          name: "previews",
+          f: async (task) => {
+            const service = createCentralOrbAgentOperations(task, h.deps, central, {
+              ...options,
+              previews,
+            });
+            const registration = {
+              port: 5173,
+              registrationId: "registration-1",
+              url: "https://5173-caller.preview.test",
+            };
+            expect(
+              (await service.invoke({ kind: "expose_port", port: 5173 }, "expose"))._unsafeUnwrap(),
+            ).toEqual(registration);
+            expect(
+              (await service.invoke({ kind: "list_previews" }, "list"))._unsafeUnwrap(),
+            ).toEqual([registration]);
+            expect(
+              (
+                await service.invoke({ kind: "expose_port", port: 8080 }, "reserved")
+              )._unsafeUnwrapErr().code,
+            ).toBe("invalid_request");
+            expect(
+              (await service.invoke({ kind: "unexpose_port", port: 5173 }, "unexpose")).isOk(),
+            ).toBe(true);
+            expect(
+              (await service.invoke({ kind: "list_previews" }, "empty"))._unsafeUnwrap(),
+            ).toEqual([]);
+            const disabled = createCentralOrbAgentOperations(task, h.deps, central, options);
+            expect(
+              (
+                await disabled.invoke({ kind: "expose_port", port: 5173 }, "off")
+              )._unsafeUnwrapErr(),
+            ).toEqual({ code: "unavailable", message: "HTTP previews are not configured" });
+            const row = h.store.orbSnapshot("caller");
+            if (!row) throw new Error("caller missing");
+            h.store.seedOrb({ ...row, agentAdmissionVersion: 1 });
+            expect(
+              (
+                await service.invoke({ kind: "expose_port", port: 5173 }, "stale")
+              )._unsafeUnwrapErr().code,
+            ).toBe("unauthorized");
+          },
+        },
+      ]);
+      expect(result.isOk()).toBe(true);
+      // Operators can tell tool registrations from runtime CLI ones.
+      expect(logs.matching("preview-registered")).toEqual([
+        expect.stringMatching(/preview-registered port=5173 caller=central /),
+      ]);
+      expect(logs.matching("preview-revoked")).toEqual([
+        expect.stringMatching(/preview-revoked port=5173 caller=central$/),
+      ]);
     });
   });
   it("passes alert request IDs to the authoritative append port", async () => {

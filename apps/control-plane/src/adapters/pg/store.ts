@@ -367,7 +367,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   ) {
     return this.db.transaction<T, StoreError>(async (query) => {
       const project = await query(
-        "SELECT state FROM projects WHERE id=(SELECT project_id FROM orbs WHERE id=$1) FOR SHARE",
+        "SELECT state, owner_user_id FROM projects WHERE id=(SELECT project_id FROM orbs WHERE id=$1) FOR SHARE",
         [input.orbId],
       );
       if (project.isErr()) return err(project.error);
@@ -378,10 +378,11 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       if (!raw) return ok(denied);
       const orb = mapOrbRow(raw);
       if (
-        orb.state !== "running" ||
-        orb.hostDiscardThroughIncarnation !== null ||
-        orb.runtimeTokenHash !== input.caller.runtimeTokenHash ||
-        orb.hostIncarnation !== input.caller.hostIncarnation
+        !acceptsOrbAgentCaller(
+          orb,
+          project.value.rows[0]?.["owner_user_id"] as string | undefined,
+          input.caller,
+        )
       )
         return ok(denied);
       const deletion = await query("SELECT orb_id FROM orb_deletions WHERE orb_id=$1", [

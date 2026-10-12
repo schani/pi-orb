@@ -2,12 +2,20 @@ import type { PreviewAdmission, PreviewError, PreviewTarget } from "@pi-orb/prot
 import { err, ok, type Result } from "neverthrow";
 import type { OrbAgent } from "./orb-agent.ts";
 import type { PreviewLease } from "./preview-activity.ts";
+import type { AgentGateView } from "./requests.ts";
 
 export interface PreviewVerifier {
   verify(encoded: string, now: number): Result<PreviewAdmission, PreviewError>;
 }
+/** What admission needs from a runtime; the Pi/Claude agent and the execution host both provide it. */
+export type PreviewRuntime = Pick<
+  OrbAgent,
+  "getHealth" | "previewActivity" | "runtimeInstanceId"
+> & {
+  gateView(): Pick<AgentGateView, "acceptingWork">;
+};
 export interface RuntimePreviewOptions {
-  agent: OrbAgent;
+  agent: PreviewRuntime;
   orbId: string;
   verifier: PreviewVerifier;
   reservedPorts: () => readonly number[];
