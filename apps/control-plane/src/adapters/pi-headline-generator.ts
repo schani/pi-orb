@@ -3,12 +3,14 @@ import { type ActivityHeadlineSource, capHeadline } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { getToken } from "../domain/broker.ts";
+import type { ModelUsageLedger } from "../domain/model-usage.ts";
 import type {
   ActivityHeadlineGenerationError,
   ActivityHeadlineGenerator,
   BrokerDeps,
   OperationContext,
 } from "../domain/ports.ts";
+import { modelCall } from "./model-usage.ts";
 
 const failure = (
   stage: ActivityHeadlineGenerationError["stage"],
@@ -21,18 +23,21 @@ const failure = (
 
 export class PiActivityHeadlineGenerator implements ActivityHeadlineGenerator {
   private readonly brokerForUser: (userId: string) => BrokerDeps;
+  private readonly modelUsage: ModelUsageLedger;
   private readonly inferenceBaseUrl: string | null;
   constructor(
     brokerForUser: (userId: string) => BrokerDeps,
+    modelUsage: ModelUsageLedger,
     inferenceBaseUrl: string | null = null,
   ) {
     this.brokerForUser = brokerForUser;
+    this.modelUsage = modelUsage;
     this.inferenceBaseUrl = inferenceBaseUrl;
   }
 
   generate(
     task: SimulationTask,
-    input: { ownerUserId: string; source: ActivityHeadlineSource },
+    input: { ownerUserId: string; orbId: string; source: ActivityHeadlineSource },
     context: OperationContext & { readonly deadlineAt: number },
   ): ResultAsync<string, ActivityHeadlineGenerationError> {
     const stopped = () => context.signal.aborted || task.monotonicNow() >= context.deadlineAt;
@@ -64,6 +69,14 @@ export class PiActivityHeadlineGenerator implements ActivityHeadlineGenerator {
               maxTokens: 96,
               sessionPrefix: "pi-orb-activity-headline",
               signal: context.signal,
+              onResponse: (response) =>
+                this.modelUsage.record(
+                  task,
+                  modelCall(
+                    { ownerUserId: input.ownerUserId, orbId: input.orbId, use: "headline" },
+                    response,
+                  ),
+                ),
               auth: {
                 apiKey: grant.accessToken,
                 ...(this.inferenceBaseUrl === null ? {} : { baseUrl: this.inferenceBaseUrl }),

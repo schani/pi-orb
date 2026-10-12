@@ -6,6 +6,7 @@ import {
   postgreSQLHostingContractSubject,
 } from "../apps/control-plane/src/adapters/pg/hosting.contract.ts";
 import { PostgreSQLHostingStore } from "../apps/control-plane/src/adapters/pg/hosting.ts";
+import { modelUsageLedgerContractTests } from "../apps/control-plane/src/adapters/pg/model-usage.contract.ts";
 import { openThrowawayPostgres } from "../apps/control-plane/src/testkit/postgres.ts";
 import { storeContractTests } from "../apps/control-plane/src/testkit/store-contract.ts";
 import { parseDockerLoopbackPort } from "./docker-port.ts";
@@ -83,6 +84,9 @@ if (providedUrl === "" && PROCESS_BACKEND) {
     return subject.client;
   });
   storeContractTests("node-postgres (real server)", () => openThrowawayPostgres(connectionString));
+  modelUsageLedgerContractTests("node-postgres (real server)", () =>
+    openThrowawayPostgres(connectionString),
+  );
   hostingStoreContractTests("node-postgres (real server)", async () => {
     const subject = await openThrowawayPostgres(connectionString);
     return postgreSQLHostingContractSubject(

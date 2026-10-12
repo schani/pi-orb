@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
@@ -19,7 +18,7 @@ const json = (
     devDependencies?: Record<string, string>;
   };
 
-const piVersion = "1.0.0";
+const piVersion = "1.1.0";
 const helperPath = "scripts/apply-dependency-patches.mjs";
 const patchPath = `patches/@earendil-works+pi-coding-agent+${piVersion}.patch`;
 
@@ -28,8 +27,7 @@ describe("Pi dependency patch installation", () => {
     expect(json("package.json").devDependencies?.["patch-package"]).toBeUndefined();
     for (const manifest of ["apps/orb-runtime/package.json", "apps/control-plane/package.json"]) {
       expect(json(manifest).dependencies).toMatchObject({
-        "@earendil-works/pi-coding-agent":
-          "file:../../vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz",
+        "@earendil-works/pi-coding-agent": piVersion,
       });
       expect(json(manifest).dependencies?.["patch-package"]).toBeUndefined();
     }
@@ -63,15 +61,7 @@ describe("Pi dependency patch installation", () => {
       ).toEqual([]);
   });
 
-  it("preserves the exact vendor SDK archive", () => {
-    expect(
-      createHash("sha256")
-        .update(readFileSync(join(root, "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz")))
-        .digest("hex"),
-    ).toBe("eb67747b526d862e6bd0c959a330b7897ece86ebed3a21e7cf846730e293e509");
-  });
-
-  it("installs the patched brace expansion despite Pi's bundled shrinkwrap", () => {
+  it("installs the SDK's pinned patched brace expansion", () => {
     const fromPi = createRequire(
       join(root, "node_modules/@earendil-works/pi-coding-agent/package.json"),
     );
@@ -120,10 +110,10 @@ describe("Pi dependency patch installation", () => {
     }
 
     const patchFiles = [
-      "@earendil-works+pi-agent-core+1.0.0.patch",
-      "@earendil-works+pi-ai+1.0.0.patch",
-      "@earendil-works+pi-codemode+1.0.0.patch",
-      "@earendil-works+pi-coding-agent+1.0.0.patch",
+      "@earendil-works+pi-agent-core+1.1.0.patch",
+      "@earendil-works+pi-ai+1.1.0.patch",
+      "@earendil-works+pi-codemode+1.1.0.patch",
+      "@earendil-works+pi-coding-agent+1.1.0.patch",
       "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
     ];
     expect(
@@ -164,10 +154,10 @@ describe("Pi dependency patch installation", () => {
       expect(source).toContain('"--pi-only"');
       expect(source).not.toContain("patch-package");
       expect(source).toContain('join(root, "scripts/apply-dependency-patches.mjs")');
-      expect(source).toContain('"@earendil-works+pi-agent-core+1.0.0.patch"');
-      expect(source).toContain('"@earendil-works+pi-ai+1.0.0.patch"');
-      expect(source).toContain('"@earendil-works+pi-coding-agent+1.0.0.patch"');
-      expect(source).toContain('"pi-coding-agent-1.0.0-brace-5.0.12.tgz"');
+      expect(source).toContain('"@earendil-works+pi-agent-core+1.1.0.patch"');
+      expect(source).toContain('"@earendil-works+pi-ai+1.1.0.patch"');
+      expect(source).toContain('"@earendil-works+pi-coding-agent+1.1.0.patch"');
+      expect(source).not.toContain("vendor");
       expect(source).not.toContain("patchPackage");
     }
     expect(manifest.dependencies?.neverthrow).toBe("8.2.0");

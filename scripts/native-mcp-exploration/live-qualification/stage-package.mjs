@@ -16,11 +16,11 @@ assert.ok(
 await mkdir(output); // Refuse to overwrite evidence.
 const stage = join(output, "staging");
 const lockSha = sha(join(local, "package-lock.json"));
-assert.equal(lockSha, "88cb750557e7060e8056f00ed7bf778b8acb8e1f53c4aebd8c60da4c6865749f");
+assert.equal(lockSha, "42714b5e7e7bc4536d4ede553726961c11367012127dbcac18586c22b0ef5ea8");
 const names = [
-  "@earendil-works+pi-coding-agent+1.0.0.patch",
-  "@earendil-works+pi-ai+1.0.0.patch",
-  "@earendil-works+pi-agent-core+1.0.0.patch",
+  "@earendil-works+pi-coding-agent+1.1.0.patch",
+  "@earendil-works+pi-ai+1.1.0.patch",
+  "@earendil-works+pi-agent-core+1.1.0.patch",
 ];
 function run(command, args, cwd, log, env = {}) {
   const result = spawnSync(command, args, {
@@ -39,7 +39,7 @@ async function install(dir, prefix) {
   run("npm", ["ci", "--ignore-scripts"], dir, `${prefix}-npm-ci.log`);
   const graph = JSON.parse(await readFile(join(dir, "package-lock.json")));
   const aiPath = "node_modules/@earendil-works/pi-ai";
-  assert.equal(graph.packages[aiPath]?.version, "1.0.0");
+  assert.equal(graph.packages[aiPath]?.version, "1.1.0");
   run("node", [join(dir, "apply-dependency-patches.mjs"), "--pi-only"], dir, `${prefix}-patch.log`);
 }
 await mkdir(join(stage, "patches"), { recursive: true });
@@ -56,16 +56,6 @@ for (const file of [
 ])
   await cp(join(local, file), join(stage, file));
 for (const name of names) await cp(join(root, "patches", name), join(stage, "patches", name));
-const vendor = "pi-coding-agent-1.0.0-brace-5.0.12.tgz";
-await mkdir(join(stage, "vendor"));
-await cp(join(root, "vendor", vendor), join(stage, "vendor", vendor));
-for (const file of ["package.json", "package-lock.json"]) {
-  const path = join(stage, file);
-  const source = await readFile(path, "utf8");
-  const original = `file:../../../vendor/${vendor}`;
-  assert.ok(source.includes(original), `missing vendor reference: ${file}`);
-  await writeFile(path, source.replaceAll(original, `file:./vendor/${vendor}`));
-}
 run(
   join(root, "node_modules/.bin/esbuild"),
   [
@@ -94,7 +84,6 @@ const manifest = {
   patchHelperSha: sha(join(stage, "apply-dependency-patches.mjs")),
   sourceLockSha: lockSha,
   lockSha: sha(join(stage, "package-lock.json")),
-  vendorSha: sha(join(root, "vendor", vendor)),
   piAiPath: "node_modules/@earendil-works/pi-ai",
   patches: names.map((name) => ({
     source: `patches/${name}`,

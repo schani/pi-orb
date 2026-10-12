@@ -38,6 +38,8 @@ it.each([false, true])("Native trailing partial commit: completion held=%s", asy
     conversationId: "conversation",
     signal: new AbortController().signal,
     models: { getModel: () => ({}), streamSimple: () => events },
+    settings: { progress: { partialIntervalMs: 100 } },
+    snapshot: async () => ({ sessionId: "provider-session" }),
     context: async () => ({ messages: [] }),
     hooks: {
       each: async (name: string, invoke: (hook: (message: unknown) => void) => Promise<void>) => {

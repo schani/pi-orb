@@ -8,19 +8,14 @@ import { guardBundle, guardInstalledStage, guardStage, sha } from "./stage-guard
 
 const root = resolve(import.meta.dirname, "../../..");
 const names = [
-  "@earendil-works+pi-coding-agent+1.0.0.patch",
-  "@earendil-works+pi-ai+1.0.0.patch",
-  "@earendil-works+pi-agent-core+1.0.0.patch",
+  "@earendil-works+pi-coding-agent+1.1.0.patch",
+  "@earendil-works+pi-ai+1.1.0.patch",
+  "@earendil-works+pi-agent-core+1.1.0.patch",
 ];
 
 async function fixture() {
   const stage = await mkdtemp(join(tmpdir(), "pi-orb-stage-guard-"));
   await mkdir(join(stage, "patches"));
-  await mkdir(join(stage, "vendor"));
-  await cp(
-    join(root, "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz"),
-    join(stage, "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz"),
-  );
   await cp(
     join(root, "scripts/apply-dependency-patches.mjs"),
     join(stage, "apply-dependency-patches.mjs"),
@@ -31,10 +26,7 @@ async function fixture() {
     join(root, "scripts/native-mcp-exploration/live-qualification/package-lock.json"),
     "utf8",
   );
-  await writeFile(
-    join(stage, "package-lock.json"),
-    sourceLock.replaceAll("file:../../../vendor/", "file:./vendor/"),
-  );
+  await writeFile(join(stage, "package-lock.json"), sourceLock);
   for (const name of names) await cp(join(root, "patches", name), join(stage, "patches", name));
   const manifest = {
     sourceLockSha: sha(
@@ -45,7 +37,6 @@ async function fixture() {
     bundleSha: sha(join(stage, "initial-auth.mjs")),
     hostBundleSha: sha(join(stage, "initial-auth.mjs")),
     bundleMetaSha: sha(join(stage, "bundle-meta.json")),
-    vendorSha: sha(join(stage, "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz")),
     patchHelperSha: sha(join(stage, "apply-dependency-patches.mjs")),
     piAiPath: "node_modules/@earendil-works/pi-ai",
     patches: names.map((name) => ({
@@ -131,11 +122,11 @@ test("stage rejects missing native retry hook even when patch digests agree", as
     const sdk = join(stage, "node_modules/@earendil-works/pi-coding-agent");
     await mkdir(join(sdk, "dist/extensions/mcp"), { recursive: true });
     await mkdir(join(stage, "node_modules/@earendil-works/pi-ai"), { recursive: true });
-    await writeFile(join(sdk, "package.json"), '{"version":"1.0.0"}');
+    await writeFile(join(sdk, "package.json"), '{"version":"1.1.0"}');
     await writeFile(join(sdk, "dist/index.js"), "export {};\n");
     await writeFile(
       join(stage, "node_modules/@earendil-works/pi-ai/package.json"),
-      '{"version":"1.0.0"}',
+      '{"version":"1.1.0"}',
     );
     await writeFile(join(sdk, "dist/extensions/mcp/index.js"), "export {};\n");
     await assert.rejects(guardStage(stage, root, manifest), /no retry hook/);

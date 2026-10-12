@@ -2,6 +2,7 @@ import { basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
   parseFrontmatter,
   type Skill,
@@ -31,6 +32,7 @@ import type { McpServerStatus } from "./adapters/durable/tools/mcp.ts";
 import { createOrbTools } from "./adapters/durable/tools/orb-tools.ts";
 import { RemoteExecutionEnv } from "./adapters/execution-client/env.ts";
 import { LazyExecutionEnv } from "./adapters/execution-client/lazy-env.ts";
+import { modelCall } from "./adapters/model-usage.ts";
 import type { PgResourceGate } from "./adapters/pg/resource-gate.ts";
 import { CODEX_PROVIDER, getToken, type TokenGrant, type TokenRequest } from "./domain/broker.ts";
 import type { RuntimeClientError } from "./domain/errors.ts";
@@ -39,6 +41,7 @@ import { admitAgentRecovery } from "./domain/lifecycle.ts";
 import { logOrbEvent } from "./domain/log.ts";
 import type { McpStore } from "./domain/mcp.ts";
 import type { McpOAuth } from "./domain/mcp-oauth.ts";
+import type { ModelCallUse, ModelUsageLedger } from "./domain/model-usage.ts";
 import {
   createCentralOrbAgentOperations,
   type OrbAgentError,
@@ -233,6 +236,7 @@ export function createProcessAgentContext(
     resources: Pick<PgResourceGate, "acquire">;
     mcp: McpStore;
     mcpOAuth: McpOAuth;
+    modelUsage: ModelUsageLedger;
     appOrigin: string;
     tailnetDnsName?: string;
     inferenceBaseUrl?: (userId: string) => string | undefined;
@@ -693,6 +697,8 @@ export function createProcessAgentContext(
           })(),
         ),
       });
+      const recordModelCall = (use: ModelCallUse, response: AssistantMessage) =>
+        options.modelUsage.record(task, modelCall({ ownerUserId, orbId: orb.id, use }, response));
       const summaryModel = models.value.getModel(CODEX_PROVIDER, "gpt-6-luna");
       const discovery =
         orb.state === "running"
@@ -702,6 +708,7 @@ export function createProcessAgentContext(
       return ok({
         env,
         models: models.value,
+        recordModelCall,
         ...(summaryModel
           ? {
               turnSummary: {
@@ -709,6 +716,7 @@ export function createProcessAgentContext(
                 summarizer: new LunaTurnSummarizer(
                   lease ? fenceModels(models.value, lease.check, lease.signal) : models.value,
                   summaryModel,
+                  (response) => recordModelCall("turn_summary", response),
                 ),
               },
             }

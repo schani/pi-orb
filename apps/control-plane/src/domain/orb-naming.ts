@@ -168,6 +168,7 @@ export function generateOrbName(
           {
             harness,
             ownerUserId: projectRow.ownerUserId,
+            orbId,
             projectName: projectRow.name,
             repositoryUrl: projectRow.repositoryUrl,
             message: input.message,

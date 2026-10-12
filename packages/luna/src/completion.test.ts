@@ -76,3 +76,17 @@ describe("Luna terminal failure diagnostics", () => {
     expect((await completeLuna(request))._unsafeUnwrapErr().providerStatus).toBeUndefined();
   });
 });
+describe("Luna responses", () => {
+  it("passes every provider response, including failures, to onResponse", async () => {
+    const seen: unknown[] = [];
+    const observed = { ...request, onResponse: (response: unknown) => seen.push(response) };
+    const success = { stopReason: "stop", content: [{ type: "text", text: "Named" }] };
+    const failure = { stopReason: "error", errorMessage: "SECRET_ERROR", content: [] };
+    mocks.complete.mockResolvedValueOnce(success).mockResolvedValueOnce(failure);
+    expect((await completeLuna(observed))._unsafeUnwrap()).toBe("Named");
+    expect((await completeLuna(observed)).isErr()).toBe(true);
+    mocks.complete.mockRejectedValueOnce(new Error("SECRET_503"));
+    expect((await completeLuna(observed)).isErr()).toBe(true);
+    expect(seen).toEqual([success, failure]);
+  });
+});

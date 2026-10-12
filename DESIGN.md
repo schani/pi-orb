@@ -117,6 +117,7 @@ Subsystem designs:
 - [docs/claude-code-ui-research.md](docs/claude-code-ui-research.md) — research on Claude Code custom UIs, SDK integration, and authentication caveats; no adoption decision
 - [docs/claude-agent-sdk.md](docs/claude-agent-sdk.md) — approved co-located POC, owner-central subscription auth, accepted long-lived guest bearer, native history/idle contracts and qualification
 - [docs/claude-sdk-capabilities.md](docs/claude-sdk-capabilities.md) — remote-tool, hook, skill and restart-history API audit; research only
+- [docs/model-usage.md](docs/model-usage.md) — per-call model usage ledger: coverage, use classification, schema, write path
 - [docs/pi-durable-evaluation.md](docs/pi-durable-evaluation.md) — Pi Durable research, historical POC and locally qualified PostgreSQL candidate
 - [docs/subagents.md](docs/subagents.md) — local leaf subagents, minimal gotgenes fork, aggregate activity and DST-first integration/acceptance plan
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
@@ -144,6 +145,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-12-durable-codex-prompt-cache.md](docs/postmortems/2026-10-12-durable-codex-prompt-cache.md) — pi-durable 1.0.0 sent Codex no `prompt_cache_key`; a request-body regression test guards the 1.1.0 fix
 - [docs/postmortems/2026-10-11-phone-tail-pointer-race.md](docs/postmortems/2026-10-11-phone-tail-pointer-race.md) — pointer press discarded the pending tail write's offset; its delayed scroll event released following
 - [docs/postmortems/2026-10-10-bootstrap-metadata-network-race.md](docs/postmortems/2026-10-10-bootstrap-metadata-network-race.md) — single metadata read lost a boot-time guest-agent network reload; bootstrap now retries transient failures
 - [docs/postmortems/2026-10-10-starting-deadline-restarts.md](docs/postmortems/2026-10-10-starting-deadline-restarts.md) — restarting control plane renewed the create/start deadline hold

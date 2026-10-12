@@ -7,7 +7,9 @@ npm ci
 node --test scripts/native-mcp-exploration/live-qualification/*.test.mjs
 ```
 
-Finish installation before testing. Node's TypeScript support is sufficient; no root `tsx` loader is needed.
+Finish installation before testing. Do not install `scripts/native-mcp-exploration/` dependencies first: its unpatched SDK would shadow the root's patched SDK for these tests.
+
+**Pi 1.1.0 pins (2026-10-12):** the recipes and guards now pin the registry Pi 1.1.0 lock and the 1.1.0 patches; these inputs have not been live-qualified. Historical 1.0.0 qualification evidence remains in `docs/testing.md`. Node's TypeScript support is sufficient; no root `tsx` loader is needed.
 
 Build the corrected, provenance-checked guest package (no cloud calls):
 

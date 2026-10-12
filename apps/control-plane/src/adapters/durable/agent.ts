@@ -1,7 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { AttachedReplicatedState } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { getSupportedThinkingLevels, type Models } from "@earendil-works/pi-ai";
+import {
+  type AssistantMessage,
+  getSupportedThinkingLevels,
+  type Models,
+} from "@earendil-works/pi-ai";
 import {
   AgentDoc,
   type AgentState,
@@ -15,6 +19,7 @@ import {
   type EnvTarget,
   Harness,
   type LiveState,
+  ProviderDoc,
   type Registry,
   type Storage,
   type TaskGraph,
@@ -57,10 +62,12 @@ import {
 } from "../../../../orb-runtime/src/pi/model-select.ts";
 import type { AgentLiveView, AgentSessionFacade, AgentSnapshot } from "../../domain/agent-ports.ts";
 import type { RuntimeClientError } from "../../domain/errors.ts";
+import type { ModelCallUse } from "../../domain/model-usage.ts";
 import type { DeliverMessageClientRequest } from "../../domain/ports.ts";
 import { storageAuthorityError } from "../durable-pg/storage-boundary.ts";
 import { durableError } from "./manager.ts";
 import { fenceModels } from "./model-fence.ts";
+import { meterModels } from "./model-usage.ts";
 import { nativeInputContent } from "./native-input.ts";
 import { activeSubagents, type PublicEntryReceipt, projectHistory } from "./projection.ts";
 import { promptExtension } from "./prompt.ts";
@@ -163,6 +170,8 @@ export interface DurableAgentOptions {
     context: import("@earendil-works/chord").Context,
   ) => ResultAsync<void, RuntimeClientError>;
   readonly models: Models;
+  /** Usage ledger tap; never awaited by the model call. */
+  readonly recordModelCall?: (use: ModelCallUse, response: AssistantMessage) => void;
   readonly registry: Registry;
   readonly modelTools?: readonly ToolRegistration[];
   readonly checkoutCommit: string | null;
@@ -298,6 +307,11 @@ export class DurableAgent implements AgentSessionFacade {
     let resourceClose: ResultAsync<void, RuntimeClientError> | undefined;
     const closeResources = () =>
       (resourceClose ??= options.closeResources?.() ?? okAsync(undefined));
+    // Bound by the identity commit, before scheduling can start a generation.
+    let rootSessionId: string | undefined;
+    const models = options.recordModelCall
+      ? meterModels(options.models, () => rootSessionId, options.recordModelCall)
+      : options.models;
     return ResultAsync.fromPromise(
       (async () => {
         options.registry.install(promptExtension(options.prompt ?? options.instructions));
@@ -306,8 +320,8 @@ export class DurableAgent implements AgentSessionFacade {
           options.storage,
           {
             models: options.checkAdmission
-              ? fenceModels(options.models, options.checkAdmission, options.ownershipSignal)
-              : options.models,
+              ? fenceModels(models, options.checkAdmission, options.ownershipSignal)
+              : models,
             registry: options.registry,
             env: (target) => options.envFor?.(target) ?? options.env,
             ...(options.now === undefined ? {} : { now: options.now }),
@@ -366,6 +380,8 @@ export class DurableAgent implements AgentSessionFacade {
             }
           }
           doc.instructionDigest = createHash("sha256").update(options.instructions).digest("hex");
+          // pi-durable creates the same document lazily before the first provider request.
+          rootSessionId = (await tx.doc(ProviderDoc, root.id)).sessionId;
           return {
             sessionId: doc.sessionId,
             timestamp: doc.timestamp,

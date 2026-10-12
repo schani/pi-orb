@@ -39,7 +39,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 19. Resolved: OpenTofu manages the static infrastructure plane; per-orb VMs stay dynamic provider resources outside IaC (docs/deployment.md).
 20. Decide how to partition polling later if redundant all-orb polling becomes inefficient at scale; no leader or partitioning is needed initially.
 21. Resolved: credential-broker and per-orb-token design written (docs/credentials.md); networking decided: Direct VPC egress to internal instance IPs (docs/host-provider.md). Remaining: implement it, and validate direct IAP-on-Cloud-Run during the WebSocket validation exercise.
-22. Define observability, audit logging, metrics, and cost attribution.
+22. Define observability, audit logging, metrics, and cost attribution. Model token attribution decided 2026-10-12 (`docs/model-usage.md`); the rest remains open.
 23. Resolved: the orphan-host sweep in docs/lifecycle.md is the decided design — a periodic idempotent loop over `listManagedHosts` that only ever stops pi-orb-labeled hosts, never starts or deletes.
 
 ## Product and security

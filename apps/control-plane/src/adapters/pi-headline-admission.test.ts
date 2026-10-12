@@ -43,16 +43,20 @@ it.each(["cancel", "expiry"] as const)(
       .mockImplementationOnce((t, p) => new ResultAsync(held.then(async () => await read(t, p))));
     const secret = vi.spyOn(secrets, "readSecret");
     const refresh = vi.spyOn(upstream, "refresh");
-    const generator = new PiActivityHeadlineGenerator(() => ({
-      pointers,
-      secrets,
-      upstreams: { [provider]: upstream },
-      constants: DEFAULT_BROKER_CONSTANTS,
-    }));
+    const generator = new PiActivityHeadlineGenerator(
+      () => ({
+        pointers,
+        secrets,
+        upstreams: { [provider]: upstream },
+        constants: DEFAULT_BROKER_CONSTANTS,
+      }),
+      { record: () => undefined },
+    );
     const result = generator.generate(
       task,
       {
         ownerUserId: "owner",
+        orbId: "00000000-0000-4000-8000-0000000000d1",
         source: { kind: "intent", tool: "codemode", text: "PRIVATE_SOURCE" },
       },
       { signal: controller.signal, deadlineAt: 30_100 },

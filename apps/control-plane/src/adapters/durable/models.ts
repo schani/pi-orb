@@ -23,7 +23,9 @@ export function createDurableModels(
   const resolve = async (signal?: AbortSignal) => {
     const result = await options.token(signal);
     // The provider OAuth callback requires rejection on failure; neverthrow is restored at our outer boundary.
-    if (result.isErr()) return Promise.reject(new Error("owner model credential unavailable"));
+    // A cancelled refresh must not publish a late grant: the SDK persists whatever the callback returns.
+    if (result.isErr() || signal?.aborted)
+      return Promise.reject(new Error("owner model credential unavailable"));
     const grant = result.value;
     diagnostics.set(grant.accessToken, {
       tokenExpiresAt: grant.expiresAt,

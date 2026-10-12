@@ -6,6 +6,7 @@ import type { HostingStore } from "../domain/hosting-ports.ts";
 import type { UserStore } from "../domain/identity.ts";
 import type { McpStore } from "../domain/mcp.ts";
 import type { McpOAuthStore } from "../domain/mcp-oauth.ts";
+import type { ModelUsageLedger } from "../domain/model-usage.ts";
 import type { PersonalInstructionsStore } from "../domain/personal-instructions.ts";
 import type {
   ControlPlaneStore,
@@ -23,6 +24,7 @@ import { PostgreSQLHostingStore } from "./pg/hosting.ts";
 import { PostgreSQLMcpStore } from "./pg/mcp.ts";
 import { PostgreSQLMcpOAuthStore } from "./pg/mcp-oauth.ts";
 import { type MigrationOptions, runMigrations } from "./pg/migrate.ts";
+import { PostgreSQLModelUsageLedger } from "./pg/model-usage.ts";
 import { PostgreSQLPersonalInstructionsStore } from "./pg/personal-instructions.ts";
 import { PGliteClient } from "./pg/pglite-client.ts";
 import { PostgreSQLProjectInstructionsStore } from "./pg/project-instructions.ts";
@@ -45,6 +47,7 @@ export interface ControlPlaneDatabase {
   readonly mcp: McpStore;
   readonly mcpOAuth: McpOAuthStore & import("../domain/mcp-oauth-garbage.ts").McpOAuthGarbageStore;
   readonly users: UserStore;
+  readonly modelUsage: ModelUsageLedger;
   migrate(options?: MigrationOptions): ResultAsync<string[], StoreError>;
   close(): ResultAsync<void, StoreError>;
 }
@@ -57,6 +60,7 @@ export type DatabaseOptions =
 export function composeControlPlaneDatabase(client: PostgreSQLClient): ControlPlaneDatabase {
   const store = new PostgreSQLControlPlaneStore(client);
   const agentPersistence = new PgAgentPersistence(client, store);
+  const modelUsage = new PostgreSQLModelUsageLedger(client);
   return {
     store,
     agentPersistence,
@@ -70,10 +74,12 @@ export function composeControlPlaneDatabase(client: PostgreSQLClient): ControlPl
     mcp: new PostgreSQLMcpStore(client),
     mcpOAuth: new PostgreSQLMcpOAuthStore(client),
     users: new PostgreSQLUserStore(client),
+    modelUsage,
     migrate: (options) => runMigrations(client, options),
     close: () =>
-      agentPersistence
-        .close()
+      modelUsage
+        .drain()
+        .andThen(() => agentPersistence.close())
         .mapErr(
           (error): StoreError => ({
             type: "store_error",

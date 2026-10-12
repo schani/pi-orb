@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { sha } from "./glideos-read-guard.mjs";
@@ -15,17 +15,15 @@ assert.ok(
 await mkdir(output); // Existing attempts are immutable.
 const stage = join(output, "staging");
 await mkdir(join(stage, "patches"), { recursive: true });
-await mkdir(join(stage, "vendor"));
 await cp(
   join(root, "scripts/apply-dependency-patches.mjs"),
   join(stage, "apply-dependency-patches.mjs"),
 );
 const patches = [
-  "@earendil-works+pi-coding-agent+1.0.0.patch",
-  "@earendil-works+pi-ai+1.0.0.patch",
-  "@earendil-works+pi-agent-core+1.0.0.patch",
+  "@earendil-works+pi-coding-agent+1.1.0.patch",
+  "@earendil-works+pi-ai+1.1.0.patch",
+  "@earendil-works+pi-agent-core+1.1.0.patch",
 ];
-const vendorName = "pi-coding-agent-1.0.0-brace-5.0.12.tgz";
 for (const file of [
   "glideos-read.test.mjs",
   "glideos-read-guard.mjs",
@@ -33,14 +31,8 @@ for (const file of [
 ])
   await cp(join(local, file), join(stage, file));
 for (const name of patches) await cp(join(root, "patches", name), join(stage, "patches", name));
-await cp(join(root, "vendor", vendorName), join(stage, "vendor", vendorName));
-for (const file of ["package.json", "package-lock.json"]) {
-  let source = await readFile(join(local, file), "utf8");
-  const original = `file:../../../vendor/${vendorName}`;
-  assert.ok(source.includes(original), `missing vendor reference: ${file}: ${vendorName}`);
-  source = source.replaceAll(original, `file:./vendor/${vendorName}`);
-  await writeFile(join(stage, file), source);
-}
+for (const file of ["package.json", "package-lock.json"])
+  await cp(join(local, file), join(stage, file));
 function run(command, args, cwd, log) {
   const result = spawnSync(command, args, {
     cwd,
@@ -79,7 +71,6 @@ const files = [
   "glideos-read.test.mjs",
   "glideos-read-guard.mjs",
   "glideos-read-preflight.mjs",
-  `vendor/${vendorName}`,
   ...patches.map((name) => `patches/${name}`),
 ];
 const manifest = {
@@ -90,7 +81,6 @@ const manifest = {
     driver: sha(join(local, "glideos-read.ts")),
     runner: sha(join(local, "runner.ts")),
     protocol: sha(join(root, "packages/protocol/src/mcp.ts")),
-    vendor: sha(join(root, "vendor", vendorName)),
     patches: Object.fromEntries(patches.map((name) => [name, sha(join(root, "patches", name))])),
   },
   files: Object.fromEntries(files.map((file) => [file, sha(join(stage, file))])),

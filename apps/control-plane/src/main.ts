@@ -502,6 +502,7 @@ export async function main(
   const nameInferenceUrl = env("PI_ORB_NAME_INFERENCE_URL", mockOpenAi?.inferenceBaseUrl ?? "");
   const nameGenerator = new PiOrbNameGenerator(
     brokerForUser,
+    database.modelUsage,
     nameInferenceUrl === "" ? null : nameInferenceUrl,
   );
   const hostedBytes =
@@ -539,6 +540,7 @@ export async function main(
     nameGenerator,
     headlineGenerator: new PiActivityHeadlineGenerator(
       brokerForUser,
+      database.modelUsage,
       nameInferenceUrl === "" ? null : nameInferenceUrl,
     ),
     nameLeaseMs: 60_000,
@@ -724,6 +726,7 @@ export async function main(
         resources: resourceGate,
         mcp: database.mcp,
         mcpOAuth,
+        modelUsage: database.modelUsage,
         appOrigin: appOrigin || `http://127.0.0.1:${port}`,
         ...(tailnetDnsName ? { tailnetDnsName } : {}),
         inferenceBaseUrl: (userId) =>

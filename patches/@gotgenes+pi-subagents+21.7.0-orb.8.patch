@@ -1,5 +1,5 @@
 diff --git a/node_modules/@gotgenes/pi-subagents/dist/extension.js b/node_modules/@gotgenes/pi-subagents/dist/extension.js
-index bb66bf8..011ff1d 100644
+index 5691e1d..eb2210f 100644
 --- a/node_modules/@gotgenes/pi-subagents/dist/extension.js
 +++ b/node_modules/@gotgenes/pi-subagents/dist/extension.js
 @@ -81,12 +81,12 @@ var AgentTypeRegistry = class {
@@ -17,7 +17,7 @@ index bb66bf8..011ff1d 100644
    }
    /** Resolve a registered agent profile; reject unknown names. */
    resolveAgentConfig(type) {
-@@ -957,7 +957,7 @@ async function createSubagentSession(params, deps) {
+@@ -951,7 +951,7 @@ async function createSubagentSession(params, deps) {
      settingsManager: sessionSettings,
      modelRegistry: snapshot.modelRegistry,
      model: cfg.model,
@@ -43,14 +43,16 @@ index bb66bf8..011ff1d 100644
            }
          }
          const childRuntime = await ModelRuntime.create({
-@@ -5680,12 +5684,17 @@ function index_default(pi, host = {}) {
+@@ -5680,12 +5684,19 @@ function index_default(pi, host = {}) {
              childRegistry.registerProvider(id, config);
            }
          });
 -        return createAgentSession({
++        const mcpExcluded = rest.tools && !rest.tools.some((name) => name.startsWith("mcp__")) ? ["mcp__*", "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"].filter((name) => !rest.tools?.includes(name)) : [];
 +        const created = await createAgentSession({
            ...rest,
 +          ...rest.tools && host.childExtensions?.some(({ name }) => name === "pi-orb:codemode") ? { tools: [.../* @__PURE__ */ new Set([...rest.tools, "codemode"])] } : {},
++          ...mcpExcluded.length > 0 ? { excludeTools: [...rest.excludeTools ?? [], ...mcpExcluded] } : {},
            sessionManager,
            resourceLoader,
            modelRuntime: childRuntime
@@ -63,7 +65,7 @@ index bb66bf8..011ff1d 100644
        assemblerIO: {
          buildAgentPrompt
 diff --git a/node_modules/@gotgenes/pi-subagents/src/config/agent-types.ts b/node_modules/@gotgenes/pi-subagents/src/config/agent-types.ts
-index e6cb8df..930e763 100644
+index b8d5444..92e9c95 100644
 --- a/node_modules/@gotgenes/pi-subagents/src/config/agent-types.ts
 +++ b/node_modules/@gotgenes/pi-subagents/src/config/agent-types.ts
 @@ -16,7 +16,7 @@ import type { AgentConfig } from "#src/types";
@@ -92,7 +94,7 @@ index e6cb8df..930e763 100644
  
    /** Resolve a registered agent profile; reject unknown names. */
 diff --git a/node_modules/@gotgenes/pi-subagents/src/index.ts b/node_modules/@gotgenes/pi-subagents/src/index.ts
-index 96edef1..6816f49 100644
+index 521739d..d3b87f6 100644
 --- a/node_modules/@gotgenes/pi-subagents/src/index.ts
 +++ b/node_modules/@gotgenes/pi-subagents/src/index.ts
 @@ -156,9 +156,17 @@ export default function (pi: ExtensionAPI, host: SubagentsHostOptions = {}) {
@@ -116,16 +118,22 @@ index 96edef1..6816f49 100644
            }
          }
          // Pi builds the child a fresh ModelRuntime whenever it is not given
-@@ -181,12 +189,19 @@ export default function (pi: ExtensionAPI, host: SubagentsHostOptions = {}) {
+@@ -181,12 +189,25 @@ export default function (pi: ExtensionAPI, host: SubagentsHostOptions = {}) {
              childRegistry.registerProvider(id, config);
            },
          });
 -        return createAgentSession({
++        // Pi >=1.0.4 keeps MCP tools registered for codemode unless the allowlist names one.
++        const mcpExcluded = rest.tools && !rest.tools.some((name) => name.startsWith("mcp__"))
++          ? ["mcp__*", "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"]
++            .filter((name) => !rest.tools?.includes(name))
++          : [];
 +        const created = await createAgentSession({
            ...rest,
 +          ...(rest.tools && host.childExtensions?.some(({ name }) => name === "pi-orb:codemode")
 +            ? { tools: [...new Set([...rest.tools, "codemode"])] }
 +            : {}),
++          ...(mcpExcluded.length > 0 ? { excludeTools: [...(rest.excludeTools ?? []), ...mcpExcluded] } : {}),
            sessionManager: sessionManager as SessionManager,
            resourceLoader: resourceLoader as ResourceLoader,
            modelRuntime: childRuntime,
@@ -151,7 +159,7 @@ index c23f38a..561f9c5 100644
      excludeTools: EXCLUDED_TOOL_NAMES,
      resourceLoader: loader,
 diff --git a/node_modules/@gotgenes/pi-subagents/src/session/session-config.ts b/node_modules/@gotgenes/pi-subagents/src/session/session-config.ts
-index bcd2d66..6cc0a96 100644
+index 79ef165..041268d 100644
 --- a/node_modules/@gotgenes/pi-subagents/src/session/session-config.ts
 +++ b/node_modules/@gotgenes/pi-subagents/src/session/session-config.ts
 @@ -90,8 +90,8 @@ export interface SessionConfig {

@@ -2,11 +2,14 @@ import { randomUUID } from "node:crypto";
 import type { Context } from "@earendil-works/chord";
 import { withAbortSignal } from "@earendil-works/chord/context";
 import {
+  type BinaryReader,
+  type DirReader,
   type Result as EnvResult,
   type ExecutionEnv,
   ExecutionError,
   FileError,
   type FileInfo,
+  type FileWatcher,
   type ShellExecOptions,
   type ShellExecResult,
   type TextLineReader,
@@ -266,8 +269,52 @@ export class LazyExecutionEnv implements ExecutionEnv {
       },
     };
   }
+  async openBinaryReader(
+    path: string,
+    options: { noFollow?: boolean } | undefined,
+    context: Context,
+  ): Promise<EnvResult<BinaryReader, FileError>> {
+    const result = await this.file(context, (env, invocation) =>
+      env.openBinaryReader(path, options, invocation),
+    );
+    if (!result.ok) return result;
+    const reader = result.value;
+    return {
+      ok: true,
+      value: {
+        info: (ctx) => this.file(ctx, (_env, invocation) => reader.info(invocation)),
+        read: (offset, length, ctx) =>
+          this.file(ctx, (_env, invocation) => reader.read(offset, length, invocation)),
+        scanLines: (scan, ctx) =>
+          this.file(ctx, (_env, invocation) => reader.scanLines(scan, invocation)),
+        close: (ctx) => reader.close(ctx),
+      },
+    };
+  }
+  async openDirReader(path: string, context: Context): Promise<EnvResult<DirReader, FileError>> {
+    const result = await this.file(context, (env, invocation) =>
+      env.openDirReader(path, invocation),
+    );
+    if (!result.ok) return result;
+    const reader = result.value;
+    return {
+      ok: true,
+      value: {
+        next: (maxEntries, ctx) =>
+          this.file(ctx, (_env, invocation) => reader.next(maxEntries, invocation)),
+        close: (ctx) => reader.close(ctx),
+      },
+    };
+  }
+  watch(
+    targets: Parameters<ExecutionEnv["watch"]>[0],
+    onChange: Parameters<ExecutionEnv["watch"]>[1],
+    context: Context,
+  ): Promise<EnvResult<FileWatcher, FileError>> {
+    return this.file(context, (env, invocation) => env.watch(targets, onChange, invocation));
+  }
   async exec(
-    command: string,
+    command: string | readonly string[],
     options: ShellExecOptions | undefined,
     context: Context,
   ): Promise<EnvResult<ShellExecResult, ExecutionError>> {

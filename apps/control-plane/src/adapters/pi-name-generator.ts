@@ -2,12 +2,14 @@ import { completeLuna } from "@pi-orb/luna";
 import type { SimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { getToken } from "../domain/broker.ts";
+import type { ModelUsageLedger } from "../domain/model-usage.ts";
 import type {
   BrokerDeps,
   OperationContext,
   OrbNameGenerator,
   OrbNameGeneratorError,
 } from "../domain/ports.ts";
+import { modelCall } from "./model-usage.ts";
 
 const failure = (message: string): OrbNameGeneratorError => ({
   type: "orb_name_generation_error",
@@ -39,13 +41,16 @@ function prompt(input: {
 
 export class PiOrbNameGenerator implements OrbNameGenerator {
   private readonly brokerForUser: (userId: string) => BrokerDeps;
+  private readonly modelUsage: ModelUsageLedger;
   private readonly inferenceBaseUrl: string | null;
 
   constructor(
     brokerForUser: (userId: string) => BrokerDeps,
+    modelUsage: ModelUsageLedger,
     inferenceBaseUrl: string | null = null,
   ) {
     this.brokerForUser = brokerForUser;
+    this.modelUsage = modelUsage;
     this.inferenceBaseUrl = inferenceBaseUrl;
   }
 
@@ -54,6 +59,7 @@ export class PiOrbNameGenerator implements OrbNameGenerator {
     input: {
       harness: "pi" | "claude";
       ownerUserId: string;
+      orbId: string;
       projectName: string;
       repositoryUrl: string;
       message: string;
@@ -93,6 +99,14 @@ export class PiOrbNameGenerator implements OrbNameGenerator {
           maxTokens: 64,
           sessionPrefix: "pi-orb-auto-name",
           signal: context.signal,
+          onResponse: (response) =>
+            this.modelUsage.record(
+              task,
+              modelCall(
+                { ownerUserId: input.ownerUserId, orbId: input.orbId, use: "orb_name" },
+                response,
+              ),
+            ),
           auth: {
             apiKey: grant.accessToken,
             ...(this.inferenceBaseUrl !== null ? { baseUrl: this.inferenceBaseUrl } : {}),

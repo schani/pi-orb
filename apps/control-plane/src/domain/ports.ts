@@ -1156,7 +1156,11 @@ export interface ActivityHeadlineGenerationError extends ActivityHeadlineFailure
 export interface ActivityHeadlineGenerator {
   generate(
     task: SimulationTask,
-    input: { ownerUserId: string; source: import("@pi-orb/protocol").ActivityHeadlineSource },
+    input: {
+      ownerUserId: string;
+      orbId: string;
+      source: import("@pi-orb/protocol").ActivityHeadlineSource;
+    },
     context: OperationContext & { readonly deadlineAt: number },
   ): ResultAsync<string, ActivityHeadlineGenerationError>;
 }
@@ -1174,6 +1178,7 @@ export interface OrbNameGenerator {
     input: {
       harness: "pi" | "claude";
       ownerUserId: string;
+      orbId: string;
       projectName: string;
       repositoryUrl: string;
       message: string;

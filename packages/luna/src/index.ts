@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type {
   Api,
+  AssistantMessage,
   Model,
   OpenAICodexResponsesOptions,
   ProviderEnv,
@@ -55,6 +56,8 @@ export interface LunaCompletionRequest {
   readonly signal: AbortSignal;
   /** Runtime callers pass a composed provider model whose transport override must be retained. */
   readonly modelTemplate?: Model<Api>;
+  /** Sees every provider response, including failed ones, for the model usage ledger (docs/model-usage.md). */
+  readonly onResponse?: (response: AssistantMessage) => void;
   readonly auth: {
     readonly apiKey?: string;
     readonly headers?: ProviderHeaders;
@@ -188,6 +191,7 @@ export function completeLuna(
       ),
     () => failure("Luna completion rejected", { reason: "completion_rejected" }),
   )().andThen((response) => {
+    request.onResponse?.(response);
     if (response.stopReason === "error" || response.stopReason === "aborted") {
       return err(
         failure(response.errorMessage ?? `Luna stopped with ${response.stopReason}`, {

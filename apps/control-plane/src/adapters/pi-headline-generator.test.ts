@@ -1,14 +1,37 @@
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { NoSimulationTask } from "determined";
 import { errAsync, ok, okAsync, ResultAsync } from "neverthrow";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ModelCall } from "../domain/model-usage.ts";
 import type { BrokerDeps } from "../domain/ports.ts";
 import { PiActivityHeadlineGenerator } from "./pi-headline-generator.ts";
 
 const mocks = vi.hoisted(() => ({ token: vi.fn(), complete: vi.fn() }));
 vi.mock("../domain/broker.ts", () => ({ getToken: mocks.token }));
 vi.mock("@pi-orb/luna", () => ({ completeLuna: mocks.complete }));
+const response: AssistantMessage = {
+  role: "assistant",
+  content: [],
+  api: "openai-codex-responses",
+  provider: "openai-codex",
+  model: "gpt-6-luna",
+  usage: {
+    input: 40,
+    output: 5,
+    cacheRead: 8,
+    cacheWrite: 0,
+    totalTokens: 53,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  },
+  stopReason: "stop",
+  timestamp: 0,
+};
+const recorded: ModelCall[] = [];
+const ledger = { record: (_task: unknown, call: ModelCall) => void recorded.push(call) };
+const ORB_ID = "00000000-0000-4000-8000-0000000000c1";
 const input = {
   ownerUserId: "owner-private-id",
+  orbId: ORB_ID,
   source: {
     kind: "intent" as const,
     tool: "codemode",
@@ -27,7 +50,7 @@ describe("PiActivityHeadlineGenerator", () => {
     const generator = new PiActivityHeadlineGenerator((user) => {
       bound.push(user);
       return {} as BrokerDeps;
-    });
+    }, ledger);
     const result = await generator.generate(task, input, {
       signal: new AbortController().signal,
       deadlineAt: task.monotonicNow() + 30_000,
@@ -39,6 +62,21 @@ describe("PiActivityHeadlineGenerator", () => {
     expect(request.prompt).toContain(JSON.stringify(input.source));
     expect(request.prompt).not.toContain(input.ownerUserId);
     expect(request.auth.apiKey).toBe("private-token");
+    request.onResponse(response);
+    expect(recorded).toEqual([
+      {
+        ownerUserId: input.ownerUserId,
+        orbId: ORB_ID,
+        use: "headline",
+        provider: "openai-codex",
+        model: "gpt-6-luna",
+        outcome: "stop",
+        input: 40,
+        output: 5,
+        cacheRead: 8,
+        cacheWrite: 0,
+      },
+    ]);
     mocks.complete.mockReturnValueOnce(okAsync("😀".repeat(600)));
     expect(
       Buffer.byteLength(
@@ -58,7 +96,7 @@ describe("PiActivityHeadlineGenerator", () => {
       controller.abort();
       return okAsync({ accessToken: "token" });
     });
-    const generator = new PiActivityHeadlineGenerator(() => ({}) as BrokerDeps);
+    const generator = new PiActivityHeadlineGenerator(() => ({}) as BrokerDeps, ledger);
     expect(
       (
         await generator.generate(task, input, {
@@ -82,7 +120,7 @@ describe("PiActivityHeadlineGenerator", () => {
           }),
         ),
     );
-    const generator = new PiActivityHeadlineGenerator(() => ({}) as BrokerDeps);
+    const generator = new PiActivityHeadlineGenerator(() => ({}) as BrokerDeps, ledger);
     const result = await generator.generate(lookupTask, input, {
       signal: controller.signal,
       deadlineAt: 30_100,
@@ -98,7 +136,7 @@ describe("PiActivityHeadlineGenerator", () => {
   it("does not begin token lookup when admission is already expired", async () => {
     const lookupTask = new NoSimulationTask("expired admission", false);
     vi.spyOn(lookupTask, "monotonicNow").mockReturnValue(30_100);
-    const generator = new PiActivityHeadlineGenerator(() => ({}) as BrokerDeps);
+    const generator = new PiActivityHeadlineGenerator(() => ({}) as BrokerDeps, ledger);
     const result = await generator.generate(lookupTask, input, {
       signal: new AbortController().signal,
       deadlineAt: 30_100,
@@ -114,7 +152,7 @@ describe("PiActivityHeadlineGenerator", () => {
     mocks.complete.mockImplementationOnce(() => {
       throw new Error("PRIVATE_PROVIDER_CANARY");
     });
-    const generator = new PiActivityHeadlineGenerator(() => ({}) as BrokerDeps);
+    const generator = new PiActivityHeadlineGenerator(() => ({}) as BrokerDeps, ledger);
     const result = await generator.generate(task, input, {
       signal: new AbortController().signal,
       deadlineAt: task.monotonicNow() + 30_000,
@@ -139,7 +177,7 @@ describe("PiActivityHeadlineGenerator", () => {
         outputTokens: 0,
       }),
     );
-    const generator = new PiActivityHeadlineGenerator(() => ({}) as BrokerDeps);
+    const generator = new PiActivityHeadlineGenerator(() => ({}) as BrokerDeps, ledger);
     const result = await generator.generate(task, input, {
       signal: new AbortController().signal,
       deadlineAt: task.monotonicNow() + 30_000,
@@ -154,7 +192,7 @@ describe("PiActivityHeadlineGenerator", () => {
     expect(JSON.stringify(result._unsafeUnwrapErr())).not.toContain("PRIVATE_PROVIDER_CANARY");
   });
   it("returns content-free typed provider/auth/empty failures", async () => {
-    const generator = new PiActivityHeadlineGenerator(() => ({}) as BrokerDeps);
+    const generator = new PiActivityHeadlineGenerator(() => ({}) as BrokerDeps, ledger);
     const context = {
       signal: new AbortController().signal,
       deadlineAt: task.monotonicNow() + 30_000,

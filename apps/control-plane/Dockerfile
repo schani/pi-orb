@@ -22,10 +22,10 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY vendor vendor
 COPY scripts/apply-dependency-patches.mjs scripts/apply-dependency-patches.mjs
-COPY patches/@earendil-works+pi-agent-core+1.0.0.patch patches/@earendil-works+pi-agent-core+1.0.0.patch
-COPY patches/@earendil-works+pi-ai+1.0.0.patch patches/@earendil-works+pi-ai+1.0.0.patch
-COPY patches/@earendil-works+pi-coding-agent+1.0.0.patch patches/@earendil-works+pi-coding-agent+1.0.0.patch
-COPY patches/@earendil-works+pi-codemode+1.0.0.patch patches/@earendil-works+pi-codemode+1.0.0.patch
+COPY patches/@earendil-works+pi-agent-core+1.1.0.patch patches/@earendil-works+pi-agent-core+1.1.0.patch
+COPY patches/@earendil-works+pi-ai+1.1.0.patch patches/@earendil-works+pi-ai+1.1.0.patch
+COPY patches/@earendil-works+pi-coding-agent+1.1.0.patch patches/@earendil-works+pi-coding-agent+1.1.0.patch
+COPY patches/@earendil-works+pi-codemode+1.1.0.patch patches/@earendil-works+pi-codemode+1.1.0.patch
 COPY patches/pi-codemode.* patches/
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/mock-openai/package.json packages/mock-openai/
