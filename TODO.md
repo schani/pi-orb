@@ -10,7 +10,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 - **Make the suite pass or skip cleanly on macOS** (2026-10-11; evidence `.context/diag-*`, `.context/unit-*.log`, `.context/e2e-*.log` in workspace `los-angeles-v1`). All reproduce on clean `main`; CI passes them.
   - The first frontend E2E run had a fourth, unidentified failure (output not retained); not reproduced in two further runs.
-  - Under concurrent Docker load, `host-key-boot.dst.test.ts` (120 s) and both `continuation-observation.dst.test.ts` cases (30 s) hit wall-clock timeouts; no trace was written and an unloaded rerun passed. Evidence `.context/unit-macos-fixes-loaded.log`.
+  - Under concurrent Docker load, both `continuation-observation.dst.test.ts` cases (30 s) hit wall-clock timeouts; no trace was written and an unloaded rerun passed. Evidence `.context/unit-macos-fixes-loaded.log`.
 
 - **Release and verify central code-mode CPU headroom** (2026-10-09; `docs/postmortems/2026-10-09-control-plane-cpu-429.md`, `docs/pi-adapter.md`, `docs/deployment.md`). The shared one-core worker budget, durable CPU/wait counters and rollout CPU/ingress-429 evidence are implemented locally. Complete normal exact-source Linux/PostgreSQL CI and E2E gates, then qualify the independently managed two-vCPU Cloud Run revision under sustained multi-worker load. Cooperative checkpoints exclude main-thread/compiler CPU and can overshoot in native operations; confirm actual serving headroom and ingress admission. Preserve central authority and first-failure evidence.
 

@@ -6,36 +6,48 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { performance } from "node:perf_hooks";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { makeRecordingSimulation, runDst } from "../../../apps/control-plane/src/testkit/sim.ts";
 import { hostKeyAlgorithms as algorithms, generateHostKeyPairs } from "./testkit/host-key-pairs.ts";
 
 const barrierPath = new URL("../../../infra/native-vm/wait-google-host-keys.sh", import.meta.url);
-type Probe = () => boolean;
-let keyGenerationCalls = 0;
-let keyPairs: ReturnType<typeof generateHostKeyPairs>;
-let generationMs = 0;
-beforeAll(() => {
-  const started = performance.now();
-  keyPairs = generateHostKeyPairs(() => keyGenerationCalls++);
-  generationMs = performance.now() - started;
-});
-afterAll(() => keyPairs.dispose());
 
-function createFixture(): {
-  root: string;
+interface GoogleGuest {
+  writeInstanceId(): void;
   install(type: string): void;
   publish(algorithm: string): void;
-  clockValue(): number;
-  barrierInvocations(): { total: number; successful: number };
-  probe: Probe;
-} {
+}
+
+// Google's late first-boot effects in order; each prefix is one barrier input state.
+const googleSteps: readonly { checkpoint: string; apply(guest: GoogleGuest): void }[] = [
+  { checkpoint: "late-write-instance-id-before-keys", apply: (guest) => guest.writeInstanceId() },
+  ...algorithms.flatMap(([type, algorithm]) => [
+    { checkpoint: `late-generate-${type}`, apply: (guest: GoogleGuest) => guest.install(type) },
+    {
+      checkpoint: `late-publish-${algorithm}`,
+      apply: (guest: GoogleGuest) => guest.publish(algorithm),
+    },
+  ]),
+];
+
+type BarrierResult = { ready: boolean; clock: number };
+type BarrierTable = ReadonlyMap<string, BarrierResult>;
+
+// Real production-barrier result per state, keyed by the last applied Google step.
+let barrierTable: BarrierTable;
+let publicKeys: Map<string, string>;
+
+function algorithmType(algorithm: string): string {
+  const type = algorithms.find((entry) => entry[1] === algorithm)?.[0];
+  if (type === undefined) throw new Error(`unknown algorithm ${algorithm}`);
+  return type;
+}
+
+function createFixture(keyPairs: ReturnType<typeof generateHostKeyPairs>) {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-host-key-dst-"));
   mkdirSync(join(root, "etc/ssh"), { recursive: true });
   mkdirSync(join(root, "generated"));
@@ -55,16 +67,17 @@ esac
   chmodSync(curl, 0o755);
   const clock = join(root, "clock");
   const clockValue = join(root, "clock-value");
-  writeFileSync(clockValue, "0");
   writeFileSync(clock, `#!/bin/bash\ncat '${clockValue}'\n`);
   chmodSync(clock, 0o755);
   const sleep = join(root, "sleep");
   writeFileSync(sleep, `#!/bin/bash\nprintf 90 >'${clockValue}'\n`);
   chmodSync(sleep, 0o755);
-  let barrierInvocations = 0;
-  let successfulBarrierInvocations = 0;
-  return {
-    root,
+  const publicKey = (type: string) =>
+    readFileSync(join(root, `generated/${type}.pub`), "utf8").split(/\s+/)[1] as string;
+  const guest: GoogleGuest = {
+    writeInstanceId() {
+      writeFileSync(join(root, "etc/google_instance_id"), "validator-instance\n");
+    },
     install(type) {
       copyFileSync(join(root, `generated/${type}`), join(root, `etc/ssh/ssh_host_${type}_key`));
       copyFileSync(
@@ -73,20 +86,16 @@ esac
       );
     },
     publish(algorithm) {
-      const type = algorithms.find((entry) => entry[1] === algorithm)?.[0];
-      if (type === undefined) throw new Error(`unknown algorithm ${algorithm}`);
-      const key = readFileSync(join(root, `generated/${type}.pub`), "utf8").split(/\s+/)[1];
-      writeFileSync(join(root, "published", algorithm), key as string);
+      writeFileSync(join(root, "published", algorithm), publicKey(algorithmType(algorithm)));
     },
-    clockValue() {
-      return Number(readFileSync(clockValue, "utf8"));
-    },
-    barrierInvocations() {
-      return { total: barrierInvocations, successful: successfulBarrierInvocations };
-    },
-    probe() {
-      barrierInvocations++;
+  };
+  return {
+    root,
+    guest,
+    publicKeys: new Map(algorithms.map(([type]) => [type, publicKey(type)])),
+    probe(): BarrierResult {
       writeFileSync(clockValue, "0");
+      let ready = true;
       try {
         execFileSync("bash", [barrierPath.pathname], {
           env: {
@@ -98,20 +107,58 @@ esac
           },
           stdio: "ignore",
         });
-        successfulBarrierInvocations++;
-        return true;
       } catch {
-        return false;
+        ready = false;
       }
+      return { ready, clock: Number(readFileSync(clockValue, "utf8")) };
     },
   };
 }
 
+beforeAll(() => {
+  const keyPairs = generateHostKeyPairs(() => {});
+  const fixture = createFixture(keyPairs);
+  try {
+    publicKeys = fixture.publicKeys;
+    const table = new Map([["empty", fixture.probe()]]);
+    for (const step of googleSteps) {
+      step.apply(fixture.guest);
+      table.set(step.checkpoint, fixture.probe());
+    }
+    barrierTable = table;
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+    keyPairs.dispose();
+  }
+});
+
 async function scenario(
   sim: Parameters<Parameters<typeof runDst>[1]>[0],
-  fixture: ReturnType<typeof createFixture>,
-  probe: Probe,
-): Promise<void> {
+  table: BarrierTable,
+): Promise<{ total: number; successful: number }> {
+  let state = "empty";
+  let clock = 0;
+  let total = 0;
+  let successful = 0;
+  const installed = new Map<string, string>();
+  const published = new Map<string, string>();
+  const guest: GoogleGuest = {
+    writeInstanceId() {},
+    install(type) {
+      installed.set(type, publicKeys.get(type) as string);
+    },
+    publish(algorithm) {
+      published.set(algorithm, publicKeys.get(algorithmType(algorithm)) as string);
+    },
+  };
+  const probe = () => {
+    const result = table.get(state);
+    if (result === undefined) throw new Error(`unverified barrier state ${state}`);
+    total++;
+    if (result.ready) successful++;
+    clock = result.clock;
+    return result.ready;
+  };
   let earlyReady = false;
   let googleDone = false;
   let presented: string | undefined;
@@ -130,13 +177,10 @@ async function scenario(
       name: "google-late-first-boot",
       f: async (task) => {
         while (!earlyReady) await task.checkpoint("google", "wait-early-ready");
-        writeFileSync(join(fixture.root, "etc/google_instance_id"), "validator-instance\n");
-        await task.checkpoint("google", "late-write-instance-id-before-keys");
-        for (const [type, algorithm] of algorithms) {
-          fixture.install(type);
-          await task.checkpoint("google", `late-generate-${type}`);
-          fixture.publish(algorithm);
-          await task.checkpoint("google", `late-publish-${algorithm}`);
+        for (const step of googleSteps) {
+          step.apply(guest);
+          state = step.checkpoint;
+          await task.checkpoint("google", step.checkpoint);
         }
         googleDone = true;
       },
@@ -154,12 +198,8 @@ async function scenario(
         while (!earlyReady) await task.checkpoint("validator", "wait-systemd-before-ssh");
         while (!probe()) await task.checkpoint("validator", "wait-google-host-key-effects");
         await task.checkpoint("validator", "ssh-ready");
-        const publicKey = readFileSync(
-          join(fixture.root, "etc/ssh/ssh_host_ed25519_key.pub"),
-          "utf8",
-        );
-        presented = publicKey.split(/\s+/)[1];
-        pinned = readFileSync(join(fixture.root, "published/ssh-ed25519"), "utf8");
+        presented = installed.get("ed25519");
+        pinned = published.get("ssh-ed25519");
         await task.checkpoint("validator", "acceptance-probe");
       },
     },
@@ -168,103 +208,47 @@ async function scenario(
   expect(googleDone).toBe(true);
   expect(presented).toBeDefined();
   expect(pinned).toBe(presented);
-  expect(fixture.clockValue(), "successful probe must not need the timeout clock").toBe(0);
+  expect(clock, "successful probe must not need the timeout clock").toBe(0);
+  return { total, successful };
 }
 
 describe("native validator first-boot SSH identity (DST)", () => {
-  it("bounds key generation across isolated fixture copies", () => {
-    const first = createFixture();
-    const second = createFixture();
-    const fixtures = [first, second];
-    try {
-      expect(keyGenerationCalls).toBe(3);
-      expect(first.root).not.toBe(second.root);
-      for (const [type, algorithm] of algorithms) {
-        const keyPath = `generated/${type}`;
-        const original = readFileSync(join(second.root, keyPath));
-        expect(statSync(join(first.root, keyPath)).mode & 0o777).toBe(0o600);
-        expect(statSync(join(first.root, keyPath)).ino).not.toBe(
-          statSync(join(second.root, keyPath)).ino,
-        );
-        expect(readFileSync(join(first.root, `${keyPath}.pub`), "utf8")).toContain(
-          "host-key-test-comment",
-        );
-        first.install(type);
-        first.publish(algorithm);
-        expect(statSync(join(first.root, `etc/ssh/ssh_host_${type}_key`)).mode & 0o777).toBe(0o600);
-        expect(() => readFileSync(join(second.root, "published", algorithm))).toThrow();
-        writeFileSync(join(first.root, keyPath), "changed");
-        expect(readFileSync(join(second.root, keyPath))).toEqual(original);
-        const third = createFixture();
-        fixtures.push(third);
-        expect(readFileSync(join(third.root, keyPath))).toEqual(original);
-      }
-      expect(keyGenerationCalls).toBe(3);
-    } finally {
-      for (const fixture of fixtures) rmSync(fixture.root, { recursive: true, force: true });
-    }
+  it("runs the production barrier once per reachable Google first-boot state", () => {
+    const closed = { ready: false, clock: 90 };
+    expect([...barrierTable]).toEqual([
+      ["empty", closed],
+      ["late-write-instance-id-before-keys", closed],
+      ["late-generate-ecdsa", closed],
+      ["late-publish-ecdsa-sha2-nistp256", closed],
+      ["late-generate-ed25519", closed],
+      ["late-publish-ssh-ed25519", closed],
+      ["late-generate-rsa", closed],
+      ["late-publish-ssh-rsa", { ready: true, clock: 0 }],
+    ]);
   });
-  it("executes the production barrier across late per-key publication schedules", async () => {
-    const roots: string[] = [];
+
+  it("explores late per-key publication schedules against the verified barrier table", async ({
+    signal,
+  }) => {
     let schedules = 0;
-    let barrierInvocations = 0;
-    let successfulBarrierInvocations = 0;
-    const started = performance.now();
-    try {
-      await runDst({ name: "native-validator-host-key-stability", iterations: 50 }, async (sim) => {
-        const fixture = createFixture();
-        roots.push(fixture.root);
-        await scenario(sim, fixture, fixture.probe);
-        const counts = fixture.barrierInvocations();
+    await runDst(
+      { name: "native-validator-host-key-stability", iterations: 50, signal },
+      async (sim) => {
+        const counts = await scenario(sim, barrierTable);
         expect(counts.total).toBeGreaterThanOrEqual(2);
         expect(counts.successful).toBe(1);
-        barrierInvocations += counts.total;
-        successfulBarrierInvocations += counts.successful;
         schedules++;
-      });
-      const expectedSchedules = process.env["DST_REPLAY"] ? 1 : 50;
-      expect(schedules).toBe(expectedSchedules);
-      expect(successfulBarrierInvocations).toBe(expectedSchedules);
-      expect(new Set(roots).size).toBe(expectedSchedules);
-      expect(keyGenerationCalls).toBe(3);
-      console.info("host-key DST qualification", {
-        schedules,
-        keyGenerationCalls,
-        barrierInvocations,
-        successfulBarrierInvocations,
-        generationMs,
-        campaignMs: performance.now() - started,
-      });
-    } finally {
-      for (const root of roots) rmSync(root, { recursive: true, force: true });
-    }
-  }, 120_000);
-
-  it("times out an incomplete production probe only through the fake sleep", () => {
-    const fixture = createFixture();
-    try {
-      writeFileSync(join(fixture.root, "etc/google_instance_id"), "validator-instance\n");
-      fixture.install("ecdsa");
-      fixture.publish("ecdsa-sha2-nistp256");
-      expect(fixture.clockValue()).toBe(0);
-      expect(fixture.probe()).toBe(false);
-      expect(fixture.clockValue()).toBe(90);
-    } finally {
-      rmSync(fixture.root, { recursive: true, force: true });
-    }
+      },
+    );
+    expect(schedules).toBe(process.env["DST_REPLAY"] ? 1 : 50);
   });
 
-  it("rejects an always-success barrier even if its source has expected marker strings", async () => {
-    const fixture = createFixture();
-    try {
-      const invalid = Object.assign(() => true, {
-        source: "google_instance_id ecdsa-sha2-nistp256 ssh-ed25519 ssh-rsa",
-      });
-      await expect(
-        scenario(makeRecordingSimulation({ name: "invalid-host-key-barrier" }), fixture, invalid),
-      ).rejects.toThrow("empty first-boot snapshot");
-    } finally {
-      rmSync(fixture.root, { recursive: true, force: true });
-    }
+  it("rejects a barrier that opens on an empty first-boot snapshot", async () => {
+    const alwaysReady = new Map(
+      [...barrierTable.keys()].map((state) => [state, { ready: true, clock: 0 }]),
+    );
+    await expect(
+      scenario(makeRecordingSimulation({ name: "invalid-host-key-barrier" }), alwaysReady),
+    ).rejects.toThrow("empty first-boot snapshot");
   });
 });
