@@ -1510,9 +1510,12 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       await page.setViewportSize({ width: 1280, height: 900 });
       await expectPage(app).toHaveCSS("position", "static");
       await expectPage(scroller).toHaveCSS("display", "block");
-      expectPage(
-        await app.evaluate((element) => element.style.getPropertyValue("--phone-viewport-height")),
-      ).toBe("");
+      // React removes the override in an effect cleanup, after the media query already applied.
+      await expectPage
+        .poll(() =>
+          app.evaluate((element) => element.style.getPropertyValue("--phone-viewport-height")),
+        )
+        .toBe("");
     } finally {
       await page.close();
     }
