@@ -51,15 +51,23 @@ describe("Claude subscription boundary", () => {
       ANTHROPIC_AUTH_TOKEN: "api2",
       ANTHROPIC_BASE_URL: "http://api",
       CLAUDE_CODE_USE_BEDROCK: "1",
+      CLAUDE_CODE_USE_VERTEX: "1",
       CLAUDE_CODE_OAUTH_TOKEN: "other",
       CLAUDE_CONFIG_DIR: "/other",
       BASH_ENV: "/profile",
       PATH: "/bin",
+      // Workload credentials for the agent's own tools; inert without CLAUDE_CODE_USE_*.
+      GOOGLE_APPLICATION_CREDENTIALS: "/home/.pi-orb-gcp.json",
+      AWS_ROLE_ARN: "arn:aws:iam::1:role/r",
+      CLOUD_ML_REGION: "us-east5",
     };
     const env = claudeChildEnvironment(base, "subscription", "/private");
     expect(env).toEqual({
       HOME: "/home",
       PATH: "/bin",
+      GOOGLE_APPLICATION_CREDENTIALS: "/home/.pi-orb-gcp.json",
+      AWS_ROLE_ARN: "arn:aws:iam::1:role/r",
+      CLOUD_ML_REGION: "us-east5",
       CLAUDE_CODE_OAUTH_TOKEN: "subscription",
       CLAUDE_CONFIG_DIR: "/private",
     });

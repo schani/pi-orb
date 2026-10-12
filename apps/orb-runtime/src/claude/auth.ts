@@ -79,6 +79,13 @@ export function fetchClaudeSubscription(
   )().andThen((value) => value);
 }
 
+/**
+ * Variables that can replace the subscription credential. Cloud credentials
+ * (`AWS_*`, `GOOGLE_APPLICATION_CREDENTIALS`) select nothing without
+ * `CLAUDE_CODE_USE_*`, so they stay available to the agent's tools.
+ */
+export const CLAUDE_AUTH_ENV = /^(ANTHROPIC_|CLAUDE_CODE_|CLAUDE_CONFIG_DIR$|BASH_ENV$|ENV$)/;
+
 /** Only the supervised SDK subprocess gets this bearer. No gateway/API fallback. */
 export function claudeChildEnvironment(
   base: Readonly<NodeJS.ProcessEnv>,
@@ -87,12 +94,7 @@ export function claudeChildEnvironment(
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [name, value] of Object.entries(base)) {
-    if (
-      /^(ANTHROPIC_|CLAUDE_CODE_|CLAUDE_CONFIG_DIR$|AWS_|GOOGLE_APPLICATION_CREDENTIALS$|CLOUD_ML_|BASH_ENV$|ENV$)/.test(
-        name,
-      )
-    )
-      continue;
+    if (CLAUDE_AUTH_ENV.test(name)) continue;
     env[name] = value;
   }
   env.CLAUDE_CODE_OAUTH_TOKEN = token;
