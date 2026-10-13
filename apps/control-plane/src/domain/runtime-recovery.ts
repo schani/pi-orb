@@ -63,6 +63,8 @@ export async function handleFailedRuntime(
         : "runtime-failed",
     {
       reason: health.error.code,
+      message: health.error.message,
+      diagnostics: health.error.diagnostics,
       ...(recoverable
         ? { episode }
         : replacementFailed

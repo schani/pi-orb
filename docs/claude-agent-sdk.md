@@ -1,5 +1,7 @@
 # Claude Agent SDK harness POC
 
+**Decision — 2026-10-13; local, undeployed:** initialization failures expose stage, underlying message/cause and last stderr line through the existing failure banner. Bounded, credential-redacted stacks/causes, observed exit and stderr reach health's optional `error.diagnostics`, `claude.initialization_failed` history and the control plane's claimed `runtime-failed` lifecycle edge, before compute disposal. Limits: 1,024-character summary, 32,768-character stderr buffer, four error-chain entries and 16,384-character diagnostics. Only messages/stacks/error codes are captured, not arbitrary exception payloads. Known credentials (including encoded variants), credential syntax and URL credentials/query/fragments are stripped before truncation. Incident: `docs/postmortems/2026-10-12-claude-charts-orb-failure.md`.
+
 ## Automatic uncertain-worker compute recovery
 
 **Decision — 2026-10-06; implemented locally, undeployed.** Exact guard health adds optional `recovery: { episode }`. The episode is a 64-character SHA-256 digest of retained native session ID, four sorted ownership-ID sets (child/task/background/handoff; descriptions excluded), and sorted submitted delivery operation IDs. It excludes compute lifetime, incarnation, prompts, result payloads and delivery content. The controller's claim ledger matches this identity across replacement/controller lifetimes; a repeated episode exhausts rather than loops.

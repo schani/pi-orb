@@ -134,6 +134,7 @@ export const RuntimeHealthSchema = Type.Union([
           code: Type.String(),
           message: Type.String(),
           retryable: Type.Boolean(),
+          diagnostics: Type.Optional(Type.String({ maxLength: 16384 })),
         },
         closed,
       ),
