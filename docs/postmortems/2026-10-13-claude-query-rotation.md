@@ -79,4 +79,6 @@ Local qualification before rebasing onto updated `main` (baseline `00205af`): **
 
 Process/PGlite full-slice E2E passed all four cases on unchanged source, including login, tool round trip, replication, drain and explicit restart. The first invocation was canceled at the tool's 240-second budget before a verdict; its log is retained. The completed run's first case took 333 seconds, without changing test deadlines or assertions. This is scoped full-slice coverage, not qualification of the entire E2E suite. No deployment.
 
+PR qualification exposed an unrelated frontend scenario assumption: [E2E shard 1](https://github.com/schani/pi-orb/actions/runs/38430183818/job/115410012379) counted three admitted requests, then tried to release `roster-one`, which had not arrived. Browser request arrival order is not guaranteed by the shared two-request pool. The scenario now releases observed admitted keys, asserts all three roster IDs, and retries the specific failed key. Cap, success/failure, retry, existing-header and privacy assertions remain. All 12 Chromium/WebKit headline cases pass after correction; the first CI log/artifacts remain retained.
+
 Historical attribution is tracked in `TODO.md`. General native idle-fencing equivalence remains question 73 (Claude SDK) in `docs/open-questions.md`.
