@@ -1,8 +1,9 @@
 import { capHeadline, type DisplayBlock, type DisplayDetailBody } from "@pi-orb/protocol";
-import { type ReactNode, useState } from "react";
+import { Fragment, type ReactNode, useState } from "react";
 import { type ActivityHeadlineSource, selectToolHeadline } from "../lib/activity-headline.ts";
 import { useActivityHeadline } from "../lib/use-activity-headline.tsx";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
+import { ChartRows } from "./ChartRows.tsx";
 import { CommittedImage, imageIndex } from "./CommittedImage.tsx";
 import { CommittedBody, type DetailContext, NestedSummary, RunningBody } from "./DetailBody.tsx";
 import { ToolImagePreview } from "./ToolImagePreview.tsx";
@@ -62,8 +63,11 @@ function categorize(calls: readonly Call[]): Category[] {
   }
   return [...categories.values()];
 }
+/** Image and chart results end their segment, so their previews and chart rows stay in call order. */
+const segmentEnd = (call: Call) =>
+  call.result?.hasImages === true || call.result?.charts !== undefined;
 function displayCategories(calls: readonly Call[]): Category[] {
-  if (!calls.some((call) => call.result?.hasImages)) return categorize(calls);
+  if (!calls.some(segmentEnd)) return categorize(calls);
   const categories: Category[] = [];
   let textCalls: Call[] = [];
   const flush = () => {
@@ -76,14 +80,14 @@ function displayCategories(calls: readonly Call[]): Category[] {
     textCalls = [];
   };
   for (const call of calls) {
-    if (!call.result?.hasImages) {
+    if (!segmentEnd(call)) {
       textCalls.push(call);
       continue;
     }
     flush();
     categories.push({
       ...categoryFor(call.name),
-      key: `image:${call.id}`,
+      key: `${call.result?.hasImages ? "image" : "chart"}:${call.id}`,
       calls: [call],
     });
   }
@@ -495,7 +499,20 @@ export function ToolActivity({
   return (
     <>
       {displayCategories(calls).map((category) => (
-        <CategoryRow key={category.key} category={category} context={detailContext} />
+        <Fragment key={category.key}>
+          <CategoryRow category={category} context={detailContext} />
+          {category.calls.map((call) =>
+            call.result?.charts !== undefined && call.resultRecordId !== undefined ? (
+              <ChartRows
+                key={call.id}
+                titles={call.result.charts}
+                recordId={call.resultRecordId}
+                detailKey={call.result.detailKey}
+                context={detailContext}
+              />
+            ) : null,
+          )}
+        </Fragment>
       ))}
     </>
   );

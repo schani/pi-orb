@@ -14,6 +14,7 @@ import {
   type ToolExecutionApi,
   type ToolExecutionResult,
 } from "@earendil-works/pi-durable";
+import { CHART_MAX_PER_SCRIPT, type ChartSpec, parseChartSpec } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, Result, ResultAsync } from "neverthrow";
 import { logOrbEvent } from "../../../domain/log.ts";
@@ -107,7 +108,7 @@ export function codemodeTool(
             `\nNamespace ${ns.name}: discover with describeNamespace(${JSON.stringify(ns.name)}).${ns.description ? ` ${ns.description}` : ""}${ns.instructions ? `\n${ns.instructions}` : ""}`,
         )
         .join("") +
-      "\nDo not redeclare tools or other injected globals. Discover children with `text(await searchTools('subagent'))`. Only script output reaches the model. The default deadline is five minutes; timeout_ms overrides it. Batch independent calls with Promise.allSettled in batches of at most 8: tool calls and host discovery globals share the 8-outstanding limit. Each execution allows 256 total callbacks, 8 MiB serialized arguments, and 64 MiB serialized replies; exceeding a limit cancels the script and callbacks without saving store writes. Chain calls or filter results. Failed scripts do not undo earlier effects; nested operations are not independently replayed. Successful store writes persist per conversation. Images must use image(), not text().",
+      "\nDo not redeclare tools or other injected globals. Discover children with `text(await searchTools('subagent'))`. Only script output reaches the model. The default deadline is five minutes; timeout_ms overrides it. Batch independent calls with Promise.allSettled in batches of at most 8: tool calls and host discovery globals share the 8-outstanding limit. Each execution allows 256 total callbacks, 8 MiB serialized arguments, and 64 MiB serialized replies; exceeding a limit cancels the script and callbacks without saving store writes. Chain calls or filter results. Failed scripts do not undo earlier effects; nested operations are not independently replayed. Successful store writes persist per conversation. Images must use image(), not text(). `await chart(spec)` shows the user a chart as its own transcript row; its data never reaches you and styling is automatic. spec is {kind:'line', title, unit?, source?, series:[{name, points:[[time, value|null]]}], markers?:[{at:time, label}], thresholds?:[{value, label}]} (time: ISO string or epoch ms; at most 6 series and 5000 points) or {kind:'bar', title, unit?, source?, bars:[{label, value}]}. source is an http(s) link to the origin, e.g. the Datadog query. At most 8 charts per script.",
     parameters: Type.Object({ code: Type.String() }, { additionalProperties: false }),
     constrainedSampling: { type: "grammar", variants: { openai_lark: CODEMODE_SOURCE_GRAMMAR } },
     replay: "unsafe",
@@ -185,6 +186,22 @@ export function codemodeTool(
       });
       let invocation = 0;
       let usage: Usage | undefined;
+      const charts: ChartSpec[] = [];
+      const chart: CodemodeTool = {
+        name: "chart",
+        execute: (value) => {
+          const parsed =
+            charts.length >= CHART_MAX_PER_SCRIPT
+              ? err({ message: `chart(): at most ${CHART_MAX_PER_SCRIPT} charts per script` })
+              : parseChartSpec(value);
+          if (parsed.isErr()) {
+            // biome-ignore lint/plugin/no-throw: QuickJS callback contract rejects into the script
+            throw new Error(parsed.error.message);
+          }
+          charts.push(parsed.value);
+          return undefined;
+        },
+      };
       const publish = async () => {
         if (!api.details) return;
         const published = await ResultAsync.fromPromise(
@@ -348,14 +365,17 @@ export function codemodeTool(
                 }),
               )
               .map(guardCallback),
-            globals: createDiscoveryGlobals(
-              catalog.policyTools(),
-              new Map(catalog.definitions().map((t) => [t.name, catalog.describe(t.name) ?? ""])),
-              {
-                getToolNamespace: (name) => catalog.metadata(name).namespace,
-                getNamespaces: () => catalog.namespaceValues(),
-              },
-            ).map(guardCallback),
+            globals: [
+              ...createDiscoveryGlobals(
+                catalog.policyTools(),
+                new Map(catalog.definitions().map((t) => [t.name, catalog.describe(t.name) ?? ""])),
+                {
+                  getToolNamespace: (name) => catalog.metadata(name).namespace,
+                  getNamespaces: () => catalog.namespaceValues(),
+                },
+              ),
+              chart,
+            ].map(guardCallback),
           }),
         () => ({ code: "unavailable" as const, message: "Sandbox initialization failed" }),
       )();
@@ -475,6 +495,7 @@ export function codemodeTool(
           omittedCalls: Math.max(0, invocation - calls.length),
           executionWait: false,
           ...(fullOutputPath ? { fullOutputPath } : {}),
+          ...(charts.length ? { charts } : {}),
         },
       };
     },

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CHART_CONTENT_TYPE } from "./chart.ts";
 import {
   capHeadline,
   createDisplayRecordProjector,
@@ -8,6 +9,7 @@ import {
   projectRecordImage,
 } from "./display.ts";
 import type { HistoryRecord } from "./history.ts";
+import type { JsonValue } from "./json.ts";
 
 const secret = "HIDDEN_BODY_CANARY";
 const record: HistoryRecord = {
@@ -1037,5 +1039,70 @@ describe("native background admission display", () => {
         };
     }
     expect(JSON.stringify(projectDisplayRecord(record))).not.toContain("asyncLaunch");
+  });
+});
+
+describe("chart projection", () => {
+  const spec = {
+    kind: "line",
+    title: "checkout-api p95 latency",
+    unit: "ms",
+    series: [
+      {
+        name: "p95",
+        points: [
+          [1, 180],
+          [2, 410],
+        ],
+      },
+    ],
+  };
+  const withCharts = (charts: unknown[]): HistoryRecord => ({
+    id: "r9",
+    parentId: null,
+    timestamp: "t",
+    type: "message",
+    role: "tool",
+    overflow: {},
+    content: [
+      {
+        type: "tool_result",
+        callId: "c9",
+        content: [
+          { type: "text", text: "Script completed" },
+          ...charts.map((data) => ({
+            type: "other" as const,
+            contentType: CHART_CONTENT_TYPE,
+            data: data as JsonValue,
+          })),
+        ],
+      },
+    ],
+  });
+
+  it("lists chart titles on the summary and serves specs as detail leaves", () => {
+    const record = withCharts([spec, { ...spec, title: "second" }]);
+    expect(projectDisplayRecord(record)).toMatchObject({
+      content: [{ type: "tool_result", charts: ["checkout-api p95 latency", "second"] }],
+    });
+    expect(projectRecordDetail(record, "r9:0")).toEqual({
+      type: "tool_result",
+      content: [
+        { type: "text", text: "Script completed" },
+        { type: "chart", spec },
+        { type: "chart", spec: { ...spec, title: "second" } },
+      ],
+    });
+  });
+
+  it("drops stored chart data that no longer satisfies the chart schema", () => {
+    const record = withCharts([{ kind: "pie", title: "nope" }]);
+    const block = projectDisplayRecord(record);
+    if (block.type !== "message") throw new Error("expected message");
+    expect(block.content[0]).not.toHaveProperty("charts");
+    expect(projectRecordDetail(record, "r9:0")).toEqual({
+      type: "tool_result",
+      content: [{ type: "text", text: "Script completed" }],
+    });
   });
 });

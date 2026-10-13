@@ -1,0 +1,136 @@
+import { Check } from "typebox/value";
+import { describe, expect, it } from "vitest";
+import {
+  CHART_MAX_POINTS,
+  CHART_MAX_SERIES,
+  CHART_MAX_SOURCE_CHARS,
+  ChartSpecSchema,
+  parseChartSpec,
+} from "./chart.ts";
+
+const line = {
+  kind: "line",
+  title: "checkout-api p95 latency",
+  unit: "ms",
+  source: "https://app.datadoghq.com/metric/explorer",
+  series: [
+    {
+      name: "p95",
+      points: [
+        ["2026-10-13T18:00:00.000Z", 180],
+        [1792000800000, null],
+        [1792001100000, 410],
+      ],
+    },
+  ],
+  markers: [{ at: "2026-10-13T18:05:00.000Z", label: "deploy a41c9e2" }],
+  thresholds: [{ value: 300, label: "SLO 300 ms" }],
+};
+
+function message(value: unknown): string {
+  const parsed = parseChartSpec(value);
+  if (parsed.isOk()) throw new Error("expected rejection");
+  expect(parsed.error.type).toBe("chart_invalid");
+  return parsed.error.message;
+}
+
+describe("parseChartSpec", () => {
+  it("normalizes timestamps to epoch milliseconds and drops null points", () => {
+    const parsed = parseChartSpec(line)._unsafeUnwrap();
+    expect(parsed).toEqual({
+      kind: "line",
+      title: "checkout-api p95 latency",
+      unit: "ms",
+      source: "https://app.datadoghq.com/metric/explorer",
+      series: [
+        {
+          name: "p95",
+          points: [
+            [Date.parse("2026-10-13T18:00:00.000Z"), 180],
+            [1792001100000, 410],
+          ],
+        },
+      ],
+      markers: [{ at: Date.parse("2026-10-13T18:05:00.000Z"), label: "deploy a41c9e2" }],
+      thresholds: [{ value: 300, label: "SLO 300 ms" }],
+    });
+    expect(Check(ChartSpecSchema, parsed)).toBe(true);
+  });
+
+  it("accepts a bar chart", () => {
+    const bars = {
+      kind: "bar",
+      title: "slowest endpoints",
+      bars: [
+        { label: "POST /checkout", value: 412 },
+        { label: "GET /cart", value: 141 },
+      ],
+    };
+    expect(parseChartSpec(bars)._unsafeUnwrap()).toEqual(bars);
+  });
+
+  it("tells the script to fold or split more than six series", () => {
+    const series = Array.from({ length: CHART_MAX_SERIES + 1 }, (_, i) => ({
+      name: `s${i}`,
+      points: [[1, i]],
+    }));
+    expect(message({ kind: "line", title: "t", series })).toMatch(/at most 6 series.*fold/i);
+  });
+
+  it("rejects unknown fields, so a spec cannot point the browser at remote data", () => {
+    expect(message({ ...line, data: { url: "https://example.com/data.json" } })).toMatch(/data/);
+  });
+
+  it("rejects a missing title and an empty bar list", () => {
+    expect(message({ kind: "line", series: line.series })).toMatch(/title/);
+    expect(message({ kind: "bar", title: "t", bars: [] })).toMatch(/bars/);
+  });
+
+  it("rejects source links that are not http(s)", () => {
+    expect(message({ ...line, source: "javascript:alert(1)" })).toMatch(/source/);
+  });
+
+  it("rejects unparseable timestamps and non-finite values", () => {
+    expect(
+      message({ kind: "line", title: "t", series: [{ name: "a", points: [["noon", 1]] }] }),
+    ).toMatch(/timestamp/);
+    expect(message({ kind: "bar", title: "t", bars: [{ label: "a", value: Number.NaN }] })).toMatch(
+      /bars/,
+    );
+  });
+
+  it("rejects duplicate series names, which would merge in the tooltip and hover", () => {
+    expect(
+      message({
+        kind: "line",
+        title: "t",
+        series: [
+          { name: "a", points: [[1, 1]] },
+          { name: "a", points: [[1, 2]] },
+        ],
+      }),
+    ).toMatch(/series "a" appears twice/);
+  });
+
+  it("rejects a series left empty after dropping nulls", () => {
+    expect(
+      message({ kind: "line", title: "t", series: [{ name: "a", points: [[1, null]] }] }),
+    ).toMatch(/series "a" has no points/);
+  });
+
+  it("bounds the stored size", () => {
+    const points = Array.from({ length: CHART_MAX_POINTS + 1 }, (_, i) => [i, i]);
+    expect(message({ kind: "line", title: "t", series: [{ name: "a", points }] })).toMatch(
+      new RegExp(`${CHART_MAX_POINTS} points`),
+    );
+    expect(
+      message({
+        kind: "bar",
+        title: "t",
+        bars: Array.from({ length: 40 }, (_, i) => ({ label: "x".repeat(60) + i, value: i })),
+        unit: "ms",
+        source: `https://example.com/${"a".repeat(CHART_MAX_SOURCE_CHARS)}`,
+      }),
+    ).toMatch(/source/);
+  });
+});

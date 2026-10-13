@@ -1,6 +1,7 @@
 export * from "./activity-headline.ts";
 export * from "./agent-settings.ts";
 export * from "./broker.ts";
+export * from "./chart.ts";
 export * from "./claude-auth.ts";
 export * from "./control-plane-api.ts";
 export * from "./display.ts";

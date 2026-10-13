@@ -2158,6 +2158,110 @@ pre,
   object-fit: contain;
 }
 
+/* ---------- transcript charts: one rail row per chart (docs/web-ui.md) ---------- */
+
+.chart-strip-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chart-strip-spark {
+  display: block;
+  width: 9rem;
+  height: 16px;
+}
+
+.chart-strip-value {
+  color: var(--k);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.chart-strip-body {
+  padding: 4px 8px 8px;
+  background: var(--w);
+}
+
+.rec-orb > .rec-bd > .activity-rail-row > .chart-strip-body {
+  padding-left: calc(2ch + 16px);
+}
+
+.chart-strip-body > footer {
+  text-align: right;
+}
+
+.chart-canvas {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.chart-source {
+  color: var(--g3);
+  border-bottom-color: var(--g2);
+}
+
+.chart-error {
+  margin: 0;
+  color: var(--bad);
+}
+
+.chart-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--g3);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.chart-key[data-highlighted] > :not([data-on]) {
+  opacity: 0.35;
+}
+
+.chart-key svg,
+.chart-tip svg {
+  margin-right: 4px;
+  vertical-align: 2px;
+}
+
+.chart-tip {
+  position: fixed;
+  z-index: 50;
+  padding: 2px 8px;
+  color: var(--k);
+  background: var(--w);
+  border: 1px solid var(--k);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 16px;
+  pointer-events: none;
+}
+
+.chart-tip table {
+  border-collapse: collapse;
+}
+
+.chart-tip td {
+  padding: 0;
+}
+
+.chart-tip td + td {
+  padding-left: 12px;
+  text-align: right;
+}
+
+.chart-tip .k {
+  color: var(--g3);
+}
+
+@media (max-width: 600px) {
+  .chart-strip-spark {
+    width: 5rem;
+  }
+}
+
 .tool-command {
   margin-top: 3px;
   padding-top: 3px;

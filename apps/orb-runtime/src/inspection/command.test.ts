@@ -1,4 +1,4 @@
-import type { OrbInspectionItem, OrbTranscript } from "@pi-orb/protocol";
+import { CHART_CONTENT_TYPE, type OrbInspectionItem, type OrbTranscript } from "@pi-orb/protocol";
 import { describe, expect, it } from "vitest";
 import {
   filterOrbs,
@@ -207,5 +207,49 @@ describe("orb inspection presentation", () => {
     expect(output).toContain("[tool result: call-1]\nsource");
     expect(output).toContain("## compaction\n\nEarlier parser work.");
     expect(output).not.toContain("secretDuplicate");
+  });
+
+  it("names charts instead of dumping their data", () => {
+    const sibling = items[1];
+    if (sibling === undefined) throw new Error("missing fixture");
+    const output = formatTranscript({
+      v: 1,
+      orb: sibling,
+      session: { id: "session-a", overflow: {} },
+      cursor: "record-1",
+      headId: "record-1",
+      records: [
+        {
+          id: "record-1",
+          parentId: null,
+          timestamp: "2026-08-26T00:00:01.000Z",
+          type: "message",
+          role: "tool",
+          content: [
+            {
+              type: "tool_result",
+              callId: "call-1",
+              content: [
+                { type: "text", text: "Script completed" },
+                {
+                  type: "other",
+                  contentType: CHART_CONTENT_TYPE,
+                  data: {
+                    kind: "bar",
+                    title: "slowest endpoints",
+                    bars: [{ label: "a", value: 412 }],
+                  },
+                },
+              ],
+            },
+          ],
+          overflow: {},
+        },
+      ],
+    });
+    expect(output).toContain(
+      "[tool result: call-1]\nScript completed\n\n[chart: slowest endpoints]",
+    );
+    expect(output).not.toContain("412");
   });
 });

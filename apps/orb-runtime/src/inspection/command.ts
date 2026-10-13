@@ -1,9 +1,11 @@
-import type {
-  ContentBlock,
-  HistoryRecord,
-  OrbInspectionItem,
-  OrbSelf,
-  OrbTranscript,
+import {
+  CHART_CONTENT_TYPE,
+  type ContentBlock,
+  type HistoryRecord,
+  type JsonValue,
+  type OrbInspectionItem,
+  type OrbSelf,
+  type OrbTranscript,
 } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
 
@@ -101,6 +103,16 @@ export function formatOrbList(items: readonly OrbInspectionItem[], currentOrbId:
   return `${rows.join("\n")}\n`;
 }
 
+/** Chart data is for the browser; readers of a transcript get its title. */
+function chartTitle(data: JsonValue): string {
+  return typeof data === "object" &&
+    data !== null &&
+    !Array.isArray(data) &&
+    typeof data["title"] === "string"
+    ? data["title"]
+    : "untitled";
+}
+
 function renderBlocks(blocks: readonly ContentBlock[]): string {
   const parts: string[] = [];
   for (const block of blocks) {
@@ -121,7 +133,11 @@ function renderBlocks(blocks: readonly ContentBlock[]): string {
         parts.push(`[tool result: ${block.callId}]\n${renderBlocks(block.content)}`);
         break;
       case "other":
-        parts.push(`[${block.contentType}]\n${JSON.stringify(block.data)}`);
+        parts.push(
+          block.contentType === CHART_CONTENT_TYPE
+            ? `[chart: ${chartTitle(block.data)}]`
+            : `[${block.contentType}]\n${JSON.stringify(block.data)}`,
+        );
         break;
     }
   }
