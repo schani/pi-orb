@@ -7,6 +7,7 @@ import {
   ComposedClaudeFixture,
   childEdge,
   childHook,
+  rootRequest,
   rootResult,
   submitReceipt,
 } from "../../../orb-runtime/src/testkit/claude-composed.ts";
@@ -163,6 +164,7 @@ it("archive seals real normalized root history only after child handoff, native 
                 "terminal child awaits native root handoff",
               );
               expect(sealed).toBe(false);
+              await f.query.emit(task, rootRequest);
               await f.query.emit(task, rootResult);
               f.query.exit();
               await task.sleep(
@@ -271,6 +273,7 @@ it("real child-only activity survives CP restart, stale pulls and wall-clock jum
                 }
                 if (phase === 1) {
                   await f.query.emit(task, childEdge("task_notification"));
+                  await f.query.emit(task, rootRequest);
                   await f.query.emit(task, rootResult);
                   f.query.exit();
                   f.query.endOutput();

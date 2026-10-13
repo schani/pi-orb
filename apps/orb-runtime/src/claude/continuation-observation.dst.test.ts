@@ -3,6 +3,7 @@ import {
   background,
   ComposedClaudeFixture,
   childEdge,
+  rootRequest,
   rootResult,
   submitReceipt,
 } from "../testkit/claude-composed.ts";
@@ -53,6 +54,7 @@ it.for(["before-result", "after-result"] as const)(
                   expect(f.query.closeRequested).toBe(false);
                   expect(Object.keys(f.journal().pendingHandoffs ?? {})).toEqual(["child"]);
                 }
+                await f.query.emit(task, rootRequest);
                 await f.query.emit(task, rootResult);
                 if (cut === "after-result") {
                   expect(f.query.closeRequested).toBe(false);

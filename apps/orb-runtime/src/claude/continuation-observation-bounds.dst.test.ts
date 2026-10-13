@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import {
   ComposedClaudeFixture,
   childEdge,
+  rootRequest,
   rootResult,
   submitReceipt,
 } from "../testkit/claude-composed.ts";
@@ -39,6 +40,7 @@ it("bounds affected-query diagnostics without dropping ownership or the drain su
             expect(f.journal().ownedTasks).toHaveProperty("child");
             await f.query.emit(task, childEdge("task_notification"));
             expect(f.query.closeRequested).toBe(false);
+            await f.query.emit(task, rootRequest);
             await f.query.emit(task, rootResult);
             f.query.exit();
             f.query.endOutput();

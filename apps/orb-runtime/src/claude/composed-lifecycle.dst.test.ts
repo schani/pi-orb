@@ -7,6 +7,7 @@ import {
   childHook,
   nativeHook,
   nativeHookResponse,
+  rootRequest,
   rootResult,
   ScheduledClaudeQuery,
   submitReceipt,
@@ -42,6 +43,7 @@ it("native child hooks, independent inventories, process exit, stdout and final 
               task,
               background([{ task_id: "inventory-task", description: "inventory-only work" }]),
             );
+            await f.query.emit(task, rootRequest);
             await f.query.emit(task, rootResult);
             expect(f.query.closeRequested).toBe(false);
             expect(f.state.ownedBackgroundTasks).toEqual({

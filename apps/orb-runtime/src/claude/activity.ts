@@ -8,7 +8,7 @@ export class ClaudeActivity {
   private cancelled = false;
   private readonly hooks = new Set<string>();
   private readonly admittedChildren = new Map<string, string>();
-  private readonly handoffs = new Map<string, string>();
+  private readonly handoffs = new Map<string, { description: string; requested: boolean }>();
   private readonly tasks = new Map<string, { description: string; ambient: boolean }>();
   private readonly edgeTasks = new Map<string, { description: string; ambient: boolean }>();
   get operationId(): string | null {
@@ -48,7 +48,7 @@ export class ClaudeActivity {
         .map(([id, task]) => [id, task.description]),
     );
     for (const [id, description] of this.admittedChildren) children.set(id, description);
-    for (const [id, description] of this.handoffs) children.set(id, description);
+    for (const [id, handoff] of this.handoffs) children.set(id, handoff.description);
     return [...children].map(([id, description]) => ({
       id,
       description,
@@ -69,9 +69,23 @@ export class ClaudeActivity {
     this.cancelled = false;
     return true;
   }
-  rootFinished(): void {
-    this.rootDone = true;
-    if (!this.draining) this.handoffs.clear();
+  rootFinished(inferenceCompleted = false): string[] {
+    const completed: string[] = [];
+    if (!this.draining && inferenceCompleted)
+      for (const [id, handoff] of this.handoffs)
+        if (handoff.requested) {
+          this.handoffs.delete(id);
+          completed.push(id);
+        }
+    this.rootDone = this.handoffs.size === 0;
+    return completed;
+  }
+  rootRequested(): void {
+    this.rootStarted();
+    for (const handoff of this.handoffs.values()) handoff.requested = true;
+  }
+  get awaitingHandoffInference(): string[] {
+    return [...this.handoffs].filter(([, handoff]) => !handoff.requested).map(([id]) => id);
   }
   hasTask(id: string): boolean {
     return (
@@ -87,7 +101,7 @@ export class ClaudeActivity {
     this.handoffs.delete(id);
   }
   taskHandoff(id: string, description: string): void {
-    this.handoffs.set(id, description);
+    this.handoffs.set(id, { description, requested: false });
     this.rootDone = false;
   }
   rootStarted(): void {

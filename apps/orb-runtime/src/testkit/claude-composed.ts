@@ -212,13 +212,16 @@ export class ScheduledClaudeQuery implements ClaudeQuery {
     await task.checkpoint(`native stdout: ${message.type}`);
     return this.emitUnscheduled(message);
   }
-  async emitUnscheduled(message: SDKMessage) {
-    if (this.outputEnded) return false;
+  emitUnscheduled(message: SDKMessage) {
+    return this.enqueue(message);
+  }
+  /** Native stdout can run ahead of adapter consumption. The promise acknowledges consumption. */
+  enqueue(message: SDKMessage): Promise<boolean> {
+    if (this.outputEnded) return Promise.resolve(false);
     const consumed = latch();
     this.messages.push({ message, consumed });
     this.wake.release();
-    await consumed.promise;
-    return true;
+    return consumed.promise.then(() => true);
   }
   exit() {
     this.processExit.release();
@@ -260,10 +263,21 @@ export function nativeHookResponse(
   };
 }
 
+export const rootRequest = {
+  type: "system",
+  subtype: "status",
+  status: "requesting",
+  uuid: "11111111-1111-4111-8111-111111111111",
+  session_id: "session",
+} as unknown as SDKMessage;
 export const rootResult = {
   type: "result",
   subtype: "success",
   is_error: false,
+  num_turns: 1,
+  stop_reason: "end_turn",
+  queued_turn_count: 0,
+  result: "Completed.",
 } as unknown as SDKMessage;
 export const childEdge = (subtype: "task_started" | "task_notification") =>
   ({

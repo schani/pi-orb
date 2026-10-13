@@ -263,6 +263,8 @@ export class ClaudeOrbAgent implements OrbAgent {
   private readonly hookCallbacks = new Set<Promise<unknown>>();
   private closing: Promise<void> | null = null;
   private queryId = "";
+  private lastRootResult: JsonObject | null = null;
+  private rotationRootWork: JsonObject | null = null;
   private observeContinuation = false;
   private continuationEdges = 0;
   private continuationSuppressed = 0;
@@ -910,6 +912,8 @@ export class ClaudeOrbAgent implements OrbAgent {
     const input = new InputQueue();
     this.input = input;
     this.queryId = randomUUID();
+    this.lastRootResult = null;
+    this.rotationRootWork = null;
     const queryId = this.queryId;
     this.observeContinuation = false;
     this.continuationEdges = 0;
@@ -1184,6 +1188,15 @@ export class ClaudeOrbAgent implements OrbAgent {
         message.status === "requesting") ||
         (message.type === "assistant" && message.parent_tool_use_id === null))
     ) {
+      this.rotationRootWork ??= {
+        queryId: this.queryId,
+        operationId: this.activity.operationId,
+        nativeSessionId: message.session_id ?? null,
+        messageType: message.type,
+        signal: message.type === "system" ? "requesting" : "root_assistant",
+        messageId: message.uuid ?? null,
+        priorResult: this.lastRootResult,
+      };
       this.outcome = "failed";
       this.operationError = "Native work started during query rotation; the session was stopped.";
     }
@@ -1264,7 +1277,10 @@ export class ClaudeOrbAgent implements OrbAgent {
       }
       if (message.subtype === "hook_started") this.activity.hookStart(message.hook_id);
       if (message.subtype === "hook_response") this.activity.hookEnd(message.hook_id);
-      if (message.subtype === "status" && message.status !== null) this.activity.rootStarted();
+      if (message.subtype === "status" && message.status !== null) {
+        if (message.status === "requesting") this.activity.rootRequested();
+        else this.activity.rootStarted();
+      }
       if (
         this.compaction !== null &&
         message.subtype === "status" &&
@@ -1397,6 +1413,14 @@ export class ClaudeOrbAgent implements OrbAgent {
       }
     }
     if (message.type === "result") {
+      this.lastRootResult = {
+        resultId: message.uuid ?? null,
+        subtype: message.subtype,
+        isError: message.is_error,
+        numTurns: message.num_turns ?? null,
+        queuedTurns: message.queued_turn_count ?? null,
+        stopReason: message.stop_reason ?? null,
+      };
       const pending = [...this.pendingSteers];
       const answered = new Set(message.user_message_uuids ?? [message.user_message_uuid]);
       const latest = pending.at(-1);
@@ -1436,26 +1460,58 @@ export class ClaudeOrbAgent implements OrbAgent {
           return;
         }
       }
+      const previousHandoffs = Object.keys(this.state?.pendingHandoffs ?? {}).sort();
+      let completedHandoffs: string[] = [];
       if (this.closing === null) {
         if (this.pendingSteers.size === 0 && (message.queued_turn_count ?? 0) === 0)
-          this.activity.rootFinished();
+          completedHandoffs = this.activity.rootFinished(message.num_turns > 0);
         else this.activity.rootStarted();
+        if (previousHandoffs.length > 0) {
+          const recorded = this.platformEvent(
+            "claude.handoff_result",
+            "Native result accounted for task continuation handoffs.",
+            {
+              sessionId: this.state?.id ?? null,
+              queryId: this.queryId,
+              operationId: this.activity.operationId,
+              ...this.lastRootResult,
+              completedHandoffs,
+              pendingHandoffs: previousHandoffs.filter((id) => !completedHandoffs.includes(id)),
+              awaitingInference: this.activity.awaitingHandoffInference.sort(),
+            },
+            message.uuid === undefined
+              ? randomUUID()
+              : `claude.handoff-result:${this.queryId}:${message.uuid}`,
+            false,
+          );
+          if (recorded.isErr()) {
+            this.fail("history_unavailable", recorded.error.message);
+            return;
+          }
+        }
       }
       this.continuationObservation("root_result", {
         subtype: message.subtype,
         resultId: message.uuid ?? null,
         nativeSessionId: message.session_id ?? null,
+        numTurns: message.num_turns ?? null,
+        stopReason: message.stop_reason ?? null,
         closing: this.closing !== null,
-        pendingHandoffs: Object.keys(this.state?.pendingHandoffs ?? {}).length,
+        pendingHandoffs: previousHandoffs.length - completedHandoffs.length,
         ownedChildren: Object.keys(this.state?.ownedChildren ?? {}).length,
         ownedTasks: Object.keys(this.state?.ownedTasks ?? {}).length,
         ownedBackgroundTasks: Object.keys(this.state?.ownedBackgroundTasks ?? {}).length,
       });
       if (this.state !== null && this.closing === null) {
-        this.state.pendingHandoffs = {};
-        this.state.handoffTerminals = {};
+        this.state.pendingHandoffs ??= {};
+        this.state.handoffTerminals ??= {};
+        for (const id of completedHandoffs) {
+          delete this.state.pendingHandoffs?.[id];
+          delete this.state.handoffTerminals?.[id];
+        }
         const saved = this.saveState();
         if (saved.isErr()) this.fail("claude_handoff_guard_failed", saved.error.message);
+        this.publishChildren();
       }
       if (message.is_error && this.outcome !== "aborted") {
         this.outcome = "failed";
@@ -1543,6 +1599,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       this.fail("claude_rotation_uncertain", message);
       const recorded = this.platformEvent("claude.rotation_failed", message, {
         reason: "root_work",
+        rootWork: this.rotationRootWork,
       });
       if (recorded.isErr()) this.fail("claude_rotation_publication_failed", recorded.error.message);
     }

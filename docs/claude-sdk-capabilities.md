@@ -135,7 +135,11 @@ The [streaming overview](https://code.claude.com/docs/en/agent-sdk/streaming-vs-
 
 ## Idleness versus root completion
 
-Research: public `SDKResultMessage` ends a root turn, not aggregate work; `queued_turn_count`, when present, describes pending input.
+Finding (2026-10-13): `SDKResultMessage` can acknowledge a command without inference (`num_turns: 0`, `stop_reason: null`, empty successful result). `queued_turn_count` counts user-initiated sends, excluding system-generated entries. The pinned native CLI emits such an acknowledgment between background-task notifications and their root continuation, even with zero queued user turns. It is not a handoff-completion fence.
+
+Decision (2026-10-13): a task handoff requires a subsequent root `requesting` edge followed by a nonzero-turn result. Results from inference already in flight at notification time and zero-turn command acknowledgments cannot finish it. Snapshot handoffs at requesting; a task finishing during that inference remains owned until a later requesting/result pair. Live and durable ownership retire the same task IDs. Local zero-turn commands without handoffs still complete. No grace timer or replay is added. Genuine root work observed after closing still fails visibly with retained ownership. Hidden `claude.handoff_result` edges record completed/pending handoffs and those awaiting inference; `claude.rotation_failed.rootWork` records the first late signal and preceding result metadata. Diagnostics contain IDs/counts, not content, and do not require nested-delegation denial.
+
+Qualification: `task-handoff-native.test.ts` feeds real SDK/CLI output and native transcripts through production ownership/history code, releasing background tasks after a result or during a held inference response. DST models both schedules, zero-turn acknowledgments, inventory/notification ordering, partial handoff consumption and buffered producer output. Both require successful completion, not containment. This reproduces an adapter defect, not the incident's unrecorded SDK ordering: `docs/postmortems/2026-10-13-claude-query-rotation.md`.
 `system/status` (`'compacting' | 'requesting' | null`) is not an idle signal.
 `system/background_tasks_changed` replaces the full task inventory; `task_started` and terminal `task_notification` edges help correlate outcomes. Ordering against root-turn bookends is unspecified.
 An ambient task excluded from the indicator is not necessarily effect-free. There is no public `Query.getBackgroundTasks()`.

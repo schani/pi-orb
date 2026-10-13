@@ -53,3 +53,13 @@ npx vitest run apps/orb-runtime/src/claude/steering-native.test.ts
 ```
 
 `steering.mjs` uses the same network guard and isolated dummy authentication, with no Agent tools. A held SDK MCP tool admits human `priority: "now"` input only after its handler starts. The next provider request must contain that input before the tool is released. A separate response-stream barrier verifies interruption of an unfinished response, followed by a successful result for the new input. Native result UUID echoes distinguish the old interrupted turn from the steering result. Return values contain only counts and booleans. These probes establish native delivery, not production model reasoning, subscription behavior or aggregate idle.
+
+## Zero-turn task acknowledgment
+
+```sh
+npx vitest run apps/orb-runtime/src/claude/task-handoff-native.test.ts
+```
+
+`task-handoff.mjs` uses real native background Bash commands blocked on owned FIFOs. It releases both after the first inference result or during a held root response, then feeds native output and transcripts through production ownership/history code. The fixture supplies metadata bootstrap, process ports and journal storage; its shutdown decision closes real native input. The test requires successful completion and ready/idle health, not acceptance of uncertainty failure.
+
+Pinned native output includes a successful zero-turn command result (`stop_reason: null`, empty result, zero queued user turns) before actual task-notification root inference. That result cannot finish task handoffs. In the held-response schedule, the older nonzero-turn result also cannot finish them. A handoff needs requesting after its notification followed by inference completion. Set `CLAUDE_HANDOFF_ARTIFACT_DIR` to retain content-free native result/decision/health evidence for both schedules, including failures. The probe uses the same dummy-authentication/environment/network isolation as other native probes, with no Agent tools or external provider calls. `docs/postmortems/2026-10-13-claude-query-rotation.md` distinguishes the reproduced adapter defect from historical incident attribution.

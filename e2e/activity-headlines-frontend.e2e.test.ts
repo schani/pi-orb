@@ -155,21 +155,37 @@ it.each(
         expect(maximum).toBe(2);
         release("roster-tool");
         await expect.poll(() => requests.length).toBe(3);
-        release("roster-one");
-        await expect(rail).toContainText("Headline roster-one");
+        const firstRoster = requests.find((key) => key !== "roster-tool");
+        expect(firstRoster).toBeDefined();
+        if (firstRoster === undefined) return;
+        release(firstRoster);
+        await expect(rail).toContainText(`Headline ${firstRoster}`);
         await expect.poll(() => requests.length).toBe(4);
+        expect([...requests].sort()).toEqual([
+          "roster-one",
+          "roster-three",
+          "roster-tool",
+          "roster-two",
+        ]);
         expect(maximum).toBe(2);
+        const [failedRoster, successfulRoster] = requests.filter(
+          (key) => key !== "roster-tool" && key !== firstRoster,
+        );
+        expect(failedRoster).toBeDefined();
+        expect(successfulRoster).toBeDefined();
+        if (failedRoster === undefined || successfulRoster === undefined) return;
         await control("fail");
-        release("roster-two");
+        release(failedRoster);
         await expect(rail).toContainText("Summary unavailable.");
         await control("success");
-        release("roster-three");
-        await expect(rail).toContainText("Headline roster-three");
+        release(successfulRoster);
+        await expect(rail).toContainText(`Headline ${successfulRoster}`);
         await rail.getByRole("button", { name: "Retry", exact: true }).click();
         expect(await rail.getAttribute("open")).not.toBeNull();
         await expect.poll(() => requests.length).toBe(5);
-        release("roster-two");
-        await expect(rail).toContainText("Headline roster-two");
+        expect(requests.at(-1)).toBe(failedRoster);
+        release(failedRoster);
+        await expect(rail).toContainText(`Headline ${failedRoster}`);
         await expect(rail).toContainText("Existing Claude header");
         await rail.locator("summary").click();
         await rail.locator("summary").click();
