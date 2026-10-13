@@ -11,6 +11,8 @@ import type { OrbState, RuntimeHealth } from "@pi-orb/protocol";
 export interface StoreError {
   readonly type: "store_error";
   readonly code: "unavailable" | "corruption" | "invariant";
+  /** Validated PostgreSQL SQLSTATE; safe for content-free diagnostics. */
+  readonly sqlState?: string;
   readonly message: string;
   readonly retryable: boolean;
 }

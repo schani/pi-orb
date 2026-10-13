@@ -77,9 +77,12 @@ export async function migrateDatabase(
       log(`lifecycle: migration-owner-resolution source=${source} outcome=${outcome}`);
     },
   });
-  // Error messages can contain database values. The last started filename and
-  // typed error code identify the failure without disclosing those values.
-  if (migrated.isErr()) log(`lifecycle: migration-failed code=${migrated.error.code}`);
+  // Database messages can contain values; log only typed codes and validated SQLSTATE.
+  if (migrated.isErr())
+    log(
+      `lifecycle: migration-failed code=${migrated.error.code}` +
+        (migrated.error.sqlState === undefined ? "" : ` sqlstate=${migrated.error.sqlState}`),
+    );
   else log(`lifecycle: migration-checked applied=${migrated.value.length}`);
   const closed = await database.close();
   if (closed.isErr()) log(`lifecycle: migration-close-failed code=${closed.error.code}`);

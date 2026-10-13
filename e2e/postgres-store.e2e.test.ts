@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { credentialPointerMigrationContractTests } from "../apps/control-plane/src/adapters/pg/credential-pointers-migration.contract.ts";
+import { historyMigrationContractTests } from "../apps/control-plane/src/adapters/pg/history-migration.contract.ts";
 import {
   hostingStoreContractTests,
   postgreSQLHostingContractSubject,
@@ -79,6 +80,7 @@ if (providedUrl === "" && PROCESS_BACKEND) {
     });
   }
 
+  historyMigrationContractTests("node-postgres (real server)", () => connectionString);
   credentialPointerMigrationContractTests("node-postgres (real server)", async () => {
     const subject = await openThrowawayPostgres(connectionString);
     return subject.client;

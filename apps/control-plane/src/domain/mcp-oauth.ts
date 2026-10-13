@@ -2,7 +2,7 @@ import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import { getToken, type TokenGrant, type TokenRequest } from "./broker.ts";
 import { DEFAULT_BROKER_CONSTANTS } from "./constants.ts";
-import type { OAuthRefreshDiagnostic } from "./errors.ts";
+import type { OAuthRefreshDiagnostic, StoreError } from "./errors.ts";
 import type {
   CredentialPointerRow,
   CredentialPointerWrite,
@@ -338,7 +338,7 @@ export class McpOAuth {
     binding: McpOAuthBinding,
     request: TokenRequest,
   ): Promise<Result<TokenGrant, McpOAuthError>> {
-    const storeError = () => ({
+    const storeError = (): StoreError => ({
       type: "store_error" as const,
       code: "unavailable" as const,
       message: "MCP OAuth unavailable",

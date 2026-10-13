@@ -1,5 +1,7 @@
 # Cloud deployment direction
 
+**Failed schema release and cleanup (2026-10-13, PDT):** [Deploy 38478055943](https://github.com/schani/pi-orb/actions/runs/38478055943) failed before apply on migration 044's deadlock. Authorized cleanup completed at 16:18:31: the exact terminal migration job was etag-deleted, then the original lock was removed with generation guard `1791931755981435`. Old serving, active pointer and failed release record remained unchanged. Production catalog/ledger were not queried. The reviewed NOWAIT correction is local, not deployed; exact-head qualification remains required. Evidence and limits: `docs/postmortems/2026-10-13-history-migration-deadlock.md`, `.context/deploy-38478055943/failure/safety/cleanup/`.
+
 **Scoped user release exception (2026-10-13, PDT):** the user authorized deployment while waiving historical explanation of the overlapping local image/OAuth/PGlite timeouts, PR 90 `1a68b06` Docker-build deadline and WebKit readiness failure in Durable qualification `38468937890`. Evidence and unknown causes are preserved in `docs/postmortems/2026-10-13-claude-history-nul.md`; no fix is claimed. Normal exact-head qualification, new-failure handling and DST replay remain mandatory. This docs-only record dispatches no deployment.
 
 **Default-branch fix release (2026-10-11):** [Deploy 38099575437](https://github.com/schani/pi-orb/actions/runs/38099575437) on `630e29ce9c15dc2c67c1d2e6c5a22285dae5045d` validated (`r-1791680828-132c88c0-4f72-46c0-8770-b17364fbc557`); all twelve gates passed and `pi-orb-issuer-00050-nn4` serves 100%. The two prior releases were `applied-but-unvalidated` on the same smoke defect (`docs/postmortems/2026-10-09-resource-fetch-main-branch.md`); their retained fixtures were deleted through the project API on 2026-10-11. The rollout monitor then reported `incomplete`: ten clean samples, then five `invalid` samples from `error log inventory truncated`. One stale Firefox tab polled with an expired session at ~2.3 requests/s; each 401 logged `lifecycle: auth-admission outcome=unauthenticated` (1,728 rows in 12 minutes), exceeding the 1,000-row query cap. Corrections: unauthenticated admission is no longer a lifecycle outcome, the web client stops non-probe API calls while sign-in is required, and unavailable monitor samples retain their fixed failure message.
@@ -496,11 +498,13 @@ The per-service Monitoring filter correction and sandbox API evidence are in
 
 A one-task, no-retry Cloud Run job runs migrations from the accepted image before
 any new service consumes schema. Production application startup does not migrate;
-local development still does. Migration filenames and outcomes are logged without
-raw database errors. An uncertain job execution retains the global release lock
+local development still does. Migration filenames, outcomes and optional validated
+SQLSTATE are logged without raw database errors. An uncertain job execution retains the global release lock
 and job identity for inspection. Successful jobs are removed. There is no
 automatic rollback of committed schema changes, nor a promise of compatibility
 for arbitrary breaking runtime/schema changes.
+
+**Migration locking (decided 2026-10-13; local, undeployed):** [Deploy 38478055943](https://github.com/schani/pi-orb/actions/runs/38478055943) failed before apply with 044 as the deadlock victim. Transaction semantics rule out a commit from that attempt, but production catalog/ledger were not queried. Blocking ordered exclusive locks are rejected: they still deadlock with inverse-order record readers in a proven three-session schedule. Migration 044 attempts the pair NOWAIT inside an exception subtransaction catching only 55P03 and releasing partial locks before backoff: 120 attempts, 119 quarter-second backoffs (29.75 seconds scheduled sleep, not a wall-clock guarantee). Exhaustion rethrows 55P03 before DDL; existing ALTERs run once in the same transaction. Durable SQL contention/acquisition/exhaustion edges diagnose this phase. The 300-second request deadline is unchanged. No whole-migration retries or automatic unlock. Retain failed release/job/lock evidence. Incident, tests-first proof and qualification limits: `docs/postmortems/2026-10-13-history-migration-deadlock.md`.
 
 **Runtime/migration compatibility (decided 2026-09-17):** migrations must let
 supported old runtimes continue temporarily. Every changed write contract must

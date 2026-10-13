@@ -8,7 +8,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Complete exact-head deployment qualification** (2026-10-13; `docs/postmortems/2026-10-13-claude-history-nul.md`). The user waived historical explanation of the overlapping local image/OAuth/PGlite timeouts, PR 90 `1a68b06` Docker-build deadline and WebKit readiness failure in run `38468937890`. Causes remain unknown; evidence is preserved, not claimed fixed. Normal exact-head gates, correction of new failures and DST replay remain mandatory.
+- **Complete exact-head deployment qualification** (2026-10-13; `docs/postmortems/2026-10-13-claude-history-nul.md`, `docs/postmortems/2026-10-13-history-migration-deadlock.md`). Include the reviewed migration-044 bounded NOWAIT acquisition and SQLSTATE telemetry; local mixed-reader, exhaustion, rollback and typecheck checks pass, but full exact-head CI/E2E remains required. The failed schema release remains failed; authorized job/lock cleanup completed without retry or deployment. The user waived historical explanation of the overlapping local image/OAuth/PGlite timeouts, PR 90 `1a68b06` Docker-build deadline and WebKit readiness failure in run `38468937890`. Causes remain unknown; evidence is preserved, not claimed fixed. Normal exact-head gates, correction of new failures and DST replay remain mandatory.
 
 - **Surface invariant history-poll blockage to the user** (2026-10-13; `docs/postmortems/2026-10-13-claude-history-nul.md`). Expose parked replication and blocked inbox delivery without claiming delivery before receipt commit; retain content-free durable diagnosis.
 

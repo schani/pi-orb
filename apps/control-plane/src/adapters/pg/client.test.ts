@@ -80,6 +80,16 @@ describe("prepareParams", () => {
 });
 
 describe("mapPgError", () => {
+  it("preserves validated SQLSTATE without changing error classification", () => {
+    for (const code of ["40P01", "23514", "22P02"]) {
+      expect(mapPgError({ code, message: "private" })).toHaveProperty("sqlState", code);
+    }
+    for (const code of [undefined, "ECONNREFUSED", "40p01", "40P01\\nprivate", 40001]) {
+      expect(mapPgError({ code })).not.toHaveProperty("sqlState");
+    }
+    expect(mapPgError({ code: "40P01" }).code).toBe("unavailable");
+  });
+
   it("classifies a data exception as a non-retryable invariant", () => {
     // 22P02: what a JS array bound to a jsonb column produced in production.
     const mapped = mapPgError(

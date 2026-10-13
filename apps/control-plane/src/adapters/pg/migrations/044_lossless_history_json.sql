@@ -1,3 +1,27 @@
+DO $$
+DECLARE
+  attempt integer;
+BEGIN
+  FOR attempt IN 1..120 LOOP
+    BEGIN
+      LOCK TABLE orbs, history_records IN ACCESS EXCLUSIVE MODE NOWAIT;
+      IF attempt > 1 THEN
+        RAISE LOG 'lifecycle: migration-lock-acquired name="044_lossless_history_json.sql" attempts=%', attempt;
+      END IF;
+      EXIT;
+    EXCEPTION WHEN lock_not_available THEN
+      IF attempt = 1 THEN
+        RAISE LOG 'lifecycle: migration-lock-contended name="044_lossless_history_json.sql"';
+      END IF;
+      IF attempt = 120 THEN
+        RAISE LOG 'lifecycle: migration-lock-exhausted name="044_lossless_history_json.sql" attempts=120 sqlstate=55P03';
+        RAISE;
+      END IF;
+    END;
+    PERFORM pg_sleep(0.25);
+  END LOOP;
+END $$;
+
 ALTER TABLE history_records
   DROP CONSTRAINT history_records_record_check,
   DROP CONSTRAINT history_records_check,
