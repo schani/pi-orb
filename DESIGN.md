@@ -151,6 +151,7 @@ Tracking:
 - [docs/postmortems/2026-10-11-phone-tail-pointer-race.md](docs/postmortems/2026-10-11-phone-tail-pointer-race.md) — pointer press discarded the pending tail write's offset; its delayed scroll event released following
 - [docs/postmortems/2026-10-10-bootstrap-metadata-network-race.md](docs/postmortems/2026-10-10-bootstrap-metadata-network-race.md) — single metadata read lost a boot-time guest-agent network reload; bootstrap now retries transient failures
 - [docs/postmortems/2026-10-10-starting-deadline-restarts.md](docs/postmortems/2026-10-10-starting-deadline-restarts.md) — restarting control plane renewed the create/start deadline hold
+- [docs/postmortems/2026-10-09-glideos-delivery-blocked.md](docs/postmortems/2026-10-09-glideos-delivery-blocked.md) — failed-resource retry poisoning and misleading delivery status; malformed YAML candidate, exact attribution pending
 - [docs/postmortems/2026-10-08-subagent-post-tool-missing-request.md](docs/postmortems/2026-10-08-subagent-post-tool-missing-request.md) — unresolved hosted post-tool stalls; bounded stream/audit evidence only
 - [docs/postmortems/2026-10-08-mcp-summary-missing-request.md](docs/postmortems/2026-10-08-mcp-summary-missing-request.md) — unresolved hosted summary failure; sanitized artifact retention only
 - [docs/postmortems/2026-10-08-webkit-reload-internal-error.md](docs/postmortems/2026-10-08-webkit-reload-internal-error.md) — unresolved Ubuntu WebKit reload failure; browser/socket/native evidence retention only

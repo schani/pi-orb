@@ -360,7 +360,10 @@ export class GitResourceSource implements ResourceSource {
         });
         return selection.andThen((value) => {
           const snapshot = { orbId: input.orbId, commitSha, ...value };
-          return snapshotPromptResources(snapshot).map(() => snapshot);
+          return snapshotPromptResources(snapshot, { invalidSkills: "warn" }).map((parsed) => ({
+            ...snapshot,
+            warnings: parsed.warnings,
+          }));
         });
       };
       const result = await ResultAsync.fromPromise(acquire(), () =>

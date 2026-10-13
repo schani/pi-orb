@@ -4,6 +4,7 @@ import {
   ResourceAcquisition,
   type ResourceSnapshot,
   type ResourceSnapshotStore,
+  type ResourceStatus,
   readResource,
   resourceError,
 } from "./resources.ts";
@@ -75,4 +76,72 @@ it("does not publish after cancellation while acquisition is held", async () => 
   release(snapshot);
   await finished;
   expect(put).not.toHaveBeenCalled();
+});
+
+it("bounds first-party messages to 1536 and strips control characters", () => {
+  const failure = resourceError(
+    "invalid",
+    `Invalid\nresource\r\t\0\x1b\x7f\x85\u2028\u202e: ${"p".repeat(2000)}`,
+  );
+  expect(failure.message).toHaveLength(1536);
+  expect(failure.message).toBe(`Invalidresource: ${"p".repeat(1519)}`);
+  expect(resourceError("invalid", "\n\0").message).toBe("Required resource snapshot unavailable");
+});
+
+it.each([false, true])(
+  "publishes ready warnings (present: %s) without reacquisition",
+  async (present) => {
+    const warnings = [{ path: ".agents/skills/bad/SKILL.md", code: "invalid_yaml" as const }];
+    const value: ResourceSnapshot = { ...snapshot, ...(present ? { warnings } : {}) };
+    const source = { acquire: vi.fn(() => okAsync(value)) };
+    const record = vi.fn((_orbId: string, _status: ResourceStatus) => okAsync(undefined));
+    const store: ResourceSnapshotStore = {
+      get: () => okAsync(value),
+      put: (value) => okAsync(value),
+      remove: () => okAsync(undefined),
+    };
+    const result = await new ResourceAcquisition(store, source, { record }).acquire({
+      orbId: "orb",
+      url: "https://example.invalid/repo",
+      signal: new AbortController().signal,
+    });
+    expect(result._unsafeUnwrap()).toBe(value);
+    expect(source.acquire).not.toHaveBeenCalled();
+    expect(record).toHaveBeenCalledExactlyOnceWith("orb", {
+      phase: "ready",
+      commitSha: value.commitSha,
+      fileCount: 1,
+      byteCount: Buffer.byteLength("instruction"),
+      warnings: present ? warnings : [],
+    });
+  },
+);
+
+it("publishes adapter-owned failure messages without changing returned errors", async () => {
+  const message = "Required instruction resource missing: AGENTS.md";
+  const error = { ...resourceError("invalid", message) };
+  const acquire = vi.fn(() => errAsync(error));
+  const put = vi.fn((value: ResourceSnapshot) => okAsync(value));
+  const record = vi.fn((_orbId: string, _status: ResourceStatus) => okAsync(undefined));
+  const store: ResourceSnapshotStore = {
+    get: () => okAsync(null),
+    put,
+    remove: () => okAsync(undefined),
+  };
+  const result = await new ResourceAcquisition(store, { acquire }, { record }).acquire({
+    orbId: "orb",
+    url: "https://example.invalid/repo",
+    signal: new AbortController().signal,
+  });
+  expect(result._unsafeUnwrapErr()).toBe(error);
+  expect(acquire).toHaveBeenCalledTimes(1);
+  expect(put).not.toHaveBeenCalled();
+  expect(record.mock.calls.map(([, status]) => status)).toEqual([
+    { phase: "acquiring" },
+    {
+      phase: "failed",
+      code: "invalid",
+      message,
+    },
+  ]);
 });

@@ -58,8 +58,8 @@ export type IndependentCase =
   | "git-abort"
   | "artifact-restart";
 
-export function registerIndependentCase(cancellation: IndependentCase) {
-  it(`central inference, MCP and native tools precede execution readiness: ${cancellation}`, async () => {
+export function registerIndependentCase(cancellation: IndependentCase, malformedSkill = false) {
+  it(`central inference, MCP and native tools precede execution readiness: ${cancellation}${malformedSkill ? " with malformed skill" : ""}`, async () => {
     expect(process.env["PI_ORB_E2E_BACKEND"], "requires real process backend").toBe("process");
     const evidence = join(evidenceRoot, `${cancellation}-${randomUUID()}`);
     const root = join(evidence, "fixture");
@@ -94,6 +94,13 @@ export function registerIndependentCase(cancellation: IndependentCase) {
       "---\nname: pinned\ndescription: Pinned resource fixture\n---\nRead asset.txt.\n",
     );
     writeFileSync(join(workspace, ".agents/skills/pinned/asset.txt"), "PINNED_RESOURCE_ASSET");
+    if (malformedSkill) {
+      mkdirSync(join(workspace, ".agents/skills/broken"), { recursive: true });
+      writeFileSync(
+        join(workspace, ".agents/skills/broken/SKILL.md"),
+        "---\nname: [unterminated\ndescription: Broken YAML\n---\nBROKEN_SKILL_MUST_NOT_BE_ADVERTISED\n",
+      );
+    }
     execFileSync("git", ["init", "-q", "-b", "main", workspace]);
     execFileSync("git", ["-C", workspace, "add", "."]);
     execFileSync("git", [
@@ -669,6 +676,34 @@ export function registerIndependentCase(cancellation: IndependentCase) {
       );
       expect(firstSummary["operationId"]).toBeTruthy();
       await summarySettled(firstSummary["operationId"]!);
+      if (malformedSkill) {
+        const baseUrl = cp.baseUrl,
+          warningPage = page;
+        const assertWarnings = async () => {
+          const view = await api(baseUrl, "GET", `/api/v1/orbs/${orb}`);
+          expect(view.status).toBe(200);
+          expect(view.body["resourceWarnings"]).toEqual([
+            { path: ".agents/skills/broken/SKILL.md", code: "invalid_yaml" },
+          ]);
+          expect(view.body["lastError"]).toBeUndefined();
+          const notice = warningPage.getByText(
+            "Skipped repository skill .agents/skills/broken/SKILL.md: invalid YAML.",
+            { exact: true },
+          );
+          await expectPage(notice).toHaveCount(1);
+          await expectPage(notice).toBeVisible();
+        };
+        const instructions = effectiveOpenAIResponseInstructions(cp.modelRequests?.[0]);
+        expect(instructions).toContain("Pinned resource fixture");
+        expect(instructions).toContain(".agents/skills/pinned/SKILL.md");
+        expect(instructions).not.toContain(".agents/skills/broken/SKILL.md");
+        expect(instructions).not.toContain("BROKEN_SKILL_MUST_NOT_BE_ADVERTISED");
+        await assertWarnings();
+        await page.reload();
+        await expectPage(page.getByText("CENTRAL_FIRST_DONE", { exact: true })).toBeVisible();
+        await assertWarnings();
+        expect(resourceAcquisitions).toBe(1);
+      }
       if (cancellation === "artifact-restart") {
         await runArtifactRestart({
           cp,

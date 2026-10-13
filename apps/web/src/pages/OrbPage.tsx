@@ -31,6 +31,7 @@ import { Icon } from "../components/Icons.tsx";
 import { OrbFailureBanner } from "../components/OrbFailureBanner.tsx";
 import { OrbIndex } from "../components/OrbIndex.tsx";
 import { OrbNotice } from "../components/OrbNotice.tsx";
+import { OrbResourceWarnings } from "../components/OrbResourceWarnings.tsx";
 import { OrbTerminal } from "../components/OrbTerminal.tsx";
 import {
   type DropZone,
@@ -2078,6 +2079,7 @@ function OrbConversation({
           <HostedFiles inventory={hostedFiles} error={hostedFilesError} />
           {uploads.progress}
           <OrbFailureBanner message={orb?.lastError} />
+          <OrbResourceWarnings warnings={orb?.resourceWarnings} />
           {dropFeedback && (
             <div className="orb-drop-feedback" role="status">
               {dropFeedback}
@@ -2262,6 +2264,7 @@ function OrbConversation({
             compacting={isLiveCompacting(orb?.state, state, orb?.centralAgent)}
             compaction={state.compaction}
             queuedMessages={queuedMessages}
+            orbState={orb?.state}
           />
         </div>
       </div>

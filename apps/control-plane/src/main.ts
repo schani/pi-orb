@@ -675,10 +675,10 @@ export async function main(
             code: "initialization_failed" as const,
             answered: true,
             retryable: error.code === "storage",
-            message: "Required resource snapshot unavailable",
+            message: error.message,
             initializationError: {
               code: "resource_acquisition_failed",
-              message: "Required resource snapshot unavailable",
+              message: error.message,
               retryable: error.code === "storage",
             },
           })),

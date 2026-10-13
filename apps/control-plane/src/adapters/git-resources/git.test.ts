@@ -245,3 +245,56 @@ it("reports a missing default branch as a classified fetch failure", async () =>
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+it("pins repository bytes with content-free malformed skill warnings", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "resource-warning-fixture-"));
+  try {
+    const git = (...args: string[]) =>
+      execFileSync("git", args, {
+        cwd: dir,
+        env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" },
+        stdio: "pipe",
+      });
+    git("init", "-b", "main");
+    git("config", "user.name", "fixture");
+    git("config", "user.email", "fixture@example.invalid");
+    await mkdir(join(dir, ".agents/skills/bad"), { recursive: true });
+    await mkdir(join(dir, ".agents/skills/good"), { recursive: true });
+    await writeFile(join(dir, "AGENTS.md"), "instructions");
+    await writeFile(
+      join(dir, ".agents/skills/bad/SKILL.md"),
+      "---\ndescription: default-DENY: SECRET\n---\n",
+    );
+    await writeFile(
+      join(dir, ".agents/skills/good/SKILL.md"),
+      "---\nname: good\ndescription: useful\n---\n",
+    );
+    git("add", ".");
+    git("commit", "-m", "fixture");
+    const source = new GitResourceSource({ environment: () => okAsync({}) }, true);
+    const result = await source.acquire({
+      orbId: "orb",
+      url: pathToFileURL(dir).href,
+      signal: new AbortController().signal,
+    });
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.files).toHaveLength(3);
+      expect(result.value.warnings).toEqual([
+        { path: ".agents/skills/bad/SKILL.md", code: "invalid_yaml" },
+      ]);
+    }
+    await writeFile(join(dir, "AGENTS.md"), Buffer.from([255]));
+    git("add", ".");
+    git("commit", "-m", "bad instruction");
+    const failed = await source.acquire({
+      orbId: "other",
+      url: pathToFileURL(dir).href,
+      signal: new AbortController().signal,
+    });
+    expect(failed.isErr()).toBe(true);
+    expect(failed.isErr() && failed.error.message).toContain("AGENTS.md");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

@@ -1,4 +1,5 @@
 import { posix } from "node:path";
+import type { ResourceWarning } from "@pi-orb/protocol";
 import { err, errAsync, okAsync, type Result, ResultAsync } from "neverthrow";
 
 export type ResourceError = {
@@ -22,11 +23,15 @@ export type GitFailureReason =
   | "repository_not_found"
   | "network"
   | "unknown";
-export const resourceError = (code: ResourceError["code"], message: string): ResourceError => ({
-  type: "resource_error",
-  code,
-  message,
-});
+const unavailableMessage = "Required resource snapshot unavailable";
+/** Callers supply first-party literals or bounded paths, never third-party error text. */
+export const resourceError = (code: ResourceError["code"], message: string): ResourceError => {
+  const safeMessage =
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: Strip controls from public diagnostics.
+    message.replace(/[\u0000-\u001f\u007f-\u009f\u2028-\u202e\u2066-\u2069]/g, "").slice(0, 1536) ||
+    unavailableMessage;
+  return { type: "resource_error", code, message: safeMessage };
+};
 export interface ResourceFile {
   path: string;
   bytes: Uint8Array;
@@ -38,6 +43,7 @@ export interface ResourceSnapshot {
   instructionPath: string | null;
   skillRoot: string | null;
   files: ResourceFile[];
+  warnings?: ResourceWarning[];
 }
 export interface ResourceSnapshotStore {
   get(orbId: string): ResultAsync<ResourceSnapshot | null, ResourceError>;
@@ -53,8 +59,14 @@ export interface ResourceSource {
 }
 export type ResourceStatus =
   | { phase: "acquiring" }
-  | { phase: "ready"; commitSha: string; fileCount: number; byteCount: number }
-  | { phase: "failed"; code: ResourceError["code"]; reason?: GitFailureReason };
+  | {
+      phase: "ready";
+      commitSha: string;
+      fileCount: number;
+      byteCount: number;
+      warnings?: ResourceWarning[];
+    }
+  | { phase: "failed"; code: ResourceError["code"]; reason?: GitFailureReason; message?: string };
 export interface ResourceStatusPort {
   record(orbId: string, status: ResourceStatus): ResultAsync<void, ResourceError>;
 }
@@ -98,6 +110,7 @@ export class ResourceAcquisition {
                 commitSha: value.commitSha,
                 fileCount: value.files.length,
                 byteCount: value.files.reduce((sum, file) => sum + file.bytes.byteLength, 0),
+                warnings: value.warnings ?? [],
               }) ?? okAsync(undefined)
             ).map(() => value),
       )
@@ -107,6 +120,7 @@ export class ResourceAcquisition {
             phase: "failed",
             code: error.code,
             ...(error.reason ? { reason: error.reason } : {}),
+            message: error.message,
           }) ?? okAsync(undefined)
         ).andThen(() => errAsync(error)),
       );

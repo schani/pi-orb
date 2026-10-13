@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { errAsync, okAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
+import type { ResourceSnapshot } from "../../domain/resources.ts";
 import { PGliteClient } from "./pglite-client.ts";
 import { PgResourceSnapshots } from "./resource-snapshots.ts";
 
@@ -135,4 +136,85 @@ describe("resource snapshot PostgreSQL persistence", () => {
     expect((await store.get(orbId))._unsafeUnwrap()).toBe(null);
     await client.end();
   });
+});
+
+it("persists only warning code/path, defaults legacy manifests, and rejects malformed warnings", async () => {
+  const client = new PGliteClient();
+  try {
+    (await client.query("CREATE TABLE orbs(id uuid PRIMARY KEY)"))._unsafeUnwrap();
+    (
+      await client.transaction(async (_query, execute) =>
+        execute(
+          await readFile(
+            new URL("./migrations/037_resource_snapshots.sql", import.meta.url),
+            "utf8",
+          ),
+        ),
+      )
+    )._unsafeUnwrap();
+    (await client.query("INSERT INTO orbs VALUES($1)", [orbId]))._unsafeUnwrap();
+    const warnings = [
+      { path: ".pi/skills/bad/SKILL.md", code: "invalid_yaml" as const, content: "PRIVATE YAML" },
+      { path: ".pi/skills/duplicate/SKILL.md", code: "duplicate_name" as const },
+    ];
+    const expected = warnings.map(({ path, code }) => ({ path, code }));
+    const store = new PgResourceSnapshots(client);
+    const snapshot = {
+      orbId,
+      commitSha: "a".repeat(40),
+      instructionPath: null,
+      skillRoot: null,
+      files: [],
+    };
+    const warning = { path: "skills/bad/SKILL.md", code: "invalid_yaml" as const };
+    const invalid = [
+      Array.from({ length: 5001 }, () => warning),
+      [{ ...warning, path: "x".repeat(1025) }],
+      [{ ...warning, code: "unknown" }],
+    ];
+    for (const warnings of invalid) {
+      expect(
+        (
+          await store.put({
+            ...snapshot,
+            // Malformed runtime input at the persistence boundary.
+            warnings: warnings as NonNullable<ResourceSnapshot["warnings"]>,
+          })
+        ).isErr(),
+      ).toBe(true);
+      expect((await store.get(orbId))._unsafeUnwrap()).toBeNull();
+    }
+    const published = (
+      await store.put({
+        ...snapshot,
+        warnings,
+      })
+    )._unsafeUnwrap();
+    expect(published.warnings).toEqual(expected);
+    expect((await new PgResourceSnapshots(client).get(orbId))._unsafeUnwrap()?.warnings).toEqual(
+      expected,
+    );
+    const manifest = (
+      await client.query("SELECT manifest FROM orb_resource_snapshots WHERE orb_id=$1", [orbId])
+    )._unsafeUnwrap().rows[0]?.manifest;
+    expect(JSON.stringify(manifest)).not.toContain("PRIVATE YAML");
+    (
+      await client.query(
+        "UPDATE orb_resource_snapshots SET manifest=manifest - 'warnings' WHERE orb_id=$1",
+        [orbId],
+      )
+    )._unsafeUnwrap();
+    expect((await store.get(orbId))._unsafeUnwrap()?.warnings).toEqual([]);
+    for (const warnings of invalid) {
+      (
+        await client.query(
+          "UPDATE orb_resource_snapshots SET manifest=jsonb_set(manifest,'{warnings}',$2::jsonb) WHERE orb_id=$1",
+          [orbId, JSON.stringify(warnings)],
+        )
+      )._unsafeUnwrap();
+      expect((await store.get(orbId)).isErr()).toBe(true);
+    }
+  } finally {
+    await client.end();
+  }
 });

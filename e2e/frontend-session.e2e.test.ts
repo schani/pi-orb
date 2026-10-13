@@ -653,7 +653,7 @@ describe("frontend-only browser behavior", () => {
             ).toEqual({ top: 0, right: 0, gap: 0 });
           }
         }
-        await expectPage(page.locator(".rec-status", { hasText: "steering" })).toBeVisible();
+        await expectPage(page.locator(".rec-status", { hasText: "delivered" })).toBeVisible();
         const failedTurn = page.locator(".rec-q", { hasText: "This oversized follow-up" });
         await expectPage(failedTurn.locator(".rec-status", { hasText: "failed" })).toBeVisible();
         expectPage(

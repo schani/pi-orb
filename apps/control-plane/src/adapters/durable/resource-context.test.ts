@@ -151,3 +151,25 @@ describe("prepared resource context", () => {
     ).toBe(true);
   });
 });
+
+it("loads valid repository siblings despite malformed YAML, while platform remains strict", async () => {
+  const f = fixture();
+  const result = await prepareResourceContext({
+    ...f.options,
+    acquisition: {
+      acquire: () =>
+        okAsync({
+          orbId: "orb",
+          commitSha: "a".repeat(40),
+          instructionPath: null,
+          skillRoot: ".pi/skills",
+          files: [
+            file(".pi/skills/bad/SKILL.md", "---\ndescription: default-DENY: SECRET\n---\n"),
+            file(".pi/skills/good/SKILL.md", "---\nname: good\ndescription: useful\n---\n"),
+          ],
+        }),
+    },
+  });
+  expect(result.isOk()).toBe(true);
+  if (result.isOk()) expect(result.value.skills.map((s) => s.name)).toEqual(["good", "hosting"]);
+});

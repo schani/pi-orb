@@ -228,6 +228,7 @@ interface ProjectView {
   updatedAt: string;
 }
 
+// Resource warnings: implemented and focused-test qualified locally, not deployed.
 interface OrbView {
   id: string;
   projectId: string;
@@ -239,6 +240,10 @@ interface OrbView {
   activity?: "idle" | "busy";
   unreadAlertId?: string;
   checkoutCommit?: string;
+  resourceWarnings?: Array<{
+    path: string;
+    code: "invalid_yaml" | "invalid_utf8" | "invalid_metadata" | "duplicate_name";
+  }>;
   lastError?: string;
   stateDetail?:
     | { type: "discarding_failed_compute"; retrying: boolean; message?: string }
@@ -316,7 +321,11 @@ OAuth (implemented locally 2026-09-10) adds `oauth: {id}` to a catalog entry. St
 
 The current running incarnation may call `POST /runtime/v1/orb/sleep` with `{v:1,durationSeconds}`. A `202` returns `{v:1,sleepId,sleepUntil}` after the two-field intent and acceptance-time deadline are durable; active sleep conflicts. `POST /runtime/v1/orb/boot-context` returns `userTimeZone: string | null` independently of the frozen FIFO-head `sleep_wake` context or `null`; it never skips an older human message or acknowledges delivery. `OrbView` exposes optional `sleepUntil`; inbox views expose optional validated system provenance. Browser clients cannot forge system messages. Lifecycle cancellation, expiry, source-aware delivery, failures, and exact schemas: `docs/orb-sleep.md`.
 
+**Resource warning contract (2026-10-09; implemented and focused-test qualified locally, not deployed):** `OrbView.resourceWarnings` restores persisted snapshot warnings after reload. Only repository skill path and allowlisted code are exposed, never source content or raw parser errors. Invalid repository skills warn/skip; platform metadata and Git/read/path/integrity/required instruction failures remain fatal (`docs/pi-adapter.md`).
+
 ### Send-anytime messages (decided and implemented 2026-08-10)
+
+**Presentation decision (2026-10-09; implemented and focused-test qualified locally, not deployed):** failed-orb `queued`/`delivering` rows display `blocked` without changing inbox status/identity or inventing a message failure. `delivered` rows remain delivered until their canonical record is applied.
 
 All user messages use the idempotent message resource, including messages sent while the runtime is live. This is one ingress path, not an offline fallback beside WebSocket sending. The request body contains the same validated text/image block union as the current live `message` action and deliberately has no caller-selected steer/follow-up mode or `expectedHeadId`.
 

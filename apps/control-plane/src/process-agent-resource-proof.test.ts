@@ -139,6 +139,7 @@ async function fixture() {
     releaseGit,
     models,
     openContext,
+    acquireResources: () => resources.acquire(task, orb, context),
     fetches: () => fetches,
     bindings: () => bindings,
     modelSetups: () => readyReads,
@@ -146,11 +147,15 @@ async function fixture() {
     setHostInstructions: (text: string) => {
       hostInstructions = text;
     },
-    state: async (state: "running" | "stopped" | "starting", newAdmission = false) => {
+    state: async (
+      state: "running" | "stopped" | "starting",
+      newAdmission = false,
+      stopReason: "manual" | "sleep" = "manual",
+    ) => {
       (
         await db.query(
           "UPDATE orbs SET state=$2, stop_reason=$3, agent_admission_version=agent_admission_version+$4 WHERE id=$1",
-          [orb.id, state, state === "stopped" ? "manual" : null, newAdmission ? 1 : 0],
+          [orb.id, state, state === "stopped" ? stopReason : null, newAdmission ? 1 : 0],
         )
       )._unsafeUnwrap();
       orb = required((await database.store.getOrb(task, orb.id))._unsafeUnwrap());
@@ -190,84 +195,142 @@ async function invoke(bundle: Bundle, name: string, args: Record<string, unknown
   return tool.execute(args, api, { ...BACKGROUND_CONTEXT, abortSignal: abort.signal });
 }
 
-it("requires the PG Git pin before model setup, refreshes managed prompts on new admission without refetch or boot", async () => {
-  const f = await fixture();
-  let first: Bundle | undefined, second: Bundle | undefined;
-  try {
-    const opening = f.openContext();
-    await f.acquired.promise;
-    expect(f.modelSetups()).toBe(0);
-    expect(f.bindings()).toBe(0);
-    expect((await new PgResourceSnapshots(f.db).get(f.snapshot.orbId))._unsafeUnwrap()).toBeNull();
-    f.releaseGit.resolve();
-    first = await opening;
-    expect(first.instructions).toContain("immutable Git instructions");
-    expect(first.instructions).toContain("personal-v1");
-    expect(first.checkoutCommit).toBe(f.snapshot.commitSha);
-    expect(
-      (await new PgResourceSnapshots(f.db).get(f.snapshot.orbId))._unsafeUnwrap()?.commitSha,
-    ).toBe(f.snapshot.commitSha);
-    expect((await invoke(first, "read", { path: skillPath })).content).toEqual([
-      { type: "text", text: skill },
-    ]);
-    const artifact = (
-      await required(f.lease().artifacts).write(Buffer.from("private persisted artifact"))
-    )._unsafeUnwrap();
-    await first.closeResources?.();
-    first = undefined;
-    await f.state("stopped", true);
-    expect((await f.lease().check()).isErr()).toBe(true);
-    (await f.lease().release())._unsafeUnwrap();
-    (
-      await f.database.personalInstructions.replace(f.task, f.project.ownerUserId, "personal-v2")
-    )._unsafeUnwrap();
-    (
-      await f.database.projectInstructions.replace(f.task, f.project.id, "project-v2")
-    )._unsafeUnwrap();
-    await f.state("starting");
-    await f.reopenLease();
-    second = await f.openContext();
-    expect(second.instructions).toContain("personal-v2");
-    expect(second.instructions).toContain("project-v2");
-    expect(second.instructions).not.toContain("personal-v1");
-    expect(second.instructions).toContain("immutable Git instructions");
-    expect(f.fetches()).toBe(1);
-    expect(f.bindings()).toBe(0);
-    const managed = (
-      await new NativeResourceContext(f.lease().storage, () => okAsync(undefined)).managed()
-    )._unsafeUnwrap();
-    expect(managed?.personal.content).toBe("personal-v2");
-    expect(managed?.project.content).toBe("project-v2");
-    const edges = (
-      await f.db.query(
-        "SELECT phase,commit_sha,error_code FROM orb_resource_events WHERE orb_id=$1 ORDER BY id",
-        [f.snapshot.orbId],
-      )
-    )._unsafeUnwrap().rows;
-    expect(edges.map((edge) => edge.phase)).toEqual(["acquiring", "ready"]);
-    expect(edges[1]?.commit_sha).toBe(f.snapshot.commitSha);
-    expect(edges.every((edge) => edge.error_code === null)).toBe(true);
-    expect((await invoke(second, "read", { path: artifact })).content).toEqual([
-      { type: "text", text: "private persisted artifact" },
-    ]);
-    const identity = await invoke(second, "read", {
-      path: "/opt/pi-orb/skills/cloud-identity/SKILL.md",
-    });
-    expect(identity.isError).not.toBe(true);
-    expect(JSON.stringify(identity.content)).toContain("boot-hooks");
-    expect(
-      (await invoke(second, "read", { path: "/opt/pi-orb/skills/boot-hooks/SKILL.md" })).isError,
-    ).not.toBe(true);
-    expect(
-      (await invoke(second, "read", { path: "./.agents/skills/proof/reference.md" })).content,
-    ).toEqual([{ type: "text", text: "offline reference" }]);
-  } finally {
-    f.releaseGit.resolve();
-    await first?.closeResources?.();
-    await second?.closeResources?.();
-    await f.close();
-  }
-});
+it.each(["manual", "sleep"] as const)(
+  "requires the PG Git pin before model setup, refreshes managed prompts after %s inhibition without refetch or boot",
+  async (stopReason) => {
+    const f = await fixture();
+    let first: Bundle | undefined, second: Bundle | undefined;
+    try {
+      const admission = async () =>
+        Number(
+          required(
+            (
+              await f.db.query("SELECT agent_admission_version FROM orbs WHERE id=$1", [
+                f.snapshot.orbId,
+              ])
+            )._unsafeUnwrap().rows[0],
+          ).agent_admission_version,
+        );
+      const persistedResources = async () =>
+        Promise.all(
+          [
+            "SELECT commit_sha,manifest FROM orb_resource_snapshots WHERE orb_id=$1",
+            "SELECT path,bytes,sha256 FROM orb_resource_files WHERE orb_id=$1 ORDER BY path",
+          ].map(async (sql) => (await f.db.query(sql, [f.snapshot.orbId]))._unsafeUnwrap().rows),
+        );
+      const initialAdmission = await admission();
+      const opening = f.openContext();
+      await f.acquired.promise;
+      expect(f.modelSetups()).toBe(0);
+      expect(f.bindings()).toBe(0);
+      expect(
+        (await new PgResourceSnapshots(f.db).get(f.snapshot.orbId))._unsafeUnwrap(),
+      ).toBeNull();
+      f.releaseGit.resolve();
+      first = await opening;
+      expect(first.instructions).toContain("immutable Git instructions");
+      expect(first.instructions).toContain("personal-v1");
+      expect(first.checkoutCommit).toBe(f.snapshot.commitSha);
+      expect(
+        (await new PgResourceSnapshots(f.db).get(f.snapshot.orbId))._unsafeUnwrap()?.commitSha,
+      ).toBe(f.snapshot.commitSha);
+      expect((await invoke(first, "read", { path: skillPath })).content).toEqual([
+        { type: "text", text: skill },
+      ]);
+      const initialResources = await persistedResources();
+      expect(initialResources[0]).toEqual([
+        {
+          commit_sha: f.snapshot.commitSha,
+          manifest: {
+            instructionPath: f.snapshot.instructionPath,
+            skillRoot: f.snapshot.skillRoot,
+            warnings: [],
+            files: f.snapshot.files.map(({ path, sha256, bytes }) => ({
+              path,
+              sha256,
+              byteCount: bytes.byteLength,
+            })),
+          },
+        },
+      ]);
+      (await f.acquireResources())._unsafeUnwrap();
+      const artifact = (
+        await required(f.lease().artifacts).write(Buffer.from("private persisted artifact"))
+      )._unsafeUnwrap();
+      await first.closeResources?.();
+      first = undefined;
+      await f.state("stopped", true, stopReason);
+      expect((await f.lease().check()).isErr()).toBe(true);
+      (await f.lease().release())._unsafeUnwrap();
+      (
+        await f.database.personalInstructions.replace(f.task, f.project.ownerUserId, "personal-v2")
+      )._unsafeUnwrap();
+      (
+        await f.database.projectInstructions.replace(f.task, f.project.id, "project-v2")
+      )._unsafeUnwrap();
+      await f.state("starting");
+      await f.reopenLease();
+      const nextAdmission = await admission();
+      expect(nextAdmission).toBe(initialAdmission + 1);
+      second = await f.openContext();
+      (await f.acquireResources())._unsafeUnwrap();
+      expect(await persistedResources()).toEqual(initialResources);
+      expect(second.instructions).toContain("personal-v2");
+      expect(second.instructions).toContain("project-v2");
+      expect(second.instructions).not.toContain("personal-v1");
+      expect(second.instructions).toContain("immutable Git instructions");
+      expect(f.fetches()).toBe(1);
+      expect(f.bindings()).toBe(0);
+      const managed = (
+        await new NativeResourceContext(f.lease().storage, () => okAsync(undefined)).managed()
+      )._unsafeUnwrap();
+      expect(managed?.personal.content).toBe("personal-v2");
+      expect(managed?.project.content).toBe("project-v2");
+      const edges = (
+        await f.db.query(
+          "SELECT admission_version,phase,commit_sha,error_code FROM orb_resource_events WHERE orb_id=$1 ORDER BY id",
+          [f.snapshot.orbId],
+        )
+      )._unsafeUnwrap().rows;
+      // Cached snapshot healing emits one ready edge per admission, not another acquisition.
+      expect(
+        edges.map((edge) => ({ ...edge, admission_version: Number(edge.admission_version) })),
+      ).toEqual([
+        {
+          admission_version: initialAdmission,
+          phase: "acquiring",
+          commit_sha: null,
+          error_code: null,
+        },
+        ...[initialAdmission, nextAdmission].map((admission_version) => ({
+          admission_version,
+          phase: "ready",
+          commit_sha: f.snapshot.commitSha,
+          error_code: null,
+        })),
+      ]);
+      expect((await invoke(second, "read", { path: artifact })).content).toEqual([
+        { type: "text", text: "private persisted artifact" },
+      ]);
+      const identity = await invoke(second, "read", {
+        path: "/opt/pi-orb/skills/cloud-identity/SKILL.md",
+      });
+      expect(identity.isError).not.toBe(true);
+      expect(JSON.stringify(identity.content)).toContain("boot-hooks");
+      expect(
+        (await invoke(second, "read", { path: "/opt/pi-orb/skills/boot-hooks/SKILL.md" })).isError,
+      ).not.toBe(true);
+      expect(
+        (await invoke(second, "read", { path: "./.agents/skills/proof/reference.md" })).content,
+      ).toEqual([{ type: "text", text: "offline reference" }]);
+    } finally {
+      f.releaseGit.resolve();
+      await first?.closeResources?.();
+      await second?.closeResources?.();
+      await f.close();
+    }
+  },
+);
 
 it("re-evaluates hook instruction offers and routes ready read/write/edit/read through real execution HTTP, not PG", async () => {
   const f = await fixture();

@@ -10,7 +10,17 @@ import {
 } from "../../domain/resources.ts";
 import { jsonParam, type PgQueryResult, type PostgreSQLClient } from "./client.ts";
 
+const resourceWarnings = z
+  .array(
+    z.object({
+      path: z.string().min(1).max(1024),
+      code: z.enum(["invalid_utf8", "invalid_yaml", "invalid_metadata", "duplicate_name"]),
+    }),
+  )
+  .max(5000);
+
 const resourceManifest = z.object({
+  warnings: resourceWarnings.default([]),
   instructionPath: z.string().nullable(),
   skillRoot: z.string().nullable(),
   files: z
@@ -87,6 +97,7 @@ function load(
         instructionPath: manifest.instructionPath,
         skillRoot: manifest.skillRoot,
         files: decoded,
+        warnings: manifest.warnings,
       });
     });
   });
@@ -123,7 +134,10 @@ export class PgResourceSnapshots implements ResourceSnapshotStore {
         const existing = await load(query, snapshot.orbId);
         if (existing.isErr()) return err(existing.error);
         if (existing.value) return ok(existing.value);
+        const warnings = resourceWarnings.safeParse(snapshot.warnings ?? []);
+        if (!warnings.success) return err(invalidSnapshot());
         const manifest = {
+          warnings: warnings.data,
           instructionPath: snapshot.instructionPath,
           skillRoot: snapshot.skillRoot,
           files: snapshot.files.map((file) => ({
@@ -148,7 +162,7 @@ export class PgResourceSnapshots implements ResourceSnapshotStore {
           const admitted = await this.publicationGuard(query, snapshot.orbId);
           if (admitted.isErr()) return err(admitted.error);
         }
-        return ok(snapshot);
+        return ok({ ...snapshot, warnings: manifest.warnings });
       })
       .mapErr(() => resourceError("storage", "Resource snapshot commit failed"));
   }

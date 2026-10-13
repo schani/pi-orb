@@ -373,12 +373,30 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
       );
   }
 
-  executionReady(task: SimulationTask, orb: OrbRow, context: OperationContext) {
-    return this.health(task, orb, context).andThen(() => {
+  executionReady(
+    task: SimulationTask,
+    orb: OrbRow,
+    context: OperationContext,
+  ): ResultAsync<void, RuntimeClientError> {
+    return this.health(task, orb, context).andThen((health) => {
+      if (health.status === "failed")
+        return errAsync({
+          type: "runtime_client_error" as const,
+          code: "initialization_failed" as const,
+          answered: true,
+          message: health.error.message,
+          retryable: health.error.retryable,
+          initializationError: health.error,
+        });
+      if (health.status === "initializing")
+        return errAsync({
+          ...durableError("central agent initializing", true),
+          initializationHealth: health,
+        });
       const agent = this.manager.get(orb.id);
       return agent
         ? agent.hydrateExecution(withAbortSignal(context.signal, BACKGROUND_CONTEXT))
-        : errAsync(durableError("central agent unavailable"));
+        : errAsync(durableError("central agent unavailable", true));
     });
   }
   executionActive(orbId: string): boolean {

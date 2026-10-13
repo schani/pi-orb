@@ -274,6 +274,20 @@ export const AckOrbAlertResponseSchema = Type.Object(
 );
 export type AckOrbAlertResponse = Static<typeof AckOrbAlertResponseSchema>;
 
+export const ResourceWarningSchema = Type.Object(
+  {
+    path: Type.String(),
+    code: Type.Union([
+      Type.Literal("invalid_utf8"),
+      Type.Literal("invalid_yaml"),
+      Type.Literal("invalid_metadata"),
+      Type.Literal("duplicate_name"),
+    ]),
+  },
+  closed,
+);
+export type ResourceWarning = Static<typeof ResourceWarningSchema>;
+
 export const OrbViewSchema = Type.Object(
   {
     id: Type.String(),
@@ -287,6 +301,7 @@ export const OrbViewSchema = Type.Object(
     activity: Type.Optional(Type.Union([Type.Literal("idle"), Type.Literal("busy")])),
     checkoutCommit: Type.Optional(Type.String()),
     lastError: Type.Optional(Type.String()),
+    resourceWarnings: Type.Optional(Type.Array(ResourceWarningSchema)),
     /** Synthesized from in-memory reconciler state; never stored. */
     stateDetail: Type.Optional(OrbStateDetailSchema),
     /** Present while a scheduled sleep is pending. */

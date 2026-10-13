@@ -227,6 +227,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   private readonly projects = new Map<string, ProjectRow>();
   private readonly orbs = new Map<string, OrbRow>();
   private readonly replicas = new Map<string, OrbReplica>();
+  private readonly resourceFailures = new Map<string, Set<number>>();
+  private readonly resourceSnapshots = new Set<string>();
   private readonly activityHeadlines = new Map<string, StoredActivityHeadline>();
   private readonly deletions = new Map<string, OrbDeletionRow>();
   private readonly messages = new Map<string, OrbMessageRow[]>();
@@ -263,6 +265,25 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     if (this.orbs.get(orb.id)?.harnessSessionId !== orb.harnessSessionId)
       this.deleteActivityHeadlines(orb.id);
     this.orbs.set(orb.id, orb);
+  }
+
+  /** Model durable resource events and the immutable snapshot independently of VM state. */
+  seedResourceFailure(orbId: string, admissionVersion: number): void {
+    const failures = this.resourceFailures.get(orbId) ?? new Set<number>();
+    failures.add(admissionVersion);
+    this.resourceFailures.set(orbId, failures);
+  }
+
+  seedResourceSnapshot(orbId: string): void {
+    this.resourceSnapshots.add(orbId);
+  }
+
+  private retriesResourceFailure(orb: OrbRow): boolean {
+    return (
+      orb.state === "failed" &&
+      this.resourceFailures.get(orb.id)?.has(orb.agentAdmissionVersion) === true &&
+      !this.resourceSnapshots.has(orb.id)
+    );
   }
 
   projectSnapshot(projectId: string): ProjectRow | null {
@@ -1412,7 +1433,11 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         autoRestartTimes: [],
         agentAdmissionVersion:
           orb.agentAdmissionVersion +
-          (orb.stopReason === "manual" || orb.stopReason === "sleep" ? 1 : 0),
+          (orb.stopReason === "manual" ||
+          orb.stopReason === "sleep" ||
+          this.retriesResourceFailure(orb)
+            ? 1
+            : 0),
       };
       this.orbs.set(orb.id, updated);
       return { outcome: "started" as const, orb: updated };
@@ -1912,11 +1937,15 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
           ? {
               sleepId: null,
               sleepUntil: null,
-              agentAdmissionVersion:
-                orb.agentAdmissionVersion +
-                (orb.stopReason === "manual" || orb.stopReason === "sleep" ? 1 : 0),
             }
           : {}),
+        agentAdmissionVersion:
+          orb.agentAdmissionVersion +
+          ((params.cancelSleep === true &&
+            (orb.stopReason === "manual" || orb.stopReason === "sleep")) ||
+          (params.toState === "starting" && this.retriesResourceFailure(orb))
+            ? 1
+            : 0),
       };
       this.orbs.set(orb.id, updated);
       return { conflict: false as const, row: updated };

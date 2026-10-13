@@ -305,6 +305,7 @@ export function makeOrbRow(
     lastReadyAt: null,
     harnessSessionId: null,
     harnessSessionHeader: null,
+    resourceWarnings: [],
     lastError: null,
     runtimeTokenHash: null,
     replicationCursor: null,
