@@ -235,6 +235,7 @@ type RuntimeHealth =
         code: string;
         message: string;
         retryable: boolean;
+        diagnostics?: string; // sanitized, at most 16,384 characters
       };
     };
 ```

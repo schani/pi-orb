@@ -73,7 +73,7 @@ const stages: Record<Failure, string> = {
   flags: "flags",
   persistence: "persistence",
 };
-const secret = "private-provider-error-not-for-history";
+const secret = "sk-ant-oat01-private-provider-secret";
 
 function fixture(autoDrain = true, factory?: ClaudeOrbAgentOptions["sdkFactory"], withMcp = false) {
   const dir = mkdtempSync(join(tmpdir(), "claude-initialization-"));
@@ -254,6 +254,10 @@ it.each(failures)(
     const initialized = await f.attach();
     expect(initialized.isErr()).toBe(true);
     expect(f.agent.getHealth()).toMatchObject({ status: "failed" });
+    if (failure === "model_unavailable")
+      expect(initialized._unsafeUnwrapErr().message).toContain(
+        "Selected Claude model is unavailable: opus",
+      );
     expect(f.agent.gateView().acceptingWork).toBe(false);
     expect(
       (await f.agent.changeSettings({ type: "set_thinking", thinkingLevel: "low" })).isErr(),
@@ -279,6 +283,50 @@ it.each(failures)(
     expect(f.factories()).toBe(1);
   },
 );
+
+it("captures production-spawner stderr, exit and SDK cause without credentials", async () => {
+  const f = fixture(true, (input, options) => {
+    const child = options.spawnClaudeCodeProcess?.({
+      command: process.execPath,
+      args: [
+        "-e",
+        "process.stderr.write('TLS negotiation failed sk-ant-oat01-private-provider-secret\\n');process.exitCode=17",
+      ],
+      cwd: options.cwd ?? process.cwd(),
+      env: process.env,
+      signal: new AbortController().signal,
+    });
+    if (!child) return err({ message: "Missing spawner" });
+    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    const closed = new Promise<void>((resolve) =>
+      (child as ChildProcess).once("close", () => resolve()),
+    );
+    const stdoutEnded = new Promise<Result<void, { message: string }>>((resolve) =>
+      child.stdout.once("end", () => resolve(ok(undefined))),
+    );
+    const sdk = new ScheduledClaudeQuery(input, options, false);
+    sdk.accountInfo = async () => {
+      await closed;
+      sdk.endOutput();
+      throw new Error("Account request rejected", { cause: new Error("Connection refused") });
+    };
+    return ok({ query: sdk, exited, stdoutEnded, requestShutdown: () => ok(undefined) });
+  });
+  expect((await f.attach()).isErr()).toBe(true);
+  const health = f.agent.getHealth();
+  expect(health).toMatchObject({
+    status: "failed",
+    error: {
+      message: expect.stringContaining("account: Account request rejected"),
+      diagnostics: expect.stringContaining("TLS negotiation failed"),
+    },
+  });
+  if (health.status !== "failed") return;
+  expect(health.error.message).toContain("Connection refused");
+  expect(health.error.message).toContain("stderr: TLS negotiation failed");
+  expect(health.error.diagnostics).toContain("exitCode=17");
+  expect(JSON.stringify({ health, records: f.history.view })).not.toContain(secret);
+});
 
 it.each(failures)(
   "seals settings after %s failure while rotating a ready session",

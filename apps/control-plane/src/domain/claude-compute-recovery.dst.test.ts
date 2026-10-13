@@ -1,11 +1,55 @@
 import { errAsync, okAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { makeHarness, restartControlPlane, seedRunningOrb } from "../testkit/fixtures.ts";
-import { runDst, waitUntil } from "../testkit/sim.ts";
+import { LogCapture, runDst, waitUntil } from "../testkit/sim.ts";
 import { reconcileOrbOnce, requestOrbStop } from "./lifecycle.ts";
 import type { OrbRow } from "./orb.ts";
 import { pollOrbUntilCaughtUp } from "./replication.ts";
 import { handleFailedRuntime } from "./runtime-recovery.ts";
+
+it("logs initialization details once before disposal and persists the user explanation", async () => {
+  const log = new LogCapture();
+  await runDst(
+    { name: "claude-initialization-diagnostics", iterations: 20, logCapture: log },
+    async (sim) => {
+      const h = makeHarness();
+      const health = {
+        v: 1 as const,
+        orbId: "orb",
+        runtimeInstanceId: "old",
+        status: "failed" as const,
+        error: {
+          code: "claude_initialization_failed",
+          retryable: false,
+          message: "Claude initialization failed at account: Connection refused",
+          diagnostics:
+            "Error: Connection refused\\n at SDK.accountInfo\\nstderr: TLS handshake failed",
+        },
+      };
+      const result = await sim.runTasks([
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, h, "orb");
+            const row = h.store.orbSnapshot("orb")!;
+            expect((await handleFailedRuntime(task, h.deps, row, health))._unsafeUnwrap()).toBe(
+              true,
+            );
+            expect(h.world.hostCount("orb")).toBe(1);
+            expect(log.matching("runtime-failed")[0]).toContain(health.error.message);
+            expect(log.matching("runtime-failed")[0]).toContain("TLS handshake failed");
+            expect(h.store.orbSnapshot("orb")?.lastError).toContain("account: Connection refused");
+            expect((await handleFailedRuntime(task, h.deps, row, health))._unsafeUnwrap()).toBe(
+              false,
+            );
+            expect(log.matching("runtime-failed")).toHaveLength(1);
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : undefined).toBe(true);
+    },
+  );
+});
 
 const episode = "a".repeat(64);
 it("preserves typed invariant failure from the atomic claim", async () => {

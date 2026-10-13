@@ -188,6 +188,27 @@ describe("history schemas", () => {
 });
 
 describe("runtime HTTP schemas", () => {
+  it("accepts bounded failed-health diagnostics without accepting oversized payloads", () => {
+    const health = {
+      v: 1,
+      orbId: "orb",
+      runtimeInstanceId: "run",
+      status: "failed",
+      error: {
+        code: "claude_initialization_failed",
+        message: "account: Connection refused",
+        retryable: false,
+        diagnostics: "Error: Connection refused\\n at SDK.accountInfo",
+      },
+    };
+    expect(Check(RuntimeHealthSchema, health)).toBe(true);
+    expect(
+      Check(RuntimeHealthSchema, {
+        ...health,
+        error: { ...health.error, diagnostics: "x".repeat(16385) },
+      }),
+    ).toBe(false);
+  });
   it("accepts all health variants", () => {
     expect(
       Check(RuntimeHealthSchema, {

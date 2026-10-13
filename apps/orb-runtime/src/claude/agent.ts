@@ -73,6 +73,7 @@ import { ClaudeActivity } from "./activity.ts";
 import { claudeChildEnvironment, fetchClaudeSubscription, verifyClaudeAccount } from "./auth.ts";
 import { validateClaudeAuthSettings } from "./auth-settings.ts";
 import { claudeBootEntries } from "./boot-notification.ts";
+import { ClaudeDiagnostics, type ClaudeQueryError } from "./diagnostics.ts";
 import { ClaudeHistory, type HistoryFiles, nativeHistoryFiles } from "./history.ts";
 import { readClaudeRepositoryInstructions } from "./instructions.ts";
 import { type ClaudeMcpRuntime, createClaudeMcp } from "./mcp.ts";
@@ -328,7 +329,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       phase,
     };
   }
-  private fail(code: string, message: string, retryable = false): void {
+  private fail(code: string, message: string, retryable = false, diagnostics?: string): void {
     this.accepting = false;
     this.outcome = "failed";
     this.operationError = message;
@@ -356,7 +357,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       ...(code === "claude_child_recovery_required" && this.state !== null
         ? { recovery: { episode: claudeRecoveryEpisode(this.state) } }
         : {}),
-      error: { code, message, retryable },
+      error: { code, message, retryable, ...(diagnostics === undefined ? {} : { diagnostics }) },
     };
   }
   private emit(frame: ServerFrame): void {
@@ -817,14 +818,27 @@ export class ClaudeOrbAgent implements OrbAgent {
   }
   private createQuery(): ResultAsync<void, { message: string }> {
     const progress = { stage: "preparation" };
-    return this.initializeQuery(progress).orElse(() => {
+    const diagnostics = new ClaudeDiagnostics([
+      this.token,
+      this.options.broker?.runtimeToken ?? "",
+      ...Object.values(this.projectSecrets),
+      ...Object.entries(process.env)
+        .filter(([key]) => /token|secret|password|key|credential|auth/i.test(key))
+        .map(([, value]) => value ?? ""),
+    ]);
+    return this.initializeQuery(progress, diagnostics).orElse((error) => {
       if (this.compaction !== null && this.outcome === "aborted")
         return errAsync({ message: "Context compaction cancelled during initialization." });
       const code =
         this.health.status === "failed" ? this.health.error.code : "claude_initialization_failed";
-      const message =
-        "Claude SDK initialization failed; inspect the retained session before restarting.";
-      this.fail(code, message);
+      const captured =
+        this.health.status === "failed" && this.health.error.diagnostics !== undefined
+          ? this.health.error
+          : error.diagnostics === undefined
+            ? diagnostics.capture(error)
+            : error;
+      const message = `Claude initialization failed at ${progress.stage}: ${captured.message}`;
+      this.fail(code, message, false, captured.diagnostics);
       if (this.settings !== null) {
         this.settings = { ...this.settings, writable: false };
         this.event(this.settings);
@@ -832,13 +846,22 @@ export class ClaudeOrbAgent implements OrbAgent {
       const recorded = this.platformEvent("claude.initialization_failed", message, {
         stage: progress.stage,
         code,
+        diagnostics: captured.diagnostics ?? "",
       });
       if (recorded.isErr())
-        this.fail("claude_initialization_publication_failed", recorded.error.message);
+        this.fail(
+          "claude_initialization_publication_failed",
+          `${message}; ${recorded.error.message}`,
+          false,
+          captured.diagnostics,
+        );
       return ResultAsync.fromSafePromise(this.closeExtensions()).andThen(() => err({ message }));
     });
   }
-  private initializeQuery(progress: { stage: string }): ResultAsync<void, { message: string }> {
+  private initializeQuery(
+    progress: { stage: string },
+    diagnostics: ClaudeDiagnostics,
+  ): ResultAsync<void, ClaudeQueryError> {
     if (this.compaction !== null && this.outcome === "aborted")
       return errAsync({ message: "Context compaction cancelled before initialization." });
     this.queryReady = false;
@@ -940,8 +963,11 @@ export class ClaudeOrbAgent implements OrbAgent {
           signal: spawnOptions.signal,
           stdio: ["pipe", "pipe", "pipe"],
         });
-        child.once("exit", resolveExit);
-        child.once("error", () => {
+        child.once("exit", (code, signal) => {
+          diagnostics.exited(code, signal);
+          resolveExit();
+        });
+        child.once("error", (error) => {
           if (
             this.compaction !== null &&
             this.outcome === "aborted" &&
@@ -949,7 +975,8 @@ export class ClaudeOrbAgent implements OrbAgent {
           ) {
             return;
           }
-          this.fail("claude_process_failed", "Claude subprocess could not start.", true);
+          const captured = diagnostics.capture(error);
+          this.fail("claude_process_failed", captured.message, true, captured.diagnostics);
           resolveExit();
           resolveStdout(err({ message: "Claude subprocess could not start." }));
         });
@@ -961,7 +988,8 @@ export class ClaudeOrbAgent implements OrbAgent {
           if (!child.stdout.readableEnded)
             resolveStdout(err({ message: "Claude stdout closed without EOF." }));
         });
-        child.stderr.on("data", () => undefined);
+        child.stderr.setEncoding("utf8");
+        child.stderr.on("data", (chunk: string) => diagnostics.stderr(chunk));
         return child;
       },
       hooks: {
@@ -1051,7 +1079,7 @@ export class ClaudeOrbAgent implements OrbAgent {
           stdoutEnded,
           requestShutdown: () => ok(undefined),
         }),
-        () => ({ message: "Cannot start native Claude SDK session." }),
+        (error) => diagnostics.capture(error),
       )();
     if (started.isErr()) return errAsync(started.error);
     const sdk = started.value.query;
@@ -1115,7 +1143,7 @@ export class ClaudeOrbAgent implements OrbAgent {
         this.queryReady = this.closing === null;
         return ok(undefined);
       },
-      () => ({ message: "Claude SDK initialization failed." }),
+      (error) => diagnostics.capture(error),
     )().andThen((result) => result);
   }
   /** Supervision seam: resolves only after all SDK stdout has been consumed. */

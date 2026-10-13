@@ -146,6 +146,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-12-claude-charts-orb-failure.md](docs/postmortems/2026-10-12-claude-charts-orb-failure.md) — initialization cause discarded before VM disposal
 - [docs/postmortems/2026-10-12-durable-orb-prompt-tail.md](docs/postmortems/2026-10-12-durable-orb-prompt-tail.md) — the orb prompt rode unpersisted at the tail of every durable request, defeating prefix caching; it is now a persisted section
 - [docs/postmortems/2026-10-12-durable-codex-prompt-cache.md](docs/postmortems/2026-10-12-durable-codex-prompt-cache.md) — pi-durable 1.0.0 sent Codex no `prompt_cache_key`; a request-body regression test guards the 1.1.0 fix
 - [docs/postmortems/2026-10-11-phone-tail-pointer-race.md](docs/postmortems/2026-10-11-phone-tail-pointer-race.md) — pointer press discarded the pending tail write's offset; its delayed scroll event released following
