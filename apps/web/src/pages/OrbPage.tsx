@@ -834,15 +834,6 @@ function CopyCodeButton({ code }: { code: string }) {
   );
 }
 
-export function OrbDiagnostics({ orb }: { orb: OrbView | null }) {
-  return (
-    <>
-      <OrbFailureBanner message={orb?.lastError} />
-      <OrbResourceWarnings warnings={orb?.resourceWarnings} />
-    </>
-  );
-}
-
 export function OrbHeaderSettings({
   view,
   pending,
@@ -2087,7 +2078,8 @@ function OrbConversation({
           )}
           <HostedFiles inventory={hostedFiles} error={hostedFilesError} />
           {uploads.progress}
-          <OrbDiagnostics orb={orb} />
+          <OrbFailureBanner message={orb?.lastError} />
+          <OrbResourceWarnings warnings={orb?.resourceWarnings} />
           {dropFeedback && (
             <div className="orb-drop-feedback" role="status">
               {dropFeedback}
