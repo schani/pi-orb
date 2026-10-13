@@ -178,7 +178,7 @@ it("persists only warning code/path, defaults legacy manifests, and rejects malf
           await store.put({
             ...snapshot,
             // Malformed runtime input at the persistence boundary.
-            warnings: warnings as ResourceSnapshot["warnings"],
+            warnings: warnings as NonNullable<ResourceSnapshot["warnings"]>,
           })
         ).isErr(),
       ).toBe(true);
