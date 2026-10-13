@@ -1,8 +1,37 @@
 import type { ActiveSubagent } from "@pi-orb/protocol";
 import { useLayoutEffect, useRef, useState } from "react";
+import { useActivityHeadline } from "../lib/use-activity-headline.tsx";
+import type { DetailContext } from "./DetailBody.tsx";
+
+type Context = Pick<DetailContext, "orbId" | "sessionId">;
+function SubagentRow({ agent, context }: { agent: ActiveSubagent; context: Context }) {
+  const { headerRef, headline } = useActivityHeadline(
+    agent.taskRecordId === undefined
+      ? undefined
+      : {
+          recordId: agent.taskRecordId,
+          detailKey: `${agent.taskRecordId}:task`,
+          headline: null,
+        },
+    context,
+    agent.description,
+  );
+  return (
+    <li ref={headerRef}>
+      <span>{headline}</span>
+      <span className={`subagent-phase-${agent.phase}`}>{agent.phase}</span>
+    </li>
+  );
+}
 
 /** Current runtime work only; durable child receipts remain in HistoryView. */
-export function SubagentRail({ agents }: { agents: readonly ActiveSubagent[] }) {
+export function SubagentRail({
+  agents,
+  context,
+}: {
+  agents: readonly ActiveSubagent[];
+  context: Context;
+}) {
   const summaryRef = useRef<HTMLElement>(null);
   const [maxHeight, setMaxHeight] = useState(160);
   useLayoutEffect(() => {
@@ -50,10 +79,7 @@ export function SubagentRail({ agents }: { agents: readonly ActiveSubagent[] }) 
       </summary>
       <ul className="subagent-roster" style={{ maxHeight }}>
         {agents.map((agent) => (
-          <li key={agent.id}>
-            <span>{agent.description}</span>
-            <span className={`subagent-phase-${agent.phase}`}>{agent.phase}</span>
-          </li>
+          <SubagentRow key={agent.id} agent={agent} context={context} />
         ))}
       </ul>
     </details>

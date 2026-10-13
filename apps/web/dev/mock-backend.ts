@@ -1056,7 +1056,19 @@ async function handleHeadlineFixture(
       const records: HistoryRecord[] = [];
       const add = (id: string, name = "codemode") =>
         records.push(headlineRecord(id, name), headlineSeparator(id));
-      if (scenario === "code headers") {
+      if (scenario === "subagent headers") {
+        add("roster-tool");
+        for (const id of ["roster-one", "roster-two", "roster-three"])
+          records.push({
+            id,
+            parentId: records.at(-1)?.id ?? null,
+            timestamp: now(),
+            overflow: {},
+            type: "event",
+            eventType: "agent.subagent_task",
+            subagentTask: { id, prompt: "PRIVATE_TASK_PROMPT", description: "" },
+          });
+      } else if (scenario === "code headers") {
         add("code-bash", "bash");
         add("code-codemode");
         add("code-ready", "bash");
@@ -2951,7 +2963,28 @@ function acceptLiveSocket(state: MockState, socket: WebSocket, orbId: string): v
     }
     send(socket, { v: 1, type: "runtime.event", at: now(), event: settingsFor(state, orbId) });
     send(socket, { v: 1, type: "sync.completed", at: now(), headId });
-    if (orbId === STICKY_BARS_ORB_ID) {
+    if (orbId === HEADLINE_ORB_ID && records.some((record) => record.id === "roster-one")) {
+      const operationId = "fixture-roster-operation";
+      for (const event of [
+        { type: "operation_started", operationId },
+        {
+          type: "subagents",
+          operationId,
+          children: [
+            { id: "roster-authored", description: "Existing Claude header", phase: "running" },
+            ...["roster-one", "roster-two", "roster-three"].map((id) => ({
+              id,
+              description: `Subagent ${id}`,
+              taskRecordId: id,
+              phase: "running" as const,
+            })),
+          ],
+        },
+        { type: "status", activity: "busy", operationId },
+      ] satisfies Extract<ServerFrame, { type: "runtime.event" }>["event"][]) {
+        send(socket, { v: 1, type: "runtime.event", at: now(), event });
+      }
+    } else if (orbId === STICKY_BARS_ORB_ID) {
       const operationId = "fixture-sticky-bars-operation";
       for (const event of [
         { type: "operation_started", operationId },

@@ -8,6 +8,8 @@ pi-orb is still a POC (noted 2026-08-03). Do not build backwards-compatibility m
 
 Always consider simplicity an important criterion when planning and building. Prefer the smallest design that satisfies the actual requirements; question whether a problem can be removed instead of managed. Avoid speculative configurability, extra state machines, and compatibility machinery without a demonstrated need. When simplifying, remove obsolete code, options, tests, and documentation together while preserving safety and observability.
 
+Discuss any change or addition to persisted state with the user before implementing it.
+
 ## Design documentation
 
 The design docs are the source of truth for pi-orb's evolving design. `DESIGN.md` is the entry point: purpose, scope, product decisions, the architecture overview, and an index of the topical docs under `docs/` (one per subsystem: host provider, lifecycle, runtime protocol, history/replication, Pi adapter, control-plane API, web UI, credentials, deployment, testing, stack). Incident forensics live in `docs/postmortems/`, undecided design questions in `docs/open-questions.md`, and actionable work in `TODO.md`.

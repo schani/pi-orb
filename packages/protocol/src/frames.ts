@@ -174,6 +174,7 @@ export type RuntimeStatusEvent = Static<typeof RuntimeStatusEventSchema>;
 export const ActiveSubagentSchema = Type.Object(
   {
     id: Type.String(),
+    taskRecordId: Type.Optional(Type.String()),
     description: Type.String(),
     phase: Type.Union([Type.Literal("queued"), Type.Literal("running"), Type.Literal("finishing")]),
   },

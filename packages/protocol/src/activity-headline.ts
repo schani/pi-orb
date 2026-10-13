@@ -104,6 +104,19 @@ export function getActivityHeadlineSource(
     if (record.id !== recordId) continue;
     if (
       record.type === "event" &&
+      record.eventType === "agent.subagent_task" &&
+      detailKey === `${record.id}:task` &&
+      record.subagentTask !== undefined &&
+      record.subagentTask.description.trim() === "" &&
+      record.subagentTask.prompt.trim() !== ""
+    )
+      return {
+        kind: "intent",
+        tool: "subagent",
+        text: quoted({ prompt: record.subagentTask.prompt }),
+      };
+    if (
+      record.type === "event" &&
       detailKey === `${record.id}:subagent` &&
       record.subagent?.kind === "notification"
     ) {

@@ -6,7 +6,12 @@ import {
   fauxProvider,
   fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
-import { createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
+import {
+  createRegistry,
+  Harness,
+  MemoryStorage,
+  ROOT_CONVERSATION_ID,
+} from "@earendil-works/pi-durable";
 import { expect, it } from "vitest";
 import { createDurableTools } from "./index.ts";
 
@@ -96,6 +101,12 @@ it.each([
       agent: { model: { provider: "faux", modelId: "faux-1" } },
     });
     await (await root.submit({ type: "input", content: "parent" }, ctx)).wait(ctx);
+    const entries = (
+      await storage.scanEntries({ conversationId: ROOT_CONVERSATION_ID }, 100, undefined, ctx)
+    ).items;
+    const tasks = entries.filter((entry) => entry.kind === "orb.subagent-task");
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]?.data).toMatchObject({ prompt: "child prompt", description: "" });
     const submissions = (await storage.scanSubmissions({}, 100, undefined, ctx)).items;
     const childInput = submissions.find((submission) =>
       submission.requestId?.startsWith("anchor:"),

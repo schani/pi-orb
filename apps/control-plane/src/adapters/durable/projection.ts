@@ -1,9 +1,34 @@
 import type { ConversationId, EntryRecord, TaskGraph } from "@earendil-works/pi-durable";
-import type { ActiveSubagent, HistoryRecord } from "@pi-orb/protocol";
+import { type ActiveSubagent, capHeadline, type HistoryRecord } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
 import { type MappingError, mapPiEntry } from "../../../../orb-runtime/src/pi/mapping.ts";
 
-export function activeSubagents(graph: TaskGraph, rootId: ConversationId): ActiveSubagent[] {
+export function activeSubagents(
+  graph: TaskGraph,
+  rootId: ConversationId,
+  records: readonly HistoryRecord[] = [],
+): ActiveSubagent[] {
+  const headers = new Map(
+    records.flatMap((record) =>
+      record.type === "event" && record.subagentTask !== undefined
+        ? [
+            [
+              record.subagentTask.id,
+              {
+                description:
+                  record.subagentTask.description.trim() !== ""
+                    ? capHeadline(record.subagentTask.description)
+                    : `Subagent ${record.subagentTask.id}`,
+                ...(record.subagentTask.description.trim() === "" &&
+                record.subagentTask.prompt.trim() !== ""
+                  ? { taskRecordId: record.id }
+                  : {}),
+              },
+            ] as const,
+          ]
+        : [],
+    ),
+  );
   const children = new Map<string, ActiveSubagent>();
   const priority = { queued: 0, running: 1, finishing: 2 };
   for (const task of Object.values(graph.tasks)) {
@@ -17,13 +42,18 @@ export function activeSubagents(graph: TaskGraph, rootId: ConversationId): Activ
             : "running";
       const existing = children.get(String(id));
       if (!existing || priority[phase] > priority[existing.phase])
-        children.set(String(id), { id: String(id), description: `Subagent ${id}`, phase });
+        children.set(String(id), {
+          id: String(id),
+          description: `Subagent ${id}`,
+          ...headers.get(String(id)),
+          phase,
+        });
     }
   }
   return [...children.values()];
 }
 
-/** Only displayable root data enters public history; native prompt/configuration state stays private. */
+/** Root transcript and child launch metadata are public history; native configuration stays private. */
 export function projectEntry(
   entry: EntryRecord,
   parentId: string | null,
@@ -36,6 +66,27 @@ export function projectEntry(
     entry.data !== null && typeof entry.data === "object" && !Array.isArray(entry.data)
       ? entry.data
       : {};
+  if (
+    entry.kind === "orb.subagent-task" &&
+    typeof data["childId"] === "number" &&
+    typeof data["prompt"] === "string" &&
+    typeof data["description"] === "string"
+  )
+    return ok({
+      id,
+      parentId,
+      timestamp: new Date(
+        typeof data["timestamp"] === "number" ? data["timestamp"] : 0,
+      ).toISOString(),
+      overflow: {},
+      type: "event",
+      eventType: "agent.subagent_task",
+      subagentTask: {
+        id: String(data["childId"]),
+        prompt: data["prompt"],
+        description: data["description"],
+      },
+    });
   if (entry.kind === "orb.model-change" || entry.kind === "orb.thinking-level-change")
     return mapPiEntry({
       id,

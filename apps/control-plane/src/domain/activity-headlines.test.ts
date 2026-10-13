@@ -439,3 +439,56 @@ describe("activity headlines", () => {
     expect(task.lines).toHaveLength(0);
   });
 });
+
+it("generates and caches a missing child header, keeping supplied headers and source text private", async () => {
+  const task = new HeadlineLogTask("child headline", false);
+  const h = makeHarness();
+  await seedHeadline(task, h);
+  const records: HistoryRecord[] = ["missing", "authored"].map((id) => ({
+    id,
+    parentId: id === "missing" ? "record" : "missing",
+    timestamp: "t",
+    overflow: {},
+    type: "event",
+    eventType: "agent.subagent_task",
+    subagentTask: {
+      id,
+      prompt: "PRIVATE_CHILD_TASK",
+      description: id === "authored" ? "Existing header" : "",
+    },
+  }));
+  (
+    await h.store.commitPullBatch(task, {
+      orbId: "orb",
+      expectedCursor: "record",
+      session: { id: "session", overflow: {} },
+      records,
+      nextCursor: "authored",
+      nextHeadId: "authored",
+    })
+  )._unsafeUnwrap();
+  const generate = vi.fn(() => okAsync("Inspect subsystem sizes"));
+  const deps = { ...h.deps, headlineGenerator: { generate } };
+  const ref = { ...headlineRef, recordId: "missing", detailKey: "missing:task" };
+  expect((await generateActivityHeadline(task, deps, ref))._unsafeUnwrap().headline).toBe(
+    "Inspect subsystem sizes",
+  );
+  expect((await generateActivityHeadline(task, deps, ref))._unsafeUnwrap().headline).toBe(
+    "Inspect subsystem sizes",
+  );
+  expect(generate).toHaveBeenCalledOnce();
+  expect(
+    (
+      await generateActivityHeadline(task, deps, {
+        ...ref,
+        recordId: "authored",
+        detailKey: "authored:task",
+      })
+    ).isErr(),
+  ).toBe(true);
+  expect(generate).toHaveBeenCalledOnce();
+  expect(task.lines.filter((line) => line.includes("outcome=stored"))).toHaveLength(1);
+  expect(task.lines.join("\n")).not.toMatch(
+    /PRIVATE_CHILD_TASK|Inspect subsystem sizes|Existing header/,
+  );
+});

@@ -207,6 +207,8 @@ interface EventRecord extends HistoryRecordBase {
   /** Present iff `eventType` is `"pi.custom_message"`. */
   custom?: { customType: string; display: boolean };
 
+  /** Central child launch metadata; omitted from browser display records. */
+  subagentTask?: { id: string; prompt: string; description: string };
   /** Present iff the custom message is a subagent receipt. */
   subagent?: {
     kind: "notification" | "update" | "workspace_notice";

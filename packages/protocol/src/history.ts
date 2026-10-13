@@ -268,6 +268,9 @@ export const EventRecordSchema = Type.Object(
     content: Type.Optional(Type.Array(ContentBlockSchema)),
     /** Present iff `eventType` is `pi.custom_message`. */
     custom: Type.Optional(CustomMessageSchema),
+    subagentTask: Type.Optional(
+      Type.Object({ id: Type.String(), prompt: Type.String(), description: Type.String() }, closed),
+    ),
     /** Present iff the custom message is a subagent receipt. */
     subagent: Type.Optional(SubagentNoticeSchema),
     /** Non-model-context orb alert rendered by clients. The record id identifies acknowledgement. */

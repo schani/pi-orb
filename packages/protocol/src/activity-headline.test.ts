@@ -516,3 +516,33 @@ describe("activity headline sources", () => {
     }
   });
 });
+
+it("offers missing-header child tasks without exposing their prompts to the browser", () => {
+  const record: HistoryRecord = {
+    id: "task",
+    parentId: null,
+    timestamp: "t",
+    overflow: { secret: "PRIVATE" },
+    type: "event",
+    eventType: "agent.subagent_task",
+    subagentTask: {
+      id: "42",
+      description: "",
+      prompt: "Inspect subsystem sizes " + "🪐".repeat(10000),
+    },
+  };
+  const source = getActivityHeadlineSource([record], "task", "task:task");
+  expect(source).toMatchObject({ kind: "intent", tool: "subagent" });
+  expect(JSON.parse(source!.text).prompt).toContain("Inspect subsystem sizes");
+  expect(Buffer.byteLength(source!.text)).toBeLessThanOrEqual(8192);
+  expect(source!.text).not.toContain("PRIVATE");
+  expect(JSON.stringify(projectDisplayRecords([record]))).not.toContain("Inspect subsystem");
+  expect(getActivityHeadlineSource([record], "task", "task:subagent")).toBeNull();
+  expect(
+    getActivityHeadlineSource(
+      [{ ...record, subagentTask: { ...record.subagentTask!, description: "Authored header" } }],
+      "task",
+      "task:task",
+    ),
+  ).toBeNull();
+});
