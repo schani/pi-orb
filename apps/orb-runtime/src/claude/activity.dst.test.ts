@@ -109,3 +109,45 @@ it("Stop continuation and cancellation cleanup retain ownership; ambient servers
   activity.processExited(true);
   expect(activity.busy).toBe(false);
 });
+
+it("a result for inference started before a task notification cannot finish its handoff", () => {
+  const activity = new ClaudeActivity();
+  activity.claim("operation");
+  activity.rootStarted();
+  activity.taskHandoff("task", "Awaiting native result handoff");
+  activity.rootFinished(true);
+  expect(activity.canDrain).toBe(false);
+  expect(activity.children.map((child) => child.id)).toEqual(["task"]);
+  activity.rootRequested();
+  activity.rootFinished(false);
+  expect(activity.canDrain).toBe(false);
+  expect(activity.children.map((child) => child.id)).toEqual(["task"]);
+  expect(activity.rootFinished(true)).toEqual(["task"]);
+  expect(activity.canDrain).toBe(true);
+});
+
+it("a requesting snapshot releases only handoffs already present when inference started", () => {
+  const activity = new ClaudeActivity();
+  activity.claim("operation");
+  activity.taskHandoff("first", "first");
+  activity.rootRequested();
+  activity.taskHandoff("second", "second");
+  activity.rootStarted();
+  expect(activity.rootFinished(true)).toEqual(["first"]);
+  expect(activity.children.map((child) => child.id)).toEqual(["second"]);
+  expect(activity.canDrain).toBe(false);
+  activity.rootRequested();
+  expect(activity.rootFinished(true)).toEqual(["second"]);
+  expect(activity.canDrain).toBe(true);
+});
+
+it("late requesting and inference results during drain cannot consume retained handoffs", () => {
+  const activity = new ClaudeActivity();
+  activity.claim("operation");
+  activity.rootFinished();
+  activity.beginDrain();
+  activity.taskHandoff("late", "late");
+  activity.rootRequested();
+  expect(activity.rootFinished(true)).toEqual([]);
+  expect(activity.children.map((child) => child.id)).toEqual(["late"]);
+});

@@ -11,7 +11,12 @@ import type {
 import type { ServerFrame } from "@pi-orb/protocol";
 import { err, ok } from "neverthrow";
 import { afterEach, expect, it, vi } from "vitest";
-import { nativeHook, nativeHookResponse } from "../testkit/claude-composed.ts";
+import {
+  nativeHook,
+  nativeHookResponse,
+  rootRequest,
+  rootResult,
+} from "../testkit/claude-composed.ts";
 import { ClaudeOrbAgent, type ClaudeQuery, type NativeState } from "./agent.ts";
 import { ClaudeHistory, nativeHistoryFiles } from "./history.ts";
 import { qualifyClaudeRestart } from "./restore.ts";
@@ -358,7 +363,7 @@ it("combines sleep context and deduplicates inbox retries without another native
   f.exit();
 });
 
-const result = { type: "result", subtype: "success", is_error: false } as unknown as SDKMessage;
+const result = rootResult;
 const task = (subtype: "task_started" | "task_notification") =>
   ({
     type: "system",
@@ -503,6 +508,7 @@ it("holds root/child ownership through SDK close, actual process exit, and final
   expect(f.agent.gateView().activity).toBe("busy");
   await f.emit(task("task_notification"));
   expect(f.agent.gateView().activity).toBe("busy");
+  await f.emit(rootRequest);
   await f.emit(result);
   const delivery = Object.values(f.state.deliveries)[0];
   f.persist({
@@ -530,6 +536,7 @@ it("awaits a new native root handoff after an asynchronous child's terminal noti
   await f.emit(task("task_notification"));
   expect(f.closeRequests()).toBe(1);
   expect(f.agent.gateView().activity).toBe("busy");
+  await f.emit(rootRequest);
   await f.emit(result);
   const delivery = Object.values(f.state.deliveries)[0];
   f.persist({ type: "user", uuid: delivery?.uuid, message: { content: "hello" } });
@@ -725,31 +732,75 @@ it.each(["new", "already-published"] as const)(
   },
 );
 
-it("keeps busy when late native inference starts race query rotation", async () => {
-  const f = fixture();
-  await f.attach();
-  await f.agent.submitMessage([{ type: "text", text: "hello" }], "op");
-  const delivery = Object.values(f.state.deliveries)[0];
-  f.persist({ type: "user", uuid: delivery?.uuid, message: { content: "hello" } });
-  await f.emit(result);
-  await f.emit({
-    type: "system",
-    subtype: "status",
-    status: "requesting",
-    uuid: "event",
-    session_id: f.state.id,
-  } as unknown as SDKMessage);
-  expect(f.agent.gateView().activity).toBe("busy");
-  f.exit();
-  await f.agent.closeExtensions();
-  expect(f.agent.getHealth()).toMatchObject({ status: "failed" });
-  expect(f.agent.gateView().activity).toBe("busy");
-  expect(
-    f.history.view.find(
+it.each(["status", "assistant"] as const)(
+  "keeps busy when late native inference starts race query rotation (%s)",
+  async (source) => {
+    const f = fixture();
+    await f.attach();
+    await f.agent.submitMessage([{ type: "text", text: "hello" }], "op");
+    const delivery = Object.values(f.state.deliveries)[0];
+    f.persist({ type: "user", uuid: delivery?.uuid, message: { content: "hello" } });
+    await f.emit({
+      ...result,
+      uuid: "drain-result",
+      num_turns: 1,
+      queued_turn_count: 0,
+      stop_reason: "end_turn",
+      result: "private-result",
+    } as unknown as SDKMessage);
+    await f.emit(
+      (source === "status"
+        ? {
+            type: "system",
+            subtype: "status",
+            status: "requesting",
+            uuid: "event",
+            session_id: f.state.id,
+          }
+        : {
+            type: "assistant",
+            parent_tool_use_id: null,
+            uuid: "event",
+            session_id: f.state.id,
+            message: { content: [] },
+          }) as unknown as SDKMessage,
+    );
+    await f.emit({
+      type: "system",
+      subtype: "status",
+      status: "requesting",
+      uuid: "later-event",
+      session_id: f.state.id,
+    } as unknown as SDKMessage);
+    expect(f.agent.gateView().activity).toBe("busy");
+    f.exit();
+    await f.agent.closeExtensions();
+    expect(f.agent.getHealth()).toMatchObject({ status: "failed" });
+    expect(f.agent.gateView().activity).toBe("busy");
+    const failure = f.history.view.find(
       (record) => record.type === "event" && record.eventType === "claude.rotation_failed",
-    ),
-  ).toMatchObject({ overflow: { reason: "root_work" } });
-});
+    );
+    expect(failure).toMatchObject({
+      custom: { display: true },
+      overflow: {
+        reason: "root_work",
+        rootWork: {
+          operationId: "op",
+          nativeSessionId: f.state.id,
+          messageId: "event",
+          messageType: source === "status" ? "system" : "assistant",
+          priorResult: {
+            resultId: "drain-result",
+            numTurns: 1,
+            queuedTurns: 0,
+            stopReason: "end_turn",
+          },
+        },
+      },
+    });
+    expect(JSON.stringify(failure)).not.toContain("private-result");
+  },
+);
 it.each(["rotation", "interrupt"] as const)(
   "%s native hook drain cannot ignore an unmatched late start after final EOF",
   async (kind) => {

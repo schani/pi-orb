@@ -4,6 +4,7 @@ import {
   ComposedClaudeFixture,
   childEdge,
   childHook,
+  rootRequest,
   rootResult,
   submitReceipt,
 } from "../testkit/claude-composed.ts";
@@ -156,6 +157,7 @@ it("keeps a known pre-result task handoff until a subsequent root result", async
             expect(f.query.closeRequested).toBe(false);
             expect(f.agent.gateView().activity).toBe("busy");
             expect(Object.keys(f.journal().pendingHandoffs ?? {})).toEqual(["child"]);
+            await f.query.emit(task, rootRequest);
             await f.query.emit(task, rootResult);
             f.query.exit();
             f.query.endOutput();

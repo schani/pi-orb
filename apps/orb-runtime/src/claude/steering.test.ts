@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import {
   ComposedClaudeFixture,
   childEdge,
+  rootRequest,
   rootResult,
   type ScheduledClaudeQuery,
 } from "../testkit/claude-composed.ts";
@@ -130,6 +131,7 @@ it("admits steering after the root reply while native child work still owns the 
     f.receipt(input);
     await f.query.emitUnscheduled(childEdge("task_notification"));
     expect(f.query.closeRequested).toBe(false);
+    await f.query.emitUnscheduled(rootRequest);
     await f.query.emitUnscheduled(resultFor(input.uuid));
     expect(f.query.closeRequested).toBe(true);
     f.query.exit();
