@@ -1,4 +1,5 @@
 import { NoSimulationTask } from "determined";
+import { okAsync } from "neverthrow";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelCall } from "../../domain/model-usage.ts";
 import { makeOrbRow, makeProjectRow, seedTestUser, TEST_USER_ID } from "../../testkit/fixtures.ts";
@@ -260,6 +261,61 @@ export function modelUsageLedgerContractTests(
       expect(
         (await ledger.read(task, "other", [AT, AT + 900000]))._unsafeUnwrap().orbs[0]?.name,
       ).toBeNull();
+    });
+
+    it("rejects malformed aggregate rows without accepting an out-of-range bucket", async () => {
+      const bucket = {
+        kind: "bucket",
+        bucket: 0,
+        use: "root",
+        provider: "p",
+        model: "m",
+        input: 1,
+        output: 2,
+        cacheRead: 3,
+        cacheWrite: 0,
+        calls: 1,
+      };
+      const orb = {
+        kind: "orb",
+        id: DELETED,
+        name: null,
+        input: 1,
+        output: 2,
+        cacheRead: 3,
+        cacheWrite: 0,
+        calls: 1,
+      };
+      const query = vi.spyOn(client, "query");
+      try {
+        for (const row of [
+          { ...bucket, bucket: 1 },
+          { ...bucket, bucket: -1 },
+          { ...bucket, bucket: 0.5 },
+          { ...bucket, bucket: "0" },
+          { ...bucket, bucket: NaN },
+          { ...bucket, use: "unknown" },
+          { ...bucket, provider: null },
+          { ...bucket, model: 7 },
+          { ...bucket, input: -1 },
+          { ...bucket, calls: 1.5 },
+          { ...bucket, cacheRead: Number.MAX_SAFE_INTEGER + 1 },
+          { ...orb, id: 7 },
+          { ...orb, name: 7 },
+          { ...orb, kind: "unknown" },
+        ]) {
+          query.mockReturnValueOnce(okAsync({ rows: [row], rowCount: 1 }));
+          const result = await ledger.read(task, TEST_USER_ID, [AT, AT + 900000]);
+          expect(result.isErr()).toBe(true);
+          expect(result._unsafeUnwrapErr().code).toBe("invariant");
+        }
+        query.mockReturnValueOnce(okAsync({ rows: [bucket, orb], rowCount: 2 }));
+        const valid = (await ledger.read(task, TEST_USER_ID, [AT, AT + 900000]))._unsafeUnwrap();
+        expect(valid.buckets[0]?.at).toBe(AT);
+        expect(valid.orbs[0]?.name).toBeNull();
+      } finally {
+        query.mockRestore();
+      }
     });
 
     it("logs one edge when writes start failing and one when they recover", async () => {

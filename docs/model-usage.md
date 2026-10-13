@@ -96,7 +96,7 @@ GROUP BY 1 ORDER BY 2 DESC LIMIT 20;
 
 `GET /api/v1/usage?boundaries=<JSON timestamp array>` reads the selected user's ledger. Ops uses the existing selected-user header; ordinary users cannot override their owner. Replies are `no-store`. Unknown query fields, non-integer/non-increasing edges, more than 188 edges, intervals over 25 hours or spans over 187 days return 400. Store unavailability returns 503; invalid aggregates return 500, with content-free failure logging.
 
-The browser supplies local-calendar edges as epoch milliseconds. The service validates them; `ModelUsageReader` aggregates bucket/use/provider/model and orb totals in one SQL snapshot, using half-open intervals. The response is `{boundaries, summary, buckets, orbs}`; totals contain `input, output, cacheRead, cacheWrite, calls`. Bucket rows also contain `at, use, provider, model`; orb rows contain `id, name`. Names join only owner-owned projects. Deleted/missing names are null; their usage remains. Unsafe totals fail rather than silently rounding.
+The browser supplies local-calendar edges as epoch milliseconds. The service validates them; `ModelUsageReader` aggregates bucket/use/provider/model and orb totals in one SQL snapshot, using half-open intervals. The response is `{boundaries, summary, buckets, orbs}`; totals contain `input, output, cacheRead, cacheWrite, calls`. Bucket rows also contain `at, use, provider, model`; orb rows contain `id, name`. Names join only owner-owned projects. Deleted/missing names are null; their usage remains. The adapter validates bucket/orb rows with the shared response schemas. Unsafe totals fail rather than silently rounding.
 
 | Period | Point/tick |
 |---|---|

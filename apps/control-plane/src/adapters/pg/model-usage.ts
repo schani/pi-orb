@@ -1,4 +1,4 @@
-import { ModelCallUseSchema, UsageTotalsSchema } from "@pi-orb/protocol";
+import { UsageViewSchema } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
@@ -17,6 +17,7 @@ function usageRows(rows: PgRow[], boundaries: readonly number[]): Result<UsageRe
       message: "Invalid model usage aggregate",
       retryable: false,
     });
+  const times = boundaries.slice(0, -1);
   for (const row of rows) {
     const totals = {
       input: row["input"],
@@ -25,30 +26,21 @@ function usageRows(rows: PgRow[], boundaries: readonly number[]): Result<UsageRe
       cacheWrite: row["cacheWrite"],
       calls: row["calls"],
     };
-    if (!Check(UsageTotalsSchema, totals)) return invalid();
     if (row["kind"] === "bucket") {
       const index = row["bucket"];
-      const use = row["use"],
-        provider = row["provider"],
-        model = row["model"];
-      if (
-        typeof index !== "number" ||
-        !Number.isInteger(index) ||
-        index < 0 ||
-        index >= boundaries.length - 1 ||
-        !Check(ModelCallUseSchema, use) ||
-        typeof provider !== "string" ||
-        typeof model !== "string"
-      )
-        return invalid();
-      const at = boundaries[index];
-      if (at === undefined) return invalid();
-      result.buckets.push({ ...totals, at, use, provider, model });
+      const bucket = {
+        ...totals,
+        at: typeof index === "number" ? times[index] : undefined,
+        use: row["use"],
+        provider: row["provider"],
+        model: row["model"],
+      };
+      if (!Check(UsageViewSchema.properties.buckets.items, bucket)) return invalid();
+      result.buckets.push(bucket);
     } else if (row["kind"] === "orb") {
-      const id = row["id"],
-        name = row["name"];
-      if (typeof id !== "string" || (name !== null && typeof name !== "string")) return invalid();
-      result.orbs.push({ ...totals, id, name });
+      const orb = { ...totals, id: row["id"], name: row["name"] };
+      if (!Check(UsageViewSchema.properties.orbs.items, orb)) return invalid();
+      result.orbs.push(orb);
     } else return invalid();
   }
   return ok(result);
