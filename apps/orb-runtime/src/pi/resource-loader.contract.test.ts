@@ -418,6 +418,7 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     expect(skills.map((skill) => skill.name)).toEqual([
       ...controlNames,
       "boot-hooks",
+      "charts",
       "cloud-identity",
       "codemode-manual",
       "codemode-quick-reference",

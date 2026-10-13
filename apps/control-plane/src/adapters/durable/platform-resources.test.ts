@@ -1,4 +1,10 @@
 import { fileURLToPath } from "node:url";
+import {
+  CHART_MAX_BARS,
+  CHART_MAX_PER_SCRIPT,
+  CHART_MAX_POINTS,
+  CHART_MAX_SERIES,
+} from "@pi-orb/protocol";
 import { expect, it } from "vitest";
 import { SnapshotResourceReader } from "../../domain/resources.ts";
 import { snapshotPromptResources } from "../git-resources/prompt.ts";
@@ -18,6 +24,7 @@ it("loads only application-owned bundled skills into private virtual paths", asy
       .sort(),
   ).toEqual([
     "/opt/pi-orb/skills/boot-hooks/SKILL.md",
+    "/opt/pi-orb/skills/charts/SKILL.md",
     "/opt/pi-orb/skills/cloud-identity/SKILL.md",
     "/opt/pi-orb/skills/codemode-manual/SKILL.md",
     "/opt/pi-orb/skills/codemode-quick-reference/SKILL.md",
@@ -179,3 +186,24 @@ it.each([
     expect(prompt).not.toContain("structuredContent");
   },
 );
+
+it("describes code-mode charts with the limits chart() enforces", async () => {
+  const bundle = await codemodeBundle();
+  const resources = snapshotPromptResources(bundle)._unsafeUnwrap();
+  const skill = resources.skills.find((entry) => entry.name === "charts");
+  expect(skill?.description).toMatch(/chart\(\)/);
+  expect(skill?.description).toMatch(/code-mode/i);
+  const content = Buffer.from(
+    (
+      await new SnapshotResourceReader(bundle).read("/opt/pi-orb/skills/charts/SKILL.md")
+    )._unsafeUnwrap(),
+  ).toString();
+  for (const limit of [
+    `${CHART_MAX_SERIES} series`,
+    `${CHART_MAX_POINTS.toLocaleString("en-US")} points`,
+    `${CHART_MAX_BARS} bars`,
+    `${CHART_MAX_PER_SCRIPT} charts per script`,
+  ])
+    expect(content).toContain(limit);
+  expect(content).toContain("await chart(");
+});

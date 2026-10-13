@@ -1,4 +1,9 @@
-import { HistoryRecordSchema, projectDisplayRecord, projectRecordDetail } from "@pi-orb/protocol";
+import {
+  CHART_CONTENT_TYPE,
+  HistoryRecordSchema,
+  projectDisplayRecord,
+  projectRecordDetail,
+} from "@pi-orb/protocol";
 import { Check } from "typebox/value";
 import { describe, expect, it } from "vitest";
 import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
@@ -563,6 +568,36 @@ describe("Pi entry mapping", () => {
       content: [{ type: "text", text: "updated" }],
       isError: false,
       patch: "--- a/src/a.ts\n+++ b/src/a.ts\n+new",
+    });
+  });
+
+  it("carries code-mode charts from result details as chart leaves", () => {
+    const chart = {
+      kind: "bar",
+      title: "slowest endpoints",
+      bars: [{ label: "POST /checkout", value: 412 }],
+    };
+    const record = expectMapped({
+      ...base,
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolCallId: "call-1",
+        toolName: "codemode",
+        content: [{ type: "text", text: "Script completed" }],
+        details: { cpu: { cpuMs: 3 }, charts: [chart] },
+        isError: false,
+      },
+    });
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.content[0]).toEqual({
+      type: "tool_result",
+      callId: "call-1",
+      content: [
+        { type: "text", text: "Script completed" },
+        { type: "other", contentType: CHART_CONTENT_TYPE, data: chart },
+      ],
+      isError: false,
     });
   });
 

@@ -1,11 +1,12 @@
-import type {
-  ContentBlock,
-  EventRecord,
-  HarnessSessionMetadata,
-  HistoryRecord,
-  JsonObject,
-  JsonValue,
-  MessageRecord,
+import {
+  CHART_CONTENT_TYPE,
+  type ContentBlock,
+  type EventRecord,
+  type HarnessSessionMetadata,
+  type HistoryRecord,
+  type JsonObject,
+  type JsonValue,
+  type MessageRecord,
 } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
 
@@ -397,9 +398,20 @@ function mapMessageEntry(
           {
             type: "tool_result",
             callId: String(message["toolCallId"] ?? ""),
-            content: mapUserContent(message["content"]).filter(
-              (block) => block.type === "text" || block.type === "image" || block.type === "other",
-            ),
+            content: [
+              ...mapUserContent(message["content"]).filter(
+                (block) =>
+                  block.type === "text" || block.type === "image" || block.type === "other",
+              ),
+              // Code-mode charts ride in result details, outside the model's view (docs/pi-adapter.md).
+              ...(isRecordObject(details) && Array.isArray(details["charts"])
+                ? details["charts"].map((data) => ({
+                    type: "other" as const,
+                    contentType: CHART_CONTENT_TYPE,
+                    data: asJson(data),
+                  }))
+                : []),
+            ],
             isError: message["isError"] === true,
             ...(patch === undefined ? {} : { patch }),
             ...(nestedCalls === undefined ? {} : { nestedCalls }),

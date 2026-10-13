@@ -1,10 +1,12 @@
 import { type Static, Type } from "typebox";
+import { Check } from "typebox/value";
 import {
   ActivityHeadlineContext,
   activityCallCode,
   activityCallEligible,
   activityResultEligible,
 } from "./activity-headline.ts";
+import { CHART_CONTENT_TYPE, type ChartSpec, ChartSpecSchema } from "./chart.ts";
 import { capHeadline } from "./headline.ts";
 import { type ContentBlock, type HistoryRecord, NestedCallsSchema } from "./history.ts";
 import { type JsonObject, JsonValueSchema } from "./json.ts";
@@ -52,6 +54,8 @@ const result = Type.Object(
     isError: Type.Optional(Type.Boolean()),
     headline: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     hasImages: Type.Boolean(),
+    /** Titles of code-mode charts; specs arrive with the detail body. */
+    charts: Type.Optional(Type.Array(Type.String())),
     asyncLaunch: Type.Optional(Type.Literal(true)),
     detailKey: Type.String(),
     added: Type.Optional(Type.Number()),
@@ -151,6 +155,7 @@ export type DisplayHistoryView = Static<typeof DisplayHistoryViewSchema>;
 
 export const DisplayDetailLeafSchema = Type.Union([
   text,
+  Type.Object({ type: Type.Literal("chart"), spec: ChartSpecSchema }, closed),
   Type.Object(
     {
       type: Type.Literal("image"),
@@ -274,6 +279,17 @@ function remoteImageUrl(value: string | undefined): string | undefined {
     : undefined;
 }
 
+/** Stored chart leaves that still satisfy the chart schema; anything else stays hidden. */
+function chartSpecs(content: readonly ContentBlock[]): ChartSpec[] {
+  return content.flatMap((child) =>
+    child.type === "other" &&
+    child.contentType === CHART_CONTENT_TYPE &&
+    Check(ChartSpecSchema, child.data)
+      ? [child.data]
+      : [],
+  );
+}
+
 function projectBlock(block: ContentBlock, key: string): DisplayBlock {
   switch (block.type) {
     case "text":
@@ -313,15 +329,18 @@ function projectBlock(block: ContentBlock, key: string): DisplayBlock {
         ...(typeof args?.limit === "number" ? { limit: args.limit } : {}),
       };
     }
-    case "tool_result":
+    case "tool_result": {
+      const charts = chartSpecs(block.content).map((spec) => capHeadline(spec.title));
       return {
         type: "tool_result",
         callId: block.callId,
         ...(block.isError === undefined ? {} : { isError: block.isError }),
         hasImages: block.content.some((item) => item.type === "image"),
+        ...(charts.length === 0 ? {} : { charts }),
         detailKey: key,
         ...(block.patch === undefined ? {} : diffStats(block.patch)),
       };
+    }
     case "other":
       return { type: "other", contentType: block.contentType };
   }
@@ -670,16 +689,20 @@ export function projectRecordDetail(
           .map((child, childIndex) =>
             child.type === "text"
               ? { type: "text" as const, text: child.text }
-              : child.type === "image"
-                ? {
-                    type: "image" as const,
-                    ...(child.mediaType === undefined ? {} : { mediaType: child.mediaType }),
-                    ...(child.data === undefined ? {} : { imageRef: `${detailKey}:${childIndex}` }),
-                    ...(child.url !== undefined && remoteImageUrl(child.url) !== undefined
-                      ? { url: child.url }
-                      : {}),
-                  }
-                : null,
+              : child.type === "other"
+                ? (chartSpecs([child]).map((spec) => ({ type: "chart" as const, spec }))[0] ?? null)
+                : child.type === "image"
+                  ? {
+                      type: "image" as const,
+                      ...(child.mediaType === undefined ? {} : { mediaType: child.mediaType }),
+                      ...(child.data === undefined
+                        ? {}
+                        : { imageRef: `${detailKey}:${childIndex}` }),
+                      ...(child.url !== undefined && remoteImageUrl(child.url) !== undefined
+                        ? { url: child.url }
+                        : {}),
+                    }
+                  : null,
           )
           .filter((child) => child !== null),
       };

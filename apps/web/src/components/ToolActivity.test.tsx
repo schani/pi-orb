@@ -1,4 +1,4 @@
-import type { ContentBlock, HistoryRecord } from "@pi-orb/protocol";
+import { CHART_CONTENT_TYPE, type ContentBlock, type HistoryRecord } from "@pi-orb/protocol";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { detailContext, displayRecord } from "../testkit/display-fixtures.ts";
@@ -606,6 +606,72 @@ describe("tool image previews", () => {
     expect(html).not.toMatch(/<details[^>]*\sopen(?:=|>)/);
     expect(html).toContain("2 files");
     expect(html).not.toContain("tool-image-previews");
+  });
+});
+
+describe("chart rows", () => {
+  const chart = (title: string) => ({
+    type: "other" as const,
+    contentType: CHART_CONTENT_TYPE,
+    data: {
+      kind: "line",
+      title,
+      series: [{ name: "p95", points: [[1, 180]] }],
+    },
+  });
+  const codemode = (callId: string, charts: string[] = []) => ({
+    call: {
+      type: "tool_call" as const,
+      callId,
+      name: "codemode",
+      arguments: { code: `await chart(${callId})` },
+    },
+    result: {
+      type: "tool_result" as const,
+      callId,
+      content: [{ type: "text" as const, text: "Script completed" }, ...charts.map(chart)],
+    },
+  });
+
+  it("follows the producing call with one open rail row per chart, without embedding data", () => {
+    const html = renderToStaticMarkup(
+      <ToolActivity
+        persisted={[
+          codemode("first"),
+          codemode("second", ["p95 latency", "error rate"]),
+          codemode("third"),
+        ]}
+      />,
+    );
+    expect(html.match(/<details[^>]*chart-strip[^>]*open=""/g)).toHaveLength(2);
+    const order = ["await chart(first)", "await chart(second)", "p95 latency", "error rate"].map(
+      (needle) => html.indexOf(needle),
+    );
+    expect(order.every((index, i) => index >= 0 && (i === 0 || index > order[i - 1]!))).toBe(true);
+    expect(html.indexOf("await chart(third)")).toBeGreaterThan(html.indexOf("error rate"));
+    expect(html).not.toContain('"points"');
+  });
+
+  it("does not repeat a chart inside the tool output drawer", () => {
+    const body = renderToStaticMarkup(
+      <DetailContent
+        body={{
+          type: "tool_result",
+          content: [
+            { type: "text", text: "Script completed" },
+            {
+              type: "chart",
+              spec: { kind: "bar", title: "drawer title", bars: [{ label: "a", value: 1 }] },
+            },
+          ],
+        }}
+        context={detailContext()}
+        recordId="result-0"
+        detailKey="result-0:0"
+      />,
+    );
+    expect(body).toContain("Script completed");
+    expect(body).not.toContain("drawer title");
   });
 });
 
