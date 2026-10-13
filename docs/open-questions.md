@@ -178,6 +178,12 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 
 76. **Open (2026-10-06):** what to do when Spot preemption is frequent enough to stall work (`docs/postmortems/2026-10-06-spot-preemption-burst.md`: six preemptions of one orb in 72 minutes during a zone-wide burst). The fleet is single-zone Spot `n2d-highmem` (`docs/host-provider.md`). Options: accept it; spread new orbs across zones (the persistent disk is zonal, so an existing orb stays in its zone); fall back to on-demand after N preemptions within a window; let the user pin an orb to on-demand. Undecided: whether the cost and complexity are justified, and whether the user should see a preemption count.
 
+**Merged numbering note (2026-10-13):** parallel branches allocated 77 to token usage and lossless history. Preserve both numbers; references require topic qualifiers. New questions start at 78.
+
 ## Token usage display — 77
 
 77. **Resolved (2026-10-13):** Trend icon beside Settings; Comparison lines with a left summary, last day/week/month/6 months, token-kind/use/model breakdowns and top-orb/use bars. Reuse chat rendering/style, hover values and series-label isolation; six months has daily points/ticks. Implementation was authorized and is complete locally, without a schema change. Decisions, rejected alternatives, coverage and validation: `docs/model-usage.md`. Not deployed.
+
+## Lossless history storage — 77
+
+77. **Resolved (2026-10-13; user-approved):** store opaque history records/session headers in PostgreSQL `json`, not `jsonb` or `TEXT`. Whole-value driver decoding preserves escaped NUL and unpaired UTF-16 without read projections. SQL field processing may still reject these strings; use structured metadata for queries/indexes. No measured performance benefit is claimed; migration requires table rewrites/access-exclusive locks. Contract: `docs/history-replication.md`.

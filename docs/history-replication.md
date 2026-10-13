@@ -374,6 +374,10 @@ An in-progress record is intentionally omitted. If shutdown terminates the proce
 
 ### Reconciliation and failure model
 
+**Decision (2026-10-13; user-approved; locally implemented, not deployed):** store complete history records and session metadata in PostgreSQL `json` (not `jsonb`). Migration `044_lossless_history_json.sql` converts both columns in place. Existing PostgreSQL/PGlite drivers decode whole values losslessly, including escaped NUL, lone surrogates and nested keys. JSONB storage/casts and SQL payload field processing can reject valid history strings; keep payloads opaque. Native files and protocol shapes are unchanged. `json` avoids application read projections; no performance improvement is demonstrated.
+
+Keep relational keys, parents, cursors, heads and the session null-pair in SQL. The PostgreSQL adapter checks serialized record ID/parent and session ID against relational keys on owned writes. Duplicate comparison is structural; records/cursor/head/receipts commit atomically. Ordinary orb row mapping uses driver-decoded objects. Reject character replacement, skipped records, premature delivery and compatibility staging. `orb_messages` remains JSONB, outside this scope. Incident and qualification evidence: `docs/postmortems/2026-10-13-claude-history-nul.md`; follow-ups: `TODO.md`.
+
 The filesystem is assumed to survive process, container, VM, and Spot failures. After restart, polling resumes from the database cursor and discovers remaining complete harness records.
 
 For Pi, the adapter can enumerate every persisted entry. A full ID-based reconciliation endpoint or diagnostic mode may become useful as a backstop if the stored cursor is invalid or the adapter/session disagree, but it is not required to reconstruct the orb, and by decision all such repair remains manual until the system is demonstrably stable.
@@ -439,7 +443,14 @@ The SQL proof is manually queried and assembled; no export helper is supplied. R
   rowCount: number, records: HistoryRecord[] }
 ```
 
-Map `orbs.id` → `orbId`, `state` → `state`, `host_ref` → `hostRef`, `harness_session_header` → `session`, `replication_cursor` → `cursor`, and `replicated_head_id` → `headId`. `records` contains the complete `history_records.record` JSONB values filtered only by `orb_id`, not SQL row wrappers or display projections; array order is immaterial. `rowCount` is the count under that same filter and snapshot. Add literal `version: 1` and operator attestation `complete: true`. Schema: `apps/control-plane/src/adapters/pg/migrations/001_initial.sql`; native metadata/record types: `packages/protocol/src/history.ts`. The selected-chain query in `apps/control-plane/src/adapters/pg/store.ts` is **not** a full-proof query.
+Map `orbs.id` → `orbId`, `state` → `state`, `host_ref` → `hostRef`, decoded `harness_session_header` → `session`, `replication_cursor` → `cursor`, and `replicated_head_id` → `headId`. `records` contains the complete decoded `history_records.record` JSON values filtered only by `orb_id`, not SQL row wrappers or display projections; array order is immaterial. `rowCount` is the count under that same filter and snapshot. Add literal `version: 1` and operator attestation `complete: true`. Schema: `apps/control-plane/src/adapters/pg/migrations/001_initial.sql` plus `044_lossless_history_json.sql`; native metadata/record types: `packages/protocol/src/history.ts`. The selected-chain query in `apps/control-plane/src/adapters/pg/store.ts` is **not** a full-proof query.
+
+For driver-decoded export values, select whole payloads; serialize the assembled proof once:
+
+```sql
+SELECT harness_session_header FROM orbs WHERE id = $1;
+SELECT record FROM history_records WHERE orb_id = $1;
+```
 
 `rowCount` must be the full SQL count. Completeness is operator-attested, not independently or cryptographically proved. The report states this and fingerprints the original proof bytes. SQL header, orb identity, pointers, count, unique IDs and every immutable normalized record must match the native selected export; extra SQL branches are refused. Every local-tail ID must be absent from the full SQL proof. No SQL row or cursor is changed.
 
@@ -457,7 +468,7 @@ After final byte/ownership verification, external `outcome.json` is fsynced. Rep
 
 The initial slice used three tables: `projects`, `orbs`, and `history_records`; credential pointers were subsequently added for the broker. Replication state lives on the orb row. Orb deletion in `docs/orb-deletion.md` adds one minimal, short-lived tombstone table to record cleanup and fence stale external operations before history, the orb row, and the tombstone are removed together. Do not add user/auth, live-event, polling-job, generic host-resource, audit, or generic request-claim tables. The send-anytime feature adds one purpose-built `orb_messages` FIFO because stopped-orb acceptance cannot be represented by runtime history that does not yet exist; it must not become a generic job table. In-orb spawning (2026-09-08, `docs/orb-spawning.md`) adds purpose-built `orb_spawns` acceptance/provenance: source/target/project IDs, source incarnation, request fingerprint, and acceptance time, committed atomically with the orb and initial inbox row. These project-owned retry tombstones retain no prompt/history and survive orb deletion until project deletion cascades them; they are not a generic request/job table.
 
-Application code generates UUIDs with Node's `crypto.randomUUID()`; PostgreSQL does not need a UUID extension.
+Application code generates UUIDs with Node's `crypto.randomUUID()`; PostgreSQL does not need a UUID extension. Migration `044_lossless_history_json.sql` defines the `json` payload columns below. SQL checks object type with `json_typeof(payload)`; payload identity checks belong at the PostgreSQL adapter boundary, without SQL field extraction.
 
 ```sql
 CREATE TABLE projects (
@@ -486,13 +497,10 @@ CREATE TABLE orbs (
   checkout_commit text,
   last_ready_at timestamptz,
   harness_session_id text,
-  harness_session_header jsonb CHECK (
-    harness_session_header IS NULL OR jsonb_typeof(harness_session_header) = 'object'
+  harness_session_header json CHECK (
+    harness_session_header IS NULL OR json_typeof(harness_session_header) = 'object'
   ),
   CHECK ((harness_session_id IS NULL) = (harness_session_header IS NULL)),
-  CHECK (
-    harness_session_header IS NULL OR harness_session_header->>'id' = harness_session_id
-  ),
   last_error text,
 
   replication_cursor text,
@@ -510,16 +518,13 @@ CREATE TABLE history_records (
   orb_id uuid NOT NULL REFERENCES orbs(id),
   record_id text NOT NULL,
   parent_id text,
-  record jsonb NOT NULL CHECK (jsonb_typeof(record) = 'object'),
+  record json NOT NULL CHECK (json_typeof(record) = 'object'),
   inserted_at timestamptz NOT NULL DEFAULT now(),
 
   PRIMARY KEY (orb_id, record_id),
   FOREIGN KEY (orb_id, parent_id)
     REFERENCES history_records(orb_id, record_id)
-    DEFERRABLE INITIALLY DEFERRED,
-
-  CHECK (record->>'id' = record_id),
-  CHECK ((record->>'parentId') IS NOT DISTINCT FROM parent_id)
+    DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE INDEX history_records_parent_idx
@@ -540,11 +545,11 @@ Orb naming reuses the `orbs` row rather than adding a job table (`docs/control-p
 
 The single feature migration, `009_orb_messages.sql`, adds `orb_messages`, keyed by `(orb_id, message_id)`, with validated JSON content, a database-assigned insertion ordinal, `queued | delivering | delivered | failed` status, optional observed delivery mode/operation ID, sanitized error, timestamps, durable batch identity, and message-driven wake metadata. The `auto_start` wake bit distinguishes send-after-stop from stop-after-send without adding lifecycle state; it is set by admission whenever the orb cannot take delivery right now (`stopping`, `stopped`, `failed`) and cleared only by delivery, terminal failure, or an explicit stop — never by the wake it causes, so the backstop's start needs no follow-up write that could be stranded (`docs/lifecycle.md`). `wake_state_version` is the orb `state_version` the intent was admitted against: a `stopped` orb wakes for any outstanding intent, while a `failed` orb wakes only for an intent naming its current version, so a new send retries a failed boot exactly once and the version bump the wake performs retires the privilege without a second write. Admission itself performs no lifecycle transition (2026-08-11) — the reconciler's terminal backstop owns the single message-driven transition. `delivery_batch_id` lets claiming the head atomically assign every currently queued row to one batch while later arrivals wait for the next one. Singleton batches use the member UUID; multi-member batches derive a deterministic UUID from ordered membership. Cancelling an unadmitted member detaches remaining rows to queued/null-batch, so changed membership rotates identity; failure updates are fenced by the captured batch UUID. Central native admission validates source IDs/order, canonical payload/system, batch/status/operation and staged queued/placed native content under the same orb lock; terminal writes do not re-admit completed input. The replicated native record carries all constituent message IDs as the durable delivery identity; its replication transaction marks all of those rows delivered, and outstanding/status reads remain reload-safe.
 
-`history_records.record` stores the complete normalized `HistoryRecord`, including lossless native conversation overflow and identity-only Pi system-state overflow. The few duplicated columns exist only for keys and tree traversal. There is deliberately no database conversation sequence number: snapshot order is reconstructed by following `parent_id` from `replication_cursor` by default, or an explicitly requested internal record anchor. `replicated_head_id` separately identifies the replicated active head; branching uses the same graph.
+`history_records.record` stores the complete normalized `HistoryRecord`, including lossless native conversation overflow and identity-only Pi system-state overflow. `orbs.harness_session_header` likewise stores serialized `HarnessSessionMetadata`; the query drivers decode both before returning adapter values. The few duplicated columns exist only for keys and tree traversal. There is deliberately no database conversation sequence number: snapshot order is reconstructed by following `parent_id` from `replication_cursor` by default, or an explicitly requested internal record anchor. `replicated_head_id` separately identifies the replicated active head; branching uses the same graph.
 
 `replicated_head_id` means the latest active head whose record is present in the replica. A runtime pull may report a source head beyond a partial batch; do not expose/store that as the replicated head until the referenced record has been committed. `replication_cursor` always references the final committed record in append order and is independent of tree order.
 
-History records are immutable by ID. A repeated pull may encounter an existing `(orb_id, record_id)` only if the stored `parent_id` and JSON value are identical; differing content is a replication-integrity error, not an update.
+History records are immutable by ID. A repeated pull may encounter an existing `(orb_id, record_id)` only if the stored `parent_id` and decoded JSON value are structurally identical; differing content is a replication-integrity error, not an update. Object-key order and JSON escaping do not establish a conflict.
 
 The pull commit remains one explicit transaction:
 

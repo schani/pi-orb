@@ -72,6 +72,9 @@ const orb: OrbRow = {
   createdAt: 1_000,
   updatedAt: 1_000,
 };
+const unicodeStrings = ["\u0000", "\ud800", "\udfff", "\\u0000", "😀"];
+const unicodeOverflow = Object.fromEntries(unicodeStrings.map((text) => [text, { [text]: text }]));
+
 const session: HarnessSessionMetadata = { id: "session-1", overflow: {} };
 const first: HistoryRecord = {
   id: "record-1",
@@ -314,9 +317,9 @@ export function storeSemanticsContractTests(
         timestamp: "2026-08-07T00:00:00.000Z",
         type: "event",
         eventType: "pi.custom",
-        content: [{ type: "text", text: id }],
+        content: [{ type: "text", text: "\u0000\ud800" }],
         alert: { message: id, requestId: id },
-        overflow: {},
+        overflow: { "\udfff": "\u0000" },
       });
       const a = alert("alert-a", null);
       const b = alert("alert-b", a.id);
@@ -1841,11 +1844,20 @@ export function storeSemanticsContractTests(
 
     it("atomically commits idempotent history and reconstructs its linear chain", async () => {
       await seed();
+      const nativePayload = { message: { content: unicodeStrings, details: unicodeOverflow } };
+      const native: HistoryRecord = {
+        ...second,
+        type: "message",
+        role: "assistant",
+        content: [{ type: "text", text: unicodeStrings.join("|") }],
+        overflow: { native: nativePayload, other: "safe" },
+      };
+      const original = JSON.stringify([first, native]);
       const committed = await store.commitPullBatch(task, {
         orbId: orb.id,
         expectedCursor: null,
         session,
-        records: [first, second],
+        records: [first, native],
         nextCursor: second.id,
         nextHeadId: second.id,
       });
@@ -1855,17 +1867,18 @@ export function storeSemanticsContractTests(
         orbId: orb.id,
         expectedCursor: second.id,
         session,
-        records: [first, second],
+        records: [first, { ...native, overflow: { other: "safe", native: nativePayload } }],
         nextCursor: second.id,
         nextHeadId: second.id,
       });
       expect(repeated.isOk()).toBe(true);
 
       const snapshot = await store.readHistorySnapshot(task, orb.id);
-      expect(snapshot.isOk() && snapshot.value.records).toEqual([first, second]);
+      expect(snapshot.isOk() && snapshot.value.records).toEqual([first, native]);
+      expect(JSON.stringify([first, native])).toBe(original);
       expect(
         (await store.readHistoryRecord(task, orb.id, session.id, second.id))._unsafeUnwrap(),
-      ).toEqual(second);
+      ).toEqual(native);
       expect(
         (await store.readHistoryRecord(task, orb.id, "wrong-session", second.id))._unsafeUnwrap(),
       ).toBeNull();
@@ -1910,13 +1923,14 @@ export function storeSemanticsContractTests(
 
     it("rejects cursor and immutable-record conflicts without partial advancement", async () => {
       await seed();
+      const unicode: HistoryRecord = { ...first, overflow: { "\udfff": "\u0000\ud800" } };
       expect(
         (
           await store.commitPullBatch(task, {
             orbId: orb.id,
             expectedCursor: null,
             session,
-            records: [first],
+            records: [unicode],
             nextCursor: first.id,
             nextHeadId: first.id,
           })
@@ -1933,7 +1947,7 @@ export function storeSemanticsContractTests(
       });
       expect(cursorConflict.isErr() && cursorConflict.error.type).toBe("cursor_conflict");
 
-      const changed = { ...first, content: [{ type: "text" as const, text: "changed" }] };
+      const changed = { ...unicode, content: [{ type: "text" as const, text: "changed" }] };
       const recordConflict = await store.commitPullBatch(task, {
         orbId: orb.id,
         expectedCursor: first.id,
@@ -2709,7 +2723,7 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
               : fence === "orb"
                 ? "UPDATE orbs SET state = 'deleting' WHERE id = $1"
                 : fence === "session"
-                  ? 'UPDATE orbs SET harness_session_id = \'changed\', harness_session_header = \'{"id":"changed","overflow":{}}\'::jsonb WHERE id = $1'
+                  ? 'UPDATE orbs SET harness_session_id = \'changed\', harness_session_header = \'{"id":"changed","overflow":{}}\' WHERE id = $1'
                   : "DELETE FROM history_records WHERE orb_id = $1";
           const changed = await query(sql, [fence === "project" ? project.id : orb.id]);
           entered();
@@ -2912,18 +2926,27 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
         now: 2_500,
       });
       expect(duplicate.isOk() && duplicate.value.duplicate).toBe(true);
-      // A stored session header is an object-shaped jsonb parameter.
-      expect(
-        (
-          await store.initOrVerifySession(task, orb.id, {
-            id: "session-jsonb",
-            overflow: { nested: { list: [1, 2, 3] } },
-          })
-        ).isOk(),
-      ).toBe(true);
-      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.harnessSessionHeader).toEqual({
-        id: "session-jsonb",
-        overflow: { nested: { list: [1, 2, 3] } },
+      const header = { ...session, overflow: unicodeOverflow };
+      (await store.initOrVerifySession(task, orb.id, header))._unsafeUnwrap();
+      const committed = (
+        await store.commitPullBatch(task, {
+          orbId: orb.id,
+          expectedCursor: null,
+          session: header,
+          records: [first],
+          nextCursor: first.id,
+          nextHeadId: first.id,
+        })
+      )._unsafeUnwrap();
+      expect(committed.harnessSessionHeader).toEqual(header);
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.harnessSessionHeader).toEqual(
+        header,
+      );
+      expect((await store.readHistorySnapshot(task, orb.id))._unsafeUnwrap()).toEqual({
+        session: header,
+        cursor: first.id,
+        headId: first.id,
+        records: [first],
       });
 
       const bareArray = await client.query("SELECT $1::jsonb AS value", [[{ type: "text" }]]);

@@ -146,6 +146,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-13-claude-history-nul.md](docs/postmortems/2026-10-13-claude-history-nul.md) — JSONB NUL rejection blocked replication, receipts and FIFO delivery; lossless storage required
 - [docs/postmortems/2026-10-13-claude-query-rotation.md](docs/postmortems/2026-10-13-claude-query-rotation.md) — native handoff-completion defect, requesting/result fence and durable diagnostics; historical attribution incomplete
 - [docs/postmortems/2026-10-12-claude-charts-orb-failure.md](docs/postmortems/2026-10-12-claude-charts-orb-failure.md) — initialization cause discarded before VM disposal
 - [docs/postmortems/2026-10-12-durable-orb-prompt-tail.md](docs/postmortems/2026-10-12-durable-orb-prompt-tail.md) — the orb prompt rode unpersisted at the tail of every durable request, defeating prefix caching; it is now a persisted section

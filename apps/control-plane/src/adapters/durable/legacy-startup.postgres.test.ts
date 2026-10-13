@@ -147,7 +147,7 @@ it
           const changed =
             order === "publication-first"
               ? await query(
-                  "UPDATE orbs SET harness_session_id='host-sdk-session',harness_session_header=$2::jsonb WHERE id=$1",
+                  "UPDATE orbs SET harness_session_id='host-sdk-session',harness_session_header=$2::text::json WHERE id=$1",
                   [orb.id, JSON.stringify({ id: "host-sdk-session", overflow: {} })],
                 )
               : await query(

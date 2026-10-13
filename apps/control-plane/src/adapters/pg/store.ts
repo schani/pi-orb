@@ -1,6 +1,6 @@
 import type { HarnessSessionMetadata, HistoryRecord, OrbState, StopReason } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { err, errAsync, ok, okAsync, type Result, ResultAsync } from "neverthrow";
+import { err, errAsync, ok, okAsync, Result, ResultAsync } from "neverthrow";
 import type {
   ActivityHeadlineRef,
   StoredActivityHeadline,
@@ -57,6 +57,24 @@ function toMs(value: unknown): number {
   if (typeof value === "string") return new Date(value).getTime();
   return 0;
 }
+
+function normalizeHistory<T>(value: T): Result<T, StoreError> {
+  return Result.fromThrowable(
+    () => JSON.parse(JSON.stringify(value)) as T,
+    (): StoreError => ({
+      type: "store_error",
+      code: "invariant",
+      message: "cannot serialize history JSON",
+      retryable: false,
+    }),
+  )();
+}
+
+const historyMappingFailure = (message: string): ReplicationIntegrityError => ({
+  type: "replication_integrity",
+  reason: "mapping_failure",
+  message,
+});
 
 function mapOrbRow(row: PgRow): OrbRow {
   return {
@@ -207,6 +225,10 @@ export async function commitHistoryTransaction(
   query: HistoryTransactionQuery,
   params: Omit<CommitPullBatchParams, "nextCursor"> & { readonly nextCursor: string | null },
 ): Promise<Result<{ row: OrbRow; publishedAlertId: string | null }, CommitPullError>> {
+  const session = normalizeHistory(params.session);
+  if (session.isErr()) return err(historyMappingFailure(session.error.message));
+  if (session.value?.id !== params.session.id)
+    return err(historyMappingFailure("serialized session identity mismatch"));
   // Serialize competing committers on the row; the cursor check below
   // still implements the optimistic CAS semantics.
   const orbResult = await query(
@@ -254,12 +276,16 @@ export async function commitHistoryTransaction(
   }
   let newestAlertId: string | null = null;
   for (const record of params.records) {
+    const normalized = normalizeHistory(record);
+    if (normalized.isErr()) return err(historyMappingFailure(normalized.error.message));
+    if (normalized.value?.id !== record.id || normalized.value?.parentId !== record.parentId)
+      return err(historyMappingFailure("serialized record identity mismatch"));
     const inserted = await query(
       `INSERT INTO history_records (orb_id, record_id, parent_id, record)
-     VALUES ($1, $2, $3, $4::jsonb)
+     VALUES ($1, $2, $3, $4::json)
      ON CONFLICT (orb_id, record_id) DO NOTHING
      RETURNING record_id`,
-      [params.orbId, record.id, record.parentId, jsonParam(record)],
+      [params.orbId, record.id, record.parentId, jsonParam(normalized.value)],
     );
     if (inserted.isErr()) return err(inserted.error);
     if (inserted.value.rowCount > 0 && record.type === "event" && record.alert !== undefined) {
@@ -274,7 +300,7 @@ export async function commitHistoryTransaction(
       );
       if (existing.isErr()) return err(existing.error);
       const stored = existing.value.rows[0]?.["record"];
-      if (!jsonEqual(stored, JSON.parse(JSON.stringify(record)))) {
+      if (!jsonEqual(stored, normalized.value)) {
         return err<{ row: OrbRow; publishedAlertId: string | null }, ReplicationIntegrityError>({
           type: "replication_integrity",
           reason: "record_conflict",
@@ -294,10 +320,10 @@ export async function commitHistoryTransaction(
     if (delivered.isErr()) return err(delivered.error);
   }
   const sessionSets = initializeSession
-    ? ", harness_session_id = $4, harness_session_header = $5::jsonb"
+    ? ", harness_session_id = $4, harness_session_header = $5::json"
     : "";
   const values: unknown[] = [params.orbId, params.nextCursor, params.nextHeadId];
-  if (initializeSession) values.push(params.session.id, jsonParam(params.session));
+  if (initializeSession) values.push(params.session.id, jsonParam(session.value));
   values.push(newestAlertId);
   const updated = await query(
     `UPDATE orbs SET replication_cursor = $2, replicated_head_id = $3,
@@ -718,6 +744,15 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         return err({ type: "project_conflict" as const, reason: "not_found" as const });
       if (state !== "active")
         return err({ type: "project_conflict" as const, reason: "deleting" as const });
+      const header = normalizeHistory(orb.harnessSessionHeader);
+      if (header.isErr()) return err(header.error);
+      if ((header.value?.id ?? null) !== orb.harnessSessionId)
+        return err({
+          type: "store_error",
+          code: "invariant",
+          retryable: false,
+          message: "serialized session identity mismatch",
+        });
       const inserted = await query(
         `INSERT INTO orbs (id, project_id, name, auto_name_lease_until, auto_name_attempts,
            auto_name_next_attempt_at, state, state_version, host_kind, host_ref,
@@ -728,7 +763,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            runtime_token_hash, replication_cursor, replicated_head_id, last_busy_at,
            stop_reason, sleep_id, sleep_until, last_mint_at,
            state_changed_at, created_at, updated_at, user_time_zone, harness, agent_admission_version, last_ready_at, claude_recovery, auto_restart_times)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb,$39)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::json,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb,$39)
          ON CONFLICT (id) DO NOTHING RETURNING *`,
         [
           orb.id,
@@ -751,7 +786,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           orb.hostDiscardRequestedAt === null ? null : new Date(orb.hostDiscardRequestedAt),
           orb.checkoutCommit,
           orb.harnessSessionId,
-          jsonParam(orb.harnessSessionHeader),
+          jsonParam(header.value),
           orb.lastError,
           orb.runtimeTokenHash,
           orb.replicationCursor,
@@ -2172,11 +2207,13 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         const row = locked.value.rows[0];
         if (row === undefined) return err({ type: "orb_not_found" as const });
         const found = await query(
-          "SELECT 1 FROM history_records WHERE orb_id = $1 AND record_id = $2 AND record->'alert' IS NOT NULL AND record->>'type' = 'event'",
+          "SELECT record FROM history_records WHERE orb_id = $1 AND record_id = $2",
           [orbId, recordId],
         );
         if (found.isErr()) return err(found.error);
-        if (found.value.rows.length === 0) return err({ type: "alert_not_replicated" as const });
+        const alert = found.value.rows[0]?.["record"] as HistoryRecord | undefined;
+        if (alert?.type !== "event" || alert.alert === undefined)
+          return err({ type: "alert_not_replicated" as const });
         const current = row["unread_alert_id"] == null ? null : String(row["unread_alert_id"]);
         if (current !== recordId) return ok({ pointer: current, cleared: false });
         const cleared = await query("UPDATE orbs SET unread_alert_id = NULL WHERE id = $1", [
@@ -2231,6 +2268,10 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       if (orbResult.isErr()) return err(orbResult.error);
       const row = orbResult.value.rows[0];
       if (row === undefined) return ok(undefined);
+      const normalized = normalizeHistory(session);
+      if (normalized.isErr()) return err(historyMappingFailure(normalized.error.message));
+      if (normalized.value?.id !== session.id)
+        return err(historyMappingFailure("serialized session identity mismatch"));
       const storedSessionId =
         row["harness_session_id"] === null ? null : String(row["harness_session_id"]);
       const storedCursor =
@@ -2243,8 +2284,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           (storedSessionId !== session.id || !jsonEqual(row["harness_session_header"], session)))
       ) {
         const updated = await query(
-          "UPDATE orbs SET harness_session_id = $2, harness_session_header = $3::jsonb WHERE id = $1",
-          [orbId, session.id, jsonParam(session)],
+          "UPDATE orbs SET harness_session_id = $2, harness_session_header = $3::json WHERE id = $1",
+          [orbId, session.id, jsonParam(normalized.value)],
         );
         if (updated.isErr()) return err(updated.error);
         return ok(undefined);
