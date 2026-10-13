@@ -8,7 +8,12 @@ import {
   type Skill,
   type SkillFrontmatter,
 } from "@earendil-works/pi-coding-agent";
-import { createRegistry, type EnvTarget, type ToolRegistration } from "@earendil-works/pi-durable";
+import {
+  createRegistry,
+  type EnvTarget,
+  type Extension,
+  type ToolRegistration,
+} from "@earendil-works/pi-durable";
 import { type AuthProvider, StreamableHttpTransport } from "@earendil-works/pi-mcp";
 import type { McpConfig } from "@pi-orb/protocol";
 import { err, ok, okAsync, Result, ResultAsync } from "neverthrow";
@@ -116,7 +121,7 @@ export function processAgentSystemContext(
   resources: readonly { path: string; content: string }[],
 ): string {
   return [
-    "Use orb_self, orb_list, orb_transcript, orb_spawn, orb_sleep, orb_alert, orb_archive and orb_delete for control-plane operations. Use codemode to compose tool calls. Subagents support start, steer, observe, wait and cancel.",
+    "Use codemode to compose tool calls.",
     ...(userTimeZone
       ? [
           `User’s time zone: ${userTimeZone}. Present dates and times in this time zone unless they request another.`,
@@ -653,9 +658,9 @@ export function createProcessAgentContext(
         }
       }
       const registry = createRegistry();
-      registry.install({
-        ...tools.extension,
-        tools: (tools.extension.tools ?? []).map((tool) =>
+      const instrument = (extension: Extension): Extension => ({
+        ...extension,
+        tools: (extension.tools ?? []).map((tool) =>
           (() => {
             const registration =
               tool.name === "codemode" ? refreshProcessMcpTool(tool, tools.ready) : tool;
@@ -697,6 +702,8 @@ export function createProcessAgentContext(
           })(),
         ),
       });
+      registry.install(instrument(tools.extension));
+      registry.install(instrument(tools.childExtension));
       const recordModelCall = (use: ModelCallUse, response: AssistantMessage) =>
         options.modelUsage.record(task, modelCall({ ownerUserId, orbId: orb.id, use }, response));
       const summaryModel = models.value.getModel(CODEX_PROVIDER, "gpt-6-luna");
@@ -723,6 +730,7 @@ export function createProcessAgentContext(
           : {}),
         registry,
         modelTools: tools.modelTools,
+        childExtension: tools.childExtension,
         checkoutCommit: prepared.value.commitSha,
         hydrateExecution,
         executionActive: () => env.active(),

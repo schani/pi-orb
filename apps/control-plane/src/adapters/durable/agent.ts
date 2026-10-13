@@ -17,6 +17,7 @@ import {
   defineDoc,
   type EntryRecord,
   type EnvTarget,
+  type Extension,
   Harness,
   type LiveState,
   ProviderDoc,
@@ -174,6 +175,8 @@ export interface DurableAgentOptions {
   readonly recordModelCall?: (use: ModelCallUse, response: AssistantMessage) => void;
   readonly registry: Registry;
   readonly modelTools?: readonly ToolRegistration[];
+  /** Installed for subagent conversations only; the root never selects it. */
+  readonly childExtension?: Extension;
   readonly checkoutCommit: string | null;
   readonly hooks?: RuntimeHooks;
   readonly instructions: string;
@@ -390,7 +393,11 @@ export class DurableAgent implements AgentSessionFacade {
           };
         }, context);
         await root.configure(
-          { cwd: options.env.cwd, ...(options.modelTools ? { tools: options.modelTools } : {}) },
+          {
+            cwd: options.env.cwd,
+            ...(options.modelTools ? { tools: options.modelTools } : {}),
+            ...(options.childExtension ? { extensions: { remove: [options.childExtension] } } : {}),
+          },
           context,
         );
         const agent = new DurableAgent({ ...options, closeResources }, harness, root);

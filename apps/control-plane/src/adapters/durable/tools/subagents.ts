@@ -6,12 +6,20 @@ import {
   defineDoc,
   defineTask,
   defineTool,
+  type ModelRef,
   ROOT_CONVERSATION_ID,
   type TaskId,
   type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
+import {
+  eligibleCodexModels,
+  SELECTABLE_CODEX_MODELS,
+} from "../../../../../orb-runtime/src/pi/model-select.ts";
 
-type Receipt = { anchor: number; prompt: string; description: string };
+export const TOOLS_EXTENSION = "orb.tools";
+/** Selected only by children: their codemode lacks the subagent tools. */
+export const CHILD_TOOLS_EXTENSION = "orb.child-tools";
+type Receipt = { anchor: number; prompt: string; description: string; model?: string };
 export const ChildReceipts = defineDoc<{ children: Record<string, Receipt> }>({
   kind: "orb.children",
   version: 1,
@@ -31,7 +39,11 @@ type State =
   | { phase: "run"; child: number }
   | { phase: "finish"; child: number };
 /** A conversation-owned anchor survives the spawning tool and owns the child's entire scope. */
-export const ChildAnchor = defineTask<{ prompt: string; description: string }, State, JsonValue>({
+export const ChildAnchor = defineTask<
+  { prompt: string; description: string; model?: ModelRef },
+  State,
+  JsonValue
+>({
   name: "orb.child",
   version: 1,
   initial: () => ({ phase: "create" }),
@@ -43,7 +55,10 @@ export const ChildAnchor = defineTask<{ prompt: string; description: string }, S
         const child = await tx.createConversation({
           ownership: { kind: "task", taskId: runtime.taskId },
         });
-        (await tx.doc(AgentDoc, child.id)).tools = ["codemode"];
+        const agent = await tx.doc(AgentDoc, child.id);
+        agent.tools = ["codemode"];
+        agent.extensions = { remove: [TOOLS_EXTENSION] };
+        if (task.input.model) agent.model = task.input.model;
         await tx.appendEntry(ROOT_CONVERSATION_ID, {
           kind: "orb.subagent-task",
           data: {
@@ -146,6 +161,7 @@ async function status(api: ToolExecutionApi, id: string, wait: boolean, ctx: Con
   return {
     agent_id: id,
     description: row.description,
+    ...(row.model ? { model: row.model } : {}),
     status: task?.state.status === "terminal" ? task.state.outcome.status : "running",
     ...(task?.state.status === "terminal" ? { receipt: task.state.outcome } : {}),
   };
@@ -154,20 +170,38 @@ export const subagentTools = [
   defineTool({
     name: "subagent",
     description:
-      "Start a background subagent in the shared checkout. Returns agent_id immediately. Inherits parent model, instructions and authorized tools. No profiles, kinds or model selectors.",
+      "Start a background subagent in the shared checkout. Returns agent_id immediately. Inherits parent instructions and authorized tools, but cannot start subagents or orbs. Runs on model, or the parent's model when omitted. No profiles or kinds.",
     parameters: Type.Object(
-      { prompt: Type.String(), description: Type.Optional(Type.String()) },
+      {
+        prompt: Type.String(),
+        description: Type.Optional(Type.String()),
+        model: Type.Optional(
+          Type.Union(SELECTABLE_CODEX_MODELS.map(({ name }) => Type.Literal(name))),
+        ),
+      },
       { additionalProperties: false },
     ),
     replay: "safe",
     execute: async (args, api, ctx) => {
+      const selected = SELECTABLE_CODEX_MODELS.find(({ name }) => name === args.model);
+      if (
+        selected &&
+        !eligibleCodexModels(api.models.getModels("openai-codex")).some(
+          ({ id }) => id === selected.id,
+        )
+      )
+        return result({ error: `Model unavailable: ${selected.name}` });
       const id = await api.commit(async (tx) => {
         const doc = await tx.doc(ChildReceipts, api.conversationId);
         const key = `${api.taskId}:${api.callId}`;
         if (doc.children[key]) return key;
         const anchor = await tx.createTask(
           ChildAnchor,
-          { prompt: args.prompt, description: args.description ?? "" },
+          {
+            prompt: args.prompt,
+            description: args.description ?? "",
+            ...(selected ? { model: { provider: "openai-codex", modelId: selected.id } } : {}),
+          },
           {
             conversationId: api.conversationId,
             ownership: { kind: "conversation" },
@@ -178,6 +212,7 @@ export const subagentTools = [
           anchor,
           prompt: args.prompt,
           description: args.description ?? "",
+          ...(selected ? { model: selected.name } : {}),
         };
         return key;
       }, ctx);

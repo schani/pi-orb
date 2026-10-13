@@ -13,7 +13,7 @@ import { type McpEndpoint, McpTools } from "./mcp.ts";
 export type { AgentToolFiles } from "./files.ts";
 
 import { imageReadTool } from "./read.ts";
-import { ChildAnchor, subagentTools } from "./subagents.ts";
+import { CHILD_TOOLS_EXTENSION, ChildAnchor, subagentTools, TOOLS_EXTENSION } from "./subagents.ts";
 
 export {
   type AuthorizeTool,
@@ -76,27 +76,31 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
   const running = new Set<CodemodeSandbox>();
   const mcp = new McpTools(options.mcp ?? [], catalog);
   catalog.add(mcp.statusTool());
-  let code = codemodeTool(catalog, running, options.files, options.orb);
+  const child = catalog.without([...subagentTools.map((tool) => tool.name), "orb_spawn"]);
+  const extensions = () => {
+    const code = codemodeTool(catalog, running, options.files, options.orb);
+    return {
+      extension: defineExtension({
+        name: TOOLS_EXTENSION,
+        tools: [...catalog.registrations(), code],
+        tasks: [ChildAnchor],
+      }),
+      childExtension: defineExtension({
+        name: CHILD_TOOLS_EXTENSION,
+        tools: [codemodeTool(child, running, options.files, options.orb)],
+      }),
+      modelTools: [code] as const,
+    };
+  };
   const bundle = {
-    extension: defineExtension({
-      name: "orb.tools",
-      tools: [...catalog.registrations(), code],
-      tasks: [ChildAnchor],
-    }),
+    ...extensions(),
     catalog,
-    modelTools: [code] as const,
     mcpStatus: () => mcp.status(),
     ready: (context: Context = BACKGROUND_CONTEXT) =>
       ResultAsync.fromSafePromise(mcp.discover(context))
         .andThen((result) => result)
         .map((statuses) => {
-          code = codemodeTool(catalog, running, options.files, options.orb);
-          bundle.modelTools = [code];
-          bundle.extension = defineExtension({
-            name: "orb.tools",
-            tools: [...catalog.registrations(), code],
-            tasks: [ChildAnchor],
-          });
+          Object.assign(bundle, extensions());
           return statuses;
         }),
     close: (): ResultAsync<void, ToolError> =>

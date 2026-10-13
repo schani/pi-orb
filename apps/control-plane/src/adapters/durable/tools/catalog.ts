@@ -97,10 +97,15 @@ function namespaceMatches(namespace: string, query: string): boolean {
 }
 /** The same gate serves model calls and every nested sandbox callback. */
 export class CallableCatalog {
-  private readonly entries = new Map<string, ToolRegistration>();
+  private readonly entries: Map<string, ToolRegistration>;
   private readonly authorize: AuthorizeTool;
-  private readonly meta = new Map<string, CallableMetadata>();
-  private readonly namespaces = new Map<string, ToolNamespace>();
+  private readonly meta: Map<string, CallableMetadata>;
+  private readonly namespaces: Map<string, ToolNamespace>;
+  private readonly hidden: ReadonlySet<string>;
+  /** These callables without `names`; later additions, such as discovered MCP tools, reach both. */
+  without(names: readonly string[]): CallableCatalog {
+    return new CallableCatalog([], this.authorize, { catalog: this, hide: names });
+  }
   namespace(value: ToolNamespace): void {
     this.namespaces.set(value.name, value);
   }
@@ -126,8 +131,16 @@ export class CallableCatalog {
       outputSchema: this.metadata(tool.name).outputSchema ?? { type: "string" },
     }));
   }
-  constructor(tools: readonly ToolRegistration[], authorize: AuthorizeTool = allow) {
+  constructor(
+    tools: readonly ToolRegistration[],
+    authorize: AuthorizeTool = allow,
+    base?: { catalog: CallableCatalog; hide: readonly string[] },
+  ) {
     this.authorize = authorize;
+    this.entries = base?.catalog.entries ?? new Map();
+    this.meta = base?.catalog.meta ?? new Map();
+    this.namespaces = base?.catalog.namespaces ?? new Map();
+    this.hidden = new Set([...(base?.catalog.hidden ?? []), ...(base?.hide ?? [])]);
     for (const tool of tools) this.add(tool);
   }
   add(tool: ToolRegistration): void {
@@ -144,7 +157,7 @@ export class CallableCatalog {
       });
   }
   definitions(): readonly ToolRegistration[] {
-    return [...this.entries.values()];
+    return [...this.entries.values()].filter((tool) => !this.hidden.has(tool.name));
   }
   describe(name: string) {
     const tool = this.policyTools().find(
@@ -191,7 +204,7 @@ export class CallableCatalog {
     api: ToolExecutionApi,
     context: Context,
   ): ResultAsync<ToolExecutionResult, ToolError> {
-    const tool = this.entries.get(name);
+    const tool = this.hidden.has(name) ? undefined : this.entries.get(name);
     if (!tool) return errAsync({ code: "unavailable", message: "Unknown tool" });
     const prepared = Result.fromThrowable(
       () => (tool.prepareArguments ? tool.prepareArguments(args) : args),
