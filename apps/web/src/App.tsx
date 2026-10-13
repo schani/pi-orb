@@ -10,17 +10,20 @@ import { CreateOrbPage } from "./pages/CreateOrbPage.tsx";
 import { NotFoundPage } from "./pages/NotFoundPage.tsx";
 import { OrbPage } from "./pages/OrbPage.tsx";
 import { ProjectsPage } from "./pages/ProjectsPage.tsx";
+import { UsagePage } from "./pages/UsagePage.tsx";
 
 export type Route =
   | { page: "projects"; focusedProjectId: string | null }
   | { page: "create_orb"; projectId: string }
   | { page: "mcp"; projectId: string }
   | { page: "orb"; orbId: string }
+  | { page: "usage" }
   | { page: "not_found" };
 
 export function parseRoute(url: string): Route {
   const path = url.split(/[?#]/, 1)[0] ?? "";
   if (path === "/") return { page: "projects", focusedProjectId: null };
+  if (path === "/usage") return { page: "usage" };
   const id = (value: string): string | null => {
     try {
       return decodeURIComponent(value);
@@ -63,6 +66,8 @@ function AppRoutes({ cache }: { cache: TranscriptCache }) {
       focusedProjectId={route.page === "mcp" ? route.projectId : route.focusedProjectId}
       mcpConfigOpen={route.page === "mcp"}
     />
+  ) : route.page === "usage" ? (
+    <UsagePage />
   ) : route.page === "create_orb" ? (
     <CreateOrbPage key={route.projectId} projectId={route.projectId} />
   ) : route.page === "orb" ? (

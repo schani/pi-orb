@@ -4,6 +4,7 @@ import embed, { type Config, type VisualizationSpec } from "vega-embed";
 import {
   barChartSpec,
   CHART_CONFIG,
+  type ChartXAxis,
   lineChartSpec,
   sparklineSpec,
   type TooltipRow,
@@ -93,27 +94,43 @@ function render(
   spec: VegaSpec,
   tooltip: (event: MouseEvent, value: unknown) => void,
 ) {
-  return ResultAsync.fromPromise(
-    embed(container, spec as VisualizationSpec, {
-      actions: false,
-      renderer: "svg",
-      config: CHART_CONFIG as unknown as Config,
-      tooltip: (_handler: unknown, event: MouseEvent, _item: unknown, value: unknown) =>
-        tooltip(event, value),
-    }),
+  // Vega caches text measurements; load the face before the first measurement.
+  return ResultAsync.fromThrowable(
+    () => document.fonts.load(`11px "${CHART_CONFIG.font}"`),
     failure,
+  )().andThen(() =>
+    ResultAsync.fromThrowable(
+      () =>
+        embed(container, spec as VisualizationSpec, {
+          actions: false,
+          renderer: "svg",
+          config: CHART_CONFIG as unknown as Config,
+          tooltip: (_handler: unknown, event: MouseEvent, _item: unknown, value: unknown) =>
+            tooltip(event, value),
+        }),
+      failure,
+    )(),
   );
 }
 
 export function mountChart(
   container: HTMLElement,
   spec: ChartSpec,
-  options: { narrow: boolean; height: number; onHighlight: (series: string | null) => void },
+  options: {
+    narrow: boolean;
+    height: number;
+    xAxis?: ChartXAxis;
+    onHighlight: (series: string | null) => void;
+  },
 ): ResultAsync<MountedChart, ChartRenderError> {
   const vega =
     spec.kind === "bar"
       ? barChartSpec(spec)
-      : lineChartSpec(spec, { narrow: options.narrow, height: options.height });
+      : lineChartSpec(spec, {
+          narrow: options.narrow,
+          height: options.height,
+          ...(options.xAxis === undefined ? {} : { xAxis: options.xAxis }),
+        });
   return render(container, vega, (event, value) => showTooltip(spec, event, value)).map(
     ({ view }) => {
       const isolating = spec.kind === "line" && spec.series.length > 1;

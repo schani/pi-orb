@@ -1,20 +1,91 @@
+import { UsageViewSchema } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { ok, ResultAsync } from "neverthrow";
+import { err, ok, type Result, ResultAsync } from "neverthrow";
+import { Check } from "typebox/value";
+import type { StoreError } from "../../domain/errors.ts";
 import { logEvent } from "../../domain/log.ts";
 import type { ModelCall, ModelUsageLedger } from "../../domain/model-usage.ts";
-import type { PostgreSQLClient } from "./client.ts";
+import type { ModelUsageReader, UsageRead } from "../../domain/usage-read.ts";
+import { arrayParam, type PgRow, type PostgreSQLClient } from "./client.ts";
+
+function usageRows(rows: PgRow[], boundaries: readonly number[]): Result<UsageRead, StoreError> {
+  const result: UsageRead = { buckets: [], orbs: [] };
+  const invalid = () =>
+    err<UsageRead, StoreError>({
+      type: "store_error",
+      code: "invariant",
+      message: "Invalid model usage aggregate",
+      retryable: false,
+    });
+  const times = boundaries.slice(0, -1);
+  for (const row of rows) {
+    const totals = {
+      input: row["input"],
+      output: row["output"],
+      cacheRead: row["cacheRead"],
+      cacheWrite: row["cacheWrite"],
+      calls: row["calls"],
+    };
+    if (row["kind"] === "bucket") {
+      const index = row["bucket"];
+      const bucket = {
+        ...totals,
+        at: typeof index === "number" ? times[index] : undefined,
+        use: row["use"],
+        provider: row["provider"],
+        model: row["model"],
+      };
+      if (!Check(UsageViewSchema.properties.buckets.items, bucket)) return invalid();
+      result.buckets.push(bucket);
+    } else if (row["kind"] === "orb") {
+      const orb = { ...totals, id: row["id"], name: row["name"] };
+      if (!Check(UsageViewSchema.properties.orbs.items, orb)) return invalid();
+      result.orbs.push(orb);
+    } else return invalid();
+  }
+  return ok(result);
+}
 
 /**
  * Fire-and-forget `model_calls` inserts (docs/model-usage.md). Each row commits in its own transaction without
  * waiting for the WAL flush; an outage logs one edge when it starts and one when it ends, never per row.
  */
-export class PostgreSQLModelUsageLedger implements ModelUsageLedger {
+export class PostgreSQLModelUsageLedger implements ModelUsageLedger, ModelUsageReader {
   private readonly db: PostgreSQLClient;
   private readonly pending = new Set<Promise<void>>();
   private failing = false;
 
   constructor(db: PostgreSQLClient) {
     this.db = db;
+  }
+
+  read(
+    _task: SimulationTask,
+    ownerUserId: string,
+    boundaries: readonly number[],
+  ): ResultAsync<UsageRead, StoreError> {
+    return this.db
+      .query(
+        `WITH edges AS (
+         SELECT at, lead(at) OVER (ORDER BY ord) AS until, (ord-1)::int AS bucket
+         FROM unnest($2::timestamptz[]) WITH ORDINALITY AS t(at, ord)
+       ), usage AS MATERIALIZED (
+         SELECT e.bucket, c.* FROM edges e JOIN model_calls c ON c.at >= e.at AND c.at < e.until
+         WHERE c.owner_user_id = $1
+       ), owned_orbs AS (
+         SELECT o.id, o.name FROM orbs o JOIN projects p ON p.id = o.project_id WHERE p.owner_user_id::text = $1
+       )
+       SELECT 'bucket' AS kind, bucket, use, provider, model, NULL::text AS id, NULL::text AS name,
+         sum(input)::float8 AS input, sum(output)::float8 AS output,
+         sum(cache_read)::float8 AS "cacheRead", sum(cache_write)::float8 AS "cacheWrite", count(*)::float8 AS calls
+       FROM usage GROUP BY bucket, use, provider, model
+       UNION ALL
+       SELECT 'orb', NULL, NULL, NULL, NULL, u.orb_id::text, o.name,
+         sum(input)::float8, sum(output)::float8, sum(cache_read)::float8, sum(cache_write)::float8, count(*)::float8
+       FROM usage u LEFT JOIN owned_orbs o ON o.id = u.orb_id GROUP BY u.orb_id, o.name`,
+        [ownerUserId, arrayParam(boundaries.map((at) => new Date(at)))],
+      )
+      .andThen((result) => usageRows(result.rows, boundaries));
   }
 
   record(task: SimulationTask, call: ModelCall): void {

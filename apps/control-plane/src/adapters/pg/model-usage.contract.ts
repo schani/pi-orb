@@ -1,4 +1,5 @@
 import { NoSimulationTask } from "determined";
+import { okAsync } from "neverthrow";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelCall } from "../../domain/model-usage.ts";
 import { makeOrbRow, makeProjectRow, seedTestUser, TEST_USER_ID } from "../../testkit/fixtures.ts";
@@ -177,6 +178,144 @@ export function modelUsageLedgerContractTests(
         [ARCHIVED, "root"],
         [DELETED, "subagent"],
       ]);
+    });
+
+    it("reads owner-scoped half-open buckets and retains nameless deleted orbs", async () => {
+      const boundaries = [AT, AT + 900_000, AT + 1_800_000];
+      const clock = vi.spyOn(task, "wallNow").mockReturnValue(AT);
+      ledger.record(task, call(ARCHIVED));
+      ledger.record(task, call(ARCHIVED, { ownerUserId: "other" }));
+      await ledger.drain();
+      clock.mockReturnValue(AT + 900_000);
+      ledger.record(task, call(DELETED, { use: "subagent" }));
+      ledger.record(
+        task,
+        call(DELETED, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, outcome: "error" }),
+      );
+      await ledger.drain();
+      clock.mockReturnValue(AT + 1_800_000);
+      ledger.record(task, call(DELETED));
+      await ledger.drain();
+      clock.mockReturnValue(AT - 1);
+      ledger.record(task, call(DELETED));
+      await ledger.drain();
+      clock.mockRestore();
+      const result = (await ledger.read(task, TEST_USER_ID, boundaries))._unsafeUnwrap();
+      expect(result.buckets).toHaveLength(3);
+      expect(result.buckets.find((row) => row.at === AT)).toMatchObject({
+        use: "root",
+        input: 120,
+        output: 30,
+        cacheRead: 4000,
+        cacheWrite: 7,
+        calls: 1,
+      });
+      expect(
+        result.buckets
+          .filter((row) => row.at === AT + 900_000)
+          .reduce((sum, row) => sum + row.calls, 0),
+      ).toBe(2);
+      expect(result.orbs.sort((a, b) => a.id.localeCompare(b.id))).toEqual([
+        {
+          id: ARCHIVED,
+          name: null,
+          input: 120,
+          output: 30,
+          cacheRead: 4000,
+          cacheWrite: 7,
+          calls: 1,
+        },
+        {
+          id: DELETED,
+          name: null,
+          input: 120,
+          output: 30,
+          cacheRead: 4000,
+          cacheWrite: 7,
+          calls: 2,
+        },
+      ]);
+      expect((await ledger.read(task, "no-calls", boundaries))._unsafeUnwrap()).toEqual({
+        buckets: [],
+        orbs: [],
+      });
+    });
+
+    it("never discloses another owner's orb name through the ledger join", async () => {
+      (await seedTestUser(task, database.users))._unsafeUnwrap();
+      (await database.store.insertProject(task, makeProjectRow(PROJECT)))._unsafeUnwrap();
+      (
+        await database.store.insertOrb(task, {
+          ...makeOrbRow(ARCHIVED, PROJECT, "stopped"),
+          name: "Mine",
+        })
+      )._unsafeUnwrap();
+      const clock = vi.spyOn(task, "wallNow").mockReturnValue(AT);
+      ledger.record(task, call(ARCHIVED));
+      ledger.record(task, call(ARCHIVED, { ownerUserId: "other" }));
+      await ledger.drain();
+      clock.mockRestore();
+      expect(
+        (await ledger.read(task, TEST_USER_ID, [AT, AT + 900000]))._unsafeUnwrap().orbs[0]?.name,
+      ).toBe("Mine");
+      expect(
+        (await ledger.read(task, "other", [AT, AT + 900000]))._unsafeUnwrap().orbs[0]?.name,
+      ).toBeNull();
+    });
+
+    it("rejects malformed aggregate rows without accepting an out-of-range bucket", async () => {
+      const bucket = {
+        kind: "bucket",
+        bucket: 0,
+        use: "root",
+        provider: "p",
+        model: "m",
+        input: 1,
+        output: 2,
+        cacheRead: 3,
+        cacheWrite: 0,
+        calls: 1,
+      };
+      const orb = {
+        kind: "orb",
+        id: DELETED,
+        name: null,
+        input: 1,
+        output: 2,
+        cacheRead: 3,
+        cacheWrite: 0,
+        calls: 1,
+      };
+      const query = vi.spyOn(client, "query");
+      try {
+        for (const row of [
+          { ...bucket, bucket: 1 },
+          { ...bucket, bucket: -1 },
+          { ...bucket, bucket: 0.5 },
+          { ...bucket, bucket: "0" },
+          { ...bucket, bucket: NaN },
+          { ...bucket, use: "unknown" },
+          { ...bucket, provider: null },
+          { ...bucket, model: 7 },
+          { ...bucket, input: -1 },
+          { ...bucket, calls: 1.5 },
+          { ...bucket, cacheRead: Number.MAX_SAFE_INTEGER + 1 },
+          { ...orb, id: 7 },
+          { ...orb, name: 7 },
+          { ...orb, kind: "unknown" },
+        ]) {
+          query.mockReturnValueOnce(okAsync({ rows: [row], rowCount: 1 }));
+          const result = await ledger.read(task, TEST_USER_ID, [AT, AT + 900000]);
+          expect(result.isErr()).toBe(true);
+          expect(result._unsafeUnwrapErr().code).toBe("invariant");
+        }
+        query.mockReturnValueOnce(okAsync({ rows: [bucket, orb], rowCount: 2 }));
+        const valid = (await ledger.read(task, TEST_USER_ID, [AT, AT + 900000]))._unsafeUnwrap();
+        expect(valid.buckets[0]?.at).toBe(AT);
+        expect(valid.orbs[0]?.name).toBeNull();
+      } finally {
+        query.mockRestore();
+      }
     });
 
     it("logs one edge when writes start failing and one when they recover", async () => {

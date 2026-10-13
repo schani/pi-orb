@@ -719,12 +719,17 @@ describe.each(["chromium", "webkit"] as const)("tool-returned image previews · 
         }
         const close = page.getByRole("button", { name: "Close image preview", exact: true });
         await expectPage(close).toBeVisible();
-        const outline = () => close.evaluate((node) => getComputedStyle(node).outlineStyle);
+        const outline = () =>
+          close.evaluate(
+            (node) => node.ownerDocument.defaultView?.getComputedStyle(node).outlineStyle,
+          );
         expectPage(await outline()).toBe("none");
         expectPage(
           await page
             .locator(".tool-image-dialog[open]")
-            .evaluate((node) => getComputedStyle(node).outlineStyle),
+            .evaluate(
+              (node) => node.ownerDocument.defaultView?.getComputedStyle(node).outlineStyle,
+            ),
         ).toBe("none");
         await page.keyboard.press("Tab");
         await expectPage(close).toBeFocused();
