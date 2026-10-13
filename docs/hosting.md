@@ -1,6 +1,6 @@
 # System-hosted files
 
-**Production validated 2026-10-06.** The single `pi-orb-issuer` application uses Google login and stateless sealed cookies. `pi-orb` is an unprivileged browser redirect to it. `docs/control-plane-consolidation.md` records decisions and cutover gates; `docs/deployment.md` records the current topology and live release evidence. Earlier dated evidence below describes its respective release.
+**Production validated 2026-10-06.** The single `pi-orb-issuer` application uses Google login and stateless sealed cookies. `docs/control-plane-consolidation.md` records decisions and cutover gates; `docs/deployment.md` records the current topology and live release evidence. Earlier dated evidence below describes its respective release.
 
 System-owned static files published by an orb under a durable, orb-specific namespace.
 

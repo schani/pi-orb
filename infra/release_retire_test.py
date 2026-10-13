@@ -40,7 +40,7 @@ class RetirementTest(unittest.TestCase):
         value["retirement"]["zeroes"] = {}
         return value
 
-    def test_normal_release_retires_application_without_waiting_for_browser_redirect(self):
+    def test_normal_release_retires_only_application_controllers(self):
         class Cloud:
             def __init__(self):
                 self.before_apply = True
@@ -51,11 +51,11 @@ class RetirementTest(unittest.TestCase):
                 return Result([{'metadata': {'name': name}}])
             def assert_service(self, name):
                 if name != 'pi-orb-issuer':
-                    raise AssertionError('redirect-only service entered controller retirement')
+                    raise AssertionError('unexpected service entered controller retirement')
             def http(self, _method, url):
                 query = parse_qs(urlsplit(url).query)
                 if 'resource.labels.service_name="pi-orb-issuer"' not in query['filter'][0]:
-                    raise AssertionError('redirect-only metrics entered controller retirement')
+                    raise AssertionError('unexpected metrics entered controller retirement')
                 points = [series('pi-orb-issuer-old', 'active', '1', service='pi-orb-issuer')]
                 if not self.before_apply:
                     points += [series('pi-orb-issuer-old', state, '0', '2026-09-09T12:03:00Z', service='pi-orb-issuer') for state in ('active', 'idle')]

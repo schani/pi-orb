@@ -1,30 +1,52 @@
 """Single-service deployment and maintenance ordering contracts."""
+import json
 import re
+import subprocess
 import unittest
 from pathlib import Path
 from infra.release_state import SERVICES
 
 
 class ConsolidationTest(unittest.TestCase):
-    def test_browser_redirect_cannot_run_controllers_or_read_application_data(self):
-        source = Path('infra/browser-redirect.tf').read_text()
-        self.assertIn('name                 = "pi-orb"', source)
-        self.assertIn('service_account = local.image_builder_email', source)
-        self.assertIn('args    = ["infra/browser-redirect.mjs"]', source)
-        self.assertIn('min_instance_count = 0', source)
-        self.assertIn('cpu_idle = true', source)
-        self.assertEqual(re.findall(r'name\s+= "(PI_ORB_[^"]+)"', source), ['PI_ORB_REDIRECT_ORIGIN'])
-        for fragment in ('value_source', 'vpc_access', 'local.control_plane_email', 'PI_ORB_HOST_SPEC_GENERATION'):
-            self.assertNotIn(fragment, source)
-
     def test_one_service_preserves_issuer_resource(self):
         source = Path('infra/run.tf').read_text()
-        self.assertEqual(re.findall(r'resource "google_cloud_run_v2_service" "([^"]+)"', source), ['issuer'])
+        resources = '\n'.join(path.read_text() for path in Path('infra').glob('*.tf'))
+        self.assertEqual(re.findall(r'resource "google_cloud_run_v2_service" "([^"]+)"', resources), ['issuer'])
         for fragment in ['service_account = local.control_plane_email', 'min_instance_count = 1', 'max_instance_count = 1', '"3600s"', 'cpu_idle', '"PRIVATE_RANGES_ONLY"', 'PI_ORB_AUTH_MODE', 'PI_ORB_MACHINE_SUBJECT', 'PI_ORB_OIDC_ISSUER_URL']:
             self.assertIn(fragment, source)
         self.assertNotIn('PI_ORB_ROLE', source)
         self.assertNotIn('iap_enabled', source)
         self.assertEqual(SERVICES, ('pi-orb-issuer',))
+
+    def test_application_image_excludes_deployment_scripts(self):
+        dockerfile = Path('apps/control-plane/Dockerfile').read_text()
+        self.assertNotIn('COPY infra/', dockerfile)
+
+    def test_saved_plan_allows_service_removal_but_preserves_database(self):
+        protected = [
+            'google_sql_database_instance.pi_orb', 'google_sql_database.pi_orb',
+            'google_sql_user.pi_orb', 'random_password.db',
+            'google_secret_manager_secret.database_url',
+            'google_secret_manager_secret_version.database_url',
+        ]
+        changes = [dict(address=address, change=dict(actions=['no-op'])) for address in protected]
+        changes += [dict(address='google_cloud_run_v2_service.browser_redirect', change=dict(actions=['delete'])),
+                    dict(address='google_cloud_run_v2_service.issuer', change=dict(actions=['update']))]
+
+        def accepted(resource_changes):
+            result = subprocess.run(['jq', '-e', '-f', 'infra/check-database-plan.jq'],
+                                    input=json.dumps(dict(resource_changes=resource_changes)),
+                                    text=True, capture_output=True, check=False)
+            return result.returncode == 0
+
+        self.assertTrue(accepted(changes))
+        for index, address in enumerate(protected):
+            with self.subTest(address=address):
+                for actions in (['update'], ['delete'], ['delete', 'create']):
+                    unsafe = json.loads(json.dumps(changes))
+                    unsafe[index]['change']['actions'] = actions
+                    self.assertFalse(accepted(unsafe))
+                self.assertFalse(accepted(changes[:index] + changes[index + 1:]))
 
     def test_issuer_resource_sizing(self):
         source = Path('infra/run.tf').read_text().split('resource "google_cloud_run_v2_service" "issuer" {', 1)[1]

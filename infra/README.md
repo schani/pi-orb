@@ -8,6 +8,14 @@ files use its separate `files` traffic-tag origin. `app_url` and `issuer_url` ar
 identical; neither substitutes Cloud Run's hashed `.uri`. Compute SSH retains IAP.
 Google browser login and machine token verification happen in the application.
 
+**URL decision (2026-10-13):** keep the exact issuer origin as the canonical browser
+address. The normal Actions saved plan deletes `google_cloud_run_v2_service.browser_redirect`
+while preserving the issuer resource and shared foundation identities. Review that
+service deletion and database/credential no-ops before apply; verify issuer
+health/API/discovery/JWKS, Google login, files and federation afterward, plus absence
+of Cloud Run service `pi-orb`. Release records and Cloud Run audit logs provide
+apply evidence. This is not a first-consolidation cutover.
+
 ## Deploy workflow
 
 First apply the separately authorized foundation (`infra/foundation/README.md`). The release refuses an unapplied or mismatched foundation. **Status (2026-09-16):** GitHub keyless authentication and the manual workflow are operational. [Release 35104816962](https://github.com/schani/pi-orb/actions/runs/35104816962) deployed project instructions from `7d53024` at generation `1789569278`; all gates passed on the first attempt and the release was validated at 14:52:20 UTC. Smoke fixtures were deleted and the release lock is absent. Exact image identities, the durable record and earlier release/recovery evidence are in `docs/deployment.md`. The user deferred database password rotation; release plans must preserve the existing credential.

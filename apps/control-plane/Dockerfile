@@ -48,7 +48,6 @@ COPY packages/protocol/src packages/protocol/src
 COPY packages/mock-openai/src packages/mock-openai/src
 COPY packages/luna/src packages/luna/src
 COPY apps/control-plane/src apps/control-plane/src
-COPY infra/browser-redirect.mjs infra/browser-redirect.mjs
 COPY apps/orb-runtime/src apps/orb-runtime/src
 COPY apps/orb-runtime/skills apps/orb-runtime/skills
 COPY --from=web-build /app/apps/web/dist apps/web/dist
