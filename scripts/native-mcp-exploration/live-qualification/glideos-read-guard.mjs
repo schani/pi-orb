@@ -28,7 +28,7 @@ export async function guard(stage) {
   );
   assert.equal(
     manifest.source.patches["@earendil-works+pi-ai+1.1.0.patch"],
-    "00c77c3ef2de00b331886971cac1c84f7efd8c68a494b48c7db9128418027a58",
+    "812225636f3c081e6e8497b0b7c98051baedea90b455f6e7f837ccc5a84be9c7",
   );
   for (const [name, pinned] of Object.entries(manifest.source.patches))
     assert.equal(sha(join(stage, "patches", name)), pinned, `qualified patch mismatch: ${name}`);

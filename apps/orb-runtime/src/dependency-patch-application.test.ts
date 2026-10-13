@@ -250,7 +250,7 @@ describe("sealed dependency patch application", () => {
   });
   it("preserves every vendor archive and shipped patch checksum", () => {
     const evidence = `d9afae712be5304e09a490f28b0493180c8565fe6585efe173b1daaab3e5cf2a  vendor/gotgenes-pi-subagents-21.7.0-orb.8.tgz
- 00c77c3ef2de00b331886971cac1c84f7efd8c68a494b48c7db9128418027a58  patches/@earendil-works+pi-ai+1.1.0.patch
+ 812225636f3c081e6e8497b0b7c98051baedea90b455f6e7f837ccc5a84be9c7  patches/@earendil-works+pi-ai+1.1.0.patch
  e817628f707f1d5ea2a3d0d27702919862b23303ba656dea8d30c6412da3e8e1  patches/@earendil-works+pi-agent-core+1.1.0.patch
  f1d54d120d0de92a0ae119e6588f43fb40114f66a3508fb57547034eddf0161e  patches/@earendil-works+pi-coding-agent+1.1.0.patch
  698bac6a2644dd02f58961cfac801c30453eb6264306996ed25fec4388a44a84  patches/@earendil-works+pi-codemode+1.1.0.patch
