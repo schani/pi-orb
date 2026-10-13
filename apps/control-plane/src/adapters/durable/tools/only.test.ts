@@ -14,6 +14,7 @@ it("offers only code-mode in root and child requests while retaining internal to
   const bundle = createDurableTools();
   const registry = createRegistry();
   registry.install(bundle.extension);
+  registry.install(bundle.childExtension);
   const faux = fauxProvider();
   const offered: string[][] = [];
   const respond: FauxResponseFactory = async (request) => {
@@ -40,7 +41,11 @@ it("offers only code-mode in root and child requests while retaining internal to
   const harness = await Harness.open(new MemoryStorage(), { models, registry }, BACKGROUND_CONTEXT);
   try {
     const root = await harness.root(BACKGROUND_CONTEXT, {
-      agent: { model: { provider: "faux", modelId: "faux-1" }, tools: bundle.modelTools },
+      agent: {
+        model: { provider: "faux", modelId: "faux-1" },
+        tools: bundle.modelTools,
+        extensions: { remove: [bundle.childExtension] },
+      },
     });
     harness.resume();
     await (await root.submit({ type: "input", content: "start" }, BACKGROUND_CONTEXT)).wait(

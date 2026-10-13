@@ -1,4 +1,5 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   type FauxResponseFactory,
@@ -6,7 +7,13 @@ import {
   fauxProvider,
   fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
-import { createRegistry, Harness, MemoryStorage, type Storage } from "@earendil-works/pi-durable";
+import {
+  createRegistry,
+  defineTool,
+  Harness,
+  MemoryStorage,
+  type Storage,
+} from "@earendil-works/pi-durable";
 import { expect, it } from "vitest";
 import { ChildReceipts, createDurableTools } from "./index.ts";
 
@@ -18,14 +25,21 @@ function barrier() {
   });
   return { promise, resolve };
 }
-function setup(responses: Parameters<ReturnType<typeof fauxProvider>["setResponses"]>[0]) {
-  const faux = fauxProvider();
+function setup(
+  responses: Parameters<ReturnType<typeof fauxProvider>["setResponses"]>[0],
+  options: {
+    faux?: Parameters<typeof fauxProvider>[0];
+    tools?: Parameters<typeof createDurableTools>[0];
+  } = {},
+) {
+  const faux = fauxProvider(options.faux);
   faux.setResponses(responses);
   const models = createModels();
   models.setProvider(faux.provider);
-  const tools = createDurableTools();
+  const tools = createDurableTools(options.tools);
   const registry = createRegistry();
   registry.install(tools.extension);
+  registry.install(tools.childExtension);
   return { models, registry, tools };
 }
 const initial = {
@@ -164,5 +178,147 @@ it("reopens persisted anchors without recreating children or rerunning the spawn
     await harness.close(ctx);
     await s.tools.close();
     await backing.close(ctx);
+  }
+});
+
+it("children neither see nor start subagents", async () => {
+  const childTools: { name: string; description: string }[][] = [];
+  const childResults: string[] = [];
+  const respond: FauxResponseFactory = async (request) => {
+    const user = request.messages.find((m) => m.role === "user");
+    if (JSON.stringify(user?.content).includes("child prompt")) {
+      const offered = new Map<string, string>();
+      for (const m of request.messages)
+        if (m.role === "system") {
+          for (const t of m.toolsRemoved ?? []) offered.delete(t.name);
+          for (const t of m.toolsAdded ?? []) offered.set(t.name, t.description);
+        }
+      childTools.push([...offered].map(([name, description]) => ({ name, description })));
+      const result = request.messages.find((m) => m.role === "toolResult");
+      if (!result)
+        return fauxAssistantMessage(
+          fauxToolCall("codemode", { code: "text(await tools.subagent({prompt: 'grandchild'}));" }),
+          { stopReason: "toolUse" },
+        );
+      childResults.push(JSON.stringify(result.content));
+      return fauxAssistantMessage("child done");
+    }
+    const last = request.messages.filter((m) => m.role === "toolResult").at(-1);
+    const text = last?.content[0];
+    if (last?.toolName === "subagent")
+      return fauxAssistantMessage(
+        fauxToolCall("get_subagent_result", {
+          agent_id: JSON.parse(text?.type === "text" ? text.text : "{}").agent_id,
+          wait: true,
+        }),
+        { stopReason: "toolUse" },
+      );
+    return fauxAssistantMessage("parent done");
+  };
+  const s = setup(
+    [
+      fauxAssistantMessage(fauxToolCall("subagent", { prompt: "child prompt" }), {
+        stopReason: "toolUse",
+      }),
+      ...Array(4).fill(respond),
+    ],
+    {
+      tools: {
+        additionalTools: [
+          defineTool({
+            name: "orb_spawn",
+            description: "Create a same-project orb with a prompt.",
+            parameters: Type.Object({ prompt: Type.String() }),
+            execute: async () => ({ content: [{ type: "text", text: "spawned" }] }),
+          }),
+        ],
+      },
+    },
+  );
+  const storage = new MemoryStorage();
+  const harness = await Harness.open(storage, s, ctx);
+  try {
+    const root = await harness.root(ctx, {
+      agent: { ...initial.agent, extensions: { remove: [s.tools.childExtension] } },
+    });
+    harness.resume();
+    await (await root.submit({ type: "input", content: "parent" }, ctx)).wait(ctx);
+    expect(childTools).toHaveLength(2);
+    for (const tools of childTools) {
+      expect(tools.map((t) => t.name)).toEqual(["codemode"]);
+      expect(tools[0]?.description).not.toMatch(/subagent/i);
+      expect(tools[0]?.description).not.toContain("orb_spawn");
+    }
+    expect(childResults[0]).toContain("tools.subagent does not exist");
+    expect(JSON.stringify(await root.entries({}, 100, undefined, ctx))).toContain("child done");
+    const conversations = await storage.scanConversations({}, 100, undefined, ctx);
+    expect(conversations.items.filter((c) => c.owner)).toHaveLength(1);
+  } finally {
+    await harness.close(ctx);
+    await s.tools.close();
+  }
+});
+
+it("starts a child on the selected model and rejects an unavailable one before creating it", async () => {
+  const childModels: string[] = [];
+  const results: string[] = [];
+  const respond: FauxResponseFactory = async (request, _options, _state, model) => {
+    const user = request.messages.find((m) => m.role === "user");
+    if (JSON.stringify(user?.content).includes("child prompt")) {
+      childModels.push(model.id);
+      return fauxAssistantMessage("child done");
+    }
+    const outcomes = request.messages.filter((m) => m.role === "toolResult");
+    if (outcomes.length === 2) {
+      results.push(...outcomes.map((m) => JSON.stringify(m.content)));
+      const first = outcomes[0]?.content[0];
+      return fauxAssistantMessage(
+        fauxToolCall("get_subagent_result", {
+          agent_id: JSON.parse(first?.type === "text" ? first.text : "{}").agent_id,
+          wait: true,
+        }),
+        { stopReason: "toolUse" },
+      );
+    }
+    if (outcomes.length === 3) results.push(JSON.stringify(outcomes[2]?.content));
+    return fauxAssistantMessage("parent done");
+  };
+  const s = setup(
+    [
+      fauxAssistantMessage(
+        [
+          fauxToolCall("subagent", { prompt: "child prompt", model: "Terra" }, { id: "a" }),
+          fauxToolCall("subagent", { prompt: "other prompt", model: "Luna" }, { id: "b" }),
+        ],
+        { stopReason: "toolUse" },
+      ),
+      ...Array(4).fill(respond),
+    ],
+    {
+      faux: {
+        provider: "openai-codex",
+        models: [
+          { id: "gpt-6.1-sol", input: ["text", "image"] },
+          { id: "gpt-5.6-terra", input: ["text", "image"] },
+        ],
+      },
+    },
+  );
+  const storage = new MemoryStorage();
+  const harness = await Harness.open(storage, s, ctx);
+  try {
+    const root = await harness.root(ctx, {
+      agent: { ...initial.agent, model: { provider: "openai-codex", modelId: "gpt-6.1-sol" } },
+    });
+    harness.resume();
+    await (await root.submit({ type: "input", content: "parent" }, ctx)).wait(ctx);
+    expect(childModels).toEqual(["gpt-5.6-terra"]);
+    expect(results[1]).toContain("Model unavailable: Luna");
+    expect(results[2]).toContain('\\"model\\":\\"Terra\\"');
+    const conversations = await storage.scanConversations({}, 100, undefined, ctx);
+    expect(conversations.items.filter((c) => c.owner)).toHaveLength(1);
+  } finally {
+    await harness.close(ctx);
+    await s.tools.close();
   }
 });

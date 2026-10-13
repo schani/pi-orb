@@ -129,7 +129,7 @@ Source inspection of the local process POC against installed Pi coding-agent `1.
 | Managed personal/project prompts configured through pi-orb (required) | Implemented; captured at context creation before guest readiness, not refreshed per generation/save | Implemented via runtime-start snapshot adoption |
 | Native instruction-file variants and `SYSTEM.md`/`APPEND_SYSTEM.md` | Partial: ancestor/home `AGENTS.md` only; SYSTEM variants are outside required scope | SDK discovery retained |
 | Executable user/project Pi extensions | Deliberately excluded centrally; first-party Durable definitions are separate | SDK loading retained |
-| Subagents | Native Durable APIs: start/steer/observe/wait/list/cancel, inherited model/instructions/authorized tools; no profiles | Patched third-party SDK extension |
+| Subagents | Native Durable APIs: start/steer/observe/wait/list/cancel, inherited instructions/authorized tools, optional named model; no profiles, nested children or orb spawning | Patched third-party SDK extension |
 | Compaction | Automatic compaction enabled; manual/budget controls not exposed; dynamic instructions injected after threshold estimation | SDK compaction machinery retained |
 | Codemode/MCP | Scoped tool calls and discovery subset; namespace/options APIs and model helpers not exposed; adapter exposes MCP tools only, not client resources/instructions | SDK integration retained |
 | Session tree/branch controls and follow-up queue | Not exposed | SDK APIs do not imply product exposure |

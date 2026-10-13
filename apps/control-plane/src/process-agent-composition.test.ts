@@ -491,7 +491,8 @@ describe("process agent composition", () => {
     ]);
     expect(system).toContain("User’s time zone: Asia/Tokyo");
     expect(system).toContain("Repository environment context");
-    expect(system).toContain("orb_self");
+    expect(system).toContain("Use codemode to compose tool calls.");
+    expect(system).not.toMatch(/orb_spawn|subagent/i);
     expect(system).not.toContain("Do not inject this resource");
     expect(system).not.toContain("profiles");
   });
