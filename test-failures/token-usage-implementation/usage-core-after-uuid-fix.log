@@ -1,0 +1,41 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ❯ apps/control-plane/src/adapters/pg/model-usage.test.ts (5 tests | 1 failed) 9629ms
+     ✓ inserts one content-free row per call without waiting for the WAL flush  2899ms
+     ✓ keeps rows through orb archival and deletion  1723ms
+     × reads owner-scoped half-open buckets and retains nameless deleted orbs 1719ms
+     ✓ never discloses another owner's orb name through the ledger join  1666ms
+     ✓ logs one edge when writes start failing and one when they recover  1620ms
+ ✓ apps/web/src/App.test.ts (5 tests) 6ms
+ ✓ apps/control-plane/src/http/usage.routes.test.ts (1 test) 87ms
+ ✓ apps/web/src/lib/usage.test.ts (5 tests) 16ms
+ ✓ packages/protocol/src/model-usage.test.ts (15 tests) 14ms
+ ✓ apps/control-plane/src/domain/usage-read.test.ts (2 tests) 9ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/control-plane/src/adapters/pg/model-usage.test.ts > PGlite model usage ledger > reads owner-scoped half-open buckets and retains nameless deleted orbs
+AssertionError: expected [] to have a length of 3 but got +0
+
+- Expected
++ Received
+
+- 3
++ 0
+
+ ❯ apps/control-plane/src/adapters/pg/model-usage.contract.ts:197:30
+    195|       clock.mockRestore();
+    196|       const result = (await ledger.read(task, TEST_USER_ID, boundaries…
+    197|       expect(result.buckets).toHaveLength(3);
+       |                              ^
+    198|       expect(result.buckets.find(row => row.at === AT)).toMatchObject({
+    199|         use: "root", input: 120, output: 30, cacheRead: 4000, cacheWri…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 5 passed (6)
+      Tests  1 failed | 32 passed (33)
+   Start at  17:35:33
+   Duration  14.09s (transform 1.63s, setup 0ms, import 3.48s, tests 9.76s, environment 1ms)

@@ -1,0 +1,29 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ❯ apps/control-plane/src/adapters/pg/model-usage.test.ts (5 tests | 2 failed) 9723ms
+     ✓ inserts one content-free row per call without waiting for the WAL flush  2959ms
+     ✓ keeps rows through orb archival and deletion  1740ms
+     × reads owner-scoped half-open buckets and retains nameless deleted orbs 1670ms
+     × never discloses another owner's orb name through the ledger join 1681ms
+     ✓ logs one edge when writes start failing and one when they recover  1671ms
+ ✓ apps/control-plane/src/http/usage.routes.test.ts (1 test) 85ms
+ ✓ packages/protocol/src/model-usage.test.ts (15 tests) 14ms
+ ✓ apps/control-plane/src/domain/usage-read.test.ts (2 tests) 9ms
+ ✓ apps/web/src/lib/usage.test.ts (5 tests) 16ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/control-plane/src/adapters/pg/model-usage.test.ts > PGlite model usage ledger > reads owner-scoped half-open buckets and retains nameless deleted orbs
+Unknown Error: Called `_unsafeUnwrap` on an Err
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  apps/control-plane/src/adapters/pg/model-usage.test.ts > PGlite model usage ledger > never discloses another owner's orb name through the ledger join
+Unknown Error: Called `_unsafeUnwrap` on an Err
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 4 passed (5)
+      Tests  2 failed | 26 passed (28)
+   Start at  17:32:49
+   Duration  13.15s (transform 1.12s, setup 0ms, import 2.57s, tests 9.85s, environment 1ms)

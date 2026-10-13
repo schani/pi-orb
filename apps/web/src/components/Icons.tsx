@@ -13,9 +13,11 @@ export type IconName =
   | "fold"
   | "send"
   | "back"
-  | "more";
+  | "more"
+  | "trend";
 
 const PATHS: Record<IconName, string> = {
+  trend: "M2 2v12h12 M4 10l3-4 3 2 4-5",
   fold: "m3 6 5 5 5-5",
   send: "M8 13V3M3 8l5-5 5 5",
   back: "M10 3 5 8l5 5",

@@ -1,0 +1,131 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ❯ apps/web/src/lib/usage.test.ts (0 test)
+ ❯ apps/control-plane/src/http/usage.routes.test.ts (1 test | 1 failed) 86ms
+   × reads selected-user usage, refuses user overrides, validates input and exposes store failures 84ms
+ ❯ apps/web/src/App.test.ts (5 tests | 1 failed) 13ms
+     ✓ uses paths, not fragments or query parameters 3ms
+     ✓ recognizes the dashboard and focused-project dashboard URLs 0ms
+     × recognizes usage without accepting unknown subroutes 7ms
+     ✓ recognizes explicit orb-creation intent URLs 0ms
+     ✓ keeps canonical missing orb URLs separate from creation intent 0ms
+ ❯ packages/protocol/src/model-usage.test.ts (0 test)
+ ❯ apps/control-plane/src/domain/usage-read.test.ts (0 test)
+ ❯ apps/control-plane/src/adapters/pg/model-usage.test.ts (5 tests | 2 failed) 9649ms
+     ✓ inserts one content-free row per call without waiting for the WAL flush  2934ms
+     ✓ keeps rows through orb archival and deletion  1761ms
+     × reads owner-scoped half-open buckets and retains nameless deleted orbs 1700ms
+     × never discloses another owner's orb name through the ledger join 1644ms
+     ✓ logs one edge when writes start failing and one when they recover  1607ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/protocol/src/model-usage.test.ts [ packages/protocol/src/model-usage.test.ts ]
+Error: Cannot find module './model-usage.ts' imported from /workspace/repo/packages/protocol/src/model-usage.test.ts
+ ❯ packages/protocol/src/model-usage.test.ts:3:1
+      1| import { Check } from "typebox/value";
+      2| import { describe, expect, it } from "vitest";
+      3| import { parseUsageQuery, UsageViewSchema } from "./model-usage.ts";
+       | ^
+      4|
+      5| describe("usage read contract", () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  apps/control-plane/src/domain/usage-read.test.ts [ apps/control-plane/src/domain/usage-read.test.ts ]
+Error: Cannot find module './usage-read.ts' imported from /workspace/repo/apps/control-plane/src/domain/usage-read.test.ts
+ ❯ apps/control-plane/src/domain/usage-read.test.ts:4:1
+      2| import { errAsync, okAsync } from "neverthrow";
+      3| import { expect, it, vi } from "vitest";
+      4| import { readModelUsage } from "./usage-read.ts";
+       | ^
+      5|
+      6| const task = new NoSimulationTask("usage read",false);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  apps/web/src/lib/usage.test.ts [ apps/web/src/lib/usage.test.ts ]
+Error: Cannot find module './usage.ts' imported from /workspace/repo/apps/web/src/lib/usage.test.ts
+ ❯ apps/web/src/lib/usage.test.ts:3:1
+      1| import type { UsageView } from "@pi-orb/protocol";
+      2| import { describe,expect,it } from "vitest";
+      3| import { cacheShare,totalTokens,usageBoundaries,usageRankings,usageTim…
+       | ^
+      4|
+      5| const at = Date.UTC(2026,9,13);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/web/src/App.test.ts > parseRoute > recognizes usage without accepting unknown subroutes
+AssertionError: expected { page: 'not_found' } to deeply equal { page: 'usage' }
+
+- Expected
++ Received
+
+  {
+-   "page": "usage",
++   "page": "not_found",
+  }
+
+ ❯ apps/web/src/App.test.ts:26:49
+     24|
+     25|   it("recognizes usage without accepting unknown subroutes", () => {
+     26|     expect(parseRoute("/usage?from=dashboard")).toEqual({ page: "usage…
+       |                                                 ^
+     27|     expect(parseRoute("/usage/unknown")).toEqual({ page: "not_found" }…
+     28|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  apps/control-plane/src/http/usage.routes.test.ts > reads selected-user usage, refuses user overrides, validates input and exposes store failures
+AssertionError: expected 404 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 404
+
+ ❯ apps/control-plane/src/http/usage.routes.test.ts:19:31
+     17|  try {
+     18|   const response=await app.inject({method:"GET",url});
+     19|   expect(response.statusCode).toBe(200);
+       |                               ^
+     20|   expect(response.headers["cache-control"]).toBe("no-store");
+     21|   expect(response.json().summary.calls).toBe(0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  apps/control-plane/src/adapters/pg/model-usage.test.ts > PGlite model usage ledger > reads owner-scoped half-open buckets and retains nameless deleted orbs
+TypeError: ledger.read is not a function
+ ❯ apps/control-plane/src/adapters/pg/model-usage.contract.ts:196:36
+    194|       await ledger.drain();
+    195|       clock.mockRestore();
+    196|       const result = (await ledger.read(task, TEST_USER_ID, boundaries…
+       |                                    ^
+    197|       expect(result.buckets).toHaveLength(3);
+    198|       expect(result.buckets.find(row => row.at === AT)).toMatchObject({
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  apps/control-plane/src/adapters/pg/model-usage.test.ts > PGlite model usage ledger > never discloses another owner's orb name through the ledger join
+TypeError: ledger.read is not a function
+ ❯ apps/control-plane/src/adapters/pg/model-usage.contract.ts:218:28
+    216|       await ledger.drain();
+    217|       clock.mockRestore();
+    218|       expect((await ledger.read(task, TEST_USER_ID, [AT,AT+900000]))._…
+       |                            ^
+    219|       expect((await ledger.read(task, "other", [AT,AT+900000]))._unsaf…
+    220|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+
+ Test Files  6 failed (6)
+      Tests  4 failed | 7 passed (11)
+   Start at  17:25:51
+   Duration  13.85s (transform 1.64s, setup 0ms, import 3.03s, tests 9.75s, environment 1ms)

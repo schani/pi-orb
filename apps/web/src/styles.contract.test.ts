@@ -10,6 +10,10 @@ function rule(selector: string): string {
   return match?.[1] ?? "";
 }
 
+it("hides a failed chart canvas while retaining its mount target", () => {
+  expect(rule(".chart-canvas[hidden]")).toContain("display: none");
+});
+
 it("renders reasoning Markdown without inheriting literal pre-wrap whitespace", () => {
   expect(rule(".reasoning-body > .chat-markdown")).toContain("white-space: normal");
 });
@@ -350,7 +354,7 @@ describe("orb workspace layout contract", () => {
     expect(rule(".orb-terminal-window .orb-terminal-emulator")).toContain("box-shadow: none");
     expect(css).not.toMatch(/orb-terminal-(header|launcher|controls)/);
     expect(rule(".orb-header-actions")).toContain("gap: 8px");
-    expect(rule("button.icon-button")).toContain("width: 20px");
+    expect(rule("button.icon-button,\na.icon-button")).toContain("width: 20px");
   });
 
   it("uses one rail-row geometry for reasoning and every tool category", () => {

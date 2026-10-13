@@ -1,0 +1,26 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+stderr | e2e/usage-frontend.e2e.test.ts > chromium: Trend usage entry, shared interactive charts, dense civil days and visible failures
+[BABEL] Note: The code generator has deoptimised the styling of /tmp/pi-orb-usage-chromium-HcInsB/deps/react-dom_client.js?v=c2dbd06c as it exceeds the max of 500KB.
+
+stderr | e2e/usage-frontend.e2e.test.ts > webkit: Trend usage entry, shared interactive charts, dense civil days and visible failures
+[BABEL] Note: The code generator has deoptimised the styling of /tmp/pi-orb-usage-webkit-4Uunvg/deps/react-dom_client.js?v=eb20f315 as it exceeds the max of 500KB.
+
+ ✓  frontend  e2e/usage-frontend.e2e.test.ts (2 tests) 24446ms
+   ✓ chromium: Trend usage entry, shared interactive charts, dense civil days and visible failures  12685ms
+   ✓ webkit: Trend usage entry, shared interactive charts, dense civil days and visible failures  11760ms
+stderr | e2e/transcript-charts-frontend.e2e.test.ts > chromium: renders code-mode charts as open rail rows with sorted tooltips and series isolation
+[BABEL] Note: The code generator has deoptimised the styling of /tmp/pi-orb-charts-chromium-Q1ZGcr/deps/react-dom_client.js?v=1ed67147 as it exceeds the max of 500KB.
+
+stderr | e2e/transcript-charts-frontend.e2e.test.ts > webkit: renders code-mode charts as open rail rows with sorted tooltips and series isolation
+[BABEL] Note: The code generator has deoptimised the styling of /tmp/pi-orb-charts-webkit-alXro9/deps/react-dom_client.js?v=e621726d as it exceeds the max of 500KB.
+
+ ✓  frontend  e2e/transcript-charts-frontend.e2e.test.ts (2 tests) 15573ms
+   ✓ chromium: renders code-mode charts as open rail rows with sorted tooltips and series isolation  9049ms
+   ✓ webkit: renders code-mode charts as open rail rows with sorted tooltips and series isolation  6522ms
+
+ Test Files  2 passed (2)
+      Tests  4 passed (4)
+   Start at  18:49:21
+   Duration  41.41s (transform 109ms, setup 0ms, import 1.11s, tests 40.02s, environment 0ms)

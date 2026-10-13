@@ -1,0 +1,26 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ❯  frontend  e2e/usage-frontend.e2e.test.ts (2 tests | 1 failed | 1 skipped) 1934ms
+   × chromium: Trend usage entry, shared interactive charts, dense civil days and visible failures 1932ms
+   ↓ webkit: Trend usage entry, shared interactive charts, dense civil days and visible failures
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL   frontend  e2e/usage-frontend.e2e.test.ts > chromium: Trend usage entry, shared interactive charts, dense civil days and visible failures
+ReferenceError: server is not defined
+ ❯ e2e/usage-frontend.e2e.test.ts:43:51
+     41|         timezoneId: "America/Los_Angeles",
+     42|       });
+     43|       const fixtureUsage = await page.request.get(server.origin + "/ap…
+       |                                                   ^
+     44|       expect(fixtureUsage.status()).toBe(200);
+     45|       expect((await fixtureUsage.json()).summary.calls).toBe(0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 skipped (2)
+   Start at  18:26:11
+   Duration  2.67s (transform 92ms, setup 0ms, import 592ms, tests 1.93s, environment 0ms)

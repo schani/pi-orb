@@ -38,6 +38,8 @@ import {
   type UpdateOrbRequest,
   type UpdateProjectRequest,
   type UploadBatch,
+  USAGE_PATH,
+  UsageViewSchema,
   WorkspaceUploadSchema,
   WorkspaceUploadsSchema,
 } from "@pi-orb/protocol";
@@ -330,6 +332,17 @@ export function logout() {
 
 export function probeSession() {
   return apiFetch(SessionProbeSchema, "/api/v1/session", { cache: "no-store" });
+}
+
+export function getModelUsage(boundaries: readonly number[], signal: AbortSignal) {
+  return apiFetch(
+    UsageViewSchema,
+    `${USAGE_PATH}?boundaries=${encodeURIComponent(JSON.stringify(boundaries))}`,
+    {
+      cache: "no-store",
+      signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
+    },
+  );
 }
 
 export function getSystem(): Promise<Result<SystemView, ApiError>> {

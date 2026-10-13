@@ -1,0 +1,2 @@
+{"period":"month","timezone":"America/Los_Angeles","now":1796148000000,"from":"Sun Nov 01 2026 10:00:00 GMT-0800 (Pacific Standard Time)","to":"Tue Dec 01 2026 10:00:00 GMT-0800 (Pacific Standard Time)","points":120,"hours":720,"twentyFiveHourIntervals":0}
+{"period":"six_months","timezone":"America/Los_Angeles","now":1796148000000,"from":"Mon Jun 01 2026 10:00:00 GMT-0700 (Pacific Daylight Time)","to":"Tue Dec 01 2026 10:00:00 GMT-0800 (Pacific Standard Time)","points":183,"hours":4393,"twentyFiveHourIntervals":1}

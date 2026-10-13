@@ -1,0 +1,46 @@
+[
+  {
+    "label": "Uncached input 0 tokens",
+    "transform": "translate(934,244)",
+    "rect": {
+      "x": 1268,
+      "y": 436,
+      "width": 151.8125,
+      "height": 14
+    },
+    "atCenter": "Uncached input 0 tokens"
+  },
+  {
+    "label": "Cache read 0 tokens",
+    "transform": "translate(934,257)",
+    "rect": {
+      "x": 1268,
+      "y": 449,
+      "width": 125.40625,
+      "height": 14
+    },
+    "atCenter": "Cache read 0 tokens"
+  },
+  {
+    "label": "Cache write 0 tokens",
+    "transform": "translate(934,270)",
+    "rect": {
+      "x": 1268,
+      "y": 462,
+      "width": 132,
+      "height": 14
+    },
+    "atCenter": "Cache write 0 tokens"
+  },
+  {
+    "label": "Output 0 tokens",
+    "transform": "translate(934,283)",
+    "rect": {
+      "x": 1268,
+      "y": 475,
+      "width": 99,
+      "height": 14
+    },
+    "atCenter": "Output 0 tokens"
+  }
+]

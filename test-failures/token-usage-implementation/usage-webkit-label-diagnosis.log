@@ -1,0 +1,50 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+stderr | e2e/usage-frontend.e2e.test.ts > webkit: Trend usage entry, shared interactive charts, dense civil days and visible failures
+[BABEL] Note: The code generator has deoptimised the styling of /tmp/pi-orb-usage-webkit-dWaXX5/deps/react-dom_client.js?v=aee8be27 as it exceeds the max of 500KB.
+
+ ❯  frontend  e2e/usage-frontend.e2e.test.ts (2 tests | 1 failed | 1 skipped) 39697ms
+   ↓ chromium: Trend usage entry, shared interactive charts, dense civil days and visible failures
+   × webkit: Trend usage entry, shared interactive charts, dense civil days and visible failures 39695ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL   frontend  e2e/usage-frontend.e2e.test.ts > webkit: Trend usage entry, shared interactive charts, dense civil days and visible failures
+TimeoutError: locator.hover: Timeout 30000ms exceeded.
+Call log:
+  - waiting for locator('.usage-timeline').locator('svg text').filter({ hasText: /^Cache read / })
+    - locator resolved to <text fill="#000" opacity="1" font-size="11px" text-anchor="start" role="graphics-symbol" font-family="JetBrains Mono" transform="translate(934,257)" aria-roledescription="text mark" aria-label="t: Nov 30; lv: 9.28571428571; label: Cache read 0 tokens">Cache read 0 tokens</text>
+  - attempting hover action
+    2 × waiting for element to be visible and stable
+      - element is visible and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <text fill="#000" opacity="1" font-size="11px" text-anchor="start" role="graphics-symbol" font-family="JetBrains Mono" transform="translate(934,270)" aria-roledescription="text mark" aria-label="t: Nov 30; lv: 4.64285714286; label: Cache write 0 tokens">Cache write 0 tokens</text> intercepts pointer events
+    - retrying hover action
+    - waiting 20ms
+    2 × waiting for element to be visible and stable
+      - element is visible and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <text fill="#000" opacity="1" font-size="11px" text-anchor="start" role="graphics-symbol" font-family="JetBrains Mono" transform="translate(934,270)" aria-roledescription="text mark" aria-label="t: Nov 30; lv: 4.64285714286; label: Cache write 0 tokens">Cache write 0 tokens</text> intercepts pointer events
+    - retrying hover action
+      - waiting 100ms
+    55 × waiting for element to be visible and stable
+       - element is visible and stable
+       - scrolling into view if needed
+       - done scrolling
+       - <text fill="#000" opacity="1" font-size="11px" text-anchor="start" role="graphics-symbol" font-family="JetBrains Mono" transform="translate(934,270)" aria-roledescription="text mark" aria-label="t: Nov 30; lv: 4.64285714286; label: Cache write 0 tokens">Cache write 0 tokens</text> intercepts pointer events
+     - retrying hover action
+       - waiting 500ms
+
+ ❯ e2e/usage-frontend.e2e.test.ts:140:19
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 skipped (2)
+   Start at  17:50:25
+   Duration  40.39s (transform 93ms, setup 0ms, import 549ms, tests 39.70s, environment 0ms)

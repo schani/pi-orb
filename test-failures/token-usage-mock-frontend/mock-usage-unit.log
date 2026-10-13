@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ✓ apps/web/src/lib/usage-fixture.test.ts (2 tests) 64ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  19:17:26
+   Duration  875ms (transform 330ms, setup 0ms, import 672ms, tests 64ms, environment 0ms)

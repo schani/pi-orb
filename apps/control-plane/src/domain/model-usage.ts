@@ -1,12 +1,7 @@
+import type { ModelCallUse } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 
-export type ModelCallUse =
-  | "root"
-  | "subagent"
-  | "compaction"
-  | "turn_summary"
-  | "headline"
-  | "orb_name";
+export type { ModelCallUse } from "@pi-orb/protocol";
 
 /** One `model_calls` row (docs/model-usage.md): provider-reported accounting, never content. */
 export interface ModelCall {

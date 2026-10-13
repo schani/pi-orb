@@ -22,6 +22,7 @@ import {
   PollOrbMessagesRequestSchema,
   type ProjectInstructions,
   type ProjectView,
+  parseUsageQuery,
   projectDisplayRecord,
   projectDisplayRecords,
   projectRecordDetail,
@@ -31,6 +32,7 @@ import {
   TERMINAL_SUBPROTOCOL,
   TerminalClientControlSchema,
   UploadBatchSchema,
+  USAGE_PATH,
   validateGitIdentity,
   validatePersonalInstructions,
   validateProjectInstructions,
@@ -41,6 +43,7 @@ import { Check } from "typebox/value";
 import type { Plugin } from "vite";
 import { WebSocket, WebSocketServer } from "ws";
 import { chartFixtureRecords } from "./chart-fixtures.ts";
+import { usageFixture } from "./usage-fixture.ts";
 
 const PROJECT_ID = "frontend-fixture-project";
 const ORB_ID = "frontend-fixture-orb";
@@ -1397,6 +1400,19 @@ async function handleApi(
       state.gitIdentity = identity.value;
     }
     sendJson(response, 200, state.gitIdentity);
+    return true;
+  }
+
+  if (method === "GET" && path === USAGE_PATH) {
+    response.setHeader("cache-control", "no-store");
+    const query = parseUsageQuery(Object.fromEntries(url.searchParams));
+    if (query.isErr()) {
+      sendJson(response, 400, {
+        error: { code: "invalid_request", message: query.error.message, retryable: false },
+      });
+      return true;
+    }
+    sendJson(response, 200, usageFixture(query.value));
     return true;
   }
 

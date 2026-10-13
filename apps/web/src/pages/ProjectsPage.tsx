@@ -419,7 +419,12 @@ export function ProjectsPage({
           <b>{totals.failed}</b>
           <span>failed</span>
         </span>
-        <PersonalInstructionsButton />
+        <div className="dashboard-actions">
+          <a href="/usage" className="icon-button" aria-label="Token usage" title="Token usage">
+            <Icon name="trend" />
+          </a>
+          <PersonalInstructionsButton />
+        </div>
       </div>
       {loadError !== null && (
         <div className="banner banner-error">

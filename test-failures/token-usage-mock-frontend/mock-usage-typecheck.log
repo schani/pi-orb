@@ -1,0 +1,3 @@
+
+> @pi-orb/web@0.0.1 typecheck
+> tsc --noEmit && tsc --noEmit -p tsconfig.dev.json

@@ -1,0 +1,14 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ✓ apps/control-plane/src/adapters/pg/model-usage.postgres.test.ts (5 tests) 3480ms
+     ✓ inserts one content-free row per call without waiting for the WAL flush  670ms
+     ✓ keeps rows through orb archival and deletion  740ms
+     ✓ reads owner-scoped half-open buckets and retains nameless deleted orbs  710ms
+     ✓ never discloses another owner's orb name through the ledger join  681ms
+     ✓ logs one edge when writes start failing and one when they recover  677ms
+
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+   Start at  18:14:11
+   Duration  4.96s (transform 793ms, setup 0ms, import 1.32s, tests 3.48s, environment 0ms)

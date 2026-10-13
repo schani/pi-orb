@@ -1,0 +1,5 @@
+PASS Last day [ '6.55M', '801.58K', '1.43M', '80.2%', '576' ]
+PASS Week [ '46.34M', '6.01M', '10.67M', '78.7%', '4.03K' ]
+PASS Month [ '193.88M', '25.22M', '44.83M', '78.6%', '17.28K' ]
+PASS 6 months [ '1.2B', '156.42M', '278.08M', '78.5%', '105.41K' ]
+PASS mock backend requests 5 no browser errors

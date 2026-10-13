@@ -549,6 +549,7 @@ export async function main(
     projectSecrets: { pointers: database.projectSecrets, secrets },
     personalInstructions: database.personalInstructions,
     gitIdentity: database.gitIdentity,
+    modelUsage: database.modelUsage,
     projectInstructions: database.projectInstructions,
     userScope: new UserScope(database.users),
     hosting: {

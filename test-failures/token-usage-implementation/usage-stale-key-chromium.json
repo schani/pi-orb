@@ -1,0 +1,30 @@
+{
+  "keyHighlighted": "",
+  "keys": [
+    {
+      "series": "Root",
+      "on": null
+    },
+    {
+      "series": "Subagent",
+      "on": null
+    },
+    {
+      "series": "Compaction",
+      "on": null
+    },
+    {
+      "series": "Turn summary",
+      "on": null
+    },
+    {
+      "series": "Headline",
+      "on": null
+    },
+    {
+      "series": "Orb name",
+      "on": null
+    }
+  ],
+  "dimmed": 0
+}

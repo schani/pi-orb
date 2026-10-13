@@ -1,0 +1,57 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ❯ apps/web/src/styles.contract.test.ts (32 tests | 1 failed | 31 skipped) 11ms
+   × hides a failed chart canvas while retaining its mount target 9ms
+   ↓ renders reasoning Markdown without inheriting literal pre-wrap whitespace
+   ↓ colors only the owning child header by state, leaving completion neutral
+   ↓ uses the error signal for activity headline failure and manual Retry
+     ↓ keeps long plain text inside a phone-width reverse band without coloring the orb row
+   ↓ gives Files the same enclosure and summary geometry as Subagents
+     ↓ has no nested disclosure-marker or identity-only styles
+     ↓ inherits the transcript face with zoom-safe phone and touch input sizes
+     ↓ separates quasi-proportional reading text from fixed-cell code
+     ↓ overlays shared crop marks without changing field spacing
+     ↓ uses a neutral highlight on every paper surface
+     ↓ uses icon-only creation without a bottom text action
+     ↓ lays projects out as fixed-width columns that fill rows from the left
+     ↓ fills available width whenever two fixed columns cannot fit
+     ↓ sizes single-column project sections to content without stretching into spare height
+     ↓ rules the board from the totals strip to the bottom-pinned footer
+     ↓ gives the project name 18px and the orb name 14px on their own lines
+     ↓ keeps every dashboard orb entry on its line grid behind its state hue
+     ↓ uses the stopped gray hue for sleeping rows without overriding selected fill
+     ↓ inverts the selected find row and underlines the matched text
+     ↓ uses gutter-free inverted user paper and plain white orb paper
+     ↓ scrolls wide tables instead of breaking words to squeeze columns
+     ↓ gives boxed code and text the same gray background as inline code
+     ↓ carries viewport height through the app to the bottom-pinned composer
+     ↓ keeps the project index beside the transcript with plain hover rows
+     ↓ keeps stacked project actions and headers on the existing grid
+     ↓ retains the diagnostic gutter and keeps queue state visible
+     ↓ overlays a full-width headerless terminal below the header and active-child rail
+     ↓ uses one rail-row geometry for reasoning and every tool category
+     ↓ balances isolated activity rows with prose without separating adjacent rail rows
+     ↓ indents expanded subagent receipts, including errors, past the rail on desktop and phones
+     ↓ contains inline tool images without cropping and keeps the viewer monochrome
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/web/src/styles.contract.test.ts > hides a failed chart canvas while retaining its mount target
+AssertionError: missing CSS rule .chart-canvas[hidden]: expected null not to be null
+ ❯ rule apps/web/src/styles.contract.test.ts:9:53
+      7|   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      8|   const match = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css);
+      9|   expect(match, `missing CSS rule ${selector}`).not.toBeNull();
+       |                                                     ^
+     10|   return match?.[1] ?? "";
+     11| }
+ ❯ apps/web/src/styles.contract.test.ts:14:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 31 skipped (32)
+   Start at  18:05:05
+   Duration  266ms (transform 74ms, setup 0ms, import 92ms, tests 11ms, environment 0ms)

@@ -103,9 +103,15 @@ const timeFormat = (spec: LineChart) => {
   return Math.max(...times) - Math.min(...times) > 86_400_000 ? "%b %d %H:%M" : "%H:%M";
 };
 
+export interface ChartXAxis {
+  readonly ticks: readonly number[];
+  readonly labelEvery: number;
+  readonly format: string;
+}
+
 export function lineChartSpec(
   spec: LineChart,
-  { narrow, height }: { narrow: boolean; height: number },
+  { narrow, height, xAxis }: { narrow: boolean; height: number; xAxis?: ChartXAxis },
 ): VegaSpec {
   const names = spec.series.map((series) => series.name);
   const many = names.length > 1;
@@ -151,7 +157,19 @@ export function lineChartSpec(
     field: "t",
     type: "temporal",
     title: null,
-    axis: { format, ...(narrow ? { tickCount: 3 } : {}) },
+    axis: {
+      format,
+      ...(narrow ? { tickCount: 3 } : {}),
+      ...(xAxis === undefined
+        ? {}
+        : {
+            values: [...xAxis.ticks],
+            tickCount: xAxis.ticks.length,
+            format: xAxis.format,
+            labelOverlap: false,
+            labelExpr: `indexof(${JSON.stringify(xAxis.ticks)}, +datum.value) % ${Math.max(1, Math.floor(xAxis.labelEvery))} == 0 || +datum.value == ${xAxis.ticks.at(-1) ?? "null"} ? timeFormat(datum.value, ${JSON.stringify(xAxis.format)}) : ''`,
+          }),
+    },
   };
   const y = { field: "v", type: "quantitative" };
   const color = {

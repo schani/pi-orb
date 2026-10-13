@@ -13,6 +13,7 @@ export * from "./history.ts";
 export * from "./hosting.ts";
 export * from "./json.ts";
 export * from "./mcp.ts";
+export * from "./model-usage.ts";
 export * from "./orb-alert.ts";
 export * from "./orb-archive.ts";
 export * from "./orb-delete.ts";

@@ -1,0 +1,50 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+stderr | e2e/usage-frontend.e2e.test.ts > chromium: Trend usage entry, shared interactive charts, dense civil days and visible failures
+[BABEL] Note: The code generator has deoptimised the styling of /tmp/pi-orb-usage-chromium-ooOsn6/deps/react-dom_client.js?v=ee9d90c5 as it exceeds the max of 500KB.
+
+stderr | e2e/usage-frontend.e2e.test.ts > webkit: Trend usage entry, shared interactive charts, dense civil days and visible failures
+[BABEL] Note: The code generator has deoptimised the styling of /tmp/pi-orb-usage-webkit-rHpIMg/deps/react-dom_client.js?v=02971da4 as it exceeds the max of 500KB.
+
+ ❯  frontend  e2e/usage-frontend.e2e.test.ts (2 tests | 1 failed) 29317ms
+   × chromium: Trend usage entry, shared interactive charts, dense civil days and visible failures 16398ms
+   ✓ webkit: Trend usage entry, shared interactive charts, dense civil days and visible failures  12918ms
+stderr | e2e/transcript-charts-frontend.e2e.test.ts > chromium: renders code-mode charts as open rail rows with sorted tooltips and series isolation
+[BABEL] Note: The code generator has deoptimised the styling of /tmp/pi-orb-charts-chromium-t5Aour/deps/react-dom_client.js?v=44fc3ca5 as it exceeds the max of 500KB.
+
+stderr | e2e/transcript-charts-frontend.e2e.test.ts > webkit: renders code-mode charts as open rail rows with sorted tooltips and series isolation
+[BABEL] Note: The code generator has deoptimised the styling of /tmp/pi-orb-charts-webkit-TqePPS/deps/react-dom_client.js?v=7c28492f as it exceeds the max of 500KB.
+
+ ✓  frontend  e2e/transcript-charts-frontend.e2e.test.ts (2 tests) 15945ms
+   ✓ chromium: renders code-mode charts as open rail rows with sorted tooltips and series isolation  9239ms
+   ✓ webkit: renders code-mode charts as open rail rows with sorted tooltips and series isolation  6705ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL   frontend  e2e/usage-frontend.e2e.test.ts > chromium: Trend usage entry, shared interactive charts, dense civil days and visible failures
+Error: expect(received).toBe(expected) // Object.is equality
+
+Expected: true
+Received: false
+
+Call Log:
+- Timeout 5000ms exceeded while waiting on the predicate
+ ❯ captureRawStack node_modules/playwright-core/lib/coreBundle.js:8588:17
+ ❯ callMatcherAsStep node_modules/playwright/lib/matchers/expect.js:13310:57
+ ❯ Object.toBe node_modules/playwright/lib/matchers/expect.js:13302:23
+ ❯ e2e/usage-frontend.e2e.test.ts:250:10
+    248|             : (await dimmed()) === 0;
+    249|         })
+    250|         .toBe(true);
+       |          ^
+    251|       // A superseded read is explicitly held, not scheduled with a sl…
+    252|       hold = true;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 3 passed (4)
+   Start at  18:46:59
+   Duration  46.65s (transform 107ms, setup 0ms, import 1.10s, tests 45.26s, environment 0ms)

@@ -1,0 +1,350 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ✓ packages/protocol/src/display.test.ts (40 tests) 89ms
+ ✓ apps/web/src/components/ToolActivity.test.tsx (35 tests) 136ms
+ ✓ packages/protocol/src/schemas.test.ts (28 tests) 128ms
+ ✓ apps/web/src/components/HistoryView.test.tsx (65 tests) 326ms
+ ❯ apps/web/src/styles.contract.test.ts (32 tests | 1 failed) 74ms
+   ✓ hides a failed chart canvas while retaining its mount target 3ms
+   ✓ renders reasoning Markdown without inheriting literal pre-wrap whitespace 0ms
+   ✓ colors only the owning child header by state, leaving completion neutral 1ms
+   ✓ uses the error signal for activity headline failure and manual Retry 1ms
+     ✓ keeps long plain text inside a phone-width reverse band without coloring the orb row 1ms
+   ✓ gives Files the same enclosure and summary geometry as Subagents 1ms
+     ✓ has no nested disclosure-marker or identity-only styles 1ms
+     ✓ inherits the transcript face with zoom-safe phone and touch input sizes 7ms
+     ✓ separates quasi-proportional reading text from fixed-cell code 4ms
+     ✓ overlays shared crop marks without changing field spacing 3ms
+     ✓ uses a neutral highlight on every paper surface 0ms
+     ✓ uses icon-only creation without a bottom text action 0ms
+     ✓ lays projects out as fixed-width columns that fill rows from the left 1ms
+     ✓ fills available width whenever two fixed columns cannot fit 0ms
+     ✓ sizes single-column project sections to content without stretching into spare height 0ms
+     ✓ rules the board from the totals strip to the bottom-pinned footer 1ms
+     ✓ gives the project name 18px and the orb name 14px on their own lines 1ms
+     ✓ keeps every dashboard orb entry on its line grid behind its state hue 2ms
+     ✓ uses the stopped gray hue for sleeping rows without overriding selected fill 1ms
+     ✓ inverts the selected find row and underlines the matched text 1ms
+     ✓ uses gutter-free inverted user paper and plain white orb paper 1ms
+     ✓ scrolls wide tables instead of breaking words to squeeze columns 1ms
+     ✓ gives boxed code and text the same gray background as inline code 1ms
+     ✓ carries viewport height through the app to the bottom-pinned composer 2ms
+     ✓ keeps the project index beside the transcript with plain hover rows 2ms
+     ✓ keeps stacked project actions and headers on the existing grid 1ms
+     ✓ retains the diagnostic gutter and keeps queue state visible 1ms
+     × overlays a full-width headerless terminal below the header and active-child rail 25ms
+     ✓ uses one rail-row geometry for reasoning and every tool category 7ms
+     ✓ balances isolated activity rows with prose without separating adjacent rail rows 1ms
+     ✓ indents expanded subagent receipts, including errors, past the rail on desktop and phones 0ms
+     ✓ contains inline tool images without cropping and keeps the viewer monochrome 1ms
+ ✓ packages/protocol/src/activity-headline.test.ts (18 tests) 115ms
+ ✓ apps/web/src/lib/api.test.ts (24 tests) 83ms
+ ✓ apps/web/src/lib/live-cache.test.ts (8 tests) 230ms
+ ✓ apps/web/src/lib/live-cache.dst.test.ts (1 test) 1030ms
+   ✓ DST: half-open offline/online recovers a parent-closed assistant suffix despite an empty inbox  1028ms
+ ✓ apps/web/src/lib/queued-messages.test.ts (15 tests) 15ms
+ ✓ apps/web/src/lib/project-orbs.test.ts (16 tests) 33ms
+ ✓ apps/web/src/lib/orb-load.test.ts (14 tests) 21ms
+ ✓ apps/web/src/lib/use-history-tail.test.ts (23 tests) 27ms
+ ✓ apps/web/src/components/HistoryView-pairing.test.tsx (10 tests) 118ms
+ ✓ apps/web/src/lib/claude-auth-entry.test.ts (15 tests) 179ms
+ ✓ apps/web/src/pages/OrbPage.test.ts (37 tests) 20ms
+ ✓ apps/control-plane/src/adapters/durable/model-usage.test.ts (2 tests) 410ms
+     ✓ classifies root, subagent and compaction calls and records the provider's usage  406ms
+ ✓ apps/web/src/lib/chart-spec.test.ts (30 tests) 226ms
+stdout | apps/web/src/components/lazy-detail-owner.test.tsx > starts only the surviving StrictMode detail effect's request
+StrictMode owner/request trace [ 'owner:1', 'cleanup:1', 'owner:2' ]
+
+stdout | apps/web/src/components/lazy-detail-owner.test.tsx > starts only the surviving StrictMode detail effect's request
+display detail {
+  orbId: 'orb',
+  recordId: 'one',
+  detailKey: 'one:0',
+  outcome: 'stored',
+  bytes: 1376
+}
+
+stdout | apps/web/src/components/lazy-detail-owner.test.tsx > defers uncached reads until fresh metadata, then wakes without remount (image=false)
+display detail {
+  orbId: 'orb',
+  recordId: 'one',
+  detailKey: 'one:0',
+  outcome: 'stored',
+  bytes: 1376
+}
+
+stdout | apps/web/src/components/lazy-detail-owner.test.tsx > defers uncached reads until fresh metadata, then wakes without remount (image=true)
+display image {
+  orbId: 'orb',
+  recordId: 'one',
+  detailKey: 'one:0',
+  imageIndex: 0,
+  sessionId: 'session',
+  outcome: 'miss'
+}
+
+stdout | apps/web/src/components/lazy-detail-owner.test.tsx > defers uncached reads until fresh metadata, then wakes without remount (image=true)
+display image {
+  orbId: 'orb',
+  recordId: 'one',
+  detailKey: 'one:0',
+  imageIndex: 0,
+  sessionId: 'session',
+  outcome: 'stored',
+  bytes: 5,
+  cacheBytes: 923
+}
+
+stdout | apps/web/src/components/lazy-detail-owner.test.tsx > renders immutable cache hits without metadata authority (image=true)
+display image {
+  orbId: 'orb',
+  recordId: 'one',
+  detailKey: 'one:0',
+  imageIndex: 0,
+  sessionId: 'session',
+  outcome: 'hit',
+  bytes: 6
+}
+
+stdout | apps/web/src/components/lazy-detail-owner.test.tsx > does not reuse or publish an old owner's pending response (image=false)
+display detail {
+  orbId: 'orb',
+  recordId: 'one',
+  detailKey: 'one:0',
+  outcome: 'stored',
+  bytes: 1376
+}
+
+stdout | apps/web/src/components/lazy-detail-owner.test.tsx > does not reuse or publish an old owner's pending response (image=true)
+display image {
+  orbId: 'orb',
+  recordId: 'one',
+  detailKey: 'one:0',
+  imageIndex: 0,
+  sessionId: 'session',
+  outcome: 'miss'
+}
+
+stdout | apps/web/src/components/lazy-detail-owner.test.tsx > does not reuse or publish an old owner's pending response (image=true)
+display image {
+  orbId: 'orb',
+  recordId: 'one',
+  detailKey: 'one:0',
+  imageIndex: 0,
+  sessionId: 'session',
+  outcome: 'miss'
+}
+
+stdout | apps/web/src/components/lazy-detail-owner.test.tsx > does not reuse or publish an old owner's pending response (image=true)
+display image {
+  orbId: 'orb',
+  recordId: 'one',
+  detailKey: 'one:0',
+  imageIndex: 0,
+  sessionId: 'session',
+  outcome: 'stored',
+  bytes: 3,
+  cacheBytes: 921
+}
+
+stdout | apps/web/src/components/lazy-detail-owner.test.tsx > starts cold owned reads before the next task (image=false)
+display detail {
+  orbId: 'orb',
+  recordId: 'one',
+  detailKey: 'one:0',
+  outcome: 'stored',
+  bytes: 1376
+}
+
+stdout | apps/web/src/components/lazy-detail-owner.test.tsx > starts cold owned reads before the next task (image=true)
+display image {
+  orbId: 'orb',
+  recordId: 'one',
+  detailKey: 'one:0',
+  imageIndex: 0,
+  sessionId: 'session',
+  outcome: 'miss'
+}
+
+stdout | apps/web/src/components/lazy-detail-owner.test.tsx > starts cold owned reads before the next task (image=true)
+display image {
+  orbId: 'orb',
+  recordId: 'one',
+  detailKey: 'one:0',
+  imageIndex: 0,
+  sessionId: 'session',
+  outcome: 'stored',
+  bytes: 4,
+  cacheBytes: 922
+}
+
+stdout | apps/web/src/components/lazy-detail-owner.test.tsx > invalidation fences pending publication (image=true)
+display image {
+  orbId: 'orb',
+  recordId: 'one',
+  detailKey: 'one:0',
+  imageIndex: 0,
+  sessionId: 'session',
+  outcome: 'miss'
+}
+
+stdout | apps/web/src/components/lazy-detail-owner.test.tsx > invalidation fences pending publication (image=true)
+display image {
+  orbId: 'orb',
+  recordId: 'one',
+  detailKey: 'one:0',
+  imageIndex: 0,
+  sessionId: 'session',
+  outcome: 'stale_epoch'
+}
+
+ ✓ apps/web/src/components/lazy-detail-owner.test.tsx (11 tests) 33ms
+ ✓ apps/web/src/pages/compaction.test.ts (13 tests) 18ms
+ ✓ apps/control-plane/src/http/user-scoped.routes.test.ts (16 tests) 609ms
+ ✓ apps/web/src/lib/transcript-cache.test.ts (10 tests) 19ms
+ ✓ apps/web/src/lib/central-streaming.test.ts (1 test) 216ms
+ ✓ apps/web/src/pages/live-output.test.ts (19 tests) 117ms
+ ✓ packages/protocol/src/repository-url.test.ts (59 tests) 53ms
+ ✓ apps/web/src/lib/claude-auth.test.ts (9 tests) 18ms
+ ✓ apps/web/src/lib/image-cache.test.ts (5 tests) 26ms
+ ✓ apps/web/src/components/HistoryView-tail.test.tsx (4 tests) 139ms
+ ✓ apps/web/src/testkit/mock-backend.test.ts (3 tests) 62ms
+ ✓ apps/web/src/lib/dashboard-search-source.test.ts (6 tests) 13ms
+ ✓ apps/web/src/components/ClaudeAuth.test.tsx (12 tests) 61ms
+ ✓ apps/web/src/pages/agent-settings.dst.test.ts (2 tests) 65ms
+ ✓ apps/web/src/lib/inbox-poller.test.ts (7 tests) 31ms
+ ✓ apps/web/src/pages/transcript-cache.test.ts (10 tests) 16ms
+ ✓ apps/web/src/lib/detail-loader.dst.test.ts (5 tests) 55ms
+ ✓ apps/web/src/lib/dev-console-debug.test.ts (6 tests) 15ms
+ ✓ apps/web/src/pages/transcript-cache.dst.test.ts (2 tests) 62ms
+ ✓ apps/web/src/components/OrbIndex.test.tsx (7 tests) 62ms
+ ✓ apps/web/src/lib/detail-owner.dst.test.ts (2 tests) 59ms
+ ✓ apps/web/src/components/Composer.test.tsx (11 tests) 51ms
+ ✓ apps/web/src/components/HistoryView.delivery-status.test.tsx (20 tests) 143ms
+ ✓ packages/protocol/src/chart.test.ts (10 tests) 263ms
+ ✓ apps/web/src/lib/usage.test.ts (6 tests) 19ms
+ ✓ packages/protocol/src/display-delivery.test.ts (6 tests) 12ms
+ ✓ apps/web/src/lib/claude-consent-window.test.ts (9 tests) 15ms
+ ✓ apps/web/src/lib/navigation.test.ts (4 tests) 28ms
+ ✓ apps/web/src/components/AppSearch.test.tsx (5 tests) 52ms
+ ✓ apps/web/src/components/StateTile.test.tsx (23 tests) 40ms
+ ✓ apps/web/src/pages/OrbPage.central-input.test.ts (1 test) 71ms
+ ✓ packages/protocol/src/workload-identity.test.ts (6 tests) 19ms
+ ✓ apps/web/src/pages/output-handoff.test.tsx (2 tests) 55ms
+ ✓ apps/web/src/lib/favicon.test.ts (6 tests) 7ms
+ ✓ apps/web/src/lib/inbox-poller.dst.test.ts (1 test) 64ms
+ ✓ apps/control-plane/src/process-agent-model-usage.test.ts (1 test) 117ms
+ ✓ apps/web/src/components/ActivityHeadline.test.tsx (3 tests) 32ms
+ ✓ apps/web/src/components/orb-file-drop.test.ts (5 tests) 9ms
+ ✓ apps/web/src/components/HistoryView.delivery.test.tsx (1 test) 48ms
+ ✓ apps/web/src/components/command-options.test.ts (4 tests) 11ms
+ ✓ packages/protocol/src/orb-inspection.test.ts (5 tests) 18ms
+ ✓ apps/web/src/lib/scroll-pin.test.ts (10 tests) 9ms
+ ✓ apps/web/src/pages/lazy-detail-handoff.test.ts (2 tests) 6ms
+ ✓ apps/web/src/components/DisplayHistory.test.tsx (2 tests) 54ms
+ ✓ apps/web/src/lib/orb-alert.test.ts (8 tests) 10ms
+ ✓ apps/web/src/lib/app-search.test.ts (6 tests) 8ms
+ ✓ apps/web/src/lib/turn-notifications.test.ts (11 tests) 27ms
+ ✓ apps/web/src/production-fields.contract.test.ts (4 tests) 48ms
+ ✓ apps/web/src/lib/terminal-layout.test.ts (5 tests) 11ms
+ ✓ apps/web/src/pages/reasoning-visibility.test.tsx (2 tests) 23ms
+ ✓ apps/web/src/lib/composer-draft.test.ts (4 tests) 14ms
+ ✓ packages/protocol/src/reasoning-headline.test.ts (7 tests) 81ms
+ ✓ packages/protocol/src/orb-sleep.test.ts (3 tests) 16ms
+ ✓ apps/web/src/pages/agent-settings.test.ts (2 tests) 7ms
+ ✓ apps/web/src/lib/session.dst.test.ts (2 tests) 98ms
+ ✓ apps/web/src/components/DetailBody.test.tsx (3 tests) 68ms
+ ✓ apps/web/src/pages/orb-header-settings.test.tsx (6 tests) 21ms
+ ✓ apps/web/src/lib/history-refresh.test.ts (6 tests) 10ms
+ ✓ apps/web/src/lib/detail-cache.test.ts (2 tests) 9ms
+ ✓ packages/protocol/src/broker.test.ts (5 tests) 17ms
+ ✓ apps/web/src/lib/mcp-form.test.ts (4 tests) 16ms
+ ✓ apps/web/src/components/HistoryView.subscription.test.tsx (1 test) 34ms
+ ✓ packages/protocol/src/manual-compaction.test.ts (5 tests) 15ms
+ ✓ apps/web/src/lib/activity-headline.test.ts (3 tests) 8ms
+ ✓ apps/control-plane/src/http/usage.routes.test.ts (1 test) 172ms
+ ✓ apps/control-plane/src/main-composition.test.ts (4 tests) 7ms
+ ✓ apps/web/src/components/HostedFiles.test.tsx (3 tests) 127ms
+ ✓ apps/web/src/pages/OrbPage.pending-abort.test.ts (2 tests) 23ms
+ ✓ apps/web/src/components/HarnessIcon.test.tsx (3 tests) 22ms
+ ✓ apps/web/src/components/OrbResourceWarnings.test.tsx (6 tests) 24ms
+ ✓ apps/web/src/lib/create-orb-request.test.ts (5 tests) 40ms
+ ✓ packages/protocol/src/model-usage.test.ts (15 tests) 34ms
+ ✓ apps/control-plane/src/domain/usage-read.test.ts (2 tests) 22ms
+ ✓ apps/web/src/components/MarkdownCodeBlock.test.tsx (11 tests) 98ms
+ ✓ packages/protocol/src/hosting.test.ts (3 tests) 13ms
+ ✓ apps/web/src/App.test.ts (5 tests) 9ms
+ ✓ packages/protocol/src/git-identity.test.ts (3 tests) 15ms
+ ✓ apps/web/src/components/Icons.test.tsx (3 tests) 22ms
+ ✓ apps/web/src/components/ProjectConfigModal.test.tsx (2 tests) 31ms
+ ✓ apps/web/src/components/ProjectMcpSettings.test.tsx (3 tests) 20ms
+ ✓ packages/protocol/src/project-secrets.test.ts (2 tests) 12ms
+ ✓ packages/protocol/src/terminal.test.ts (2 tests) 13ms
+ ✓ packages/protocol/src/claude-auth.test.ts (4 tests) 14ms
+ ✓ packages/protocol/src/resource-warnings.test.ts (9 tests) 23ms
+ ✓ packages/protocol/src/personal-instructions.test.ts (3 tests) 21ms
+ ✓ apps/web/src/lib/session.test.ts (3 tests) 8ms
+ ✓ apps/web/src/lib/claude-auth-api.test.ts (2 tests) 51ms
+ ✓ packages/protocol/src/stream-telemetry.test.ts (1 test) 17ms
+ ✓ apps/web/src/lib/copy-to-clipboard.test.ts (3 tests) 18ms
+ ✓ apps/web/src/components/OrbNotice.test.tsx (4 tests) 18ms
+ ✓ packages/protocol/src/mcp.test.ts (2 tests) 10ms
+ ✓ apps/web/src/components/SubagentRail.test.tsx (1 test) 20ms
+ ✓ apps/web/src/components/ChatMarkdown.test.tsx (2 tests) 40ms
+ ✓ apps/web/src/components/settings-fallback.test.tsx (1 test) 36ms
+ ✓ apps/web/src/lib/history-tail.test.ts (3 tests) 6ms
+ ✓ apps/web/src/components/LogoutButton.test.tsx (2 tests) 16ms
+ ✓ apps/web/src/lib/project-deletion.test.ts (2 tests) 6ms
+ ✓ apps/web/src/components/composer-mode.test.ts (6 tests) 7ms
+ ✓ apps/web/src/components/ProjectInstructions.test.tsx (1 test) 21ms
+ ✓ apps/web/src/components/OrbFailureBanner.test.tsx (2 tests) 11ms
+ ✓ apps/web/src/components/OrbTerminal.test.tsx (2 tests) 34ms
+ ✓ apps/web/src/components/SessionRibbon.test.tsx (2 tests) 18ms
+ ✓ packages/protocol/src/harness.test.ts (1 test) 8ms
+ ✓ apps/web/src/lib/object-url.test.ts (2 tests) 19ms
+ ✓ apps/web/src/components/ConfigTabs.test.tsx (1 test) 35ms
+ ✓ apps/web/src/lib/page-title.test.ts (2 tests) 5ms
+ ✓ apps/web/src/lib/uuid.test.ts (1 test) 5ms
+ ✓ apps/web/src/lib/terminal-copy.test.ts (2 tests) 5ms
+ ✓ apps/web/src/components/send-shortcut.test.ts (3 tests) 6ms
+ ✓ apps/web/src/lib/auth-navigation.test.ts (1 test) 6ms
+ ✓ apps/web/src/components/TextFieldFrame.test.tsx (1 test) 15ms
+ ✓ apps/web/src/pages/CreateOrbPage.test.tsx (1 test) 39ms
+ ✓ packages/protocol/src/runtime-launch.test.ts (1 test) 4ms
+ ✓ apps/control-plane/src/adapters/pg/model-usage.test.ts (5 tests) 9842ms
+     ✓ inserts one content-free row per call without waiting for the WAL flush  2888ms
+     ✓ keeps rows through orb archival and deletion  1774ms
+     ✓ reads owner-scoped half-open buckets and retains nameless deleted orbs  1795ms
+     ✓ never discloses another owner's orb name through the ledger join  1668ms
+     ✓ logs one edge when writes start failing and one when they recover  1715ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/web/src/styles.contract.test.ts > orb workspace layout contract > overlays a full-width headerless terminal below the header and active-child rail
+AssertionError: expected '\n    width: 44px;\n    height: 44px;…' to contain 'width: 20px'
+
+- Expected
++ Received
+
+- width: 20px
++
++     width: 44px;
++     height: 44px;
++
+
+ ❯ apps/web/src/styles.contract.test.ts:357:40
+    355|     expect(css).not.toMatch(/orb-terminal-(header|launcher|controls)/);
+    356|     expect(rule(".orb-header-actions")).toContain("gap: 8px");
+    357|     expect(rule("button.icon-button")).toContain("width: 20px");
+       |                                        ^
+    358|   });
+    359|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 131 passed (132)
+      Tests  1 failed | 1004 passed (1005)
+   Start at  18:18:24
+   Duration  66.86s (transform 5.95s, setup 0ms, import 72.37s, tests 17.78s, environment 22ms)

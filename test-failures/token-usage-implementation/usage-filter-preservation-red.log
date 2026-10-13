@@ -1,0 +1,44 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+stderr | e2e/usage-frontend.e2e.test.ts > chromium: Trend usage entry, shared interactive charts, dense civil days and visible failures
+[BABEL] Note: The code generator has deoptimised the styling of /tmp/pi-orb-usage-chromium-RQShrm/deps/react-dom_client.js?v=314a2fcd as it exceeds the max of 500KB.
+
+ ❯  frontend  e2e/usage-frontend.e2e.test.ts (2 tests | 1 failed | 1 skipped) 16082ms
+   × chromium: Trend usage entry, shared interactive charts, dense civil days and visible failures 16080ms
+   ↓ webkit: Trend usage entry, shared interactive charts, dense civil days and visible failures
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL   frontend  e2e/usage-frontend.e2e.test.ts > chromium: Trend usage entry, shared interactive charts, dense civil days and visible failures
+Error: expect(locator).toHaveValue(expected) failed
+
+Locator:  getByLabel('Measure')
+Expected: "output"
+Received: "total"
+Timeout:  5000ms
+
+Call log:
+  - Expect "toHaveValue" getByLabel('Measure') with timeout 5000ms
+  - waiting for getByLabel('Measure')
+    14 × locator resolved to <select aria-label="Measure">…</select>
+       - unexpected value "total"
+
+ ❯ captureRawStack node_modules/playwright-core/lib/coreBundle.js:8588:17
+ ❯ callMatcherAsStep node_modules/playwright/lib/matchers/expect.js:13310:57
+ ❯ Object.toHaveValue node_modules/playwright/lib/matchers/expect.js:13302:23
+ ❯ e2e/usage-frontend.e2e.test.ts:201:48
+    199|       releaseHeld();
+    200|       await expect(tickLines).toHaveCount(96);
+    201|       await expect(page.getByLabel("Measure")).toHaveValue("output");
+       |                                                ^
+    202|       await expect(page.getByLabel("Breakdown")).toHaveValue("use");
+    203|       mode = "failed";
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 skipped (2)
+   Start at  18:17:52
+   Duration  16.86s (transform 93ms, setup 0ms, import 582ms, tests 16.08s, environment 0ms)

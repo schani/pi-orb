@@ -1,0 +1,42 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+stderr | e2e/usage-frontend.e2e.test.ts > chromium: Trend usage entry, shared interactive charts, dense civil days and visible failures
+[BABEL] Note: The code generator has deoptimised the styling of /tmp/pi-orb-usage-chromium-DnSDl5/deps/react-dom_client.js?v=ed43267c as it exceeds the max of 500KB.
+
+ ❯  frontend  e2e/usage-frontend.e2e.test.ts (2 tests | 1 failed | 1 skipped) 12104ms
+   × chromium: Trend usage entry, shared interactive charts, dense civil days and visible failures 12103ms
+   ↓ webkit: Trend usage entry, shared interactive charts, dense civil days and visible failures
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL   frontend  e2e/usage-frontend.e2e.test.ts > chromium: Trend usage entry, shared interactive charts, dense civil days and visible failures
+Error: expect(locator).toBeVisible() failed
+
+Locator: getByRole('link', { name: 'Token usage' })
+Expected: visible
+Timeout: 5000ms
+Error: element(s) not found
+
+Call log:
+  - Expect "toBeVisible" getByRole('link', { name: 'Token usage' }) with timeout 5000ms
+  - waiting for getByRole('link', { name: 'Token usage' })
+
+ ❯ captureRawStack node_modules/playwright-core/lib/coreBundle.js:8588:17
+ ❯ callMatcherAsStep node_modules/playwright/lib/matchers/expect.js:13310:57
+ ❯ Object.toBeVisible node_modules/playwright/lib/matchers/expect.js:13302:23
+ ❯ e2e/usage-frontend.e2e.test.ts:46:23
+     44|   await gotoFrontendFixture(page,origin+"/");
+     45|   const entry=page.getByRole("link",{name:"Token usage"});
+     46|   await expect(entry).toBeVisible();
+       |                       ^
+     47|   await expect(entry.locator("use")).toHaveAttribute("href","#i-trend"…
+     48|   await expect(entry.locator("xpath=following-sibling::*[1]")).toHaveA…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 skipped (2)
+   Start at  17:27:40
+   Duration  12.93s (transform 85ms, setup 0ms, import 616ms, tests 12.10s, environment 0ms)

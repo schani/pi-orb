@@ -1,0 +1,30 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ❯ apps/web/src/lib/usage.test.ts (6 tests | 1 failed | 5 skipped) 6ms
+     × keeps large summary counts compact 5ms
+     ↓ builds dense rolling periods and clamps calendar month subtraction
+     ↓ sums volume including cache and weights cache share by prompt tokens
+     ↓ fills every interval, preserves token composition and reconciles use/model lines
+     ↓ limits model lines to five leaders plus Other without discarding usage
+     ↓ ranks the selected measure, keeps equal names distinct, and represents empty data
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/web/src/lib/usage.test.ts > usage presentation > keeps large summary counts compact
+TypeError: formatUsageCount is not a function
+ ❯ apps/web/src/lib/usage.test.ts:41:12
+     39| describe("usage presentation", () => {
+     40|   it("keeps large summary counts compact", () => {
+     41|     expect(formatUsageCount(39_300_292)).toBe("39.3M");
+       |            ^
+     42|     expect(formatUsageCount(10_000_000_000)).toBe("10B");
+     43|     expect(formatUsageCount(100)).toBe("100");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 skipped (6)
+   Start at  18:14:08
+   Duration  244ms (transform 82ms, setup 0ms, import 97ms, tests 6ms, environment 0ms)

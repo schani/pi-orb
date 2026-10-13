@@ -1,0 +1,384 @@
+apps/control-plane/src/http/usage.routes.test.ts:24:15 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    22 │     TEST_SYSTEM_VIEW,
+    23 │   );
+  > 24 │   const url = "/api/v1/usage?boundaries=" + encodeURIComponent("[0,900000]");
+       │               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    25 │   try {
+    26 │     const response = await app.inject({ method: "GET", url });
+
+  i Unsafe fix: Use a template literal.
+
+    22 22 │       TEST_SYSTEM_VIEW,
+    23 23 │     );
+    24    │ - ··const·url·=·"/api/v1/usage?boundaries="·+·encodeURIComponent("[0,900000]");
+       24 │ + ··const·url·=·`/api/v1/usage?boundaries=${encodeURIComponent("[0,900000]")}`;
+    25 25 │     try {
+    26 26 │       const response = await app.inject({ method: "GET", url });
+
+
+apps/web/src/lib/usage.test.ts:80:14 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    78 │     const buckets = Array.from({ length: 8 }, (_, i) => ({
+    79 │       ...data.buckets[0]!,
+  > 80 │       model: "m" + i,
+       │              ^^^^^^^
+    81 │       input: 10,
+    82 │       output: 0,
+
+  i Unsafe fix: Use a template literal.
+
+     78  78 │       const buckets = Array.from({ length: 8 }, (_, i) => ({
+     79  79 │         ...data.buckets[0]!,
+     80     │ - ······model:·"m"·+·i,
+         80 │ + ······model:·`m${i}`,
+     81  81 │         input: 10,
+     82  82 │         output: 0,
+
+
+apps/web/src/lib/usage.ts:75:53 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    73 │     } else
+    74 │       add(
+  > 75 │         breakdown === "use" ? USE_LABELS[row.use] : row.provider + " / " + row.model,
+       │                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    76 │         row.at,
+    77 │         totalTokens(row),
+
+  i Unsafe fix: Use a template literal.
+
+     73  73 │       } else
+     74  74 │         add(
+     75     │ - ········breakdown·===·"use"·?·USE_LABELS[row.use]·:·row.provider·+·"·/·"·+·row.model,
+         75 │ + ········breakdown·===·"use"·?·USE_LABELS[row.use]·:·`${row.provider}·/·${row.model}`,
+     76  76 │           row.at,
+     77  77 │           totalTokens(row),
+
+
+apps/web/src/lib/usage.ts:115:11 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    113 │     label:
+    114 │       labels.filter((name) => name === labels[index]).length > 1
+  > 115 │         ? (row.name ?? "Orb").slice(0, 40) + " · " + row.id
+        │           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    116 │         : (labels[index] ?? row.id),
+    117 │     value: value(row),
+
+  i Unsafe fix: Use a template literal.
+
+    113 113 │       label:
+    114 114 │         labels.filter((name) => name === labels[index]).length > 1
+    115     │ - ········?·(row.name·??·"Orb").slice(0,·40)·+·"···"·+·row.id
+        115 │ + ········?·`${(row.name·??·"Orb").slice(0,·40)}···${row.id}`
+    116 116 │           : (labels[index] ?? row.id),
+    117 117 │       value: value(row),
+
+
+apps/web/src/pages/UsagePage.tsx:66:51 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    64 │     ["Uncached input", formatValue(undefined, data.summary.input)],
+    65 │     ["Output", formatValue(undefined, data.summary.output)],
+  > 66 │     ["Prompt cache share", share === null ? "—" : (share * 100).toFixed(1) + "%"],
+       │                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    67 │     ["Recorded calls", formatValue(undefined, data.summary.calls)],
+    68 │   ];
+
+  i Unsafe fix: Use a template literal.
+
+     64  64 │       ["Uncached input", formatValue(undefined, data.summary.input)],
+     65  65 │       ["Output", formatValue(undefined, data.summary.output)],
+     66     │ - ····["Prompt·cache·share",·share·===·null·?·"—"·:·(share·*·100).toFixed(1)·+·"%"],
+         66 │ + ····["Prompt·cache·share",·share·===·null·?·"—"·:·`${(share·*·100).toFixed(1)}%`],
+     67  67 │       ["Recorded calls", formatValue(undefined, data.summary.calls)],
+     68  68 │     ];
+
+
+apps/web/src/pages/UsagePage.tsx:212:14 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    210 │       </nav>
+    211 │       <UsagePeriodView
+  > 212 │         key={period + ":" + attempt}
+        │              ^^^^^^^^^^^^^^^^^^^^^^
+    213 │         period={period}
+    214 │         onRetry={() => setAttempt((value) => value + 1)}
+
+  i Unsafe fix: Use a template literal.
+
+    210 210 │         </nav>
+    211 211 │         <UsagePeriodView
+    212     │ - ········key={period·+·":"·+·attempt}
+        212 │ + ········key={`${period}:${attempt}`}
+    213 213 │           period={period}
+    214 214 │           onRetry={() => setAttempt((value) => value + 1)}
+
+
+e2e/usage-frontend.e2e.test.ts:16:51 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    14 │   async (engine) => {
+    15 │     const root = join(import.meta.dirname, "../apps/web");
+  > 16 │     const cacheDir = await mkdtemp(join(tmpdir(), "pi-orb-usage-" + engine + "-"));
+       │                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    17 │     const vite = await createServer({
+    18 │       root,
+
+  i Unsafe fix: Use a template literal.
+
+     14  14 │     async (engine) => {
+     15  15 │       const root = join(import.meta.dirname, "../apps/web");
+     16     │ - ····const·cacheDir·=·await·mkdtemp(join(tmpdir(),·"pi-orb-usage-"·+·engine·+·"-"));
+         16 │ + ····const·cacheDir·=·await·mkdtemp(join(tmpdir(),·`pi-orb-usage-${engine}-`));
+     17  17 │       const vite = await createServer({
+     18  18 │         root,
+
+
+e2e/usage-frontend.e2e.test.ts:92:22 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    90 │         await route.fulfill({ json: data });
+    91 │       });
+  > 92 │       const origin = "http://127.0.0.1:" + address.port;
+       │                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    93 │       await gotoFrontendFixture(page, origin + "/");
+    94 │       const entry = page.getByRole("link", { name: "Token usage" });
+
+  i Unsafe fix: Use a template literal.
+
+     90  90 │           await route.fulfill({ json: data });
+     91  91 │         });
+     92     │ - ······const·origin·=·"http://127.0.0.1:"·+·address.port;
+         92 │ + ······const·origin·=·`http://127.0.0.1:${address.port}`;
+     93  93 │         await gotoFrontendFixture(page, origin + "/");
+     94  94 │         const entry = page.getByRole("link", { name: "Token usage" });
+
+
+e2e/usage-frontend.e2e.test.ts:93:39 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    91 │       });
+    92 │       const origin = "http://127.0.0.1:" + address.port;
+  > 93 │       await gotoFrontendFixture(page, origin + "/");
+       │                                       ^^^^^^^^^^^^
+    94 │       const entry = page.getByRole("link", { name: "Token usage" });
+    95 │       await expect(entry).toBeVisible();
+
+  i Unsafe fix: Use a template literal.
+
+     91  91 │         });
+     92  92 │         const origin = "http://127.0.0.1:" + address.port;
+     93     │ - ······await·gotoFrontendFixture(page,·origin·+·"/");
+         93 │ + ······await·gotoFrontendFixture(page,·`${origin}/`);
+     94  94 │         const entry = page.getByRole("link", { name: "Token usage" });
+     95  95 │         await expect(entry).toBeVisible();
+
+
+e2e/usage-frontend.e2e.test.ts:102:36 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    100 │       );
+    101 │       await entry.click();
+  > 102 │       await expect(page).toHaveURL(origin + "/usage");
+        │                                    ^^^^^^^^^^^^^^^^^
+    103 │       const timeline = page.locator(".usage-timeline");
+    104 │       const tickLines = timeline.locator('g.role-axis[aria-label^="X-axis"] g.role-axis-tick line');
+
+  i Unsafe fix: Use a template literal.
+
+    100 100 │         );
+    101 101 │         await entry.click();
+    102     │ - ······await·expect(page).toHaveURL(origin·+·"/usage");
+        102 │ + ······await·expect(page).toHaveURL(`${origin}/usage`);
+    103 103 │         const timeline = page.locator(".usage-timeline");
+    104 104 │         const tickLines = timeline.locator('g.role-axis[aria-label^="X-axis"] g.role-axis-tick line');
+
+
+e2e/usage-frontend.e2e.test.ts:167:39 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+
+    165 │           );
+    166 │         expect(clipped).toEqual([]);
+  > 167 │         await page.screenshot({ path: "/tmp/usage-implemented-" + width + ".png", fullPage: true });
+        │                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    168 │       }
+    169 │       // A superseded read is explicitly held, not scheduled with a sleep.
+
+  i Unsafe fix: Use a template literal.
+
+    165 165 │             );
+    166 166 │           expect(clipped).toEqual([]);
+    167     │ - ········await·page.screenshot({·path:·"/tmp/usage-implemented-"·+·width·+·".png",·fullPage:·true·});
+        167 │ + ········await·page.screenshot({·path:·`/tmp/usage-implemented-${width}.png`,·fullPage:·true·});
+    168 168 │         }
+    169 169 │         // A superseded read is explicitly held, not scheduled with a sleep.
+
+
+apps/web/src/lib/usage.test.ts:79:10 lint/style/noNonNullAssertion ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    77 │   it("limits model lines to five leaders plus Other without discarding usage", () => {
+    78 │     const buckets = Array.from({ length: 8 }, (_, i) => ({
+  > 79 │       ...data.buckets[0]!,
+       │          ^^^^^^^^^^^^^^^^
+    80 │       model: "m" + i,
+    81 │       input: 10,
+
+
+apps/web/src/styles.css:1250:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 1, 0)
+
+    1248 │ }
+    1249 │
+  > 1250 │ .project-secrets-header {
+         │ ^^^^^^^^^^^^^^^^^^^^^^^
+    1251 │   display: flex;
+    1252 │   min-height: 32px;
+
+  i This selector specificity is (0, 2, 0)
+
+    1168 │     height: 48px;
+    1169 │   }
+  > 1170 │   .personal-instructions-dialog .project-secrets-header {
+         │   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    1171 │     min-height: 48px;
+    1172 │   }
+
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+
+
+apps/web/src/styles.css:1318:3 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 1, 0)
+
+    1317 │ @media (max-width: 600px) {
+  > 1318 │   .project-secrets-header {
+         │   ^^^^^^^^^^^^^^^^^^^^^^^
+    1319 │     min-height: 44px;
+    1320 │     padding-right: 54px;
+
+  i This selector specificity is (0, 2, 0)
+
+    1168 │     height: 48px;
+    1169 │   }
+  > 1170 │   .personal-instructions-dialog .project-secrets-header {
+         │   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    1171 │     min-height: 48px;
+    1172 │   }
+
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+
+
+apps/web/src/styles.css:2442:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 1, 0)
+
+    2440 │ }
+    2441 │
+  > 2442 │ .subagent-notice-body {
+         │ ^^^^^^^^^^^^^^^^^^^^^
+    2443 │   padding: 4px 8px;
+    2444 │   overflow-wrap: anywhere;
+
+  i This selector specificity is (0, 4, 0)
+
+    2107 │ .rec-orb > .rec-bd > .activity-rail-row > .reasoning-body,
+    2108 │ .rec-orb > .rec-bd > .activity-rail-row > .tool-activity-calls,
+  > 2109 │ .rec-orb > .rec-bd > .activity-rail-row > .subagent-notice-body {
+         │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    2110 │   padding-left: calc(2ch + 16px);
+    2111 │   border-top: 0;
+
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+
+
+apps/web/src/styles.css:2505:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 1, 1)
+
+    2503 │   border-top: 1px solid var(--g2);
+    2504 │ }
+  > 2505 │ .subagent-roster > li {
+         │ ^^^^^^^^^^^^^^^^^^^^^
+    2506 │   display: grid;
+    2507 │   grid-template-columns: minmax(0, 1fr) auto;
+
+  i This selector specificity is (0, 1, 2)
+
+    2500 │   border-top: 1px solid var(--g2);
+    2501 │ }
+  > 2502 │ .subagent-roster > li + li {
+         │ ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    2503 │   border-top: 1px solid var(--g2);
+    2504 │ }
+
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+
+
+apps/web/src/styles.css:2939:3 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 1, 1)
+
+    2937 │   .subagent-live-rail > summary,
+    2938 │   .hosted-files > summary,
+  > 2939 │   .subagent-roster > li,
+         │   ^^^^^^^^^^^^^^^^^^^^^
+    2940 │   .subagent-notice > summary {
+    2941 │     min-height: 44px;
+
+  i This selector specificity is (0, 1, 2)
+
+    2500 │   border-top: 1px solid var(--g2);
+    2501 │ }
+  > 2502 │ .subagent-roster > li + li {
+         │ ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    2503 │   border-top: 1px solid var(--g2);
+    2504 │ }
+
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+
+
+e2e/usage-frontend.e2e.test.ts:162:49 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+
+    160 │               .filter(
+    161 │                 (n) =>
+  > 162 │                   n.getBoundingClientRect().x < n.closest("svg")!.getBoundingClientRect().x - 1,
+        │                                                 ^^^^^^^^^^^^^^^^^
+    163 │               )
+    164 │               .map((n) => n.textContent),
+
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+
+    160 160 │                 .filter(
+    161 161 │                   (n) =>
+    162     │ - ··················n.getBoundingClientRect().x·<·n.closest("svg")!.getBoundingClientRect().x·-·1,
+        162 │ + ··················n.getBoundingClientRect().x·<·n.closest("svg")?.getBoundingClientRect().x·-·1,
+    163 163 │                 )
+    164 164 │                 .map((n) => n.textContent),
+
+
+Skipped 20 suggested fixes.
+If you wish to apply the suggested (unsafe) fixes, use the command biome check --write --unsafe
+
+Checked 27 files in 404ms. Fixed 17 files.
+Found 7 warnings.
+Found 11 infos.
