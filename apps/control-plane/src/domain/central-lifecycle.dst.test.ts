@@ -1,11 +1,13 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
+import type { SimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { LazyExecutionEnv } from "../adapters/execution-client/lazy-env.ts";
 import { makeHarness, makeOrbRow, makeProjectRow, seedRunningOrb } from "../testkit/fixtures.ts";
 import { runDst, waitUntil } from "../testkit/sim.ts";
 import type { AgentPlane } from "./agent-ports.ts";
+import type { RuntimeClientError } from "./errors.ts";
 import { awaitExecutionBinding } from "./execution-admission.ts";
 import {
   admitAgentRecovery,
@@ -14,6 +16,7 @@ import {
   requestOrbStart,
   requestOrbStop,
 } from "./lifecycle.ts";
+import type { OrbRow } from "./orb.ts";
 import { pollOrbUntilCaughtUp } from "./replication.ts";
 
 function plane(deliver: () => void, work = false): AgentPlane {
@@ -61,6 +64,19 @@ function plane(deliver: () => void, work = false): AgentPlane {
     close: () => okAsync(undefined),
   };
 }
+
+const terminalReadiness: RuntimeClientError = {
+  type: "runtime_client_error",
+  code: "initialization_failed",
+  answered: true,
+  retryable: false,
+  message: "outer transport explanation",
+  initializationError: {
+    code: "resource_acquisition_failed",
+    message: "resource denied",
+    retryable: false,
+  },
+};
 
 describe("independent central lifecycle", () => {
   it("retries stopped-host unloading once work becomes quiescent without reopening or suspending", async () => {
@@ -224,28 +240,49 @@ describe("independent central lifecycle", () => {
     });
   });
 
-  for (const accepted of [true, false]) {
-    it(`hydrates guest resources before publishing running (accepted=${accepted})`, async () => {
+  for (const readiness of [
+    "success",
+    "generic",
+    "generic-retryable",
+    "retryable",
+    "creating",
+    "starting",
+  ] as const) {
+    const accepted = readiness === "success";
+    const terminal = readiness === "creating" || readiness === "starting";
+    const state = readiness === "creating" ? "creating" : "starting";
+    it(`hydrates guest resources before publishing running (${readiness})`, async () => {
       await runDst(
-        { name: `central-resource-ready-${accepted}`, iterations: 10, lateTimerProbability: 0 },
+        { name: `central-resource-ready-${readiness}`, iterations: 10, lateTimerProbability: 0 },
         async (sim) => {
           const h = makeHarness();
           let adopted = 0;
           let suspends = 0;
+          let conversationClosed = 0;
+          let executionClosed = 0;
           const central: AgentPlane = {
-            ...plane(() => undefined),
+            ...plane(() => undefined, true),
             executionReady: () => {
-              expect(h.store.orbSnapshot("orb")?.state).toBe("starting");
+              expect(h.store.orbSnapshot("orb")?.state).toBe(state);
               adopted++;
               return accepted
                 ? okAsync(undefined)
-                : errAsync({
-                    type: "runtime_client_error",
-                    code: "unreachable",
-                    message: "resource snapshot unavailable",
-                    retryable: false,
-                    answered: true,
-                  });
+                : terminal || readiness === "retryable"
+                  ? errAsync({
+                      ...terminalReadiness,
+                      retryable: !terminal,
+                      initializationError: {
+                        ...terminalReadiness.initializationError!,
+                        retryable: !terminal,
+                      },
+                    })
+                  : errAsync({
+                      type: "runtime_client_error",
+                      code: "unreachable",
+                      message: "resource snapshot unavailable",
+                      retryable: readiness === "generic-retryable",
+                      answered: true,
+                    });
             },
             suspend: () => {
               suspends++;
@@ -258,15 +295,57 @@ describe("independent central lifecycle", () => {
               name: "driver",
               f: async (task) => {
                 seedRunningOrb(task, h, "orb");
-                h.store.seedOrb({ ...h.store.orbSnapshot("orb")!, state: "starting" });
-                await reconcileOrbOnce(task, deps, "orb");
+                h.store.seedOrb({ ...h.store.orbSnapshot("orb")!, state });
+                const before = h.store.orbSnapshot("orb")!;
+                (
+                  await h.store.enqueueOrbMessage(task, {
+                    orbId: "orb",
+                    messageId: "original",
+                    content: [{ type: "text", text: "continue" }],
+                    now: task.wallNow(),
+                    wake: false,
+                  })
+                )._unsafeUnwrap();
+                (
+                  await h.store.claimNextOrbMessageBatch(task, {
+                    orbId: "orb",
+                    now: task.wallNow(),
+                  })
+                )._unsafeUnwrap();
+                const inbox = h.store.messageSnapshots("orb");
+                expect(inbox).toMatchObject([{ messageId: "original", status: "delivering" }]);
+                deps.control.registerBrowserConnection("orb", "chat", () => conversationClosed++);
+                deps.control.registerBrowserConnection(
+                  "orb",
+                  "exec",
+                  () => executionClosed++,
+                  "execution",
+                );
+                const outcome = await reconcileOrbOnce(task, deps, "orb");
                 expect(adopted).toBe(1);
-                expect(h.store.orbSnapshot("orb")?.state).toBe(accepted ? "running" : "starting");
+                expect(h.store.orbSnapshot("orb")?.state).toBe(
+                  terminal ? "failed" : accepted ? "running" : state,
+                );
                 expect(suspends).toBe(0);
-                if (!accepted)
+                if (terminal) {
+                  expect(outcome).toEqual({ type: "transitioned", toState: "failed" });
+                  expect(h.store.orbSnapshot("orb")).toMatchObject({
+                    stateVersion: before.stateVersion + 1,
+                    lastError: "runtime_failed: resource_acquisition_failed: resource denied",
+                    agentAdmissionVersion: before.agentAdmissionVersion,
+                  });
+                  expect(h.store.messageSnapshots("orb")).toEqual(inbox);
+                  expect([conversationClosed, executionClosed]).toEqual([0, 1]);
+                  expect(deps.control.hasAgentWork("orb")).toBe(true);
+                  expect(central.session("orb")!.workActive!()).toBe(true);
+                } else if (!accepted) {
+                  expect(outcome).toEqual({ type: "waiting", reason: "readiness" });
                   expect(deps.control.getBootProbe("orb")?.lastError).toBe(
-                    "resource snapshot unavailable",
+                    readiness === "generic" || readiness === "generic-retryable"
+                      ? "resource snapshot unavailable"
+                      : terminalReadiness.message,
                   );
+                }
               },
             },
           ]);
@@ -275,6 +354,73 @@ describe("independent central lifecycle", () => {
       );
     });
   }
+  it("late typed readiness cannot overwrite completed Stop", async () => {
+    await runDst(
+      { name: "central-ready-stop-cas", iterations: 20, lateTimerProbability: 0 },
+      async (sim) => {
+        const h = makeHarness();
+        let blocked = false;
+        let stopped = false;
+        let stopRow: OrbRow | undefined;
+        const deps = {
+          ...h.deps,
+          agentPlane: {
+            ...plane(() => undefined, true),
+            executionReady: (task: SimulationTask) =>
+              new ResultAsync(
+                (async () => {
+                  blocked = true;
+                  await task.checkpoint("terminal readiness blocked");
+                  await waitUntil(task, "Stop completed", () => stopped, { intervalMs: 1 });
+                  await task.checkpoint("terminal readiness released");
+                  return err(terminalReadiness);
+                })(),
+              ),
+          },
+        };
+        const result = await sim.runTasks([
+          {
+            name: "readiness",
+            f: async (task) => {
+              seedRunningOrb(task, h, "orb");
+              h.store.seedOrb({ ...h.store.orbSnapshot("orb")!, state: "starting" });
+              expect(await reconcileOrbOnce(task, deps, "orb")).toEqual({ type: "conflict" });
+              expect(stopRow).toBeDefined();
+              expect(h.store.orbSnapshot("orb")).toEqual(stopRow);
+            },
+          },
+          {
+            name: "stop",
+            f: async (task) => {
+              await waitUntil(task, "readiness blocked", () => blocked, { intervalMs: 1 });
+              expect((await requestOrbStop(task, deps, "orb")).isOk()).toBe(true);
+              const stopping = h.store.orbSnapshot("orb")!;
+              expect(stopping.state).toBe("stopping");
+              stopRow = (
+                await h.store.casTransition(task, {
+                  orbId: "orb",
+                  expectedStateVersion: stopping.stateVersion,
+                  toState: "stopped",
+                  now: task.wallNow(),
+                  lastError: "stop retained evidence",
+                })
+              )._unsafeUnwrap();
+              expect(stopRow).toMatchObject({
+                state: "stopped",
+                stateVersion: stopping.stateVersion + 1,
+                stopReason: "manual",
+                agentAdmissionVersion: stopping.agentAdmissionVersion,
+                lastError: "stop retained evidence",
+              });
+              await task.checkpoint("Stop CAS completed");
+              stopped = true;
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      },
+    );
+  });
   it("pulls central history during VM failure without overwriting guest liveness or hooks", async () => {
     await runDst({ name: "central-history-failed-vm", iterations: 10 }, async (sim) => {
       const harness = makeHarness();

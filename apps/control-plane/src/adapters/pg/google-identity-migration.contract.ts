@@ -20,7 +20,7 @@ const followingMigrations = [
   "040_auto_restart_times.sql",
   "041_model_calls.sql",
   "042_git_identities.sql",
-  "042_resource_warnings.sql",
+  "043_resource_warnings.sql",
 ];
 const first = {
   userId: "00000000-0000-4000-8000-000000000001",

@@ -8,9 +8,10 @@ import { RuntimeHealthSchema } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { RuntimeClientError } from "../../domain/errors.ts";
 import { makeOrbRow } from "../../testkit/fixtures.ts";
+import { runDst } from "../../testkit/sim.ts";
 import { DurableAgentPlane, OrbAgentManager } from "./manager.ts";
 import { MemoryAgentPersistence } from "./memory-persistence.testkit.ts";
 
@@ -48,13 +49,19 @@ describe("execution initialization health", () => {
       })
     )._unsafeUnwrap();
     try {
-      const result = await plane.health(
-        new NoSimulationTask("initializing-health", false),
-        makeOrbRow("orb", "project", "starting", { hostIncarnation: 1 }),
-        { signal: new AbortController().signal },
-      );
-      expect(result.isOk()).toBe(true);
-      if (result.isOk()) expect(result.value).toEqual(initializationHealth);
+      const task = new NoSimulationTask("initializing-health", false);
+      const orb = makeOrbRow("orb", "project", "starting", { hostIncarnation: 1 });
+      const context = { signal: new AbortController().signal };
+      const result = await plane.health(task, orb, context);
+      expect(result._unsafeUnwrap()).toBe(initializationHealth);
+      const readiness = (await plane.executionReady(task, orb, context))._unsafeUnwrapErr();
+      expect(readiness).toMatchObject({
+        type: "runtime_client_error",
+        answered: true,
+        retryable: true,
+        initializationHealth,
+      });
+      expect(readiness.initializationHealth).toBe(initializationHealth);
       expect(plane.session("orb")).toBeNull();
     } finally {
       await plane.close();
@@ -77,7 +84,7 @@ describe("execution initialization health", () => {
           persistence: new MemoryAgentPersistence(),
           openContext: () => {
             attempts++;
-            return attempts === 1
+            return attempts <= 2
               ? errAsync({
                   type: "runtime_client_error",
                   code: "initialization_failed",
@@ -109,13 +116,25 @@ describe("execution initialization health", () => {
           error: initializationError,
         });
         expect(Check(RuntimeHealthSchema, failed)).toBe(true);
+        if (failed.status === "failed") expect(failed.error).toBe(initializationError);
+        const readiness = (await plane.executionReady(task, orb, context))._unsafeUnwrapErr();
+        expect(readiness).toEqual({
+          type: "runtime_client_error",
+          code: "initialization_failed",
+          answered: true,
+          message: initializationError.message,
+          retryable,
+          initializationError,
+        });
+        expect(readiness.initializationError).toBe(initializationError);
+        expect(attempts).toBe(2);
         expect(plane.session("orb")).toBeNull();
         await plane.suspend(task, "orb", context);
         const ready = (
           await plane.health(task, { ...orb, hostIncarnation: 2 }, context)
         )._unsafeUnwrap();
         expect(ready.status).toBe("ready");
-        expect(attempts).toBe(2);
+        expect(attempts).toBe(3);
       } finally {
         await plane.close();
         await rm(directory, { recursive: true, force: true });
@@ -144,13 +163,11 @@ describe("execution initialization health", () => {
         })
       )._unsafeUnwrap();
       try {
-        const result = await plane.health(
-          new NoSimulationTask("transient-health", false),
-          makeOrbRow("orb", "project", "starting", { hostIncarnation: 1 }),
-          { signal: new AbortController().signal },
-        );
-        expect(result.isErr()).toBe(true);
-        if (result.isErr()) expect(result.error).toBe(failure);
+        const task = new NoSimulationTask("transient-health", false);
+        const orb = makeOrbRow("orb", "project", "starting", { hostIncarnation: 1 });
+        const context = { signal: new AbortController().signal };
+        expect((await plane.health(task, orb, context))._unsafeUnwrapErr()).toBe(failure);
+        expect((await plane.executionReady(task, orb, context))._unsafeUnwrapErr()).toBe(failure);
       } finally {
         await plane.close();
         await rm(directory, { recursive: true, force: true });
@@ -159,6 +176,59 @@ describe("execution initialization health", () => {
   );
 });
 
+it("replays checkpointed resource failures with both retryabilities", async () => {
+  const options = { name: "durable-execution-readiness-resource-failure", iterations: 5 };
+  await runDst(options, async (sim) => {
+    const result = await sim.runTasks(
+      [true, false].map((retryable) => ({
+        name: `resource-failure-${retryable}`,
+        f: async (task) => {
+          const failure: RuntimeClientError = {
+            type: "runtime_client_error",
+            code: "initialization_failed",
+            answered: true,
+            message: "Required resource snapshot unavailable: .pi/skills/platform/SKILL.md",
+            retryable,
+            initializationError: {
+              code: "resource_acquisition_failed",
+              message: "Required resource snapshot unavailable: .pi/skills/platform/SKILL.md",
+              retryable,
+            },
+          };
+          const persistence = new MemoryAgentPersistence();
+          const open = vi.spyOn(persistence, "open");
+          const openContext = vi.fn(() => errAsync(failure));
+          const plane = (
+            await DurableAgentPlane.create({
+              persistence,
+              openContext,
+              prepare: (task) =>
+                ResultAsync.fromSafePromise(task.checkpoint(`prepare-${retryable}`)).andThen(() =>
+                  errAsync(failure),
+                ),
+            })
+          )._unsafeUnwrap();
+          const orb = makeOrbRow("orb", "project", "starting");
+          const context = { signal: new AbortController().signal };
+          try {
+            const failed = (await plane.health(task, orb, context))._unsafeUnwrap();
+            expect(failed.status).toBe("failed");
+            if (failed.status === "failed") expect(failed.error).toBe(failure.initializationError);
+            const error = (await plane.executionReady(task, orb, context))._unsafeUnwrapErr();
+            expect(error).toEqual(failure);
+            expect(error.initializationError).toBe(failure.initializationError);
+            expect(error.retryable).toBe(failure.retryable);
+            expect(open).not.toHaveBeenCalled();
+            expect(openContext).not.toHaveBeenCalled();
+          } finally {
+            await plane.close();
+          }
+        },
+      })),
+    );
+    expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+  });
+});
 describe("orb Harness ownership", () => {
   it("advances the revocation floor even before an old owner was observed", async () => {
     const manager = new OrbAgentManager<number>({
