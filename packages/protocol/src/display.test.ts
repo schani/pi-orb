@@ -156,7 +156,12 @@ describe("browser display projection", () => {
     expect(projected.slice(2, 4).every((record) => !("content" in record))).toBe(true);
     expect(
       projected.filter((record) => record.type === "message").map((record) => record.id),
-    ).toEqual(["inbox", "foreign", "literal", "pi"]);
+    ).toEqual(["inbox"]);
+    expect(
+      projected
+        .filter((record) => record.type === "event" && record.delivery !== undefined)
+        .map((record) => record.id),
+    ).toEqual(["foreign", "literal", "pi"]);
     expect(projected.filter((record) => record.type === "compaction")).toHaveLength(1);
     expect(projectRecordDetail(summary, "summary:summary")).toEqual({
       type: "compaction",
@@ -246,7 +251,7 @@ describe("browser display projection", () => {
     });
     expect(JSON.stringify(projected[2])).not.toContain(body);
     expect(projected.slice(3)).toMatchObject([
-      { role: "user", content: [{ type: "text", text: body }] },
+      { type: "event", eventType: "agent.delivery", delivery: { kind: "injected" } },
       { role: "user", content: [{ type: "text", text: body }] },
     ]);
     expect(projectDisplayRecord(injected)).toEqual(projected[2]);

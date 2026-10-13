@@ -46,6 +46,7 @@ function message(id: string, role: "user" | "assistant", text: string): MessageR
     overflow: { native: {} },
     type: "message",
     role,
+    ...(role === "user" ? { inboxMessageIds: [`inbox-${id}`] } : {}),
     content: [{ type: "text", text }],
   };
 }
@@ -1113,6 +1114,7 @@ describe("HistoryView", () => {
         overflow: { native: {} },
         type: "message",
         role: "user",
+        inboxMessageIds: [`inbox-${id}`],
         content,
       }) as HistoryRecord;
     const html = renderToStaticMarkup(

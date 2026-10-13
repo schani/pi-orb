@@ -307,6 +307,29 @@ function ReasoningRail({
     </ActivityRailRow>
   );
 }
+function DeliveryRow({ record }: { record: EventRecord }) {
+  const openState = useContext(OpenDetailValue);
+  const detailKey = record.delivery?.detailKey;
+  const [open, setOpen] = useState(() => openState?.opened.has(record.id) ?? false);
+  return (
+    <ActivityRailRow
+      className="delivery"
+      label={record.delivery?.kind}
+      headline={record.delivery?.headline ?? undefined}
+      defaultOpen={open}
+      onToggle={(value) => {
+        setOpen(value);
+        if (value) openState?.opened.add(record.id);
+        else openState?.opened.delete(record.id);
+      }}
+    >
+      {open && detailKey !== undefined && (
+        <LazyLegacyBody recordId={record.id} detailKey={detailKey} />
+      )}
+    </ActivityRailRow>
+  );
+}
+
 function renderReasoningRail(
   detailKey: string,
   key: string | number,
@@ -437,6 +460,10 @@ function renderAgentRecords(
       flushTools();
       if (isSubagentNotice(record)) {
         nodes.push(<OwnedSubagent key={record.id} record={record} />);
+        continue;
+      }
+      if (record.delivery !== undefined) {
+        nodes.push(<DeliveryRow key={record.id} record={record} />);
         continue;
       }
       nodes.push(
@@ -575,7 +602,7 @@ function groupTurns(records: readonly DisplayRecord[]): Turn[] {
           turns.push({ kind: "alert", record, message: record.alert.message });
         } else if (record.eventType === "agent.compaction") {
           turns.push({ kind: "compaction", record });
-        } else if (isDisplayedCustomMessage(record)) {
+        } else if (record.delivery !== undefined || isDisplayedCustomMessage(record)) {
           appendAgentPart(record);
         }
         break;

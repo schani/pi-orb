@@ -465,8 +465,13 @@ nativeIt(
         });
         expect(records.filter((record) => record.type === "compaction")).toHaveLength(1);
         const display = records.map(projectDisplayRecord);
+        // The probe's uncorrelated prompt is the only visible user-role row.
         expect(
-          display.filter((record) => record.type === "message" && record.role === "user"),
+          display.filter(
+            (record) =>
+              (record.type === "message" && record.role === "user") ||
+              (record.type === "event" && record.delivery !== undefined),
+          ),
         ).toHaveLength(1);
         expect(JSON.stringify(display)).not.toContain("local-command-");
         expect(

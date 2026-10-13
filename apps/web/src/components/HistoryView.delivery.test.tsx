@@ -6,7 +6,7 @@ import { snapshotFromHistory } from "../lib/transcript-cache.ts";
 import { detailContext } from "../testkit/display-fixtures.ts";
 import { HistoryView } from "./HistoryView.tsx";
 
-it("keeps private task deliveries out of public DTOs and cached human bubbles on full/cursor replay", () => {
+it("renders task deliveries as collapsed rows, never human bubbles, on full/cursor replay", () => {
   const human: HistoryRecord = {
     id: "human",
     parentId: null,
@@ -24,7 +24,10 @@ it("keeps private task deliveries out of public DTOs and cached human bubbles on
     type: "message",
     role: "user",
     content: [
-      { type: "text", text: "<task-notification>PRIVATE_CHILD_CANARY</task-notification>" },
+      {
+        type: "text",
+        text: "<task-notification>\n<summary>Child finished</summary>\n<result>PRIVATE_CHILD_CANARY</result>\n</task-notification>",
+      },
     ],
     overflow: {
       native: {
@@ -54,6 +57,10 @@ it("keeps private task deliveries out of public DTOs and cached human bubbles on
     />,
   );
   expect(html).toContain("Identify all contradictions in docs!");
+  expect(html.match(/rec-you/g)).toHaveLength(1);
+  expect(html).toMatch(
+    /<article class="rec rec-orb"[^>]*>.*activity-rail-row.*delivery.*task<\/span> · <span[^>]*>Child finished<\/span>/,
+  );
   expect(html).not.toContain("PRIVATE_CHILD_CANARY");
   expect(JSON.stringify(projected)).not.toContain("PRIVATE_CHILD_CANARY");
   expect(cached.records.has(notification.id)).toBe(true);
