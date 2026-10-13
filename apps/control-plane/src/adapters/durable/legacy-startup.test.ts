@@ -323,21 +323,16 @@ it.each(["malformed", "header-conflict", "head-without-cursor", "custom-session"
       (
         await f.database.store.initOrVerifySession(f.task, f.orb.id, {
           id: "actual-native-session",
-          overflow: {},
+          overflow: kind === "custom-session" ? { "\u0000\udfff": "\u0000\ud800" } : {},
         })
       )._unsafeUnwrap();
       if (kind === "header-conflict") {
-        const before = await f.snapshot();
-        expect(
-          (
-            await f.db.query("UPDATE orbs SET harness_session_header=$2::jsonb WHERE id=$1", [
-              f.orb.id,
-              JSON.stringify({ id: "conflicting-header" }),
-            ])
-          ).isErr(),
-        ).toBe(true);
-        expect(await f.snapshot()).toEqual(before);
-        return;
+        (
+          await f.db.query("UPDATE orbs SET harness_session_header=$2 WHERE id=$1", [
+            f.orb.id,
+            JSON.stringify({ id: "conflicting-header", overflow: {} }),
+          ])
+        )._unsafeUnwrap();
       }
       if (kind === "head-without-cursor") {
         (
@@ -373,6 +368,12 @@ it.each(["malformed", "header-conflict", "head-without-cursor", "custom-session"
           retryable: false,
         });
       expect(await f.snapshot()).toEqual(before);
+      if (kind === "custom-session") {
+        const reopened = (
+          await f.database.agentPersistence.open(f.task, f.orb, operation)
+        )._unsafeUnwrap();
+        (await reopened.release())._unsafeUnwrap();
+      }
     } finally {
       await f.database.agentPersistence.close();
       await f.database.close();

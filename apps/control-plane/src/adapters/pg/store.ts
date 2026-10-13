@@ -1,6 +1,6 @@
 import type { HarnessSessionMetadata, HistoryRecord, OrbState, StopReason } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { err, errAsync, ok, okAsync, type Result, ResultAsync } from "neverthrow";
+import { err, ok, okAsync, Result, ResultAsync } from "neverthrow";
 import type {
   ActivityHeadlineRef,
   StoredActivityHeadline,
@@ -42,6 +42,13 @@ import type {
 import { hasNativeInboxAdmission } from "../durable-pg/inbox-admission.ts";
 import { removePrivateAgentState } from "./archive-private-state.ts";
 import { arrayParam, jsonParam, type PgRow, type PostgreSQLClient } from "./client.ts";
+import {
+  decodeRecord,
+  decodeSession,
+  decodeStoredSession,
+  encodeRecord,
+  encodeSession,
+} from "./history-json.ts";
 import { PgWorkspaceUploads } from "./workspace-uploads.ts";
 
 const BOOT_CONTEXT_STATES: readonly OrbState[] = [
@@ -58,8 +65,16 @@ function toMs(value: unknown): number {
   return 0;
 }
 
-function mapOrbRow(row: PgRow): OrbRow {
-  return {
+const historyMappingFailure = (error: StoreError): ReplicationIntegrityError => ({
+  type: "replication_integrity",
+  reason: "mapping_failure",
+  message: error.message,
+});
+
+function mapOrbRow(row: PgRow): Result<OrbRow, StoreError> {
+  const session = decodeStoredSession(row["harness_session_header"], row["id"]);
+  if (session.isErr()) return err(session.error);
+  return ok({
     id: String(row["id"]),
     projectId: String(row["project_id"]),
     harness: row["harness"] as OrbRow["harness"],
@@ -98,7 +113,7 @@ function mapOrbRow(row: PgRow): OrbRow {
     checkoutCommit: row["checkout_commit"] === null ? null : String(row["checkout_commit"]),
     lastReadyAt: row["last_ready_at"] == null ? null : toMs(row["last_ready_at"]),
     harnessSessionId: row["harness_session_id"] === null ? null : String(row["harness_session_id"]),
-    harnessSessionHeader: (row["harness_session_header"] ?? null) as HarnessSessionMetadata | null,
+    harnessSessionHeader: session.value,
     resourceWarnings: (row["resource_warnings"] ?? []) as OrbRow["resourceWarnings"],
     lastError: row["last_error"] === null ? null : String(row["last_error"]),
     runtimeTokenHash: row["runtime_token_hash"] === null ? null : String(row["runtime_token_hash"]),
@@ -118,7 +133,7 @@ function mapOrbRow(row: PgRow): OrbRow {
     archivedAt: row["archived_at"] == null ? null : toMs(row["archived_at"]),
     createdAt: toMs(row["created_at"]),
     updatedAt: toMs(row["updated_at"]),
-  };
+  });
 }
 
 function mapActivityHeadline(row: PgRow): StoredActivityHeadline {
@@ -207,6 +222,8 @@ export async function commitHistoryTransaction(
   query: HistoryTransactionQuery,
   params: Omit<CommitPullBatchParams, "nextCursor"> & { readonly nextCursor: string | null },
 ): Promise<Result<{ row: OrbRow; publishedAlertId: string | null }, CommitPullError>> {
+  const sessionText = encodeSession(params.session, params.session.id, params.orbId);
+  if (sessionText.isErr()) return err(historyMappingFailure(sessionText.error));
   // Serialize competing committers on the row; the cursor check below
   // still implements the optimistic CAS semantics.
   const orbResult = await query(
@@ -231,12 +248,18 @@ export async function commitHistoryTransaction(
   }
   const storedSessionId =
     orbRow["harness_session_id"] === null ? null : String(orbRow["harness_session_id"]);
+  const storedSession = decodeSession(
+    orbRow["harness_session_header"],
+    storedSessionId,
+    params.orbId,
+  );
+  if (storedSession.isErr()) return err(historyMappingFailure(storedSession.error));
   let initializeSession = false;
   if (storedSessionId === null) {
     initializeSession = true;
   } else if (
     storedSessionId !== params.session.id ||
-    !jsonEqual(orbRow["harness_session_header"], params.session)
+    !jsonEqual(storedSession.value, params.session)
   ) {
     if (currentCursor === null) {
       // An empty replica pins nothing (docs/history-replication.md): with no
@@ -254,12 +277,14 @@ export async function commitHistoryTransaction(
   }
   let newestAlertId: string | null = null;
   for (const record of params.records) {
+    const encoded = encodeRecord(record);
+    if (encoded.isErr()) return err(historyMappingFailure(encoded.error));
     const inserted = await query(
       `INSERT INTO history_records (orb_id, record_id, parent_id, record)
-     VALUES ($1, $2, $3, $4::jsonb)
+     VALUES ($1, $2, $3, $4)
      ON CONFLICT (orb_id, record_id) DO NOTHING
      RETURNING record_id`,
-      [params.orbId, record.id, record.parentId, jsonParam(record)],
+      [params.orbId, record.id, record.parentId, encoded.value],
     );
     if (inserted.isErr()) return err(inserted.error);
     if (inserted.value.rowCount > 0 && record.type === "event" && record.alert !== undefined) {
@@ -269,12 +294,19 @@ export async function commitHistoryTransaction(
       // Existing row: identical content is an idempotent repeat,
       // different content is an integrity error (docs/history-replication.md).
       const existing = await query(
-        "SELECT record FROM history_records WHERE orb_id = $1 AND record_id = $2",
+        "SELECT record_id, parent_id, record FROM history_records WHERE orb_id = $1 AND record_id = $2",
         [params.orbId, record.id],
       );
       if (existing.isErr()) return err(existing.error);
-      const stored = existing.value.rows[0]?.["record"];
-      if (!jsonEqual(stored, JSON.parse(JSON.stringify(record)))) {
+      const stored = decodeRecord(existing.value.rows[0] ?? {});
+      if (stored.isErr()) return err(historyMappingFailure(stored.error));
+      const incoming = decodeRecord({
+        record: encoded.value,
+        record_id: record.id,
+        parent_id: record.parentId,
+      });
+      if (incoming.isErr()) return err(historyMappingFailure(incoming.error));
+      if (!jsonEqual(stored.value, incoming.value)) {
         return err<{ row: OrbRow; publishedAlertId: string | null }, ReplicationIntegrityError>({
           type: "replication_integrity",
           reason: "record_conflict",
@@ -294,10 +326,10 @@ export async function commitHistoryTransaction(
     if (delivered.isErr()) return err(delivered.error);
   }
   const sessionSets = initializeSession
-    ? ", harness_session_id = $4, harness_session_header = $5::jsonb"
+    ? ", harness_session_id = $4, harness_session_header = $5"
     : "";
   const values: unknown[] = [params.orbId, params.nextCursor, params.nextHeadId];
-  if (initializeSession) values.push(params.session.id, jsonParam(params.session));
+  if (initializeSession) values.push(params.session.id, sessionText.value);
   values.push(newestAlertId);
   const updated = await query(
     `UPDATE orbs SET replication_cursor = $2, replicated_head_id = $3,
@@ -315,7 +347,9 @@ export async function commitHistoryTransaction(
       message: "orb row disappeared during commit",
     });
   }
-  return ok({ row: mapOrbRow(row), publishedAlertId: newestAlertId });
+  return mapOrbRow(row)
+    .map((row) => ({ row, publishedAlertId: newestAlertId }))
+    .mapErr(historyMappingFailure);
 }
 
 /** PostgreSQL `ControlPlaneStore` (docs/history-replication.md/docs/stack.md). */
@@ -596,9 +630,11 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         params.projectId,
       ]);
       if (children.isErr()) return err(children.error);
+      const orbs = Result.combine(children.value.rows.map(mapOrbRow));
+      if (orbs.isErr()) return err(orbs.error);
       return ok({
         project: mapProjectRow(projectRow),
-        orbs: children.value.rows.map(mapOrbRow),
+        orbs: orbs.value,
         newlyRequested,
         repaired: Number(repairCount.value.rows[0]?.["count"] ?? 0),
       });
@@ -678,7 +714,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   getOrb(_task: SimulationTask, orbId: string): ResultAsync<OrbRow | null, StoreError> {
     return this.db
       .query("SELECT * FROM orbs WHERE id = $1", [orbId])
-      .map((result) => (result.rows[0] !== undefined ? mapOrbRow(result.rows[0]) : null));
+      .andThen((result) => (result.rows[0] !== undefined ? mapOrbRow(result.rows[0]) : ok(null)));
   }
 
   getOrbByRuntimeTokenHash(
@@ -687,13 +723,13 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   ): ResultAsync<OrbRow | null, StoreError> {
     return this.db
       .query("SELECT * FROM orbs WHERE runtime_token_hash = $1", [tokenHash])
-      .map((result) => (result.rows[0] !== undefined ? mapOrbRow(result.rows[0]) : null));
+      .andThen((result) => (result.rows[0] !== undefined ? mapOrbRow(result.rows[0]) : ok(null)));
   }
 
   listOrbsByProject(_task: SimulationTask, projectId: string): ResultAsync<OrbRow[], StoreError> {
     return this.db
       .query("SELECT * FROM orbs WHERE project_id = $1 ORDER BY created_at", [projectId])
-      .map((result) => result.rows.map(mapOrbRow));
+      .andThen((result) => Result.combine(result.rows.map(mapOrbRow)));
   }
 
   listOrbsInStates(
@@ -702,7 +738,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   ): ResultAsync<OrbRow[], StoreError> {
     return this.db
       .query("SELECT * FROM orbs WHERE state = ANY($1) ORDER BY created_at", [arrayParam(states)])
-      .map((result) => result.rows.map(mapOrbRow));
+      .andThen((result) => Result.combine(result.rows.map(mapOrbRow)));
   }
 
   insertOrb(_task: SimulationTask, orb: OrbRow): ResultAsync<OrbRow, StoreError | ProjectConflict> {
@@ -718,6 +754,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         return err({ type: "project_conflict" as const, reason: "not_found" as const });
       if (state !== "active")
         return err({ type: "project_conflict" as const, reason: "deleting" as const });
+      const header = encodeSession(orb.harnessSessionHeader, orb.harnessSessionId, orb.id);
+      if (header.isErr()) return err(header.error);
       const inserted = await query(
         `INSERT INTO orbs (id, project_id, name, auto_name_lease_until, auto_name_attempts,
            auto_name_next_attempt_at, state, state_version, host_kind, host_ref,
@@ -728,7 +766,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            runtime_token_hash, replication_cursor, replicated_head_id, last_busy_at,
            stop_reason, sleep_id, sleep_until, last_mint_at,
            state_changed_at, created_at, updated_at, user_time_zone, harness, agent_admission_version, last_ready_at, claude_recovery, auto_restart_times)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb,$39)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb,$39)
          ON CONFLICT (id) DO NOTHING RETURNING *`,
         [
           orb.id,
@@ -751,7 +789,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           orb.hostDiscardRequestedAt === null ? null : new Date(orb.hostDiscardRequestedAt),
           orb.checkoutCommit,
           orb.harnessSessionId,
-          jsonParam(orb.harnessSessionHeader),
+          header.value,
           orb.lastError,
           orb.runtimeTokenHash,
           orb.replicationCursor,
@@ -775,7 +813,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       if (inserted.isErr()) return err(inserted.error);
       if (inserted.value.rows.length === 0)
         return err({ type: "project_conflict" as const, reason: "concurrent_change" as const });
-      return ok(mapOrbRow(inserted.value.rows[0] ?? {}));
+      return mapOrbRow(inserted.value.rows[0] ?? {});
     });
   }
 
@@ -804,10 +842,13 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         ]);
         if (caller.isErr()) return err(caller.error);
         const source = caller.value.rows[0];
+        const sourceOrb = source === undefined ? ok(null) : mapOrbRow(source);
+        if (sourceOrb.isErr()) return err(sourceOrb.error);
         if (
           source === undefined ||
+          sourceOrb.value === null ||
           !acceptsOrbAgentCaller(
-            mapOrbRow(source),
+            sourceOrb.value,
             project.value.rows[0]?.["owner_user_id"] as string | undefined,
             params.caller,
           )
@@ -888,7 +929,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            ${params.onlyIfNull ? "AND name IS NULL" : ""} RETURNING *`,
         [params.orbId, params.name, new Date(params.now)],
       )
-      .map((result) => (result.rows[0] === undefined ? null : mapOrbRow(result.rows[0])));
+      .andThen((result) => (result.rows[0] === undefined ? ok(null) : mapOrbRow(result.rows[0])));
   }
 
   claimOrbAutoName(
@@ -974,7 +1015,11 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       const existingRow = existing.value.rows[0];
       if (existingRow !== undefined) {
         if (!jsonEqual(existingRow["content"], params.content)) return err(stateConflict(state));
-        return ok({ message: mapMessageRow(existingRow), orb: mapOrbRow(orbRow), duplicate: true });
+        return mapOrbRow(orbRow).map((orb) => ({
+          message: mapMessageRow(existingRow),
+          orb,
+          duplicate: true,
+        }));
       }
       if (
         params.cancelSleep !== false &&
@@ -1027,11 +1072,11 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       );
       if (touched.isErr()) return err(touched.error);
       orbRow = touched.value.rows[0] ?? orbRow;
-      return ok({
+      return mapOrbRow(orbRow).map((orb) => ({
         message: mapMessageRow(inserted.value.rows[0] ?? {}),
-        orb: mapOrbRow(orbRow),
+        orb,
         duplicate: false,
-      });
+      }));
     });
   }
 
@@ -1089,10 +1134,12 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         row["project_id"],
       ]);
       if (project.isErr()) return err(project.error);
+      const callerOrb = mapOrbRow(row);
+      if (callerOrb.isErr()) return err(callerOrb.error);
       if (
         row["sleep_id"] !== null ||
         !acceptsOrbAgentCaller(
-          mapOrbRow(row),
+          callerOrb.value,
           project.value.rows[0]?.["owner_user_id"] as string | undefined,
           params.caller,
         )
@@ -1109,7 +1156,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       );
       if (updated.isErr()) return err(updated.error);
       const accepted = updated.value.rows[0];
-      return accepted === undefined ? err(stateConflict()) : ok(mapOrbRow(accepted));
+      return accepted === undefined ? err(stateConflict()) : mapOrbRow(accepted);
     });
   }
 
@@ -1128,8 +1175,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       )
       .andThen((result) =>
         result.rows[0] === undefined
-          ? errAsync(stateConflict())
-          : okAsync(mapOrbRow(result.rows[0])),
+          ? err<OrbRow, StoreError | StateConflict>(stateConflict())
+          : mapOrbRow(result.rows[0]),
       );
   }
 
@@ -1459,7 +1506,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         [params.orbId, new Date(params.now)],
       );
       if (cleared.isErr()) return err(cleared.error);
-      return ok({ orb: mapOrbRow(updatedRow), cancelledSleepId });
+      return mapOrbRow(updatedRow).map((orb) => ({ orb, cancelledSleepId }));
     });
   }
 
@@ -1511,7 +1558,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       );
       if (started.isErr()) return err(started.error);
       const row = started.value.rows[0];
-      return row === undefined ? err(stateConflict()) : ok(mapOrbRow(row));
+      return row === undefined ? err(stateConflict()) : mapOrbRow(row);
     });
   }
 
@@ -1565,7 +1612,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         ],
       );
       if (intent.isErr()) return err(intent.error);
-      return ok(mapOrbRow(row));
+      return mapOrbRow(row);
     });
   }
 
@@ -1633,7 +1680,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       if (row === undefined) return err(stateConflict());
       const removed = await query("DELETE FROM orb_deletions WHERE orb_id = $1", [params.orbId]);
       if (removed.isErr()) return err(removed.error);
-      return ok(mapOrbRow(row));
+      return mapOrbRow(row);
     });
   }
 
@@ -1690,7 +1737,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         ],
       );
       if (tombstone.isErr()) return err(tombstone.error);
-      return ok(mapOrbRow(row));
+      return mapOrbRow(row);
     });
   }
 
@@ -1891,7 +1938,9 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           ),
         );
       }
-      const orb = mapOrbRow(raw);
+      const mapped = mapOrbRow(raw);
+      if (mapped.isErr()) return err(mapped.error);
+      const orb = mapped.value;
       if (
         orb.hostRef === null ||
         (params.force !== true && orb.hostSpecFingerprint === params.desiredFingerprint)
@@ -1921,7 +1970,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       const row = updated.value.rows[0];
       return row === undefined
         ? err(stateConflict(orb.state))
-        : ok({ type: "requested" as const, orb: mapOrbRow(row) });
+        : mapOrbRow(row).map((orb) => ({ type: "requested" as const, orb }));
     });
   }
 
@@ -1938,7 +1987,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       const result = await this.db.query(sql, [orbId, expectedStateVersion, ...values]);
       if (result.isErr()) return err(result.error);
       const row = result.value.rows[0];
-      if (row !== undefined) return ok(mapOrbRow(row));
+      if (row !== undefined) return mapOrbRow(row);
       const current = await this.db.query("SELECT state FROM orbs WHERE id = $1", [orbId]);
       const state = current.isOk() ? current.value.rows[0]?.["state"] : undefined;
       return err(stateConflict(typeof state === "string" ? (state as OrbState) : undefined));
@@ -2019,7 +2068,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         );
         if (updated.isErr()) return err(updated.error);
         const row = updated.value.rows[0];
-        return row === undefined ? err(stateConflict()) : ok(mapOrbRow(row));
+        return row === undefined ? err(stateConflict()) : mapOrbRow(row);
       });
     }
     if (params.cancelSleep === true) {
@@ -2172,11 +2221,15 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         const row = locked.value.rows[0];
         if (row === undefined) return err({ type: "orb_not_found" as const });
         const found = await query(
-          "SELECT 1 FROM history_records WHERE orb_id = $1 AND record_id = $2 AND record->'alert' IS NOT NULL AND record->>'type' = 'event'",
+          "SELECT record_id, parent_id, record FROM history_records WHERE orb_id = $1 AND record_id = $2",
           [orbId, recordId],
         );
         if (found.isErr()) return err(found.error);
         if (found.value.rows.length === 0) return err({ type: "alert_not_replicated" as const });
+        const alert = decodeRecord(found.value.rows[0] ?? {});
+        if (alert.isErr()) return err(alert.error);
+        if (alert.value.type !== "event" || alert.value.alert === undefined)
+          return err({ type: "alert_not_replicated" as const });
         const current = row["unread_alert_id"] == null ? null : String(row["unread_alert_id"]);
         if (current !== recordId) return ok({ pointer: current, cleared: false });
         const cleared = await query("UPDATE orbs SET unread_alert_id = NULL WHERE id = $1", [
@@ -2233,6 +2286,10 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       if (row === undefined) return ok(undefined);
       const storedSessionId =
         row["harness_session_id"] === null ? null : String(row["harness_session_id"]);
+      const encoded = encodeSession(session, session.id, orbId);
+      if (encoded.isErr()) return err(historyMappingFailure(encoded.error));
+      const storedSession = decodeSession(row["harness_session_header"], storedSessionId, orbId);
+      if (storedSession.isErr()) return err(historyMappingFailure(storedSession.error));
       const storedCursor =
         row["replication_cursor"] === null ? null : String(row["replication_cursor"]);
       if (
@@ -2240,16 +2297,16 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         // An empty replica pins nothing (docs/history-replication.md): with no committed
         // cursor, a changed session identity is legitimate rotation.
         (storedCursor === null &&
-          (storedSessionId !== session.id || !jsonEqual(row["harness_session_header"], session)))
+          (storedSessionId !== session.id || !jsonEqual(storedSession.value, session)))
       ) {
         const updated = await query(
-          "UPDATE orbs SET harness_session_id = $2, harness_session_header = $3::jsonb WHERE id = $1",
-          [orbId, session.id, jsonParam(session)],
+          "UPDATE orbs SET harness_session_id = $2, harness_session_header = $3 WHERE id = $1",
+          [orbId, session.id, encoded.value],
         );
         if (updated.isErr()) return err(updated.error);
         return ok(undefined);
       }
-      if (storedSessionId !== session.id || !jsonEqual(row["harness_session_header"], session)) {
+      if (storedSessionId !== session.id || !jsonEqual(storedSession.value, session)) {
         return err<void, ReplicationIntegrityError>({
           type: "replication_integrity",
           reason: "session_mismatch",
@@ -2268,13 +2325,15 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   ): ResultAsync<HistoryRecord | null, StoreError> {
     return this.db.transaction<HistoryRecord | null, StoreError>(async (query) => {
       const result = await query(
-        `SELECT h.record FROM history_records h JOIN orbs o ON o.id = h.orb_id
+        `SELECT h.record_id, h.parent_id, h.record FROM history_records h JOIN orbs o ON o.id = h.orb_id
           WHERE h.orb_id = $1 AND h.record_id = $2 AND o.harness_session_id = $3 AND o.state <> 'deleting'`,
         [orbId, recordId, sessionId],
       );
       return result.isErr()
         ? err(result.error)
-        : ok((result.value.rows[0]?.["record"] ?? null) as HistoryRecord | null);
+        : result.value.rows[0] === undefined
+          ? ok(null)
+          : decodeRecord(result.value.rows[0]);
     });
   }
 
@@ -2301,7 +2360,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       StoreError
     >(async (query) => {
       const orbResult = await query(
-        "SELECT state, harness_session_header, replication_cursor, replicated_head_id FROM orbs WHERE id = $1",
+        "SELECT state, harness_session_id, harness_session_header, replication_cursor, replicated_head_id FROM orbs WHERE id = $1",
         [orbId],
       );
       if (orbResult.isErr()) return err(orbResult.error);
@@ -2321,15 +2380,23 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
              JOIN chain ON h.record_id = chain.parent_id
             WHERE h.orb_id = $1
          )
-         SELECT record FROM chain ORDER BY depth DESC`,
+         SELECT record_id, parent_id, record FROM chain ORDER BY depth DESC`,
         [orbId, atRecordId ?? cursor],
       );
       if (recordsResult.isErr()) return err(recordsResult.error);
+      const session = decodeSession(
+        row["harness_session_header"],
+        row["harness_session_id"],
+        orbId,
+      );
+      if (session.isErr()) return err(session.error);
+      const records = Result.combine(recordsResult.value.rows.map(decodeRecord));
+      if (records.isErr()) return err(records.error);
       return ok({
-        session: (row["harness_session_header"] ?? null) as HarnessSessionMetadata | null,
+        session: session.value,
         cursor,
         headId: row["replicated_head_id"] === null ? null : String(row["replicated_head_id"]),
-        records: recordsResult.value.rows.map((r) => r["record"] as HistoryRecord),
+        records: records.value,
       });
     });
   }

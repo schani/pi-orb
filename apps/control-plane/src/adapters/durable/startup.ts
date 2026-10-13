@@ -11,6 +11,7 @@ import type { Query } from "../durable-pg/executor.ts";
 import type { AuthorityError } from "../durable-pg/index.ts";
 import { storageAuthorityError } from "../durable-pg/storage-boundary.ts";
 import { readTransactionStorage } from "../durable-pg/transaction-reader.ts";
+import { decodeSession } from "../pg/history-json.ts";
 import { projectHistory } from "./projection.ts";
 
 export const legacyBackendMessage =
@@ -57,16 +58,8 @@ export async function checkNativeStartup(query: Query, orbId: string, startup = 
       message: "Agent authority is closed",
     });
   const session = row.harness_session_id;
-  const header = row.harness_session_header;
-  if (
-    (session == null) !== (header == null) ||
-    (header != null &&
-      (typeof header !== "object" ||
-        Array.isArray(header) ||
-        !("id" in header) ||
-        header.id !== session))
-  )
-    return err(integrity());
+  const decoded = decodeSession(row.harness_session_header, session, orbId);
+  if (decoded.isErr()) return err(integrity());
   const documents = await query(
     "SELECT id FROM durable_pg_documents WHERE orb_id=$1 AND kind=$2 AND scope_kind='conversation' AND owner_id=$3 AND family=0 AND key_value=$4 AND retired_at IS NULL LIMIT 2",
     [orbId, JSON.stringify("orb.identity"), ROOT_CONVERSATION_ID, JSON.stringify("")],

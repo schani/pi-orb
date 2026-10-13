@@ -8,6 +8,13 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Attribute lossless-history qualification timeouts before deployment** (2026-10-13; `docs/testing.md`). Preserve image/OAuth and PGlite setup-hook failures from overlapping local runs; causes remain unproven. Qualify resource ownership and test cancellation (300-second sandbox versus 30-second test without forwarded abort signal), then complete broader exact-source gates. An exclusive scoped pass is not clearance; no deployment waiver.
+
+
+- **Surface invariant history-poll blockage to the user** (2026-10-13; `docs/postmortems/2026-10-13-claude-history-nul.md`). Expose parked replication and blocked inbox delivery without claiming delivery before receipt commit; retain content-free durable diagnosis.
+
+- **Handle arbitrary input Unicode at the inbox storage boundary** (2026-10-13; `docs/history-replication.md`). `orb_messages` content remains JSONB and can reject NUL/unpaired surrogates; the history TEXT correction does not cover input acceptance. Define and test lossless storage or explicit user-visible rejection separately.
+
 - **Attribute the historical Claude query-rotation failure** (2026-10-13; `docs/postmortems/2026-10-13-claude-query-rotation.md`). Retained evidence is copied read-only; temporary login revoked. Premature handoff completion is reproduced against the pinned native CLI for zero-turn acknowledgments and older in-flight inference results, and corrected locally with native/DST completion regressions and durable diagnostics. The incident's deployed runtime revision and exact SDK-result/shutdown ordering remain unestablished. Local exact-source unit/infra/typecheck/lint and scoped process full-slice E2E pass. Complete normal release CI/full E2E before any separately authorized deployment; do not automatically replay the failed orb.
 
 - **Qualify the Codex default-continuation correction before release** (2026-10-12; `docs/pi-adapter.md`). The tracked Pi AI 1.1.0 patch and offline regression are implemented locally. Complete normal exact-source full-suite/E2E qualification before any separately authorized deployment; offline request equivalence is not backend cache or billing evidence.

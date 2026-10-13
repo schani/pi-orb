@@ -2709,7 +2709,7 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
               : fence === "orb"
                 ? "UPDATE orbs SET state = 'deleting' WHERE id = $1"
                 : fence === "session"
-                  ? 'UPDATE orbs SET harness_session_id = \'changed\', harness_session_header = \'{"id":"changed","overflow":{}}\'::jsonb WHERE id = $1'
+                  ? 'UPDATE orbs SET harness_session_id = \'changed\', harness_session_header = \'{"id":"changed","overflow":{}}\' WHERE id = $1'
                   : "DELETE FROM history_records WHERE orb_id = $1";
           const changed = await query(sql, [fence === "project" ? project.id : orb.id]);
           entered();
@@ -2912,7 +2912,7 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
         now: 2_500,
       });
       expect(duplicate.isOk() && duplicate.value.duplicate).toBe(true);
-      // A stored session header is an object-shaped jsonb parameter.
+      // Session headers retain structured metadata.
       expect(
         (
           await store.initOrVerifySession(task, orb.id, {

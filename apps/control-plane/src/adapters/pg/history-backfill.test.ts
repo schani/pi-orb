@@ -243,6 +243,16 @@ describe(`${BACKFILL} history backfill`, () => {
   const stored = new Map<string, HistoryRecord>();
 
   beforeAll(async () => {
+    (
+      await client.query(
+        "CREATE TABLE schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())",
+      )
+    )._unsafeUnwrap();
+    (
+      await client.query(
+        "INSERT INTO schema_migrations (name) VALUES ('044_lossless_history_json.sql')",
+      )
+    )._unsafeUnwrap();
     expect((await runMigrations(client)).isOk()).toBe(true);
     expect(
       (
