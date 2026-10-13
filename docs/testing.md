@@ -2,6 +2,10 @@
 
 **PR 84 qualification — 2026-10-13:** the rebased, simplified initialization diagnostics pass 108 focused tests and typecheck/lint. The seven frontend files completed before the [first CI shard failure](https://github.com/schani/pi-orb/actions/runs/38348517524/job/115135368758) pass locally (24 tests), but that does not clear its subsequent runner segmentation fault/exit139; the crashing component and cause remain unproven. First logs/artifacts: `.context/pr84-revision/`. No deployment qualification is claimed.
 
+## Cross-observer delivery order (2026-10-13)
+
+Browser E2Es must not assume delivery order between separate `IntersectionObserver`s; Chromium varies it. Assert the observed order. Incident: `docs/postmortems/2026-10-13-subagent-headline-observer-order.md`.
+
 ## Claude immediate steering (2026-10-12; local, undeployed)
 
 `steering.test.ts` covers immediate human input, same-operation admission, duplicate receipts, interruption results, child-only work, nonhuman origin, capped UUID echoes, persistence and initialization fences. Two DST cases each run 40 schedules for root-result and Abort races. Two controlled native probes use SDK 0.3.289 / CLI 2.1.289, a loopback provider, held MCP/response barriers, dummy authentication and network isolation; no agents or live model calls. `claude-compute-recovery.http.test.ts` verifies busy steering through `FetchRuntimeClient`, the runtime HTTP server and persisted/replicated history alongside the existing WebSocket recovery handshake.
