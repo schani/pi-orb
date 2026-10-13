@@ -33,6 +33,7 @@ test("shipped Pi-only helper applies and reapplies in checkout staging and extra
     patch,
     "@earendil-works+pi-ai+1.1.0.patch",
     "@earendil-works+pi-agent-core+1.1.0.patch",
+    "@earendil-works+pi-codemode+1.1.0.patch",
   ];
   const targets = [];
   const gitFiles = ["config", "index"].map((file) => {
@@ -115,7 +116,7 @@ test("Glideos rejects a substituted shipped patch even with updated file manifes
               "e817628f707f1d5ea2a3d0d27702919862b23303ba656dea8d30c6412da3e8e1",
             [patch]: patchHash,
             "@earendil-works+pi-ai+1.1.0.patch":
-              "00c77c3ef2de00b331886971cac1c84f7efd8c68a494b48c7db9128418027a58",
+              "812225636f3c081e6e8497b0b7c98051baedea90b455f6e7f837ccc5a84be9c7",
           },
         },
         files: { [`patches/${patch}`]: hash(join(dir, "patches", patch)) },

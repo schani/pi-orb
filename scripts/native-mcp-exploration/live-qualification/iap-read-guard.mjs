@@ -21,7 +21,7 @@ export async function guard(stage) {
     "@earendil-works+pi-agent-core+1.1.0.patch":
       "e817628f707f1d5ea2a3d0d27702919862b23303ba656dea8d30c6412da3e8e1",
     "@earendil-works+pi-ai+1.1.0.patch":
-      "00c77c3ef2de00b331886971cac1c84f7efd8c68a494b48c7db9128418027a58",
+      "812225636f3c081e6e8497b0b7c98051baedea90b455f6e7f837ccc5a84be9c7",
     "@earendil-works+pi-coding-agent+1.1.0.patch":
       "f1d54d120d0de92a0ae119e6588f43fb40114f66a3508fb57547034eddf0161e",
   };

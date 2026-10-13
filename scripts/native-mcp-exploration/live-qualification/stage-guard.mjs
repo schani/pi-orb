@@ -19,7 +19,7 @@ const patches = new Map([
   ],
   [
     "@earendil-works+pi-ai+1.1.0.patch",
-    "00c77c3ef2de00b331886971cac1c84f7efd8c68a494b48c7db9128418027a58",
+    "812225636f3c081e6e8497b0b7c98051baedea90b455f6e7f837ccc5a84be9c7",
   ],
 ]);
 
