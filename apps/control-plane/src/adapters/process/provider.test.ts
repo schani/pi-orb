@@ -677,50 +677,123 @@ describe("ProcessOrbHostProvider", () => {
     },
   );
 
-  launchIt("discard kills group members that outlive the leader", async () => {
-    const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
-    const memberPidFile = join(tmpdir(), `pi-orb-member-${crypto.randomUUID()}`);
-    const { provider, root } = makeProvider(
-      { OBSERVED_ENV_FILE: observedEnv, GROUP_MEMBER_PID_FILE: memberPidFile },
-      { terminateGraceMs: 150 },
-    );
-    let memberPid: number | null = null;
-    try {
-      const provisioned = await provider.provision(task, request, context);
-      expect(provisioned.isOk()).toBe(true);
-      memberPid = await eventually(() => {
-        try {
-          const pid = Number(readFileSync(memberPidFile, "utf8"));
-          return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
-        } catch {
-          return null;
-        }
-      });
-      expect(processExists(memberPid)).toBe(true);
-
-      // The leader dies on SIGTERM; the member ignores it. Discard may only
-      // report absence once the whole group is gone, which requires the
-      // SIGKILL rung and the post-SIGKILL group probe.
-      const discarded = await provider.discardCompute(
-        task,
-        { orbId: request.orbId, throughIncarnation: 0 },
-        context,
+  launchIt.each([false, true])(
+    "discard kills group members that outlive the leader (delayed drain: %s)",
+    async (delayed) => {
+      const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
+      const memberPidFile = join(tmpdir(), `pi-orb-member-${crypto.randomUUID()}`);
+      const { provider, root } = makeProvider(
+        { OBSERVED_ENV_FILE: observedEnv, GROUP_MEMBER_PID_FILE: memberPidFile },
+        { terminateGraceMs: 150 },
       );
-      expect(discarded.isOk(), JSON.stringify(discarded)).toBe(true);
-      expect(processExists(memberPid)).toBe(false);
-      expect(existsSync(join(root, "configured-state", request.orbId, "host.json"))).toBe(false);
-    } finally {
-      if (memberPid !== null && processExists(memberPid)) {
-        try {
-          process.kill(memberPid, "SIGKILL");
-        } catch {
-          // Already gone.
+      let memberPid: number | null = null;
+      let pausedSupervisor: number | null = null;
+      try {
+        const provisioned = await provider.provision(task, request, context);
+        expect(provisioned.isOk()).toBe(true);
+        memberPid = await eventually(() => {
+          try {
+            const pid = Number(readFileSync(memberPidFile, "utf8"));
+            return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+          } catch {
+            return null;
+          }
+        });
+        expect(processExists(memberPid)).toBe(true);
+
+        const directory = join(root, "configured-state", request.orbId);
+        const metadataPath = join(directory, "host.json");
+        const receiptPath = join(directory, "drained.json");
+        const metadata = JSON.parse(readFileSync(metadataPath, "utf8")) as {
+          processGroupId: number;
+          processBirth: string;
+          drainToken: string;
+        };
+        const diagnostics = () => {
+          const read = (path: string) => {
+            try {
+              return readFileSync(path, "utf8");
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+              throw error;
+            }
+          };
+          return JSON.stringify({
+            metadata,
+            supervisorStat: read(`/proc/${metadata.processGroupId}/stat`),
+            receipt: read(receiptPath),
+            stderr: read(join(directory, "runtime.err.log")),
+          });
+        };
+        if (delayed) {
+          pausedSupervisor = metadata.processGroupId;
+          process.kill(pausedSupervisor, "SIGSTOP");
+          await eventually(() =>
+            readFileSync(`/proc/${metadata.processGroupId}/stat`, "utf8").includes(") T ")
+              ? true
+              : null,
+          );
         }
+
+        // Drive deadline expiry explicitly; successful drain follows the receipt,
+        // not the scheduler's ability to kill, reap and fsync within 150 ms.
+        const clock = vi.spyOn(Date, "now").mockReturnValue(0);
+        if (delayed) clock.mockReturnValueOnce(0).mockReturnValue(151);
+        const discard = () =>
+          provider.discardCompute(task, { orbId: request.orbId, throughIncarnation: 0 }, context);
+        const discarded = await Promise.resolve(discard()).finally(() => clock.mockRestore());
+        if (delayed) {
+          expect(discarded.isErr(), diagnostics()).toBe(true);
+          if (discarded.isErr()) {
+            expect(discarded.error).toEqual({
+              type: "orb_host_provider_error",
+              provider: "process",
+              operation: "discard",
+              code: "unavailable",
+              message: "execution supervisor loss: descendant cleanup is unknown",
+              retryable: true,
+            });
+          }
+          expect(existsSync(metadataPath), diagnostics()).toBe(true);
+          expect(existsSync(receiptPath), diagnostics()).toBe(false);
+          expect(processExists(memberPid), diagnostics()).toBe(true);
+          process.kill(metadata.processGroupId, "SIGCONT");
+          pausedSupervisor = null;
+          await eventually(() => {
+            if (!existsSync(receiptPath) || processExists(metadata.processGroupId)) return null;
+            const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as { launch: string };
+            return receipt.launch === metadata.drainToken ? true : null;
+          }).catch((error: unknown) => {
+            console.error(diagnostics());
+            throw error;
+          });
+          expect(readFileSync(join(directory, "runtime.err.log"), "utf8")).toContain(
+            "execution supervisor: descendants drained",
+          );
+          expect((await discard()).isOk(), diagnostics()).toBe(true);
+        } else {
+          expect(discarded.isOk(), diagnostics()).toBe(true);
+        }
+        expect(JSON.parse(readFileSync(receiptPath, "utf8"))).toEqual({
+          launch: metadata.drainToken,
+        });
+        expect(processExists(metadata.processGroupId), diagnostics()).toBe(false);
+        expect(processExists(memberPid), diagnostics()).toBe(false);
+        expect(existsSync(metadataPath)).toBe(false);
+      } finally {
+        if (pausedSupervisor !== null) process.kill(pausedSupervisor, "SIGCONT");
+        if (memberPid !== null && processExists(memberPid)) {
+          try {
+            process.kill(memberPid, "SIGKILL");
+          } catch {
+            // Already gone.
+          }
+        }
+        rmSync(observedEnv, { force: true });
+        rmSync(memberPidFile, { force: true });
       }
-      rmSync(observedEnv, { force: true });
-      rmSync(memberPidFile, { force: true });
-    }
-  });
+    },
+  );
 });
 
 describe("ProcessOrbHostProvider host specification", () => {
