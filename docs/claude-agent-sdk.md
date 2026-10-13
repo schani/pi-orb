@@ -19,6 +19,18 @@ Implemented: immutable harness selection/inheritance; owner connection UI/native
 
 Existing conversations automatically continue after restart using the shared Pi boot decision, including combined sleep-wake context. Missing human input receipts or unreconciled child ownership fail visibly; old child work is never replayed. A background child terminal requires a subsequent native root handoff; absent that edge, work remains busy until explicit interruption. Query rotation changes SessionStart/SessionEnd hook frequency. Always-open-query parity and interactive question UI remain unqualified. Scope and guards: `docs/claude-sdk-capabilities.md`. Historical Spot-preemption recovery: [docs/postmortems/2026-10-06-claude-orb-preemption.md](postmortems/2026-10-06-claude-orb-preemption.md).
 
+## Human steering (decided 2026-10-12; implemented locally, undeployed)
+
+Human input uses `priority: "now"` with `origin: { kind: "human" }`. During an active operation, inbox input joins its operation ID and returns `delivery: "steer"`; it does not wait for the reply, tools, children or hooks to finish. Chat and boot prompts have `"now"` priority; system/boot input retains nonhuman provenance.
+
+Keep new input in the durable inbox during query initialization, settings changes, manual compaction, explicit Abort/failure, and query shutdown. Normal completion still rotates the query only after owned work, supervised native exit, stdout/iterator/hook drain and final history commit.
+
+Persist the steer flag, native input UUID, inbox identities and operation ID before SDK submission. Duplicate delivery retains its original classification without resubmission. An interrupted old turn's result cannot close the query while accepted steering awaits its own native result UUID echo. For an echo capped at 64 UUIDs, retiring omitted inputs additionally requires the latest accepted UUID, zero queued turns and durable native receipts for every pending input. Abort without a durable receipt fails visibly rather than replaying input.
+
+Existing control-plane `message-batch-dispatched` edges record turn/steer delivery. Hidden replicated `claude.steering_result` edges retain query/operation/result identities, answered and pending input UUIDs and native queued-turn count; no prompts or tool output. User messages and operation outcomes remain visible in ordinary history. Non-steered operations emit no steering diagnostics.
+
+Native priority semantics and pinned-version evidence: `docs/claude-sdk-capabilities.md`. Qualification: `docs/testing.md`.
+
 ## Manual compaction (decided 2026-10-06; local, undeployed)
 
 Claude uses the shared runtime `compact` command and thinking-styled row. Admission claims aggregate ownership synchronously before credentials or query initialization; settings, inbox, children, hooks and task handoffs remain fenced. `compactionAfterId` freezes the last visible published record at admission. Native input is a string `/compact` with optional instructions, never `client_composed` (which disables native slash dispatch). No public `Query.compact()` exists. No human/inbox message, assistant stream or Luna summary is fabricated.
@@ -118,7 +130,7 @@ The first slice targets a working orb, not a chat-only integration. These are qu
 
 - Chat, native tools and image input/output; advertise image capability only after the pinned model and serializers are proven.
 - Durable send-anytime acceptance, reconnect, complete history, stopped/archived views, Start/Stop/Abort, terminal, workspace uploads, platform Bash CLI/instructions and guarded boot notices.
-- Initially retain busy input in the existing durable control-plane inbox and submit only when aggregate idle. Preserve FIFO batching and acceptance-versus-delivery status. SDK queued input is **not** Pi steering; true in-turn steering requires later qualification before advertising it.
+- Preserve durable inbox FIFO batching and acceptance-versus-delivery status. Human input uses native `"now"` priority and may steer an active operation. Priority semantics and pinned-version evidence are in `docs/claude-sdk-capabilities.md`.
 - Native Claude Agent/subagent tools may expose the active rail only after aggregate busy, cancellation, drain and interruption contracts are proven. Otherwise explicitly omit that capability in the preview; do not claim parity.
 - Keep child transcripts local and private; replicate root results/minimal lifecycle facts only. Do not port Pi's gotgenes extension or codemode packages.
 - Use the shared message/command composer and retain the interactive terminal. Native Bash tools remain available.

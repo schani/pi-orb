@@ -110,7 +110,7 @@ With `query({ prompt: newMessage, options: { resume: sessionId, sessionStore: st
 Thus restart history has an actual SDK API, not merely a proposal to ship filesystem files manually. It needs full native records, not displayed message lists or history embedded in a prompt.
 `projectKey` must match cwd identity; `CLAUDE_CODE_PROJECT_DIR_NAME` can stabilize it on SDK 0.3.234+. Child restoration uses native transcript subkeys, not browser replication.
 Current 0.3.289 exports `importSessionToStore(sessionId, store, { dir?, includeSubagents?, batchSize? })`: it copies existing local raw transcripts **into** the store, not arbitrary chat into a native session. No exported `importSession` exists.
-`query()` AsyncIterable input supplies new user prompts that trigger turns; it is not assistant/system-history injection.
+`query()` AsyncIterable input supplies new user prompts, either starting turns or joining a running turn; it is not assistant/system-history injection.
 
 **Implemented restart continuation (2026-10-06):** after retained native history and ownership qualification, Claude uses Pi's pure boot planner over normalized root evidence. A durable journal claim precedes one ordinary native continuation prompt and busy admission; native receipt provenance keeps that automatic prompt outside human budget resets. Compaction-summary/meta input likewise grants no human budget. Three claims after real user input bound dangling-tail recovery; explicit Abort/error terminals stay settled. The claim—not a second human delivery ledger entry—covers a crash before the automatic prompt's native receipt. Missing human receipts still fail closed. Sleep-wake identity is combined and deduplicated through the claim. Epoch cancellation prevents prompt admission after recovery Abort; old native child work is not replayed. Sanitized source/generation diagnostics remain in the private session pointer, not conversation. Implementation and qualification limits: `docs/claude-agent-sdk.md`.
 
@@ -118,6 +118,20 @@ Mirroring is best effort: failures can emit `mirror_error`, drop a batch and con
 Resumed temporary native files are deleted at session end; a dropped batch can lose the only copy. Product reliability must address this before relying on the store for durability.
 The selected topology retains authoritative native files on the orb filesystem; no startup `SessionStore` or extra native-history service is needed. Its hydration API remains research evidence, not required integration. Normalized control-plane display history is insufficient for native restore.
 Sources: [sessions](https://code.claude.com/docs/en/agent-sdk/sessions), [session storage](https://code.claude.com/docs/en/agent-sdk/session-storage), published signatures below.
+
+## Live input and steering
+
+**Research — 2026-10-12:** the [TypeScript reference](https://code.claude.com/docs/en/agent-sdk/typescript#sdkusermessage) explicitly supports mid-turn input through streaming `SDKUserMessage`:
+
+- `priority: "next"` (also the default): consume within the current turn after running tool calls finish; if the turn ends first, start the next turn.
+- `priority: "later"`: wait for a new turn.
+- `priority: "now"` with `origin: { kind: "human" }`: move eligible work to the background and consume within the current turn. Bash, Agent and MCP calls require CLI 2.1.286+; WebFetch/WebSearch require 2.1.287+. If only generating a response or running work that cannot move, interrupt and consume next. Without human origin, `"now"` interrupts instead.
+
+The repository pins SDK 0.3.289. Its [published types](https://unpkg.com/@anthropic-ai/claude-agent-sdk@0.3.289/sdk.d.ts) expose `priority` and `origin`, and its manifest identifies CLI 2.1.289. Inspection of the published `sdk.mjs` shows `streamInput()` writes each yielded message, preserving these fields, without waiting for a turn result; result types also describe user messages folded into a running turn between tool rounds. Source inspection establishes the SDK contract; controlled native execution evidence is recorded below.
+
+The [streaming overview](https://code.claude.com/docs/en/agent-sdk/streaming-vs-single-mode) describes sequential queued messages without these priority semantics. Historical [issue 70](https://github.com/anthropics/claude-agent-sdk-typescript/issues/70) was closed with that overview; follow-up reports questioned mid-turn delivery. Those reports do not override the current explicit reference and pinned types.
+
+**Implemented locally — 2026-10-12:** pi-orb submits `"now"` input during active operations, with human origin only for human input; it preserves durable admission, duplicate correlation, explicit Abort and shutdown fences (`docs/claude-agent-sdk.md`). Native tests against SDK 0.3.289 / CLI 2.1.289 demonstrate delivery while an MCP tool is blocked and interruption of a partially streamed response. An owned loopback provider and explicit tool/stream barriers make both cases deterministic; no live model credentials or agent delegation are used. These qualify native transport behavior, not live model judgment or always-open-query parity. Fixture and limits: `scripts/claude-sdk-contract/README.md`, `docs/testing.md`.
 
 ## Idleness versus root completion
 

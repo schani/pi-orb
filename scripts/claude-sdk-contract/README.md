@@ -45,3 +45,11 @@ The project-definition table runs the production `settingSources: ["user", "proj
 Production qualification injects the actual `ComposedClaudeFixture` attach/submit query's `PreToolUse` callbacks into the native probe. Under `bypassPermissions`, all worker Agent calls are denied for both project names, both definition background settings, and input true/false/absent. The reviewer provider must consume all three exact denial IDs/reasons; complete tool-result blocks must equal the native transcript. No leaf request or descendant file may exist. Ordinary worker Bash still executes; its private content never reaches root. A separate two-root-Agent provider barrier proves parallel asynchronous fanout remains available. Canned reviewer/root finals prove protocol completion, not live inference quality. Set `CLAUDE_ROOT_POLICY_ARTIFACT_DIR` when running the native contract test to retain content-free evidence.
 
 Root can resume a named reviewer through its ordinary native `SendMessage({to: name, message: ...})` tool. The probe verifies a second reviewer result and root synthesis through that public path. This qualifies native routing and continuation, not whether a real model will choose the tool or supply a semantically complete answer.
+
+## Steering
+
+```sh
+npx vitest run apps/orb-runtime/src/claude/steering-native.test.ts
+```
+
+`steering.mjs` uses the same network guard and isolated dummy authentication, with no Agent tools. A held SDK MCP tool admits human `priority: "now"` input only after its handler starts. The next provider request must contain that input before the tool is released. A separate response-stream barrier verifies interruption of an unfinished response, followed by a successful result for the new input. Native result UUID echoes distinguish the old interrupted turn from the steering result. Return values contain only counts and booleans. These probes establish native delivery, not production model reasoning, subscription behavior or aggregate idle.

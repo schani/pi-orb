@@ -241,8 +241,8 @@ it("persists restart claim and owns admission before query initialization", asyn
   expect(
     (
       await f.agent.deliverInboxMessage("later", ["later"], [{ type: "text", text: "human later" }])
-    ).isErr(),
-  ).toBe(true);
+    )._unsafeUnwrap(),
+  ).toMatchObject({ delivery: "steer", operationId: f.agent.gateView().activeOperationId });
   expect(f.agent.prepareIdleStop()._unsafeUnwrap()).toBe(false);
   f.exit();
 });

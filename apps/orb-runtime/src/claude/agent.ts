@@ -96,6 +96,7 @@ const NativeStateSchema = Type.Object({
     Type.Object({
       uuid: Type.String(),
       operationId: Type.String(),
+      steer: Type.Optional(Type.Literal(true)),
       messageIds: Type.Array(Type.String()),
       content: Type.Optional(Type.Array(MessageInputBlockSchema)),
       fingerprint: Type.String(),
@@ -181,6 +182,7 @@ export type ClaudeQuery = Pick<
 interface Delivery {
   uuid: string;
   operationId: string;
+  steer?: true;
   messageIds: string[];
   content?: MessageInputBlock[];
   fingerprint: string;
@@ -276,6 +278,7 @@ export class ClaudeOrbAgent implements OrbAgent {
   private accepting = true;
   private configuring = false;
   private submissionEpoch = 0;
+  private readonly pendingSteers = new Set<string>();
   private compaction: ManualCompaction | null = null;
   private queryAbort: AbortController | null = null;
   private drainingOperation: Promise<void> | null = null;
@@ -1366,7 +1369,50 @@ export class ClaudeOrbAgent implements OrbAgent {
       }
     }
     if (message.type === "result") {
-      if (this.closing === null) this.activity.rootFinished();
+      const pending = [...this.pendingSteers];
+      const answered = new Set(message.user_message_uuids ?? [message.user_message_uuid]);
+      const latest = pending.at(-1);
+      // The native UUID echo is capped at 64; a drained batch must not strand its omitted inputs.
+      if (
+        answered.size === 64 &&
+        latest !== undefined &&
+        answered.has(latest) &&
+        message.queued_turn_count === 0
+      ) {
+        const flushed = this.flushHistory();
+        if (flushed.isErr()) {
+          this.fail("history_unavailable", flushed.error.message);
+          return;
+        }
+        if (pending.every((uuid) => this.history?.view.some((record) => record.id === uuid)))
+          for (const uuid of pending) answered.add(uuid);
+      }
+      for (const uuid of answered) if (uuid !== undefined) this.pendingSteers.delete(uuid);
+      if (pending.length > 0) {
+        const recorded = this.platformEvent(
+          "claude.steering_result",
+          "Native steering result.",
+          {
+            operationId: this.activity.operationId,
+            queryId: this.queryId,
+            resultId: message.uuid ?? null,
+            answeredInputs: pending.filter((uuid) => answered.has(uuid)),
+            pendingInputs: [...this.pendingSteers],
+            queuedTurns: message.queued_turn_count ?? null,
+          },
+          message.uuid === undefined ? randomUUID() : `claude.steering-result:${message.uuid}`,
+          false,
+        );
+        if (recorded.isErr()) {
+          this.fail("claude_steering_persistence_failed", recorded.error.message);
+          return;
+        }
+      }
+      if (this.closing === null) {
+        if (this.pendingSteers.size === 0 && (message.queued_turn_count ?? 0) === 0)
+          this.activity.rootFinished();
+        else this.activity.rootStarted();
+      }
       this.continuationObservation("root_result", {
         subtype: message.subtype,
         resultId: message.uuid ?? null,
@@ -1554,6 +1600,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       }
     }
     this.activity.processExited(true);
+    this.pendingSteers.clear();
     this.blocks.clear();
     this.tools.clear();
     this.event({
@@ -1847,77 +1894,11 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.event({ type: "operation_started", operationId });
     this.event({ type: "status", activity: "busy", operationId });
     return this.startQuery()
-      .andThen(() => {
-        const state = this.state,
-          history = this.history,
-          input = this.input;
-        if (
-          epoch !== this.submissionEpoch ||
-          this.activity.operationId !== operationId ||
-          !this.accepting ||
-          this.health.status !== "ready" ||
-          state === null ||
-          history === null ||
-          input === null ||
-          this.sdk === null ||
-          this.closing !== null
-        )
-          return err({ message: "Claude submission was cancelled before inference." });
-        const uuid = randomUUID();
-        const delivery: Delivery = {
-          uuid,
-          operationId,
-          messageIds: [...messageIds],
-          content: [...content],
-          submitted: true,
-          fingerprint: this.deliveryFingerprint(content, messageIds, system),
-          ...(system === undefined ? {} : { system }),
-        };
-        const correlated = history.correlate(uuid, {
-          messageIds,
-          operationId,
-          ...(system === undefined ? {} : { system: true }),
-          ...(boot ? { boot: true } : {}),
-        });
-        if (correlated.isErr()) {
-          this.fail("claude_input_persistence_failed", correlated.error.message);
-          return err(correlated.error);
-        }
-        if (!boot) {
-          state.deliveries[messageIds[0] ?? uuid] = delivery;
-          const persisted = this.saveState();
-          if (persisted.isErr()) {
-            this.fail("claude_input_persistence_failed", persisted.error.message);
-            return err(persisted.error);
-          }
-        }
-        input.push({
-          type: "user",
-          uuid,
-          session_id: state.id,
-          parent_tool_use_id: null,
-          message: {
-            role: "user",
-            content: content.map((block) =>
-              block.type === "text"
-                ? { type: "text" as const, text: block.text }
-                : {
-                    type: "image" as const,
-                    source: {
-                      type: "base64" as const,
-                      media_type: block.mediaType as
-                        | "image/png"
-                        | "image/jpeg"
-                        | "image/gif"
-                        | "image/webp",
-                      data: block.data,
-                    },
-                  },
-            ),
-          },
-        });
-        return ok(undefined);
-      })
+      .andThen(() =>
+        epoch === this.submissionEpoch
+          ? this.enqueueInput(content, operationId, messageIds, system, "turn", boot)
+          : err({ message: "Claude submission was cancelled before inference." }),
+      )
       .mapErr((error) => {
         if (this.outcome !== "aborted") this.outcome = "failed";
         this.operationError = error.message;
@@ -1925,6 +1906,90 @@ export class ClaudeOrbAgent implements OrbAgent {
         void this.drainOperation();
         return error;
       });
+  }
+  private enqueueInput(
+    content: readonly MessageInputBlock[],
+    operationId: string,
+    messageIds: readonly string[],
+    system: OrbMessageSystem | undefined,
+    kind: "turn" | "steer",
+    boot = false,
+  ): Result<void, { message: string }> {
+    const state = this.state,
+      history = this.history,
+      input = this.input;
+    if (
+      this.activity.operationId !== operationId ||
+      !this.accepting ||
+      this.health.status !== "ready" ||
+      state === null ||
+      history === null ||
+      input === null ||
+      this.sdk === null ||
+      this.closing !== null
+    )
+      return err({ message: "Claude submission was cancelled before inference." });
+    const uuid = randomUUID();
+    const delivery: Delivery = {
+      uuid,
+      operationId,
+      ...(kind === "steer" ? { steer: true as const } : {}),
+      messageIds: [...messageIds],
+      content: [...content],
+      submitted: true,
+      fingerprint: this.deliveryFingerprint(content, messageIds, system),
+      ...(system === undefined ? {} : { system }),
+    };
+    const correlated = history.correlate(uuid, {
+      messageIds,
+      operationId,
+      ...(system === undefined ? {} : { system: true }),
+      ...(boot ? { boot: true } : {}),
+    });
+    if (correlated.isErr()) {
+      this.fail("claude_input_persistence_failed", correlated.error.message);
+      return err(correlated.error);
+    }
+    if (!boot) {
+      state.deliveries[messageIds[0] ?? uuid] = delivery;
+      const persisted = this.saveState();
+      if (persisted.isErr()) {
+        this.fail("claude_input_persistence_failed", persisted.error.message);
+        return err(persisted.error);
+      }
+    }
+    if (kind === "steer") {
+      this.pendingSteers.add(uuid);
+      this.activity.rootStarted();
+    }
+    input.push({
+      type: "user",
+      uuid,
+      session_id: state.id,
+      parent_tool_use_id: null,
+      priority: "now",
+      ...(system === undefined && !boot ? { origin: { kind: "human" as const } } : {}),
+      message: {
+        role: "user",
+        content: content.map((block) =>
+          block.type === "text"
+            ? { type: "text" as const, text: block.text }
+            : {
+                type: "image" as const,
+                source: {
+                  type: "base64" as const,
+                  media_type: block.mediaType as
+                    | "image/png"
+                    | "image/jpeg"
+                    | "image/gif"
+                    | "image/webp",
+                  data: block.data,
+                },
+              },
+        ),
+      },
+    });
+    return ok(undefined);
   }
   deliverInboxMessage(
     messageId: string,
@@ -1979,21 +2044,40 @@ export class ClaudeOrbAgent implements OrbAgent {
           status: this.history?.view.some((record) => record.id === existing.uuid)
             ? ("persisted" as const)
             : ("queued" as const),
-          delivery: "turn" as const,
+          delivery: existing.steer === true ? ("steer" as const) : ("turn" as const),
           operationId: existing.operationId,
           duplicate: true,
         }),
       );
     }
-    const operationId = randomUUID();
-    return this.submit(content, operationId, messageIds, system)
+    const activeOperationId = this.activity.operationId;
+    const delivery = activeOperationId === null ? ("turn" as const) : ("steer" as const);
+    const operationId = activeOperationId ?? randomUUID();
+    if (
+      delivery === "steer" &&
+      (!this.accepting ||
+        this.health.status !== "ready" ||
+        !this.queryReady ||
+        this.configuring ||
+        this.compaction !== null ||
+        this.closing !== null ||
+        this.outcome !== "completed")
+    )
+      return errAsync({ message: "Claude session is not accepting work.", retryable: true });
+    return (
+      delivery === "steer"
+        ? ResultAsync.fromSafePromise(
+            Promise.resolve(this.enqueueInput(content, operationId, messageIds, system, delivery)),
+          ).andThen((result) => result)
+        : this.submit(content, operationId, messageIds, system)
+    )
       .map(() => {
         if (system === undefined) this.triggerAutoName(content);
         return {
           v: 1 as const,
           messageId,
           status: "queued" as const,
-          delivery: "turn" as const,
+          delivery,
           operationId,
           duplicate: false,
         };

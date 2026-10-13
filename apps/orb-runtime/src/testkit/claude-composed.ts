@@ -210,6 +210,9 @@ export class ScheduledClaudeQuery implements ClaudeQuery {
   applyFlagSettings = async () => undefined;
   async emit(task: SimulationTask, message: SDKMessage) {
     await task.checkpoint(`native stdout: ${message.type}`);
+    return this.emitUnscheduled(message);
+  }
+  async emitUnscheduled(message: SDKMessage) {
     if (this.outputEnded) return false;
     const consumed = latch();
     this.messages.push({ message, consumed });

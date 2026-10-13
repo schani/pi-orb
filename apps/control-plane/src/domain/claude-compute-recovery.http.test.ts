@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
   GIT_IDENTITY_RUNTIME_PATH,
   MCP_RUNTIME_PATH,
@@ -312,21 +313,18 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
       const operationId = health.status === "ready" ? health.operationId : undefined;
       expect(operationId).toEqual(expect.any(String));
       expect(claims[0]).toMatchObject({ overflow: { operationId, reason: "resumed" } });
-      const blocked = await runtimeClient.deliverMessage(
+      const steered = await runtimeClient.deliverMessage(
         task,
         {
           baseUrl: currentUrl,
-          messageId: "next",
-          messageIds: ["next"],
-          content: [{ type: "text", text: "next" }],
+          messageId: "steer",
+          messageIds: ["steer"],
+          content: [{ type: "text", text: "change course" }],
         },
         context,
       );
-      expect(blocked._unsafeUnwrapErr()).toMatchObject({
-        code: "http_error",
-        message: "Claude session is not accepting work.",
-      });
-      expect(f.journal().deliveries.next).toBeUndefined();
+      expect(steered._unsafeUnwrap()).toMatchObject({ delivery: "steer", operationId });
+      expect(f.journal().deliveries.steer).toMatchObject({ steer: true, operationId });
       expect(replacementQueries).toHaveLength(2);
       const bootQuery = replacementQuery!;
       expect(bootQuery.options.resume).toBe(f.state.id);
@@ -336,6 +334,19 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
       expect(continuation.value?.message.content).toEqual(claims[0]!.content);
       f.receipt(continuation.value!);
       await bootQuery.emit(task, rootResult);
+      expect(bootQuery.closeRequested).toBe(false);
+      const steering = (await bootQuery.input.next()).value!;
+      expect(steering).toMatchObject({
+        priority: "now",
+        origin: { kind: "human" },
+        message: { content: [{ type: "text", text: "change course" }] },
+      });
+      f.receipt(steering);
+      await bootQuery.emit(task, {
+        ...rootResult,
+        user_message_uuid: steering.uuid,
+        user_message_uuids: [steering.uuid],
+      } as SDKMessage);
       expect(bootQuery.closeRequested).toBe(true);
       expect(replacement!.getHealth()).toMatchObject({ status: "ready", activity: "busy" });
       expect(replacement!.prepareIdleStop()._unsafeUnwrap()).toBe(false);
@@ -361,6 +372,9 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
           overflow: expect.objectContaining({ operationId, outcome: "completed" }),
         }),
       );
+      expect(settled.filter((record) => record.id === steering.uuid)).toEqual([
+        expect.objectContaining({ type: "message", inboxMessageIds: ["steer"] }),
+      ]);
       expect(settled.filter((record) => record.id === input.value!.uuid)).toHaveLength(1);
       expect(
         settled.filter(
