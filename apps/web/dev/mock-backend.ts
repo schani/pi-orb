@@ -159,6 +159,7 @@ function initialState(timestampChurn: boolean): MockState {
   const failedReceiptId = randomUUID();
   const finalReceiptId = randomUUID();
   const receiptAfterId = randomUUID();
+  const deliveryId = randomUUID();
   const imageRequestId = randomUUID();
   const imageCallsId = randomUUID();
   const imageReadResultId = randomUUID();
@@ -186,6 +187,7 @@ function initialState(timestampChurn: boolean): MockState {
       timestamp: createdAt,
       type: "message",
       role: "user",
+      inboxMessageIds: [`inbox-${activityUserId}`],
       content: [
         {
           type: "text",
@@ -422,11 +424,26 @@ function initialState(timestampChurn: boolean): MockState {
       overflow: {},
     },
     {
-      id: imageRequestId,
+      id: deliveryId,
       parentId: receiptAfterId,
       timestamp: createdAt,
       type: "message",
       role: "user",
+      content: [
+        {
+          type: "text",
+          text: "<task-notification>\n<task-id>bdh1i4wbt</task-id>\n<status>stopped</status>\n<summary>Background shell command didn't finish before the previous session ended</summary>\n</task-notification>",
+        },
+      ],
+      overflow: { native: { type: "user", origin: { kind: "task-notification" } } },
+    },
+    {
+      id: imageRequestId,
+      parentId: deliveryId,
+      timestamp: createdAt,
+      type: "message",
+      role: "user",
+      inboxMessageIds: [`inbox-${imageRequestId}`],
       content: [{ type: "text", text: "Inspect the responsive dashboard captures." }],
       overflow: {},
     },
@@ -548,6 +565,7 @@ function initialState(timestampChurn: boolean): MockState {
       timestamp: createdAt,
       type: "message",
       role: "user",
+      inboxMessageIds: [`inbox-${userId}`],
       content: [{ type: "text", text: example.prompt }],
       overflow: {},
     });
@@ -617,6 +635,7 @@ function initialState(timestampChurn: boolean): MockState {
       timestamp: createdAt,
       type: "message",
       role: index % 2 === 0 ? "user" : "assistant",
+      ...(index % 2 === 0 ? { inboxMessageIds: [`inbox-long-history-${index}`] } : {}),
       content: [
         {
           type: "text",

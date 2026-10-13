@@ -14,7 +14,6 @@ import {
   type ContentBlock,
   type HistoryRecord,
   HistoryRecordSchema,
-  isClaudeSessionTaskNotification,
   type JsonObject,
   JsonObjectSchema,
   type JsonValue,
@@ -332,19 +331,6 @@ export class ClaudeHistory {
             type: "event",
             eventType: "claude.compact_command",
             overflow: { native: { type: native.type ?? "user", uuid: id } },
-          };
-        } else if (provenance === undefined && isClaudeSessionTaskNotification(native)) {
-          record = {
-            ...base,
-            type: "event",
-            eventType: "claude.task_notification",
-            overflow: {
-              native: {
-                type: "user",
-                uuid: id,
-                origin: { kind: "task-notification", producer: "session-task" },
-              },
-            },
           };
         } else if (native.type === "user" && native.isMeta === true && provenance === undefined) {
           record = {

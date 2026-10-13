@@ -1,20 +1,7 @@
 import { type Static, Type } from "typebox";
-import { type JsonObject, JsonObjectSchema, JsonValueSchema } from "./json.ts";
+import { JsonObjectSchema, JsonValueSchema } from "./json.ts";
 
 const closed = { additionalProperties: false } as const;
-
-export function isClaudeSessionTaskNotification(native: JsonObject): boolean {
-  const origin = native.origin;
-  return (
-    native.type === "user" &&
-    typeof origin === "object" &&
-    origin !== null &&
-    !Array.isArray(origin) &&
-    origin.kind === "task-notification" &&
-    origin.producer === "session-task" &&
-    origin.subkind === undefined
-  );
-}
 
 export const HarnessSessionMetadataSchema = Type.Object(
   {

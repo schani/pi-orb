@@ -148,6 +148,8 @@ export function DetailContent({
       );
     case "compaction":
       return <span>{body.text}</span>;
+    case "delivery":
+      return <pre className="tool-call-output">{body.text}</pre>;
     case "subagent":
       return (
         <span>

@@ -69,6 +69,7 @@ function message(
     timestamp: id,
     type: "message",
     role,
+    ...(role === "user" ? { inboxMessageIds: [`inbox-${id}`] } : {}),
     content: [{ type: "text", text: `CONTENT-${id}` }],
     overflow: {},
   };

@@ -6,7 +6,7 @@ import { expect, it } from "vitest";
 import { makeHarness, makeOrbRow, makeProjectRow, TEST_SYSTEM_VIEW } from "../testkit/fixtures.ts";
 import { registerRoutes } from "./routes.ts";
 
-it("projects a persisted native task delivery without changing the audit record", async () => {
+it("projects a persisted native task delivery as a delivery row without changing the audit record", async () => {
   const task = new NoSimulationTask("task delivery display", false);
   const harness = makeHarness();
   harness.store.seedProject(makeProjectRow("project"));
@@ -18,7 +18,10 @@ it("projects a persisted native task delivery without changing the audit record"
     type: "message",
     role: "user",
     content: [
-      { type: "text", text: "<task-notification>PRIVATE_CHILD_CANARY</task-notification>" },
+      {
+        type: "text",
+        text: "<task-notification>\n<summary>Child finished</summary>\n</task-notification>",
+      },
     ],
     overflow: {
       native: {
@@ -54,7 +57,8 @@ it("projects a persisted native task delivery without changing the audit record"
         parentId: null,
         timestamp: auth.timestamp,
         type: "event",
-        eventType: "claude.task_notification",
+        eventType: "agent.delivery",
+        delivery: { kind: "task", headline: "Child finished", detailKey: `${auth.id}:delivery` },
       },
     ]);
     expect(body.cursor).toBe(auth.id);

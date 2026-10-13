@@ -5,7 +5,7 @@ import { projectDisplayRecords } from "@pi-orb/protocol";
 import { expect, it } from "vitest";
 import { ClaudeHistory } from "./history.ts";
 
-it("maps session-task deliveries to content-free events, preserving native bytes, IDs and human receipts", () => {
+it("keeps task deliveries as receipt-less user messages that display as delivery rows", () => {
   const dir = mkdtempSync(join(tmpdir(), "claude-task-notification-"));
   try {
     const file = join(dir, "root.jsonl");
@@ -42,16 +42,23 @@ it("maps session-task deliveries to content-free events, preserving native bytes
     expect(records[0]).toMatchObject({
       id: notification.uuid,
       parentId: null,
-      type: "event",
-      eventType: "claude.task_notification",
+      type: "message",
+      role: "user",
+      content: [{ type: "text", text: notification.message.content }],
     });
-    expect(JSON.stringify(records[0])).not.toContain("PRIVATE_CHILD_CANARY");
+    expect(records[0]).not.toHaveProperty("inboxMessageIds");
     expect(records[1]).toMatchObject({ type: "message", role: "user", inboxMessageIds: ["inbox"] });
     expect(records[2]).toMatchObject({ type: "message", role: "user" });
     expect(records[3]).toMatchObject({ type: "message", role: "user" });
+    expect(projectDisplayRecords(records).map((record) => record.type)).toEqual([
+      "event",
+      "message",
+      "event",
+      "event",
+    ]);
     expect(projectDisplayRecords(records)[0]).toMatchObject({
-      type: "event",
-      eventType: "claude.task_notification",
+      eventType: "agent.delivery",
+      delivery: { kind: "task" },
     });
     const reopened = new ClaudeHistory(dir, "session", "t");
     expect(reopened.scan(file)._unsafeUnwrap()).toEqual(records);

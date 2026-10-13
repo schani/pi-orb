@@ -6,13 +6,8 @@ import {
   activityResultEligible,
 } from "./activity-headline.ts";
 import { capHeadline } from "./headline.ts";
-import {
-  type ContentBlock,
-  type HistoryRecord,
-  isClaudeSessionTaskNotification,
-  NestedCallsSchema,
-} from "./history.ts";
-import { JsonValueSchema } from "./json.ts";
+import { type ContentBlock, type HistoryRecord, NestedCallsSchema } from "./history.ts";
+import { type JsonObject, JsonValueSchema } from "./json.ts";
 import { reasoningHeadline } from "./reasoning-headline.ts";
 
 export { capHeadline } from "./headline.ts";
@@ -102,6 +97,19 @@ const subagent = Type.Object(
   },
   closed,
 );
+const delivery = Type.Object(
+  {
+    kind: Type.Union([
+      Type.Literal("task"),
+      Type.Literal("scheduled"),
+      Type.Literal("peer"),
+      Type.Literal("injected"),
+    ]),
+    headline: Type.Union([Type.String(), Type.Null()]),
+    detailKey: Type.Optional(Type.String()),
+  },
+  closed,
+);
 const event = Type.Object(
   {
     ...base,
@@ -113,6 +121,7 @@ const event = Type.Object(
       Type.Object({ customType: Type.String(), display: Type.Boolean() }, closed),
     ),
     subagent: Type.Optional(subagent),
+    delivery: Type.Optional(delivery),
     alert: Type.Optional(Type.Object({ message: Type.String(), requestId: Type.String() }, closed)),
     inboxMessageIds: Type.Optional(Type.Array(Type.String())),
   },
@@ -173,6 +182,7 @@ export const DisplayDetailBodySchema = Type.Union([
     closed,
   ),
   Type.Object({ type: Type.Literal("compaction"), text: Type.String() }, closed),
+  Type.Object({ type: Type.Literal("delivery"), text: Type.String() }, closed),
   Type.Object(
     {
       type: Type.Literal("subagent"),
@@ -338,6 +348,48 @@ function nativeClaudeUser(record: HistoryRecord) {
     : null;
 }
 
+function deliveryKind(native: JsonObject | null): Static<typeof delivery>["kind"] {
+  const origin = native?.origin;
+  if (typeof origin !== "object" || origin === null || Array.isArray(origin)) return "injected";
+  if (origin.kind !== "task-notification") return "injected";
+  if (origin.subkind === undefined) return "task";
+  if (origin.subkind === "scheduled-trigger") return "scheduled";
+  if (origin.subkind === "peer-send-message" || origin.subkind === "session-inbox") return "peer";
+  return "injected";
+}
+
+/** A user-role message without an inbox receipt was not typed by the human. */
+function userDelivery(
+  record: HistoryRecord,
+): { kind: Static<typeof delivery>["kind"]; text: string } | null {
+  if (
+    record.type !== "message" ||
+    record.role !== "user" ||
+    record.inboxMessageIds !== undefined ||
+    record.content.some((block) => block.type === "tool_result")
+  )
+    return null;
+  const native = nativeClaudeUser(record);
+  const kind = deliveryKind(native);
+  // Native metadata (skill bodies, command caveats) stays hidden.
+  if (kind === "injected" && native?.isMeta === true) return null;
+  const text = record.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n");
+  return { kind, text };
+}
+
+function deliveryHeadline(text: string): string | null {
+  const line =
+    /<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1]?.trim() ??
+    text
+      .split("\n")
+      .find((candidate) => candidate.trim() !== "")
+      ?.trim();
+  return line === undefined || line === "" ? null : capHeadline(line);
+}
+
 function asyncLaunchCallId(record: HistoryRecord): string | undefined {
   const native = record.overflow.native;
   if (
@@ -393,8 +445,25 @@ export function projectDisplayRecord(record: HistoryRecord): DisplayRecord {
   };
   const asyncLaunchId = asyncLaunchCallId(record);
   const nativeUser = nativeClaudeUser(record);
-  if (nativeUser !== null && isClaudeSessionTaskNotification(nativeUser))
-    return { ...base, type: "event", eventType: "claude.task_notification" };
+  const userMessageDelivery = userDelivery(record);
+  if (record.type === "event" && record.eventType === "claude.task_notification")
+    return {
+      ...base,
+      type: "event",
+      eventType: "agent.delivery",
+      delivery: { kind: "task", headline: null },
+    };
+  if (userMessageDelivery !== null)
+    return {
+      ...base,
+      type: "event",
+      eventType: "agent.delivery",
+      delivery: {
+        kind: userMessageDelivery.kind,
+        headline: deliveryHeadline(userMessageDelivery.text),
+        detailKey: `${record.id}:delivery`,
+      },
+    };
   if (nativeUser?.isMeta === true)
     return { ...base, type: "event", eventType: "claude.native_metadata" };
   if (record.type === "event" && record.eventType === "claude.auth")
@@ -558,6 +627,10 @@ export function projectRecordDetail(
     }
     if (durationMs !== undefined && durationMs >= 0) body.durationMs = durationMs;
     return body;
+  }
+  if (detailKey === `${record.id}:delivery`) {
+    const text = userDelivery(record)?.text;
+    return text === undefined ? null : { type: "delivery", text };
   }
   if (!detailKey.startsWith(`${record.id}:`)) return null;
   const suffix = detailKey.slice(record.id.length + 1);
