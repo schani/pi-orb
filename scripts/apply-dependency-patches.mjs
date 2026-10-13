@@ -30,11 +30,11 @@ const packages = [
     package: "node_modules/@earendil-works/pi-ai",
     version: "1.1.0",
     patch: "@earendil-works+pi-ai+1.1.0.patch",
-    sha: "00c77c3ef2de00b331886971cac1c84f7efd8c68a494b48c7db9128418027a58",
+    sha: "812225636f3c081e6e8497b0b7c98051baedea90b455f6e7f837ccc5a84be9c7",
     files: {
       "node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js": [
         "b185956e11a5c5cb522e5cad77daf21ce31c3c304e86a8333ffcb49ff78466ea",
-        "48d7d64da1c9d7e5c16d06bb7735cb95ed5e24c775a62bc3dd081683c832573a",
+        "1a58c22af874449cb6c4afb43e6694e4b0e26e8a41f2feb657109cd32e2fdca8",
       ],
       "node_modules/@earendil-works/pi-ai/dist/auth/resolve.js": [
         "3fcec09018831324d9c7fb02f4aea707e8a9e4fec5a2bdf1b3d84d716fd3091e",

@@ -70,7 +70,7 @@ Volume is a few thousand calls per day, so per-call inserts need no batching. Cl
 
 ## Observability
 
-Insert failures emit `model_usage.write_failed` (with the store error code) on the first failure after success and `model_usage.write_recovered` on the first success after failure; a healthy ledger logs nothing (`docs/lifecycle.md`). The ledger itself is the observability for model spend and cache health.
+Insert failures emit `model_usage.write_failed` (with the store error code) on the first failure after success and `model_usage.write_recovered` on the first success after failure; a healthy ledger logs nothing (`docs/lifecycle.md`). The ledger itself is the observability for model spend and cache health. It does not record full-context versus continuation request shape. The default-transport correction in `docs/pi-adapter.md` establishes request equivalence, not cache-miss causation or billing savings; full-context requests can cache and deltas need not reduce billed tokens.
 
 ## Queries
 

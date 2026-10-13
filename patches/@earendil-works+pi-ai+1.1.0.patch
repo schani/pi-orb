@@ -1,5 +1,5 @@
 diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js b/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
-index 6ee63ec..d06e2a0 100644
+index 6ee63ec..3c44584 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
 +++ b/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
 @@ -1,7 +1,7 @@
@@ -199,6 +199,15 @@ index 6ee63ec..d06e2a0 100644
      });
  };
  // ============================================================================
+@@ -1172,7 +1239,7 @@
+ async function processWebSocketStream(url, body, headers, output, stream, model, onStart, idleTimeoutMs, websocketConnectTimeoutMs, cacheSessionId, accountId, grammarToolInputProperties, options) {
+     const { socket, entry, reused, release } = await acquireWebSocket(url, headers, cacheSessionId, accountId, options?.signal, websocketConnectTimeoutMs, options?.env);
+     let keepConnection = true;
+-    const useCachedContext = options?.transport === "websocket-cached" || options?.transport === "auto";
++    const useCachedContext = options?.transport === "websocket-cached" || (options?.transport || "auto") === "auto";
+     // ChatGPT Codex Responses rejects `store: true` ("Store must be set to false").
+     // WebSocket continuation still works via connection-scoped previous_response_id state.
+     const fullBody = body;
 @@ -1241,11 +1308,12 @@ async function parseErrorResponse(response) {
      const raw = await response.text();
      let message = raw || response.statusText || "Request failed";
