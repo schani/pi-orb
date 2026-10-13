@@ -8,8 +8,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Attribute lossless-history qualification timeouts before deployment** (2026-10-13; `docs/testing.md`). Preserve image/OAuth and PGlite setup-hook failures from overlapping local runs; causes remain unproven. Qualify resource ownership and test cancellation (300-second sandbox versus 30-second test without forwarded abort signal), then complete broader exact-source gates. An exclusive scoped pass is not clearance; no deployment waiver.
-
+- **Attribute lossless-history qualification timeouts before deployment** (2026-10-13; `docs/postmortems/2026-10-13-claude-history-nul.md`). Preserve image/OAuth and PGlite setup-hook failures from overlapping local runs; causes remain unproven. Qualify resource ownership and test cancellation (300-second sandbox versus 30-second test without forwarded abort signal), then complete broader exact-source gates. An exclusive scoped pass is not clearance; no deployment waiver.
 
 - **Surface invariant history-poll blockage to the user** (2026-10-13; `docs/postmortems/2026-10-13-claude-history-nul.md`). Expose parked replication and blocked inbox delivery without claiming delivery before receipt commit; retain content-free durable diagnosis.
 

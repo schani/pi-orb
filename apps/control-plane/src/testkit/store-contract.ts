@@ -314,9 +314,9 @@ export function storeSemanticsContractTests(
         timestamp: "2026-08-07T00:00:00.000Z",
         type: "event",
         eventType: "pi.custom",
-        content: [{ type: "text", text: id }],
+        content: [{ type: "text", text: "\u0000\ud800" }],
         alert: { message: id, requestId: id },
-        overflow: {},
+        overflow: { "\udfff": "\u0000" },
       });
       const a = alert("alert-a", null);
       const b = alert("alert-b", a.id);
@@ -1841,11 +1841,22 @@ export function storeSemanticsContractTests(
 
     it("atomically commits idempotent history and reconstructs its linear chain", async () => {
       await seed();
+      const strings = ["\u0000", "\ud800", "\udfff", "\\u0000", "😀"];
+      const overflow = Object.fromEntries(strings.map((text) => [text, { [text]: text }]));
+      const nativePayload = { message: { content: strings, details: overflow } };
+      const native: HistoryRecord = {
+        ...second,
+        type: "message",
+        role: "assistant",
+        content: [{ type: "text", text: strings.join("|") }],
+        overflow: { native: nativePayload, other: "safe" },
+      };
+      const original = JSON.stringify([first, native]);
       const committed = await store.commitPullBatch(task, {
         orbId: orb.id,
         expectedCursor: null,
         session,
-        records: [first, second],
+        records: [first, native],
         nextCursor: second.id,
         nextHeadId: second.id,
       });
@@ -1855,23 +1866,65 @@ export function storeSemanticsContractTests(
         orbId: orb.id,
         expectedCursor: second.id,
         session,
-        records: [first, second],
+        records: [first, { ...native, overflow: { other: "safe", native: nativePayload } }],
         nextCursor: second.id,
         nextHeadId: second.id,
       });
       expect(repeated.isOk()).toBe(true);
 
       const snapshot = await store.readHistorySnapshot(task, orb.id);
-      expect(snapshot.isOk() && snapshot.value.records).toEqual([first, second]);
+      expect(snapshot.isOk() && snapshot.value.records).toEqual([first, native]);
+      expect(JSON.stringify([first, native])).toBe(original);
       expect(
         (await store.readHistoryRecord(task, orb.id, session.id, second.id))._unsafeUnwrap(),
-      ).toEqual(second);
+      ).toEqual(native);
       expect(
         (await store.readHistoryRecord(task, orb.id, "wrong-session", second.id))._unsafeUnwrap(),
       ).toBeNull();
       expect(
         (await store.readHistoryRecord(task, orb.id, session.id, "missing"))._unsafeUnwrap(),
       ).toBeNull();
+      const other = { ...orb, id: "00000000-0000-4000-8000-000000000004" };
+      (await store.insertOrb(task, other))._unsafeUnwrap();
+      const header = { ...session, overflow };
+      (await store.initOrVerifySession(task, other.id, header))._unsafeUnwrap();
+      const headerOnly = (
+        await store.commitPullBatch(task, {
+          orbId: other.id,
+          expectedCursor: null,
+          session: header,
+          records: [first],
+          nextCursor: first.id,
+          nextHeadId: first.id,
+        })
+      )._unsafeUnwrap();
+      let transitioned = headerOnly;
+      for (const toState of ["starting", "stopped"] as const) {
+        transitioned = (
+          await store.casTransition(task, {
+            orbId: other.id,
+            expectedStateVersion: transitioned.stateVersion,
+            toState,
+            now: 2_000,
+          })
+        )._unsafeUnwrap();
+        expect(transitioned.harnessSessionHeader).toEqual(header);
+      }
+      expect(headerOnly.harnessSessionHeader).toEqual(header);
+      expect((await store.getOrb(task, other.id))._unsafeUnwrap()?.harnessSessionHeader).toEqual(
+        header,
+      );
+      expect((await store.readHistorySnapshot(task, other.id))._unsafeUnwrap()).toEqual({
+        session: header,
+        cursor: first.id,
+        headId: first.id,
+        records: [first],
+      });
+      const conflict = await store.initOrVerifySession(task, other.id, session);
+      expect(conflict.isErr() && conflict.error).toMatchObject({
+        type: "replication_integrity",
+        reason: "session_mismatch",
+      });
     });
 
     it("anchors source history to an inactive branch without changing replica metadata", async () => {
@@ -1910,13 +1963,14 @@ export function storeSemanticsContractTests(
 
     it("rejects cursor and immutable-record conflicts without partial advancement", async () => {
       await seed();
+      const unicode: HistoryRecord = { ...first, overflow: { "\udfff": "\u0000\ud800" } };
       expect(
         (
           await store.commitPullBatch(task, {
             orbId: orb.id,
             expectedCursor: null,
             session,
-            records: [first],
+            records: [unicode],
             nextCursor: first.id,
             nextHeadId: first.id,
           })
@@ -1933,7 +1987,7 @@ export function storeSemanticsContractTests(
       });
       expect(cursorConflict.isErr() && cursorConflict.error.type).toBe("cursor_conflict");
 
-      const changed = { ...first, content: [{ type: "text" as const, text: "changed" }] };
+      const changed = { ...unicode, content: [{ type: "text" as const, text: "changed" }] };
       const recordConflict = await store.commitPullBatch(task, {
         orbId: orb.id,
         expectedCursor: first.id,
