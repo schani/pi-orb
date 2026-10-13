@@ -16,6 +16,7 @@ const cases = [
   "scope replay result",
   "failure manual Retry",
   "code headers",
+  "subagent headers",
 ] as const;
 function gate() {
   let release!: () => void;
@@ -142,7 +143,41 @@ it.each(
         expect(request, `held ${key}`).toBeDefined();
         request?.gate.release();
       };
-      if (scenario === "code headers") {
+      if (scenario === "subagent headers") {
+        const rail = page.locator(".subagent-live-rail");
+        await expect(rail).toBeVisible();
+        await expect(rail.locator("li")).toHaveCount(4);
+        await expect(rail).toContainText("Existing Claude header");
+        await expect.poll(() => requests.length).toBe(1);
+        expect(requests).toEqual(["roster-tool"]);
+        await rail.locator("summary").click();
+        await expect.poll(() => requests.length).toBe(2);
+        expect(maximum).toBe(2);
+        release("roster-tool");
+        await expect.poll(() => requests.length).toBe(3);
+        release("roster-one");
+        await expect(rail).toContainText("Headline roster-one");
+        await expect.poll(() => requests.length).toBe(4);
+        expect(maximum).toBe(2);
+        await control("fail");
+        release("roster-two");
+        await expect(rail).toContainText("Summary unavailable.");
+        await control("success");
+        release("roster-three");
+        await expect(rail).toContainText("Headline roster-three");
+        await rail.getByRole("button", { name: "Retry", exact: true }).click();
+        expect(await rail.getAttribute("open")).not.toBeNull();
+        await expect.poll(() => requests.length).toBe(5);
+        release("roster-two");
+        await expect(rail).toContainText("Headline roster-two");
+        await expect(rail).toContainText("Existing Claude header");
+        await rail.locator("summary").click();
+        await rail.locator("summary").click();
+        await flush();
+        expect(requests).toHaveLength(5);
+        expect(maximum).toBe(2);
+        await expect(page.locator("body")).not.toContainText("PRIVATE_TASK_PROMPT");
+      } else if (scenario === "code headers") {
         let detailReads = 0;
         page.on("request", (request) => {
           if (new URL(request.url()).pathname.includes(`/${ORB}/details/`)) detailReads++;

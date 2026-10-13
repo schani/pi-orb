@@ -807,6 +807,13 @@ export class DurableAgent implements AgentSessionFacade {
           });
         }
         this.updateStatus();
+        const view = result.isOk() ? this.liveView() : null;
+        if (view)
+          this.emit({
+            type: "subagents",
+            operationId: view.operationId,
+            children: [...view.subagents],
+          });
         return result;
       });
     return this.projection;
@@ -856,7 +863,7 @@ export class DurableAgent implements AgentSessionFacade {
           ? {}
           : { message: tool.output }),
     }));
-    const subagents = activeSubagents(this.tasks, this.root.id);
+    const subagents = activeSubagents(this.tasks, this.root.id, this.records);
     return {
       operationId: this.operationId,
       operationKind: this.operationKind,

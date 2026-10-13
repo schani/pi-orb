@@ -6,6 +6,7 @@ describe("SubagentRail", () => {
   it("expands once to a flat description-and-phase roster without ID-only disclosures", () => {
     const html = renderToStaticMarkup(
       <SubagentRail
+        context={{ orbId: "orb", sessionId: "session" }}
         agents={[
           { id: "internal-running-id", description: "Check services", phase: "running" },
           { id: "internal-queued-id", description: "Check deployment", phase: "queued" },

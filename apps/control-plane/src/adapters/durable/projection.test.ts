@@ -107,3 +107,43 @@ describe("Durable root projection", () => {
     ).toBeNull();
   });
 });
+
+it("projects child task headers independently of private child history", () => {
+  const records = [42, 54].map(
+    (id) =>
+      projectEntry(
+        entry({
+          id,
+          kind: "orb.subagent-task",
+          data: {
+            childId: id,
+            prompt: `Task ${id}`,
+            description: id === 54 ? "Existing header" : " \n ",
+            timestamp: 1000,
+            instructions: "PRIVATE",
+          },
+        }),
+        null,
+        "session",
+      )._unsafeUnwrap()!,
+  );
+  expect(records[0]).toMatchObject({
+    type: "event",
+    eventType: "agent.subagent_task",
+    subagentTask: { id: "42", prompt: "Task 42" },
+    overflow: {},
+  });
+  const graph = {
+    tasks: {
+      a: { conversationId: 42, conversations: [], state: { status: "running" } },
+      b: { conversationId: 54, conversations: [], state: { status: "pending" } },
+    },
+  } as unknown as import("@earendil-works/pi-durable").TaskGraph;
+  expect(
+    activeSubagents(graph, 1 as import("@earendil-works/pi-durable").ConversationId, records),
+  ).toEqual([
+    { id: "42", description: "Subagent 42", phase: "running", taskRecordId: "session:42" },
+    { id: "54", description: "Existing header", phase: "queued" },
+  ]);
+  expect(JSON.stringify(records)).not.toContain("PRIVATE");
+});

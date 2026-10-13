@@ -740,6 +740,7 @@ export const HistoryView = memo(function HistoryView({
   viewportRef,
   onCompensatedRef,
 }: HistoryViewProps) {
+  const sharedHeadlineSlots = useContext(HeadlineSlots);
   const [headlineSlots] = useState(() => new HeadlineLimiter());
   const [openedDetails] = useState(() => new Set<string>());
   const representedMessageIds = useMemo(() => representedInboxMessageIds(records), [records]);
@@ -803,7 +804,7 @@ export const HistoryView = memo(function HistoryView({
   };
   return createElement(
     HeadlineSlots.Provider,
-    { value: headlineSlots },
+    { value: sharedHeadlineSlots ?? headlineSlots },
     <DetailContextValue.Provider value={detailContext}>
       <OpenDetailValue.Provider value={openDetailValue}>
         <div className="history" ref={historyRef}>

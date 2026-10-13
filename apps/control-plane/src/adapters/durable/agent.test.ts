@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createAssistantMessageEventStream, Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
+  type FauxResponseFactory,
   fauxAssistantMessage,
   fauxProvider,
   fauxToolCall,
@@ -1217,4 +1218,80 @@ describe("central Durable agent", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+});
+
+it("publishes a persisted Luna source for a child launched inside codemode", async () => {
+  const { createDurableTools } = await import("./tools/index.ts");
+  const tools = createDurableTools();
+  const registry = createRegistry();
+  registry.install(tools.extension);
+  const faux = fauxProvider();
+  const models = createModels();
+  models.setProvider(faux.provider);
+  faux.setResponses([
+    fauxAssistantMessage(
+      fauxToolCall("codemode", {
+        code: 'text(await tools.subagent({prompt:"PRIVATE_TASK_INPUT"}));',
+      }),
+      { stopReason: "toolUse" },
+    ),
+    ...Array(3).fill(
+      async (
+        request: Parameters<FauxResponseFactory>[0],
+        options: Parameters<FauxResponseFactory>[1],
+      ) => {
+        const user = request.messages.find((message) => message.role === "user");
+        if (JSON.stringify(user?.content).includes("PRIVATE_TASK_INPUT")) {
+          await new Promise<void>((resolve) => {
+            if (options?.signal?.aborted) resolve();
+            else options?.signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return fauxAssistantMessage("", { stopReason: "aborted" });
+        }
+        return fauxAssistantMessage("parent finished");
+      },
+    ),
+  ]);
+  const agent = (
+    await DurableAgent.open({
+      orbId: "orb",
+      storage: new MemoryStorage(),
+      models,
+      registry,
+      env: new NodeExecutionEnv({ cwd: "/tmp" }),
+      checkoutCommit: null,
+      instructions: "PRIVATE_INSTRUCTIONS",
+      initialSettings,
+    })
+  )._unsafeUnwrap();
+  const sourcePublished = barrier();
+  const children: import("@pi-orb/protocol").ActiveSubagent[] = [];
+  const unsubscribe = agent.subscribe((frame) => {
+    if (frame.type === "runtime.event" && frame.event.type === "subagents") {
+      for (const child of frame.event.children) {
+        if (child.taskRecordId) {
+          children.push(child);
+          sourcePublished.resolve();
+        }
+      }
+    }
+  });
+  try {
+    (await agent.deliver(input))._unsafeUnwrap();
+    await sourcePublished.promise;
+    const child = children[0];
+    expect(child?.description).toBe(`Subagent ${child?.id}`);
+    expect(JSON.stringify(children)).not.toContain("PRIVATE");
+    const snapshot = agent.snapshot()._unsafeUnwrap();
+    const source = snapshot.records.find((record) => record.id === child?.taskRecordId);
+    expect(source).toMatchObject({ type: "event", subagentTask: { prompt: "PRIVATE_TASK_INPUT" } });
+    expect(JSON.stringify(source)).not.toContain("PRIVATE_INSTRUCTIONS");
+    expect(
+      snapshot.records.filter((record) => record.type === "event" && record.subagentTask),
+    ).toHaveLength(1);
+  } finally {
+    unsubscribe();
+    await agent.close();
+    await tools.close();
+  }
 });

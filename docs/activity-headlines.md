@@ -8,6 +8,18 @@ Command-header extension and provider retry qualification (2026-10-05; not deplo
 
 ## Selected design (2026-10-04)
 
+### Live subagent headers (decided and implemented locally 2026-10-12; not deployed)
+
+Keep a supplied nonblank task description, including Claude's native header; do not infer a replacement. Central Durable children without one use a Luna task-intent headline in the expanded live roster. Whitespace-only descriptions count as missing. Launch, execution and roster publication never wait for inference.
+
+The child-create transaction appends one root `orb.subagent-task` entry with the child conversation ID, original task prompt and optional-header value, including launches from nested codemode and descendant agents. Normalized `agent.subagent_task` records retain typed `subagentTask: {id, prompt, description}` for source/cache authorization; display history omits that metadata and shows no duplicate transcript row. Instructions, reasoning, results and private child transcripts are not sources. This deliberately persists launch-task metadata, not child conversation history.
+
+A missing-header roster item carries `taskRecordId`; its source key is `<recordId>:task` in the root session. Opening the rail qualifies visible child rows through the existing headline hook. Supplied headers carry no source reference. Pending retains the generic label; success replaces it; failure shows the existing scoped `Summary unavailable. Retry`. Collapse/reopen preserves mounted state, and child removal/session change cancels it. Roster and transcript share the same two-request limiter. Existing held POST, cache, owner credentials, deadline, retry and content-free `headline.completed`/`headline.retry_scheduled` telemetry apply unchanged. Reconnect can cheaply POST the immutable cached source; no autonomous runtime queue or child transcript endpoint is added.
+
+Rejected: requiring agent-authored headers for every launch or replacing an existing header with Luna. The user wants generated fallback only.
+
+Local qualification: typecheck and lint pass (existing warnings); 575 unit/DST tests pass across 118 selected files, with 10 environment-gated skips. The broad command reached its tool deadline after 60 completed files; the remaining 58 completed separately, not a passing rerun of a failure. All 12 Chromium/WebKit headline browser cases pass, including missing/supplied headers, shared request slots, Retry and collapse/reopen; three receipt geometry cases pass after installing the missing bundled Chromium. Red/source and first environment-failure logs remain in `.context/subagent-headlines/`. No full Docker E2E gate, deployment or real-Luna acceptance is claimed; this workspace has no Docker daemon.
+
 ### Targets and presentation
 
 - Calls: codemode input intent, canonical SDK `bash` command intent, subagent task intent and `get_subagent_result` retrieval intent (decided 2026-10-05; command extension implemented locally, not deployed). Retrieval source includes only bounded `agent_id` and optional boolean `wait`/`verbose`; arbitrary arguments and private child data are excluded. Results: canonical `bash` public output, `get_subagent_result`, foreground subagent terminal output and typed root completion receipts. Codemode tool results remain ineligible; launch acknowledgements preserve intent. A replicated foreground result replaces intent in the same row, using its own immutable cache key.

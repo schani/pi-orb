@@ -12,6 +12,7 @@ import {
   type ServerFrame,
 } from "@pi-orb/protocol";
 import {
+  createElement,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -45,6 +46,7 @@ import { StateTile } from "../components/StateTile.tsx";
 import { SubagentRail } from "../components/SubagentRail.tsx";
 import { TextFieldFrame } from "../components/TextFieldFrame.tsx";
 import { useWorkspaceUploads } from "../components/useWorkspaceUploads.tsx";
+import { HeadlineLimiter } from "../lib/activity-headline.ts";
 import {
   type ApiError,
   acknowledgeOrbAlert,
@@ -102,6 +104,7 @@ import {
   requestNotificationPermission,
   showTurnNotification,
 } from "../lib/turn-notifications.ts";
+import { HeadlineSlots } from "../lib/use-activity-headline.tsx";
 import { usePhoneLayout } from "../lib/use-phone-layout.ts";
 import { usePhoneViewport } from "../lib/use-phone-viewport.ts";
 import { generateUuid } from "../lib/uuid.ts";
@@ -980,6 +983,7 @@ function OrbConversation({
         : { type: "history_failed", error: load.history.error },
     ),
   );
+  const [headlineSlots] = useState(() => new HeadlineLimiter());
   const historyRecords = useMemo(() => [...state.records.values()], [state.records]);
   const liveBlocks = useMemo(() => [...state.liveBlocks.values()], [state.liveBlocks]);
   const tools = useMemo(() => [...state.tools.values()], [state.tools]);
@@ -1926,7 +1930,9 @@ function OrbConversation({
       ? null
       : formatTimeRemaining(orb.actionRequired.expiresAt, ageNow);
 
-  return (
+  return createElement(
+    HeadlineSlots.Provider,
+    { value: headlineSlots },
     <main
       className="orb-main"
       ref={mainRef}
@@ -2074,7 +2080,7 @@ function OrbConversation({
         </header>
         <div className="orb-header-scroll">
           {canConnectLive(orb) && connected && state.subagents.length > 0 && (
-            <SubagentRail agents={state.subagents} />
+            <SubagentRail agents={state.subagents} context={detailContext} />
           )}
           <HostedFiles inventory={hostedFiles} error={hostedFilesError} />
           {uploads.progress}
@@ -2302,6 +2308,6 @@ function OrbConversation({
           onAbort={sendAbort}
         />
       )}
-    </main>
+    </main>,
   );
 }

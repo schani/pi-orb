@@ -65,7 +65,11 @@ it("cancels only the selected child; root abort drains its sibling", async () =>
     fauxAssistantMessage(
       [
         fauxToolCall("subagent", { prompt: "child-a" }, { id: "a" }),
-        fauxToolCall("subagent", { prompt: "child-b" }, { id: "b" }),
+        fauxToolCall(
+          "subagent",
+          { prompt: "child-b", description: "Existing child header" },
+          { id: "b" },
+        ),
       ],
       { stopReason: "toolUse" },
     ),
@@ -78,6 +82,16 @@ it("cancels only the selected child; root abort drains its sibling", async () =>
     await (await root.submit({ type: "input", content: "parent" }, ctx)).wait(ctx);
     const entries = await root.entries({}, 100, undefined, ctx);
     expect(JSON.stringify(entries.items)).toContain('\\"status\\":\\"aborted\\"');
+    expect(
+      entries.items
+        .filter((entry) => entry.kind === "orb.subagent-task")
+        .map((entry) => entry.data),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ prompt: "child-a", description: "" }),
+        expect.objectContaining({ prompt: "child-b", description: "Existing child header" }),
+      ]),
+    );
     const inspection = await harness.inspect(ctx);
     expect(inspection.tasks.filter((t) => t.record.kind === "orb.child")).toHaveLength(1);
     await root.abort(ctx, { background: true });
@@ -140,6 +154,11 @@ it("reopens persisted anchors without recreating children or rerunning the spawn
     ).toHaveLength(1);
     const record = await storage.task(anchor.anchor as never, ctx);
     expect(JSON.stringify(record)).toContain("recovered child");
+    expect(
+      (await reopened.entries({}, 100, undefined, ctx)).items.filter(
+        (entry) => entry.kind === "orb.subagent-task",
+      ),
+    ).toHaveLength(1);
     await recovered.tools.close();
   } finally {
     await harness.close(ctx);

@@ -6,6 +6,7 @@ import {
   defineDoc,
   defineTask,
   defineTool,
+  ROOT_CONVERSATION_ID,
   type TaskId,
   type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
@@ -30,12 +31,12 @@ type State =
   | { phase: "run"; child: number }
   | { phase: "finish"; child: number };
 /** A conversation-owned anchor survives the spawning tool and owns the child's entire scope. */
-export const ChildAnchor = defineTask<{ prompt: string }, State, JsonValue>({
+export const ChildAnchor = defineTask<{ prompt: string; description: string }, State, JsonValue>({
   name: "orb.child",
   version: 1,
   initial: () => ({ phase: "create" }),
   phases: {
-    create: async (_task, runtime, ctx) =>
+    create: async (task, runtime, ctx) =>
       runtime.commit(async (tx) => {
         if ((await tx.doc(ChildControl, runtime.taskId)).cancelled)
           return { status: "terminal", outcome: { status: "aborted" } };
@@ -43,6 +44,15 @@ export const ChildAnchor = defineTask<{ prompt: string }, State, JsonValue>({
           ownership: { kind: "task", taskId: runtime.taskId },
         });
         (await tx.doc(AgentDoc, child.id)).tools = ["codemode"];
+        await tx.appendEntry(ROOT_CONVERSATION_ID, {
+          kind: "orb.subagent-task",
+          data: {
+            childId: child.id,
+            prompt: task.input.prompt,
+            description: task.input.description,
+            timestamp: runtime.now(),
+          },
+        });
         return { status: "running", checkpoint: { phase: "run", child: child.id } };
       }, ctx),
     run: async (task, runtime, ctx) => {
@@ -157,7 +167,7 @@ export const subagentTools = [
         if (doc.children[key]) return key;
         const anchor = await tx.createTask(
           ChildAnchor,
-          { prompt: args.prompt },
+          { prompt: args.prompt, description: args.description ?? "" },
           {
             conversationId: api.conversationId,
             ownership: { kind: "conversation" },
