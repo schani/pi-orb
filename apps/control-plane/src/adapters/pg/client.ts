@@ -44,18 +44,21 @@ const CORRUPTION_CODES = new Set([
 const INVARIANT_CLASSES = new Set(["22", "42"]);
 
 export function mapPgError(error: unknown): StoreError {
-  const code =
-    typeof error === "object" && error !== null && "code" in error
-      ? String((error as { code: unknown }).code)
-      : "";
+  const rawCode =
+    typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+  const code = rawCode === undefined ? "" : String(rawCode);
+  const diagnostics =
+    typeof rawCode === "string" && rawCode.length === 5 && /^[0-9A-Z]{5}$/u.test(rawCode)
+      ? { sqlState: rawCode }
+      : {};
   const message = error instanceof Error ? error.message : String(error);
   if (CORRUPTION_CODES.has(code)) {
-    return { type: "store_error", code: "corruption", message, retryable: false };
+    return { type: "store_error", code: "corruption", message, retryable: false, ...diagnostics };
   }
   if (INVARIANT_CLASSES.has(code.slice(0, 2))) {
-    return { type: "store_error", code: "invariant", message, retryable: false };
+    return { type: "store_error", code: "invariant", message, retryable: false, ...diagnostics };
   }
-  return { type: "store_error", code: "unavailable", message, retryable: true };
+  return { type: "store_error", code: "unavailable", message, retryable: true, ...diagnostics };
 }
 
 // ---------------------------------------------------------------------------

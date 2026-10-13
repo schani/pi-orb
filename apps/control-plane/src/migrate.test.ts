@@ -84,6 +84,27 @@ it("closes after migration failure and logs only typed codes", async () => {
   expect(lines.join("\n")).not.toContain("private-sentinel");
 });
 
+it("logs safe migration SQLSTATE but no database message", async () => {
+  const lines: string[] = [];
+  expect(
+    await migrateDatabase(
+      {
+        migrate: () =>
+          errAsync({
+            type: "store_error",
+            code: "unavailable",
+            sqlState: "40P01",
+            message: "private-sentinel",
+            retryable: true,
+          }),
+        close: () => okAsync(undefined),
+      },
+      (line) => lines.push(line),
+    ),
+  ).toBe(1);
+  expect(lines).toEqual(["lifecycle: migration-failed code=unavailable sqlstate=40P01"]);
+});
+
 it("logs credential owner resolution without identity values", async () => {
   const lines: string[] = [];
   expect(
