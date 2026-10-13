@@ -8,7 +8,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Attribute lossless-history qualification failures before deployment** (2026-10-13; `docs/postmortems/2026-10-13-claude-history-nul.md`). Image/OAuth and PGlite setup-hook timeouts from overlapping local runs remain unproven; qualify resource ownership and cancellation (300-second sandbox versus 30-second test without forwarded abort). The `1a68b06` Docker-build 600-second deadline at layer export (~512-second npm install; no tests ran) also remains unexplained. Complete exact-source gates; historical scoped passes and the corrected eight CI migration-list failures do not clear these blockers. No waiver.
+- **Complete exact-head deployment qualification** (2026-10-13; `docs/postmortems/2026-10-13-claude-history-nul.md`). The user waived historical explanation of the overlapping local image/OAuth/PGlite timeouts, PR 90 `1a68b06` Docker-build deadline and WebKit readiness failure in run `38468937890`. Causes remain unknown; evidence is preserved, not claimed fixed. Normal exact-head gates, correction of new failures and DST replay remain mandatory.
 
 - **Surface invariant history-poll blockage to the user** (2026-10-13; `docs/postmortems/2026-10-13-claude-history-nul.md`). Expose parked replication and blocked inbox delivery without claiming delivery before receipt commit; retain content-free durable diagnosis.
 
