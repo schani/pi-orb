@@ -107,9 +107,10 @@ it.each(["chromium", "webkit"] as const)(
       await page.goto(`http://127.0.0.1:${address.port}/orbs/${orb}`);
       await check(page.locator(".history")).toContainText("Review 100");
       await check(page.locator(".rec-q")).toContainText("INBOX_DELTA_PROMPT");
+      await check(page.locator(".rec-q .rec-status")).toHaveText("paused");
       delivered = true;
       await check.poll(() => repairStarted).toBe(true);
-      await check(page.locator(".rec-q .rec-status")).toHaveText("steering");
+      await check(page.locator(".rec-q .rec-status")).toHaveText("delivered");
       release();
       await check(page.locator(".rec-q")).toHaveCount(0);
       await check(page.locator(".history")).toContainText("INBOX_DELTA_PROMPT");
