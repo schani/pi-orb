@@ -429,8 +429,10 @@ describe("orb workspace layout contract", () => {
     expect(full).toContain("width: auto");
     expect(full).toContain("height: auto");
     expect(full).toContain("object-fit: contain");
+    expect(dialog).toContain("max-height: calc(100dvh - 32px)");
+    expect(full).toContain("max-height: calc(100dvh - 70px)");
     expect(css).toMatch(
-      /@media \(max-width: 600px\)[\s\S]*?\.tool-image-dialog-close \{[^}]*width: 44px;[^}]*height: 44px/,
+      /@media \(max-width: 600px\), \(any-pointer: coarse\) \{\s*\.tool-image-dialog \{[^}]*\}\s*\.tool-image-dialog-close \{[^}]*width: 44px;[^}]*height: 44px/,
     );
   });
 });

@@ -702,6 +702,79 @@ describe.each(["chromium", "webkit"] as const)("tool-returned image previews · 
     }
   });
 
+  it.each(["click", "Enter"] as const)(
+    "opens via %s without a focus outline on the close button until Tab",
+    async (open) => {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      try {
+        await gotoFrontendHistory(page, url, ORB_ID);
+        const trigger = imageActivity(page, "artifacts/dashboard-preview.svg").getByRole("button", {
+          name: "Enlarge image returned by read",
+          exact: true,
+        });
+        if (open === "click") await trigger.click();
+        else {
+          await trigger.focus();
+          await page.keyboard.press("Enter");
+        }
+        const close = page.getByRole("button", { name: "Close image preview", exact: true });
+        await expectPage(close).toBeVisible();
+        const outline = () => close.evaluate((node) => getComputedStyle(node).outlineStyle);
+        expectPage(await outline()).toBe("none");
+        expectPage(
+          await page
+            .locator(".tool-image-dialog[open]")
+            .evaluate((node) => getComputedStyle(node).outlineStyle),
+        ).toBe("none");
+        await page.keyboard.press("Tab");
+        await expectPage(close).toBeFocused();
+        expectPage(await outline()).toBe("solid");
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
+  it("closes on a backdrop tap but not on an image tap", async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    try {
+      await gotoFrontendHistory(page, url, ORB_ID);
+      const trigger = imageActivity(page, "artifacts/dashboard-preview.svg").getByRole("button", {
+        name: "Enlarge image returned by read",
+        exact: true,
+      });
+      await trigger.click();
+      const dialog = page.getByRole("dialog", { name: "Image returned by read", exact: true });
+      await dialog.getByRole("img", { name: "Image returned by read", exact: true }).click();
+      await expectPage(dialog).toBeVisible();
+      await page.mouse.click(4, 4);
+      await expectPage(dialog).not.toBeVisible();
+      await expectPage(trigger).toBeFocused();
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("gives touch tablets a 44px on-screen close target", async () => {
+    const page = await browser.newPage({ viewport: { width: 1024, height: 768 }, hasTouch: true });
+    try {
+      await gotoFrontendHistory(page, url, ORB_ID);
+      await imageActivity(page, "artifacts/dashboard-preview.svg")
+        .getByRole("button", { name: "Enlarge image returned by read", exact: true })
+        .tap();
+      const close = page.getByRole("button", { name: "Close image preview", exact: true });
+      const box = await close.boundingBox();
+      expectPage(box?.width).toBeGreaterThanOrEqual(44);
+      expectPage(box?.height).toBeGreaterThanOrEqual(44);
+      expectPage(box?.y).toBeGreaterThanOrEqual(0);
+      expectPage((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(1024);
+      await close.tap();
+      await expectPage(page.getByRole("dialog")).not.toBeVisible();
+    } finally {
+      await page.close();
+    }
+  });
+
   it.each([320, 390])("fits inline previews within a %ipx viewport", async (width) => {
     const page = await browser.newPage({ viewport: { width, height: 844 } });
     try {

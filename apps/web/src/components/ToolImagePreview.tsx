@@ -34,7 +34,10 @@ export function ToolImagePreview({ src, toolName }: ToolImagePreviewProps) {
         className="tool-image-trigger"
         type="button"
         aria-label={`Enlarge image returned by ${toolName}`}
-        onClick={() => dialog.current?.showModal()}
+        onClick={() => {
+          dialog.current?.showModal();
+          dialog.current?.focus();
+        }}
       >
         <img
           className="tool-image-thumbnail"
@@ -43,11 +46,16 @@ export function ToolImagePreview({ src, toolName }: ToolImagePreviewProps) {
           onError={() => setFailedSource(source)}
         />
       </button>
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: backdrop tap is the touch counterpart of the dialog's native Escape. */}
       <dialog
         ref={dialog}
+        tabIndex={-1}
         className="tool-image-dialog"
         aria-label={label}
         onClose={() => trigger.current?.focus()}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) dialog.current?.close();
+        }}
       >
         <button
           className="tool-image-dialog-close"

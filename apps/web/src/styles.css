@@ -2122,12 +2122,13 @@ pre,
   width: fit-content;
   height: fit-content;
   max-width: calc(100vw - 32px);
-  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
   padding: 28px 8px 8px;
   color: var(--k);
   background: var(--w);
   border: 1px solid var(--k);
   border-radius: 0;
+  outline: none;
 }
 
 .tool-image-dialog::backdrop {
@@ -2154,8 +2155,21 @@ pre,
   width: auto;
   height: auto;
   max-width: calc(100vw - 50px);
-  max-height: calc(100vh - 70px);
+  max-height: calc(100dvh - 70px);
   object-fit: contain;
+}
+
+@media (max-width: 600px), (any-pointer: coarse) {
+  .tool-image-dialog {
+    padding-top: 44px;
+  }
+  .tool-image-dialog-close {
+    width: 44px;
+    height: 44px;
+  }
+  .tool-image-full {
+    max-height: calc(100dvh - 86px);
+  }
 }
 
 /* ---------- transcript charts: one rail row per chart (docs/web-ui.md) ---------- */
@@ -3134,16 +3148,6 @@ button.orb-phone-menu {
   .project-head-actions > .icon-button {
     width: 48px;
     height: 48px;
-  }
-  .tool-image-dialog {
-    padding-top: 44px;
-  }
-  .tool-image-dialog-close {
-    width: 44px;
-    height: 44px;
-  }
-  .tool-image-full {
-    max-height: calc(100vh - 86px);
   }
   .command-picker {
     max-height: min(240px, 35dvh);
