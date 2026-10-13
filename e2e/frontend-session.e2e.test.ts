@@ -5224,6 +5224,127 @@ describe("frontend-only browser behavior", () => {
     await page.close();
   });
 
+  it.each([
+    { engine: chromium, name: "Chromium desktop", width: 1280 },
+    { engine: chromium, name: "Chromium phone", width: 390 },
+    { engine: webkit, name: "WebKit desktop", width: 1280 },
+    { engine: webkit, name: "WebKit phone", width: 390 },
+  ])("keeps hosted files above the scrolling transcript on $name", async ({ engine, width }) => {
+    const ownedBrowser = await engine.launch();
+    const page = await ownedBrowser.newPage({ viewport: { width, height: 740 } });
+    const id = "frontend-long-history";
+    await page.routeWebSocket(`**/orbs/${id}/live`, () => {});
+    await page.route(`**/api/v1/orbs/${id}/hosted-files`, (route) =>
+      route.fulfill({
+        json: {
+          files: [
+            {
+              path: "chart.html",
+              url: "https://files.example.test/chart.html",
+              mediaType: "text/html",
+              size: 1536,
+              updatedAt: 1791856800000,
+            },
+          ],
+          cleanupIssues: [],
+        },
+      }),
+    );
+    try {
+      await gotoFrontendHistory(page, `${origin}/orbs/${id}`, id);
+      const files = page.locator(".hosted-files");
+      const summary = files.locator(":scope > summary");
+      await expectPage(summary).toHaveText("files (1)");
+      expectPage(
+        await files.evaluate((element) =>
+          element.parentElement?.classList.contains("orb-header-scroll"),
+        ),
+      ).toBe(true);
+      const scroller = page.locator(".orb-transcript-scroll");
+      for (const expanded of [false, true]) {
+        if (expanded) await summary.click();
+        const before = await files.boundingBox();
+        await scroller.evaluate((element) => {
+          element.scrollTop = element.scrollHeight;
+        });
+        expectPage(await scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(1000);
+        expectPage(await files.boundingBox()).toEqual(before);
+        await expectPage(summary).toBeInViewport();
+        if (expanded) {
+          await expectPage(files.getByRole("link", { name: "chart.html" })).toBeInViewport();
+          const bounds = await files.evaluate((element) => ({
+            files: element.getBoundingClientRect().bottom,
+            transcript: element.ownerDocument
+              .querySelector(".orb-transcript-scroll")
+              ?.getBoundingClientRect().top,
+          }));
+          expectPage(bounds.files).toBeLessThanOrEqual(bounds.transcript ?? 0);
+        }
+        await scroller.evaluate((element) => {
+          element.scrollTop = 0;
+        });
+      }
+    } finally {
+      await closeRoutedPage(page);
+      await ownedBrowser.close();
+    }
+  });
+
+  it.each([1280, 390])(
+    "previews enclosed Files and Subagents over scrollable history at %ipx",
+    async (width) => {
+      const page = await browser.newPage({ viewport: { width, height: 740 } });
+      const id = "frontend-sticky-bars";
+      try {
+        expectPage((await page.request.get(`${origin}/api/v1/orbs/${id}`)).status()).toBe(200);
+        await gotoFrontendHistory(page, `${origin}/orbs/${id}`, id);
+        const files = page.locator(".hosted-files");
+        const agents = page.locator(".subagent-live-rail");
+        await expectPage(files.locator("summary")).toHaveText("files (1)");
+        await expectPage(agents).toContainText("1 running");
+        await expectPage(agents).toContainText("1 queued");
+        await expectPage(agents).toContainText("1 finishing");
+        await agents.locator("summary").click();
+        await files.locator("summary").click();
+        await expectPage(agents.locator(".subagent-roster > li")).toHaveCount(3);
+        await expectPage(files.getByRole("link", { name: "index.html" })).toBeVisible();
+        const geometry = await files.evaluate((element) => {
+          const rail = element.ownerDocument.querySelector(".subagent-live-rail");
+          const view = element.ownerDocument.defaultView;
+          const summarize = (node: typeof element | null) => {
+            const summary = node?.querySelector("summary");
+            return {
+              border: node && view?.getComputedStyle(node).borderBottom,
+              height: summary?.getBoundingClientRect().height,
+              marker: node?.querySelector(".activity-rail-marker")?.getBoundingClientRect().left,
+              label: node?.querySelector(".activity-rail-summary")?.getBoundingClientRect().left,
+            };
+          };
+          return { files: summarize(element), agents: summarize(rail) };
+        });
+        expectPage(geometry.files).toEqual(geometry.agents);
+        expectPage(geometry.files.border).toMatch(/^1px solid/);
+        const filesBefore = await files.boundingBox();
+        const agentsBefore = await agents.boundingBox();
+        const scroller = page.locator(".orb-transcript-scroll");
+        await scroller.evaluate((element) => {
+          element.scrollTop = 0;
+        });
+        await expectPage.poll(() => scroller.evaluate((element) => element.scrollTop)).toBe(0);
+        await scroller.evaluate((element) => {
+          element.scrollTop = element.scrollHeight;
+        });
+        expectPage(await scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(1000);
+        expectPage(await files.boundingBox()).toEqual(filesBefore);
+        expectPage(await agents.boundingBox()).toEqual(agentsBefore);
+        await expectPage(files).toBeInViewport();
+        await expectPage(agents).toBeInViewport();
+      } finally {
+        await closeRoutedPage(page);
+      }
+    },
+  );
+
   it("shows hosted files on an archived orb and preserves a missing orb URL", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/orbs/frontend-archived-orb`);

@@ -46,6 +46,7 @@ const ORB_ID = "frontend-fixture-orb";
 const AUTH_ORB_ID = "frontend-auth-copy-test";
 const ARCHIVED_ORB_ID = "frontend-archived-orb";
 const HEADLINE_ORB_ID = "frontend-activity-headlines";
+const STICKY_BARS_ORB_ID = "frontend-sticky-bars";
 const TIMESTAMP_CHURN_ORB_IDS = [ORB_ID, "frontend-long-history", "frontend-lazy-details"];
 const NEW_ORB_STARTUP_DELAY_MS = 10_000;
 const now = () => new Date().toISOString();
@@ -648,6 +649,12 @@ function initialState(timestampChurn: boolean): MockState {
       overflow: {},
     });
   }
+  const stickyBarsOrb: OrbView = {
+    ...longOrb,
+    id: STICKY_BARS_ORB_ID,
+    name: "Charts and Datadog widgets",
+    activity: "busy",
+  };
   const lazyOrb: OrbView = { ...orb, id: "frontend-lazy-details", name: "Lazy details" };
   const lazyRecords: HistoryRecord[] = [
     {
@@ -783,6 +790,7 @@ function initialState(timestampChurn: boolean): MockState {
       ...fleetOrbs.map((entry): [string, OrbView] => [entry.id, entry]),
       [orb.id, orb],
       [longOrb.id, longOrb],
+      [stickyBarsOrb.id, stickyBarsOrb],
       [lazyOrb.id, lazyOrb],
       [mixedOrb.id, mixedOrb],
       [authOrb.id, authOrb],
@@ -792,6 +800,7 @@ function initialState(timestampChurn: boolean): MockState {
       ...fleetHistories,
       [orb.id, records],
       [longOrb.id, longRecords],
+      [stickyBarsOrb.id, [...longRecords]],
       [lazyOrb.id, lazyRecords],
       [mixedOrb.id, mixedRecords],
       [authOrb.id, []],
@@ -802,6 +811,7 @@ function initialState(timestampChurn: boolean): MockState {
       ...fleetOrbs.map((entry): [string, OrbMessageView[]] => [entry.id, []]),
       [orb.id, seededMessages],
       [longOrb.id, []],
+      [stickyBarsOrb.id, []],
       [lazyOrb.id, []],
       [authOrb.id, []],
       [archivedOrb.id, []],
@@ -1968,7 +1978,7 @@ async function handleApi(
     sendJson(response, 200, {
       cleanupIssues: [],
       files:
-        orbId === ARCHIVED_ORB_ID
+        orbId === ARCHIVED_ORB_ID || orbId === STICKY_BARS_ORB_ID
           ? [
               {
                 mediaType: "text/html",
@@ -2941,7 +2951,24 @@ function acceptLiveSocket(state: MockState, socket: WebSocket, orbId: string): v
     }
     send(socket, { v: 1, type: "runtime.event", at: now(), event: settingsFor(state, orbId) });
     send(socket, { v: 1, type: "sync.completed", at: now(), headId });
-    if (!compact)
+    if (orbId === STICKY_BARS_ORB_ID) {
+      const operationId = "fixture-sticky-bars-operation";
+      for (const event of [
+        { type: "operation_started", operationId },
+        {
+          type: "subagents",
+          operationId,
+          children: [
+            { id: "fixture-charts", description: "Build chart embeds", phase: "running" },
+            { id: "fixture-datadog", description: "Check Datadog widgets", phase: "queued" },
+            { id: "fixture-layout", description: "Review transcript layout", phase: "finishing" },
+          ],
+        },
+        { type: "status", activity: "busy", operationId },
+      ] satisfies Extract<ServerFrame, { type: "runtime.event" }>["event"][]) {
+        send(socket, { v: 1, type: "runtime.event", at: now(), event });
+      }
+    } else if (!compact)
       send(
         socket,
         eventFrame({

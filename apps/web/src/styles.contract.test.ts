@@ -53,6 +53,16 @@ describe("orb alerts", () => {
   });
 });
 
+it("gives Files the same enclosure and summary geometry as Subagents", () => {
+  const enclosure = rule(".subagent-live-rail.activity-rail-row,\n.hosted-files.activity-rail-row");
+  expect(enclosure).toContain("margin: 0");
+  expect(enclosure).toContain("border-bottom: 1px solid var(--g2)");
+  const summary = rule(".subagent-live-rail > summary,\n.hosted-files > summary");
+  expect(summary).toContain("min-height: 20px");
+  expect(summary).toContain("padding: 0 12px");
+  expect(rule(".hosted-files-inventory")).toContain("border-top: 1px solid var(--g2)");
+});
+
 describe("subagent roster", () => {
   it("has no nested disclosure-marker or identity-only styles", () => {
     expect(css).not.toMatch(/\.subagent-roster[^{}]*::before/);

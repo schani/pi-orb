@@ -2207,14 +2207,30 @@ pre,
   margin-top: 4px;
   color: var(--g3);
 }
-.subagent-live-rail.activity-rail-row {
+.subagent-live-rail.activity-rail-row,
+.hosted-files.activity-rail-row {
   margin: 0;
   border: 0;
   border-bottom: 1px solid var(--g2);
 }
-.subagent-live-rail > summary {
+.subagent-live-rail > summary,
+.hosted-files > summary {
   min-height: 20px;
   padding: 0 12px;
+}
+.hosted-files-inventory {
+  padding: 0 12px;
+  border-top: 1px solid var(--g2);
+}
+.hosted-file {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  min-height: 24px;
+  overflow-wrap: anywhere;
+}
+.hosted-file + .hosted-file {
+  border-top: 1px solid var(--g2);
 }
 .subagent-counts {
   display: flex;
@@ -2676,6 +2692,7 @@ button.orb-phone-menu {
   }
 
   .subagent-live-rail > summary,
+  .hosted-files > summary,
   .subagent-roster > li,
   .subagent-notice > summary {
     min-height: 44px;
@@ -2683,7 +2700,8 @@ button.orb-phone-menu {
   .subagent-notice .activity-rail-summary {
     white-space: normal;
   }
-  .subagent-live-rail > summary {
+  .subagent-live-rail > summary,
+  .hosted-files > summary {
     grid-template-columns: 1ch auto minmax(0, 1fr);
   }
 

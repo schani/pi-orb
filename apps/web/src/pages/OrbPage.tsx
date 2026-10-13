@@ -2075,6 +2075,7 @@ function OrbConversation({
           {canConnectLive(orb) && connected && state.subagents.length > 0 && (
             <SubagentRail agents={state.subagents} />
           )}
+          <HostedFiles inventory={hostedFiles} error={hostedFilesError} />
           {uploads.progress}
           <OrbFailureBanner message={orb?.lastError} />
           {dropFeedback && (
@@ -2206,7 +2207,6 @@ function OrbConversation({
               )}
             </OrbNotice>
           )}
-          <HostedFiles inventory={hostedFiles} error={hostedFilesError} />
           {orbError !== null && (
             <OrbNotice error>
               {orb === null && "metadata unavailable: "}

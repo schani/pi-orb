@@ -20,6 +20,9 @@ describe("HostedFiles", () => {
       ],
     };
     const html = renderToStaticMarkup(<HostedFiles inventory={inventory} error={null} />);
+    expect(html).toContain('class="hosted-files activity-rail-row"');
+    expect(html).toContain('class="activity-rail-marker"');
+    expect(html).toContain('class="hosted-files-inventory"');
     expect(html).toContain('href="https://files.test/s/orb/site/index.html"');
     expect(html).toContain("site/index.html");
     expect(html).toContain("1.5 KiB");

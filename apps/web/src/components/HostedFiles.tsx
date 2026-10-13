@@ -29,22 +29,29 @@ export function HostedFiles({
     return null;
   const hasIssue = error !== null || (inventory?.cleanupIssues.length ?? 0) > 0;
   return (
-    <details className="hosted-files" open={hasIssue}>
-      <summary>files{inventory === null ? "" : ` (${inventory.files.length})`}</summary>
-      {error !== null && <p className="error-text">{describeApiError(error)}</p>}
-      {inventory?.files.map((file) => (
-        <div className="hosted-file" key={file.path}>
-          {safeUrl(file.url) ? <a href={file.url}>{file.path}</a> : <span>{file.path}</span>}
-          <span className="muted">
-            {byteSize(file.size)} · {new Date(file.updatedAt).toLocaleString()}
-          </span>
-        </div>
-      ))}
-      {inventory?.cleanupIssues.map((issue) => (
-        <p className="error-text" key={`${issue.path ?? "*"}:${issue.lastErrorAt}`}>
-          {issue.path === null ? "cleanup" : issue.path}: {issue.lastError}
-        </p>
-      ))}
+    <details className="hosted-files activity-rail-row" open={hasIssue}>
+      <summary>
+        <span className="activity-rail-marker" aria-hidden="true" />
+        <span className="activity-rail-summary">
+          files{inventory === null ? "" : ` (${inventory.files.length})`}
+        </span>
+      </summary>
+      <div className="hosted-files-inventory">
+        {error !== null && <p className="error-text">{describeApiError(error)}</p>}
+        {inventory?.files.map((file) => (
+          <div className="hosted-file" key={file.path}>
+            {safeUrl(file.url) ? <a href={file.url}>{file.path}</a> : <span>{file.path}</span>}
+            <span className="muted">
+              {byteSize(file.size)} · {new Date(file.updatedAt).toLocaleString()}
+            </span>
+          </div>
+        ))}
+        {inventory?.cleanupIssues.map((issue) => (
+          <p className="error-text" key={`${issue.path ?? "*"}:${issue.lastErrorAt}`}>
+            {issue.path === null ? "cleanup" : issue.path}: {issue.lastError}
+          </p>
+        ))}
+      </div>
     </details>
   );
 }
