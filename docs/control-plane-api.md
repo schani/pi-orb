@@ -1,5 +1,10 @@
 # Projects and the control-plane API
 
+## Model usage (implemented locally 2026-10-13)
+
+`GET /api/v1/usage?boundaries=<JSON epoch-millisecond array>` returns selected-owner `{boundaries, summary, buckets, orbs}`, with `cache-control: no-store`. The service validates bounded increasing edges; the ledger reads half-open intervals in one snapshot. Unknown fields/invalid ranges return 400, unavailable storage 503 and invalid aggregates 500. It does not wake compute. Contract and coverage: `docs/model-usage.md`.
+
+
 ## Harness selection (POC, 2026-10-04)
 
 Creation accepts optional `harness: "pi" | "claude"`, defaulting to Pi. Migration `029_orb_harness.sql` persists the required, checked value; all orb views expose it without credential data. Selection is immutable: a conflicting supplied harness on a same-ID retry returns 409, while omission preserves the accepted selection. Start/Stop and compute replacement retain it. The durable `created` lifecycle edge includes harness. In-orb spawning inherits the fenced caller row; callers cannot select a different harness.

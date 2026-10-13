@@ -13,6 +13,7 @@ import {
   type SystemView,
   UpdateOrbRequestSchema,
   UpdateProjectRequestSchema,
+  USAGE_PATH,
   validateRepositoryUrl,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
@@ -57,6 +58,7 @@ import {
   publishSigningKey,
   type RotationError,
 } from "../domain/signing-keys.ts";
+import { readModelUsage } from "../domain/usage-read.ts";
 import { registerActivityHeadlineRoutes } from "./activity-headline-routes.ts";
 import { requirePrincipal } from "./browser-identity.ts";
 import { sendGitIdentity } from "./git-identity.ts";
@@ -292,6 +294,21 @@ export function registerRoutes(
 
   registerProjectInstructionsRoutes(app, task, deps.projectInstructions);
   registerActivityHeadlineRoutes(app, task, deps);
+
+  app.get(USAGE_PATH, async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const user = await selectedUser(request, reply, task, deps);
+    if (user === null) return;
+    const result = await readModelUsage(task, deps.modelUsage, user.id, request.query);
+    if (result.isOk()) return reply.send(result.value);
+    if (result.error.type === "usage_request_invalid")
+      return reply.status(400).send(httpError("invalid_request", result.error.message, false));
+    request.log.error(
+      { ownerUserId: user.id, query: request.query, code: result.error.code },
+      "model usage read failed",
+    );
+    return sendStoreError(reply, result.error);
+  });
 
   app.get(PERSONAL_INSTRUCTIONS_PATH, async (request, reply) => {
     reply.header("cache-control", "no-store");

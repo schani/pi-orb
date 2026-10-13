@@ -22,6 +22,11 @@ describe("parseRoute", () => {
     });
   });
 
+  it("recognizes usage without accepting unknown subroutes", () => {
+    expect(parseRoute("/usage?from=dashboard")).toEqual({ page: "usage" });
+    expect(parseRoute("/usage/unknown")).toEqual({ page: "not_found" });
+  });
+
   it("recognizes explicit orb-creation intent URLs", () => {
     expect(parseRoute("/projects/project-1/orbs/new")).toEqual({
       page: "create_orb",

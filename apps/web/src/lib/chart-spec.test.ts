@@ -90,6 +90,39 @@ describe("end-label spreading", () => {
 });
 
 describe("line chart spec", () => {
+  it("uses caller-supplied dense ticks without dropping time-series points", () => {
+    const ticks = Array.from({ length: 183 }, (_, i) => Date.UTC(2026, 3, 13 + i, 17));
+    const input = line(2, {
+      series: [0, 1].map((i) => ({ name: `series-${i}`, points: ticks.map((t) => [t, i + 1]) })),
+    });
+    for (const narrow of [false, true]) {
+      const spec = lineChartSpec(input, {
+        narrow,
+        height: 280,
+        xAxis: { ticks, labelEvery: 23, format: "%b %d" },
+      });
+      const encoding = marks(spec, "line")[0]?.encoding;
+      expect(encoding?.["x"]).toMatchObject({
+        axis: { values: ticks, tickCount: ticks.length, format: "%b %d", labelOverlap: false },
+      });
+      const axis = (encoding?.["x"] as { axis: { labelExpr: string } } | undefined)?.axis;
+      expect(axis).toBeDefined();
+      expect(axis?.labelExpr).toContain("indexof(");
+      expect(axis?.labelExpr).toContain("% 23");
+      expect(axis?.labelExpr).toContain("+datum.value");
+      expect(JSON.stringify(spec)).toContain(String(ticks.at(-1)));
+      expect(() => compile(spec as Parameters<typeof compile>[0])).not.toThrow();
+    }
+    const defaultAxis = (
+      marks(lineChartSpec(line(2), { narrow: false, height: 180 }), "line")[0]?.encoding?.["x"] as
+        | { axis: Record<string, unknown> }
+        | undefined
+    )?.axis;
+    expect(defaultAxis).toBeDefined();
+    expect(defaultAxis).not.toHaveProperty("values");
+    expect(defaultAxis).not.toHaveProperty("labelExpr");
+  });
+
   it("names multiple series at their line ends and lets a hovered name isolate its line", () => {
     const spec = lineChartSpec(line(3), { narrow: false, height: 180 });
     expect(spec.params).toEqual([{ name: "hl", value: null }]);
