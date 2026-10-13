@@ -18,6 +18,10 @@ it("captures SDK stack/cause and stderr without credentials or arbitrary payload
   expect(result.diagnostics).toContain("diagnostics.test.ts");
   expect(result.diagnostics).toContain("TLS failed [redacted]");
   expect(result.diagnostics).toContain("exitCode=17");
+  const invalidStack = Object.assign(new Error("safe"), {
+    stack: { toString: () => "private input" },
+  });
+  expect(diagnostic.capture(invalidStack).diagnostics).not.toContain("private input");
   for (const secret of ["opaque-secret", "old line", "hidden", "private input"])
     expect(JSON.stringify(result)).not.toContain(secret);
 });

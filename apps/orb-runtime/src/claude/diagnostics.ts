@@ -65,16 +65,18 @@ export class ClaudeDiagnostics {
         let current = error;
         for (let depth = 0; current !== undefined && depth < 4; depth++) {
           const value = current as { message?: unknown; code?: unknown } | null;
+          const messageValue = value?.message,
+            code = value?.code;
+          const stack = current instanceof Error ? current.stack : undefined;
           const message =
             typeof current === "string"
               ? current
-              : typeof value?.message === "string"
-                ? value.message
+              : typeof messageValue === "string"
+                ? messageValue
                 : "Unknown error";
           messages.push(message);
-          details.push(current instanceof Error ? (current.stack ?? message) : message);
-          if (typeof value?.code === "string" || typeof value?.code === "number")
-            details.push(`code=${value.code}`);
+          details.push(typeof stack === "string" ? stack : message);
+          if (typeof code === "string" || typeof code === "number") details.push(`code=${code}`);
           current = current instanceof Error ? current.cause : undefined;
         }
         return {
