@@ -328,7 +328,7 @@ it.each(["malformed", "header-conflict", "head-without-cursor", "custom-session"
       )._unsafeUnwrap();
       if (kind === "header-conflict") {
         (
-          await f.db.query("UPDATE orbs SET harness_session_header=$2 WHERE id=$1", [
+          await f.db.query("UPDATE orbs SET harness_session_header=$2::text::json WHERE id=$1", [
             f.orb.id,
             JSON.stringify({ id: "conflicting-header", overflow: {} }),
           ])

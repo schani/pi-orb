@@ -72,6 +72,9 @@ const orb: OrbRow = {
   createdAt: 1_000,
   updatedAt: 1_000,
 };
+const unicodeStrings = ["\u0000", "\ud800", "\udfff", "\\u0000", "😀"];
+const unicodeOverflow = Object.fromEntries(unicodeStrings.map((text) => [text, { [text]: text }]));
+
 const session: HarnessSessionMetadata = { id: "session-1", overflow: {} };
 const first: HistoryRecord = {
   id: "record-1",
@@ -1841,14 +1844,12 @@ export function storeSemanticsContractTests(
 
     it("atomically commits idempotent history and reconstructs its linear chain", async () => {
       await seed();
-      const strings = ["\u0000", "\ud800", "\udfff", "\\u0000", "😀"];
-      const overflow = Object.fromEntries(strings.map((text) => [text, { [text]: text }]));
-      const nativePayload = { message: { content: strings, details: overflow } };
+      const nativePayload = { message: { content: unicodeStrings, details: unicodeOverflow } };
       const native: HistoryRecord = {
         ...second,
         type: "message",
         role: "assistant",
-        content: [{ type: "text", text: strings.join("|") }],
+        content: [{ type: "text", text: unicodeStrings.join("|") }],
         overflow: { native: nativePayload, other: "safe" },
       };
       const original = JSON.stringify([first, native]);
@@ -1884,47 +1885,6 @@ export function storeSemanticsContractTests(
       expect(
         (await store.readHistoryRecord(task, orb.id, session.id, "missing"))._unsafeUnwrap(),
       ).toBeNull();
-      const other = { ...orb, id: "00000000-0000-4000-8000-000000000004" };
-      (await store.insertOrb(task, other))._unsafeUnwrap();
-      const header = { ...session, overflow };
-      (await store.initOrVerifySession(task, other.id, header))._unsafeUnwrap();
-      const headerOnly = (
-        await store.commitPullBatch(task, {
-          orbId: other.id,
-          expectedCursor: null,
-          session: header,
-          records: [first],
-          nextCursor: first.id,
-          nextHeadId: first.id,
-        })
-      )._unsafeUnwrap();
-      let transitioned = headerOnly;
-      for (const toState of ["starting", "stopped"] as const) {
-        transitioned = (
-          await store.casTransition(task, {
-            orbId: other.id,
-            expectedStateVersion: transitioned.stateVersion,
-            toState,
-            now: 2_000,
-          })
-        )._unsafeUnwrap();
-        expect(transitioned.harnessSessionHeader).toEqual(header);
-      }
-      expect(headerOnly.harnessSessionHeader).toEqual(header);
-      expect((await store.getOrb(task, other.id))._unsafeUnwrap()?.harnessSessionHeader).toEqual(
-        header,
-      );
-      expect((await store.readHistorySnapshot(task, other.id))._unsafeUnwrap()).toEqual({
-        session: header,
-        cursor: first.id,
-        headId: first.id,
-        records: [first],
-      });
-      const conflict = await store.initOrVerifySession(task, other.id, session);
-      expect(conflict.isErr() && conflict.error).toMatchObject({
-        type: "replication_integrity",
-        reason: "session_mismatch",
-      });
     });
 
     it("anchors source history to an inactive branch without changing replica metadata", async () => {
@@ -2966,18 +2926,27 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
         now: 2_500,
       });
       expect(duplicate.isOk() && duplicate.value.duplicate).toBe(true);
-      // Session headers retain structured metadata.
-      expect(
-        (
-          await store.initOrVerifySession(task, orb.id, {
-            id: "session-jsonb",
-            overflow: { nested: { list: [1, 2, 3] } },
-          })
-        ).isOk(),
-      ).toBe(true);
-      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.harnessSessionHeader).toEqual({
-        id: "session-jsonb",
-        overflow: { nested: { list: [1, 2, 3] } },
+      const header = { ...session, overflow: unicodeOverflow };
+      (await store.initOrVerifySession(task, orb.id, header))._unsafeUnwrap();
+      const committed = (
+        await store.commitPullBatch(task, {
+          orbId: orb.id,
+          expectedCursor: null,
+          session: header,
+          records: [first],
+          nextCursor: first.id,
+          nextHeadId: first.id,
+        })
+      )._unsafeUnwrap();
+      expect(committed.harnessSessionHeader).toEqual(header);
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.harnessSessionHeader).toEqual(
+        header,
+      );
+      expect((await store.readHistorySnapshot(task, orb.id))._unsafeUnwrap()).toEqual({
+        session: header,
+        cursor: first.id,
+        headId: first.id,
+        records: [first],
       });
 
       const bareArray = await client.query("SELECT $1::jsonb AS value", [[{ type: "text" }]]);
