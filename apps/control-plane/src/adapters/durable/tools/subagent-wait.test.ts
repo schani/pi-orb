@@ -1,17 +1,9 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { ToolExecutionResult, WatchEnd } from "@earendil-works/pi-durable";
+import type { WatchEnd } from "@earendil-works/pi-durable";
 import { expect, it } from "vitest";
 import { waitArgs as args, toolData as data, WaitBoundary, wait } from "./testkit/subagent-wait.ts";
 
 const ctx = BACKGROUND_CONTEXT;
-async function observe(boundary: WaitBoundary, execution: Promise<ToolExecutionResult>) {
-  const first = await Promise.race([
-    execution.then(() => "returned"),
-    boundary.registered.promise.then(() => "waiting"),
-  ]);
-  if (first === "waiting")
-    expect(boundary.acquisitions, "completion wait must observe parent inbox").toBe(1);
-}
 
 it("followUp and writes do not interrupt child completion", async () => {
   await using boundary = await WaitBoundary.open();
@@ -53,7 +45,7 @@ it.each([
   await using boundary = await WaitBoundary.open();
   const execution = wait.execute(args, boundary.api, ctx);
   try {
-    await observe(boundary, execution);
+    await boundary.registered.promise;
     boundary.close(end);
     const output = await execution;
     expect(output.isError).toBe(true);
@@ -75,7 +67,6 @@ it.each(["acquireFailure", "startFailure", "stopFailure", "readFailure", "waitFa
     if (failure === "stopFailure") await boundary.queue("steer");
     const execution = wait.execute(args, boundary.api, ctx);
     try {
-      // Completion makes this finite even on the pre-feature implementation.
       boundary.complete();
       const output = await execution;
       expect(output.isError).toBe(true);

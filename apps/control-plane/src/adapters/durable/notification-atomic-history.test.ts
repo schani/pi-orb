@@ -66,7 +66,7 @@ async function openNotificationDatabase(kind: "pglite" | "postgres") {
 }
 
 it.for(["pglite", "postgres"] as const)(
-  "%s atomically projects typed native notifications through placement, replay, reopen and pull without flagging the user; root alerts still flag",
+  "%s atomically projects typed native notifications through placement, replay, reopen and pull without flagging the user",
   async (kind, { skip }) => {
     const fixture = await openNotificationDatabase(kind);
     if (!fixture) return skip("needs PI_ORB_DURABLE_PG_TEST_URL");
@@ -189,30 +189,6 @@ it.for(["pglite", "postgres"] as const)(
       expect(snapshot.headId).toBe(
         (await database.store.getOrb(task, orb.id))._unsafeUnwrap()?.replicatedHeadId,
       );
-      await agent.close();
-      agent = (
-        await DurableAgent.open({
-          orbId: orb.id,
-          storage: await openStorage(),
-          models,
-          registry: createRegistry(),
-          env: new NodeExecutionEnv({ cwd: "/tmp" }),
-          instructions: "",
-          checkoutCommit: null,
-          initialSettings: { model: { provider: "faux", id: "faux-1" }, thinkingLevel: "off" },
-        })
-      )._unsafeUnwrap();
-      const alert = (await agent.appendAlert("root-alert", "root needs attention"))._unsafeUnwrap();
-      const flagged = (await database.store.getOrb(task, orb.id))._unsafeUnwrap();
-      expect(flagged?.unreadAlertId).toBe(alert.recordId);
-      expect(JSON.stringify(agent.snapshot()._unsafeUnwrap())).toContain("root needs attention");
-      expect(
-        JSON.stringify(
-          (
-            await db.query("SELECT record FROM history_records WHERE orb_id=$1", [orb.id])
-          )._unsafeUnwrap().rows,
-        ),
-      ).toContain(secret);
     } finally {
       if (agent) await agent.close();
       if (harness) await harness.close(context);

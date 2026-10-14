@@ -44,16 +44,6 @@ it.each(["before", "acquired", "waiting"] as const)(
             const execution = wait.execute(args, api, BACKGROUND_CONTEXT);
             pending.push(execution);
             try {
-              const first = await Promise.race([
-                execution.then(() => "returned"),
-                arrival.promise.then(() => "waiting"),
-              ]);
-              if (first === "waiting") {
-                expect(
-                  boundary.acquisitions,
-                  "completion wait must own an atomic inbox watch",
-                ).toBeGreaterThan(0);
-              }
               const output = await execution;
               outputs.push(output);
               expect(output.isError).not.toBe(true);
@@ -66,8 +56,6 @@ it.each(["before", "acquired", "waiting"] as const)(
               expect(boundary.child.abortRequested).toBe(false);
             } finally {
               arrival.resolve();
-              // Failure cleanup is explicit; not synchronization for the assertion.
-              if (boundary.acquisitions === 0) boundary.complete();
             }
           },
         })),

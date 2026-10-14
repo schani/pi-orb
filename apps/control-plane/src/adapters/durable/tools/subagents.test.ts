@@ -11,11 +11,17 @@ import {
   createRegistry,
   defineTool,
   Harness,
+  InboxDoc,
   MemoryStorage,
   type Storage,
+  type SubmissionId,
+  type TaskId,
+  type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
 import { expect, it } from "vitest";
 import { ChildReceipts, createDurableTools } from "./index.ts";
+import { ChildAnchor, subagentTools } from "./subagents.ts";
+import { toolData, wait } from "./testkit/subagent-wait.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 function barrier() {
@@ -318,6 +324,67 @@ it("starts a child on the selected model and rejects an unavailable one before c
     const conversations = await storage.scanConversations({}, 100, undefined, ctx);
     expect(conversations.items.filter((c) => c.owner)).toHaveLength(1);
   } finally {
+    await harness.close(ctx);
+    await s.tools.close();
+  }
+});
+
+it("parent input interrupts a real child wait without aborting its anchor or consuming the inbox", async () => {
+  const entered = barrier(),
+    release = barrier();
+  const s = setup([
+    async () => {
+      entered.resolve();
+      await release.promise;
+      return fauxAssistantMessage("child receipt");
+    },
+  ]);
+  const harness = await Harness.open(new MemoryStorage(), s, ctx);
+  try {
+    const root = await harness.root(ctx, initial);
+    const api = {
+      conversationId: root.id,
+      taskId: 42 as TaskId,
+      callId: "spawn",
+      models: s.models,
+      commit: root.commit.bind(root),
+      snapshot: harness.snapshot.bind(harness),
+      getTask: harness.getTask.bind(harness),
+      waitForTask: harness.waitForTask.bind(harness),
+      watchDoc: harness.watchDoc.bind(harness),
+    } as unknown as ToolExecutionApi;
+    const spawn = subagentTools.find((tool) => tool.name === "subagent");
+    if (!spawn) throw new Error("Missing subagent tool");
+    const agentId = toolData(await spawn.execute({ prompt: "work" }, api, ctx)).agent_id;
+    harness.resume();
+    await entered.promise;
+    await root.commit(async (tx) => {
+      (await tx.doc(InboxDoc, root.id)).items.push({
+        id: 999 as SubmissionId,
+        mode: "steer",
+        content: [{ type: "text", text: "parent input" }],
+      });
+    }, ctx);
+    const yielded = await wait.execute({ agent_id: agentId, wait: true }, api, ctx);
+    expect(yielded.isError).not.toBe(true);
+    expect(toolData(yielded)).toMatchObject({ status: "running", interrupted: "parent_input" });
+    const anchor = (await harness.inspect(ctx)).tasks.find(
+      (task) => task.record.kind === ChildAnchor.definition.name,
+    )?.record;
+    if (!anchor) throw new Error("Missing ChildAnchor");
+    expect(anchor.state.status).not.toBe("terminal");
+    expect(anchor.abortRequested).toBe(false);
+    expect((await harness.snapshot(InboxDoc, root.id, ctx))?.items).toHaveLength(1);
+    release.resolve();
+    await harness.waitForTask(anchor.id, ctx);
+    expect(toolData(await wait.execute({ agent_id: agentId, wait: true }, api, ctx))).toMatchObject(
+      {
+        status: "completed",
+        receipt: { result: { output: "child receipt" } },
+      },
+    );
+  } finally {
+    release.resolve();
     await harness.close(ctx);
     await s.tools.close();
   }
