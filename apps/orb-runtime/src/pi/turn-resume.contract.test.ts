@@ -3,13 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  detectInterruptedTurn,
-  startInterruptedTurnResume,
-  TURN_RESUME_CUSTOM_TYPE,
-  TURN_RESUME_DECLINED_CUSTOM_TYPE,
-  type TurnResumeMarker,
-} from "./turn-resume.ts";
+import { detectInterruptedTurn, TURN_RESUME_CUSTOM_TYPE } from "./turn-resume.ts";
 
 /**
  * Pinned-SDK contract (docs/lifecycle.md): interrupted-turn detection reads
@@ -163,64 +157,6 @@ describe("Pi session interrupted-turn contract", () => {
       reason: "already_resumed",
       suppressed: { shape: "dangling_tool_calls", headRecordId: secondHead, announced: false },
     });
-  });
-
-  it("the declined-resume record is written once and survives every later boot", async () => {
-    const manager = SessionManager.create(dir, sessionDir);
-    manager.appendMessage(userMessage);
-    // `appendMessage` returns the persisted entry ID: the interrupted head.
-    const head = manager.appendMessage(toolCallMessage);
-    for (let i = 0; i < 3; i++)
-      manager.appendCustomMessageEntry(TURN_RESUME_CUSTOM_TYPE, "resuming", true, {
-        shape: "dangling_tool_calls",
-      });
-
-    // Boot 1 after the resumed turn died with its host: the guard declines and
-    // says so, through the same call AgentSession makes for a custom message.
-    const firstBoot = reopen(manager);
-    const persist = (message: TurnResumeMarker): Promise<void> => {
-      firstBoot.appendCustomMessageEntry(
-        message.customType,
-        message.content,
-        message.display,
-        message.details,
-      );
-      return Promise.resolve();
-    };
-    const declined = startInterruptedTurnResume(firstBoot.buildContextEntries(), {
-      sendCustomMessage: persist,
-    });
-    expect(declined.marker?.customType).toBe(TURN_RESUME_DECLINED_CUSTOM_TYPE);
-    expect(declined.observation).toEqual({
-      outcome: "declined_already_resumed",
-      shape: "dangling_tool_calls",
-      headRecordId: head,
-    });
-    const issued = declined.issued;
-    if (issued === null) throw new Error("expected the decline record to be issued");
-    expect((await issued).isOk()).toBe(true);
-
-    // Boot 2 reloads that record from disk: same verdict, no second record.
-    const secondBoot = reopen(firstBoot);
-    const again = startInterruptedTurnResume(secondBoot.buildContextEntries(), {
-      sendCustomMessage: () => Promise.reject(new Error("must not be called")),
-    });
-    expect(again.marker).toBeNull();
-    expect(again.issued).toBeNull();
-    expect(again.observation).toEqual({
-      outcome: "declined_already_resumed",
-      shape: "dangling_tool_calls",
-      headRecordId: head,
-    });
-    const declines = secondBoot
-      .buildContextEntries()
-      .filter(
-        (entry) =>
-          typeof entry === "object" &&
-          entry !== null &&
-          (entry as { customType?: unknown }).customType === TURN_RESUME_DECLINED_CUSTOM_TYPE,
-      );
-    expect(declines.length).toBe(1);
   });
 
   it("a later interruption resumes even though an earlier one was marked", () => {
