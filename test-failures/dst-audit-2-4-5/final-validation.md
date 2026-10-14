@@ -34,3 +34,9 @@ Source manifests in `.context/dst-audit/final/` contain 1580 entries and share S
 Local full process E2E is **partial, not passed**. It started without a reported failure; validation agent orderly-stopped it after PR-merge CI Docker/process runs completed. Stop requested at 08:40:58 PDT; exited 143 at 08:41:01 PDT, source-diff exit 0. Local log/shutdown records remain under `.context/dst-audit/final/`; no local pass is inferred from CI.
 
 All historical first-failure evidence, replay distinctions and manifest hashes remain preserved. Only documentation/receipt status is updated; trace/log artifacts are unchanged.
+
+## Reintegration
+
+Rebased onto `main` at `5dab2c5f7697de0c62a6f364f6092d80c660edb4`; only `docs/testing.md` conflicted, and both entries were retained. At rebased `41826d5`, all 91 other feature files/patches matched the pre-rebase tree; all 16 upstream-only files matched main. Application/E2E/package/script/patch and root package blobs exactly matched qualified merge `92ede4c`, including both Dockerfiles. Manifests/comparisons: `.context/dst-audit/rebase/`.
+
+Post-rebase focused validation: **80 tests passed** across poll concurrency, loops, replication, naming, outbound writer/reducer and detail-loader suites. Root typecheck and lint passed (302 warnings / 44 infos). Current-head CI remains pending; historical greens do not qualify subsequent commits or authorize merge/deployment.
