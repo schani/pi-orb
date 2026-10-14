@@ -105,15 +105,25 @@ for (const width of [1280, 390, 320]) {
       );
       await expectPage(body).toHaveCount(0);
       expectPage(alertRequests).toEqual([]);
+      await summary.hover();
       const geometry = await summary.evaluate((element) => {
         const view = element.ownerDocument.defaultView;
         if (view === null) throw new Error("missing message window");
         const preview = element.querySelector(".activity-rail-headline");
         const source = element.querySelector(".activity-rail-metric");
         const text = element.querySelector(".activity-rail-summary");
-        if (preview === null || source === null || text === null)
-          throw new Error("missing message columns");
+        const ordinary = element.ownerDocument.querySelector(".reasoning:not([open]) > summary");
+        if (preview === null || source === null || text === null || ordinary === null)
+          throw new Error("missing message columns or ordinary activity row");
         return {
+          focusVisible: element.matches(":focus-visible"),
+          background: view.getComputedStyle(element).backgroundColor,
+          summaryHeight: element.getBoundingClientRect().height,
+          rowHeight: element.parentElement?.getBoundingClientRect().height,
+          ordinaryHeight: ordinary.getBoundingClientRect().height,
+          textHeight: text.getBoundingClientRect().height,
+          textTop: text.getBoundingClientRect().top,
+          sourceTop: source.getBoundingClientRect().top,
           lineHeight: Number.parseFloat(view.getComputedStyle(element).lineHeight),
           previewHeight: preview.getBoundingClientRect().height,
           sourceWidth: source.getBoundingClientRect().width,
@@ -125,6 +135,12 @@ for (const width of [1280, 390, 320]) {
           overflow: element.ownerDocument.documentElement.scrollWidth - view.innerWidth,
         };
       });
+      expectPage(geometry.focusVisible).toBe(false);
+      expectPage(geometry.background).toBe("rgb(242, 242, 242)");
+      expectPage(geometry.summaryHeight).toBe(geometry.ordinaryHeight);
+      expectPage(geometry.rowHeight).toBe(geometry.ordinaryHeight);
+      expectPage(geometry.textHeight).toBe(geometry.lineHeight);
+      expectPage(geometry.sourceTop).toBeCloseTo(geometry.textTop, 1);
       expectPage(geometry.whiteSpace).toBe("nowrap");
       expectPage(geometry.previewHeight).toBeLessThanOrEqual(geometry.lineHeight);
       expectPage(geometry.sourceWidth).toBeLessThan(geometry.rowWidth / 3);
@@ -141,6 +157,7 @@ for (const width of [1280, 390, 320]) {
           const style = view.getComputedStyle(element);
           return {
             focusVisible: element.matches(":focus-visible"),
+            summaryHeight: element.getBoundingClientRect().height,
             background: style.backgroundColor,
             color: style.color,
             sourceColor: view.getComputedStyle(source).color,
@@ -161,6 +178,7 @@ for (const width of [1280, 390, 320]) {
           outlineWidth: "1px",
           outlineColor: "rgb(85, 85, 85)",
         });
+        expectPage(focused.summaryHeight).toBe(geometry.ordinaryHeight);
         expectPage(focused.sourceWidth).toBeGreaterThan(0);
         expectPage(focused.sourceLeft).toBeGreaterThanOrEqual(focused.textRight);
       };

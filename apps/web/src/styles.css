@@ -3087,7 +3087,7 @@ button.orb-phone-menu {
   .subagent-live-rail > summary,
   .hosted-files > summary,
   .subagent-roster > li,
-  .subagent-notice > summary {
+  .subagent-notice:not(.subagent-message-notice) > summary {
     min-height: 44px;
   }
   .subagent-notice .activity-rail-summary {
