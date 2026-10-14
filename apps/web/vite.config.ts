@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => ({
       ? [
           mockBackendPlugin({
             timestampChurn: process.env["PI_ORB_FIXTURE_TIMESTAMP_CHURN"] === "1",
+            orbNesting: process.env["PI_ORB_FIXTURE_ORB_NESTING"] === "1",
           }),
         ]
       : []),
