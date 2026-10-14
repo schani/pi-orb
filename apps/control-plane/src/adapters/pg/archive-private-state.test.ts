@@ -132,11 +132,11 @@ it("seals the retained transcript and deletes private authority, resources and s
       )._unsafeUnwrap().rows[0]?.archived,
     ).toBe(true);
     expect((await authority.acquire(orb.id, "late", 0, 0, 1000)).isErr()).toBe(true);
-    expect(
-      (
-        await db.query("SELECT history_sealed_at FROM orb_deletions WHERE orb_id=$1", [orb.id])
-      )._unsafeUnwrap().rows[0]?.history_sealed_at,
-    ).not.toBeNull();
+    const deletion = (
+      await db.query("SELECT history_sealed_at FROM orb_deletions WHERE orb_id=$1", [orb.id])
+    )._unsafeUnwrap();
+    expect(deletion.rows).toHaveLength(1);
+    expect(deletion.rows[0]?.history_sealed_at).toStrictEqual(new Date(0));
   } finally {
     await database.close();
   }
