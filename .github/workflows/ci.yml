@@ -80,6 +80,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install OpenTofu
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/tofu_1.12.6_linux_amd64.zip"
+          curl --fail --silent --show-error --location https://github.com/opentofu/opentofu/releases/download/v1.12.6/tofu_1.12.6_linux_amd64.zip -o "$archive"
+          printf '5dc43da4f750f33873dc25e94587128709e819e544b7be9016b255316153c3a8  %s\n' "$archive" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/tofu-bin"
+          unzip -q "$archive" tofu -d "$RUNNER_TEMP/tofu-bin"
+          echo "$RUNNER_TEMP/tofu-bin" >> "$GITHUB_PATH"
+
+      - name: Test foundation contracts
+        run: infra/foundation/test.sh
+
       - name: Typecheck
         run: npm run typecheck
 
