@@ -296,3 +296,66 @@ it("reachable failed Claude guard claims one fenced replacement after failed pul
     expect(result.isOk(), result.isErr() ? result.error.message : undefined).toBe(true);
   });
 });
+
+it("persists identity-gap diagnostics intact without authorizing replacement", async () => {
+  const log = new LogCapture();
+  await runDst(
+    { name: "claude-identity-gap-diagnostics", iterations: 10, logCapture: log },
+    async (sim) => {
+      const h = makeHarness();
+      const message =
+        "Native history and streamed output could not be correlated; inspection is required. " +
+        JSON.stringify({
+          liveBlocks: 3,
+          published: 811,
+          nativeLength: 814,
+          blocks: Array.from({ length: 3 }, (_, index) => ({
+            id: `block-${index}:0`,
+            ownerCount: 2,
+            owners: Array.from({ length: 2 }, (_, owner) => ({
+              id: `owner-${index}-${owner}-${"a".repeat(80)}`,
+              match: "wrong_role",
+              record: {
+                id: `owner-${index}-${owner}-${"a".repeat(80)}`,
+                type: "message",
+                role: "user",
+              },
+            })),
+          })),
+          omittedBlocks: 0,
+          firstUnpublished: { id: "native-tail", type: "message", role: "assistant" },
+        });
+      expect(message.length).toBeGreaterThan(1024);
+      const health = {
+        ...failedHealth,
+        error: { code: "claude_stream_identity_gap", message, retryable: false },
+      };
+      const result = await sim.runTasks([
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, h, "orb");
+            const running = h.store.orbSnapshot("orb");
+            if (running === null) throw new Error("expected running orb");
+            const row = { ...running, harness: "claude" as const };
+            h.store.seedOrb(row);
+            expect((await handleFailedRuntime(task, h.deps, row, health))._unsafeUnwrap()).toBe(
+              true,
+            );
+            const failed = h.store.orbSnapshot("orb");
+            if (failed === null) throw new Error("expected failed orb");
+            expect(failed.state).toBe("failed");
+            expect(failed.lastError).toBe(`runtime_failed: claude_stream_identity_gap: ${message}`);
+            expect(failed.claudeRecovery).toBeUndefined();
+            expect(log.matching("runtime-failed")[0]).toContain(
+              `message=${JSON.stringify(message)}`,
+            );
+            const restarted = restartControlPlane(h);
+            expect(restarted.store.orbSnapshot("orb")?.lastError).toBe(failed.lastError);
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : undefined).toBe(true);
+    },
+  );
+});

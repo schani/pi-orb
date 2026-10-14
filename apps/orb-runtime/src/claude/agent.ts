@@ -15,6 +15,7 @@ import {
   type ClaudeRecoveryProof,
   type CommittedDisplayDetail,
   type DeliverOrbMessageResponse,
+  type HistoryRecord,
   type JsonObject,
   type LiveDisplayDetail,
   type McpConfig,
@@ -1605,10 +1606,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     }
     if (this.health.status === "failed") return;
     if (this.blocks.size > 0 || this.published !== this.history?.view.length) {
-      this.fail(
-        "claude_stream_identity_gap",
-        "Native history and streamed output could not be correlated; inspection is required.",
-      );
+      this.fail("claude_stream_identity_gap", this.streamIdentityGapMessage());
       return;
     }
     if (this.hasOwnedWork()) {
@@ -1787,6 +1785,56 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.fail(code, message);
     const recorded = this.platformEvent("claude.cleanup_failed", message, { code });
     if (recorded.isErr()) this.fail("claude_cleanup_publication_failed", recorded.error.message);
+  }
+  private streamIdentityGapMessage(): string {
+    const view = this.history?.view ?? [];
+    // Copy only bounded identifier fields, never native payloads or streamed block text.
+    const id = (value: unknown): string | null =>
+      typeof value === "string" &&
+      value.length > 0 &&
+      value.length <= 96 &&
+      !/[^A-Za-z0-9._:-]/.test(value)
+        ? value
+        : null;
+    const identity = (record: HistoryRecord | undefined) =>
+      record === undefined
+        ? null
+        : {
+            id: id(record.id),
+            type: record.type,
+            role: record.type === "message" ? record.role : null,
+          };
+    const blocks = [...this.blocks.keys()].slice(0, 3).map((blockId) => {
+      const owners = [...this.messageBlocks].filter(([, blockIds]) => blockIds.includes(blockId));
+      return {
+        id: id(blockId),
+        ownerCount: owners.length,
+        owners: owners.slice(0, 2).map(([uuid]) => {
+          const record = view.find((record) => record.id === uuid);
+          return {
+            id: id(uuid),
+            match:
+              record === undefined
+                ? "missing"
+                : record.type === "message" && record.role === "assistant"
+                  ? "assistant"
+                  : "wrong_role",
+            record: identity(record),
+          };
+        }),
+      };
+    });
+    return (
+      "Native history and streamed output could not be correlated; inspection is required. " +
+      JSON.stringify({
+        liveBlocks: this.blocks.size,
+        published: this.published,
+        nativeLength: this.history?.view.length ?? null,
+        blocks,
+        omittedBlocks: this.blocks.size - blocks.length,
+        firstUnpublished: identity(view[this.published]),
+      })
+    );
   }
   private flushHistory(): Result<void, { message: string }> {
     if (this.history === null) return ok(undefined);

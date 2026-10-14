@@ -362,3 +362,25 @@ describe("FetchRuntimeClient status contracts", () => {
     });
   });
 });
+
+it("preserves a bounded terminal correlation message over health HTTP", async () => {
+  const health = {
+    v: 1,
+    orbId: "orb",
+    runtimeInstanceId: "runtime",
+    status: "failed",
+    error: {
+      code: "claude_stream_identity_gap",
+      retryable: false,
+      message: `inspection required: ${"bounded-id ".repeat(300)}firstUnpublished=native-tail`,
+    },
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Response.json(health)),
+  );
+  const result = await new FetchRuntimeClient().health(task, "http://runtime.test", {
+    signal: new AbortController().signal,
+  });
+  expect(result._unsafeUnwrap()).toEqual(health);
+});
