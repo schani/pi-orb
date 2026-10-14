@@ -4,7 +4,8 @@
 
 ## Required behavior
 
-- An orb can issue `pi-orb alert "message"` to alert the user.
+- An orb can issue `orb_alert` or `pi-orb alert "message"` to alert the user on that orb.
+- **Clarified (2026-10-14):** alerts are not sent to the parent orb. They do not enqueue parent messages or trigger a parent turn.
 - The message appears chronologically in the transcript with distinct alert styling.
 - A durable orb-level unread flag replaces the normal state icon with a red alert icon, regardless of lifecycle/activity state.
 - Selecting the orb clears the flag. The historical alert and its styling remain.

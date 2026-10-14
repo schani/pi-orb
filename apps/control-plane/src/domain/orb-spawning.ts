@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import type { OrbSpawnRequest } from "@pi-orb/protocol";
+import type { OrbSelf, OrbSpawnRequest } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import type { ResultAsync } from "neverthrow";
 import type { StoreError } from "./errors.ts";
 import { logOrbEvent } from "./log.ts";
 import { newOrbRow } from "./new-orb.ts";
 import type { OrbRow } from "./orb.ts";
-import type { ArchiveCaller, ControlPlaneDeps, SpawnConflict } from "./ports.ts";
+import type { ArchiveCaller, ControlPlaneDeps, ControlPlaneStore, SpawnConflict } from "./ports.ts";
 
 export function spawnOrb(
   task: SimulationTask,
@@ -51,4 +51,19 @@ export function spawnOrb(
         });
       return undefined;
     });
+}
+
+export function getOrbSpawnRelations(
+  task: SimulationTask,
+  store: Pick<ControlPlaneStore, "getSpawnCaller" | "listSpawnChildren">,
+  orbId: string,
+  appOrigin: string,
+): ResultAsync<Pick<OrbSelf, "spawnedBy" | "children">, StoreError> {
+  const url = (id: string) => `${appOrigin}/orbs/${id}`;
+  return store.getSpawnCaller(task, orbId).andThen((callerId) =>
+    store.listSpawnChildren(task, orbId).map((children) => ({
+      spawnedBy: callerId === null ? null : { id: callerId, url: url(callerId) },
+      children: children.map((child) => ({ ...child, url: url(child.id) })),
+    })),
+  );
 }

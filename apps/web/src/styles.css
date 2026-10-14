@@ -1842,6 +1842,7 @@ body:has(.orb-page) {
 
 .rec-you,
 .rec-orb,
+.rec-peer,
 .rec-alert {
   display: block;
 }
@@ -1887,12 +1888,47 @@ body:has(.orb-page) {
   border-left: 2px dotted var(--w);
 }
 
+.rec-peer {
+  min-width: 0;
+  padding: 9px 12px;
+  background: var(--g1);
+  color: var(--k);
+}
+
+.rec-peer.rec-q {
+  color: var(--k);
+  border-left-color: var(--g3);
+}
+
+.peer-heading {
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
+}
+
+.peer-sender {
+  color: var(--k);
+  border-bottom: 1px solid currentcolor;
+}
+
+.peer-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .rec-status {
   margin-right: 6px;
   padding: 0 5px;
   color: inherit;
   border: 1px solid currentcolor;
   line-height: 16px;
+}
+
+.peer-heading .rec-status {
+  margin-left: 6px;
+}
+
+.rec-peer .error-text {
+  overflow-wrap: anywhere;
 }
 
 .msg-text,

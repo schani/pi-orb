@@ -99,6 +99,7 @@ import {
 } from "./domain/loops.ts";
 import { McpOAuth, type McpOAuthProtocol } from "./domain/mcp-oauth.ts";
 import { mcpOAuthCleanupLoop } from "./domain/mcp-oauth-garbage.ts";
+import { sendGuestOrbMessage } from "./domain/orb-messaging.ts";
 import { spawnOrb } from "./domain/orb-spawning.ts";
 import type { BrokerDeps, ControlPlaneDeps, SigningKeyDeps } from "./domain/ports.ts";
 import { getProjectSecretSnapshot } from "./domain/project-secrets.ts";
@@ -900,6 +901,7 @@ export async function main(
             resourceGate.initialPin(task, orb),
         }
       : {}),
+    send: (task, caller, request) => sendGuestOrbMessage(task, deps, caller, request),
     spawn: (task, caller, orbId, request) => spawnOrb(task, deps, caller, orbId, request),
     sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
       requestOrbSleep(task, deps, orbId, caller, durationSeconds, sleepId),

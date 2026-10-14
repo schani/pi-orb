@@ -480,3 +480,18 @@ describe("native Claude root authority", () => {
     ).not.toContain("private");
   });
 });
+
+it.each([
+  { system: false, messageIds: ["inbox"] },
+  { messageIds: ["inbox"] },
+  { system: true, messageIds: [] },
+  { system: true, messageIds: ["one", "two"] },
+])("rejects peer provenance without a singleton non-human receipt: %j", (invalid) => {
+  const dir = fixture();
+  const sender = { orbId: "11111111-1111-4111-8111-111111111111" };
+  const provenance = { operationId: "op", sender, ...invalid };
+  const history = new ClaudeHistory(dir, "session", "t");
+  expect(history.correlate("peer", provenance).isErr()).toBe(true);
+  writeFileSync(join(dir, "provenance.json"), JSON.stringify({ peer: provenance }));
+  expect(new ClaudeHistory(dir, "session", "t").scan(null).isErr()).toBe(true);
+});

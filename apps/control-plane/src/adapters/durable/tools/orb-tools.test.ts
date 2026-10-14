@@ -28,6 +28,7 @@ it("uses durable child task identities and does not expose authority arguments",
     "orb_list",
     "orb_transcript",
     "orb_spawn",
+    "orb_send",
     "orb_alert",
     "orb_sleep",
     "orb_archive",
@@ -46,4 +47,29 @@ it("uses durable child task identities and does not expose authority arguments",
   }
   expect(tools.find((t) => t.name === "orb_delete")!.replay).toBe("unsafe");
   expect(tools.find((t) => t.name === "orb_alert")!.replay).toBe("unsafe");
+});
+
+it("describes family inspection and alerts without parent delivery", () => {
+  const tools = createOrbTools({ invoke: () => okAsync({}) });
+  expect(tools.find((tool) => tool.name === "orb_self")?.description).toMatch(/parent.*child/i);
+  expect(tools.find((tool) => tool.name === "orb_alert")?.description).toContain(
+    "Alerts are not sent to the parent orb.",
+  );
+});
+
+it("binds peer sends to durable tool call identity, never model sender input", async () => {
+  const invoke = vi.fn(() => okAsync({ orbId: "target", messageId: "receipt" }));
+  const tool = createOrbTools({ invoke }).find((t) => t.name === "orb_send");
+  expect(tool).toBeDefined();
+  if (!tool) return;
+  expect(tool.replay).toBe("safe");
+  await tool.execute(
+    { orbId: "target", message: "hi" },
+    { taskId: "task", callId: "call" } as never,
+    BACKGROUND_CONTEXT,
+  );
+  expect(invoke).toHaveBeenCalledWith(
+    { kind: "send", orbId: "target", message: "hi" },
+    JSON.stringify(["task", "call"]),
+  );
 });

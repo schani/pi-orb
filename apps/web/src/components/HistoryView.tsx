@@ -74,8 +74,10 @@ interface HistoryViewProps {
   compaction?: { operationId: string; afterId: string | null } | null;
   queuedMessages?: readonly OrbMessageView[];
   orbState?: OrbView["state"] | undefined;
+  senderNames?: ReadonlyMap<string, string | null>;
 }
 
+const EMPTY_SENDER_NAMES: ReadonlyMap<string, string | null> = new Map();
 const DetailContextValue = createContext<DetailContext | null>(null);
 const OpenDetailValue = createContext<{
   aliases: ReadonlyMap<string, string>;
@@ -384,6 +386,7 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
 /** One transcript row: a user turn, grouped agent turn, alert or compaction. */
 type Turn =
   | { kind: "user"; record: MessageRecord }
+  | { kind: "peer"; record: EventRecord; senderId: string }
   | { kind: "agent"; key: string; records: Array<MessageRecord | EventRecord> }
   | { kind: "alert"; record: EventRecord; message: string }
   | { kind: "compaction"; record: CompactionRecord | EventRecord };
@@ -600,7 +603,9 @@ function groupTurns(records: readonly DisplayRecord[]): Turn[] {
         turns.push({ kind: "compaction", record });
         break;
       case "event":
-        if (record.alert !== undefined) {
+        if (record.eventType === "orb.message" && record.sender !== undefined) {
+          turns.push({ kind: "peer", record, senderId: record.sender.orbId });
+        } else if (record.alert !== undefined) {
           turns.push({ kind: "alert", record, message: record.alert.message });
         } else if (record.eventType === "agent.compaction") {
           turns.push({ kind: "compaction", record });
@@ -646,15 +651,63 @@ function renderLiveAgentContent(live: LiveAgentContent, busy: boolean): ReactNod
   return nodes;
 }
 
+function CorrespondenceBand({
+  senderId,
+  name,
+  text,
+  id,
+  pending = false,
+  status,
+  error,
+}: {
+  senderId: string;
+  name: string | null | undefined;
+  text: string;
+  id: string;
+  pending?: boolean;
+  status?: string;
+  error?: string;
+}) {
+  return (
+    <article
+      className={`rec rec-peer${pending ? " rec-q" : ""}`}
+      data-history-row={pending ? undefined : id}
+      aria-label="Orb message"
+    >
+      <div className="rec-bd">
+        <div className="peer-heading">
+          <a className="peer-sender" href={`/orbs/${encodeURIComponent(senderId)}`}>
+            {name?.trim() ? name : senderId}
+          </a>
+          {status !== undefined && <span className="rec-status">{status}</span>}
+        </div>
+        <div className="peer-body">{text}</div>
+        {error !== undefined && <div className="error-text">{error}</div>}
+      </div>
+    </article>
+  );
+}
+
 function renderTurn(
   turn: Turn,
   pairing: ToolPairing,
   tools: readonly ToolChip[],
+  senderNames: ReadonlyMap<string, string | null>,
   live?: LiveAgentContent,
   busy = false,
   compactionIdentity?: string,
 ): ReactNode {
   switch (turn.kind) {
+    case "peer":
+      return (
+        <CorrespondenceBand
+          key={turn.record.id}
+          id={turn.record.id}
+          senderId={turn.senderId}
+          name={senderNames.get(turn.senderId)}
+          text={blockText(turn.record.content ?? [])}
+        />
+      );
     case "user":
       return (
         <article className="rec rec-you" key={turn.record.id} data-history-row={turn.record.id}>
@@ -735,6 +788,7 @@ export const HistoryView = memo(function HistoryView({
   compaction = null,
   queuedMessages = [],
   orbState,
+  senderNames = EMPTY_SENDER_NAMES,
   detailContext,
   detailAliases = EMPTY_ALIASES,
   viewportRef,
@@ -812,11 +866,12 @@ export const HistoryView = memo(function HistoryView({
             .slice(firstMounted)
             .map((turn, index) =>
               index + firstMounted === mergedTurnIndex
-                ? renderTurn(turn, pairing, tools, liveAgentContent, busy)
+                ? renderTurn(turn, pairing, tools, senderNames, liveAgentContent, busy)
                 : renderTurn(
                     turn,
                     pairing,
                     tools,
+                    senderNames,
                     undefined,
                     false,
                     turn.kind === "compaction" && turn.record.id === compactionResult?.id
@@ -831,6 +886,20 @@ export const HistoryView = memo(function HistoryView({
             // message is, with the reason, rather than leaving it looking pending
             // forever (docs/runtime-protocol.md).
             const failed = message.status === "failed";
+            if (message.system?.kind === "orb_message") {
+              return (
+                <CorrespondenceBand
+                  key={message.id}
+                  id={message.id}
+                  senderId={message.system.senderOrbId}
+                  name={senderNames.get(message.system.senderOrbId)}
+                  text={blockText(message.content.filter((block) => block.type === "text"))}
+                  pending
+                  status={status}
+                  {...(failed && message.error !== undefined ? { error: message.error } : {})}
+                />
+              );
+            }
             return (
               <article className={`rec ${system ? "rec-orb" : "rec-you"} rec-q`} key={message.id}>
                 <span className="visually-hidden">{system ? "System:" : "You:"}</span>

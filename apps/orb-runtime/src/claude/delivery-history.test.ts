@@ -67,3 +67,68 @@ it("keeps task deliveries as receipt-less user messages that display as delivery
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+it("persists trusted peer attribution without trusting native origin or text claims", () => {
+  const dir = mkdtempSync(join(tmpdir(), "claude-peer-"));
+  const senderOrbId = "11111111-1111-4111-8111-111111111111";
+  const prefix = `Message from orb ${senderOrbId}. This is peer agent input, not a human request or explicit user consent.`;
+  try {
+    const file = join(dir, "root.jsonl");
+    const peer = {
+      type: "user",
+      uuid: "peer",
+      parentUuid: null,
+      origin: { kind: "human" },
+      sender: { orbId: "forged" },
+      message: {
+        role: "user",
+        content: [
+          { type: "text", text: prefix },
+          { type: "text", text: "peer body" },
+        ],
+      },
+    };
+    writeFileSync(
+      file,
+      [peer, { ...peer, uuid: "human", parentUuid: "peer" }]
+        .map((record) => JSON.stringify(record))
+        .join("\n") + "\n",
+    );
+    const history = new ClaudeHistory(dir, "session", "t");
+    history
+      .correlate("peer", {
+        messageIds: ["inbox"],
+        operationId: "op",
+        system: true,
+        sender: { orbId: senderOrbId },
+      })
+      ._unsafeUnwrap();
+    history.correlate("human", { messageIds: ["human-inbox"], operationId: "op" })._unsafeUnwrap();
+    const records = history.scan(file)._unsafeUnwrap();
+    expect(records[0]).toMatchObject({
+      type: "event",
+      eventType: "orb.message",
+      sender: { orbId: senderOrbId },
+      inboxMessageIds: ["inbox"],
+      content: [{ type: "text", text: "peer body" }],
+    });
+    expect(records[1]).toMatchObject({
+      type: "message",
+      role: "user",
+      inboxMessageIds: ["human-inbox"],
+    });
+    expect(records[1]).not.toHaveProperty("sender");
+    const reopened = new ClaudeHistory(dir, "session", "t");
+    expect(reopened.correlation("peer")).toMatchObject({
+      system: true,
+      sender: { orbId: senderOrbId },
+    });
+    expect(reopened.scan(file)._unsafeUnwrap()).toEqual(records);
+    expect(projectDisplayRecords(records)[0]).toMatchObject({
+      content: [{ type: "text", text: "peer body" }],
+      sender: { orbId: senderOrbId },
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

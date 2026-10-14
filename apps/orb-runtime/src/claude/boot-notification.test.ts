@@ -116,6 +116,14 @@ describe("Claude uses Pi's boot decision", () => {
       content: [{ type: "text", text: "upload" }],
     };
     expect(plan([...exhausted, system])).toMatchObject({ triggerTurn: false });
+    const peer: HistoryRecord = {
+      ...system,
+      id: "peer",
+      eventType: "orb.message",
+      sender: { orbId: "11111111-1111-4111-8111-111111111111" },
+      inboxMessageIds: ["peer"],
+    };
+    expect(plan([...exhausted, peer])).toMatchObject({ triggerTurn: false });
     expect(plan([...exhausted, { ...human, id: "next-human" }])).toMatchObject({
       triggerTurn: true,
       marker: { details: { reason: "resumed" } },

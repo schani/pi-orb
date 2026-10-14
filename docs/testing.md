@@ -1,5 +1,21 @@
 # Testing
 
+## Interruption evidence (decision 2026-10-14)
+
+Keep test logs, traces, screenshots and failure evidence on the persistent workspace, not `/tmp`. A same-instance Spot restart preserved the workspace but lost reported `/tmp` evidence: `docs/postmortems/2026-10-14-cross-orb-host-preemption.md`. Cross-orb evidence lives under `.context/cross-orb/`.
+
+## Orb messaging (2026-10-14; implemented locally, qualification pending)
+
+The contract in `docs/orb-messaging.md` is implemented in backend, harness and UI code. Scoped checks, enumerated separately rather than added across overlapping workloads:
+
+- Backend/domain/routes: 125 passes in `.context/cross-orb/backend-review-qualified.log`; CLI/inspection: 10 passes in `.context/cross-orb/backend-cli-qualified.log`.
+- Harness/protocol: 213 passes in `.context/cross-orb/peer-final-tests.log`; reviewer and central receipt corrections are documented in `.context/cross-orb/harness-report.md`.
+- UI: 138 targeted units in `.context/cross-orb/ui/unit-qualified.log`; 10 Chromium/WebKit cases in `.context/cross-orb/ui/browser-qualified.log`. Owned cache isolation, fixture corrections and explicit module-graph warmup corrected the recorded cold-cache/waiter failures; first evidence and timing analysis remain in `.context/cross-orb/ui/failure-analysis.md`. An interrupted broad web-unit run is not a full pass.
+
+Three PGlite `beforeEach` setup timeouts occurred before test bodies and remain under diagnosis; the passing scoped store/CHECK cases do not clear them (`.context/cross-orb/backend-store-qualified.log`, `.context/cross-orb/backend-report.md`). Real-process E2E is still in progress, with fixture-failure corrections underway and evidence under `.context/cross-orb/messaging/`. No passing rerun alone clears a failure.
+
+These receipts are focused checks, not final-source full qualification. Normal full gates, PR and process-host preview validation remain pending in `TODO.md`; no production deployment is authorized.
+
 ## Release SSH rendered contract (decision 2026-10-14)
 
 CI requires `infra/foundation/test.sh` using checksum-pinned OpenTofu 1.12.6,

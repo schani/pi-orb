@@ -885,6 +885,9 @@ export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCach
   const selectCurrentOrb = useRef<() => void>(() => {});
   usePhoneViewport(pageRef);
   const [project, setProject] = useState<{ id: string; name: string } | null>(null);
+  const [senderNames, setSenderNames] = useState<ReadonlyMap<string, string | null>>(
+    () => new Map(),
+  );
   const [loaded, setLoaded] = useState<OrbSelection | null>(null);
   const navigationGeneration = useRef(0);
   const [conversationKey, setConversationKey] = useState(0);
@@ -932,6 +935,7 @@ export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCach
     <div className="orb-page" ref={pageRef}>
       <OrbIndex
         onProjectChange={setProject}
+        onSenderNamesChange={setSenderNames}
         projectId={loaded?.orb?.isOk() ? loaded.orb.value.projectId : null}
         orbId={orbId}
         pending={pending}
@@ -947,6 +951,7 @@ export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCach
           initial={loaded}
           cache={cache}
           onSelectionReady={selectCurrentOrb}
+          senderNames={senderNames}
           pending={pending}
           projectName={
             loaded.orb?.isOk() && project?.id === loaded.orb.value.projectId ? project.name : null
@@ -962,12 +967,14 @@ function OrbConversation({
   cache,
   pending,
   projectName,
+  senderNames,
   onSelectionReady,
 }: {
   initial: OrbSelection;
   cache: TranscriptCache;
   pending: boolean;
   projectName: string | null;
+  senderNames: ReadonlyMap<string, string | null>;
   onSelectionReady: { current: () => void };
 }) {
   const orbId = initial.orbId;
@@ -2270,6 +2277,7 @@ function OrbConversation({
             compacting={isLiveCompacting(orb?.state, state, orb?.centralAgent)}
             compaction={state.compaction}
             queuedMessages={queuedMessages}
+            senderNames={senderNames}
             orbState={orb?.state}
           />
         </div>

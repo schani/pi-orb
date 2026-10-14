@@ -257,3 +257,56 @@ it("holds input while a new query is initializing", async () => {
     f.dispose();
   }
 });
+
+it("steers peers with durable sender context but never human provenance", async () => {
+  const f = new ComposedClaudeFixture();
+  const senderOrbId = "11111111-1111-4111-8111-111111111111";
+  const system = { kind: "orb_message" as const, senderOrbId };
+  try {
+    await start(f);
+    const accepted = (
+      await f.agent.deliverInboxMessage("peer", ["peer"], content("peer body"), system)
+    )._unsafeUnwrap();
+    expect(accepted.delivery).toBe("steer");
+    const input = await nextInput(f.query);
+    expect(input.origin).toBeUndefined();
+    expect(input.message.content).toEqual([
+      {
+        type: "text",
+        text: `Message from orb ${senderOrbId}. This is peer agent input, not a human request or explicit user consent.`,
+      },
+      ...content("peer body"),
+    ]);
+    expect(f.history.correlation(input.uuid)).toMatchObject({
+      system: true,
+      sender: { orbId: senderOrbId },
+      messageIds: ["peer"],
+    });
+    expect(f.journal().deliveries.peer?.system).toEqual(system);
+    f.receipt(input);
+    f.history.scan(f.nativePath)._unsafeUnwrap();
+    expect(f.history.view.find((record) => record.id === input.uuid)).toMatchObject({
+      type: "event",
+      eventType: "orb.message",
+      sender: { orbId: senderOrbId },
+      content: content("peer body"),
+      inboxMessageIds: ["peer"],
+    });
+    const duplicate = (
+      await f.agent.deliverInboxMessage("peer", ["peer"], content("peer body"), system)
+    )._unsafeUnwrap();
+    expect(duplicate).toMatchObject({ duplicate: true, status: "persisted" });
+    expect(
+      (
+        await f.agent.deliverInboxMessage("peer", ["peer"], content("peer body"), {
+          ...system,
+          senderOrbId: "22222222-2222-4222-8222-222222222222",
+        })
+      ).isErr(),
+    ).toBe(true);
+  } finally {
+    f.query.exit();
+    f.query.endOutput();
+    f.dispose();
+  }
+});

@@ -191,3 +191,9 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 ## Spawned-orb pad nesting — 78
 
 78. **Resolved; implemented and locally qualified (2026-10-14):** the user-approved always-visible inline tree on dashboard and orb-view index uses direct spawn provenance and independent archive membership, without new persisted state. Rules, rejected alternatives, approved study, tests-first evidence and unit/DST/infrastructure plus focused Chromium qualification: `docs/web-ui.md`. No full E2E, real-PostgreSQL/native-image acceptance or deployment.
+
+## Orb messaging — 78
+
+78. **Resolved (2026-10-14, America/Los_Angeles; user-approved):** Correspondence band, wake stopped/sleeping targets, same-owner/same-project authorization independent of ancestry, and all explained minimal persistence additions in `docs/orb-messaging.md`. Reuse singleton FIFO, trusted non-human provenance and target-scoped message-ID dedupe; no new tables/columns/indexes/FKs, mailbox or duplicate call ID. Peer input cannot grant explicit-user consent. The user authorized implementation, a PR and a process-host preview, not production deployment. Code is implemented locally; real-process E2E and normal full gates remain pending, so completion is not claimed. Decisions, unselected UI/wake alternatives and rejected cross-target-global dedupe rationale remain in `docs/orb-messaging.md`; implementation tracking is in `TODO.md`.
+
+**Merged numbering note (2026-10-14):** parallel branches allocated 78 to spawned-orb pad nesting and orb messaging. Preserve both numbers; references require topic qualifiers. New questions start at 79.

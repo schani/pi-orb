@@ -10,6 +10,7 @@ import { CHART_CONTENT_TYPE, type ChartSpec, ChartSpecSchema } from "./chart.ts"
 import { capHeadline } from "./headline.ts";
 import { type ContentBlock, type HistoryRecord, NestedCallsSchema } from "./history.ts";
 import { type JsonObject, JsonValueSchema } from "./json.ts";
+import { OrbMessageSenderSchema } from "./orb-message-context.ts";
 import { reasoningHeadline } from "./reasoning-headline.ts";
 
 export { capHeadline } from "./headline.ts";
@@ -127,6 +128,7 @@ const event = Type.Object(
     subagent: Type.Optional(subagent),
     delivery: Type.Optional(delivery),
     alert: Type.Optional(Type.Object({ message: Type.String(), requestId: Type.String() }, closed)),
+    sender: Type.Optional(OrbMessageSenderSchema),
     inboxMessageIds: Type.Optional(Type.Array(Type.String())),
   },
   closed,
@@ -530,7 +532,8 @@ export function projectDisplayRecord(record: HistoryRecord): DisplayRecord {
         record.subagent !== undefined ||
         (record.custom?.display !== true &&
           record.eventType !== "agent.settings_fallback" &&
-          record.eventType !== "agent.compaction")
+          record.eventType !== "agent.compaction" &&
+          record.eventType !== "orb.message")
           ? {}
           : {
               content: projectBlocks(record.content, record.id),
@@ -553,6 +556,7 @@ export function projectDisplayRecord(record: HistoryRecord): DisplayRecord {
               },
             }),
         ...(record.alert === undefined ? {} : { alert: record.alert }),
+        ...(record.sender === undefined ? {} : { sender: record.sender }),
         ...(record.inboxMessageIds === undefined
           ? {}
           : { inboxMessageIds: record.inboxMessageIds }),

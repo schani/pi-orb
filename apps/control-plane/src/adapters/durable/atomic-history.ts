@@ -107,12 +107,7 @@ export async function projectNativeCommit(
             const system = receipt.system;
             receipts.set(submission.entry, {
               messageIds: receipt.messageIds.filter((id): id is string => typeof id === "string"),
-              ...(system &&
-              typeof system === "object" &&
-              !Array.isArray(system) &&
-              typeof system.kind === "string"
-                ? { system: { kind: system.kind } }
-                : {}),
+              ...(system === undefined ? {} : { system }),
             });
           }
           cursor = page.next;

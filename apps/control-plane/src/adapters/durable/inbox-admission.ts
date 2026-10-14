@@ -105,7 +105,11 @@ export async function projectNativeInboxCommit(
             rows.value.rows.map((row) => ({ content: row.content as MessageInputBlock[] })),
           );
           const system = rows.value.rows[0]?.system as OrbMessageSystem | null;
-          if (rows.value.rows.some((row) => !jsonEqual(row.system, system))) return err(rejected());
+          if (
+            (system !== null && ids.length !== 1) ||
+            rows.value.rows.some((row) => !jsonEqual(row.system, system))
+          )
+            return err(rejected());
           const fingerprint = Result.fromThrowable(
             () => JSON.parse(captured.fingerprint as string),
             rejected,
