@@ -1,4 +1,6 @@
+import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,6 +15,8 @@ HELPER = ROOT / 'infra/runner_apt.py'
 MIRROR = b'mirror+file:/etc/apt/apt-mirrors.txt'
 ARCHIVE = b'https://archive.ubuntu.com/ubuntu/'
 SIGNED_BY = b'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg'
+CONFIG_NAME = '99pi-orb-force-ipv4'
+IPV4 = b'Acquire::ForceIPv4 "true";\n'
 FIXTURE = (b'# mirror+file:/etc/apt/apt-mirrors.txt\r\n'
            b'Types: deb\r\nURIs: ' + MIRROR + b'\r\n'
            b'Suites: noble noble-updates noble-backports noble-security\r\n'
@@ -23,7 +27,8 @@ FIXTURE = (b'# mirror+file:/etc/apt/apt-mirrors.txt\r\n'
 
 class RunnerAptTests(unittest.TestCase):
     def run_helper(self, source):
-        return subprocess.run([sys.executable, str(HELPER), str(source)],
+        return subprocess.run([sys.executable, str(HELPER), str(source),
+                               str(source.parent / CONFIG_NAME)],
                               capture_output=True, check=False)
 
     def test_changes_only_exact_uri_and_is_idempotent(self):
@@ -61,8 +66,50 @@ class RunnerAptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(source.read_bytes(), fixture.replace(MIRROR, ARCHIVE))
 
+    def test_ipv4_config_is_scoped_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'ubuntu.sources'
+            source.write_bytes(FIXTURE)
+            config = source.parent / CONFIG_NAME
+            other = source.parent / '20other'
+            original = b'Acquire::Retries "0";\nAcquire::https::Timeout "30";\n'
+            other.write_bytes(original)
+            first = self.run_helper(source)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertTrue(config.exists(), 'runner IPv4 config was not written')
+            self.assertEqual(config.read_bytes(), IPV4)
+            os.utime(config, ns=(1_000_000_000, 1_000_000_000))
+            second = self.run_helper(source)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertEqual(config.read_bytes(), IPV4)
+            self.assertEqual(config.stat().st_mtime_ns, 1_000_000_000)
+            self.assertEqual(other.read_bytes(), original)
+            self.assertIn(b'Acquire::ForceIPv4 "true";', first.stdout)
+            self.assertEqual(first.stdout, second.stdout)
+
+    @unittest.skipUnless(shutil.which('apt-config'), 'requires APT')
+    def test_apt_child_reads_ipv4_config_without_cli_flags(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            parts = root / 'apt.conf.d'
+            parts.mkdir()
+            source = parts / 'ubuntu.sources'
+            source.write_bytes(FIXTURE)
+            result = self.run_helper(source)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            # Isolate APT from the host; the child loads the generated drop-in.
+            main = root / 'apt.conf'
+            main.write_text(f'Dir::Etc::parts "{parts}";\n'
+                            f'Dir::Etc::main "{root}/absent";\n')
+            child = subprocess.run(['apt-config', 'dump'],
+                                   env=dict(os.environ, APT_CONFIG=str(main)),
+                                   capture_output=True, check=False)
+            self.assertEqual(child.returncode, 0, child.stderr)
+            self.assertIn(IPV4, child.stdout)
+
     def test_workflows_prepare_mirror_before_first_apt_operation(self):
-        command = 'sudo python3 infra/runner_apt.py /etc/apt/sources.list.d/ubuntu.sources'
+        command = ('sudo python3 infra/runner_apt.py /etc/apt/sources.list.d/ubuntu.sources '
+                   '/etc/apt/apt.conf.d/' + CONFIG_NAME)
         for workflow, job in [('ci', 'checks'), ('e2e', 'e2e'), ('deploy', 'release')]:
             with self.subTest(workflow=workflow):
                 text = (ROOT / f'.github/workflows/{workflow}.yml').read_text()
@@ -71,6 +118,8 @@ class RunnerAptTests(unittest.TestCase):
                 self.assertIn('runs-on: ubuntu-24.04', jobs[job])
                 self.assertEqual(text.count(command), 1)
                 self.assertLess(jobs[job].index(command), jobs[job].index('sudo apt-get'))
+        e2e = (ROOT / '.github/workflows/e2e.yml').read_text()
+        self.assertLess(e2e.index(command), e2e.index('npm run test:e2e:install'))
         ci = (ROOT / '.github/workflows/ci.yml').read_text()
         image_job = ci.split('  control-plane-image:\n', 1)[1].split('\n  checks:', 1)[0]
         self.assertNotIn('runner_apt.py', image_job)
