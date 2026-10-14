@@ -1,6 +1,6 @@
 # Orb messaging
 
-> **IMPLEMENTED LOCALLY — 2026-10-14 (America/Los_Angeles); qualification pending.** Backend, harness and UI code implement the approved contract below. Focused checks pass; real-process E2E is in progress and normal full gates remain pending. The user authorized a PR and a process-host preview, not production deployment. Question 78 in `docs/open-questions.md` is resolved; remaining work is tracked in `TODO.md`.
+> **IMPLEMENTED LOCALLY — 2026-10-14 (America/Los_Angeles); qualification partial.** Backend, harness and UI code implement the approved contract below. Focused checks and both actual-process messaging cases pass; normal full gates remain pending. The user authorized a PR and a process-host preview, not production deployment. Question 78 in `docs/open-questions.md` is resolved; remaining work is tracked in `TODO.md`.
 
 ## Requirement and presentation
 

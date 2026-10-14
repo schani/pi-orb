@@ -130,12 +130,19 @@ it
         execFileSync("git", args, { cwd: repository, stdio: "ignore" });
 
       git = await ownedGitHttps(repository, root);
-      const sendCode = (index: number) => {
+      const sendStep = (index: number) => {
         const body = bodies[index] ?? "";
+        const match = `^SEND_PEER_${index}$`;
         if (index === 0 && agentBackend === "central-durable")
-          return `text(await tools.orb_send(${JSON.stringify({ orbId: receiverId, message: body })})); text('SEND_DONE_0');`;
+          return call(match, "codemode", {
+            code: `text(await tools.orb_send(${JSON.stringify({ orbId: receiverId, message: body })})); text('SEND_DONE_0');`,
+          });
         const command = `pi-orb send ${receiverId} ${quote(body)} --request-id ${requestIds[index]} && pi-orb send ${receiverId} ${quote(body)} --request-id ${requestIds[index]} && printf SEND_DONE_${index}`;
-        return `text(await tools.bash(${JSON.stringify({ command })}));`;
+        return agentBackend === "host-pi"
+          ? call(match, "bash", { command })
+          : call(match, "codemode", {
+              code: `text(await tools.bash(${JSON.stringify({ command })}));`,
+            });
       };
       fake = await createFakeSession(
         `orb-messaging-${runId}`,
@@ -154,7 +161,7 @@ it
                       summaryRule(),
                     ]
                   : []),
-                call(`^SEND_PEER_${index}$`, "codemode", { code: sendCode(index) }),
+                sendStep(index),
                 reply(result(`SEND_DONE_${index}`), `SENDER_ACK_${index}`),
                 summaryRule(),
                 reply(
@@ -240,6 +247,18 @@ it
         );
       const view = (id: string) => api(activeCp.baseUrl, "GET", `/api/v1/orbs/${id}`);
       const history = (id: string) => api(activeCp.baseUrl, "GET", `/api/v1/orbs/${id}/history`);
+      const senderHistory = async () => {
+        const source = await history(senderId);
+        const records = source.body["records"] as {
+          failure?: { message: string };
+          content?: { type: string; text?: string; isError?: boolean }[];
+        }[];
+        const failure = records.findLast((record) => record.failure)?.failure;
+        if (failure) throw new FatalProbeError(`sender provider failure: ${failure.message}`);
+        if (records.some((record) => record.content?.some((block) => block.isError)))
+          throw new FatalProbeError("sender tool rejected; inspect saved sender history/details");
+        return records;
+      };
       const inbox = async (): Promise<InboxRow[]> => {
         const response = await api(baseUrl, "POST", `/api/v1/orbs/${receiverId}/messages/poll`, {
           after: 0,
@@ -368,15 +387,7 @@ it
           );
           if (rows.length > 1) throw new FatalProbeError("duplicate peer acceptance");
           if (rows[0]) return rows[0];
-          const source = await history(senderId);
-          const records = source.body["records"] as {
-            failure?: { message: string };
-            content?: { type: string; text?: string; isError?: boolean }[];
-          }[];
-          const failure = records.findLast((record) => record.failure)?.failure;
-          if (failure) throw new FatalProbeError(`sender provider failure: ${failure.message}`);
-          if (records.some((record) => record.content?.some((block) => block.isError)))
-            throw new FatalProbeError("sender tool rejected; inspect saved sender history/details");
+          const records = await senderHistory();
           if (JSON.stringify(records).includes(`SENDER_ACK_${index}`))
             throw new FatalProbeError("sender completed without accepting the peer inbox record");
           return null;
@@ -413,9 +424,7 @@ it
         expect(await page.evaluate(() => "__peerInjected" in globalThis)).toBe(false);
         await page.screenshot({ path: join(root, `pending-${index}-320.png`), fullPage: true });
         await waitFor("sender tool result retained", async () =>
-          JSON.stringify((await history(senderId)).body).includes(`SENDER_ACK_${index}`)
-            ? true
-            : null,
+          JSON.stringify(await senderHistory()).includes(`SENDER_ACK_${index}`) ? true : null,
         );
         await summaryCount(index === 0 ? 2 : 5);
         gate.release();
@@ -428,10 +437,15 @@ it
         await check(committed).toHaveCount(1);
         await check(committed.locator(".peer-body")).toHaveText(bodies[index] ?? "");
         await check(committed.getByRole("link")).toHaveText(senderName);
-        const snapshot = await readReplicatedHistorySnapshot(cp, receiverId);
-        const correlated = (snapshot.records as Receipt[]).filter((record) =>
-          record.inboxMessageIds?.includes(row.id),
-        );
+        const receiptControlPlane = cp;
+        const correlated = await waitFor("peer receipt replicated", async () => {
+          const snapshot = await readReplicatedHistorySnapshot(receiptControlPlane, receiverId);
+          const receipts = (snapshot.records as Receipt[]).filter((record) =>
+            record.inboxMessageIds?.includes(row.id),
+          );
+          if (receipts.length > 1) throw new FatalProbeError("duplicate peer receipt");
+          return receipts.length === 1 ? receipts : null;
+        });
         expect(correlated).toHaveLength(1);
         expect(correlated[0]).toMatchObject({
           type: "event",
