@@ -22,6 +22,14 @@ in the image-build job because its text extraction included the following
 `checks` job; extraction now ends at that boundary. Its original failure is
 retained in `infra-final.log`. See `infra/foundation/README.md`.
 
+## DST audits #2, #4, #5 (2026-10-14; historical qualification, undeployed)
+
+#2 exercises production polling with independent central/history/naming worker mailboxes: held/catch-up phases must not block other orbs or later ticks. Stop/fatal supervision yields between history rounds after admitted I/O completes; shutdown DSTs assert four commits, replica consistency, unchanged retries/cadence and sanitized crash telemetry. Joining a concurrent sweep would still starve later ticks. Intermediate FIFO/control-port/crash-trigger reds were fixture-only; corrected pre-fix shutdown/fatal replays reproduce the product defect. Post-fix strict replay diverges at 108/122 because the next round was removed, not a green replay; fresh schedules validate the correction.
+
+#4 composes the real outbound writer, JSON transport and browser reducer: seven drain prefixes × 80 schedules assert exact wire order and visible B compaction. Critical boundaries fence all transient coalescing. #5 covers repeated retry and synchronous publication ownership changes: six cases × 30 schedules require one current owner and no leaked timer. Original #4/#5 replays pass after correction.
+
+[Single evidence receipt](../test-failures/2026-10-14-dst-audit-2-4-5.md) links the verified complete archive, original first reds/replays, snapshots, hashes, reproduction commands and historical CI. PR head `705b8d8` qualified on merge `92ede4c` against `224a38d` with 11 green checks; current-head CI remains pending. Local full process E2E was partial, not passed. Coverage review (2026-10-14) found missing compositions, not confirmed bugs; follow-ups live only in `TODO.md`. No release, deployment or merge qualification is implied. Preserve original scenarios/baselines: #2's initial trace uses the old two-task topology; shutdown uses the independent-lane audit tree, not main.
+
 **PR 84 qualification — 2026-10-13:** the rebased, simplified initialization diagnostics pass 108 focused tests and typecheck/lint. The seven frontend files completed before the [first CI shard failure](https://github.com/schani/pi-orb/actions/runs/38348517524/job/115135368758) pass locally (24 tests), but that does not clear its subsequent runner segmentation fault/exit139; the crashing component and cause remain unproven. First logs/artifacts: `.context/pr84-revision/`. No deployment qualification is claimed.
 
 ## Claude immediate steering (2026-10-12; local, undeployed)

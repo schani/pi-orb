@@ -1,7 +1,13 @@
 import { NoSimulationTask } from "determined";
 import { describe, expect, it } from "vitest";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
-import { pollAllOnce, ReconcileDispatcher, reconcileAllOnce } from "./loops.ts";
+import {
+  PollDispatcher,
+  pollAllOnce,
+  pollLoop,
+  ReconcileDispatcher,
+  reconcileAllOnce,
+} from "./loops.ts";
 
 /** A `NoSimulationTask` that keeps the lifecycle lines instead of dropping them. */
 class RecordingTask extends NoSimulationTask {
@@ -116,5 +122,76 @@ describe("loop handling of a store invariant", () => {
     const next = harness.deps.control.getNextAttemptAt("reconcile:orb-live");
     expect(Number.isFinite(next)).toBe(true);
     expect(task.lines.filter((line) => line.includes("reconcile-retry"))).toHaveLength(0);
+  });
+});
+
+describe("poll dispatcher supervision", () => {
+  it("drains held work on shutdown without launching a duplicate lane", async () => {
+    const task = new RecordingTask("poll drain");
+    const h = makeHarness();
+    h.store.seedOrb(makeOrbRow("orb", "project", "running", { name: "named" }));
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered = (): void => {};
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let calls = 0;
+    const stop = new AbortController();
+    const loop = pollLoop(task, h.deps, stop.signal, async () => {
+      calls++;
+      entered();
+      await held;
+    });
+    await started;
+    stop.abort();
+    let finished = false;
+    void loop.then(() => {
+      finished = true;
+    });
+    await Promise.resolve();
+    expect(finished).toBe(false);
+    release();
+    await loop;
+    expect(calls).toBe(1);
+    expect(finished).toBe(true);
+  });
+
+  it("keeps one in-flight lane across repeated sweeps", async () => {
+    const task = new RecordingTask("poll duplicate");
+    const h = makeHarness();
+    h.store.seedOrb(makeOrbRow("orb", "project", "running", { name: "named" }));
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const calls: string[] = [];
+    const dispatcher = new PollDispatcher(h.deps, async (key) => {
+      calls.push(key);
+      await held;
+    });
+    await pollAllOnce(task, h.deps, dispatcher);
+    await pollAllOnce(task, h.deps, dispatcher);
+    expect(calls).toEqual(["poll:orb"]);
+    release();
+    await dispatcher.drain();
+  });
+
+  it("rethrows worker crashes and logs only their lane and classification", async () => {
+    const task = new RecordingTask("poll crash");
+    const h = makeHarness();
+    h.store.seedOrb(makeOrbRow("orb", "project", "running", { name: "named" }));
+    const failure = new Error("private transcript bytes");
+    const dispatcher = new PollDispatcher(h.deps, () => Promise.reject(failure));
+    await pollAllOnce(task, h.deps, dispatcher);
+    await expect(dispatcher.drain()).rejects.toBe(failure);
+    await expect(pollAllOnce(task, h.deps, dispatcher)).rejects.toBe(failure);
+    const lines = task.lines.filter((line) => line.includes("poll-task-crashed"));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("lane=history");
+    expect(lines[0]).toContain("error=unexpected");
+    expect(lines[0]).not.toContain(failure.message);
   });
 });

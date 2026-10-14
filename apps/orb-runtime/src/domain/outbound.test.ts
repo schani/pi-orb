@@ -1,4 +1,4 @@
-import type { ServerFrame } from "@pi-orb/protocol";
+import type { RuntimeEvent, ServerFrame } from "@pi-orb/protocol";
 import { describe, expect, it } from "vitest";
 import { type FrameSink, OutboundWriter } from "./outbound.ts";
 
@@ -60,7 +60,105 @@ const statusFrame = (activity: "idle" | "busy"): ServerFrame => ({
   event: { type: "status", activity },
 });
 
+const eventFrame = (event: RuntimeEvent): ServerFrame => ({
+  v: 1,
+  type: "runtime.event",
+  at,
+  event,
+});
+
+const barriers: ServerFrame[] = [
+  historyFrame("committed"),
+  eventFrame({ type: "operation_started", operationId: "op-1" }),
+  eventFrame({ type: "operation_finished", operationId: "op-1", outcome: "completed" }),
+  eventFrame({ type: "subagents", operationId: "op-1", children: [] }),
+  { v: 1, type: "sync.completed", at, headId: null },
+  {
+    v: 1,
+    type: "request.result",
+    at,
+    requestId: "request",
+    result: { type: "accepted", operationId: "op-1", duplicate: false },
+  },
+  {
+    v: 1,
+    type: "server.error",
+    at,
+    error: { code: "test", message: "test", retryable: false },
+  },
+];
+
+const transientPairs = [
+  { kind: "status", first: statusFrame("busy"), next: statusFrame("idle") },
+  { kind: "output_patch", first: patchFrame("b1", 1, "first"), next: patchFrame("b1", 2, "next") },
+  {
+    kind: "tool_state",
+    first: eventFrame({
+      type: "tool_state",
+      operationId: "op-1",
+      callId: "call",
+      name: "bash",
+      state: "running",
+      revision: 1,
+    }),
+    next: eventFrame({
+      type: "tool_state",
+      operationId: "op-1",
+      callId: "call",
+      name: "bash",
+      state: "completed",
+      revision: 2,
+    }),
+  },
+];
+
 describe("OutboundWriter", () => {
+  it.each(
+    barriers.flatMap((barrier) =>
+      transientPairs.map((pair) => ({
+        ...pair,
+        boundary: barrier.type === "runtime.event" ? barrier.event.type : barrier.type,
+        barrier,
+      })),
+    ),
+  )("does not coalesce $kind across $boundary", ({ first, next, barrier }) => {
+    const sink = new FakeSink();
+    sink.bufferedAmount = 1_000;
+    const writer = new OutboundWriter(sink, {
+      maxCriticalBufferedBytes: 100_000,
+      highWaterMark: 100,
+    });
+    writer.enqueue(first);
+    writer.enqueue(barrier);
+    writer.enqueue(next);
+    sink.bufferedAmount = 0;
+    writer.onDrain();
+    expect(sink.sent).toEqual([first, barrier, next]);
+    expect(sink.closedWith).toBeNull();
+  });
+
+  it.each(transientPairs)(
+    "still coalesces $kind within the trailing transient segment",
+    ({ first, next, kind }) => {
+      const sink = new FakeSink();
+      sink.bufferedAmount = 1_000;
+      const writer = new OutboundWriter(sink, {
+        maxCriticalBufferedBytes: 100_000,
+        highWaterMark: 100,
+      });
+      const barrier = historyFrame("committed");
+      writer.enqueue(first);
+      writer.enqueue(barrier);
+      writer.enqueue(first);
+      writer.enqueue(next);
+      sink.bufferedAmount = 0;
+      writer.onDrain();
+      const coalesced = kind === "output_patch" ? patchFrame("b1", 2, "firstnext") : next;
+      expect(sink.sent).toEqual([first, barrier, coalesced]);
+      expect(sink.closedWith).toBeNull();
+    },
+  );
+
   it("sends the sync batch synchronously regardless of size (budget exemption)", () => {
     const sink = new FakeSink();
     sink.bufferedAmount = 10_000_000; // heavily backpressured socket
