@@ -425,9 +425,13 @@ export function buildRuntimeServer(
           return;
         }
         if (!Check(ClientFrameSchema, parsed)) {
-          const maybeRequest = parsed as { requestId?: unknown };
-          if (typeof maybeRequest.requestId === "string") {
-            sendResult(maybeRequest.requestId, {
+          if (
+            typeof parsed === "object" &&
+            parsed !== null &&
+            "requestId" in parsed &&
+            typeof parsed.requestId === "string"
+          ) {
+            sendResult(parsed.requestId, {
               type: "rejected",
               error: { code: "invalid_request", message: "invalid frame", retryable: false },
             });
