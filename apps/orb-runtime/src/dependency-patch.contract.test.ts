@@ -33,11 +33,8 @@ describe("Pi dependency patch installation", () => {
     }
   });
 
-  it("removes the vulnerable patch tooling from root and standalone lock graphs", () => {
-    for (const path of [
-      "package-lock.json",
-      "scripts/native-mcp-exploration/live-qualification/package-lock.json",
-    ]) {
+  it("removes the vulnerable patch tooling from the root lock graph", () => {
+    for (const path of ["package-lock.json"]) {
       const lock = JSON.parse(read(path)) as { packages: Record<string, unknown> };
       for (const name of ["patch-package", "find-yarn-workspace-root", "micromatch", "braces"]) {
         expect(
@@ -142,25 +139,6 @@ describe("Pi dependency patch installation", () => {
     expect(runtime.indexOf("COPY patches patches")).toBeLessThan(
       runtime.indexOf("RUN npm ci --workspace @pi-orb/orb-runtime"),
     );
-  });
-
-  it("packages the same sealed helper for standalone archives", () => {
-    const manifest = json("scripts/native-mcp-exploration/live-qualification/package.json");
-    expect(manifest.dependencies?.["patch-package"]).toBeUndefined();
-    expect(manifest.scripts?.postinstall).toBe("node apply-dependency-patches.mjs --pi-only");
-    for (const name of ["stage", "iap-read", "glideos-read"]) {
-      const source = read(`scripts/native-mcp-exploration/live-qualification/${name}-package.mjs`);
-      expect(source).toContain('"apply-dependency-patches.mjs"');
-      expect(source).toContain('"--pi-only"');
-      expect(source).not.toContain("patch-package");
-      expect(source).toContain('join(root, "scripts/apply-dependency-patches.mjs")');
-      expect(source).toContain('"@earendil-works+pi-agent-core+1.1.0.patch"');
-      expect(source).toContain('"@earendil-works+pi-ai+1.1.0.patch"');
-      expect(source).toContain('"@earendil-works+pi-coding-agent+1.1.0.patch"');
-      expect(source).not.toContain("vendor");
-      expect(source).not.toContain("patchPackage");
-    }
-    expect(manifest.dependencies?.neverthrow).toBe("8.2.0");
   });
 
   it("applies the packaged patch during native-image installation", () => {

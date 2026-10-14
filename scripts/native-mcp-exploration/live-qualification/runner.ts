@@ -11,10 +11,8 @@ import {
 import type { McpCatalog } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { err, ok, Result, ResultAsync } from "neverthrow";
-import { fetchMcpCatalog } from "../../../apps/orb-runtime/src/mcp/boot.ts";
 import { createOrbMcpExtension } from "../../../apps/orb-runtime/src/mcp/native.ts";
 import { HttpMcpTokenEndpoint } from "../../../apps/orb-runtime/src/mcp/oauth.ts";
-import { fetchProjectSecretSnapshotAtBoot } from "../../../apps/orb-runtime/src/project-secrets/endpoint.ts";
 import { installOneRejectedReadPost } from "./fault.mjs";
 import {
   exactReviewedCall,
@@ -27,9 +25,6 @@ import {
   summarizeReadShape,
 } from "./policy.mjs";
 
-// This file is bundled with the production adapter; all other imports resolve in the guest's isolated 1.1.0 install.
-const CONFIG_URL =
-  "http://metadata.google.internal/computeMetadata/v1/instance/attributes/pi-orb-config";
 const EXACT_REVIEWED_CALLS: Record<
   string,
   Record<string, Record<string, unknown> | Record<string, unknown>[]>
@@ -57,115 +52,14 @@ const EXACT_REVIEWED_CALLS: Record<
   },
   posthog: { exec: { command: 'call dashboards-get-all {"limit":1}' } },
 };
-export function dedicatedCatalog(catalog: McpCatalog): boolean {
-  const expected = {
-    cloudflare: ["https://mcp.cloudflare.com/mcp", "075be044-30ad-4933-b6fc-d7a55b9816a1"],
-    datadog: ["https://mcp.us5.datadoghq.com/v1/mcp", "7f3e3961-a70f-4b57-8de3-24a642f56005"],
-  };
-  return (
-    catalog.revision === 1 &&
-    catalog.servers.length === 2 &&
-    catalog.servers.every(
-      (server) =>
-        Object.hasOwn(expected, server.name) &&
-        server.url === expected[server.name as keyof typeof expected][0] &&
-        server.oauth?.id === expected[server.name as keyof typeof expected][1] &&
-        Object.keys(server.headers).length === 0,
-    )
-  );
-}
-const output = (record: Record<string, unknown>) =>
-  process.stdout.write(`${JSON.stringify(record)}\n`);
 type Failure = {
-  phase: "identity" | "catalog" | "binding" | "connection" | "guard" | "native_session";
+  phase: "connection" | "guard" | "native_session";
   code: string;
 };
 const failure = (phase: Failure["phase"], code: string): Failure => ({ phase, code });
 // SDK/platform calls are isolated here; exception details must never enter qualification evidence.
 const platform = <T>(operation: () => Promise<T>, phase: Failure["phase"], code: string) =>
   ResultAsync.fromThrowable(operation, () => failure(phase, code))();
-
-export function referencedSecrets(
-  catalog: Pick<McpCatalog, "servers">,
-  snapshot: Readonly<Record<string, string>>,
-): Result<Record<string, string>, Failure> {
-  const selected: Record<string, string> = {};
-  for (const server of catalog.servers)
-    for (const binding of Object.values(server.headers))
-      if ("secret" in binding) {
-        const value = snapshot[binding.secret];
-        if (!value) return err(failure("binding", "secret_unavailable"));
-        selected[binding.secret] = value;
-      }
-  return ok(selected);
-}
-
-async function main() {
-  const phase = process.argv[2];
-  if (!["discover", "inspect", "call", "tokens", "reject-read", "reconnect"].includes(phase))
-    return err(failure("guard", "invalid_phase"));
-  const metadata = await platform(
-    () =>
-      fetch(CONFIG_URL, {
-        headers: { "Metadata-Flavor": "Google" },
-        signal: AbortSignal.timeout(10_000),
-      }),
-    "identity",
-    "metadata_fetch_failed",
-  );
-  if (metadata.isErr()) return metadata;
-  if (!metadata.value.ok) return err(failure("identity", "metadata_unavailable"));
-  const identity = await platform(
-    () => metadata.value.json() as Promise<Record<string, string>>,
-    "identity",
-    "metadata_invalid",
-  );
-  if (identity.isErr()) return identity;
-  if (
-    !identity.value.PI_ORB_RUNTIME_TOKEN ||
-    !identity.value.PI_ORB_CONTROL_PLANE_URL ||
-    identity.value.PI_ORB_ID !== process.env.EXPECTED_ORB_ID
-  )
-    return err(failure("identity", "unexpected_identity"));
-  const broker = {
-    controlPlaneUrl: identity.value.PI_ORB_CONTROL_PLANE_URL,
-    runtimeToken: identity.value.PI_ORB_RUNTIME_TOKEN,
-  };
-  const catalogResult = await fetchMcpCatalog(broker);
-  if (catalogResult.isErr()) return err(failure("catalog", "catalog_unavailable"));
-  const catalog = catalogResult.value;
-  if (!dedicatedCatalog(catalog)) return err(failure("catalog", "unexpected_catalog"));
-  if (phase === "tokens") {
-    for (const server of catalog.servers) {
-      if (!server.oauth) continue;
-      const grant = await new HttpMcpTokenEndpoint(broker, server.oauth.id, server.url).request(
-        new NoSimulationTask("live-qualification-grant", false),
-        AbortSignal.timeout(20_000),
-      );
-      output(
-        grant.isOk()
-          ? { phase: "grant", ...summarizeGrant(server.name, grant.value) }
-          : { phase: "grant", server: server.name, code: grant.error.code },
-      );
-    }
-    return ok(undefined);
-  }
-  // The first-party broker derives the project from this guest's incarnation.
-  const snapshot = await fetchProjectSecretSnapshotAtBoot(broker);
-  if (snapshot.isErr()) return err(failure("binding", "snapshot_unavailable"));
-  const secrets = referencedSecrets(catalog, snapshot.value.values);
-  if (secrets.isErr()) return secrets;
-  return runQualification({
-    catalog,
-    broker,
-    secrets: secrets.value,
-    phase,
-    serverName: process.argv[3],
-    toolName: process.argv[4],
-    argument: process.argv[5],
-    output,
-  });
-}
 
 export async function runQualification(options: {
   catalog: McpCatalog;
@@ -465,12 +359,4 @@ export async function runQualification(options: {
       "cleanup_failed",
     );
   }
-}
-if (process.argv[1]?.endsWith("/qualification.mjs")) {
-  main().then((result) => {
-    if (result.isErr()) {
-      output({ phase: "error", stage: result.error.phase, code: result.error.code });
-      process.exitCode = 1;
-    }
-  });
 }
