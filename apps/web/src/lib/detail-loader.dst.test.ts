@@ -153,3 +153,122 @@ it("coalesces an unfinished read across close/reopen and disconnect/reconnect wi
   expect(publish).toHaveBeenCalledWith(ok("current"));
   loader.close();
 });
+
+it("DST: repeated retry before response retains one publisher and one closeable timer", async () => {
+  vi.useFakeTimers();
+  await runDst({ name: "detail-repeated-retry", iterations: 30 }, async (sim) => {
+    vi.clearAllTimers();
+    let resolve!: (result: Result<string, string>) => void;
+    const read = vi.fn(
+      () =>
+        new Promise<Result<string, string>>((done) => {
+          resolve = done;
+        }),
+    );
+    const publish = vi.fn();
+    const loader = new DetailLoader<string>({ read, publish });
+    let retried!: () => void;
+    const retriesDone = new Promise<void>((done) => {
+      retried = done;
+    });
+    loader.open("same", true);
+    const result = await sim.runTasks([
+      {
+        name: "retry",
+        f: async (task) => {
+          await task.checkpoint("first retry before response");
+          loader.retry();
+          await task.checkpoint("second retry before response");
+          loader.retry();
+          retried();
+        },
+      },
+      {
+        name: "response",
+        f: async (task) => {
+          await retriesDone;
+          await task.checkpoint("resolve coalesced request");
+          expect(read).toHaveBeenCalledTimes(1);
+          resolve(ok("current"));
+          await Promise.resolve();
+          const published = publish.mock.calls.length;
+          const timersBeforeClose = vi.getTimerCount();
+          loader.close();
+          expect({ published, timersBeforeClose, timersAfterClose: vi.getTimerCount() }).toEqual({
+            published: 1,
+            timersBeforeClose: 1,
+            timersAfterClose: 0,
+          });
+          expect(publish).toHaveBeenCalledWith(ok("current"));
+        },
+      },
+    ]);
+    if (result.isErr()) throw result.error;
+  });
+});
+
+it.each(["close", "disconnect", "reconnect", "open", "retry"] as const)(
+  "DST: publish reentrancy via %s leaves polling with the current owner only",
+  async (action) => {
+    vi.useFakeTimers();
+    await runDst({ name: `detail-publish-${action}`, iterations: 30 }, async (sim) => {
+      vi.clearAllTimers();
+      const pending: Array<(result: Result<string, string>) => void> = [];
+      const read = vi.fn(() => new Promise<Result<string, string>>((done) => pending.push(done)));
+      const publish = vi.fn((result: Result<string, string>) => {
+        if (result.isErr() || result.value !== "first") return;
+        switch (action) {
+          case "close":
+            loader.close();
+            break;
+          case "disconnect":
+            loader.connected(false);
+            break;
+          case "reconnect":
+            loader.connected(false);
+            loader.connected(true);
+            break;
+          case "open":
+            loader.open("next", true);
+            break;
+          case "retry":
+            loader.retry();
+            break;
+        }
+      });
+      const loader = new DetailLoader<string>({ read, publish });
+      loader.open("same", true);
+      const result = await sim.runTasks([
+        {
+          name: "responses",
+          f: async (task) => {
+            await task.checkpoint("publish changes owner");
+            pending.shift()?.(ok("first"));
+            await Promise.resolve();
+            const timersAfterPublish = vi.getTimerCount();
+            const continues = action === "reconnect" || action === "open" || action === "retry";
+            await task.checkpoint("current owner response");
+            if (continues) pending.shift()?.(ok("current"));
+            await Promise.resolve();
+            const timersAfterCurrent = vi.getTimerCount();
+            loader.close();
+            expect({
+              timersAfterPublish,
+              timersAfterCurrent,
+              timersAfterClose: vi.getTimerCount(),
+              reads: read.mock.calls.length,
+              publishes: publish.mock.calls.length,
+            }).toEqual({
+              timersAfterPublish: 0,
+              timersAfterCurrent: continues ? 1 : 0,
+              timersAfterClose: 0,
+              reads: continues ? 2 : 1,
+              publishes: continues ? 2 : 1,
+            });
+          },
+        },
+      ]);
+      if (result.isErr()) throw result.error;
+    });
+  },
+);

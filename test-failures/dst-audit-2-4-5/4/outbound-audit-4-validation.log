@@ -1,0 +1,12 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ✓ apps/orb-runtime/src/domain/outbound.test.ts (32 tests) 26ms
+ ✓ apps/web/src/pages/compaction.test.ts (13 tests) 10ms
+ ✓ apps/web/src/pages/live-output.test.ts (19 tests) 95ms
+ ✓ apps/web/src/pages/outbound.dst.test.ts (7 tests) 190ms
+
+ Test Files  4 passed (4)
+      Tests  71 passed (71)
+   Start at  14:34:35
+   Duration  6.04s (transform 2.41s, setup 0ms, import 4.89s, tests 322ms, environment 1ms)

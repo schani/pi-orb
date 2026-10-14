@@ -1,0 +1,35 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ❯ apps/control-plane/src/domain/loops.test.ts (7 tests | 1 failed | 6 skipped) 17ms
+     ↓ parks the orb's reconciliation instead of retrying with backoff
+     ↓ parks the orb's history pulls instead of retrying every tick
+     ↓ correlates a nudge arriving during an in-flight pass with the later pass
+     ↓ keeps ordinary store outages on their normal retry cadence
+     ↓ drains held work on shutdown without launching a duplicate lane
+     ↓ keeps one in-flight lane across repeated sweeps
+     × rethrows worker crashes and logs only their lane and classification 15ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/control-plane/src/domain/loops.test.ts > poll dispatcher supervision > rethrows worker crashes and logs only their lane and classification
+AssertionError: expected 'lifecycle: orb=orb poll-task-crashed …' to contain 'lane=history'
+
+Expected: "lane=history"
+Received: "lifecycle: orb=orb poll-task-crashed lane=poll:orb error="private transcript bytes""
+
+ ❯ apps/control-plane/src/domain/loops.test.ts:177:22
+    175|     const lines = task.lines.filter((line) => line.includes("poll-task…
+    176|     expect(lines).toHaveLength(1);
+    177|     expect(lines[0]).toContain("lane=history");
+       |                      ^
+    178|     expect(lines[0]).toContain("error=unexpected");
+    179|     expect(lines[0]).not.toContain(failure.message);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 skipped (7)
+   Start at  14:37:52
+   Duration  1.37s (transform 805ms, setup 0ms, import 1.21s, tests 17ms, environment 0ms)

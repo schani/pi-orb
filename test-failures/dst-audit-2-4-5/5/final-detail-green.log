@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ✓ apps/web/src/lib/detail-loader.dst.test.ts (11 tests) 81ms
+
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Start at  14:45:44
+   Duration  394ms (transform 111ms, setup 0ms, import 148ms, tests 81ms, environment 0ms)

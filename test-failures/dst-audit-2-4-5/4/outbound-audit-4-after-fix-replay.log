@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ✓ apps/web/src/pages/outbound.dst.test.ts (7 tests | 6 skipped) 12ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 6 skipped (7)
+   Start at  14:34:31
+   Duration  3.11s (transform 1.68s, setup 0ms, import 2.79s, tests 12ms, environment 0ms)

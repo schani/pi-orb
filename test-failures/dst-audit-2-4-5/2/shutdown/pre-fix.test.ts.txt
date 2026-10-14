@@ -1,0 +1,436 @@
+import type { HistoryRecord } from "@pi-orb/protocol";
+import { ConditionVariable, type SimulationTask } from "determined";
+import { ok, okAsync, ResultAsync } from "neverthrow";
+import { describe, expect, it } from "vitest";
+import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
+import { LogCapture, runDst, waitUntil } from "../testkit/sim.ts";
+import type { AgentPlane } from "./agent-ports.ts";
+import { pollLoop, type ReconcileTaskRunner } from "./loops.ts";
+
+type ReconcileJob = {
+  readonly run: (task: SimulationTask) => Promise<void>;
+  readonly resolve: () => void;
+  readonly reject: (error: unknown) => void;
+};
+
+/**
+ * `determined` models concurrency with distinct SimulationTasks. Production
+ * creates one real-time task per dispatched orb; this mailbox gives each
+ * statically declared DST worker its own task while exercising the same
+ * dispatcher contract.
+ */
+class SimulationPollTaskRunner {
+  calls = 0;
+  private readonly queued = new Map<string, ReconcileJob>();
+  private readonly waiting = new Map<string, (job: ReconcileJob | null) => void>();
+
+  readonly run: ReconcileTaskRunner = (orbId, operation) =>
+    new Promise<void>((resolve, reject) => {
+      this.calls++;
+      const job = { run: operation, resolve, reject };
+      const waiter = this.waiting.get(orbId);
+      if (waiter !== undefined) {
+        this.waiting.delete(orbId);
+        waiter(job);
+        return;
+      }
+      if (this.queued.has(orbId)) throw new Error(`duplicate queued reconcile for ${orbId}`);
+      this.queued.set(orbId, job);
+    });
+
+  async worker(task: SimulationTask, orbId: string, stop: AbortSignal): Promise<void> {
+    while (!stop.aborted) {
+      const job = await this.next(orbId, stop);
+      if (job === null) return;
+      try {
+        await job.run(task);
+        job.resolve();
+      } catch (error) {
+        job.reject(error);
+      }
+    }
+  }
+
+  private next(orbId: string, stop: AbortSignal): Promise<ReconcileJob | null> {
+    const queued = this.queued.get(orbId);
+    if (queued !== undefined) {
+      this.queued.delete(orbId);
+      return Promise.resolve(queued);
+    }
+    if (stop.aborted) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      const onAbort = (): void => {
+        this.waiting.delete(orbId);
+        resolve(null);
+      };
+      stop.addEventListener("abort", onAbort, { once: true });
+      this.waiting.set(orbId, (job) => {
+        stop.removeEventListener("abort", onAbort);
+        resolve(job);
+      });
+    });
+  }
+}
+
+const phases = ["health", "claim", "delivery", "history", "commit", "naming", "catchup"] as const;
+
+describe("real multi-orb polling (DST)", () => {
+  for (const phase of phases) {
+    it(`delivers B on later ticks while A holds ${phase}`, async () => {
+      await runDst(
+        {
+          name: `poll-held-${phase}`,
+          iterations: 20,
+          lateTimerProbability: 0,
+          logCapture: new LogCapture(),
+        },
+        async (sim) => {
+          const h = makeHarness({
+            constants: {
+              reconcileTickMs: 20,
+              historyPullIntervalMs: 20,
+              runtimeRequestTimeoutMs: 100_000,
+            },
+          });
+          h.store.seedProject(makeProjectRow("project"));
+          for (const id of ["a", "b"])
+            h.store.seedOrb(
+              makeOrbRow(id, "project", "creating", {
+                name: id === "a" && phase === "naming" ? null : id,
+              }),
+            );
+          const gate = new ConditionVariable("held poll phase");
+          let held = false;
+          let released = false;
+          let ready = false;
+          let pollFinished = false;
+          const stop = new AbortController();
+          const workersStop = new AbortController();
+          const runner = new SimulationPollTaskRunner();
+          const deliveries: string[] = [];
+          const records = new Map<string, HistoryRecord[]>([
+            ["a", []],
+            ["b", []],
+          ]);
+          let batches = 0;
+          let holdCalls = 0;
+          async function hold(task: SimulationTask) {
+            holdCalls++;
+            held = true;
+            gate.notifyAll(task, "A held");
+            while (!released) await gate.wait(task, "A release");
+          }
+          function record(
+            task: SimulationTask,
+            orbId: string,
+            id: string,
+            inbox = false,
+          ): HistoryRecord {
+            const list = records.get(orbId) ?? [];
+            return {
+              id,
+              parentId: list.at(-1)?.id ?? null,
+              timestamp: new Date(task.wallNow()).toISOString(),
+              overflow: {},
+              type: "message",
+              role: "user",
+              content: [{ type: "text", text: id }],
+              ...(inbox ? { inboxMessageIds: [id] } : {}),
+            };
+          }
+          const claim = h.store.claimNextOrbMessageBatch.bind(h.store);
+          h.store.claimNextOrbMessageBatch = (task, request) =>
+            new ResultAsync(
+              (async () => {
+                if (request.orbId === "a" && phase === "claim" && !released) await hold(task);
+                return claim(task, request);
+              })(),
+            );
+          const commit = h.store.commitPullBatch.bind(h.store);
+          h.store.commitPullBatch = (task, request) =>
+            new ResultAsync(
+              (async () => {
+                if (request.orbId === "a" && phase === "commit" && !released) await hold(task);
+                return commit(task, request);
+              })(),
+            );
+          const plane: AgentPlane = {
+            placement: "central",
+            health: (task, orb) =>
+              new ResultAsync(
+                (async () => {
+                  if (orb.id === "a" && phase === "health" && !released) await hold(task);
+                  return ok({
+                    v: 1 as const,
+                    orbId: orb.id,
+                    runtimeInstanceId: orb.id,
+                    status: "ready" as const,
+                    checkoutCommit: "central",
+                    sessionId: orb.id,
+                    activity: "busy" as const,
+                  });
+                })(),
+              ),
+            deliverMessage: (task, orb, request) =>
+              new ResultAsync(
+                (async () => {
+                  if (orb.id === "a" && phase === "delivery" && !released) await hold(task);
+                  if (!deliveries.includes(request.messageId)) {
+                    records.get(orb.id)?.push(record(task, orb.id, request.messageId, true));
+                    deliveries.push(request.messageId);
+                  }
+                  gate.notifyAll(task, "delivered");
+                  return ok({
+                    v: 1 as const,
+                    messageId: request.messageId,
+                    status: "persisted" as const,
+                    delivery: "steer" as const,
+                    operationId: "turn",
+                    duplicate: false,
+                  });
+                })(),
+              ),
+            pullHistory: (task, orb, request) =>
+              new ResultAsync(
+                (async () => {
+                  if (orb.id === "a" && phase === "history" && !released) await hold(task);
+                  const list = records.get(orb.id) ?? [];
+                  if (orb.id === "a" && phase === "catchup" && !released) {
+                    list.push(record(task, orb.id, `catchup-${++batches}`));
+                    held = true;
+                    gate.notifyAll(task, "catchup continues");
+                    await task.sleep(5, "sustained new history");
+                  }
+                  const index =
+                    request.after === null
+                      ? -1
+                      : list.findIndex((item) => item.id === request.after);
+                  const page = list.slice(index + 1);
+                  return ok({
+                    v: 1 as const,
+                    orbId: orb.id,
+                    runtimeInstanceId: orb.id,
+                    activity: "busy" as const,
+                    session: { id: orb.id, overflow: {} },
+                    records: page,
+                    cursor: page.at(-1)?.id ?? request.after,
+                    headId: list.at(-1)?.id ?? null,
+                  });
+                })(),
+              ),
+            prepareIdleStop: () => okAsync({ v: 1 as const, prepared: false }),
+            suspend: () => okAsync(undefined),
+            dispose: () => okAsync(undefined),
+            close: () => okAsync(undefined),
+            session: () => null,
+          };
+          const deps = {
+            ...h.deps,
+            agentPlane: plane,
+            nameGenerator: {
+              generate: (task: SimulationTask) =>
+                new ResultAsync(
+                  (async () => {
+                    if (phase === "naming" && !released) await hold(task);
+                    return ok("A name");
+                  })(),
+                ),
+            },
+          };
+          const result = await sim.runTasks([
+            ...["central:a", "central:b", "poll:a", "poll:b", "name:a", "name:b"].map((lane) => ({
+              name: lane,
+              f: (task: SimulationTask) => runner.worker(task, lane, workersStop.signal),
+            })),
+            {
+              name: "poller",
+              f: async (task) => {
+                while (!ready) await gate.wait(task, "setup");
+                await pollLoop(task, deps, stop.signal, runner.run);
+                pollFinished = true;
+                workersStop.abort();
+              },
+            },
+            {
+              name: "driver",
+              f: async (task) => {
+                records.get("a")?.push(record(task, "a", "seed"));
+                if (["health", "claim", "delivery"].includes(phase))
+                  expect(
+                    (
+                      await h.store.enqueueOrbMessage(task, {
+                        orbId: "a",
+                        messageId: "a-input",
+                        content: [{ type: "text", text: "A input" }],
+                        now: task.wallNow(),
+                      })
+                    ).isOk(),
+                  ).toBe(true);
+                ready = true;
+                gate.notifyAll(task, "setup ready");
+                while (!held) await gate.wait(task, "A enters phase");
+                for (const id of ["b-first", "b-later"]) {
+                  expect(
+                    (
+                      await h.store.enqueueOrbMessage(task, {
+                        orbId: "b",
+                        messageId: id,
+                        content: [{ type: "text", text: id }],
+                        now: task.wallNow(),
+                      })
+                    ).isOk(),
+                  ).toBe(true);
+                  await waitUntil(
+                    task,
+                    `${id} receipt before A release`,
+                    () =>
+                      h.store
+                        .messageSnapshots("b")
+                        .some((row) => row.messageId === id && row.status === "delivered"),
+                    { intervalMs: 20, timeoutMs: 1_000 },
+                  );
+                  expect(released).toBe(false);
+                  await task.sleep(80, "future dispatcher ticks");
+                }
+                if (["history", "commit", "naming", "catchup"].includes(phase)) {
+                  expect(
+                    (
+                      await h.store.enqueueOrbMessage(task, {
+                        orbId: "a",
+                        messageId: "a-later",
+                        content: [{ type: "text", text: "later" }],
+                        now: task.wallNow(),
+                      })
+                    ).isOk(),
+                  ).toBe(true);
+                  await waitUntil(
+                    task,
+                    "A central lane remains independent",
+                    () => deliveries.includes("a-later"),
+                    { intervalMs: 20, timeoutMs: 1_000 },
+                  );
+                }
+                if (phase === "catchup") expect(batches).toBeGreaterThan(3);
+                else expect(holdCalls).toBe(1);
+                stop.abort();
+                const callsAtStop = runner.calls;
+                await task.sleep(80, "shutdown waits for held lanes");
+                expect(pollFinished).toBe(false);
+                expect(runner.calls).toBe(callsAtStop);
+                released = true;
+                gate.notifyAll(task, "A released after shutdown drain check");
+              },
+            },
+          ]);
+          expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+          expect(deliveries).toContain("b-later");
+          expect(pollFinished).toBe(true);
+        },
+      );
+    });
+  }
+});
+
+for (const ending of ["shutdown", "fatal"] as const) {
+  it(`drains sustained catchup on ${ending} without releasing the source`, async () => {
+    const logs = new LogCapture();
+    await runDst(
+      { name: `poll-catchup-${ending}`, iterations: 30, lateTimerProbability: 0, logCapture: logs,
+        maxVirtualDurationMs: 2_000 },
+      async (sim) => {
+        const h = makeHarness({ constants: { reconcileTickMs: 20, historyPullIntervalMs: 20 } });
+        h.store.seedProject(makeProjectRow("project"));
+        h.store.seedOrb(makeOrbRow("a", "project", "creating", { name: "a" }));
+        if (ending === "fatal")
+          h.store.seedOrb(makeOrbRow("b", "project", "creating", { name: "b" }));
+        const gate = new ConditionVariable("catchup boundary");
+        const stop = new AbortController();
+        const workersStop = new AbortController();
+        const runner = new SimulationPollTaskRunner();
+        const crash = new Error("crashed history lane");
+        let pulls = 0;
+        let commits = 0;
+        let held = false;
+        let releaseCommit = false;
+        let triggerCrash = false;
+        let finished = false;
+        let failure: unknown;
+        const commit = h.store.commitPullBatch.bind(h.store);
+        h.store.commitPullBatch = (task, request) => new ResultAsync((async () => {
+          if (request.orbId === "a" && commits === 3) {
+            held = true;
+            gate.notifyAll(task, "commit held");
+            while (!releaseCommit) await gate.wait(task, "release safe commit");
+          }
+          const result = await commit(task, request);
+          if (result.isOk()) commits++;
+          return result;
+        })());
+        const plane: AgentPlane = {
+          placement: "central",
+          health: (_task, orb) => okAsync({ v: 1, orbId: orb.id, runtimeInstanceId: orb.id,
+            status: "ready", checkoutCommit: "central", sessionId: orb.id, activity: "idle" }),
+          deliverMessage: () => { throw new Error("no messages expected"); },
+          pullHistory: (task, orb, request) => new ResultAsync((async () => {
+            const id = `record-${++pulls}`;
+            const records: HistoryRecord[] = orb.id === "a" ? [{ id, parentId: request.after,
+              timestamp: new Date(task.wallNow()).toISOString(), overflow: {}, type: "message",
+              role: "user", content: [{ type: "text", text: id }] }] : [];
+            await task.sleep(5, "source remains nonempty");
+            return ok({ v: 1 as const, orbId: orb.id, runtimeInstanceId: orb.id,
+              activity: "idle" as const, session: { id: orb.id, overflow: {} }, records,
+              cursor: records.at(-1)?.id ?? request.after, headId: records.at(-1)?.id ?? null });
+          })()),
+          prepareIdleStop: () => okAsync({ v: 1, prepared: false }),
+          suspend: () => okAsync(undefined), dispose: () => okAsync(undefined),
+          close: () => okAsync(undefined), session: () => null,
+        };
+        const deps = { ...h.deps, agentPlane: plane };
+        const run: ReconcileTaskRunner = (lane, operation) => runner.run(lane,
+          lane === "poll:b" ? async (task) => {
+            while (!triggerCrash) await gate.wait(task, "crash trigger");
+            throw crash;
+          } : operation);
+        const result = await sim.runTasks([
+          ...["central:a", "poll:a", ...(ending === "fatal" ? ["central:b", "poll:b"] : [])]
+            .map((lane) => ({ name: lane,
+              f: (task: SimulationTask) => runner.worker(task, lane, workersStop.signal) })),
+          { name: "poller", f: async (task) => {
+            try { await pollLoop(task, deps, stop.signal, run); }
+            catch (error) { failure = error; }
+            finally { finished = true; workersStop.abort(); }
+          } },
+          { name: "driver", f: async (task) => {
+            while (!held) await gate.wait(task, "fourth batch reaches commit");
+            // A yielded catchup must not erase an existing retry episode or schedule success.
+            h.deps.control.bumpRetryAttempts("poll:a");
+            const nextAttempt = h.deps.control.getNextAttemptAt("poll:a");
+            if (ending === "shutdown") stop.abort();
+            else {
+              triggerCrash = true;
+              gate.notifyAll(task, "crash lane");
+              await waitUntil(task, "crash captured", () => logs.matching("poll-task-crashed").length === 1,
+                { intervalMs: 5, timeoutMs: 200 });
+            }
+            const calls = runner.calls;
+            await task.sleep(60, "admitted commit must drain");
+            expect(finished).toBe(false);
+            expect(commits).toBe(3);
+            expect(runner.calls).toBe(calls);
+            releaseCommit = true;
+            gate.notifyAll(task, "finish current commit only");
+            await waitUntil(task, "sustained source must not block drain", () => finished,
+              { intervalMs: 5, timeoutMs: 200 });
+            expect(commits).toBe(4);
+            expect(h.deps.control.hasRetryAttempts("poll:a")).toBe(true);
+            expect(h.deps.control.getNextAttemptAt("poll:a")).toBe(nextAttempt);
+          } },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(failure).toBe(ending === "fatal" ? crash : undefined);
+        expect(logs.matching("pull-failed")).toHaveLength(0);
+        expect(logs.matching("poll-task-crashed")).toHaveLength(ending === "fatal" ? 1 : 0);
+      },
+    );
+  });
+}

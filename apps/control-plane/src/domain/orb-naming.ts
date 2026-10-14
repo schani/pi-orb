@@ -5,6 +5,7 @@ import { withDeadline } from "./dst.ts";
 import type { StoreError } from "./errors.ts";
 import { logOrbEvent } from "./log.ts";
 import type {
+  ControlPlaneDeps,
   ControlPlaneStore,
   OrbNameGenerator as GeneratorPort,
   OrbNameGeneratorError,
@@ -212,4 +213,39 @@ export function generateOrbName(
     return ok(assigned.value === null ? "already_named" : "assigned");
   };
   return new ResultAsync(run());
+}
+
+/** Recover automatic naming from already-replicated human input. */
+export async function reconcileOrbName(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orbId: string,
+): Promise<void> {
+  const orb = await deps.store.getOrb(task, orbId);
+  if (orb.isErr() || orb.value === null || orb.value.name !== null) return;
+  const history = await deps.store.readHistorySnapshot(task, orbId);
+  if (history.isErr()) return;
+  const firstUser = history.value.records.find(
+    (record) => record.type === "message" && record.role === "user",
+  );
+  if (firstUser === undefined || firstUser.type !== "message") return;
+  const message = firstUser.content
+    .filter(
+      (block): block is Extract<(typeof firstUser.content)[number], { type: "text" }> =>
+        block.type === "text",
+    )
+    .map((block) => block.text)
+    .join("\n");
+  const imageOnly =
+    message.trim() === "" && firstUser.content.some((block) => block.type === "image");
+  if (message.trim() === "" && !imageOnly) return;
+  const generated = await generateOrbName(
+    task,
+    { store: deps.store, generator: deps.nameGenerator, leaseMs: deps.nameLeaseMs },
+    orbId,
+    { message: imageOnly ? "[image-only request]" : message, readme: null },
+  );
+  if (generated.isErr()) {
+    logOrbEvent(task, orbId, "auto-name-failed", { error: generated.error.message });
+  }
 }

@@ -6,6 +6,7 @@ import { cleanupRetiredHostedFiles } from "./hosting.ts";
 import { type ReconcileOutcome, reconcileCentralAgent, reconcileOrbOnce } from "./lifecycle.ts";
 import { logEvent, logOrbEvent, logProjectEvent } from "./log.ts";
 import type { OrbRow } from "./orb.ts";
+import { reconcileOrbName } from "./orb-naming.ts";
 import type { ControlPlaneDeps } from "./ports.ts";
 import { reconcileProjectDeletionOnce } from "./project-deletion.ts";
 import { pollOrbUntilCaughtUp } from "./replication.ts";
@@ -61,12 +62,19 @@ const RECONCILABLE_STATES: readonly OrbState[] = [
 const isTerminal = (state: OrbState): boolean =>
   state === "stopped" || state === "failed" || state === "archived";
 
-/** One sweep: pull every due running orb until caught up. */
-export async function pollAllOnce(task: SimulationTask, deps: ControlPlaneDeps): Promise<void> {
+/** One scan: dispatch independent lanes, or run them on the caller task. */
+export async function pollAllOnce(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  dispatcher?: PollDispatcher,
+  stop?: AbortSignal,
+): Promise<void> {
+  dispatcher?.check();
   const orbsResult = await deps.store.listOrbsInStates(
     task,
     deps.agentPlane?.placement === "central" ? CENTRAL_POLLABLE_STATES : POLLABLE_STATES,
   );
+  dispatcher?.check();
   if (orbsResult.isErr()) {
     // Store outage: retry on the next tick. Logged on the edge only — the tick
     // is ~10s and an outage lasts minutes.
@@ -80,51 +88,147 @@ export async function pollAllOnce(task: SimulationTask, deps: ControlPlaneDeps):
   }
   const now = task.monotonicNow();
   for (const orb of orbsResult.value) {
+    if (hasStopped(stop)) return;
     if (agentPlacement(deps.agentPlane, orb) !== "central" && orb.state !== "running") continue;
-    // Central input follows the dispatcher tick, not guest work or history cadence.
+    if (dispatcher !== undefined) {
+      dispatcher.dispatch(task, orb);
+      continue;
+    }
+    await pollCentralOnce(task, deps, orb);
+    if (deps.control.getNextAttemptAt(`poll:${orb.id}`) > now) continue;
+    await pollHistoryOnce(task, deps, orb, stop);
+    if (hasStopped(stop)) return;
+    await reconcileOrbName(task, deps, orb.id);
+  }
+}
+
+async function pollCentralOnce(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orb: OrbRow,
+): Promise<void> {
+  if (
+    agentPlacement(deps.agentPlane, orb) === "central" &&
+    deps.control.getNextAttemptAt(`central:${orb.id}`) !== PARKED_FOREVER
+  ) {
+    const agent = await reconcileCentralAgent(task, deps, orb.id);
+    const failure = agent.isErr() && agent.error.type === "retryable" ? agent.error : null;
+    if (deps.control.noteCondition(`central-reconcile:${orb.id}`, failure !== null) && failure)
+      logOrbEvent(task, orb.id, "central-reconcile-blocked", { message: failure.message });
+    if (failure?.invariant) deps.control.setNextAttemptAt(`central:${orb.id}`, PARKED_FOREVER);
     if (
-      agentPlacement(deps.agentPlane, orb) === "central" &&
-      deps.control.getNextAttemptAt(`central:${orb.id}`) !== PARKED_FOREVER
-    ) {
-      const agent = await reconcileCentralAgent(task, deps, orb.id);
-      const failure = agent.isErr() && agent.error.type === "retryable" ? agent.error : null;
-      if (deps.control.noteCondition(`central-reconcile:${orb.id}`, failure !== null) && failure)
-        logOrbEvent(task, orb.id, "central-reconcile-blocked", { message: failure.message });
-      if (failure?.invariant) deps.control.setNextAttemptAt(`central:${orb.id}`, PARKED_FOREVER);
-      if (
-        agent.isOk() &&
-        agent.value.state === "stopped" &&
-        deps.control.hasAgentWork(orb.id) &&
-        agent.value.stopReason !== "manual" &&
-        agent.value.stopReason !== "sleep"
-      )
-        deps.control.nudgeNextAttemptAt(`reconcile:${orb.id}`);
+      agent.isOk() &&
+      agent.value.state === "stopped" &&
+      deps.control.hasAgentWork(orb.id) &&
+      agent.value.stopReason !== "manual" &&
+      agent.value.stopReason !== "sleep"
+    )
+      deps.control.nudgeNextAttemptAt(`reconcile:${orb.id}`);
+  }
+}
+
+async function pollHistoryOnce(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orb: OrbRow,
+  stop?: AbortSignal,
+): Promise<void> {
+  const key = `poll:${orb.id}`;
+  const outcome = await pollOrbUntilCaughtUp(task, deps, orb.id, Infinity, stop);
+  if (outcome.type === "yielded") return;
+  // A runtime going quiet is the first symptom of the failures this loop
+  // exists to survive, so the first failing pull of an episode is logged;
+  // repeats are not, and a success closes the episode silently.
+  if (outcome.type === "retryable") {
+    if (deps.control.bumpRetryAttempts(key) === 1) {
+      logOrbEvent(task, orb.id, "pull-failed", {
+        message: outcome.message,
+        ...(outcome.invariant === true ? { invariant: true } : {}),
+      });
     }
-    const key = `poll:${orb.id}`;
-    if (deps.control.getNextAttemptAt(key) > now) continue;
-    const outcome = await pollOrbUntilCaughtUp(task, deps, orb.id);
-    // A runtime going quiet is the first symptom of the failures this loop
-    // exists to survive, so the first failing pull of an episode is logged;
-    // repeats are not, and a success closes the episode silently.
-    if (outcome.type === "retryable") {
-      if (deps.control.bumpRetryAttempts(key) === 1) {
-        logOrbEvent(task, orb.id, "pull-failed", {
-          message: outcome.message,
-          ...(outcome.invariant === true ? { invariant: true } : {}),
-        });
-      }
-    } else {
-      deps.control.clearRetryAttempts(key);
-    }
-    // Retryable failures retry at the ordinary polling cadence (docs/history-replication.md); an
-    // integrity failure removed the orb from the pollable set, and an invariant
-    // failure parks this orb's pulls until the fix is deployed.
-    deps.control.setNextAttemptAt(
-      key,
-      outcome.type === "retryable" && outcome.invariant === true
-        ? PARKED_FOREVER
-        : task.monotonicNow() + deps.constants.historyPullIntervalMs,
+  } else {
+    deps.control.clearRetryAttempts(key);
+  }
+  // Retryable failures retry at the ordinary polling cadence (docs/history-replication.md); an
+  // integrity failure removed the orb from the pollable set, and an invariant
+  // failure parks this orb's pulls until the fix is deployed.
+  deps.control.setNextAttemptAt(
+    key,
+    outcome.type === "retryable" && outcome.invariant === true
+      ? PARKED_FOREVER
+      : task.monotonicNow() + deps.constants.historyPullIntervalMs,
+  );
+}
+
+/** Independent per-orb lanes; held pulls/naming never occupy the input scheduler. */
+export class PollDispatcher {
+  private readonly inFlight = new Map<string, Promise<void>>();
+  private fatalError: Error | null = null;
+
+  private readonly deps: ControlPlaneDeps;
+  private readonly runTask: ReconcileTaskRunner;
+  private readonly stop: AbortSignal;
+  private readonly fatalStop = new AbortController();
+
+  constructor(deps: ControlPlaneDeps, runTask: ReconcileTaskRunner, stop?: AbortSignal) {
+    this.deps = deps;
+    this.runTask = runTask;
+    this.stop =
+      stop === undefined ? this.fatalStop.signal : AbortSignal.any([stop, this.fatalStop.signal]);
+  }
+
+  dispatch(task: SimulationTask, orb: OrbRow): void {
+    this.check();
+    if (hasStopped(this.stop)) return;
+    if (agentPlacement(this.deps.agentPlane, orb) === "central")
+      this.start(task, orb, `central:${orb.id}`, (worker) =>
+        pollCentralOnce(worker, this.deps, orb),
+      );
+    this.start(task, orb, `poll:${orb.id}`, (worker) =>
+      pollHistoryOnce(worker, this.deps, orb, this.stop),
     );
+    if (orb.name === null)
+      this.start(task, orb, `name:${orb.id}`, async (worker) => {
+        await reconcileOrbName(worker, this.deps, orb.id);
+        this.deps.control.setNextAttemptAt(
+          `name:${orb.id}`,
+          worker.monotonicNow() + this.deps.constants.historyPullIntervalMs,
+        );
+      });
+  }
+
+  private start(
+    task: SimulationTask,
+    orb: OrbRow,
+    key: string,
+    operation: (worker: SimulationTask) => Promise<void>,
+  ): void {
+    if (this.inFlight.has(key) || this.deps.control.getNextAttemptAt(key) > task.monotonicNow())
+      return;
+    const running = this.runTask(key, operation).catch((error: unknown) => {
+      const fatal = error instanceof Error ? error : new Error(unexpectedMessage(error));
+      this.fatalError ??= fatal;
+      this.fatalStop.abort();
+      if (this.deps.control.noteCondition(`poll-task-crashed:${key}`, true))
+        logOrbEvent(task, orb.id, "poll-task-crashed", {
+          lane: key.startsWith("poll:") ? "history" : key.split(":")[0],
+          error: "unexpected",
+        });
+    });
+    this.inFlight.set(key, running);
+    void running.then(() => {
+      if (this.inFlight.get(key) === running) this.inFlight.delete(key);
+    });
+  }
+
+  async drain(): Promise<void> {
+    await Promise.all(this.inFlight.values());
+    this.check();
+  }
+
+  check(): void {
+    // biome-ignore lint: Narrow background-loop supervisor boundary; unexpected worker failures reject the loop.
+    if (this.fatalError !== null) throw this.fatalError;
   }
 }
 
@@ -132,11 +236,17 @@ export async function pollLoop(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   stop: AbortSignal,
+  runTask?: ReconcileTaskRunner,
 ): Promise<void> {
-  while (!stop.aborted) {
-    await pollAllOnce(task, deps);
-    const slept = await sleepResult(task, deps.constants.reconcileTickMs, "poll loop tick", stop);
-    if (slept.isErr()) return;
+  const dispatcher = runTask === undefined ? undefined : new PollDispatcher(deps, runTask, stop);
+  try {
+    while (!stop.aborted) {
+      await pollAllOnce(task, deps, dispatcher, stop);
+      const slept = await sleepResult(task, deps.constants.reconcileTickMs, "poll loop tick", stop);
+      if (slept.isErr()) break;
+    }
+  } finally {
+    await dispatcher?.drain();
   }
 }
 

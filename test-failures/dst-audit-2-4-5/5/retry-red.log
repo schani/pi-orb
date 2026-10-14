@@ -1,0 +1,51 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ❯ apps/web/src/lib/detail-loader.dst.test.ts (6 tests | 1 failed | 5 skipped) 27ms
+   ↓ DST: open running detail polls once per second without overlapping; close and navigation fence late responses
+   ↓ one in-flight read, retry after error, disconnect stops refresh and commit fences running response
+   ↓ terminal live snapshot stops polling
+   ↓ coalesces pending reads across disclosure remounts sharing an active-view pool
+   ↓ coalesces an unfinished read across close/reopen and disconnect/reconnect without accepting the old owner
+   × DST: repeated retry before response retains one publisher and one closeable timer 25ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/web/src/lib/detail-loader.dst.test.ts > DST: repeated retry before response retains one publisher and one closeable timer
+Error: DST scenario "detail-repeated-retry" failed at iteration 0 (trace: /workspace/repo/test-failures/detail-repeated-retry-1791988983532-0.json, replay reproduces the failure): expected { published: 3, …(2) } to deeply equal { published: 1, …(2) }
+ ❯ runDst apps/orb-runtime/src/testkit/sim.ts:121:13
+    119|       }
+    120|       const message = error instanceof Error ? error.message : String(…
+    121|       throw new Error(
+       |             ^
+    122|         `DST scenario "${options.name}" failed at iteration ${i} ` +
+    123|           `(trace: ${path}, replay ${reproduced ? "reproduces" : "DID …
+ ❯ apps/web/src/lib/detail-loader.dst.test.ts:159:3
+
+Caused by: AssertionError: expected { published: 3, …(2) } to deeply equal { published: 1, …(2) }
+
+- Expected
++ Received
+
+  {
+-   "published": 1,
+-   "timersAfterClose": 0,
+-   "timersBeforeClose": 1,
++   "published": 3,
++   "timersAfterClose": 2,
++   "timersBeforeClose": 3,
+  }
+
+ ❯ Object.f apps/web/src/lib/detail-loader.dst.test.ts:190:90
+ ❯ SimulationImpl.runTasks node_modules/determined/dist/index.js:858:14
+ ❯ apps/web/src/lib/detail-loader.dst.test.ts:168:20
+ ❯ runDst apps/orb-runtime/src/testkit/sim.ts:101:7
+ ❯ apps/web/src/lib/detail-loader.dst.test.ts:159:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 skipped (6)
+   Start at  14:43:03
+   Duration  284ms (transform 84ms, setup 0ms, import 116ms, tests 27ms, environment 0ms)

@@ -1,0 +1,54 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ❯ apps/web/src/pages/outbound.dst.test.ts (7 tests | 1 failed | 6 skipped) 18ms
+   × DST: preserves B compaction when socket drain starts after 6 enqueues 16ms
+   ↓ DST: preserves B compaction when socket drain starts after 0 enqueues
+   ↓ DST: preserves B compaction when socket drain starts after 1 enqueues
+   ↓ DST: preserves B compaction when socket drain starts after 2 enqueues
+   ↓ DST: preserves B compaction when socket drain starts after 3 enqueues
+   ↓ DST: preserves B compaction when socket drain starts after 4 enqueues
+   ↓ DST: preserves B compaction when socket drain starts after 5 enqueues
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/web/src/pages/outbound.dst.test.ts > DST: preserves B compaction when socket drain starts after 6 enqueues
+Error: DST scenario "outbound-compaction-boundary-6" failed at iteration 0 (trace: /workspace/repo/test-failures/outbound-compaction-boundary-6-1791988407116-0.json, replay reproduces the failure): {"sent":[{"v":1,"type":"runtime.event","at":"2026-10-14T14:00:00Z","event":{"type":"operation_started","operationId":"A"}},{"v":1,"type":"runtime.event","at":"2026-10-14T14:00:00Z","event":{"type":"status","activity":"busy","operationId":"B","work":"compaction","compactionAfterId":"after-A"}},{"v":1,"type":"runtime.event","at":"2026-10-14T14:00:00Z","event":{"type":"operation_finished","operationId":"A","outcome":"completed"}},{"v":1,"type":"runtime.event","at":"2026-10-14T14:00:00Z","event":{"type":"operation_started","operationId":"B"}}]}: expected { records: Map{}, …(28) } to match object { operationId: 'B', …(3) }
+(25 matching properties omitted from actual)
+ ❯ runDst apps/orb-runtime/src/testkit/sim.ts:121:13
+    119|       }
+    120|       const message = error instanceof Error ? error.message : String(…
+    121|       throw new Error(
+       |             ^
+    122|         `DST scenario "${options.name}" failed at iteration ${i} ` +
+    123|           `(trace: ${path}, replay ${reproduced ? "reproduces" : "DID …
+ ❯ apps/web/src/pages/outbound.dst.test.ts:33:5
+
+Caused by: AssertionError: {"sent":[{"v":1,"type":"runtime.event","at":"2026-10-14T14:00:00Z","event":{"type":"operation_started","operationId":"A"}},{"v":1,"type":"runtime.event","at":"2026-10-14T14:00:00Z","event":{"type":"status","activity":"busy","operationId":"B","work":"compaction","compactionAfterId":"after-A"}},{"v":1,"type":"runtime.event","at":"2026-10-14T14:00:00Z","event":{"type":"operation_finished","operationId":"A","outcome":"completed"}},{"v":1,"type":"runtime.event","at":"2026-10-14T14:00:00Z","event":{"type":"operation_started","operationId":"B"}}]}: expected { records: Map{}, …(28) } to match object { operationId: 'B', …(3) }
+(25 matching properties omitted from actual)
+
+- Expected
++ Received
+
+@@ -1,8 +1,8 @@
+  {
+    "activity": "busy",
+-   "compacting": true,
++   "compacting": false,
+    "compaction": {
+      "afterId": "after-A",
+      "operationId": "B",
+    },
+    "operationId": "B",
+
+ ❯ apps/web/src/pages/outbound.dst.test.ts:92:51
+ ❯ runDst apps/orb-runtime/src/testkit/sim.ts:101:7
+ ❯ apps/web/src/pages/outbound.dst.test.ts:33:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 skipped (7)
+   Start at  14:33:25
+   Duration  1.73s (transform 1.01s, setup 0ms, import 1.57s, tests 18ms, environment 0ms)

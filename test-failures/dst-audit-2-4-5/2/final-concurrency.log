@@ -1,0 +1,10 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ✓ apps/control-plane/src/domain/poll-concurrency.dst.test.ts (7 tests) 729ms
+ ✓ apps/control-plane/src/domain/loops.test.ts (7 tests) 59ms
+
+ Test Files  2 passed (2)
+      Tests  14 passed (14)
+   Start at  14:39:52
+   Duration  2.68s (transform 824ms, setup 0ms, import 1.61s, tests 788ms, environment 0ms)

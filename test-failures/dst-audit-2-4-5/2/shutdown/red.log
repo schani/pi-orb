@@ -1,0 +1,71 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ❯ apps/control-plane/src/domain/poll-concurrency.dst.test.ts (9 tests | 2 failed | 7 skipped) 68ms
+     ↓ delivers B on later ticks while A holds health
+     ↓ delivers B on later ticks while A holds claim
+     ↓ delivers B on later ticks while A holds delivery
+     ↓ delivers B on later ticks while A holds history
+     ↓ delivers B on later ticks while A holds commit
+     ↓ delivers B on later ticks while A holds naming
+     ↓ delivers B on later ticks while A holds catchup
+   × drains sustained catchup on shutdown without releasing the source 38ms
+   × drains sustained catchup on fatal without releasing the source 27ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/control-plane/src/domain/poll-concurrency.dst.test.ts > drains sustained catchup on shutdown without releasing the source
+Error: DST scenario "poll-catchup-shutdown" failed at iteration 0 (trace: /workspace/repo/test-failures/poll-catchup-shutdown-1791989081410-0.json, replay reproduces the failure): waitUntil timed out: sustained source must not block drain: expected false to be true // Object.is equality
+ ❯ runDst apps/control-plane/src/testkit/sim.ts:189:13
+    187|         reproduced = true;
+    188|       }
+    189|       throw new Error(
+       |             ^
+    190|         `DST scenario "${options.name}" failed at iteration ${i} ` +
+    191|           `(trace: ${path}, replay ${reproduced ? "reproduces" : "DID …
+ ❯ apps/control-plane/src/domain/poll-concurrency.dst.test.ts:337:5
+
+Caused by: AssertionError: waitUntil timed out: sustained source must not block drain: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ apps/control-plane/src/domain/poll-concurrency.dst.test.ts:429:75
+ ❯ runDst apps/control-plane/src/testkit/sim.ts:159:7
+ ❯ apps/control-plane/src/domain/poll-concurrency.dst.test.ts:337:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  apps/control-plane/src/domain/poll-concurrency.dst.test.ts > drains sustained catchup on fatal without releasing the source
+Error: DST scenario "poll-catchup-fatal" failed at iteration 0 (trace: /workspace/repo/test-failures/poll-catchup-fatal-1791989081445-0.json, replay reproduces the failure): waitUntil timed out: crash captured: expected false to be true // Object.is equality
+ ❯ runDst apps/control-plane/src/testkit/sim.ts:189:13
+    187|         reproduced = true;
+    188|       }
+    189|       throw new Error(
+       |             ^
+    190|         `DST scenario "${options.name}" failed at iteration ${i} ` +
+    191|           `(trace: ${path}, replay ${reproduced ? "reproduces" : "DID …
+ ❯ apps/control-plane/src/domain/poll-concurrency.dst.test.ts:337:5
+
+Caused by: AssertionError: waitUntil timed out: crash captured: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ apps/control-plane/src/domain/poll-concurrency.dst.test.ts:429:75
+ ❯ runDst apps/control-plane/src/testkit/sim.ts:159:7
+ ❯ apps/control-plane/src/domain/poll-concurrency.dst.test.ts:337:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 7 skipped (9)
+   Start at  14:44:40
+   Duration  1.39s (transform 733ms, setup 0ms, import 1.15s, tests 68ms, environment 0ms)

@@ -1,0 +1,42 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ❯ apps/control-plane/src/domain/poll-concurrency.dst.test.ts (9 tests | 1 failed | 8 skipped) 31ms
+     ↓ delivers B on later ticks while A holds health
+     ↓ delivers B on later ticks while A holds claim
+     ↓ delivers B on later ticks while A holds delivery
+     ↓ delivers B on later ticks while A holds history
+     ↓ delivers B on later ticks while A holds commit
+     ↓ delivers B on later ticks while A holds naming
+     ↓ delivers B on later ticks while A holds catchup
+   ↓ drains sustained catchup on shutdown without releasing the source
+   × drains sustained catchup on fatal without releasing the source 30ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/control-plane/src/domain/poll-concurrency.dst.test.ts > drains sustained catchup on fatal without releasing the source
+AssertionError: waitUntil timed out: sustained source must not block drain: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ apps/control-plane/src/domain/poll-concurrency.dst.test.ts:429:75
+    427|           } },
+    428|         ]);
+    429|         expect(result.isOk(), result.isErr() ? result.error.message : …
+       |                                                                           ^
+    430|         expect(failure).toBe(ending === "fatal" ? crash : undefined);
+    431|         expect(logs.matching("pull-failed")).toHaveLength(0);
+ ❯ runDst apps/control-plane/src/testkit/sim.ts:148:5
+ ❯ apps/control-plane/src/domain/poll-concurrency.dst.test.ts:337:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 skipped (9)
+   Start at  14:45:32
+   Duration  1.38s (transform 778ms, setup 0ms, import 1.19s, tests 31ms, environment 0ms)

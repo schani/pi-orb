@@ -1047,7 +1047,9 @@ export async function main(
   const runReconcileTask: ReconcileTaskRunner = (orbId, operation) =>
     operation(new ControlPlaneTask(`reconciler:${orbId}`));
   const loops: readonly Promise<void>[] = [
-    pollLoop(new ControlPlaneTask("poller"), deps, stop.signal),
+    pollLoop(new ControlPlaneTask("poller"), deps, stop.signal, (lane, operation) =>
+      operation(new ControlPlaneTask(`poller:${lane}`)),
+    ),
     reconcileLoop(new ControlPlaneTask("reconcile-scheduler"), deps, stop.signal, runReconcileTask),
     projectDeletionLoop(new ControlPlaneTask("project-deletion"), deps, stop.signal),
     orphanSweepLoop(new ControlPlaneTask("sweeper"), deps, stop.signal),

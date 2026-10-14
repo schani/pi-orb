@@ -1,0 +1,14 @@
+
+ RUN  v4.1.11 /workspace/repo
+
+ ✓ apps/control-plane/src/domain/claude-composed-lifecycle.dst.test.ts (7 tests) 4592ms
+   ✓ archive seals real normalized root history only after child handoff, native exit, stdout EOF and final replication commit  2597ms
+   ✓ real child-only activity survives CP restart, stale pulls and wall-clock jumps until process/history drain  1336ms
+ ✓ apps/control-plane/src/domain/reconcile-concurrency.dst.test.ts (8 tests) 417ms
+     ✓ runs real creating lifecycles concurrently through one global auth flow  322ms
+ ✓ apps/control-plane/src/domain/orb-naming.dst.test.ts (7 tests) 38ms
+
+ Test Files  3 passed (3)
+      Tests  22 passed (22)
+   Start at  14:38:54
+   Duration  8.67s (transform 1.13s, setup 0ms, import 3.16s, tests 5.05s, environment 0ms)
