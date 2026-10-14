@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { type Browser, expect as check, chromium, type Page } from "@playwright/test";
 import { build } from "vite";
 import { expect, it } from "vitest";
@@ -22,12 +21,21 @@ import {
   waitFor,
 } from "./harness.ts";
 import { ownedControlPlaneIngress } from "./testkit/owned-control-plane-ingress.ts";
+import { ownedGitHttps } from "./testkit/owned-git-https.ts";
 
 const stop = { type: "stop", status: "completed" } as const;
-const summaryRule = () => ({
-  match: { userMessage: { regex: "^Write a single short desktop-notification sentence" } },
-  steps: [{ type: "text", content: "Correspondence received." }, stop],
+const user = (regex: string) => ({ userMessage: { regex } });
+const result = (regex: string) => ({ toolResultContains: { regex } });
+const reply = (match: Record<string, unknown>, content: string) => ({
+  match,
+  steps: [{ type: "text", content }, stop],
 });
+const call = (regex: string, name: string, args: object) => ({
+  match: user(regex),
+  steps: [{ type: "toolCall", name, arguments: args }, stop],
+});
+const summaryRule = () =>
+  reply(user("^Write a single short desktop-notification sentence"), "Correspondence received.");
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const hostile =
   '<script>globalThis.__peerInjected=true</script>\n<img src=x onerror="globalThis.__peerInjected=true">\n**literal** & "quotes"\n' +
@@ -96,6 +104,7 @@ it
     const requestIds = [randomUUID(), randomUUID()];
     const bodies = [`STOPPED_PEER_BODY\n${hostile}`, `SLEEPING_PEER_BODY\n${hostile}`];
     let cp: ControlPlaneHandle | undefined;
+    let git: Awaited<ReturnType<typeof ownedGitHttps>> | undefined;
     let ingress: Awaited<ReturnType<typeof ownedControlPlaneIngress>> | undefined;
     let fake: FakeSession | undefined;
     let names: FakeSession | undefined;
@@ -107,6 +116,8 @@ it
     let phase = "setup";
     const frames: { direction: string; frame: unknown }[] = [];
     const browserErrors: string[] = [];
+    const save = (name: string, value: unknown) =>
+      writeFileSync(join(root, name), JSON.stringify(value, null, 2));
     try {
       const repository = join(root, "source");
       mkdirSync(repository);
@@ -118,6 +129,7 @@ it
       ])
         execFileSync("git", args, { cwd: repository, stdio: "ignore" });
 
+      git = await ownedGitHttps(repository, root);
       const sendCode = (index: number) => {
         const body = bodies[index] ?? "";
         if (index === 0 && agentBackend === "central-durable")
@@ -130,53 +142,25 @@ it
         {
           auth: { accountId: `orb-messaging-${runId}`, device: { manualApprove: true } },
           model: {
+            // Both orbs share the mock's forward-only cursor; release receiver work only after the sender settles.
             rules: [
-              {
-                match: { userMessage: { regex: "^HUMAN_HANDSHAKE$" } },
-                steps: [{ type: "text", content: "HUMAN_HANDSHAKE_ACK" }, stop],
-              },
+              reply(user("^HUMAN_HANDSHAKE$"), "HUMAN_HANDSHAKE_ACK"),
               summaryRule(),
               ...[0, 1].flatMap((index) => [
                 ...(index === 1
                   ? [
-                      {
-                        match: { userMessage: { regex: "^SCHEDULE_PEER_SLEEP$" } },
-                        steps: [
-                          {
-                            type: "toolCall",
-                            name: "bash",
-                            arguments: { command: "pi-orb sleep 30m" },
-                          },
-                          stop,
-                        ],
-                      },
-                      {
-                        match: { toolResultContains: { regex: "Sleep scheduled until" } },
-                        steps: [{ type: "text", content: "RECEIVER_SLEEP_ACK" }, stop],
-                      },
+                      call("^SCHEDULE_PEER_SLEEP$", "bash", { command: "pi-orb sleep 30m" }),
+                      reply(result("Sleep scheduled until"), "RECEIVER_SLEEP_ACK"),
                       summaryRule(),
                     ]
                   : []),
-                {
-                  match: { userMessage: { regex: `^SEND_PEER_${index}$` } },
-                  steps: [
-                    { type: "toolCall", name: "codemode", arguments: { code: sendCode(index) } },
-                    stop,
-                  ],
-                },
-                {
-                  match: { toolResultContains: { regex: `SEND_DONE_${index}` } },
-                  steps: [{ type: "text", content: `SENDER_ACK_${index}` }, stop],
-                },
+                call(`^SEND_PEER_${index}$`, "codemode", { code: sendCode(index) }),
+                reply(result(`SEND_DONE_${index}`), `SENDER_ACK_${index}`),
                 summaryRule(),
-                {
-                  match: {
-                    userMessage: {
-                      regex: index === 0 ? "STOPPED_PEER_BODY" : "SLEEPING_PEER_BODY",
-                    },
-                  },
-                  steps: [{ type: "text", content: `RECEIVER_ACK_${index}` }, stop],
-                },
+                reply(
+                  user(index === 0 ? "STOPPED_PEER_BODY" : "SLEEPING_PEER_BODY"),
+                  `RECEIVER_ACK_${index}`,
+                ),
                 summaryRule(),
               ]),
             ],
@@ -188,10 +172,7 @@ it
         `orb-messaging-names-${runId}`,
         {
           model: {
-            rules: [0, 1].map(() => ({
-              match: { default: true },
-              steps: [{ type: "text", content: "Correspondence sender" }, stop],
-            })),
+            rules: [0, 1].map(() => reply({ default: true }, "Correspondence sender")),
           },
         },
         agentBackend,
@@ -232,11 +213,10 @@ it
           PI_ORB_E2E_MESSAGE_RECEIVER: receiverId,
           PI_ORB_APP_ORIGIN: baseUrl,
           PI_ORB_BROKER_URL: baseUrl,
-          GIT_CONFIG_COUNT: "2",
-          GIT_CONFIG_KEY_0: `url.${pathToFileURL(repository).href}.insteadOf`,
+          GIT_CONFIG_COUNT: "1",
+          GIT_CONFIG_KEY_0: `url.${git.baseUrl}.insteadOf`,
           GIT_CONFIG_VALUE_0: "https://github.com/e2e/orb-messaging",
-          GIT_CONFIG_KEY_1: "protocol.file.allow",
-          GIT_CONFIG_VALUE_1: "always",
+          GIT_SSL_CAINFO: git.cert,
         },
       });
       ingress.connect(cp.baseUrl);
@@ -344,8 +324,22 @@ it
       const humanColor = await page
         .locator(".rec-you")
         .filter({ hasText: "HUMAN_HANDSHAKE" })
-        .evaluate("(element) => getComputedStyle(element).backgroundColor");
+        .evaluate(
+          (element) => element.ownerDocument.defaultView?.getComputedStyle(element).backgroundColor,
+        );
 
+      expect(humanColor).toBe("rgb(0, 0, 0)");
+      const assistantPaint = await page
+        .locator(".rec-orb")
+        .filter({ hasText: "HUMAN_HANDSHAKE_ACK" })
+        .evaluate((element) => {
+          const view = element.ownerDocument.defaultView;
+          return {
+            row: view?.getComputedStyle(element).backgroundColor,
+            paper: view?.getComputedStyle(element.ownerDocument.body).backgroundColor,
+          };
+        });
+      expect(assistantPaint).toEqual({ row: "rgba(0, 0, 0, 0)", paper: "rgb(255, 255, 255)" });
       await summaryCount(1);
       expect((await api(baseUrl, "POST", `/api/v1/orbs/${receiverId}/stop`)).status).toBe(202);
       await state(receiverId, "stopped");
@@ -375,7 +369,10 @@ it
           if (rows.length > 1) throw new FatalProbeError("duplicate peer acceptance");
           if (rows[0]) return rows[0];
           const source = await history(senderId);
-          const records = source.body["records"] as { failure?: { message: string }; content?: { type: string; text?: string; isError?: boolean }[] }[];
+          const records = source.body["records"] as {
+            failure?: { message: string };
+            content?: { type: string; text?: string; isError?: boolean }[];
+          }[];
           const failure = records.findLast((record) => record.failure)?.failure;
           if (failure) throw new FatalProbeError(`sender provider failure: ${failure.message}`);
           if (records.some((record) => record.content?.some((block) => block.isError)))
@@ -386,7 +383,9 @@ it
         });
         messageIds.push(row.id);
         expect(row.system).toEqual({ kind: "orb_message", senderOrbId: senderId });
-        await waitFor("receiver reached shared FIFO claim gate", async () => (entered() ? true : null));
+        await waitFor("receiver reached shared FIFO claim gate", async () =>
+          entered() ? true : null,
+        );
         expect((await view(receiverId)).body).not.toHaveProperty("sleepUntil");
         await page.reload();
         const pending = page.locator(".rec-peer.rec-q").filter({ hasText: bodies[index] ?? "" });
@@ -400,7 +399,7 @@ it
         });
         await check(senderLink).toHaveText(senderName);
         const peerColor = await pending.evaluate(
-          "(element) => getComputedStyle(element).backgroundColor",
+          (element) => element.ownerDocument.defaultView?.getComputedStyle(element).backgroundColor,
         );
         expect(peerColor).not.toBe(humanColor);
         expect(peerColor).toBe("rgb(242, 242, 242)");
@@ -497,15 +496,18 @@ it
         join(root, "failure.txt"),
         error instanceof Error ? (error.stack ?? error.message) : String(error),
       );
-      writeFileSync(
-        join(root, "manifest.json"),
-        JSON.stringify({ runId, agentBackend, phase, projectId, senderId, receiverId }, null, 2),
-      );
-      writeFileSync(join(root, "browser-frames.json"), JSON.stringify(frames, null, 2));
-      writeFileSync(join(root, "browser-errors.json"), JSON.stringify(browserErrors));
+      save("manifest.json", { runId, agentBackend, phase, projectId, senderId, receiverId });
+      save("browser-frames.json", frames);
+      save("browser-errors.json", browserErrors);
       if (cp) {
         writeFileSync(join(root, "control-plane.log"), cp.logs.join(""));
         for (const id of [senderId, receiverId]) {
+          save(
+            `${id}-native-history.json`,
+            await readReplicatedHistorySnapshot(cp, id).catch((cause: unknown) => ({
+              error: String(cause),
+            })),
+          );
           for (const suffix of ["", "/history", "/messages/poll"]) {
             const result = await api(
               ingress?.baseUrl ?? cp.baseUrl,
@@ -513,24 +515,21 @@ it
               `/api/v1/orbs/${id}${suffix}`,
               suffix.endsWith("poll") ? { after: 0, tracked: [] } : undefined,
             ).catch((cause: unknown) => ({ error: String(cause) }));
-            writeFileSync(
-              join(root, `${id}-${suffix.replaceAll("/", "-") || "view"}.json`),
-              JSON.stringify(result, null, 2),
-            );
+            save(`${id}-${suffix.replaceAll("/", "-") || "view"}.json`, result);
           }
         }
       }
-      if (names) {
-        const requests = await fakeControl(names.sessionKey, "/requests").catch(
-          (cause: unknown) => ({ error: String(cause) }),
-        );
-        writeFileSync(join(root, "name-requests.json"), JSON.stringify(requests, null, 2));
-      }
-      if (fake) {
-        const requests = await fakeControl(fake.sessionKey, "/requests").catch(
-          (cause: unknown) => ({ error: String(cause) }),
-        );
-        writeFileSync(join(root, "fake-requests.json"), JSON.stringify(requests, null, 2));
+      for (const [name, session] of [
+        ["name-requests", names],
+        ["fake-requests", fake],
+      ] as const) {
+        if (session)
+          save(
+            `${name}.json`,
+            await fakeControl(session.sessionKey, "/requests").catch((cause: unknown) => ({
+              error: String(cause),
+            })),
+          );
       }
       if (page && !page.isClosed())
         await page.screenshot({ path: join(root, "failure.png"), fullPage: true }).catch(() => {});
@@ -543,6 +542,7 @@ it
         cp?.stop(),
         ingress?.close(),
         gate?.close(),
+        git?.close(),
         fake ? deleteFakeSession(fake.sessionKey) : Promise.resolve(),
         names ? deleteFakeSession(names.sessionKey) : Promise.resolve(),
       ]);
