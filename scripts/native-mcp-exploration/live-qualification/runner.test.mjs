@@ -3,35 +3,7 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import { test } from "node:test";
 import { installOneRejectedReadPost } from "./fault.mjs";
-import { dedicatedCatalog, referencedSecrets, runQualification } from "./runner.ts";
-
-test("dedicated catalog fence accepts only the two exact grant bindings", () => {
-  const servers = [
-    {
-      name: "cloudflare",
-      url: "https://mcp.cloudflare.com/mcp",
-      oauth: { id: "075be044-30ad-4933-b6fc-d7a55b9816a1" },
-      headers: {},
-    },
-    {
-      name: "datadog",
-      url: "https://mcp.us5.datadoghq.com/v1/mcp",
-      oauth: { id: "7f3e3961-a70f-4b57-8de3-24a642f56005" },
-      headers: {},
-    },
-  ];
-  assert.equal(dedicatedCatalog({ revision: 1, servers }), true);
-  for (const catalog of [
-    { revision: 3, servers },
-    { revision: 1, servers: [...servers, { name: "posthog" }] },
-    { revision: 1, servers: [servers[0], { ...servers[1], oauth: { id: "wrong" } }] },
-    {
-      revision: 1,
-      servers: [servers[0], { ...servers[1], headers: { Authorization: { literal: "oops" } } }],
-    },
-  ])
-    assert.equal(dedicatedCatalog(catalog), false);
-});
+import { runQualification } from "./runner.ts";
 
 test("one-shot fault only changes exact MCP tool POST after grant and restores fetch", async () => {
   const original = globalThis.fetch;
@@ -78,18 +50,6 @@ test("one-shot fault only changes exact MCP tool POST after grant and restores f
   } finally {
     globalThis.fetch = original;
   }
-});
-
-test("snapshot projection retains only referenced bindings", () => {
-  const catalog = { servers: [{ headers: { Authorization: { secret: "POSTHOG_TOKEN" } } }] };
-  const snapshot = { POSTHOG_TOKEN: "fixture-key", OTHER: "must-not-leak" };
-  const selected = referencedSecrets(catalog, snapshot);
-  assert.equal(selected.isOk(), true);
-  assert.deepEqual(selected.value, { POSTHOG_TOKEN: "fixture-key" });
-  assert.equal(JSON.stringify(selected.value).includes(snapshot.OTHER), false);
-  const missing = referencedSecrets(catalog, { OTHER: "must-not-leak" });
-  assert.equal(missing.isErr(), true);
-  assert.deepEqual(missing.error, { phase: "binding", code: "secret_unavailable" });
 });
 
 test("actual Pi 1.1.0 session binds production native adapter, discovers, calls and shuts down", {

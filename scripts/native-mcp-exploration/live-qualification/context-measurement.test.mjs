@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { pathToFileURL } from "node:url";
+import * as sdk from "@earendil-works/pi-coding-agent";
 import {
   createContextMeasurement,
   summarizeContext,
@@ -139,12 +139,12 @@ test("generic output receives exactly one sanitized argument, never SDK context"
   assert.equal(JSON.stringify(records).includes("must-not-pass"), false);
 });
 
-test("pinned SDK fixture manually emits hooks for independent root/child active tool profiles, not a model pipeline", async () => {
-  const stage = process.env["STAGED_INITIAL_AUTH"];
-  assert.ok(stage, "STAGED_INITIAL_AUTH must name a clean-installed qualification stage");
-  const sdkPath = join(stage, "node_modules/@earendil-works/pi-coding-agent");
-  const sdk = await import(pathToFileURL(join(sdkPath, "dist/index.js")).href);
-  assert.equal(JSON.parse(await readFile(join(sdkPath, "package.json"), "utf8")).version, "1.1.0");
+test("installed SDK fixture manually emits hooks for independent root/child active tool profiles, not a model pipeline", async () => {
+  const manifest = new URL(
+    "../package.json",
+    import.meta.resolve("@earendil-works/pi-coding-agent"),
+  );
+  assert.equal(JSON.parse(await readFile(manifest, "utf8")).version, "1.1.0");
   const dir = await mkdtemp(join(tmpdir(), "native-mcp-context-"));
   const results = [];
   const sessions = [];

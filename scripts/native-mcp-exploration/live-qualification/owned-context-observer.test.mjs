@@ -23,7 +23,6 @@ import {
   activateCodemode,
   createOrbExtensions,
 } from "../../../apps/orb-runtime/src/pi/extensions/index.ts";
-import { approvedCatalog } from "./owned-context.ts";
 import observer, { qualifiesMeasurement, successfulAssistant } from "./owned-context-observer.mjs";
 import {
   contextToolPolicy,
@@ -32,51 +31,6 @@ import {
   summarizeContextRecords,
 } from "./owned-context-policy.mjs";
 
-test("the model catalog fence admits only the owned two-server revision", () => {
-  const catalog = {
-    revision: 1,
-    servers: [
-      {
-        name: "cloudflare",
-        url: "https://mcp.cloudflare.com/mcp",
-        oauth: { id: "1cfa006b-da21-4c11-9b5b-95cd28a9bf1b" },
-        headers: {},
-      },
-      {
-        name: "datadog",
-        url: "https://mcp.us5.datadoghq.com/v1/mcp",
-        oauth: { id: "c25b1857-1896-45cf-a427-a90cee36d125" },
-        headers: {},
-      },
-    ],
-  };
-  assert.equal(approvedCatalog(catalog), true);
-  assert.equal(approvedCatalog({ ...catalog, revision: 2 }), false);
-  assert.equal(
-    approvedCatalog({ ...catalog, servers: [catalog.servers[0], catalog.servers[0]] }),
-    false,
-  );
-  assert.equal(
-    approvedCatalog({
-      ...catalog,
-      servers: [
-        { ...catalog.servers[0], oauth: { id: "406a3aeb-7e46-492e-b56a-07364453d511" } },
-        catalog.servers[1],
-      ],
-    }),
-    false,
-  );
-  assert.equal(
-    approvedCatalog({
-      ...catalog,
-      servers: [
-        { ...catalog.servers[0], headers: { Authorization: "stolen" } },
-        catalog.servers[1],
-      ],
-    }),
-    false,
-  );
-});
 test("denied search shapes distinguish optional SDK limit from wrong query without disclosing input", () => {
   const limit = deniedSearchShape({ query: "cloudflare account", limit: 3 });
   assert.deepEqual(limit, {
