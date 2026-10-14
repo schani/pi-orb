@@ -362,6 +362,10 @@ export async function probeNativeSdk({
       cancellation.accepted = true;
     };
     const account = await sdk.accountInfo();
+    const supportedModels = (await sdk.supportedModels()).map(({ value, resolvedModel }) => ({
+      value,
+      resolvedModel,
+    }));
     if (cancelAt === "initialization") {
       // Startup-input fence: initialization completes, but no user input was sent.
       // Adapter cancellation before query construction needs its own epoch guard.
@@ -546,6 +550,7 @@ export async function probeNativeSdk({
     );
     return {
       account,
+      supportedModels,
       restart,
       requestCount,
       requestSettings,

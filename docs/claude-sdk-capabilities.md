@@ -5,7 +5,7 @@ User decision (2026-10-04): SDK/harness and workspace are co-located on the orb 
 
 ## Scope and evidence
 
-Latest checked: SDK **0.3.289**, CLI **2.1.289** (2026-10-04); neither is pinned by pi-orb.
+Pinned: SDK **0.3.300**, CLI **2.1.300** (2026-10-14).
 
 No finite override list guarantees full native Claude Code functionality. `toolAliases` redirects model-issued calls, not harness-internal filesystem/process operations; aliases and `disallowedTools` are complementary, not an OS sandbox.
 Native settings, CLAUDE.md, Git context, auto-memory and session files remain local to the CLI. Native file checkpointing excludes remote/network files. Headless SDK runs also omit interactive CLI features.
@@ -127,7 +127,7 @@ Sources: [sessions](https://code.claude.com/docs/en/agent-sdk/sessions), [sessio
 - `priority: "later"`: wait for a new turn.
 - `priority: "now"` with `origin: { kind: "human" }`: move eligible work to the background and consume within the current turn. Bash, Agent and MCP calls require CLI 2.1.286+; WebFetch/WebSearch require 2.1.287+. If only generating a response or running work that cannot move, interrupt and consume next. Without human origin, `"now"` interrupts instead.
 
-The repository pins SDK 0.3.289. Its [published types](https://unpkg.com/@anthropic-ai/claude-agent-sdk@0.3.289/sdk.d.ts) expose `priority` and `origin`, and its manifest identifies CLI 2.1.289. Inspection of the published `sdk.mjs` shows `streamInput()` writes each yielded message, preserving these fields, without waiting for a turn result; result types also describe user messages folded into a running turn between tool rounds. Source inspection establishes the SDK contract; controlled native execution evidence is recorded below.
+SDK 0.3.289's [published types](https://unpkg.com/@anthropic-ai/claude-agent-sdk@0.3.289/sdk.d.ts) expose `priority` and `origin`, and its manifest identifies CLI 2.1.289. Inspection of the published `sdk.mjs` shows `streamInput()` writes each yielded message, preserving these fields, without waiting for a turn result; result types also describe user messages folded into a running turn between tool rounds. Source inspection establishes the SDK contract; controlled native execution evidence is recorded below.
 
 The [streaming overview](https://code.claude.com/docs/en/agent-sdk/streaming-vs-single-mode) describes sequential queued messages without these priority semantics. Historical [issue 70](https://github.com/anthropics/claude-agent-sdk-typescript/issues/70) was closed with that overview; follow-up reports questioned mid-turn delivery. Those reports do not override the current explicit reference and pinned types.
 

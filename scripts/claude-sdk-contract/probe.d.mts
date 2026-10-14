@@ -46,6 +46,7 @@ export interface NativeProbeResult extends NativeCancellationResult {
   projectKeyMatchesCwd: boolean;
   sdkVersion: string;
   cliVersion: string;
+  supportedModels: { value: string; resolvedModel?: string }[];
   childFiles: string[];
   childAssistantUuids: string[];
   childNativeAssistantUuids: string[];
