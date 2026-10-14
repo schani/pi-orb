@@ -137,7 +137,11 @@ it.each(["chromium", "webkit"] as const)(
           .locator('g.role-axis[aria-label^="X-axis"] g.role-axis-label text')
           .evaluateAll((ns) => {
             const boxes = ns
-              .filter((n) => n.textContent !== "" && getComputedStyle(n).opacity !== "0")
+              .filter(
+                (n) =>
+                  n.textContent !== "" &&
+                  n.ownerDocument.defaultView?.getComputedStyle(n).opacity !== "0",
+              )
               .map((n) => n.getBoundingClientRect());
             return boxes.length > 1 && boxes.every((b, i) => (boxes[i - 1]?.right ?? 0) < b.left);
           });
