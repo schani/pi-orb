@@ -1,4 +1,5 @@
 import type { Context, JsonValue } from "@earendil-works/chord";
+import { withCancel } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
 import {
   AgentDoc,
@@ -6,15 +7,18 @@ import {
   defineDoc,
   defineTask,
   defineTool,
+  InboxDoc,
   type ModelRef,
   ROOT_CONVERSATION_ID,
   type TaskId,
   type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
+import { err, ok, Result, ResultAsync } from "neverthrow";
 import {
   eligibleCodexModels,
   SELECTABLE_CODEX_MODELS,
 } from "../../../../../orb-runtime/src/pi/model-select.ts";
+import { errorResult } from "./catalog.ts";
 
 export const TOOLS_EXTENSION = "orb.tools";
 /** Selected only by children: their codemode lacks the subagent tools. */
@@ -158,6 +162,13 @@ async function status(api: ToolExecutionApi, id: string, wait: boolean, ctx: Con
   const task = wait
     ? await api.waitForTask(row.anchor as TaskId, ctx)
     : await api.getTask(row.anchor as TaskId, ctx);
+  return statusValue(id, row, task);
+}
+function statusValue(
+  id: string,
+  row: Receipt,
+  task: Awaited<ReturnType<ToolExecutionApi["getTask"]>>,
+) {
   return {
     agent_id: id,
     description: row.description,
@@ -165,6 +176,104 @@ async function status(api: ToolExecutionApi, id: string, wait: boolean, ctx: Con
     status: task?.state.status === "terminal" ? task.state.outcome.status : "running",
     ...(task?.state.status === "terminal" ? { receipt: task.state.outcome } : {}),
   };
+}
+type WaitError = { code: "cancelled" | "unavailable"; message: string };
+const waitError = (stage: string, ctx: Context) => (): WaitError => ({
+  code: ctx.abortSignal?.aborted ? "cancelled" : "unavailable",
+  message: `Subagent wait ${stage} failed`,
+});
+/** Observe parent input without changing the child task or any ordinary join. */
+function waitForChild(api: ToolExecutionApi, id: TaskId, ctx: Context) {
+  return ResultAsync.fromSafePromise(
+    (async () => {
+      const acquired = await ResultAsync.fromThrowable(
+        () => api.watchDoc(InboxDoc, api.conversationId, ctx),
+        waitError("watch acquisition", ctx),
+      )();
+      if (acquired.isErr()) return err(acquired.error);
+      const watch = acquired.value;
+      if (!watch)
+        return err<never, WaitError>({
+          code: "unavailable",
+          message: "Subagent wait parent inbox unavailable",
+        });
+      let steer!: (value: Result<"parent_input", WaitError>) => void;
+      const input = new Promise<Result<"parent_input", WaitError>>((resolve) => {
+        steer = resolve;
+      });
+      const pending = (value: typeof watch.value) => {
+        if (value?.items.some((item) => item.mode === "steer")) steer(ok("parent_input"));
+      };
+      pending(watch.value);
+      const started = Result.fromThrowable(
+        () =>
+          watch.start(async (value) => {
+            pending(value);
+          }),
+        waitError("watch start", ctx),
+      )();
+      const local = withCancel(ctx);
+      const completion = started.isOk()
+        ? ResultAsync.fromThrowable(
+            () => api.waitForTask(id, local.context),
+            waitError("completion", ctx),
+          )().map(() => "completed" as const)
+        : undefined;
+      const closed = ResultAsync.fromThrowable(
+        () => watch.closed,
+        waitError("watch close", ctx),
+      )().andThen((end) =>
+        err<never, WaitError>({
+          code: end.reason === "cancelled" ? "cancelled" : "unavailable",
+          message: `Subagent wait watch ended: ${end.reason}`,
+        }),
+      );
+      const winner = completion ? await Promise.race([completion, input, closed]) : started;
+      // Only the local observing context is cancelled; the target task survives.
+      local.cancel();
+      if (completion) await completion;
+      const stopped = await ResultAsync.fromThrowable(
+        () => watch.stop(),
+        waitError("watch cleanup", ctx),
+      )();
+      if (stopped.isErr()) return err(stopped.error);
+      if (stopped.value.reason !== "stopped")
+        return err<never, WaitError>({
+          code: stopped.value.reason === "cancelled" ? "cancelled" : "unavailable",
+          message: `Subagent wait watch ended: ${stopped.value.reason}`,
+        });
+      if (winner.isErr()) return err(winner.error);
+      const task = await ResultAsync.fromThrowable(
+        () => api.getTask(id, ctx),
+        waitError("receipt read", ctx),
+      )();
+      if (task.isErr()) return err(task.error);
+      if (ctx.abortSignal?.aborted)
+        return err<never, WaitError>({
+          code: "cancelled",
+          message: "Subagent wait cancelled",
+        });
+      return ok({
+        task: task.value,
+        interrupted: winner.value === "parent_input" && task.value?.state.status !== "terminal",
+      });
+    })(),
+  ).andThen((value) => value);
+}
+async function waitStatus(api: ToolExecutionApi, id: string, ctx: Context) {
+  const rows = await ResultAsync.fromThrowable(
+    () => api.snapshot(ChildReceipts, api.conversationId, ctx),
+    waitError("subagent lookup", ctx),
+  )();
+  if (rows.isErr()) return errorResult(rows.error);
+  const row = rows.value?.children[id];
+  if (!row) return result({ agent_id: id, error: "Subagent doesn't exist" });
+  const waited = await waitForChild(api, row.anchor as TaskId, ctx);
+  if (waited.isErr()) return errorResult(waited.error);
+  return result({
+    ...statusValue(id, row, waited.value.task),
+    ...(waited.value.interrupted ? { interrupted: "parent_input" } : {}),
+  });
 }
 export const subagentTools = [
   defineTool({
@@ -256,14 +365,17 @@ export const subagentTools = [
   }),
   defineTool({
     name: "get_subagent_result",
-    description: "Get subagent status and its persistent completion receipt; optionally wait.",
+    description:
+      "Get subagent status and its persistent completion receipt; optionally wait. Pending parent steering interrupts the wait, not the child.",
     parameters: Type.Object(
       { agent_id: Type.String(), wait: Type.Optional(Type.Boolean()) },
       { additionalProperties: false },
     ),
     replay: "safe",
     execute: async (args, api, ctx) =>
-      result(await status(api, args.agent_id, args.wait ?? false, ctx)),
+      args.wait
+        ? waitStatus(api, args.agent_id, ctx)
+        : result(await status(api, args.agent_id, false, ctx)),
   }),
   defineTool({
     name: "list_subagents",

@@ -7,6 +7,7 @@ import type { RuntimeClientError } from "../../domain/errors.ts";
 import type { OrbRow } from "../../domain/orb.ts";
 import type { OperationContext } from "../../domain/ports.ts";
 import { durableError } from "./manager.ts";
+import { NOTIFICATION_REQUEST_PREFIX } from "./notifications.ts";
 import type { AgentPersistence, AgentStorageLease } from "./persistence.ts";
 import { projectHistory } from "./projection.ts";
 
@@ -123,7 +124,26 @@ export class MemoryAgentPersistence implements AgentPersistence {
       undefined,
       BACKGROUND_CONTEXT,
     );
-    const records = projectHistory([...entries.items].reverse(), String(value["sessionId"]));
+    const submissions = await storage.scanSubmissions(
+      { conversationId: root.id },
+      10000,
+      undefined,
+      BACKGROUND_CONTEXT,
+    );
+    const hidden = new Set(
+      submissions.items.flatMap((submission) =>
+        submission.entry !== undefined &&
+        submission.requestId?.startsWith(NOTIFICATION_REQUEST_PREFIX)
+          ? [submission.entry]
+          : [],
+      ),
+    );
+    const records = projectHistory(
+      [...entries.items].reverse(),
+      String(value["sessionId"]),
+      new Map(),
+      hidden,
+    );
     if (records.isErr()) return err(durableError(records.error.message));
     return ok({
       orbId: orb.id,

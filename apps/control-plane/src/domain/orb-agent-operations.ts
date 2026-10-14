@@ -17,7 +17,7 @@ export interface OrbAgentIdentity {
   readonly runtimeTokenHash: string;
 }
 export type OrbAgentRequest =
-  | { kind: "self" | "list" | "archive" | "delete" }
+  | { kind: "self" | "list" | "archive" | "delete" | "notification_admission" }
   | { kind: "transcript"; orbId: string }
   | { kind: "spawn"; prompt: string; name?: string }
   | { kind: "alert"; message: string }
@@ -105,6 +105,10 @@ export function createOrbAgentOperations(
             return err(failure("unauthorized", "agent identity rejected"));
           if (!requestId) return err(failure("invalid_request", "request ID required"));
           switch (request.kind) {
+            case "notification_admission":
+              return central !== null
+                ? ok({ accepted: true })
+                : err(failure("unauthorized", "central agent required"));
             case "self": {
               const spawnedBy = await deps.store.getSpawnCaller(task, orb.id);
               if (spawnedBy.isErr()) return err(unavailable());

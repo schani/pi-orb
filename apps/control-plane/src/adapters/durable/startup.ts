@@ -11,6 +11,7 @@ import type { Query } from "../durable-pg/executor.ts";
 import type { AuthorityError } from "../durable-pg/index.ts";
 import { storageAuthorityError } from "../durable-pg/storage-boundary.ts";
 import { readTransactionStorage } from "../durable-pg/transaction-reader.ts";
+import { NOTIFICATION_REQUEST_PREFIX } from "./notifications.ts";
 import { projectHistory } from "./projection.ts";
 
 export const legacyBackendMessage =
@@ -133,7 +134,24 @@ export async function checkNativeStartup(query: Query, orbId: string, startup = 
             cursor = page.next;
           } while (cursor);
           entries.sort((a, b) => a.id - b.id);
-          const projected = projectHistory(entries, nativeSession);
+          const hidden = new Set<number>();
+          cursor = undefined;
+          do {
+            const page = await storage.scanSubmissions(
+              { conversationId: ROOT_CONVERSATION_ID },
+              500,
+              cursor,
+              BACKGROUND_CONTEXT,
+            );
+            for (const submission of page.items)
+              if (
+                submission.entry !== undefined &&
+                submission.requestId?.startsWith(NOTIFICATION_REQUEST_PREFIX)
+              )
+                hidden.add(submission.entry);
+            cursor = page.next;
+          } while (cursor);
+          const projected = projectHistory(entries, nativeSession, new Map(), hidden);
           if (
             projected.isErr() ||
             !projected.value.some((record) => record.id === row.replication_cursor) ||

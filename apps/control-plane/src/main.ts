@@ -733,6 +733,13 @@ export async function main(
         ...(tailnetDnsName ? { tailnetDnsName } : {}),
         inferenceBaseUrl: (userId) =>
           (adapters.mockOpenAiForUser?.(userId) ?? mockOpenAi)?.inferenceBaseUrl,
+        notifyParent: (orbId, expectedAdmissionVersion, message, api, context) =>
+          centralPlane
+            ? centralPlane.notifyParent(orbId, message, api, context, expectedAdmissionVersion)
+            : errAsync({
+                code: "unavailable" as const,
+                message: "Notification admission unavailable",
+              }),
         appendAlert: (orbId, requestId, message, expectedAdmissionVersion) => {
           if (!centralPlane)
             return errAsync({ code: "unavailable" as const, message: "central agent unavailable" });

@@ -1,20 +1,32 @@
+import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
-import { defineTool, type ToolExecutionApi } from "@earendil-works/pi-durable";
-import type { OrbAgentOperations, OrbAgentRequest } from "../../../domain/orb-agent-operations.ts";
+import {
+  defineTool,
+  ROOT_CONVERSATION_ID,
+  type ToolExecutionApi,
+} from "@earendil-works/pi-durable";
+import { errAsync, type ResultAsync } from "neverthrow";
+import type {
+  OrbAgentError,
+  OrbAgentOperations,
+  OrbAgentRequest,
+} from "../../../domain/orb-agent-operations.ts";
+import type { ParentNotification } from "../notifications.ts";
 
 /** Calls the application service directly, never a guest CLI or runtime HTTP endpoint. */
-export function createOrbTools(service: OrbAgentOperations) {
+export function createOrbTools(service: OrbAgentOperations, notifyParent?: ParentNotification) {
+  const resultOutput = (result: Awaited<ResultAsync<unknown, OrbAgentError>>) => ({
+    content: [
+      {
+        type: "text" as const,
+        text: JSON.stringify(result.isOk() ? result.value : { error: result.error }),
+      },
+    ],
+    ...(result.isErr() ? { isError: true } : {}),
+  });
   const output = async (request: OrbAgentRequest, api: ToolExecutionApi) => {
     const result = await service.invoke(request, JSON.stringify([api.taskId, api.callId]));
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: JSON.stringify(result.isOk() ? result.value : { error: result.error }),
-        },
-      ],
-      ...(result.isErr() ? { isError: true } : {}),
-    };
+    return resultOutput(result);
   };
   const empty = Type.Object({}, { additionalProperties: false });
   return [
@@ -51,10 +63,28 @@ export function createOrbTools(service: OrbAgentOperations) {
     }),
     defineTool({
       name: "orb_alert",
-      description: "Append a transcript alert and flag this orb.",
+      description:
+        "Notify the parent privately from a subagent; otherwise append an alert and flag this orb.",
       parameters: Type.Object({ message: Type.String() }, { additionalProperties: false }),
       replay: "unsafe",
-      execute: async (args, api) => output({ kind: "alert", ...args }, api),
+      execute: async (args, api, context: Context) => {
+        if (api.conversationId === ROOT_CONVERSATION_ID)
+          return output({ kind: "alert", ...args }, api);
+        if (!notifyParent)
+          return resultOutput(
+            await errAsync({
+              code: "unavailable",
+              message: "Private notifications unavailable",
+            } satisfies OrbAgentError),
+          );
+        const admitted = await service.invoke(
+          { kind: "notification_admission" },
+          JSON.stringify([api.taskId, api.callId]),
+        );
+        return resultOutput(
+          admitted.isErr() ? admitted : await notifyParent(args.message, api, context),
+        );
+      },
     }),
     defineTool({
       name: "orb_sleep",

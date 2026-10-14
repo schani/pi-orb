@@ -183,9 +183,11 @@ export function projectHistory(
   entries: readonly EntryRecord[],
   sessionId: string,
   receipts: ReadonlyMap<number, PublicEntryReceipt> = new Map(),
+  hidden: ReadonlySet<number> = new Set(),
 ): Result<readonly HistoryRecord[], MappingError> {
   const records: HistoryRecord[] = [];
   for (const entry of entries) {
+    if (hidden.has(entry.id)) continue;
     const projected = projectEntry(entry, records.at(-1)?.id ?? null, sessionId);
     if (projected.isErr()) return err(projected.error);
     if (!projected.value) continue;
