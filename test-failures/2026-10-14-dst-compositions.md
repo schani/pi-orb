@@ -25,6 +25,9 @@ Detail fixture 1: stale scope attributed to remount key; observe actual loader-c
 Both detail issues: three explicit red replays before each correction; archived `.context/dst-compositions/detail/receipt.md` explains attribution.
 Corrected-prefix detail replays exhaust truncated traces, NOT green replays; fresh schedules pass. Author focused logs are retained; broader checks belong in the parent PR body.
 
+[Mutation archive](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/087158de-a85f-4594-8e0f-99270f568805/dst-boundary-compositions/sensitivity.tar.gz) (baseline `f643f26`): new compositions killed three mutants; publication-guard removal survived, but failed the byte-identical inherited control. Remaining coverage: `TODO.md`.
+SHA-256: `4b9314677315052f48e147aacf6500b9cb8d5535466199510690ebd56c1be529`; all 55 original payload hashes verified after extraction; originals retained.
+
 ## Replay
 
 Use an isolated checkout of the exact base and `npm ci`; archive `REPLAY.md` maps every trace/selector to its preserved red snapshot and gives fresh-schedule commands.

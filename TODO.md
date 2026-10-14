@@ -116,6 +116,11 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Follow-ups
 
+- **Complete DST boundary coverage** (`docs/testing.md`; coverage holes, not confirmed product defects).
+  - Extend generated grammar, including consecutive appends, through overflow/reconnect.
+  - Race Stop/delete with commit/CAS/recovery.
+  - Change loader ownership synchronously during publication while retry/shared read is pending; guarantee a repeated-retry witness.
+
 - **Complete Claude steering release qualification** (2026-10-12; `docs/testing.md`). Immediate input is implemented locally; native/HTTP/DST checks pass. Complete the final full unit run, full process/Docker E2E and PostgreSQL gates before release. No deployment.
 - **Charts for the Claude harness.** Transcript charts (`docs/web-ui.md`) exist only for central Pi code mode. Claude orbs need their own path to `details.charts`-equivalent chart leaves, e.g. a pi-orb MCP tool whose result carries the chart spec outside the model-visible content.
 - **Remove unreachable non-Linux process-host paths** (2026-10-11; `docs/host-provider.md`). `launch()` refuses non-Linux hosts, so `process/provider.ts`'s unsupervised spawn, `ps`-based zombie probe (`liveProcessRows`) and non-Linux termination ladder can no longer run.
