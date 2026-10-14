@@ -25,6 +25,11 @@ import {
 } from "./testkit/durable-model-fixture.ts";
 
 const stop = { type: "stop", status: "completed" } as const;
+const codemode = (code: string) => ({
+  type: "toolCall",
+  name: "codemode",
+  arguments: { code },
+});
 
 it.runIf(process.env["PI_ORB_E2E_BACKEND"] === "process")(
   "central child alert interrupts a normal codemode wait privately; root escalation stays public",
@@ -49,66 +54,43 @@ it.runIf(process.env["PI_ORB_E2E_BACKEND"] === "process")(
               {
                 match: { userMessage: { regex: "^NOTIFY_START$" } },
                 steps: [
-                  {
-                    type: "toolCall",
-                    name: "codemode",
-                    arguments: {
-                      code: `
+                  codemode(`
 text(await tools.bash({command:'mkfifo notify-spawn-release notify-alert-release notify-child-release notify-parent-release'}));
 const child = JSON.parse(await tools.subagent({prompt:'NOTIFY_CHILD',description:'notification sender'}));
 store('notify-child', child.agent_id);
+text(child);
 text(await tools.bash({command:'read value < notify-spawn-release'}));
-text('NOTIFY_SPAWNED');`,
-                    },
-                  },
+text('NOTIFY_SPAWNED');`),
                   stop,
                 ],
               },
               {
                 match: { userMessage: { regex: "^NOTIFY_CHILD$" } },
                 steps: [
-                  {
-                    type: "toolCall",
-                    name: "codemode",
-                    arguments: {
-                      code: `
+                  codemode(`
 text(await tools.bash({command:'printf ready > notify-child-ready; read value < notify-alert-release'}));
 text(await tools.orb_alert({message:'PRIVATE_CHILD_COORDINATION'}));
 text(await tools.bash({command:'printf accepted > notify-alert-accepted; read value < notify-child-release'}));
-text('NOTIFY_CHILD_FINISHED');`,
-                    },
-                  },
+text('NOTIFY_CHILD_FINISHED');`),
                   stop,
                 ],
               },
               {
                 match: { toolResultContains: { regex: "NOTIFY_SPAWNED" } },
                 steps: [
-                  {
-                    type: "toolCall",
-                    name: "codemode",
-                    arguments: {
-                      code: `
+                  codemode(`
 text(await tools.get_subagent_result({agent_id:load('notify-child'),wait:true}));
-text('NOTIFY_WAIT_CONTINUED');`,
-                    },
-                  },
+text('NOTIFY_WAIT_CONTINUED');`),
                   stop,
                 ],
               },
               {
                 match: { userMessage: { regex: "PRIVATE_CHILD_COORDINATION" } },
                 steps: [
-                  {
-                    type: "toolCall",
-                    name: "codemode",
-                    arguments: {
-                      code: `
+                  codemode(`
 text(await tools.bash({command:'printf received > notify-parent-received; read value < notify-parent-release'}));
 text(await tools.get_subagent_result({agent_id:load('notify-child'),wait:true}));
-text('NOTIFY_PARENT_HANDLED');`,
-                    },
-                  },
+text('NOTIFY_PARENT_HANDLED');`),
                   stop,
                 ],
               },
@@ -129,13 +111,9 @@ text('NOTIFY_PARENT_HANDLED');`,
               {
                 match: { userMessage: { regex: "^NOTIFY_ESCALATE$" } },
                 steps: [
-                  {
-                    type: "toolCall",
-                    name: "codemode",
-                    arguments: {
-                      code: "text(await tools.orb_alert({message:'ROOT_PUBLIC_ESCALATION'})); text('NOTIFY_ESCALATED');",
-                    },
-                  },
+                  codemode(
+                    "text(await tools.orb_alert({message:'ROOT_PUBLIC_ESCALATION'})); text('NOTIFY_ESCALATED');",
+                  ),
                   stop,
                 ],
               },
@@ -297,8 +275,24 @@ text('NOTIFY_PARENT_HANDLED');`,
         latestUserMessage(request)?.includes("PRIVATE_CHILD_COORDINATION"),
       );
       expect(notification).toBeDefined();
+      const spawnReceipt = privateHistory.records
+        .flatMap((record) =>
+          record.type === "message"
+            ? record.content.flatMap((block) =>
+                block.type === "tool_result"
+                  ? block.content.filter(
+                      (item) => item.type === "text" && item.text.includes('"agent_id"'),
+                    )
+                  : [],
+              )
+            : [],
+        )
+        .find((block) => block.type === "text" && !block.text.includes('"status"'));
+      expect(spawnReceipt?.type).toBe("text");
+      const agentId = spawnReceipt?.type === "text" ? JSON.parse(spawnReceipt.text).agent_id : null;
+      expect(agentId).toEqual(expect.any(String));
       expect(JSON.parse(latestUserMessage(notification) ?? "null")).toMatchObject({
-        agent_id: expect.any(String),
+        agent_id: agentId,
         description: "notification sender",
         message: "PRIVATE_CHILD_COORDINATION",
       });

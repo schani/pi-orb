@@ -47,18 +47,10 @@ export class WaitBoundary {
   readonly watches = new Set<DocumentWatch<InboxState>>();
   readonly waiters = new Set<ReturnType<typeof deferred<Child>>>();
   readonly registered = deferred();
-  readonly acquired = deferred();
-  readonly started = deferred();
-  readonly localCancelled = deferred();
-  readonly diagnostics: unknown[] = [];
   acquisitions = 0;
-  stops = 0;
-  taskReads = 0;
   waitCalls = 0;
   cancelCalls = 0;
-  beforeAcquire: () => Promise<void> = async () => {};
   afterAcquire: () => Promise<void> = async () => {};
-  beforeRead: () => Promise<void> = async () => {};
   acquireFailure: unknown;
   startFailure: unknown;
   stopFailure: unknown;
@@ -74,7 +66,6 @@ export class WaitBoundary {
     callId: "wait",
     models: createModels(),
     output: () => {},
-    diagnostic: (value: unknown) => this.diagnostics.push(value),
     snapshot: async (token: unknown, id: unknown) => {
       expect(id).toBe(ROOT_CONVERSATION_ID);
       if (token === ChildReceipts)
@@ -82,12 +73,8 @@ export class WaitBoundary {
       expect(token).toBe(InboxDoc);
       return structuredClone(this.inbox);
     },
-    // Codemode's ordinary store boundary, not a yield propagation mechanism.
-    commit: async (change: (tx: unknown) => unknown) => change({ doc: async () => ({}) }),
     getTask: async (id: TaskId) => {
       expect(id).toBe(this.child.id);
-      this.taskReads++;
-      await this.beforeRead();
       if (this.readFailure) throw this.readFailure;
       return this.child;
     },
@@ -100,7 +87,6 @@ export class WaitBoundary {
       const waiter = deferred<Child>();
       const cancel = () => {
         this.cancelCalls++;
-        this.localCancelled.resolve();
         waiter.reject(ctx.abortSignal?.reason ?? new Error("cancelled"));
       };
       this.waiters.add(waiter);
@@ -116,7 +102,6 @@ export class WaitBoundary {
     watchDoc: async (token: unknown, id: unknown, ctx: Context) => {
       expect(token).toBe(InboxDoc);
       expect(id).toBe(ROOT_CONVERSATION_ID);
-      await this.beforeAcquire();
       if (this.acquireFailure) throw this.acquireFailure;
       this.acquisitions++;
       let value = structuredClone(this.inbox);
@@ -162,11 +147,9 @@ export class WaitBoundary {
           if (this.startFailure) throw this.startFailure;
           if (ended || listener) throw new Error("watch cannot start");
           listener = callback;
-          this.started.resolve();
           schedule();
         },
         stop: async () => {
-          this.stops++;
           end(this.stopEnd);
           if (this.stopFailure) throw this.stopFailure;
           return closed.promise;
@@ -181,7 +164,6 @@ export class WaitBoundary {
       this.ends.set(watch, end);
       ctx.abortSignal?.addEventListener("abort", cancel, { once: true });
       if (ctx.abortSignal?.aborted) cancel();
-      this.acquired.resolve();
       await this.afterAcquire();
       return watch;
     },

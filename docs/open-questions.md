@@ -188,6 +188,12 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 
 77. **Resolved (2026-10-13; user-approved):** store opaque history records/session headers in PostgreSQL `json`, not `jsonb` or `TEXT`. Whole-value driver decoding preserves escaped NUL and unpaired UTF-16 without read projections. SQL field processing may still reject these strings; use structured metadata for queries/indexes. No measured performance benefit is claimed; migration requires table rewrites/access-exclusive locks. Contract: `docs/history-replication.md`.
 
+**Merged numbering note (2026-10-14):** parallel branches allocated 78 to spawned-orb pad nesting and expandable child-to-parent alerts. Preserve both numbers; references require topic qualifiers. New questions start at 79.
+
 ## Spawned-orb pad nesting — 78
 
 78. **Resolved; implemented and locally qualified (2026-10-14):** the user-approved always-visible inline tree on dashboard and orb-view index uses direct spawn provenance and independent archive membership, without new persisted state. Rules, rejected alternatives, approved study, tests-first evidence and unit/DST/infrastructure plus focused Chromium qualification: `docs/web-ui.md`. No full E2E, real-PostgreSQL/native-image acceptance or deployment.
+
+## Expandable child-to-parent alerts — 78
+
+78. **Open:** which of five HTML proposals should display child-to-parent alerts as collapsed, expandable transcript items like tool calls, without an unread flag? Contract and scope: `docs/orb-alerts.md`. Backend/projection implementation awaits selection; no new persisted state or change to root/CLI public alerts.

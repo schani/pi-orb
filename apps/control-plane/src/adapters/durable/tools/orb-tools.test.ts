@@ -1,7 +1,7 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
-import { okAsync } from "neverthrow";
-import { expect, it, vi } from "vitest";
+import { errAsync, okAsync } from "neverthrow";
+import { assert, expect, it, vi } from "vitest";
 import type { OrbAgentOperations } from "../../../domain/orb-agent-operations.ts";
 import { createOrbTools } from "./orb-tools.ts";
 
@@ -47,3 +47,28 @@ it("uses durable child task identities and does not expose authority arguments",
   expect(tools.find((t) => t.name === "orb_delete")!.replay).toBe("unsafe");
   expect(tools.find((t) => t.name === "orb_alert")!.replay).toBe("unsafe");
 });
+
+it.each(["denied", "unbound"] as const)(
+  "fails closed for %s child notification",
+  async (binding) => {
+    const invoke = vi.fn<OrbAgentOperations["invoke"]>(() => okAsync({ accepted: true }));
+    const notify = vi.fn(() => errAsync({ code: "unauthorized" as const, message: "revoked" }));
+    const alert = createOrbTools({ invoke }, binding === "denied" ? notify : undefined).find(
+      (tool) => tool.name === "orb_alert",
+    );
+    assert.isDefined(alert);
+    const result = await alert.execute(
+      { message: "PRIVATE" },
+      { taskId: 42, conversationId: 7, callId: "outer:nested:0" } as ToolExecutionApi,
+      BACKGROUND_CONTEXT,
+    );
+    expect(result.isError).toBe(true);
+    if (binding === "denied") {
+      expect(JSON.stringify(result.content)).toContain("unauthorized");
+      expect(invoke).toHaveBeenCalledExactlyOnceWith(
+        { kind: "notification_admission" },
+        '[42,"outer:nested:0"]',
+      );
+    } else expect(invoke).not.toHaveBeenCalled();
+  },
+);
