@@ -1,4 +1,5 @@
 import type { BarChart, LineChart, ModelCallUse, UsageTotals, UsageView } from "@pi-orb/protocol";
+import type { ChartXAxis } from "./chart-spec.ts";
 
 export type UsagePeriod = "day" | "week" | "month" | "six_months";
 export type UsageBreakdown = "token_kind" | "use" | "model";
@@ -57,6 +58,27 @@ export function usageBoundaries(period: UsagePeriod, now: number): number[] {
   }
   result.push(now);
   return result;
+}
+
+/** A tick per bucket; labels on local 3-hour, midnight or month-start boundaries. */
+export function usageAxis(period: UsagePeriod, boundaries: readonly number[]): ChartXAxis {
+  const first = boundaries[0] ?? 0;
+  const mark = new Date(first);
+  mark.setMinutes(0, 0, 0);
+  mark.setHours(period === "day" ? mark.getHours() - (mark.getHours() % 3) : 0);
+  if (period === "six_months") mark.setDate(1);
+  const labels: number[] = [];
+  for (; mark.getTime() < (boundaries.at(-1) ?? 0); ) {
+    if (mark.getTime() >= first) labels.push(mark.getTime());
+    if (period === "day") mark.setHours(mark.getHours() + 3);
+    else if (period === "six_months") mark.setMonth(mark.getMonth() + 1);
+    else mark.setDate(mark.getDate() + 1);
+  }
+  return {
+    ticks: boundaries.slice(0, -1),
+    labels,
+    format: period === "day" ? "%H:%M" : period === "six_months" ? "%b" : "%b %d",
+  };
 }
 
 export function usageTimeline(data: UsageView, breakdown: UsageBreakdown): LineChart {

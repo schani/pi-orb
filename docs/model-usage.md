@@ -107,7 +107,7 @@ The browser supplies local-calendar edges as epoch milliseconds. The service val
 | Month | 6 hours since the same local time one calendar month ago |
 | 6 months | Local day since the same local time six calendar months ago |
 
-Month subtraction clamps to the destination month's last day. Daily intervals can be 23/25 hours across DST. The final interval ends at request time. Every bucket gets a tick and a zero-filled point; text labels are spaced, retaining the first/last. Month/six-month counts vary with the calendar.
+Month subtraction clamps to the destination month's last day. Daily intervals can be 23/25 hours across DST. The final interval ends at request time. Every bucket gets a tick and a zero-filled point. Labels mark local civil boundaries, not rolling bucket edges: every 3 hours (`15:00`) for the last day, midnights (`Oct 08`) for week/month, month starts (`May`) for six months; overlapping ones are dropped at render time (2026-10-14). Month/six-month counts vary with the calendar.
 
 The token-kind timeline labels cache reads **Cached input**, paired with **Uncached input**; cache writes remain separate.
 
@@ -115,7 +115,7 @@ Summary: token volume, uncached input, output, weighted prompt cache share and r
 
 Breakdowns: token kind, use or provider/model. More than six models becomes five volume leaders plus Other, preserving totals. Use/model lines sum all four token fields. One measure selects all tokens/uncached input/output for both rankings. Rankings show five leading orbs and observed uses. Period changes and Retry preserve filters; breakdown/measure changes never refetch. Obsolete reads are aborted/ignored; failures show Retry, not stale totals or an empty-success state.
 
-`Chart.tsx` owns the shared React lifecycle for transcript charts, the usage timeline and Use ranking; `chart-render.ts` and `chart-spec.ts` own rendering, tooltips, isolation and styles. Desktop end labels and the phone key isolate series on hover. Fonts load before Vega measures text. Optional render-only `ChartXAxis {ticks, labelEvery, format}` controls dense ticks without changing persisted `ChartSpec`.
+`Chart.tsx` owns the shared React lifecycle for transcript charts, the usage timeline and Use ranking; `chart-render.ts` and `chart-spec.ts` own rendering, tooltips, isolation and styles. Desktop end labels and the phone key isolate series on hover. Fonts load before Vega measures text. Optional render-only `ChartXAxis {ticks, labels, format}` controls dense ticks and label positions without changing persisted `ChartSpec`.
 
 Validation: protocol/service/HTTP/web tests; ledger contracts against PGlite and real PostgreSQL; Chromium/WebKit usage and transcript-chart E2E, including 320/390px, held obsolete reads, retry/empty states and both civil DST transitions. Failure evidence: `test-failures/2026-10-13-token-usage-implementation.md`. No deployment or full release qualification is claimed.
 

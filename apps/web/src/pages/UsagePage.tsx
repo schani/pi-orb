@@ -4,7 +4,6 @@ import { Chart } from "../components/Chart.tsx";
 import { Icon } from "../components/Icons.tsx";
 import { UsageOrbRankings } from "../components/UsageOrbRankings.tsx";
 import { type ApiError, describeApiError, getModelUsage } from "../lib/api.ts";
-import type { ChartXAxis } from "../lib/chart-spec.ts";
 import {
   cacheShare,
   formatUsageCount,
@@ -13,11 +12,11 @@ import {
   type UsageBreakdown,
   type UsageMeasure,
   type UsagePeriod,
+  usageAxis,
   usageBoundaries,
   usageRankings,
   usageTimeline,
 } from "../lib/usage.ts";
-import { usePhoneLayout } from "../lib/use-phone-layout.ts";
 
 const PERIODS: readonly [UsagePeriod, string][] = [
   ["day", "Last day"],
@@ -45,7 +44,6 @@ function LoadedUsage({
   onFiltersChange,
 }: { data: UsageView; period: UsagePeriod } & FilterProps) {
   const { breakdown, measure } = filters;
-  const phone = usePhoneLayout();
   const timeline = useMemo(() => usageTimeline(data, breakdown), [data, breakdown]);
   const ranks = useMemo(() => usageRankings(data, measure), [data, measure]);
   const identity = useMemo(
@@ -57,14 +55,7 @@ function LoadedUsage({
     }),
     [data, period],
   );
-  const xAxis = useMemo<ChartXAxis>(
-    () => ({
-      ticks: data.boundaries.slice(0, -1),
-      labelEvery: Math.ceil((data.boundaries.length - 1) / (phone ? 3 : 8)),
-      format: period === "day" ? "%H:%M" : period === "week" ? "%b %d %H:%M" : "%b %d",
-    }),
-    [data, period, phone],
-  );
+  const xAxis = useMemo(() => usageAxis(period, data.boundaries), [data, period]);
   const share = cacheShare(data.summary);
   const date = (at: number) =>
     new Date(at).toLocaleString(undefined, {

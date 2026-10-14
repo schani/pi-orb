@@ -104,8 +104,10 @@ const timeFormat = (spec: LineChart) => {
 };
 
 export interface ChartXAxis {
+  /** Unlabeled. */
   readonly ticks: readonly number[];
-  readonly labelEvery: number;
+  /** Vega drops labels that would overlap. */
+  readonly labels: readonly number[];
   readonly format: string;
 }
 
@@ -163,11 +165,13 @@ export function lineChartSpec(
       ...(xAxis === undefined
         ? {}
         : {
-            values: [...xAxis.ticks],
-            tickCount: xAxis.ticks.length,
+            values: [...xAxis.labels],
+            tickCount: xAxis.labels.length,
             format: xAxis.format,
-            labelOverlap: false,
-            labelExpr: `indexof(${JSON.stringify(xAxis.ticks)}, +datum.value) % ${Math.max(1, Math.floor(xAxis.labelEvery))} == 0 || +datum.value == ${xAxis.ticks.at(-1) ?? "null"} ? timeFormat(datum.value, ${JSON.stringify(xAxis.format)}) : ''`,
+            labelOverlap: "greedy",
+            labelSeparation: 12,
+            ticks: false,
+            labelPadding: CHART_CONFIG.axis.tickSize + CHART_CONFIG.axis.labelPadding,
           }),
     },
   };
@@ -199,6 +203,17 @@ export function lineChartSpec(
           },
         },
       ],
+    });
+  if (xAxis !== undefined)
+    layer.push({
+      name: "x_ticks",
+      data: { values: xAxis.ticks.map((t) => ({ t })) },
+      mark: { type: "rule" },
+      encoding: {
+        x: { field: "t", type: "temporal" },
+        y: { value: height },
+        y2: { value: height + CHART_CONFIG.axis.tickSize },
+      },
     });
   for (const marker of spec.markers ?? [])
     layer.push({

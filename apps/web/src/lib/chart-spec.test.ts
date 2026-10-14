@@ -14,11 +14,19 @@ import {
   tooltipRows,
 } from "./chart-spec.ts";
 
-type Layer = { mark?: { type?: string }; layer?: Layer[]; encoding?: Record<string, unknown> };
+type Layer = {
+  mark?: { type?: string };
+  layer?: Layer[];
+  encoding?: Record<string, unknown>;
+  data?: { values?: unknown[] };
+};
 const flatten = (layers: Layer[]): Layer[] =>
   layers.flatMap((layer) => [layer, ...flatten(layer.layer ?? [])]);
 const marks = (spec: { layer?: Layer[] }, type: string) =>
   flatten(spec.layer ?? []).filter((layer) => layer.mark?.type === type);
+
+const isComb = (layer: Layer) =>
+  (layer.encoding?.["y2"] as { value?: number } | undefined)?.value !== undefined;
 
 const line = (count: number, extra: Partial<LineChart> = {}): LineChart => ({
   kind: "line",
@@ -90,8 +98,9 @@ describe("end-label spreading", () => {
 });
 
 describe("line chart spec", () => {
-  it("uses caller-supplied dense ticks without dropping time-series points", () => {
+  it("labels caller-supplied positions over dense unlabeled ticks", () => {
     const ticks = Array.from({ length: 183 }, (_, i) => Date.UTC(2026, 3, 13 + i, 17));
+    const labels = Array.from({ length: 6 }, (_, i) => Date.UTC(2026, 4 + i, 1));
     const input = line(2, {
       series: [0, 1].map((i) => ({ name: `series-${i}`, points: ticks.map((t) => [t, i + 1]) })),
     });
@@ -99,28 +108,30 @@ describe("line chart spec", () => {
       const spec = lineChartSpec(input, {
         narrow,
         height: 280,
-        xAxis: { ticks, labelEvery: 23, format: "%b %d" },
+        xAxis: { ticks, labels, format: "%b" },
       });
-      const encoding = marks(spec, "line")[0]?.encoding;
-      expect(encoding?.["x"]).toMatchObject({
-        axis: { values: ticks, tickCount: ticks.length, format: "%b %d", labelOverlap: false },
+      const axis = (marks(spec, "line")[0]?.encoding?.["x"] as { axis: object } | undefined)?.axis;
+      expect(axis).toMatchObject({
+        values: labels,
+        tickCount: labels.length,
+        format: "%b",
+        labelOverlap: "greedy",
+        labelSeparation: 12,
+        ticks: false,
       });
-      const axis = (encoding?.["x"] as { axis: { labelExpr: string } } | undefined)?.axis;
-      expect(axis).toBeDefined();
-      expect(axis?.labelExpr).toContain("indexof(");
-      expect(axis?.labelExpr).toContain("% 23");
-      expect(axis?.labelExpr).toContain("+datum.value");
-      expect(JSON.stringify(spec)).toContain(String(ticks.at(-1)));
+      expect(axis).not.toHaveProperty("labelExpr");
+      const comb = flatten(spec.layer ?? []).find(isComb);
+      expect(comb?.mark?.type).toBe("rule");
+      expect(comb?.data?.values).toEqual(ticks.map((t) => ({ t })));
       expect(() => compile(spec as Parameters<typeof compile>[0])).not.toThrow();
     }
+    const plain = lineChartSpec(line(2), { narrow: false, height: 180 });
     const defaultAxis = (
-      marks(lineChartSpec(line(2), { narrow: false, height: 180 }), "line")[0]?.encoding?.["x"] as
-        | { axis: Record<string, unknown> }
-        | undefined
+      marks(plain, "line")[0]?.encoding?.["x"] as { axis: Record<string, unknown> } | undefined
     )?.axis;
     expect(defaultAxis).toBeDefined();
     expect(defaultAxis).not.toHaveProperty("values");
-    expect(defaultAxis).not.toHaveProperty("labelExpr");
+    expect(flatten(plain.layer ?? []).some(isComb)).toBe(false);
   });
 
   it("names multiple series at their line ends and lets a hovered name isolate its line", () => {
