@@ -154,6 +154,20 @@ function renderRecord(record: HistoryRecord): string {
   if (record.alert !== undefined) {
     return `## alert\n\n${record.alert.message}`;
   }
+  if (
+    record.subagent?.kind === "notification" &&
+    record.subagent.message !== undefined &&
+    record.subagent.status === undefined &&
+    record.subagent.error === undefined &&
+    record.subagent.resultPreview === undefined
+  ) {
+    const source = record.subagent.description ?? record.subagent.id ?? "subagent";
+    const id =
+      record.subagent.description !== undefined && record.subagent.id !== undefined
+        ? ` (${record.subagent.id})`
+        : "";
+    return `## subagent notification: ${cell(source)}${id}\n\n${record.subagent.message}`;
+  }
   return `## event: ${record.eventType}${
     record.content === undefined ? "" : `\n\n${renderBlocks(record.content)}`
   }`;

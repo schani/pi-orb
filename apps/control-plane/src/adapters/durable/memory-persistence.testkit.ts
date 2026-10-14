@@ -130,7 +130,7 @@ export class MemoryAgentPersistence implements AgentPersistence {
       undefined,
       BACKGROUND_CONTEXT,
     );
-    const hidden = new Set(
+    const notifications = new Set(
       submissions.items.flatMap((submission) =>
         submission.entry !== undefined &&
         submission.requestId?.startsWith(NOTIFICATION_REQUEST_PREFIX)
@@ -142,7 +142,7 @@ export class MemoryAgentPersistence implements AgentPersistence {
       [...entries.items].reverse(),
       String(value["sessionId"]),
       new Map(),
-      hidden,
+      notifications,
     );
     if (records.isErr()) return err(durableError(records.error.message));
     return ok({

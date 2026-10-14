@@ -8,7 +8,12 @@ import {
 } from "./activity-headline.ts";
 import { CHART_CONTENT_TYPE, type ChartSpec, ChartSpecSchema } from "./chart.ts";
 import { capHeadline } from "./headline.ts";
-import { type ContentBlock, type HistoryRecord, NestedCallsSchema } from "./history.ts";
+import {
+  type ContentBlock,
+  type EventRecord,
+  type HistoryRecord,
+  NestedCallsSchema,
+} from "./history.ts";
 import { type JsonObject, JsonValueSchema } from "./json.ts";
 import { reasoningHeadline } from "./reasoning-headline.ts";
 
@@ -96,11 +101,21 @@ const subagent = Type.Object(
     id: Type.Optional(Type.String()),
     description: Type.Optional(Type.String()),
     status: Type.Optional(Type.String()),
+    messagePreview: Type.Optional(Type.String()),
     headline: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     detailKey: Type.String(),
   },
   closed,
 );
+function notificationMessage(subagent: NonNullable<EventRecord["subagent"]>): string | undefined {
+  return subagent.kind === "notification" &&
+    subagent.status === undefined &&
+    subagent.error === undefined &&
+    subagent.resultPreview === undefined
+    ? subagent.message
+    : undefined;
+}
+
 const delivery = Type.Object(
   {
     kind: Type.Union([
@@ -518,7 +533,9 @@ export function projectDisplayRecord(record: HistoryRecord): DisplayRecord {
       };
     case "compaction":
       return { ...base, type: "compaction", detailKey: `${record.id}:summary` };
-    case "event":
+    case "event": {
+      const messageNotice =
+        record.subagent === undefined ? undefined : notificationMessage(record.subagent);
       return {
         ...base,
         type: "event",
@@ -541,7 +558,13 @@ export function projectDisplayRecord(record: HistoryRecord): DisplayRecord {
           : {
               subagent: {
                 kind: record.subagent.kind,
-                ...(record.subagent.kind === "notification" ? { headline: null } : {}),
+                ...(messageNotice !== undefined
+                  ? {
+                      messagePreview: capHeadline(messageNotice.replace(/\s+/gu, " ").trim()),
+                    }
+                  : record.subagent.kind === "notification"
+                    ? { headline: null }
+                    : {}),
                 detailKey: `${record.id}:subagent`,
                 ...(record.subagent.id === undefined ? {} : { id: record.subagent.id }),
                 ...(record.subagent.description === undefined
@@ -557,6 +580,7 @@ export function projectDisplayRecord(record: HistoryRecord): DisplayRecord {
           ? {}
           : { inboxMessageIds: record.inboxMessageIds }),
       };
+    }
   }
 }
 
@@ -630,7 +654,10 @@ export function projectRecordDetail(
     const body: Extract<DisplayDetailBody, { type: "subagent" }> = {
       type: "subagent",
     };
-    if (kind === "update") {
+    const messageNotice = notificationMessage(record.subagent);
+    if (messageNotice !== undefined) {
+      body.message = messageNotice;
+    } else if (kind === "update") {
       const selected = visible(message);
       if (selected !== undefined) body.message = selected;
     } else if (kind === "workspace_notice") {

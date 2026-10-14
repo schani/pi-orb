@@ -2574,6 +2574,15 @@ pre,
   margin-left: 0;
 }
 
+.subagent-message-notice > summary {
+  grid-template-columns: 2ch minmax(0, 1fr) minmax(0, min(28ch, 30%));
+}
+.subagent-message-notice .activity-rail-metric {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+
 .subagent-notice-body {
   padding: 4px 8px;
   overflow-wrap: anywhere;
@@ -3077,6 +3086,9 @@ button.orb-phone-menu {
   }
   .subagent-notice .activity-rail-summary {
     white-space: normal;
+  }
+  .subagent-message-notice .activity-rail-summary {
+    white-space: nowrap;
   }
   .subagent-live-rail > summary,
   .hosted-files > summary {

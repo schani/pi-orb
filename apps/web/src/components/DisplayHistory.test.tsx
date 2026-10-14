@@ -2,6 +2,7 @@ import type { DisplayRecord } from "@pi-orb/protocol";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { TranscriptCache } from "../lib/transcript-cache.ts";
+import { detailContext } from "../testkit/display-fixtures.ts";
 import { HistoryView } from "./HistoryView.tsx";
 
 const base = {
@@ -60,6 +61,40 @@ describe("browser summary rendering", () => {
     expect(html).toContain("other");
     expect(html).toContain(`title="${headline}"`);
     expect(read).not.toHaveBeenCalled();
+  });
+  it("keeps a compact child message in the native activity rail", () => {
+    const notice = {
+      kind: "notification" as const,
+      id: "child",
+      description: "Check deployment",
+      messagePreview: "Actual child message",
+      detailKey: "notice:subagent",
+    };
+    const records: DisplayRecord[] = [
+      {
+        id: "notice",
+        parentId: null,
+        timestamp: base.timestamp,
+        type: "event",
+        eventType: "pi.custom_message",
+        custom: { customType: "subagent-notification", display: true },
+        subagent: notice,
+      },
+    ];
+    const html = renderToStaticMarkup(
+      <HistoryView
+        records={records}
+        liveBlocks={[]}
+        tools={[]}
+        busy={false}
+        detailContext={detailContext()}
+      />,
+    );
+    expect(html.match(/<details/g)).toHaveLength(1);
+    expect(html).toContain("subagent-message-notice");
+    expect(html).toContain('title="Actual child message">Actual child message</span>');
+    expect(html).not.toContain("subagent-notice-body");
+    expect(html).not.toContain("alert-band");
   });
   it("retains visible prose and failures while rendering reasoning as an empty disclosure", () => {
     const records: DisplayRecord[] = [

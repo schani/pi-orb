@@ -150,6 +150,34 @@ describe("orb inspection presentation", () => {
     );
   });
 
+  it("exports a typed child notification message once as literal text", () => {
+    const orb = items[0];
+    if (orb === undefined) return;
+    const message = "Child line\n<strong>literal HTML</strong>";
+    const output = formatTranscript({
+      v: 1,
+      orb,
+      session: { id: "session", overflow: {} },
+      cursor: "notice",
+      headId: "notice",
+      records: [
+        {
+          id: "notice",
+          parentId: null,
+          timestamp: "t",
+          type: "event",
+          eventType: "pi.custom_message",
+          overflow: {},
+          custom: { customType: "subagent-notification", display: true },
+          subagent: { kind: "notification", id: "7", description: "Check", message },
+        },
+      ],
+    });
+    expect(output).toContain("## subagent notification: Check (7)\n\n" + message);
+    expect(output.split(message)).toHaveLength(2);
+    expect(output).not.toContain("agent_id");
+  });
+
   it("renders normalized transcript content without native overflow", () => {
     const sibling = items[1];
     expect(sibling).toBeDefined();

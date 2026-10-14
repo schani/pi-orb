@@ -3,7 +3,8 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } fro
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RUNTIME_SUBPROTOCOL, type ServerFrame } from "@pi-orb/protocol";
+import { PGlite } from "@electric-sql/pglite";
+import { capHeadline, RUNTIME_SUBPROTOCOL, type ServerFrame } from "@pi-orb/protocol";
 import { expect, it } from "vitest";
 import WebSocket from "ws";
 import {
@@ -24,6 +25,10 @@ import {
   requestedTools,
 } from "./testkit/durable-model-fixture.ts";
 
+const message =
+  "PRIVATE_CHILD_COORDINATION  <b>literal</b>\n" + "😀".repeat(500) + "\nDETAIL_ONLY_TAIL";
+const messagePreview = capHeadline(message.replace(/\s+/gu, " ").trim());
+
 const stop = { type: "stop", status: "completed" } as const;
 const codemode = (code: string) => ({
   type: "toolCall",
@@ -32,7 +37,7 @@ const codemode = (code: string) => ({
 });
 
 it.runIf(process.env["PI_ORB_E2E_BACKEND"] === "process")(
-  "central child alert interrupts a normal codemode wait privately; root escalation stays public",
+  "central child alert interrupts a normal wait with a typed inline preview retained through archive; root escalation still flags",
   async () => {
     const runId = randomUUID();
     const root = mkdtempSync(join(tmpdir(), "pi-orb-subagent-notify-"));
@@ -69,7 +74,7 @@ text('NOTIFY_SPAWNED');`),
                 steps: [
                   codemode(`
 text(await tools.bash({command:'printf ready > notify-child-ready; read value < notify-alert-release'}));
-text(await tools.orb_alert({message:'PRIVATE_CHILD_COORDINATION'}));
+text(await tools.orb_alert({message:${JSON.stringify(message)}}));
 text(await tools.bash({command:'printf accepted > notify-alert-accepted; read value < notify-child-release'}));
 text('NOTIFY_CHILD_FINISHED');`),
                   stop,
@@ -259,7 +264,7 @@ text('NOTIFY_PARENT_HANDLED');`),
       expect(transcript).toContain("NOTIFY_WAIT_CONTINUED");
       expect(transcript).toContain('\\"status\\":\\"running\\"');
       expect(transcript).toContain('\\"interrupted\\":\\"parent_input\\"');
-      expect(transcript).not.toContain("PRIVATE_CHILD_COORDINATION");
+      expect(transcript).toContain("DETAIL_ONLY_TAIL");
       expect(
         privateHistory.records.filter(
           (record) => record.type === "event" && record.eventType === "orb.alert",
@@ -294,9 +299,47 @@ text('NOTIFY_PARENT_HANDLED');`),
       expect(JSON.parse(latestUserMessage(notification) ?? "null")).toMatchObject({
         agent_id: agentId,
         description: "notification sender",
-        message: "PRIVATE_CHILD_COORDINATION",
+        message,
       });
       expect(onlyCodemodeCatalog(notification)).toBe(true);
+      const notice = privateHistory.records.find(
+        (record) => record.type === "event" && record.subagent?.message === message,
+      );
+      expect(notice).toEqual({
+        id: expect.any(String),
+        parentId: expect.any(String),
+        timestamp: expect.any(String),
+        type: "event",
+        eventType: "pi.custom_message",
+        overflow: {},
+        custom: { customType: "subagent-notification", display: true },
+        subagent: {
+          kind: "notification",
+          id: agentId,
+          description: "notification sender",
+          message,
+        },
+      });
+      const compact = (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`)).body;
+      expect(compact["records"]).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: notice?.id,
+            subagent: {
+              kind: "notification",
+              id: agentId,
+              description: "notification sender",
+              messagePreview,
+              detailKey: `${notice?.id}:subagent`,
+            },
+          }),
+        ]),
+      );
+      expect(JSON.stringify(compact)).not.toContain("DETAIL_ONLY_TAIL");
+      const detailPath = `/api/v1/orbs/${orb}/details/${encodeURIComponent(notice?.id ?? "")}/${encodeURIComponent(`${notice?.id}:subagent`)}?sessionId=${encodeURIComponent(privateHistory.session?.id ?? "")}`;
+      const detail = await api(cp.baseUrl, "GET", detailPath);
+      expect(detail.status).toBe(200);
+      expect(detail.body["body"]).toEqual({ type: "subagent", message });
 
       // Release only after proving the parent handled the alert with a live child.
       await writeFile(join(checkout, "notify-child-release"), "release\n");
@@ -331,8 +374,9 @@ text('NOTIFY_PARENT_HANDLED');`),
       await waitFor("escalation turn summary settled", async () =>
         active.logs.join("").split("harness.summary_completed").length === 3 ? true : null,
       );
-      expect(JSON.stringify(escalated)).not.toContain("PRIVATE_CHILD_COORDINATION");
-      expect(JSON.stringify(frames)).not.toContain("PRIVATE_CHILD_COORDINATION");
+      expect(escalated.records).toEqual(expect.arrayContaining([notice]));
+      expect(JSON.stringify(frames)).toContain(messagePreview.slice(0, 26));
+      expect(JSON.stringify(frames)).not.toContain("DETAIL_ONLY_TAIL");
       expect((await api(cp.baseUrl, "POST", `/api/v1/orbs/${orb}/stop`)).status).toBe(202);
       await waitFor("notification orb stopped", async () =>
         (await view())["state"] === "stopped" ? true : null,
@@ -350,10 +394,36 @@ text('NOTIFY_PARENT_HANDLED');`),
       const reopened = await history();
       expect(reopened.records.slice(0, escalated.records.length)).toEqual(escalated.records);
       expect(reopened.session).toEqual(escalated.session);
-      expect(JSON.stringify(reopened)).not.toContain("PRIVATE_CHILD_COORDINATION");
+      expect(reopened.records).toEqual(expect.arrayContaining([notice]));
+      expect((await api(cp.baseUrl, "GET", detailPath)).body).toEqual(detail.body);
       const catalogs = cp.modelRequests?.filter((request) => requestedTools(request).length > 0);
       expect(catalogs?.length).toBeGreaterThan(3);
       expect(catalogs?.every(onlyCodemodeCatalog)).toBe(true);
+      expect((await api(cp.baseUrl, "POST", `/api/v1/orbs/${orb}/archive`)).status).toBe(202);
+      await waitFor(
+        "notification archive purges private state",
+        async () => ((await view())["state"] === "archived" ? true : null),
+        { timeoutMs: 125_000 },
+      );
+      expect(existsSync(checkout)).toBe(false);
+      expect((await history()).records).toEqual(expect.arrayContaining([notice]));
+      expect((await api(cp.baseUrl, "GET", detailPath)).body).toEqual(detail.body);
+      await cp.stop();
+      const persistence = new PGlite(join(root, "db"));
+      try {
+        const native = await persistence.query<{ count: number }>(
+          "SELECT COUNT(*)::integer AS count FROM durable_pg_entries WHERE orb_id=$1",
+          [orb],
+        );
+        expect(native.rows[0]?.count).toBe(0);
+        const retained = await persistence.query<{ record: unknown }>(
+          "SELECT record FROM history_records WHERE orb_id=$1 AND record_id=$2",
+          [orb, notice?.id],
+        );
+        expect(retained.rows[0]?.record).toEqual(notice);
+      } finally {
+        await persistence.close();
+      }
       failed = false;
     } catch (error) {
       writeFileSync(join(root, "failure.txt"), String(error));

@@ -15,7 +15,7 @@ import { DurableAgent } from "./agent.ts";
 import { projectNativeCommit } from "./atomic-history.ts";
 
 it.for(["pglite", "postgres"] as const)(
-  "%s atomically hides reserved native input through placement, replay, reopen and pull without flagging the user; root alerts still flag",
+  "%s atomically projects typed native notifications through placement, replay, reopen and pull without flagging the user; root alerts still flag",
   async (kind, { skip }) => {
     const schema = `notification_private_${randomUUID().replaceAll("-", "")}`;
     let admin: PgClient | undefined;
@@ -34,7 +34,15 @@ it.for(["pglite", "postgres"] as const)(
     const task = new NoSimulationTask("private-notification", false);
     const project = makeProjectRow(randomUUID());
     const orb = makeOrbRow(randomUUID(), project.id, "running");
-    const secret = "PRIVATE notification atomic 46ab8";
+    const secret = "literal notification atomic 46ab8";
+    const payload = JSON.stringify({ agent_id: "7", description: "Check", message: secret });
+    const notice = {
+      type: "event",
+      eventType: "pi.custom_message",
+      overflow: {},
+      custom: { customType: "subagent-notification", display: true },
+      subagent: { kind: "notification", id: "7", description: "Check", message: secret },
+    };
     const authority = new PgDurableAuthority(db, () => 0);
     const models = createModels(),
       faux = fauxProvider();
@@ -93,7 +101,7 @@ it.for(["pglite", "postgres"] as const)(
       const before = (await database.store.getOrb(task, orb.id))._unsafeUnwrap();
       const draft = {
         type: "input" as const,
-        content: secret,
+        content: payload,
         requestId: "subagent-notify:42:outer:nested:0",
         whenBusy: "steer" as const,
       };
@@ -103,13 +111,16 @@ it.for(["pglite", "postgres"] as const)(
       expect(replay.id).toBe(first.id);
       await root.waitForIdle(context);
       expect(generations).toBe(1);
-      expect(requests[0]).toContain(secret);
+      expect(requests[0]).toContain(JSON.stringify(payload).slice(1, -1));
       const records = (
         await db.query("SELECT record FROM history_records WHERE orb_id=$1 ORDER BY record_id", [
           orb.id,
         ])
       )._unsafeUnwrap();
-      expect(JSON.stringify(records.rows)).not.toContain(secret);
+      expect(records.rows.map((row) => row["record"])).toEqual(
+        expect.arrayContaining([expect.objectContaining(notice)]),
+      );
+      expect(JSON.stringify(records.rows)).not.toContain("agent_id");
       const row = (await database.store.getOrb(task, orb.id))._unsafeUnwrap();
       expect(row?.unreadAlertId).toBeNull();
       expect(row?.replicationCursor).not.toBe(before?.replicationCursor);
@@ -139,10 +150,15 @@ it.for(["pglite", "postgres"] as const)(
         })
       )._unsafeUnwrap();
       const snapshot = agent.snapshot()._unsafeUnwrap();
-      expect(JSON.stringify(snapshot)).not.toContain(secret);
-      expect(JSON.stringify((await agent.pullHistory(null, 500))._unsafeUnwrap())).not.toContain(
-        secret,
+      expect(snapshot.records).toEqual(expect.arrayContaining([expect.objectContaining(notice)]));
+      expect((await agent.pullHistory(null, 500))._unsafeUnwrap().records).toEqual(
+        expect.arrayContaining([expect.objectContaining(notice)]),
       );
+      expect(
+        snapshot.records.filter(
+          (record) => record.type === "event" && record.subagent?.message === secret,
+        ),
+      ).toHaveLength(1);
       expect(snapshot.headId).toBe(
         (await database.store.getOrb(task, orb.id))._unsafeUnwrap()?.replicatedHeadId,
       );
@@ -169,7 +185,7 @@ it.for(["pglite", "postgres"] as const)(
             await db.query("SELECT record FROM history_records WHERE orb_id=$1", [orb.id])
           )._unsafeUnwrap().rows,
         ),
-      ).not.toContain(secret);
+      ).toContain(secret);
     } finally {
       if (agent) await agent.close();
       if (harness) await harness.close(context);

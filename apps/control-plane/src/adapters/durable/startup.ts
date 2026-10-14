@@ -134,7 +134,7 @@ export async function checkNativeStartup(query: Query, orbId: string, startup = 
             cursor = page.next;
           } while (cursor);
           entries.sort((a, b) => a.id - b.id);
-          const hidden = new Set<number>();
+          const notifications = new Set<number>();
           cursor = undefined;
           do {
             const page = await storage.scanSubmissions(
@@ -148,10 +148,10 @@ export async function checkNativeStartup(query: Query, orbId: string, startup = 
                 submission.entry !== undefined &&
                 submission.requestId?.startsWith(NOTIFICATION_REQUEST_PREFIX)
               )
-                hidden.add(submission.entry);
+                notifications.add(submission.entry);
             cursor = page.next;
           } while (cursor);
-          const projected = projectHistory(entries, nativeSession, new Map(), hidden);
+          const projected = projectHistory(entries, nativeSession, new Map(), notifications);
           if (
             projected.isErr() ||
             !projected.value.some((record) => record.id === row.replication_cursor) ||

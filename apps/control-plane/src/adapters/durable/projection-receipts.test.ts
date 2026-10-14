@@ -24,12 +24,17 @@ it("projects committed receipt enrichment with the native user entry", () => {
   });
 });
 
-it("excludes reserved entries before receipt enrichment, without redacting quoted text", () => {
+it("projects only trusted notification placements, before human receipt enrichment, with public ancestry", () => {
+  const payload = JSON.stringify({
+    agent_id: "child-7",
+    description: "Check",
+    message: "literal <b>message</b>\nnext",
+  });
   const entries = [2, 3, 4, 5].map((id) => ({
     id: id as EntryId,
     conversationId: 1 as ConversationId,
-    kind: "pi.message",
-    model: [{ role: "user" as const, content: "PRIVATE notification", timestamp: id }],
+    kind: "pi.user",
+    model: [{ role: "user" as const, content: payload, timestamp: id }],
   }));
   const records = projectHistory(
     entries,
@@ -39,8 +44,59 @@ it("excludes reserved entries before receipt enrichment, without redacting quote
   )._unsafeUnwrap();
   expect(records.map(({ id, parentId }) => ({ id, parentId }))).toEqual([
     { id: "session:2", parentId: null },
-    { id: "session:4", parentId: "session:2" },
+    { id: "session:3", parentId: "session:2" },
+    { id: "session:4", parentId: "session:3" },
+    { id: "session:5", parentId: "session:4" },
   ]);
+  expect(records[1]).toEqual({
+    id: "session:3",
+    parentId: "session:2",
+    timestamp: new Date(3).toISOString(),
+    type: "event",
+    eventType: "pi.custom_message",
+    overflow: {},
+    custom: { customType: "subagent-notification", display: true },
+    subagent: {
+      kind: "notification",
+      id: "child-7",
+      description: "Check",
+      message: "literal <b>message</b>\nnext",
+    },
+  });
+  expect(records[0]).toMatchObject({
+    type: "message",
+    role: "user",
+    content: [{ type: "text", text: payload }],
+  });
+  expect(records[2]).toMatchObject({ type: "message", role: "user" });
   expect(JSON.stringify(records)).not.toContain("ordinary-inbox-receipt");
-  expect(JSON.stringify(records)).toContain("PRIVATE notification");
+});
+
+it.each([
+  "not JSON",
+  "null",
+  "[]",
+  "{}",
+  '{"agent_id":7,"description":"task","message":"body"}',
+  '{"agent_id":"7","description":"task","message":null}',
+])("rejects malformed trusted payload %s without exposing raw user input", (content) => {
+  const result = projectHistory(
+    [
+      {
+        id: 3 as EntryId,
+        conversationId: 1 as ConversationId,
+        kind: "pi.user",
+        model: [{ role: "user", content, timestamp: 3 }],
+      },
+    ],
+    "session",
+    new Map(),
+    new Set([3]),
+  );
+  expect(result.isErr()).toBe(true);
+  expect(result._unsafeUnwrapErr()).toEqual({
+    type: "history_mapping_error",
+    code: "mapping_failure",
+    message: "Invalid subagent notification placement",
+  });
 });

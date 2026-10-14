@@ -86,7 +86,7 @@ export async function projectNativeCommit(
         const value = identity.value;
         if (typeof value.sessionId !== "string" || typeof value.timestamp !== "number") return null;
         const receipts = new Map<number, PublicEntryReceipt>();
-        const hidden = new Set<number>();
+        const notifications = new Set<number>();
         let cursor: Cursor | undefined;
         do {
           const page = await storage.scanSubmissions(
@@ -100,7 +100,7 @@ export async function projectNativeCommit(
               submission.entry !== undefined &&
               submission.requestId?.startsWith(NOTIFICATION_REQUEST_PREFIX)
             )
-              hidden.add(submission.entry);
+              notifications.add(submission.entry);
             if (submission.entry === undefined || !submission.requestId?.startsWith("inbox:"))
               continue;
             const raw = value.receipts;
@@ -147,7 +147,7 @@ export async function projectNativeCommit(
           },
           entries,
           receipts,
-          hidden,
+          notifications,
         };
       } finally {
         await storage.close(BACKGROUND_CONTEXT);
@@ -165,7 +165,7 @@ export async function projectNativeCommit(
     read.value.entries,
     read.value.session.id,
     read.value.receipts,
-    read.value.hidden,
+    read.value.notifications,
   );
   if (projected.isErr())
     return err<never, AuthorityError>({

@@ -757,7 +757,7 @@ export class DurableAgent implements AgentSessionFacade {
 
   private queueProjection(): Promise<Result<void, RuntimeClientError>> {
     const entries = [...this.entries];
-    const hidden = new Set(this.notificationEntries);
+    const notifications = new Set(this.notificationEntries);
     this.pendingProjection++;
     this.projection = this.projection
       .then(async (previous) => {
@@ -767,7 +767,7 @@ export class DurableAgent implements AgentSessionFacade {
           const receipt = this.receipts[messageId];
           if (receipt) receipts.set(entryId, receipt);
         }
-        const projected = projectHistory(entries, this.session.id, receipts, hidden);
+        const projected = projectHistory(entries, this.session.id, receipts, notifications);
         if (projected.isErr()) return err(durableError("central history mapping failed"));
         const records = [...projected.value];
         const snapshot: AgentSnapshot = {

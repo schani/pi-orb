@@ -196,4 +196,4 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 
 ## Expandable child-to-parent alerts — 78
 
-78. **Open:** which of five HTML proposals should display child-to-parent alerts as collapsed, expandable transcript items like tool calls, without an unread flag? Contract and scope: `docs/orb-alerts.md`. Backend/projection implementation awaits selection; no new persisted state or change to root/CLI public alerts.
+78. **Resolved (2026-10-14): option 2, Inline preview.** The user selected option 2; implemented locally, not deployed. Reuse notification records/details and retain the full plain message publicly; no unread flag, new persisted structure or root/CLI alert change. Study, unselected alternatives, contract and qualification: `docs/orb-alerts.md`.
