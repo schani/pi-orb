@@ -1,34 +1,26 @@
 # DST boundary compositions — evidence
 
-2026-10-14, America/Los_Angeles; test-only, undeployed. No product bugs or production edits.
+2026-10-14, America/Los_Angeles; test-only, undeployed. No production changes.
 Base: `a60f497b609f4f1ef0a8eabc81a0c9c52f0f0f1d`; branch: `test/dst-boundary-compositions`.
-[PR #97](https://github.com/schani/pi-orb/pull/97) merged after 11 green checks. Shared `npm ci` exited 0.
 
-[Evidence archive](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/087158de-a85f-4594-8e0f-99270f568805/dst-boundary-compositions/evidence.tar.gz)
+## Lean revision
+[Verified archive](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/087158de-a85f-4594-8e0f-99270f568805/dst-boundary-compositions/lean-revision.tar.gz)
+SHA-256: `dc47ab0f207203f3495468b202d5a9831629d1d7bd0d9fa9c00e02121da3ef00`; 672 payload hashes verified after extraction.
+Includes all revision author/planning/validation evidence, both isolated mutation phases, four final test snapshots, source hashes and exact `REPLAY.md`/`REPLAY-MAP.json`.
+Poll composes lifecycle/actual commit/CAS, Stop/delete, progressing Pi/Claude peers and drained restart; generated writer grammar crosses four overflow cuts through real retry/sync/reducer/cache; detail covers shared pending retries, synchronous publication ownership and actual component key wiring.
+A–F each fail a new intended assertion and explicitly replay red before restoration; G key omission fails the component read-count assertion (non-DST). All seven match final tested sources.
+Revision author reds: two poll observation/admission assumptions and three writer schema violations; explicit red replays preceded fixture corrections.
+Both masked C reds/replays remain; corrected C fails directly at `b receipt while A held`. Fixture synchronization changed, not production.
+Current-source local gates: 71 focused/adjacent tests (eight files), root typecheck and lint passed. Full current-head CI pending.
+The broad run predates the final C fixture correction and was cancelled incomplete; it does not qualify current sources. Phase-zero dependency replacement/preload crash evidence and install timestamps are preserved; no product defect claimed.
+Memory/mocked ports only; no PostgreSQL/native SDK, real network/browser/DOM, concurrent React or deployment qualification.
+
+## Preserved historical evidence
+[Original archive](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/087158de-a85f-4594-8e0f-99270f568805/dst-boundary-compositions/evidence.tar.gz): 18 first fixture traces (12 poll, six detail), red snapshots and replay maps; all 137 payload hashes verified. Pre-review sources, not current qualification.
 SHA-256: `ad390b5e56ba61168988c6dedb627a6d50b33ac58e26b462b6a097668b45d649`.
-138 files: 110 author files, 18 root first-failure traces (12 poll, six detail), four frozen source snapshots, three shared provenance files, inventory/replay/checksum manifests.
-All 137 payload checksums verified after extraction. `INVENTORY.json` inventories/hashes all four author directories; originals remain untouched.
-Archive v1 preserves pre-review fixtures; snapshots are author-phase, not final test qualification. Final sources/checks belong to the new PR code/body; parent validation and unrelated #97/audit/auth evidence are excluded. No raw trace/log/snapshot is added to Git.
-
-## Coverage and classifications
-
-Poll: 12 × 20 = 240 schedules; actual poll/reconcile lanes + `HarnessAgentPlane`, mixed Pi/Claude, commit-before/lost-ack/real CAS, Stop/delete/fresh `ControlState`.
-Atomic records/cursor/receipts, FIFO, sibling progress, no overlap/resurrection; drained restart, not abrupt death; memory, not PostgreSQL cascade/native SDK proof.
-Writer grammar: 41 schedules (one forced held span + 40 raced), real writer/JSON/reducer critical-prefix oracle, valid multi-operation append/replace/tool/history retirement; same-key output/tool revisions straddle a nonretiring `history.record` to witness its coalescing fence.
-Overflow: 36 schedules, actual client retry + `computeSyncFrames` + reducer/cache + retired callbacks; mock socket, not real socket/browser.
-Detail: three terminal cases × 80 = 240 schedules; real `RunningBody`/`DetailLoader`, scoped pool/determined timers, independent retry/response/owner/connection actors.
-Real `CommittedBody` stale-owner/invalidation denial and current cache admission; pinned witnesses precede mixed actors; hook harness/mock HTTP, not ReactDOM/E2E.
-Counts do not imply unique iterations or exhaustive failures. Existing telemetry is asserted; no new events needed.
-Poll fixture 1: memory inbox survives deletion unlike PostgreSQL cascade; corrected to assert late-commit nonmutation.
-Poll fixture 2: `hostStateOf` throws after destruction; corrected to assert `hostCount === 0`. All 12 explicit red replays preceded fixes.
-Detail fixture 1: stale scope attributed to remount key; observe actual loader-call key. Fixture 2: actor block misplaced outside `runTasks`.
-Both detail issues: three explicit red replays before each correction; archived `.context/dst-compositions/detail/receipt.md` explains attribution.
-Corrected-prefix detail replays exhaust truncated traces, NOT green replays; fresh schedules pass. Author focused logs are retained; broader checks belong in the parent PR body.
-
-[Mutation archive](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/087158de-a85f-4594-8e0f-99270f568805/dst-boundary-compositions/sensitivity.tar.gz) (baseline `f643f26`): new compositions killed three mutants; publication-guard removal survived, but failed the byte-identical inherited control. Remaining coverage: `TODO.md`.
-SHA-256: `4b9314677315052f48e147aacf6500b9cb8d5535466199510690ebd56c1be529`; all 55 original payload hashes verified after extraction; originals retained.
+Poll reds were deletion-observation fixtures; detail reds were scope-observation/actor-placement fixtures. Explicit red replays preceded corrections; truncated corrected detail replays were not green replays.
+[Prior mutation archive](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/087158de-a85f-4594-8e0f-99270f568805/dst-boundary-compositions/sensitivity.tar.gz): three mutants detected; publication guard survived new compositions but failed the inherited control. Historical result, superseded by final D's direct timer assertion.
+SHA-256: `4b9314677315052f48e147aacf6500b9cb8d5535466199510690ebd56c1be529`; all 55 payload hashes verified. Original archives/traces remain unchanged.
 
 ## Replay
-
-Use an isolated checkout of the exact base and `npm ci`; archive `REPLAY.md` maps every trace/selector to its preserved red snapshot and gives fresh-schedule commands.
-Pattern: install the mapped snapshot at its original test path, then `DST_REPLAY="$ARCHIVED/test-failures/<trace>.json" npx vitest run <test-path> -t '<mapped-selector>'`; never overwrite active tests.
+Use a disposable checkout and `npm ci`. The lean archive maps every revision red to exact snapshots, selectors, guards and traces; `replay.py` reproduces them without touching active checkouts. Original 18-trace commands remain in v1's `REPLAY.md`.

@@ -1,5 +1,5 @@
 import type { CommittedDisplayDetail } from "@pi-orb/protocol";
-import { ok } from "neverthrow";
+import { err, ok } from "neverthrow";
 import { beforeEach, expect, it, vi } from "vitest";
 import {
   snapshotFromHistory,
@@ -8,7 +8,7 @@ import {
 } from "../lib/transcript-cache.ts";
 import { history } from "../testkit/transcript.ts";
 import { CommittedImage } from "./CommittedImage.tsx";
-import { CommittedBody, type DetailContext } from "./DetailBody.tsx";
+import { CommittedBody, type DetailContext, RunningBody } from "./DetailBody.tsx";
 
 // Execute passive effects with dependency tracking, without a browser/server.
 const hooks = vi.hoisted(() => ({
@@ -17,6 +17,7 @@ const hooks = vi.hoisted(() => ({
 }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
+  useMemo: (factory: () => unknown) => factory(),
   useState: (initial: unknown) => {
     const index = hooks.cursor++;
     hooks.slots[index] ??= { value: initial };
@@ -39,16 +40,17 @@ vi.mock("react", async (original) => ({
   },
 }));
 vi.mock("../lib/api.ts", () => ({
+  getLiveDetail: vi.fn(),
   getCommittedDetail: vi.fn(),
   getCommittedImage: vi.fn(),
-  describeApiError: vi.fn(),
+  describeApiError: vi.fn((error: { message: string }) => error.message),
 }));
 vi.mock("../lib/object-url.ts", () => ({
   createImageObjectUrl: vi.fn(() => ok("blob:test")),
   revokeImageObjectUrl: vi.fn(() => ok(undefined)),
 }));
 
-import { getCommittedDetail, getCommittedImage } from "../lib/api.ts";
+import { getCommittedDetail, getCommittedImage, getLiveDetail } from "../lib/api.ts";
 import { createImageObjectUrl } from "../lib/object-url.ts";
 
 beforeEach(() => {
@@ -56,6 +58,7 @@ beforeEach(() => {
   hooks.slots = [];
   hooks.cursor = 0;
   vi.clearAllMocks();
+  vi.mocked(getLiveDetail).mockReset();
   vi.mocked(getCommittedDetail).mockReset();
   vi.mocked(getCommittedImage).mockReset();
 });
@@ -256,4 +259,50 @@ it.each([false, true])("invalidation fences pending publication (image=%s)", asy
   expect(hooks.slots.some((slot) => JSON.stringify(slot.value)?.includes("cached detail"))).toBe(
     false,
   );
+});
+
+// Fresh disclosures only; production constructs keys, without concurrent React semantics.
+it.each([false, true])("RunningBody scope wiring (reverse=%s)", async (reverse) => {
+  const f = fixture();
+  const finish: (() => void)[] = [];
+  vi.mocked(getLiveDetail).mockImplementation((_orb, _op, block) => {
+    return new Promise((resolve) => {
+      finish.push(() => resolve(err({ type: "network", message: block })));
+    });
+  });
+  try {
+    for (const coordinate of [-1, -1, 0, 1, 2, 3]) {
+      for (const slot of hooks.slots.splice(0)) slot.cleanup?.();
+      hooks.cursor = 0;
+      const scope = ["orb", "session", "operation", "block"];
+      if (coordinate >= 0) scope[coordinate] = "next";
+      const [orbId, sessionId, operationId, blockId] = scope as [string, string, string, string];
+      Object.assign(f.context, { orbId, sessionId, operationId, connected: true });
+      RunningBody({ context: f.context, blockId });
+    }
+    expect(getLiveDetail).toHaveBeenCalledTimes(5);
+    expect([...f.context.livePending.keys()]).toEqual([
+      '["orb","session","operation","block"]',
+      '["next","session","operation","block"]',
+      '["orb","next","operation","block"]',
+      '["orb","session","next","block"]',
+      '["orb","session","operation","next"]',
+    ]);
+    const expectedRequestArgs = [...f.context.livePending.keys()].map((key) => {
+      const [orb, session, operation, block] = JSON.parse(key);
+      return [orb, operation, block, session];
+    });
+    expect(vi.mocked(getLiveDetail).mock.calls).toEqual(expectedRequestArgs);
+    for (const settle of reverse ? [...finish].reverse() : finish) {
+      settle();
+      await flush();
+    }
+    expect(hooks.slots[1]?.value).toMatchObject({ message: "next" });
+    expect(f.context.livePending.size).toBe(0);
+  } finally {
+    for (const slot of hooks.slots) slot.cleanup?.();
+    for (const settle of finish) settle();
+    await flush();
+    f.release();
+  }
 });

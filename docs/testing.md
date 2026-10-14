@@ -1,13 +1,12 @@
 # Testing
 
-## DST boundary compositions (coverage 2026-10-14)
+## DST boundary compositions (decision 2026-10-14)
 
-- Test-only bounded compositions; [evidence receipt](../test-failures/2026-10-14-dst-compositions.md). Coverage is partial; remaining work is in `TODO.md`.
-- Poll/reconcile + `HarnessAgentPlane`: atomic records/cursor/receipts, FIFO and sibling progress; lifecycle order is fixed, restart drained; memory, not PostgreSQL/native SDK proof.
-- Generated writer grammar → JSON → reducer checks critical prefixes and history coalescing fences; overflow/reconnect uses a separate fixed sequence, not generated grammar.
-- Recovery composes client retry, `computeSyncFrames`, reducer/cache and retired callbacks; mocked sockets, not browser/network proof.
-- Detail composes real loaders/cache with scheduled retry/response/ownership/connection actors; mocked React/HTTP; synchronous publication reentry is untested. Pinned witnesses do not guarantee repeated retries.
-- Intentional mutations: three detected, publication ownership guard removal undetected by new compositions; inherited control detects it. No current product defect established; existing telemetry asserted.
+- Poll/reconcile + `HarnessAgentPlane`: lifecycle actor versus actual commit/CAS (both winners), Stop/delete, progressing Pi/Claude peers and drained restart; atomic history/cursor/receipts and FIFO.
+- Generated append/append and replace/append grammar crosses nonretiring history and four overflow cuts → actual client retry/sync/reducer/cache; grammar-derived text/live/history anchors supplement the shared-reducer transport oracle.
+- Real detail loaders/shared pool: repeated retries while pending, simulated deadlines, synchronous publisher close/disconnect/replacement; actual `RunningBody` key wiring uses the existing narrow hook mock.
+- Six independent guard mutations each fail a new assertion and explicitly replay red before restoration: history fence, retired-socket ownership, cross-orb progress, post-publication ownership, retry generation and append folding; component key omission also fails.
+- Bounded coverage ([evidence](../test-failures/2026-10-14-dst-compositions.md)); memory/mocked ports only; no PostgreSQL/native SDK, real network/browser/DOM or concurrent React proof. Existing telemetry is asserted; no production changes.
 
 ## Release SSH rendered contract (decision 2026-10-14)
 
@@ -37,7 +36,7 @@ retained in `infra-final.log`. See `infra/foundation/README.md`.
 
 #4 composes the real outbound writer, JSON transport and browser reducer: seven drain prefixes × 80 schedules assert exact wire order and visible B compaction. Critical boundaries fence all transient coalescing. #5 covers repeated retry and synchronous publication ownership changes: six cases × 30 schedules require one current owner and no leaked timer. Original #4/#5 replays pass after correction.
 
-[Single evidence receipt](../test-failures/2026-10-14-dst-audit-2-4-5.md) links the verified complete archive, original first reds/replays, snapshots, hashes, reproduction commands and historical CI. PR head `705b8d8` qualified on merge `92ede4c` against `224a38d` with 11 green checks; PR #97 subsequently merged as `a60f497` after all 11 checks passed. Local full process E2E was partial, not passed. Coverage review (2026-10-14) found missing compositions, not confirmed bugs; see the bounded compositions above and remaining work in `TODO.md`. No deployment qualification is implied. Preserve original scenarios/baselines: #2's initial trace uses the old two-task topology; shutdown uses the independent-lane audit tree, not main.
+[Single evidence receipt](../test-failures/2026-10-14-dst-audit-2-4-5.md) links the verified complete archive, original first reds/replays, snapshots, hashes, reproduction commands and historical CI. PR head `705b8d8` qualified on merge `92ede4c` against `224a38d` with 11 green checks; PR #97 subsequently merged as `a60f497` after all 11 checks passed. Local full process E2E was partial, not passed. Coverage review (2026-10-14) found missing compositions, not confirmed bugs; see the bounded compositions above for current scope. No deployment qualification is implied. Preserve original scenarios/baselines: #2's initial trace uses the old two-task topology; shutdown uses the independent-lane audit tree, not main.
 
 **PR 84 qualification — 2026-10-13:** the rebased, simplified initialization diagnostics pass 108 focused tests and typecheck/lint. The seven frontend files completed before the [first CI shard failure](https://github.com/schani/pi-orb/actions/runs/38348517524/job/115135368758) pass locally (24 tests), but that does not clear its subsequent runner segmentation fault/exit139; the crashing component and cause remain unproven. First logs/artifacts: `.context/pr84-revision/`. No deployment qualification is claimed.
 

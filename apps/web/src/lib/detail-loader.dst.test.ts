@@ -1,3 +1,5 @@
+import type { LiveDisplayDetail } from "@pi-orb/protocol";
+import type { Deadline, SimulationTask } from "determined";
 import { err, ok, type Result } from "neverthrow";
 import { afterEach, expect, it, vi } from "vitest";
 import { runDst } from "../../../orb-runtime/src/testkit/sim.ts";
@@ -272,3 +274,215 @@ it.each(["close", "disconnect", "reconnect", "open", "retry"] as const)(
     });
   },
 );
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+const scope = JSON.stringify(["orb", "session", "operation", "block"]);
+const sides = ["before", "after"] as const;
+type Response = Result<LiveDisplayDetail, string>;
+type Key = [string, string, string, string];
+
+// Actual disclosures and scoped pool; only platform timers and HTTP completion are supplied.
+function disclosures(task: SimulationTask) {
+  const active = new Map<number, Deadline>();
+  let serial = 0;
+  vi.stubGlobal("setTimeout", (fire: () => void, delay: number) => {
+    const id = ++serial;
+    const deadline = task.createDeadline(delay, `detail timer ${id}`);
+    active.set(id, deadline);
+    deadline.signal.addEventListener("abort", () => {
+      active.delete(id);
+      deadline.cancel();
+      fire(); // Deferred read only: no task API inside the abort listener.
+    });
+    return id;
+  });
+  vi.stubGlobal("clearTimeout", (id: number) => {
+    active.get(id)?.cancel();
+    active.delete(id);
+  });
+  const pending = new Map<string, Promise<Response>>();
+  const requests: { key: string; response: ReturnType<typeof deferred<Response>> }[] = [];
+  const read = (key: string) => {
+    const response = deferred<Response>();
+    requests.push({ key, response });
+    return response.promise;
+  };
+  const seen = vi.fn<(result: Response) => void>();
+  const peerSeen = vi.fn<(result: Response) => void>();
+  const shouldContinue = (detail: LiveDisplayDetail) => detail.state === "running";
+  const current = new DetailLoader({ read, pending, publish: seen, shouldContinue });
+  const peer = new DetailLoader({ read, pending, publish: peerSeen, shouldContinue });
+  const finish = async (index: number, state: LiveDisplayDetail["state"] | "error") => {
+    const request = requests[index] ?? expect.fail("missing detail request");
+    const [, sessionId, operationId, blockId] = JSON.parse(request.key) as Key;
+    request.response.resolve(
+      state === "error"
+        ? err("network")
+        : ok({
+            v: 1,
+            sessionId,
+            operationId,
+            blockId,
+            state,
+            body: { type: "reasoning", text: `response-${index}` },
+          }),
+    );
+    await request.response.promise;
+  };
+  const dispose = () => {
+    current.close();
+    peer.close();
+    for (const deadline of active.values()) deadline.cancel();
+    vi.unstubAllGlobals();
+  };
+  return {
+    current,
+    peer,
+    seen,
+    peerSeen,
+    requests,
+    pending,
+    finish,
+    active,
+    dispose,
+    ready: deferred<void>(),
+    done: deferred<void>(),
+    order: [] as string[],
+  };
+}
+type Disclosures = ReturnType<typeof disclosures>;
+type Actor = (task: SimulationTask, views: Disclosures) => Promise<void>;
+
+async function compose(name: string, ownership: Actor, response: Actor) {
+  await runDst({ name, iterations: 1, timerOrder: "earliest" }, async (sim) => {
+    const started = deferred<Disclosures>();
+    let views: Disclosures | undefined;
+    try {
+      const result = await sim.runTasks([
+        {
+          name: "ownership",
+          f: async (task) => {
+            views = disclosures(task);
+            started.resolve(views);
+            await ownership(task, views);
+          },
+        },
+        {
+          name: "response",
+          f: async (task) => {
+            const views = await started.promise;
+            await views.ready.promise;
+            await response(task, views);
+          },
+        },
+      ]);
+      if (result.isErr()) throw result.error;
+    } finally {
+      views?.dispose();
+    }
+  });
+}
+
+it.each(
+  sides.flatMap((side) =>
+    (["completed", "error", "unavailable"] as const).map((terminal) => ({ side, terminal })),
+  ),
+)(
+  "DST: shared retry response $side ownership deadline; $terminal stops polling",
+  async ({ side, terminal }) => {
+    await compose(
+      `detail-shared-retry-${side}-${terminal}`,
+      async (task, f) => {
+        f.current.open(scope, true);
+        f.peer.open(scope, true);
+        f.current.retry();
+        f.current.retry();
+        expect(f.requests).toHaveLength(1);
+        expect(f.pending.size).toBe(1);
+        f.ready.resolve();
+        await task.sleep(10, "peer ownership deadline");
+        f.order.push("retire");
+        f.peer.close();
+        await f.done.promise;
+        expect(f.seen).toHaveBeenCalledTimes(1);
+        expect(f.peerSeen).toHaveBeenCalledTimes(side === "before" ? 1 : 0);
+        expect(f.active.size).toBe(1);
+        await task.sleep(1001, "current poll deadline");
+        expect(f.requests).toHaveLength(2);
+        expect(f.active.size).toBe(0);
+        await f.finish(1, terminal);
+        expect(f.seen).toHaveBeenCalledTimes(2);
+        await task.sleep(2000, "terminal quiet");
+        expect(f.requests).toHaveLength(2);
+        expect(f.active.size).toBe(0);
+        expect(f.pending.size).toBe(0);
+        f.current.close();
+        expect(f.active.size).toBe(0);
+        expect(f.order).toEqual(
+          side === "before" ? ["response", "retire"] : ["retire", "response"],
+        );
+      },
+      async (task, f) => {
+        await task.sleep(side === "before" ? 1 : 20, "response arrival");
+        f.order.push("response");
+        await f.finish(0, "running");
+        f.done.resolve();
+      },
+    );
+  },
+);
+
+it.each(
+  sides.flatMap((side) =>
+    (["close", "disconnect", "replace"] as const).map((action) => ({ side, action })),
+  ),
+)("DST: shared publication reenters $action ownership ($side)", async ({ action, side }) => {
+  await compose(
+    `detail-shared-reentry-${action}-${side}`,
+    async (task, f) => {
+      const next = JSON.stringify(["orb", "session", "next-operation", "block"]);
+      const change = () => {
+        if (action === "close") f.current.close();
+        else if (action === "disconnect") f.current.connected(false);
+        else f.current.open(next, true);
+      };
+      f.seen.mockImplementation((result) => {
+        if (side === "after" && result.isOk() && result.value.operationId === "operation") {
+          change(); // On the subscriber stack, not in the next scheduled actor.
+        }
+      });
+      f.current.open(scope, true);
+      f.peer.open(scope, true);
+      expect(f.requests).toHaveLength(1);
+      if (side === "before") change();
+      f.ready.resolve();
+      await f.done.promise;
+      expect(f.seen).toHaveBeenCalledTimes(side === "after" ? 1 : 0);
+      expect(f.peerSeen).toHaveBeenCalledTimes(1);
+      expect(f.active.size).toBe(1); // Only the unchanged peer may poll.
+      if (action === "replace") {
+        expect(f.requests.map((read) => read.key)).toEqual([scope, next]);
+        await f.finish(1, "running");
+        expect(f.seen).toHaveBeenCalledTimes(side === "after" ? 2 : 1);
+        expect(f.active.size).toBe(2);
+      }
+      f.current.close();
+      f.peer.close();
+      expect(f.active.size).toBe(0); // Includes timers whose handles could have been overwritten.
+      await task.sleep(2000, "retired timers quiet");
+      expect(f.requests).toHaveLength(action === "replace" ? 2 : 1);
+    },
+    async (task, f) => {
+      await task.checkpoint("shared publication");
+      await f.finish(0, "running");
+      f.done.resolve();
+    },
+  );
+});
