@@ -22,6 +22,7 @@ const followingMigrations = [
   "042_git_identities.sql",
   "043_resource_warnings.sql",
   "044_lossless_history_json.sql",
+  "045_orb_messaging.sql",
 ];
 const first = {
   userId: "00000000-0000-4000-8000-000000000001",
