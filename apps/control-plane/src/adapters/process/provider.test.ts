@@ -122,6 +122,91 @@ async function eventually<T>(read: () => T | null, timeoutMs = 3_000): Promise<T
   throw new Error("condition did not become true");
 }
 
+type ScheduleDeadline = (expire: () => void) => () => void;
+
+async function withDiscardDeadline<T>(
+  discard: () => PromiseLike<T>,
+  diagnostics: () => string,
+  schedule: ScheduleDeadline = (expire) => {
+    const timer = setTimeout(expire, 3_000);
+    return () => clearTimeout(timer);
+  },
+): Promise<T> {
+  let expired = false;
+  // Keep deadline creation at zero even if the injected schedule expires first.
+  const clock = vi
+    .spyOn(Date, "now")
+    .mockReturnValueOnce(0)
+    .mockImplementation(() => (expired ? 151 : 0));
+  let cancel = () => {};
+  try {
+    cancel = schedule(() => {
+      expired = true;
+    });
+    const result = await discard();
+    if (expired) throw new Error(`discard drain deadline expired: ${diagnostics()}`);
+    return result;
+  } finally {
+    clock.mockRestore();
+    cancel();
+  }
+}
+
+it("discard deadline owns missing-drain settlement and restores the clock", async () => {
+  const originalNow = Date.now;
+  let expire = () => {};
+  const cancel = vi.fn();
+  const schedule: ScheduleDeadline = (callback) => {
+    expire = callback;
+    return cancel;
+  };
+  let release = () => {};
+  const settlement = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let discardSettled = false;
+  let helperSettled = false;
+  const diagnostics = vi.fn(() => "receipt: null; supervisorStat: T; stderr: waiting");
+  const pending = withDiscardDeadline(
+    async () => {
+      const deadline = Date.now() + 150;
+      await settlement;
+      expect(Date.now()).toBeGreaterThanOrEqual(deadline);
+      discardSettled = true;
+    },
+    diagnostics,
+    schedule,
+  )
+    .then(
+      () => null,
+      (error: unknown) => error,
+    )
+    .finally(() => {
+      helperSettled = true;
+    });
+  try {
+    expect(Date.now()).toBe(0);
+    expire();
+    await new Promise(setImmediate);
+    expect(helperSettled).toBe(false);
+    expect(discardSettled).toBe(false);
+    expect(Date.now()).toBe(151);
+    release();
+    expect(await pending).toEqual(
+      new Error(
+        "discard drain deadline expired: receipt: null; supervisorStat: T; stderr: waiting",
+      ),
+    );
+    expect(discardSettled).toBe(true);
+    expect(diagnostics).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(Date.now).toBe(originalNow);
+  } finally {
+    release();
+    await pending;
+  }
+});
+
 afterEach(async () => {
   vi.unstubAllEnvs();
   await Promise.all(providers.splice(0).map((provider) => provider.close()));
@@ -677,50 +762,141 @@ describe("ProcessOrbHostProvider", () => {
     },
   );
 
-  launchIt("discard kills group members that outlive the leader", async () => {
-    const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
-    const memberPidFile = join(tmpdir(), `pi-orb-member-${crypto.randomUUID()}`);
-    const { provider, root } = makeProvider(
-      { OBSERVED_ENV_FILE: observedEnv, GROUP_MEMBER_PID_FILE: memberPidFile },
-      { terminateGraceMs: 150 },
-    );
-    let memberPid: number | null = null;
-    try {
-      const provisioned = await provider.provision(task, request, context);
-      expect(provisioned.isOk()).toBe(true);
-      memberPid = await eventually(() => {
-        try {
-          const pid = Number(readFileSync(memberPidFile, "utf8"));
-          return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
-        } catch {
-          return null;
-        }
-      });
-      expect(processExists(memberPid)).toBe(true);
-
-      // The leader dies on SIGTERM; the member ignores it. Discard may only
-      // report absence once the whole group is gone, which requires the
-      // SIGKILL rung and the post-SIGKILL group probe.
-      const discarded = await provider.discardCompute(
-        task,
-        { orbId: request.orbId, throughIncarnation: 0 },
-        context,
+  launchIt.each([false, true])(
+    "discard kills group members that outlive the leader (delayed drain: %s)",
+    async (delayed) => {
+      const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
+      const memberPidFile = join(tmpdir(), `pi-orb-member-${crypto.randomUUID()}`);
+      const { provider, root } = makeProvider(
+        { OBSERVED_ENV_FILE: observedEnv, GROUP_MEMBER_PID_FILE: memberPidFile },
+        { terminateGraceMs: 150 },
       );
-      expect(discarded.isOk(), JSON.stringify(discarded)).toBe(true);
-      expect(processExists(memberPid)).toBe(false);
-      expect(existsSync(join(root, "configured-state", request.orbId, "host.json"))).toBe(false);
-    } finally {
-      if (memberPid !== null && processExists(memberPid)) {
-        try {
-          process.kill(memberPid, "SIGKILL");
-        } catch {
-          // Already gone.
+      let memberPid: number | null = null;
+      let pausedSupervisor: number | null = null;
+      try {
+        const provisioned = await provider.provision(task, request, context);
+        expect(provisioned.isOk()).toBe(true);
+        memberPid = await eventually(() => {
+          try {
+            const pid = Number(readFileSync(memberPidFile, "utf8"));
+            return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+          } catch {
+            return null;
+          }
+        });
+        expect(processExists(memberPid)).toBe(true);
+
+        const directory = join(root, "configured-state", request.orbId);
+        const metadataPath = join(directory, "host.json");
+        const receiptPath = join(directory, "drained.json");
+        const metadata = JSON.parse(readFileSync(metadataPath, "utf8")) as {
+          processGroupId: number;
+          processBirth: string;
+          drainToken: string;
+        };
+        const diagnostics = () => {
+          const read = (path: string) => {
+            try {
+              return readFileSync(path, "utf8");
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+              throw error;
+            }
+          };
+          return JSON.stringify({
+            metadata,
+            supervisorStat: read(`/proc/${metadata.processGroupId}/stat`),
+            receipt: read(receiptPath),
+            stderr: read(join(directory, "runtime.err.log")),
+          });
+        };
+        if (delayed) {
+          pausedSupervisor = metadata.processGroupId;
+          process.kill(pausedSupervisor, "SIGSTOP");
+          await eventually(() =>
+            readFileSync(`/proc/${metadata.processGroupId}/stat`, "utf8").includes(") T ")
+              ? true
+              : null,
+          );
         }
+
+        // Drive deadline expiry explicitly; successful drain follows the receipt,
+        // not the scheduler's ability to kill, reap and fsync within 150 ms.
+        const discard = () =>
+          provider.discardCompute(task, { orbId: request.orbId, throughIncarnation: 0 }, context);
+        let discarded: Awaited<ReturnType<typeof discard>> | undefined;
+        const originalNow = Date.now;
+        if (delayed) {
+          await expect(
+            withDiscardDeadline(
+              async () => {
+                discarded = await discard();
+              },
+              diagnostics,
+              (expire) => {
+                queueMicrotask(expire);
+                return () => {};
+              },
+            ),
+          ).rejects.toThrow("discard drain deadline expired:");
+        } else {
+          discarded = await withDiscardDeadline(discard, diagnostics);
+        }
+        expect(Date.now).toBe(originalNow);
+        expect(discarded, diagnostics()).toBeDefined();
+        if (discarded === undefined) return;
+        if (delayed) {
+          expect(discarded.isErr(), diagnostics()).toBe(true);
+          if (discarded.isErr()) {
+            expect(discarded.error).toEqual({
+              type: "orb_host_provider_error",
+              provider: "process",
+              operation: "discard",
+              code: "unavailable",
+              message: "execution supervisor loss: descendant cleanup is unknown",
+              retryable: true,
+            });
+          }
+          expect(existsSync(metadataPath), diagnostics()).toBe(true);
+          expect(existsSync(receiptPath), diagnostics()).toBe(false);
+          expect(processExists(memberPid), diagnostics()).toBe(true);
+          process.kill(metadata.processGroupId, "SIGCONT");
+          pausedSupervisor = null;
+          await eventually(() => {
+            if (!existsSync(receiptPath) || processExists(metadata.processGroupId)) return null;
+            const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as { launch: string };
+            return receipt.launch === metadata.drainToken ? true : null;
+          }).catch((error: unknown) => {
+            console.error(diagnostics());
+            throw error;
+          });
+          expect(readFileSync(join(directory, "runtime.err.log"), "utf8")).toContain(
+            "execution supervisor: descendants drained",
+          );
+          expect((await discard()).isOk(), diagnostics()).toBe(true);
+        } else {
+          expect(discarded.isOk(), diagnostics()).toBe(true);
+        }
+        expect(JSON.parse(readFileSync(receiptPath, "utf8"))).toEqual({
+          launch: metadata.drainToken,
+        });
+        expect(processExists(metadata.processGroupId), diagnostics()).toBe(false);
+        expect(processExists(memberPid), diagnostics()).toBe(false);
+        expect(existsSync(metadataPath)).toBe(false);
+      } finally {
+        if (pausedSupervisor !== null) process.kill(pausedSupervisor, "SIGCONT");
+        if (memberPid !== null && processExists(memberPid)) {
+          try {
+            process.kill(memberPid, "SIGKILL");
+          } catch {
+            // Already gone.
+          }
+        }
+        rmSync(observedEnv, { force: true });
+        rmSync(memberPidFile, { force: true });
       }
-      rmSync(observedEnv, { force: true });
-      rmSync(memberPidFile, { force: true });
-    }
-  });
+    },
+  );
 });
 
 describe("ProcessOrbHostProvider host specification", () => {
