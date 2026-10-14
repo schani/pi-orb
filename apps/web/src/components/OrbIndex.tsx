@@ -19,6 +19,7 @@ import {
 import { useAddressedProject } from "../lib/use-addressed-project.ts";
 import { useAppSearchSource } from "./AppSearch.tsx";
 import { ProjectHeader } from "./ProjectHeader.tsx";
+import { ProjectOrbTree } from "./ProjectOrbTree.tsx";
 import { StateTile } from "./StateTile.tsx";
 
 interface OrbList {
@@ -135,7 +136,11 @@ export function IndexProject({
               {describeApiError(list.error)}
             </div>
           )}
-          {rows(shelves.working)}
+          <ProjectOrbTree items={shelves.working}>
+            {(orb) => (
+              <IndexRow orb={orb} orbId={orbId} pending={pending} now={now} onSelect={onSelect} />
+            )}
+          </ProjectOrbTree>
           {shelves.archive.length > 0 && (
             <details
               className="project-archive"

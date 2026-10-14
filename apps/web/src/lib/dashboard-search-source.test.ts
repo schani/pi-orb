@@ -99,6 +99,36 @@ describe("dashboard search source", () => {
     expect(items[1]?.glyph?.state).toBe("busy");
   });
 
+  it("matches working tree traversal while keeping archives flat, including after promotion", () => {
+    const child = { ...orb("child", "Child", "running"), spawnedBy: "parent" };
+    const other = orb("other", "Other", "running");
+    const parent = orb("parent", "Parent", "stopped");
+    const grandchild = { ...orb("grandchild", "Grandchild", "running"), spawnedBy: "child" };
+    const archived = { ...orb("archived", "Archived", "archived"), spawnedBy: "parent" };
+    const orbOrder = new Map();
+    const titles = (items: OrbView[]) =>
+      buildDashboardSearchSource({
+        projects: [project("project-1", "Atlas", "https://github.com/acme/atlas")],
+        projectsLoading: false,
+        projectsFailed: false,
+        now,
+        orbOrder,
+        orbLists: { "project-1": { type: "loaded", items } },
+      })
+        .items.filter((item) => item.group === "orbs")
+        .map((item) => item.title);
+    expect(titles([child, other, parent, grandchild, archived])).toEqual([
+      "Other",
+      "Parent",
+      "Child",
+      "Grandchild",
+      "Archived",
+    ]);
+    expect(titles([child, other, { ...parent, state: "archiving" }, grandchild, archived])).toEqual(
+      ["Child", "Grandchild", "Other", "Parent", "Archived"],
+    );
+  });
+
   it("forwards sleep metadata into Find glyphs", () => {
     const sleeping = {
       ...orb("sleeping", "Delayed work", "stopped"),

@@ -81,6 +81,26 @@ describe("stacked project index", () => {
     expect(html).toContain('class="ix-age">…</span>');
   });
 
+  it("renders an expanded working tree with native selected links and a flat archive", () => {
+    const child = { ...orb, id: "child", name: "Child", spawnedBy: orb.id };
+    const archived = { ...orb, id: "archived", state: "archived" as const, spawnedBy: orb.id };
+    const html = renderToStaticMarkup(
+      <IndexProject
+        {...props}
+        orbId={child.id}
+        list={{ items: [child, orb, archived], error: null }}
+      />,
+    );
+    expect(html).toContain('data-orb-id="child" data-orb-depth="1"');
+    expect(html.indexOf('href="/orbs/orb-1"')).toBeLessThan(html.indexOf('href="/orbs/child"'));
+    expect(html).toContain('href="/orbs/child"');
+    expect(html.match(/aria-current="page"/g)).toHaveLength(1);
+    expect(html).not.toContain("aria-expanded");
+    expect(html.match(/<details/g)).toHaveLength(1);
+    expect(html).not.toContain('data-orb-id="archived"');
+    expect(html).toContain('href="/orbs/archived"');
+  });
+
   it("forwards sleep metadata into fleet rows while retaining selected fill", () => {
     const sleeping = {
       ...orb,
