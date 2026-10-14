@@ -1,5 +1,27 @@
 # Testing
 
+## Release SSH rendered contract (decision 2026-10-14)
+
+CI requires `infra/foundation/test.sh` using checksum-pinned OpenTofu 1.12.6,
+matching deployment. The native Google mock plan pins the entire three-binding
+`google_project_iam_member.deployer_iap_tunnel` expression map against independent
+constants and counts actual rendered logical operators (≤12). This is a rendered
+text contract, not CEL execution or live IAM proof. With no existing CEL tooling,
+full-expression pins avoid a new evaluator. No policy changes or cloud credentials
+are involved.
+
+The temporary real-module copy is validated before omitting only `imports.tf`
+adoption directives for the mock plan: OpenTofu 1.12.6 crashes on mock imports. Init uses
+`-backend=false -lockfile=readonly` and temporary `TF_DATA_DIR`.
+Seven isolated mutations failed contract assertions after successful init:
+`&&→||`, ungrouped OR, appended `true`, widened build and orb prefixes, extra
+binding and non-22 port. Logs/diffs: `/tmp/audit7-evidence` (untracked).
+The import crash and initial invalid-subnet mutation setup error are preserved,
+not counted as contract failures. The first infrastructure run rejected OpenTofu
+in the image-build job because its text extraction included the following
+`checks` job; extraction now ends at that boundary. Its original failure is
+retained in `infra-final.log`. See `infra/foundation/README.md`.
+
 **PR 84 qualification — 2026-10-13:** the rebased, simplified initialization diagnostics pass 108 focused tests and typecheck/lint. The seven frontend files completed before the [first CI shard failure](https://github.com/schani/pi-orb/actions/runs/38348517524/job/115135368758) pass locally (24 tests), but that does not clear its subsequent runner segmentation fault/exit139; the crashing component and cause remain unproven. First logs/artifacts: `.context/pr84-revision/`. No deployment qualification is claimed.
 
 ## Claude immediate steering (2026-10-12; local, undeployed)
