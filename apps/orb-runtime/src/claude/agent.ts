@@ -15,7 +15,6 @@ import {
   type ClaudeRecoveryProof,
   type CommittedDisplayDetail,
   type DeliverOrbMessageResponse,
-  type HistoryRecord,
   type JsonObject,
   type LiveDisplayDetail,
   type McpConfig,
@@ -1796,14 +1795,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       !/[^A-Za-z0-9._:-]/.test(value)
         ? value
         : null;
-    const identity = (record: HistoryRecord | undefined) =>
-      record === undefined
-        ? null
-        : {
-            id: id(record.id),
-            type: record.type,
-            role: record.type === "message" ? record.role : null,
-          };
+    const first = view[this.published];
     const blocks = [...this.blocks.keys()].slice(0, 3).map((blockId) => {
       const owners = [...this.messageBlocks].filter(([, blockIds]) => blockIds.includes(blockId));
       return {
@@ -1819,7 +1811,6 @@ export class ClaudeOrbAgent implements OrbAgent {
                 : record.type === "message" && record.role === "assistant"
                   ? "assistant"
                   : "wrong_role",
-            record: identity(record),
           };
         }),
       };
@@ -1832,7 +1823,13 @@ export class ClaudeOrbAgent implements OrbAgent {
         nativeLength: this.history?.view.length ?? null,
         blocks,
         omittedBlocks: this.blocks.size - blocks.length,
-        firstUnpublished: identity(view[this.published]),
+        firstUnpublished: first
+          ? {
+              id: id(first.id),
+              type: first.type,
+              role: first.type === "message" ? first.role : null,
+            }
+          : null,
       })
     );
   }

@@ -8,8 +8,6 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Inspect the retained Claude identity-gap session before resume** (2026-10-14; `docs/postmortems/2026-10-14-claude-stream-identity-gap.md`). Read-only inspection of orb `4647f261-2126-4f20-a61c-51095d222a47`'s native disk/session should distinguish unmatched streamed identities from unpublished native history. Preserve evidence; do not replay or restart to diagnose.
-
 - **Diagnose identity-smoke cleanup before release validation** (2026-10-14; `docs/postmortems/2026-10-14-identity-smoke-cleanup.md`). Preserve Deploy 38596107385's failed identity gate; owned fixtures are now verified absent, but its original auth/transport/rejection cause is unknown. Correct premature success and silent DELETE failure diagnostics with token-safe phase/exit/HTTP/code evidence and tests-first coverage. Deferred candidate `43f059be` rejects successful array responses and is not approved for merge. Any later validation requires an explicit decision; no rerun or historical waiver is implied.
 
 - **Validate transcript target UUIDs before store lookup** (2026-10-13; `docs/postmortems/2026-10-13-rollout-monitor-anomalies.md`). Return a typed client-visible invalid-target response, not PostgreSQL 22P02 → internal 500. Test the HTTP boundary with real PostgreSQL; retain content-free route/error correlation for unexpected lookup failures.

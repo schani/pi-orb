@@ -269,15 +269,8 @@ Use the pinned SDK with fake-model request assertions in browser-runtime handsha
 
 **Publication invariant (2026-10-06):** native-only assistant prefixes may publish past live blocks only when every block has explicit `messageBlocks` ownership by an exact durable assistant UUID in the current scan. Native order and matching-record-only retirement are preserved; missing/mismatched identities, wrong-role matches and unbound blocks fail closed. Evidence and historical attribution limits: [docs/postmortems/2026-10-06-claude-publication-order.md](postmortems/2026-10-06-claude-publication-order.md).
 
-**Terminal publication invariant (2026-10-14):** after drain, completion requires `blocks.size === 0` and `published === history.view.length`. `claude_stream_identity_gap` fails closed without automatic recovery. Manual Start is not a demonstrated repair; native disk inspection precedes resume for attribution. Historical evidence and unresolved cause: `docs/postmortems/2026-10-14-claude-stream-identity-gap.md`.
-
-**Terminal diagnostics (2026-10-14):** the existing failure message includes content-free JSON:
-
-- `liveBlocks`, `published`, `nativeLength` (`history.view.length`, including platform records), `omittedBlocks`.
-- Up to three live block IDs; each has `ownerCount` and up to two owner UUIDs with native match (`missing`, `assistant`, `wrong_role`) and matching record ID/type/role. Zero owners identifies an unbound block.
-- `firstUnpublished`: record ID/type/role, or `null`.
-
-IDs remain exact only for 1–96 ASCII identifier characters (`A–Z`, `a–z`, `0–9`, `.`, `_`, `:`, `-`); absent, malformed or oversized IDs become `null`, never truncated fragments. Matching uses full identities even when display is omitted. No content, signatures, SDK bodies or native overflow are copied. Counters alone cannot identify mismatched ownership; bounded samples preserve that evidence without dumping a transcript. Health → persisted/UI-visible `lastError` preserves the message; no new journal state or schema.
+**Terminal diagnostics (2026-10-14):** `claude_stream_identity_gap` still fails closed; its existing health → persisted/UI-visible `lastError` now includes live/published/native counts, the first unpublished record's ID/type/role, and up to three live block IDs with owner counts and two owner UUID/native-match samples (`missing`, `assistant`, `wrong_role`; zero owners means unbound).
+IDs outside 1–96 ASCII identifier characters (`A–Z`, `a–z`, `0–9`, `.`, `_`, `:`, `-`) become `null`; matching still uses full identities. Payloads, text, signatures and overflow are excluded. Bounded samples distinguish ownership failures without copying transcripts; no new persisted state or automatic recovery.
 
 ## Proposed observability
 
