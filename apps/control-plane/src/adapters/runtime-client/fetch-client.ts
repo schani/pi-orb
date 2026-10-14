@@ -11,7 +11,7 @@ import {
   RuntimeHttpErrorSchema,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { err, ok, type Result, ResultAsync } from "neverthrow";
+import { err, ok, Result, ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
 import type { RuntimeClientError } from "../../domain/errors.ts";
 import type {
@@ -73,6 +73,7 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
     url: string,
     context: OperationContext,
     init?: Omit<RequestInit, "signal">,
+    acceptedStatuses: readonly number[] = [200],
   ): ResultAsync<{ status: number; body: unknown }, RuntimeClientError> {
     const run = async (): Promise<
       Result<{ status: number; body: unknown }, RuntimeClientError>
@@ -86,11 +87,27 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
         },
       );
       if (response.isErr()) return err(response.error);
-      const body = await ResultAsync.fromPromise(response.value.json(), (error) =>
-        clientError("invalid_response", `unparseable response body: ${String(error)}`, false, true),
-      );
+      const { status } = response.value;
+      const text = await ResultAsync.fromThrowable(
+        () => response.value.text(),
+        (error) =>
+          clientError(
+            context.signal.aborted ? "cancelled" : "unreachable",
+            `runtime HTTP ${status} body read ${context.signal.aborted ? "cancelled" : "failed"} (cause: ${causeCode(error) ?? "unknown"})`,
+            true,
+            false,
+          ),
+      )();
+      if (text.isErr()) return err(text.error);
+      const body = Result.fromThrowable(
+        (text: string): unknown => JSON.parse(text),
+        () =>
+          acceptedStatuses.includes(status)
+            ? clientError("invalid_response", "unparseable response body", false, true)
+            : this.mapErrorResponse(status, undefined),
+      )(text.value);
       if (body.isErr()) return err(body.error);
-      return ok({ status: response.value.status, body: body.value });
+      return ok({ status, body: body.value });
     };
     return new ResultAsync(run());
   }
@@ -129,6 +146,7 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
           ...(request.system === undefined ? {} : { system: request.system }),
         }),
       },
+      [200, 202],
     ).andThen(({ status, body }) => {
       if (status !== 200 && status !== 202) return err(this.mapErrorResponse(status, body));
       if (!Check(DeliverOrbMessageResponseSchema, body)) {
