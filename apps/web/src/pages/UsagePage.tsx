@@ -85,7 +85,6 @@ function LoadedUsage({
         <span>
           {date(data.boundaries[0] ?? 0)} → {date(data.boundaries.at(-1) ?? 0)}
         </span>
-        <span>Recorded Pi + Luna</span>
       </div>
       <div className="usage-overview">
         <dl className="usage-summary">

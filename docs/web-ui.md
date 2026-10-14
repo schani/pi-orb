@@ -21,7 +21,7 @@ Race found while qualifying (2026-10-13): two overlapping `vega-embed` mounts on
 
 Trend beside Settings opens `/usage`: Comparison lines with a left summary, last day/week/month/6 months, token-kind/use/model breakdowns and top-orb/use bars. Period changes preserve filters. Owner-scoped `/api/v1/usage` reads recorded Pi + Luna usage; errors offer Retry, empty reads show no recorded calls. No persisted state changes.
 
-Transcript and usage share `Chart.tsx`, spec builders, renderer and CSS. Hover shows exact point values; end-label/phone-key hover isolates series. Dense 15-minute/hourly/6-hour/daily ticks retain every point while spacing text labels. Phones stack the summary/rankings and use 44px controls. Bounds use browser-local civil time, including DST. API, coverage, rationale and validation: `docs/model-usage.md`. Not deployed.
+Transcript and usage share `Chart.tsx`, spec builders, renderer and CSS. Hover shows exact point values; end-label/phone-key hover isolates series. Dense 15-minute/hourly/6-hour/daily ticks retain every point while spacing text labels. At ≤900 CSS px, the summary and rankings stack; phones use 44px controls. Bounds use browser-local civil time, including DST. API, coverage, rationale and validation: `docs/model-usage.md`. Not deployed.
 
 ## Resource warnings and blocked delivery (decided 2026-10-09; implemented and focused-test qualified locally, not deployed)
 
