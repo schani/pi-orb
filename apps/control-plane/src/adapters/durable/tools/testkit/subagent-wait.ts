@@ -2,17 +2,23 @@ import type { Context, JsonValue } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
+  type ConversationId,
+  createSession,
   type DocumentWatch,
   InboxDoc,
   type InboxState,
-  ROOT_CONVERSATION_ID,
+  MemoryStorage,
+  type Session,
+  type SubmissionId,
   type TaskId,
   type TaskRecord,
   type ToolExecutionApi,
+  type ToolExecutionResult,
+  type ToolRegistration,
   type WatchEnd,
 } from "@earendil-works/pi-durable";
 import { expect } from "vitest";
-import { ChildReceipts } from "../subagents.ts";
+import { ChildReceipts, subagentTools } from "../subagents.ts";
 
 export function deferred<T = void>() {
   let resolve!: (value: T) => void;
@@ -25,18 +31,43 @@ export function deferred<T = void>() {
 }
 
 type Child = TaskRecord<JsonValue, JsonValue, JsonValue>;
-type Listener = Parameters<DocumentWatch<InboxState>["start"]>[0];
 
-/**
- * Exact pi-durable 1.1 watch boundary: acquisition atomically attaches and
- * snapshots; later revisions buffer until start; listeners never run inline.
- * No task cancellation is coupled to cancellation of an observing context.
- */
+export const wait = subagentTools.find(
+  (tool) => tool.name === "get_subagent_result",
+) as ToolRegistration;
+export const waitArgs = { agent_id: "child", wait: true };
+export function toolData(value: ToolExecutionResult) {
+  return JSON.parse(value.content?.find((block) => block.type === "text")?.text ?? "");
+}
+
+/** Native inbox watch; only the child waiter and injected boundary failures are controlled. */
 export class WaitBoundary {
-  inbox: InboxState = { items: [] };
+  private readonly session: Session;
+
+  private constructor(session: Session, conversationId: ConversationId) {
+    this.session = session;
+    this.api = { ...this.api, conversationId };
+    this.child = { ...this.child, conversationId };
+  }
+
+  static async open() {
+    const session = createSession(new MemoryStorage(), { now: () => 0 });
+    const conversationId = await session.commit(async (tx) => {
+      const conversation = await tx.createConversation({ ownership: { kind: "ownerless" } });
+      await tx.doc(InboxDoc, conversation.id);
+      return conversation.id;
+    }, BACKGROUND_CONTEXT);
+    return new WaitBoundary(session, conversationId);
+  }
+
+  async [Symbol.asyncDispose]() {
+    this.complete();
+    await this.session.close(BACKGROUND_CONTEXT);
+  }
+
   child: Child = {
     id: 7 as TaskId<JsonValue>,
-    conversationId: ROOT_CONVERSATION_ID,
+    conversationId: 0 as ConversationId,
     kind: "orb.child",
     version: 1,
     input: null,
@@ -44,7 +75,7 @@ export class WaitBoundary {
     abortRequested: false,
     state: { status: "running", checkpoint: { phase: "run", child: 2 } },
   };
-  readonly watches = new Set<DocumentWatch<InboxState>>();
+  readonly watches = new Map<DocumentWatch<InboxState>, (end: WatchEnd) => void>();
   readonly waiters = new Set<ReturnType<typeof deferred<Child>>>();
   readonly registered = deferred();
   acquisitions = 0;
@@ -57,21 +88,17 @@ export class WaitBoundary {
   stopEnd: WatchEnd = { reason: "stopped" };
   readFailure: unknown;
   waitFailure: unknown;
-  private readonly publications = new Map<DocumentWatch<InboxState>, (value: InboxState) => void>();
-  private readonly ends = new Map<DocumentWatch<InboxState>, (end: WatchEnd) => void>();
 
   readonly api = {
-    conversationId: ROOT_CONVERSATION_ID,
+    conversationId: 0 as ConversationId,
     taskId: 9 as TaskId,
     callId: "wait",
     models: createModels(),
     output: () => {},
     snapshot: async (token: unknown, id: unknown) => {
-      expect(id).toBe(ROOT_CONVERSATION_ID);
-      if (token === ChildReceipts)
-        return { children: { child: { anchor: 7, prompt: "work", description: "leaf" } } };
-      expect(token).toBe(InboxDoc);
-      return structuredClone(this.inbox);
+      expect(id).toBe(this.api.conversationId);
+      expect(token).toBe(ChildReceipts);
+      return { children: { child: { anchor: 7, prompt: "work", description: "leaf" } } };
     },
     getTask: async (id: TaskId) => {
       expect(id).toBe(this.child.id);
@@ -101,89 +128,57 @@ export class WaitBoundary {
     },
     watchDoc: async (token: unknown, id: unknown, ctx: Context) => {
       expect(token).toBe(InboxDoc);
-      expect(id).toBe(ROOT_CONVERSATION_ID);
+      expect(id).toBe(this.api.conversationId);
       if (this.acquireFailure) throw this.acquireFailure;
       this.acquisitions++;
-      let value = structuredClone(this.inbox);
-      let listener: Listener | undefined;
-      let ended = false;
-      let draining = false;
-      const pending: InboxState[] = [];
+      const native = await this.session.watchDoc(InboxDoc, this.api.conversationId, ctx);
+      if (!native) throw new Error("Missing native inbox watch");
       const closed = deferred<WatchEnd>();
-      const end = (reason: WatchEnd) => {
-        if (ended) return;
-        ended = true;
-        pending.length = 0;
-        this.watches.delete(watch);
-        this.publications.delete(watch);
-        this.ends.delete(watch);
-        ctx.abortSignal?.removeEventListener("abort", cancel);
-        closed.resolve(reason);
-      };
-      const cancel = () => end({ reason: "cancelled" });
-      const drain = async () => {
-        if (draining || !listener || ended) return;
-        draining = true;
-        try {
-          while (pending.length && !ended) {
-            const next = pending.shift();
-            if (!next) break;
-            value = next;
-            await listener(value, [["r", value]], BACKGROUND_CONTEXT);
-          }
-        } catch (error) {
-          end({ reason: "listener_error", error: error as Error });
-        } finally {
-          draining = false;
-        }
-      };
-      const schedule = () => queueMicrotask(() => void drain());
+      void native.closed.then(closed.resolve);
       const watch: DocumentWatch<InboxState> = {
         get value() {
-          return value;
+          return native.value;
         },
         closed: closed.promise,
         start: (callback) => {
           if (this.startFailure) throw this.startFailure;
-          if (ended || listener) throw new Error("watch cannot start");
-          listener = callback;
-          schedule();
+          native.start(callback);
         },
         stop: async () => {
-          end(this.stopEnd);
+          closed.resolve(this.stopEnd);
+          await native.stop();
           if (this.stopFailure) throw this.stopFailure;
           return closed.promise;
         },
       };
-      // No await between the acquisition value and registration.
-      this.watches.add(watch);
-      this.publications.set(watch, (revision) => {
-        pending.push(structuredClone(revision));
-        if (listener) schedule();
+      this.watches.set(watch, (reason) => {
+        closed.resolve(reason);
+        void native.stop();
       });
-      this.ends.set(watch, end);
-      ctx.abortSignal?.addEventListener("abort", cancel, { once: true });
-      if (ctx.abortSignal?.aborted) cancel();
+      void closed.promise.then(() => this.watches.delete(watch));
       await this.afterAcquire();
       return watch;
     },
   } as unknown as ToolExecutionApi;
 
-  queue(mode: "steer" | "followUp" | "write") {
-    const id = this.inbox.items.length + 1;
-    this.inbox = {
-      items: [
-        ...this.inbox.items,
+  async queue(mode: "steer" | "followUp" | "write") {
+    await this.session.commit(async (tx) => {
+      const inbox = await tx.doc(InboxDoc, this.api.conversationId);
+      const id = (inbox.items.length + 1) as SubmissionId;
+      inbox.items.push(
         mode === "write"
           ? { id, mode, entry: { kind: "passive" } }
           : { id, mode, content: [{ type: "text", text: "input" }] },
-      ],
-    } as InboxState;
-    for (const publish of this.publications.values()) publish(this.inbox);
+      );
+    }, BACKGROUND_CONTEXT);
+  }
+
+  get inbox() {
+    return this.session.snapshot(InboxDoc, this.api.conversationId, BACKGROUND_CONTEXT);
   }
 
   close(reason: WatchEnd) {
-    for (const end of [...this.ends.values()]) end(reason);
+    for (const end of this.watches.values()) end(reason);
   }
 
   complete() {

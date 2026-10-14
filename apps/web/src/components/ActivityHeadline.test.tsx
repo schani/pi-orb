@@ -1,7 +1,7 @@
 import type { DisplayRecord } from "@pi-orb/protocol";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { detailContext } from "../testkit/display-fixtures.ts";
+import { detailContext, messageNotice } from "../testkit/display-fixtures.ts";
 import { SubagentNotice } from "./SubagentNotice.tsx";
 import { ToolActivity, type ToolCallBlock, type ToolResultBlock } from "./ToolActivity.tsx";
 
@@ -59,22 +59,7 @@ describe("activity headline rendering", () => {
   it.each(["", "Review <script>alert('literal')</script> **plain**"])(
     "renders message preview %j as a neutral notification with source on the right",
     (messagePreview) => {
-      const notice = {
-        kind: "notification" as const,
-        id: "child-7",
-        description: "Review",
-        detailKey: "receipt:subagent",
-        messagePreview,
-      };
-      const record: Extract<DisplayRecord, { type: "event" }> = {
-        id: "receipt",
-        parentId: null,
-        timestamp: "now",
-        type: "event",
-        eventType: "pi.custom_message",
-        custom: { customType: "subagent-notification", display: true },
-        subagent: notice,
-      };
+      const record = messageNotice(messagePreview, "receipt", "child-7", "Review");
       const html = renderToStaticMarkup(
         <SubagentNotice record={record} detailContext={detailContext()} />,
       );

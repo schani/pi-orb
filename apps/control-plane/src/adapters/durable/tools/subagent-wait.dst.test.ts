@@ -1,30 +1,25 @@
 import { BACKGROUND_CONTEXT, withCancel } from "@earendil-works/chord/context";
-import type {
-  ToolExecutionApi,
-  ToolExecutionResult,
-  ToolRegistration,
-} from "@earendil-works/pi-durable";
+import type { ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { SimulationTask } from "determined";
 import { expect, it } from "vitest";
 import { runDst } from "../../../testkit/sim.ts";
-import { subagentTools } from "./subagents.ts";
-import { deferred, WaitBoundary } from "./testkit/subagent-wait.ts";
-
-const wait = subagentTools.find((tool) => tool.name === "get_subagent_result") as ToolRegistration;
-const args = { agent_id: "child", wait: true };
-function data(value: ToolExecutionResult) {
-  return JSON.parse(value.content?.find((block) => block.type === "text")?.text ?? "");
-}
+import {
+  waitArgs as args,
+  toolData as data,
+  deferred,
+  WaitBoundary,
+  wait,
+} from "./testkit/subagent-wait.ts";
 
 it.each(["before", "acquired", "waiting"] as const)(
   "DST: every parallel child wait yields to parent steer %s acquisition/start",
   async (timing) => {
     await runDst({ name: `subagent-wait-${timing}`, iterations: 30 }, async (sim) => {
-      const boundary = new WaitBoundary();
+      await using boundary = await WaitBoundary.open();
       const ready = [deferred(), deferred()] as const;
       const outputs: ToolExecutionResult[] = [];
       const pending: Promise<ToolExecutionResult>[] = [];
-      if (timing === "before") boundary.queue("steer");
+      if (timing === "before") await boundary.queue("steer");
       if (timing === "acquired") {
         // Acquisition revision stays empty; this commit buffers before start.
         boundary.afterAcquire = async () => boundary.queue("steer");
@@ -82,9 +77,9 @@ it.each(["before", "acquired", "waiting"] as const)(
             if (timing === "waiting") {
               await Promise.all(ready.map((arrival) => arrival.promise));
               await task.checkpoint("both completion waiters registered before parent input");
-              boundary.queue("followUp");
-              boundary.queue("write");
-              boundary.queue("steer");
+              await boundary.queue("followUp");
+              await boundary.queue("write");
+              await boundary.queue("steer");
             }
           },
         },
@@ -95,9 +90,9 @@ it.each(["before", "acquired", "waiting"] as const)(
       expect(outputs).toHaveLength(2);
       expect(boundary.watches.size).toBe(0);
       expect(boundary.waiters.size).toBe(0);
-      expect(boundary.inbox.items.filter((item) => item.mode === "steer").length).toBeGreaterThan(
-        0,
-      );
+      expect(
+        (await boundary.inbox)?.items.filter((item) => item.mode === "steer").length,
+      ).toBeGreaterThan(0);
       expect(data(await wait.execute(args, boundary.api, BACKGROUND_CONTEXT))).toMatchObject({
         status: "completed",
         receipt: { result: { output: "later receipt" } },
@@ -108,7 +103,7 @@ it.each(["before", "acquired", "waiting"] as const)(
 
 it("DST: completion races steer at the final read; caller cancellation stays distinct", async () => {
   await runDst({ name: "subagent-wait-completion-race", iterations: 100 }, async (sim) => {
-    const boundary = new WaitBoundary();
+    await using boundary = await WaitBoundary.open();
     const cancellation = withCancel(BACKGROUND_CONTEXT);
     const arrived = [deferred(), deferred()] as const;
     const cancelled = deferred();
@@ -189,7 +184,7 @@ it("DST: completion races steer at the final read; caller cancellation stays dis
         f: async (task: SimulationTask) => {
           await raceReady.promise;
           await task.checkpoint("parent steer commit");
-          boundary.queue("steer");
+          await boundary.queue("steer");
         },
       },
     ]);

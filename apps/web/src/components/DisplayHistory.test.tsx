@@ -2,7 +2,7 @@ import type { DisplayRecord } from "@pi-orb/protocol";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { TranscriptCache } from "../lib/transcript-cache.ts";
-import { detailContext } from "../testkit/display-fixtures.ts";
+import { detailContext, messageNotice } from "../testkit/display-fixtures.ts";
 import { HistoryView } from "./HistoryView.tsx";
 
 const base = {
@@ -63,24 +63,7 @@ describe("browser summary rendering", () => {
     expect(read).not.toHaveBeenCalled();
   });
   it("keeps a compact child message in the native activity rail", () => {
-    const notice = {
-      kind: "notification" as const,
-      id: "child",
-      description: "Check deployment",
-      messagePreview: "Actual child message",
-      detailKey: "notice:subagent",
-    };
-    const records: DisplayRecord[] = [
-      {
-        id: "notice",
-        parentId: null,
-        timestamp: base.timestamp,
-        type: "event",
-        eventType: "pi.custom_message",
-        custom: { customType: "subagent-notification", display: true },
-        subagent: notice,
-      },
-    ];
+    const records = [messageNotice("Actual child message", "notice", "child", "Check deployment")];
     const html = renderToStaticMarkup(
       <HistoryView
         records={records}

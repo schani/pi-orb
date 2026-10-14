@@ -15,7 +15,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { expect, it } from "vitest";
 import { ChildAnchor, subagentTools } from "./subagents.ts";
-import { deferred } from "./testkit/subagent-wait.ts";
+import { deferred, toolData, wait } from "./testkit/subagent-wait.ts";
 
 it("real Harness watch buffers steer before start; ChildAnchor survives and later settles", async () => {
   const ctx = BACKGROUND_CONTEXT;
@@ -67,14 +67,10 @@ it("real Harness watch buffers steer before start; ChildAnchor survives and late
     }) as ToolExecutionApi["watchDoc"],
   } as unknown as ToolExecutionApi;
   const spawn = subagentTools.find((tool) => tool.name === "subagent") as ToolRegistration;
-  const wait = subagentTools.find(
-    (tool) => tool.name === "get_subagent_result",
-  ) as ToolRegistration;
   let execution: ReturnType<typeof wait.execute> | undefined;
   try {
     const started = await spawn.execute({ prompt: "work" }, api, ctx);
-    const agentId = JSON.parse(started.content?.find((block) => block.type === "text")?.text ?? "")
-      .agent_id as string;
+    const agentId = toolData(started).agent_id as string;
     harness.resume();
     await entered.promise;
     // Baseline reaches waitForTask, not watchDoc: fail finitely without a timer.
@@ -101,9 +97,7 @@ it("real Harness watch buffers steer before start; ChildAnchor survives and late
     releaseWatch.resolve();
     const yielded = await execution;
     expect(yielded.isError).not.toBe(true);
-    expect(
-      JSON.parse(yielded.content?.find((block) => block.type === "text")?.text ?? ""),
-    ).toMatchObject({
+    expect(toolData(yielded)).toMatchObject({
       status: "running",
       interrupted: "parent_input",
     });
@@ -118,9 +112,7 @@ it("real Harness watch buffers steer before start; ChildAnchor survives and late
     releaseChild.resolve();
     await harness.waitForTask(anchor.id, ctx);
     const final = await wait.execute({ agent_id: agentId, wait: true }, api, ctx);
-    expect(
-      JSON.parse(final.content?.find((block) => block.type === "text")?.text ?? ""),
-    ).toMatchObject({
+    expect(toolData(final)).toMatchObject({
       status: "completed",
       receipt: { result: { output: "child receipt" } },
     });
