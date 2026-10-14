@@ -40,7 +40,11 @@ beforeAll(async () => {
   expect(address !== null && address !== undefined && typeof address !== "string").toBe(true);
   origin = `http://127.0.0.1:${(address as { port: number }).port}`;
   browser = await chromium.launch({
-    executablePath: process.env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"] ?? "/usr/bin/chromium",
+    ...(process.env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"]
+      ? { executablePath: process.env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"] }
+      : existsSync("/usr/bin/chromium")
+        ? { executablePath: "/usr/bin/chromium" }
+        : {}),
     args: ["--no-sandbox"],
   });
 });

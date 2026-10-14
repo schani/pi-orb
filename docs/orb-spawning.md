@@ -8,6 +8,8 @@ The new orb gets a fresh default-branch checkout, normal project secrets, boot h
 
 This is not a parent/child lifecycle, result callback, worktree handoff, wait/cancel protocol, or scheduler. Cross-project creation, recursive delegation, cost quotas, and TTLs are outside this slice. The broader orchestration question remains in `docs/open-questions.md`, question 29. Agent instructions describe requested delegation, warn about fresh checkouts and compute independence, and prohibit recursive fan-out without user direction.
 
+**Browser nesting (implemented locally 2026-10-14; not deployed):** project orb-list and individual-orb GETs expose the existing immutable caller ID as optional `OrbView.spawnedBy`, retaining provenance after caller archival/deletion and omitting it for non-spawned orbs. Mutation responses may omit it. Nesting is derived presentation only: same-project working parents, including stopped/failed orbs, retain working children; a missing or shelved parent releases direct working children to roots without reparenting writes. Archive membership remains independent. Rules and observability: `docs/web-ui.md`; API shape: `docs/control-plane-api.md`. No new persisted state or schema.
+
 ## CLI
 
 ```sh

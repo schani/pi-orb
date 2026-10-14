@@ -18,6 +18,7 @@ import { logOrbEvent } from "../../domain/log.ts";
 import { messageBatchId } from "../../domain/message-batch.ts";
 import type {
   OrbDeletionRow,
+  OrbListRow,
   OrbMessageMetadataRow,
   OrbMessagePoll,
   OrbMessageRow,
@@ -716,10 +717,23 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       .map((result) => (result.rows[0] !== undefined ? mapOrbRow(result.rows[0]) : null));
   }
 
-  listOrbsByProject(_task: SimulationTask, projectId: string): ResultAsync<OrbRow[], StoreError> {
+  listOrbsByProject(
+    _task: SimulationTask,
+    projectId: string,
+  ): ResultAsync<OrbListRow[], StoreError> {
     return this.db
-      .query("SELECT * FROM orbs WHERE project_id = $1 ORDER BY created_at", [projectId])
-      .map((result) => result.rows.map(mapOrbRow));
+      .query(
+        `SELECT o.*, s.caller_orb_id AS spawned_by
+         FROM orbs o LEFT JOIN orb_spawns s ON s.orb_id = o.id AND s.project_id = o.project_id
+         WHERE o.project_id = $1 ORDER BY o.created_at`,
+        [projectId],
+      )
+      .map((result) =>
+        result.rows.map((row) => ({
+          ...mapOrbRow(row),
+          spawnedBy: (row["spawned_by"] as string | null) ?? null,
+        })),
+      );
   }
 
   listOrbsInStates(

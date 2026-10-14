@@ -1,0 +1,25 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/repo[39m
+
+ [31m❯[39m apps/web/src/lib/project-orb-tree.test.ts [2m([22m[2m0 test[22m[2m)[22m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Suites 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m apps/web/src/lib/project-orb-tree.test.ts[2m [ apps/web/src/lib/project-orb-tree.test.ts ][22m
+[31m[1mError[22m: Cannot find module './project-orb-tree.ts' imported from /workspace/repo/apps/web/src/lib/project-orb-tree.test.ts[39m
+[36m [2m❯[22m apps/web/src/lib/project-orb-tree.test.ts:[2m3:1[22m[39m
+    [90m  1|[39m [35mimport[39m type { [33mOrbView[39m } [35mfrom[39m [32m"@pi-orb/protocol"[39m[33m;[39m
+    [90m  2|[39m [35mimport[39m { describe[33m,[39m expect[33m,[39m it } [35mfrom[39m [32m"vitest"[39m[33m;[39m
+    [90m  3|[39m [35mimport[39m { buildProjectOrbTree } [35mfrom[39m [32m"./project-orb-tree.ts"[39m[33m;[39m
+    [90m   |[39m [31m^[39m
+    [90m  4|[39m [35mimport[39m { splitProjectOrbs } [35mfrom[39m [32m"./project-orbs.ts"[39m[33m;[39m
+    [90m  5|[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [2mno tests[22m
+[2m   Start at [22m 18:15:29
+[2m   Duration [22m 220ms[2m (transform 46ms, setup 0ms, import 0ms, tests 0ms, environment 0ms)[22m
+

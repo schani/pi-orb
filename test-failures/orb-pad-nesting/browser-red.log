@@ -1,0 +1,52 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/repo[39m
+
+ [31m❯[39m [30m[43m frontend [49m[39m e2e/orb-nesting-frontend.e2e.test.ts [2m([22m[2m3 tests[22m[2m | [22m[31m1 failed[39m[2m | [22m[33m2 skipped[39m[2m)[22m[33m 15031[2mms[22m[39m
+[31m   [31m×[31m dashboard keeps the working tree expanded and promotes children on authoritative list changes[39m[33m 12787[2mms[22m[39m
+   [2m[90m↓[39m[22m orb keeps the working tree expanded and promotes children on authoritative list changes
+   [2m[90m↓[39m[22m contains deep lineage on desktop and phone without hiding rows or changing shelf controls
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[43m frontend [49m[39m e2e/orb-nesting-frontend.e2e.test.ts[2m > [22mdashboard keeps the working tree expanded and promotes children on authoritative list changes
+[31m[1mError[22m: expect(locator).toHaveText(expected) failed
+
+Locator: locator('#project-frontend-fixture-project').locator('.orb-tree .orb-entry-link, .orb-tree .ix-row .trunc')
+Timeout: 5000ms
+- Expected  - 8
++ Received  + 1
+
+- Array [
+-   "Other",
+-   "Parent",
+-   "Child",
+-   "Grandchild",
+-   "Sibling",
+-   "Released",
+- ]
++ Array []
+
+Call log:
+  - Expect "toHaveText" locator('#project-frontend-fixture-project').locator('.orb-tree .orb-entry-link, .orb-tree .ix-row .trunc') with timeout 5000ms
+  - waiting for locator('#project-frontend-fixture-project').locator('.orb-tree .orb-entry-link, .orb-tree .ix-row .trunc')
+    14 × locator resolved to 0 elements
+[39m
+[90m [2m❯[22m captureRawStack node_modules/playwright-core/lib/coreBundle.js:[2m8588:17[22m[39m
+[90m [2m❯[22m callMatcherAsStep node_modules/playwright/lib/matchers/expect.js:[2m13310:57[22m[39m
+[90m [2m❯[22m Object.toHaveText node_modules/playwright/lib/matchers/expect.js:[2m13302:23[22m[39m
+[36m [2m❯[22m e2e/orb-nesting-frontend.e2e.test.ts:[2m101:38[22m[39m
+    [90m 99|[39m       [35mawait[39m [34mfixture[39m(page[33m,[39m () [33m=>[39m items)[33m;[39m
+    [90m100|[39m       [35mawait[39m [34mgotoFrontendFixture[39m(page[33m,[39m [32m`[39m[36m${[39morigin[36m}[39m[32m[39m[36m${[39mpath[36m}[39m[32m`[39m[33m,[39m scope)[33m;[39m
+    [90m101|[39m       await expectPage(workingNames).toHaveText(["Other", "Parent", "C…
+    [90m   |[39m                                      [31m^[39m
+    [90m102|[39m       await expectPage(row(childId)).toHaveAttribute("data-orb-depth",…
+    [90m103|[39m       await expectPage(row("grandchild")).toHaveAttribute("data-orb-de…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[33m2 skipped[39m[90m (3)[39m
+[2m   Start at [22m 18:17:32
+[2m   Duration [22m 16.42s[2m (transform 176ms, setup 0ms, import 1.07s, tests 15.03s, environment 0ms)[22m
+

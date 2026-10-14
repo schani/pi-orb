@@ -618,6 +618,124 @@ export function storeSemanticsContractTests(
       expect((await store.spawnOrb(task, params)).isErr()).toBe(true);
     });
 
+    it("lists immutable spawn provenance through caller archival and deletion", async () => {
+      (await store.insertProject(task, project))._unsafeUnwrap();
+      const caller = { ...orb, state: "running" as const, runtimeTokenHash: "token" };
+      (await store.insertOrb(task, caller))._unsafeUnwrap();
+      const child = { ...orb, id: "00000000-0000-4000-8000-000000000003" };
+      (
+        await store.spawnOrb(task, {
+          callerOrbId: caller.id,
+          caller: { runtimeTokenHash: "token", hostIncarnation: 0 },
+          orb: child,
+          prompt: "work",
+          requestHash: "hash",
+        })
+      )._unsafeUnwrap();
+      const otherProject = {
+        ...project,
+        id: "00000000-0000-4000-8000-000000000004",
+        name: "other",
+      };
+      (await store.insertProject(task, otherProject))._unsafeUnwrap();
+      (
+        await store.insertOrb(task, {
+          ...orb,
+          id: "00000000-0000-4000-8000-000000000005",
+          projectId: otherProject.id,
+        })
+      )._unsafeUnwrap();
+      const read = async () => (await store.listOrbsByProject(task, project.id))._unsafeUnwrap();
+      const expectRelation = async () => {
+        const rows = await read();
+        expect(rows.map((row) => row.id).sort()).toEqual([caller.id, child.id].sort());
+        expect(rows.find((row) => row.id === caller.id)).toMatchObject({ spawnedBy: null });
+        expect(rows.find((row) => row.id === child.id)).toMatchObject({ spawnedBy: caller.id });
+      };
+      await expectRelation();
+      (
+        await store.setOrbName(task, {
+          orbId: child.id,
+          name: "Renamed",
+          now: 1500,
+          onlyIfNull: false,
+        })
+      )._unsafeUnwrap();
+      const archive = (
+        await store.requestOrbArchive(task, {
+          orbId: caller.id,
+          expectedStateVersion: 0,
+          now: 2000,
+          cleanupAfter: 2000,
+        })
+      )._unsafeUnwrap();
+      await expectRelation();
+      (
+        await store.sealOrbArchive(task, {
+          orbId: caller.id,
+          expectedStateVersion: archive.stateVersion,
+          now: 2500,
+          cursor: null,
+          headId: null,
+        })
+      )._unsafeUnwrap();
+      const archived = (
+        await store.finalizeOrbArchive(task, {
+          orbId: caller.id,
+          expectedStateVersion: archive.stateVersion,
+          now: 3000,
+        })
+      )._unsafeUnwrap();
+      await expectRelation();
+      const deletion = (
+        await store.requestOrbDeletion(task, {
+          orbId: caller.id,
+          expectedStateVersion: archived.stateVersion,
+          now: 4000,
+          cleanupAfter: 4000,
+        })
+      )._unsafeUnwrap();
+      await expectRelation();
+      (
+        await store.finalizeOrbDeletion(task, {
+          orbId: caller.id,
+          expectedStateVersion: deletion.stateVersion,
+        })
+      )._unsafeUnwrap();
+      expect(await read()).toMatchObject([{ id: child.id, name: "Renamed", spawnedBy: caller.id }]);
+      expect((await store.getSpawnCaller(task, child.id))._unsafeUnwrap()).toBe(caller.id);
+      const childDeletion = (
+        await store.requestOrbDeletion(task, {
+          orbId: child.id,
+          expectedStateVersion: 0,
+          now: 5000,
+          cleanupAfter: 5000,
+        })
+      )._unsafeUnwrap();
+      (
+        await store.finalizeOrbDeletion(task, {
+          orbId: child.id,
+          expectedStateVersion: childDeletion.stateVersion,
+        })
+      )._unsafeUnwrap();
+      expect(await read()).toEqual([]);
+      expect((await store.getSpawnCaller(task, child.id))._unsafeUnwrap()).toBe(caller.id);
+      const projectDeletion = (
+        await store.requestProjectDeletion(task, {
+          projectId: project.id,
+          now: 6000,
+          cleanupAfter: 6000,
+        })
+      )._unsafeUnwrap();
+      (
+        await store.finalizeProjectDeletion(task, {
+          projectId: project.id,
+          expectedStateVersion: projectDeletion.project.stateVersion,
+        })
+      )._unsafeUnwrap();
+      expect((await store.getSpawnCaller(task, child.id))._unsafeUnwrap()).toBeNull();
+    });
+
     it("serializes concurrent spawn retries and project deletion", async () => {
       expect((await store.insertProject(task, project)).isOk()).toBe(true);
       expect(

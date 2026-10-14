@@ -1,0 +1,60 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/repo[39m
+
+ [31m❯[39m [30m[43m frontend [49m[39m e2e/orb-nesting-frontend.e2e.test.ts [2m([22m[2m3 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[33m 32285[2mms[22m[39m
+   [33m[2m✓[22m[39m dashboard keeps the working tree expanded and promotes children on authoritative list changes [33m 14029[2mms[22m[39m
+[31m   [31m×[31m orb keeps the working tree expanded and promotes children on authoritative list changes[39m[33m 9073[2mms[22m[39m
+[31m   [31m×[31m contains deep lineage on desktop and phone without hiding rows or changing shelf controls[39m[33m 8198[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 2 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[43m frontend [49m[39m e2e/orb-nesting-frontend.e2e.test.ts[2m > [22morb keeps the working tree expanded and promotes children on authoritative list changes
+[31m[1mError[22m: expect(locator).toBeVisible() failed
+
+Locator: locator('.ix-project').locator('.project-archive').getByRole('link', { name: 'Archived child', exact: true })
+Expected: visible
+Timeout: 5000ms
+Error: element(s) not found
+
+Call log:
+  - Expect "toBeVisible" locator('.ix-project').locator('.project-archive').getByRole('link', { name: 'Archived child', exact: true }) with timeout 5000ms
+  - waiting for locator('.ix-project').locator('.project-archive').getByRole('link', { name: 'Archived child', exact: true })
+[39m
+[90m [2m❯[22m captureRawStack node_modules/playwright-core/lib/coreBundle.js:[2m8588:17[22m[39m
+[90m [2m❯[22m callMatcherAsStep node_modules/playwright/lib/matchers/expect.js:[2m13310:57[22m[39m
+[90m [2m❯[22m Object.toBeVisible node_modules/playwright/lib/matchers/expect.js:[2m13302:23[22m[39m
+[36m [2m❯[22m e2e/orb-nesting-frontend.e2e.test.ts:[2m148:9[22m[39m
+    [90m146|[39m       [35mawait[39m [34mexpectPage[39m(
+    [90m147|[39m         archive.getByRole("link", { name: "Archived child", exact: tru…
+    [90m148|[39m       )[33m.[39m[34mtoBeVisible[39m()[33m;[39m
+    [90m   |[39m         [31m^[39m
+    [90m149|[39m       [35mawait[39m [34mexpectPage[39m(archive[33m.[39m[34mlocator[39m([32m".orb-tree"[39m))[33m.[39m[34mtoHaveCount[39m([34m0[39m)[33m;[39m
+    [90m150|[39m       [35mawait[39m archive[33m.[39m[34mlocator[39m([32m"summary"[39m)[33m.[39m[34mclick[39m()[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[43m frontend [49m[39m e2e/orb-nesting-frontend.e2e.test.ts[2m > [22mcontains deep lineage on desktop and phone without hiding rows or changing shelf controls
+[31m[1mAssertionError[22m: expected 20 to be 44 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 44[39m
+[31m+ 20[39m
+
+[36m [2m❯[22m e2e/orb-nesting-frontend.e2e.test.ts:[2m251:32[22m[39m
+    [90m249|[39m             [35mawait[39m [34mexpectPage[39m(target)[33m.[39m[34mtoBeVisible[39m()[33m;[39m
+    [90m250|[39m             [35mconst[39m box [33m=[39m [35mawait[39m target[33m.[39m[34mboundingBox[39m()[33m;[39m
+    [90m251|[39m             [34mexpect[39m(box[33m?.[39mwidth)[33m.[39m[34mtoBe[39m(width [33m<=[39m [34m600[39m [33m?[39m [34m44[39m [33m:[39m [34m20[39m)[33m;[39m
+    [90m   |[39m                                [31m^[39m
+    [90m252|[39m           }
+    [90m253|[39m           await expectPage(tree.locator("summary, details, [aria-expan…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m1 passed[39m[22m[90m (3)[39m
+[2m   Start at [22m 18:19:29
+[2m   Duration [22m 33.01s[2m (transform 86ms, setup 0ms, import 585ms, tests 32.29s, environment 0ms)[22m
+

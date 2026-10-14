@@ -23,6 +23,7 @@ import { logOrbEvent } from "../domain/log.ts";
 import { messageBatchId } from "../domain/message-batch.ts";
 import type {
   OrbDeletionRow,
+  OrbListRow,
   OrbMessagePoll,
   OrbMessageRow,
   OrbRow,
@@ -701,9 +702,20 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     });
   }
 
-  listOrbsByProject(task: SimulationTask, projectId: string): ResultAsync<OrbRow[], StoreError> {
+  listOrbsByProject(
+    task: SimulationTask,
+    projectId: string,
+  ): ResultAsync<OrbListRow[], StoreError> {
     return this.access(task, FAILPOINTS.storeRead, "list orbs by project", () =>
-      [...this.orbs.values()].filter((orb) => orb.projectId === projectId),
+      [...this.orbs.values()]
+        .filter((orb) => orb.projectId === projectId)
+        .map((orb) => {
+          const spawn = this.spawns.get(orb.id);
+          return {
+            ...orb,
+            spawnedBy: spawn?.projectId === orb.projectId ? spawn.callerOrbId : null,
+          };
+        }),
     );
   }
 

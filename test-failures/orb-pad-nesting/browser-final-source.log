@@ -1,0 +1,55 @@
+
+> test:e2e
+> vitest run --config e2e/vitest.config.ts --project=frontend e2e/orb-nesting-frontend.e2e.test.ts e2e/frontend-web-shell.e2e.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/repo[39m
+
+ [32m✓[39m [30m[43m frontend [49m[39m e2e/orb-nesting-frontend.e2e.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 40146[2mms[22m[39m
+   [33m[2m✓[22m[39m dashboard keeps the working tree expanded and promotes children on authoritative list changes [33m 14490[2mms[22m[39m
+   [33m[2m✓[22m[39m orb keeps the working tree expanded and promotes children on authoritative list changes [33m 11955[2mms[22m[39m
+   [33m[2m✓[22m[39m contains deep lineage on desktop and phone without hiding rows or changing shelf controls [33m 12713[2mms[22m[39m
+[90mstdout[2m | e2e/frontend-web-shell.e2e.test.ts
+[22m[39mvite v7.3.6 building client environment for production...
+
+[90mstdout[2m | e2e/frontend-web-shell.e2e.test.ts
+[22m[39mtransforming...
+
+[90mstdout[2m | e2e/frontend-web-shell.e2e.test.ts
+[22m[39m✓ 1741 modules transformed.
+
+[90mstdout[2m | e2e/frontend-web-shell.e2e.test.ts
+[22m[39mrendering chunks...
+
+[90mstdout[2m | e2e/frontend-web-shell.e2e.test.ts
+[22m[39mcomputing gzip size...
+
+[90mstderr[2m | e2e/frontend-web-shell.e2e.test.ts
+[22m[39m
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+
+[90mstdout[2m | e2e/frontend-web-shell.e2e.test.ts
+[22m[39m../../../../tmp/pi-orb-built-shell-7FWrAQ/index.html                           0.52 kB │ gzip:   0.32 kB
+../../../../tmp/pi-orb-built-shell-7FWrAQ/assets/ghostty-vt-CIdFSEIN.wasm    429.51 kB │ gzip: 129.46 kB
+../../../../tmp/pi-orb-built-shell-7FWrAQ/assets/index-DCIgJ9yT.css           49.72 kB │ gzip:  10.26 kB
+../../../../tmp/pi-orb-built-shell-7FWrAQ/assets/chart-render-C77_o5Is.js    846.83 kB │ gzip: 293.04 kB
+../../../../tmp/pi-orb-built-shell-7FWrAQ/assets/index-BaeMw-jC.js         1,091.73 kB │ gzip: 315.01 kB
+
+[90mstdout[2m | e2e/frontend-web-shell.e2e.test.ts
+[22m[39m✓ built in 7.86s
+
+ [32m✓[39m [30m[43m frontend [49m[39m e2e/frontend-web-shell.e2e.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 19915[2mms[22m[39m
+   [33m[2m✓[22m[39m / freezes orb ordering across polls, but not activity or reload [33m 3342[2mms[22m[39m
+   [33m[2m✓[22m[39m /orbs/missing-orb freezes orb ordering across polls, but not activity or reload [33m 3261[2mms[22m[39m
+   [33m[2m✓[22m[39m creates a project from GitHub shorthand schani/pi-orb with a canonical API URL [33m 1149[2mms[22m[39m
+   [33m[2m✓[22m[39m creates a project from GitHub shorthand github.com/schani/pi-orb with a canonical API URL [33m 1440[2mms[22m[39m
+   [33m[2m✓[22m[39m boots the production shell and loads its built JS, CSS and favicon on direct deep links and reload [33m 1885[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m2 passed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[32m8 passed[39m[22m[90m (8)[39m
+[2m   Start at [22m 11:56:13
+[2m   Duration [22m 62.06s[2m (transform 362ms, setup 0ms, import 1.73s, tests 60.06s, environment 0ms)[22m
+

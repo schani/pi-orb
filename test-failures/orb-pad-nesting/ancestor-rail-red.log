@@ -1,0 +1,51 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/repo[39m
+
+ [31m❯[39m [30m[43m frontend [49m[39m e2e/orb-nesting-frontend.e2e.test.ts [2m([22m[2m3 tests[22m[2m | [22m[31m1 failed[39m[2m | [22m[33m2 skipped[39m[2m)[22m[33m 5550[2mms[22m[39m
+[31m   [31m×[31m dashboard keeps the working tree expanded and promotes children on authoritative list changes[39m[33m 4583[2mms[22m[39m
+   [2m[90m↓[39m[22m orb keeps the working tree expanded and promotes children on authoritative list changes
+   [2m[90m↓[39m[22m contains deep lineage on desktop and phone without hiding rows or changing shelf controls
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[43m frontend [49m[39m e2e/orb-nesting-frontend.e2e.test.ts[2m > [22mdashboard keeps the working tree expanded and promotes children on authoritative list changes
+[31m[1mAssertionError[22m: expected [ [ '9px', '0px' ], …(2) ] to deeply equal [ [ '9px', '10px' ], …(2) ][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  [[22m
+[2m    [[22m
+[2m      "9px",[22m
+[32m-     "10px",[39m
+[31m+     "0px",[39m
+[2m    ],[22m
+[2m    [[22m
+[32m-     "9px",[39m
+[32m-     "28px",[39m
+[31m+     "27px",[39m
+[31m+     "0px",[39m
+[2m    ],[22m
+[2m    [[22m
+[2m      "9px",[22m
+[32m-     "10px",[39m
+[31m+     "0px",[39m
+[2m    ],[22m
+[2m  ][22m
+
+[36m [2m❯[22m e2e/orb-nesting-frontend.e2e.test.ts:[2m150:64[22m[39m
+    [90m148|[39m         })[33m,[39m
+    [90m149|[39m       ))[33m;[39m
+    [90m150|[39m       expect(guides.map((guide) => [guide.left, guide.width])).toEqual…
+    [90m   |[39m                                                                [31m^[39m
+    [90m151|[39m         [[32m"9px"[39m[33m,[39m [32m"10px"[39m][33m,[39m [[32m"9px"[39m[33m,[39m [32m"28px"[39m][33m,[39m [[32m"9px"[39m[33m,[39m [32m"10px"[39m][33m,[39m
+    [90m152|[39m       ])[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[33m2 skipped[39m[90m (3)[39m
+[2m   Start at [22m 18:24:59
+[2m   Duration [22m 6.36s[2m (transform 96ms, setup 0ms, import 653ms, tests 5.55s, environment 0ms)[22m
+

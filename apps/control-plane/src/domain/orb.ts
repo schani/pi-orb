@@ -86,6 +86,11 @@ export interface OrbRow {
   readonly updatedAt: number;
 }
 
+/** Read-only projection of existing spawn acceptance provenance. */
+export interface OrbListRow extends OrbRow {
+  readonly spawnedBy: string | null;
+}
+
 export interface OrbMessageRow {
   readonly orbId: string;
   readonly messageId: string;

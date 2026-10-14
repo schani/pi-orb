@@ -1,0 +1,356 @@
+
+> lint
+> biome check .
+
+scripts/local-fake-provider.test.mjs:431:240 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    429 │     const wrapper = fileURLToPath(new URL("./local-fake-provider.mjs", import.meta.url));
+    430 │     const handle = await f.start(
+  > 431 │ .....process.env,PATH:${JSON.stringify(bin + ":" + process.env.PATH)},PI_ORB_E2E_BACKEND:'process',PI_O...
+        │                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    432 │     );
+    433 │     const pid = Number(await checkpoint(marker));
+  
+  i Unsafe fix: Use a template literal.
+  
+    429 429 │       const wrapper = fileURLToPath(new URL("./local-fake-provider.mjs", import.meta.url));
+    430 430 │       const handle = await f.start(
+    431     │ - ...{env:{...process.env,PATH:${JSON.stringify(bin·+·":"·+·process.env.PATH)},PI_ORB_E2E_BACKEND:'proces...
+        431 │ + ...'],{env:{...process.env,PATH:${JSON.stringify(`${bin}:${process.env.PATH}`)},PI_ORB_E2E_BACKEND:'pro...
+    432 432 │       );
+    433 433 │       const pid = Number(await checkpoint(marker));
+  
+
+apps/control-plane/src/adapters/docker/provider.ts:823:11 lint/complexity/useOptionalChain  FIXABLE  ━━━━━━━━━━
+
+  ! Change to an optional chain.
+  
+    821 │       const host = this.toObservation(info);
+    822 │       const token = tokenFromInspect(info);
+  > 823 │       if (!host || host.state !== "running" || !host.runtimeAddress || !token)
+        │           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    824 │         return err(providerError("observe", "unavailable", "execution binding unavailable", true));
+    825 │       return ok({
+  
+  i Unsafe fix: Change to an optional chain.
+  
+    821 821 │         const host = this.toObservation(info);
+    822 822 │         const token = tokenFromInspect(info);
+    823     │ - ······if·(!host·||·host.state·!==·"running"·||·!host.runtimeAddress·||·!token)
+        823 │ + ······if·(host?.state·!==·"running"·||·!host.runtimeAddress·||·!token)
+    824 824 │           return err(providerError("observe", "unavailable", "execution binding unavailable", true));
+    825 825 │         return ok({
+  
+
+apps/control-plane/src/adapters/durable/abort-outcome.test.ts:151:21 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    149 │     const cancelledReceipt = (await agent.deliver(input(cancelled)))._unsafeUnwrap();
+    150 │     await publicWait.promise;
+  > 151 │     const waiting = frames
+        │                     ^^^^^^
+  > 152 │       .flatMap((frame) =>
+  > 153 │         frame.type === "runtime.event" && frame.event.type === "tool_state" ? [frame.event] : [],
+  > 154 │       )
+  > 155 │       .at(-1)!;
+        │       ^^^^^^^^
+    156 │     expect(waiting.operationId).toBe(cancelledReceipt.operationId);
+    157 │     expect(effects).toBe(0);
+  
+
+apps/control-plane/src/adapters/durable/agent.test.ts:290:33 lint/complexity/noCommaOperator ━━━━━━━━━━
+
+  ! The comma operator is disallowed.
+  
+    288 │         commitHistory: (snapshot) =>
+    289 │           snapshot.records.some((record) => record.type === "event" && record.alert)
+  > 290 │             ? (entered.resolve(),
+        │                                 ^
+    291 │               ResultAsync.fromPromise(release.promise, () => durableError("barrier")))
+    292 │             : okAsync(undefined),
+  
+  i Its use is often confusing and obscures side effects.
+  
+
+apps/control-plane/src/adapters/durable/cancelled-native-batch.test.ts:51:22 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    49 │         await database.store.enqueueOrbMessage(task, {
+    50 │           orbId: orb.id,
+  > 51 │           messageId: id!,
+       │                      ^^^
+    52 │           content: [{ type: "text", text: text! }],
+    53 │           wake: false,
+  
+
+apps/control-plane/src/adapters/durable/cancelled-native-batch.test.ts:52:43 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    50 │           orbId: orb.id,
+    51 │           messageId: id!,
+  > 52 │           content: [{ type: "text", text: text! }],
+       │                                           ^^^^^
+    53 │           wake: false,
+    54 │           now: 0,
+  
+
+apps/control-plane/src/adapters/durable/cancelled-native-batch.test.ts:72:54 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    70 │                 (write) =>
+    71 │                   write.type === "submission" &&
+  > 72 │                   write.value.requestId === `inbox:${batch[0]!.deliveryBatchId}`,
+       │                                                      ^^^^^^^^^
+    73 │               )
+    74 │             ) {
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+     70  70 │                   (write) =>
+     71  71 │                     write.type === "submission" &&
+     72     │ - ··················write.value.requestId·===·`inbox:${batch[0]!.deliveryBatchId}`,
+         72 │ + ··················write.value.requestId·===·`inbox:${batch[0]?.deliveryBatchId}`,
+     73  73 │                 )
+     74  74 │               ) {
+  
+
+apps/control-plane/src/adapters/durable/cancelled-native-batch.test.ts:109:18 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    107 │     delivery = agent.deliver({
+    108 │       baseUrl: "unused",
+  > 109 │       messageId: batch[0]!.deliveryBatchId!,
+        │                  ^^^^^^^^^
+    110 │       messageIds: [firstId, cancelId],
+    111 │       content: [{ type: "text", text: "survivor\n\ncancel me" }],
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    107 107 │       delivery = agent.deliver({
+    108 108 │         baseUrl: "unused",
+    109     │ - ······messageId:·batch[0]!.deliveryBatchId!,
+        109 │ + ······messageId:·batch[0]?.deliveryBatchId!,
+    110 110 │         messageIds: [firstId, cancelId],
+    111 111 │         content: [{ type: "text", text: "survivor\n\ncancel me" }],
+  
+
+apps/control-plane/src/adapters/durable/cancelled-native-batch.test.ts:109:18 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    107 │     delivery = agent.deliver({
+    108 │       baseUrl: "unused",
+  > 109 │       messageId: batch[0]!.deliveryBatchId!,
+        │                  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    110 │       messageIds: [firstId, cancelId],
+    111 │       content: [{ type: "text", text: "survivor\n\ncancel me" }],
+  
+
+apps/control-plane/src/adapters/durable/cancelled-native-batch.test.ts:144:26 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    142 │         orbId: orb.id,
+    143 │         messageIds: [firstId, cancelId],
+  > 144 │         deliveryBatchId: batch[0]!.deliveryBatchId!,
+        │                          ^^^^^^^^^
+    145 │         lastError: "old rejection",
+    146 │         now: 4,
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    142 142 │           orbId: orb.id,
+    143 143 │           messageIds: [firstId, cancelId],
+    144     │ - ········deliveryBatchId:·batch[0]!.deliveryBatchId!,
+        144 │ + ········deliveryBatchId:·batch[0]?.deliveryBatchId!,
+    145 145 │           lastError: "old rejection",
+    146 146 │           now: 4,
+  
+
+apps/control-plane/src/adapters/durable/cancelled-native-batch.test.ts:144:26 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    142 │         orbId: orb.id,
+    143 │         messageIds: [firstId, cancelId],
+  > 144 │         deliveryBatchId: batch[0]!.deliveryBatchId!,
+        │                          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    145 │         lastError: "old rejection",
+    146 │         now: 4,
+  
+
+apps/control-plane/src/adapters/durable/cancelled-native-batch.test.ts:157:20 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    155 │       await agent.deliver({
+    156 │         baseUrl: "unused",
+  > 157 │         messageId: next[0]!.deliveryBatchId!,
+        │                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+    158 │         messageIds: [firstId],
+    159 │         content: [{ type: "text", text: "survivor" }],
+  
+
+apps/control-plane/src/adapters/durable/cancelled-native-batch.test.ts:157:20 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    155 │       await agent.deliver({
+    156 │         baseUrl: "unused",
+  > 157 │         messageId: next[0]!.deliveryBatchId!,
+        │                    ^^^^^^^^
+    158 │         messageIds: [firstId],
+    159 │         content: [{ type: "text", text: "survivor" }],
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    155 155 │         await agent.deliver({
+    156 156 │           baseUrl: "unused",
+    157     │ - ········messageId:·next[0]!.deliveryBatchId!,
+        157 │ + ········messageId:·next[0]?.deliveryBatchId!,
+    158 158 │           messageIds: [firstId],
+    159 159 │           content: [{ type: "text", text: "survivor" }],
+  
+
+apps/control-plane/src/adapters/durable/composed-waiting.test.ts:216:29 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    214 │       expect(effects).toBe(0);
+    215 │       if (outcome === "abort") {
+  > 216 │         const operationId = toolFrames.at(-1)!.operationId;
+        │                             ^^^^^^^^^^^^^^^^^^
+    217 │         expect(
+    218 │           (await agent.request("abort", { type: "abort", operationId }))._unsafeUnwrap(),
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    214 214 │         expect(effects).toBe(0);
+    215 215 │         if (outcome === "abort") {
+    216     │ - ········const·operationId·=·toolFrames.at(-1)!.operationId;
+        216 │ + ········const·operationId·=·toolFrames.at(-1)?.operationId;
+    217 217 │           expect(
+    218 218 │             (await agent.request("abort", { type: "abort", operationId }))._unsafeUnwrap(),
+  
+
+apps/control-plane/src/adapters/durable/instruction-generation.test.ts:57:34 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    55 │         execute: async (_args, api, ctx) => {
+    56 │           try {
+  > 57 │             const result = await api.env!.exists("file", ctx);
+       │                                  ^^^^^^^^
+    58 │             return result.ok
+    59 │               ? { content: [{ type: "text", text: "exists" }] }
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+     55  55 │           execute: async (_args, api, ctx) => {
+     56  56 │             try {
+     57     │ - ············const·result·=·await·api.env!.exists("file",·ctx);
+         57 │ + ············const·result·=·await·api.env?.exists("file",·ctx);
+     58  58 │               return result.ok
+     59  59 │                 ? { content: [{ type: "text", text: "exists" }] }
+  
+
+apps/control-plane/src/adapters/durable/instruction-generation.test.ts:62:19 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    60 │               : { isError: true, content: [{ type: "text", text: result.error.message }] };
+    61 │           } finally {
+  > 62 │             await api.env!.cleanup(BACKGROUND_CONTEXT);
+       │                   ^^^^^^^^
+    63 │           }
+    64 │         },
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+     60  60 │                 : { isError: true, content: [{ type: "text", text: result.error.message }] };
+     61  61 │             } finally {
+     62     │ - ············await·api.env!.cleanup(BACKGROUND_CONTEXT);
+         62 │ + ············await·api.env?.cleanup(BACKGROUND_CONTEXT);
+     63  63 │             }
+     64  64 │           },
+  
+
+apps/control-plane/src/adapters/durable/legacy-startup.postgres.test.ts:29:32 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    27 │   "real PostgreSQL startup fences %s with independent connections",
+    28 │   async (order) => {
+  > 29 │     const admin = new PgClient(connection!);
+       │                                ^^^^^^^^^^^
+    30 │     const schema = `legacy_start_${randomUUID().replaceAll("-", "")}`;
+    31 │     (await admin.query(`CREATE SCHEMA ${schema}`))._unsafeUnwrap();
+  
+
+apps/control-plane/src/adapters/durable/legacy-startup.postgres.test.ts:32:25 lint/style/noNonNullAssertion ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    30 │     const schema = `legacy_start_${randomUUID().replaceAll("-", "")}`;
+    31 │     (await admin.query(`CREATE SCHEMA ${schema}`))._unsafeUnwrap();
+  > 32 │     const url = new URL(connection!);
+       │                         ^^^^^^^^^^^
+    33 │     url.searchParams.set("options", `-c search_path=${schema}`);
+    34 │     const db = new PgClient(url.toString());
+  
+
+apps/control-plane/src/adapters/durable/legacy-startup.postgres.test.ts:142:16 lint/style/noNonNullAssertion  FIXABLE  ━━━━━━━━━━
+
+  ! Forbidden non-null assertion.
+  
+    140 │       } else {
+    141 │         // Preflight is deliberately advisory: an independent locked writer wins next.
+  > 142 │         (await database.agentPersistence.checkStartup!(task, orb, operation))._unsafeUnwrap();
+        │                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    143 │         const locked = barrier(),
+    144 │           release = barrier();
+  
+  i Unsafe fix: Replace with optional chain operator ?. This operator includes runtime checks, so it is safer than the compile-only non-null assertion operator
+  
+    140 140 │         } else {
+    141 141 │           // Preflight is deliberately advisory: an independent locked writer wins next.
+    142     │ - ········(await·database.agentPersistence.checkStartup!(task,·orb,·operation))._unsafeUnwrap();
+        142 │ + ········(await·database.agentPersistence.checkStartup?.(task,·orb,·operation))._unsafeUnwrap();
+    143 143 │           const locked = barrier(),
+    144 144 │             release = barrier();
+  
+
+scripts/native-mcp-exploration/live-qualification/native-browser-main.mjs:4:8 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━
+
+  ! This import is unused.
+  
+    2 │ import { readFileSync, statSync } from "node:fs";
+    3 │ import { registerHooks } from "node:module";
+  > 4 │ import { resolve } from "node:path";
+      │        ^^^^^^^^^^^
+    5 │ import { NoSimulationTask } from "determined";
+    6 │ import { openControlPlaneDatabase } from "../../../apps/control-plane/src/adapters/database.ts";
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+     2  2 │   import { readFileSync, statSync } from "node:fs";
+     3  3 │   import { registerHooks } from "node:module";
+     4    │ - import·{·resolve·}·from·"node:path";
+     5  4 │   import { NoSimulationTask } from "determined";
+     6  5 │   import { openControlPlaneDatabase } from "../../../apps/control-plane/src/adapters/database.ts";
+  
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 318.
+Checked 1451 files in 6s. No fixes applied.
+Found 294 warnings.
+Found 44 infos.

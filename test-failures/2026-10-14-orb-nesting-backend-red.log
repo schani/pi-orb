@@ -1,0 +1,558 @@
+Backend nesting tests-first evidence, before implementation on a60f497b.
+
+First run: schema and HTTP assertions fail because spawnedBy is absent.
+Store setup also fails: the second project reused the first project's name.
+Corrected that fixture name, added direct-GET tests, then reran before implementation.
+Second run: all six failures are the intended missing-provenance assertions/behavior.
+No product fix preceded either red run.
+
+Command (first):
+npx vitest run packages/protocol/src/orb-spawn-view.test.ts apps/control-plane/src/http/orb-list.routes.test.ts apps/control-plane/src/testkit/store.contract.test.ts apps/control-plane/src/adapters/pg/stores.test.ts -t 'browser spawn provenance|caller IDs|lists immutable spawn provenance'
+
+Command (second): same files, -t 'browser spawn provenance|caller IDs|lists immutable spawn provenance|same provenance|provenance read outage'
+
+--- backend-red.log ---
+
+ RUN  v4.1.11 /workspace/repo
+
+ ❯ apps/control-plane/src/http/orb-list.routes.test.ts (4 tests | 1 failed | 3 skipped) 98ms
+   × exposes only caller IDs using one project-list read, without per-orb lookups 96ms
+   ↓ keeps a missing project distinct from an empty project
+   ↓ does not silently drop provenance on 'unavailable'
+   ↓ does not silently drop provenance on 'invariant'
+ ❯ packages/protocol/src/orb-spawn-view.test.ts (4 tests | 1 failed) 13ms
+     × accepts an optional caller ID 10ms
+     ✓ rejects non-string provenance: null 0ms
+     ✓ rejects non-string provenance: 42 0ms
+     ✓ rejects non-string provenance: {"id":"parent","url":"https://app.test/orbs/parent"} 0ms
+ ❯ apps/control-plane/src/testkit/store.contract.test.ts (55 tests | 1 failed | 54 skipped) 18ms
+     ↓ caches activity headlines separately with isolated keys and unchanged history
+     ↓ returns the first successful headline and its timestamp to both concurrent writers
+     ↓ fences missing sources, stale sessions and deletion even on existing cache keys
+     ↓ retains cached headlines through archival
+     ↓ keeps the first orb time zone when an ID collides at insertion
+     ↓ publishes only inserted alerts and compare-clears without erasing a newer alert
+     ↓ atomically accepts and resolves scheduled sleep with singleton system provenance
+     ↓ atomically registers immutable upload batch membership
+     ↓ persists upload leases, fences idle CAS, and never wakes from upload notification
+     ↓ atomically spawns with immutable retry identity and fences retired callers
+     × lists immutable spawn provenance through caller archival and deletion 15ms
+     ↓ serializes concurrent spawn retries and project deletion
+     ↓ persists projects and performs lifecycle state-version CAS
+     ↓ charges restarts and fails a budget-exhausted orb with its agent suspended
+     ↓ claims a Claude ownership episode once and creates proof only at fenced finalization
+     ↓ atomically fails, revokes runtime auth, and fences compute disposal
+     ↓ fences immutable host-spec replacement forward and commits durable intent
+     ↓ leaves a hostless or same-spec orb untouched and conflicts on a stale version
+     ↓ rejects stale provision commits across replacement request and finalization
+     ↓ requests replacement at the generation boundary and reads a null committed generation as zero
+     ↓ carries retained failure evidence through a replacement request and finalization
+     ↓ forces replacement when provider stamps disagree with durable current spec
+     ↓ guards discard finalization and clears retained evidence on replacement commit
+     ↓ claims the mint rate-limit slot atomically and only moves it forward
+     ↓ admits exactly one of many concurrent mint-slot claims
+     ↓ lets a mint slot claim interleave a lifecycle read and its CAS
+     ↓ coordinates auto-naming and preserves a manual name
+     ↓ durably queues a stopped-orb message, wakes it, and completes from replicated identity
+     ↓ fails a rejected batch terminally and keeps the queue moving
+     ↓ wakes a stopped orb for any outstanding wake intent, not only the oldest message
+     ↓ wakes a failed orb once for a new send and never for a stranded intent
+     ↓ records a delivery note that replication already marked delivered
+     ↓ atomically commits idempotent history and reconstructs its linear chain
+     ↓ anchors source history to an inactive branch without changing replica metadata
+     ↓ rejects cursor and immutable-record conflicts without partial advancement
+     ↓ persists name and repository together and rejects edits after deletion
+     ↓ atomically fences project creation, fans out deletion, and finalizes last
+     ↓ upgrades an in-progress archive when its project is deleted
+     ↓ atomically requests and finalizes permanent deletion with history
+     ↓ fences self-delete authority inside the write: {"runtimeTokenHash":"stale","hostIncarnation":2}
+     ↓ fences self-delete authority inside the write: {"runtimeTokenHash":"current","hostIncarnation":1}
+     ↓ refuses self-delete at the write during stopping
+     ↓ refuses self-delete at the write during discard
+     ↓ fences self-archive authority inside the write: {"runtimeTokenHash":"stale","hostIncarnation":2}
+     ↓ fences self-archive authority inside the write: {"runtimeTokenHash":"current","hostIncarnation":1}
+     ↓ refuses self-archive at the write during stopping
+     ↓ refuses self-archive at the write during discard
+     ↓ seals and finalizes archival without deleting history
+     ↓ inserts keys with their JWK intact and lists them oldest first
+     ↓ refuses a duplicate kid and a second active key as corruption
+     ↓ fences activation and retirement on the row version
+     ↓ refuses to activate a second key while one is already active
+     ↓ refuses transitions the timestamp completeness check forbids
+     ↓ refuses an inserted row whose timestamps do not match its state
+     ↓ conflicts on a stale row version and on an unknown kid without writing
+ ❯ apps/control-plane/src/adapters/pg/stores.test.ts (66 tests | 1 failed | 65 skipped) 2976ms
+     ↓ caches activity headlines separately with isolated keys and unchanged history
+     ↓ returns the first successful headline and its timestamp to both concurrent writers
+     ↓ fences missing sources, stale sessions and deletion even on existing cache keys
+     ↓ retains cached headlines through archival
+     ↓ keeps the first orb time zone when an ID collides at insertion
+     ↓ publishes only inserted alerts and compare-clears without erasing a newer alert
+     ↓ atomically accepts and resolves scheduled sleep with singleton system provenance
+     ↓ atomically registers immutable upload batch membership
+     ↓ persists upload leases, fences idle CAS, and never wakes from upload notification
+     ↓ atomically spawns with immutable retry identity and fences retired callers
+     × lists immutable spawn provenance through caller archival and deletion 2974ms
+     ↓ serializes concurrent spawn retries and project deletion
+     ↓ persists projects and performs lifecycle state-version CAS
+     ↓ charges restarts and fails a budget-exhausted orb with its agent suspended
+     ↓ claims a Claude ownership episode once and creates proof only at fenced finalization
+     ↓ atomically fails, revokes runtime auth, and fences compute disposal
+     ↓ fences immutable host-spec replacement forward and commits durable intent
+     ↓ leaves a hostless or same-spec orb untouched and conflicts on a stale version
+     ↓ rejects stale provision commits across replacement request and finalization
+     ↓ requests replacement at the generation boundary and reads a null committed generation as zero
+     ↓ carries retained failure evidence through a replacement request and finalization
+     ↓ forces replacement when provider stamps disagree with durable current spec
+     ↓ guards discard finalization and clears retained evidence on replacement commit
+     ↓ claims the mint rate-limit slot atomically and only moves it forward
+     ↓ admits exactly one of many concurrent mint-slot claims
+     ↓ lets a mint slot claim interleave a lifecycle read and its CAS
+     ↓ coordinates auto-naming and preserves a manual name
+     ↓ durably queues a stopped-orb message, wakes it, and completes from replicated identity
+     ↓ fails a rejected batch terminally and keeps the queue moving
+     ↓ wakes a stopped orb for any outstanding wake intent, not only the oldest message
+     ↓ wakes a failed orb once for a new send and never for a stranded intent
+     ↓ records a delivery note that replication already marked delivered
+     ↓ atomically commits idempotent history and reconstructs its linear chain
+     ↓ anchors source history to an inactive branch without changing replica metadata
+     ↓ rejects cursor and immutable-record conflicts without partial advancement
+     ↓ persists name and repository together and rejects edits after deletion
+     ↓ atomically fences project creation, fans out deletion, and finalizes last
+     ↓ upgrades an in-progress archive when its project is deleted
+     ↓ atomically requests and finalizes permanent deletion with history
+     ↓ fences self-delete authority inside the write: {"runtimeTokenHash":"stale","hostIncarnation":2}
+     ↓ fences self-delete authority inside the write: {"runtimeTokenHash":"current","hostIncarnation":1}
+     ↓ refuses self-delete at the write during stopping
+     ↓ refuses self-delete at the write during discard
+     ↓ fences self-archive authority inside the write: {"runtimeTokenHash":"stale","hostIncarnation":2}
+     ↓ fences self-archive authority inside the write: {"runtimeTokenHash":"current","hostIncarnation":1}
+     ↓ refuses self-archive at the write during stopping
+     ↓ refuses self-archive at the write during discard
+     ↓ seals and finalizes archival without deleting history
+     ↓ inserts keys with their JWK intact and lists them oldest first
+     ↓ refuses a duplicate kid and a second active key as corruption
+     ↓ fences activation and retirement on the row version
+     ↓ refuses to activate a second key while one is already active
+     ↓ refuses transitions the timestamp completeness check forbids
+     ↓ refuses an inserted row whose timestamps do not match its state
+     ↓ conflicts on a stale row version and on an unknown kid without writing
+     ↓ isolates credential pointer CAS and leases by user
+     ↓ serializes headline publication behind an uncommitted session fence on real PostgreSQL
+     ↓ serializes headline publication behind an uncommitted source fence on real PostgreSQL
+     ↓ serializes headline publication behind an uncommitted orb fence on real PostgreSQL
+     ↓ serializes headline publication behind an uncommitted project fence on real PostgreSQL
+     ↓ cascades headline source/session deletion and fences subsequent publication
+     ↓ rolls back partial spawn writes and retains deletion-safe provenance
+     ↓ rejects malformed system inbox provenance at the schema boundary
+     ↓ round-trips structured jsonb parameters and refuses undeclared ones
+     ↓ implements project-secret pointer CAS and the deletion fence
+     ↓ implements credential pointer CAS
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/protocol/src/orb-spawn-view.test.ts > browser spawn provenance > accepts an optional caller ID
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ packages/protocol/src/orb-spawn-view.test.ts:20:67
+     18|   it("accepts an optional caller ID", () => {
+     19|     expect(Check(OrbViewSchema, orb)).toBe(true);
+     20|     expect(Check(OrbViewSchema, { ...orb, spawnedBy: "parent" })).toBe…
+       |                                                                   ^
+     21|   });
+     22|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  apps/control-plane/src/http/orb-list.routes.test.ts > exposes only caller IDs using one project-list read, without per-orb lookups
+AssertionError: expected undefined to be 'parent' // Object.is equality
+
+- Expected:
+"parent"
+
++ Received:
+undefined
+
+ ❯ apps/control-plane/src/http/orb-list.routes.test.ts:38:77
+     36|   const items = response.json().items;
+     37|   expect(items).toHaveLength(2);
+     38|   expect(items.find((orb: { id: string }) => orb.id === "child").spawn…
+       |                                                                             ^
+     39|   expect(items.find((orb: { id: string }) => orb.id === "parent")).not…
+     40|   for (const orb of items) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  apps/control-plane/src/testkit/store.contract.test.ts > in-memory store contract > lists immutable spawn provenance through caller archival and deletion
+Unknown Error: Called `_unsafeUnwrap` on an Err
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  apps/control-plane/src/adapters/pg/stores.test.ts > PGlite store contract > lists immutable spawn provenance through caller archival and deletion
+Unknown Error: Called `_unsafeUnwrap` on an Err
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  4 failed (4)
+      Tests  4 failed | 3 passed | 122 skipped (129)
+   Start at  18:15:40
+   Duration  6.63s (transform 1.19s, setup 0ms, import 2.92s, tests 3.10s, environment 0ms)
+
+
+--- backend-red-corrected.log ---
+
+ RUN  v4.1.11 /workspace/repo
+
+ ❯ apps/control-plane/src/adapters/pg/stores.test.ts (66 tests | 1 failed | 65 skipped) 2996ms
+     ↓ caches activity headlines separately with isolated keys and unchanged history
+     ↓ returns the first successful headline and its timestamp to both concurrent writers
+     ↓ fences missing sources, stale sessions and deletion even on existing cache keys
+     ↓ retains cached headlines through archival
+     ↓ keeps the first orb time zone when an ID collides at insertion
+     ↓ publishes only inserted alerts and compare-clears without erasing a newer alert
+     ↓ atomically accepts and resolves scheduled sleep with singleton system provenance
+     ↓ atomically registers immutable upload batch membership
+     ↓ persists upload leases, fences idle CAS, and never wakes from upload notification
+     ↓ atomically spawns with immutable retry identity and fences retired callers
+     × lists immutable spawn provenance through caller archival and deletion 2993ms
+     ↓ serializes concurrent spawn retries and project deletion
+     ↓ persists projects and performs lifecycle state-version CAS
+     ↓ charges restarts and fails a budget-exhausted orb with its agent suspended
+     ↓ claims a Claude ownership episode once and creates proof only at fenced finalization
+     ↓ atomically fails, revokes runtime auth, and fences compute disposal
+     ↓ fences immutable host-spec replacement forward and commits durable intent
+     ↓ leaves a hostless or same-spec orb untouched and conflicts on a stale version
+     ↓ rejects stale provision commits across replacement request and finalization
+     ↓ requests replacement at the generation boundary and reads a null committed generation as zero
+     ↓ carries retained failure evidence through a replacement request and finalization
+     ↓ forces replacement when provider stamps disagree with durable current spec
+     ↓ guards discard finalization and clears retained evidence on replacement commit
+     ↓ claims the mint rate-limit slot atomically and only moves it forward
+     ↓ admits exactly one of many concurrent mint-slot claims
+     ↓ lets a mint slot claim interleave a lifecycle read and its CAS
+     ↓ coordinates auto-naming and preserves a manual name
+     ↓ durably queues a stopped-orb message, wakes it, and completes from replicated identity
+     ↓ fails a rejected batch terminally and keeps the queue moving
+     ↓ wakes a stopped orb for any outstanding wake intent, not only the oldest message
+     ↓ wakes a failed orb once for a new send and never for a stranded intent
+     ↓ records a delivery note that replication already marked delivered
+     ↓ atomically commits idempotent history and reconstructs its linear chain
+     ↓ anchors source history to an inactive branch without changing replica metadata
+     ↓ rejects cursor and immutable-record conflicts without partial advancement
+     ↓ persists name and repository together and rejects edits after deletion
+     ↓ atomically fences project creation, fans out deletion, and finalizes last
+     ↓ upgrades an in-progress archive when its project is deleted
+     ↓ atomically requests and finalizes permanent deletion with history
+     ↓ fences self-delete authority inside the write: {"runtimeTokenHash":"stale","hostIncarnation":2}
+     ↓ fences self-delete authority inside the write: {"runtimeTokenHash":"current","hostIncarnation":1}
+     ↓ refuses self-delete at the write during stopping
+     ↓ refuses self-delete at the write during discard
+     ↓ fences self-archive authority inside the write: {"runtimeTokenHash":"stale","hostIncarnation":2}
+     ↓ fences self-archive authority inside the write: {"runtimeTokenHash":"current","hostIncarnation":1}
+     ↓ refuses self-archive at the write during stopping
+     ↓ refuses self-archive at the write during discard
+     ↓ seals and finalizes archival without deleting history
+     ↓ inserts keys with their JWK intact and lists them oldest first
+     ↓ refuses a duplicate kid and a second active key as corruption
+     ↓ fences activation and retirement on the row version
+     ↓ refuses to activate a second key while one is already active
+     ↓ refuses transitions the timestamp completeness check forbids
+     ↓ refuses an inserted row whose timestamps do not match its state
+     ↓ conflicts on a stale row version and on an unknown kid without writing
+     ↓ isolates credential pointer CAS and leases by user
+     ↓ serializes headline publication behind an uncommitted session fence on real PostgreSQL
+     ↓ serializes headline publication behind an uncommitted source fence on real PostgreSQL
+     ↓ serializes headline publication behind an uncommitted orb fence on real PostgreSQL
+     ↓ serializes headline publication behind an uncommitted project fence on real PostgreSQL
+     ↓ cascades headline source/session deletion and fences subsequent publication
+     ↓ rolls back partial spawn writes and retains deletion-safe provenance
+     ↓ rejects malformed system inbox provenance at the schema boundary
+     ↓ round-trips structured jsonb parameters and refuses undeclared ones
+     ↓ implements project-secret pointer CAS and the deletion fence
+     ↓ implements credential pointer CAS
+ ❯ apps/control-plane/src/http/orb-list.routes.test.ts (7 tests | 3 failed | 4 skipped) 132ms
+   × exposes only caller IDs using one project-list read, without per-orb lookups 96ms
+   × exposes the same provenance on direct GET, including a deleted caller 16ms
+   ↓ does not read provenance for a missing orb
+   ↓ keeps a missing project distinct from an empty project
+   ↓ does not silently drop provenance on 'unavailable'
+   ↓ does not silently drop provenance on 'invariant'
+   × reports a provenance read outage on direct GET 19ms
+ ❯ apps/control-plane/src/testkit/store.contract.test.ts (55 tests | 1 failed | 54 skipped) 43ms
+     ↓ caches activity headlines separately with isolated keys and unchanged history
+     ↓ returns the first successful headline and its timestamp to both concurrent writers
+     ↓ fences missing sources, stale sessions and deletion even on existing cache keys
+     ↓ retains cached headlines through archival
+     ↓ keeps the first orb time zone when an ID collides at insertion
+     ↓ publishes only inserted alerts and compare-clears without erasing a newer alert
+     ↓ atomically accepts and resolves scheduled sleep with singleton system provenance
+     ↓ atomically registers immutable upload batch membership
+     ↓ persists upload leases, fences idle CAS, and never wakes from upload notification
+     ↓ atomically spawns with immutable retry identity and fences retired callers
+     × lists immutable spawn provenance through caller archival and deletion 40ms
+     ↓ serializes concurrent spawn retries and project deletion
+     ↓ persists projects and performs lifecycle state-version CAS
+     ↓ charges restarts and fails a budget-exhausted orb with its agent suspended
+     ↓ claims a Claude ownership episode once and creates proof only at fenced finalization
+     ↓ atomically fails, revokes runtime auth, and fences compute disposal
+     ↓ fences immutable host-spec replacement forward and commits durable intent
+     ↓ leaves a hostless or same-spec orb untouched and conflicts on a stale version
+     ↓ rejects stale provision commits across replacement request and finalization
+     ↓ requests replacement at the generation boundary and reads a null committed generation as zero
+     ↓ carries retained failure evidence through a replacement request and finalization
+     ↓ forces replacement when provider stamps disagree with durable current spec
+     ↓ guards discard finalization and clears retained evidence on replacement commit
+     ↓ claims the mint rate-limit slot atomically and only moves it forward
+     ↓ admits exactly one of many concurrent mint-slot claims
+     ↓ lets a mint slot claim interleave a lifecycle read and its CAS
+     ↓ coordinates auto-naming and preserves a manual name
+     ↓ durably queues a stopped-orb message, wakes it, and completes from replicated identity
+     ↓ fails a rejected batch terminally and keeps the queue moving
+     ↓ wakes a stopped orb for any outstanding wake intent, not only the oldest message
+     ↓ wakes a failed orb once for a new send and never for a stranded intent
+     ↓ records a delivery note that replication already marked delivered
+     ↓ atomically commits idempotent history and reconstructs its linear chain
+     ↓ anchors source history to an inactive branch without changing replica metadata
+     ↓ rejects cursor and immutable-record conflicts without partial advancement
+     ↓ persists name and repository together and rejects edits after deletion
+     ↓ atomically fences project creation, fans out deletion, and finalizes last
+     ↓ upgrades an in-progress archive when its project is deleted
+     ↓ atomically requests and finalizes permanent deletion with history
+     ↓ fences self-delete authority inside the write: {"runtimeTokenHash":"stale","hostIncarnation":2}
+     ↓ fences self-delete authority inside the write: {"runtimeTokenHash":"current","hostIncarnation":1}
+     ↓ refuses self-delete at the write during stopping
+     ↓ refuses self-delete at the write during discard
+     ↓ fences self-archive authority inside the write: {"runtimeTokenHash":"stale","hostIncarnation":2}
+     ↓ fences self-archive authority inside the write: {"runtimeTokenHash":"current","hostIncarnation":1}
+     ↓ refuses self-archive at the write during stopping
+     ↓ refuses self-archive at the write during discard
+     ↓ seals and finalizes archival without deleting history
+     ↓ inserts keys with their JWK intact and lists them oldest first
+     ↓ refuses a duplicate kid and a second active key as corruption
+     ↓ fences activation and retirement on the row version
+     ↓ refuses to activate a second key while one is already active
+     ↓ refuses transitions the timestamp completeness check forbids
+     ↓ refuses an inserted row whose timestamps do not match its state
+     ↓ conflicts on a stale row version and on an unknown kid without writing
+ ❯ packages/protocol/src/orb-spawn-view.test.ts (4 tests | 1 failed) 12ms
+     × accepts an optional caller ID 10ms
+     ✓ rejects non-string provenance: null 0ms
+     ✓ rejects non-string provenance: 42 0ms
+     ✓ rejects non-string provenance: {"id":"parent","url":"https://app.test/orbs/parent"} 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/protocol/src/orb-spawn-view.test.ts > browser spawn provenance > accepts an optional caller ID
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ packages/protocol/src/orb-spawn-view.test.ts:20:67
+     18|   it("accepts an optional caller ID", () => {
+     19|     expect(Check(OrbViewSchema, orb)).toBe(true);
+     20|     expect(Check(OrbViewSchema, { ...orb, spawnedBy: "parent" })).toBe…
+       |                                                                   ^
+     21|   });
+     22|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  apps/control-plane/src/http/orb-list.routes.test.ts > exposes only caller IDs using one project-list read, without per-orb lookups
+AssertionError: expected undefined to be 'parent' // Object.is equality
+
+- Expected:
+"parent"
+
++ Received:
+undefined
+
+ ❯ apps/control-plane/src/http/orb-list.routes.test.ts:38:77
+     36|   const items = response.json().items;
+     37|   expect(items).toHaveLength(2);
+     38|   expect(items.find((orb: { id: string }) => orb.id === "child").spawn…
+       |                                                                             ^
+     39|   expect(items.find((orb: { id: string }) => orb.id === "parent")).not…
+     40|   for (const orb of items) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  apps/control-plane/src/http/orb-list.routes.test.ts > exposes the same provenance on direct GET, including a deleted caller
+AssertionError: expected undefined to be 'parent' // Object.is equality
+
+- Expected:
+"parent"
+
++ Received:
+undefined
+
+ ❯ apps/control-plane/src/http/orb-list.routes.test.ts:51:43
+     49| it("exposes the same provenance on direct GET, including a deleted cal…
+     50|   const read = () => app.inject({ method: "GET", url: "/api/v1/orbs/ch…
+     51|   expect((await read()).json().spawnedBy).toBe("parent");
+       |                                           ^
+     52|   const parent = h.store.orbSnapshot("parent")!;
+     53|   const deletion = (await h.store.requestOrbDeletion(task, {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  apps/control-plane/src/http/orb-list.routes.test.ts > reports a provenance read outage on direct GET
+AssertionError: expected 200 to be 503 // Object.is equality
+
+- Expected
++ Received
+
+- 503
++ 200
+
+ ❯ apps/control-plane/src/http/orb-list.routes.test.ts:102:31
+    100|   }));
+    101|   const response = await app.inject({ method: "GET", url: "/api/v1/orb…
+    102|   expect(response.statusCode).toBe(503);
+       |                               ^
+    103|   expect(response.json().error.retryable).toBe(true);
+    104| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  apps/control-plane/src/testkit/store.contract.test.ts > in-memory store contract > lists immutable spawn provenance through caller archival and deletion
+AssertionError: expected { …(41) } to match object { spawnedBy: null }
+(41 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "spawnedBy": null,
++   "agentAdmissionVersion": 0,
++   "autoNameAttempts": 0,
++   "autoNameLeaseUntil": null,
++   "autoNameNextAttemptAt": null,
++   "autoRestartTimes": [],
++   "checkoutCommit": null,
++   "createdAt": 1000,
++   "harness": "pi",
++   "harnessSessionHeader": null,
++   "harnessSessionId": null,
++   "hostDiscardError": null,
++   "hostDiscardEvidence": null,
++   "hostDiscardReason": null,
++   "hostDiscardRequestedAt": null,
++   "hostDiscardThroughIncarnation": null,
++   "hostIncarnation": 0,
++   "hostKind": "process",
++   "hostRef": null,
++   "hostSpecFingerprint": null,
++   "hostSpecGeneration": null,
++   "id": "00000000-0000-4000-8000-000000000002",
++   "lastBusyAt": null,
++   "lastError": null,
++   "lastMintAt": null,
++   "lastReadyAt": null,
++   "name": null,
++   "projectId": "00000000-0000-4000-8000-000000000001",
++   "replicatedHeadId": null,
++   "replicationCursor": null,
++   "resourceWarnings": [],
++   "runtimeTokenHash": "token",
++   "sleepId": null,
++   "sleepUntil": null,
++   "state": "running",
++   "stateChangedAt": 1000,
++   "stateVersion": 0,
++   "stopReason": null,
++   "unreadAlertId": null,
++   "updatedAt": 1000,
++   "uploadActiveUntil": null,
++   "userTimeZone": null,
+  }
+
+ ❯ expectRelation apps/control-plane/src/testkit/store-contract.ts:644:58
+    642|         const rows = await read();
+    643|         expect(rows.map((row) => row.id).sort()).toEqual([caller.id, c…
+    644|         expect(rows.find((row) => row.id === caller.id)).toMatchObject…
+       |                                                          ^
+    645|         expect(rows.find((row) => row.id === child.id)).toMatchObject(…
+    646|       };
+ ❯ apps/control-plane/src/testkit/store-contract.ts:647:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ FAIL  apps/control-plane/src/adapters/pg/stores.test.ts > PGlite store contract > lists immutable spawn provenance through caller archival and deletion
+AssertionError: expected { …(42) } to match object { spawnedBy: null }
+(42 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "spawnedBy": null,
++   "agentAdmissionVersion": 0,
++   "archivedAt": null,
++   "autoNameAttempts": 0,
++   "autoNameLeaseUntil": null,
++   "autoNameNextAttemptAt": null,
++   "autoRestartTimes": [],
++   "checkoutCommit": null,
++   "createdAt": 1000,
++   "harness": "pi",
++   "harnessSessionHeader": null,
++   "harnessSessionId": null,
++   "hostDiscardError": null,
++   "hostDiscardEvidence": null,
++   "hostDiscardReason": null,
++   "hostDiscardRequestedAt": null,
++   "hostDiscardThroughIncarnation": null,
++   "hostIncarnation": 0,
++   "hostKind": "process",
++   "hostRef": null,
++   "hostSpecFingerprint": null,
++   "hostSpecGeneration": null,
++   "id": "00000000-0000-4000-8000-000000000002",
++   "lastBusyAt": null,
++   "lastError": null,
++   "lastMintAt": null,
++   "lastReadyAt": null,
++   "name": null,
++   "projectId": "00000000-0000-4000-8000-000000000001",
++   "replicatedHeadId": null,
++   "replicationCursor": null,
++   "resourceWarnings": [],
++   "runtimeTokenHash": "token",
++   "sleepId": null,
++   "sleepUntil": null,
++   "state": "running",
++   "stateChangedAt": 1000,
++   "stateVersion": 0,
++   "stopReason": null,
++   "unreadAlertId": null,
++   "updatedAt": 1000,
++   "uploadActiveUntil": null,
++   "userTimeZone": null,
+  }
+
+ ❯ expectRelation apps/control-plane/src/testkit/store-contract.ts:644:58
+    642|         const rows = await read();
+    643|         expect(rows.map((row) => row.id).sort()).toEqual([caller.id, c…
+    644|         expect(rows.find((row) => row.id === caller.id)).toMatchObject…
+       |                                                          ^
+    645|         expect(rows.find((row) => row.id === child.id)).toMatchObject(…
+    646|       };
+ ❯ apps/control-plane/src/testkit/store-contract.ts:647:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+
+
+ Test Files  4 failed (4)
+      Tests  6 failed | 3 passed | 123 skipped (132)
+   Start at  18:16:23
+   Duration  6.66s (transform 1.24s, setup 0ms, import 2.87s, tests 3.18s, environment 1ms)
+

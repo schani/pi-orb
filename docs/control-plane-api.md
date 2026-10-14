@@ -177,6 +177,8 @@ This is intentionally not implemented by calling `/api/v1/*`: incarnation bearer
 
 ### In-orb spawning (decided and implemented 2026-09-08)
 
+**Browser spawn provenance (implemented locally 2026-10-14; not deployed):** `OrbView.spawnedBy?: string` is the immutable caller orb ID from `orb_spawns`, omitted for non-spawned orbs. `GET /api/v1/projects/:projectId/orbs` and `GET /api/v1/orbs/:orbId` retain it after caller archival/deletion; mutation responses may omit it. It is provenance, not lifecycle ownership or an eligible display parent. Service/store reads expose the existing relation without new persisted state. Display rules: `docs/web-ui.md`. Runtime self-inspection retains its existing `{id,url}|null` shape; no runtime WebSocket or harness changes.
+
 `PUT /runtime/v1/orbs/:orbId/spawn` accepts `{ prompt, name? }` from a running orb's per-incarnation bearer. It derives the project from the caller and atomically commits an independent orb, its initial inbox message, and immutable acceptance/provenance. It returns non-cacheable `202 { orbId, projectId, url, messageId }` without waiting for boot or completion; `url` uses configured `PI_ORB_APP_ORIGIN`, not the runtime service origin. The new orb ID also identifies the initial message and retries. Same caller/body retries do not duplicate work; altered requests, retired identity, and lifecycle fences fail explicitly. CLI usage, transaction/authority boundaries, error classes, and project-owned deletion-safe retry tombstones: `docs/orb-spawning.md`.
 
 ### In-orb self-archival (decided and implemented 2026-09-05)
@@ -244,6 +246,7 @@ interface OrbView {
   stateVersion: number;
   activity?: "idle" | "busy";
   unreadAlertId?: string;
+  spawnedBy?: string;
   checkoutCommit?: string;
   resourceWarnings?: Array<{
     path: string;
