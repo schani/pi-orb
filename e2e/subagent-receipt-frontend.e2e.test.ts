@@ -131,9 +131,45 @@ for (const width of [1280, 390, 320]) {
       expectPage(geometry.sourceRight).toBeGreaterThan(geometry.previewRight);
       expectPage(geometry.clipped).toBe(true);
       expectPage(geometry.overflow).toBeLessThanOrEqual(0);
+      const expectFocusedNotice = async () => {
+        const focused = await summary.evaluate((element) => {
+          const view = element.ownerDocument.defaultView;
+          const source = element.querySelector(".activity-rail-metric");
+          const text = element.querySelector(".activity-rail-summary");
+          if (view === null || source === null || text === null)
+            throw new Error("missing focused message columns");
+          const style = view.getComputedStyle(element);
+          return {
+            focusVisible: element.matches(":focus-visible"),
+            background: style.backgroundColor,
+            color: style.color,
+            sourceColor: view.getComputedStyle(source).color,
+            outline: style.outlineStyle,
+            outlineWidth: style.outlineWidth,
+            outlineColor: style.outlineColor,
+            sourceWidth: source.getBoundingClientRect().width,
+            sourceLeft: source.getBoundingClientRect().left,
+            textRight: text.getBoundingClientRect().right,
+          };
+        });
+        expectPage(focused).toMatchObject({
+          focusVisible: true,
+          background: "rgb(255, 255, 255)",
+          color: "rgb(0, 0, 0)",
+          sourceColor: "rgb(85, 85, 85)",
+          outline: "solid",
+          outlineWidth: "1px",
+          outlineColor: "rgb(85, 85, 85)",
+        });
+        expectPage(focused.sourceWidth).toBeGreaterThan(0);
+        expectPage(focused.sourceLeft).toBeGreaterThanOrEqual(focused.textRight);
+      };
+      await page.keyboard.press("Tab");
       await summary.focus();
+      await expectFocusedNotice();
       await summary.press("Enter");
       await expectPage(preview).toHaveCount(0);
+      await expectFocusedNotice();
       await expectPage(body).toHaveText(
         `Receipt <script>globalThis.__inlineAlertExecuted=true</script> **literal**\n\n${"long-token-".repeat(90)} End of actual message.`,
       );

@@ -2577,6 +2577,12 @@ pre,
 .subagent-message-notice > summary {
   grid-template-columns: 2ch minmax(0, 1fr) minmax(0, min(28ch, 30%));
 }
+.subagent-message-notice > summary:focus-visible {
+  outline: 1px solid var(--g3);
+  outline-offset: -1px;
+  background: var(--w);
+  color: var(--k);
+}
 .subagent-message-notice .activity-rail-metric {
   overflow: hidden;
   text-overflow: ellipsis;
