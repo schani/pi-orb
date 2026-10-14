@@ -62,12 +62,6 @@ it.for(["pglite", "postgres"] as const)(
       )._unsafeUnwrap();
       (await database.store.insertProject(task, project))._unsafeUnwrap();
       (await database.store.insertOrb(task, orb))._unsafeUnwrap();
-      (
-        await db.query(
-          'INSERT INTO orb_messages(orb_id,message_id,content,status,delivery_batch_id) VALUES($1,$2,\'[{"type":"text","text":"first"}]\',\'delivering\',$3)',
-          [orb.id, messageId, batchId],
-        )
-      )._unsafeUnwrap();
       const lease = (
         await database.agentPersistence.open(task, orb, { signal: new AbortController().signal })
       )._unsafeUnwrap();
@@ -180,6 +174,12 @@ it.for(["pglite", "postgres"] as const)(
         })
       )._unsafeUnwrap();
       await priorEntered.promise;
+      (
+        await db.query(
+          'INSERT INTO orb_messages(orb_id,message_id,content,status,delivery_batch_id) VALUES($1,$2,\'[{"type":"text","text":"first"}]\',\'delivering\',$3)',
+          [orb.id, messageId, batchId],
+        )
+      )._unsafeUnwrap();
       delivery = agent.deliver({
         baseUrl: "unused",
         messageId: batchId,
