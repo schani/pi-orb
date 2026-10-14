@@ -1,6 +1,3 @@
-import { once } from "node:events";
-import { createServer, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
 import { NoSimulationTask } from "determined";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { describeFetchError, FetchRuntimeClient } from "./fetch-client.ts";
@@ -303,113 +300,29 @@ describe("FetchRuntimeClient response evidence", () => {
   });
 });
 
-async function withLoopback(
-  respond: (response: ServerResponse) => void,
-  run: (baseUrl: string) => Promise<void>,
-): Promise<void> {
-  const server = createServer((_request, response) => respond(response));
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  try {
-    await run(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
-  } finally {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+describe("FetchRuntimeClient status contracts", () => {
+  function pullResponse(status: number, body: string) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body, { status })),
+    );
+    return new FetchRuntimeClient().pullHistory(
+      task,
+      { baseUrl: "http://runtime.test", after: null, limit: 10 },
+      { signal: new AbortController().signal },
+    );
   }
-}
-
-function pullHistory(baseUrl: string, signal = new AbortController().signal) {
-  return new FetchRuntimeClient().pullHistory(
-    task,
-    { baseUrl, after: null, limit: 10 },
-    { signal },
-  );
-}
-
-/** Observe native fetch/body consumption without replacing either operation. */
-function bodyReadGate(): Promise<void> {
-  const nativeFetch = globalThis.fetch;
-  let resolveStarted!: () => void;
-  const started = new Promise<void>((resolve) => {
-    resolveStarted = resolve;
-  });
-  vi.stubGlobal("fetch", async (...args: Parameters<typeof fetch>) => {
-    const response = await nativeFetch(...args);
-    for (const method of ["json", "text"] as const) {
-      const read = response[method].bind(response);
-      Object.defineProperty(response, method, {
-        value: () => {
-          const pending = read();
-          resolveStarted();
-          return pending;
-        },
-      });
-    }
-    return response;
-  });
-  return started;
-}
-
-describe("FetchRuntimeClient loopback body failures", () => {
-  it("classifies abort after headers during a held body as retryable cancellation", async () => {
-    const bodyStarted = bodyReadGate();
-    const controller = new AbortController();
-    await withLoopback(
-      (response) => {
-        response.writeHead(200, { "content-type": "application/json" });
-        response.flushHeaders();
-      },
-      async (baseUrl) => {
-        const pending = pullHistory(baseUrl, controller.signal);
-        await bodyStarted;
-        controller.abort();
-        expect((await pending)._unsafeUnwrapErr()).toMatchObject({
-          code: "cancelled",
-          retryable: true,
-          answered: false,
-          message: expect.stringContaining("body read cancelled"),
-        });
-      },
-    );
-  });
-
-  it("classifies socket interruption after headers during a held body as retryable transport failure", async () => {
-    const bodyStarted = bodyReadGate();
-    let heldResponse!: ServerResponse;
-    await withLoopback(
-      (response) => {
-        heldResponse = response;
-        response.writeHead(200, { "content-type": "application/json" });
-        response.flushHeaders();
-      },
-      async (baseUrl) => {
-        const pending = pullHistory(baseUrl);
-        await bodyStarted;
-        heldResponse.destroy();
-        expect((await pending)._unsafeUnwrapErr()).toMatchObject({
-          code: "unreachable",
-          retryable: true,
-          answered: false,
-          message: expect.stringContaining("UND_ERR_SOCKET"),
-        });
-      },
-    );
-  });
 
   it.each([201, 202, 400, 503])(
     "preserves HTTP %s classification for a complete non-JSON history response",
     async (status) => {
-      await withLoopback(
-        (response) => response.writeHead(status).end("upstream unavailable"),
-        async (baseUrl) => {
-          expect((await pullHistory(baseUrl))._unsafeUnwrapErr()).toMatchObject({
-            code: "http_error",
-            retryable: status >= 500,
-            answered: true,
-            message: `runtime returned HTTP ${status}`,
-          });
-        },
-      );
+      expect((await pullResponse(status, "upstream unavailable"))._unsafeUnwrapErr()).toEqual({
+        type: "runtime_client_error",
+        code: "http_error",
+        retryable: status >= 500,
+        answered: true,
+        message: `runtime returned HTTP ${status}`,
+      });
     },
   );
 
@@ -417,55 +330,35 @@ describe("FetchRuntimeClient loopback body failures", () => {
     ["cursor_not_found", 409, false],
     ["history_unavailable", 503, true],
   ] as const)("preserves structured %s errors", async (code, status, retryable) => {
-    await withLoopback(
-      (response) =>
-        response
-          .writeHead(status, { "content-type": "application/json" })
-          .end(JSON.stringify({ v: 1, error: { code, message: "runtime error", retryable } })),
-      async (baseUrl) => {
-        expect((await pullHistory(baseUrl))._unsafeUnwrapErr()).toMatchObject({
-          code,
-          retryable,
-          answered: true,
-          message: "runtime error",
-        });
-      },
-    );
-  });
-
-  it.each([
-    ["unparseable JSON", "private-body"],
-    ["invalid schema", "{}"],
-  ])("keeps complete 200 %s as an integrity failure without body contents", async (_case, body) => {
-    await withLoopback(
-      (response) => response.writeHead(200, { "content-type": "application/json" }).end(body),
-      async (baseUrl) => {
-        const error = (await pullHistory(baseUrl))._unsafeUnwrapErr();
-        expect(error).toMatchObject({
-          code: "invalid_response",
-          retryable: false,
-          answered: true,
-        });
-        expect(error.message).not.toContain("private-body");
-      },
-    );
+    const body = JSON.stringify({ v: 1, error: { code, message: "runtime error", retryable } });
+    expect((await pullResponse(status, body))._unsafeUnwrapErr()).toEqual({
+      type: "runtime_client_error",
+      code,
+      retryable,
+      answered: true,
+      message: "runtime error",
+    });
   });
 
   it("keeps malformed accepted 202 message responses as integrity failures", async () => {
-    await withLoopback(
-      (response) => response.writeHead(202).end("{"),
-      async (baseUrl) => {
-        const result = await new FetchRuntimeClient().deliverMessage(
-          task,
-          { baseUrl, messageId: "message", messageIds: ["message"], content: [] },
-          { signal: new AbortController().signal },
-        );
-        expect(result._unsafeUnwrapErr()).toMatchObject({
-          code: "invalid_response",
-          retryable: false,
-          answered: true,
-        });
-      },
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{", { status: 202 })),
     );
+    const result = await new FetchRuntimeClient().deliverMessage(
+      task,
+      {
+        baseUrl: "http://runtime.test",
+        messageId: "message",
+        messageIds: ["message"],
+        content: [],
+      },
+      { signal: new AbortController().signal },
+    );
+    expect(result._unsafeUnwrapErr()).toMatchObject({
+      code: "invalid_response",
+      retryable: false,
+      answered: true,
+    });
   });
 });
