@@ -4,7 +4,7 @@
 npx vitest run apps/orb-runtime/src/claude/native-sdk.contract.test.ts
 ```
 
-Requires installed SDK **0.3.289**, bundled CLI **2.1.289**, Python 3, and Linux x86-64 with seccomp user notification. The normal test suite skips these guarded probes on other platforms. Direct probe invocation fails closed there; no unguarded fallback runs.
+Requires installed SDK **0.3.300**, bundled CLI **2.1.300**, Python 3, and Linux x86-64 with seccomp user notification. The normal test suite skips these guarded probes on other platforms. Direct probe invocation fails closed there; no unguarded fallback runs.
 
 The actual native CLI talks to an owned loopback Anthropic Messages server. Its canned SSE responses request `Bash` (`printf native-contract-fixed-output`), then finish. A separate scenario delegates that operation to a native child agent. Another submits `/compact`.
 
@@ -26,6 +26,7 @@ The fixture records field names, not credentials, prompts, request bodies, files
 - Root assistant and tool-result UUIDs equal their SDK message UUIDs.
 - `ClaudeHistory.correlate()` maps that receipt into inbox provenance.
 - The root file is `config/projects/<sanitized-cwd>/<session-id>.jsonl` for the short, canonical probe path and ends with a newline.
+- `supportedModels()` resolves `default`/`opus` → `claude-opus-5-5`, `fable` → `claude-fable-5-1`, `sonnet` → `claude-sonnet-5-5`, `haiku` → `claude-haiku-5-5`.
 - Supported model `claude-sonnet-5-5` receives the selected `low` effort. Native assistant records carry the same effort. Unsupported `claude-sonnet-4-5` omitted effort during characterization.
 - `/compact` preserves the previously-fsynced byte prefix and appends a boundary with native compaction metadata plus an `isCompactSummary` user record.
 - Child conversations live in separate `subagents/agent-*.jsonl` files. Child assistant UUIDs do not appear in the root. The SDK forwards the child's tool-call assistant but not its final hand-back assistant.

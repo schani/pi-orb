@@ -11,7 +11,7 @@ const sdk = JSON.parse(
     "utf8",
   ),
 );
-assert.equal(sdk.version, "0.3.289");
+assert.equal(sdk.version, "0.3.300");
 const musl = process.platform === "linux" && !process.report.getReport().header.glibcVersionRuntime;
 const platform = `${process.platform}-${process.arch}${musl ? "-musl" : ""}`;
 const executable = require.resolve(
@@ -22,5 +22,5 @@ const version = execFileSync(executable, ["--version"], {
   env: { PATH: process.env.PATH },
   timeout: 10_000,
 }).trim();
-assert.equal(version, "2.1.289 (Claude Code)");
-console.log(`CLAUDE_SDK_OK ${sdk.version} / 2.1.289`);
+assert.equal(version, "2.1.300 (Claude Code)");
+console.log(`CLAUDE_SDK_OK ${sdk.version} / 2.1.300`);

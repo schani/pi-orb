@@ -1,6 +1,6 @@
 {
-  "sdkVersion": "0.3.289",
-  "cliVersion": "2.1.289",
+  "sdkVersion": "0.3.300",
+  "cliVersion": "2.1.300",
   "compaction": {
     "metadataKeys": [
       "cumulativeDroppedTokens",
@@ -87,6 +87,8 @@
         "message",
         "parentUuid",
         "perTurnEffort",
+        "requestRef",
+        "requestedModel",
         "sessionId",
         "timestamp",
         "type",
@@ -115,6 +117,7 @@
         "isSidechain",
         "message",
         "parentUuid",
+        "permissionDecision",
         "promptId",
         "sessionId",
         "sourceToolAssistantUUID",
@@ -139,6 +142,8 @@
         "message",
         "parentUuid",
         "perTurnEffort",
+        "requestRef",
+        "requestedModel",
         "sessionId",
         "timestamp",
         "type",
