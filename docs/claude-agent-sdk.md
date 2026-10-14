@@ -269,6 +269,9 @@ Use the pinned SDK with fake-model request assertions in browser-runtime handsha
 
 **Publication invariant (2026-10-06):** native-only assistant prefixes may publish past live blocks only when every block has explicit `messageBlocks` ownership by an exact durable assistant UUID in the current scan. Native order and matching-record-only retirement are preserved; missing/mismatched identities, wrong-role matches and unbound blocks fail closed. Evidence and historical attribution limits: [docs/postmortems/2026-10-06-claude-publication-order.md](postmortems/2026-10-06-claude-publication-order.md).
 
+**Terminal diagnostics (2026-10-14):** `claude_stream_identity_gap` still fails closed; its existing health → persisted/UI-visible `lastError` now includes live/published/native counts, the first unpublished record's ID/type/role, and up to three live block IDs with owner counts and two owner UUID/native-match samples (`missing`, `assistant`, `wrong_role`; zero owners means unbound).
+IDs outside 1–96 ASCII identifier characters (`A–Z`, `a–z`, `0–9`, `.`, `_`, `:`, `-`) become `null`; matching still uses full identities. Payloads, text, signatures and overflow are excluded. Bounded samples distinguish ownership failures without copying transcripts; no new persisted state or automatic recovery.
+
 ## Proposed observability
 
 - Persist orb harness, SDK/CLI versions and session binding; journal native-ingestion gaps/conflicts and sanitized process-exit/SDK-result categories.

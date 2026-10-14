@@ -8,6 +8,13 @@ import { afterEach, expect, it } from "vitest";
 import { ClaudeOrbAgent, type ClaudeQuery, type NativeState } from "./agent.ts";
 import { ClaudeHistory, nativeHistoryFiles } from "./history.ts";
 
+function gapDiagnostics(agent: ClaudeOrbAgent) {
+  const health = agent.getHealth();
+  if (health.status !== "failed") throw new Error("expected failed health");
+  expect(health.error).toMatchObject({ code: "claude_stream_identity_gap", retryable: false });
+  return JSON.parse(health.error.message.slice(health.error.message.indexOf("{")));
+}
+
 const dirs: string[] = [];
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -261,6 +268,30 @@ it.each([
       status: "failed",
       error: { code: "claude_stream_identity_gap" },
     });
+    const gap = gapDiagnostics(f.agent);
+    expect(gap).toMatchObject({
+      liveBlocks: ["missing-uuid", "mismatched-uuid", "role-mismatch"].includes(ordering) ? 1 : 2,
+      published: 0,
+      nativeLength: f.history.view.length,
+      omittedBlocks: 0,
+      firstUnpublished: { id: "recovery-assistant", type: "message", role: "assistant" },
+    });
+    expect(gap.blocks[0]).toEqual({
+      id: "start:0",
+      ownerCount: 1,
+      owners: [
+        {
+          id: ["missing-uuid", "unbound-block"].includes(ordering) ? null : "final-assistant",
+          match: ["missing-uuid", "unbound-block", "mismatched-uuid"].includes(ordering)
+            ? "missing"
+            : ordering === "role-mismatch"
+              ? "wrong_role"
+              : "assistant",
+        },
+      ],
+    });
+    if (ordering === "partial-multi-block")
+      expect(gap.blocks[1]).toEqual({ id: "next:0", ownerCount: 0, owners: [] });
     expect(records).toEqual([]);
     expect(f.agent.liveView()?.blocks.length).toBe(
       ["missing-uuid", "mismatched-uuid", "role-mismatch"].includes(ordering) ? 1 : 2,
@@ -283,4 +314,69 @@ it.each([
     [],
   ]);
   expect(f.agent.liveView()).toBeNull();
+});
+
+it("bounds diagnostic samples and redacts unsafe identities and content", async () => {
+  const f = fixture();
+  expect((await f.attach()).isOk()).toBe(true);
+  expect((await f.agent.submitMessage([{ type: "text", text: "PRIVATE" }], "op")).isOk()).toBe(
+    true,
+  );
+  const emit = (message: object) =>
+    f.emit({ ...message, session_id: f.state.id, parent_tool_use_id: null } as SDKMessage);
+  const content = [{ type: "text", text: "PRIVATE" }];
+  const content_block = { type: "thinking", thinking: "PRIVATE", signature: "PRIVATE" };
+  const ids = ["b".repeat(94), "PRIVATE/ID\n", "x".repeat(97), "omitted"];
+  for (const [index, uuid] of ids.entries()) {
+    for (let owner = 0; owner < 3; owner++) {
+      await emit({
+        type: "stream_event",
+        uuid,
+        event: { type: "content_block_start", index: 0, content_block },
+      });
+      await emit({
+        type: "assistant",
+        uuid: index === 0 ? (owner === 0 ? "a".repeat(96) : `owner-${owner}`) : `${uuid}-${owner}`,
+        message: { role: "assistant", id: "PRIVATE", content },
+      });
+    }
+  }
+  f.persist({
+    type: "assistant",
+    uuid: "PRIVATE/NATIVE",
+    parentUuid: null,
+    message: { role: "assistant", content },
+    metadata: "PRIVATE",
+  });
+  await emit({ type: "result", subtype: "success", is_error: false });
+  await f.awaitCloseRequest(2);
+  f.exit();
+  await f.agent.closeExtensions();
+  const gap = gapDiagnostics(f.agent);
+  expect(gap).toMatchObject({
+    liveBlocks: 4,
+    published: 0,
+    nativeLength: f.history.view.length,
+    omittedBlocks: 1,
+    firstUnpublished: { id: null, type: "message", role: "assistant" },
+  });
+  expect(gap.blocks).toEqual([
+    {
+      id: `${"b".repeat(94)}:0`,
+      ownerCount: 3,
+      owners: [
+        { id: "a".repeat(96), match: "missing" },
+        { id: "owner-1", match: "missing" },
+      ],
+    },
+    ...[1, 2].map(() => ({
+      id: null,
+      ownerCount: 3,
+      owners: Array(2).fill({ id: null, match: "missing" }),
+    })),
+  ]);
+  const health = f.agent.getHealth();
+  if (health.status !== "failed") throw new Error("expected failed health");
+  expect(health.error.message.length).toBeLessThan(4096);
+  expect(health.error.message).not.toMatch(/PRIVATE|owner-2|omitted:0/);
 });
