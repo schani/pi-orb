@@ -1,11 +1,24 @@
 import type { HistoryRecord } from "@pi-orb/protocol";
 import { ConditionVariable, type SimulationTask } from "determined";
-import { ok, okAsync, ResultAsync } from "neverthrow";
+import { ok, okAsync, type Result, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
-import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
+import { SdkAgentPlane } from "../adapters/sdk-agent-plane.ts";
+import { FAILPOINTS } from "../testkit/failpoints.ts";
+import {
+  makeHarness,
+  makeOrbRow,
+  makeProjectRow,
+  restartControlPlane,
+  seedRunningOrb,
+} from "../testkit/fixtures.ts";
+import { assertReplicaComplete } from "../testkit/invariants.ts";
 import { LogCapture, runDst, waitUntil } from "../testkit/sim.ts";
+import { commitAgentHistory } from "./agent-history.ts";
 import type { AgentPlane } from "./agent-ports.ts";
-import { pollLoop, type ReconcileTaskRunner } from "./loops.ts";
+import { HarnessAgentPlane } from "./harness-agent-plane.ts";
+import { requestOrbDeletion, requestOrbStop } from "./lifecycle.ts";
+import { pollLoop, type ReconcileTaskRunner, reconcileLoop } from "./loops.ts";
+import type { CommitPullBatchParams } from "./ports.ts";
 
 type ReconcileJob = {
   readonly run: (task: SimulationTask) => Promise<void>;
@@ -504,3 +517,377 @@ for (const ending of ["shutdown", "fatal"] as const) {
     );
   });
 }
+
+// In-memory atomic-stage boundaries, not PostgreSQL isolation.
+const boundaryCases = (["stop", "delete"] as const).flatMap(
+  (ending) =>
+    [
+      { ending, fault: "before", order: "lifecycle-first" },
+      { ending, fault: "after", order: "commit-first" },
+      { ending, fault: "cas", order: "lifecycle-first" },
+      { ending, fault: "cas", order: "commit-first" },
+    ] as const,
+);
+it.each(boundaryCases)(
+  "composes poll $fault/$ending/$order at the commit boundary",
+  async ({ fault, ending, order }) => {
+    const logs = new LogCapture();
+    const before = FAILPOINTS.storeCommitBefore,
+      after = FAILPOINTS.storeCommitAfter;
+    const injection = fault === "before" ? before : fault === "after" ? after : "";
+    const edge = order === "lifecycle-first" ? before : after;
+    const firstError =
+      fault === "cas"
+        ? order === "lifecycle-first"
+          ? "cursor_conflict"
+          : undefined
+        : "store_error";
+    await runDst(
+      {
+        name: `poll-boundary-${fault}-${ending}-${order}`,
+        iterations: 10,
+        lateTimerProbability: 0,
+        logCapture: logs,
+        failpointProbabilities: { [injection]: 1 },
+      },
+      async (sim) => {
+        let h = makeHarness({
+          constants: {
+            reconcileTickMs: 20,
+            historyPullIntervalMs: 20,
+            runtimeRequestTimeoutMs: 100_000,
+            idleStopAfterMs: 1_000_000,
+            deletionQuarantineMs: 200,
+            hostBackstopIntervalMs: 100,
+          },
+        });
+        const ids = ["a", "b", "c"];
+        const gate = new ConditionVariable("atomic stage");
+        let captured: CommitPullBatchParams | undefined;
+        let ready = false,
+          boundary = false,
+          command = false,
+          lifecycle = false;
+        let release = false,
+          completed = false;
+        const until = (task: SimulationTask, why: string, check: () => boolean) =>
+          waitUntil(task, why, check, { intervalMs: 20, timeoutMs: 60_000 });
+        const replica = (id: string) => h.store.replicaRecords(id);
+        const messages = (id: string) => h.store.messageSnapshots(id);
+        const receipts = (id: string) =>
+          replica(id).flatMap((r) =>
+            r.type === "message" || r.type === "event" ? (r.inboxMessageIds ?? []) : [],
+          );
+        const delivered = (id: string, suffix: string) =>
+          messages(id).some((r) => r.messageId === `${id}-${suffix}` && r.status === "delivered");
+        const atomic = (present: boolean) => {
+          expect(captured?.records).toHaveLength(1);
+          expect(replica("a")).toEqual(present ? captured?.records : []);
+          expect(receipts("a")).toEqual(present ? ["a-first"] : []);
+          expect(delivered("a", "first")).toBe(present);
+          expect(h.store.orbSnapshot("a")).toMatchObject({
+            replicationCursor: present ? captured?.nextCursor : null,
+            replicatedHeadId: present ? captured?.nextHeadId : null,
+          });
+        };
+        // This SDK-backed central port models guest acceptance, not Native admission.
+        const trace: { edge: string; ids: readonly string[]; version?: number; state?: string }[] =
+          [];
+        const openAdmissionVersion = 0;
+        let permitted: string[] | undefined;
+        const entered: string[] = [];
+        const accept = h.world.deliverInboxBatch.bind(h.world);
+        h.world.deliverInboxBatch = (orbId, request, options) => {
+          const response = accept(orbId, request, options);
+          if (orbId === "a" && !response.duplicate) {
+            // No await separates acceptance from this public authority snapshot.
+            const authority = h.store.orbSnapshot(orbId);
+            trace.push({
+              edge: "guest-accepted",
+              ids: [...request.messageIds],
+              version: authority?.agentAdmissionVersion ?? -1,
+              state: authority?.state ?? "missing",
+            });
+            expect(
+              authority,
+              `new modeled guest acceptance outside open authority: ${JSON.stringify(trace)}`,
+            ).toMatchObject({ state: "running", agentAdmissionVersion: openAdmissionVersion });
+          }
+          return response;
+        };
+        const append = h.world.appendInboxMessage.bind(h.world);
+        h.world.appendInboxMessage = (orbId, messageIds, text, classification) => {
+          const record = append(orbId, messageIds, text, classification);
+          if (orbId === "a") trace.push({ edge: "guest-durable", ids: [...messageIds] });
+          return record;
+        };
+        const original = h.store.commitPullBatch.bind(h.store);
+        const scoped = (task: SimulationTask, first = false): SimulationTask => ({
+          ...task,
+          failpoint: async (name, ...args) => {
+            if (name === after && args[0] === "a")
+              trace.push({
+                edge: "public-commit-observed",
+                ids: [h.store.orbSnapshot("a")?.replicationCursor ?? ""],
+              });
+            if (first && name === edge) {
+              trace.push({ edge: `held-${name}`, ids: [] });
+              boundary = true;
+              gate.notifyAll(task, "transaction at atomic boundary");
+              while (!release) await gate.wait(task, "lifecycle versus stage/response");
+            }
+            return task.failpoint(first && name === injection ? name : "disabled", ...args);
+          },
+        });
+        const errorIs = (r: Result<unknown, { type: string }>, type?: string) =>
+          expect(r.isErr() ? r.error.type : undefined).toBe(type);
+        h.store.commitPullBatch = (task, request) =>
+          new ResultAsync(
+            (async () => {
+              const first = request.orbId === "a" && captured === undefined;
+              if (first) captured = request;
+              else if (request.orbId === "a")
+                while (!completed) await gate.wait(task, "recovery admission");
+              const result = await original(scoped(task, first), request);
+              if (first) {
+                errorIs(result, firstError);
+                atomic(fault !== "before");
+                completed = true;
+                gate.notifyAll(task, "recovery admitted after atomicity witness");
+              }
+              return result;
+            })(),
+          );
+        const good = (r: { isOk(): boolean }) => expect(r.isOk()).toBe(true);
+        const enqueue = async (task: SimulationTask, id: string, suffix: string, wake = true) =>
+          good(
+            await h.store.enqueueOrbMessage(task, {
+              orbId: id,
+              messageId: `${id}-${suffix}`,
+              content: [{ type: "text", text: suffix }],
+              now: task.wallNow(),
+              wake,
+            }),
+          );
+        const state = () => h.store.orbSnapshot("a")?.state ?? null;
+        const terminal = ending === "stop" ? "stopped" : null;
+        for (const process of [0, 1]) {
+          const previous = h.deps.control;
+          if (process) h = restartControlPlane(h);
+          expect(h.deps.control === previous).toBe(process === 0);
+          const sdk = new SdkAgentPlane(h.deps);
+          const pi: AgentPlane = {
+            placement: "central",
+            health: sdk.health.bind(sdk),
+            deliverMessage: (task, orb, request, context) => {
+              if (orb.id === "a") {
+                entered.push(...request.messageIds);
+                trace.push({ edge: "port-entered", ids: [...request.messageIds] });
+              }
+              return sdk.deliverMessage(task, orb, request, context).andThen((response) => {
+                h.world.flushPendingInboxBatches(orb.id);
+                const session = h.world.sessionHeaderOf(orb.id);
+                if (session === null) throw new Error("seeded session missing");
+                const records = [...h.world.entriesOf(orb.id)];
+                return commitAgentHistory(task, h.deps, {
+                  orbId: orb.id,
+                  runtimeInstanceId: orb.id,
+                  session,
+                  records,
+                  headId: records.at(-1)?.id ?? null,
+                  activity: "busy",
+                }).map(() => response);
+              });
+            },
+            pullHistory: sdk.pullHistory.bind(sdk),
+            prepareIdleStop: sdk.prepareIdleStop.bind(sdk),
+            suspend: sdk.suspend.bind(sdk),
+            dispose: sdk.dispose.bind(sdk),
+            close: sdk.close.bind(sdk),
+            session: sdk.session.bind(sdk),
+          };
+          const deps = { ...h.deps, agentPlane: new HarnessAgentPlane(pi, sdk, h.store) };
+          const stop = new AbortController(),
+            workersStop = new AbortController();
+          const runner = new SimulationPollTaskRunner();
+          const active = new Set<string>();
+          const run: ReconcileTaskRunner = (lane, operation) => {
+            expect(active.has(lane), `overlapping ${lane}`).toBe(false);
+            active.add(lane);
+            return runner.run(lane, operation).finally(() => active.delete(lane));
+          };
+          let finished = 0;
+          const loop = async (task: SimulationTask, poll: boolean) => {
+            while (!ready) await gate.wait(task, "fleet seeded");
+            await (poll ? pollLoop : reconcileLoop)(task, deps, stop.signal, run);
+            if (++finished === 2) workersStop.abort();
+          };
+          const result = await sim.runTasks([
+            ...ids
+              .flatMap((id) => [id, `central:${id}`, `poll:${id}`])
+              .map((lane) => ({
+                name: `${process}:${lane}`,
+                f: (task: SimulationTask) => runner.worker(task, lane, workersStop.signal),
+              })),
+            { name: "poller", f: (task) => loop(task, true) },
+            { name: "reconciler", f: (task) => loop(task, false) },
+            {
+              name: "lifecycle actor",
+              f: async (task) => {
+                if (process) return;
+                while (!command) await gate.wait(task, "lifecycle command");
+                good(
+                  await (ending === "stop" ? requestOrbStop : requestOrbDeletion)(task, deps, "a"),
+                );
+                const authority = h.store.orbSnapshot("a");
+                expect(authority).toMatchObject({
+                  state: ending === "stop" ? "stopping" : "deleting",
+                  agentAdmissionVersion: openAdmissionVersion + 1,
+                });
+                // This observes the committed fence version, not its mutation timestamp.
+                trace.push({
+                  edge: "fence-version-observed",
+                  ids: [],
+                  version: authority?.agentAdmissionVersion ?? -1,
+                });
+                permitted = trace
+                  .filter((e) => e.edge === "guest-accepted" && e.version === openAdmissionVersion)
+                  .flatMap((e) => e.ids);
+                expect(permitted, JSON.stringify(trace)).toEqual(["a-first"]);
+                if (fault === "cas") {
+                  if (captured === undefined) throw new Error("missing pending CAS");
+                  const competitor = await original(scoped(task), captured);
+                  errorIs(competitor, order === "commit-first" ? "cursor_conflict" : undefined);
+                  atomic(true);
+                }
+                lifecycle = true;
+              },
+            },
+            {
+              name: "driver",
+              f: async (task) => {
+                if (!process) {
+                  for (const id of ids) {
+                    seedRunningOrb(task, h, id);
+                    const orb = h.store.orbSnapshot(id);
+                    if (orb === null) throw new Error("seeded orb missing");
+                    h.store.seedOrb({
+                      ...orb,
+                      name: id,
+                      harness: id === "b" ? "claude" : "pi",
+                    });
+                  }
+                  h.world.scriptDeliverMessage("a", { kind: "enqueue_without_persist" });
+                  await enqueue(task, "a", "first");
+                  ready = true;
+                  gate.notifyAll(task, "fleet ready");
+                  await until(task, "actual transaction boundary", () => boundary);
+                  atomic(order === "commit-first");
+                  expect(
+                    trace.filter((e) => e.edge === "guest-accepted").flatMap((e) => e.ids),
+                  ).toEqual(["a-first"]);
+                  expect(trace.map((e) => e.edge).slice(0, 3)).toEqual([
+                    "port-entered",
+                    "guest-accepted",
+                    "guest-durable",
+                  ]);
+                  await enqueue(task, "a", "later");
+                  trace.push({ edge: "inbox-queued", ids: ["a-later"] });
+                  for (const suffix of ["first", "later"]) {
+                    for (const id of ids.slice(1)) {
+                      await enqueue(task, id, suffix);
+                      await until(task, `${id} receipt while A held`, () => delivered(id, suffix));
+                      assertReplicaComplete(h.world, h.store, id);
+                      expect(release).toBe(false);
+                    }
+                    await task.sleep(80, "future dispatcher ticks");
+                  }
+                  expect(entered, JSON.stringify(trace)).toEqual(["a-first"]);
+                  expect(messages("a").find((r) => r.messageId === "a-later")).toMatchObject({
+                    status: "queued",
+                    autoStart: false,
+                  });
+                  command = true;
+                  gate.notifyAll(task, "lifecycle command admitted");
+                  await until(task, "command during pending commit", () => lifecycle);
+                  expect(permitted, JSON.stringify(trace)).toEqual(["a-first"]);
+                  const calls = runner.calls;
+                  await task.sleep(80, "live dispatch across durable fence");
+                  expect(runner.calls).toBeGreaterThan(calls);
+                  expect(finished).toBe(0);
+                  trace.push({ edge: "release-old-commit", ids: [] });
+                  release = true;
+                  gate.notifyAll(task, "release admitted old transaction");
+                  await until(task, "old transaction settles", () => completed);
+                  await until(task, "live lifecycle reaches terminal", () => state() === terminal);
+                  if (ending === "stop") {
+                    await until(task, "admitted final flush", () => delivered("a", "first"));
+                    expect(receipts("a"), JSON.stringify(trace)).toEqual(permitted);
+                    await enqueue(task, "a", "fenced", false);
+                  } else {
+                    if (captured === undefined) throw new Error("missing late commit");
+                    const inbox = messages("a");
+                    const traceLength = trace.length;
+                    errorIs(await original(scoped(task), captured), "replication_integrity");
+                    expect(trace).toHaveLength(traceLength);
+                    expect(h.store.orbSnapshot("a")).toBeNull();
+                    expect(replica("a")).toEqual([]);
+                    expect(messages("a")).toEqual(inbox);
+                  }
+                } else {
+                  // Both old loops and all admitted lanes drained; this is not crash recovery.
+                  await until(
+                    task,
+                    "drained restart preserves terminal",
+                    () => state() === terminal,
+                  );
+                }
+                for (const id of ids.slice(1)) {
+                  const suffix = process ? "restart" : "after-stop";
+                  await enqueue(task, id, suffix);
+                  await until(task, "unrelated live FIFO", () => delivered(id, suffix));
+                  assertReplicaComplete(h.world, h.store, id);
+                  expect(receipts(id)).toEqual([
+                    `${id}-first`,
+                    `${id}-later`,
+                    `${id}-after-stop`,
+                    ...(process ? [`${id}-restart`] : []),
+                  ]);
+                  expect(finished).toBe(0);
+                }
+                await task.sleep(200, "all lanes honor terminal fence");
+                expect(state()).toBe(terminal);
+                if (ending === "stop") {
+                  assertReplicaComplete(h.world, h.store, "a");
+                  expect(receipts("a"), JSON.stringify(trace)).toEqual(permitted);
+                  expect(messages("a").every((r) => !r.autoStart)).toBe(true);
+                  expect(messages("a").find((r) => r.messageId === "a-later")).toMatchObject({
+                    status: "queued",
+                    autoStart: false,
+                  });
+                  expect(messages("a").find((r) => r.messageId === "a-fenced")).toMatchObject({
+                    status: "queued",
+                    autoStart: false,
+                  });
+                }
+                expect(
+                  trace.filter((e) => e.edge === "guest-accepted").flatMap((e) => e.ids),
+                ).toEqual(permitted);
+                expect(finished).toBe(0);
+                if (ending === "stop") expect(h.world.hostStateOf("a")).toBe("stopped");
+                else expect(h.world.hostCount("a")).toBe(0);
+                stop.abort();
+              },
+            },
+          ]);
+          expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+          expect(finished).toBe(2);
+          expect(active.size).toBe(0);
+        }
+        expect(logs.matching("stop-accepted")).toHaveLength(ending === "stop" ? 1 : 0);
+        expect(logs.matching("delete_requested")).toHaveLength(ending === "delete" ? 1 : 0);
+        expect(logs.matching("task-crashed")).toHaveLength(0);
+      },
+    );
+  },
+);

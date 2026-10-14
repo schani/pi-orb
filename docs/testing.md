@@ -1,5 +1,15 @@
 # Testing
 
+## DST boundary compositions (decision 2026-10-14)
+
+- Writer expectations are authored semantic facts: ordered records, ancestry, roles/receipts, distinct block text/revisions and tool identities/names/states. Reducer/projector/sync results supply actual observations only. Unrelated history preserves live blocks; partial retirement removes exactly its named subset. Real retry resumes from an advanced cursor after interrupted sync; runtime output and commits continue while final sync drains. Retired sockets/cache owners cannot publish.
+- Detail expectations use explicit API identities and successful DTO bodies, not private key encoding. Reentry bounds active timers; a surviving peer and replacement actually refresh through simulated polling deadlines. Retained component hook slots check current rendered bodies and stale-success/cache fencing in both response orders.
+- Poll expectations derive exact receipt identities/multiplicity from synchronous, public-version-tagged **modeled guest acceptance**, not replica contents. Pre-Stop accepted work may finish after durable Stop; later queued work remains unaccepted while dispatch/reconcile continue and unrelated Pi/Claude peers progress. Stop/delete commit boundaries and drained restart are distinct from crash recovery.
+
+Independent semantic facts avoid common-mode agreement; mutation failures establish sensitivity, not specification validity. Current-source focused tests and root typecheck/lint passed. The pre-assertion broad run hit its unchanged 1,200-second cap (exit 124), without a reported failure or final totals: incomplete, not qualification. Full current-head CI remains pending.
+
+[Evidence and replay](../test-failures/2026-10-14-dst-compositions.md). Memory adapters, serialized transport and narrow hook mocks do not prove PostgreSQL, Native SDK admission/suspension, real network/browser/DOM or concurrent React. No production changes, merge or deployment.
+
 ## Release SSH rendered contract (decision 2026-10-14)
 
 CI requires `infra/foundation/test.sh` using checksum-pinned OpenTofu 1.12.6,
@@ -28,7 +38,7 @@ retained in `infra-final.log`. See `infra/foundation/README.md`.
 
 #4 composes the real outbound writer, JSON transport and browser reducer: seven drain prefixes × 80 schedules assert exact wire order and visible B compaction. Critical boundaries fence all transient coalescing. #5 covers repeated retry and synchronous publication ownership changes: six cases × 30 schedules require one current owner and no leaked timer. Original #4/#5 replays pass after correction.
 
-[Single evidence receipt](../test-failures/2026-10-14-dst-audit-2-4-5.md) links the verified complete archive, original first reds/replays, snapshots, hashes, reproduction commands and historical CI. PR head `705b8d8` qualified on merge `92ede4c` against `224a38d` with 11 green checks; current-head CI remains pending. Local full process E2E was partial, not passed. Coverage review (2026-10-14) found missing compositions, not confirmed bugs; follow-ups live only in `TODO.md`. No release, deployment or merge qualification is implied. Preserve original scenarios/baselines: #2's initial trace uses the old two-task topology; shutdown uses the independent-lane audit tree, not main.
+[Single evidence receipt](../test-failures/2026-10-14-dst-audit-2-4-5.md) links the verified complete archive, original first reds/replays, snapshots, hashes, reproduction commands and historical CI. PR head `705b8d8` qualified on merge `92ede4c` against `224a38d` with 11 green checks; PR #97 subsequently merged as `a60f497` after all 11 checks passed. Local full process E2E was partial, not passed. Coverage review (2026-10-14) found missing compositions, not confirmed bugs; see the bounded compositions above for current scope. No deployment qualification is implied. Preserve original scenarios/baselines: #2's initial trace uses the old two-task topology; shutdown uses the independent-lane audit tree, not main.
 
 **PR 84 qualification — 2026-10-13:** the rebased, simplified initialization diagnostics pass 108 focused tests and typecheck/lint. The seven frontend files completed before the [first CI shard failure](https://github.com/schani/pi-orb/actions/runs/38348517524/job/115135368758) pass locally (24 tests), but that does not clear its subsequent runner segmentation fault/exit139; the crashing component and cause remain unproven. First logs/artifacts: `.context/pr84-revision/`. No deployment qualification is claimed.
 

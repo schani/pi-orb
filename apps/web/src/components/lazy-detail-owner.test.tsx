@@ -1,4 +1,4 @@
-import type { CommittedDisplayDetail } from "@pi-orb/protocol";
+import type { CommittedDisplayDetail, LiveDisplayDetail } from "@pi-orb/protocol";
 import { ok } from "neverthrow";
 import { beforeEach, expect, it, vi } from "vitest";
 import {
@@ -8,7 +8,7 @@ import {
 } from "../lib/transcript-cache.ts";
 import { history } from "../testkit/transcript.ts";
 import { CommittedImage } from "./CommittedImage.tsx";
-import { CommittedBody, type DetailContext } from "./DetailBody.tsx";
+import { CommittedBody, type DetailContext, RunningBody } from "./DetailBody.tsx";
 
 // Execute passive effects with dependency tracking, without a browser/server.
 const hooks = vi.hoisted(() => ({
@@ -17,6 +17,13 @@ const hooks = vi.hoisted(() => ({
 }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
+  useMemo: (factory: () => unknown, deps: unknown[]) => {
+    const index = hooks.cursor++;
+    const slot = hooks.slots[index];
+    if (!slot?.deps || deps.some((dep, i) => !Object.is(dep, slot.deps?.[i])))
+      hooks.slots[index] = { deps, value: factory() };
+    return hooks.slots[index]?.value;
+  },
   useState: (initial: unknown) => {
     const index = hooks.cursor++;
     hooks.slots[index] ??= { value: initial };
@@ -39,16 +46,17 @@ vi.mock("react", async (original) => ({
   },
 }));
 vi.mock("../lib/api.ts", () => ({
+  getLiveDetail: vi.fn(),
   getCommittedDetail: vi.fn(),
   getCommittedImage: vi.fn(),
-  describeApiError: vi.fn(),
+  describeApiError: vi.fn((error: { message: string }) => error.message),
 }));
 vi.mock("../lib/object-url.ts", () => ({
   createImageObjectUrl: vi.fn(() => ok("blob:test")),
   revokeImageObjectUrl: vi.fn(() => ok(undefined)),
 }));
 
-import { getCommittedDetail, getCommittedImage } from "../lib/api.ts";
+import { getCommittedDetail, getCommittedImage, getLiveDetail } from "../lib/api.ts";
 import { createImageObjectUrl } from "../lib/object-url.ts";
 
 beforeEach(() => {
@@ -56,6 +64,7 @@ beforeEach(() => {
   hooks.slots = [];
   hooks.cursor = 0;
   vi.clearAllMocks();
+  vi.mocked(getLiveDetail).mockReset();
   vi.mocked(getCommittedDetail).mockReset();
   vi.mocked(getCommittedImage).mockReset();
 });
@@ -256,4 +265,109 @@ it.each([false, true])("invalidation fences pending publication (image=%s)", asy
   expect(hooks.slots.some((slot) => JSON.stringify(slot.value)?.includes("cached detail"))).toBe(
     false,
   );
+});
+
+// Narrow hook wiring/state checks, not ReactDOM scheduling qualification.
+it.each([false, true])("live identities (newFirst=%s)", async (newFirst) => {
+  const f = fixture();
+  const cases = [
+    ["orb", "session", "operation", "block", "baseline body"],
+    ["other-orb", "session", "operation", "block", "other orb body"],
+    ["orb", "other-session", "operation", "block", "other session body"],
+    ["orb", "session", "other-operation", "block", "other operation body"],
+    ["orb", "session", "operation", "other-block", "current block body"],
+  ] as const;
+  const finish: (() => void)[] = [];
+  const render = (context: DetailContext, blockId: string) => {
+    hooks.cursor = 0;
+    return RunningBody({ context, blockId });
+  };
+  try {
+    for (const [orbId, sessionId, operationId, blockId, text] of cases) {
+      const detail: LiveDisplayDetail = {
+        v: 1,
+        sessionId,
+        operationId,
+        blockId,
+        state: "completed",
+        body: { type: "reasoning", text },
+      };
+      vi.mocked(getLiveDetail).mockReturnValueOnce(
+        new Promise((resolve) => finish.push(() => resolve(ok(detail)))),
+      );
+      f.context = { ...f.context, orbId, sessionId, operationId, connected: true };
+      render(f.context, blockId);
+      if (text === "baseline body") {
+        for (const slot of hooks.slots.splice(0)) slot.cleanup?.();
+        render(f.context, blockId); // Same identity remount must reuse the pending HTTP read.
+        expect(getLiveDetail).toHaveBeenCalledTimes(1);
+      }
+    }
+    expect(vi.mocked(getLiveDetail).mock.calls).toEqual(
+      cases.map(([orb, session, operation, block]) => [orb, operation, block, session]),
+    );
+    expect(getLiveDetail).toHaveBeenCalledTimes(5);
+    for (const index of newFirst ? [4, 3, 2, 1, 0] : [0, 1, 2, 3, 4]) {
+      finish[index]?.();
+      await flush();
+      const currentReady = newFirst || index === 4;
+      expect(render(f.context, "other-block").props.children).toBe(
+        currentReady ? "current block body" : "",
+      );
+      if (!currentReady) expect(hooks.slots[0]?.value).toBeUndefined();
+    }
+    expect(f.context.livePending.size).toBe(0);
+  } finally {
+    for (const slot of hooks.slots) slot.cleanup?.();
+    for (const settle of finish) settle();
+    await flush();
+    f.release();
+  }
+});
+
+it.each([false, true])("session ownership (newFirst=%s)", async (newFirst) => {
+  const f = fixture();
+  const finish: (() => void)[] = [];
+  const next: CommittedDisplayDetail = {
+    ...f.detail,
+    sessionId: "replacement-session",
+    body: { type: "reasoning", text: "replacement body" },
+  };
+  try {
+    for (const detail of [f.detail, next])
+      vi.mocked(getCommittedDetail).mockReturnValueOnce(
+        new Promise((resolve) => finish.push(() => resolve(ok(detail)))),
+      );
+    mount(f.context, false);
+    await flush();
+    f.owner().publish(snapshotFromHistory(history("orb", ["one"], "replacement-session")));
+    f.context = { ...f.context, sessionId: "replacement-session" };
+    mount(f.context, false);
+    await flush();
+    expect(vi.mocked(getCommittedDetail).mock.calls).toEqual([
+      ["orb", "one", "one:0", "session"],
+      ["orb", "one", "one:0", "replacement-session"],
+    ]);
+    for (const index of newFirst ? [1, 0] : [0, 1]) {
+      finish[index]?.();
+      await flush();
+      expect(mount(f.context, false).props.children).toEqual(
+        newFirst || index === 1
+          ? expect.objectContaining({ props: expect.objectContaining({ body: next.body }) })
+          : "Loading…",
+      );
+      expect(hooks.slots[1]?.value).toEqual(
+        newFirst || index === 1 ? expect.objectContaining({ value: next.body }) : null,
+      );
+      expect(f.context.cache.getDetail("orb", "session", "one", "one:0")).toBeUndefined();
+    }
+    expect(f.context.cache.getDetail("orb", "replacement-session", "one", "one:0")?.body).toEqual(
+      next.body,
+    );
+  } finally {
+    for (const slot of hooks.slots) slot.cleanup?.();
+    for (const settle of finish) settle();
+    await flush();
+    f.release();
+  }
 });
