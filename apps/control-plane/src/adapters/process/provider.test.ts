@@ -122,6 +122,91 @@ async function eventually<T>(read: () => T | null, timeoutMs = 3_000): Promise<T
   throw new Error("condition did not become true");
 }
 
+type ScheduleDeadline = (expire: () => void) => () => void;
+
+async function withDiscardDeadline<T>(
+  discard: () => PromiseLike<T>,
+  diagnostics: () => string,
+  schedule: ScheduleDeadline = (expire) => {
+    const timer = setTimeout(expire, 3_000);
+    return () => clearTimeout(timer);
+  },
+): Promise<T> {
+  let expired = false;
+  // Keep deadline creation at zero even if the injected schedule expires first.
+  const clock = vi
+    .spyOn(Date, "now")
+    .mockReturnValueOnce(0)
+    .mockImplementation(() => (expired ? 151 : 0));
+  let cancel = () => {};
+  try {
+    cancel = schedule(() => {
+      expired = true;
+    });
+    const result = await discard();
+    if (expired) throw new Error(`discard drain deadline expired: ${diagnostics()}`);
+    return result;
+  } finally {
+    clock.mockRestore();
+    cancel();
+  }
+}
+
+it("discard deadline owns missing-drain settlement and restores the clock", async () => {
+  const originalNow = Date.now;
+  let expire = () => {};
+  const cancel = vi.fn();
+  const schedule: ScheduleDeadline = (callback) => {
+    expire = callback;
+    return cancel;
+  };
+  let release = () => {};
+  const settlement = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let discardSettled = false;
+  let helperSettled = false;
+  const diagnostics = vi.fn(() => "receipt: null; supervisorStat: T; stderr: waiting");
+  const pending = withDiscardDeadline(
+    async () => {
+      const deadline = Date.now() + 150;
+      await settlement;
+      expect(Date.now()).toBeGreaterThanOrEqual(deadline);
+      discardSettled = true;
+    },
+    diagnostics,
+    schedule,
+  )
+    .then(
+      () => null,
+      (error: unknown) => error,
+    )
+    .finally(() => {
+      helperSettled = true;
+    });
+  try {
+    expect(Date.now()).toBe(0);
+    expire();
+    await new Promise(setImmediate);
+    expect(helperSettled).toBe(false);
+    expect(discardSettled).toBe(false);
+    expect(Date.now()).toBe(151);
+    release();
+    expect(await pending).toEqual(
+      new Error(
+        "discard drain deadline expired: receipt: null; supervisorStat: T; stderr: waiting",
+      ),
+    );
+    expect(discardSettled).toBe(true);
+    expect(diagnostics).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(Date.now).toBe(originalNow);
+  } finally {
+    release();
+    await pending;
+  }
+});
+
 afterEach(async () => {
   vi.unstubAllEnvs();
   await Promise.all(providers.splice(0).map((provider) => provider.close()));
@@ -737,11 +822,29 @@ describe("ProcessOrbHostProvider", () => {
 
         // Drive deadline expiry explicitly; successful drain follows the receipt,
         // not the scheduler's ability to kill, reap and fsync within 150 ms.
-        const clock = vi.spyOn(Date, "now").mockReturnValue(0);
-        if (delayed) clock.mockReturnValueOnce(0).mockReturnValue(151);
         const discard = () =>
           provider.discardCompute(task, { orbId: request.orbId, throughIncarnation: 0 }, context);
-        const discarded = await Promise.resolve(discard()).finally(() => clock.mockRestore());
+        let discarded: Awaited<ReturnType<typeof discard>> | undefined;
+        const originalNow = Date.now;
+        if (delayed) {
+          await expect(
+            withDiscardDeadline(
+              async () => {
+                discarded = await discard();
+              },
+              diagnostics,
+              (expire) => {
+                queueMicrotask(expire);
+                return () => {};
+              },
+            ),
+          ).rejects.toThrow("discard drain deadline expired:");
+        } else {
+          discarded = await withDiscardDeadline(discard, diagnostics);
+        }
+        expect(Date.now).toBe(originalNow);
+        expect(discarded, diagnostics()).toBeDefined();
+        if (discarded === undefined) return;
         if (delayed) {
           expect(discarded.isErr(), diagnostics()).toBe(true);
           if (discarded.isErr()) {

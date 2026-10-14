@@ -20,9 +20,15 @@ A controlled reproduction stops the supervisor with SIGSTOP, confirms `/proc/<pi
 
 ## Correction and invariant
 
-**Decision 2026-10-13:** separate successful drain from deadline expiry in the test. Freeze the success-path deadline clock while the real subreaper drains; the test runner still bounds hangs. For expiry, pause the supervisor and advance the clock explicitly. Assert retryable uncertainty retains metadata and live descendants. Resume, wait for the matching receipt and supervisor absence, then require a successful recovery discard.
+**Decision 2026-10-13:** separate successful drain from deadline expiry in the test. Freeze the success-path deadline clock while the real subreaper drains. For expiry, pause the supervisor and advance the clock explicitly. Assert retryable uncertainty retains metadata and live descendants. Resume, wait for the matching receipt and supervisor absence, then require a successful recovery discard.
 
 Both cases assert matching receipts, supervisor/descendant absence and metadata removal. Failed assertions include the recorded birth identity, current supervisor stat, receipt and stderr. No production deadline, receipt gate or persisted schema changes.
+
+**Correction 2026-10-14:** Vitest's timeout does not cancel an awaited discard. A missing receipt with `Date.now()` frozen can leave the discard polling forever, its clock spy installed and teardown competing with owned work. This is a harness defect, not evidence of the historical CI cause. The operation context checks cancellation only at entry, so aborting it cannot stop that loop.
+
+The success test now schedules a 3-second clock advance past its 150 ms deadline, awaits the actual discard, then fails with metadata, supervisor stat, receipt and stderr diagnostics. Clock restoration and timer cancellation run in `finally`. A `Promise.race` would leave the losing discard alive; a larger Vitest timeout would not cancel it. Neither is used. Production behavior and persisted state are unchanged.
+
+Injected scheduling triggers expiry without sleeping. The core regression holds discard settlement to prove ownership and asserts diagnostic failure, clock restoration and deadline cancellation. The existing paused-supervisor case also exercises the helper against a real missing receipt before recovery. Original red evidence records three failures (clock remained 0 instead of 151; deadline cancellation never ran); coverage was then trimmed to the core regression and existing process tests. Local evidence: `.context/process-discard-deadline/`.
 
 Invariant: elapsed time never proves cleanup; disposal requires launch-matched drain evidence and supervisor absence. See `docs/host-provider.md`.
 
