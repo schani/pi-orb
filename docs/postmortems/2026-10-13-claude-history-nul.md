@@ -22,7 +22,7 @@ JSON permits escaped NUL (`\u0000`); PostgreSQL JSONB rejects it. The replica's 
 
 **Required correction (2026-10-13):** replica storage must losslessly round-trip valid history strings, including NUL in normalized and native overflow fields; deleting/replacing characters or skipping records is not acceptable. Receipt and cursor atomicity must remain intact.
 
-**Decision (2026-10-13; user-approved; locally implemented, not deployed):** store complete records/session metadata as PostgreSQL `json`, not `jsonb`. Drivers decode whole values; SQL payload field processing remains forbidden because it can reject escaped NUL/unpaired UTF-16. Preserve relational constraints, duplicated identity guards, structural duplicates and atomic records/cursor/receipts. No stripping, skipping or compatibility staging. Contract: `docs/history-replication.md`; follow-ups: `TODO.md`.
+**Decision (2026-10-13; user-approved; deployed later that day):** store complete records/session metadata as PostgreSQL `json`, not `jsonb`. Drivers decode whole values; SQL payload field processing remains forbidden because it can reject escaped NUL/unpaired UTF-16. Preserve relational constraints, duplicated identity guards, structural duplicates and atomic records/cursor/receipts. No stripping, skipping or compatibility staging. Contract: `docs/history-replication.md`; follow-ups: `TODO.md`.
 
 ## Qualification evidence
 
@@ -39,3 +39,9 @@ First overlapping runs recorded image/OAuth 30-second timeouts and PGlite 10-sec
 **Decision (user-approved 2026-10-13, PDT):** “I don't care, go ahead with deploy!” waives historical explanation of only the overlapping local image/OAuth/PGlite timeouts above, PR 90 `1a68b06` Docker-build deadline and prior WebKit readiness failure below. Causes remain unknown; no fix or passing rerun clearing them is claimed. Preserve first-failure evidence. Normal exact-head qualification, correction of new failures and DST replay remain mandatory; no gates are bypassed. This documentation task dispatches no deployment or recovery.
 
 [Durable qualification 38468937890, Central process 1/4](https://github.com/schani/pi-orb/actions/runs/38468937890/job/115542687858), at `44094c064d723189b5433cfeaa396c05928b208d`, failed the WebKit shared-project-header case in `e2e/harness-icons-frontend.e2e.test.ts:135`: readiness timed out waiting 30 seconds for a request. Its snapshot recorded a pending document request, no new navigation/module checkpoints and access-control fetch errors; these do not establish the cause. Evidence remains in `.context/deploy-ab8c9c7/{run-38468937890.log,run-38468937890.json,artifacts-38468937890.json}` and the linked Actions run. This exception does not cover other WebKit failures.
+
+## Deployed qualification (2026-10-13, PDT)
+
+Exact-head CI, all four Docker E2E shards and all four Central process shards plus image qualification passed on attempt 1 at `66479dffe6da964b5b2e50094a7d9852949ba213`. [Deploy 38484755289](https://github.com/schani/pi-orb/actions/runs/38484755289) applied migration 044 at 17:05:57 and validated all twelve transaction gates at 17:41:28. The workflow subsequently failed on monitor outcome `regression`, not the transaction. No clean monitor, historical-timeout fix or original-orb recovery is claimed; production catalog/ledger were not independently queried. Earlier checkpoints and scoped waivers above remain unchanged.
+
+Release/verification evidence: `docs/deployment.md`, `.context/deploy-38484755289/{qualification,artifacts,verification}/`. Monitor attribution and limits: `docs/postmortems/2026-10-13-rollout-monitor-anomalies.md`.
