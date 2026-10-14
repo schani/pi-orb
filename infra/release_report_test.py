@@ -139,7 +139,7 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn('install_components: beta', workflow)
         self.assertIn('ref: ${{ github.sha }}', workflow)
         self.assertIn('git checkout -B main "$GITHUB_SHA"', workflow)
-        self.assertIn('test "$GITHUB_SHA" = "$(git rev-parse origin/main)"', workflow)
+        self.assertIn('test "$GITHUB_SHA" = "$(git rev-parse HEAD)"', workflow)
         self.assertLess(workflow.index('python3 infra/artifact_guard.py'), workflow.index('google-github-actions/auth@'))
         steps = re.findall(r'      - name: ([^\n]+)\n(.*?)(?=      - name: |\Z)', workflow, re.S)
         checkout = 'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09'

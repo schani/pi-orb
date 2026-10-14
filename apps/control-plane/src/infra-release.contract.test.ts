@@ -64,7 +64,6 @@ NODE
     `case "$1" in
   status) exit 0 ;;
   branch) echo main ;;
-  fetch) exit 0 ;;
   rev-parse) echo abc123 ;;
   *) exit 1 ;;
 esac\n`,
@@ -181,6 +180,70 @@ VARS
   );
 
   return { root, log };
+}
+
+function makePinnedFixture() {
+  const fixture = makeFixture();
+  const { root } = fixture;
+  rmSync(join(root, "bin/git"));
+  const git = (...args: string[]) => {
+    const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+    return result.stdout.trim();
+  };
+  git("init", "-b", "main");
+  git("config", "user.email", "release-test@example.invalid");
+  git("config", "user.name", "Release test");
+  writeFileSync(join(root, ".git/info/exclude"), "*\n");
+  copyFileSync(resolve("infra/artifact_guard.py"), join(root, "infra/artifact_guard.py"));
+  const build = join(root, "infra/build-push.sh");
+  executable(
+    build,
+    `if [ "\${ADVANCE_AT:-}" = build ]; then
+  git --git-dir="$PINNED_ORIGIN" update-ref refs/heads/main "$ADVANCED_SHA"
+fi
+${readFileSync(build, "utf8")}`,
+  );
+  git("add", "-f", "infra");
+  git("commit", "-m", "Selected release");
+  const selected = git("rev-parse", "HEAD");
+  const origin = mkdtempSync(join(tmpdir(), "pi-orb-release-origin-"));
+  fixtures.push(origin);
+  git("init", "--bare", origin);
+  git("remote", "add", "origin", origin);
+  git("push", "origin", "main");
+  git("commit", "--allow-empty", "-m", "Main advances");
+  const advanced = git("rev-parse", "HEAD");
+  git("push", "origin", "main");
+  git("reset", "--hard", selected);
+
+  const python = spawnSync("which", ["python3"], { encoding: "utf8" }).stdout.trim();
+  const wrapper = join(root, "bin/python3");
+  const original = readFileSync(wrapper, "utf8");
+  executable(
+    wrapper,
+    `if [ "$1" = infra/artifact_guard.py ]; then exec "${python}" "$@"; fi
+if [ "$1 \${2:-}" = "-m infra.ci_qualification" ]; then
+  echo "qualification:$GITHUB_SHA" >> "$CALL_LOG"
+  PYTHONPATH="${resolve(".")}" "${python}" - <<'PYTHON'
+import os
+from unittest.mock import patch
+from infra.ci_qualification import main
+from infra.ci_qualification_test import FakeAPI
+api = FakeAPI()
+sha = os.environ['GITHUB_SHA']
+for runs in api.runs.values():
+    for run in runs: run['head_sha'] = sha
+for jobs in api.jobs.values():
+    for job in jobs: job['head_sha'] = sha
+with patch('infra.ci_qualification.GitHub', return_value=api):
+    raise SystemExit(main(['qualify', 'verify']))
+PYTHON
+  exit $?
+fi
+${original}`,
+  );
+  return { ...fixture, git, selected, advanced, origin };
 }
 
 function makeDeployFixture(): { root: string; log: string; policy: string } {
@@ -336,6 +399,119 @@ describe("workload-identity cloud release configuration", () => {
 });
 
 describe("infra/release.sh", () => {
+  it.each(["preflight", "build"])(
+    "admits the qualified pinned SHA when main advances at %s",
+    (advanceAt) => {
+      const { root, log, git, selected, advanced, origin } = makePinnedFixture();
+      if (advanceAt === "build") {
+        git(`--git-dir=${origin}`, "update-ref", "refs/heads/main", selected);
+      }
+      const evidence = spawnSync(
+        "python3",
+        [
+          "-c",
+          `
+import json
+from infra.ci_qualification import inspect
+from infra.ci_qualification_test import FakeAPI
+api = FakeAPI()
+for runs in api.runs.values():
+    for run in runs: run['head_sha'] = '${selected}'
+for jobs in api.jobs.values():
+    for job in jobs: job['head_sha'] = '${selected}'
+print(json.dumps(inspect(api, '${selected}').value))
+`,
+        ],
+        { encoding: "utf8" },
+      );
+      expect(evidence.status, evidence.stderr).toBe(0);
+      const result = spawnSync(join(root, "infra/release.sh"), ["--yes", "--first-consolidation"], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          CALL_LOG: log,
+          PATH: `${join(root, "bin")}:${process.env.PATH}`,
+          PROJECT: "test-project",
+          TMPDIR: join(root, "tmp"),
+          GITHUB_ACTIONS: "true",
+          GITHUB_REPOSITORY: "schani/pi-orb",
+          GITHUB_REF: "refs/heads/main",
+          GITHUB_EVENT_NAME: "workflow_dispatch",
+          GITHUB_WORKFLOW_REF: "schani/pi-orb/.github/workflows/deploy.yml@refs/heads/main",
+          ADVANCE_AT: advanceAt,
+          PINNED_ORIGIN: origin,
+          ADVANCED_SHA: advanced,
+          GITHUB_SHA: selected,
+          GH_TOKEN: "test-token",
+          PI_ORB_CI_QUALIFICATION: evidence.stdout.trim(),
+        },
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(git("rev-parse", "HEAD")).toBe(selected);
+      expect(git(`--git-dir=${origin}`, "rev-parse", "main")).toBe(advanced);
+      const calls = readFileSync(log, "utf8");
+      expect(calls).toMatch(
+        /qualification:[a-f0-9]{40}[\s\S]*gcloud:storage cp[\s\S]*infra.release_cutover[\s\S]*run jobs create/,
+      );
+      expect(calls).toContain(`infra.release_state init `);
+      expect(calls).toContain(` ${selected} test-project`);
+    },
+  );
+
+  it.each(["qualified", "wrong SHA", "tracked artifact"])(
+    "workflow checks the selected SHA before authentication (%s)",
+    (admission) => {
+      const { root, git, selected, advanced } = makePinnedFixture();
+      let dispatched = selected;
+      if (admission === "wrong SHA") dispatched = advanced;
+      if (admission === "tracked artifact") {
+        writeFileSync(join(root, "gha-creds-test.json"), "{}");
+        git("add", "-f", "gha-creds-test.json");
+        git("commit", "-m", "Tracked credential artifact");
+        dispatched = git("rev-parse", "HEAD");
+      }
+      const workflow = readFileSync(resolve(".github/workflows/deploy.yml"), "utf8");
+      const preflight = workflow
+        .split("          fetch-depth: 0\n")[1]
+        ?.split("        run: |\n")[1]
+        ?.split("      - name:")[0];
+      expect(preflight).toBeDefined();
+      const result = spawnSync("bash", ["-c", preflight?.replace(/^ {10}/gm, "") ?? ""], {
+        cwd: root,
+        encoding: "utf8",
+        env: { ...process.env, GITHUB_SHA: dispatched },
+      });
+      expect(result.status, result.stderr).toBe(admission === "qualified" ? 0 : 1);
+      if (admission === "tracked artifact")
+        expect(result.stderr).toContain("forbidden artifact name");
+      expect(git("rev-parse", "HEAD")).toBe(
+        admission === "tracked artifact" ? dispatched : selected,
+      );
+      expect(git("rev-parse", "origin/main")).toBe(advanced);
+    },
+  );
+
+  it.each(["dirty checkout", "wrong SHA"])("refuses %s before cloud access", (admission) => {
+    const { root, log, selected, advanced } = makePinnedFixture();
+    if (admission === "dirty checkout") writeFileSync(join(root, "infra/api.sh"), "changed");
+    const result = spawnSync(join(root, "infra/release.sh"), ["--yes"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CALL_LOG: log,
+        PATH: `${join(root, "bin")}:${process.env.PATH}`,
+        TMPDIR: join(root, "tmp"),
+        GITHUB_ACTIONS: "true",
+        GITHUB_SHA: admission === "wrong SHA" ? advanced : selected,
+      },
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      admission === "wrong SHA" ? "GitHub SHA differs from checkout" : "working tree is not clean",
+    );
+    expect(readFileSync(log, "utf8")).not.toContain("gcloud:");
+  });
+
   it.each([false, true])("rechecks GitHub qualification before locking (failed=%s)", (failed) => {
     const { root, log } = makeFixture();
     const result = spawnSync(join(root, "infra/release.sh"), ["--yes"], {

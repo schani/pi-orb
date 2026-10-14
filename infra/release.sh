@@ -23,7 +23,7 @@ QUALIFICATION=""
 
 usage() {
   echo 'Usage: ./infra/release.sh [--yes] [--validate RELEASE_ID|latest] [--first-consolidation]'
-  echo 'Deploy clean, freshly fetched main, or explicitly validate a recorded deployment without rebuilding/reapplying.'
+  echo 'Deploy the clean selected main commit, or explicitly validate a recorded deployment without rebuilding/reapplying.'
 }
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -137,9 +137,7 @@ done
 export CLOUDSDK_CORE_LOG_HTTP=false CLOUDSDK_CORE_VERBOSITY=warning
 if [ -n "$(git status --porcelain)" ]; then echo 'release preflight failed: working tree is not clean' >&2; exit 1; fi
 if [ "$(git branch --show-current)" != main ]; then echo 'release preflight failed: current branch is not main' >&2; exit 1; fi
-git fetch --quiet origin main
 head_commit=$(git rev-parse HEAD)
-if [ "$head_commit" != "$(git rev-parse origin/main)" ]; then echo 'release preflight failed: HEAD is not latest origin/main' >&2; exit 1; fi
 python3 infra/artifact_guard.py
 if [ -z "$VALIDATE" ] && [ "${GITHUB_ACTIONS:-}" = true ]; then
   [ "$head_commit" = "${GITHUB_SHA:-}" ] || { echo 'release: GitHub SHA differs from checkout' >&2; exit 1; }
@@ -260,8 +258,6 @@ if [ -z "$VALIDATE" ]; then
   database_version=${database_version##*/}
   [[ "$database_version" =~ ^[0-9]+$ ]] || { echo 'release: invalid database secret version' >&2; exit 1; }
   if [ "$FIRST_CONSOLIDATION" = true ]; then
-    git fetch --quiet origin main
-    [ "$head_commit" = "$(git rev-parse origin/main)" ] || { echo 'release refused: main changed before retirement' >&2; exit 1; }
     stage maintenance
     KEEP_REMOTE_LOCK=true
     release_run_child python3 -m infra.release_cutover "$RECORD"
