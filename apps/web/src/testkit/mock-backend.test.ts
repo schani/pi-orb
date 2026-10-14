@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { DisplayHistoryView, OrbView } from "@pi-orb/protocol";
+import type { DisplayHistoryView, OrbView, UsageView } from "@pi-orb/protocol";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Connect, ViteDevServer } from "vite";
@@ -151,4 +151,20 @@ it("rotates real orb updates each list poll only when opted in", async () => {
     previous = current;
   }
   expect(new Set(newestIds).size).toBe(rotatingIds.length);
+});
+
+it("binds named usage rankings to seeded orb metadata and retains one deleted orb", async () => {
+  const get = fixture();
+  const edges = [Date.UTC(2026, 9, 13), Date.UTC(2026, 9, 14)];
+  const usage = await get<UsageView>(
+    "/api/v1/usage?boundaries=" + encodeURIComponent(JSON.stringify(edges)),
+  );
+  const { items } = await get<{ items: OrbView[] }>(projectPath);
+  expect(usage.orbs).toHaveLength(5);
+  for (const row of usage.orbs.filter((row) => row.name !== null)) {
+    expect(items.find((orb) => orb.id === row.id)?.name).toBe(row.name);
+  }
+  const missing = usage.orbs.filter((row) => row.name === null);
+  expect(missing).toHaveLength(1);
+  expect(items.some((orb) => orb.id === missing[0]?.id)).toBe(false);
 });

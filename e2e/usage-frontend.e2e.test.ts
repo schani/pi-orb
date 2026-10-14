@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { UsageView } from "@pi-orb/protocol";
-import { type Browser, chromium, expect, webkit } from "@playwright/test";
+import { type Browser, chromium, expect, type Page, webkit } from "@playwright/test";
 import { createServer } from "vite";
 import { it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
@@ -109,7 +109,7 @@ it.each(["chromium", "webkit"] as const)(
         await route.fulfill({ json: data });
       });
       await gotoFrontendFixture(page, origin + "/");
-      const entry = page.getByRole("link", { name: "Token usage" });
+      const entry = page.getByRole("link", { name: "Token usage", exact: true });
       await expect(entry).toBeVisible();
       await expect(entry.locator("use")).toHaveAttribute("href", "#i-trend");
       await expect(entry.locator("xpath=following-sibling::*[1]")).toHaveAttribute(
@@ -141,7 +141,7 @@ it.each(["chromium", "webkit"] as const)(
         await page.getByRole("button", { name: label, exact: true }).click();
         await expect(tickLines).toHaveCount(count);
         await expect(timeline.locator("g.mark-line path")).toHaveCount(4);
-        await expect(page.locator(".usage-rankings .chart-canvas svg")).toHaveCount(2);
+        await expect(page.locator(".usage-rankings .chart-canvas svg")).toHaveCount(1);
       }
       await expect(page.locator(".usage-summary dd")).toHaveText(["100", "10", "5", "84.2%", "1"]);
       const daily = windows.at(-1) ?? [];
@@ -187,7 +187,8 @@ it.each(["chromium", "webkit"] as const)(
       await expect(page.locator(".chart-tip")).toContainText("tokens");
       const readsBeforeFilters = windows.length;
       await page.getByLabel("Measure").selectOption("output");
-      await expect(page.locator(".usage-bars svg text", { hasText: "5 tokens" })).toHaveCount(2);
+      await expect(page.locator(".usage-bars svg text", { hasText: "5 tokens" })).toHaveCount(1);
+      await expect(page.locator(".usage-orb-value")).toHaveText("5 tokens");
       await page.getByLabel("Breakdown").selectOption("use");
       await expect(timeline.locator("g.mark-line path")).toHaveCount(6);
       await page.getByLabel("Breakdown").selectOption("model");
@@ -321,6 +322,8 @@ it.each(["chromium", "webkit"] as const)(
           .locator("html")
           .evaluate((n) => n.scrollWidth <= (n.ownerDocument.defaultView?.innerWidth ?? 0)),
       ).toBe(true);
+      await page.unroute("**/api/v1/usage?*");
+      await checkOrbLinks(page, origin);
       expect(errors).toEqual([]);
     } finally {
       await browser?.close();
@@ -329,3 +332,90 @@ it.each(["chromium", "webkit"] as const)(
     }
   },
 );
+
+async function checkOrbLinks(page: Page, origin: string) {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(origin + "/usage");
+  const rows = page.locator(".usage-orb-row");
+  await expect(rows).toHaveCount(5);
+  const response = await page.request.get(
+    origin +
+      "/api/v1/usage?boundaries=" +
+      encodeURIComponent(JSON.stringify([Date.UTC(2026, 9, 13), Date.UTC(2026, 9, 14)])),
+  );
+  const metadata = ((await response.json()) as UsageView).orbs;
+  for (const orb of metadata) {
+    await expect(
+      page.locator('.usage-orb-row[href="/orbs/' + encodeURIComponent(orb.id) + '"]'),
+    ).toHaveCount(1);
+  }
+  const named = metadata.find((orb) => orb.name !== null);
+  if (!named || named.name === null) throw new Error("No named usage fixture orb");
+  const href = "/orbs/" + encodeURIComponent(named.id);
+  const row = page.locator('.usage-orb-row[href="' + href + '"]');
+  await row.hover();
+  await expect(row).toHaveCSS("background-color", "rgb(242, 242, 242)");
+  await expect(row.locator(".usage-orb-name")).toHaveCSS("text-decoration-line", "underline");
+  await expect(row.locator(".usage-orb-value")).toHaveCSS("text-decoration-line", "none");
+  for (const part of [".usage-orb-name", ".usage-orb-bar", ".usage-orb-value"]) {
+    await row.locator(part).click();
+    await expect(page).toHaveURL(origin + href);
+    await expect(page.locator(".orb-identity")).toContainText(named.name);
+    await page.goBack();
+    await expect(rows).toHaveCount(5);
+  }
+  const newPage = page.context().waitForEvent("page");
+  await row.click({ modifiers: ["ControlOrMeta"] });
+  const tab = await newPage;
+  await expect(tab).toHaveURL(origin + href);
+  await expect(page).toHaveURL(origin + "/usage");
+  await tab.close();
+  await page.mouse.move(0, 0);
+  await page.getByLabel("Measure").focus();
+  for (const target of await rows.all()) {
+    await page.keyboard.press("Tab");
+    await expect(target).toBeFocused();
+    await expect(target).toHaveCSS("outline-width", "2px");
+    await expect(target).toHaveCSS("outline-style", "solid");
+  }
+  await page.keyboard.press("Tab");
+  await expect(page.locator(".usage-orb-row:focus")).toHaveCount(0);
+  await row.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(origin + href);
+  await page.goBack();
+  const missing = metadata.find((orb) => orb.name === null);
+  if (!missing) throw new Error("No deleted usage fixture orb");
+  const missingHref = "/orbs/" + encodeURIComponent(missing.id);
+  await page.locator('.usage-orb-row[href="' + missingHref + '"]').click();
+  await expect(page).toHaveURL(origin + missingHref);
+  await expect(page.getByRole("heading", { name: "Orb doesn't exist", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Back to dashboard" })).toHaveAttribute("href", "/");
+  await page.goBack();
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(rows).toHaveCount(5);
+    expect(
+      await rows.evaluateAll((ns) =>
+        ns.every((n) => {
+          const box = n.getBoundingClientRect();
+          return (
+            box.height >= 44 &&
+            box.x >= 0 &&
+            box.right <= (n.ownerDocument.defaultView?.innerWidth ?? 0)
+          );
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      await page
+        .locator(".usage-orb-value")
+        .evaluateAll((ns) =>
+          ns.every(
+            (n) =>
+              n.getBoundingClientRect().right <= (n.ownerDocument.defaultView?.innerWidth ?? 0),
+          ),
+        ),
+    ).toBe(true);
+  }
+}

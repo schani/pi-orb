@@ -106,13 +106,32 @@ describe("usage presentation", () => {
   it("ranks the selected measure, keeps equal names distinct, and represents empty data", () => {
     const totals = usageRankings(data, "total");
     const output = usageRankings(data, "output");
-    expect(totals.orbs?.bars.map((b) => b.value)).toEqual([102, 25]);
-    expect(output.orbs?.bars.map((b) => b.value)).toEqual([5, 2]);
-    expect(new Set(output.orbs?.bars.map((b) => b.label)).size).toBe(2);
+    expect(totals.orbs.map((b) => b.value)).toEqual([102, 25]);
+    expect(output.orbs.map((b) => b.value)).toEqual([5, 2]);
+    expect(totals.orbs.map((row) => row.id)).toEqual(["a", "b"]);
+    expect(new Set(output.orbs.map((row) => row.label)).size).toBe(2);
+    expect(output.orbs.map((row) => row.id)).toEqual(["b", "a"]);
+    expect(usageRankings({ ...data, orbs: [...data.orbs].reverse() }, "total")).toEqual(totals);
     expect(output.uses?.bars.map((b) => b.label)).toEqual(["Subagent", "Root"]);
     expect(usageRankings({ ...data, summary: empty, buckets: [], orbs: [] }, "total")).toEqual({
-      orbs: null,
+      orbs: [],
       uses: null,
     });
+  });
+  it("preserves full duplicate names, zero rows, null-name IDs and ID-sorted top five", () => {
+    const name = "Same long name ".repeat(20);
+    const orbs = ["f", "e", "d", "c", "b", "a"].map((id) => ({
+      ...empty,
+      id,
+      name: id === "a" ? null : name,
+    }));
+    expect(usageRankings({ ...data, orbs }, "input").orbs).toEqual(
+      ["a", "b", "c", "d", "e"].map((id) => ({
+        id,
+        label: id === "a" ? id : name + " · " + id,
+        value: 0,
+      })),
+    );
+    expect(orbs.map((row) => row.id)).toEqual(["f", "e", "d", "c", "b", "a"]);
   });
 });
