@@ -17,6 +17,8 @@ import {
   type JsonObject,
   JsonObjectSchema,
   type JsonValue,
+  OrbMessageSenderSchema,
+  orbMessageBody,
 } from "@pi-orb/protocol";
 import { err, ok, Result } from "neverthrow";
 import { Type } from "typebox";
@@ -26,16 +28,28 @@ const IndexSchema = Type.Object({
   records: Type.Array(HistoryRecordSchema),
   fingerprints: Type.Array(Type.String()),
 });
-const ProvenanceSchema = Type.Record(
-  Type.String(),
-  Type.Object({
-    messageIds: Type.Array(Type.String()),
-    operationId: Type.String(),
-    system: Type.Optional(Type.Boolean()),
-    compaction: Type.Optional(Type.Boolean()),
-    boot: Type.Optional(Type.Boolean()),
-  }),
-);
+const ProvenanceEntrySchema = Type.Union([
+  Type.Object(
+    {
+      messageIds: Type.Array(Type.String()),
+      operationId: Type.String(),
+      system: Type.Optional(Type.Boolean()),
+      compaction: Type.Optional(Type.Boolean()),
+      boot: Type.Optional(Type.Boolean()),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      messageIds: Type.Array(Type.String(), { minItems: 1, maxItems: 1 }),
+      operationId: Type.String(),
+      system: Type.Literal(true),
+      sender: OrbMessageSenderSchema,
+    },
+    { additionalProperties: false },
+  ),
+]);
+const ProvenanceSchema = Type.Record(Type.String(), ProvenanceEntrySchema);
 
 export interface ClaudeHistoryError {
   readonly type: "claude_history_error";
@@ -45,6 +59,7 @@ export interface Provenance {
   readonly messageIds: readonly string[];
   readonly operationId: string;
   readonly system?: boolean;
+  readonly sender?: { readonly orbId: string };
   readonly compaction?: boolean;
   readonly boot?: boolean;
 }
@@ -223,6 +238,8 @@ export class ClaudeHistory {
   }
   correlate(uuid: string, provenance: Provenance): Result<void, ClaudeHistoryError> {
     if (this.loadError !== null) return err(this.loadError);
+    if (!Check(ProvenanceEntrySchema, provenance))
+      return err({ type: "claude_history_error", message: "Invalid Claude input provenance." });
     const existing = this.provenance[uuid];
     if (existing !== undefined)
       return JSON.stringify(existing) === JSON.stringify(provenance)
@@ -358,10 +375,17 @@ export class ClaudeHistory {
               ? {
                   ...base,
                   type: "event",
-                  eventType: "claude.platform_message",
-                  content,
+                  eventType:
+                    provenance.sender === undefined ? "claude.platform_message" : "orb.message",
+                  ...(provenance.sender === undefined ? {} : { sender: provenance.sender }),
+                  content:
+                    provenance.sender === undefined
+                      ? content
+                      : orbMessageBody(content, provenance.sender.orbId),
                   inboxMessageIds: [...provenance.messageIds],
-                  custom: { customType: "pi-orb.system-message", display: true },
+                  ...(provenance.sender === undefined
+                    ? { custom: { customType: "pi-orb.system-message", display: true } }
+                    : {}),
                   overflow: { native },
                 }
               : {

@@ -149,6 +149,29 @@ export interface CentralAgentCaller {
 
 export type ArchiveCaller = GuestAgentCaller | CentralAgentCaller;
 
+export interface OrbMessageSender {
+  readonly orbId: string;
+  readonly projectId: string;
+  readonly ownerUserId: string;
+  readonly caller: ArchiveCaller;
+}
+
+export interface OrbMessageTargetNotFound {
+  readonly type: "orb_message_target_not_found";
+}
+
+export interface EnqueueOrbMessageParams {
+  readonly orbId: string;
+  readonly messageId: string;
+  readonly content: readonly MessageInputBlock[];
+  readonly now: number;
+  /** Trusted service-bound identity; never accepted from human/browser input. */
+  readonly sender?: OrbMessageSender;
+  /** Upload notifications never request compute startup or cancel sleep. */
+  readonly wake?: boolean;
+  readonly cancelSleep?: boolean;
+}
+
 export interface SpawnOrbParams {
   readonly callerOrbId: string;
   readonly caller: ArchiveCaller;
@@ -238,6 +261,11 @@ export interface ControlPlaneStore extends ActivityHeadlineStore {
   /** Inserts only while the parent project is active, fencing create-vs-delete. */
   insertOrb(task: SimulationTask, orb: OrbRow): ResultAsync<OrbRow, StoreError | ProjectConflict>;
   getSpawnCaller(task: SimulationTask, orbId: string): ResultAsync<string | null, StoreError>;
+  /** Existing direct accepted children, including archived orbs, ordered by ID. */
+  listSpawnChildren(
+    task: SimulationTask,
+    callerOrbId: string,
+  ): ResultAsync<Pick<OrbRow, "id" | "name">[], StoreError>;
   spawnOrb(
     task: SimulationTask,
     params: SpawnOrbParams,
@@ -265,18 +293,10 @@ export interface ControlPlaneStore extends ActivityHeadlineStore {
    */
   enqueueOrbMessage(
     task: SimulationTask,
-    params: {
-      orbId: string;
-      messageId: string;
-      content: readonly MessageInputBlock[];
-      now: number;
-      /** Upload notifications never request compute startup or cancel sleep. */
-      wake?: boolean;
-      cancelSleep?: boolean;
-    },
+    params: EnqueueOrbMessageParams,
   ): ResultAsync<
     { message: OrbMessageRow; orb: OrbRow; duplicate: boolean },
-    StoreError | StateConflict
+    StoreError | StateConflict | OrbMessageTargetNotFound
   >;
   listOrbMessages(task: SimulationTask, orbId: string): ResultAsync<OrbMessageRow[], StoreError>;
   pollOrbMessages(

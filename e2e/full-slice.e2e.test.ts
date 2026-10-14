@@ -2374,6 +2374,7 @@ describe("full slice E2E", () => {
         repositoryUrl: REPOSITORY_URL,
       },
       spawnedBy: null,
+      children: [],
       previewHost: null,
     });
     const selfText = await terminalRun(
@@ -2492,8 +2493,20 @@ describe("full slice E2E", () => {
         repositoryUrl: REPOSITORY_URL,
       },
       spawnedBy: { id: secondOrbId, url: `${base}/orbs/${secondOrbId}` },
+      children: [],
       previewHost: null,
     });
+    const parentSelf = await terminalRun(
+      secondOrbId,
+      String.raw`pi-orb self --json; printf '\120\101\122\105\116\124\137\123\105\114\106\137\104\117\116\105\012'`,
+      "PARENT_SELF_DONE",
+    );
+    const parentIdentity = JSON.parse(
+      parentSelf.slice(parentSelf.indexOf('{\r\n  "v"'), parentSelf.indexOf("PARENT_SELF_DONE")),
+    ) as { children: unknown[] };
+    expect(parentIdentity.children).toEqual([
+      { id: spawnedOrbId, name: spawnedView.body["name"], url: `${base}/orbs/${spawnedOrbId}` },
+    ]);
     const retriedSpawn = await terminalRun(
       secondOrbId,
       `${spawnCommand}; printf '\\123\\120\\101\\127\\116\\137\\122\\105\\124\\122\\131\\012'`,

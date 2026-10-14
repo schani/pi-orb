@@ -85,6 +85,8 @@ The browser talks only to the control plane. In the original first slice, the co
 
 An orb can launch another orb with a prompt through `pi-orb spawn` and receive its browser URL (implemented 2026-09-08). This creates independent same-project work with atomic durable prompt acceptance; see `docs/orb-spawning.md`.
 
+Orb-to-orb messaging is approved (2026-10-14, America/Los_Angeles), independent of ancestry: same-owner/same-project trusted non-human input through the existing inbox, shown in a Correspondence band, waking stopped/sleeping targets. The approved minimal contract is implemented locally; real-process E2E and normal full gates remain pending. A PR and a process-host preview are authorized, not production deployment (`docs/orb-messaging.md`, `TODO.md`).
+
 First-class child orbs/subagents are a product goal but not part of the first slice. Local subagent integration is being validated in `docs/subagents.md` (2026-09-14): a minimal pinned gotgenes fork plus runtime-owned aggregate activity, preserving one user-facing root conversation with additional internal SDK sessions. It is not deployed.
 
 Likely future properties:
@@ -111,6 +113,7 @@ Subsystem designs:
 - [docs/project-deletion.md](docs/project-deletion.md) — permanent project deletion by atomic fan-out through deletion-grade cleanup for every child orb
 - [docs/orb-archival.md](docs/orb-archival.md) — read-only transcript retention after shared deletion-grade resource cleanup
 - [docs/orb-spawning.md](docs/orb-spawning.md) — in-orb CLI creation with an atomically queued prompt and browser URL
+- [docs/orb-messaging.md](docs/orb-messaging.md) — locally implemented same-owner/same-project peer input, Correspondence band, wake policy and minimal persistence; qualification pending
 - [docs/runtime-protocol.md](docs/runtime-protocol.md) — the browser↔runtime wire protocol: handshake, display frames, detail HTTP, ordering, backpressure
 - [docs/history-replication.md](docs/history-replication.md) — the harness-agnostic history model, pull-only replication, PostgreSQL schema, and implemented explicit offline recovery (2026-10-05, America/Cancun)
 - [docs/pi-adapter.md](docs/pi-adapter.md) — Pi embedding and the Pi→normalized history mapping

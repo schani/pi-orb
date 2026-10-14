@@ -18,6 +18,7 @@ import {
   requestOrbDeletion,
   requestOrbSleep,
 } from "../domain/lifecycle.ts";
+import { sendGuestOrbMessage } from "../domain/orb-messaging.ts";
 import type { OrbNameGenerator, SigningKeyRow, SigningKeyStore } from "../domain/ports.ts";
 import { createSigningKeyBootstrapState, ensureActiveSigningKey } from "../domain/signing-keys.ts";
 import { MintDenialLog } from "../domain/workload-identity.ts";
@@ -315,6 +316,8 @@ describe("minted tokens verify against the served JWKS", () => {
     });
     registerRuntimeRoutes(app, task, {
       appOrigin: "https://browser.test",
+      send: (task, caller, request) =>
+        sendGuestOrbMessage(task, { ...makeHarness().deps, store }, caller, request),
       spawn: () => okAsync(undefined),
       sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
         requestOrbSleep(

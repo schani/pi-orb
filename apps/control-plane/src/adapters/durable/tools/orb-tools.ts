@@ -32,7 +32,7 @@ export function createOrbTools(service: OrbAgentOperations, notifyParent?: Paren
   return [
     defineTool({
       name: "orb_self",
-      description: "Get this orb's identity, project and URLs.",
+      description: "Get this orb's identity, project, parent provenance, direct children and URLs.",
       parameters: empty,
       replay: "safe",
       execute: async (_args, api) => output({ kind: "self" }, api),
@@ -62,9 +62,20 @@ export function createOrbTools(service: OrbAgentOperations, notifyParent?: Paren
       execute: async (args, api) => output({ kind: "spawn", ...args }, api),
     }),
     defineTool({
+      name: "orb_send",
+      description:
+        "Queue non-human input to a same-owner, same-project orb and wake it. Acceptance is not a reply.",
+      parameters: Type.Object(
+        { orbId: Type.String(), message: Type.String() },
+        { additionalProperties: false },
+      ),
+      replay: "safe",
+      execute: async (args, api) => output({ kind: "send", ...args }, api),
+    }),
+    defineTool({
       name: "orb_alert",
       description:
-        "Notify the parent privately from a subagent; otherwise append an alert and flag this orb.",
+        "Notify the parent conversation privately from a subagent; otherwise append a transcript alert and flag this orb. Alerts are not sent to the parent orb.",
       parameters: Type.Object({ message: Type.String() }, { additionalProperties: false }),
       replay: "unsafe",
       execute: async (args, api, context: Context) => {

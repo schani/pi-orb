@@ -86,6 +86,7 @@ describe("orb inspection presentation", () => {
       },
       project: { id: "project-a", name: "App", repositoryUrl: "https://github.com/o/r" },
       spawnedBy: null,
+      children: [],
       previewHost: null,
     };
     const output = formatSelf(self);
@@ -93,6 +94,18 @@ describe("orb inspection presentation", () => {
     expect(output).toContain("2026-10-01T00:00:00.000Z");
     expect(output).not.toContain("Preview:");
     expect(output).not.toContain("Spawned by:");
+    expect(output).not.toContain("Child:");
+    const family = formatSelf({
+      ...self,
+      spawnedBy: { id: "parent", url: "https://browser.test/orbs/parent" },
+      children: [
+        { id: "child", name: "Parser\nwork", url: "https://browser.test/orbs/child" },
+        { id: "unnamed", name: null, url: "https://browser.test/orbs/unnamed" },
+      ],
+    });
+    expect(family).toContain("Spawned by: parent (https://browser.test/orbs/parent)");
+    expect(family).toContain("Child: Parser work (child) https://browser.test/orbs/child");
+    expect(family).toContain("Child: untitled orb (unnamed) https://browser.test/orbs/unnamed");
     expect(
       formatSelf({
         ...self,
@@ -279,5 +292,43 @@ describe("orb inspection presentation", () => {
       "[tool result: call-1]\nScript completed\n\n[chart: slowest endpoints]",
     );
     expect(output).not.toContain("412");
+  });
+});
+
+it("renders peer source and full literal body once in text and JSON transcripts", () => {
+  const senderOrbId = "11111111-1111-4111-8111-111111111111";
+  const body = "<script>literal</script>\nsecond line";
+  const transcript: OrbTranscript = {
+    v: 1,
+    orb: items[0]!,
+    session: null,
+    cursor: "peer",
+    headId: "peer",
+    records: [
+      {
+        id: "peer",
+        parentId: null,
+        timestamp: "t",
+        overflow: { native: "PRIVATE_PEER_OVERFLOW" },
+        type: "event",
+        eventType: "orb.message",
+        sender: { orbId: senderOrbId },
+        content: [{ type: "text", text: body }],
+        inboxMessageIds: ["inbox"],
+      },
+    ],
+  };
+  const output = formatTranscript(transcript);
+  expect(output).toContain(`## orb message from ${senderOrbId}\n\n${body}`);
+  expect(output.split(senderOrbId)).toHaveLength(2);
+  expect(output.split(body)).toHaveLength(2);
+  expect(output).not.toContain("PRIVATE_PEER_OVERFLOW");
+  const json = JSON.parse(JSON.stringify(transcript)) as OrbTranscript;
+  expect(json.records[0]).toMatchObject({
+    type: "event",
+    eventType: "orb.message",
+    sender: { orbId: senderOrbId },
+    content: [{ type: "text", text: body }],
+    inboxMessageIds: ["inbox"],
   });
 });

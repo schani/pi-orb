@@ -27,6 +27,7 @@ import {
   type OrbBootContext,
   type OrbBootContextResponse,
   type OrbMessageSystem,
+  orbMessageContext,
   projectRecordDetail,
   projectRecordImage,
   type RuntimeAlertRequest,
@@ -2263,6 +2264,8 @@ export class PiOrbAgent {
         ? { type: "text" as const, text: block.text }
         : { type: "image" as const, data: block.data, mimeType: block.mediaType },
     );
+    if (system?.kind === "orb_message")
+      piContent.unshift({ type: "text", text: orbMessageContext(system.senderOrbId) });
     if (system === undefined) this.triggerAutoName(content);
     return ResultAsync.fromPromise(
       session.sendCustomMessage(

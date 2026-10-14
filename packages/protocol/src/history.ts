@@ -1,5 +1,6 @@
 import { type Static, Type } from "typebox";
 import { JsonObjectSchema, JsonValueSchema } from "./json.ts";
+import { OrbMessageSenderSchema } from "./orb-message-context.ts";
 
 const closed = { additionalProperties: false } as const;
 
@@ -275,6 +276,8 @@ export const EventRecordSchema = Type.Object(
     subagent: Type.Optional(SubagentNoticeSchema),
     /** Non-model-context orb alert rendered by clients. The record id identifies acknowledgement. */
     alert: Type.Optional(Type.Object({ message: Type.String(), requestId: Type.String() }, closed)),
+    /** Authenticated peer identity on `orb.message` events. */
+    sender: Type.Optional(OrbMessageSenderSchema),
     /** Durable inbox identities delivered by this event, in order. */
     inboxMessageIds: Type.Optional(Type.Array(Type.String())),
   },

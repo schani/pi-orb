@@ -1,6 +1,13 @@
 import type { ConversationId, EntryRecord, TaskGraph } from "@earendil-works/pi-durable";
-import { type ActiveSubagent, capHeadline, type HistoryRecord } from "@pi-orb/protocol";
+import {
+  type ActiveSubagent,
+  capHeadline,
+  type HistoryRecord,
+  OrbMessageSystemSchema,
+  orbMessageBody,
+} from "@pi-orb/protocol";
 import { err, ok, Result } from "neverthrow";
+import { Check } from "typebox/value";
 import { type MappingError, mapPiEntry } from "../../../../orb-runtime/src/pi/mapping.ts";
 
 export function activeSubagents(
@@ -227,7 +234,7 @@ function projectNotification(
 
 export interface PublicEntryReceipt {
   readonly messageIds: readonly string[];
-  readonly system?: { readonly kind: string };
+  readonly system?: unknown;
 }
 
 export function projectHistory(
@@ -245,23 +252,40 @@ export function projectHistory(
     if (projected.isErr()) return err(projected.error);
     if (!projected.value) continue;
     const receipt = receipts.get(entry.id);
+    const system = receipt?.system;
+    if (
+      system !== undefined &&
+      (!Check(OrbMessageSystemSchema, system) ||
+        (system.kind === "orb_message" && receipt?.messageIds.length !== 1))
+    )
+      return err({
+        type: "history_mapping_error",
+        code: "mapping_failure",
+        message: "Invalid inbox system receipt",
+      });
     const record = projected.value;
     records.push(
-      record.type === "message" && receipt?.system
+      record.type === "message" && receipt && system
         ? {
             id: record.id,
             parentId: record.parentId,
             timestamp: record.timestamp,
             type: "event",
-            eventType: "pi.custom_message",
-            content: record.content,
-            custom: {
-              customType:
-                receipt.system.kind === "sleep_wake"
-                  ? "pi-orb.sleep-wake"
-                  : "pi-orb.system-message",
-              display: true,
-            },
+            eventType: system.kind === "orb_message" ? "orb.message" : "pi.custom_message",
+            ...(system.kind === "orb_message" ? { sender: { orbId: system.senderOrbId } } : {}),
+            content:
+              system.kind === "orb_message"
+                ? orbMessageBody(record.content, system.senderOrbId)
+                : record.content,
+            ...(system.kind === "orb_message"
+              ? {}
+              : {
+                  custom: {
+                    customType:
+                      system.kind === "sleep_wake" ? "pi-orb.sleep-wake" : "pi-orb.system-message",
+                    display: true,
+                  },
+                }),
             inboxMessageIds: [...receipt.messageIds],
             overflow: {},
           }

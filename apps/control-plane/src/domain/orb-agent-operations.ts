@@ -1,12 +1,16 @@
-import { createHash } from "node:crypto";
+import { orbToolRequestId } from "./orb-tool-request-id.ts";
+
+export { orbToolRequestId } from "./orb-tool-request-id.ts";
+
 import { previewHost } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, ResultAsync } from "neverthrow";
 import { acceptsCentralAgentCaller } from "./agent-authorization.ts";
 import { requestOrbArchive, requestOrbDeletion, requestOrbSleep } from "./lifecycle.ts";
 import type { OrbRow } from "./orb.ts";
+import { sendOrbMessage } from "./orb-messaging.ts";
 import { normalizeOrbName } from "./orb-naming.ts";
-import { spawnOrb } from "./orb-spawning.ts";
+import { getOrbSpawnRelations, spawnOrb } from "./orb-spawning.ts";
 import type { CentralAgentCaller, ControlPlaneDeps } from "./ports.ts";
 
 export interface OrbAgentIdentity {
@@ -21,6 +25,7 @@ export type OrbAgentRequest =
   | { kind: "transcript"; orbId: string }
   | { kind: "spawn"; prompt: string; name?: string }
   | { kind: "alert"; message: string }
+  | { kind: "send"; orbId: string; message: string }
   | { kind: "sleep"; durationSeconds: number };
 export interface OrbAgentError {
   readonly code:
@@ -50,13 +55,6 @@ const failure = (code: OrbAgentError["code"], message: string): OrbAgentError =>
   code,
   message,
 });
-/** Stable UUID scoped to the calling orb and durable tool task, never supplied by model arguments. */
-export function orbToolRequestId(orbId: string, requestId: string): string {
-  const hex = createHash("sha256")
-    .update(JSON.stringify([orbId, requestId]))
-    .digest("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
-}
 export function createOrbAgentOperations(
   task: SimulationTask,
   deps: ControlPlaneDeps,
@@ -110,8 +108,13 @@ export function createOrbAgentOperations(
                 ? ok({ accepted: true })
                 : err(failure("unauthorized", "central agent required"));
             case "self": {
-              const spawnedBy = await deps.store.getSpawnCaller(task, orb.id);
-              if (spawnedBy.isErr()) return err(unavailable());
+              const relations = await getOrbSpawnRelations(
+                task,
+                deps.store,
+                orb.id,
+                options.appOrigin,
+              );
+              if (relations.isErr()) return err(unavailable());
               return ok({
                 orb: {
                   id: orb.id,
@@ -120,10 +123,7 @@ export function createOrbAgentOperations(
                   createdAt: new Date(orb.createdAt).toISOString(),
                 },
                 project: item(orb, project.value).project,
-                spawnedBy:
-                  spawnedBy.value === null
-                    ? null
-                    : { id: spawnedBy.value, url: url(spawnedBy.value) },
+                ...relations.value,
                 previewHost:
                   options.tailnetDnsName === undefined
                     ? null
@@ -184,6 +184,22 @@ export function createOrbAgentOperations(
                 );
               return ok({ orbId: id, projectId: orb.projectId, messageId: id, url: url(id) });
             }
+            case "send":
+              return await sendOrbMessage(
+                task,
+                deps,
+                {
+                  orbId: orb.id,
+                  projectId: identity.projectId,
+                  ownerUserId: identity.ownerUserId,
+                  caller,
+                },
+                {
+                  orbId: request.orbId,
+                  message: request.message,
+                  messageId: orbToolRequestId(orb.id, requestId),
+                },
+              );
             case "alert":
               if (central === null && orb.state !== "running")
                 return err(failure("conflict", "orb is not running"));

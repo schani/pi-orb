@@ -13,6 +13,7 @@ export const INSPECTION_USAGE = `usage:
   pi-orb self [--json]
   pi-orb orbs [query] [--json]
   pi-orb transcript <orb-id> [--json]
+  pi-orb send <orb-id> "message" [--request-id <id>]
   pi-orb alert "message" [--request-id <id>]
   pi-orb id-token --audience <audience> [--ttl-seconds <60..3600>]
   pi-orb archive
@@ -55,6 +56,8 @@ export function formatSelf(self: OrbSelf): string {
   ];
   if (self.spawnedBy !== null)
     lines.push(`Spawned by: ${self.spawnedBy.id} (${self.spawnedBy.url})`);
+  for (const child of self.children)
+    lines.push(`Child: ${cell(child.name ?? "untitled orb")} (${cell(child.id)}) ${child.url}`);
   if (self.previewHost !== null) lines.push(`Preview: ${self.previewHost}`);
   return `${lines.join("\n")}\n`;
 }
@@ -150,6 +153,9 @@ function renderRecord(record: HistoryRecord): string {
   }
   if (record.type === "compaction") {
     return `## compaction\n\n${renderBlocks(record.summary)}`;
+  }
+  if (record.eventType === "orb.message" && record.sender !== undefined) {
+    return `## orb message from ${record.sender.orbId}\n\n${renderBlocks(record.content ?? [])}`;
   }
   if (record.alert !== undefined) {
     return `## alert\n\n${record.alert.message}`;

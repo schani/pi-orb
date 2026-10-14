@@ -7,8 +7,11 @@ import {
   type JsonObject,
   type JsonValue,
   type MessageRecord,
+  OrbMessageSystemSchema,
+  orbMessageBody,
 } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
+import { Check } from "typebox/value";
 
 /**
  * Lossless Pi-entry → normalized-record mapping (docs/pi-adapter.md). Every
@@ -563,6 +566,27 @@ export function mapPiEntry(entry: unknown): Result<HistoryRecord, MappingError> 
       const details = entry["details"];
       const subagent = subagentNotice(customType, details);
       const ids = inboxMessageIds(details);
+      const system = isRecordObject(details) ? details["system"] : undefined;
+      if (
+        customType === "pi-orb.system-message" &&
+        isRecordObject(system) &&
+        system["kind"] === "orb_message"
+      ) {
+        if (
+          !Check(OrbMessageSystemSchema, system) ||
+          system.kind !== "orb_message" ||
+          ids.length !== 1
+        )
+          return fail("Invalid peer inbox receipt");
+        return ok({
+          ...identity,
+          type: "event",
+          eventType: "orb.message",
+          sender: { orbId: system.senderOrbId },
+          content: orbMessageBody(mapUserContent(entry["content"]), system.senderOrbId),
+          inboxMessageIds: ids,
+        });
+      }
       return ok({
         ...identity,
         type: "event",

@@ -1,18 +1,28 @@
 import { type Static, Type } from "typebox";
 import { MessageInputBlockSchema } from "./frames.ts";
+import { OrbMessageSenderIdSchema } from "./orb-message-context.ts";
 
 const closed = { additionalProperties: false } as const;
 
 export const ORB_SELF_SLEEP_PATH = "/runtime/v1/orb/sleep";
 export const ORB_BOOT_CONTEXT_PATH = "/runtime/v1/orb/boot-context";
 
-export const OrbMessageSystemSchema = Type.Object(
-  {
-    kind: Type.Union([Type.Literal("sleep_wake"), Type.Literal("sleep_expired")]),
-    sleepUntil: Type.String(),
-  },
-  closed,
-);
+export const OrbMessageSystemSchema = Type.Union([
+  Type.Object(
+    {
+      kind: Type.Union([Type.Literal("sleep_wake"), Type.Literal("sleep_expired")]),
+      sleepUntil: Type.String(),
+    },
+    closed,
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("orb_message"),
+      senderOrbId: OrbMessageSenderIdSchema,
+    },
+    closed,
+  ),
+]);
 export type OrbMessageSystem = Static<typeof OrbMessageSystemSchema>;
 
 export const OrbSleepRequestSchema = Type.Object(

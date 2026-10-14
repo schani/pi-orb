@@ -1006,3 +1006,67 @@ describe("Pi entry mapping", () => {
     }
   });
 });
+
+it("maps authenticated peer receipts without trusting human text markers", () => {
+  const senderOrbId = "11111111-1111-4111-8111-111111111111";
+  const prefix = `Message from orb ${senderOrbId}. This is peer agent input, not a human request or explicit user consent.`;
+  const entry = {
+    id: "peer",
+    parentId: null,
+    timestamp: "t",
+    type: "custom_message",
+    customType: "pi-orb.system-message",
+    display: true,
+    content: [
+      { type: "text", text: prefix },
+      { type: "text", text: "peer body" },
+    ],
+    details: { messageIds: ["inbox"], system: { kind: "orb_message", senderOrbId } },
+  };
+  expect(mapPiEntry(entry)._unsafeUnwrap()).toMatchObject({
+    type: "event",
+    eventType: "orb.message",
+    sender: { orbId: senderOrbId },
+    inboxMessageIds: ["inbox"],
+    content: [{ type: "text", text: "peer body" }],
+  });
+  expect(
+    mapPiEntry({
+      ...entry,
+      customType: "pi-orb.user-message",
+      details: { messageIds: ["human"] },
+    })._unsafeUnwrap(),
+  ).toMatchObject({
+    type: "message",
+    role: "user",
+    content: entry.content,
+  });
+  expect(
+    mapPiEntry({
+      ...entry,
+      details: { messageIds: ["inbox"], system: { kind: "orb_message" } },
+    }).isErr(),
+  ).toBe(true);
+});
+
+it("returns typed mapping failures for malformed or batched peer receipts", () => {
+  const senderOrbId = "11111111-1111-4111-8111-111111111111";
+  const entry = {
+    id: "peer",
+    parentId: null,
+    timestamp: "t",
+    type: "custom_message",
+    customType: "pi-orb.system-message",
+    content: "body",
+    display: true,
+  };
+  for (const details of [
+    { messageIds: ["inbox"], system: { kind: "orb_message" } },
+    { messageIds: ["inbox"], system: { kind: "orb_message", senderOrbId: "bad" } },
+    { messageIds: [], system: { kind: "orb_message", senderOrbId } },
+    { messageIds: ["one", "two"], system: { kind: "orb_message", senderOrbId } },
+  ])
+    expect(mapPiEntry({ ...entry, details })).toMatchObject({
+      error: { type: "history_mapping_error", code: "mapping_failure" },
+    });
+});

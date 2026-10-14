@@ -100,6 +100,7 @@ describe("pi-orb inspection CLI entry point", () => {
             },
             project: orb.project,
             spawnedBy: null,
+            children: [{ id: "child", name: "Child work", url: "https://browser.test/orbs/child" }],
             previewHost: null,
           }),
         );
@@ -151,11 +152,13 @@ describe("pi-orb inspection CLI entry point", () => {
     const summary = await runCli(baseUrl, ["self"]);
     expect(summary).toMatchObject({ code: 0, stderr: "" });
     expect(summary.stdout).toContain("Dashboard: https://browser.test/orbs/orb-current");
+    expect(summary.stdout).toContain("Child: Child work (child) https://browser.test/orbs/child");
     const json = await runCli(baseUrl, ["self", "--json"]);
     expect(json).toMatchObject({ code: 0, stderr: "" });
     expect(JSON.parse(json.stdout)).toMatchObject({
       orb: { id: "orb-current" },
       spawnedBy: null,
+      children: [{ id: "child", name: "Child work", url: "https://browser.test/orbs/child" }],
       previewHost: null,
     });
     mode = "unauthorized";
