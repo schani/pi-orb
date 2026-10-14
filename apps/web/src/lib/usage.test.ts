@@ -4,6 +4,7 @@ import {
   cacheShare,
   formatUsageCount,
   totalTokens,
+  usageAxis,
   usageBoundaries,
   usageRankings,
   usageTimeline,
@@ -65,6 +66,26 @@ describe("usage presentation", () => {
     const end = new Date(2026, 2, 31, 10).getTime();
     expect(usageBoundaries("month", end)[0]).toBe(new Date(2026, 1, 28, 10).getTime());
     expect(usageBoundaries("six_months", now)[0]).toBe(new Date(2026, 3, 13, 10).getTime());
+  });
+  it("ticks every bucket and labels local civil boundaries", () => {
+    const now = new Date(2026, 9, 14, 11, 58).getTime();
+    const local = (month: number, day: number, hour = 0) =>
+      new Date(2026, month, day, hour).getTime();
+    const expected = {
+      day: [12, 15, 18, 21, 24, 27, 30, 33].map((hour) => local(9, 13, hour)),
+      week: Array.from({ length: 7 }, (_, i) => local(9, 8 + i)),
+      month: Array.from({ length: 30 }, (_, i) => local(8, 15 + i)),
+      six_months: Array.from({ length: 6 }, (_, i) => local(4 + i, 1)),
+    };
+    const formats = { day: "%H:%M", week: "%b %d", month: "%b %d", six_months: "%b" };
+    for (const period of ["day", "week", "month", "six_months"] as const) {
+      const boundaries = usageBoundaries(period, now);
+      expect(usageAxis(period, boundaries)).toEqual({
+        ticks: boundaries.slice(0, -1),
+        labels: expected[period],
+        format: formats[period],
+      });
+    }
   });
   it("sums volume including cache and weights cache share by prompt tokens", () => {
     expect(totalTokens(data.summary)).toBe(127);

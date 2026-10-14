@@ -131,7 +131,20 @@ it.each(["chromium", "webkit"] as const)(
       await entry.click();
       await expect(page).toHaveURL(origin + "/usage");
       const timeline = page.locator(".usage-timeline");
-      const tickLines = timeline.locator('g.role-axis[aria-label^="X-axis"] g.role-axis-tick line');
+      const tickLines = timeline.locator("g.x_ticks_marks line");
+      const xLabelsApart = () =>
+        timeline
+          .locator('g.role-axis[aria-label^="X-axis"] g.role-axis-label text')
+          .evaluateAll((ns) => {
+            const boxes = ns
+              .filter(
+                (n) =>
+                  n.textContent !== "" &&
+                  n.ownerDocument.defaultView?.getComputedStyle(n).opacity !== "0",
+              )
+              .map((n) => n.getBoundingClientRect());
+            return boxes.length > 1 && boxes.every((b, i) => (boxes[i - 1]?.right ?? 0) < b.left);
+          });
       for (const [label, count] of [
         ["Last day", 96],
         ["Week", 168],
@@ -140,6 +153,10 @@ it.each(["chromium", "webkit"] as const)(
       ] as const) {
         await page.getByRole("button", { name: label, exact: true }).click();
         await expect(tickLines).toHaveCount(count);
+        for (const width of [320, 1440]) {
+          await page.setViewportSize({ width, height: 1000 });
+          await expect.poll(xLabelsApart).toBe(true);
+        }
         await expect(timeline.locator("g.mark-line path")).toHaveCount(4);
         await expect(page.locator(".usage-rankings .chart-canvas svg")).toHaveCount(1);
       }
