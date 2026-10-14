@@ -28,11 +28,7 @@ For simplicity the CLI makes **one** request with a 10-second deadline and no au
 
 `pi-orb orbs` and `pi-orb transcript <id>` already provide discovery and replicated progress inspection. The returned browser URL shows existing startup, inbox, failure, and transcript state. There is no completion notification back to the caller.
 
-## Spawn relations (decided and implemented 2026-10-14)
-
-Native `orb_self` and `pi-orb self [--json]` expose `spawnedBy: {id,url} | null` and required `children: [{id,name,url}]`. Parent provenance survives parent deletion. Children are existing direct accepted targets, ordered by ID, with current names (`null` if unnamed) and dashboard URLs from configured app origin. Include archived and deleting targets until removal; omit deleted targets, grandchildren and unrelated orbs. No children yields `[]`.
-
-Both paths use a shared application service through the store port, querying existing `orb_spawns` acceptance state and current orb metadata. No migration, new persisted state, lifecycle coupling or messaging. `orb_alert` and `pi-orb alert` alert the user on the issuing orb; alerts are not sent to the parent orb. Inspect a child's replicated progress with `orb_transcript` or `pi-orb transcript <id>`.
+**Spawn relations (2026-10-14):** native `orb_self` and `pi-orb self [--json]` expose historical `spawnedBy:{id,url}|null` and required `children:[{id,name:string|null,url}]`, existing direct accepted targets ordered by ID. Archived/deleting children remain until removed; deleted targets and grandchildren are omitted; empty means `[]`. Both paths use a shared application service/store port over existing `orb_spawns`, with no new persistence or lifecycle coupling (`docs/control-plane-api.md`). Alerts address the issuing orb's user, not its parent; inspect child progress with `orb_transcript` or `pi-orb transcript <id>`.
 
 ## Runtime API
 

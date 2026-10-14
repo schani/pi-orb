@@ -8,6 +8,7 @@ import { jsonParam, type PostgreSQLClient } from "../adapters/pg/client.ts";
 import type { StoreError } from "../domain/errors.ts";
 import type { OrbRow, ProjectRow } from "../domain/orb.ts";
 import type {
+  CentralAgentCaller,
   ControlPlaneStore,
   CredentialPointerStore,
   ProjectSecretPointerStore,
@@ -551,6 +552,16 @@ export function storeSemanticsContractTests(
       expect((await store.listOrbMessages(task, orb.id))._unsafeUnwrap()).toHaveLength(1);
     });
 
+    function peerCentralCaller(orbId: string): CentralAgentCaller {
+      return {
+        kind: "central",
+        ownerUserId: OWNER,
+        projectId: project.id,
+        orbId,
+        agentAdmissionVersion: 0,
+      };
+    }
+
     it("canonicalizes existing human uppercase UUID targets without changing dedupe", async () => {
       await seed();
       const human = { ...orb, id: "abcdef00-0000-4000-8000-000000000009" };
@@ -579,13 +590,7 @@ export function storeSemanticsContractTests(
         orbId: id,
         projectId: project.id,
         ownerUserId: OWNER,
-        caller: {
-          kind: "central" as const,
-          orbId: id,
-          projectId: project.id,
-          ownerUserId: OWNER,
-          agentAdmissionVersion: 0,
-        },
+        caller: peerCentralCaller(id),
       });
       const params = {
         orbId: orb.id,
@@ -661,24 +666,17 @@ export function storeSemanticsContractTests(
         kind: "orb_message",
         senderOrbId: source.id,
       });
-      expect(
-        (
-          await store.enqueueOrbMessage(task, {
-            ...params,
-            content: [{ type: "text", text: "changed" }],
-          })
-        ).isErr(),
-      ).toBe(true);
-      expect(
-        (
-          await store.enqueueOrbMessage(task, {
-            orbId: params.orbId,
-            messageId: params.messageId,
-            content: params.content,
-            now: params.now,
-          })
-        ).isErr(),
-      ).toBe(true);
+      const incompatibleRetries = [
+        { ...params, content: [{ type: "text" as const, text: "changed" }] },
+        {
+          orbId: params.orbId,
+          messageId: params.messageId,
+          content: params.content,
+          now: params.now,
+        },
+      ];
+      for (const retry of incompatibleRetries)
+        expect((await store.enqueueOrbMessage(task, retry)).isErr()).toBe(true);
       for (const sender of [
         { ...params.sender, ownerUserId: "wrong" },
         { ...params.sender, projectId: "00000000-0000-4000-8000-000000000005" },
@@ -686,13 +684,7 @@ export function storeSemanticsContractTests(
         { ...params.sender, caller: { runtimeTokenHash: "peer-token", hostIncarnation: 2 } },
         {
           ...params.sender,
-          caller: {
-            kind: "central" as const,
-            ownerUserId: OWNER,
-            projectId: project.id,
-            orbId: source.id,
-            agentAdmissionVersion: 9,
-          },
+          caller: { ...peerCentralCaller(source.id), agentAdmissionVersion: 9 },
         },
       ])
         expect((await store.enqueueOrbMessage(task, { ...params, sender })).isErr()).toBe(true);
@@ -722,13 +714,6 @@ export function storeSemanticsContractTests(
 
     it("lists existing direct spawn children with current names, including archived targets", async () => {
       await seed();
-      const authority = (orbId: string) => ({
-        kind: "central" as const,
-        ownerUserId: OWNER,
-        projectId: project.id,
-        orbId,
-        agentAdmissionVersion: 0,
-      });
       const childId = "00000000-0000-4000-8000-000000000003";
       const unnamedId = "00000000-0000-4000-8000-000000000004";
       const grandchildId = "00000000-0000-4000-8000-000000000005";
@@ -744,7 +729,7 @@ export function storeSemanticsContractTests(
           (
             await store.spawnOrb(task, {
               callerOrbId,
-              caller: authority(callerOrbId),
+              caller: peerCentralCaller(callerOrbId),
               orb: { ...orb, id },
               prompt: "work",
               requestHash: id,

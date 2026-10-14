@@ -85,7 +85,7 @@ The browser talks only to the control plane. In the original first slice, the co
 
 An orb can launch another orb with a prompt through `pi-orb spawn` and receive its browser URL (implemented 2026-09-08). This creates independent same-project work with atomic durable prompt acceptance; see `docs/orb-spawning.md`.
 
-Orb-to-orb messaging is approved (2026-10-14, America/Los_Angeles), independent of ancestry: same-owner/same-project trusted non-human input through the existing inbox, shown in a Correspondence band, waking stopped/sleeping targets. The approved minimal contract is implemented locally; real-process E2E and normal full gates remain pending. A PR and a process-host preview are authorized, not production deployment (`docs/orb-messaging.md`, `TODO.md`).
+Orb-to-orb messaging is approved (2026-10-14, America/Los_Angeles), independent of ancestry: same-owner/same-project trusted non-human input through the existing inbox, shown in a Correspondence band, waking stopped/sleeping targets. The approved minimal contract is implemented locally; scoped actual-process checks pass, full qualification remains pending. A PR and a process-host preview are authorized, not production deployment (`docs/orb-messaging.md`, `TODO.md`).
 
 First-class child orbs/subagents are a product goal but not part of the first slice. Local subagent integration is being validated in `docs/subagents.md` (2026-09-14): a minimal pinned gotgenes fork plus runtime-owned aggregate activity, preserving one user-facing root conversation with additional internal SDK sessions. It is not deployed.
 
@@ -149,7 +149,6 @@ Subsystem designs:
 
 Tracking:
 
-- [docs/postmortems/2026-10-14-pglite-qualification-contention.md](docs/postmortems/2026-10-14-pglite-qualification-contention.md) — controlled CPU-only setup-timeout reproduction; serial shared-VM gate ownership, historical attribution incomplete
 - [docs/postmortems/2026-10-13-rollout-monitor-anomalies.md](docs/postmortems/2026-10-13-rollout-monitor-anomalies.md) — validated deployment, diagnostic mint-floor denials and preexisting malformed transcript-ID failure; monitor regression preserved
 - [docs/postmortems/2026-10-13-claude-history-nul.md](docs/postmortems/2026-10-13-claude-history-nul.md) — JSONB NUL rejection blocked replication, receipts and FIFO delivery; lossless storage required
 - [docs/postmortems/2026-10-13-claude-query-rotation.md](docs/postmortems/2026-10-13-claude-query-rotation.md) — native handoff-completion defect, requesting/result fence and durable diagnostics; historical attribution incomplete

@@ -10,34 +10,11 @@ Independent semantic facts avoid common-mode agreement; mutation failures establ
 
 [Evidence and replay](../test-failures/2026-10-14-dst-compositions.md). Memory adapters, serialized transport and narrow hook mocks do not prove PostgreSQL, Native SDK admission/suspension, real network/browser/DOM or concurrent React. No production changes, merge or deployment.
 
-## Interruption evidence (decision 2026-10-14)
+## Orb messaging (2026-10-14; qualification partial)
 
-Keep test logs, traces, screenshots and failure evidence on the persistent workspace, not `/tmp`. A same-instance Spot restart preserved the workspace but lost reported `/tmp` evidence: `docs/postmortems/2026-10-14-cross-orb-host-preemption.md`. Cross-orb evidence lives under `.context/cross-orb/`.
+`docs/orb-messaging.md` defines the contract. Tests must cover trusted singleton peer provenance across all harnesses, forged text/native-origin rejection, human-only guard and consent isolation, same-owner/same-project authority, FIFO, replay/conflicting IDs and lost acknowledgements. Store/DST scenarios must fence Stop, sleep, replacement and deletion races; replay recorded DST failures before changes. Process E2E must verify stopped/sleeping wake and exact sender, literal body and singleton receipt through replication; visible delivery alone is not a replication barrier.
 
-## Shared-VM qualification ownership (decision 2026-10-14)
-
-One parent owns the CPU-heavy qualification slot: wait for other gate process groups to finish, grant the slot explicitly, and hold new unit/store, browser/process-E2E and static/build runners until the owner releases it after child cleanup. Run these separate gates serially; `--maxWorkers=1` does not serialize independent runners. Preview services may remain only while idle. Gates requiring port 5173 must coordinate ownership and pause only the owned preview frontend. CJS script fixtures beneath a repository-local TMPDIR need an isolated module boundary; otherwise the repository ESM package scope changes their interpretation. Preserve source hashes, first failures and setup phase/CPU/memory telemetry; do not increase hook timeouts to conceal contention.
-
-A frozen-source, CPU-only reproduction caused the three PGlite store hooks and CHECK setup to exceed their unchanged 10-second deadline. WASM readiness took 8.36–12.65 seconds under load versus 1.50–2.89 seconds in exclusive controls; all migrations completed and each client closed before the next setup. This confirms a harness CPU-starvation failure mode, not a SQL defect or a leaked setup promise in that reproduction. The original 12:13:55 PDT failure lacks phase telemetry: its exact cause remains unproven, and passing controls do not clear it. Forensics and limits: `docs/postmortems/2026-10-14-pglite-qualification-contention.md`; telemetry: `.context/cross-orb/store-isolation/report.md`. No test-source change or historical-cause waiver.
-
-## Orb messaging (2026-10-14; implemented locally, qualification pending)
-
-The contract in `docs/orb-messaging.md` is implemented in backend, harness and UI code. Scoped checks, enumerated separately rather than added across overlapping workloads:
-
-- Backend: 135 scoped passes—125 domain/routes in `.context/cross-orb/backend-review-qualified.log`, 10 CLI/inspection in `.context/cross-orb/backend-cli-qualified.log`.
-- Harness/protocol: 213 passes in `.context/cross-orb/peer-final-tests.log`; reviewer and central receipt corrections are documented in `.context/cross-orb/harness-report.md`.
-- UI: 138 targeted units in `.context/cross-orb/ui/unit-qualified.log`; 10 Chromium/WebKit cases in `.context/cross-orb/ui/browser-qualified.log`. Owned cache isolation, fixture corrections and explicit module-graph warmup corrected the recorded cold-cache/waiter failures; first evidence and timing analysis remain in `.context/cross-orb/ui/failure-analysis.md`. An interrupted broad web-unit run is not a full pass.
-
-The initial three PGlite `beforeEach` failures preceded test bodies. Bounded CPU-only contention reproduced them on frozen source; exclusive controls passed seven selected cases before and after load, with completed migrations and close-before-next-setup telemetry. This supports serial shared-VM gate ownership, not exact historical-stage attribution or clearance by rerun (`docs/postmortems/2026-10-14-pglite-qualification-contention.md`, `.context/cross-orb/store-isolation/report.md`). Initial evidence remains in `.context/cross-orb/backend-store-qualified.log`. The historical attribution remains unresolved; full qualification is incomplete.
-
-Final scoped receipts (2026-10-14, America/Los_Angeles):
-- Initial full Vitest: 4,630 passed, four failed, 34 skipped. Correcting the expected migration ledger filename to 045 passed all 19 selected cases: composed coverage is 4,634 passes/34 skips, **not a passing npm test command**.
-- Full typecheck passed: `.context/cross-orb/final/typecheck-20261014T201139086951Z.log`. Root lint passed with 296 warnings/45 infos: `.context/cross-orb/final/lint-20261014T202028886782Z.log`.
-- Actual-process/PGlite central-durable messaging passed (152.695s). Host-Pi passed once (177.258s) after direct-bash CLI fixture correction and an explicit bounded replicated-receipt barrier; narrow E2E typecheck and file Biome check passed serially. Logs: `.context/cross-orb/final/receipt-barrier-*.log`. Both stopped/sleeping cases retain exact singleton ID, event type, sender and literal-content assertions. Live UI delivery is not a database replication barrier. Earlier failure `.context/cross-orb/messaging/host-pi-5yfzyF/` retains the native receipt and database prefix ending at its exact parent. The separate restart-notice `no_matching_rule` is not claimed fixed.
-- Infrastructure initially recorded 90 passes/two failures from preview ownership of 5173; pausing the owned frontend corrected that guard. The next attempt exposed repository-local TMPDIR CJS/ESM interpretation (`.context/cross-orb/final/tmp/pi-orb-local-fake-MBFewK/tool-1792008679781.log`); infrastructure remains uncleared.
-- Real-backend preview smoke passed at 13:48 PDT: backend PID 29302/7100 and frontend PID 29995/5173 unchanged, root/projects HTTP 200, Create project visible, no page errors. Fresh Codex login is required; real inference and remote-client browser reachability are unqualified. Receipt: `.context/cross-orb/preview/readiness.json`. Draft PR: https://github.com/schani/pi-orb/pull/112.
-
-These are scoped/composed receipts, not final-source full qualification. Python/native-VM infrastructure, a passing full unit command, whole `test:e2e`, exact-head CI and historical PGlite attribution remain pending in `TODO.md`. No merge or deployment clearance.
+Scoped backend/harness/UI and both actual-process messaging cases have passed; this is not final-source full qualification. First failures and receipts remain under `.context/cross-orb/`. Historical non-UI PGlite anomalies and infrastructure fixture failures are not cleared. Pending full gates: `TODO.md`.
 
 ## Release SSH rendered contract (decision 2026-10-14)
 

@@ -2,36 +2,23 @@ import { NoSimulationTask } from "determined";
 import { expect, it } from "vitest";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
 import { LogCapture, runDst } from "../testkit/sim.ts";
+import type { OrbRow } from "./orb.ts";
 import { sendOrbMessage } from "./orb-messaging.ts";
+
+function peerOrb(
+  id: string,
+  state: OrbRow["state"],
+  overrides: Partial<OrbRow> = {},
+  projectId = sender.projectId,
+): OrbRow {
+  return makeOrbRow(id, projectId, state, overrides);
+}
 
 function seed() {
   const h = makeHarness();
-  h.store.seedProject({
-    ...makeProjectRow("00000000-0000-4000-8000-000000000010"),
-    ownerUserId: "00000000-0000-4000-8000-000000000011",
-  });
-  h.store.seedOrb(
-    makeOrbRow(
-      "00000000-0000-4000-8000-000000000001",
-      "00000000-0000-4000-8000-000000000010",
-      "running",
-      {
-        runtimeTokenHash: "token",
-        hostIncarnation: 1,
-        hostRef: "host",
-      },
-    ),
-  );
-  h.store.seedOrb(
-    makeOrbRow(
-      "00000000-0000-4000-8000-000000000002",
-      "00000000-0000-4000-8000-000000000010",
-      "stopped",
-      {
-        stopReason: "manual",
-      },
-    ),
-  );
+  h.store.seedProject({ ...makeProjectRow(sender.projectId), ownerUserId: sender.ownerUserId });
+  h.store.seedOrb(peerOrb(sender.orbId, "running", { ...sender.caller, hostRef: "host" }));
+  h.store.seedOrb(peerOrb(request.orbId, "stopped", { stopReason: "manual" }));
   return h;
 }
 const sender = {
@@ -56,25 +43,21 @@ it("emits one content-free acceptance edge across lost acknowledgements and retr
         f: async (task) => {
           expect((await sendOrbMessage(task, h.deps, sender, request)).isOk()).toBe(true);
           expect((await sendOrbMessage(task, h.deps, sender, request)).isOk()).toBe(true);
-          const target = h.store.orbSnapshot("00000000-0000-4000-8000-000000000002");
+          const target = h.store.orbSnapshot(request.orbId);
           expect(target).toBeDefined();
           if (!target) return;
           expect(
             (
               await h.store.requestOrbStop(task, {
-                orbId: "00000000-0000-4000-8000-000000000002",
+                orbId: request.orbId,
                 expectedStateVersion: target.stateVersion,
                 now: task.wallNow(),
               })
             ).isOk(),
           ).toBe(true);
           expect((await sendOrbMessage(task, h.deps, sender, request)).isOk()).toBe(true);
-          expect(h.store.orbSnapshot("00000000-0000-4000-8000-000000000002")?.stopReason).toBe(
-            "manual",
-          );
-          expect(
-            h.store.messageSnapshots("00000000-0000-4000-8000-000000000002")[0]?.autoStart,
-          ).toBe(false);
+          expect(h.store.orbSnapshot(request.orbId)?.stopReason).toBe("manual");
+          expect(h.store.messageSnapshots(request.orbId)[0]?.autoStart).toBe(false);
         },
       },
     ]);
@@ -123,15 +106,14 @@ it.each([
       {
         name: "revoke",
         f: async (task) => {
+          const senderFence = {
+            orbId: sender.orbId,
+            expectedStateVersion: 0,
+            now: task.wallNow(),
+          };
           switch (mutation) {
             case "central-stop-start": {
-              const stopped = (
-                await h.store.requestOrbStop(task, {
-                  orbId: sender.orbId,
-                  expectedStateVersion: 0,
-                  now: task.wallNow(),
-                })
-              )._unsafeUnwrap().orb;
+              const stopped = (await h.store.requestOrbStop(task, senderFence))._unsafeUnwrap().orb;
               acceptedBeforeRevocation = h.store.messageSnapshots(request.orbId).length === 1;
               (
                 await h.store.casTransition(task, {
@@ -146,20 +128,12 @@ it.each([
               break;
             }
             case "stop":
-              (
-                await h.store.requestOrbStop(task, {
-                  orbId: "00000000-0000-4000-8000-000000000001",
-                  expectedStateVersion: 0,
-                  now: task.wallNow(),
-                })
-              )._unsafeUnwrap();
+              (await h.store.requestOrbStop(task, senderFence))._unsafeUnwrap();
               break;
             case "replace":
               (
                 await h.store.casUpdateFields(task, {
-                  orbId: "00000000-0000-4000-8000-000000000001",
-                  expectedStateVersion: 0,
-                  now: task.wallNow(),
+                  ...senderFence,
                   runtimeTokenHash: "new-token",
                 })
               )._unsafeUnwrap();
@@ -167,21 +141,17 @@ it.each([
             case "discard":
               (
                 await h.store.requestHostSpecReplacement(task, {
-                  orbId: "00000000-0000-4000-8000-000000000001",
-                  expectedStateVersion: 0,
+                  ...senderFence,
                   desiredFingerprint: "00000000-0000-4000-8000-000000000014",
                   configuredGeneration: 1,
                   force: true,
-                  now: task.wallNow(),
                 })
               )._unsafeUnwrap();
               break;
             case "archive":
               (
                 await h.store.requestOrbArchive(task, {
-                  orbId: "00000000-0000-4000-8000-000000000001",
-                  expectedStateVersion: 0,
-                  now: task.wallNow(),
+                  ...senderFence,
                   cleanupAfter: task.wallNow(),
                 })
               )._unsafeUnwrap();
@@ -189,9 +159,7 @@ it.each([
             case "delete":
               (
                 await h.store.requestOrbDeletion(task, {
-                  orbId: "00000000-0000-4000-8000-000000000001",
-                  expectedStateVersion: 0,
-                  now: task.wallNow(),
+                  ...senderFence,
                   cleanupAfter: task.wallNow(),
                 })
               )._unsafeUnwrap();
@@ -230,13 +198,14 @@ it("rejects cross-project and unavailable targets and wakes eligible stopped/fai
   const task = new NoSimulationTask("peer scopes", false);
   h.store.seedProject({
     ...makeProjectRow("00000000-0000-4000-8000-000000000012"),
-    ownerUserId: "00000000-0000-4000-8000-000000000011",
+    ownerUserId: sender.ownerUserId,
   });
   h.store.seedOrb(
-    makeOrbRow(
+    peerOrb(
       "00000000-0000-4000-8000-000000000003",
-      "00000000-0000-4000-8000-000000000012",
       "running",
+      {},
+      "00000000-0000-4000-8000-000000000012",
     ),
   );
   expect(
@@ -256,19 +225,13 @@ it("rejects cross-project and unavailable targets and wakes eligible stopped/fai
       true,
     );
   for (const state of ["archiving", "archived", "deleting"] as const) {
-    h.store.seedOrb(
-      makeOrbRow(
-        "00000000-0000-4000-8000-000000000002",
-        "00000000-0000-4000-8000-000000000010",
-        state,
-      ),
-    );
+    h.store.seedOrb(peerOrb(request.orbId, state));
     expect((await sendOrbMessage(task, h.deps, sender, request)).isErr()).toBe(true);
   }
   for (const state of ["stopped", "stopping", "failed"] as const) {
     const id = `00000000-0000-4000-8000-00000000000${state === "failed" ? 7 : state === "stopping" ? 6 : 5}`;
     h.store.seedOrb(
-      makeOrbRow(id, "00000000-0000-4000-8000-000000000010", state, {
+      peerOrb(id, state, {
         stopReason: "sleep",
         sleepId: "00000000-0000-4000-8000-000000000015",
         sleepUntil: 5000,
@@ -295,7 +258,7 @@ it.each(["stop", "delete"] as const)(
   async (mutation) => {
     await runDst({ name: `peer-target-${mutation}`, iterations: 20 }, async (sim) => {
       const h = seed();
-      h.store.seedOrb(makeOrbRow(request.orbId, sender.projectId, "running"));
+      h.store.seedOrb(peerOrb(request.orbId, "running"));
       let sendAccepted: boolean | undefined;
       let sendBeforeFence: boolean | undefined;
       const result = await sim.runTasks([
