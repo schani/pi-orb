@@ -11,9 +11,9 @@ import { detailContext } from "./display-fixtures.ts";
 const projectPath = "/api/v1/projects/frontend-fixture-project/orbs";
 const rotatingIds = ["frontend-fixture-orb", "frontend-long-history", "frontend-lazy-details"];
 
-function fixture(timestampChurn = false) {
+function fixture({ timestampChurn = false, orbNesting = false } = {}) {
   let middleware: Connect.NextHandleFunction | undefined;
-  const plugin = mockBackendPlugin({ timestampChurn });
+  const plugin = mockBackendPlugin({ timestampChurn, orbNesting });
   const configure = plugin.configureServer;
   if (typeof configure !== "function") return expect.fail("missing fixture server hook");
   configure.call(
@@ -111,6 +111,38 @@ it("seeds completed, failed and unresolved codemode calls in one group", async (
   }
 });
 
+it.each([false, true])(
+  "seeds navigable nested orbs only when opted in (%s)",
+  async (orbNesting) => {
+    const get = fixture({ orbNesting });
+    const { items } = await get<{ items: OrbView[] }>(projectPath);
+    expect(
+      items
+        .filter((orb) => orb.spawnedBy !== undefined)
+        .map(({ id, spawnedBy }) => ({
+          id,
+          spawnedBy,
+        })),
+    ).toEqual(
+      orbNesting
+        ? [
+            { id: "frontend-long-history", spawnedBy: "frontend-fixture-orb" },
+            { id: "frontend-lazy-details", spawnedBy: "frontend-long-history" },
+            { id: "frontend-charts", spawnedBy: "frontend-fixture-orb" },
+          ]
+        : [],
+    );
+    for (const id of [...rotatingIds, "frontend-charts", "frontend-sticky-bars"]) {
+      const orb = items.find((item) => item.id === id);
+      expect(orb).toBeDefined();
+      expect(await get<OrbView>(`/api/v1/orbs/${id}`)).toEqual(orb);
+      const history = await get<DisplayHistoryView>(`/api/v1/orbs/${id}/history`);
+      expect(history.records.length).toBeGreaterThan(0);
+    }
+    expect(items.find((orb) => orb.id === "frontend-sticky-bars")?.spawnedBy).toBeUndefined();
+  },
+);
+
 it("leaves timestamps unchanged in the default frontend fixture", async () => {
   vi.useFakeTimers();
   vi.setSystemTime("2026-10-05T12:00:00Z");
@@ -123,7 +155,7 @@ it("leaves timestamps unchanged in the default frontend fixture", async () => {
 it("rotates real orb updates each list poll only when opted in", async () => {
   vi.useFakeTimers();
   vi.setSystemTime("2026-10-05T12:00:00Z");
-  const get = fixture(true);
+  const get = fixture({ timestampChurn: true });
   let previous = await get<{ items: OrbView[] }>(projectPath);
   const newestIds: string[] = [];
   for (let poll = 1; poll <= rotatingIds.length; poll += 1) {

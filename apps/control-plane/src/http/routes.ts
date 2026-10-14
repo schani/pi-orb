@@ -42,6 +42,7 @@ import { logOrbEvent } from "../domain/log.ts";
 import type { OrbMessageMetadataRow, OrbMessageRow, ProjectRow } from "../domain/orb.ts";
 import { ackOrbAlert } from "../domain/orb-alerts.ts";
 import { normalizeOrbName, setOrbName } from "../domain/orb-naming.ts";
+import { readOrb, readProjectOrbs } from "../domain/orb-read.ts";
 import {
   readPersonalInstructions,
   savePersonalInstructions,
@@ -638,19 +639,17 @@ export function registerRoutes(
   app.get<{ Params: { projectId: string } }>(
     "/api/v1/projects/:projectId/orbs",
     async (request, reply) => {
-      const project = await deps.store.getProject(task, request.params.projectId);
-      if (project.isErr()) {
-        return sendStoreError(reply, project.error);
-      }
-      if (project.value === null) {
-        return reply.status(404).send(httpError("not_found", "project not found", false));
-      }
-      const orbs = await deps.store.listOrbsByProject(task, request.params.projectId);
+      const orbs = await readProjectOrbs(task, deps.store, request.params.projectId);
       if (orbs.isErr()) {
         return sendStoreError(reply, orbs.error);
       }
+      if (orbs.value === null) {
+        return reply.status(404).send(httpError("not_found", "project not found", false));
+      }
       return reply.send({
-        items: orbs.value.map((orb) => orbView(orb, deps.control, config, viewerUserId(request))),
+        items: orbs.value.map((orb) =>
+          orbView(orb, deps.control, config, viewerUserId(request), orb.spawnedBy),
+        ),
       });
     },
   );
@@ -695,14 +694,16 @@ export function registerRoutes(
   );
 
   app.get<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId", async (request, reply) => {
-    const orb = await deps.store.getOrb(task, request.params.orbId);
+    const orb = await readOrb(task, deps.store, request.params.orbId);
     if (orb.isErr()) {
       return sendStoreError(reply, orb.error);
     }
     if (orb.value === null) {
       return reply.status(404).send(httpError("not_found", "orb not found", false));
     }
-    return reply.send(viewOrb(request, orb.value));
+    return reply.send(
+      orbView(orb.value, deps.control, config, viewerUserId(request), orb.value.spawnedBy),
+    );
   });
 
   app.post<{ Params: { orbId: string } }>(

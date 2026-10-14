@@ -145,6 +145,7 @@ export function orbView(
   control: ControlState,
   config: ViewConfig,
   viewerUserId: string | null = null,
+  spawnedBy: string | null = null,
 ): OrbView {
   const authBlock = control.getAuthBlock(orb.id);
   const challenge = authBlock?.challenge ?? null;
@@ -171,6 +172,7 @@ export function orbView(
     name: orb.name,
     state: orb.state,
     stateVersion: orb.stateVersion,
+    ...(spawnedBy !== null ? { spawnedBy } : {}),
     ...(config.centralAgent ? { centralAgent: true } : {}),
     ...(activity !== undefined ? { activity } : {}),
     ...(orb.checkoutCommit !== null ? { checkoutCommit: orb.checkoutCommit } : {}),

@@ -1,5 +1,6 @@
 import type { OrbView, ProjectView } from "@pi-orb/protocol";
 import type { AppSearchItem, AppSearchSource } from "./app-search.ts";
+import { buildProjectOrbTree } from "./project-orb-tree.ts";
 import {
   formatProjectOrbAge,
   type OrbOrderCache,
@@ -87,7 +88,11 @@ export function buildDashboardSearchSource(snapshot: DashboardSearchSnapshot): A
       continue;
     }
     const shelves = splitProjectOrbs(orbList.items, snapshot.orbOrder);
-    items.push(...shelves.working.map((orb) => orbItem(project, orb, false, snapshot.now)));
+    items.push(
+      ...buildProjectOrbTree(shelves.working).map(({ orb }) =>
+        orbItem(project, orb, false, snapshot.now),
+      ),
+    );
     items.push(...shelves.archive.map((orb) => orbItem(project, orb, true, snapshot.now)));
   }
 

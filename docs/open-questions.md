@@ -187,3 +187,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 ## Lossless history storage — 77
 
 77. **Resolved (2026-10-13; user-approved):** store opaque history records/session headers in PostgreSQL `json`, not `jsonb` or `TEXT`. Whole-value driver decoding preserves escaped NUL and unpaired UTF-16 without read projections. SQL field processing may still reject these strings; use structured metadata for queries/indexes. No measured performance benefit is claimed; migration requires table rewrites/access-exclusive locks. Contract: `docs/history-replication.md`.
+
+## Spawned-orb pad nesting — 78
+
+78. **Resolved; implemented and locally qualified (2026-10-14):** the user-approved always-visible inline tree on dashboard and orb-view index uses direct spawn provenance and independent archive membership, without new persisted state. Rules, rejected alternatives, approved study, tests-first evidence and unit/DST/infrastructure plus focused Chromium qualification: `docs/web-ui.md`. No full E2E, real-PostgreSQL/native-image acceptance or deployment.

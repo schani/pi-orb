@@ -19,6 +19,7 @@ import { LogoutButton } from "../components/LogoutButton.tsx";
 import { PersonalInstructionsButton } from "../components/PersonalInstructions.tsx";
 import { ProjectConfigModal } from "../components/ProjectConfigModal.tsx";
 import { ProjectHeader } from "../components/ProjectHeader.tsx";
+import { ProjectOrbTree } from "../components/ProjectOrbTree.tsx";
 import { StateTile } from "../components/StateTile.tsx";
 import { TextFieldFrame } from "../components/TextFieldFrame.tsx";
 import {
@@ -502,9 +503,9 @@ export function ProjectsPage({
                       failed to load orbs: {describeApiError(orbList.error)}
                     </div>
                   )}
-                  {shelves.working.map((orb) => (
-                    <OrbEntry key={orb.id} orb={orb} {...entryProps} />
-                  ))}
+                  <ProjectOrbTree items={shelves.working}>
+                    {(orb) => <OrbEntry orb={orb} {...entryProps} />}
+                  </ProjectOrbTree>
                   {orbList.type === "loaded" && (
                     <ProjectArchive items={shelves.archive} {...entryProps} />
                   )}

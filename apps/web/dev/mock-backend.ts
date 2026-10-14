@@ -94,7 +94,7 @@ interface MockState {
   projectInstructions: Map<string, ProjectInstructions>;
 }
 
-function initialState(timestampChurn: boolean): MockState {
+function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
   const createdAt = now();
   const runningOrbCreatedAt = new Date(Date.now() - 14 * 60_000).toISOString();
   const authOrbCreatedAt = new Date(Date.now() - 3 * 24 * 60 * 60_000).toISOString();
@@ -661,6 +661,11 @@ function initialState(timestampChurn: boolean): MockState {
   };
   const chartsOrb: OrbView = { ...orb, id: "frontend-charts", name: "Transcript charts" };
   const lazyOrb: OrbView = { ...orb, id: "frontend-lazy-details", name: "Lazy details" };
+  if (orbNesting) {
+    longOrb.spawnedBy = orb.id;
+    lazyOrb.spawnedBy = longOrb.id;
+    chartsOrb.spawnedBy = orb.id;
+  }
   const lazyRecords: HistoryRecord[] = [
     {
       id: "lazy-intro",
@@ -3092,8 +3097,8 @@ function acceptTerminalSocket(socket: WebSocket): void {
  * It implements the real HTTP and WebSocket contracts, so production UI code
  * has no mock branches and protocol drift remains visible.
  */
-export function mockBackendPlugin({ timestampChurn = false } = {}): Plugin {
-  const state = initialState(timestampChurn);
+export function mockBackendPlugin({ timestampChurn = false, orbNesting = false } = {}): Plugin {
+  const state = initialState(timestampChurn, orbNesting);
   let sessionExpired = false;
   const sockets = new WebSocketServer({
     noServer: true,

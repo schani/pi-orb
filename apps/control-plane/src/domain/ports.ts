@@ -27,6 +27,7 @@ import type {
 } from "./errors.ts";
 import type {
   OrbDeletionRow,
+  OrbListRow,
   OrbMessagePoll,
   OrbMessageRow,
   OrbRow,
@@ -229,7 +230,7 @@ export interface ControlPlaneStore extends ActivityHeadlineStore {
     task: SimulationTask,
     tokenHash: string,
   ): ResultAsync<OrbRow | null, StoreError>;
-  listOrbsByProject(task: SimulationTask, projectId: string): ResultAsync<OrbRow[], StoreError>;
+  listOrbsByProject(task: SimulationTask, projectId: string): ResultAsync<OrbListRow[], StoreError>;
   listOrbsInStates(
     task: SimulationTask,
     states: readonly OrbState[],

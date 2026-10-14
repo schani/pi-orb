@@ -791,6 +791,46 @@ a.project-new-orb-icon:focus-visible {
   margin: 0 10px 2px;
 }
 
+/* Keep every lineage row visible while reserving name/action width at deep levels. */
+.orb-tree {
+  --orb-tree-junction: 15px;
+  flex: none;
+  min-width: 0;
+}
+
+.orb-index .orb-tree {
+  --orb-tree-junction: 10px;
+}
+
+.orb-tree-row {
+  --orb-indent: min(calc(var(--orb-depth) * 18px), 40%);
+  position: relative;
+  min-width: 0;
+  padding-left: var(--orb-indent);
+}
+
+.orb-tree-row:not([data-orb-depth="0"])::before,
+.orb-tree-row:not([data-orb-depth="0"])::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+.orb-tree-row:not([data-orb-depth="0"])::before {
+  top: 0;
+  bottom: 0;
+  left: 9px;
+  width: calc(var(--orb-indent) - 8px);
+  background: repeating-linear-gradient(to right, var(--g2) 0 1px, transparent 1px 18px);
+}
+
+.orb-tree-row:not([data-orb-depth="0"])::after {
+  top: var(--orb-tree-junction);
+  left: calc(var(--orb-indent) - 9px);
+  width: 8px;
+  border-top: 1px solid var(--g2);
+}
+
 /* orb entry: a 22px name line over a 20px meta line, behind a 2px state hue */
 .orb-entry {
   flex: none;
