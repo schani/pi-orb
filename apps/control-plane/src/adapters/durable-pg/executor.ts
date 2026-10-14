@@ -1,4 +1,4 @@
-import type { Seq, StorageWrite } from "@earendil-works/pi-durable";
+import type { Seq, StorageWrite, SubmissionId } from "@earendil-works/pi-durable";
 import type { ResultAsync } from "neverthrow";
 import type { StoreError } from "../../domain/errors.ts";
 import type { PgQueryResult } from "../pg/client.ts";
@@ -15,7 +15,12 @@ export interface SqlExecutor {
 export interface SqlDatabase extends SqlExecutor {
   mintId(): Promise<number>;
   transaction<T>(callback: (executor: SqlExecutor) => Promise<T>): Promise<T>;
-  project(executor: SqlExecutor, writes: readonly StorageWrite[], seq: Seq): Promise<void>;
+  project(
+    executor: SqlExecutor,
+    writes: readonly StorageWrite[],
+    seq: Seq,
+    admittedSubmissions: ReadonlySet<SubmissionId>,
+  ): Promise<void>;
   close(): Promise<void>;
 }
 

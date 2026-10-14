@@ -1,5 +1,9 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { ROOT_CONVERSATION_ID, type StorageWrite } from "@earendil-works/pi-durable";
+import {
+  ROOT_CONVERSATION_ID,
+  type StorageWrite,
+  type SubmissionId,
+} from "@earendil-works/pi-durable";
 import type { MessageInputBlock, OrbMessageSystem } from "@pi-orb/protocol";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 import { jsonEqual } from "../../domain/json-equal.ts";
@@ -21,6 +25,7 @@ export async function projectNativeInboxCommit(
   query: Query,
   orbId: string,
   writes: readonly StorageWrite[],
+  admittedSubmissions: ReadonlySet<SubmissionId>,
 ) {
   const submissions = writes.flatMap((write) =>
     write.type === "submission" &&
@@ -82,8 +87,9 @@ export async function projectNativeInboxCommit(
             if (outcome.isErr()) return err(outcome.error);
             continue;
           }
-          // Receipt finalization follows native admission; later placement must not re-admit it.
-          if (captured?.submissionId === submission.id) continue;
+          // Native admission can precede receipt finalization; placement is not new input.
+          if (admittedSubmissions.has(submission.id) || captured?.submissionId === submission.id)
+            continue;
           const orb = await query("SELECT sleep_id,stop_reason FROM orbs WHERE id=$1", [orbId]);
           if (orb.isErr()) return err(orb.error);
           if (orb.value.rows[0]?.sleep_id != null || orb.value.rows[0]?.stop_reason === "sleep")

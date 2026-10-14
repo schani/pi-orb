@@ -212,6 +212,22 @@ export class PgStorage implements Storage {
       const committedSeq = seqFromNumber(metadata.next_seq);
       await this.checkGlobalIds(transaction, writes);
       await this.checkDocumentActions(transaction, documentActions);
+      // Capture durable admission before upserts erase the distinction from new input.
+      const admittedSubmissions = new Set<SubmissionId>();
+      for (const write of writes) {
+        if (write.type !== "submission" || write.value.type !== "input") continue;
+        const row = await transaction.get<JsonRow>(
+          "SELECT record FROM submissions WHERE id = ?",
+          write.value.id,
+        );
+        const prior = row === undefined ? undefined : parseJson<SubmissionRecord>(row.record);
+        if (
+          prior?.type === "input" &&
+          prior.conversationId === write.value.conversationId &&
+          prior.requestId === write.value.requestId
+        )
+          admittedSubmissions.add(prior.id);
+      }
       for (const write of writes) await this.applyTableWrite(transaction, write, committedSeq);
       await this.applyDocumentActions(transaction, documentActions, committedSeq);
       await transaction.run(
@@ -219,7 +235,7 @@ export class PgStorage implements Storage {
         String(Math.max(Number(metadata.next_id), candidateNextId)),
         committedSeq + 1,
       );
-      await this.db.project(transaction, writes, committedSeq);
+      await this.db.project(transaction, writes, committedSeq, admittedSubmissions);
       return committedSeq;
     });
     this.nextId = Math.max(this.nextId, candidateNextId);

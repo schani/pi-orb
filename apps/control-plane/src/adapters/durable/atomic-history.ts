@@ -5,6 +5,7 @@ import {
   ROOT_CONVERSATION_ID,
   StorageRejected,
   type StorageWrite,
+  type SubmissionId,
 } from "@earendil-works/pi-durable";
 import { err, ok, okAsync, ResultAsync } from "neverthrow";
 import { executor, type Query } from "../durable-pg/executor.ts";
@@ -51,11 +52,12 @@ export async function projectNativeCommit(
   query: Query,
   orbId: string,
   writes?: readonly StorageWrite[],
+  admittedSubmissions: ReadonlySet<SubmissionId> = new Set(),
 ) {
   if (writes) {
     const notification = await projectNotificationAdmission(query, orbId, writes);
     if (notification.isErr()) return err(notification.error);
-    const admitted = await projectNativeInboxCommit(query, orbId, writes);
+    const admitted = await projectNativeInboxCommit(query, orbId, writes, admittedSubmissions);
     if (admitted.isErr()) return err(admitted.error);
     const dirty = await hasPublicHistoryWrites(query, orbId, writes);
     if (dirty.isErr()) return err(dirty.error);

@@ -1,4 +1,4 @@
-import type { Seq, Storage, StorageWrite } from "@earendil-works/pi-durable";
+import type { Seq, Storage, StorageWrite, SubmissionId } from "@earendil-works/pi-durable";
 import { StorageRejected } from "@earendil-works/pi-durable";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 import type { StoreError } from "../../domain/errors.ts";
@@ -27,6 +27,7 @@ export type CommitOptions = {
     query: Query,
     writes: readonly StorageWrite[],
     seq: Seq,
+    admittedSubmissions: ReadonlySet<SubmissionId>,
   ): Promise<Result<void, AuthorityError | StoreError>>;
   afterCommit?(seq: Seq): void;
   checkpoint?(
@@ -334,10 +335,10 @@ export class PgDurableAuthority {
         }
         return result.value;
       },
-      project: async (transaction, writes, seq) => {
+      project: async (transaction, writes, seq, admittedSubmissions) => {
         if (!options) rejectStorage("Read-only authority");
         await options.checkpoint?.("after_native");
-        const result = await options.project(transaction.query, writes, seq);
+        const result = await options.project(transaction.query, writes, seq, admittedSubmissions);
         if (result.isErr())
           rejectStorage("Public history projection rejected", { cause: result.error });
         await options.checkpoint?.("after_projection");
