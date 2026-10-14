@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NoSimulationTask } from "determined";
+import { ok, ResultAsync } from "neverthrow";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   liveProcessRows,
@@ -129,6 +130,105 @@ afterEach(async () => {
 });
 
 describe("ProcessOrbHostProvider", () => {
+  async function discardWithFrozenDeadline(
+    discard: () => ReturnType<ProcessOrbHostProvider["discardCompute"]>,
+    diagnostics: () => string,
+    delayed = false,
+  ) {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(0);
+    if (delayed) clock.mockReturnValueOnce(0).mockReturnValue(151);
+    let expired: Error | undefined;
+    const watchdog = setTimeout(() => {
+      clock.mockRestore();
+      let snapshot: string;
+      try {
+        snapshot = diagnostics();
+      } catch (error) {
+        snapshot = `diagnostics failed: ${String(error)}`;
+      }
+      expired = new Error(`discard watchdog expired after 3000 ms: ${snapshot}`);
+    }, 3_000);
+    try {
+      const discarded = await discard();
+      if (expired) throw expired;
+      return discarded;
+    } catch (error) {
+      throw expired ?? error;
+    } finally {
+      clearTimeout(watchdog);
+      clock.mockRestore();
+    }
+  }
+
+  it.each(["resolve", "reject", "throw"])("discard watchdog cleans up on %s", async (exit) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const originalNow = Date.now;
+    const failure = new Error("injected discard failure");
+    const diagnostics = vi.fn(() => "unused");
+    try {
+      const outcome = await discardWithFrozenDeadline(() => {
+        if (exit === "throw") throw failure;
+        return new ResultAsync<void, never>(
+          exit === "reject" ? Promise.reject(failure) : Promise.resolve(ok(undefined)),
+        );
+      }, diagnostics).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(outcome).toBe(exit === "resolve" ? null : failure);
+      expect(Date.now).toBe(originalNow);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(diagnostics).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
+  it("discard watchdog restores the clock, snapshots diagnostics and awaits settlement", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const originalNow = Date.now;
+    let settle = () => {};
+    const pending = new ResultAsync<void, never>(
+      new Promise((resolve) => {
+        settle = () => resolve(ok(undefined));
+      }),
+    );
+    let snapshot = { supervisorStat: "stopped", receipt: null, stderr: "waiting" };
+    const diagnostics = vi.fn(() => JSON.stringify(snapshot));
+    let settled = false;
+    const outcome = discardWithFrozenDeadline(() => pending, diagnostics)
+      .then(
+        () => null,
+        (error: unknown) => error,
+      )
+      .finally(() => {
+        settled = true;
+      });
+    try {
+      expect(Date.now()).toBe(0);
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(Date.now).toBe(originalNow);
+      expect(Date.now()).toBeGreaterThan(151);
+      expect(diagnostics).toHaveBeenCalledTimes(1);
+      expect(settled).toBe(false);
+      snapshot = { supervisorStat: "gone", receipt: null, stderr: "changed" };
+      settle();
+      const failure = await outcome;
+      expect(failure).toBeInstanceOf(Error);
+      expect(String(failure)).toContain("discard watchdog expired after 3000 ms");
+      expect(String(failure)).toContain(
+        '"supervisorStat":"stopped","receipt":null,"stderr":"waiting"',
+      );
+      expect(vi.getTimerCount()).toBe(0);
+      expect(Date.now).toBe(originalNow);
+    } finally {
+      settle();
+      await outcome;
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
   launchIt.each([
     { harness: "pi", runtimeMode: "pi" },
     { harness: "pi", runtimeMode: "execution" },
@@ -737,11 +837,9 @@ describe("ProcessOrbHostProvider", () => {
 
         // Drive deadline expiry explicitly; successful drain follows the receipt,
         // not the scheduler's ability to kill, reap and fsync within 150 ms.
-        const clock = vi.spyOn(Date, "now").mockReturnValue(0);
-        if (delayed) clock.mockReturnValueOnce(0).mockReturnValue(151);
         const discard = () =>
           provider.discardCompute(task, { orbId: request.orbId, throughIncarnation: 0 }, context);
-        const discarded = await Promise.resolve(discard()).finally(() => clock.mockRestore());
+        const discarded = await discardWithFrozenDeadline(discard, diagnostics, delayed);
         if (delayed) {
           expect(discarded.isErr(), diagnostics()).toBe(true);
           if (discarded.isErr()) {

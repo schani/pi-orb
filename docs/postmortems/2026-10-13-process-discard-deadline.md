@@ -20,7 +20,9 @@ A controlled reproduction stops the supervisor with SIGSTOP, confirms `/proc/<pi
 
 ## Correction and invariant
 
-**Decision 2026-10-13:** separate successful drain from deadline expiry in the test. Freeze the success-path deadline clock while the real subreaper drains; the test runner still bounds hangs. For expiry, pause the supervisor and advance the clock explicitly. Assert retryable uncertainty retains metadata and live descendants. Resume, wait for the matching receipt and supervisor absence, then require a successful recovery discard.
+**Decision 2026-10-13:** separate successful drain from deadline expiry in the test. Freeze the success-path deadline clock while the real subreaper drains. For expiry, pause the supervisor and advance the clock explicitly. Assert retryable uncertainty retains metadata and live descendants. Resume, wait for the matching receipt and supervisor absence, then require a successful recovery discard.
+
+**Correction 2026-10-14:** a runner timeout cannot cancel an owned discard or restore its frozen clock. A test-local watchdog uses the existing 3,000 ms eventual-condition budget. On expiry it restores the clock so the provider deadline can elapse, snapshots supervisor state, receipt and stderr, awaits discard settlement, then fails explicitly with that snapshot. Every exit clears the timer and restores the clock. An injected pending-operation test advances only the watchdog timer and proves restoration before settlement, expiry-time diagnostics and explicit failure; success, rejection and synchronous-throw exits also verify cleanup. This corrects the harness, not the unproven historical failure.
 
 Both cases assert matching receipts, supervisor/descendant absence and metadata removal. Failed assertions include the recorded birth identity, current supervisor stat, receipt and stderr. No production deadline, receipt gate or persisted schema changes.
 
