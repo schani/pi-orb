@@ -91,7 +91,7 @@ Evidence: `.context/migration044-fix/three-session-proof.{mjs,log}`.
 Ordered blocking locks are insufficient. Changing only new reader SQL would
 not protect already-live old readers.
 
-## Approved correction (2026-10-13; local, undeployed)
+## Approved correction (2026-10-13; subsequently deployed)
 
 Attempt both exclusive locks with NOWAIT inside an exception subtransaction
 catching only `lock_not_available` (55P03). Contention rolls back partial
@@ -155,7 +155,7 @@ attempt 2 and one exhaustion at attempt 120, including rollback-surviving edges.
 
 Additional scoped checks pass: 17 PGlite/history/migration/MCP DST tests,
 root typecheck (including E2E), and root lint (warnings/information, no errors).
-No full CI/E2E qualification is claimed.
+At this local checkpoint, no full CI/E2E qualification was claimed.
 
 Evidence under `.context/migration044-fix/`:
 
@@ -214,7 +214,11 @@ and continuation revalidated all guards without replaying job deletion.
 
 Cleanup made exactly two guarded DELETEs, no SQL, release-record write or
 workflow dispatch/rerun. Production catalog, column types and migration
-ledger remain unqueried. Cleanup did not deploy the correction or validate
-the failed release. Full exact-main CI/E2E remains required; local checks
-are not deployment qualification. Existing qualification work remains in
-`TODO.md`.
+ledger remained unqueried. Cleanup did not deploy the correction or validate
+the failed release; local checks were not deployment qualification.
+
+## Deployed qualification (2026-10-13, PDT)
+
+Exact source `66479dffe6da964b5b2e50094a7d9852949ba213` passed first-attempt CI, Docker E2E and Durable qualification. All five real-PostgreSQL lock/rollback cases passed in CI and Docker shard 4 (ten executions, no skips). [Deploy 38484755289](https://github.com/schani/pi-orb/actions/runs/38484755289) recorded 044 applied at 17:05:57 and all twelve transaction gates validated at 17:41:28. No migration-job ERROR rows were found. Actual production contention/acquisition/exhaustion edges were unconfirmed; production catalog/ledger were not queried. The original failed release remains failed.
+
+The separate monitor reported `regression` and failed the workflow; neither a clean monitor nor elimination of all DDL contention is claimed. Exact evidence: `.context/deploy-38484755289/{qualification,artifacts,verification}/`; outcome: `docs/deployment.md`; anomaly attribution: `docs/postmortems/2026-10-13-rollout-monitor-anomalies.md`.

@@ -146,6 +146,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-13-rollout-monitor-anomalies.md](docs/postmortems/2026-10-13-rollout-monitor-anomalies.md) — validated deployment, diagnostic mint-floor denials and preexisting malformed transcript-ID failure; monitor regression preserved
 - [docs/postmortems/2026-10-13-claude-history-nul.md](docs/postmortems/2026-10-13-claude-history-nul.md) — JSONB NUL rejection blocked replication, receipts and FIFO delivery; lossless storage required
 - [docs/postmortems/2026-10-13-claude-query-rotation.md](docs/postmortems/2026-10-13-claude-query-rotation.md) — native handoff-completion defect, requesting/result fence and durable diagnostics; historical attribution incomplete
 - [docs/postmortems/2026-10-12-claude-charts-orb-failure.md](docs/postmortems/2026-10-12-claude-charts-orb-failure.md) — initialization cause discarded before VM disposal
