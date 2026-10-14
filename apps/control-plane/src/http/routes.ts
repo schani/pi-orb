@@ -197,10 +197,10 @@ function sendCommandError(
 
 /**
  * Staged signing-key rotation for an operator (docs/workload-identity.md).
- * Registered only where key management is wired in, which is the browser and
- * `ops` roles: they are the private, invoker-IAM-gated surface. The public
- * `issuer` role serves JWKS and must never be able to change what it publishes,
- * and the `runtime` role is the credential broker every orb depends on.
+ * Registered with signing-key dependencies inside the application-authenticated
+ * browser/API scope. The consolidated service has public ingress; Google-mode
+ * requests require a valid session cookie or an admitted Google machine ID token,
+ * with exact configured Origin checks for cookie-authenticated writes.
  *
  * The two stages are deliberately two requests. Publishing and activating in
  * one breath publishes a key in name only: no verifier has re-fetched JWKS in
@@ -256,9 +256,8 @@ function sendRotationError(reply: FastifyReply, error: RotationError): FastifyRe
  * Result-returning domain services, and fold each result into an explicit
  * response. No exceptions for normal control flow.
  *
- * `signingKeys` is optional because only the roles that manage keys pass it;
- * without it the rotation routes are simply not registered, so a role that has
- * no business rotating cannot be made to by a request.
+ * Rotation routes are registered only when `signingKeys` is supplied; production
+ * supplies it inside the application-authenticated browser/API scope.
  */
 export function registerRoutes(
   app: FastifyInstance,

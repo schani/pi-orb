@@ -794,7 +794,7 @@ decisions taken while fixing them, and the alternatives rejected:
 - **Rotation is staged, and is reachable.** `rotateSigningKey` activated microseconds after
   publishing, so the `pending` state existed but the verifier-cache overlap it exists for was never
   granted; and it had no production caller at all, so an operator could not rotate a leaked key.
-  The operator flow is now two requests on the private browser/`ops` API:
+  The operator flow is two requests on the application-authenticated browser/API scope:
 
   ```text
   POST /api/v1/issuer/signing-keys/publish     → the new key appears in JWKS, still not signing
@@ -806,11 +806,13 @@ decisions taken while fixing them, and the alternatives rejected:
   than `IssuerConstants.rotationSoakMs` (10 minutes — twice the JWKS `max-age`, so even a verifier
   that fetched the key set one instant before publication has re-fetched). `{"force": true}`
   overrides it for the leaked-key emergency, where a few tokens rejected by a stale verifier cost
-  less than one more minute of signing with a key someone else holds. The routes are registered
-  only where key management is wired in: the public `issuer` role publishes JWKS and must not be
-  able to change what it publishes, and the `runtime` role is the credential broker every orb
-  depends on. `rotateSigningKey` survives as the unstaged form the recovery scenarios and the
-  composition tests drive; it takes no soak because it publishes the key itself.
+  less than one more minute of signing with a key someone else holds. The consolidated service
+  has public ingress, but these routes require application authentication: a valid session cookie
+  or an admitted Google machine ID token, with exact configured Origin checks for cookie writes
+  (`docs/credentials.md`). `main.ts` supplies signing-key dependencies inside that authenticated
+  scope; public discovery/JWKS handlers do not register rotation routes. `rotateSigningKey`
+  remains the unstaged form the recovery scenarios and composition tests drive; it takes no soak
+  because it publishes the key itself.
 
 - **Rotation retires only the key it started from.** The convergence loop retired *whatever was
   active when the loop got around to it*, so two rotations converging at once let the slower one

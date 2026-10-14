@@ -23,15 +23,18 @@ const TERMINAL_PROXY_BUFFER_BYTES = 1024 * 1024;
 let connectionCounter = 0;
 
 /**
- * Live proxy (docs/runtime-protocol.md/docs/history-replication.md): after routing, text frames and close
- * signals are forwarded without interpretation; the runtime's `client.hello`
- * is the first application frame. A connection race or an unavailable runtime
- * closes with 1013 and the browser returns to the HTTP lifecycle API.
+ * Live routing (docs/runtime-protocol.md/docs/history-replication.md): host-native
+ * text frames and close signals are forwarded to/from the runtime without
+ * application interpretation, except for the idle-auto-stop sniffs below.
+ * The browser's `client.hello` is the first application frame. A connection race
+ * or unavailable runtime closes with 1013; the browser returns to the HTTP API.
+ * Central placement uses central-live.ts instead: it validates client frames,
+ * handles the hello/synchronization handshake locally, and dispatches requests
+ * through the agent session facade without a guest socket.
  *
- * Idle auto-stop (docs/lifecycle.md) carves out the only two content sniffs: presence
- * frames are consumed here (the runtime has no use for tab visibility), and
- * client requests refresh the advisory `last_busy_at` timestamp before being
- * forwarded unchanged.
+ * Idle auto-stop (docs/lifecycle.md) consumes presence frames here and refreshes
+ * the advisory `last_busy_at` timestamp on client requests. Host-native requests
+ * are then forwarded unchanged.
  */
 export async function registerLiveProxy(
   app: FastifyInstance,
