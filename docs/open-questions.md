@@ -190,4 +190,4 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 
 ## Spawned-orb pad nesting — 78
 
-78. **Resolved; implemented and locally qualified (2026-10-14):** the user-approved always-visible inline tree on dashboard and orb-view index uses direct spawn provenance and independent archive membership, without new persisted state. Rules, rejected alternatives, tests-first evidence and unit/DST/infrastructure plus focused Chromium qualification: `docs/web-ui.md`; approved study: `design-prototypes/orb-nesting.html`. No full E2E, real-PostgreSQL/native-image acceptance or deployment.
+78. **Resolved; implemented and locally qualified (2026-10-14):** the user-approved always-visible inline tree on dashboard and orb-view index uses direct spawn provenance and independent archive membership, without new persisted state. Rules, rejected alternatives, approved study, tests-first evidence and unit/DST/infrastructure plus focused Chromium qualification: `docs/web-ui.md`. No full E2E, real-PostgreSQL/native-image acceptance or deployment.
