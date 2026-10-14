@@ -14,15 +14,21 @@ Independent semantic facts avoid common-mode agreement; mutation failures establ
 
 Keep test logs, traces, screenshots and failure evidence on the persistent workspace, not `/tmp`. A same-instance Spot restart preserved the workspace but lost reported `/tmp` evidence: `docs/postmortems/2026-10-14-cross-orb-host-preemption.md`. Cross-orb evidence lives under `.context/cross-orb/`.
 
+## Shared-VM qualification ownership (decision 2026-10-14)
+
+One parent owns the CPU-heavy qualification slot: wait for other gate process groups to finish, grant the slot explicitly, and hold new unit/store, browser/process-E2E and static/build runners until the owner releases it after child cleanup. Run these separate gates serially; `--maxWorkers=1` does not serialize independent runners. Preview services may remain only while idle. Preserve source hashes, first failures and setup phase/CPU/memory telemetry; do not increase hook timeouts to conceal contention.
+
+A frozen-source, CPU-only reproduction caused the three PGlite store hooks and CHECK setup to exceed their unchanged 10-second deadline. WASM readiness took 8.36–12.65 seconds under load versus 1.50–2.89 seconds in exclusive controls; all migrations completed and each client closed before the next setup. This confirms a harness CPU-starvation failure mode, not a SQL defect or a leaked setup promise in that reproduction. The original 12:13:55 PDT failure lacks phase telemetry: its exact cause remains unproven, and passing controls do not clear it. Forensics and limits: `docs/postmortems/2026-10-14-pglite-qualification-contention.md`; telemetry: `.context/cross-orb/store-isolation/report.md`. No test-source change or historical-cause waiver.
+
 ## Orb messaging (2026-10-14; implemented locally, qualification pending)
 
 The contract in `docs/orb-messaging.md` is implemented in backend, harness and UI code. Scoped checks, enumerated separately rather than added across overlapping workloads:
 
-- Backend/domain/routes: 125 passes in `.context/cross-orb/backend-review-qualified.log`; CLI/inspection: 10 passes in `.context/cross-orb/backend-cli-qualified.log`.
+- Backend: 135 scoped passes—125 domain/routes in `.context/cross-orb/backend-review-qualified.log`, 10 CLI/inspection in `.context/cross-orb/backend-cli-qualified.log`.
 - Harness/protocol: 213 passes in `.context/cross-orb/peer-final-tests.log`; reviewer and central receipt corrections are documented in `.context/cross-orb/harness-report.md`.
 - UI: 138 targeted units in `.context/cross-orb/ui/unit-qualified.log`; 10 Chromium/WebKit cases in `.context/cross-orb/ui/browser-qualified.log`. Owned cache isolation, fixture corrections and explicit module-graph warmup corrected the recorded cold-cache/waiter failures; first evidence and timing analysis remain in `.context/cross-orb/ui/failure-analysis.md`. An interrupted broad web-unit run is not a full pass.
 
-Three PGlite `beforeEach` setup timeouts occurred before test bodies and remain under diagnosis; the passing scoped store/CHECK cases do not clear them (`.context/cross-orb/backend-store-qualified.log`, `.context/cross-orb/backend-report.md`). Real-process E2E is still in progress, with fixture-failure corrections underway and evidence under `.context/cross-orb/messaging/`. No passing rerun alone clears a failure.
+The initial three PGlite `beforeEach` failures preceded test bodies. Bounded CPU-only contention reproduced them on frozen source; exclusive controls passed seven selected cases before and after load, with completed migrations and close-before-next-setup telemetry. This supports serial shared-VM gate ownership, not exact historical-stage attribution or clearance by rerun (`docs/postmortems/2026-10-14-pglite-qualification-contention.md`, `.context/cross-orb/store-isolation/report.md`). Initial evidence remains in `.context/cross-orb/backend-store-qualified.log`. Parent-owned real-process E2E/full gates remain pending; evidence lives under `.context/cross-orb/messaging/`.
 
 These receipts are focused checks, not final-source full qualification. Normal full gates, PR and process-host preview validation remain pending in `TODO.md`; no production deployment is authorized.
 
