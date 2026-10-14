@@ -2574,6 +2574,21 @@ pre,
   margin-left: 0;
 }
 
+.subagent-message-notice > summary {
+  grid-template-columns: 2ch minmax(0, 1fr) minmax(0, min(28ch, 30%));
+}
+.subagent-message-notice > summary:focus-visible {
+  outline: 1px solid var(--g3);
+  outline-offset: -1px;
+  background: var(--w);
+  color: var(--k);
+}
+.subagent-message-notice .activity-rail-metric {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+
 .subagent-notice-body {
   padding: 4px 8px;
   overflow-wrap: anywhere;
@@ -3072,11 +3087,14 @@ button.orb-phone-menu {
   .subagent-live-rail > summary,
   .hosted-files > summary,
   .subagent-roster > li,
-  .subagent-notice > summary {
+  .subagent-notice:not(.subagent-message-notice) > summary {
     min-height: 44px;
   }
   .subagent-notice .activity-rail-summary {
     white-space: normal;
+  }
+  .subagent-message-notice .activity-rail-summary {
+    white-space: nowrap;
   }
   .subagent-live-rail > summary,
   .hosted-files > summary {

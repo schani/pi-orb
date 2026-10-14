@@ -17,3 +17,26 @@ export function detailContext(): DetailContext {
     imagePending: new Map(),
   };
 }
+
+export function messageNotice(
+  messagePreview: string,
+  id: string,
+  childId: string,
+  description: string,
+): Extract<DisplayRecord, { type: "event" }> {
+  return {
+    id,
+    parentId: null,
+    timestamp: "2026-10-02T00:00:00Z",
+    type: "event",
+    eventType: "pi.custom_message",
+    custom: { customType: "subagent-notification", display: true },
+    subagent: {
+      kind: "notification",
+      id: childId,
+      description,
+      detailKey: `${id}:subagent`,
+      messagePreview,
+    },
+  };
+}

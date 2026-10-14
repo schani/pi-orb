@@ -1,6 +1,6 @@
 import type { ConversationId, EntryRecord, TaskGraph } from "@earendil-works/pi-durable";
 import { type ActiveSubagent, capHeadline, type HistoryRecord } from "@pi-orb/protocol";
-import { err, ok, type Result } from "neverthrow";
+import { err, ok, Result } from "neverthrow";
 import { type MappingError, mapPiEntry } from "../../../../orb-runtime/src/pi/mapping.ts";
 
 export function activeSubagents(
@@ -174,6 +174,57 @@ export function projectEntry(
   });
 }
 
+function projectNotification(
+  entry: EntryRecord,
+  parentId: string | null,
+  sessionId: string,
+): Result<HistoryRecord, MappingError> {
+  const invalid = (): MappingError => ({
+    type: "history_mapping_error",
+    code: "mapping_failure",
+    message: "Invalid subagent notification placement",
+  });
+  const message = entry.model?.[0];
+  if (
+    entry.kind !== "pi.user" ||
+    entry.model?.length !== 1 ||
+    message?.role !== "user" ||
+    typeof message.content !== "string"
+  )
+    return err(invalid());
+  const content = message.content;
+  const parsed = Result.fromThrowable((): unknown => JSON.parse(content), invalid)();
+  if (parsed.isErr()) return err(parsed.error);
+  const payload = parsed.value;
+  if (
+    payload === null ||
+    typeof payload !== "object" ||
+    Array.isArray(payload) ||
+    !("agent_id" in payload) ||
+    typeof payload.agent_id !== "string" ||
+    !("description" in payload) ||
+    typeof payload.description !== "string" ||
+    !("message" in payload) ||
+    typeof payload.message !== "string"
+  )
+    return err(invalid());
+  return ok({
+    id: `${sessionId}:${entry.id}`,
+    parentId,
+    timestamp: new Date(message.timestamp).toISOString(),
+    type: "event",
+    eventType: "pi.custom_message",
+    custom: { customType: "subagent-notification", display: true },
+    subagent: {
+      kind: "notification",
+      id: payload.agent_id,
+      description: payload.description,
+      message: payload.message,
+    },
+    overflow: {},
+  });
+}
+
 export interface PublicEntryReceipt {
   readonly messageIds: readonly string[];
   readonly system?: { readonly kind: string };
@@ -183,10 +234,14 @@ export function projectHistory(
   entries: readonly EntryRecord[],
   sessionId: string,
   receipts: ReadonlyMap<number, PublicEntryReceipt> = new Map(),
+  notifications: ReadonlySet<number> = new Set(),
 ): Result<readonly HistoryRecord[], MappingError> {
   const records: HistoryRecord[] = [];
   for (const entry of entries) {
-    const projected = projectEntry(entry, records.at(-1)?.id ?? null, sessionId);
+    const parentId = records.at(-1)?.id ?? null;
+    const projected = notifications.has(entry.id)
+      ? projectNotification(entry, parentId, sessionId)
+      : projectEntry(entry, parentId, sessionId);
     if (projected.isErr()) return err(projected.error);
     if (!projected.value) continue;
     const receipt = receipts.get(entry.id);

@@ -746,6 +746,55 @@ describe("browser display projection", () => {
     });
   });
 
+  it("projects a literal bounded message preview and keeps the full body only in detail", () => {
+    for (const message of [
+      "  <b>literal</b>\n next\tline  ",
+      "😀".repeat(500) + "\nDISTINCT_TAIL",
+    ]) {
+      const source: HistoryRecord = {
+        id: "child-alert",
+        parentId: "r1",
+        timestamp: "t",
+        type: "event",
+        eventType: "pi.custom_message",
+        overflow: {},
+        custom: { customType: "subagent-notification", display: true },
+        subagent: { kind: "notification", id: "child", description: "task", message },
+      };
+      const before = JSON.stringify(source);
+      const preview = capHeadline(message.replace(/\s+/gu, " ").trim());
+      for (const display of [
+        projectDisplayRecord(source),
+        createDisplayRecordProjector()(source),
+        ...projectDisplayRecords([source]),
+      ]) {
+        expect(display).toEqual({
+          id: source.id,
+          parentId: source.parentId,
+          timestamp: source.timestamp,
+          type: "event",
+          eventType: "pi.custom_message",
+          custom: source.custom,
+          subagent: {
+            kind: "notification",
+            id: "child",
+            description: "task",
+            messagePreview: preview,
+            detailKey: "child-alert:subagent",
+          },
+        });
+        expect(JSON.stringify(display)).not.toContain("DISTINCT_TAIL");
+      }
+      expect(Buffer.byteLength(preview)).toBeLessThanOrEqual(1024);
+      expect(preview).not.toContain("�");
+      expect(projectRecordDetail(source, "child-alert:subagent")).toEqual({
+        type: "subagent",
+        message,
+      });
+      expect(JSON.stringify(source)).toBe(before);
+    }
+  });
+
   it("does not transmit mapped subagent notification content until its detail is requested", () => {
     const notification: HistoryRecord = {
       id: "subagent-notification-record",

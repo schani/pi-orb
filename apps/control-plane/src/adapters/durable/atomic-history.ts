@@ -13,6 +13,7 @@ import { PgStorage } from "../durable-pg/storage.ts";
 import { arrayParam } from "../pg/client.ts";
 import { commitHistoryTransaction } from "../pg/store.ts";
 import { projectNativeInboxCommit } from "./inbox-admission.ts";
+import { NOTIFICATION_REQUEST_PREFIX, projectNotificationAdmission } from "./notifications.ts";
 import { type PublicEntryReceipt, projectHistory } from "./projection.ts";
 
 /** Task/progress/store documents never trigger a root transcript scan. */
@@ -52,6 +53,8 @@ export async function projectNativeCommit(
   writes?: readonly StorageWrite[],
 ) {
   if (writes) {
+    const notification = await projectNotificationAdmission(query, orbId, writes);
+    if (notification.isErr()) return err(notification.error);
     const admitted = await projectNativeInboxCommit(query, orbId, writes);
     if (admitted.isErr()) return err(admitted.error);
     const dirty = await hasPublicHistoryWrites(query, orbId, writes);
@@ -83,6 +86,7 @@ export async function projectNativeCommit(
         const value = identity.value;
         if (typeof value.sessionId !== "string" || typeof value.timestamp !== "number") return null;
         const receipts = new Map<number, PublicEntryReceipt>();
+        const notifications = new Set<number>();
         let cursor: Cursor | undefined;
         do {
           const page = await storage.scanSubmissions(
@@ -92,6 +96,11 @@ export async function projectNativeCommit(
             BACKGROUND_CONTEXT,
           );
           for (const submission of page.items) {
+            if (
+              submission.entry !== undefined &&
+              submission.requestId?.startsWith(NOTIFICATION_REQUEST_PREFIX)
+            )
+              notifications.add(submission.entry);
             if (submission.entry === undefined || !submission.requestId?.startsWith("inbox:"))
               continue;
             const raw = value.receipts;
@@ -138,6 +147,7 @@ export async function projectNativeCommit(
           },
           entries,
           receipts,
+          notifications,
         };
       } finally {
         await storage.close(BACKGROUND_CONTEXT);
@@ -151,7 +161,12 @@ export async function projectNativeCommit(
   );
   if (read.isErr()) return err(read.error);
   if (!read.value) return ok(undefined);
-  const projected = projectHistory(read.value.entries, read.value.session.id, read.value.receipts);
+  const projected = projectHistory(
+    read.value.entries,
+    read.value.session.id,
+    read.value.receipts,
+    read.value.notifications,
+  );
   if (projected.isErr())
     return err<never, AuthorityError>({
       type: "authority_error",

@@ -33,13 +33,18 @@ afterAll(async () => {
 for (const width of [1280, 390, 320]) {
   it(`balances real HistoryView receipt spacing and keeps adjacent rails joined at ${width}px`, async () => {
     const page = await browser.newPage({ viewport: { width, height: 800 } });
+    const alertRequests: string[] = [];
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (/\/(details|headlines)\/child-message-alert\//.test(path)) alertRequests.push(path);
+    });
     try {
       await gotoFrontendHistory(
         page,
         `${origin}/orbs/frontend-fixture-orb`,
         "frontend-fixture-orb",
       );
-      const rows = page.locator(".subagent-notice");
+      const rows = page.locator(".subagent-notice:not(.subagent-message-notice)");
       await expectPage(rows).toHaveCount(3);
       await expectPage(page.locator("body")).not.toContainText("private-child-");
       const measure = async () =>
@@ -84,6 +89,122 @@ for (const width of [1280, 390, 320]) {
       await expectPage(rows.first().locator(".subagent-duration")).toHaveText("1.3s");
       await expectPage(rows.nth(1).locator(".subagent-duration")).toHaveCount(0);
       await expectPage(page.locator("body")).not.toContainText("private-child-");
+
+      const alert = page.locator(".subagent-message-notice");
+      const summary = alert.locator("summary");
+      const preview = alert.locator(".activity-rail-headline");
+      const body = alert.locator(".subagent-notice-body");
+      await expectPage(alert).toHaveCount(1);
+      await alert.scrollIntoViewIfNeeded();
+      await expectPage(alert.locator(".activity-rail-label")).toHaveText("notification");
+      await expectPage(preview).toContainText("Receipt <script>");
+      await expectPage(preview).toHaveAttribute("title", /\*\*literal\*\*/);
+      await expectPage(alert.locator(".activity-rail-metric > span")).toHaveAttribute(
+        "title",
+        /Inspect notification layout .* · worker-7/,
+      );
+      await expectPage(body).toHaveCount(0);
+      expectPage(alertRequests).toEqual([]);
+      await summary.hover();
+      const geometry = await summary.evaluate((element) => {
+        const view = element.ownerDocument.defaultView;
+        if (view === null) throw new Error("missing message window");
+        const preview = element.querySelector(".activity-rail-headline");
+        const source = element.querySelector(".activity-rail-metric");
+        const text = element.querySelector(".activity-rail-summary");
+        const ordinary = element.ownerDocument.querySelector(".reasoning:not([open]) > summary");
+        if (preview === null || source === null || text === null || ordinary === null)
+          throw new Error("missing message columns or ordinary activity row");
+        return {
+          focusVisible: element.matches(":focus-visible"),
+          background: view.getComputedStyle(element).backgroundColor,
+          summaryHeight: element.getBoundingClientRect().height,
+          rowHeight: element.parentElement?.getBoundingClientRect().height,
+          ordinaryHeight: ordinary.getBoundingClientRect().height,
+          textHeight: text.getBoundingClientRect().height,
+          textTop: text.getBoundingClientRect().top,
+          sourceTop: source.getBoundingClientRect().top,
+          lineHeight: Number.parseFloat(view.getComputedStyle(element).lineHeight),
+          previewHeight: preview.getBoundingClientRect().height,
+          sourceWidth: source.getBoundingClientRect().width,
+          rowWidth: element.getBoundingClientRect().width,
+          sourceRight: source.getBoundingClientRect().right,
+          previewRight: text.getBoundingClientRect().right,
+          clipped: source.scrollWidth > source.clientWidth && text.scrollWidth > text.clientWidth,
+          whiteSpace: view.getComputedStyle(text).whiteSpace,
+          overflow: element.ownerDocument.documentElement.scrollWidth - view.innerWidth,
+        };
+      });
+      expectPage(geometry.focusVisible).toBe(false);
+      expectPage(geometry.background).toBe("rgb(242, 242, 242)");
+      expectPage(geometry.summaryHeight).toBe(geometry.ordinaryHeight);
+      expectPage(geometry.rowHeight).toBe(geometry.ordinaryHeight);
+      expectPage(geometry.textHeight).toBe(geometry.lineHeight);
+      expectPage(geometry.sourceTop).toBeCloseTo(geometry.textTop, 1);
+      expectPage(geometry.whiteSpace).toBe("nowrap");
+      expectPage(geometry.previewHeight).toBeLessThanOrEqual(geometry.lineHeight);
+      expectPage(geometry.sourceWidth).toBeLessThan(geometry.rowWidth / 3);
+      expectPage(geometry.sourceRight).toBeGreaterThan(geometry.previewRight);
+      expectPage(geometry.clipped).toBe(true);
+      expectPage(geometry.overflow).toBeLessThanOrEqual(0);
+      const expectFocusedNotice = async () => {
+        const focused = await summary.evaluate((element) => {
+          const view = element.ownerDocument.defaultView;
+          const source = element.querySelector(".activity-rail-metric");
+          const text = element.querySelector(".activity-rail-summary");
+          if (view === null || source === null || text === null)
+            throw new Error("missing focused message columns");
+          const style = view.getComputedStyle(element);
+          return {
+            focusVisible: element.matches(":focus-visible"),
+            summaryHeight: element.getBoundingClientRect().height,
+            background: style.backgroundColor,
+            color: style.color,
+            sourceColor: view.getComputedStyle(source).color,
+            outline: style.outlineStyle,
+            outlineWidth: style.outlineWidth,
+            outlineColor: style.outlineColor,
+            sourceWidth: source.getBoundingClientRect().width,
+            sourceLeft: source.getBoundingClientRect().left,
+            textRight: text.getBoundingClientRect().right,
+          };
+        });
+        expectPage(focused).toMatchObject({
+          focusVisible: true,
+          background: "rgb(255, 255, 255)",
+          color: "rgb(0, 0, 0)",
+          sourceColor: "rgb(85, 85, 85)",
+          outline: "solid",
+          outlineWidth: "1px",
+          outlineColor: "rgb(85, 85, 85)",
+        });
+        expectPage(focused.summaryHeight).toBe(geometry.ordinaryHeight);
+        expectPage(focused.sourceWidth).toBeGreaterThan(0);
+        expectPage(focused.sourceLeft).toBeGreaterThanOrEqual(focused.textRight);
+      };
+      await page.keyboard.press("Tab");
+      await summary.focus();
+      await expectFocusedNotice();
+      await summary.press("Enter");
+      await expectPage(preview).toHaveCount(0);
+      await expectFocusedNotice();
+      await expectPage(body).toHaveText(
+        `Receipt <script>globalThis.__inlineAlertExecuted=true</script> **literal**\n\n${"long-token-".repeat(90)} End of actual message.`,
+      );
+      await expectPage(body.locator("script, strong, p")).toHaveCount(0);
+      await expectPage(body).not.toContainText("worker-7");
+      expectPage(alertRequests).toHaveLength(1);
+      expectPage(alertRequests[0]).toContain("/details/");
+      expectPage(await page.evaluate("globalThis.__inlineAlertExecuted")).toBeUndefined();
+      expectPage(
+        await page.evaluate("document.documentElement.scrollWidth - innerWidth"),
+      ).toBeLessThanOrEqual(0);
+      await summary.press("Space");
+      await expectPage(body).toHaveCount(0);
+      await expectPage(preview).toBeVisible();
+      await summary.press("Enter");
+      await expectPage(body).toBeVisible();
+      expectPage(alertRequests).toHaveLength(1);
     } finally {
       await page.close();
     }

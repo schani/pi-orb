@@ -24,6 +24,7 @@ import {
   type Registry,
   type Storage,
   type TaskGraph,
+  type ToolExecutionApi,
   type ToolRegistration,
   type Tx,
 } from "@earendil-works/pi-durable";
@@ -64,12 +65,14 @@ import {
 import type { AgentLiveView, AgentSessionFacade, AgentSnapshot } from "../../domain/agent-ports.ts";
 import type { RuntimeClientError } from "../../domain/errors.ts";
 import type { ModelCallUse } from "../../domain/model-usage.ts";
+import type { OrbAgentError } from "../../domain/orb-agent-operations.ts";
 import type { DeliverMessageClientRequest } from "../../domain/ports.ts";
 import { storageAuthorityError } from "../durable-pg/storage-boundary.ts";
 import { durableError } from "./manager.ts";
 import { fenceModels } from "./model-fence.ts";
 import { meterModels } from "./model-usage.ts";
 import { nativeInputContent } from "./native-input.ts";
+import { NOTIFICATION_REQUEST_PREFIX, submitParentNotification } from "./notifications.ts";
 import { activeSubagents, type PublicEntryReceipt, projectHistory } from "./projection.ts";
 import { promptExtension } from "./prompt.ts";
 import { startupRuntimeError } from "./startup.ts";
@@ -215,6 +218,7 @@ export class DurableAgent implements AgentSessionFacade {
   private pendingSummaries = 0;
   private summaryOutcomes: Promise<void> = Promise.resolve();
   private readonly inboxEntries = new Map<number, string>();
+  private readonly notificationEntries = new Set<number>();
   private readonly liveBlocks = new Map<string, Set<string>>();
   private readonly retiredBlocks = new Map<string, string[]>();
   private session = { id: "", timestamp: "", overflow: {} };
@@ -418,9 +422,15 @@ export class DurableAgent implements AgentSessionFacade {
             submissionCursor,
             context,
           );
-          for (const submission of page.items)
+          for (const submission of page.items) {
             if (submission.entry !== undefined && submission.requestId?.startsWith("inbox:"))
               agent.inboxEntries.set(submission.entry, submission.requestId.slice(6));
+            if (
+              submission.entry !== undefined &&
+              submission.requestId?.startsWith(NOTIFICATION_REQUEST_PREFIX)
+            )
+              agent.notificationEntries.add(submission.entry);
+          }
           submissionCursor = page.next;
         } while (submissionCursor !== undefined);
         let cursor: Cursor | undefined;
@@ -459,10 +469,16 @@ export class DurableAgent implements AgentSessionFacade {
             }
             if (
               change.type === "submission" &&
-              change.value.entry !== undefined &&
-              change.value.requestId?.startsWith("inbox:")
-            )
-              agent.inboxEntries.set(change.value.entry, change.value.requestId.slice(6));
+              change.value.conversationId === root.id &&
+              change.value.entry !== undefined
+            ) {
+              if (change.value.requestId?.startsWith("inbox:"))
+                agent.inboxEntries.set(change.value.entry, change.value.requestId.slice(6));
+              if (change.value.requestId?.startsWith(NOTIFICATION_REQUEST_PREFIX)) {
+                agent.notificationEntries.add(change.value.entry);
+                changed = true;
+              }
+            }
           }
           if (changed) agent.queueProjection();
         });
@@ -741,6 +757,7 @@ export class DurableAgent implements AgentSessionFacade {
 
   private queueProjection(): Promise<Result<void, RuntimeClientError>> {
     const entries = [...this.entries];
+    const notifications = new Set(this.notificationEntries);
     this.pendingProjection++;
     this.projection = this.projection
       .then(async (previous) => {
@@ -750,7 +767,7 @@ export class DurableAgent implements AgentSessionFacade {
           const receipt = this.receipts[messageId];
           if (receipt) receipts.set(entryId, receipt);
         }
-        const projected = projectHistory(entries, this.session.id, receipts);
+        const projected = projectHistory(entries, this.session.id, receipts, notifications);
         if (projected.isErr()) return err(durableError("central history mapping failed"));
         const records = [...projected.value];
         const snapshot: AgentSnapshot = {
@@ -878,6 +895,32 @@ export class DurableAgent implements AgentSessionFacade {
       tools,
       subagents,
     };
+  }
+
+  notifyParent(
+    message: string,
+    api: ToolExecutionApi,
+    invocationContext: import("@earendil-works/chord").Context,
+  ): ResultAsync<{ accepted: true }, OrbAgentError> {
+    const checkLocal = (): ResultAsync<void, RuntimeClientError> =>
+      this.closing || this.paused || this.options.ownershipSignal?.aborted || this.failure
+        ? errAsync(this.failure ?? durableError("Harness admissions closed"))
+        : okAsync(undefined);
+    const admit = () =>
+      checkLocal()
+        .andThen(() => this.options.checkAdmission?.() ?? okAsync(undefined))
+        .andThen(checkLocal);
+    return this.serial(
+      async () => await submitParentNotification(message, api, invocationContext, admit),
+    ).mapErr(
+      (error): OrbAgentError => ({
+        code: error.code === "invalid_response" ? "invalid_request" : "unavailable",
+        message:
+          error.code === "invalid_response"
+            ? "Invalid notification target"
+            : "Notification admission unavailable",
+      }),
+    );
   }
 
   appendAlert(

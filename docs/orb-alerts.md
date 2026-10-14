@@ -25,9 +25,29 @@
 
 ## Implementation contract
 
+### Child-to-parent steering (decision 2026-10-14; implemented locally, not deployed)
+
+Native child `orb_alert({message})` steers its parent with trusted JSON `{agent_id,description,message}`, using `whenBusy: "steer"`. `{accepted:true}` means durable native submission, not inference or comprehension. Trusted child ownership and receipt lookup supply identity; `requestId: subagent-notify:<taskId>:<callId>` deduplicates calls. Root `orb_alert` and CLI alerts retain the red transcript band and unread flag below.
+
+**Selected (2026-10-14): [option 2, Inline preview](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/ba74c9c5-9d6c-41e8-b95d-f380ec08a22f/design/expandable-alerts/index.html#proposal-2).** The user selected option 2. Alternatives 1 Rail row, 3 Wait attachment, 4 Margin flag and 5 Stack remain unselected in the linked study. Question 78 is resolved.
+
+Only the placed entry projects as the existing displayed `pi.custom_message` / `subagent-notification` receipt, identified by reserved `submission.entry` provenance, never JSON-looking text. Public history retains the full plain message for replay, Stop/Start and archives after private-state purge; it contains neither user-role attribution, `inboxMessageIds`, `record.alert` nor raw native payload (`docs/history-replication.md`). No early submission event, child-session access, new columns, document kinds, queue, acknowledgement cursor or backfill.
+
+The collapsed neutral disclosure reads `notification · actual preview`, with bounded `description · id` at right. Compact display data alone adds optional `subagent.messagePreview`: whitespace-collapsed actual message through `capHeadline`, capped at 1 KiB UTF-8, not a persisted field. Expansion hides the preview and loads existing `detail.body.message`, rendering the full message once as literal text. Reuse `ActivityRailRow` keyboard behavior and the existing details failure/Retry path; no severity, unread flag or generated-summary request (`docs/web-ui.md`).
+
+Routing uses `apps/control-plane/src/adapters/durable/tools/orb-tools.ts`, `agent.ts` and `notifications.ts` in the same adapter. Caller admission, current-agent binding and native invocation fencing remain authoritative. Local close/pause/ownership/failure flags are rechecked after asynchronous admission; queued/placed notification writes also recheck admission under the native SQL transaction's orb lock. Owned-drain cannot admit notifications.
+
+The parent can receive it while working, including while waiting for any child (`docs/subagents.md`). Code-mode propagation is out of scope: an interrupted nested wait returns to its script; the script must finish before parent inference resumes. No child cancellation.
+
+**Rejected:** public-alert escalation flags the user unnecessarily, not transcript visibility; tool-output-only delivery misses idle parents; a separate queue duplicates native submission authority.
+
+**Local qualification (2026-10-14):** 142 focused backend tests (including real PostgreSQL/PGlite and 190 wait DST schedules), 90 UI unit tests, three-width Chromium frontend E2E, Chromium/WebKit manual smoke at 1280/390/320, and first-run process E2E pass. Full typecheck and lint pass (302 warnings, 47 infos). Review found no blockers. Receipts and preserved first-failure corrections: `.context/inline-alerts/qualification-summary.md`. Full `npm test` remains incomplete; no hosted-provider or deployment clearance.
+
+Durable submission/provenance and the retained message diagnose delivery; typed projection failures and existing detail failure/Retry expose failures. No additional telemetry notifications.
+
 ### One transcript authority
 
-`pi-orb alert "message" [--request-id <id>]` calls local `POST /v1/alert` with `{v:1,message,requestId}` and the runtime bearer. Messages are nonblank and limited to 4,096 characters; the HTTP byte limit accommodates JSON escaping. The response is `{v:1,id,duplicate}`. Explicit authentication is required because the runtime server binds to `0.0.0.0`, and tailnet forwarding can expose loopback listeners too. Shutdown and idle-stop fencing close alert admission. A runtime application service validates a bounded nonempty plain-text string and appends a non-model-context `pi-orb.alert` custom entry through the Pi adapter. The normalized event has `eventType: "pi.custom"` and `alert: {message, requestId}`. That typed field lets the web renderer identify it without inspecting harness-native overflow or parsing message text. The alert is not a human message, an instruction to the agent, or a new inference turn.
+`pi-orb alert "message" [--request-id <id>]` calls local `POST /v1/alert` with `{v:1,message,requestId}` and the runtime bearer. Messages are nonblank and limited to 4,096 characters; the HTTP byte limit accommodates JSON escaping. The response is `{v:1,id,duplicate}`. Explicit authentication is required because the runtime server binds to `0.0.0.0`, and tailnet forwarding can expose loopback listeners too. Shutdown and idle-stop fencing close alert admission. A runtime application service validates a bounded nonempty plain-text string and appends a non-model-context `pi-orb.alert` custom entry through the Pi adapter. The normalized event has `eventType: "pi.custom"` and `alert: {message, requestId}`. That typed field lets the web renderer identify it without inspecting harness-native overflow or parsing message text. A public alert is not a human message, an instruction to the agent, or a new inference turn.
 
 The synchronous SDK append shares the runtime's session writer; fsync precedes publication and CLI success. Existing live committed-history publication and pull-only replication carry the same record. Neither the control plane nor the WebSocket proxy manufactures a second transcript record. Fresh-session reopen tests and a busy-agent CLI integration test cover persistence without waiting for the invoking tool's turn to end. Plain-text `pi-orb transcript` exports the alert message once under an alert heading; JSON preserves the normalized record.
 

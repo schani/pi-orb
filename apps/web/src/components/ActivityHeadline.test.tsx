@@ -1,7 +1,7 @@
 import type { DisplayRecord } from "@pi-orb/protocol";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { detailContext } from "../testkit/display-fixtures.ts";
+import { detailContext, messageNotice } from "../testkit/display-fixtures.ts";
 import { SubagentNotice } from "./SubagentNotice.tsx";
 import { ToolActivity, type ToolCallBlock, type ToolResultBlock } from "./ToolActivity.tsx";
 
@@ -56,6 +56,25 @@ describe("activity headline rendering", () => {
     const { headline: _headline, ...ack } = result;
     expect(markup("Intent", ack)).toContain('title="Intent"');
   });
+  it.each(["", "Review <script>alert('literal')</script> **plain**"])(
+    "renders message preview %j as a neutral notification with source on the right",
+    (messagePreview) => {
+      const record = messageNotice(messagePreview, "receipt", "child-7", "Review");
+      const html = renderToStaticMarkup(
+        <SubagentNotice record={record} detailContext={detailContext()} />,
+      );
+      expect(html).toContain("activity-rail-row-neutral subagent-notice subagent-message-notice");
+      expect(html).toContain('class="activity-rail-label">notification</span>');
+      expect(html).toContain(
+        'class="activity-rail-metric"><span title="Review · child-7">Review · child-7</span>',
+      );
+      expect(html).toContain('class="activity-rail-headline"');
+      expect(html).not.toContain("<script>");
+      expect(html).not.toContain("<strong>");
+      expect(html).not.toContain("subagent-notice-body");
+      if (messagePreview !== "") expect(html).toContain("&lt;script&gt;");
+    },
+  );
   it("keeps typed receipt description and status while putting supplied text only in the outcome", () => {
     const record: Extract<DisplayRecord, { type: "event" }> = {
       id: "receipt",

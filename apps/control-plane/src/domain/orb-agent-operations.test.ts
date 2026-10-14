@@ -46,6 +46,7 @@ describe("central orb operations", () => {
     async (state) => {
       await runDst({ name: `central-native-${state}`, iterations: 5 }, async (sim) => {
         const h = seed();
+        const appendAlert = vi.fn(() => okAsync({ recordId: "a" }));
         h.store.seedOrb(
           makeOrbRow("caller", "project", state, { hostRef: null, runtimeTokenHash: null }),
         );
@@ -62,8 +63,12 @@ describe("central orb operations", () => {
                   orbId: "caller",
                   agentAdmissionVersion: 0,
                 },
-                { appOrigin: "http://app", appendAlert: () => okAsync({ recordId: "a" }) },
+                { appOrigin: "http://app", appendAlert },
               );
+              expect(
+                (await service.invoke({ kind: "notification_admission" }, "notify")).isOk(),
+              ).toBe(true);
+              expect(appendAlert).not.toHaveBeenCalled();
               expect(
                 (await service.invoke({ kind: "spawn", prompt: "work" }, "spawn")).isOk(),
               ).toBe(true);
@@ -148,7 +153,14 @@ describe("central orb operations", () => {
                 },
                 { appOrigin: "http://app", appendAlert },
               );
-              for (const kind of ["spawn", "alert", "archive", "delete", "sleep"] as const) {
+              for (const kind of [
+                "spawn",
+                "alert",
+                "archive",
+                "delete",
+                "sleep",
+                "notification_admission",
+              ] as const) {
                 const request =
                   kind === "spawn"
                     ? { kind, prompt: "work" }
@@ -158,7 +170,8 @@ describe("central orb operations", () => {
                         ? { kind, durationSeconds: 60 }
                         : { kind };
                 const continuation =
-                  revocation === "archiving" && (kind === "alert" || kind === "archive");
+                  revocation === "archiving" &&
+                  (kind === "alert" || kind === "archive" || kind === "notification_admission");
                 expect((await service.invoke(request, kind)).isOk()).toBe(continuation);
               }
             },
@@ -191,11 +204,17 @@ describe("central orb operations", () => {
             expect(row).toBeDefined();
             if (!row) return;
             h.store.seedOrb({ ...row, agentAdmissionVersion: 1 });
+            expect(
+              (await service.invoke({ kind: "notification_admission" }, "old-notify")).isErr(),
+            ).toBe(true);
             expect((await service.invoke({ kind: "alert", message: "look" }, "old")).isErr()).toBe(
               true,
             );
             h.store.seedOrb(row);
             h.store.seedProject({ ...makeProjectRow("project"), ownerUserId: "other" });
+            expect(
+              (await service.invoke({ kind: "notification_admission" }, "old-notify")).isErr(),
+            ).toBe(true);
             expect((await service.invoke({ kind: "spawn", prompt: "work" }, "old")).isErr()).toBe(
               true,
             );

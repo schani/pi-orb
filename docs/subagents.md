@@ -14,6 +14,18 @@ The process POC uses Durable-owned child conversations, not gotgenes profiles. `
 
 **Model selector (decided 2026-10-13; supersedes "no model selector" above):** `subagent({prompt,description?,model?})` takes `Astra`, `Sol`, `Terra` or `Luna`, the conversation picker's names (`SELECTABLE_CODEX_MODELS`); omitted inherits the parent's model. An unavailable model returns `Model unavailable: <name>` before any child is created. The receipt and `get_subagent_result`/`list_subagents` report the selected name. The schema enum rejects other values, so no provider/model ID path exists; the earlier host-pi selector accepted both.
 
+## Parent input during completion waits (decision 2026-10-14; implemented locally, not deployed)
+
+Native child `orb_alert` retains trusted JSON parent steering and durable acceptance. **Selected 2026-10-14; implemented locally, not deployed:** its placed entry also projects as an existing notification receipt, with actual message preview and full plain-text details, no unread flag or private child-transcript access (`docs/orb-alerts.md`, `docs/history-replication.md`). Root/CLI alerts and legacy completion/update notices are unchanged.
+
+`get_subagent_result({agent_id,wait:true})` yields on **any pending parent steer**, including human input or another child's alert, not only input from the child being observed. Already-pending input and input arriving during the wait both qualify; `followUp` remains unchanged.
+
+The parent inbox uses atomic snapshot-and-watch registration to prevent lost wakeups; this is not a simultaneous atomic observation of child state and inbox state. Pending steer triggers a child reread: if already terminal, return its actual receipt; otherwise return a normal result with `status: "running"` and `interrupted: "parent_input"`. The wait neither consumes the parent input nor cancels the child; native delivery retains authority.
+
+**Scope:** no code-mode propagation. The nested wait returns its interruption result to the script; the script must finish before parent inference resumes. An outer script may keep running or wait again. This decision does not qualify prompt responsiveness through arbitrary code-mode scripts.
+
+**Local qualification:** `subagent-wait.test.ts` covers typed boundary failures and unchanged followUp/nonwait; `subagent-wait.dst.test.ts` covers native Session buffering and 190 schedules for atomic acquisition, parallel observers, terminal precedence and caller cancellation. `subagents.test.ts` covers actual ChildAnchor survival and inbox preservation. `durable-process.e2e.test.ts` covers normal codemode continuation and a later child receipt. RED traces were replayed before production edits and retained in `.context/subagent-wait/summary.md`; consolidated qualification is indexed in `.context/subagent-notify/consolidation-map.md`. Current notification qualification and incomplete full-suite scope remain in `docs/orb-alerts.md`.
+
 ## Status and provenance
 
 **Planning consolidated 2026-09-13; implementation in progress 2026-09-14, not deployed.** This document combines orb `b18fc524-632d-42cd-ab90-8b2ac55de80d` and the fork/minimal-change discussion in orb `58efed98-b832-4025-a899-7f43fed7ed72`. The executable backlog is in `TODO.md`; product decisions are recorded only in `docs/open-questions.md`: 62–64 are resolved. The earlier orb's provisional question 47 is not a valid reference in this checkout: 47 here concerns archival.

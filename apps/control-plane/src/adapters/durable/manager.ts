@@ -1,4 +1,6 @@
+import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
+import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import type { RuntimeHealth } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, type Result, ResultAsync } from "neverthrow";
@@ -6,6 +8,7 @@ import type { AgentAlertWriter, AgentPlane, AgentSessionFacade } from "../../dom
 import type { RuntimeClientError } from "../../domain/errors.ts";
 import { logOrbEvent } from "../../domain/log.ts";
 import type { OrbRow } from "../../domain/orb.ts";
+import type { OrbAgentError } from "../../domain/orb-agent-operations.ts";
 import type {
   DeliverMessageClientRequest,
   OperationContext,
@@ -401,6 +404,19 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
   }
   executionActive(orbId: string): boolean {
     return this.manager.get(orbId)?.executionActive() ?? false;
+  }
+
+  notifyParent(
+    orbId: string,
+    message: string,
+    api: ToolExecutionApi,
+    context: Context,
+    expectedAdmissionVersion: number,
+  ): ResultAsync<{ accepted: true }, OrbAgentError> {
+    const agent = this.manager.get(orbId, expectedAdmissionVersion);
+    return agent
+      ? agent.notifyParent(message, api, context)
+      : errAsync({ code: "unavailable", message: "Notification admission unavailable" });
   }
 
   appendAlert(

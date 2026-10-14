@@ -20,15 +20,19 @@ export function SubagentNotice({
 }) {
   const [open, setOpen] = useState(false);
   const notice = record.subagent;
+  const messagePreview = notice?.messagePreview;
+  const isMessage = messagePreview !== undefined;
   const summary = useActivityHeadline(
-    notice?.headline !== undefined
+    !isMessage && notice?.headline !== undefined
       ? { recordId: record.id, detailKey: notice.detailKey, headline: notice.headline }
       : undefined,
     detailContext,
   );
   if (notice === undefined) return null;
   const description = text(notice.description) ?? "Subagent";
-  const failed = notice.status === "error";
+  const failed = !isMessage && notice.status === "error";
+  const source = `${description} · ${notice.id ?? ""}`;
+  const headline = isMessage ? (open ? undefined : messagePreview) : summary.headline;
   const status =
     notice.kind === "update"
       ? "update"
@@ -41,12 +45,12 @@ export function SubagentNotice({
             : (text(notice.status) ?? "notification");
   return (
     <ActivityRailRow
-      label={description}
+      label={isMessage ? "notification" : description}
       headerRef={summary.headerRef}
-      {...(summary.headline !== undefined ? { headline: summary.headline } : {})}
-      metric={status}
+      {...(headline !== undefined ? { headline } : {})}
+      metric={isMessage ? <span title={source}>{source}</span> : status}
       state={failed ? "failed" : "neutral"}
-      className="subagent-notice"
+      className={`subagent-notice${isMessage ? " subagent-message-notice" : ""}`}
       onToggle={setOpen}
     >
       {open && (
@@ -58,7 +62,7 @@ export function SubagentNotice({
             body.type === "subagent" ? (
               <div className={`subagent-notice-body${failed ? " tool-call-output-error" : ""}`}>
                 <PlainChatText>
-                  {notice.kind === "update"
+                  {isMessage || notice.kind === "update"
                     ? (text(body.message) ?? "Notification details unavailable.")
                     : notice.kind === "workspace_notice"
                       ? (text(body.notice) ?? "Notification details unavailable.")

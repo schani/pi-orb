@@ -25,6 +25,7 @@ import type { DurableAgentPlaneOptions } from "./adapters/durable/manager.ts";
 import { durableError } from "./adapters/durable/manager.ts";
 import { fenceModels } from "./adapters/durable/model-fence.ts";
 import { createDurableModels } from "./adapters/durable/models.ts";
+import type { ParentNotification } from "./adapters/durable/notifications.ts";
 import { loadPlatformResources } from "./adapters/durable/platform-resources.ts";
 import { renderPrompt } from "./adapters/durable/prompt.ts";
 import {
@@ -245,6 +246,11 @@ export function createProcessAgentContext(
     appOrigin: string;
     tailnetDnsName?: string;
     inferenceBaseUrl?: (userId: string) => string | undefined;
+    notifyParent?: (
+      orbId: string,
+      expectedAdmissionVersion: number,
+      ...args: Parameters<ParentNotification>
+    ) => ReturnType<ParentNotification>;
     appendAlert: (
       orbId: string,
       requestId: string,
@@ -512,6 +518,7 @@ export function createProcessAgentContext(
             .check()
             .mapErr((): ToolError => ({ code: "forbidden", message: "Agent ownership revoked" })),
       });
+      const notifyParent = options.notifyParent;
       const tools = createDurableTools({
         orb: { id: orb.id, task },
         files: {
@@ -536,7 +543,13 @@ export function createProcessAgentContext(
           (lease?.check() ?? okAsync(undefined)).mapErr(
             (): ToolError => ({ code: "forbidden", message: "Agent ownership revoked" }),
           ),
-        additionalTools: createOrbTools(service),
+        additionalTools: createOrbTools(
+          service,
+          notifyParent
+            ? (message, api, ctx) =>
+                notifyParent(orb.id, orb.agentAdmissionVersion, message, api, ctx)
+            : undefined,
+        ),
         mcp: catalog.value.servers.map((server) => {
           let state: "needs-auth" | "available" | "unavailable" = "unavailable";
           return {
