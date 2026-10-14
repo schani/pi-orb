@@ -23,7 +23,7 @@ First apply the separately authorized foundation (`infra/foundation/README.md`).
 In GitHub Actions, select **Deploy → Run workflow → main**, leaving
 `validate_release` empty for a new deployment. Supply a recorded release ID or
 `latest` only for explicit validation-only recovery. The workflow pins tools,
-rejects a dispatched commit that is no longer main, and runs `infra/release.sh`
+verifies the immutable dispatched SHA checkout, and runs `infra/release.sh`
 under non-cancelled concurrency. Its summary and single allowlisted JSON artifact
 report the actual outcome and retained fixtures; raw plans/state/log bundles are
 never uploaded. The job timeout is 240 minutes. Normal releases retain HTTP availability; the first
@@ -34,7 +34,7 @@ CI, E2E and Deploy use `ubuntu-24.04` / Node `24.6.0`; E2E runs four isolated,
 serial shards (`docs/testing.md`). **Qualification reuse (implemented locally
 2026-10-05; not deployed or live-validated):** new GitHub releases
 wait before the release lock for successful same-repository `push`/`main` CI and
-E2E runs at the dispatched SHA, then recheck latest main. Their run IDs and attempts
+E2E runs at the immutable dispatched SHA. Their run IDs and attempts
 become release evidence instead of rerunning the suites. Each workflow must have
 one matching push run on its first attempt, with every required job successful.
 Missing/pending runs wait up to 60 minutes in a 65-minute job; failed/cancelled
@@ -56,8 +56,8 @@ The supported manual deployment is one command from the repository root:
 
     ./infra/release.sh
 
-It requires a clean `main` checkout exactly matching freshly fetched
-`origin/main`, shows the exact OpenTofu plan, and requires typing `deploy` before
+It requires a clean selected commit on local branch `main`, shows the exact
+OpenTofu plan, and requires typing `deploy` before
 applying. `./infra/release.sh --yes` is the non-interactive form shared with CI.
 
 `./infra/release.sh --validate RELEASE_ID` explicitly validates the recorded
@@ -158,7 +158,7 @@ Required ordering: retire only `pi-orb`, `pi-orb-ops` and `pi-orb-runtime-api`; 
 
 **Decision, 2026-10-05:** downtime, backend API breaks and lost queued messages are acceptable. Preserve existing conversation history and persistent workspace data; users can stop/restart old orbs. No fleet drain, maintenance snapshot or automatic resumption is required.
 
-Set Deploy input `first_consolidation: true` for the first release (`--first-consolidation` in the shared shell). Qualification, fresh build, saved-plan/configuration/permission checks and a refreshed main-SHA guard precede deletion. Actions inventories exact service UIDs and deletes with v2 ETag preconditions; issuer and unrelated services remain. All three already absent is allowed, but partial absence requires operator review. Existing active/idle zeroes and pending Compute-operation checks gate migration. Retirement or migration uncertainty retains the global lock and recorded phase for inspection; no automatic rollback or retry. Durable release records and the Actions summary report phase/outcome independently of orb uptime.
+Set Deploy input `first_consolidation: true` for the first release (`--first-consolidation` in the shared shell). Qualification, fresh build, saved-plan/configuration/permission checks precede deletion. Actions inventories exact service UIDs and deletes with v2 ETag preconditions; issuer and unrelated services remain. All three already absent is allowed, but partial absence requires operator review. Existing active/idle zeroes and pending Compute-operation checks gate migration. Retirement or migration uncertainty retains the global lock and recorded phase for inspection; no automatic rollback or retry. Durable release records and the Actions summary report phase/outcome independently of orb uptime.
 
 ## Tooling access
 

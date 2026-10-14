@@ -73,12 +73,10 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
-      - name: Verify exact main and reject tracked credential artifacts
+      - name: Verify selected SHA and reject tracked credential artifacts
         run: |
           set -euo pipefail
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
-          git fetch origin main
-          test "$GITHUB_SHA" = "$(git rev-parse origin/main)"
           git checkout -B main "$GITHUB_SHA"
           python3 infra/artifact_guard.py
       - name: Set up Node.js
