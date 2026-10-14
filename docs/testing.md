@@ -2,11 +2,13 @@
 
 ## DST boundary compositions (decision 2026-10-14)
 
-- Poll/reconcile + `HarnessAgentPlane`: lifecycle actor versus actual commit/CAS (both winners), Stop/delete, progressing Pi/Claude peers and drained restart; atomic history/cursor/receipts and FIFO.
-- Generated append/append and replace/append grammar crosses nonretiring history and four overflow cuts → actual client retry/sync/reducer/cache; grammar-derived text/live/history anchors supplement the shared-reducer transport oracle.
-- Real detail loaders/shared pool: repeated retries while pending, simulated deadlines, synchronous publisher close/disconnect/replacement; actual `RunningBody` key wiring uses the existing narrow hook mock.
-- Six independent guard mutations each fail a new assertion and explicitly replay red before restoration: history fence, retired-socket ownership, cross-orb progress, post-publication ownership, retry generation and append folding; component key omission also fails.
-- Bounded coverage ([evidence](../test-failures/2026-10-14-dst-compositions.md)); memory/mocked ports only; no PostgreSQL/native SDK, real network/browser/DOM or concurrent React proof. Existing telemetry is asserted; no production changes.
+- Writer expectations are authored semantic facts: ordered records, ancestry, roles/receipts, distinct block text/revisions and tool identities/names/states. Reducer/projector/sync results supply actual observations only. Unrelated history preserves live blocks; partial retirement removes exactly its named subset. Real retry resumes from an advanced cursor after interrupted sync; runtime output and commits continue while final sync drains. Retired sockets/cache owners cannot publish.
+- Detail expectations use explicit API identities and successful DTO bodies, not private key encoding. Reentry bounds active timers; a surviving peer and replacement actually refresh through simulated polling deadlines. Retained component hook slots check current rendered bodies and stale-success/cache fencing in both response orders.
+- Poll expectations derive exact receipt identities/multiplicity from synchronous, public-version-tagged **modeled guest acceptance**, not replica contents. Pre-Stop accepted work may finish after durable Stop; later queued work remains unaccepted while dispatch/reconcile continue and unrelated Pi/Claude peers progress. Stop/delete commit boundaries and drained restart are distinct from crash recovery.
+
+Independent semantic facts avoid common-mode agreement; mutation failures establish sensitivity, not specification validity. Current-source focused tests and root typecheck/lint passed. The pre-assertion broad run hit its unchanged 1,200-second cap (exit 124), without a reported failure or final totals: incomplete, not qualification. Full current-head CI remains pending.
+
+[Evidence and replay](../test-failures/2026-10-14-dst-compositions.md). Memory adapters, serialized transport and narrow hook mocks do not prove PostgreSQL, Native SDK admission/suspension, real network/browser/DOM or concurrent React. No production changes, merge or deployment.
 
 ## Release SSH rendered contract (decision 2026-10-14)
 

@@ -1,5 +1,5 @@
-import type { CommittedDisplayDetail } from "@pi-orb/protocol";
-import { err, ok } from "neverthrow";
+import type { CommittedDisplayDetail, LiveDisplayDetail } from "@pi-orb/protocol";
+import { ok } from "neverthrow";
 import { beforeEach, expect, it, vi } from "vitest";
 import {
   snapshotFromHistory,
@@ -17,7 +17,13 @@ const hooks = vi.hoisted(() => ({
 }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
-  useMemo: (factory: () => unknown) => factory(),
+  useMemo: (factory: () => unknown, deps: unknown[]) => {
+    const index = hooks.cursor++;
+    const slot = hooks.slots[index];
+    if (!slot?.deps || deps.some((dep, i) => !Object.is(dep, slot.deps?.[i])))
+      hooks.slots[index] = { deps, value: factory() };
+    return hooks.slots[index]?.value;
+  },
   useState: (initial: unknown) => {
     const index = hooks.cursor++;
     hooks.slots[index] ??= { value: initial };
@@ -261,44 +267,103 @@ it.each([false, true])("invalidation fences pending publication (image=%s)", asy
   );
 });
 
-// Fresh disclosures only; production constructs keys, without concurrent React semantics.
-it.each([false, true])("RunningBody scope wiring (reverse=%s)", async (reverse) => {
+// Narrow hook wiring/state checks, not ReactDOM scheduling qualification.
+it.each([false, true])("live identities (newFirst=%s)", async (newFirst) => {
+  const f = fixture();
+  const cases = [
+    ["orb", "session", "operation", "block", "baseline body"],
+    ["other-orb", "session", "operation", "block", "other orb body"],
+    ["orb", "other-session", "operation", "block", "other session body"],
+    ["orb", "session", "other-operation", "block", "other operation body"],
+    ["orb", "session", "operation", "other-block", "current block body"],
+  ] as const;
+  const finish: (() => void)[] = [];
+  const render = (context: DetailContext, blockId: string) => {
+    hooks.cursor = 0;
+    return RunningBody({ context, blockId });
+  };
+  try {
+    for (const [orbId, sessionId, operationId, blockId, text] of cases) {
+      const detail: LiveDisplayDetail = {
+        v: 1,
+        sessionId,
+        operationId,
+        blockId,
+        state: "completed",
+        body: { type: "reasoning", text },
+      };
+      vi.mocked(getLiveDetail).mockReturnValueOnce(
+        new Promise((resolve) => finish.push(() => resolve(ok(detail)))),
+      );
+      f.context = { ...f.context, orbId, sessionId, operationId, connected: true };
+      render(f.context, blockId);
+      if (text === "baseline body") {
+        for (const slot of hooks.slots.splice(0)) slot.cleanup?.();
+        render(f.context, blockId); // Same identity remount must reuse the pending HTTP read.
+        expect(getLiveDetail).toHaveBeenCalledTimes(1);
+      }
+    }
+    expect(vi.mocked(getLiveDetail).mock.calls).toEqual(
+      cases.map(([orb, session, operation, block]) => [orb, operation, block, session]),
+    );
+    expect(getLiveDetail).toHaveBeenCalledTimes(5);
+    for (const index of newFirst ? [4, 3, 2, 1, 0] : [0, 1, 2, 3, 4]) {
+      finish[index]?.();
+      await flush();
+      const currentReady = newFirst || index === 4;
+      expect(render(f.context, "other-block").props.children).toBe(
+        currentReady ? "current block body" : "",
+      );
+      if (!currentReady) expect(hooks.slots[0]?.value).toBeUndefined();
+    }
+    expect(f.context.livePending.size).toBe(0);
+  } finally {
+    for (const slot of hooks.slots) slot.cleanup?.();
+    for (const settle of finish) settle();
+    await flush();
+    f.release();
+  }
+});
+
+it.each([false, true])("session ownership (newFirst=%s)", async (newFirst) => {
   const f = fixture();
   const finish: (() => void)[] = [];
-  vi.mocked(getLiveDetail).mockImplementation((_orb, _op, block) => {
-    return new Promise((resolve) => {
-      finish.push(() => resolve(err({ type: "network", message: block })));
-    });
-  });
+  const next: CommittedDisplayDetail = {
+    ...f.detail,
+    sessionId: "replacement-session",
+    body: { type: "reasoning", text: "replacement body" },
+  };
   try {
-    for (const coordinate of [-1, -1, 0, 1, 2, 3]) {
-      for (const slot of hooks.slots.splice(0)) slot.cleanup?.();
-      hooks.cursor = 0;
-      const scope = ["orb", "session", "operation", "block"];
-      if (coordinate >= 0) scope[coordinate] = "next";
-      const [orbId, sessionId, operationId, blockId] = scope as [string, string, string, string];
-      Object.assign(f.context, { orbId, sessionId, operationId, connected: true });
-      RunningBody({ context: f.context, blockId });
-    }
-    expect(getLiveDetail).toHaveBeenCalledTimes(5);
-    expect([...f.context.livePending.keys()]).toEqual([
-      '["orb","session","operation","block"]',
-      '["next","session","operation","block"]',
-      '["orb","next","operation","block"]',
-      '["orb","session","next","block"]',
-      '["orb","session","operation","next"]',
+    for (const detail of [f.detail, next])
+      vi.mocked(getCommittedDetail).mockReturnValueOnce(
+        new Promise((resolve) => finish.push(() => resolve(ok(detail)))),
+      );
+    mount(f.context, false);
+    await flush();
+    f.owner().publish(snapshotFromHistory(history("orb", ["one"], "replacement-session")));
+    f.context = { ...f.context, sessionId: "replacement-session" };
+    mount(f.context, false);
+    await flush();
+    expect(vi.mocked(getCommittedDetail).mock.calls).toEqual([
+      ["orb", "one", "one:0", "session"],
+      ["orb", "one", "one:0", "replacement-session"],
     ]);
-    const expectedRequestArgs = [...f.context.livePending.keys()].map((key) => {
-      const [orb, session, operation, block] = JSON.parse(key);
-      return [orb, operation, block, session];
-    });
-    expect(vi.mocked(getLiveDetail).mock.calls).toEqual(expectedRequestArgs);
-    for (const settle of reverse ? [...finish].reverse() : finish) {
-      settle();
+    for (const index of newFirst ? [1, 0] : [0, 1]) {
+      finish[index]?.();
       await flush();
+      expect(mount(f.context, false).props.children).toEqual(
+        newFirst || index === 1
+          ? expect.objectContaining({ props: expect.objectContaining({ body: next.body }) })
+          : "Loading…",
+      );
+      expect(hooks.slots[1]?.value).toEqual(
+        newFirst || index === 1 ? expect.objectContaining({ value: next.body }) : null,
+      );
+      expect(f.context.cache.getDetail("orb", "session", "one", "one:0")).toBeUndefined();
     }
-    expect(hooks.slots[1]?.value).toMatchObject({ message: "next" });
-    expect(f.context.livePending.size).toBe(0);
+    expect(f.context.cache.getDetail("orb", "replacement-session", "one", "one:0")?.body).toEqual(
+      next.body,
+    );
   } finally {
     for (const slot of hooks.slots) slot.cleanup?.();
     for (const settle of finish) settle();
