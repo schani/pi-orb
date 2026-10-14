@@ -195,6 +195,47 @@ it.each(["chromium", "webkit"] as const)(
       await page.getByLabel("Breakdown").selectOption("token_kind");
       expect(windows.length).toBe(readsBeforeFilters);
       await page.screenshot({ path: "/tmp/usage-implemented-1440.png", fullPage: true });
+      for (const width of [1440, 901, 900, 621]) {
+        await page.setViewportSize({ width, height: 1000 });
+        const stacked = width <= 900;
+        await expect
+          .poll(() =>
+            page.locator(".usage-overview").evaluate((n) => {
+              const [summary, timeline] = [...n.children].map((c) => c.getBoundingClientRect());
+              return !!summary && !!timeline && timeline.top >= summary.bottom;
+            }),
+          )
+          .toBe(stacked);
+        await expect
+          .poll(() =>
+            page.locator(".usage-bars").evaluate((n) => {
+              const [orbs, uses] = [...n.children].map((c) => c.getBoundingClientRect());
+              return !!orbs && !!uses && uses.top >= orbs.bottom;
+            }),
+          )
+          .toBe(stacked);
+        if (stacked) {
+          await expect
+            .poll(() =>
+              timeline.evaluate((n) => {
+                const plot = n.getBoundingClientRect();
+                const overview = n.parentElement?.getBoundingClientRect();
+                return overview !== undefined && Math.abs(plot.width - overview.width) < 1;
+              }),
+            )
+            .toBe(true);
+        }
+        expect(
+          await page
+            .locator("html")
+            .evaluate((n) => n.scrollWidth <= (n.ownerDocument.defaultView?.innerWidth ?? 0)),
+        ).toBe(true);
+        await page.screenshot({
+          path: "/tmp/usage-layout-" + engine + "-" + width + ".png",
+          fullPage: true,
+        });
+      }
+      await expect(page.getByText("Recorded Pi + Luna", { exact: true })).toHaveCount(0);
       for (const width of [390, 320]) {
         await page.setViewportSize({ width, height: 900 });
         const key = timeline.locator(".chart-key");

@@ -92,7 +92,9 @@ GROUP BY 1 ORDER BY 2 DESC LIMIT 20;
 
 ## Usage API and display (implemented locally 2026-10-13)
 
-**Selected:** Trend icon beside Settings → `/usage`; Comparison lines with a left summary rail, stacked on phones. No schema migration or persisted preference.
+**Selected:** Trend icon beside Settings → `/usage`; Comparison lines with a left summary rail on wide screens. No schema migration or persisted preference.
+
+**Decided 2026-10-14:** Stack the overview and rankings at ≤900 CSS px to preserve chart room, using a compact summary grid. Phone padding/controls apply at ≤600 px; the range shows dates only. Chromium/WebKit regressions cover breakpoints, chart width and overflow.
 
 `GET /api/v1/usage?boundaries=<JSON timestamp array>` reads the selected user's ledger. Ops uses the existing selected-user header; ordinary users cannot override their owner. Replies are `no-store`. Unknown query fields, non-integer/non-increasing edges, more than 188 edges, intervals over 25 hours or spans over 187 days return 400. Store unavailability returns 503; invalid aggregates return 500, with content-free failure logging.
 
