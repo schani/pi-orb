@@ -39,7 +39,7 @@ const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const hostile =
   '<script>globalThis.__peerInjected=true</script>\n<img src=x onerror="globalThis.__peerInjected=true">\n**literal** & "quotes"\n' +
   "unbroken-".repeat(100);
-/** Hold the shared FIFO before native admission until the sender settles the mock cursor. */
+/** Hold receiver work until the sender settles the mock cursor. */
 async function deliveryGate() {
   let release = () => {};
   let entered = 0;
@@ -54,7 +54,7 @@ async function deliveryGate() {
   if (address === null || typeof address === "string")
     throw new Error("missing delivery gate listener");
   return {
-    url: `http://127.0.0.1:${address.port}/claim`,
+    url: `http://127.0.0.1:${address.port}/delivery`,
     arm: () => {
       const before = entered;
       gate = new Promise<void>((resolve) => {
@@ -131,7 +131,7 @@ it
         {
           auth: { accountId: `orb-messaging-${runId}`, device: { manualApprove: true } },
           model: {
-            // Both orbs share the mock's forward-only cursor; release receiver work only after the sender settles.
+            // Gate central FIFO admission or native host boot before advancing the shared cursor.
             rules: [0, 1].flatMap((index) => [
               ...(index === 1
                 ? [
@@ -143,6 +143,9 @@ it
               sendStep(index),
               reply(result(`SEND_DONE_${index}`), `SENDER_ACK_${index}`),
               summaryRule(),
+              ...(index === 1 && agentBackend === "host-pi"
+                ? [reply(user("^The agent runtime was restarted\\."), "RECEIVER_RESTART_ACK")]
+                : []),
               reply(
                 user(index === 0 ? "STOPPED_PEER_BODY" : "SLEEPING_PEER_BODY"),
                 `RECEIVER_ACK_${index}`,
@@ -182,7 +185,7 @@ it
         readinessHeaders: { host: new URL(baseUrl).host },
         extraEnv: {
           PI_ORB_E2E_HISTORY_INSPECTION: "1",
-          PI_ORB_E2E_MESSAGE_CLAIM_GATE: gate.url,
+          PI_ORB_E2E_MESSAGE_DELIVERY_GATE: gate.url,
           PI_ORB_E2E_MESSAGE_RECEIVER: receiverId,
           PI_ORB_APP_ORIGIN: baseUrl,
           PI_ORB_BROKER_URL: baseUrl,
@@ -307,9 +310,7 @@ it
         expect(row.system).toEqual({ kind: "orb_message", senderOrbId: senderId });
         expect(row.status).toBe("queued");
         expect(row.content).toEqual([{ type: "text", text: bodies[index] }]);
-        await waitFor("receiver reached shared FIFO claim gate", async () =>
-          entered() ? true : null,
-        );
+        await waitFor("receiver reached delivery gate", async () => (entered() ? true : null));
         expect((await view(receiverId)).body).not.toHaveProperty("sleepUntil");
         await waitFor("sender tool result retained", async () =>
           JSON.stringify(await records(senderId)).includes(`SENDER_ACK_${index}`) ? true : null,
@@ -317,6 +318,12 @@ it
         await summaryCount(index === 0 ? 1 : 4);
         gate.release();
         await state(receiverId, "running");
+        if (index === 1 && agentBackend === "host-pi")
+          await waitFor("receiver restart acknowledgement retained", async () =>
+            JSON.stringify(await records(receiverId)).includes("RECEIVER_RESTART_ACK")
+              ? true
+              : null,
+          );
         await waitFor("receiver acknowledgement retained", async () =>
           JSON.stringify(await records(receiverId)).includes(`RECEIVER_ACK_${index}`) ? true : null,
         );

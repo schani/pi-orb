@@ -1,7 +1,3 @@
-import { orbToolRequestId } from "./orb-tool-request-id.ts";
-
-export { orbToolRequestId } from "./orb-tool-request-id.ts";
-
 import { previewHost } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, ResultAsync } from "neverthrow";
@@ -11,6 +7,7 @@ import type { OrbRow } from "./orb.ts";
 import { sendOrbMessage } from "./orb-messaging.ts";
 import { normalizeOrbName } from "./orb-naming.ts";
 import { getOrbSpawnRelations, spawnOrb } from "./orb-spawning.ts";
+import { orbToolRequestId } from "./orb-tool-request-id.ts";
 import type { CentralAgentCaller, ControlPlaneDeps } from "./ports.ts";
 
 export interface OrbAgentIdentity {

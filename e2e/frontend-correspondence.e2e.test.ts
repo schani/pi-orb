@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { DisplayHistoryView, DisplayRecord, OrbView } from "@pi-orb/protocol";
+import type {
+  DisplayHistoryView,
+  DisplayRecord,
+  OrbMessageListView,
+  OrbMessageView,
+  OrbView,
+} from "@pi-orb/protocol";
 import { type Browser, expect as check, chromium, webkit } from "@playwright/test";
 import { createServer } from "vite";
 import { it } from "vitest";
@@ -19,6 +25,15 @@ const senderName = "sender-".repeat(80);
 const body =
   '<script>globalThis.__peerInjected=true</script>\n<img src=x onerror="bad()"> & "quotes"\n**literal**\n' +
   "snapshot-".repeat(90);
+const pending: OrbMessageView = {
+  id: "24504d20-a36e-475e-8153-ec5ad22aa131",
+  orbId,
+  status: "queued",
+  content: [{ type: "text", text: body }],
+  system: { kind: "orb_message", senderOrbId: senderId },
+  createdAt: "2026-10-14T00:00:00Z",
+  updatedAt: "2026-10-14T00:00:00Z",
+};
 const peer: DisplayRecord = {
   id: "peer-record",
   parentId: null,
@@ -27,7 +42,7 @@ const peer: DisplayRecord = {
   eventType: "orb.message",
   content: [{ type: "text", text: body }],
   sender: { orbId: senderId },
-  inboxMessageIds: ["peer-inbox"],
+  inboxMessageIds: [pending.id],
 };
 
 it.each(["chromium", "webkit"] as const)("%s: correspondence at 320px", async (engine) => {
@@ -62,6 +77,7 @@ it.each(["chromium", "webkit"] as const)("%s: correspondence at 320px", async (e
     const events: string[] = [];
     const errors: string[] = [];
     let senderPresent = true;
+    let delivered = false;
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("console", (message) => {
       if (message.type() === "error") events.push(`console: ${message.text()}`);
@@ -92,21 +108,53 @@ it.each(["chromium", "webkit"] as const)("%s: correspondence at 320px", async (e
           },
         });
       });
-      await page.route(`**/api/v1/orbs/${orbId}/history`, (route) =>
-        route.fulfill({
+      await page.route(`**/api/v1/orbs/${orbId}/messages/poll`, (route) => {
+        const initial = route.request().postDataJSON().after === 0;
+        const { content: _content, system: _system, ...update } = pending;
+        events.push(
+          JSON.stringify({
+            source: "fixture.inbox",
+            status: delivered ? "delivered" : "queued",
+            id: pending.id,
+          }),
+        );
+        return route.fulfill({
+          json: {
+            items: initial ? [{ ...pending, status: delivered ? "delivered" : "queued" }] : [],
+            updates: !initial && delivered ? [{ ...update, status: "delivered" }] : [],
+            cursor: 1,
+          } satisfies OrbMessageListView,
+        });
+      });
+      await page.route(`**/api/v1/orbs/${orbId}/history`, (route) => {
+        events.push(
+          JSON.stringify({ source: "fixture.history", headId: delivered ? peer.id : null }),
+        );
+        return route.fulfill({
           json: {
             orbId,
             session: { id: "session" },
-            cursor: peer.id,
-            headId: peer.id,
-            records: [peer],
+            cursor: delivered ? peer.id : null,
+            headId: delivered ? peer.id : null,
+            records: delivered ? [peer] : [],
           } satisfies DisplayHistoryView,
-        }),
-      );
+        });
+      });
       const band = page.locator(".rec-peer");
       const url = `${origin}/orbs/${orbId}`;
       await gotoFrontendHistory(page, url, orbId, band);
       await check(band).toHaveCount(1);
+      await check(band).toHaveClass("rec rec-peer rec-q");
+      await check(band.locator(".rec-status")).toHaveText("paused");
+      await check(band.locator(".peer-sender")).toHaveText(senderName);
+      await check(band.locator(".peer-sender")).toHaveAttribute("href", `/orbs/${senderId}`);
+      await check.poll(() => band.locator(".peer-body").textContent()).toBe(body);
+      const committedResponse = page.waitForResponse(`**/api/v1/orbs/${orbId}/history`);
+      delivered = true;
+      await committedResponse;
+      await check(band).toHaveAttribute("data-history-row", peer.id);
+      await check(band).toHaveCount(1);
+      await check(page.locator(".rec-q, .rec-status")).toHaveCount(0);
       await check(band.locator(".peer-sender")).toHaveText(senderName);
       await check(band.locator(".peer-sender")).toHaveAttribute("href", `/orbs/${senderId}`);
       await check.poll(() => band.locator(".peer-body").textContent()).toBe(body);

@@ -888,6 +888,14 @@ export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCach
   const [senderNames, setSenderNames] = useState<ReadonlyMap<string, string | null>>(
     () => new Map(),
   );
+  const updateSenderNames = useCallback((incoming: ReadonlyMap<string, string | null>) => {
+    setSenderNames((previous) =>
+      previous.size === incoming.size &&
+      [...incoming].every(([id, name]) => previous.get(id) === name)
+        ? previous
+        : incoming,
+    );
+  }, []);
   const [loaded, setLoaded] = useState<OrbSelection | null>(null);
   const navigationGeneration = useRef(0);
   const [conversationKey, setConversationKey] = useState(0);
@@ -935,7 +943,7 @@ export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCach
     <div className="orb-page" ref={pageRef}>
       <OrbIndex
         onProjectChange={setProject}
-        onSenderNamesChange={setSenderNames}
+        onSenderNamesChange={updateSenderNames}
         projectId={loaded?.orb?.isOk() ? loaded.orb.value.projectId : null}
         orbId={orbId}
         pending={pending}
