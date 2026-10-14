@@ -299,3 +299,66 @@ describe("FetchRuntimeClient response evidence", () => {
     });
   });
 });
+
+describe("FetchRuntimeClient status contracts", () => {
+  function pullResponse(status: number, body: string) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body, { status })),
+    );
+    return new FetchRuntimeClient().pullHistory(
+      task,
+      { baseUrl: "http://runtime.test", after: null, limit: 10 },
+      { signal: new AbortController().signal },
+    );
+  }
+
+  it.each([201, 202, 400, 503])(
+    "preserves HTTP %s classification for a complete non-JSON history response",
+    async (status) => {
+      expect((await pullResponse(status, "upstream unavailable"))._unsafeUnwrapErr()).toEqual({
+        type: "runtime_client_error",
+        code: "http_error",
+        retryable: status >= 500,
+        answered: true,
+        message: `runtime returned HTTP ${status}`,
+      });
+    },
+  );
+
+  it.each([
+    ["cursor_not_found", 409, false],
+    ["history_unavailable", 503, true],
+  ] as const)("preserves structured %s errors", async (code, status, retryable) => {
+    const body = JSON.stringify({ v: 1, error: { code, message: "runtime error", retryable } });
+    expect((await pullResponse(status, body))._unsafeUnwrapErr()).toEqual({
+      type: "runtime_client_error",
+      code,
+      retryable,
+      answered: true,
+      message: "runtime error",
+    });
+  });
+
+  it("keeps malformed accepted 202 message responses as integrity failures", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{", { status: 202 })),
+    );
+    const result = await new FetchRuntimeClient().deliverMessage(
+      task,
+      {
+        baseUrl: "http://runtime.test",
+        messageId: "message",
+        messageIds: ["message"],
+        content: [],
+      },
+      { signal: new AbortController().signal },
+    );
+    expect(result._unsafeUnwrapErr()).toMatchObject({
+      code: "invalid_response",
+      retryable: false,
+      answered: true,
+    });
+  });
+});
