@@ -1,11 +1,24 @@
 import type { HistoryRecord } from "@pi-orb/protocol";
-import { ConditionVariable, type SimulationTask } from "determined";
+import { ConditionVariable, SimpleEntropySource, type SimulationTask } from "determined";
 import { ok, okAsync, ResultAsync } from "neverthrow";
-import { describe, expect, it } from "vitest";
-import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
+import { describe, expect, it, vi } from "vitest";
+import { SdkAgentPlane } from "../adapters/sdk-agent-plane.ts";
+import { FAILPOINTS } from "../testkit/failpoints.ts";
+import {
+  makeHarness,
+  makeOrbRow,
+  makeProjectRow,
+  restartControlPlane,
+  seedRunningOrb,
+} from "../testkit/fixtures.ts";
+import { assertReplicaComplete, assertReplicaIntegrity } from "../testkit/invariants.ts";
 import { LogCapture, runDst, waitUntil } from "../testkit/sim.ts";
+import { commitAgentHistory } from "./agent-history.ts";
 import type { AgentPlane } from "./agent-ports.ts";
-import { pollLoop, type ReconcileTaskRunner } from "./loops.ts";
+import { HarnessAgentPlane } from "./harness-agent-plane.ts";
+import { requestOrbDeletion, requestOrbStop } from "./lifecycle.ts";
+import { pollLoop, type ReconcileTaskRunner, reconcileLoop } from "./loops.ts";
+import type { CommitPullBatchParams } from "./ports.ts";
 
 type ReconcileJob = {
   readonly run: (task: SimulationTask) => Promise<void>;
@@ -504,3 +517,379 @@ for (const ending of ["shutdown", "fatal"] as const) {
     );
   });
 }
+
+// Model/native harness ports only; routing, publication, receipts and lifecycle are production.
+it.each(
+  (["pi", "claude"] as const).flatMap((target) =>
+    (["before", "after", "cas"] as const).flatMap((fault) =>
+      (["stop", "delete"] as const).map((ending) => ({ target, fault, ending })),
+    ),
+  ),
+)(
+  "composes mixed poll lanes: $target receipt $fault, $ending, restart",
+  async ({ target, fault, ending }) => {
+    let seed = 0x97c0ffee;
+    const entropy = vi.spyOn(SimpleEntropySource.prototype, "random").mockImplementation(() => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 0x1_0000_0000;
+    });
+    const logs = new LogCapture();
+    try {
+      await runDst(
+        {
+          name: `poll-composed-${target}-${fault}-${ending}`,
+          iterations: 20,
+          lateTimerProbability: 0,
+          maxVirtualDurationMs: 120_000,
+          logCapture: logs,
+          failpointProbabilities:
+            fault === "cas"
+              ? {}
+              : {
+                  [fault === "before" ? FAILPOINTS.storeCommitBefore : FAILPOINTS.storeCommitAfter]:
+                    1,
+                },
+        },
+        async (sim) => {
+          let h = makeHarness({
+            constants: {
+              reconcileTickMs: 20,
+              historyPullIntervalMs: 20,
+              runtimeRequestTimeoutMs: 100_000,
+              idleStopAfterMs: 1_000_000,
+              deletionQuarantineMs: 200,
+              hostBackstopIntervalMs: 100,
+            },
+          });
+          const gate = new ConditionVariable("composed receipt window");
+          const ids = ["a", "b", "c"];
+          const suspended = new Set<string>();
+          let ready = false;
+          let held = false;
+          let released = false;
+          let winnerReady = false;
+          let captured: CommitPullBatchParams | undefined;
+          let failures = 0;
+          let conflicts = 0;
+          const original = h.store.commitPullBatch.bind(h.store);
+          // Only the first target commit fires the existing transaction failpoints.
+          const scopedTask = (task: SimulationTask, inject = false) =>
+            new Proxy(task, {
+              get(t, key) {
+                if (key === "failpoint")
+                  return (name: string, ...args: unknown[]) =>
+                    t.failpoint(inject ? name : `disabled:${name}`, ...args);
+                const value = Reflect.get(t, key);
+                return typeof value === "function" ? value.bind(t) : value;
+              },
+            });
+          h.store.commitPullBatch = (task, request) =>
+            new ResultAsync(
+              (async () => {
+                const first = request.orbId === "a" && captured === undefined;
+                if (first) {
+                  captured = request;
+                  gate.notifyAll(task, "receipt admitted");
+                  if (fault === "cas") {
+                    while (!winnerReady) await gate.wait(task, "competing commit wins");
+                  }
+                } else if (request.orbId === "a" && !released) {
+                  while (!released) await gate.wait(task, "target receipt lane held");
+                }
+                const result = await original(scopedTask(task, first), request);
+                if (first) {
+                  expect(result.isErr()).toBe(true);
+                  if (result.isErr()) {
+                    expect(result.error.type).toBe(
+                      fault === "cas" ? "cursor_conflict" : "store_error",
+                    );
+                    if (fault === "cas") conflicts++;
+                    else failures++;
+                  }
+                  held = true;
+                  gate.notifyAll(task, "failure happened before lifecycle command");
+                  while (!released) await gate.wait(task, "failed receipt response held");
+                }
+                return result;
+              })(),
+            );
+          const snapshot = (id: string) => {
+            const session = h.world.sessionHeaderOf(id);
+            if (session === null) throw new Error("seeded mixed session missing");
+            return {
+              orbId: id,
+              runtimeInstanceId: `central-${id}`,
+              activity: "busy" as const,
+              session,
+              records: [...h.world.entriesOf(id)],
+              headId: h.world.entriesOf(id).at(-1)?.id ?? null,
+            };
+          };
+          const compose = () => {
+            const pi: AgentPlane = {
+              placement: "central",
+              health: (_task, orb) =>
+                okAsync({
+                  v: 1,
+                  orbId: orb.id,
+                  runtimeInstanceId: `central-${orb.id}`,
+                  status: "ready",
+                  checkoutCommit: "central",
+                  sessionId: snapshot(orb.id).session.id,
+                  activity: suspended.has(orb.id) ? "idle" : "busy",
+                }),
+              deliverMessage: (task, orb, request) => {
+                expect(orb.harness).toBe("pi");
+                const response = h.world.deliverInboxBatch(
+                  orb.id,
+                  {
+                    batchId: request.messageId,
+                    messageIds: request.messageIds ?? [request.messageId],
+                    text: request.messageId,
+                  },
+                  { flush: true },
+                );
+                return commitAgentHistory(task, h.deps, snapshot(orb.id)).map(() => response);
+              },
+              pullHistory: (task, orb, request) => {
+                expect(orb.harness).toBe("pi");
+                const value = snapshot(orb.id);
+                const index =
+                  request.after === null
+                    ? -1
+                    : value.records.findIndex((r) => r.id === request.after);
+                const records = value.records.slice(index + 1, index + 1 + request.limit);
+                return ResultAsync.fromSafePromise(task.checkpoint("central harness snapshot")).map(
+                  () => ({
+                    v: 1 as const,
+                    ...value,
+                    records,
+                    cursor: records.at(-1)?.id ?? request.after,
+                  }),
+                );
+              },
+              prepareIdleStop: () => okAsync({ v: 1, prepared: false }),
+              suspend: (_task, id) => {
+                suspended.add(id);
+                return okAsync(undefined);
+              },
+              dispose: (_task, id) => {
+                suspended.add(id);
+                return okAsync(undefined);
+              },
+              session: () => null,
+              close: () => okAsync(undefined),
+            };
+            return {
+              ...h.deps,
+              agentPlane: new HarnessAgentPlane(pi, new SdkAgentPlane(h.deps), h.store),
+            };
+          };
+          const enqueue = async (task: SimulationTask, id: string, suffix: string) => {
+            expect(
+              (
+                await h.store.enqueueOrbMessage(task, {
+                  orbId: id,
+                  messageId: `${id}-${suffix}`,
+                  content: [{ type: "text", text: suffix }],
+                  now: task.wallNow(),
+                })
+              ).isOk(),
+            ).toBe(true);
+          };
+          const until = (
+            task: SimulationTask,
+            reason: string,
+            predicate: () => boolean,
+            timeoutMs = 10_000,
+          ) => waitUntil(task, reason, predicate, { intervalMs: 20, timeoutMs });
+          const delivered = (id: string, suffix: string) =>
+            h.store
+              .messageSnapshots(id)
+              .some((row) => row.messageId === `${id}-${suffix}` && row.status === "delivered");
+          const assertReceipts = (id: string) => {
+            assertReplicaIntegrity(h.world, h.store, id);
+            const receiptIds = h.store
+              .replicaRecords(id)
+              .flatMap((r) =>
+                r.type === "message" || r.type === "event" ? (r.inboxMessageIds ?? []) : [],
+              );
+            expect(new Set(receiptIds).size).toBe(receiptIds.length);
+            for (const row of h.store.messageSnapshots(id))
+              expect(row.status === "delivered").toBe(receiptIds.includes(row.messageId));
+            return receiptIds;
+          };
+          for (const process of [0, 1]) {
+            if (process === 1) {
+              const old = h.deps.control;
+              h = restartControlPlane(h);
+              expect(h.deps.control).not.toBe(old);
+            }
+            const deps = compose();
+            const stop = new AbortController();
+            const workersStop = new AbortController();
+            const runner = new SimulationPollTaskRunner();
+            const active = new Set<string>();
+            const admissions = new Map<string, number>();
+            const run: ReconcileTaskRunner = (lane, operation) => {
+              expect(active.has(lane), `overlapping ${lane} in process ${process}`).toBe(false);
+              active.add(lane);
+              admissions.set(lane, (admissions.get(lane) ?? 0) + 1);
+              return runner.run(lane, operation).finally(() => active.delete(lane));
+            };
+            let finished = 0;
+            const loop = async (task: SimulationTask, kind: "poll" | "reconcile") => {
+              while (!ready) await gate.wait(task, "seeded mixed fleet");
+              if (kind === "poll") await pollLoop(task, deps, stop.signal, run);
+              else await reconcileLoop(task, deps, stop.signal, run);
+              if (++finished === 2) workersStop.abort();
+            };
+            const result = await sim.runTasks([
+              ...ids
+                .flatMap((id) => [id, `central:${id}`, `poll:${id}`])
+                .map((lane) => ({
+                  name: `${process}:${lane}`,
+                  f: (task: SimulationTask) => runner.worker(task, lane, workersStop.signal),
+                })),
+              { name: `${process}:poller`, f: (task) => loop(task, "poll") },
+              { name: `${process}:reconciler`, f: (task) => loop(task, "reconcile") },
+              {
+                name: `${process}:driver`,
+                f: async (task) => {
+                  if (process === 0) {
+                    for (const id of ids) {
+                      seedRunningOrb(task, h, id);
+                      const orb = h.store.orbSnapshot(id);
+                      if (orb === null) throw new Error("seeded mixed orb missing");
+                      h.store.seedOrb({
+                        ...orb,
+                        name: id,
+                        harness: (id === "a" ? target === "claude" : id === "c") ? "claude" : "pi",
+                      });
+                    }
+                    await enqueue(task, "a", "first");
+                    ready = true;
+                    gate.notifyAll(task, "fleet ready");
+                    while (captured === undefined) await gate.wait(task, "first receipt window");
+                    if (fault === "cas") {
+                      expect((await original(task, captured)).isOk()).toBe(true);
+                      winnerReady = true;
+                      gate.notifyAll(task, "real cursor CAS winner committed");
+                    }
+                    while (!held) await gate.wait(task, "fault actually happened");
+                    expect(failures + conflicts).toBe(1);
+                    assertReceipts("a");
+                    expect(delivered("a", "first")).toBe(fault !== "before");
+                    expect(h.store.orbSnapshot("a")).toMatchObject({
+                      replicationCursor: fault === "before" ? null : captured.nextCursor,
+                      replicatedHeadId: fault === "before" ? null : captured.nextHeadId,
+                    });
+                    expect(h.store.replicaRecords("a")).toHaveLength(fault === "before" ? 0 : 1);
+                    await enqueue(task, "a", "later");
+                    for (const suffix of ["first", "later"]) {
+                      for (const id of ["b", "c"]) await enqueue(task, id, suffix);
+                      await until(task, "both sibling receipts while A held", () =>
+                        ["b", "c"].every((id) => delivered(id, suffix)),
+                      );
+                      for (const id of ["b", "c"]) assertReceipts(id);
+                      expect(released).toBe(false);
+                      expect(delivered("a", "later")).toBe(false);
+                      await task.sleep(80, "later dispatcher ticks do not overlap held lane");
+                    }
+                    expect(admissions.get("central:c")).toBeUndefined();
+                    expect(admissions.get("central:b")).toBeGreaterThan(1);
+                    expect(admissions.get("poll:c")).toBeGreaterThan(1);
+                    expect(
+                      (
+                        await (ending === "stop" ? requestOrbStop : requestOrbDeletion)(
+                          task,
+                          deps,
+                          "a",
+                        )
+                      ).isOk(),
+                    ).toBe(true);
+                    expect(
+                      logs.matching(ending === "stop" ? "stop-accepted" : "delete_requested"),
+                    ).toHaveLength(1);
+                    // End process admission only after the forced fault and user command; drain admitted I/O.
+                    stop.abort();
+                    released = true;
+                    gate.notifyAll(task, "old process drains receipt responses");
+                  } else {
+                    await until(
+                      task,
+                      "restarted lifecycle completes",
+                      () =>
+                        ending === "stop"
+                          ? h.store.orbSnapshot("a")?.state === "stopped"
+                          : h.store.orbSnapshot("a") === null,
+                      60_000,
+                    );
+                    if (ending === "stop") {
+                      await until(
+                        task,
+                        "Stop retains accepted native receipt history",
+                        () => h.store.replicaRecords("a").length === h.world.entriesOf("a").length,
+                      );
+                      assertReplicaComplete(h.world, h.store, "a");
+                      const receiptIds = assertReceipts("a");
+                      expect(delivered("a", "first")).toBe(true);
+                      expect(receiptIds).toEqual(
+                        ["a-first", "a-later"].slice(0, receiptIds.length),
+                      );
+                      expect(h.store.messageSnapshots("a").every((row) => !row.autoStart)).toBe(
+                        true,
+                      );
+                      expect(h.world.filesystemExists("a")).toBe(true);
+                    } else {
+                      if (captured === undefined) throw new Error("receipt window missing");
+                      const inbox = h.store.messageSnapshots("a");
+                      const late = await original(scopedTask(task), captured);
+                      expect(late.isErr()).toBe(true);
+                      if (late.isErr())
+                        expect(late.error).toMatchObject({
+                          type: "replication_integrity",
+                          reason: "mapping_failure",
+                        });
+                      expect(h.store.replicaRecords("a")).toEqual([]);
+                      expect(h.store.messageSnapshots("a")).toEqual(inbox);
+                      expect(h.world.filesystemExists("a")).toBe(false);
+                    }
+                    for (const id of ["b", "c"]) {
+                      await enqueue(task, id, "restart");
+                      await until(task, "sibling progresses in fresh process", () =>
+                        delivered(id, "restart"),
+                      );
+                      assertReplicaComplete(h.world, h.store, id);
+                      expect(assertReceipts(id)).toEqual([
+                        `${id}-first`,
+                        `${id}-later`,
+                        `${id}-restart`,
+                      ]);
+                    }
+                    await task.sleep(200, "terminal backstop cannot resurrect Stop/delete");
+                    expect(h.store.orbSnapshot("a")?.state ?? null).toBe(
+                      ending === "stop" ? "stopped" : null,
+                    );
+                    if (ending === "stop") expect(h.world.hostStateOf("a")).toBe("stopped");
+                    else expect(h.world.hostCount("a")).toBe(0);
+                    stop.abort();
+                  }
+                },
+              },
+            ]);
+            expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+            expect(active.size).toBe(0);
+            expect(finished).toBe(2);
+          }
+          expect(failures).toBe(fault === "cas" ? 0 : 1);
+          expect(conflicts).toBe(fault === "cas" ? 1 : 0);
+          expect(logs.matching("poll-task-crashed")).toHaveLength(0);
+          expect(logs.matching("reconcile-task-crashed")).toHaveLength(0);
+        },
+      );
+    } finally {
+      entropy.mockRestore();
+    }
+  },
+);

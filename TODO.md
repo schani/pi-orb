@@ -100,12 +100,6 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Hardening
 
-- **Proposed DST composition follow-ups** (2026-10-14; [coverage context](docs/testing.md)). Missing compositions, not confirmed bugs:
-  - Real `pollLoop` lanes: combine commit/lost-ack/CAS failures with Stop/delete/restart across central Pi/host Claude; assert atomic records/cursor/receipts, FIFO, sibling progress and no resurrection.
-  - `OutboundWriter` JSON → real OrbPage reducer: mix valid patches/tools/history retirement with scheduled drains and overflow/reconnect; assert semantic equivalence at critical boundaries, no resurrection or gaps.
-  - `DetailLoader` scoped keys/shared pool with `determined` deadlines: combine retry/response/disconnect/remount/session-operation replacement; assert one current publication/timer/read and no stale cache writes.
-  Existing suites cover individual contracts, not these mixed compositions.
-
 - [x] **Qualify activity headlines locally.** Final volume-guard-qualified gate passes: 2,690 unit/DST tests, 122 infrastructure checks and 385 default Docker E2Es. Real-Luna acceptance is user-reported (“works!”), not repeated. WebKit root cause remains unresolved. Evidence: `docs/activity-headlines.md`, `docs/testing.md`.
 - **Requalify Docker volume ownership guard.** After `docker volume create`, inspect exact orb-ID and inventory scope before mounting; reject foreign adoption. Run the complete fresh gate after the provider/guard regressions change. Evidence: `docs/postmortems/2026-10-05-e2e-docker-inventory-isolation.md`.
 
