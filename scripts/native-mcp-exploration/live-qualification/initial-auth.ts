@@ -1,7 +1,6 @@
-import { watch } from "node:fs";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { join } from "node:path";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -12,12 +11,9 @@ import {
 import type { McpCatalog } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { err, ok, ResultAsync } from "neverthrow";
-import { fetchMcpCatalog } from "../../../apps/orb-runtime/src/mcp/boot.ts";
 import { createOrbMcpExtension } from "../../../apps/orb-runtime/src/mcp/native.ts";
 import { HttpMcpTokenEndpoint } from "../../../apps/orb-runtime/src/mcp/oauth.ts";
-import { fetchProjectSecretSnapshotAtBoot } from "../../../apps/orb-runtime/src/project-secrets/endpoint.ts";
 import { summarizeCall, summarizeCloudflareRead, summarizeDatadogRead } from "./policy.mjs";
-import { dedicatedCatalog, referencedSecrets } from "./runner.ts";
 
 const calls = {
   cloudflare: {
@@ -39,35 +35,6 @@ type Failure = { phase: string; code: string };
 const failure = (phase: string, code: string): Failure => ({ phase, code });
 const safe = <T>(fn: () => Promise<T>, phase: string, code: string) =>
   ResultAsync.fromThrowable(fn, () => failure(phase, code))();
-
-// One external resume file, watched only after both initial failures. Never retry authentication on a timer.
-export async function waitForResumeFile(path: string, timeoutMs = 10 * 60_000): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const watcher = watch(dirname(path), (_event, file) => {
-      if (file === basename(path)) void check();
-    });
-    const timer = setTimeout(() => finish(new Error("resume_expired")), timeoutMs);
-    let done = false;
-    const finish = (error?: Error) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      watcher.close();
-      if (error) reject(error);
-      else resolve();
-    };
-    watcher.on("error", () => finish(new Error("resume_watch_failed")));
-    const check = async () => {
-      try {
-        await access(path);
-        finish();
-      } catch {
-        /* No signal yet. */
-      }
-    };
-    void check();
-  });
-}
 
 export async function runInitialAuth(options: {
   catalog: McpCatalog;
@@ -251,52 +218,3 @@ export async function runInitialAuth(options: {
     await safe(() => rm(dir.value, { recursive: true, force: true }), "session", "cleanup_failed");
   }
 }
-
-async function main() {
-  const url =
-    "http://metadata.google.internal/computeMetadata/v1/instance/attributes/pi-orb-config";
-  const metadata = await safe(
-    () =>
-      fetch(url, {
-        headers: { "Metadata-Flavor": "Google" },
-        signal: AbortSignal.timeout(10_000),
-      }).then((r) => r.json()) as Promise<Record<string, string>>,
-    "identity",
-    "metadata_unavailable",
-  );
-  if (metadata.isErr()) return metadata;
-  if (
-    !metadata.value.PI_ORB_RUNTIME_TOKEN ||
-    !metadata.value.PI_ORB_CONTROL_PLANE_URL ||
-    metadata.value.PI_ORB_ID !== process.env.EXPECTED_ORB_ID
-  )
-    return err(failure("identity", "unexpected_orb"));
-  const broker = {
-    controlPlaneUrl: metadata.value.PI_ORB_CONTROL_PLANE_URL,
-    runtimeToken: metadata.value.PI_ORB_RUNTIME_TOKEN,
-  };
-  const catalog = await fetchMcpCatalog(broker);
-  if (catalog.isErr() || !dedicatedCatalog(catalog.value))
-    return err(failure("catalog", "unexpected_catalog"));
-  const snapshot = await fetchProjectSecretSnapshotAtBoot(broker);
-  if (snapshot.isErr()) return err(failure("binding", "snapshot_unavailable"));
-  const secrets = referencedSecrets(catalog.value, snapshot.value.values);
-  if (secrets.isErr()) return secrets;
-  const signal = process.env.RESUME_FILE;
-  if (!signal?.startsWith("/tmp/native-mcp-reauthorization/"))
-    return err(failure("guard", "invalid_signal"));
-  return runInitialAuth({
-    catalog: catalog.value,
-    broker,
-    secrets: secrets.value,
-    waitForResume: () => waitForResumeFile(signal),
-    output: (record) => process.stdout.write(`${JSON.stringify(record)}\n`),
-  });
-}
-if (process.argv[1]?.endsWith("/initial-auth.mjs"))
-  void main().then((result) => {
-    if (result.isErr()) {
-      process.stdout.write(`${JSON.stringify({ phase: "error", ...result.error })}\n`);
-      process.exitCode = 1;
-    }
-  });

@@ -1,0 +1,1 @@
+{"name":"outbound-compaction-boundary-6","iteration":0,"records":[{"type":"run-start","wallClockEpoch":1767225600000},{"type":"entropy","name":"Picking task out of runtime-events, socket-drain","value":0.5393654731791905}]}

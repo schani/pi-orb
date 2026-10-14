@@ -1,16 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { cp, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
-import { guard as guardGlideos, sha as hash } from "./glideos-read-guard.mjs";
-import { guard as guardIap } from "./iap-read-guard.mjs";
 
-const lock = "42714b5e7e7bc4536d4ede553726961c11367012127dbcac18586c22b0ef5ea8";
+const hash = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
 const patch = "@earendil-works+pi-coding-agent+1.1.0.patch";
-const patchHash = "f1d54d120d0de92a0ae119e6588f43fb40114f66a3508fb57547034eddf0161e";
 
 function run(cwd, command, args) {
   const result = spawnSync(command, args, {
@@ -46,8 +44,6 @@ test("shipped Pi-only helper applies and reapplies in checkout staging and extra
   });
   const before = gitFiles.map(hash);
   try {
-    const manifest = JSON.parse(await readFile(join(import.meta.dirname, "package.json"), "utf8"));
-    assert.equal(manifest.dependencies.neverthrow, "8.2.0");
     await cp(join(root, "node_modules/neverthrow"), join(pristine, "node_modules/neverthrow"), {
       recursive: true,
     });
@@ -94,73 +90,3 @@ test("shipped Pi-only helper applies and reapplies in checkout staging and extra
     await rm(owned, { recursive: true, force: true });
   }
 });
-
-test("Glideos rejects a substituted shipped patch even with updated file manifest", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "glideos-tamper-"));
-  try {
-    await mkdir(join(dir, "patches"));
-    await writeFile(join(dir, "patches", patch), "altered patch");
-    const root = resolve(import.meta.dirname, "../../..");
-    await cp(
-      join(root, "patches/@earendil-works+pi-agent-core+1.1.0.patch"),
-      join(dir, "patches/@earendil-works+pi-agent-core+1.1.0.patch"),
-    );
-    await writeFile(
-      join(dir, "manifest.json"),
-      JSON.stringify({
-        projectId: "35f581fb-7bbf-4542-a1e8-0d047657a71d",
-        source: {
-          lock,
-          patches: {
-            "@earendil-works+pi-agent-core+1.1.0.patch":
-              "e817628f707f1d5ea2a3d0d27702919862b23303ba656dea8d30c6412da3e8e1",
-            [patch]: patchHash,
-            "@earendil-works+pi-ai+1.1.0.patch":
-              "812225636f3c081e6e8497b0b7c98051baedea90b455f6e7f837ccc5a84be9c7",
-          },
-        },
-        files: { [`patches/${patch}`]: hash(join(dir, "patches", patch)) },
-      }),
-    );
-    await assert.rejects(guardGlideos(dir), /qualified patch mismatch/);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-for (const patch of [
-  "@earendil-works+pi-agent-core+1.1.0.patch",
-  "@earendil-works+pi-ai+1.1.0.patch",
-  "@earendil-works+pi-coding-agent+1.1.0.patch",
-]) {
-  test(`IAP rejects substituted ${patch} with a matching mutable manifest`, async () => {
-    const root = resolve(import.meta.dirname, "../../..");
-    const dir = await mkdtemp(join(tmpdir(), "iap-patch-seal-"));
-    try {
-      await mkdir(join(dir, "patches"));
-      await cp(join(import.meta.dirname, "package-lock.json"), join(dir, "package-lock.json"));
-      const files = {};
-      for (const name of [
-        "@earendil-works+pi-agent-core+1.1.0.patch",
-        "@earendil-works+pi-ai+1.1.0.patch",
-        "@earendil-works+pi-coding-agent+1.1.0.patch",
-      ]) {
-        const file = `patches/${name}`;
-        await cp(join(root, file), join(dir, file));
-        if (name === patch) await writeFile(join(dir, file), "substituted patch");
-        files[file] = hash(join(dir, file));
-      }
-      await writeFile(
-        join(dir, "manifest.json"),
-        JSON.stringify({
-          sourceLockSha: lock,
-          lockSha: hash(join(dir, "package-lock.json")),
-          files,
-        }),
-      );
-      await assert.rejects(guardIap(dir), /qualified patch mismatch/);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-}

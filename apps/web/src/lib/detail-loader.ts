@@ -1,6 +1,6 @@
 import type { Result } from "neverthrow";
 
-/** One open disclosure. Every open/close/disconnect advances the response owner. */
+/** One open disclosure. Open/close/connection changes/retry advance the response owner. */
 export class DetailLoader<T, E = string> {
   private generation = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -50,6 +50,7 @@ export class DetailLoader<T, E = string> {
   }
 
   retry(): void {
+    this.generation++;
     this.stopTimer();
     this.refresh(this.generation);
   }
@@ -73,6 +74,7 @@ export class DetailLoader<T, E = string> {
     void request.then((result) => {
       if (this.generation !== owner || this.key !== key || !this.online) return;
       this.options.publish(result);
+      if (this.generation !== owner || this.key !== key || !this.online) return;
       if (this.running && result.isOk() && (this.options.shouldContinue?.(result.value) ?? true)) {
         this.timer = setTimeout(() => {
           this.timer = undefined;

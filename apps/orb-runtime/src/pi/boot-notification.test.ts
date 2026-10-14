@@ -133,6 +133,27 @@ describe("boot notification decision", () => {
     expect(plan.marker.content).toContain("will not be resumed automatically");
     expect(plan.marker.content).not.toContain("Continue whatever you were doing");
   });
+  it("deduplicates a visible decline only within the same runtime boot", () => {
+    const claim = persisted(notice([initialBoot, user, dangling]));
+    const entries = [initialBoot, user, dangling, claim, claim, claim];
+    const identity = { ...boot, runtimeInstanceId: "runtime-3" };
+    const declined = notice(entries, identity);
+    expect(declined.triggerTurn).toBe(false);
+    expect(declined.marker).toMatchObject({
+      customType: "pi-orb.turn-resume-declined",
+      display: true,
+      details: { ...identity, reason: "declined_already_resumed" },
+    });
+    const records = [...entries, persisted(declined)];
+    expect(planBootNotification(records, records, identity)).toEqual({ kind: "none" });
+    const later = notice(records, { ...identity, runtimeInstanceId: "runtime-4" });
+    expect(later.triggerTurn).toBe(false);
+    expect(later.marker).toMatchObject({
+      customType: "pi-orb.turn-resume-declined",
+      display: true,
+      details: { reason: "declined_already_resumed", previousRuntimeInstanceId: "runtime-3" },
+    });
+  });
   it("compaction cannot erase the notification crash-loop budget", () => {
     const marker = persisted(notice(settled));
     const compacted = {

@@ -73,7 +73,7 @@ class PreflightTest(unittest.TestCase):
     def test_ci_builds_control_plane_without_deployment_authority(self):
         workflow = Path(".github/workflows/ci.yml").read_text()
         self.assertIn("permissions:\n  contents: read\n", workflow)
-        build = workflow.split("  control-plane-image:\n", 1)[1]
+        build = workflow.split("  control-plane-image:\n", 1)[1].split("\n  checks:\n", 1)[0]
         self.assertIn("runs-on: ubuntu-24.04", build)
         self.assertNotIn("needs:", build)
         for forbidden in ["secrets.", "id-token:", "google-github-actions/", "docker push", "release.sh", "tofu"]:

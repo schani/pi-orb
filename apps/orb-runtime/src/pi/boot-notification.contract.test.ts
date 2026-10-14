@@ -8,12 +8,13 @@ import { PiOrbAgent, type PiSession } from "./agent.ts";
 import { BOOT_BASELINE_TYPE, planBootNotification } from "./boot-notification.ts";
 import { mapPiEntry } from "./mapping.ts";
 import { interruptedSubagents } from "./subagent-recovery.ts";
+import { TURN_RESUME_CUSTOM_TYPE, TURN_RESUME_DECLINED_CUSTOM_TYPE } from "./turn-resume.ts";
 
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
-function fixture() {
+function fixture(tail: "settled" | "dangling_tool_calls" | "trailing_tool_result" = "settled") {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-boot-contract-"));
   roots.push(root);
   const manager = SessionManager.create(root, root);
@@ -25,8 +26,11 @@ function fixture() {
   manager.appendMessage({ role: "user", content: "do work", timestamp: 1 });
   manager.appendMessage({
     role: "assistant",
-    content: [{ type: "text", text: "done" }],
-    stopReason: "stop",
+    content:
+      tail === "settled"
+        ? [{ type: "text", text: "done" }]
+        : [{ type: "toolCall", id: "call-1", name: "bash", arguments: { command: "ls" } }],
+    stopReason: tail === "settled" ? "stop" : "toolUse",
     api: "openai-responses",
     provider: "openai-codex",
     model: "test",
@@ -40,6 +44,15 @@ function fixture() {
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     },
   });
+  if (tail === "trailing_tool_result")
+    manager.appendMessage({
+      role: "toolResult",
+      toolCallId: "call-1",
+      toolName: "bash",
+      content: [{ type: "text", text: "README.md" }],
+      isError: false,
+      timestamp: 3,
+    });
   const agent = new PiOrbAgent({
     skillsDir: null,
     orbId: "boot-test",
@@ -101,6 +114,118 @@ it("persists a visible, model-visible user-role notice and deduplicates after re
         text: expect.stringContaining("All processes running before the restart were killed"),
       },
     ],
+  });
+  expect(
+    planBootNotification(reopened.getEntries(), reopened.buildContextEntries(), {
+      runtimeInstanceId: agent.runtimeInstanceId,
+      executionId: "new-host",
+      incarnation: "0",
+    }).kind,
+  ).toBe("none");
+});
+
+it.each(["dangling_tool_calls", "trailing_tool_result"] as const)(
+  "resumes a persisted %s through session attachment without awaiting inference",
+  (shape) => {
+    const { agent, manager, root } = fixture(shape);
+    const headRecordId = manager.getEntries().at(-1)?.id;
+    const calls: { triggerTurn?: boolean }[] = [];
+    const pi: PiSession = {
+      pendingMessageCount: 0,
+      cancelQueuedCustomSteer: () => false,
+      compact: async () => {
+        throw new Error("Compaction not used by this fixture");
+      },
+      abortCompaction: () => undefined,
+      waitForIdle: async () => undefined,
+      sendUserMessage: async () => undefined,
+      abort: async () => undefined,
+      isIdle: true,
+      subscribe: () => () => undefined,
+      sendCustomMessage: (message, options) => {
+        manager.appendCustomMessageEntry(
+          message.customType,
+          message.content,
+          message.display,
+          message.details,
+        );
+        calls.push(options ?? {});
+        return new Promise<void>(() => undefined);
+      },
+    };
+    agent.attachSession(pi, manager, { summarize: () => okAsync("") });
+    expect(calls).toEqual([{ triggerTurn: true }]);
+    expect(agent.getHealth()).toMatchObject({
+      status: "ready",
+      activity: "busy",
+      turnResume: { outcome: "resumed", shape, headRecordId },
+    });
+    const reopened = SessionManager.open(manager.getSessionFile() as string, root, root);
+    expect(reopened.getEntries().at(-1)).toMatchObject({
+      type: "custom_message",
+      customType: "pi-orb.turn-resume",
+      display: true,
+      details: { reason: "resumed", shape, headRecordId },
+    });
+    expect(convertToLlm(reopened.buildSessionContext().messages).at(-1)).toMatchObject({
+      role: "user",
+      content: [
+        { type: "text", text: expect.stringContaining("Continue from where you left off") },
+      ],
+    });
+  },
+);
+
+it("persists a visible decline without triggering a turn after three resume attempts", () => {
+  const { agent, manager, root } = fixture("dangling_tool_calls");
+  for (let i = 0; i < 3; i++)
+    manager.appendCustomMessageEntry(TURN_RESUME_CUSTOM_TYPE, "resuming", true, {
+      shape: "dangling_tool_calls",
+    });
+  const calls: { triggerTurn?: boolean }[] = [];
+  const pi: PiSession = {
+    pendingMessageCount: 0,
+    cancelQueuedCustomSteer: () => false,
+    compact: async () => {
+      throw new Error("Compaction not used by this fixture");
+    },
+    abortCompaction: () => undefined,
+    waitForIdle: async () => undefined,
+    sendUserMessage: async () => undefined,
+    abort: async () => undefined,
+    isIdle: true,
+    subscribe: () => () => undefined,
+    sendCustomMessage: (message, options) => {
+      manager.appendCustomMessageEntry(
+        message.customType,
+        message.content,
+        message.display,
+        message.details,
+      );
+      calls.push(options ?? {});
+      return Promise.resolve();
+    },
+  };
+  agent.attachSession(pi, manager, { summarize: () => okAsync("") });
+  expect(calls).toEqual([{ triggerTurn: false }]);
+  expect(agent.getHealth()).toMatchObject({
+    status: "ready",
+    activity: "idle",
+    turnResume: { outcome: "declined_already_resumed" },
+  });
+  const reopened = SessionManager.open(manager.getSessionFile() as string, root, root);
+  expect(reopened.getEntries().at(-1)).toMatchObject({
+    type: "custom_message",
+    customType: TURN_RESUME_DECLINED_CUSTOM_TYPE,
+    display: true,
+    details: {
+      reason: "declined_already_resumed",
+      runtimeInstanceId: agent.runtimeInstanceId,
+    },
+  });
+  expect(convertToLlm(reopened.buildSessionContext().messages).at(-1)).toMatchObject({
+    role: "user",
+    content: [{ type: "text", text: expect.stringContaining("will not be resumed automatically") }],
   });
   expect(
     planBootNotification(reopened.getEntries(), reopened.buildContextEntries(), {
@@ -483,10 +608,16 @@ it("reports a typed initialization failure when session context cannot be read",
   });
 });
 
-it.each(["throw", "reject"])(
-  "makes a %s from Pi durable and visible and releases the operation",
-  async (mode) => {
-    const { agent, manager } = fixture();
+it.each([
+  ["throw", "settled"],
+  ["reject", "settled"],
+  ["throw", "dangling_tool_calls"],
+  ["reject", "dangling_tool_calls"],
+] as const)(
+  "makes a %s from Pi durable and visible and releases the operation (%s)",
+  async (mode, tail) => {
+    const { agent, manager } = fixture(tail);
+    const headRecordId = manager.getEntries().at(-1)?.id;
     let savedResolve = (): void => {};
     const saved = new Promise<void>((resolve) => {
       savedResolve = resolve;
@@ -510,13 +641,21 @@ it.each(["throw", "reject"])(
     expect(agent.getHealth()).toMatchObject({
       status: "ready",
       activity: "idle",
-      turnResume: { outcome: "resume_failed" },
+      turnResume: {
+        outcome: "resume_failed",
+        headRecordId,
+        ...(tail === "settled" ? {} : { shape: tail }),
+      },
     });
     expect(manager.getEntries().at(-1)).toMatchObject({
       type: "custom_message",
       customType: "pi-orb.restart-notification-failed",
       display: true,
-      details: { reason: "delivery_failed", runtimeInstanceId: agent.runtimeInstanceId },
+      details: {
+        reason: "delivery_failed",
+        runtimeInstanceId: agent.runtimeInstanceId,
+        headRecordId,
+      },
     });
   },
 );

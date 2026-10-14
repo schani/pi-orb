@@ -64,7 +64,6 @@ describe("Pi package dependency contracts", () => {
     "package-lock.json",
     "scripts/subagent-liveness/package-lock.json",
     "scripts/native-mcp-exploration/package-lock.json",
-    "scripts/native-mcp-exploration/live-qualification/package-lock.json",
   ])("resolves every installed dependency in %s", (path) => {
     expect(checkGraph(json(path))).toEqual([]);
   });

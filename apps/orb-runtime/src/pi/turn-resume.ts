@@ -1,6 +1,3 @@
-import type { RuntimeTurnResume } from "@pi-orb/protocol";
-import { ResultAsync } from "neverthrow";
-
 /**
  * Interrupted-turn resume at runtime boot (docs/lifecycle.md).
  *
@@ -10,12 +7,7 @@ import { ResultAsync } from "neverthrow";
  * in the persisted session tail, so the decision is made here — locally, at
  * boot, from the tail alone, never from the cause of the restart.
  *
- * Detection is a pure function of the session entries; issuing the resume is
- * a single `sendCustomMessage` whose entry is simultaneously the visible
- * marker, the turn trigger, and one durable claim against the three-attempt guard. When
- * that guard suppresses a resume it says so in history too: a declined resume
- * must be as visible as a performed one, or the guard reproduces the very
- * symptom it exists to prevent ("the orb silently stopped mid-work").
+ * Detection is pure; boot-notification.ts plans the visible record and turn.
  */
 
 /** Custom type of the resume marker; also the guard key on the next boot. */
@@ -23,10 +15,6 @@ export const TURN_RESUME_CUSTOM_TYPE = "pi-orb.turn-resume";
 
 /** Custom type of the record announcing a resume the loop guard declined. */
 export const TURN_RESUME_DECLINED_CUSTOM_TYPE = "pi-orb.turn-resume-declined";
-
-/** Marker text. The model sees it: it is a session record, not an event. */
-export const TURN_RESUME_CONTENT =
-  "The previous turn was interrupted by a host restart. All processes running before the restart were killed — any servers, background jobs, and shell sessions from before the restart are no longer running. Resuming the turn now. Continue from where you left off.";
 
 /** Decline text. Addressed to the user: nothing will happen without them. */
 export const TURN_RESUME_DECLINED_CONTENT =
@@ -39,14 +27,6 @@ export type InterruptedTurnShape =
   | "dangling_tool_calls"
   /** A user message with no assistant reply at all (lost first bytes). */
   | "unanswered_user_message";
-
-export type NoResumeReason =
-  /** Nothing conversational is persisted — including every fresh session. */
-  | "empty_session"
-  /** The tail is a finished turn (or an aborted one). */
-  | "settled_tail"
-  /** Earlier automatic boot turns; dangling tails exhaust the guard at three. */
-  | "already_resumed";
 
 /** The interrupted tail a decision is about: its shape and its head entry. */
 export interface InterruptedTail {
@@ -74,44 +54,6 @@ export type TurnResumeDecision =
        */
       readonly suppressed: SuppressedResume | null;
     };
-
-/** Exactly the marker `AgentSession.sendCustomMessage` is handed. */
-export interface TurnResumeMarker {
-  readonly customType: string;
-  readonly content: string;
-  readonly display: boolean;
-  readonly details: {
-    readonly shape?: InterruptedTurnShape;
-    readonly headRecordId?: string;
-  };
-}
-
-/** The one AgentSession capability the resume needs. */
-export interface ResumeCapableSession {
-  sendCustomMessage(message: TurnResumeMarker, options?: { triggerTurn?: boolean }): Promise<void>;
-}
-
-export interface TurnResumeError {
-  readonly message: string;
-}
-
-export interface TurnResumeAttempt {
-  readonly decision: TurnResumeDecision;
-  /**
-   * What boot reports in `RuntimeHealth`, or null for an ordinary boot
-   * (docs/lifecycle.md: only notable decisions are reported).
-   */
-  readonly observation: RuntimeTurnResume | null;
-  /** The record appended to the session, or null when boot appended none. */
-  readonly marker: TurnResumeMarker | null;
-  /**
-   * For a resume, settles when the *resumed turn* does, not when the marker is
-   * appended: with `triggerTurn` the SDK awaits the whole agent run. Boot must
-   * never await this — it is exposed for logging and for tests. A decline
-   * settles as soon as its record is persisted.
-   */
-  readonly issued: ResultAsync<void, TurnResumeError> | null;
-}
 
 // -- tail classification ------------------------------------------------------
 
@@ -268,112 +210,4 @@ export function detectInterruptedTurn(entries: readonly unknown[]): TurnResumeDe
     reason: "already_resumed",
     suppressed: { ...dangling, announced: declineIndex > lastUserIndex },
   };
-}
-
-function optionalDetail(headRecordId: string | null): { headRecordId?: string } {
-  return headRecordId === null ? {} : { headRecordId };
-}
-
-/**
- * Detect and act: append the resume marker with `triggerTurn` for an
- * interrupted tail, or — when the loop guard suppresses a resume that has not
- * been announced yet — append the visible, non-triggering decline record. The
- * returned attempt is synchronous: the caller (boot) reports ready without
- * waiting, and a resumed turn surfaces as ordinary `busy` activity through the
- * normal agent-event path.
- */
-export function startInterruptedTurnResume(
-  entries: readonly unknown[],
-  session: ResumeCapableSession,
-): TurnResumeAttempt {
-  const decision = detectInterruptedTurn(entries);
-  const plan = planMarker(decision);
-  if (plan === null)
-    return { decision, observation: observationOf(decision), marker: null, issued: null };
-
-  // The SDK call can throw synchronously as well as reject; both are mapped
-  // at this boundary, and neither may escape into the boot path. The call
-  // itself is issued synchronously, so the record is queued before boot
-  // continues.
-  const send = ResultAsync.fromThrowable(
-    (): Promise<void> =>
-      plan.triggerTurn
-        ? session.sendCustomMessage(plan.marker, { triggerTurn: true })
-        : session.sendCustomMessage(plan.marker),
-    (error): TurnResumeError => ({
-      message: error instanceof Error ? error.message : String(error),
-    }),
-  );
-  return {
-    decision,
-    observation: observationOf(decision),
-    marker: plan.marker,
-    issued: send().map(() => undefined),
-  };
-}
-
-/** The record this decision appends, if any, and whether it triggers a turn. */
-function planMarker(
-  decision: TurnResumeDecision,
-): { readonly marker: TurnResumeMarker; readonly triggerTurn: boolean } | null {
-  if (decision.resume) {
-    return {
-      marker: {
-        customType: TURN_RESUME_CUSTOM_TYPE,
-        content: TURN_RESUME_CONTENT,
-        display: true,
-        details: { shape: decision.shape, ...optionalDetail(decision.headRecordId) },
-      },
-      triggerTurn: true,
-    };
-  }
-  if (decision.reason !== "already_resumed") return null;
-  const suppressed = decision.suppressed;
-  // Only a guard that actually holds a dangling turn back is worth telling the
-  // user about, and only once per interruption.
-  if (suppressed === null || suppressed.announced) return null;
-  return {
-    marker: {
-      customType: TURN_RESUME_DECLINED_CUSTOM_TYPE,
-      content: TURN_RESUME_DECLINED_CONTENT,
-      display: true,
-      details: optionalDetail(suppressed.headRecordId),
-    },
-    // Deliberately no turn: declining *is* the decision.
-    triggerTurn: false,
-  };
-}
-
-/**
- * The health report for a boot decision (docs/lifecycle.md). A declined resume
- * is reported on every boot that declines, even when the record announcing it
- * is already in history: health describes this boot, the record deduplicates
- * across boots.
- */
-function observationOf(decision: TurnResumeDecision): RuntimeTurnResume | null {
-  if (decision.resume) {
-    return {
-      outcome: "resumed",
-      shape: decision.shape,
-      ...optionalDetail(decision.headRecordId),
-    };
-  }
-  if (decision.reason !== "already_resumed" || decision.suppressed === null) return null;
-  return {
-    outcome: "declined_already_resumed",
-    shape: decision.suppressed.shape,
-    ...optionalDetail(decision.suppressed.headRecordId),
-  };
-}
-
-/** One grep-friendly line per boot resume decision. */
-export function describeTurnResumeDecision(decision: TurnResumeDecision): string {
-  if (decision.resume) {
-    return `turn-resume: resuming interrupted turn shape=${decision.shape} head=${decision.headRecordId ?? "unknown"}`;
-  }
-  if (decision.reason !== "already_resumed" || decision.suppressed === null) {
-    return `turn-resume: no resume reason=${decision.reason}`;
-  }
-  const { shape, headRecordId, announced } = decision.suppressed;
-  return `turn-resume: no resume reason=already_resumed suppressed=${shape} head=${headRecordId ?? "unknown"} announced=${announced}`;
 }

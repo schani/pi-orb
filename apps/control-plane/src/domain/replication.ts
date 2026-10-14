@@ -5,7 +5,6 @@ import { sleepResult, withDeadline } from "./dst.ts";
 import { formatOrbFailure, type ReplicationIntegrityError, type StoreError } from "./errors.ts";
 import { agentPlacement } from "./harness-agent-plane.ts";
 import { logOrbEvent } from "./log.ts";
-import { generateOrbName } from "./orb-naming.ts";
 import type { ControlPlaneDeps, OrbHostRef } from "./ports.ts";
 import { inspectFailedRuntime } from "./runtime-recovery.ts";
 
@@ -131,55 +130,40 @@ export async function failOrbForIntegrity(
   return false;
 }
 
+type YieldedPollOutcome = { readonly type: "yielded"; readonly committedRecords: number };
+
 /**
  * Pull one orb from its committed cursor until the runtime returns no new
  * complete records (docs/history-replication.md/docs/history-replication.md). Non-empty commits loop immediately;
  * cursor conflicts re-read and continue (another poller won); retryable
  * failures return to the ordinary polling cadence with the cursor unchanged.
  * A bounded caller gets `retryable`, not `caught_up`, if its attempt limit ends first.
+ * An optional stop signal yields between rounds, never inside a commit.
  */
-async function reconcileOrbName(
+export function pollOrbUntilCaughtUp(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   orbId: string,
-): Promise<void> {
-  const orb = await deps.store.getOrb(task, orbId);
-  if (orb.isErr() || orb.value === null || orb.value.name !== null) return;
-  const history = await deps.store.readHistorySnapshot(task, orbId);
-  if (history.isErr()) return;
-  const firstUser = history.value.records.find(
-    (record) => record.type === "message" && record.role === "user",
-  );
-  if (firstUser === undefined || firstUser.type !== "message") return;
-  const message = firstUser.content
-    .filter(
-      (block): block is Extract<(typeof firstUser.content)[number], { type: "text" }> =>
-        block.type === "text",
-    )
-    .map((block) => block.text)
-    .join("\n");
-  const imageOnly =
-    message.trim() === "" && firstUser.content.some((block) => block.type === "image");
-  if (message.trim() === "" && !imageOnly) return;
-  const generated = await generateOrbName(
-    task,
-    { store: deps.store, generator: deps.nameGenerator, leaseMs: deps.nameLeaseMs },
-    orbId,
-    { message: imageOnly ? "[image-only request]" : message, readme: null },
-  );
-  if (generated.isErr()) {
-    logOrbEvent(task, orbId, "auto-name-failed", { error: generated.error.message });
-  }
-}
-
+  maxAttempts?: number,
+): Promise<PollOutcome>;
+export function pollOrbUntilCaughtUp(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orbId: string,
+  maxAttempts: number,
+  stop: AbortSignal | undefined,
+): Promise<PollOutcome | YieldedPollOutcome>;
 export async function pollOrbUntilCaughtUp(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   orbId: string,
   maxAttempts = Infinity,
-): Promise<PollOutcome> {
+  stop?: AbortSignal,
+): Promise<PollOutcome | YieldedPollOutcome> {
   let committedRecords = 0;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // Finish admitted adapter I/O and commit before observing shutdown/fatal.
+    if (stop?.aborted) return { type: "yielded", committedRecords };
     const orbResult = await deps.store.getOrb(task, orbId);
     if (orbResult.isErr()) return retryableStore(orbResult.error);
     const orb = orbResult.value;
@@ -316,7 +300,6 @@ export async function pollOrbUntilCaughtUp(
         }
         return retryableStore(error);
       }
-      await reconcileOrbName(task, deps, orbId);
       return { type: "caught_up", committedRecords };
     }
 
@@ -348,5 +331,6 @@ export async function pollOrbUntilCaughtUp(
     await task.checkpoint("committed pull batch");
     // Non-empty response: pull again immediately to reduce lag.
   }
+  if (stop?.aborted) return { type: "yielded", committedRecords };
   return { type: "retryable", message: "pull attempt limit reached" };
 }

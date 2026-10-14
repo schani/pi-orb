@@ -88,7 +88,10 @@ export class OutboundWriter {
     const event = frame.event;
     for (let i = this.queue.length - 1; i >= 0; i--) {
       const queued = this.queue[i];
-      if (queued === undefined || queued.frame.type !== "runtime.event") continue;
+      if (queued === undefined) continue;
+      // Preserve transient ordering relative to every critical frame.
+      if (!isTransient(queued.frame)) break;
+      if (queued.frame.type !== "runtime.event") continue;
       const queuedEvent = queued.frame.event;
       if (event.type === "status" && queuedEvent.type === "status") {
         this.replaceAt(i, frame);

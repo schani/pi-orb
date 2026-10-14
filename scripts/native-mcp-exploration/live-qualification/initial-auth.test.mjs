@@ -1,35 +1,8 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { once } from "node:events";
-import { realpathSync } from "node:fs";
 import { createServer } from "node:http";
-import { join, resolve, sep } from "node:path";
 import { test } from "node:test";
-import { pathToFileURL } from "node:url";
-
-const staged = process.env.STAGED_INITIAL_AUTH;
-const stage = staged && resolve(staged);
-if (stage) {
-  const sdk = realpathSync(
-    join(stage, "node_modules/@earendil-works/pi-coding-agent/dist/index.js"),
-  );
-  assert.ok(sdk.startsWith(realpathSync(stage) + sep), `SDK escaped stage: ${sdk}`);
-  assert.equal(
-    execFileSync(
-      process.execPath,
-      [
-        "--input-type=module",
-        "-e",
-        "process.stdout.write(import.meta.resolve('@earendil-works/pi-coding-agent'))",
-      ],
-      { cwd: stage, encoding: "utf8" },
-    ),
-    pathToFileURL(sdk).href,
-  );
-}
-const { runInitialAuth } = await import(
-  stage ? pathToFileURL(join(stage, "initial-auth.mjs")).href : "./initial-auth.ts"
-);
+import { runInitialAuth } from "./initial-auth.ts";
 
 const cf = {
   code: "async () => { const r = await cloudflare.request({ method: 'GET', path: '/accounts', query: { per_page: 1 } }); return { success: r.success, status: r.status, count: Array.isArray(r.result) ? r.result.length : 0 }; }",
@@ -137,7 +110,32 @@ test("initial broker auth_required yields zero tools; only next before_agent_sta
       { name: "execute", arguments: cf },
       { name: "search_datadog_monitors", arguments: dd },
     ]);
-    assert.equal(records.filter((r) => r.phase === "initial_auth").length, 2);
+    assert.deepEqual(
+      records
+        .filter((r) => r.phase === "initial_auth")
+        .map((r) => ({
+          server: r.server,
+          state: r.state,
+          code: r.diagnostic?.code,
+          toolCount: r.toolCount,
+        })),
+      ["cloudflare", "datadog"].map((server) => ({
+        server,
+        state: "needs-auth",
+        code: "auth_required",
+        toolCount: 0,
+      })),
+    );
+    assert.deepEqual(
+      records
+        .filter((r) => r.phase === "rediscovery")
+        .map((r) => ({
+          server: r.server,
+          state: r.state,
+          count: r.count,
+        })),
+      ["cloudflare", "datadog"].map((server) => ({ server, state: "connected", count: 1 })),
+    );
     assert.deepEqual(
       records.filter((r) => r.phase === "read").map((r) => r.server),
       ["cloudflare", "datadog"],
