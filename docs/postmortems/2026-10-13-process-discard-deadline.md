@@ -25,3 +25,7 @@ A controlled reproduction stops the supervisor with SIGSTOP, confirms `/proc/<pi
 Both cases assert matching receipts, supervisor/descendant absence and metadata removal. Failed assertions include the recorded birth identity, current supervisor stat, receipt and stderr. No production deadline, receipt gate or persisted schema changes.
 
 Invariant: elapsed time never proves cleanup; disposal requires launch-matched drain evidence and supervisor absence. See `docs/host-provider.md`.
+
+## Scoped release exception
+
+**User decision 2026-10-14 (PDT):** historical root-cause investigation of PR 92's first CI process-discard failure is not a merge/deployment requirement. Preserve the evidence above; neither the historical cause nor its repair is claimed proven. Fresh first-attempt exact-head CI, E2E and Durable qualification, new-failure correction and DST replay remain mandatory.
