@@ -115,13 +115,23 @@ Summary: token volume, uncached input, output, weighted prompt cache share and r
 
 Breakdowns: token kind, use or provider/model. More than six models becomes five volume leaders plus Other, preserving totals. Use/model lines sum all four token fields. One measure selects all tokens/uncached input/output for both rankings. Rankings show five leading orbs and observed uses. Period changes and Retry preserve filters; breakdown/measure changes never refetch. Obsolete reads are aborted/ignored; failures show Retry, not stale totals or an empty-success state.
 
-`Chart.tsx` owns the shared React lifecycle for transcript and usage charts; `chart-render.ts` and `chart-spec.ts` own rendering, tooltips, isolation and styles. Desktop end labels and the phone key isolate series on hover. Fonts load before Vega measures text. Optional render-only `ChartXAxis {ticks, labelEvery, format}` controls dense ticks without changing persisted `ChartSpec`.
+`Chart.tsx` owns the shared React lifecycle for transcript charts, the usage timeline and Use ranking; `chart-render.ts` and `chart-spec.ts` own rendering, tooltips, isolation and styles. Desktop end labels and the phone key isolate series on hover. Fonts load before Vega measures text. Optional render-only `ChartXAxis {ticks, labelEvery, format}` controls dense ticks without changing persisted `ChartSpec`.
 
 Validation: protocol/service/HTTP/web tests; ledger contracts against PGlite and real PostgreSQL; Chromium/WebKit usage and transcript-chart E2E, including 320/390px, held obsolete reads, retry/empty states and both civil DST transitions. Failure evidence: `test-failures/2026-10-13-token-usage-implementation.md`. No deployment or full release qualification is claimed.
 
+## Top-orb links (approved 2026-10-14; implemented locally)
+
+Top orbs uses one native whole-row anchor for name, proportional bar and exact token count, keyed and routed by encoded ID. Rankings retain full accessible labels, distinguish duplicate names with IDs, use IDs for null names and sort by measure then ID. Gray hover underlines only the name; keyboard focus is visible with one stop per row. Mobile/coarse targets are at least 44px.
+
+A dedicated native component preserves link semantics (Back, new tabs, copy-link) without coupling navigation to shared Vega charts. The timeline and Use ranking retain Vega. Deleted orbs use the existing missing-resource page: requested URL preserved, “Orb doesn't exist” and dashboard link. Existing usage diagnostics and visible errors suffice; no persistence or navigation telemetry added.
+
+[Approved hosted prototype](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/d513d1fd-ee60-4e08-8373-833a56f035f9/design/usage-orb-links/index.html).
+
+Validation: focused units and Chromium/WebKit usage E2E, web typecheck, scoped lint and build. No full release, deployment or physical-device qualification claimed.
+
 ## Mock frontend (2026-10-13)
 
-`npm run dev:frontend` serves `/usage` from the mock backend. `apps/web/dev/usage-fixture.ts` generates deterministic quarter-hour events from April 2026, aggregated into requested boundaries, with all six uses, multiple models and five orbs (one nameless). Summary, breakdown and ranking totals reconcile; overlapping ranges are additive. No production ledger or provider is contacted.
+`npm run dev:frontend` serves `/usage` from the mock backend. `apps/web/dev/usage-fixture.ts` generates deterministic quarter-hour events from April 2026, aggregated into requested boundaries, with all six uses, multiple models and five orbs. Four named usage UUIDs are seeded as stopped mock orbs from shared metadata; one nameless UUID deliberately remains missing, exercising retained usage after deletion. Summary, breakdown and ranking totals reconcile; overlapping ranges are additive. No production ledger or provider is contacted.
 
 ## Design alternatives (2026-10-13)
 

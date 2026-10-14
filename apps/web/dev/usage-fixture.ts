@@ -16,6 +16,12 @@ const names = [
   "Agent SDK parity",
   null,
 ];
+const usageOrbId = (index: number) =>
+  "10000000-0000-4000-8000-" + String(index + 1).padStart(12, "0");
+export const usageOrbs = names.map((name, index) => ({
+  id: usageOrbId(index),
+  name,
+}));
 const keys = ["input", "output", "cacheRead", "cacheWrite", "calls"] as const;
 const empty = (): UsageTotals => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0 });
 const add = (target: UsageTotals, row: UsageTotals) => {
@@ -61,7 +67,7 @@ export function usageFixture(boundaries: readonly number[]): UsageView {
       if (total === undefined) {
         total = {
           ...empty(),
-          id: "10000000-0000-4000-8000-" + String(orb + 1).padStart(12, "0"),
+          id: usageOrbId(orb),
           name: names[orb] ?? null,
         };
         orbs.set(orb, total);

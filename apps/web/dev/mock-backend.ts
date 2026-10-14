@@ -43,7 +43,7 @@ import { Check } from "typebox/value";
 import type { Plugin } from "vite";
 import { WebSocket, WebSocketServer } from "ws";
 import { chartFixtureRecords } from "./chart-fixtures.ts";
-import { usageFixture } from "./usage-fixture.ts";
+import { usageFixture, usageOrbs } from "./usage-fixture.ts";
 
 const PROJECT_ID = "frontend-fixture-project";
 const ORB_ID = "frontend-fixture-orb";
@@ -797,6 +797,9 @@ function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
       ...fleetProjects.map((entry): [string, ProjectView] => [entry.id, entry]),
     ]),
     orbs: new Map([
+      ...usageOrbs.flatMap((entry): [string, OrbView][] =>
+        entry.name === null ? [] : [[entry.id, { ...orb, ...entry, state: "stopped" }]],
+      ),
       ...fleetOrbs.map((entry): [string, OrbView] => [entry.id, entry]),
       [orb.id, orb],
       [longOrb.id, longOrb],

@@ -105,22 +105,21 @@ export function usageTimeline(data: UsageView, breakdown: UsageBreakdown): LineC
   };
 }
 
+export interface RankedUsageOrb {
+  id: string;
+  label: string;
+  value: number;
+}
+
 export function usageRankings(
   data: UsageView,
   measure: UsageMeasure,
-): { orbs: BarChart | null; uses: BarChart | null } {
+): { orbs: RankedUsageOrb[]; uses: BarChart | null } {
   const value = (row: UsageTotals) => (measure === "total" ? totalTokens(row) : row[measure]);
   const orbs = [...data.orbs]
     .sort((a, b) => value(b) - value(a) || a.id.localeCompare(b.id))
     .slice(0, 5);
   const labels = orbs.map((row) => row.name ?? row.id);
-  const orbBars = orbs.map((row, index) => ({
-    label:
-      labels.filter((name) => name === labels[index]).length > 1
-        ? (row.name ?? "Orb").slice(0, 40) + " · " + row.id
-        : (labels[index] ?? row.id),
-    value: value(row),
-  }));
   const useTotals = new Map<ModelCallUse, number>();
   for (const row of data.buckets)
     useTotals.set(row.use, (useTotals.get(row.use) ?? 0) + value(row));
@@ -128,10 +127,14 @@ export function usageRankings(
     .map(([use, n]) => ({ label: USE_LABELS[use], value: n }))
     .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
   return {
-    orbs:
-      orbBars.length === 0
-        ? null
-        : { kind: "bar", title: "Top orbs", unit: "tokens", bars: orbBars },
+    orbs: orbs.map((row, index) => ({
+      id: row.id,
+      label:
+        labels.filter((label) => label === labels[index]).length > 1
+          ? (row.name ?? row.id) + " · " + row.id
+          : (row.name ?? row.id),
+      value: value(row),
+    })),
     uses:
       useBars.length === 0 ? null : { kind: "bar", title: "Use", unit: "tokens", bars: useBars },
   };

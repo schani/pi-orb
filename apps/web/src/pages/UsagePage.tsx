@@ -2,6 +2,7 @@ import type { UsageView } from "@pi-orb/protocol";
 import { useEffect, useMemo, useState } from "react";
 import { Chart } from "../components/Chart.tsx";
 import { Icon } from "../components/Icons.tsx";
+import { UsageOrbRankings } from "../components/UsageOrbRankings.tsx";
 import { type ApiError, describeApiError, getModelUsage } from "../lib/api.ts";
 import type { ChartXAxis } from "../lib/chart-spec.ts";
 import {
@@ -143,10 +144,10 @@ function LoadedUsage({
             </label>
           </header>
           <div className="usage-bars">
-            {ranks.orbs !== null && (
+            {ranks.orbs.length > 0 && (
               <section>
                 <h3>Top orbs</h3>
-                <Chart spec={ranks.orbs} identity={identity} />
+                <UsageOrbRankings rows={ranks.orbs} />
               </section>
             )}
             {ranks.uses !== null && (
