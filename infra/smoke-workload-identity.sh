@@ -102,6 +102,9 @@ cleanup() {
     echo "Delete only these test fixtures after preserving evidence; they may still incur compute/storage charges." >&2
   fi
   [ -n "$WORK_DIR" ] && rm -rf "$WORK_DIR"
+  if [ "$status" -eq 0 ]; then
+    echo "WORKLOAD-IDENTITY SMOKE PASSED in $(($(date +%s) - START_TS))s; fixture deletion verified."
+  fi
   exit "$status"
 }
 trap cleanup EXIT
@@ -715,7 +718,7 @@ command_orb "$MINT_ORB" stop
 wait_for_state "$MINT_ORB" stopped "$STOPPED_TIMEOUT" "stop-mint-orb"
 
 echo
-echo "WORKLOAD-IDENTITY SMOKE PASSED in $(($(date +%s) - START_TS))s"
+echo "Workload-identity assertions passed; verifying fixture deletion."
 echo "  issuer:      $ISSUER_URL"
 echo "  audience:    $AUDIENCE"
 echo "  claims:      $CLAIMS"
@@ -724,4 +727,3 @@ if [ "$FEDERATE" = true ]; then
 else
   echo "  federation:  SKIPPED (no WIF tier configured)"
 fi
-echo "  cleanup:     both orbs are deleted on exit$([ "$PROJECT_IS_DISPOSABLE" = true ] && echo ", along with the project")"

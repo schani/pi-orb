@@ -1,5 +1,7 @@
 # Cloud deployment direction
 
+**Identity cleanup failed (2026-10-14, PDT):** [Deploy 38596107385](https://github.com/schani/pi-orb/actions/runs/38596107385) on `310def9658c2fe58125494b2ca57b6e0fdf41974` is **applied-but-unvalidated**, phase `identity`, exit 1. Identity assertions passed, but both identity fixtures were `cleanup-failed`; the premature `PASSED` banner is not the success verdict. The release record is authoritative. Parent read-only observations found both fixtures stopped without deletion intent and zero scoped DELETE log rows; exact auth/transport/rejection cause remains unknown. No root-fix claim or waiver. Diagnostics/verdict correction and preserved evidence: `docs/postmortems/2026-10-14-identity-smoke-cleanup.md`. This correction authorizes no cleanup or deployment; cloud mutation remains Actions-only pending a new explicit parent directive.
+
 **PR 92 scoped release exception (2026-10-14, PDT):** the user waived historical investigation of the first CI process-discard failure and authorized merge/deploy. Evidence and the unproven cause remain in `docs/postmortems/2026-10-13-process-discard-deadline.md`; no historical root-cause fix is claimed. Fresh first-attempt exact-head CI/E2E/Durable qualification, new-failure handling and DST replay remain mandatory. The exception neither bypasses the global release lock nor authorizes manual cloud mutation.
 
 **Validated transaction, monitor flagged (2026-10-13, PDT):** [Deploy 38484755289](https://github.com/schani/pi-orb/actions/runs/38484755289) completed with workflow **failure** from the rollout monitor. The authoritative transaction deployed `66479dffe6da964b5b2e50094a7d9852949ba213` as `r-1791935519-4b99cc0b-7365-4fc7-a485-2a795ca6d660`, **validated**, exit 0, all twelve gates passed at 17:41:28. Exact-head [CI](https://github.com/schani/pi-orb/actions/runs/38484734030), [E2E](https://github.com/schani/pi-orb/actions/runs/38484734139) and [Durable qualification](https://github.com/schani/pi-orb/actions/runs/38484734033) passed on attempt 1; no gate bypass. Migration 044 applied at 17:05:57; production catalog/ledger were not independently queried. This establishes deployment, not recovery of the original blocked orb.
@@ -552,7 +554,13 @@ checks deployment identity, and runs only post-apply revision pruning,
 retirement/activation/validation—not build, migrations or infrastructure apply. The original failure is never rewritten into success.
 
 Successful smoke fixtures are deleted and verified absent; failed fixtures remain
-for diagnosis and cost accounting. An accepted cloud cleanup operation can outlive
+for diagnosis and cost accounting. **Decision (2026-10-14):** complete identity
+smoke success follows verified cleanup, never assertion success alone. Cleanup
+failure logs contain only owned kind/ID, fixed phase/error categories and exit
+codes; API diagnostics add HTTP status without tokens, raw stderr or error
+bodies. Absence requires HTTP 404 with `not_found`, carried by `api.sh` as
+`{"error":{"code":"not_found"},"httpStatus":404}`.
+Evidence: `docs/postmortems/2026-10-14-identity-smoke-cleanup.md`. An accepted cloud cleanup operation can outlive
 its CLI: a command timeout alone does not establish resource state. Reconciliation
 must use the exact operation and resource identities
 (`docs/postmortems/2026-09-16-validator-cleanup-timeout.md`).
