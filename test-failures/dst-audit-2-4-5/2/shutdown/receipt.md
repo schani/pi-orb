@@ -1,6 +1,6 @@
 # Audit #2 — safe-boundary shutdown
 
-2026-10-14, America/Los_Angeles. Local, undeployed. Corrected sources are frozen (`frozen-sha256.txt`). **76 focused tests pass**; full normal-suite and runtime E2E validation are running, with the final gate pending. Original receipt: `.context/dst-audit/2-shutdown/receipt.md`; provenance: `../../MANIFEST.md`.
+2026-10-14, America/Los_Angeles. Local, undeployed. Corrected sources are frozen (`frozen-sha256.txt`). **76 focused tests pass**; PR head `705b8d8` qualified on merge `92ede4c` against `224a38d`: [final receipt](../../final-validation.md). Final current-head CI is pending; the prior 11 greens are historical integration proof; no release qualification. Original receipt: `.context/dst-audit/2-shutdown/receipt.md`; provenance: `../../MANIFEST.md`.
 
 ## Red and explicit pre-fix replay
 

@@ -37,4 +37,4 @@ Backward coalescing stops at the first critical queued frame; matching transient
 - Unit: three transient kinds × seven critical boundaries, plus trailing-segment coalescing and existing budget/drain tests.
 - Runtime/web TypeScript and scoped Biome pass; `git diff --check` passes. Logs: `.context/dst-audit/4-outbound-coalescing/{runtime-typecheck,web-typecheck,biome}.log`.
 
-Full normal-suite and runtime E2E validation are running; the final gate remains pending. Local, undeployed.
+PR head `705b8d8` qualified on merge `92ede4c` against `224a38d`: [final receipt](dst-audit-2-4-5/final-validation.md). Final current-head CI is pending; the prior 11 greens are historical integration proof; undeployed, no release qualification.

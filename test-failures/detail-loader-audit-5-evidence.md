@@ -40,7 +40,7 @@ DST_REPLAY=test-failures/dst-audit-2-4-5/5/<recorded-trace> npx vitest run apps/
 
 ## Qualification and evidence
 
-All six explicit replays pass after their respective fixes. Full detail-loader suite: 11 tests pass, including 30 iterations per DST scenario (180 iterations across the six new cases). Targeted Biome check passes after formatting. Full normal-suite and runtime E2E validation are running; the final gate remains pending.
+All six explicit replays pass after their respective fixes. Full detail-loader suite: 11 tests pass, including 30 iterations per DST scenario (180 iterations across the six new cases). Targeted Biome check passes after formatting. PR head `705b8d8` qualified on merge `92ede4c` against `224a38d`: [final receipt](dst-audit-2-4-5/final-validation.md). Final current-head CI is pending; the prior 11 greens are historical integration proof; no release qualification.
 
 Original traces remain intact. Raw logs: `.context/dst-audit/5/retry-red.log`, `retry-replay-red.log`, `retry-replay-green.log`, `publish-red.log`, `publish-<action>-replay-red.log`, `publish-<action>-replay-green.log`, `detail-green.log`, `biome.log`, `final-detail-green.log`, `final-replays-green.log`.
 
