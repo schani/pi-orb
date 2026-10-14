@@ -1519,9 +1519,8 @@ async function reconcileRunning(
     if (delivered !== null) return delivered;
   }
 
-  // Scheduled sleep ignores browser presence but waits for runtime work,
-  // outstanding inbox delivery, and admitted uploads. The batch branch above
-  // returned while any inbox obligation remained.
+  // Sleep drains admitted work and uploads, regardless of browser presence.
+  // Unadmitted FIFO rows wait for legitimate wake.
   const sleepNow = task.wallNow();
   if (orb.sleepId !== null && orb.sleepUntil !== null && sleepNow < orb.sleepUntil) {
     if (agentPlacement(deps.agentPlane, orb) === "central") {
@@ -1529,7 +1528,9 @@ async function reconcileRunning(
       if (messages.isErr()) return retryable(messages.error);
       if (
         messages.value.some(
-          (message) => message.status === "queued" || message.status === "delivering",
+          (message) =>
+            (message.status === "queued" || message.status === "delivering") &&
+            message.operationId !== null,
         )
       )
         return { type: "noop" };
@@ -1640,6 +1641,7 @@ async function dispatchQueuedMessages(
       if (
         current.value === null ||
         current.value.agentAdmissionVersion !== orb.agentAdmissionVersion ||
+        current.value.sleepId !== null ||
         current.value.stopReason === "manual" ||
         current.value.stopReason === "sleep" ||
         ["archiving", "archived", "deleting"].includes(current.value.state)
@@ -2650,7 +2652,7 @@ export async function reconcileCentralAgent(
       const busy = deps.agentPlane?.session(orbId)?.workActive?.() === true;
       deps.control.noteAgentWork(orbId, busy);
       if (busy) await deps.store.touchLastBusy(task, { orbId, now: task.wallNow() });
-      if (orb.stopReason !== "sleep") {
+      if (orb.sleepId === null && orb.stopReason !== "sleep") {
         const delivered = await dispatchQueuedMessages(task, deps, orb, "");
         const blocked = delivered?.type === "retryable";
         if (deps.control.noteCondition(`central-delivery:${orbId}`, blocked) && blocked)

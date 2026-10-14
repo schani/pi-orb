@@ -7,7 +7,12 @@ import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts"
 import { runDst, TEST_WALL_EPOCH, waitUntil } from "../testkit/sim.ts";
 import { commitAgentHistory } from "./agent-history.ts";
 import type { AgentPlane } from "./agent-ports.ts";
-import { reconcileCentralAgent, reconcileOrbOnce, requestOrbStop } from "./lifecycle.ts";
+import {
+  reconcileCentralAgent,
+  reconcileOrbOnce,
+  requestOrbSleep,
+  requestOrbStop,
+} from "./lifecycle.ts";
 import { pollLoop } from "./loops.ts";
 
 describe("independent central dispatcher", () => {
@@ -99,6 +104,121 @@ describe("independent central dispatcher", () => {
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(delivered).toBe(0);
+      expect(h.store.messageSnapshots("orb")[0]).toMatchObject({
+        status: "delivering",
+        autoStart: false,
+      });
+    });
+  });
+  it("does not deliver a claimed old batch after accepted Sleep", async () => {
+    await runDst({ name: "central-dispatch-sleep-claim", iterations: 15 }, async (sim) => {
+      const h = makeHarness();
+      const gate = new ConditionVariable("claim sleep authority");
+      let queued = false;
+      let claimed = false;
+      let released = false;
+      let delivered = 0;
+      const original = h.store.claimNextOrbMessageBatch.bind(h.store);
+      h.store.claimNextOrbMessageBatch = (task, request) =>
+        new ResultAsync(
+          (async () => {
+            const result = await original(task, request);
+            claimed = true;
+            gate.notifyAll(task, "claimed");
+            while (!released) await gate.wait(task, "sleep accepted");
+            return result;
+          })(),
+        );
+      const unavailable = () =>
+        errAsync({
+          type: "runtime_client_error" as const,
+          code: "unreachable" as const,
+          message: "not needed",
+          retryable: true,
+          answered: false,
+        });
+      const plane: AgentPlane = {
+        placement: "central",
+        health: () =>
+          okAsync({
+            v: 1 as const,
+            orbId: "orb",
+            runtimeInstanceId: "central",
+            status: "initializing" as const,
+            phase: "booting" as const,
+          }),
+        deliverMessage: () => {
+          delivered++;
+          return okAsync({
+            v: 1 as const,
+            messageId: "old",
+            status: "persisted" as const,
+            delivery: "turn" as const,
+            operationId: "turn",
+            duplicate: false,
+          });
+        },
+        pullHistory: unavailable,
+        prepareIdleStop: unavailable,
+        suspend: () => okAsync(undefined),
+        dispose: () => okAsync(undefined),
+        session: () => null,
+        close: () => okAsync(undefined),
+      };
+      const deps = { ...h.deps, agentPlane: plane };
+      const project = makeProjectRow("project");
+      h.store.seedProject(project);
+      h.store.seedOrb(makeOrbRow("orb", "project", "running"));
+      const result = await sim.runTasks([
+        {
+          name: "dispatcher",
+          f: async (task) => {
+            while (!queued) await gate.wait(task, "input queued");
+            await reconcileCentralAgent(task, deps, "orb");
+          },
+        },
+        {
+          name: "stop",
+          f: async (task) => {
+            expect(
+              (
+                await h.store.enqueueOrbMessage(task, {
+                  orbId: "orb",
+                  messageId: "old",
+                  content: [{ type: "text", text: "old" }],
+                  now: task.wallNow(),
+                })
+              ).isOk(),
+            ).toBe(true);
+            queued = true;
+            gate.notifyAll(task, "queued");
+            while (!claimed) await gate.wait(task, "claimed batch");
+            expect(
+              (
+                await requestOrbSleep(
+                  task,
+                  deps,
+                  "orb",
+                  {
+                    kind: "central",
+                    orbId: "orb",
+                    projectId: "project",
+                    ownerUserId: project.ownerUserId,
+                    agentAdmissionVersion: 0,
+                  },
+                  300,
+                  "sleep",
+                )
+              ).isOk(),
+            ).toBe(true);
+            released = true;
+            gate.notifyAll(task, "sleep accepted");
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(h.store.orbSnapshot("orb")).toMatchObject({ sleepId: "sleep", stopReason: null });
       expect(delivered).toBe(0);
       expect(h.store.messageSnapshots("orb")[0]).toMatchObject({
         status: "delivering",

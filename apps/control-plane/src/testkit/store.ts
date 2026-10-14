@@ -1226,6 +1226,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     params: { orbId: string; now: number },
   ): ResultAsync<OrbMessageRow[], StoreError> {
     return this.access(task, FAILPOINTS.storeWrite, "claim orb message batch", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (orb?.sleepId != null || orb?.stopReason === "sleep") return [];
       const rows = this.messages.get(params.orbId) ?? [];
       const outstanding = rows.filter(
         (row) => row.status === "queued" || row.status === "delivering",

@@ -38,6 +38,185 @@ function contract(name: string, open: () => Promise<Subject>): void {
 
     afterEach(async () => subject.close());
 
+    it.each([false, true])(
+      "holds old input through Sleep until fresh peer admission (claimed=%s)",
+      async (claimed) => {
+        const store = subject.store;
+        const senderId = "00000000-0000-4000-8000-000000000086";
+        const project = (await store.getProject(task, PROJECT))._unsafeUnwrap();
+        expect(project).not.toBeNull();
+        if (project === null) throw new Error("seeded project missing");
+        expect((await store.insertOrb(task, makeOrbRow(senderId, PROJECT, "running"))).isOk()).toBe(
+          true,
+        );
+        const sender = {
+          orbId: senderId,
+          projectId: PROJECT,
+          ownerUserId: project.ownerUserId,
+          caller: {
+            kind: "central" as const,
+            orbId: senderId,
+            projectId: PROJECT,
+            ownerUserId: project.ownerUserId,
+            agentAdmissionVersion: 0,
+          },
+        };
+        const enqueue = (messageId: string) =>
+          store.enqueueOrbMessage(task, {
+            orbId: ORB,
+            messageId,
+            sender,
+            content: [{ type: "text", text: messageId }],
+            now: 1,
+          });
+        expect((await enqueue(FIRST)).isOk()).toBe(true);
+        const humanId = "00000000-0000-4000-8000-000000000087";
+        expect(
+          (
+            await store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId: humanId,
+              content: [{ type: "text", text: "later human" }],
+              now: 2,
+            })
+          ).isOk(),
+        ).toBe(true);
+        if (claimed)
+          expect(
+            (await store.claimNextOrbMessageBatch(task, { orbId: ORB, now: 2 }))
+              ._unsafeUnwrap()
+              .map((row) => row.messageId),
+          ).toEqual([FIRST]);
+        expect(
+          (
+            await store.scheduleOrbSleep(task, {
+              orbId: ORB,
+              caller: { runtimeTokenHash: "caller", hostIncarnation: 2 },
+              sleepId: WAKE,
+              durationSeconds: 300,
+            })
+          ).isOk(),
+        ).toBe(true);
+        expect(
+          (await store.claimNextOrbMessageBatch(task, { orbId: ORB, now: 3 }))._unsafeUnwrap(),
+        ).toEqual([]);
+        expect((await store.getOrb(task, ORB))._unsafeUnwrap()).toMatchObject({ sleepId: WAKE });
+        expect((await enqueue(FIRST))._unsafeUnwrap().duplicate).toBe(true);
+        expect((await store.getOrb(task, ORB))._unsafeUnwrap()).toMatchObject({ sleepId: WAKE });
+        expect((await enqueue(LAST))._unsafeUnwrap().duplicate).toBe(false);
+        expect((await store.getOrb(task, ORB))._unsafeUnwrap()).toMatchObject({
+          sleepId: null,
+          sleepUntil: null,
+        });
+        expect(
+          (await store.claimNextOrbMessageBatch(task, { orbId: ORB, now: 4 }))
+            ._unsafeUnwrap()
+            .map((row) => row.messageId),
+        ).toEqual([FIRST]);
+        expect(
+          (await store.listOrbMessages(task, ORB))._unsafeUnwrap().map((row) => row.system),
+        ).toEqual([
+          { kind: "orb_message", senderOrbId: senderId },
+          null,
+          { kind: "orb_message", senderOrbId: senderId },
+        ]);
+        const record: HistoryRecord = {
+          id: "first-peer",
+          parentId: null,
+          timestamp: "2026-01-01T00:00:00.000Z",
+          overflow: {},
+          type: "event",
+          eventType: "orb.message",
+          content: [{ type: "text", text: FIRST }],
+          sender: { orbId: senderId },
+          inboxMessageIds: [FIRST],
+        };
+        expect(
+          (
+            await store.commitPullBatch(task, {
+              orbId: ORB,
+              expectedCursor: null,
+              session: { id: "session", overflow: {} },
+              records: [record],
+              nextCursor: record.id,
+              nextHeadId: record.id,
+            })
+          ).isOk(),
+        ).toBe(true);
+        expect(
+          (await store.claimNextOrbMessageBatch(task, { orbId: ORB, now: 5 }))
+            ._unsafeUnwrap()
+            .map((row) => row.messageId),
+        ).toEqual([humanId]);
+      },
+    );
+
+    it("fresh peer admission cancels Sleep, but later Sleep and Stop win", async () => {
+      const store = subject.store;
+      const peerId = "00000000-0000-4000-8000-000000000086";
+      const project = (await store.getProject(task, PROJECT))._unsafeUnwrap();
+      expect(project).not.toBeNull();
+      if (project === null) throw new Error("seeded project missing");
+      expect((await store.insertOrb(task, makeOrbRow(peerId, PROJECT, "running"))).isOk()).toBe(
+        true,
+      );
+      const sleep = (sleepId: string) =>
+        store.scheduleOrbSleep(task, {
+          orbId: ORB,
+          caller: { runtimeTokenHash: "caller", hostIncarnation: 2 },
+          sleepId,
+          durationSeconds: 300,
+        });
+      const send = () =>
+        store.enqueueOrbMessage(task, {
+          orbId: ORB,
+          messageId: FIRST,
+          now: 1,
+          content: [{ type: "text", text: "peer" }],
+          sender: {
+            orbId: peerId,
+            projectId: PROJECT,
+            ownerUserId: project.ownerUserId,
+            caller: {
+              kind: "central",
+              orbId: peerId,
+              projectId: PROJECT,
+              ownerUserId: project.ownerUserId,
+              agentAdmissionVersion: 0,
+            },
+          },
+        });
+      expect((await sleep(WAKE)).isOk()).toBe(true);
+      expect((await send())._unsafeUnwrap().duplicate).toBe(false);
+      expect((await store.getOrb(task, ORB))._unsafeUnwrap()).toMatchObject({
+        sleepId: null,
+        sleepUntil: null,
+      });
+      expect((await sleep(LAST)).isOk()).toBe(true);
+      expect((await send())._unsafeUnwrap().duplicate).toBe(true);
+      expect((await store.getOrb(task, ORB))._unsafeUnwrap()).toMatchObject({ sleepId: LAST });
+      const current = (await store.getOrb(task, ORB))._unsafeUnwrap();
+      if (current === null) throw new Error("seeded orb missing");
+      expect(
+        (
+          await store.requestOrbStop(task, {
+            orbId: ORB,
+            expectedStateVersion: current.stateVersion,
+            now: 2,
+          })
+        ).isOk(),
+      ).toBe(true);
+      expect((await send())._unsafeUnwrap().duplicate).toBe(true);
+      expect((await store.getOrb(task, ORB))._unsafeUnwrap()).toMatchObject({
+        sleepId: null,
+        stopReason: "manual",
+      });
+      expect((await store.listOrbMessages(task, ORB))._unsafeUnwrap()[0]).toMatchObject({
+        autoStart: false,
+        system: { kind: "orb_message", senderOrbId: peerId },
+      });
+    });
+
     it("freezes human -> sleep_wake -> human at the source FIFO head", async () => {
       const store = subject.store;
       const firstContent = [{ type: "text" as const, text: "older human" }];

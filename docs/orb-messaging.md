@@ -8,6 +8,8 @@ Peer messages are non-human agent input, independent of spawn ancestry; alerts a
 
 **Wake:** reuse message-driven wake for stopped/sleeping targets, including manually stopped targets when send follows Stop. Admission cancels scheduled sleep and clears existing inhibition; Stop after send cancels wake authority, not queued content. Sends during stopping wait for drain. Eligible failed targets retain the existing state-version-fenced one-attempt wake rule (`docs/lifecycle.md`). Rejected: queue-only or rejection solely because stopped/sleeping.
 
+**Sleep ordering (decided and implemented locally 2026-10-14; undeployed):** fresh peer admission cancels a pending deadline; later Sleep/Stop outranks earlier peer admission. Old SQL-queued or claimed input waits for legitimate wake. Central Pi Durable busy peers stay in SQL until idle, using native `whenBusy: reject`; human steering already accepted by Native drains normally. Direct browser steering defers retryably while unadmitted SQL input remains, so it cannot bypass a held peer. Retry does not cancel Sleep or recreate wake authority. Caller sleep fencing and non-human consent guards remain unchanged. Rule and rejected alternatives: `docs/orb-sleep.md`.
+
 ## Interfaces and admission
 
 - **Builtin:** `orb_send({orbId,message})`; sender/request identity comes from the authenticated caller/durable tool task, never model arguments.
@@ -26,10 +28,12 @@ Shared `orbToolRequestId(senderOrbId,requestId)` derives `message_id`; existing 
 - **Claude:** existing delivery-state `system` accepts the variant; UUID-keyed `provenance.json` adds optional `sender:{orbId}` alongside `system:boolean`, requiring valid sender and singleton inbox identity. No new file/receipt identity.
 - **Wake:** existing `auto_start`/`wake_state_version` and sleep/stop/admission fields change atomically; no new flag, deadline or state machine.
 
-Trusted `OrbMessageSystem` provenance traverses delivery, native receipts, history, display and model context. Non-null system rows are singleton FIFO barriers: no peer/human or cross-sender squash, no overtaking. Busy steering/idle input carries a stable-ID non-human/non-consent label; only that generated label is excluded from public content. Peers cannot reset human-only boot retry guards or grant explicit-user consent for deletion, archival or recursive spawning, even when forwarding permission claims. Receipt/replay/acknowledgement semantics remain unchanged; acceptance promises queueing, not consumption, reply or exactly-once effects.
+Trusted `OrbMessageSystem` provenance traverses delivery, native receipts, history, display and model context. Non-null system rows are singleton FIFO barriers: no peer/human or cross-sender squash, no overtaking. Peer input carries a stable-ID non-human/non-consent label; only that generated label is excluded from public content. Peers cannot reset human-only boot retry guards or grant explicit-user consent for deletion, archival or recursive spawning, even when forwarding permission claims. Receipt/replay/acknowledgement semantics remain unchanged; acceptance promises queueing, not consumption, reply or exactly-once effects.
 
 Stable sender ID is not incarnation-scoped; no sender name/owner/project/incarnation snapshots or sender FK. Sender deletion preserves received messages; attribution survives sender/inbox removal. Inbox retention/dedupe lasts until receiver deletion, history follows receiver retention/archive; no TTLs/tombstones. Receiver deletion does not remove copies sent elsewhere.
 
 ## Presentation and observability
 
 Tool responses identify target/inbox record or typed rejection/unknown acceptance. Pending/history bands retain sender/body and visible durable errors (`docs/web-ui.md`). One content-free `lifecycle: orb=<target> message-accepted sender=<sender> message=<message-id>` edge correlates each new acceptance; retries emit none. Existing wake/delivery/failure edges, native history and inbox status/errors explain subsequent outcomes without logging message text.
+
+Central busy-peer deferral is retryable and keeps the existing singleton batch/receipt identity. A receipt captured before rejected native submission is not a duplicate acceptance; the first successful submission returns `duplicate:false`, then exact retries deduplicate. Existing `central-delivery-blocked` records the content-free deferral edge; pending inbox rows remain visible without a terminal error. Sleep admission rejection also returns retryable deferral, not failed content.

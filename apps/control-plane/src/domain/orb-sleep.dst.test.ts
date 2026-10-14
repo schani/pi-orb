@@ -1,6 +1,8 @@
+import { errAsync, okAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { makeHarness, makeOrbRow, makeProjectRow, seedRunningOrb } from "../testkit/fixtures.ts";
 import { LogCapture, runDst, waitUntil } from "../testkit/sim.ts";
+import type { AgentPlane } from "./agent-ports.ts";
 import { reconcileOrbOnce, requestOrbSleep, requestOrbStop } from "./lifecycle.ts";
 import { pollLoop, reconcileLoop } from "./loops.ts";
 
@@ -14,6 +16,103 @@ function required<T>(value: T | null | undefined, label: string): T {
 }
 
 describe("scheduled sleep lifecycle (DST)", () => {
+  it.each(["central", "guest"] as const)(
+    "%s sleeps with old unadmitted FIFO rows held",
+    async (placement) => {
+      const logs = new LogCapture();
+      await runDst(
+        { name: `sleep-held-fifo-${placement}`, iterations: 15, logCapture: logs },
+        async (sim) => {
+          const h = makeHarness();
+          // This scenario isolates FIFO drain, not provider-request timeout recovery.
+          h.deps.hostProvider.observe = (task, ref) => okAsync(h.world.observeHost(task, ref));
+          let deliveries = 0;
+          const unavailable = () =>
+            errAsync({
+              type: "runtime_client_error" as const,
+              code: "unreachable" as const,
+              message: "not needed",
+              retryable: true,
+              answered: false,
+            });
+          const plane: AgentPlane = {
+            placement: "central",
+            health: () =>
+              okAsync({
+                v: 1 as const,
+                orbId: ORB,
+                runtimeInstanceId: "central",
+                status: "ready" as const,
+                checkoutCommit: "commit",
+                sessionId: "central",
+                activity: "idle" as const,
+              }),
+            deliverMessage: () => {
+              deliveries++;
+              return unavailable();
+            },
+            pullHistory: unavailable,
+            prepareIdleStop: () => okAsync({ v: 1 as const, prepared: true }),
+            suspend: () => okAsync(undefined),
+            dispose: () => okAsync(undefined),
+            close: () => okAsync(undefined),
+            session: () => null,
+          };
+          const deps = placement === "central" ? { ...h.deps, agentPlane: plane } : h.deps;
+          const result = await sim.runTasks([
+            {
+              name: "driver",
+              f: async (task) => {
+                seedRunningOrb(task, h, ORB);
+                const orb = required(h.store.orbSnapshot(ORB), "running orb");
+                deps.control.noteStateEpisode(ORB, orb.stateChangedAt);
+                deps.control.recordPullSuccess(ORB, task.monotonicNow(), "idle", "runtime");
+                (
+                  await h.store.enqueueOrbMessage(task, {
+                    orbId: ORB,
+                    messageId: "old-peer",
+                    content: [{ type: "text", text: "old" }],
+                    now: task.wallNow(),
+                  })
+                )._unsafeUnwrap();
+                (
+                  await h.store.claimNextOrbMessageBatch(task, { orbId: ORB, now: task.wallNow() })
+                )._unsafeUnwrap();
+                (
+                  await requestOrbSleep(
+                    task,
+                    deps,
+                    ORB,
+                    {
+                      runtimeTokenHash: required(orb.runtimeTokenHash, "token"),
+                      hostIncarnation: orb.hostIncarnation,
+                    },
+                    300,
+                    "sleep",
+                  )
+                )._unsafeUnwrap();
+                await reconcileOrbOnce(task, deps, ORB);
+                expect(h.store.orbSnapshot(ORB)).toMatchObject({
+                  state: "stopping",
+                  stopReason: "sleep",
+                  sleepId: "sleep",
+                });
+                expect(h.store.messageSnapshots(ORB)[0]).toMatchObject({
+                  status: "delivering",
+                  operationId: null,
+                  deliveryBatchId: "old-peer",
+                });
+                expect(deliveries).toBe(0);
+              },
+            },
+          ]);
+          expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+          expect(logs.matching("sleep-stop-initiated")).toHaveLength(1);
+        },
+      );
+    },
+  );
+
   it("uses durable acceptance time and expires once at the exact busy boundary", async () => {
     await runDst({ name: "sleep-busy-exact-boundary", iterations: 20 }, async (sim) => {
       const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
@@ -567,6 +666,12 @@ describe("scheduled sleep lifecycle (DST)", () => {
               content: [{ type: "text", text: "older" }],
               now: task.wallNow(),
             });
+            await waitUntil(
+              task,
+              "older message delivered",
+              () => harness.store.messageSnapshots(ORB)[0]?.status === "delivered",
+              { timeoutMs: 60_000 },
+            );
             expect(
               (
                 await requestOrbSleep(
@@ -585,12 +690,6 @@ describe("scheduled sleep lifecycle (DST)", () => {
                 )
               ).isOk(),
             ).toBe(true);
-            await waitUntil(
-              task,
-              "older message delivered",
-              () => harness.store.messageSnapshots(ORB)[0]?.status === "delivered",
-              { timeoutMs: 60_000 },
-            );
             harness.world.setActivity(ORB, "idle");
             await waitUntil(
               task,

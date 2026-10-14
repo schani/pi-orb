@@ -10,7 +10,7 @@ import { composeControlPlaneDatabase } from "../database.ts";
 import { PGliteClient } from "../pg/pglite-client.ts";
 import { DurableAgent } from "./agent.ts";
 
-it.each(["payload", "batch", "missing"] as const)(
+it.each(["payload", "batch", "missing", "sleep"] as const)(
   "rejects captured input when %s changes before native admission, without inference/public admission",
   async (change) => {
     const db = new PGliteClient(),
@@ -121,6 +121,21 @@ it.each(["payload", "batch", "missing"] as const)(
             [orb.id, messageId, randomUUID()],
           )
         )._unsafeUnwrap();
+      else if (change === "sleep")
+        (
+          await database.store.scheduleOrbSleep(task, {
+            orbId: orb.id,
+            caller: {
+              kind: "central",
+              orbId: orb.id,
+              projectId: project.id,
+              ownerUserId: project.ownerUserId,
+              agentAdmissionVersion: 0,
+            },
+            sleepId: randomUUID(),
+            durationSeconds: 300,
+          })
+        )._unsafeUnwrap();
       else
         (
           await db.query("DELETE FROM orb_messages WHERE orb_id=$1 AND message_id=$2", [
@@ -129,7 +144,13 @@ it.each(["payload", "batch", "missing"] as const)(
           ])
         )._unsafeUnwrap();
       release();
-      expect((await delivery).isErr()).toBe(true);
+      const outcome = await delivery;
+      expect(outcome.isErr()).toBe(true);
+      if (change === "sleep")
+        expect(outcome._unsafeUnwrapErr()).toMatchObject({
+          retryable: true,
+          message: "Input admission paused by sleep",
+        });
       expect(calls).toBe(0);
       expect(
         (

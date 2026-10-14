@@ -1344,6 +1344,15 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     params: { orbId: string; now: number },
   ): ResultAsync<OrbMessageRow[], StoreError> {
     return this.db.transaction<OrbMessageRow[], StoreError>(async (query) => {
+      const current = await query("SELECT sleep_id,stop_reason FROM orbs WHERE id=$1 FOR UPDATE", [
+        params.orbId,
+      ]);
+      if (current.isErr()) return err(current.error);
+      if (
+        current.value.rows[0]?.["sleep_id"] != null ||
+        current.value.rows[0]?.["stop_reason"] === "sleep"
+      )
+        return ok([]);
       const outstanding = await query(
         `SELECT * FROM orb_messages WHERE orb_id = $1
            AND status IN ('queued', 'delivering') ORDER BY ordinal FOR UPDATE`,

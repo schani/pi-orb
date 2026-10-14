@@ -29,9 +29,10 @@ export async function projectNativeInboxCommit(
     (write.value.status === "queued" ||
       write.value.status === "placed" ||
       (write.value.status === "unanswered" && write.value.entry === undefined)) &&
-    /^inbox:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
+    (/^inbox:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
       write.value.requestId ?? "",
-    )
+    ) ||
+      write.value.requestId?.startsWith("inbox:browser:"))
       ? [write.value]
       : [],
   );
@@ -64,8 +65,8 @@ export async function projectNativeInboxCommit(
           const ids = Array.isArray(captured?.messageIds)
             ? captured.messageIds.filter((id): id is string => typeof id === "string")
             : [batchId];
-          if (ids.length === 0) continue;
           if (submission.status === "unanswered") {
+            if (ids.length === 0) continue;
             const outcome = await query(
               `UPDATE orb_messages SET status='failed',last_error=$4,auto_start=false,updated_at=now()
               WHERE orb_id=$1 AND message_id=ANY($2::uuid[]) AND delivery_batch_id=$3 AND status IN ('queued','delivering')`,
@@ -83,6 +84,28 @@ export async function projectNativeInboxCommit(
           }
           // Receipt finalization follows native admission; later placement must not re-admit it.
           if (captured?.submissionId === submission.id) continue;
+          const orb = await query("SELECT sleep_id,stop_reason FROM orbs WHERE id=$1", [orbId]);
+          if (orb.isErr()) return err(orb.error);
+          if (orb.value.rows[0]?.sleep_id != null || orb.value.rows[0]?.stop_reason === "sleep")
+            return err<never, AuthorityError>({
+              type: "authority_error",
+              code: "busy",
+              message: "Input admission paused by sleep",
+            });
+          if (ids.length === 0) {
+            const held = await query(
+              "SELECT 1 FROM orb_messages WHERE orb_id=$1 AND status IN ('queued','delivering') AND operation_id IS NULL LIMIT 1",
+              [orbId],
+            );
+            if (held.isErr()) return err(held.error);
+            if (held.value.rows.length > 0)
+              return err<never, AuthorityError>({
+                type: "authority_error",
+                code: "busy",
+                message: "Input admission waits for queued messages",
+              });
+            continue;
+          }
           const rows = await query(
             "SELECT message_id,content,system,status,delivery_batch_id,operation_id FROM orb_messages WHERE orb_id=$1 AND message_id=ANY($2::uuid[]) ORDER BY ordinal FOR UPDATE",
             [orbId, arrayParam(ids)],
