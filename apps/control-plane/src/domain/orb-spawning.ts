@@ -6,7 +6,12 @@ import type { StoreError } from "./errors.ts";
 import { logOrbEvent } from "./log.ts";
 import { newOrbRow } from "./new-orb.ts";
 import type { OrbRow } from "./orb.ts";
-import { resolveSpawnModel, type SpawnModelError, spawnModelError } from "./orb-spawn-model.ts";
+import {
+  resolveSpawnModel,
+  type SpawnModelError,
+  spawnModelError,
+  spawnModelHarness,
+} from "./orb-spawn-model.ts";
 import type { ArchiveCaller, ControlPlaneDeps, ControlPlaneStore, SpawnConflict } from "./ports.ts";
 
 export function spawnOrb(
@@ -47,7 +52,7 @@ export function spawnOrb(
       return deps.spawnModels
         .read(task, project.ownerUserId, selector)
         .andThen((catalog) => resolveSpawnModel(selector, catalog))
-        .andThen(({ model }) => admit(model, project.ownerUserId));
+        .andThen((model) => admit(model, project.ownerUserId));
     });
   });
 
@@ -56,13 +61,7 @@ export function spawnOrb(
     expectedOwnerUserId?: string,
   ): ResultAsync<void, StoreError | SpawnConflict | SpawnModelError> {
     const harness =
-      initialModel === null
-        ? caller.harness
-        : initialModel.provider === "openai-codex"
-          ? "pi"
-          : initialModel.provider === "claude"
-            ? "claude"
-            : null;
+      initialModel === null ? caller.harness : spawnModelHarness(initialModel.provider);
     if (harness === null)
       return errAsync(spawnModelError("invalid", "Unsupported spawn model provider."));
     const orb = newOrbRow(

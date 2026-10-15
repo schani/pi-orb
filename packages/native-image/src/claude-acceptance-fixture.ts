@@ -45,7 +45,11 @@ export async function materializeClaudeAcceptanceFixture(directory: string, repo
     await copyFile(join(source, file), join(candidate, file));
   }
   for (const path of packages) {
-    await cp(join(source, path), join(candidate, path), { recursive: true, dereference: true });
+    await cp(
+      await realpath(join(source, path)),
+      join(candidate, path.slice(path.indexOf("node_modules/"))),
+      { recursive: true, dereference: true },
+    );
   }
   // Workspaces retain their package scope without resolving through the checkout.
   await mkdir(join(candidate, "node_modules/@pi-orb"), { recursive: true });

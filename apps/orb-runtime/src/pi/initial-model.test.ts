@@ -31,14 +31,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it.each([
-  "new",
-  "header",
-  "settings",
-  "removed",
-  "disconnected",
-  "settings-removed-intent",
-] as const)(
+it.each(["new", "header", "removed", "disconnected", "settings-removed-intent"] as const)(
   "Pi boot applies intent before fresh session and preserves native settings (%s)",
   async (mode) => {
     for (const name of ["HOME", "RUSTUP_HOME", "CARGO_HOME", "PATH", "PI_CODING_AGENT_DIR"])

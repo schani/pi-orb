@@ -8,6 +8,8 @@ afterEach(() => {
 
 const broker = { controlPlaneUrl: "http://control-plane.test", runtimeToken: "secret" };
 
+const emptyContext = { v: 1, context: null, initialModel: null, userTimeZone: null };
+
 describe("boot context client", () => {
   it("reads sleep context through the authenticated adapter without acknowledging it", async () => {
     const fetch = vi.fn(
@@ -43,12 +45,17 @@ describe("boot context client", () => {
     );
   });
 
-  it("reads the time zone even without a sleep-wake context", async () => {
+  it("reads time zone and model intent without a sleep-wake context", async () => {
     vi.stubGlobal(
       "fetch",
       async () =>
         new Response(
-          JSON.stringify({ v: 1, context: null, initialModel: null, userTimeZone: "Europe/Paris" }),
+          JSON.stringify({
+            v: 1,
+            context: null,
+            initialModel: { provider: "claude", id: "sonnet" },
+            userTimeZone: "Europe/Paris",
+          }),
           {
             status: 200,
           },
@@ -57,7 +64,7 @@ describe("boot context client", () => {
     expect((await fetchBootContext(broker))._unsafeUnwrap()).toEqual({
       v: 1,
       context: null,
-      initialModel: null,
+      initialModel: { provider: "claude", id: "sonnet" },
       userTimeZone: "Europe/Paris",
     });
   });
@@ -92,12 +99,9 @@ describe("boot context client", () => {
           { status: 503 },
         );
       }
-      return new Response(
-        JSON.stringify({ v: 1, context: null, initialModel: null, userTimeZone: null }),
-        {
-          status: 200,
-        },
-      );
+      return new Response(JSON.stringify(emptyContext), {
+        status: 200,
+      });
     });
 
     const result = await fetchBootContext(broker, {
@@ -108,12 +112,7 @@ describe("boot context client", () => {
       },
     });
 
-    expect(result._unsafeUnwrap()).toEqual({
-      v: 1,
-      context: null,
-      initialModel: null,
-      userTimeZone: null,
-    });
+    expect(result._unsafeUnwrap()).toEqual(emptyContext);
     expect(attempts).toBe(5);
     expect(delays).toEqual([1_000, 2_000, 4_000, 4_000]);
   });
@@ -208,12 +207,9 @@ describe("boot context client", () => {
         );
       }
       now += BOOT_CONTEXT_REQUEST_TIMEOUT_MS;
-      return new Response(
-        JSON.stringify({ v: 1, context: null, initialModel: null, userTimeZone: null }),
-        {
-          status: 200,
-        },
-      );
+      return new Response(JSON.stringify(emptyContext), {
+        status: 200,
+      });
     });
 
     const result = await fetchBootContext(broker, {
@@ -224,12 +220,7 @@ describe("boot context client", () => {
       },
     });
 
-    expect(result._unsafeUnwrap()).toEqual({
-      v: 1,
-      context: null,
-      initialModel: null,
-      userTimeZone: null,
-    });
+    expect(result._unsafeUnwrap()).toEqual(emptyContext);
     expect(attempts).toBe(2);
     expect(now).toBe(10_499);
   });
@@ -247,12 +238,9 @@ describe("boot context client", () => {
         now += 10_000;
         throw failure;
       }
-      return new Response(
-        JSON.stringify({ v: 1, context: null, initialModel: null, userTimeZone: null }),
-        {
-          status: 200,
-        },
-      );
+      return new Response(JSON.stringify(emptyContext), {
+        status: 200,
+      });
     });
 
     const result = await fetchBootContext(broker, {
@@ -263,12 +251,7 @@ describe("boot context client", () => {
       },
     });
 
-    expect(result._unsafeUnwrap()).toEqual({
-      v: 1,
-      context: null,
-      initialModel: null,
-      userTimeZone: null,
-    });
+    expect(result._unsafeUnwrap()).toEqual(emptyContext);
     expect(attempts).toBe(2);
     expect(delays).toEqual([1_000]);
   });
@@ -286,12 +269,9 @@ describe("boot context client", () => {
             }),
             { status: 503 },
           )
-        : new Response(
-            JSON.stringify({ v: 1, context: null, initialModel: null, userTimeZone: null }),
-            {
-              status: 200,
-            },
-          );
+        : new Response(JSON.stringify(emptyContext), {
+            status: 200,
+          });
     });
 
     await fetchBootContext(broker, {

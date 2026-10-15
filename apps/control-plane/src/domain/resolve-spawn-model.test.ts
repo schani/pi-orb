@@ -21,8 +21,8 @@ describe("canonical spawn model", () => {
     { provider: "claude", id: "claude-opus-resolved" },
   ])("canonicalizes %j to the advertised family", (selector) => {
     expect(resolveSpawnModel(selector, catalog)._unsafeUnwrap()).toEqual({
-      model: { provider: "claude", id: "opus" },
-      harness: "claude",
+      provider: "claude",
+      id: "opus",
     });
   });
   it("does not guess unadvertised IDs from a family name", () => {
@@ -36,6 +36,10 @@ describe("canonical spawn model", () => {
     expect(result.isErr() && result.error.reason).toBe("ambiguous");
     expect(result.isErr() && result.error.message).toContain("openai-codex/gpt-6.1-sol");
     expect(result.isErr() && result.error.message).toContain("claude/opus");
+  });
+  it("rejects disconnected selection", () => {
+    const result = resolveSpawnModel("Opus", { ...catalog, disconnected: ["claude"] });
+    expect(result.isErr() && result.error.reason).toBe("disconnected");
   });
   it("never assigns an unsupported harness", () => {
     expect(

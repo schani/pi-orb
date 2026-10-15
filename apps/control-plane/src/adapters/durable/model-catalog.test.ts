@@ -1,12 +1,9 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { createRegistry, MemoryStorage } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { okAsync } from "neverthrow";
 import { assert, describe, expect, it, vi } from "vitest";
-import { DurableAgent } from "./agent.ts";
+import { DurableAgent, type DurableAgentOptions } from "./agent.ts";
 import { MemoryAgentPersistence } from "./memory-persistence.testkit.ts";
 import { createDurableModels } from "./models.ts";
 
@@ -18,20 +15,31 @@ async function models() {
   )._unsafeUnwrap();
 }
 
+function openAgent(
+  models: DurableAgentOptions["models"],
+  storage: DurableAgentOptions["storage"],
+  id?: string,
+) {
+  return DurableAgent.open({
+    orbId: "catalog",
+    models,
+    storage,
+    registry: createRegistry(),
+    env: new NodeExecutionEnv({ cwd: "/tmp" }),
+    checkoutCommit: "commit",
+    instructions: "",
+    ...(id === undefined
+      ? {}
+      : {
+          initialSettings: { model: { provider: "openai-codex", id }, thinkingLevel: "high" },
+        }),
+  });
+}
+
 describe("Durable public model catalog", () => {
   it("offers the four shared friendly aliases with canonical IDs and SDK capabilities", async () => {
     const runtime = await models();
-    const agent = (
-      await DurableAgent.open({
-        orbId: "catalog",
-        storage: new MemoryStorage(),
-        models: runtime,
-        registry: createRegistry(),
-        env: new NodeExecutionEnv({ cwd: "/tmp" }),
-        checkoutCommit: "commit",
-        instructions: "",
-      })
-    )._unsafeUnwrap();
+    const agent = (await openAgent(runtime, new MemoryStorage()))._unsafeUnwrap();
     try {
       const settings = agent.snapshot()._unsafeUnwrap().settings;
       assert(settings);
@@ -70,37 +78,32 @@ describe("Durable public model catalog", () => {
     }
   });
 
-  it("restores an older saved canonical selection without resolving it to the current alias", async () => {
+  it.each([
+    ["gpt-6-sol", "gpt-6-astra"],
+    ["gpt-6.1-sol", "removed-initial-intent"],
+  ])("restores exact native %s over initial intent %s", async (saved, intent) => {
     const runtime = await models();
-    const directory = await mkdtemp(join(tmpdir(), "durable-catalog-"));
     const authority = new MemoryAgentPersistence();
     const open = async (id: string) =>
-      DurableAgent.open({
-        orbId: "saved-catalog",
-        storage: (await authority.openOrb("saved-catalog", false))._unsafeUnwrap().storage,
-        models: runtime,
-        registry: createRegistry(),
-        env: new NodeExecutionEnv({ cwd: "/tmp" }),
-        checkoutCommit: "commit",
-        instructions: "",
-        initialSettings: { model: { provider: "openai-codex", id }, thinkingLevel: "high" },
-      });
-    const original = (await open("gpt-6-sol"))._unsafeUnwrap();
-    expect(original.snapshot()._unsafeUnwrap().settings?.settings.model).toEqual({
-      provider: "openai-codex",
-      id: "gpt-6-sol",
-    });
-    await original.close();
-    const resumed = (await open("gpt-6-astra"))._unsafeUnwrap();
+      openAgent(runtime, (await authority.openOrb("catalog", false))._unsafeUnwrap().storage, id);
     try {
-      const settings = resumed.snapshot()._unsafeUnwrap().settings;
-      expect(settings?.settings.model).toEqual({ provider: "openai-codex", id: "gpt-6-sol" });
-      expect(settings?.models.map(({ name }) => name)).toEqual(["Astra", "Sol", "Terra", "Luna"]);
-      expect(settings?.models.find(({ name }) => name === "Sol")?.id).toBe("gpt-6.1-sol");
+      const original = (await open(saved))._unsafeUnwrap();
+      expect(original.snapshot()._unsafeUnwrap().settings?.settings.model).toEqual({
+        provider: "openai-codex",
+        id: saved,
+      });
+      await original.close();
+      const resumed = (await open(intent))._unsafeUnwrap();
+      try {
+        const settings = resumed.snapshot()._unsafeUnwrap().settings;
+        expect(settings?.settings.model).toEqual({ provider: "openai-codex", id: saved });
+        expect(settings?.models.map(({ name }) => name)).toEqual(["Astra", "Sol", "Terra", "Luna"]);
+        expect(settings?.models.find(({ name }) => name === "Sol")?.id).toBe("gpt-6.1-sol");
+      } finally {
+        await resumed.close();
+      }
     } finally {
-      await resumed.close();
       await authority.close();
-      await rm(directory, { recursive: true, force: true });
     }
   });
 });
@@ -113,19 +116,11 @@ it.each(["removed", "disconnected", "lookup-throws"] as const)(
     if (failure === "disconnected") available.mockResolvedValue([]);
     if (failure === "lookup-throws") available.mockRejectedValue(new Error("credential-secret"));
     const stream = vi.spyOn(runtime, "streamSimple");
-    const result = await DurableAgent.open({
-      orbId: "unavailable-intent",
-      storage: new MemoryStorage(),
-      models: runtime,
-      registry: createRegistry(),
-      env: new NodeExecutionEnv({ cwd: "/tmp" }),
-      checkoutCommit: "commit",
-      instructions: "",
-      initialSettings: {
-        model: { provider: "openai-codex", id: failure === "removed" ? "removed" : "gpt-6-astra" },
-        thinkingLevel: "high",
-      },
-    });
+    const result = await openAgent(
+      runtime,
+      new MemoryStorage(),
+      failure === "removed" ? "removed" : "gpt-6-astra",
+    );
     if (result.isOk()) await result.value.close();
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr()).toMatchObject({
@@ -137,47 +132,9 @@ it.each(["removed", "disconnected", "lookup-throws"] as const)(
   },
 );
 
-it("checks restored native model rather than an unavailable initial intent", async () => {
-  const runtime = await models();
-  const authority = new MemoryAgentPersistence();
-  const open = async (id: string) =>
-    DurableAgent.open({
-      orbId: "restored-intent",
-      storage: (await authority.openOrb("restored-intent", false))._unsafeUnwrap().storage,
-      models: runtime,
-      registry: createRegistry(),
-      env: new NodeExecutionEnv({ cwd: "/tmp" }),
-      checkoutCommit: "commit",
-      instructions: "",
-      initialSettings: { model: { provider: "openai-codex", id }, thinkingLevel: "high" },
-    });
-  try {
-    const first = (await open("gpt-6.1-sol"))._unsafeUnwrap();
-    await first.close();
-    const resumed = (await open("removed-initial-intent"))._unsafeUnwrap();
-    try {
-      expect(resumed.snapshot()._unsafeUnwrap().settings?.settings.model.id).toBe("gpt-6.1-sol");
-    } finally {
-      await resumed.close();
-    }
-  } finally {
-    await authority.close();
-  }
-});
-
 it("keeps omitted default bootstrap available before owner login", async () => {
   const runtime = await models();
   vi.spyOn(runtime, "getAvailable").mockResolvedValue([]);
-  const agent = (
-    await DurableAgent.open({
-      orbId: "login-bootstrap",
-      storage: new MemoryStorage(),
-      models: runtime,
-      registry: createRegistry(),
-      env: new NodeExecutionEnv({ cwd: "/tmp" }),
-      checkoutCommit: "commit",
-      instructions: "",
-    })
-  )._unsafeUnwrap();
+  const agent = (await openAgent(runtime, new MemoryStorage()))._unsafeUnwrap();
   await agent.close();
 });

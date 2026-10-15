@@ -1,29 +1,23 @@
 import { NoSimulationTask } from "determined";
 import { errAsync, okAsync } from "neverthrow";
 import { describe, expect, it, vi } from "vitest";
-import type {
-  BrokerDeps,
-  StoredClaudeSubscriptionCredential,
-  StoredSecret,
-} from "../domain/ports.ts";
+import type { BrokerDeps, StoredSecret } from "../domain/ports.ts";
 import { createSpawnModels } from "./spawn-models.ts";
 
 const task = new NoSimulationTask("spawn-catalog", false);
+const subscription = { kind: "claude_subscription", token: "owner-token", createdAt: 0 } as const;
+function broker(secret: StoredSecret | null = subscription) {
+  const readPointer = vi.fn(() => okAsync(secret === null ? null : { secretVersion: "version" }));
+  const readSecret = vi.fn(() => okAsync(secret));
+  const owner = vi.fn(
+    () => ({ pointers: { readPointer }, secrets: { readSecret } }) as unknown as BrokerDeps,
+  );
+  return { owner, readPointer, readSecret };
+}
+
 describe("owner spawn catalog", () => {
   it("reads owner credentials without broker refresh or writes", async () => {
-    const readSecret = vi.fn(() =>
-      okAsync<StoredSecret | null>({
-        kind: "claude_subscription",
-        token: "owner-token",
-        createdAt: 0,
-      }),
-    );
-    const readPointer = vi.fn((_task, provider) =>
-      okAsync(provider === "claude" ? { secretVersion: "version" } : null),
-    );
-    const owner = vi.fn(
-      () => ({ pointers: { readPointer }, secrets: { readSecret } }) as unknown as BrokerDeps,
-    );
+    const { owner, readSecret } = broker();
     const discover = vi.fn(() =>
       okAsync([{ provider: "claude", id: "opus", name: "Opus", thinkingLevels: [] }]),
     );
@@ -38,23 +32,19 @@ describe("owner spawn catalog", () => {
     expect(readSecret).toHaveBeenCalledTimes(1);
   });
   it("does not launch discovery for a disconnected owner", async () => {
-    const owner = () =>
-      ({ pointers: { readPointer: () => okAsync(null) } }) as unknown as BrokerDeps;
+    const { owner } = broker(null);
     const discover = vi.fn();
     const result = await createSpawnModels(owner, discover).read(task, "owner", "Opus");
     expect(result._unsafeUnwrap().disconnected).toEqual(["claude"]);
     expect(discover).not.toHaveBeenCalled();
   });
   it("does not consult Claude credentials or SDK for Sol", async () => {
-    const readPointer = vi.fn(() => okAsync({ secretVersion: "codex" }));
-    const owner = () =>
-      ({
-        pointers: { readPointer },
-        secrets: {
-          readSecret: () =>
-            okAsync({ access: "access", refresh: "refresh", accountId: "owner", expiresAt: 100 }),
-        },
-      }) as unknown as BrokerDeps;
+    const { owner, readPointer } = broker({
+      access: "access",
+      refresh: "refresh",
+      accountId: "owner",
+      expiresAt: 100,
+    });
     const discover = vi.fn();
     const catalog = (
       await createSpawnModels(owner, discover).read(task, "owner", "Sol")
@@ -65,30 +55,12 @@ describe("owner spawn catalog", () => {
     expect(discover).not.toHaveBeenCalled();
   });
   it("distinguishes a known family absent from SDK advertisement", async () => {
-    const owner = () =>
-      ({
-        pointers: { readPointer: () => okAsync({ secretVersion: "version" }) },
-        secrets: {
-          readSecret: () => okAsync({ kind: "claude_subscription", token: "owner-token" }),
-        },
-      }) as unknown as BrokerDeps;
+    const { owner } = broker();
     const result = await createSpawnModels(owner, () => okAsync([])).read(task, "owner", "Fable");
     expect(result.isErr() && result.error.reason).toBe("unadvertised");
   });
-  it("sanitizes discovery failures", async () => {
-    const secret: StoredClaudeSubscriptionCredential = {
-      kind: "claude_subscription",
-      token: "private",
-      createdAt: 0,
-    };
-    const owner = () =>
-      ({
-        pointers: {
-          readPointer: (_task: unknown, provider: string) =>
-            okAsync(provider === "claude" ? { secretVersion: "version" } : null),
-        },
-        secrets: { readSecret: () => okAsync(secret) },
-      }) as unknown as BrokerDeps;
+  it("propagates typed discovery failures", async () => {
+    const { owner } = broker();
     const result = await createSpawnModels(owner, () =>
       errAsync({
         type: "spawn_model_error",

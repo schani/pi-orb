@@ -50,7 +50,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it.each(["fresh", "retained", "removed", "retained-removed-intent", "disconnected"] as const)(
+it.each(["fresh", "removed", "retained-removed-intent", "disconnected"] as const)(
   "boot applies available effective native model (%s)",
   async (mode) => {
     const retained = mode.startsWith("retained");

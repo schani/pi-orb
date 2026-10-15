@@ -1,8 +1,7 @@
-import type { HarnessKind, ModelOption, OrbSpawnRequest } from "@pi-orb/protocol";
+import type { AgentSettings, HarnessKind, ModelOption, OrbSpawnRequest } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, type Result, type ResultAsync } from "neverthrow";
 
-export type InitialModel = Pick<ModelOption, "provider" | "id">;
 export interface SpawnModelError {
   readonly type: "spawn_model_error";
   readonly reason: "invalid" | "unadvertised" | "ambiguous" | "disconnected" | "unavailable";
@@ -31,7 +30,7 @@ export function spawnModelError(
 export function resolveSpawnModel(
   selector: NonNullable<OrbSpawnRequest["model"]>,
   catalog: SpawnModelCatalog,
-): Result<{ model: InitialModel; harness: HarnessKind }, SpawnModelError> {
+): Result<AgentSettings["model"], SpawnModelError> {
   const matches = catalog.models.filter((model) => matchesSpawnModel(selector, model));
   if (matches.length > 1)
     return err(
@@ -46,32 +45,34 @@ export function resolveSpawnModel(
     return err(
       spawnModelError("disconnected", `Connect ${selected.provider} before spawning this model.`),
     );
-  const harness =
-    selected.provider === "openai-codex" ? "pi" : selected.provider === "claude" ? "claude" : null;
-  if (harness === null) return err(spawnModelError("invalid", "Unsupported spawn model provider."));
-  return ok({ model: { provider: selected.provider, id: selected.id }, harness });
+  if (spawnModelHarness(selected.provider) === null)
+    return err(spawnModelError("invalid", "Unsupported spawn model provider."));
+  return ok({ provider: selected.provider, id: selected.id });
+}
+
+export function spawnModelHarness(provider: string): HarnessKind | null {
+  return provider === "openai-codex" ? "pi" : provider === "claude" ? "claude" : null;
 }
 
 export function matchesSpawnModel(
   selector: NonNullable<OrbSpawnRequest["model"]>,
   model: SpawnModelOption,
 ): boolean {
-  if (typeof selector !== "string")
+  if (typeof selector === "string" && !selector.includes("/"))
     return (
-      model.provider === selector.provider &&
-      (model.id === selector.id || model.aliases?.includes(selector.id) === true)
+      model.id === selector ||
+      model.aliases?.includes(selector) === true ||
+      model.name.toLowerCase() === selector.toLowerCase()
     );
-  if (selector.includes("/")) {
-    const slash = selector.indexOf("/");
-    return (
-      model.provider === selector.slice(0, slash) &&
-      (model.id === selector.slice(slash + 1) ||
-        model.aliases?.includes(selector.slice(slash + 1)) === true)
-    );
-  }
+  const ref =
+    typeof selector === "string"
+      ? {
+          provider: selector.slice(0, selector.indexOf("/")),
+          id: selector.slice(selector.indexOf("/") + 1),
+        }
+      : selector;
   return (
-    model.id === selector ||
-    model.aliases?.includes(selector) === true ||
-    model.name.toLowerCase() === selector.toLowerCase()
+    model.provider === ref.provider &&
+    (model.id === ref.id || model.aliases?.includes(ref.id) === true)
   );
 }
