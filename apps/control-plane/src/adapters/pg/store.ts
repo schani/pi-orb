@@ -1580,9 +1580,10 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     params: { orbId: string; expectedStateVersion: number; now: number },
   ): ResultAsync<OrbRow | null, StoreError | StateConflict> {
     return this.db.transaction<OrbRow | null, StoreError | StateConflict>(async (query) => {
-      const locked = await query("SELECT state, state_version FROM orbs WHERE id = $1 FOR UPDATE", [
-        params.orbId,
-      ]);
+      const locked = await query(
+        "SELECT state, state_version, sleep_id FROM orbs WHERE id = $1 FOR UPDATE",
+        [params.orbId],
+      );
       if (locked.isErr()) return err(locked.error);
       const orbRow = locked.value.rows[0];
       if (orbRow === undefined) return err(stateConflict());
@@ -1593,6 +1594,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       ) {
         return err(stateConflict(state));
       }
+      if (orbRow["sleep_id"] !== null) return ok(null);
       // `FOR UPDATE` on the intent rows makes this decision exclusive with the
       // clear an explicit stop performs: whichever commits first wins, and the
       // loser reads the committed answer. A `stopped` orb wakes for any

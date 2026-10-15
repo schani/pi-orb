@@ -38,6 +38,84 @@ function contract(name: string, open: () => Promise<Subject>): void {
 
     afterEach(async () => subject.close());
 
+    it.each(["stopped", "failed"] as const)(
+      "old queued wake cannot supersede a preserved Sleep in %s, but fresh input can",
+      async (terminalState) => {
+        const store = subject.store;
+        const transition = async (toState: "stopped" | "starting" | "running" | "failed") => {
+          const orb = (await store.getOrb(task, ORB))._unsafeUnwrap();
+          if (orb === null) throw new Error("seeded orb missing");
+          return (
+            await store.casTransition(task, {
+              orbId: ORB,
+              expectedStateVersion: orb.stateVersion,
+              toState,
+              now: 1,
+            })
+          )._unsafeUnwrap();
+        };
+        await transition("stopped");
+        const old = (
+          await store.enqueueOrbMessage(task, {
+            orbId: ORB,
+            messageId: FIRST,
+            content: [{ type: "text", text: "old input" }],
+            now: 2,
+          })
+        )._unsafeUnwrap();
+        expect(old.message.autoStart).toBe(true);
+        await transition("starting");
+        await transition("running");
+        const sleeping = (
+          await store.scheduleOrbSleep(task, {
+            orbId: ORB,
+            caller: { runtimeTokenHash: "caller", hostIncarnation: 2 },
+            sleepId: WAKE,
+            durationSeconds: 300,
+          })
+        )._unsafeUnwrap();
+        await transition(terminalState);
+        const before = (await store.getOrb(task, ORB))._unsafeUnwrap();
+        if (before === null || sleeping.sleepUntil === null)
+          throw new Error("sleeping orb missing");
+        for (const now of [sleeping.sleepUntil - 1, sleeping.sleepUntil + 1]) {
+          expect(
+            (
+              await store.casStartOrbForQueuedMessage(task, {
+                orbId: ORB,
+                expectedStateVersion: before.stateVersion,
+                now,
+              })
+            )._unsafeUnwrap(),
+          ).toBeNull();
+          expect((await store.getOrb(task, ORB))._unsafeUnwrap()).toEqual(before);
+        }
+        const fresh = (
+          await store.enqueueOrbMessage(task, {
+            orbId: ORB,
+            messageId: LAST,
+            content: [{ type: "text", text: "fresh input" }],
+            now: 3,
+          })
+        )._unsafeUnwrap();
+        expect(fresh.orb.sleepId).toBeNull();
+        expect(
+          (
+            await store.casStartOrbForQueuedMessage(task, {
+              orbId: ORB,
+              expectedStateVersion: fresh.orb.stateVersion,
+              now: 4,
+            })
+          )._unsafeUnwrap(),
+        ).toMatchObject({ state: "starting", sleepId: null });
+        expect(
+          (await store.claimNextOrbMessageBatch(task, { orbId: ORB, now: 5 }))
+            ._unsafeUnwrap()
+            .map((row) => row.messageId),
+        ).toEqual([FIRST, LAST]);
+      },
+    );
+
     it.each([false, true])(
       "holds old input through Sleep until fresh peer admission (claimed=%s)",
       async (claimed) => {

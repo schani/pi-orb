@@ -1457,6 +1457,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       ) {
         return { outcome: "conflict" as const };
       }
+      if (orb.sleepId !== null) return { outcome: "no_intent" as const };
       // A `stopped` orb wakes for any outstanding intent; a `failed` orb only
       // for an intent admitted against this very failure, and the version bump
       // below retires that privilege (docs/lifecycle.md).

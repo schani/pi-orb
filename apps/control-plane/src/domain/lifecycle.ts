@@ -2683,7 +2683,13 @@ async function reconcileComputeOnce(
   if (orb === null) return { type: "noop" };
   if (agentPlacement(deps.agentPlane, orb) === "central")
     deps.control.noteAgentWork(orbId, deps.agentPlane?.session(orbId)?.workActive?.() === true);
-  if (orb.sleepId !== null && orb.sleepUntil !== null && task.wallNow() >= orb.sleepUntil) {
+  // Due handling consumes running/terminal sleeps; transient phases must finish first.
+  if (
+    (orb.state === "running" || orb.state === "stopped" || orb.state === "failed") &&
+    orb.sleepId !== null &&
+    orb.sleepUntil !== null &&
+    task.wallNow() >= orb.sleepUntil
+  ) {
     await task.checkpoint("sleep.due-observed");
     const due = await deps.store.processDueOrbSleep(task, {
       orbId: orb.id,
