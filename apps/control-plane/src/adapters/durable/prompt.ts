@@ -4,6 +4,7 @@ import {
   type Extension,
   GenerationTask,
   hook,
+  ROOT_CONVERSATION_ID,
   section,
 } from "@earendil-works/pi-durable";
 
@@ -41,8 +42,12 @@ export function renderPrompt(snapshot: PromptSnapshot): string {
 export function promptExtension(
   instructions: string | ((conversationId: string) => string),
 ): Extension {
-  const render = (conversationId: string) =>
-    typeof instructions === "string" ? instructions : instructions(conversationId);
+  const render = (conversationId: string) => {
+    const prompt = typeof instructions === "string" ? instructions : instructions(conversationId);
+    return conversationId === String(ROOT_CONVERSATION_ID)
+      ? prompt
+      : `${prompt}\n\nYou are a subagent. Do not spawn orbs.`;
+  };
   // Tagged so a later "Updated system prompt section" names a delimited part of the instructions.
   const tagged = (text: string) => `<${SECTION}>\n${text}\n</${SECTION}>`;
   // The persisted section becomes the request's instructions and is re-sent only when it changes,

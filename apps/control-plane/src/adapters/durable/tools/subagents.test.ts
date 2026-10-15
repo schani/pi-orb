@@ -19,6 +19,8 @@ import {
   type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
 import { expect, it } from "vitest";
+import { InstructionReadiness } from "../instruction-readiness.ts";
+import { promptExtension } from "../prompt.ts";
 import { ChildReceipts, createDurableTools } from "./index.ts";
 import { ChildAnchor, subagentTools } from "./subagents.ts";
 import { toolData, wait } from "./testkit/subagent-wait.ts";
@@ -187,10 +189,24 @@ it("reopens persisted anchors without recreating children or rerunning the spawn
   }
 });
 
-it("children neither see nor start subagents", async () => {
+it("children inherit refreshed instructions but neither see nor start subagents", async () => {
+  const instructions = new InstructionReadiness("PENDING_PROMPT");
+  const prompts = { root: [] as string[], child: [] as string[] };
+  const capture = (request: Parameters<FauxResponseFactory>[0]) => {
+    const child = JSON.stringify(request.messages.find((m) => m.role === "user")?.content).includes(
+      "child prompt",
+    );
+    const section = request.messages.findLast(
+      (m) => m.role === "system" && m.sections?.["orb-instructions"] !== undefined,
+    );
+    prompts[child ? "child" : "root"].push(
+      section?.role === "system" ? (section.sections?.["orb-instructions"] ?? "") : "",
+    );
+  };
   const childTools: { name: string; description: string }[][] = [];
   const childResults: string[] = [];
   const respond: FauxResponseFactory = async (request) => {
+    capture(request);
     const user = request.messages.find((m) => m.role === "user");
     if (JSON.stringify(user?.content).includes("child prompt")) {
       const offered = new Map<string, string>();
@@ -201,11 +217,13 @@ it("children neither see nor start subagents", async () => {
         }
       childTools.push([...offered].map(([name, description]) => ({ name, description })));
       const result = request.messages.find((m) => m.role === "toolResult");
-      if (!result)
+      if (!result) {
+        instructions.offer("HOST_READY_PROMPT");
         return fauxAssistantMessage(
           fauxToolCall("codemode", { code: "text(await tools.subagent({prompt: 'grandchild'}));" }),
           { stopReason: "toolUse" },
         );
+      }
       childResults.push(JSON.stringify(result.content));
       return fauxAssistantMessage("child done");
     }
@@ -223,9 +241,12 @@ it("children neither see nor start subagents", async () => {
   };
   const s = setup(
     [
-      fauxAssistantMessage(fauxToolCall("subagent", { prompt: "child prompt" }), {
-        stopReason: "toolUse",
-      }),
+      (request) => {
+        capture(request);
+        return fauxAssistantMessage(fauxToolCall("subagent", { prompt: "child prompt" }), {
+          stopReason: "toolUse",
+        });
+      },
       ...Array(4).fill(respond),
     ],
     {
@@ -241,6 +262,7 @@ it("children neither see nor start subagents", async () => {
       },
     },
   );
+  s.registry.install(promptExtension((id) => instructions.prompt(id)));
   const storage = new MemoryStorage();
   const harness = await Harness.open(storage, s, ctx);
   try {
@@ -249,6 +271,15 @@ it("children neither see nor start subagents", async () => {
     });
     harness.resume();
     await (await root.submit({ type: "input", content: "parent" }, ctx)).wait(ctx);
+    const tagged = (text: string) => `<orb-instructions>\n${text}\n</orb-instructions>`;
+    const childNote = "\n\nYou are a subagent. Do not spawn orbs.";
+    expect(prompts.child).toEqual([
+      tagged(`PENDING_PROMPT${childNote}`),
+      tagged(`HOST_READY_PROMPT${childNote}`),
+    ]);
+    expect(prompts.root[0]).toBe(tagged("PENDING_PROMPT"));
+    expect(prompts.root.at(-1)).toBe(tagged("HOST_READY_PROMPT"));
+    for (const prompt of prompts.root) expect(prompt).not.toContain(childNote.trim());
     expect(childTools).toHaveLength(2);
     for (const tools of childTools) {
       expect(tools.map((t) => t.name)).toEqual(["codemode"]);

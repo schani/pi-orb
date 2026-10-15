@@ -54,7 +54,7 @@ export function createOrbTools(service: OrbAgentOperations, notifyParent?: Paren
     }),
     defineTool({
       name: "orb_spawn",
-      description: "Create a same-project orb with a prompt.",
+      description: "Create a same-project orb with a prompt. Orbs do not share workspaces.",
       parameters: OrbSpawnRequestSchema,
       replay: "safe",
       execute: async (args, api) => output({ kind: "spawn", ...args }, api),

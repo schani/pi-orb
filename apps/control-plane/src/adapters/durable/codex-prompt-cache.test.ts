@@ -279,7 +279,12 @@ describe("durable Codex prompt cache key", () => {
     for (const bodies of conversations.values()) {
       for (const body of bodies) {
         const input = JSON.stringify(body.input);
-        expect(body.instructions).toBe("<orb-instructions>\nPENDING_PROMPT\n</orb-instructions>");
+        const childNote = input.includes("ROOT_TURN")
+          ? ""
+          : "\n\nYou are a subagent. Do not spawn orbs.";
+        expect(body.instructions).toBe(
+          `<orb-instructions>\nPENDING_PROMPT${childNote}\n</orb-instructions>`,
+        );
         expect(input.split("ORB_PROMPT").length - 1).toBe(input.includes("ROOT_TURN_TWO") ? 1 : 0);
       }
       for (const [index, body] of bodies.entries()) {
