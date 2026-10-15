@@ -1,6 +1,6 @@
 import type { HistoryRecord } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { type ControlPlaneDatabase, composeControlPlaneDatabase } from "../adapters/database.ts";
 import { PGliteClient } from "../adapters/pg/pglite-client.ts";
 import { makeOrbRow, makeProjectRow, seedTestUser } from "../testkit/fixtures.ts";
@@ -14,18 +14,14 @@ const WAKE = "00000000-0000-4000-8000-000000000083";
 const FIRST = "00000000-0000-4000-8000-000000000084";
 const LAST = "00000000-0000-4000-8000-000000000085";
 
-type Subject = { store: ControlPlaneStore; close: () => Promise<void> };
-
-function contract(name: string, open: () => Promise<Subject>): void {
+function contract(name: string, open: () => Promise<ControlPlaneStore>): void {
   describe(`${name} scheduled sleep FIFO matrix`, () => {
-    let subject: Subject;
-
-    beforeEach(async () => {
-      subject = await open();
-      expect((await subject.store.insertProject(task, makeProjectRow(PROJECT))).isOk()).toBe(true);
+    it("freezes human -> sleep_wake -> human at the source FIFO head", async () => {
+      const store = await open();
+      expect((await store.insertProject(task, makeProjectRow(PROJECT))).isOk()).toBe(true);
       expect(
         (
-          await subject.store.insertOrb(
+          await store.insertOrb(
             task,
             makeOrbRow(ORB, PROJECT, "running", {
               runtimeTokenHash: "caller",
@@ -34,12 +30,7 @@ function contract(name: string, open: () => Promise<Subject>): void {
           )
         ).isOk(),
       ).toBe(true);
-    });
 
-    afterEach(async () => subject.close());
-
-    it("freezes human -> sleep_wake -> human at the source FIFO head", async () => {
-      const store = subject.store;
       const firstContent = [{ type: "text" as const, text: "older human" }];
       expect(
         (
@@ -186,17 +177,14 @@ function contract(name: string, open: () => Promise<Subject>): void {
   });
 }
 
-contract("in-memory", async () => ({
-  store: new InMemoryControlPlaneStore(),
-  close: async () => undefined,
-}));
+contract("in-memory", async () => new InMemoryControlPlaneStore());
 
 contract("PGlite", async () => {
   const database: ControlPlaneDatabase = composeControlPlaneDatabase(new PGliteClient());
+  onTestFinished(async () => {
+    expect((await database.close()).isOk()).toBe(true);
+  });
   expect((await database.migrate()).isOk()).toBe(true);
   expect((await seedTestUser(task, database.users)).isOk()).toBe(true);
-  return {
-    store: database.store,
-    close: async () => void (await database.close()),
-  };
+  return database.store;
 });
