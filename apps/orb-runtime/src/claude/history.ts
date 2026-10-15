@@ -103,6 +103,37 @@ const object = (value: JsonValue | undefined): JsonObject =>
 const text = (value: JsonValue | undefined): string | undefined =>
   typeof value === "string" ? value : undefined;
 
+/** Shared lookup for committed ordinary and consumed-queue receipts. */
+export function claudeInputReceipt(
+  records: readonly HistoryRecord[],
+  uuid: string,
+): HistoryRecord | undefined {
+  return (
+    records.find(
+      (record) =>
+        record.id === uuid &&
+        ((record.type === "message" && record.role === "user") ||
+          (record.type === "event" &&
+            [
+              "claude.boot_receipt",
+              "claude.compact_command",
+              "claude.platform_message",
+              "orb.message",
+            ].includes(record.eventType))),
+    ) ??
+    records.find(
+      (record) =>
+        record.id === `claude.input-receipt:${uuid}` &&
+        record.type === "event" &&
+        record.eventType === "claude.input_receipt" &&
+        record.overflow.inputUuid === uuid,
+    )
+  );
+}
+
+const boundedIdentifier = (value: JsonValue | undefined): value is string =>
+  typeof value === "string" && /^[A-Za-z0-9._:-]{1,96}$/.test(value);
+
 export function claudeContent(value: JsonValue | undefined): ContentBlock[] {
   if (typeof value === "string") return [{ type: "text", text: value }];
   if (!Array.isArray(value)) return [];
@@ -211,6 +242,9 @@ export class ClaudeHistory {
   get view(): readonly HistoryRecord[] {
     return this.records;
   }
+  inputReceipt(uuid: string): HistoryRecord | undefined {
+    return claudeInputReceipt(this.records, uuid);
+  }
   correlation(uuid: string): Provenance | undefined {
     return this.provenance[uuid];
   }
@@ -259,6 +293,142 @@ export class ClaudeHistory {
       }),
     )();
   }
+  private deriveInputReceipts(
+    natives: readonly JsonObject[],
+    fingerprints: readonly string[],
+    records: readonly HistoryRecord[],
+  ): Result<HistoryRecord[], ClaudeHistoryError> {
+    const root = (native: JsonObject) =>
+      native.sessionId === this.session &&
+      (native.isSidechain === undefined || native.isSidechain === false) &&
+      native.agentId === undefined &&
+      native.agent_id === undefined;
+    const attachments = natives.flatMap((native, index) => {
+      const attachment = object(native.attachment);
+      return root(native) &&
+        native.type === "attachment" &&
+        attachment.type === "queued_command" &&
+        boundedIdentifier(native.uuid) &&
+        boundedIdentifier(attachment.source_uuid) &&
+        boundedIdentifier(attachment.delivery_id)
+        ? [
+            {
+              index,
+              id: native.uuid,
+              inputUuid: attachment.source_uuid,
+              deliveryId: attachment.delivery_id,
+            },
+          ]
+        : [];
+    });
+    const removals = natives.flatMap((native, index) =>
+      root(native) &&
+      native.type === "queue-operation" &&
+      native.operation === "remove" &&
+      native.reason === "absorbed_mid_turn" &&
+      boundedIdentifier(native.commandUuid) &&
+      boundedIdentifier(native.deliveryId)
+        ? [{ index, inputUuid: native.commandUuid, deliveryId: native.deliveryId }]
+        : [],
+    );
+    const additions: HistoryRecord[] = [];
+    const verified = new Set<string>();
+    const conflict = (): Result<never, ClaudeHistoryError> =>
+      err({
+        type: "claude_history_error",
+        message: "Consumed Claude input receipt proof conflicts.",
+      });
+    for (const attachment of attachments) {
+      const provenance = this.provenance[attachment.inputUuid];
+      if (provenance === undefined) continue;
+      const matches = removals.filter(
+        (removal) =>
+          removal.inputUuid === attachment.inputUuid &&
+          removal.deliveryId === attachment.deliveryId,
+      );
+      if (matches.length === 0) continue;
+      if (
+        matches.length !== 1 ||
+        attachments.some(
+          (other) =>
+            other !== attachment &&
+            (other.inputUuid === attachment.inputUuid ||
+              other.deliveryId === attachment.deliveryId),
+        ) ||
+        removals.some(
+          (other) =>
+            (other.inputUuid === attachment.inputUuid ||
+              other.deliveryId === attachment.deliveryId) &&
+            (other.inputUuid !== attachment.inputUuid ||
+              other.deliveryId !== attachment.deliveryId),
+        )
+      )
+        return conflict();
+      if (!boundedIdentifier(this.session) || !boundedIdentifier(provenance.operationId))
+        return conflict();
+      const removal = matches[0];
+      if (removal === undefined) return conflict();
+      if (removal.index <= attachment.index) continue;
+      const id = `claude.input-receipt:${attachment.inputUuid}`;
+      const record: HistoryRecord = {
+        id,
+        parentId: additions.at(-1)?.id ?? records.at(-1)?.id ?? null,
+        timestamp:
+          text(natives[removal.index]?.timestamp) ??
+          records.find((item) => item.id === attachment.id)?.timestamp ??
+          this.timestamp,
+        type: "event",
+        eventType: "claude.input_receipt",
+        inboxMessageIds: [...provenance.messageIds],
+        overflow: {
+          sessionId: this.session,
+          operationId: provenance.operationId,
+          inputUuid: attachment.inputUuid,
+          deliveryId: attachment.deliveryId,
+          attachmentId: attachment.id,
+          attachmentLine: attachment.index + 1,
+          consumptionLine: removal.index + 1,
+          attachmentHash: fingerprints[attachment.index] ?? "",
+          consumptionHash: fingerprints[removal.index] ?? "",
+          inputKind: provenance.boot
+            ? "boot"
+            : provenance.compaction
+              ? "compaction"
+              : provenance.sender !== undefined
+                ? "peer"
+                : provenance.system
+                  ? "system"
+                  : "human",
+        },
+      };
+      const existing = records.find((item) => item.id === id);
+      if (existing !== undefined) {
+        // Reopening may add native suffix records; retain the first append's ancestry and clock.
+        const position = records.indexOf(existing);
+        if (
+          existing.parentId !== (records[position - 1]?.id ?? null) ||
+          JSON.stringify(existing) !==
+            JSON.stringify({
+              ...record,
+              parentId: existing.parentId,
+              timestamp: existing.timestamp,
+            })
+        )
+          return conflict();
+      } else additions.push(record);
+      verified.add(id);
+    }
+    if (
+      records.some(
+        (record) =>
+          record.type === "event" &&
+          record.eventType === "claude.input_receipt" &&
+          !verified.has(record.id),
+      )
+    )
+      return conflict();
+    return ok(additions);
+  }
   scan(path: string | null): Result<readonly HistoryRecord[], ClaudeHistoryError> {
     if (this.loadError !== null) return err(this.loadError);
     return Result.fromThrowable(
@@ -291,7 +461,9 @@ export class ClaudeHistory {
           message: "Committed Claude transcript prefix changed; restart requires inspection.",
         });
       const next = [...this.records];
-      for (let index = this.fingerprints.length; index < lines.length; index++) {
+      const natives: JsonObject[] = [];
+      // Receipt derivation must include already fingerprinted legacy attachment lines.
+      for (let index = 0; index < lines.length; index++) {
         const parsed: Result<JsonObject, ClaudeHistoryError> = Result.fromThrowable(
           (): JsonObject => JSON.parse(lines[index] ?? "") as JsonObject,
           (): ClaudeHistoryError => ({
@@ -306,6 +478,8 @@ export class ClaudeHistory {
             type: "claude_history_error",
             message: "Native Claude record is not an object.",
           });
+        natives.push(native);
+        if (index < this.fingerprints.length) continue;
         const id = text(native.uuid) ?? `claude:${this.session}:${index}:${fingerprints[index]}`;
         if (next.some((record) => record.id === id))
           return err({
@@ -436,6 +610,9 @@ export class ClaudeHistory {
           });
         next.push(record);
       }
+      const receipts = this.deriveInputReceipts(natives, fingerprints, next);
+      if (receipts.isErr()) return err(receipts.error);
+      next.push(...receipts.value);
       if (next.length === this.records.length) return ok(this.records);
       return Result.fromThrowable(
         () => {

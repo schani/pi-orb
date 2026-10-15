@@ -34,7 +34,7 @@ import { makeHarness, seedRunningOrb } from "../testkit/fixtures.ts";
 import { reconcileOrbOnce, requestOrbStop } from "./lifecycle.ts";
 import { pollOrbUntilCaughtUp } from "./replication.ts";
 
-it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
+it.each(["ready", "queued-legacy", "missing-lifetime", "repeated-guard", "stop"] as const)(
   "failed guard HTTP/complete boot/WS recovery: %s",
   async (scenario) => {
     const task = new NoSimulationTask("claude-compute-recovery-http", false);
@@ -137,7 +137,8 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
       ).toBe(true);
       const input = await f.query.input.next();
       expect(input.done).not.toBe(true);
-      f.receipt(input.value!);
+      if (scenario === "queued-legacy") f.queuedReceipt(input.value!);
+      else f.receipt(input.value!);
       await f.query.emit(task, rootResult);
       await childHook(task, f);
       f.query.exit();
@@ -148,6 +149,20 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
         error: { code: "claude_child_recovery_required" },
         recovery: { episode: expect.stringMatching(/^[a-f0-9]{64}$/) },
       });
+      if (scenario === "queued-legacy") {
+        // A pre-fix normalizer indexed every line but retained only wrapper identities.
+        const indexPath = join(f.dir, "claude", "index.json");
+        const index = JSON.parse(f.files.read(indexPath)!);
+        const receipt = index.records.find(
+          (record: { eventType?: string }) => record.eventType === "claude.input_receipt",
+        );
+        index.records = index.records
+          .filter((record: { eventType?: string }) => record.eventType !== "claude.input_receipt")
+          .map((record: { parentId: string | null }) =>
+            record.parentId === receipt.id ? { ...record, parentId: receipt.parentId } : record,
+          );
+        f.files.commit(indexPath, JSON.stringify(index));
+      }
       if (scenario === "missing-lifetime") {
         const retained = f.journal();
         delete retained.guardLifetime;
@@ -251,7 +266,11 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
       expect(h.store.orbSnapshot("orb-a")?.state).toBe("running");
       expect(f.journal().ownedChildren).toEqual({});
       expect(replacements).toBe(1);
-      await pollOrbUntilCaughtUp(task, deps, "orb-a", 10);
+      const receiptPoll = await pollOrbUntilCaughtUp(task, deps, "orb-a", 10);
+      expect(
+        receiptPoll,
+        JSON.stringify({ receiptPoll, state: h.store.orbSnapshot("orb-a") }),
+      ).toMatchObject({ type: "caught_up" });
       expect(h.store.messageSnapshots("orb-a")[0]?.status).toBe("delivered");
       expect(
         h.store
@@ -341,7 +360,7 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
         origin: { kind: "human" },
         message: { content: [{ type: "text", text: "change course" }] },
       });
-      f.receipt(steering);
+      f.queuedReceipt(steering);
       await bootQuery.emit(task, {
         ...rootResult,
         user_message_uuid: steering.uuid,
@@ -372,10 +391,23 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
           overflow: expect.objectContaining({ operationId, outcome: "completed" }),
         }),
       );
-      expect(settled.filter((record) => record.id === steering.uuid)).toEqual([
-        expect.objectContaining({ type: "message", inboxMessageIds: ["steer"] }),
-      ]);
-      expect(settled.filter((record) => record.id === input.value!.uuid)).toHaveLength(1);
+      expect(
+        settled.filter(
+          (record) =>
+            record.type === "event" &&
+            record.eventType === "claude.input_receipt" &&
+            record.overflow.inputUuid === steering.uuid,
+        ),
+      ).toEqual([expect.objectContaining({ type: "event", inboxMessageIds: ["steer"] })]);
+      expect(
+        settled.filter(
+          (record) =>
+            record.id === input.value!.uuid ||
+            (record.type === "event" &&
+              record.eventType === "claude.input_receipt" &&
+              record.overflow.inputUuid === input.value!.uuid),
+        ),
+      ).toHaveLength(1);
       expect(
         settled.filter(
           (record) => record.type === "event" && record.eventType === "pi-orb.turn-resume",

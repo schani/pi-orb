@@ -63,9 +63,15 @@ The published result is independently inventoried at:
 
 https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/c9a30a6d-afb3-4a51-a979-335ae7ac389e/analyst-onboarding-redesigns-v4.html
 
-Leave the failed orb and disk intact. Recommend a tests-first normalization correction that recognizes the consumed queued-command representation and retains its input/inbox correlation without rewriting existing attachment identities. Then separately review explicit offline reconciliation of this exact delivery and the unreplicated final tail. Neither an SDK result UUID echo alone nor attachment presence alone should authorize a generalized replay/repair path. No reconciliation was performed.
+Leave the failed orb and disk intact. No target restart, replay, ledger edit, inbox acknowledgement or native-file mutation was performed. The separate unreplicated tail remains unexplained; follow-up work lives in `TODO.md`.
 
-No safe automatic repair is established. Do not delete a delivery entry, fabricate a receipt, mark the inbox delivered, or bypass the guard. Recovering the existing session requires explicit user-approved reconciliation after native inspection; a fresh orb with selected files/context is a separate possible continuation, not exactly-once recovery. Follow-up work lives in `TODO.md`.
+## Approved correction (2026-10-15; local, undeployed)
+
+After this inspection, the user approved an append-only existing-schema `claude.input_receipt` event, not target mutation or deployment. `ClaudeHistory` reparses all complete root lines after fsync/hash-prefix validation, including already fingerprinted stripped wrappers. It joins a same-session queued attachment to exactly one later `remove / absorbed_mid_turn` matching **both** input UUID and delivery ID, then joins trusted saved provenance. Incomplete, mismatched, child/sidechain, untrusted and conflicting evidence cannot authorize receipt. Native origin/prompt and result echoes are not provenance or consumption proof.
+
+A deterministic event appends to the current journal tail without rewriting native bytes, old records or identities. Its bounded identifiers, source lines/hashes, classification and trusted inbox IDs retain durable consumption evidence. Reopen verifies/reuses its original timestamp and parent. Atomic scan/index commit precedes payload retirement, publication and ordinary transactional inbox acknowledgement. Shared receipt lookup covers restore and all four agent exact-ID sites; ordinary user/platform UUID receipts remain supported. Missing proof retains the visible fail-closed guard; automatic input replay remains forbidden.
+
+Boot planning places genuine human authority at the original attachment position, not at the appended event. This preserves the retained final reply's settled classification and prevents late receipts from resetting the human budget. The retained handoff success does not manufacture an adapter operation terminal; qualification may report an interrupted operation without replaying it. Requirements and rationale: `docs/claude-agent-sdk.md`; tests and preserved failures: `docs/testing.md`.
 
 ## Reproduction and preservation
 

@@ -1543,7 +1543,7 @@ export class ClaudeOrbAgent implements OrbAgent {
           this.fail("history_unavailable", flushed.error.message);
           return;
         }
-        if (pending.every((uuid) => this.history?.view.some((record) => record.id === uuid)))
+        if (pending.every((uuid) => this.history?.inputReceipt(uuid) !== undefined))
           for (const uuid of pending) answered.add(uuid);
       }
       for (const uuid of answered) if (uuid !== undefined) this.pendingSteers.delete(uuid);
@@ -1735,7 +1735,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       (delivery) =>
         delivery.operationId === operationId &&
         delivery.submitted &&
-        !this.history?.view.some((record) => record.id === delivery.uuid),
+        this.history?.inputReceipt(delivery.uuid) === undefined,
     );
     if (unsettled) {
       this.fail(
@@ -1953,10 +1953,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     );
     let compacted = false;
     for (const delivery of Object.values(this.state?.deliveries ?? {})) {
-      if (
-        delivery.content === undefined ||
-        !scanned.value.some((record) => record.id === delivery.uuid)
-      )
+      if (delivery.content === undefined || this.history.inputReceipt(delivery.uuid) === undefined)
         continue;
       delete delivery.content;
       delete delivery.system;
@@ -2279,9 +2276,10 @@ export class ClaudeOrbAgent implements OrbAgent {
         Promise.resolve({
           v: 1 as const,
           messageId,
-          status: this.history?.view.some((record) => record.id === existing.uuid)
-            ? ("persisted" as const)
-            : ("queued" as const),
+          status:
+            this.history?.inputReceipt(existing.uuid) !== undefined
+              ? ("persisted" as const)
+              : ("queued" as const),
           delivery: existing.steer === true ? ("steer" as const) : ("turn" as const),
           operationId: existing.operationId,
           duplicate: true,

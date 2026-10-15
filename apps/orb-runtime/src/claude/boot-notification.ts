@@ -1,18 +1,43 @@
 import type { HistoryRecord } from "@pi-orb/protocol";
 import { BOOT_BASELINE_TYPE } from "../pi/boot-notification.ts";
 
+function isNativeMetadata(native: unknown): boolean {
+  return (
+    native !== null &&
+    typeof native === "object" &&
+    !Array.isArray(native) &&
+    (("isCompactSummary" in native && native.isCompactSummary === true) ||
+      ("isMeta" in native && native.isMeta === true))
+  );
+}
+
 /** Adapt native root evidence to the shared pure boot policy, never to a Pi session. */
 export function claudeBootEntries(records: readonly HistoryRecord[]): unknown[] {
-  return records.flatMap((record): unknown[] => {
-    if (record.type === "message") {
-      const native = record.overflow.native;
-      if (
-        native !== null &&
-        typeof native === "object" &&
-        !Array.isArray(native) &&
-        (native.isCompactSummary === true || native.isMeta === true)
+  const humanReceipts = new Map(
+    records.flatMap((record) =>
+      record.type === "event" &&
+      record.eventType === "claude.input_receipt" &&
+      record.overflow.inputKind === "human" &&
+      typeof record.overflow.attachmentId === "string" &&
+      typeof record.overflow.inputUuid === "string" &&
+      !records.some(
+        (item) =>
+          item.id === record.overflow.inputUuid &&
+          item.type === "message" &&
+          item.role === "user" &&
+          !isNativeMetadata(item.overflow.native),
       )
-        return [];
+        ? [[record.overflow.attachmentId, record.overflow.inputUuid] as const]
+        : [],
+    ),
+  );
+  return records.flatMap((record): unknown[] => {
+    // A late appended receipt contributes human authority only at its native attachment position.
+    const inputUuid = humanReceipts.get(record.id);
+    if (inputUuid !== undefined)
+      return [{ type: "message", id: inputUuid, message: { role: "user", content: [] } }];
+    if (record.type === "message") {
+      if (isNativeMetadata(record.overflow.native)) return [];
       const content = record.content.map((block) =>
         block.type === "tool_call" ? { type: "toolCall" } : block,
       );

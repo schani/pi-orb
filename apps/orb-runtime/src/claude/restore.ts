@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import type { ClaudeRecoveryProof, HistoryRecord, JsonObject } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
 
+import { claudeInputReceipt } from "./history.ts";
+
 export interface ClaudeHandoffTerminal {
   queryId: string;
   operationId: string | null;
@@ -265,7 +267,7 @@ export function qualifyClaudeRestart(
   const interrupted = new Set<string>();
   for (const delivery of Object.values(state.deliveries)) {
     if (!delivery.submitted) continue;
-    if (!records.some((record) => record.id === delivery.uuid))
+    if (claudeInputReceipt(records, delivery.uuid) === undefined)
       return err({
         code: "claude_delivery_uncertain",
         message:

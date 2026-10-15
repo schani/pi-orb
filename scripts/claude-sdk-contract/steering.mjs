@@ -1,7 +1,8 @@
+import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -55,7 +56,7 @@ function startResponse(response, block) {
 }
 
 /** Genuine pinned SDK/CLI; owned loopback provider, explicit barriers, no agents or credentials. */
-export async function probeSteering(mode) {
+export async function probeSteering(mode, { onRoot } = {}) {
   const home = await mkdtemp(join(tmpdir(), "claude-steering-contract-"));
   const cwd = join(home, "workspace");
   const config = join(home, "config");
@@ -64,6 +65,13 @@ export async function probeSteering(mode) {
   const ready = latch();
   const releaseTool = latch();
   const endInput = latch();
+  const sessionId = randomUUID();
+  const rootPath = join(
+    config,
+    "projects",
+    cwd.replace(/[^a-zA-Z0-9]/g, "-"),
+    `${sessionId}.jsonl`,
+  );
   const firstUuid = randomUUID();
   const steerUuid = randomUUID();
   const marker = "NATIVE_STEER_CHANGE_COURSE";
@@ -163,6 +171,7 @@ export async function probeSteering(mode) {
       prompt: input,
       options: {
         cwd,
+        sessionId,
         settingSources: [],
         tools: [],
         plugins: [],
@@ -255,7 +264,66 @@ export async function probeSteering(mode) {
         `Native steering ${mode} exceeded its owned deadline: ${JSON.stringify({ requests, results, steeredWhileToolBlocked })}`,
       );
     if (unexpectedRequest) throw new Error(`Unexpected local request: ${unexpectedRequest}`);
-    return { requests, results, steeredWhileToolBlocked, toolCompleted };
+    const fd = await open(rootPath, "r");
+    try {
+      await fd.sync();
+    } finally {
+      await fd.close();
+    }
+    const source = await readFile(rootPath, "utf8");
+    assert(source.endsWith("\n"), "Native steering transcript has an incomplete final record.");
+    const records = source
+      .trimEnd()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const rootUser = (uuid) =>
+      records.find(
+        (record) =>
+          record.type === "user" &&
+          record.uuid === uuid &&
+          record.sessionId === sessionId &&
+          record.isSidechain === false,
+      );
+    assert(rootUser(firstUuid), "Initial input has no durable native root user receipt.");
+    const queuedIndex = records.findIndex(
+      (record) =>
+        record.type === "attachment" &&
+        record.sessionId === sessionId &&
+        record.isSidechain === false &&
+        typeof record.uuid === "string" &&
+        record.uuid !== steerUuid &&
+        record.attachment?.type === "queued_command" &&
+        record.attachment.source_uuid === steerUuid,
+    );
+    let nativeReceipt;
+    if (queuedIndex >= 0) {
+      const queued = records[queuedIndex].attachment;
+      assert.equal(queued.prompt, marker);
+      assert.equal(typeof queued.delivery_id, "string");
+      assert(queued.delivery_id.length > 0);
+      assert(
+        records
+          .slice(queuedIndex + 1)
+          .some(
+            (record) =>
+              record.type === "queue-operation" &&
+              record.operation === "remove" &&
+              record.reason === "absorbed_mid_turn" &&
+              record.sessionId === sessionId &&
+              record.commandUuid === steerUuid &&
+              record.deliveryId === queued.delivery_id,
+          ),
+        "Queued native input has no later matching absorbed_mid_turn removal.",
+      );
+      nativeReceipt = "queued_command";
+    } else {
+      const user = rootUser(steerUuid);
+      assert(user, "Steering has neither a durable queued attachment nor a root user receipt.");
+      assert.equal(user.message.content, marker);
+      nativeReceipt = "user";
+    }
+    await onRoot?.({ home, rootPath, sessionId, firstUuid, steerUuid });
+    return { requests, results, steeredWhileToolBlocked, toolCompleted, nativeReceipt };
   } finally {
     clearTimeout(timer);
     ready.resolve();

@@ -137,6 +137,30 @@ export class ComposedClaudeFixture {
     if (text === null) throw new Error("fixture session journal not committed");
     return JSON.parse(text);
   }
+  queuedReceipt(message: SDKUserMessage) {
+    this.append({
+      type: "attachment",
+      uuid: `attachment:${message.uuid}`,
+      sessionId: this.state.id,
+      isSidechain: false,
+      timestamp: this.state.timestamp,
+      attachment: {
+        type: "queued_command",
+        source_uuid: message.uuid,
+        delivery_id: `delivery:${message.uuid}`,
+        prompt: message.message.content,
+      },
+    });
+    this.append({
+      type: "queue-operation",
+      operation: "remove",
+      reason: "absorbed_mid_turn",
+      sessionId: this.state.id,
+      commandUuid: message.uuid,
+      deliveryId: `delivery:${message.uuid}`,
+      timestamp: this.state.timestamp,
+    });
+  }
   receipt(message: SDKUserMessage) {
     this.append({
       type: "user",
