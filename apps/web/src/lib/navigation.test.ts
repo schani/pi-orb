@@ -92,4 +92,47 @@ describe("native anchor admission", () => {
       ).toBe(false);
     }
   });
+
+  it.each([
+    ["", true],
+    ["_blank", false],
+  ])("intercepts an SVG anchor (target=%s) like an HTML anchor", (target, intercepted) => {
+    const listeners = new Map<string, (event: MouseEvent) => void>();
+    const pushState = vi.fn();
+    class Element {}
+    // SVG anchors expose `href`/`target` as SVGAnimatedString, not strings.
+    const svgAnchor = Object.assign(new Element(), {
+      href: { baseVal: "/orbs/o" },
+      target: { baseVal: target },
+      getAttribute: (name: string) => ({ href: "/orbs/o", target })[name] ?? null,
+      hasAttribute: () => false,
+      closest: () => svgAnchor,
+    });
+    vi.stubGlobal("Element", Element);
+    vi.stubGlobal("document", { baseURI: "https://app.test/usage" });
+    vi.stubGlobal("window", {
+      history: { pushState },
+      location: { origin: "https://app.test", pathname: "/usage", search: "", hash: "" },
+      addEventListener: (type: string, listener: (event: MouseEvent) => void) =>
+        listeners.set(type, listener),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+    const unsubscribe = subscribeNavigation(vi.fn());
+    try {
+      const preventDefault = vi.fn();
+      listeners.get("click")?.({
+        target: svgAnchor,
+        button: 0,
+        defaultPrevented: false,
+        preventDefault,
+      } as unknown as MouseEvent);
+      expect(pushState).toHaveBeenCalledTimes(intercepted ? 1 : 0);
+      if (intercepted) expect(pushState).toHaveBeenCalledWith(null, "", "/orbs/o");
+      expect(preventDefault).toHaveBeenCalledTimes(intercepted ? 1 : 0);
+    } finally {
+      unsubscribe();
+      vi.unstubAllGlobals();
+    }
+  });
 });
