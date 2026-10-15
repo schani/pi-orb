@@ -328,6 +328,128 @@ it("captures production-spawner stderr, exit and SDK cause without credentials",
   expect(JSON.stringify({ health, records: f.history.view })).not.toContain(secret);
 });
 
+it.each([
+  ["iterator", "none"],
+  ["payload_listener", "none"],
+  ["all_listener", "none"],
+  ["iterator", "sdk"],
+  ["iterator", "history"],
+] as const)(
+  "retains stream failure diagnostics after %s exceptions and %s cleanup failure",
+  async (origin, cleanup) => {
+    const releaseFailure = gate();
+    const childClosed = gate();
+    let factories = 0;
+    const cause = Object.assign(new Error(`socket refused ${secret}`), { code: "ECONNRESET" });
+    const original = new Error(`stream consumption rejected ${secret}`, { cause });
+    const f = fixture(true, (input, options) => {
+      const metadata = factories++ === 0;
+      const output = new ScheduledClaudeQuery(input, options, metadata);
+      if (metadata)
+        return ok({
+          query: output,
+          exited: output.processExit.promise,
+          stdoutEnded: output.stdoutEnded,
+          requestShutdown: () => output.requestShutdown(),
+        });
+      const child = options.spawnClaudeCodeProcess?.({
+        command: process.execPath,
+        args: ["-e", `process.stderr.write('stream stderr ${secret}\\n');process.exitCode=17`],
+        cwd: options.cwd ?? process.cwd(),
+        env: process.env,
+        signal: new AbortController().signal,
+      });
+      if (!child) return err({ message: "Missing spawner" });
+      child.stdout.resume();
+      (child as ChildProcess).once("close", () => childClosed.resolve());
+      output[Symbol.asyncIterator] = async function* () {
+        await releaseFailure.promise;
+        await childClosed.promise;
+        if (origin === "iterator") throw original;
+        yield {
+          type: "assistant",
+          uuid: "failing-assistant",
+          session_id: f.state.id,
+          parent_tool_use_id: null,
+          message: { content: [{ type: "tool_use", id: "call", name: "Bash", input: {} }] },
+        } as unknown as SDKMessage;
+      };
+      output.close = () => {
+        if (cleanup === "sdk") throw new Error("secondary SDK close failure");
+      };
+      return ok({
+        query: output,
+        exited: childClosed.promise,
+        stdoutEnded: childClosed.promise.then(() => ok(undefined)),
+        requestShutdown: () => ok(undefined),
+      });
+    });
+    expect((await f.attach()).isOk()).toBe(true);
+    expect(
+      (await f.agent.submitMessage([{ type: "text", text: "private prompt" }], "stream-op")).isOk(),
+    ).toBe(true);
+    const failedHealthAtNotification: unknown[] = [];
+    f.agent.subscribe((frame) => {
+      if (frame.type !== "runtime.event") return;
+      if (frame.event.type === "tool_state") throw original;
+      if (origin === "all_listener") {
+        failedHealthAtNotification.push(f.agent.getHealth());
+        throw new Error("secondary listener failure");
+      }
+    });
+    releaseFailure.resolve();
+    await expect(f.agent.waitForStream()).resolves.toBeUndefined();
+    const health = f.agent.getHealth();
+    expect(health).toMatchObject({
+      status: "failed",
+      orbId: "o",
+      error: {
+        code: "claude_stream_failed",
+        retryable: true,
+        message: expect.stringContaining("stream consumption rejected [redacted]"),
+        diagnostics: expect.stringContaining("ECONNRESET"),
+      },
+    });
+    if (health.status !== "failed") return;
+    expect(health.error.message).toContain("socket refused [redacted]");
+    expect(health.error.message).toContain("stderr: stream stderr [redacted]");
+    expect(health.error.diagnostics).toContain("initialization.test.ts");
+    expect(health.error.diagnostics).toContain("exitCode=17 signal=none");
+    const identity = JSON.parse(health.error.diagnostics?.split("\n")[0] ?? "{}");
+    expect(identity).toEqual({
+      stage: origin === "iterator" ? "sdk_iteration" : "message_processing",
+      sessionId: f.state.id,
+      queryId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      operationId: "stream-op",
+    });
+    expect(health.error.message.length).toBeLessThanOrEqual(1024);
+    expect(health.error.diagnostics?.length).toBeLessThanOrEqual(16384);
+    expect(JSON.stringify({ health, frames: f.frames, records: f.history.view })).not.toMatch(
+      /private-provider-secret|private prompt|secondary listener failure/,
+    );
+    expect(f.agent.gateView().acceptingWork).toBe(false);
+    expect(
+      (await f.agent.submitMessage([{ type: "text", text: "blocked" }], "blocked")).isErr(),
+    ).toBe(true);
+    expect(
+      (await f.agent.changeSettings({ type: "set_thinking", thinkingLevel: "low" })).isErr(),
+    ).toBe(true);
+    expect(factories).toBe(2);
+    if (cleanup !== "none") {
+      if (cleanup === "history") f.failHistory();
+      await expect(f.agent.closeExtensions()).resolves.toBeUndefined();
+      expect(f.agent.getHealth()).toEqual(health);
+      expect(f.agent.gateView().acceptingWork).toBe(false);
+    }
+    if (origin === "all_listener") {
+      expect(failedHealthAtNotification).toHaveLength(1);
+      expect(failedHealthAtNotification[0]).toEqual(health);
+    } else {
+      expect(settings(f)).toMatchObject({ event: { writable: false } });
+    }
+  },
+);
+
 it.each(failures)(
   "seals settings after %s failure while rotating a ready session",
   async (failure) => {
