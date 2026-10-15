@@ -564,6 +564,7 @@ it.each(boundaryCases)(
         const ids = ["a", "b", "c"];
         const gate = new ConditionVariable("atomic stage");
         let captured: CommitPullBatchParams | undefined;
+        let deliveryTask: SimulationTask | undefined;
         let ready = false,
           boundary = false,
           command = false,
@@ -644,6 +645,9 @@ it.each(boundaryCases)(
         h.store.commitPullBatch = (task, request) =>
           new ResultAsync(
             (async () => {
+              // Hold delivery's projection, not the independent history lane's transaction.
+              if (request.orbId === "a" && task !== deliveryTask)
+                while (!completed) await gate.wait(task, "initial delivery projection");
               const first = request.orbId === "a" && captured === undefined;
               if (first) captured = request;
               else if (request.orbId === "a")
@@ -689,6 +693,7 @@ it.each(boundaryCases)(
                 const session = h.world.sessionHeaderOf(orb.id);
                 if (session === null) throw new Error("seeded session missing");
                 const records = [...h.world.entriesOf(orb.id)];
+                if (orb.id === "a") deliveryTask = task;
                 return commitAgentHistory(task, h.deps, {
                   orbId: orb.id,
                   runtimeInstanceId: orb.id,

@@ -146,6 +146,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-15-claude-success-failed-operation.md](docs/postmortems/2026-10-15-claude-success-failed-operation.md) — sticky operation failure despite final SDK success; triggering error unidentified
 - [docs/postmortems/2026-10-13-rollout-monitor-anomalies.md](docs/postmortems/2026-10-13-rollout-monitor-anomalies.md) — validated deployment, diagnostic mint-floor denials and preexisting malformed transcript-ID failure; monitor regression preserved
 - [docs/postmortems/2026-10-13-claude-history-nul.md](docs/postmortems/2026-10-13-claude-history-nul.md) — JSONB NUL rejection blocked replication, receipts and FIFO delivery; lossless storage required
 - [docs/postmortems/2026-10-13-claude-query-rotation.md](docs/postmortems/2026-10-13-claude-query-rotation.md) — native handoff-completion defect, requesting/result fence and durable diagnostics; historical attribution incomplete

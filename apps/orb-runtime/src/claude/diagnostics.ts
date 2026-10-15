@@ -1,3 +1,4 @@
+import type { SDKAssistantMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { Result } from "neverthrow";
 
 export interface ClaudeQueryError {
@@ -55,6 +56,37 @@ export class ClaudeDiagnostics {
         // biome-ignore lint/suspicious/noControlCharactersInRegex: remove control bytes while retaining newlines and tabs.
         .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "")
     );
+  }
+
+  assistant(message: SDKAssistantMessage) {
+    const text = this.redact(
+      message.message.content
+        .flatMap((block) => (block.type === "text" ? [block.text] : []))
+        .join("\n"),
+    );
+    return {
+      category: message.error ?? "unknown",
+      errorText: text.slice(0, 8192),
+      apiErrorStatus: null,
+      truncated: text.length > 8192,
+    };
+  }
+
+  result(message: SDKResultMessage) {
+    const errors = message.subtype === "success" ? [] : message.errors;
+    const redactedErrors = errors.slice(0, 16).map((error) => this.redact(error));
+    const text = message.subtype === "success" ? this.redact(message.result) : null;
+    return {
+      category: message.subtype === "success" ? "api_error" : message.subtype,
+      errors: redactedErrors.map((error) => error.slice(0, 1024)),
+      errorCount: errors.length,
+      errorText: text === null ? null : text.slice(0, 8192),
+      apiErrorStatus: message.subtype === "success" ? (message.api_error_status ?? null) : null,
+      truncated:
+        errors.length > 16 ||
+        redactedErrors.some((error) => error.length > 1024) ||
+        (text !== null && text.length > 8192),
+    };
   }
 
   capture(error: unknown): { message: string; diagnostics: string } {

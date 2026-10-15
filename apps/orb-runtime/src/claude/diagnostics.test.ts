@@ -50,3 +50,67 @@ it("redacts credential syntax, encoded secrets, URLs and ANSI-split credentials 
   diagnostic.stderr("partial " + "x".repeat(40000));
   expect(diagnostic.capture("failed").diagnostics).not.toContain("xxxx");
 });
+
+it("redacts and bounds SDK errors without serializing unrelated fields or stderr", () => {
+  const diagnostics = new ClaudeDiagnostics(["opaque-secret"]);
+  diagnostics.stderr("private stderr");
+  const result = (fields: object) =>
+    diagnostics.result({
+      type: "result",
+      subtype: "success",
+      is_error: true,
+      ...fields,
+    } as Parameters<ClaudeDiagnostics["result"]>[0]);
+  const api = result({
+    result: `Denied opaque-secret ${"x".repeat(9000)}`,
+    api_error_status: 429,
+    headers: { authorization: "private header" },
+    prompt: "private prompt",
+  });
+  expect(api).toMatchObject({
+    category: "api_error",
+    errors: [],
+    apiErrorStatus: 429,
+    truncated: true,
+  });
+  expect(api.errorText).toHaveLength(8192);
+  expect(api.errorText).toContain("Denied [redacted]");
+  expect(result({ result: "HTTP 403" })).toMatchObject({ apiErrorStatus: null, truncated: false });
+  expect(result({ result: "", api_error_status: null })).toMatchObject({
+    errorText: "",
+    apiErrorStatus: null,
+  });
+  const errors = result({
+    subtype: "error_during_execution",
+    errors: Array(20).fill(`socket opaque-secret ${"x".repeat(2000)}`),
+  });
+  expect(errors).toMatchObject({
+    category: "error_during_execution",
+    errorCount: 20,
+    errorText: null,
+    apiErrorStatus: null,
+    truncated: true,
+  });
+  expect(errors.errors).toHaveLength(16);
+  expect(
+    errors.errors.every((error) => error.length === 1024 && error.startsWith("socket [redacted]")),
+  ).toBe(true);
+  const assistant = diagnostics.assistant({
+    error: "authentication_failed",
+    message: {
+      content: [
+        { type: "text", text: `Denied opaque-secret ${"x".repeat(9000)}` },
+        { type: "thinking", thinking: "private reasoning", signature: "private signature" },
+        { type: "tool_use", name: "private tool", input: { value: "private input" } },
+      ],
+    },
+  } as Parameters<ClaudeDiagnostics["assistant"]>[0]);
+  expect(assistant).toMatchObject({
+    category: "authentication_failed",
+    apiErrorStatus: null,
+    truncated: true,
+  });
+  expect(assistant.errorText).toHaveLength(8192);
+  expect(assistant.errorText).toContain("Denied [redacted]");
+  expect(JSON.stringify([api, errors, assistant])).not.toMatch(/opaque-secret|private/);
+});
