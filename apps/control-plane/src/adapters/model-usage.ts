@@ -14,6 +14,7 @@ export function modelCall(
     output: response.usage.output,
     cacheRead: response.usage.cacheRead,
     cacheWrite: response.usage.cacheWrite,
+    costUsd: response.usage.cost.total,
     ...(response.durationMs === undefined ? {} : { durationMs: response.durationMs }),
   };
 }

@@ -172,6 +172,7 @@ describe("PiOrbNameGenerator", () => {
         output: 5,
         cacheRead: 8,
         cacheWrite: 0,
+        costUsd: 0,
       },
     ]);
   });

@@ -207,3 +207,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 ## Spawn model intent — 79
 
 79. **Resolved (2026-10-14, America/Los_Angeles; user-approved):** one nullable `orbs.initial_model` JSONB column stores immutable canonical `{provider,id}` intent atomically with spawn acceptance. Native settings remain authoritative after initialization. No selector snapshot, receipt column, table, index or flag. Contract and rejected alternatives: `docs/orb-spawning.md`.
+
+## Claude model usage forwarding — 80
+
+80. **Resolved (2026-10-14; user decision):** Claude orbs' per-call usage (`docs/model-usage.md`) reaches `model_calls` as one hidden replicated `claude.model_call` history record per call, inserted by the control plane in the history commit transaction. Rejected: a runtime→control-plane endpoint — a new route, client and loss handling, where history replication already provides durable, authenticated, exactly-once delivery; the cost is roughly 20% more history records in busy Claude orbs. `query_source` maps `sdk` → `root`, `agent:*` → `subagent`, `compact` → `compaction`, others verbatim. `cost_usd` is stored for Pi and Claude calls.

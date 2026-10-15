@@ -1,3 +1,4 @@
+import { CLAUDE_MODEL_CALL_EVENT, type HistoryRecord } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { okAsync } from "neverthrow";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,6 +26,7 @@ const call = (orbId: string, overrides: Partial<ModelCall> = {}): ModelCall => (
   output: 30,
   cacheRead: 4_000,
   cacheWrite: 7,
+  costUsd: 0.0125,
   durationMs: 2_345,
   ...overrides,
 });
@@ -78,7 +80,11 @@ export function modelUsageLedgerContractTests(
     it("inserts one content-free row per call without waiting for the WAL flush", async () => {
       const clock = vi.spyOn(task, "wallNow").mockReturnValue(AT);
       ledger.record(task, call(ARCHIVED));
-      const { durationMs: _untimed, ...failed } = call(DELETED, {
+      const {
+        durationMs: _untimed,
+        costUsd: _uncosted,
+        ...failed
+      } = call(DELETED, {
         use: "turn_summary",
         model: "gpt-6-luna",
         outcome: "error",
@@ -106,6 +112,7 @@ export function modelUsageLedgerContractTests(
           output: 30,
           cache_read: 4_000,
           cache_write: 7,
+          cost_usd: 0.0125,
           duration_ms: 2_345,
         },
         {
@@ -120,6 +127,7 @@ export function modelUsageLedgerContractTests(
           output: 0,
           cache_read: 0,
           cache_write: 0,
+          cost_usd: null,
           duration_ms: null,
         },
       ]);
@@ -128,6 +136,75 @@ export function modelUsageLedgerContractTests(
         "SET LOCAL synchronous_commit = off",
       ]);
       clock.mockRestore();
+    });
+
+    it("inserts one row per newly replicated Claude model call, in the history commit", async () => {
+      (await seedTestUser(task, database.users))._unsafeUnwrap();
+      (await database.store.insertProject(task, makeProjectRow(PROJECT)))._unsafeUnwrap();
+      (
+        await database.store.insertOrb(task, makeOrbRow(ARCHIVED, PROJECT, "running"))
+      )._unsafeUnwrap();
+      const event = (id: string, eventType: string, overflow: object): HistoryRecord => ({
+        id,
+        parentId: null,
+        timestamp: "2026-10-14T00:00:01.000Z",
+        type: "event",
+        eventType,
+        content: [{ type: "text", text: "" }],
+        custom: { customType: eventType, display: false },
+        overflow: overflow as HistoryRecord["overflow"],
+      });
+      const usage = {
+        outcome: "ok",
+        at: "2026-10-14T00:00:00.500Z",
+        model: "claude-opus-5-5",
+        querySource: "agent:custom",
+        input: 3,
+        output: 200,
+        cacheRead: 40_000,
+        cacheWrite: 1_500,
+        costUsd: 0.042,
+        durationMs: 4_100,
+      };
+      const records = [
+        event("call", CLAUDE_MODEL_CALL_EVENT, usage),
+        event("other", "claude.steering_result", usage),
+        event("malformed", CLAUDE_MODEL_CALL_EVENT, { ...usage, input: "3" }),
+      ];
+      const commit = (expectedCursor: string | null, nextCursor: string) =>
+        database.store.commitPullBatch(task, {
+          orbId: ARCHIVED,
+          expectedCursor,
+          session: { id: "session", overflow: {} },
+          records,
+          nextCursor,
+          nextHeadId: "malformed",
+        });
+      (await commit(null, "malformed"))._unsafeUnwrap();
+      // A redelivered batch inserts no history rows, so it inserts no usage rows.
+      (await commit("malformed", "malformed"))._unsafeUnwrap();
+      expect(
+        (await rows()).map(({ id: _id, ...row }) => ({
+          ...row,
+          at: (row["at"] as Date).getTime(),
+        })),
+      ).toEqual([
+        {
+          at: Date.parse("2026-10-14T00:00:00.500Z"),
+          owner_user_id: TEST_USER_ID,
+          orb_id: ARCHIVED,
+          use: "subagent",
+          provider: "anthropic",
+          model: "claude-opus-5-5",
+          outcome: "ok",
+          input: 3,
+          output: 200,
+          cache_read: 40_000,
+          cache_write: 1_500,
+          cost_usd: 0.042,
+          duration_ms: 4_100,
+        },
+      ]);
     });
 
     it("keeps rows through orb archival and deletion", async () => {
@@ -337,7 +414,7 @@ export function modelUsageLedgerContractTests(
           { ...bucket, bucket: 0.5 },
           { ...bucket, bucket: "0" },
           { ...bucket, bucket: NaN },
-          { ...bucket, use: "unknown" },
+          { ...bucket, use: null },
           { ...bucket, orbId: null },
           { ...bucket, orbId: 7 },
           { ...bucket, provider: null },

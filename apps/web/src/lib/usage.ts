@@ -12,6 +12,7 @@ export const USE_LABELS: Record<ModelCallUse, string> = {
   headline: "Headline",
   orb_name: "Orb name",
 };
+const labelOfUse = (use: string): string => USE_LABELS[use as ModelCallUse] ?? use;
 export const TOKEN_LABELS = {
   input: "Uncached input",
   cacheRead: "Cached input",
@@ -109,7 +110,7 @@ export function usageTimeline(
     } else
       add(
         breakdown === "use"
-          ? USE_LABELS[row.use]
+          ? labelOfUse(row.use)
           : breakdown === "orb"
             ? row.orbId
             : row.provider + " / " + row.model,
@@ -171,11 +172,11 @@ export function usageRankings(
     .sort((a, b) => value(b) - value(a) || a.id.localeCompare(b.id))
     .slice(0, 5);
   const labels = orbs.map((row) => row.name ?? row.id);
-  const useTotals = new Map<ModelCallUse, number>();
+  const useTotals = new Map<string, number>();
   for (const row of data.buckets)
     useTotals.set(row.use, (useTotals.get(row.use) ?? 0) + value(row));
   const useBars = [...useTotals.entries()]
-    .map(([use, n]) => ({ label: USE_LABELS[use], value: n }))
+    .map(([use, n]) => ({ label: labelOfUse(use), value: n }))
     .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
   return {
     orbs: orbs.map((row, index) => ({

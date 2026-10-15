@@ -17,7 +17,12 @@ import {
   rootRequest,
   rootResult,
 } from "../testkit/claude-composed.ts";
-import { ClaudeOrbAgent, type ClaudeQuery, type NativeState } from "./agent.ts";
+import {
+  ClaudeOrbAgent,
+  type ClaudeOrbAgentOptions,
+  type ClaudeQuery,
+  type NativeState,
+} from "./agent.ts";
 import { ClaudeHistory, nativeHistoryFiles } from "./history.ts";
 import { qualifyClaudeRestart } from "./restore.ts";
 
@@ -32,6 +37,7 @@ function fixture(
     tokenSource: "CLAUDE_CODE_OAUTH_TOKEN",
   },
   holdMetadata = false,
+  modelUsage?: ClaudeOrbAgentOptions["modelUsage"],
 ) {
   const dir = mkdtempSync(join(tmpdir(), "claude-lifecycle-"));
   dirs.push(dir);
@@ -138,6 +144,7 @@ function fixture(
     workDir: dir,
     skillsDir: null,
     broker: null,
+    ...(modelUsage === undefined ? {} : { modelUsage }),
     sdkFactory: (input, opts) => {
       if (failStartup) return err({ message: "injected startup failure" });
       closed = false;
@@ -228,6 +235,69 @@ it("records successful subscription diagnostics outside conversation history", a
   expect(
     f.history.view.some((record) => record.type === "event" && record.eventType === "claude.auth"),
   ).toBe(false);
+});
+
+it("records each model call as a hidden replicated history event", async () => {
+  const f = fixture();
+  await f.attach();
+  const call = {
+    outcome: "ok" as const,
+    at: "2026-10-14T00:00:00.500Z",
+    model: "claude-opus-5-5",
+    querySource: "sdk",
+    input: 3,
+    output: 200,
+    cacheRead: 40_000,
+    cacheWrite: 1_500,
+    costUsd: 0.042,
+  };
+  f.agent.recordModelCall(call);
+  f.agent.recordModelCall({ ...call, querySource: "compact" });
+  const events = f.history.view.filter(
+    (record) => record.type === "event" && record.eventType === "claude.model_call",
+  );
+  expect(events.map((record) => record.overflow)).toEqual([
+    call,
+    { ...call, querySource: "compact" },
+  ]);
+  expect(
+    events.every((record) => record.type === "event" && record.custom?.display === false),
+  ).toBe(true);
+  f.exit();
+});
+
+it("points Claude Code's OpenTelemetry log export at the model usage receiver", async () => {
+  const f = fixture(
+    undefined,
+    false,
+    ok({ endpoint: "http://127.0.0.1:1/v1/logs", token: "t", close: async () => undefined }),
+  );
+  await f.attach();
+  expect(f.options()?.env).toMatchObject({
+    CLAUDE_CODE_ENABLE_TELEMETRY: "1",
+    OTEL_LOGS_EXPORTER: "otlp",
+    OTEL_EXPORTER_OTLP_LOGS_PROTOCOL: "http/json",
+    OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://127.0.0.1:1/v1/logs",
+    OTEL_EXPORTER_OTLP_LOGS_HEADERS: "authorization=Bearer t",
+  });
+  f.exit();
+});
+
+it("runs Claude without export and records why when the receiver could not listen", async () => {
+  const f = fixture(
+    undefined,
+    false,
+    err({ code: "model_usage_receiver_unavailable", message: "listen EADDRINUSE" }),
+  );
+  await f.attach();
+  expect(f.agent.getHealth()).toMatchObject({ status: "ready" });
+  expect(f.options()?.env?.OTEL_LOGS_EXPORTER).toBeUndefined();
+  expect(
+    f.history.view.some(
+      (record) => record.type === "event" && record.eventType === "claude.model_usage_unavailable",
+    ),
+  ).toBe(true);
+  f.exit();
 });
 
 it("persists restart claim and owns admission before query initialization", async () => {

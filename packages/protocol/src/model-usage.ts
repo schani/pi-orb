@@ -3,15 +3,53 @@ import { type Static, Type } from "typebox";
 import { Check } from "typebox/value";
 
 export const USAGE_PATH = "/api/v1/usage";
-export const ModelCallUseSchema = Type.Union([
-  Type.Literal("root"),
-  Type.Literal("subagent"),
-  Type.Literal("compaction"),
-  Type.Literal("turn_summary"),
-  Type.Literal("headline"),
-  Type.Literal("orb_name"),
+/** Named `model_calls.use` values; Claude auxiliary calls store their raw `query_source` (docs/model-usage.md). */
+export type ModelCallUse =
+  | "root"
+  | "subagent"
+  | "compaction"
+  | "turn_summary"
+  | "headline"
+  | "orb_name";
+
+/** Hidden history event carrying one Claude Code model call (docs/model-usage.md). */
+export const CLAUDE_MODEL_CALL_EVENT = "claude.model_call";
+// `model_calls` columns are `integer`; an out-of-range value must not fail the history commit.
+const int = Type.Integer({ minimum: 0, maximum: 2_147_483_647 });
+const callBase = {
+  at: Type.String(),
+  sessionId: Type.Optional(Type.String()),
+  promptId: Type.Optional(Type.String()),
+  model: Type.String(),
+  /** `sdk` (root), `agent:*` (subagent), `compact`, or an auxiliary source such as `generate_session_title`. */
+  querySource: Type.Optional(Type.String()),
+  agentName: Type.Optional(Type.String()),
+  durationMs: Type.Optional(int),
+  requestId: Type.Optional(Type.String()),
+  speed: Type.Optional(Type.String()),
+  effort: Type.Optional(Type.String()),
+};
+/** One Claude Code `api_request` (`ok`) or `api_error` (`error`) OpenTelemetry event. */
+export const ClaudeModelCallSchema = Type.Union([
+  Type.Object({
+    ...callBase,
+    outcome: Type.Literal("ok"),
+    input: int,
+    output: int,
+    cacheRead: int,
+    cacheWrite: int,
+    costUsd: Type.Number({ minimum: 0 }),
+    ttftMs: Type.Optional(int),
+  }),
+  Type.Object({
+    ...callBase,
+    outcome: Type.Literal("error"),
+    error: Type.String(),
+    statusCode: Type.Optional(Type.String()),
+    attempt: Type.Optional(int),
+  }),
 ]);
-export type ModelCallUse = Static<typeof ModelCallUseSchema>;
+export type ClaudeModelCall = Static<typeof ClaudeModelCallSchema>;
 const closed = { additionalProperties: false } as const;
 const timestamp = Type.Integer({ minimum: 0, maximum: 8_640_000_000_000_000 });
 const count = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
@@ -37,7 +75,7 @@ export const UsageViewSchema = Type.Object(
           ...UsageTotalsSchema.properties,
           at: timestamp,
           orbId: Type.String(),
-          use: ModelCallUseSchema,
+          use: Type.String(),
           provider: Type.String(),
           model: Type.String(),
         },

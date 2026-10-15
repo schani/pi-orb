@@ -23,7 +23,7 @@ const response: AssistantMessage = {
     cacheRead: 64,
     cacheWrite: 0,
     totalTokens: 143,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.0021 },
   },
   stopReason: "stop",
   durationMs: 512,
@@ -37,6 +37,7 @@ const call = {
   output: 9,
   cacheRead: 64,
   cacheWrite: 0,
+  costUsd: 0.0021,
   durationMs: 512,
 };
 

@@ -12,6 +12,8 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import {
   type AgentSettingsEvent,
+  CLAUDE_MODEL_CALL_EVENT,
+  type ClaudeModelCall,
   type ClaudeRecoveryProof,
   type CommittedDisplayDetail,
   type DeliverOrbMessageResponse,
@@ -78,6 +80,11 @@ import { ClaudeDiagnostics, type ClaudeQueryError } from "./diagnostics.ts";
 import { ClaudeHistory, type HistoryFiles, nativeHistoryFiles } from "./history.ts";
 import { readClaudeRepositoryInstructions } from "./instructions.ts";
 import { type ClaudeMcpRuntime, createClaudeMcp } from "./mcp.ts";
+import {
+  type ModelUsageReceiver,
+  type ModelUsageReceiverError,
+  telemetryEnvironment,
+} from "./model-usage.ts";
 import { DEFAULT_CLAUDE_MODEL, findClaudeModel, latestClaudeModels } from "./models.ts";
 import { findNativeClaudeTranscript } from "./native-path.ts";
 import {
@@ -159,6 +166,8 @@ export interface ClaudeOrbAgentOptions {
   readonly claudeRecoveryProof?: ClaudeRecoveryProof | undefined;
   readonly testLaunchFailure?: boolean;
   readonly files?: HistoryFiles;
+  /** Loopback OpenTelemetry receiver Claude Code exports model calls to. */
+  readonly modelUsage?: Result<ModelUsageReceiver, ModelUsageReceiverError>;
   readonly sdkFactory?: (
     input: AsyncIterable<SDKUserMessage>,
     options: Options,
@@ -650,6 +659,29 @@ export class ClaudeOrbAgent implements OrbAgent {
       return;
     }
   }
+  /** Claude runs without usage export when the receiver could not listen (docs/model-usage.md). */
+  private recordModelUsageUnavailable(): void {
+    const usage = this.options.modelUsage;
+    if (usage === undefined || usage.isOk()) return;
+    const recorded = this.platformEvent(
+      "claude.model_usage_unavailable",
+      "Claude model usage is not recorded.",
+      { code: usage.error.code, error: usage.error.message },
+    );
+    if (recorded.isErr())
+      this.fail("claude_model_usage_publication_failed", recorded.error.message);
+  }
+  /** Replicates one exported model call to the control plane's ledger (docs/model-usage.md). */
+  recordModelCall(call: ClaudeModelCall): void {
+    const recorded = this.platformEvent(
+      CLAUDE_MODEL_CALL_EVENT,
+      "",
+      { ...call },
+      randomUUID(),
+      false,
+    );
+    if (recorded.isErr()) console.error(`claude.model_call_unrecorded: ${recorded.error.message}`);
+  }
   /** Testable composition boundary around a retained native authority and supervised SDK. */
   attachSession(
     state: NativeState,
@@ -667,6 +699,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.operationError = undefined;
     this.activity.claim(`claude-initialization:${this.runtimeInstanceId}`);
     this.activity.beginDrain();
+    this.recordModelUsageUnavailable();
     return this.startQuery()
       .andThen(() => ResultAsync.fromSafePromise(this.closeExtensions()))
       .andThen(() => {
@@ -949,7 +982,12 @@ export class ClaudeOrbAgent implements OrbAgent {
       abortController: this.queryAbort,
       ...(this.mcp === null ? {} : { mcpServers: this.mcp.mcpServers }),
       cwd: state.cwd,
-      env: claudeChildEnvironment(process.env, this.token, this.configDir),
+      env: {
+        ...claudeChildEnvironment(process.env, this.token, this.configDir),
+        ...(this.options.modelUsage?.isOk()
+          ? telemetryEnvironment(this.options.modelUsage.value)
+          : {}),
+      },
       ...(nativePath.value !== null ? { resume: state.id } : { sessionId: state.id }),
       model: state.model ?? DEFAULT_CLAUDE_MODEL,
       ...(state.effort === undefined ? {} : { effort: state.effort }),

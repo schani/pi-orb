@@ -16,6 +16,7 @@ import type {
 import { jsonEqual } from "../../domain/json-equal.ts";
 import { logOrbEvent } from "../../domain/log.ts";
 import { messageBatchId } from "../../domain/message-batch.ts";
+import { claudeModelCall } from "../../domain/model-usage.ts";
 import type {
   OrbDeletionRow,
   OrbListRow,
@@ -294,6 +295,31 @@ export async function commitHistoryTransaction(
     if (inserted.isErr()) return err(inserted.error);
     if (inserted.value.rowCount > 0 && record.type === "event" && record.alert !== undefined) {
       newestAlertId = record.id;
+    }
+    // Exactly once: only a newly stored record becomes a ledger row (docs/model-usage.md).
+    const call = inserted.value.rowCount > 0 ? claudeModelCall(record) : null;
+    if (call !== null) {
+      const metered = await query(
+        `INSERT INTO model_calls (at, owner_user_id, orb_id, use, provider, model, outcome,
+           input, output, cache_read, cache_write, cost_usd, duration_ms)
+         SELECT $2, p.owner_user_id::text, o.id, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+         FROM orbs o JOIN projects p ON p.id = o.project_id WHERE o.id = $1`,
+        [
+          params.orbId,
+          new Date(call.at),
+          call.use,
+          call.provider,
+          call.model,
+          call.outcome,
+          call.input,
+          call.output,
+          call.cacheRead,
+          call.cacheWrite,
+          call.costUsd ?? null,
+          call.durationMs ?? null,
+        ],
+      );
+      if (metered.isErr()) return err(metered.error);
     }
     if (inserted.value.rowCount === 0) {
       // Existing row: identical content is an idempotent repeat,

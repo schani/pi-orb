@@ -75,6 +75,7 @@ describe("PiActivityHeadlineGenerator", () => {
         output: 5,
         cacheRead: 8,
         cacheWrite: 0,
+        costUsd: 0,
       },
     ]);
     mocks.complete.mockReturnValueOnce(okAsync("😀".repeat(600)));

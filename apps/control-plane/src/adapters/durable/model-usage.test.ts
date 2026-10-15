@@ -172,6 +172,7 @@ describe("durable model usage capture", () => {
         output: 2,
         cacheRead: 4,
         cacheWrite: 1,
+        costUsd: expect.any(Number),
         durationMs: expect.any(Number),
       });
   });
