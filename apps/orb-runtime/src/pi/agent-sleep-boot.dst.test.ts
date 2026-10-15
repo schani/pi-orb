@@ -249,7 +249,6 @@ it("actual boot deduplicates serialized HTTP retries before and after wake persi
     const context = deferred<{
       v: 1;
       context: OrbBootContext | null;
-      initialModel: null;
       userTimeZone: string | null;
     }>();
     const sessionCreation = deferred<void>();
@@ -282,7 +281,7 @@ it("actual boot deduplicates serialized HTTP retries before and after wake persi
               await agent.deliverInboxMessage("sleep-1", ["sleep-1"], wake.content, wake.system)
             ).isErr(),
           ).toBe(true);
-          context.resolve({ v: 1, context: wake, initialModel: null, userTimeZone: "Asia/Tokyo" });
+          context.resolve({ v: 1, context: wake, userTimeZone: "Asia/Tokyo" });
           while (!controls.sessionCreationStarted)
             await task.checkpoint("wait for context-dependent session creation");
           expect(controls.loaderTimeZone).toBe("Asia/Tokyo");

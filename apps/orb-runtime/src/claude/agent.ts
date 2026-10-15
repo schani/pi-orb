@@ -533,7 +533,7 @@ export class ClaudeOrbAgent implements OrbAgent {
                 timestamp: new Date().toISOString(),
                 cwd,
                 deliveries: {},
-                ...(context.value.initialModel === null
+                ...(context.value.initialModel === undefined
                   ? {}
                   : { model: context.value.initialModel.id }),
               }

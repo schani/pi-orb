@@ -38,29 +38,12 @@ describe("orb sleep protocol", () => {
       content: [{ type: "text", text: "Sleep finished." }],
       system,
     };
+    expect(Check(OrbBootContextResponseSchema, { v: 1, context, userTimeZone: null })).toBe(true);
+    expect(Check(OrbBootContextResponseSchema, { v: 1, context: null, userTimeZone: null })).toBe(
+      true,
+    );
     expect(
-      Check(OrbBootContextResponseSchema, {
-        v: 1,
-        context,
-        initialModel: null,
-        userTimeZone: null,
-      }),
-    ).toBe(true);
-    expect(
-      Check(OrbBootContextResponseSchema, {
-        v: 1,
-        context: null,
-        initialModel: null,
-        userTimeZone: null,
-      }),
-    ).toBe(true);
-    expect(
-      Check(OrbBootContextResponseSchema, {
-        v: 1,
-        context,
-        initialModel: null,
-        userTimeZone: "America/New_York",
-      }),
+      Check(OrbBootContextResponseSchema, { v: 1, context, userTimeZone: "America/New_York" }),
     ).toBe(true);
     expect(Check(OrbBootContextResponseSchema, { v: 1, context: null })).toBe(false);
     expect(Check(DeliverOrbMessageRequestSchema, { v: 1, ...context })).toBe(true);
@@ -75,6 +58,29 @@ describe("orb sleep protocol", () => {
         updatedAt: system.sleepUntil,
       }),
     ).toBe(true);
+  });
+
+  it("accepts absent or exact initial model intent and rejects malformed present values", () => {
+    const response = { v: 1, context: null, userTimeZone: null };
+    expect(Check(OrbBootContextResponseSchema, response)).toBe(true);
+    expect(
+      Check(OrbBootContextResponseSchema, {
+        ...response,
+        initialModel: { provider: "claude", id: "sonnet" },
+      }),
+    ).toBe(true);
+    for (const initialModel of [
+      null,
+      {},
+      { provider: "claude" },
+      { id: "sonnet" },
+      { provider: "", id: "sonnet" },
+      { provider: "claude", id: "" },
+      { provider: "claude", id: 1 },
+      { provider: "claude", id: "sonnet", extra: true },
+      "claude/sonnet",
+    ])
+      expect(Check(OrbBootContextResponseSchema, { ...response, initialModel })).toBe(false);
   });
 
   it("allows inbox identity on event records", () => {

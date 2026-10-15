@@ -27,12 +27,12 @@ export function settingsFallbackMessage(
 export function restoreSessionSettings<M extends { provider: string; id: string; input: string[] }>(
   manager: Pick<SessionManager, "buildSessionContext" | "getEntries">,
   models: readonly M[],
-  initialModel: AgentSettings["model"] | null = null,
+  initialModel?: AgentSettings["model"],
 ) {
   const restored = manager.buildSessionContext();
-  const freshIntent = manager.getEntries().length === 0 ? initialModel : null;
+  const freshIntent = manager.getEntries().length === 0 ? initialModel : undefined;
   const model =
-    freshIntent !== null
+    freshIntent !== undefined
       ? models.find((item) => item.provider === freshIntent.provider && item.id === freshIntent.id)
       : (models.find(
           (item) =>

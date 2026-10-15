@@ -960,8 +960,13 @@ describe("runtime broker routes", () => {
       },
     );
 
-    it("exposes an unknown time zone even without wake context", async () => {
-      store.seedOrb(makeOrbRow(ORB, PROJECT, "starting", { runtimeTokenHash: sha256(TOKEN) }));
+    it.each([null, { provider: "claude", id: "sonnet" }])("boot context %j", async (model) => {
+      store.seedOrb(
+        makeOrbRow(ORB, PROJECT, "starting", {
+          runtimeTokenHash: sha256(TOKEN),
+          initialModel: model,
+        }),
+      );
       const response = await app.inject({
         method: "POST",
         url: "/runtime/v1/orb/boot-context",
@@ -972,7 +977,7 @@ describe("runtime broker routes", () => {
       expect(response.json()).toEqual({
         v: 1,
         context: null,
-        initialModel: null,
+        ...(model === null ? {} : { initialModel: model }),
         userTimeZone: null,
       });
     });

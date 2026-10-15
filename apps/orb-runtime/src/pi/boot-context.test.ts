@@ -8,8 +8,6 @@ afterEach(() => {
 
 const broker = { controlPlaneUrl: "http://control-plane.test", runtimeToken: "secret" };
 
-const emptyContext = { v: 1, context: null, initialModel: null, userTimeZone: null };
-
 describe("boot context client", () => {
   it("reads sleep context through the authenticated adapter without acknowledging it", async () => {
     const fetch = vi.fn(
@@ -17,7 +15,6 @@ describe("boot context client", () => {
         new Response(
           JSON.stringify({
             v: 1,
-            initialModel: null,
             userTimeZone: "Asia/Tokyo",
             context: {
               messageId: "sleep-1",
@@ -31,7 +28,6 @@ describe("boot context client", () => {
     );
     vi.stubGlobal("fetch", fetch);
     expect((await fetchBootContext(broker))._unsafeUnwrap()).toMatchObject({
-      initialModel: null,
       userTimeZone: "Asia/Tokyo",
       context: { messageId: "sleep-1", system: { kind: "sleep_wake" } },
     });
@@ -99,7 +95,7 @@ describe("boot context client", () => {
           { status: 503 },
         );
       }
-      return new Response(JSON.stringify(emptyContext), {
+      return new Response(JSON.stringify({ v: 1, context: null, userTimeZone: null }), {
         status: 200,
       });
     });
@@ -112,7 +108,7 @@ describe("boot context client", () => {
       },
     });
 
-    expect(result._unsafeUnwrap()).toEqual(emptyContext);
+    expect(result._unsafeUnwrap()).toEqual({ v: 1, context: null, userTimeZone: null });
     expect(attempts).toBe(5);
     expect(delays).toEqual([1_000, 2_000, 4_000, 4_000]);
   });
@@ -207,7 +203,7 @@ describe("boot context client", () => {
         );
       }
       now += BOOT_CONTEXT_REQUEST_TIMEOUT_MS;
-      return new Response(JSON.stringify(emptyContext), {
+      return new Response(JSON.stringify({ v: 1, context: null, userTimeZone: null }), {
         status: 200,
       });
     });
@@ -220,7 +216,7 @@ describe("boot context client", () => {
       },
     });
 
-    expect(result._unsafeUnwrap()).toEqual(emptyContext);
+    expect(result._unsafeUnwrap()).toEqual({ v: 1, context: null, userTimeZone: null });
     expect(attempts).toBe(2);
     expect(now).toBe(10_499);
   });
@@ -238,7 +234,7 @@ describe("boot context client", () => {
         now += 10_000;
         throw failure;
       }
-      return new Response(JSON.stringify(emptyContext), {
+      return new Response(JSON.stringify({ v: 1, context: null, userTimeZone: null }), {
         status: 200,
       });
     });
@@ -251,7 +247,7 @@ describe("boot context client", () => {
       },
     });
 
-    expect(result._unsafeUnwrap()).toEqual(emptyContext);
+    expect(result._unsafeUnwrap()).toEqual({ v: 1, context: null, userTimeZone: null });
     expect(attempts).toBe(2);
     expect(delays).toEqual([1_000]);
   });
@@ -269,7 +265,7 @@ describe("boot context client", () => {
             }),
             { status: 503 },
           )
-        : new Response(JSON.stringify(emptyContext), {
+        : new Response(JSON.stringify({ v: 1, context: null, userTimeZone: null }), {
             status: 200,
           });
     });

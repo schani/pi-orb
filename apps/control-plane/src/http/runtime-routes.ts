@@ -539,7 +539,7 @@ export function registerRuntimeRoutes(
       v: 1,
       context: context.value,
       userTimeZone: auth.orb.userTimeZone,
-      initialModel: auth.orb.initialModel,
+      ...(auth.orb.initialModel === null ? {} : { initialModel: auth.orb.initialModel }),
     });
   });
 
