@@ -65,7 +65,7 @@ export const OrbStateSchema = Type.Union([
 ]);
 export type OrbState = Static<typeof OrbStateSchema>;
 
-/** Why an orb last entered `stopping`; absent for explicit stops (docs/lifecycle.md). */
+/** Why an orb last entered `stopping`; `manual` is an explicit Stop (docs/lifecycle.md). */
 export const StopReasonSchema = Type.Union([
   Type.Literal("idle"),
   Type.Literal("sleep"),
@@ -308,7 +308,7 @@ export const OrbViewSchema = Type.Object(
     stateDetail: Type.Optional(OrbStateDetailSchema),
     /** Present while a scheduled sleep is pending. */
     sleepUntil: Type.Optional(Type.String()),
-    /** Present when the last stop was automatic. */
+    /** Why the orb is stopping or stopped; cleared when it starts again. */
     stopReason: Type.Optional(StopReasonSchema),
     stateChangedAt: Type.String(),
     archivedAt: Type.Optional(Type.String()),

@@ -157,7 +157,8 @@ it.each(
     const finalMessage = response(["final normalized reasoning"]);
     send({ type: "message_end", message: finalMessage });
     // The SDK persists after invoking its subscribers. Deliberately use final
-    // text different from the stream, defeating the old text-equality heuristic.
+    // text different from the stream, so no text-equality retirement can pass
+    // (docs/postmortems/2026-09-09-stale-thinking.md).
     if (blockedFirst) entries.push({ id: "bad", type: "unmappable" });
     entries.push({
       id: "saved",

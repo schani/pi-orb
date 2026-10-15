@@ -21,17 +21,17 @@ const REPOSITORY_URL = makeProjectRow(PROJECT).repositoryUrl;
 
 /**
  * Two desired specifications live in the fleet during a deploy. Replacement
- * may move only from generation 1 to generation 2, never backward.
+ * may move only from the old generation to the new, never backward.
  */
 const OLD_GENERATION = 1;
 const NEW_GENERATION = 2;
 
 /**
- * The two revisions deploy genuinely different *effective* specifications —
- * different runtime digest, startup contract, machine settings — which is what
- * makes their fingerprints differ. The generation is a separate input that
- * only fences who may replace forward, so a redeploy that changes nothing
- * effective still changes no fingerprint and replaces nothing.
+ * The two revisions deploy different *effective* specifications (production:
+ * runtime digest, startup contract, machine settings; here opaque strings),
+ * which is what makes their fingerprints differ. The generation is a separate
+ * input that only fences who may replace forward, so a redeploy that changes
+ * nothing effective still changes no fingerprint and replaces nothing.
  */
 const OLD_SPEC = "spec-rollover-old";
 const NEW_SPEC = "spec-rollover-new";

@@ -53,7 +53,7 @@ export interface CasTransitionParams {
   readonly lastError?: string | null;
   readonly hostRef?: string | null;
   readonly checkoutCommit?: string | null;
-  /** Set entering `stopping` (idle) and cleared on explicit stops/starts (docs/lifecycle.md). */
+  /** `idle`/`sleep` when lifecycle stops the orb, cleared on starts; explicit Stop writes `manual` via `requestOrbStop` (docs/lifecycle.md). */
   readonly stopReason?: StopReason | null;
   /** Replaces the rolling automatic-restart record (docs/lifecycle.md). */
   readonly autoRestartTimes?: readonly number[];
@@ -324,7 +324,7 @@ export interface ControlPlaneStore extends ActivityHeadlineStore {
     task: SimulationTask,
     params: { orbId: string; caller: ArchiveCaller },
   ): ResultAsync<OrbBootContext | null, StoreError | StateConflict>;
-  /** Atomically freezes all currently queued messages into the next FIFO delivery batch. */
+  /** Atomically freezes the next FIFO delivery batch: queued user messages up to the next system message, or that system message alone. */
   claimNextOrbMessageBatch(
     task: SimulationTask,
     params: { orbId: string; now: number },
@@ -478,11 +478,11 @@ export interface ControlPlaneStore extends ActivityHeadlineStore {
    * wins. Like `touchLastBusy` it is CAS-free: no `state_version` bump and no
    * `state_changed_at` move, so it can never conflict with lifecycle CAS.
    *
-   * The floor only moves forward, since a claim is admitted only from strictly
-   * below it. An orb id that resolves to no row cannot be throttled, so it is
-   * reported as not claimed with the full interval: the mint path calls this
-   * only after a bearer resolved to an orb, and denying is the fail-closed
-   * answer if that orb vanished in between.
+   * The floor only moves forward: a claim needs the previous mint to be at least
+   * `minIntervalMs` before `at`. An orb id that resolves to no row cannot be
+   * throttled, so it is reported as not claimed with the full interval: the
+   * mint path calls this only after a bearer resolved to an orb, and denying
+   * is the fail-closed answer if that orb vanished in between.
    */
   claimMintSlot(
     task: SimulationTask,
@@ -853,7 +853,7 @@ export interface CredentialPointerRow {
   readonly secretVersion: string | null;
   /** Refresh-coalescing lease, wall-clock ms; 0 = no lease. */
   readonly refreshLeaseUntil: number;
-  /** Wall-clock ms of the last refresh attempt that reached the upstream. */
+  /** Wall-clock ms when the last refresh attempt started; floors the global refresh rate limit. */
   readonly lastRefreshAt: number;
 }
 
@@ -1082,7 +1082,7 @@ export interface SigningKeyGenerator {
 }
 
 export interface SigningKeyStore {
-  /** Every key, oldest first: JWKS publishes the active one plus retiring ones. */
+  /** Every key, oldest first: JWKS publishes the active key plus pending and recently retired ones. */
   listSigningKeys(task: SimulationTask): ResultAsync<SigningKeyRow[], StoreError>;
   /**
    * Inserts a key. A duplicate `kid` and a second `active` key are both
@@ -1131,7 +1131,6 @@ export interface SigningKeyBootstrapState {
   running: boolean;
 }
 
-/** Everything key management needs (`domain/signing-keys.ts`). */
 export interface SigningKeyDeps extends SigningKeyMaterialDeps, JwksDeps {
   readonly generator: SigningKeyGenerator;
   /** Owned by this instance, never recreated inside its boot retry loop. */

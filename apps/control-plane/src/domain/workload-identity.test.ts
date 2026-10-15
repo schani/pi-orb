@@ -113,7 +113,7 @@ describe("audience validation", () => {
   it("counts the cap in UTF-8 bytes, not characters", async () => {
     const cap = makeMintHarness().mintDeps.constants.maxAudienceBytes;
     // "é" is two UTF-8 bytes: cap/2 of them exactly fill the cap, and a string
-    // of `cap` characters is twice the cap in bytes even though a
+    // of `cap` multi-byte characters exceeds the cap in bytes even though a
     // character-counting check would wave it through.
     const atCap = seed();
     const exact = "é".repeat(cap / 2);

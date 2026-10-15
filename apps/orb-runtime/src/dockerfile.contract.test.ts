@@ -141,7 +141,7 @@ describe("orb runtime Dockerfile contract", () => {
   it("bakes the agent skills outside the persistent volume", () => {
     // /workspace is a VOLUME: anything the image places under it is shadowed
     // by the orb's persistent filesystem at runtime, so the skills must live
-    // elsewhere. `BAKED_SKILLS_DIR` in the resource loader is the other half.
+    // elsewhere. Providers point the runtime at them through `SKILLS_DIR_ENV`.
     expect(dockerfile).toContain("COPY apps/orb-runtime/skills /opt/pi-orb/skills");
     expect(
       existsSync(join(repositoryRoot, "apps/orb-runtime/skills/cloud-identity/SKILL.md")),

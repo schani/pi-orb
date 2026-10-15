@@ -22,7 +22,6 @@ function formatCompactDuration(elapsed: number): string | null {
   return `${Math.max(1, Math.floor(elapsed / unit.milliseconds))}${unit.unit}`;
 }
 
-/** Compact update age. */
 export function formatProjectOrbAge(updatedAt: string, now: number): string | null {
   const updated = Date.parse(updatedAt);
   if (!Number.isFinite(updated)) return null;
@@ -54,7 +53,7 @@ export interface OrbGlyph {
   /** Selects the hue for the glyph and the entry's left border. */
   state: OrbGlyphState;
   iconHref: string;
-  /** The state word, carried only as the glyph's title. */
+  /** The state word, used as the glyph's alt text and title. */
   label: string;
 }
 

@@ -347,7 +347,7 @@ export async function commitHistoryTransaction(
   return ok({ row: mapOrbRow(row), publishedAlertId: newestAlertId });
 }
 
-/** PostgreSQL `ControlPlaneStore` (docs/history-replication.md/docs/stack.md). */
+/** PostgreSQL `ControlPlaneStore` (docs/history-replication.md, docs/stack.md). */
 export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   private readonly db: PostgreSQLClient;
   readonly uploads: PgWorkspaceUploads;
@@ -2226,7 +2226,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     // concurrent requests exactly one row update succeeds and the rest are
     // throttled (docs/workload-identity.md). A read-then-advance pair would
     // let all of them pass the same stale check. The floor cannot move
-    // backwards: a claim is admitted only from strictly below the threshold.
+    // backwards: a claim is admitted only when the last mint is at or before
+    // the threshold.
     const at = new Date(params.at);
     return this.db
       .query(

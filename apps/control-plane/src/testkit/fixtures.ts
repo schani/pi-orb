@@ -329,9 +329,9 @@ export function makeOrbRow(
 
 /**
  * The specification stamp the harness's own provider would put on this orb's
- * compute. Seeding with anything else (the old `fake-spec-<generation>`
- * default did) makes the seeded host look stale to the start path and turns
- * every scenario into an unintended replacement scenario.
+ * compute. Seeding with anything else makes the seeded host look stale to
+ * the start path and turns every scenario into an unintended replacement
+ * scenario.
  */
 export function desiredSpecFingerprintOf(
   harness: TestHarness,

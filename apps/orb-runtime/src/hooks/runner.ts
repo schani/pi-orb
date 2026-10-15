@@ -26,7 +26,7 @@ import type { HookFileStore, HookName, HookProcess, HookSpawner } from "./ports.
 export const SETUP_DEADLINE_MS = 20 * 60_000;
 /** Amp's value; after this the resume hook keeps running while the agent proceeds. */
 export const RESUME_BLOCKING_WINDOW_MS = 10_000;
-/** How much hook output the status file keeps for the health report and the log. */
+/** How much hook output the status file keeps; the health report carries only the verdict. */
 export const STATUS_TAIL_LINES = 20;
 
 export const HOOK_DIRECTORY = ".agents";
@@ -204,8 +204,8 @@ export class BootHookRunner {
 
   /**
    * Runs setup unless this incarnation already ran it. Resolves with the
-   * outcome, or null when there is no hook or it already ran — in both cases
-   * boot continues immediately.
+   * outcome, or null when there is no hook, it already ran, or a shutdown
+   * interrupted it.
    */
   async runSetup(): Promise<RuntimeHookStatus | null> {
     if (this.stampedIncarnation() === this.options.incarnation) return null;
@@ -257,7 +257,8 @@ export class BootHookRunner {
    *
    * Call it once, after resume's blocking window and before the agent session
    * exists. A resume that finishes in the background afterwards can still
-   * write the file; it takes effect on the next start.
+   * write the file; it reaches terminals opened later (they re-read it) and
+   * the agent's shells on the next start.
    *
    * Returns null when no hook wrote one. A file the runtime cannot make sense
    * of is reported, never fatal: the orb still starts, exactly as a failed

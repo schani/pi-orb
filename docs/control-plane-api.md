@@ -2,7 +2,7 @@
 
 ## Model usage (implemented locally 2026-10-13)
 
-`GET /api/v1/usage?boundaries=<JSON epoch-millisecond array>` returns selected-owner `{boundaries, summary, buckets, orbs}`, with `cache-control: no-store`. The service validates bounded increasing edges; the ledger reads half-open intervals in one snapshot. Unknown fields/invalid ranges return 400, unavailable storage 503 and invalid aggregates 500. It does not wake compute. Contract and coverage: `docs/model-usage.md`.
+`GET /api/v1/usage?boundaries=<JSON epoch-millisecond array>` returns selected-owner `{boundaries, summary, buckets, orbs}`, with `cache-control: no-store`. Bucket rows include `orbId` for per-orb timelines (2026-10-14); names remain in owner-scoped orb totals. The service validates bounded increasing edges; the ledger reads half-open intervals in one snapshot. Unknown fields/invalid ranges return 400, unavailable storage 503 and invalid aggregates 500. It does not wake compute. Contract and coverage: `docs/model-usage.md`.
 
 
 ## Harness selection (POC, 2026-10-04)

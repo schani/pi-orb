@@ -241,6 +241,48 @@ export function modelUsageLedgerContractTests(
       });
     });
 
+    it("separates orbs sharing a bucket, use and model without duplicating totals", async () => {
+      const clock = vi.spyOn(task, "wallNow").mockReturnValue(AT);
+      ledger.record(task, call(ARCHIVED));
+      ledger.record(task, call(ARCHIVED));
+      ledger.record(task, call(DELETED));
+      ledger.record(task, call(DELETED, { ownerUserId: "other" }));
+      await ledger.drain();
+      clock.mockRestore();
+      const result = (await ledger.read(task, TEST_USER_ID, [AT, AT + 900000]))._unsafeUnwrap();
+      expect(result.buckets.sort((a, b) => a.orbId.localeCompare(b.orbId))).toEqual([
+        {
+          at: AT,
+          orbId: ARCHIVED,
+          use: "root",
+          provider: "openai-codex",
+          model: "gpt-6-astra",
+          input: 240,
+          output: 60,
+          cacheRead: 8000,
+          cacheWrite: 14,
+          calls: 2,
+        },
+        {
+          at: AT,
+          orbId: DELETED,
+          use: "root",
+          provider: "openai-codex",
+          model: "gpt-6-astra",
+          input: 120,
+          output: 30,
+          cacheRead: 4000,
+          cacheWrite: 7,
+          calls: 1,
+        },
+      ]);
+      for (const orb of result.orbs) {
+        const buckets = result.buckets.filter((row) => row.orbId === orb.id);
+        for (const key of ["input", "output", "cacheRead", "cacheWrite", "calls"] as const)
+          expect(buckets.reduce((sum, row) => sum + row[key], 0)).toBe(orb[key]);
+      }
+    });
+
     it("never discloses another owner's orb name through the ledger join", async () => {
       (await seedTestUser(task, database.users))._unsafeUnwrap();
       (await database.store.insertProject(task, makeProjectRow(PROJECT)))._unsafeUnwrap();
@@ -267,6 +309,7 @@ export function modelUsageLedgerContractTests(
       const bucket = {
         kind: "bucket",
         bucket: 0,
+        orbId: DELETED,
         use: "root",
         provider: "p",
         model: "m",
@@ -295,6 +338,8 @@ export function modelUsageLedgerContractTests(
           { ...bucket, bucket: "0" },
           { ...bucket, bucket: NaN },
           { ...bucket, use: "unknown" },
+          { ...bucket, orbId: null },
+          { ...bucket, orbId: 7 },
           { ...bucket, provider: null },
           { ...bucket, model: 7 },
           { ...bucket, input: -1 },

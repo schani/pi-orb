@@ -101,7 +101,6 @@ export class SqlArrayParam {
 /** Bind `value` as `json`/`jsonb`. `null`/`undefined` bind as SQL NULL. */
 export const jsonParam = (value: unknown): JsonParam => new JsonParam(value);
 
-/** Bind `values` as a PostgreSQL array. */
 export const arrayParam = (values: readonly unknown[]): SqlArrayParam => new SqlArrayParam(values);
 
 /** Which driver a prepared parameter list is destined for. */

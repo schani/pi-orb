@@ -26,7 +26,7 @@ import { computeSyncFrames } from "../domain/sync.ts";
 import type { TerminalManager } from "../terminal/manager.ts";
 import { registerTerminalRoute } from "./terminal-route.ts";
 
-// Sized for pasted screenshots: base64 inflates ~4/3, so 6 MiB of prompt
+// Sized for pasted screenshots: base64 inflates ~4/3, so the prompt cap
 // admits roughly a 4.5 MiB image plus text (capability `input.image`).
 const MAX_INCOMING_FRAME_BYTES = 8 * 1024 * 1024;
 const MAX_PROMPT_BYTES = 6 * 1024 * 1024;
@@ -56,7 +56,7 @@ export function buildRuntimeServer(
 
   app.get("/v1/health", async (_request, reply) => reply.status(200).send(agent.getHealth()));
 
-  // JSON.stringify may escape each permitted UTF-16 code unit as six bytes.
+  // ALERT_MAX_LENGTH UTF-16 units, each a six-byte \uXXXX escape, still fit this limit.
   app.post(RUNTIME_ALERT_PATH, { bodyLimit: 32 * 1024 }, async (request, reply) => {
     const authorization = request.headers.authorization;
     const expected = alertToken === undefined ? null : Buffer.from(`Bearer ${alertToken}`);

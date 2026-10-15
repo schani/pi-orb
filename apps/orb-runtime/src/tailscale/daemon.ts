@@ -146,8 +146,8 @@ export async function startTailscale(
   if (daemon.isErr()) return err({ code: "daemon_spawn_failed", message: daemon.error });
   const deadReason = daemon.value;
 
-  // tailscaled needs a moment to create the socket; `tailscale up` polls for
-  // the Running state itself, so retries only cover that startup window.
+  // tailscaled needs a moment to create the socket, so a failed `tailscale up`
+  // is retried; each attempt already waits for the Running state itself.
   let lastError = "no attempt was made";
   for (let attempt = 1; attempt <= UP_ATTEMPTS; attempt += 1) {
     const exited = deadReason();

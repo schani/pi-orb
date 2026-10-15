@@ -47,7 +47,7 @@ interface ComposerProps {
   onImageRemove: (id: string) => void;
   onAttachmentError?: (message: string) => void;
   dropLabel?: string | null;
-  /** Connected, idle, and no request in flight. */
+  /** Orb not deleting or archived, settings writable, history loaded, and no request in flight. */
   canSend: boolean;
   onSend: () => void;
   /** An operation is running and can be aborted. */

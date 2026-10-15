@@ -74,9 +74,8 @@ const signerError = (code: SignerError["code"], message: string): SignerError =>
 const unavailable = (message: string): SignerError => signerError("unavailable", message);
 
 /**
- * Any store trouble on a key path is "no usable signing material", which is
- * the only thing the caller can act on: the issuer fails closed and the
- * request is retried. A `corruption`/`invariant` store error keeps its message
+ * Every store trouble on a key path becomes a retryable `unavailable`: the
+ * issuer fails closed and the request is retried. The store's message is kept
  * so the boot log still names the real cause.
  */
 function fromStore(reason: string, error: StoreError | SigningKeyConflict): SignerError {
@@ -121,7 +120,8 @@ function listKeys(
  *    `pending` first would buy nothing: the alternative to signing with an
  *    unseen key here is not signing at all, and no verifier can hold a cached
  *    key set that would have explained a key that never existed. Ordinary key
- *    changes take the overlapping path in `rotateSigningKey` instead.
+ *    changes go through the staged flow instead (`publishSigningKey`, then
+ *    `activatePublishedSigningKey`).
  *
  * Two instances booting together race on the unique-active index, not on a
  * read: the loser's insert or CAS is refused, it re-reads, destroys the secret

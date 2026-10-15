@@ -320,7 +320,7 @@ it.each(["chromium", "webkit"] as const)(
         await page.unroute(`**${pollPath}`);
         await page.locator(`.orb-index a[href="/orbs/frontend-fixture-orb"]`).click();
         await expect(page.locator(".orb-name")).toHaveText("Frontend Playground");
-        // Transcript movement during a native pointer sequence must not move the rail's hit targets.
+        // Programmatic transcript movement must not move the rail's hit targets.
         const rail = await page.evaluate<{
           positioning: string;
           delta: number;

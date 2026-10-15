@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Run the native CLI with connect/sendto restricted to the owned loopback server.
+"""Run the native CLI with connect/sendto restricted to the owned loopback TCP server; Unix sockets pass.
 
 Linux x86-64 seccomp user notification: inspect sockaddr in the stopped child.
 No request payloads or credential values are read or retained.

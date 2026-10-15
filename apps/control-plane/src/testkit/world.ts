@@ -33,7 +33,7 @@ export type InitOutcome = "ready" | "failed_nonretryable" | "failed_retryable" |
 const HANG_STEP_MS = 250;
 
 /**
- * How the runtime answers `POST /messages` for one orb (docs/runtime-protocol.md).
+ * How the runtime answers `PUT /v1/messages/:messageId` for one orb (docs/runtime-protocol.md).
  * `ok` is the ordinary path; the other two are the answers a queued message can
  * meet that no retry can improve on, and that therefore decide whether the
  * inbox drains or wedges:
@@ -139,9 +139,9 @@ interface FakeFilesystem {
    * "interrupted-turn resume at runtime boot"). The real runtime derives this
    * from the tail's shape — a trailing tool result, a trailing assistant
    * message with open tool calls, or a trailing user message with no reply —
-   * which this world does not model at record granularity; `beginTurn` sets
-   * the flag and `finishTurn` clears it, and the boot-time contract keys off
-   * it exactly as the runtime keys off the tail.
+   * which this world does not model at record granularity; `beginTurn` and
+   * `appendInboxMessage` set the flag, `finishTurn` clears it, and the
+   * boot-time contract keys off it exactly as the runtime keys off the tail.
    */
   turnInFlight: boolean;
   /**
@@ -188,7 +188,7 @@ interface FakeRuntimeInstance {
   /**
    * Inbox batches this incarnation has handed to Pi but whose record is not on
    * disk yet, keyed by durable batch ID — the runtime's in-memory
-   * pending-batch set (`AgentRuntime.pendingInboxMessages`,
+   * pending-batch set (`PiOrbAgent.pendingInboxMessages`,
    * docs/runtime-protocol.md). It is consulted before enqueueing, so a retry
    * against the same incarnation never delivers twice, and it dies with the
    * process, so a crash before the flush loses the batch entirely.
@@ -303,8 +303,9 @@ const DEFAULT_DESIRED_SPEC = "spec-a";
 /**
  * The `customType` of the resume marker the runtime appends when it
  * picks an interrupted turn back up (docs/lifecycle.md; one
- * `sendCustomMessage(..., { triggerTurn: true, display: true })`, which the Pi
- * adapter normalizes to an `event` record — docs/pi-adapter.md).
+ * `sendCustomMessage(marker, { triggerTurn: true })` of a `display: true`
+ * custom message, which the Pi adapter normalizes to an `event` record —
+ * docs/pi-adapter.md).
  */
 // Mirrors TURN_RESUME_CUSTOM_TYPE in apps/orb-runtime/src/pi/turn-resume.ts.
 const RESUME_MARKER_CUSTOM_TYPE = "pi-orb.turn-resume";
@@ -324,12 +325,10 @@ function hasCustomType(record: HistoryRecord, customType: string): boolean {
   return record.type === "event" && record.custom?.customType === customType;
 }
 
-/** Whether a record is the runtime's interrupted-turn resume marker. */
 export function isResumeMarker(record: HistoryRecord): boolean {
   return hasCustomType(record, RESUME_MARKER_CUSTOM_TYPE);
 }
 
-/** Whether a record is the runtime's declined-resume announcement. */
 export function isDeclineMarker(record: HistoryRecord): boolean {
   return hasCustomType(record, DECLINE_MARKER_CUSTOM_TYPE);
 }
@@ -452,7 +451,6 @@ export class FakeWorld {
     };
   }
 
-  /** Append a complete message record to the orb's persistent session. */
   appendMessage(orbId: string, text?: string): HistoryRecord {
     const state = this.orbState(orbId);
     const fs = state.filesystem;
@@ -533,7 +531,7 @@ export class FakeWorld {
 
   /**
    * The runtime's side of one idempotent batch delivery
-   * (`AgentRuntime.deliverInboxMessage`, docs/runtime-protocol.md): consult the
+   * (`PiOrbAgent.deliverInboxMessage`, docs/runtime-protocol.md): consult the
    * persisted session, then this incarnation's pending set, and only then
    * enqueue. `flush` says whether the session write lands within this call or
    * whether the batch stays in memory, where a crash can still lose it.
@@ -903,7 +901,7 @@ export class FakeWorld {
             `expected ${String(specFingerprint)}`,
         );
       }
-      // Idempotent: return the existing host (starting it if stopped) and
+      // Idempotent: return the existing host (starting it if stopped or failed) and
       // read its token back — never re-mint for an existing incarnation.
       if (state.host.state === "stopped" || state.host.state === "failed") {
         this.startHost(task, state.host.ref);
@@ -1105,8 +1103,9 @@ export class FakeWorld {
     runtime.sessionLoaded = true;
     const fs = state.filesystem;
     if (!fs.turnInFlight || fs.sessionId === null) return;
-    // The head the decision keys off: the last record that is not pi-orb's own
-    // bookkeeping, which is what the runtime's detection walks back to.
+    // The head the decision keys off: the last record that is not a resume or
+    // decline marker, as the runtime's detection filters both before it
+    // classifies the tail.
     const headRecordId = fs.entries.findLast(
       (record) => !isResumeMarker(record) && !isDeclineMarker(record),
     )?.id;
@@ -1155,7 +1154,7 @@ export class FakeWorld {
     }));
   }
 
-  /** Count durable claims after the last human message. */
+  /** Count `isMarker` records after the last user message: the loop guard's claims. */
   private markersAfterLastUserMessage(
     fs: FakeFilesystem,
     isMarker: (record: HistoryRecord) => boolean,
@@ -1412,9 +1411,10 @@ export class FakeOrbHostProvider implements OrbHostProvider {
 
   /**
    * The pure fingerprint calculation of docs/compute-replacement.md: it hashes
-   * the effective specification with the orb's repository URL and nothing
-   * else. The deploy generation is deliberately not an input — an ordinary
-   * redeploy of an unchanged specification must leave the fleet alone.
+   * the effective specification with the orb's repository URL and harness
+   * kind, and nothing else. The deploy generation is deliberately not an
+   * input — an ordinary redeploy of an unchanged specification must leave the
+   * fleet alone.
    */
   desiredSpecFingerprint(input: {
     readonly orbId: string;

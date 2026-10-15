@@ -29,7 +29,7 @@ export function selectToolHeadline(
       };
 }
 
-/** Each mounted view owns two HTTP slots, separate from detail loading. */
+/** Two concurrent headline reads per limiter; a page shares one limiter across its views. */
 export class HeadlineLimiter {
   private active = 0;
   private readonly queue: Array<(release: () => void) => void> = [];

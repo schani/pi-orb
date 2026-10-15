@@ -7,8 +7,8 @@ const task = new NoSimulationTask("runtime client response evidence", false);
 afterEach(() => vi.unstubAllGlobals());
 
 /**
- * undici's rejection shapes (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md):
- * every one of these reads as the bare message "fetch failed" without the walk.
+ * Rejection shapes the cause walk must unwrap (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md):
+ * undici wraps the syscall code in `cause`, so without the walk probes read as a bare "fetch failed".
  */
 const withCause = (message: string, cause: unknown): Error => {
   const error = new Error(message);

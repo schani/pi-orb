@@ -103,7 +103,7 @@ import { interruptedSubagents } from "./subagent-recovery.ts";
 export interface PiOrbAgentOptions {
   readonly orbId: string;
   readonly repositoryUrl: string;
-  /** Persistent orb filesystem root (the Docker volume). */
+  /** Persistent per-orb filesystem root. */
   readonly workDir: string;
   /** Host-provider supplied bundled-skills install directory. */
   readonly skillsDir: string | null;
@@ -339,7 +339,7 @@ export class PiOrbAgent {
     };
   }
 
-  /** Terminates a resume hook that outlived its blocking window. */
+  /** Aborts the boot checkout wait and kills any in-flight hook (setup or overdue resume). */
   shutdownHooks(): void {
     this.shuttingDown = true;
     this.bootAbort.abort();
@@ -367,7 +367,7 @@ export class PiOrbAgent {
 
   // -- boot -----------------------------------------------------------------
 
-  /** Expected init failures become `status: "failed"`; unexpected ones too. */
+  /** Typed init failures become `status: "failed"`; a thrown exception rejects this promise. */
   async boot(): Promise<void> {
     const result = await this.bootSteps();
     if (result.isErr()) {
@@ -561,7 +561,8 @@ export class PiOrbAgent {
       return err(this.failed("credential_unavailable", auth.error, true));
     }
     if (auth.value === undefined) {
-      // First boot of this incarnation: pull the initial token. Pi drives
+      // No stored credential (auth.json lives in the persistent workDir, so this
+      // is normally the orb's first boot): pull the initial token. Pi drives
       // our broker-backed oauth `login`; no prompts are involved.
       const login = await ResultAsync.fromPromise(
         modelRuntime.login("openai-codex", "oauth", {
@@ -1625,8 +1626,8 @@ export class PiOrbAgent {
 
   /**
    * The snapshot served to the control plane's history pull
-   * (docs/history-replication.md): empty until the SDK has written the session file (no assistant
-   * message yet, pinned in session-flush.contract.test.ts), because every
+   * (docs/history-replication.md): empty until the SDK has written the session file (no user or
+   * assistant message yet, pinned in session-flush.contract.test.ts), because every
    * entry before that is memory-only and a committed cursor naming one would
    * be unresolvable after a restart. Browser-facing views use `snapshot()`
    * ungated — gating only part of them desynchronizes the head the client

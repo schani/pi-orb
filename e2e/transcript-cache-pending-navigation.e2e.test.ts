@@ -56,7 +56,7 @@ it.each(["chromium", "webkit"] as const)(
         historyReads++;
         await route.continue();
       });
-      // Both cold reads are owned. History may not begin until metadata completes.
+      // Both cold reads for B are owned and held; the app issues them in parallel.
       for (const suffix of ["", "/history"]) {
         await page.route(`**/api/v1/orbs/${b}${suffix}`, async (route) => {
           heldPaths.push(new URL(route.request().url()).pathname);

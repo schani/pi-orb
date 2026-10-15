@@ -1,5 +1,5 @@
-# Orb runtime image (DESIGN.md §3.3, §17.7): Debian-based Node 24 with git,
-# Python 3, zip/unzip, the GitHub CLI (§15.3), the Google Cloud CLI, and
+# Orb runtime image: Debian-based Node 24 with git,
+# Python 3, zip/unzip, the GitHub CLI, the Google Cloud CLI, and
 # Tailscale for tier-1 port exposure
 # (docs/ports.md). No systemd unit is enabled — the runtime process spawns
 # tailscaled itself, in userspace-networking mode, so the container needs
@@ -68,7 +68,7 @@ COPY packages/mock-openai/src packages/mock-openai/src
 COPY packages/luna/src packages/luna/src
 COPY apps/orb-runtime/src apps/orb-runtime/src
 
-# Broker-backed GitHub auth (DESIGN.md §15.3): a gh shim ahead of /usr/bin/gh
+# Broker-backed GitHub auth (docs/credentials.md): a gh shim ahead of /usr/bin/gh
 # and a git credential helper for https://github.com, both fetching fresh
 # short-lived tokens per invocation — no hosts.yml, nothing persisted.
 COPY apps/orb-runtime/docker/gh /usr/local/bin/gh

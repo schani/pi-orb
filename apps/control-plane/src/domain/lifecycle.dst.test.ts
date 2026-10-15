@@ -29,8 +29,7 @@ const ORB = "orb-a";
 const PROJECT = "project-a";
 
 /**
- * Recovering one dead runtime may cost a restart (one stop) plus the final
- * stop of a completed drain; anything beyond that is a restart storm, not
+ * Host stops one dead runtime's recovery may cost; more is a restart storm, not
  * recovery (docs/postmortems/2026-08-05-unreachable-restart-livelock.md).
  */
 const MAX_STOPS_PER_RECOVERY = 3;
@@ -421,7 +420,7 @@ describe("orb lifecycle (DST)", () => {
       expect(before.authGate.flowStartCount).toBe(1);
 
       // Phase 2: fresh in-memory state, durable rows drive recovery. The
-      // second flow auto-completes (the "user" logs in this time).
+      // second flow waits for a login, which the driver completes below.
       const after = restartControlPlane(before);
       after.authGate.invalidateCredential();
       const stopAfter = new AbortController();
@@ -429,7 +428,6 @@ describe("orb lifecycle (DST)", () => {
       // same standard options (biased timer policy, fixed epoch).
       const { makeRecordingSimulation } = await import("../testkit/sim.ts");
       const sim2 = makeRecordingSimulation({ name: "restart-during-login-phase2" });
-      // Let the fresh gate complete after a short wait.
       const phase2 = await sim2.runTasks([
         { name: "reconciler-2", f: (task) => reconcileLoop(task, after.deps, stopAfter.signal) },
         {
@@ -700,11 +698,10 @@ describe("orb lifecycle (DST)", () => {
   //    makes a single claim the only possible outcome.
   // 2. `delivery` ("steer" vs "turn") is written by the delivery note, which
   //    replication can overtake: a pull that commits the inbox record first
-  //    marks the rows `delivered`, and the note — which only touches
-  //    queued/delivering rows — then matches nothing, so the classification is
-  //    lost for good (~1 schedule in 20 000, found here 2026-08-10; the defect
-  //    itself is in TODO.md). The poller is held until the note is durable so
-  //    this scenario measures batching, not that race.
+  //    marks the rows `delivered`, and the note must still land
+  //    (~1 schedule in 20 000; fixed 2026-08-10, docs/runtime-protocol.md). The
+  //    poller is held until the note is durable so this scenario measures
+  //    batching, not that race; `note-after-replication-commit` forces it.
   it("two messages queued while busy are delivered as one squashed steering message", async () => {
     await runDst({ name: "busy-message-steers", iterations: 15 }, async (sim) => {
       const harness = makeHarness();
@@ -783,7 +780,6 @@ describe("orb lifecycle (DST)", () => {
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(harness.store.messageSnapshots(ORB)[0]?.delivery).toBe("steer");
-      // One claim, one delivery: each message reached the runtime exactly once.
       const records = harness.store.replicaRecords(ORB);
       expect(inboxRecordsFor(records, messageId)).toHaveLength(1);
       expect(inboxRecordsFor(records, secondMessageId)).toHaveLength(1);
@@ -867,7 +863,6 @@ describe("orb lifecycle (DST)", () => {
       const rejected = harness.store.messageSnapshots(ORB)[0];
       expect(rejected?.status).toBe("failed");
       expect(rejected?.lastError).toContain("invalid_request");
-      // The doomed payload never reached the session, the follow-up did.
       const records = harness.store.replicaRecords(ORB);
       expect(inboxRecordsFor(records, rejectedId)).toHaveLength(0);
       expect(inboxRecordsFor(records, followUpId)).toHaveLength(1);
@@ -1005,7 +1000,6 @@ describe("orb lifecycle (DST)", () => {
       const records = harness.store.replicaRecords(ORB);
       expect(inboxRecordsFor(records, olderId)).toHaveLength(1);
       expect(inboxRecordsFor(records, wakeId)).toHaveLength(1);
-      // FIFO: the older message is never delivered after the newer one.
       const olderIndex = records.findIndex((record) => inboxMessageIdsOf(record).includes(olderId));
       const wakeIndex = records.findIndex((record) => inboxMessageIdsOf(record).includes(wakeId));
       expect(olderIndex).toBeLessThanOrEqual(wakeIndex);
@@ -2308,7 +2302,7 @@ describe("orb lifecycle (DST)", () => {
               seedRunningOrb(task, harness, ORB);
               harness.world.appendMessage(ORB);
               harness.world.appendMessage(ORB);
-              // Database outage for the whole early drain window.
+              // History endpoint down for the whole early drain window.
               harness.world.setPullOutage(task, ORB, 6_000);
               const stopResult = await requestOrbStop(task, harness.deps, ORB);
               expect(stopResult.isOk()).toBe(true);
@@ -2338,10 +2332,9 @@ describe("orb lifecycle (DST)", () => {
         assertReplicaComplete(harness.world, harness.store, ORB);
         expect(harness.world.hostStateOf(ORB)).toBe("stopped");
         // The blocked drain retries every reconcile tick for the whole outage
-        // and logs the block on the retrying edge only. The status is cleared
-        // in exactly one place — a drain that caught up — so a drain that then
-        // has to start over (a failed host stop) opens a new episode and earns
-        // one more line. That, and not a bare "at most one", is the invariant.
+        // and logs the block on the retrying edge only. The retrying status is
+        // cleared only by a completed stop or a new state episode, never by a
+        // bare retry, so the block logs once per such clear, plus the first.
         expect(capture.matching("drain-blocked").length).toBeLessThanOrEqual(
           capture.matching("drain-caught-up").length + 1,
         );
@@ -3543,7 +3536,6 @@ describe("idle auto-stop (DST)", () => {
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(harness.world.hostStateOf(ORB)).toBe("running");
-      // The busy pulls persisted the activity timestamp along the way.
       expect(harness.store.orbSnapshot(ORB)?.lastBusyAt).not.toBeNull();
     });
   });
@@ -3874,7 +3866,6 @@ describe("reconciler logging (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        // Many blocked passes, one line.
         expect(blocked).toBeGreaterThanOrEqual(2);
         expect(capture.matching("drain-blocked").length).toBe(1);
         expect(harness.store.orbSnapshot(ORB)?.state).toBe("stopping");

@@ -3,8 +3,8 @@
 # and pushed by build-push.sh, digests passed as vars.
 #
 # State lives in GCS (versioned bucket) — the original local state was lost
-# with its working directory, so every pre-existing resource is adopted via
-# the import blocks in imports.tf/network.tf/iam.tf on the first apply.
+# with its working directory, so pre-existing resources are adopted via the
+# import blocks in imports.tf on the first apply.
 
 terraform {
   backend "gcs" {

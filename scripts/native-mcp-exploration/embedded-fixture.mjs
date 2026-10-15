@@ -226,8 +226,8 @@ async function createFixture({
           terminated.release(e);
       });
       await session.bindExtensions({});
-      // The MCP connection starts on session_start. Wait for inventory through a session prompt,
-      // rather than assuming a fixed startup delay.
+      // The MCP connection starts on session_start; callers wait for inventory through
+      // promptCodemode(), not a fixed startup delay.
     },
     promptCodemode() {
       return session.prompt("Explore the fixture via codemode");

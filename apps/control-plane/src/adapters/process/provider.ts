@@ -50,8 +50,9 @@ export interface ProcessOrbHostProviderOptions {
   readonly extraEnv?: Readonly<Record<string, string>>;
   readonly restartDelayMs?: number;
   /**
-   * Grace between SIGTERM and SIGKILL, and after SIGKILL before disposal
-   * reports uncertainty instead of absence. Defaults to 2s.
+   * Bounded wait after SIGTERM before escalating to SIGKILL (off Linux) or
+   * reporting uncertainty (Linux, awaiting the drain receipt), and after
+   * SIGKILL before reporting uncertainty instead of absence. Defaults to 2s.
    */
   readonly terminateGraceMs?: number;
   /**
@@ -741,14 +742,6 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     );
   }
 
-  /**
-   * The one SIGTERM → bounded group wait → SIGKILL → bounded group wait
-   * ladder every termination path shares. Absence of the *whole group* is
-   * the only success: probing the leader alone would report absence while a
-   * group member survives, and returning before the post-SIGKILL probe would
-   * report absence on hope. Uncertainty is a retryable error
-   * (docs/compute-replacement.md).
-   */
   private processBirth(pid: number): Result<string | null, OrbHostProviderError> {
     return Result.fromThrowable(
       () => {
@@ -866,6 +859,15 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     }
   }
 
+  /**
+   * Non-Linux termination ladder: SIGTERM → bounded group wait → SIGKILL →
+   * bounded group wait. Absence of the *whole group* is the only success:
+   * probing the leader alone would report absence while a group member
+   * survives, and returning before the post-SIGKILL probe would report
+   * absence on hope. Uncertainty is a retryable error
+   * (docs/compute-replacement.md). Linux goes through terminateSupervisor
+   * instead, because SIGKILLing the subreaper would erase descendant evidence.
+   */
   private async killProcessGroup(
     operation: OrbHostProviderError["operation"],
     processGroupId: number,

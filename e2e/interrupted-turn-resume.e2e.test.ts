@@ -50,7 +50,7 @@ const RUNTIME_IMAGE = "pi-orb-runtime:dev";
 const REPOSITORY_URL = "https://github.com/schani/pi-orb";
 const PROCESS_BACKEND = process.env["PI_ORB_E2E_BACKEND"] === "process";
 
-/** Marker text of the resume record the runtime appends (turn-resume.ts). */
+/** Custom types of the resume and declined-resume records (turn-resume.ts). */
 const RESUME_CUSTOM_TYPE = "pi-orb.turn-resume";
 const DECLINE_CUSTOM_TYPE = "pi-orb.turn-resume-declined";
 

@@ -11,7 +11,6 @@ import { reconcileCentralAgent, requestOrbStart } from "./lifecycle.ts";
 import { cancelQueuedUserTurn } from "./queued-turn-cancellation.ts";
 
 const message = "This orb uses the old Pi backend. Create a new orb to continue.";
-// This agreed boundary verdict predates the production error-union addition.
 const refusal = {
   type: "runtime_client_error",
   code: "legacy_backend",

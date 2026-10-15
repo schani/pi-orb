@@ -65,6 +65,6 @@ for (const backend of ["pglite", ...(postgres ? ["postgres"] : [])]) {
       }
     },
   });
-  // Network PG cases share tables in a dedicated test database and run sequentially.
+  // Network PG cases each get a schema in the test database; this file's cases run sequentially.
   for (const entry of cases) it(`${backend}: ${entry.name}`, entry.run);
 }

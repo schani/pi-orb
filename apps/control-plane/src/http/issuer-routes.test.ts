@@ -170,8 +170,8 @@ describe("issuer discovery and JWKS", () => {
     keys.seedKey(
       jwkRow("retired-key", {
         state: "retired",
-        // Retired exactly at the edge of the window: tokens it signed may still
-        // be inside their own lifetime, so dropping it now would make them look
+        // Retired a minute inside the window: tokens it signed may still be
+        // inside their own lifetime, so dropping it now would make them look
         // forged (docs/workload-identity.md).
         retiredAt: Date.now() - DEFAULT_ISSUER_CONSTANTS.jwksOverlapMs + 60_000,
       }),
@@ -232,10 +232,10 @@ describe("issuer discovery and JWKS", () => {
 
   it("answers a missing key table as retryable rather than as our own bug", async () => {
     // `relation "oidc_signing_keys" does not exist` (SQLSTATE 42P01) reaches
-    // the domain as an `invariant` store error. The issuer role is the one role
-    // that never runs migrations, so this is a real first-deploy race against
-    // the browser role's migration — and it is retryable, whatever the code
-    // says. A 500 here would tell the verifier to stop asking.
+    // the domain as an `invariant` store error. The issuer role never runs
+    // migrations, so this is a real first-deploy race against the release
+    // job's migration — and it is retryable, whatever the code says. A 500
+    // here would tell the verifier to stop asking.
     const broken = await issuerOverBrokenKeys({
       type: "store_error",
       code: "invariant",

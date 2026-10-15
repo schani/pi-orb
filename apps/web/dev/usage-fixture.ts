@@ -55,14 +55,15 @@ export function usageFixture(boundaries: readonly number[]): UsageView {
       };
       const model = models[modelIndex] ?? "gpt-5.4-mini";
       const provider = index < 3 ? "openai-codex" : "openai";
-      const key = bucket + "/" + use + "/" + model;
+      const orb = (tick + index) % names.length;
+      const orbId = usageOrbId(orb);
+      const key = bucket + "/" + use + "/" + model + "/" + orbId;
       let group = buckets.get(key);
       if (group === undefined) {
-        group = { ...empty(), at: boundaries[bucket] ?? start, use, provider, model };
+        group = { ...empty(), at: boundaries[bucket] ?? start, orbId, use, provider, model };
         buckets.set(key, group);
       }
       add(group, row);
-      const orb = (tick + index) % names.length;
       let total = orbs.get(orb);
       if (total === undefined) {
         total = {

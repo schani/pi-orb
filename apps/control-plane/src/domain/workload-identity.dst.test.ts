@@ -361,7 +361,6 @@ describe("identity minting across lifecycle states (DST)", () => {
         })),
       );
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      // Two concurrent mints, two identities, two distinct token IDs.
       expect(new Set(minted.values()).size).toBe(2);
     });
   });
@@ -373,7 +372,7 @@ describe("identity minting racing lifecycle transitions (DST)", () => {
       const harness = makeMintHarness({
         constants: { idleStopAfterMs: 3_600_000 },
         // The rate limit is not what this scenario is about; keep the floor
-        // low so mints actually reach the lifecycle decision.
+        // low so mints succeed often enough for the stop race to show in them.
         issuerConstants: { minMintIntervalMs: 50 },
       });
       const loops = new AbortController();
@@ -668,9 +667,9 @@ describe("identity minting racing lifecycle transitions (DST)", () => {
           f: async (task) => {
             // A stream of denials interleaving the reconciler's reads and its
             // CAS transitions. Once the stop commits the answer becomes
-            // `not_mintable` instead: the lifecycle
-            // gate deliberately runs before request validation, so a stopping
-            // orb never has its request inspected at all.
+            // `not_mintable` instead: the lifecycle gate deliberately runs
+            // before request validation, so a stopping orb never has its
+            // request inspected at all.
             for (let attempt = 0; attempt < 12; attempt++) {
               await task.sleep(1 + task.random("denial stagger") * 200, "denial stagger");
               const outcome = await mint(task, harness, bearer, { ttlSeconds: 1 });

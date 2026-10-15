@@ -624,7 +624,7 @@ async function mintDirect(
 }
 
 /**
- * First-timeout diagnostics shared by every test: the current orb API view,
+ * Failure diagnostics shared by every test: the current orb API view,
  * the provider inventory for the orb, and the control-plane log tail captured
  * by the harness.
  */
@@ -2642,8 +2642,9 @@ describe("full slice E2E", () => {
         },
       ]);
       await expectPage(page.getByRole("dialog")).toHaveCount(0);
-      // History publication precedes output_retired. This assertion concerns
-      // the completed upload, not the intermediate live/history overlap.
+      // History publication retires the live blocks (retiredBlockIds on the
+      // history.record frame). This assertion concerns the completed upload,
+      // not the intermediate live/history overlap.
       await waitFor(
         "upload reply persisted and operation drained",
         async () => {

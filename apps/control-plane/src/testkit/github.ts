@@ -22,7 +22,7 @@ const transient = (message: string): GithubOAuthTransientError => ({
  */
 export class FakeGithubOAuthClient implements GithubOAuthClient {
   deviceCodeRequests = 0;
-  /** Wall-clock ms of every pollDeviceToken call that reached the fake. */
+  /** Wall-clock ms of every pollDeviceToken call not failed by a failpoint. */
   readonly pollTimes: number[] = [];
   intervalMs: number;
   expiresInMs: number;

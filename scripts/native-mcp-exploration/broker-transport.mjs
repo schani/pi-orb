@@ -11,7 +11,7 @@ import { err, ok, ResultAsync } from "neverthrow";
 
 export const brokerError = (code) => ({ code, message: "MCP credential unavailable" });
 
-/** Exploration port: broker.resolve() returns an access token; not the production resolver. */
+/** Exploration port: broker.resolve() yields a Result with an access token; not the production resolver. */
 export async function resolveBrokerCredential(broker, signal) {
   const resolved = await ResultAsync.fromPromise(
     Promise.resolve().then(() => broker.resolve(signal)),

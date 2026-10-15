@@ -76,9 +76,9 @@ const SCHEDULING = {
 } as const;
 const SERVICE_ACCOUNT_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"] as const;
 /**
- * Guest-attribute paths this provider writes from the VM and reads back. A
- * guest attribute is `namespace/key`, so both live directly under the `pi-orb`
- * namespace and each `getGuestAttributes?queryPath=…` returns one item.
+ * Guest attribute the VM writes and this provider reads back. A guest
+ * attribute is `namespace/key`, so it lives directly under the `pi-orb`
+ * namespace and its `getGuestAttributes?queryPath=…` returns one item.
  */
 const BOOT_STATUS_ATTRIBUTE = {
   path: "pi-orb/boot-status",
@@ -223,7 +223,6 @@ export function mapInstanceStatus(status: string): OrbHostState {
   }
 }
 
-/** Read a metadata attribute from an instance resource. */
 export function metadataValue(instance: Record<string, unknown>, key: string): string | null {
   const metadata = instance["metadata"] as Record<string, unknown> | undefined;
   const items = metadata?.["items"];
@@ -727,7 +726,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
           networkInterfaces: [
             {
               subnetwork: `projects/${this.options.projectId}/${spec.subnetwork}`,
-              // Ephemeral external IP for outbound only (no NAT, docs/host-provider.md); the
+              // Ephemeral external IP for outbound only (no Cloud NAT, docs/host-provider.md); the
               // VPC firewall denies all inbound except the control plane.
               accessConfigs: [{ type: "ONE_TO_ONE_NAT", name: "External NAT" }],
             },

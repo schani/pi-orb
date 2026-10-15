@@ -6,7 +6,7 @@ import {
 } from "@pi-orb/protocol";
 
 /**
- * Lifecycle timing constants (docs/lifecycle.md/docs/lifecycle.md). All time flows through the
+ * Lifecycle timing constants (docs/lifecycle.md). All time flows through the
  * injected `SimulationTask` clock, so simulations tune these freely.
  */
 export interface LifecycleConstants {
@@ -122,7 +122,7 @@ export interface IssuerConstants {
   /**
    * How long a newly published key must sit in JWKS before it may start
    * signing. It has to exceed the `max-age` the JWKS endpoint serves
-   * (`http/issuer-routes.ts`, five minutes), so that a verifier which fetched
+   * (`src/http/issuer-routes.ts`, five minutes), so that a verifier which fetched
    * the key set the instant before publication has refreshed before the first
    * token it cannot otherwise explain arrives. The emergency rotation of a
    * leaked key overrides it deliberately: a few rejected tokens beat a key

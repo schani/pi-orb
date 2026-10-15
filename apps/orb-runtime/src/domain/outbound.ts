@@ -25,7 +25,7 @@ function isTransient(frame: ServerFrame): boolean {
 }
 
 /**
- * Per-connection ordered outbound writer (docs/runtime-protocol.md/docs/runtime-protocol.md).
+ * Per-connection ordered outbound writer (docs/runtime-protocol.md).
  *
  * The synchronization batch bypasses the budget entirely: it references
  * entries the harness already holds in memory, and closing on its size would
@@ -73,7 +73,10 @@ export class OutboundWriter {
     this.checkBudget();
   }
 
-  /** Called when the underlying socket reports that its buffer drained. */
+  /**
+   * Flush queued frames below the high-water mark. The server polls this on a timer;
+   * nothing calls it on a socket drain event.
+   */
   onDrain(): void {
     if (this.closed) return;
     while (this.queue.length > 0 && this.sink.bufferedAmount < this.options.highWaterMark) {

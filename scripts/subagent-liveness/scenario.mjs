@@ -785,8 +785,9 @@ if (scenario === "child-first") {
     assert.equal(bridgeBusy, true);
     assert.equal(saw("tool:one:entered"), false);
     failureGate.resolve();
-    // Characterize the source-audited missing already-aborted check: the
-    // session binds its abort listener after preparation, so the child runs.
+    // Bare-session characterization of the source-audited missing already-aborted
+    // check: the session binds its abort listener after preparation, so the child
+    // runs. Runtime mode must execute zero child work.
     if (runtime) {
       await waitEvent("child:terminal-drained");
       assert.equal(saw("model:child:one"), false);
@@ -868,7 +869,8 @@ if (scenario === "inbox-child-only") {
 }
 if (!wholeAbort) await waitEvent("model:followup-entered");
 await until(() => terminalRows.length === ids.size);
-// The real extension wakes the parent even for explicit cancellation.
+// Explicit child cancellation wakes the parent in bare-session mode; a runtime
+// whole-operation abort does not (see wholeAbort).
 if (scenario === "cancel-running") note("assert:cancel-completion-wakes-parent");
 if (!wholeAbort) assert.equal(bridgeBusy, true);
 if (loadFailure) {

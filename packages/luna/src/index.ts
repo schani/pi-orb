@@ -54,7 +54,7 @@ export interface LunaCompletionRequest {
   readonly maxTokens: number;
   readonly sessionPrefix: string;
   readonly signal: AbortSignal;
-  /** Runtime callers pass a composed provider model whose transport override must be retained. */
+  /** Runtime callers pass a composed provider model; only its baseUrl is kept (resolveLunaModel). */
   readonly modelTemplate?: Model<Api>;
   /** Sees every provider response, including failed ones, for the model usage ledger (docs/model-usage.md). */
   readonly onResponse?: (response: AssistantMessage) => void;

@@ -41,7 +41,7 @@ for (const name of ["contract-leaf", "general-purpose"] as const) {
               (entry) => entry.matcher === "Agent",
             )?.hooks;
             if (!callbacks) throw new Error("Production Agent hook missing.");
-            // Tests-first: reject the old foreground-only policy before starting native descendants.
+            // The root-only policy denies the dispatch before any native descendant starts.
             const input = {
               hook_event_name: "PreToolUse" as const,
               session_id: composed.state.id,

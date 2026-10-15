@@ -2526,6 +2526,41 @@ pre,
   font-size: 11px;
 }
 
+.chart-key a,
+.chart-key button {
+  padding: 0;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.chart-key button:hover:not(:disabled) {
+  color: inherit;
+  background: none;
+}
+
+.usage-timeline .chart-key a,
+.usage-timeline .chart-key button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+.chart-series-action {
+  pointer-events: bounding-box;
+}
+
+.chart-series-action:focus-visible,
+.chart-key a:focus-visible,
+.chart-key button:focus-visible {
+  outline: 2px solid var(--k);
+  outline-offset: 2px;
+}
+
 .chart-key[data-highlighted] > :not([data-on]) {
   opacity: 0.35;
 }

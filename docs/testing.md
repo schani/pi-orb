@@ -10,6 +10,35 @@ CI runs 64 seeds per placement, 96 commands each. `LIFECYCLE_CAMPAIGN_SEEDS` exp
 
 **Boundary ownership (decision 2026-10-15):** shared PG/memory contracts own atomic ownership, retry identity and Sleep FIFO. Native inbox-abort and sleep-fence fixtures own busy peer/human admission and browser/SQL admission-to-receipt gaps. The campaign owns orchestration and input/receipt conservation, not a second Native admission model. The existing full-slice central E2E owns CLI-to-child/native-to-parent unattended delivery, replicated provenance and literal gray rendering; focused CLI/runtime/UI contracts own their distinct boundaries. Effect censuses and exhaustive environment-command catalogs add no distinct safety invariant at the lifecycle boundary and are rejected.
 
+## Usage legend actions (2026-10-14; local, undeployed)
+
+Sanitized failure excerpts are preserved below; `.context/usage-legend-actions/` was the orb-local source, not durable storage. Tests-first logs cover absent targets/buttons and undersized phone controls. `browser-1.log` through `browser-4.log` preserve implementation failures: Vega href encoding navigated to `/undefined`; native SVG anchor children replace it. Standalone `svg-probe.json` / `svg-variants.json` reproduce Chromium omitting nested anchors from `elementsFromPoint`; bounding-box pointer events correct the action-anchor probe. Both engines pass normal action clicks. WebKit's inert Other text rejects locator preflight; its test checks the painted hit point before a real mouse click. No forced activation or universal hit-testing claim. Temporary diagnostics were removed from E2E source.
+
+`browser-final.log`: four Chromium/WebKit usage/transcript-chart tests pass, including keyboard/new tabs, deleted IDs, hover, no-refetch, overflow and ≥44px phone targets. `web-unit-final.log`: 795 tests / 105 files pass. `typecheck-corrected.log`: repository compiler passes after test tuple/index typing corrections. Build passes with a large-chunk warning; scoped lint has no errors. `preview-report.md`: expected deleted-fixture 404s, not product failures. Host reboot interrupted tool access, not completed tests; parent restarted the preview. No persistence/runtime-protocol changes, deployment or full release qualification.
+
+## Usage by orb (2026-10-14; local, undeployed)
+
+Tests first reproduced missing orb bucket attribution and timeline grouping. Final focused units: 46 passed (protocol, service/HTTP, PGlite ledger, presentation and mock backend). Chromium/WebKit usage E2E: 2 passed, including Orb selection without refetch, single-orb tooltip, five orb lines, deleted-name fallback and 320/390px overflow. Root typecheck, web build, scoped lint and diff checks passed; lint retains warnings/infos. No persisted state changed. Actual PostgreSQL was not run: no configured test database or Docker daemon. No full suite or deployment qualification claimed.
+
+The first browser run failed in both engines at a new assertion requiring a single-series end label. `lineChartSpec` intentionally emits labels only for multiple series (`many && !narrow`), so this was a deterministic test assumption, not a product failure. The replacement waits for the Orb path's `aria-label` before hovering and verifies its tooltip; the explicit identity barrier avoids confusing the preceding one-line Model chart with the replacement. Sanitized first-failure excerpts are preserved below; the original final log was ephemeral.
+
+### Preserved local failure evidence
+
+Sanitized excerpts from the usage implementation runs (2026-10-14 America/Los_Angeles); no raw page dumps or credentials:
+
+| Source | First failure / diagnostic | Cause and correction |
+|---|---|---|
+| `usage-orb-first-browser.log`, Chromium + WebKit | `svg text` matching `/^Recorded orb /`: expected 1, received 0 | Single-series labels were intentionally absent. Test now waits for the Orb path identity before checking its tooltip; actions subsequently add single-series labels. |
+| `tests-first.log` | `expected undefined to deeply equal { field: 'href', type: 'nominal' }`; `Cannot read properties of undefined (reading 'series')` | Expected red for missing actions/return contract. Vega href approach was later rejected; final tests require actions outside Vega data. |
+| `browser-tests-first.log`, both engines | `locator.click: Timeout 30000ms exceeded`, waiting for button `Uncached input` | Expected red before action controls existed. |
+| `browser-1.log` / `browser-2.log` | Chromium: Measure `input`, `element(s) not found`; WebKit: `Cached input … intercepts pointer events` | Vega synthetic href navigated to `/undefined`; removed encoding and placed native SVG anchor children in named text marks. |
+| `browser-3.log` | Chromium action anchor: `<svg …> intercepts pointer events` | Standalone probe: `elementFromPoint` found `a`, but `elementsFromPoint` returned only `svg, BODY, HTML`; `pointer-events: bounding-box` included `a` in both. Applied only to action anchors. |
+| `browser-3.log` / `browser-4.log` | WebKit inert Other text: `<svg …> intercepts pointer events` | Locator preflight rejected inert SVG text. Test verifies the painted center hits the label, then performs a real mouse click; actionable entries retain ordinary locator clicks. |
+| `touch-targets-first.log` | `nodes.every(node => node.getBoundingClientRect().height >= 44)`: expected true, received false | Added usage-key inline-flex/min-height styling; retained assertion. |
+| `unit-1.log`, `web-typecheck-1.log`, `typecheck-final.log` | `chart.series` undefined; TS2379/TS2345 for `string | undefined` | Updated one test to `.spec` and corrected tuple/index typing; compiler then passed. |
+
+Final local evidence: 795 web units, four Chromium/WebKit usage/transcript-chart cases, repository typecheck, web build and scoped lint passed. Build retained the >500 kB chunk warning. This is local qualification, not deployment evidence; PR CI records current-head qualification.
+
 ## DST boundary compositions (decision 2026-10-14)
 
 - Writer expectations are authored semantic facts: ordered records, ancestry, roles/receipts, distinct block text/revisions and tool identities/names/states. Reducer/projector/sync results supply actual observations only. Unrelated history preserves live blocks; partial retirement removes exactly its named subset. Real retry resumes from an advanced cursor after interrupted sync; runtime output and commits continue while final sync drains. Retired sockets/cache owners cannot publish.

@@ -48,7 +48,7 @@ it.each(["chromium", "webkit"] as const)(
       await page.route(`**/api/v1/orbs/${ORB}`, async (route) => {
         orbReads++;
         const response = await route.fetch();
-        // StrictMode runs the bootstrap load twice; hold only conversation polling.
+        // StrictMode runs the bootstrap orb load twice; hold only later loads.
         if (orbReads > 2) await held;
         const body = await response.json();
         await route.fulfill({ response, json: { ...body, state: "stopped", activity: "idle" } });

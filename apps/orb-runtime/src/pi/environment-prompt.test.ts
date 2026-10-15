@@ -104,7 +104,7 @@ describe("runtime environment prompt", () => {
 
   it("documents the boot hooks the repository may own", () => {
     // The failure fragment (`hooks/prompt.ts`) is appended only when a hook
-    // broke; an agent that never sees one must still know the convention
+    // or its env file breaks; an agent that never sees one must still know the convention
     // exists, or it will never write one (docs/orb-setup-hook.md).
     expect(environmentPrompt).toContain(".agents/setup");
     expect(environmentPrompt).toContain(".agents/resume");

@@ -103,6 +103,10 @@ const timeFormat = (spec: LineChart) => {
   return Math.max(...times) - Math.min(...times) > 86_400_000 ? "%b %d %H:%M" : "%H:%M";
 };
 
+/** Local UI actions, never part of the protocol's persisted ChartSpec. */
+export type ChartSeriesAction = { href: string } | { onSelect: () => void };
+export type ChartSeriesActions = ReadonlyMap<string, ChartSeriesAction>;
+
 export interface ChartXAxis {
   /** Unlabeled. */
   readonly ticks: readonly number[];
@@ -113,11 +117,21 @@ export interface ChartXAxis {
 
 export function lineChartSpec(
   spec: LineChart,
-  { narrow, height, xAxis }: { narrow: boolean; height: number; xAxis?: ChartXAxis },
+  {
+    narrow,
+    height,
+    xAxis,
+    seriesActions,
+  }: {
+    narrow: boolean;
+    height: number;
+    xAxis?: ChartXAxis;
+    seriesActions?: ChartSeriesActions;
+  },
 ): VegaSpec {
   const names = spec.series.map((series) => series.name);
   const many = names.length > 1;
-  const labels = many && !narrow;
+  const labels = !narrow && (many || spec.series.some((s) => seriesActions?.has(s.name)));
   const { colors, dash } = seriesStyles(names.length);
   const rows = spec.series.flatMap((series, index) =>
     series.points.map(([t, v]) => ({ t, v, s: series.name, k: `s${index}` })),
@@ -269,6 +283,7 @@ export function lineChartSpec(
       ...(labels
         ? [
             {
+              name: "end_labels",
               mark: { type: "text", align: "left", dx: leaders ? 16 : 8, cursor: "default" },
               encoding: {
                 x,

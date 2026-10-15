@@ -4,6 +4,7 @@ import embed, { type Config, type VisualizationSpec } from "vega-embed";
 import {
   barChartSpec,
   CHART_CONFIG,
+  type ChartSeriesActions,
   type ChartXAxis,
   lineChartSpec,
   sparklineSpec,
@@ -120,6 +121,7 @@ export function mountChart(
     narrow: boolean;
     height: number;
     xAxis?: ChartXAxis;
+    seriesActions?: ChartSeriesActions;
     onHighlight: (series: string | null) => void;
   },
 ): ResultAsync<MountedChart, ChartRenderError> {
@@ -130,6 +132,7 @@ export function mountChart(
           narrow: options.narrow,
           height: options.height,
           ...(options.xAxis === undefined ? {} : { xAxis: options.xAxis }),
+          ...(options.seriesActions === undefined ? {} : { seriesActions: options.seriesActions }),
         });
   return render(container, vega, (event, value) => showTooltip(spec, event, value)).map(
     ({ view }) => {
@@ -152,6 +155,42 @@ export function mountChart(
         view.addEventListener("pointerout", (_event, item) => {
           if (series(item) !== undefined) highlight(null);
         });
+      }
+      if (spec.kind === "line" && options.seriesActions !== undefined) {
+        // This named mark preserves series order; never derive identity from rendered label text.
+        container
+          .querySelectorAll<SVGTextElement>("g.end_labels_marks text")
+          .forEach((text, index) => {
+            const name = spec.series[index]?.name;
+            const action = name === undefined ? undefined : options.seriesActions?.get(name);
+            if (name === undefined || action === undefined) return;
+            const control = document.createElementNS("http://www.w3.org/2000/svg", "a");
+            if ("href" in action) control.setAttribute("href", action.href);
+            control.textContent = text.textContent;
+            // Vega caches single-line text content, so isolation/resize retains this child.
+            text.replaceChildren(control);
+            text.setAttribute("role", "presentation");
+            text.removeAttribute("aria-label");
+            control.setAttribute("tabindex", "0");
+            control.setAttribute("aria-label", name);
+            control.setAttribute("role", "href" in action ? "link" : "button");
+            control.classList.add("chart-series-action");
+            text.style.cursor = "pointer";
+            control.addEventListener("pointerenter", () => highlight(name));
+            control.addEventListener("pointerleave", () => highlight(null));
+            control.addEventListener("focus", () => highlight(name));
+            control.addEventListener("blur", () => highlight(null));
+            if ("onSelect" in action) {
+              control.addEventListener("click", () => action.onSelect());
+              control.addEventListener("keydown", (event) => {
+                if (!(event instanceof KeyboardEvent)) return;
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  if (!event.repeat) action.onSelect();
+                }
+              });
+            }
+          });
       }
       return {
         highlight,

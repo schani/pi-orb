@@ -4,7 +4,7 @@ import { expect, it } from "vitest";
 const workerUrl = new URL("./bounded-worker.js", import.meta.url);
 
 it("preserves an image larger than the text capture budget through the public worker", async () => {
-  // A 1 MiB decoded image expands beyond 1 MiB on the worker pipe.
+  // Base64 expands the decoded image beyond 1 MiB on the worker pipe.
   const png = Buffer.alloc(1024 * 1024, 97);
   Buffer.from("89504e470d0a1a0a", "hex").copy(png);
   const data = png.toString("base64");

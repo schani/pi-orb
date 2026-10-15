@@ -33,6 +33,15 @@ describe("usage read contract", () => {
   ])("rejects malformed or unbounded reads: %j", (query) => {
     expect(parseUsageQuery(query)._unsafeUnwrapErr().type).toBe("usage_request_invalid");
   });
+  it("requires per-orb attribution on bucket rows", () => {
+    const totals = { input: 1, output: 0, cacheRead: 0, cacheWrite: 0, calls: 1 };
+    const bucket = { ...totals, at: 0, use: "root", provider: "p", model: "m" };
+    const response = { boundaries: [0, 1], summary: totals, buckets: [bucket], orbs: [] };
+    expect(Check(UsageViewSchema, response)).toBe(false);
+    expect(Check(UsageViewSchema, { ...response, buckets: [{ ...bucket, orbId: "orb" }] })).toBe(
+      true,
+    );
+  });
   it("rejects unsafe or negative totals in successful responses", () => {
     const response = {
       boundaries: [0, 1],

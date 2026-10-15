@@ -21,7 +21,10 @@ interface Recorded {
   body?: Record<string, unknown>;
 }
 
-/** Scripted transport: matches each request in order against a handler. */
+/**
+ * Scripted transport: each request consumes the next handler; image lookups
+ * get fixed responses and are not recorded.
+ */
 class FakeTransport implements GceApiTransport {
   readonly requests: Recorded[] = [];
   private readonly script: ((request: Recorded) => GceResponse)[];
@@ -464,11 +467,9 @@ describe("GceOrbHostProvider", () => {
       const spec = items.find((item) => item.key === "pi-orb-host-spec-fingerprint")?.value;
       expect(spec).toBe(result.isOk() ? result.value.specFingerprint : "");
       expect(items.some((item) => item.key === "pi-orb-script-sha256")).toBe(false);
-      // Transitional rollover fence: the legacy generation stamp carries the
-      // configured deploy generation so a draining pre-replacement revision
-      // reads new instances as "the future" and never repairs them backward
-      // (docs/compute-replacement.md). It is a stamp only — nothing in the
-      // current adapter reads it back.
+      // The deploy generation is not stamped on the instance: it returns as
+      // specGeneration for lifecycle to commit as host_spec_generation
+      // (docs/compute-replacement.md).
     },
   );
 
