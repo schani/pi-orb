@@ -32,9 +32,9 @@ COPY packages/mock-openai/package.json packages/mock-openai/
 COPY packages/luna/package.json packages/luna/
 COPY apps/control-plane/package.json apps/control-plane/
 RUN npm ci --workspace @pi-orb/control-plane --include-workspace-root=false --ignore-scripts \
-  && node scripts/apply-dependency-patches.mjs --pi-only \
-  && rm -rf node_modules/node-pty/prebuilds \
-  && npm rebuild node-pty \
+  && node scripts/apply-dependency-patches.mjs --pi-only
+RUN --network=none rm -rf node_modules/node-pty/prebuilds \
+  && npm_config_nodedir=/usr/local npm rebuild node-pty \
   && node -e "const pty = require('node-pty'); const child = pty.spawn('/bin/sh', ['-c', 'exit 0']); child.onExit(({ exitCode }) => process.exit(exitCode))"
 
 FROM node:24-bookworm-slim
