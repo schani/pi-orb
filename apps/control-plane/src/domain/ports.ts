@@ -261,13 +261,6 @@ export interface ControlPlaneStore extends ActivityHeadlineStore {
   ): ResultAsync<OrbRow[], StoreError>;
   /** Inserts only while the parent project is active, fencing create-vs-delete. */
   insertOrb(task: SimulationTask, orb: OrbRow): ResultAsync<OrbRow, StoreError | ProjectConflict>;
-  getSpawnAcceptance(
-    task: SimulationTask,
-    orbId: string,
-  ): ResultAsync<
-    { callerOrbId: string; requestHash: string; initialModel: OrbRow["initialModel"] } | null,
-    StoreError
-  >;
   getSpawnCaller(task: SimulationTask, orbId: string): ResultAsync<string | null, StoreError>;
   /** Existing direct accepted children, including archived orbs, ordered by ID. */
   listSpawnChildren(
@@ -1225,11 +1218,11 @@ export interface OrbResourceCleaner {
 }
 
 export interface ControlPlaneDeps {
+  readonly checkSpawnModel: import("./orb-spawn-model.ts").CheckSpawnModel;
   readonly workspaceUploadRuntime?: (
     task: SimulationTask,
   ) => import("./workspace-uploads.ts").UploadRuntime;
   readonly store: ControlPlaneStore;
-  readonly spawnModels: import("./orb-spawn-model.ts").SpawnModels;
   readonly hostProvider: OrbHostProvider;
   readonly resourceCleaner: OrbResourceCleaner;
   readonly runtimeClient: OrbRuntimeClient;

@@ -426,16 +426,10 @@ it.each(["guest", "central"] as const)(
 );
 
 it.each(["runtime", "central"] as const)(
-  "%s spawn resolves owner catalog and retries after disconnect",
+  "%s spawn atomically accepts initial model and retries",
   async (kind) => {
     const h = seed();
-    const read = vi.fn(() =>
-      okAsync({
-        models: [{ provider: "claude", id: "sonnet", name: "Sonnet", thinkingLevels: [] }],
-        disconnected: [] as string[],
-      }),
-    );
-    const deps = { ...h.deps, spawnModels: { read } };
+    const deps = h.deps;
     const task = new NoSimulationTask("model ingress", false);
     const options = { appOrigin: "http://app", appendAlert: () => okAsync({ recordId: "a" }) };
     const service =
@@ -452,16 +446,17 @@ it.each(["runtime", "central"] as const)(
             options,
           )
         : createOrbAgentOperations(task, deps, identity, options);
-    const request = { kind: "spawn", prompt: "work", model: "Sonnet" } as const;
+    const request = {
+      kind: "spawn",
+      prompt: "work",
+      model: { provider: "claude", id: "sonnet" },
+    } as const;
     const first = (await service.invoke(request, "chosen"))._unsafeUnwrap() as { orbId: string };
     expect(h.store.orbSnapshot(first.orbId)).toMatchObject({
       harness: "claude",
       initialModel: { provider: "claude", id: "sonnet" },
     });
-    expect(read).toHaveBeenCalledWith(task, "owner", "Sonnet");
-    read.mockImplementation(() => okAsync({ models: [], disconnected: ["claude"] }));
     expect((await service.invoke(request, "chosen"))._unsafeUnwrap()).toEqual(first);
-    expect(read).toHaveBeenCalledTimes(1);
     expect(h.store.messageSnapshots(first.orbId)).toHaveLength(1);
   },
 );

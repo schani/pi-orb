@@ -832,28 +832,6 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     });
   }
 
-  getSpawnAcceptance(
-    _task: SimulationTask,
-    orbId: string,
-  ): ReturnType<ControlPlaneStore["getSpawnAcceptance"]> {
-    return this.db
-      .query(
-        `SELECT s.caller_orb_id, s.request_hash, o.initial_model
-       FROM orb_spawns s LEFT JOIN orbs o ON o.id = s.orb_id WHERE s.orb_id = $1`,
-        [orbId],
-      )
-      .map(({ rows }) => {
-        const row = rows[0];
-        return row === undefined
-          ? null
-          : {
-              callerOrbId: String(row["caller_orb_id"]),
-              requestHash: String(row["request_hash"]),
-              initialModel: (row["initial_model"] ?? null) as OrbRow["initialModel"],
-            };
-      });
-  }
-
   getSpawnCaller(_task: SimulationTask, orbId: string): ResultAsync<string | null, StoreError> {
     return this.db
       .query("SELECT caller_orb_id FROM orb_spawns WHERE orb_id = $1", [orbId])

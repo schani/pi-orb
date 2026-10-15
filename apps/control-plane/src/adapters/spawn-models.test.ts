@@ -1,73 +1,75 @@
 import { NoSimulationTask } from "determined";
 import { errAsync, okAsync } from "neverthrow";
-import { describe, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 import type { BrokerDeps, StoredSecret } from "../domain/ports.ts";
-import { createSpawnModels } from "./spawn-models.ts";
+import { createSpawnModelCheck } from "./spawn-models.ts";
 
-const task = new NoSimulationTask("spawn-catalog", false);
-const subscription = { kind: "claude_subscription", token: "owner-token", createdAt: 0 } as const;
-function broker(secret: StoredSecret | null = subscription) {
+const task = new NoSimulationTask("spawn-model", false);
+function fixture(
+  secret: StoredSecret | null = {
+    kind: "claude_subscription",
+    token: "owner-token",
+    createdAt: 0,
+  },
+) {
   const readPointer = vi.fn(() => okAsync(secret === null ? null : { secretVersion: "version" }));
   const readSecret = vi.fn(() => okAsync(secret));
-  const owner = vi.fn(
+  const broker = vi.fn(
     () => ({ pointers: { readPointer }, secrets: { readSecret } }) as unknown as BrokerDeps,
   );
-  return { owner, readPointer, readSecret };
+  const checkClaude = vi.fn(() => okAsync<void>(undefined));
+  return {
+    broker,
+    checkClaude,
+    readPointer,
+    readSecret,
+    check: createSpawnModelCheck(broker, checkClaude),
+  };
 }
 
-describe("owner spawn catalog", () => {
-  it("reads owner credentials without broker refresh or writes", async () => {
-    const { owner, readSecret } = broker();
-    const discover = vi.fn(() =>
-      okAsync([{ provider: "claude", id: "opus", name: "Opus", thinkingLevels: [] }]),
-    );
-    const catalog = (
-      await createSpawnModels(owner, discover).read(task, "owner", "Opus")
-    )._unsafeUnwrap();
-    expect(owner).toHaveBeenCalledWith("owner");
-    expect(discover).toHaveBeenCalledWith("owner-token");
-    expect(catalog.disconnected).toEqual([]);
-    expect(catalog.models.find((m) => m.name === "Sol")?.id).toBe("gpt-6.1-sol");
-    expect(catalog.models.find((m) => m.name === "Opus")?.id).toBe("opus");
-    expect(readSecret).toHaveBeenCalledTimes(1);
-  });
-  it("does not launch discovery for a disconnected owner", async () => {
-    const { owner } = broker(null);
-    const discover = vi.fn();
-    const result = await createSpawnModels(owner, discover).read(task, "owner", "Opus");
-    expect(result._unsafeUnwrap().disconnected).toEqual(["claude"]);
-    expect(discover).not.toHaveBeenCalled();
-  });
-  it("does not consult Claude credentials or SDK for Sol", async () => {
-    const { owner, readPointer } = broker({
-      access: "access",
-      refresh: "refresh",
-      accountId: "owner",
-      expiresAt: 100,
-    });
-    const discover = vi.fn();
-    const catalog = (
-      await createSpawnModels(owner, discover).read(task, "owner", "Sol")
-    )._unsafeUnwrap();
-    expect(catalog.disconnected).toEqual([]);
-    expect(readPointer).toHaveBeenCalledTimes(1);
-    expect(readPointer).toHaveBeenCalledWith(task, "openai-codex");
-    expect(discover).not.toHaveBeenCalled();
-  });
-  it("distinguishes a known family absent from SDK advertisement", async () => {
-    const { owner } = broker();
-    const result = await createSpawnModels(owner, () => okAsync([])).read(task, "owner", "Fable");
-    expect(result.isErr() && result.error.reason).toBe("unadvertised");
-  });
-  it("propagates typed discovery failures", async () => {
-    const { owner } = broker();
-    const result = await createSpawnModels(owner, () =>
-      errAsync({
-        type: "spawn_model_error",
-        reason: "unavailable",
-        message: "Claude model catalog unavailable.",
-      }),
-    ).read(task, "owner", "Opus");
-    expect(result.isErr() && result.error.reason).toBe("unavailable");
-  });
+it("checks only the requested provider with owner credentials", async () => {
+  const f = fixture();
+  expect((await f.check(task, "owner", { provider: "claude", id: "opus" })).isOk()).toBe(true);
+  expect(f.broker).toHaveBeenCalledWith("owner");
+  expect(f.readPointer).toHaveBeenCalledExactlyOnceWith(task, "claude");
+  expect(f.readSecret).toHaveBeenCalledExactlyOnceWith(task, "claude", "version");
+  expect(f.checkClaude).toHaveBeenCalledExactlyOnceWith("owner-token", "opus");
+});
+it("rejects disconnected owners without starting SDK discovery", async () => {
+  const f = fixture(null);
+  expect(
+    (await f.check(task, "owner", { provider: "claude", id: "opus" }))._unsafeUnwrapErr().reason,
+  ).toBe("disconnected");
+  expect(f.checkClaude).not.toHaveBeenCalled();
+});
+it.each([
+  ["gpt-6.1-sol", true],
+  ["unknown", false],
+] as const)("checks exact Pi ID %s without Claude discovery", async (id, accepted) => {
+  const f = fixture({ access: "a", refresh: "r", accountId: "owner", expiresAt: 100 });
+  expect((await f.check(task, "owner", { provider: "openai-codex", id })).isOk()).toBe(accepted);
+  expect(f.readPointer).toHaveBeenCalledExactlyOnceWith(task, "openai-codex");
+  expect(f.checkClaude).not.toHaveBeenCalled();
+});
+it("preserves typed lookup failures", async () => {
+  const f = fixture();
+  const check = createSpawnModelCheck(f.broker, () =>
+    errAsync({
+      type: "spawn_model_error",
+      reason: "unavailable",
+      message: "Lookup unavailable.",
+    }),
+  );
+  expect(
+    (await check(task, "owner", { provider: "claude", id: "opus" }))._unsafeUnwrapErr().reason,
+  ).toBe("unavailable");
+});
+it("rejects a non-Codex secret for Pi admission", async () => {
+  const f = fixture();
+  expect(
+    (
+      await f.check(task, "owner", { provider: "openai-codex", id: "gpt-6.1-sol" })
+    )._unsafeUnwrapErr().reason,
+  ).toBe("unavailable");
+  expect(f.checkClaude).not.toHaveBeenCalled();
 });

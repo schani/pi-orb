@@ -59,13 +59,10 @@ export function createOrbTools(service: OrbAgentOperations, notifyParent?: Paren
           prompt: Type.String(),
           name: Type.Optional(Type.String()),
           model: Type.Optional(
-            Type.Union([
-              Type.String({ minLength: 1 }),
-              Type.Object(
-                { provider: Type.String({ minLength: 1 }), id: Type.String({ minLength: 1 }) },
-                { additionalProperties: false },
-              ),
-            ]),
+            Type.Object(
+              { provider: Type.String({ minLength: 1 }), id: Type.String({ minLength: 1 }) },
+              { additionalProperties: false },
+            ),
           ),
         },
         { additionalProperties: false },

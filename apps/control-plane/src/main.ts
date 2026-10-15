@@ -18,7 +18,7 @@ import { NoSimulationTask, type SimulationTask } from "determined";
 import Fastify from "fastify";
 import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
 import { ClaudePtyAuthTransport } from "./adapters/claude-auth-pty.ts";
-import { discoverClaudeModels } from "./adapters/claude-model-catalog.ts";
+import { checkClaudeSpawnModel } from "./adapters/claude-model-catalog.ts";
 import { openControlPlaneDatabase } from "./adapters/database.ts";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
 import { DurableAgentPlane } from "./adapters/durable/manager.ts";
@@ -57,7 +57,7 @@ import { SdkAgentPlane } from "./adapters/sdk-agent-plane.ts";
 import { createSealedAuthCookies } from "./adapters/sealed-auth-cookies.ts";
 import { FileSecretStore } from "./adapters/secrets/file-store.ts";
 import { GsmSecretStore } from "./adapters/secrets/gsm-store.ts";
-import { createSpawnModels } from "./adapters/spawn-models.ts";
+import { createSpawnModelCheck } from "./adapters/spawn-models.ts";
 import {
   FetchTailscaleApiTransport,
   HttpTailscaleAuthKeyMinter,
@@ -523,7 +523,7 @@ export async function main(
       finish: (row) => uploadRequest(task, deps, row, "finish"),
     }),
     store: database.store,
-    spawnModels: createSpawnModels(brokerForUser, discoverClaudeModels),
+    checkSpawnModel: createSpawnModelCheck(brokerForUser, checkClaudeSpawnModel),
     hostProvider,
     resourceCleaner:
       tailscaleForProvider && tailscaleClient !== null

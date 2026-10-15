@@ -3,14 +3,13 @@ import { describe, expect, it } from "vitest";
 import { OrbSpawnRequestSchema } from "./orb-spawn.ts";
 
 describe("spawn model selector", () => {
-  it.each(["Sol", "Opus", "claude/opus", { provider: "claude", id: "opus" }])(
-    "accepts %j",
-    (model) => {
-      expect(Check(OrbSpawnRequestSchema, { prompt: "work", model })).toBe(true);
-    },
-  );
+  it.each([{ provider: "claude", id: "opus" }])("accepts %j", (model) => {
+    expect(Check(OrbSpawnRequestSchema, { prompt: "work", model })).toBe(true);
+  });
   it.each([
     "",
+    "Sol",
+    "claude/opus",
     null,
     {},
     { provider: "claude" },

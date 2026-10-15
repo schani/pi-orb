@@ -355,7 +355,7 @@ describe("runtime broker routes", () => {
     routeStore: ControlPlaneStore = store,
     tailnetDnsName: string | null = "tail.test.ts.net",
     hostingGuard = false,
-    spawnModels = makeHarness().deps.spawnModels,
+    checkSpawnModel = makeHarness().deps.checkSpawnModel,
   ): Promise<void> {
     app = Fastify();
     if (hostingGuard)
@@ -376,7 +376,7 @@ describe("runtime broker routes", () => {
       spawn: (task, caller, orbId, request) =>
         spawnOrb(
           task,
-          { ...makeHarness().deps, store: routeStore, spawnModels },
+          { ...makeHarness().deps, store: routeStore, checkSpawnModel },
           caller,
           orbId,
           request,
@@ -688,36 +688,32 @@ describe("runtime broker routes", () => {
         headers: { authorization: `Bearer ${token}`, host: "untrusted.test" },
         payload,
       });
-    it("resolves explicit model through owner admission and returns unavailable without writes", async () => {
-      const read = vi.fn<ReturnType<typeof makeHarness>["deps"]["spawnModels"]["read"]>(() =>
+    it("returns availability errors without creating work", async () => {
+      await app.close();
+      await startApp(TEST_ISSUER_CONSTANTS, store, null, false, () =>
         errAsync({
           type: "spawn_model_error",
           reason: "unavailable",
-          message: "Catalog unavailable.",
+          message: "Model lookup unavailable.",
         }),
       );
-      await app.close();
-      await startApp(TEST_ISSUER_CONSTANTS, store, null, false, { read });
       store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
-      expect((await spawn({ prompt: "work", model: "Sonnet" })).statusCode).toBe(503);
+      expect(
+        (await spawn({ prompt: "work", model: { provider: "claude", id: "sonnet" } })).statusCode,
+      ).toBe(503);
       expect(store.orbSnapshot(id)).toBeNull();
       expect(store.messageSnapshots(id)).toHaveLength(0);
-      expect((await store.getSpawnAcceptance(task, id))._unsafeUnwrap()).toBeNull();
-      read.mockReturnValue(
-        okAsync({
-          models: [{ provider: "claude", id: "sonnet", name: "Sonnet", thinkingLevels: [] }],
-          disconnected: [],
-        }),
-      );
-      expect((await spawn({ prompt: "work", model: "Sonnet" })).statusCode).toBe(202);
-      expect(read).toHaveBeenCalledWith(task, TEST_USER_ID, "Sonnet");
+    });
+
+    it("accepts canonical initial settings after availability validation", async () => {
+      store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+      const request = { prompt: "work", model: { provider: "claude", id: "sonnet" } };
+      expect((await spawn(request)).statusCode).toBe(202);
       expect(store.orbSnapshot(id)).toMatchObject({
         harness: "claude",
-        initialModel: { provider: "claude", id: "sonnet" },
+        initialModel: request.model,
       });
-      read.mockReturnValue(okAsync({ models: [], disconnected: ["claude"] }));
-      expect((await spawn({ prompt: "work", model: "Sonnet" })).statusCode).toBe(202);
-      expect(read).toHaveBeenCalledTimes(2);
+      expect((await spawn(request)).statusCode).toBe(202);
       expect(store.messageSnapshots(id)).toHaveLength(1);
     });
 

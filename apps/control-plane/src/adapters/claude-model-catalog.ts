@@ -2,13 +2,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { ResultAsync } from "neverthrow";
+import { err, ok, ResultAsync } from "neverthrow";
 import { claudeChildEnvironment } from "../../../orb-runtime/src/claude/auth.ts";
 import { latestClaudeModels } from "../../../orb-runtime/src/claude/models.ts";
-import { spawnModelError } from "../domain/orb-spawn-model.ts";
+import type { SpawnModelError } from "../domain/orb-spawn-model.ts";
 
 /** SDK control request only: no user input, inference, native session, or retained config. */
-export function discoverClaudeModels(token: string) {
+export function checkClaudeSpawnModel(token: string, id: string) {
   return ResultAsync.fromThrowable(
     async () => {
       const directory = await mkdtemp(join(tmpdir(), "orb-model-catalog-"));
@@ -35,10 +35,7 @@ export function discoverClaudeModels(token: string) {
           },
         });
         const advertised = await process.supportedModels();
-        return latestClaudeModels(advertised).map((model) => {
-          const resolved = advertised.find((entry) => entry.value === model.id)?.resolvedModel;
-          return { ...model, aliases: resolved === undefined ? [] : [resolved] };
-        });
+        return latestClaudeModels(advertised).some((model) => model.id === id);
       } finally {
         clearTimeout(timeout);
         abortController.abort();
@@ -49,6 +46,18 @@ export function discoverClaudeModels(token: string) {
         }
       }
     },
-    () => spawnModelError("unavailable", "Claude model catalog unavailable."),
-  )();
+    (): SpawnModelError => ({
+      type: "spawn_model_error",
+      reason: "unavailable",
+      message: "Claude model lookup unavailable.",
+    }),
+  )().andThen((available) =>
+    available
+      ? ok(undefined)
+      : err({
+          type: "spawn_model_error" as const,
+          reason: "invalid" as const,
+          message: "Unknown or unavailable Claude model.",
+        }),
+  );
 }

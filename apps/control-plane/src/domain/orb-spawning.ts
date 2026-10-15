@@ -6,12 +6,7 @@ import type { StoreError } from "./errors.ts";
 import { logOrbEvent } from "./log.ts";
 import { newOrbRow } from "./new-orb.ts";
 import type { OrbRow } from "./orb.ts";
-import {
-  resolveSpawnModel,
-  type SpawnModelError,
-  spawnModelError,
-  spawnModelHarness,
-} from "./orb-spawn-model.ts";
+import { type SpawnModelError, spawnModelHarness } from "./orb-spawn-model.ts";
 import type { ArchiveCaller, ControlPlaneDeps, ControlPlaneStore, SpawnConflict } from "./ports.ts";
 
 export function spawnOrb(
@@ -22,48 +17,38 @@ export function spawnOrb(
   request: OrbSpawnRequest,
   authority?: ArchiveCaller,
 ): ResultAsync<void, StoreError | SpawnConflict | SpawnModelError> {
-  const requestHash = (model: OrbRow["initialModel"]) =>
-    createHash("sha256")
-      .update(
-        JSON.stringify([
-          request.prompt,
-          request.name ?? null,
-          typeof request.model === "object"
-            ? [request.model.provider, request.model.id]
-            : (request.model ?? null),
-          model === null ? null : [model.provider, model.id],
-        ]),
-      )
-      .digest("hex");
-  return deps.store.getSpawnAcceptance(task, orbId).andThen((accepted) => {
-    if (accepted !== null) {
-      if (
-        accepted.callerOrbId !== caller.id ||
-        accepted.requestHash !== requestHash(accepted.initialModel)
-      )
-        return err<void, SpawnConflict>({ type: "spawn_conflict", reason: "conflict" });
-      return admit(accepted.initialModel);
-    }
-    if (request.model === undefined) return admit(null);
-    const selector = request.model;
+  const initialModel = request.model ?? null;
+  const selectedHarness =
+    initialModel === null ? caller.harness : spawnModelHarness(initialModel.provider);
+  if (selectedHarness === null)
+    return errAsync({
+      type: "spawn_model_error",
+      reason: "invalid",
+      message: "Unsupported spawn model provider.",
+    });
+  const harness = selectedHarness;
+  const requestHash = createHash("sha256")
+    .update(
+      JSON.stringify([
+        request.prompt,
+        request.name ?? null,
+        initialModel === null ? null : [initialModel.provider, initialModel.id],
+      ]),
+    )
+    .digest("hex");
+  if (initialModel === null) return admit();
+  return deps.store.getSpawnCaller(task, orbId).andThen((acceptedCaller) => {
+    if (acceptedCaller !== null) return admit();
     return deps.store.getProject(task, caller.projectId).andThen((project) => {
       if (project === null || project.state !== "active")
         return err<void, SpawnConflict>({ type: "spawn_conflict", reason: "conflict" });
-      return deps.spawnModels
-        .read(task, project.ownerUserId, selector)
-        .andThen((catalog) => resolveSpawnModel(selector, catalog))
-        .andThen((model) => admit(model, project.ownerUserId));
+      return deps
+        .checkSpawnModel(task, project.ownerUserId, initialModel)
+        .andThen(() => admit(project.ownerUserId));
     });
   });
 
-  function admit(
-    initialModel: OrbRow["initialModel"],
-    expectedOwnerUserId?: string,
-  ): ResultAsync<void, StoreError | SpawnConflict | SpawnModelError> {
-    const harness =
-      initialModel === null ? caller.harness : spawnModelHarness(initialModel.provider);
-    if (harness === null)
-      return errAsync(spawnModelError("invalid", "Unsupported spawn model provider."));
+  function admit(expectedOwnerUserId?: string): ResultAsync<void, StoreError | SpawnConflict> {
     const orb = newOrbRow(
       {
         orbId,
@@ -85,7 +70,7 @@ export function spawnOrb(
         },
         orb,
         prompt: request.prompt,
-        requestHash: requestHash(initialModel),
+        requestHash,
       })
       .map(({ duplicate }) => {
         deps.control.nudgeNextAttemptAt(`reconcile:${orbId}`);

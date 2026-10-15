@@ -11,7 +11,7 @@ export const OrbSpawnRequestSchema = Type.Object(
   {
     prompt: Type.String({ minLength: 1, maxLength: ORB_SPAWN_MAX_BYTES }),
     name: Type.Optional(Type.String({ minLength: 1, maxLength: ORB_NAME_MAX_CHARS })),
-    model: Type.Optional(Type.Union([ModelRefSchema, Type.String({ minLength: 1 })])),
+    model: Type.Optional(ModelRefSchema),
   },
   { additionalProperties: false },
 );

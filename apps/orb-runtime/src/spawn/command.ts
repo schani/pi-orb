@@ -11,7 +11,7 @@ import { Check } from "typebox/value";
 import type { BrokerEnv } from "../broker/endpoint.ts";
 
 export const SPAWN_USAGE =
-  "usage: pi-orb spawn (--prompt <text> | --prompt-file <path|->) [--name <name>] [--model <label|provider/id>] [--id <uuid>] [--json]";
+  "usage: pi-orb spawn (--prompt <text> | --prompt-file <path|->) [--name <name>] [--model <provider/id>] [--id <uuid>] [--json]";
 export type SpawnFailure = {
   readonly type: "spawn_failure";
   readonly message: string;
@@ -21,7 +21,7 @@ export type SpawnArgs = {
   source: { text: string } | { file: string };
   id?: string;
   name?: string;
-  model?: string;
+  model?: OrbSpawnRequest["model"];
   json: boolean;
 };
 const invalid = (message: string): SpawnFailure => ({
@@ -34,7 +34,7 @@ export function parseSpawnArgs(args: readonly string[]): Result<SpawnArgs, Spawn
   let source: SpawnArgs["source"] | undefined;
   let id: string | undefined;
   let name: string | undefined;
-  let model: string | undefined;
+  let model: OrbSpawnRequest["model"];
   let json = false;
   const seen = new Set<string>();
   for (let i = 0; i < args.length; i++) {
@@ -58,7 +58,11 @@ export function parseSpawnArgs(args: readonly string[]): Result<SpawnArgs, Spawn
         id = value.toLowerCase();
         break;
       case "--model":
-        model = value;
+        if (!/^[^/\s]+\/[^/\s]+$/u.test(value)) return err(invalid("--model must be provider/id"));
+        model = {
+          provider: value.slice(0, value.indexOf("/")),
+          id: value.slice(value.indexOf("/") + 1),
+        };
         break;
       case "--name":
         name = value;

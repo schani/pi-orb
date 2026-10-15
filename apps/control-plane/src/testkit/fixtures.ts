@@ -115,8 +115,8 @@ export function makeHarness(options?: {
   });
   const deps: ControlPlaneDeps = {
     store,
+    checkSpawnModel: () => okAsync(undefined),
     hostProvider: new FakeOrbHostProvider(world),
-    spawnModels: { read: () => okAsync({ models: [], disconnected: [] }) },
     resourceCleaner: { cleanupOrb: () => okAsync(undefined) },
     runtimeClient: new FakeRuntimeClient(world),
     authGate,

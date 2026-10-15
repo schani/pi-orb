@@ -1050,7 +1050,7 @@ export function storeSemanticsContractTests(
       expect((await store.getSpawnCaller(task, childId))._unsafeUnwrap()).toBe(orb.id);
     });
 
-    it("fences explicit catalog ownership under the atomic project lock", async () => {
+    it("fences availability-check ownership under the atomic project lock", async () => {
       (await store.insertProject(task, project))._unsafeUnwrap();
       const source = { ...orb, state: "running" as const, runtimeTokenHash: "token" };
       (await store.insertOrb(task, source))._unsafeUnwrap();
@@ -1071,7 +1071,7 @@ export function storeSemanticsContractTests(
       const denied = await store.spawnOrb(task, params);
       expect(denied.isErr() && denied.error).toMatchObject({ type: "spawn_conflict" });
       expect((await store.getOrb(task, child.id))._unsafeUnwrap()).toBeNull();
-      expect((await store.getSpawnAcceptance(task, child.id))._unsafeUnwrap()).toBeNull();
+      expect((await store.getSpawnCaller(task, child.id))._unsafeUnwrap()).toBeNull();
       expect((await store.listOrbMessages(task, child.id))._unsafeUnwrap()).toEqual([]);
       expect(
         (
@@ -1113,11 +1113,6 @@ export function storeSemanticsContractTests(
           harness: targetHarness,
           initialModel,
           userTimeZone: "Europe/Paris",
-        });
-        expect((await store.getSpawnAcceptance(task, child.id))._unsafeUnwrap()).toEqual({
-          callerOrbId: caller.id,
-          requestHash: "chosen-model",
-          initialModel,
         });
         expect((await store.spawnOrb(task, params))._unsafeUnwrap()).toEqual({ duplicate: true });
         expect((await store.listOrbMessages(task, child.id))._unsafeUnwrap()).toHaveLength(1);

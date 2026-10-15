@@ -7,16 +7,16 @@ const sdk = vi.hoisted(() => ({
 }));
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: sdk.query }));
 
-import { discoverClaudeModels } from "./claude-model-catalog.ts";
+import { checkClaudeSpawnModel } from "./claude-model-catalog.ts";
 
 describe("ephemeral Claude catalog", () => {
-  it("advertises SDK models without sending input or retaining a session", async () => {
+  it("checks exact SDK model IDs without sending input or retaining a session", async () => {
     sdk.query.mockReturnValue(sdk);
     sdk.supportedModels.mockResolvedValue([
       { value: "opus", displayName: "Opus", description: "" },
     ]);
-    const result = await discoverClaudeModels("owner-token");
-    expect(result._unsafeUnwrap().map((model) => model.id)).toEqual(["opus"]);
+    const result = await checkClaudeSpawnModel("owner-token", "opus");
+    expect(result.isOk()).toBe(true);
     const call = sdk.query.mock.calls.at(-1)?.[0];
     expect(call.options.persistSession).toBe(false);
     expect(call.options.settingSources).toEqual([]);
@@ -25,15 +25,24 @@ describe("ephemeral Claude catalog", () => {
     expect(await call.prompt.next()).toMatchObject({ done: true });
     expect(sdk.close).toHaveBeenCalled();
   });
+  it("rejects an exact ID absent from SDK advertisement", async () => {
+    sdk.query.mockReturnValue(sdk);
+    sdk.supportedModels.mockResolvedValue([
+      { value: "opus", displayName: "Opus", description: "" },
+    ]);
+    expect((await checkClaudeSpawnModel("owner-token", "sonnet"))._unsafeUnwrapErr().reason).toBe(
+      "invalid",
+    );
+  });
   it("closes discovery and returns a typed sanitized failure", async () => {
     sdk.close.mockClear();
     sdk.query.mockReturnValue(sdk);
     sdk.supportedModels.mockRejectedValue(new Error("private"));
-    const result = await discoverClaudeModels("owner-token");
+    const result = await checkClaudeSpawnModel("owner-token", "opus");
     expect(result.isErr() && result.error).toEqual({
       type: "spawn_model_error",
       reason: "unavailable",
-      message: "Claude model catalog unavailable.",
+      message: "Claude model lookup unavailable.",
     });
     expect(sdk.close).toHaveBeenCalledTimes(1);
   });
@@ -50,11 +59,11 @@ it.each(["query", "close"] as const)(
     sdk.close.mockImplementation(() => {
       if (stage === "close") throw new Error("private-token");
     });
-    const result = await discoverClaudeModels("owner-token");
+    const result = await checkClaudeSpawnModel("owner-token", "opus");
     expect(result._unsafeUnwrapErr()).toEqual({
       type: "spawn_model_error",
       reason: "unavailable",
-      message: "Claude model catalog unavailable.",
+      message: "Claude model lookup unavailable.",
     });
   },
 );

@@ -5,7 +5,7 @@ import { assert, expect, it, vi } from "vitest";
 import type { OrbAgentOperations } from "../../../domain/orb-agent-operations.ts";
 import { createOrbTools } from "./orb-tools.ts";
 
-it.each(["Sol", { provider: "claude", id: "opus" }])("forwards model intent %j", async (model) => {
+it.each([{ provider: "claude", id: "opus" }])("forwards model intent %j", async (model) => {
   const invoke = vi.fn<OrbAgentOperations["invoke"]>(() => okAsync({ accepted: true }));
   const tool = createOrbTools({ invoke }).find((t) => t.name === "orb_spawn")!;
   await tool.execute(
