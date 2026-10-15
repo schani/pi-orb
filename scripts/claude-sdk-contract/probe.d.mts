@@ -79,6 +79,10 @@ export interface NativeProbeResult extends NativeCancellationResult {
 }
 export interface NativeProbeOptions {
   withSubagent?: boolean;
+  /** Merged over the probe's isolated native environment. */
+  env?: Record<string, string>;
+  /** Loopback ports the network guard admits besides the fake API. */
+  allowPorts?: number[];
   withCompact?: boolean;
   compactInstructions?: string;
   cancelAt?: "initialization" | "before-enqueue" | "before-dispatch" | "in-progress" | "queued";

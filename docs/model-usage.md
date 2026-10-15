@@ -1,6 +1,6 @@
 # Model usage ledger
 
-**Decided 2026-10-12.** Every platform-managed model call writes one content-free row to PostgreSQL `model_calls`: time, owner, orb, use, provider/model, outcome and provider-reported token counts. Rows outlive orb archival and deletion.
+**Decided 2026-10-12.** Every platform-managed model call writes one content-free row to PostgreSQL `model_calls`: time, owner, orb, use, provider/model, outcome, provider-reported token counts and estimated cost. Rows outlive orb archival and deletion.
 
 ## Why
 
@@ -34,7 +34,33 @@ The wrapper sits beside `fenceModels` around the per-orb `ModelRuntime` from `cr
 
 The full normalized root history separately retains optional `usage.costUsd` from the SDK's `usage.cost.total`, plus `totalTokens`; these are estimates, not subscription charges. The display projection omits usage. History does not replace the retained ledger: it lacks child/compaction/presentation coverage and permanent orb deletion removes it (`apps/orb-runtime/src/pi/mapping.ts`, `docs/history-replication.md`).
 
-Not covered: Claude orbs (Claude Code calls models inside the VM) and arbitrary model calls made by orb workloads. Calls lost to a crash before their response completes are not recorded; provider-side billing can exceed the ledger.
+Claude orbs are covered separately (below). Not covered: arbitrary model calls made by orb workloads. Calls lost to a crash before their response completes are not recorded; provider-side billing can exceed the ledger.
+
+## Claude orbs
+
+Claude Code calls models inside the VM, in a native process the SDK spawns, so the control plane sees none of them and no OpenTelemetry provider can be injected in-process.
+
+**Implemented 2026-10-13: per-call capture in the runtime.** `main.ts` starts a loopback OTLP/JSON logs receiver (`apps/orb-runtime/src/claude/model-usage.ts`) and the agent spawns Claude Code with `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_LOGS_EXPORTER=otlp`, `http/json`, a 1 s export interval and a random bearer header. Environment set by the spawner outranks project settings, which can only turn telemetry off. Claude Code emits one `api_request` event per model call (model, input, output, cache read/creation tokens, `cost_usd`, `duration_ms`, `ttft_ms`, `request_id`, `query_source`, `effort`, `speed`, plus `agent.name` for subagents) and `api_error` per failed attempt; the receiver keeps only the fields `model_calls` stores (time, model, `query_source`, tokens, cost, duration) and ignores every other event (prompts, responses, tool data) and every non-`claude-code` service, since shell commands inherit the exporter environment. A contract test drives the real binary through the shared native probe (`scripts/claude-sdk-contract/probe.mjs`, whose network guard admits the receiver's port) and requires one exported call per fake API request (`model-usage.contract.test.ts`).
+
+`query_source` classifies the call: `sdk` is the root loop, `agent:builtin:<type>` / `agent:custom` / `agent:default` are subagents, `compact` is compaction, and auxiliary sources include `generate_session_title`, `web_search_tool`, `web_fetch_apply` and `side_question`. In the contract run, the result message's cumulative `modelUsage` omitted the compaction call that telemetry reported.
+
+**Rejected: diffing `result.modelUsage`.** It is cumulative per `query()`, restored on resume, reset by `/clear`, and per model rather than per call or use.
+
+**Implemented 2026-10-14: forwarding through history (question 80 in `docs/open-questions.md`).** The agent appends each call as a hidden `claude.model_call` event whose overflow is the `ClaudeModelCall` (`packages/protocol/src/model-usage.ts`). Replication carries it to the control plane, where `commitHistoryTransaction` inserts the `model_calls` row in the same transaction that stores the record, only when that record is newly inserted, so redelivered batches add nothing. The owner is the orb's project owner. `claudeModelCall` (`apps/control-plane/src/domain/model-usage.ts`) maps the record; one that is malformed stays in history and produces no row.
+
+| `query_source` | `use` |
+|---|---|
+| `sdk` | `root` |
+| `agent:*` | `subagent` |
+| `compact` | `compaction` |
+| absent | `unknown` |
+| any other | the raw value, e.g. `generate_session_title` |
+
+Claude rows have provider `anthropic`, outcome `ok` (`api_request`) or `error` (`api_error`, zero tokens, no cost), and `at` from Claude Code's event timestamp. Each failed attempt is a row.
+
+**Rejected: a runtime→control-plane endpoint.** It needs a new route, client and loss handling; replication already delivers durably, authenticated and exactly once. The cost is history size: the busiest Claude orb on 2026-10-13 had 417 root calls in 2,141 records, so per-call records add at least ~20%.
+
+A receiver that cannot listen leaves Claude running without export and records `claude.model_usage_unavailable` in history. Exports batched in Claude Code at a crash are lost. Record ids are random, so an export the receiver accepted but Claude Code resent would count twice; the loopback makes that unlikely.
 
 ## Schema
 
@@ -52,17 +78,18 @@ CREATE TABLE model_calls (
   output integer NOT NULL,          -- includes reasoning
   cache_read integer NOT NULL,
   cache_write integer NOT NULL,
-  duration_ms integer
+  duration_ms integer,
+  cost_usd double precision         -- list-price estimate; NULL before 2026-10-14
 );
 CREATE INDEX model_calls_at ON model_calls (at);
 CREATE INDEX model_calls_orb_at ON model_calls (orb_id, at);
 ```
 
-No foreign keys: archival, orb deletion and project deletion leave rows intact. Rows contain no prompts, responses, tool data or names, so retaining them does not conflict with the deletion contract in `docs/orb-deletion.md`. Counts are pi-ai's normalized `Usage`; a failed call records whatever the provider reported, often zeros.
+No foreign keys: archival, orb deletion and project deletion leave rows intact. Rows contain no prompts, responses, tool data or names, so retaining them does not conflict with the deletion contract in `docs/orb-deletion.md`. Pi counts are pi-ai's normalized `Usage`; a failed call records whatever the provider reported, often zeros. `cost_usd` is pi-ai's `usage.cost.total` or Claude Code's `cost_usd`: both are list-price estimates (**decided 2026-10-14**), not subscription charges.
 
 ## Write path
 
-Recording never blocks or fails a model call. The wrapper hands the row to a `ModelUsageLedger` port; the PostgreSQL adapter inserts it asynchronously in its own transaction with `SET LOCAL synchronous_commit = off`, so the commit does not wait for the WAL flush. A database crash can lose roughly the last second of rows; a control-plane crash loses rows not yet inserted.
+Claude rows are written inside the history commit (above). For Pi, recording never blocks or fails a model call. The wrapper hands the row to a `ModelUsageLedger` port; the PostgreSQL adapter inserts it asynchronously in its own transaction with `SET LOCAL synchronous_commit = off`, so the commit does not wait for the WAL flush. A database crash can lose roughly the last second of rows; a control-plane crash loses rows not yet inserted.
 
 Volume is a few thousand calls per day, so per-call inserts need no batching. Closing the database drains inserts still in flight, after the central agent plane has closed.
 
@@ -111,9 +138,9 @@ Month subtraction clamps to the destination month's last day. Daily intervals ca
 
 The token-kind timeline labels cache reads **Cached input**, paired with **Uncached input**; cache writes remain separate.
 
-Summary: token volume, uncached input, output, weighted prompt cache share and recorded calls. Volume sums all four token fields; it is not spend. Cache share is `cacheRead / (input + cacheRead + cacheWrite)`, or `—` without prompt tokens. Failed responses still count as recorded calls. Coverage is Pi + Luna, not Claude/workloads, prices or a completeness guarantee; periods predating capture lack history.
+Summary: token volume, uncached input, output, weighted prompt cache share and recorded calls. Volume sums all four token fields; it is not spend. Cache share is `cacheRead / (input + cacheRead + cacheWrite)`, or `—` without prompt tokens. Failed responses still count as recorded calls. Coverage is Pi, Luna and Claude (from 2026-10-14), not workloads, prices or a completeness guarantee; periods predating capture lack history.
 
-**Decided 2026-10-14:** Breakdowns include Orb alongside token kind, use and provider/model. Orb lines group by retained ledger ID; names come from the existing owner-scoped orb totals, falling back to IDs after deletion. Duplicate names and the reserved Other label include IDs. More than six orbs/models becomes five volume leaders plus Other, preserving totals; ties sort by ID/model. Use/model/orb lines sum all four token fields. No persisted state changes. Qualification and test-only first-failure evidence: `docs/testing.md`. One measure selects all tokens/uncached input/output for both rankings. Rankings show five leading orbs and observed uses. Period changes and Retry preserve filters; breakdown/measure changes never refetch. Obsolete reads are aborted/ignored; failures show Retry, not stale totals or an empty-success state.
+**Decided 2026-10-14:** Breakdowns include Orb alongside token kind, use and provider/model. Orb lines group by retained ledger ID; names come from the existing owner-scoped orb totals, falling back to IDs after deletion. Duplicate names and the reserved Other label include IDs. More than six orbs/models becomes five volume leaders plus Other, preserving totals; ties sort by ID/model. Use/model/orb lines sum all four token fields. No persisted state changes. Qualification and test-only first-failure evidence: `docs/testing.md`. One measure selects all tokens/uncached input/output for both rankings. Rankings show five leading orbs and observed uses; an unnamed use (a Claude auxiliary `query_source`) is labelled with its raw value. Period changes and Retry preserve filters; breakdown/measure changes never refetch. Obsolete reads are aborted/ignored; failures show Retry, not stale totals or an empty-success state.
 
 `Chart.tsx` owns the shared React lifecycle for transcript charts, the usage timeline and Use ranking; `chart-render.ts` and `chart-spec.ts` own rendering, tooltips, isolation and styles. Desktop end labels and the phone key isolate series on hover. Fonts load before Vega measures text. Optional render-only `ChartXAxis {ticks, labels, format}` controls dense ticks and label positions without changing persisted `ChartSpec`.
 

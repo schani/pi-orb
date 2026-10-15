@@ -1,5 +1,11 @@
-import type { ModelCallUse } from "@pi-orb/protocol";
+import {
+  CLAUDE_MODEL_CALL_EVENT,
+  ClaudeModelCallSchema,
+  type HistoryRecord,
+  type ModelCallUse,
+} from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
+import { Check } from "typebox/value";
 
 export type { ModelCallUse } from "@pi-orb/protocol";
 
@@ -7,19 +13,43 @@ export type { ModelCallUse } from "@pi-orb/protocol";
 export interface ModelCall {
   readonly ownerUserId: string;
   readonly orbId: string;
-  readonly use: ModelCallUse;
+  /** A `ModelCallUse`, or a Claude auxiliary call's raw `query_source`. */
+  readonly use: string;
   readonly provider: string;
   readonly model: string;
-  /** `AssistantMessage.stopReason`. */
+  /** `AssistantMessage.stopReason`; `ok`/`error` for Claude. */
   readonly outcome: string;
   readonly input: number;
   readonly output: number;
   readonly cacheRead: number;
   readonly cacheWrite: number;
+  /** Provider-side list-price estimate. */
+  readonly costUsd?: number;
   readonly durationMs?: number;
 }
 
 /** Content-free ledger of platform-managed model calls; `record` stamps the time and never blocks or fails the call. */
 export interface ModelUsageLedger {
   record(task: SimulationTask, call: ModelCall): void;
+}
+
+function claudeUse(querySource: string | undefined): ModelCallUse | string {
+  if (querySource === undefined) return "unknown";
+  if (querySource === "sdk") return "root";
+  if (querySource.startsWith("agent:")) return "subagent";
+  if (querySource === "compact") return "compaction";
+  return querySource;
+}
+
+/** The `model_calls` row for a replicated `claude.model_call` record; null for any other or malformed record. */
+export function claudeModelCall(
+  record: HistoryRecord,
+): (Omit<ModelCall, "ownerUserId" | "orbId"> & { readonly at: number }) | null {
+  if (record.type !== "event" || record.eventType !== CLAUDE_MODEL_CALL_EVENT) return null;
+  const call = record.overflow;
+  if (!Check(ClaudeModelCallSchema, call)) return null;
+  const at = Date.parse(call.at);
+  if (Number.isNaN(at)) return null;
+  const { querySource: _, at: _at, ...counts } = call;
+  return { ...counts, at, use: claudeUse(call.querySource), provider: "anthropic" };
 }

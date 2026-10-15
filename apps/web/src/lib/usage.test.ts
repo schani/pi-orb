@@ -227,6 +227,18 @@ describe("usage presentation", () => {
     ]);
     expect(chart.series.flatMap((s) => s.points).reduce((sum, p) => sum + p[1], 0)).toBe(80);
   });
+  it("labels a Claude auxiliary use by its raw query source", () => {
+    const view = {
+      ...data,
+      buckets: [{ ...data.buckets[0]!, use: "generate_session_title" }],
+    };
+    expect(usageRankings(view, "total").uses?.bars.map((b) => b.label)).toEqual([
+      "generate_session_title",
+    ]);
+    expect(usageTimeline(view, "use").spec.series.map((s) => s.name)).toContain(
+      "generate_session_title",
+    );
+  });
   it("ranks the selected measure, keeps equal names distinct, and represents empty data", () => {
     const totals = usageRankings(data, "total");
     const output = usageRankings(data, "output");

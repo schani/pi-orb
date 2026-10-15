@@ -64,7 +64,7 @@ if not ancillary:
     _, status = os.waitpid(pid, 0)
     sys.exit(os.waitstatus_to_exitcode(status))
 listener = array.array("i", ancillary[0][2])[0]
-port = int(os.environ["NATIVE_CONTRACT_PORT"])
+ports = {int(port) for port in os.environ["NATIVE_CONTRACT_PORT"].split(",")}
 
 def forward(sig, _frame):
     try:
@@ -88,7 +88,7 @@ def read_address(notice, pointer, length):
     if family == socket.AF_UNIX:
         return True
     if family == socket.AF_INET and length >= 16:
-        return struct.unpack_from("!H", address, 2)[0] == port and address[4:8] == socket.inet_aton("127.0.0.1")
+        return struct.unpack_from("!H", address, 2)[0] in ports and address[4:8] == socket.inet_aton("127.0.0.1")
     return False
 
 while True:

@@ -3,6 +3,7 @@ import { readMockOpenAiEnv } from "@pi-orb/mock-openai";
 import { HARNESS_ENV, SKILLS_DIR_ENV } from "@pi-orb/protocol";
 import { readBrokerEnv } from "./broker/endpoint.ts";
 import { ClaudeOrbAgent } from "./claude/agent.ts";
+import { startModelUsageReceiver } from "./claude/model-usage.ts";
 import { readClaudeRecoveryProof } from "./claude/recovery-proof.ts";
 import type { OrbAgent } from "./domain/orb-agent.ts";
 import { ORB_MARKER_ENV } from "./hooks/env-file.ts";
@@ -58,8 +59,17 @@ async function main(): Promise<void> {
     claudeRecoveryProof: readClaudeRecoveryProof(process.env.PI_ORB_CLAUDE_RECOVERY_PROOF),
     testLaunchFailure: launchFailure.inject,
   };
-  const agent: OrbAgent =
-    harness === "claude" ? new ClaudeOrbAgent(agentOptions) : new PiOrbAgent(agentOptions);
+  // Exports arrive only after the agent spawns Claude Code, so the sink never sees `claude` unset.
+  let claude: ClaudeOrbAgent | undefined;
+  if (harness === "claude")
+    claude = new ClaudeOrbAgent({
+      ...agentOptions,
+      modelUsage: await startModelUsageReceiver(
+        (call) => claude?.recordModelCall(call),
+        (error) => console.error(`claude.model_usage_rejected: ${error.message}`),
+      ),
+    });
+  const agent: OrbAgent = claude ?? new PiOrbAgent(agentOptions);
 
   // The health server starts before slow initialization (docs/host-provider.md).
   // PTYs are admitted only after the checkout is ready, but their manager is
