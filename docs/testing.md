@@ -4,7 +4,7 @@
 
 `lifecycle-campaign.dst.test.ts` runs two concurrent callers with independent compute/history workers over reachable lifecycle histories. A commit ledger tracks admission order, content, provenance, Sleep deadlines and explicit revocations independently of responses. Every still-authorized input requires a durable session receipt and replicated delivered status; failed rows/states never waive delivery.
 
-Fair quiescence joins actors, removes injected faults and budgets remaining Sleep, boot/setup, drain/retry, quarantine and FIFO-page deadlines. Late timers remain active. Coverage floors require consumed fault effects and actual admissions/receipts, not selected commands or installed scripts.
+Fair quiescence joins actors, removes injected faults and budgets remaining Sleep, boot/setup, drain/retry, quarantine and FIFO-page deadlines. Late timers remain active. Coverage floors require consumed fault effects and actual admissions/receipts, not selected commands or installed scripts. Committed admission/authority and transport-outcome witnesses stay in the normal failure trace; aggregate applied-effect floors are printed once. Repeated command/result tallies and per-seed success-log copies are unnecessary.
 
 CI runs 64 seeds per placement, 96 commands each. `LIFECYCLE_CAMPAIGN_SEEDS` expands the range; `LIFECYCLE_CAMPAIGN_FIRST_SEED` chooses its start. Replay matching source with `DST_REPLAY=<trace> LIFECYCLE_CAMPAIGN_FIRST_SEED=<seed> LIFECYCLE_CAMPAIGN_SEEDS=1 npx vitest run apps/control-plane/src/domain/lifecycle-campaign.dst.test.ts -t '<placement> seed <seed>$'`.
 

@@ -765,42 +765,33 @@ export function storeSemanticsContractTests(
       expect((await store.listSpawnChildren(task, childId))._unsafeUnwrap()).toEqual([
         { id: grandchildId, name: null },
       ]);
-      const deleting = (
-        await store.requestOrbDeletion(task, {
-          orbId: unnamedId,
-          expectedStateVersion: 0,
-          now: 2002,
-          cleanupAfter: 2002,
-        })
-      )._unsafeUnwrap();
-      expect((await store.listSpawnChildren(task, orb.id))._unsafeUnwrap()).toEqual(expected);
-      expect(
-        (
-          await store.finalizeOrbDeletion(task, {
-            orbId: unnamedId,
-            expectedStateVersion: deleting.stateVersion,
+      for (const [orbId, now] of [
+        [unnamedId, 2002],
+        [orb.id, 2003],
+      ] as const) {
+        const deleting = (
+          await store.requestOrbDeletion(task, {
+            orbId,
+            expectedStateVersion: 0,
+            now,
+            cleanupAfter: now,
           })
-        ).isOk(),
-      ).toBe(true);
-      expect((await store.listSpawnChildren(task, orb.id))._unsafeUnwrap()).toEqual([
-        { id: childId, name: "Renamed" },
-      ]);
-      const parent = (
-        await store.requestOrbDeletion(task, {
-          orbId: orb.id,
-          expectedStateVersion: 0,
-          now: 2003,
-          cleanupAfter: 2003,
-        })
-      )._unsafeUnwrap();
-      expect(
-        (
-          await store.finalizeOrbDeletion(task, {
-            orbId: orb.id,
-            expectedStateVersion: parent.stateVersion,
-          })
-        ).isOk(),
-      ).toBe(true);
+        )._unsafeUnwrap();
+        if (orbId === unnamedId)
+          expect((await store.listSpawnChildren(task, orb.id))._unsafeUnwrap()).toEqual(expected);
+        expect(
+          (
+            await store.finalizeOrbDeletion(task, {
+              orbId,
+              expectedStateVersion: deleting.stateVersion,
+            })
+          ).isOk(),
+        ).toBe(true);
+        if (orbId === unnamedId)
+          expect((await store.listSpawnChildren(task, orb.id))._unsafeUnwrap()).toEqual([
+            { id: childId, name: "Renamed" },
+          ]);
+      }
       expect((await store.getSpawnCaller(task, childId))._unsafeUnwrap()).toBe(orb.id);
     });
 

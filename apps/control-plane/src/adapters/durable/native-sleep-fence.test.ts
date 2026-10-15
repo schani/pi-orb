@@ -17,7 +17,7 @@ import {
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { NoSimulationTask } from "determined";
 import { expect, it, vi } from "vitest";
-import { makeOrbRow, makeProjectRow } from "../../testkit/fixtures.ts";
+import { makeOrbRow, makeProjectRow, seedTestUser } from "../../testkit/fixtures.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
 import { PGliteClient } from "../pg/pglite-client.ts";
 import { DurableAgent } from "./agent.ts";
@@ -67,23 +67,17 @@ it.each(["peer", "human", "browser-sleep-gap", "browser-peer-gap", "human-gap"] 
     let agent: DurableAgent | undefined;
     try {
       (await database.migrate())._unsafeUnwrap();
-      (
-        await database.users.resolveUser(
-          task,
-          { issuer: "test", subject: "owner", email: null },
-          { id: project.ownerUserId, now: 0 },
-        )
-      )._unsafeUnwrap();
+      (await seedTestUser(task, database.users))._unsafeUnwrap();
       (await database.store.insertProject(task, project))._unsafeUnwrap();
       (await database.store.insertOrb(task, orb))._unsafeUnwrap();
       (await database.store.insertOrb(task, peer))._unsafeUnwrap();
       const lease = (
         await database.agentPersistence.open(task, orb, { signal: new AbortController().signal })
       )._unsafeUnwrap();
-      const open = (currentLease: typeof lease) =>
-        DurableAgent.open({
+      agent = (
+        await DurableAgent.open({
           orbId: orb.id,
-          storage: currentLease.storage,
+          storage: lease.storage,
           models,
           registry,
           modelTools: [hold],
@@ -91,12 +85,12 @@ it.each(["peer", "human", "browser-sleep-gap", "browser-peer-gap", "human-gap"] 
           checkoutCommit: "commit",
           instructions: "",
           initialSettings: { model: { provider: "faux", id: "faux-1" }, thinkingLevel: "off" },
-          ownershipSignal: currentLease.signal,
-          checkAdmission: currentLease.check,
-          beginDrain: currentLease.beginDrain,
-          closeResources: currentLease.release,
-        });
-      agent = (await open(lease))._unsafeUnwrap();
+          ownershipSignal: lease.signal,
+          checkAdmission: lease.check,
+          beginDrain: lease.beginDrain,
+          closeResources: lease.release,
+        })
+      )._unsafeUnwrap();
       const currentAgent = agent;
       lease.signal.addEventListener(
         "abort",
@@ -120,6 +114,35 @@ it.each(["peer", "human", "browser-sleep-gap", "browser-peer-gap", "human-gap"] 
           agent.waitForIdle().then(() => "idle"),
         ]),
       ).toBe("held");
+      const readSubmission = async (messageId: string) =>
+        (
+          await lease.storage.scanSubmissions(
+            { conversationId: ROOT_CONVERSATION_ID },
+            100,
+            undefined,
+            BACKGROUND_CONTEXT,
+          )
+        ).items.find((row) => row.requestId === `inbox:${messageId}`);
+      const peerRecords = (messageId: string) =>
+        currentAgent
+          .snapshot()
+          ._unsafeUnwrap()
+          .records.filter(
+            (row) => row.type !== "compaction" && row.inboxMessageIds?.includes(messageId),
+          );
+      const sleep = () =>
+        database.store.scheduleOrbSleep(task, {
+          orbId: orb.id,
+          caller: {
+            kind: "central",
+            orbId: orb.id,
+            projectId: project.id,
+            ownerUserId: project.ownerUserId,
+            agentAdmissionVersion: 0,
+          },
+          sleepId: randomUUID(),
+          durationSeconds: 300,
+        });
       const sender = {
         orbId: peer.id,
         projectId: project.id,
@@ -132,19 +155,25 @@ it.each(["peer", "human", "browser-sleep-gap", "browser-peer-gap", "human-gap"] 
           agentAdmissionVersion: 0,
         },
       };
+      const queue = (
+        messageId: string,
+        content: Parameters<typeof database.store.enqueueOrbMessage>[1]["content"],
+        fromPeer = false,
+        now = 0,
+      ) =>
+        database.store.enqueueOrbMessage(task, {
+          orbId: orb.id,
+          messageId,
+          content,
+          now,
+          ...(fromPeer ? { sender } : {}),
+        });
       if (kind.endsWith("gap")) {
         const browser = kind.startsWith("browser");
         const messageId = browser ? "browser:gap" : randomUUID();
         const content = [{ type: "text" as const, text: "accepted steering" }];
         if (!browser) {
-          (
-            await database.store.enqueueOrbMessage(task, {
-              orbId: orb.id,
-              messageId,
-              content,
-              now: 0,
-            })
-          )._unsafeUnwrap();
+          (await queue(messageId, content))._unsafeUnwrap();
           (
             await database.store.claimNextOrbMessageBatch(task, { orbId: orb.id, now: 0 })
           )._unsafeUnwrap();
@@ -175,16 +204,7 @@ it.each(["peer", "human", "browser-sleep-gap", "browser-peer-gap", "human-gap"] 
             })
           : agent.deliver(request);
         await submitted.promise;
-        const readSubmission = async () =>
-          (
-            await lease.storage.scanSubmissions(
-              { conversationId: ROOT_CONVERSATION_ID },
-              100,
-              undefined,
-              BACKGROUND_CONTEXT,
-            )
-          ).items.find((row) => row.requestId === `inbox:${messageId}`);
-        expect(await readSubmission()).toMatchObject({ status: "queued" });
+        expect(await readSubmission(messageId)).toMatchObject({ status: "queued" });
         const identityDocument = await lease.storage.findDocument(
           {
             kind: "orb.identity",
@@ -208,34 +228,15 @@ it.each(["peer", "human", "browser-sleep-gap", "browser-peer-gap", "human-gap"] 
         ).toBeUndefined();
         if (kind === "browser-peer-gap") {
           (
-            await database.store.enqueueOrbMessage(task, {
-              orbId: orb.id,
-              messageId: randomUUID(),
-              content: [{ type: "text", text: "later peer" }],
-              sender,
-              now: 0,
-            })
+            await queue(randomUUID(), [{ type: "text", text: "later peer" }], true, 0)
           )._unsafeUnwrap();
         } else {
-          (
-            await database.store.scheduleOrbSleep(task, {
-              orbId: orb.id,
-              caller: {
-                kind: "central",
-                orbId: orb.id,
-                projectId: project.id,
-                ownerUserId: project.ownerUserId,
-                agentAdmissionVersion: 0,
-              },
-              sleepId: randomUUID(),
-              durationSeconds: 300,
-            })
-          )._unsafeUnwrap();
+          (await sleep())._unsafeUnwrap();
         }
         release.resolve();
         const idle = await agent.waitForIdle();
         expect(idle.isOk(), idle.isErr() ? idle.error.message : "").toBe(true);
-        expect(await readSubmission()).toMatchObject({ status: "done" });
+        expect(await readSubmission(messageId)).toMatchObject({ status: "done" });
         expect(faux.state.callCount).toBe(2);
         expect(toolCalls).toBe(1);
         expect(agent.health().status).toBe("ready");
@@ -258,15 +259,7 @@ it.each(["peer", "human", "browser-sleep-gap", "browser-peer-gap", "human-gap"] 
       const content = [{ type: "text" as const, text: "queued peer" }];
       const system =
         kind === "peer" ? { kind: "orb_message" as const, senderOrbId: peer.id } : undefined;
-      (
-        await database.store.enqueueOrbMessage(task, {
-          orbId: orb.id,
-          messageId,
-          content,
-          ...(kind === "peer" ? { sender } : {}),
-          now: 0,
-        })
-      )._unsafeUnwrap();
+      (await queue(messageId, content, kind === "peer"))._unsafeUnwrap();
       (
         await database.store.claimNextOrbMessageBatch(task, { orbId: orb.id, now: 0 })
       )._unsafeUnwrap();
@@ -280,16 +273,7 @@ it.each(["peer", "human", "browser-sleep-gap", "browser-peer-gap", "human-gap"] 
       const admission = await agent.deliver(request);
       if (kind === "human") {
         expect(admission._unsafeUnwrap()).toMatchObject({ delivery: "steer", duplicate: false });
-        expect(
-          (
-            await lease.storage.scanSubmissions(
-              { conversationId: ROOT_CONVERSATION_ID },
-              100,
-              undefined,
-              BACKGROUND_CONTEXT,
-            )
-          ).items.find((row) => row.requestId === `inbox:${messageId}`),
-        ).toMatchObject({ status: "queued" });
+        expect(await readSubmission(messageId)).toMatchObject({ status: "queued" });
       } else {
         const deferred = admission;
         expect(deferred.isErr()).toBe(true);
@@ -301,31 +285,9 @@ it.each(["peer", "human", "browser-sleep-gap", "browser-peer-gap", "human-gap"] 
         });
         expect(browser.isErr()).toBe(true);
         expect(browser._unsafeUnwrapErr()).toMatchObject({ retryable: true });
-        expect(
-          (
-            await lease.storage.scanSubmissions(
-              { conversationId: ROOT_CONVERSATION_ID },
-              100,
-              undefined,
-              BACKGROUND_CONTEXT,
-            )
-          ).items.some((row) => row.requestId === `inbox:${messageId}`),
-        ).toBe(false);
+        expect((await readSubmission(messageId)) !== undefined).toBe(false);
       }
-      (
-        await database.store.scheduleOrbSleep(task, {
-          orbId: orb.id,
-          caller: {
-            kind: "central",
-            orbId: orb.id,
-            projectId: project.id,
-            ownerUserId: project.ownerUserId,
-            agentAdmissionVersion: 0,
-          },
-          sleepId: randomUUID(),
-          durationSeconds: 300,
-        })
-      )._unsafeUnwrap();
+      (await sleep())._unsafeUnwrap();
       release.resolve();
       (await agent.waitForIdle())._unsafeUnwrap();
       expect(faux.state.callCount).toBe(2);
@@ -334,14 +296,7 @@ it.each(["peer", "human", "browser-sleep-gap", "browser-peer-gap", "human-gap"] 
         expect(
           (await database.store.listOrbMessages(task, orb.id))._unsafeUnwrap()[0],
         ).toMatchObject({ status: "delivered", lastError: null });
-        expect(
-          agent
-            .snapshot()
-            ._unsafeUnwrap()
-            .records.filter(
-              (row) => row.type !== "compaction" && row.inboxMessageIds?.includes(messageId),
-            ),
-        ).toHaveLength(1);
+        expect(peerRecords(messageId)).toHaveLength(1);
         expect((await agent.deliver(request))._unsafeUnwrap()).toMatchObject({
           delivery: "steer",
           duplicate: true,
@@ -363,25 +318,11 @@ it.each(["peer", "human", "browser-sleep-gap", "browser-peer-gap", "human-gap"] 
             })
           )._unsafeUnwrap(),
         ).toMatchObject({ state: "stopping", stopReason: "sleep" });
-        expect(
-          agent
-            .snapshot()
-            ._unsafeUnwrap()
-            .records.filter(
-              (row) => row.type !== "compaction" && row.inboxMessageIds?.includes(messageId),
-            ),
-        ).toHaveLength(1);
+        expect(peerRecords(messageId)).toHaveLength(1);
         return;
       }
 
-      expect(
-        agent
-          .snapshot()
-          ._unsafeUnwrap()
-          .records.some(
-            (row) => row.type !== "compaction" && row.inboxMessageIds?.includes(messageId),
-          ),
-      ).toBe(false);
+      expect(peerRecords(messageId).length > 0).toBe(false);
       expect((await database.store.listOrbMessages(task, orb.id))._unsafeUnwrap()[0]).toMatchObject(
         {
           status: "delivering",
@@ -392,26 +333,9 @@ it.each(["peer", "human", "browser-sleep-gap", "browser-peer-gap", "human-gap"] 
       const retry = await agent.deliver(request);
       expect(retry.isErr()).toBe(true);
       expect(retry._unsafeUnwrapErr()).toMatchObject({ retryable: true });
-      expect(
-        (
-          await lease.storage.scanSubmissions(
-            { conversationId: ROOT_CONVERSATION_ID },
-            100,
-            undefined,
-            BACKGROUND_CONTEXT,
-          )
-        ).items.some((row) => row.requestId === `inbox:${messageId}`),
-      ).toBe(false);
+      expect((await readSubmission(messageId)) !== undefined).toBe(false);
       // Fresh peer admission is the legitimate wake; no receipt or request identity is replaced.
-      (
-        await database.store.enqueueOrbMessage(task, {
-          orbId: orb.id,
-          messageId: randomUUID(),
-          content: [{ type: "text", text: "wake" }],
-          sender,
-          now: 1,
-        })
-      )._unsafeUnwrap();
+      (await queue(randomUUID(), [{ type: "text", text: "wake" }], true, 1))._unsafeUnwrap();
       const freshOrb = (await database.store.getOrb(task, orb.id))._unsafeUnwrap();
       if (freshOrb === null) throw new Error("seeded orb missing");
       expect(freshOrb.sleepId).toBeNull();
@@ -432,14 +356,7 @@ it.each(["peer", "human", "browser-sleep-gap", "browser-peer-gap", "human-gap"] 
           lastError: null,
         },
       );
-      expect(
-        agent
-          .snapshot()
-          ._unsafeUnwrap()
-          .records.filter(
-            (row) => row.type !== "compaction" && row.inboxMessageIds?.includes(messageId),
-          ),
-      ).toHaveLength(1);
+      expect(peerRecords(messageId)).toHaveLength(1);
     } finally {
       receiptRelease.resolve();
       release.resolve();

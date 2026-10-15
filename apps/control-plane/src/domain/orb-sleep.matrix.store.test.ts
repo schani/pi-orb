@@ -38,13 +38,29 @@ function contract(name: string, open: () => Promise<Subject>): void {
 
     afterEach(async () => subject.close());
 
+    const currentOrb = async () => {
+      const orb = (await subject.store.getOrb(task, ORB))._unsafeUnwrap();
+      if (orb === null) throw new Error("seeded orb missing");
+      return orb;
+    };
+    const sleep = (sleepId: string) =>
+      subject.store.scheduleOrbSleep(task, {
+        orbId: ORB,
+        caller: { runtimeTokenHash: "caller", hostIncarnation: 2 },
+        sleepId,
+        durationSeconds: 300,
+      });
+    const claimIds = async (now: number) =>
+      (await subject.store.claimNextOrbMessageBatch(task, { orbId: ORB, now }))
+        ._unsafeUnwrap()
+        .map((row) => row.messageId);
+
     it.each(["stopped", "failed"] as const)(
       "old queued wake cannot supersede a preserved Sleep in %s, but fresh input can",
       async (terminalState) => {
         const store = subject.store;
         const transition = async (toState: "stopped" | "starting" | "running" | "failed") => {
-          const orb = (await store.getOrb(task, ORB))._unsafeUnwrap();
-          if (orb === null) throw new Error("seeded orb missing");
+          const orb = await currentOrb();
           return (
             await store.casTransition(task, {
               orbId: ORB,
@@ -66,18 +82,10 @@ function contract(name: string, open: () => Promise<Subject>): void {
         expect(old.message.autoStart).toBe(true);
         await transition("starting");
         await transition("running");
-        const sleeping = (
-          await store.scheduleOrbSleep(task, {
-            orbId: ORB,
-            caller: { runtimeTokenHash: "caller", hostIncarnation: 2 },
-            sleepId: WAKE,
-            durationSeconds: 300,
-          })
-        )._unsafeUnwrap();
+        const sleeping = (await sleep(WAKE))._unsafeUnwrap();
         await transition(terminalState);
-        const before = (await store.getOrb(task, ORB))._unsafeUnwrap();
-        if (before === null || sleeping.sleepUntil === null)
-          throw new Error("sleeping orb missing");
+        const before = await currentOrb();
+        if (sleeping.sleepUntil === null) throw new Error("sleeping orb missing");
         for (const now of [sleeping.sleepUntil - 1, sleeping.sleepUntil + 1]) {
           expect(
             (
@@ -88,7 +96,7 @@ function contract(name: string, open: () => Promise<Subject>): void {
               })
             )._unsafeUnwrap(),
           ).toBeNull();
-          expect((await store.getOrb(task, ORB))._unsafeUnwrap()).toEqual(before);
+          expect(await currentOrb()).toEqual(before);
         }
         const fresh = (
           await store.enqueueOrbMessage(task, {
@@ -108,32 +116,27 @@ function contract(name: string, open: () => Promise<Subject>): void {
             })
           )._unsafeUnwrap(),
         ).toMatchObject({ state: "starting", sleepId: null });
-        expect(
-          (await store.claimNextOrbMessageBatch(task, { orbId: ORB, now: 5 }))
-            ._unsafeUnwrap()
-            .map((row) => row.messageId),
-        ).toEqual([FIRST, LAST]);
+        expect(await claimIds(5)).toEqual([FIRST, LAST]);
       },
     );
 
     it.each([false, true])(
-      "holds old input through Sleep until fresh peer admission (claimed=%s)",
+      "holds FIFO through Sleep, fresh wake and later Stop (claimed=%s)",
       async (claimed) => {
         const store = subject.store;
-        const senderId = "00000000-0000-4000-8000-000000000086";
-        const project = (await store.getProject(task, PROJECT))._unsafeUnwrap();
-        expect(project).not.toBeNull();
+        const peerId = "00000000-0000-4000-8000-000000000086";
+        const project = (await subject.store.getProject(task, PROJECT))._unsafeUnwrap();
         if (project === null) throw new Error("seeded project missing");
-        expect((await store.insertOrb(task, makeOrbRow(senderId, PROJECT, "running"))).isOk()).toBe(
-          true,
-        );
+        (
+          await subject.store.insertOrb(task, makeOrbRow(peerId, PROJECT, "running"))
+        )._unsafeUnwrap();
         const sender = {
-          orbId: senderId,
+          orbId: peerId,
           projectId: PROJECT,
           ownerUserId: project.ownerUserId,
           caller: {
             kind: "central" as const,
-            orbId: senderId,
+            orbId: peerId,
             projectId: PROJECT,
             ownerUserId: project.ownerUserId,
             agentAdmissionVersion: 0,
@@ -159,44 +162,26 @@ function contract(name: string, open: () => Promise<Subject>): void {
             })
           ).isOk(),
         ).toBe(true);
-        if (claimed)
-          expect(
-            (await store.claimNextOrbMessageBatch(task, { orbId: ORB, now: 2 }))
-              ._unsafeUnwrap()
-              .map((row) => row.messageId),
-          ).toEqual([FIRST]);
-        expect(
-          (
-            await store.scheduleOrbSleep(task, {
-              orbId: ORB,
-              caller: { runtimeTokenHash: "caller", hostIncarnation: 2 },
-              sleepId: WAKE,
-              durationSeconds: 300,
-            })
-          ).isOk(),
-        ).toBe(true);
+        if (claimed) expect(await claimIds(2)).toEqual([FIRST]);
+        expect((await sleep(WAKE)).isOk()).toBe(true);
         expect(
           (await store.claimNextOrbMessageBatch(task, { orbId: ORB, now: 3 }))._unsafeUnwrap(),
         ).toEqual([]);
-        expect((await store.getOrb(task, ORB))._unsafeUnwrap()).toMatchObject({ sleepId: WAKE });
+        expect(await currentOrb()).toMatchObject({ sleepId: WAKE });
         expect((await enqueue(FIRST))._unsafeUnwrap().duplicate).toBe(true);
-        expect((await store.getOrb(task, ORB))._unsafeUnwrap()).toMatchObject({ sleepId: WAKE });
+        expect(await currentOrb()).toMatchObject({ sleepId: WAKE });
         expect((await enqueue(LAST))._unsafeUnwrap().duplicate).toBe(false);
-        expect((await store.getOrb(task, ORB))._unsafeUnwrap()).toMatchObject({
+        expect(await currentOrb()).toMatchObject({
           sleepId: null,
           sleepUntil: null,
         });
-        expect(
-          (await store.claimNextOrbMessageBatch(task, { orbId: ORB, now: 4 }))
-            ._unsafeUnwrap()
-            .map((row) => row.messageId),
-        ).toEqual([FIRST]);
+        expect(await claimIds(4)).toEqual([FIRST]);
         expect(
           (await store.listOrbMessages(task, ORB))._unsafeUnwrap().map((row) => row.system),
         ).toEqual([
-          { kind: "orb_message", senderOrbId: senderId },
+          { kind: "orb_message", senderOrbId: sender.orbId },
           null,
-          { kind: "orb_message", senderOrbId: senderId },
+          { kind: "orb_message", senderOrbId: sender.orbId },
         ]);
         const record: HistoryRecord = {
           id: "first-peer",
@@ -206,7 +191,7 @@ function contract(name: string, open: () => Promise<Subject>): void {
           type: "event",
           eventType: "orb.message",
           content: [{ type: "text", text: FIRST }],
-          sender: { orbId: senderId },
+          sender: { orbId: sender.orbId },
           inboxMessageIds: [FIRST],
         };
         expect(
@@ -221,79 +206,44 @@ function contract(name: string, open: () => Promise<Subject>): void {
             })
           ).isOk(),
         ).toBe(true);
+        expect(await claimIds(5)).toEqual([humanId]);
         expect(
-          (await store.claimNextOrbMessageBatch(task, { orbId: ORB, now: 5 }))
+          (await store.listOrbMessages(task, ORB))
             ._unsafeUnwrap()
-            .map((row) => row.messageId),
-        ).toEqual([humanId]);
-      },
-    );
-
-    it("fresh peer admission cancels Sleep, but later Sleep and Stop win", async () => {
-      const store = subject.store;
-      const peerId = "00000000-0000-4000-8000-000000000086";
-      const project = (await store.getProject(task, PROJECT))._unsafeUnwrap();
-      expect(project).not.toBeNull();
-      if (project === null) throw new Error("seeded project missing");
-      expect((await store.insertOrb(task, makeOrbRow(peerId, PROJECT, "running"))).isOk()).toBe(
-        true,
-      );
-      const sleep = (sleepId: string) =>
-        store.scheduleOrbSleep(task, {
-          orbId: ORB,
-          caller: { runtimeTokenHash: "caller", hostIncarnation: 2 },
-          sleepId,
-          durationSeconds: 300,
+            .find((row) => row.messageId === LAST),
+        ).toMatchObject({ status: "queued" });
+        const laterSleep = (await sleep(LAST))._unsafeUnwrap();
+        expect(laterSleep.sleepUntil).not.toBeNull();
+        expect((await enqueue(LAST))._unsafeUnwrap().duplicate).toBe(true);
+        expect(await currentOrb()).toMatchObject({
+          sleepId: LAST,
+          sleepUntil: laterSleep.sleepUntil,
         });
-      const send = () =>
-        store.enqueueOrbMessage(task, {
-          orbId: ORB,
-          messageId: FIRST,
-          now: 1,
-          content: [{ type: "text", text: "peer" }],
-          sender: {
-            orbId: peerId,
-            projectId: PROJECT,
-            ownerUserId: project.ownerUserId,
-            caller: {
-              kind: "central",
-              orbId: peerId,
-              projectId: PROJECT,
-              ownerUserId: project.ownerUserId,
-              agentAdmissionVersion: 0,
-            },
-          },
-        });
-      expect((await sleep(WAKE)).isOk()).toBe(true);
-      expect((await send())._unsafeUnwrap().duplicate).toBe(false);
-      expect((await store.getOrb(task, ORB))._unsafeUnwrap()).toMatchObject({
-        sleepId: null,
-        sleepUntil: null,
-      });
-      expect((await sleep(LAST)).isOk()).toBe(true);
-      expect((await send())._unsafeUnwrap().duplicate).toBe(true);
-      expect((await store.getOrb(task, ORB))._unsafeUnwrap()).toMatchObject({ sleepId: LAST });
-      const current = (await store.getOrb(task, ORB))._unsafeUnwrap();
-      if (current === null) throw new Error("seeded orb missing");
-      expect(
+        const current = await currentOrb();
         (
           await store.requestOrbStop(task, {
             orbId: ORB,
             expectedStateVersion: current.stateVersion,
-            now: 2,
+            now: 6,
           })
-        ).isOk(),
-      ).toBe(true);
-      expect((await send())._unsafeUnwrap().duplicate).toBe(true);
-      expect((await store.getOrb(task, ORB))._unsafeUnwrap()).toMatchObject({
-        sleepId: null,
-        stopReason: "manual",
-      });
-      expect((await store.listOrbMessages(task, ORB))._unsafeUnwrap()[0]).toMatchObject({
-        autoStart: false,
-        system: { kind: "orb_message", senderOrbId: peerId },
-      });
-    });
+        )._unsafeUnwrap();
+        expect((await enqueue(LAST))._unsafeUnwrap().duplicate).toBe(true);
+        expect(await currentOrb()).toMatchObject({
+          sleepId: null,
+          sleepUntil: null,
+          stopReason: "manual",
+        });
+        expect(
+          (await store.listOrbMessages(task, ORB))
+            ._unsafeUnwrap()
+            .find((row) => row.messageId === LAST),
+        ).toMatchObject({
+          status: "queued",
+          autoStart: false,
+          system: { kind: "orb_message", senderOrbId: sender.orbId },
+        });
+      },
+    );
 
     it("freezes human -> sleep_wake -> human at the source FIFO head", async () => {
       const store = subject.store;

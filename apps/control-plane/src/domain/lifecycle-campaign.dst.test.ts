@@ -1,7 +1,6 @@
-import { mkdirSync, writeFileSync } from "node:fs";
 import type { HistoryRecord } from "@pi-orb/protocol";
 import { ApplicationFailure, type SimulationTask } from "determined";
-import { err, errAsync, okAsync, type Result, type ResultAsync } from "neverthrow";
+import { err, errAsync, okAsync } from "neverthrow";
 import { afterAll, describe, expect, it } from "vitest";
 import { FAILPOINTS } from "../testkit/failpoints.ts";
 import {
@@ -174,7 +173,6 @@ describe("stateful lifecycle campaign", () => {
             let cleanup: "archive" | "delete" | undefined;
             const sleeps = new Map<string, number>();
             const submitted = new Map<string, DeliverMessageClientRequest>();
-            const coverage = new Set<string>();
             const counts: Record<string, number> = {};
             const count = (key: string, amount = 1) => {
               counts[key] = (counts[key] ?? 0) + amount;
@@ -394,7 +392,6 @@ describe("stateful lifecycle campaign", () => {
                               : url(),
                           );
                           deliveryModes.set(proxy, script?.kind ?? "unreachable");
-                          count(`applied:delivery-boundary:${script?.kind ?? "unreachable"}`);
                           witness(target, "delivery-boundary", script);
                         }
                       } catch (error) {
@@ -530,10 +527,6 @@ describe("stateful lifecycle campaign", () => {
               return guestDeliver(task, request, context);
             };
 
-            function inspectCentral(request: DeliverMessageClientRequest) {
-              inspectRequest(request);
-              return { ...request, baseUrl: url() };
-            }
             const plane: AgentPlane = {
               placement: "central",
               health: (task, _orb, context) => {
@@ -563,9 +556,10 @@ describe("stateful lifecycle campaign", () => {
                 if (authorityOrder !== dispatch.order)
                   count("applied:dispatch-spans-authority-change");
                 dispatchReads.delete(task);
+                inspectRequest(request);
                 return central.deps.runtimeClient.deliverMessage(
                   task,
-                  inspectCentral(request),
+                  { ...request, baseUrl: url() },
                   context,
                 );
               },
@@ -603,7 +597,6 @@ describe("stateful lifecycle campaign", () => {
             };
             if (placement === "central") deps = { ...deps, agentPlane: plane };
 
-            let currentWall = 0;
             function safety() {
               const orb = h.store.orbSnapshot(ORB);
               const rows = h.store.messageSnapshots(ORB);
@@ -646,9 +639,6 @@ describe("stateful lifecycle campaign", () => {
                 } else expect(submitted.has(id)).toBe(true);
               }
               if (!orb) return;
-              coverage.add(`state:${orb.state}`);
-              if (orb.sleepId !== null && orb.sleepUntil !== null && orb.sleepUntil <= currentWall)
-                coverage.add(`overdue:${orb.state}`);
               expect(
                 orb.sleepId,
                 "accepted Sleep survives until explicit cancellation or due processing",
@@ -665,9 +655,6 @@ describe("stateful lifecycle campaign", () => {
             }
 
             async function run(task: SimulationTask, command: Command) {
-              coverage.add(command);
-              count(`command:${command}`);
-              currentWall = task.wallNow();
               const orb = h.store.orbSnapshot(ORB);
               witness(task, "invoke", {
                 seed,
@@ -677,17 +664,6 @@ describe("stateful lifecycle campaign", () => {
                 wall: task.wallNow(),
               });
               const id = `campaign-${seed}-${ordinal++}`;
-              const response = async <T, E>(pending: ResultAsync<T, E>): Promise<Result<T, E>> => {
-                const result = await pending;
-                witness(task, "response", {
-                  id,
-                  command,
-                  ok: result.isOk(),
-                  value: result.isOk() ? result.value : result.error,
-                });
-                count(`result:${command}:${result.isOk() ? "ok" : "err"}`);
-                return result;
-              };
               if (
                 ["busy", "idle", "crash", "delay"].includes(command) &&
                 (!world.filesystemExists(ORB) || !h.world.filesystemExists(ORB))
@@ -695,16 +671,11 @@ describe("stateful lifecycle campaign", () => {
                 return;
               switch (command) {
                 case "human": {
-                  const result = await response(
-                    enqueueOrbMessage(task, deps, {
-                      orbId: ORB,
-                      messageId: id,
-                      content: [{ type: "text", text: id }],
-                    }),
-                  );
-                  if (result.isOk()) {
-                    count("admitted:human");
-                  }
+                  await enqueueOrbMessage(task, deps, {
+                    orbId: ORB,
+                    messageId: id,
+                    content: [{ type: "text", text: id }],
+                  });
                   break;
                 }
                 case "peer":
@@ -715,26 +686,23 @@ describe("stateful lifecycle campaign", () => {
                   );
                   const request =
                     command === "retry" && lastPeer ? lastPeer : { messageId: id, message: id };
-                  const result = await response(
-                    sendOrbMessage(
-                      task,
-                      deps,
-                      {
-                        orbId: source.id,
-                        projectId: source.projectId,
-                        ownerUserId: command === "foreign" ? "foreign-owner" : TEST_USER_ID,
-                        caller: {
-                          runtimeTokenHash: present(source.runtimeTokenHash),
-                          hostIncarnation: source.hostIncarnation,
-                        },
+                  const result = await sendOrbMessage(
+                    task,
+                    deps,
+                    {
+                      orbId: source.id,
+                      projectId: source.projectId,
+                      ownerUserId: command === "foreign" ? "foreign-owner" : TEST_USER_ID,
+                      caller: {
+                        runtimeTokenHash: present(source.runtimeTokenHash),
+                        hostIncarnation: source.hostIncarnation,
                       },
-                      { ...request, orbId: ORB },
-                    ),
+                    },
+                    { ...request, orbId: ORB },
                   );
                   if (command === "foreign") expect(result.isErr(), "owner isolation").toBe(true);
                   else if (result.isOk()) {
                     lastPeer = request;
-                    count("admitted:peer");
                   }
                   break;
                 }
@@ -758,24 +726,21 @@ describe("stateful lifecycle campaign", () => {
                             command === "stale" ? "revoked-token" : present(orb.runtimeTokenHash),
                           hostIncarnation: orb.hostIncarnation,
                         };
-                  const result = await response(
-                    requestOrbSleep(task, deps, ORB, caller, duration, id),
-                  );
+                  const result = await requestOrbSleep(task, deps, ORB, caller, duration, id);
                   if (command === "stale")
                     expect(result.isErr(), "stale incarnation rejected").toBe(true);
                   if (result.isOk()) {
                     expect(sleeps.get(id)).toBe(result.value.sleepUntil);
-                    count(`sleep-accepted:${orb.state}`);
                   }
                   break;
                 }
                 case "stop-ack":
                   h.store.failNextOrbStopAfterCommit(1);
-                  await response(requestOrbStop(task, deps, ORB));
+                  await requestOrbStop(task, deps, ORB);
                   break;
                 case "stop-rollback":
                   h.store.failNextClearOrbMessageAutoStart(1);
-                  await response(requestOrbStop(task, deps, ORB));
+                  await requestOrbStop(task, deps, ORB);
                   break;
                 case "pause-compute":
                   computePaused = !computePaused;
@@ -794,7 +759,6 @@ describe("stateful lifecycle campaign", () => {
                     const duration = 10_000 + task.random("unreachable duration") * 30_000;
                     unreachableUntil = task.monotonicNow() + duration;
                     world.setRuntimeUnreachable(task, ORB, duration);
-                    count("applied:unreachable-window");
                   }
                   break;
                 case "pull-outage":
@@ -804,14 +768,13 @@ describe("stateful lifecycle campaign", () => {
                       ORB,
                       10_000 + task.random("pull outage duration") * 30_000,
                     );
-                  if (world.filesystemExists(ORB)) count("applied:pull-outage-window");
                   break;
                 case "stop": {
-                  await response(requestOrbStop(task, deps, ORB));
+                  await requestOrbStop(task, deps, ORB);
                   break;
                 }
                 case "start": {
-                  await response(requestOrbStart(task, deps, ORB));
+                  await requestOrbStart(task, deps, ORB);
                   break;
                 }
                 case "tick":
@@ -870,13 +833,9 @@ describe("stateful lifecycle campaign", () => {
                 case "delete":
                   // Cleanup is selected throughout the sequence, not a mandatory final suffix.
                   if (task.random("admit cleanup command") < 0.03) {
-                    const result = await response(
-                      (command === "archive" ? requestOrbArchive : requestOrbDeletion)(
-                        task,
-                        deps,
-                        ORB,
-                      ),
-                    );
+                    const result = await (command === "archive"
+                      ? requestOrbArchive
+                      : requestOrbDeletion)(task, deps, ORB);
                     if (result.isOk()) cleanup = command;
                   }
                   break;
@@ -884,32 +843,20 @@ describe("stateful lifecycle campaign", () => {
             }
 
             const result = await sim.runTasks([
-              {
-                name: "compute worker",
-                f: async (raw) => {
+              ...(["compute", "history"] as const).map((role) => ({
+                name: `${role} worker`,
+                f: async (raw: SimulationTask) => {
                   const task = clock(raw);
                   await waitUntil(task, "campaign seeded", () => ready, { intervalMs: 1 });
                   while (driving) {
-                    const role = deps;
-                    if (!computePaused) await reconcileAllOnce(task, role);
-                    await task.sleep(100 + task.random("compute tick") * 400, "compute tick");
+                    const current = deps;
+                    if (role === "compute" ? !computePaused : !historyPaused)
+                      await (role === "compute" ? reconcileAllOnce : pollAllOnce)(task, current);
+                    await task.sleep(100 + task.random(`${role} tick`) * 400, `${role} tick`);
                   }
                   workers--;
                 },
-              },
-              {
-                name: "history worker",
-                f: async (raw) => {
-                  const task = clock(raw);
-                  await waitUntil(task, "campaign seeded", () => ready, { intervalMs: 1 });
-                  while (driving) {
-                    const role = deps;
-                    if (!historyPaused) await pollAllOnce(task, role);
-                    await task.sleep(100 + task.random("history tick") * 400, "history tick");
-                  }
-                  workers--;
-                },
-              },
+              })),
               ...[0, 1].map((actor) => ({
                 name: `caller ${actor}`,
                 f: async (raw: SimulationTask) => {
@@ -921,22 +868,9 @@ describe("stateful lifecycle campaign", () => {
                     );
                     if (activeCalls > 0) count("applied:overlapping-caller");
                     activeCalls++;
-                    const before = { ...counts };
                     await run(task, command);
                     activeCalls--;
-                    currentWall = task.wallNow();
                     safety();
-                    witness(task, "command-complete", {
-                      actor,
-                      step,
-                      command,
-                      state: h.store.orbSnapshot(ORB)?.state,
-                      observedDuringCall: Object.fromEntries(
-                        Object.entries(counts)
-                          .filter(([key, value]) => value !== before[key])
-                          .map(([key, value]) => [key, value - (before[key] ?? 0)]),
-                      ),
-                    });
                     await task.sleep(task.random("command spacing") * 500, "command spacing");
                   }
                   callers--;
@@ -953,7 +887,6 @@ describe("stateful lifecycle campaign", () => {
                   seedRunningOrb(task, central, ORB);
                   if (task.random("initial lifecycle") < 0.5) {
                     seedRunningOrb(task, h, ORB, { bootLatencyMs: 50, initDurationMs: 0 });
-                    coverage.add("initial:running");
                   } else {
                     h.store.seedProject(makeProjectRow(PROJECT));
                     h.world.configureOrb(ORB, { bootLatencyMs: 50, initDurationMs: 0 });
@@ -971,7 +904,6 @@ describe("stateful lifecycle campaign", () => {
                         await createOrb(initialization, deps, { orbId: ORB, projectId: PROJECT })
                       ).isOk(),
                     ).toBe(true);
-                    coverage.add("initial:creating");
                   }
                   h.store.seedOrb({ ...present(h.store.orbSnapshot(PEER)), projectId: PROJECT });
                   ready = true;
@@ -1022,7 +954,6 @@ describe("stateful lifecycle campaign", () => {
                     if (h.world.filesystemExists(ORB)) h.world.setActivity(ORB, "idle");
                     await reconcileAllOnce(task, deps);
                     await pollAllOnce(task, deps);
-                    currentWall = task.wallNow();
                     safety();
                     const orb = h.store.orbSnapshot(ORB);
                     const receipts = new Set(sessionRecords().flatMap(recordIds));
@@ -1093,19 +1024,6 @@ describe("stateful lifecycle campaign", () => {
                     assertReplicaComplete(world, h.store, ORB);
                   count("applied:non-earliest-timer", logs.lateChoices);
                   safety();
-                  for (const key of coverage) count(`covered:${key}`);
-                  const evidenceDir = `.context/lifecycle-campaign/${process.pid}`;
-                  mkdirSync(evidenceDir, { recursive: true });
-                  writeFileSync(
-                    `${evidenceDir}/${placement}-${seed}.json`,
-                    JSON.stringify({
-                      seed,
-                      placement,
-                      counts,
-                      obligations,
-                      witnesses: logs.lines(),
-                    }),
-                  );
                   completed++;
                   for (const [key, value] of Object.entries(counts))
                     totals[`${placement}:${key}`] = (totals[`${placement}:${key}`] ?? 0) + value;

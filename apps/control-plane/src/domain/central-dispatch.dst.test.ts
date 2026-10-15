@@ -16,216 +16,125 @@ import {
 import { pollLoop } from "./loops.ts";
 
 describe("independent central dispatcher", () => {
-  it("does not deliver a claimed old batch after explicit Stop", async () => {
-    await runDst({ name: "central-dispatch-stop-claim", iterations: 15 }, async (sim) => {
-      const h = makeHarness();
-      const gate = new ConditionVariable("claim stop authority");
-      let queued = false;
-      let claimed = false;
-      let released = false;
-      let delivered = 0;
-      const original = h.store.claimNextOrbMessageBatch.bind(h.store);
-      h.store.claimNextOrbMessageBatch = (task, request) =>
-        new ResultAsync(
-          (async () => {
-            const result = await original(task, request);
-            claimed = true;
-            gate.notifyAll(task, "claimed");
-            while (!released) await gate.wait(task, "stop accepted");
-            return result;
-          })(),
-        );
-      const unavailable = () =>
-        errAsync({
-          type: "runtime_client_error" as const,
-          code: "unreachable" as const,
-          message: "not needed",
-          retryable: true,
-          answered: false,
-        });
-      const plane: AgentPlane = {
-        placement: "central",
-        health: () =>
-          okAsync({
-            v: 1 as const,
-            orbId: "orb",
-            runtimeInstanceId: "central",
-            status: "initializing" as const,
-            phase: "booting" as const,
-          }),
-        deliverMessage: () => {
-          delivered++;
-          return okAsync({
-            v: 1 as const,
-            messageId: "old",
-            status: "persisted" as const,
-            delivery: "turn" as const,
-            operationId: "turn",
-            duplicate: false,
+  it.each(["stop", "sleep"] as const)(
+    "does not deliver a claimed old batch after %s",
+    async (fence) => {
+      await runDst({ name: `central-dispatch-${fence}-claim`, iterations: 15 }, async (sim) => {
+        const h = makeHarness();
+        const gate = new ConditionVariable(`claim ${fence} authority`);
+        let queued = false;
+        let claimed = false;
+        let released = false;
+        let delivered = 0;
+        const original = h.store.claimNextOrbMessageBatch.bind(h.store);
+        h.store.claimNextOrbMessageBatch = (task, request) =>
+          new ResultAsync(
+            (async () => {
+              const result = await original(task, request);
+              claimed = true;
+              gate.notifyAll(task, "claimed");
+              while (!released) await gate.wait(task, `${fence} accepted`);
+              return result;
+            })(),
+          );
+        const unavailable = () =>
+          errAsync({
+            type: "runtime_client_error" as const,
+            code: "unreachable" as const,
+            message: "not needed",
+            retryable: true,
+            answered: false,
           });
-        },
-        pullHistory: unavailable,
-        prepareIdleStop: unavailable,
-        suspend: () => okAsync(undefined),
-        dispose: () => okAsync(undefined),
-        session: () => null,
-        close: () => okAsync(undefined),
-      };
-      const deps = { ...h.deps, agentPlane: plane };
-      h.store.seedOrb(makeOrbRow("orb", "project", "creating"));
-      const result = await sim.runTasks([
-        {
-          name: "dispatcher",
-          f: async (task) => {
-            while (!queued) await gate.wait(task, "input queued");
-            await reconcileCentralAgent(task, deps, "orb");
+        const plane: AgentPlane = {
+          placement: "central",
+          health: () =>
+            okAsync({
+              v: 1 as const,
+              orbId: "orb",
+              runtimeInstanceId: "central",
+              status: "initializing" as const,
+              phase: "booting" as const,
+            }),
+          deliverMessage: () => {
+            delivered++;
+            return okAsync({
+              v: 1 as const,
+              messageId: "old",
+              status: "persisted" as const,
+              delivery: "turn" as const,
+              operationId: "turn",
+              duplicate: false,
+            });
           },
-        },
-        {
-          name: "stop",
-          f: async (task) => {
-            expect(
-              (
-                await h.store.enqueueOrbMessage(task, {
-                  orbId: "orb",
-                  messageId: "old",
-                  content: [{ type: "text", text: "old" }],
-                  now: task.wallNow(),
-                })
-              ).isOk(),
-            ).toBe(true);
-            queued = true;
-            gate.notifyAll(task, "queued");
-            while (!claimed) await gate.wait(task, "claimed batch");
-            expect((await requestOrbStop(task, deps, "orb")).isOk()).toBe(true);
-            released = true;
-            gate.notifyAll(task, "stop accepted");
+          pullHistory: unavailable,
+          prepareIdleStop: unavailable,
+          suspend: () => okAsync(undefined),
+          dispose: () => okAsync(undefined),
+          session: () => null,
+          close: () => okAsync(undefined),
+        };
+        const deps = { ...h.deps, agentPlane: plane };
+        const project = makeProjectRow("project");
+        if (fence === "sleep") h.store.seedProject(project);
+        h.store.seedOrb(makeOrbRow("orb", "project", fence === "sleep" ? "running" : "creating"));
+        const result = await sim.runTasks([
+          {
+            name: "dispatcher",
+            f: async (task) => {
+              while (!queued) await gate.wait(task, "input queued");
+              await reconcileCentralAgent(task, deps, "orb");
+            },
           },
-        },
-      ]);
-      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      expect(delivered).toBe(0);
-      expect(h.store.messageSnapshots("orb")[0]).toMatchObject({
-        status: "delivering",
-        autoStart: false,
-      });
-    });
-  });
-  it("does not deliver a claimed old batch after accepted Sleep", async () => {
-    await runDst({ name: "central-dispatch-sleep-claim", iterations: 15 }, async (sim) => {
-      const h = makeHarness();
-      const gate = new ConditionVariable("claim sleep authority");
-      let queued = false;
-      let claimed = false;
-      let released = false;
-      let delivered = 0;
-      const original = h.store.claimNextOrbMessageBatch.bind(h.store);
-      h.store.claimNextOrbMessageBatch = (task, request) =>
-        new ResultAsync(
-          (async () => {
-            const result = await original(task, request);
-            claimed = true;
-            gate.notifyAll(task, "claimed");
-            while (!released) await gate.wait(task, "sleep accepted");
-            return result;
-          })(),
-        );
-      const unavailable = () =>
-        errAsync({
-          type: "runtime_client_error" as const,
-          code: "unreachable" as const,
-          message: "not needed",
-          retryable: true,
-          answered: false,
-        });
-      const plane: AgentPlane = {
-        placement: "central",
-        health: () =>
-          okAsync({
-            v: 1 as const,
-            orbId: "orb",
-            runtimeInstanceId: "central",
-            status: "initializing" as const,
-            phase: "booting" as const,
-          }),
-        deliverMessage: () => {
-          delivered++;
-          return okAsync({
-            v: 1 as const,
-            messageId: "old",
-            status: "persisted" as const,
-            delivery: "turn" as const,
-            operationId: "turn",
-            duplicate: false,
-          });
-        },
-        pullHistory: unavailable,
-        prepareIdleStop: unavailable,
-        suspend: () => okAsync(undefined),
-        dispose: () => okAsync(undefined),
-        session: () => null,
-        close: () => okAsync(undefined),
-      };
-      const deps = { ...h.deps, agentPlane: plane };
-      const project = makeProjectRow("project");
-      h.store.seedProject(project);
-      h.store.seedOrb(makeOrbRow("orb", "project", "running"));
-      const result = await sim.runTasks([
-        {
-          name: "dispatcher",
-          f: async (task) => {
-            while (!queued) await gate.wait(task, "input queued");
-            await reconcileCentralAgent(task, deps, "orb");
-          },
-        },
-        {
-          name: "stop",
-          f: async (task) => {
-            expect(
-              (
-                await h.store.enqueueOrbMessage(task, {
-                  orbId: "orb",
-                  messageId: "old",
-                  content: [{ type: "text", text: "old" }],
-                  now: task.wallNow(),
-                })
-              ).isOk(),
-            ).toBe(true);
-            queued = true;
-            gate.notifyAll(task, "queued");
-            while (!claimed) await gate.wait(task, "claimed batch");
-            expect(
-              (
-                await requestOrbSleep(
-                  task,
-                  deps,
-                  "orb",
-                  {
-                    kind: "central",
+          {
+            name: "stop",
+            f: async (task) => {
+              expect(
+                (
+                  await h.store.enqueueOrbMessage(task, {
                     orbId: "orb",
-                    projectId: "project",
-                    ownerUserId: project.ownerUserId,
-                    agentAdmissionVersion: 0,
-                  },
-                  300,
-                  "sleep",
-                )
-              ).isOk(),
-            ).toBe(true);
-            released = true;
-            gate.notifyAll(task, "sleep accepted");
+                    messageId: "old",
+                    content: [{ type: "text", text: "old" }],
+                    now: task.wallNow(),
+                  })
+                ).isOk(),
+              ).toBe(true);
+              queued = true;
+              gate.notifyAll(task, "queued");
+              while (!claimed) await gate.wait(task, "claimed batch");
+              const accepted =
+                fence === "stop"
+                  ? await requestOrbStop(task, deps, "orb")
+                  : await requestOrbSleep(
+                      task,
+                      deps,
+                      "orb",
+                      {
+                        kind: "central",
+                        orbId: "orb",
+                        projectId: "project",
+                        ownerUserId: project.ownerUserId,
+                        agentAdmissionVersion: 0,
+                      },
+                      300,
+                      "sleep",
+                    );
+              expect(accepted.isOk()).toBe(true);
+              released = true;
+              gate.notifyAll(task, `${fence} accepted`);
+            },
           },
-        },
-      ]);
-      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      expect(h.store.orbSnapshot("orb")).toMatchObject({ sleepId: "sleep", stopReason: null });
-      expect(delivered).toBe(0);
-      expect(h.store.messageSnapshots("orb")[0]).toMatchObject({
-        status: "delivering",
-        autoStart: false,
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        if (fence === "sleep")
+          expect(h.store.orbSnapshot("orb")).toMatchObject({ sleepId: "sleep", stopReason: null });
+        expect(delivered).toBe(0);
+        expect(h.store.messageSnapshots("orb")[0]).toMatchObject({
+          status: "delivering",
+          autoStart: false,
+        });
       });
-    });
-  });
+    },
+  );
   it("delivers later input and completes Stop while VM provisioning remains held", async () => {
     // Isolate admission progress, not provider-deadline recovery (covered separately).
     await runDst(
