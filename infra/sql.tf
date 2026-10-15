@@ -62,7 +62,7 @@ resource "google_secret_manager_secret_iam_member" "cp_reads_database_url" {
 }
 
 # Parent secret for the broker's Codex credential (docs/credentials.md); the
-# GsmSecretStore only adds/reads/destroys versions on it.
+# GsmSecretStore only adds, reads, lists, and destroys versions on it.
 resource "google_secret_manager_secret" "codex_credential" {
   secret_id = "pi-orb-credential-openai-codex"
   replication {

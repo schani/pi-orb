@@ -193,8 +193,8 @@ const base64url = (value: string): string => Buffer.from(value, "utf8").toString
  * Deterministic stand-in for the RS256 signer. The output is JWT-shaped —
  * `base64url(header).base64url(claims).<signature>` — with a literal signature
  * segment, so a scenario can decode exactly what would have been signed and
- * assert on the claims. Real signature verification belongs to the stage-2
- * `node:crypto` adapter and its JWKS tests, not here.
+ * assert on the claims. Real signature verification belongs to the `node:crypto`
+ * signer in `adapters/oidc/` and its JWKS tests, not here.
  */
 export class FakeTokenSigner implements TokenSigner {
   /** Successful signatures; the count a rate-limit scenario bounds. */
@@ -252,7 +252,6 @@ export function decodeFakeIdToken(jwt: string): IdTokenClaims {
   return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as IdTokenClaims;
 }
 
-/** The `kid` in a `FakeTokenSigner` JWT header. */
 export function decodeFakeIdTokenKid(jwt: string): string {
   const header = jwt.split(".")[0];
   if (header === undefined) throw new Error(`not a JWT-shaped token: ${jwt}`);

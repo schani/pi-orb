@@ -10,9 +10,9 @@ import { inspectFailedRuntime } from "./runtime-recovery.ts";
 
 /**
  * The classified result of pulling one orb until it is caught up
- * (docs/history-replication.md/docs/history-replication.md). Failures are values, not exceptions; integrity
- * failures have already been acted on (host stopped, orb failed) when this
- * returns.
+ * (docs/history-replication.md). Failures are values, not exceptions; integrity
+ * failures have already been acted on (orb failed, compute discard requested)
+ * when this returns.
  */
 export type PollOutcome =
   | { readonly type: "caught_up"; readonly committedRecords: number }
@@ -65,11 +65,11 @@ function validatePullResponse(
 }
 
 /**
- * Mark the orb `failed` with a typed error and stop its host — the shared
- * non-retryable integrity path (docs/history-replication.md). The CAS comes
- * first: stopping a `stopping` orb's host before claiming the row lets the
- * drain reconciler observe the stop as an already-stopped host and CAS the orb
- * to a clean `stopped`, discarding the integrity signal (DST-found 2026-08-06).
+ * Mark the orb `failed` with a typed error and request compute discard — the
+ * shared non-retryable integrity path (docs/history-replication.md). The CAS
+ * comes first: a `stopping` orb's host stopped before the row is claimed lets
+ * the drain reconciler observe an already-stopped host and CAS the orb to a clean
+ * `stopped`, discarding the integrity signal (DST-found 2026-08-06).
  * The same transaction revokes runtime authorization and creates durable
  * compute-discard authority; shared lifecycle reconciliation owns disposal.
  */
@@ -134,7 +134,7 @@ type YieldedPollOutcome = { readonly type: "yielded"; readonly committedRecords:
 
 /**
  * Pull one orb from its committed cursor until the runtime returns no new
- * complete records (docs/history-replication.md/docs/history-replication.md). Non-empty commits loop immediately;
+ * complete records (docs/history-replication.md). Non-empty commits loop immediately;
  * cursor conflicts re-read and continue (another poller won); retryable
  * failures return to the ordinary polling cadence with the cursor unchanged.
  * A bounded caller gets `retryable`, not `caught_up`, if its attempt limit ends first.
@@ -266,7 +266,8 @@ export async function pollOrbUntilCaughtUp(
       // rotation (docs/history-replication.md) — silently, which would make a
       // lost session look like nothing happened. The domain re-derives the
       // store's condition here so the acceptance is on the record; adapters
-      // stay quiet. Logged once: the commit below adopts the new identity.
+      // stay quiet. Logged once: the session check or batch commit below adopts
+      // the new identity.
       logOrbEvent(task, orbId, "session-rotated", {
         stored: orb.harnessSessionId,
         pulled: response.session.id,

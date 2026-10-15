@@ -11,7 +11,7 @@ export const FAILPOINTS = {
   storeCommitAfter: "store.commit.after",
   storeAckBefore: "store.alert.ack.before",
   storeAckAfter: "store.alert.ack.after",
-  /** The one write that clears a queued message's wake intent. */
+  /** The manual stop request, which clears queued messages' wake intent. */
   storeClearMessageAutoStart: "store.message.clear_auto_start",
   storeDiscardStatus: "compute-replacement.store.discard-status",
   storeDiscardFinalize: "compute-replacement.store.discard-finalize",

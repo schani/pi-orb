@@ -136,10 +136,10 @@ function holdingForSetupHook(task: SimulationTask, deps: ControlPlaneDeps, orbId
   const now = task.monotonicNow();
   if (now - probe.setupRunningSinceMono > deps.constants.setupHookHoldMs) return false;
   // And only while there is still a runtime to hold for: a runtime silent this
-  // long is gone, and without this the hold would hide that for twenty
-  // minutes — the "silence looks like progress" failure the readiness path
-  // exists to prevent. The grace is the boot-sized one, not the ordinary
-  // unreachable grace: readiness probes during a boot contend with slow
+  // long is gone, and without this the hold would hide that until
+  // `setupHookHoldMs` runs out — the "silence looks like progress" failure the
+  // readiness path exists to prevent. The grace is the boot-sized one, not the
+  // ordinary unreachable grace: readiness probes during a boot contend with slow
   // provider observes and are routinely cancelled in bursts, and ending a
   // legitimate twenty-minute setup over a burst of cancellations would be the
   // 2026-08-05 livelock's mistake in a new place (docs/lifecycle.md).
@@ -974,9 +974,9 @@ async function reconcileCreateStart(
       provisioned.value.ref.resourceId !== hostResourceId ||
       provisioned.value.runtimeTokenHash !== orb.runtimeTokenHash
     ) {
-      // A replaced host may keep its resource name (Docker container names
-      // are stable) while carrying a fresh token, so the hash is compared
-      // independently of the ref.
+      // A replaced host may keep its resource name (Docker names derive from
+      // orb and incarnation, so a same-incarnation re-provision keeps it) while
+      // carrying a fresh token, so the hash is compared independently of the ref.
       const updated = await deps.store.casUpdateFields(task, {
         orbId: orb.id,
         expectedStateVersion: orb.stateVersion,
@@ -2500,9 +2500,11 @@ async function reconcileTerminalBackstop(
   deps: ControlPlaneDeps,
   orb: OrbRow,
 ): Promise<ReconcileOutcome> {
-  // This is the *only* message-driven lifecycle transition: admission records
-  // the message and its wake intent, and the transition happens here, for
-  // every caller, with its own edge log (docs/lifecycle.md, 2026-08-11).
+  // This is the message-driven lifecycle transition for stopped and failed
+  // orbs: admission records the message and its wake intent, and the transition
+  // happens here, for every caller, with its own edge log (docs/lifecycle.md,
+  // 2026-08-11). A central agent's failed-state wake is reserved in
+  // reconcileCentralAgent before publication.
   //
   // Any outstanding message's wake intent starts a `stopped` orb, not only the
   // oldest one's: FIFO decides delivery order, never whether the orb comes up.
@@ -2511,7 +2513,6 @@ async function reconcileTerminalBackstop(
   // itself is left standing until the message is delivered, failed, or
   // explicitly stopped, which is what makes the wake retryable without a
   // second write to strand.
-  //
   if (
     agentPlacement(deps.agentPlane, orb) === "central" &&
     orb.state === "stopped" &&
@@ -3236,7 +3237,7 @@ export function requestOrbStop(
 /**
  * Durable send-anytime admission (docs/runtime-protocol.md), for every caller.
  * The command records the message and — when the orb cannot take delivery now
- * — its wake intent, then nudges the per-orb reconciler, which owns the single
+ * — its wake intent, then nudges the per-orb reconciler, which owns the
  * message-driven lifecycle transition and its `transition` edge log. Admission
  * itself never changes orb state (docs/lifecycle.md, 2026-08-11).
  */

@@ -39,7 +39,7 @@ async function runtimeAddress(
     : ok(observed.value.runtimeAddress.baseUrl);
 }
 
-/** Read committed history first; only an already-running host can answer a replica gap. */
+/** Committed history first; a replica gap asks the runtime of a host-placed running/stopping/archiving orb. */
 export async function readDisplayDetail(
   task: SimulationTask,
   deps: ControlPlaneDeps,

@@ -288,8 +288,8 @@ export function registerRoutes(
         });
   });
 
-  // Which host provider, which database, which build. Resolved at boot and
-  // constant for the process's lifetime, so it reads nothing per request.
+  // Provider, database and build are fixed at boot; `deploymentStatus` is
+  // mutated in place by main.ts, so send the shared object, not a copy.
   app.get("/api/v1/system", async (_request, reply) => reply.send(system));
 
   registerProjectInstructionsRoutes(app, task, deps.projectInstructions);

@@ -39,7 +39,10 @@ export function memoryHistoryFiles(): HistoryFiles {
   };
 }
 
-/** Only the SDK process is fake: journals, normalization and admission are production code. */
+/**
+ * Only the SDK process and journal storage are fake: journal logic, normalization and admission
+ * are production code.
+ */
 export class ComposedClaudeFixture {
   readonly dir = mkdtempSync(join(tmpdir(), "claude-composed-dst-"));
   readonly configDir = join(this.dir, "config");

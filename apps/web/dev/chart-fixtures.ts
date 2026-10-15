@@ -1,6 +1,5 @@
 import { CHART_CONTENT_TYPE, type ChartSpec, type HistoryRecord } from "@pi-orb/protocol";
 
-/** Deterministic Datadog-shaped series for the transcript chart fixture orb. */
 function rng(seed: number) {
   let state = seed;
   return () => {
@@ -11,6 +10,7 @@ function rng(seed: number) {
   };
 }
 
+/** Deterministic Datadog-shaped series for the transcript chart fixture orb. */
 const T0 = Date.UTC(2026, 9, 13, 18, 0);
 const STEP = 5 * 60_000;
 const DEPLOY = T0 + 3 * 3_600_000 + STEP;

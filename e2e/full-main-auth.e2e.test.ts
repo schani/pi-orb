@@ -128,7 +128,7 @@ it("main Google mode authenticates public/private/files surfaces and proxies a r
     },
   });
   // Runtime machine traffic uses an owned internal proxy, just as a deployed HTTPS
-  // app ingress supplies its configured Host. Browser tests below set Host explicitly.
+  // app ingress supplies its configured Host. Test requests below set Host explicitly.
   broker = createServer((request, response) => {
     if (!cp) {
       response.writeHead(503).end();

@@ -33,8 +33,9 @@ const envLines = (env: HookEnvReport | null): string[] => {
 
 /**
  * The agent cannot see a boot hook's outcome on its own, and a broken hook is
- * exactly the thing it should fix first. Only failures are appended: a healthy
- * boot must not spend context saying so (docs/orb-setup-hook.md).
+ * exactly the thing it should fix first. Only failures and env-file problems
+ * are appended: a healthy boot must not spend context saying so
+ * (docs/orb-setup-hook.md).
  */
 export function bootHookPrompt(
   hooks: RuntimeHooks,
@@ -58,6 +59,7 @@ export function bootHookPrompt(
     "",
     "The orb started anyway, so the environment those hooks were supposed to prepare may be",
     "incomplete. Read the log before assuming a missing tool or credential is a platform problem,",
-    "and fix the hook rather than working around it — it runs again on the next start.",
+    "and fix the hook rather than working around it — setup runs again on the next compute",
+    "incarnation, resume on the next start.",
   ].join("\n");
 }

@@ -25,7 +25,7 @@ const REAL_OAUTH_BASE_URL = "https://github.com";
 const REAL_API_BASE_URL = "https://api.github.com";
 
 /** Fallback lifetimes for apps with token expiration disabled: an access
- * token GitHub will not expire gets a nominal 8-hour broker lifetime, and a
+ * token GitHub will not expire gets a nominal broker lifetime, and a
  * missing refresh token forces re-login when it "expires" — acceptable POC
  * degradation; the app is expected to have expiration enabled. */
 const FALLBACK_ACCESS_TTL_S = 8 * 3600;

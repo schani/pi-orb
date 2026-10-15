@@ -131,7 +131,10 @@ function createClaudeAuthController(visible = () => document.visibilityState ===
   });
 }
 
-/** The owner pane only reads on entry; connection admission remains an explicit click. */
+/**
+ * The pane reads when it becomes active or visible and polls only while connecting; connection
+ * admission remains an explicit click.
+ */
 export function ClaudeAuthSettings({ active }: { active: boolean }) {
   const visible = useRef(active);
   visible.current = active;

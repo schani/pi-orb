@@ -140,7 +140,7 @@ export interface HostingStore {
     path: string,
     expected: HostedObjectRef | undefined,
   ): ResultAsync<void, HostingError>;
-  /** Fences future reserve/publish and returns every durable owner needing cleanup. */
+  /** Fences future reserve/publish and enqueues every durable owner needing cleanup. */
   beginOrbCleanup(task: SimulationTask, orbId: string): ResultAsync<void, HostingError>;
   claimCleanup(
     task: SimulationTask,
@@ -176,6 +176,6 @@ export interface HostingDeps {
   readonly store: HostingStore;
   readonly bytes: HostedByteStore;
   readonly maxFileBytes?: number;
-  /** At least the enclosing upload deadline; adapters may renew during long writes. */
+  /** At least the enclosing upload deadline; nothing renews it during long writes. */
   readonly uploadLeaseMs: number;
 }

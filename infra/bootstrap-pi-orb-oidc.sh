@@ -15,9 +15,9 @@
 # No resource here is ever deleted: pool, provider, and service account are
 # created when absent and converged when present. The one thing the script does
 # remove is a binding it previously created itself — a workload-identity
-# admission from this pool, or a project role on its own test account, that the
-# scope it was just given no longer covers. That is not destruction, it is what
-# makes "the scope you asked for" true; `add-iam-policy-binding` alone would
+# admission from this pool, or a project role on its own test account, other
+# than the one the scope it was just given names. That is not destruction, it is
+# what makes "the scope you asked for" true; `add-iam-policy-binding` alone would
 # leave every past, broader grant standing. `--dry-run` lists those removals.
 set -euo pipefail
 
@@ -203,7 +203,7 @@ fi
 # test account, which exists for nothing else. No other member, role, resource,
 # or conditional binding is ever touched, and nothing is deleted anywhere else.
 
-stale_admissions() { # principalSets from this pool that the requested scope does not cover
+stale_admissions() { # principalSets from this pool other than the requested one
   [ -n "$project_number" ] || return 0
   # Not created yet on a first run: nothing to reconcile. Under pipefail a failed
   # policy read would otherwise abort the script before it prints its plan.

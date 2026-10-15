@@ -75,7 +75,7 @@ export interface ProjectSecretBootRetryOptions {
 /**
  * Bootstrap has two expected short races: a newly provisioned host may ask
  * before its bearer hash commits, and a new runtime Cloud Run revision may ask
- * before the browser role finishes the same release's migration. Retry only
+ * before the same release's migration job finishes. Retry only
  * those availability/authorization outcomes inside one bounded boot window;
  * malformed data remains terminal immediately.
  */

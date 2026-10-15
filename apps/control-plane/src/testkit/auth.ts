@@ -36,7 +36,7 @@ export class FakeAuthGate implements AuthGate {
     this.state = "ok";
   }
 
-  /** Drop the credential so the next ensureAuth needs a fresh flow. */
+  /** Drop the credential so the next ensureAuth requires login again. */
   invalidateCredential(): void {
     this.state = "unauthenticated";
   }

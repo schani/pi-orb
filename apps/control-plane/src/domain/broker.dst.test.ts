@@ -302,7 +302,9 @@ describe("credential broker (DST)", () => {
               "still-valid grant",
             );
             expect(early.generation).toBe(1);
-            // Once expired, the stored refresh token is dead: forced re-login.
+            // The rotation was never recorded, so the stored refresh token is
+            // dead: once the access token expires, the next request reports
+            // auth_required (forced re-login).
             await task.sleep(4 * 60_000, "wait for expiry");
             const after = await getToken(task, harness.deps, PROVIDER, {
               reason: "startup",

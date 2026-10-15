@@ -1695,12 +1695,12 @@ describe("runtime broker routes", () => {
    */
   describe("id-token minting", () => {
     /**
-     * An hour-long mint floor. The domain stamps the slot claim from real wall
-     * time here, so with the fixture's 1 s floor the throttle assertion would
-     * really be an assertion about how fast the machine runs two injections —
-     * green on a laptop, intermittently red on a loaded CI box, which is
-     * exactly the un-reproducible failure AGENTS.md forbids. An hour is a floor
-     * elapsed real time cannot plausibly cross, so what is under test is the
+     * The domain stamps the slot claim from real wall time here, so with the
+     * fixture's 1 s floor the throttle assertion would really be an assertion
+     * about how fast the machine runs two injections — green on a laptop,
+     * intermittently red on a loaded CI box, which is exactly the
+     * un-reproducible failure AGENTS.md forbids. An hour is a floor elapsed
+     * real time cannot plausibly cross, so what is under test is the
      * throttle logic alone. Every other case in this block mints at most once
      * against a store the hook rebuilds, so the larger floor is invisible to
      * them.

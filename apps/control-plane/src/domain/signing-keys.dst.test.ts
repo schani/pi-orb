@@ -569,7 +569,7 @@ describe("rotating the issuer's signing key (DST)", () => {
         expect(log.matching("issuer-key-retired").length).toBe(1);
 
         // Where two keys were published, the loser's stays published-but-unused
-        // exactly as the doc promises — never retired, never resurrected.
+        // exactly as docs/workload-identity.md promises — never retired, never resurrected.
         for (const row of substrate.keys.allRows()) {
           if (row.kid === original || row.kid === winner.kid) continue;
           expect(row.state, `${row.kid} should still be awaiting adoption`).toBe("pending");
@@ -825,7 +825,7 @@ describe("minting across a key rotation (DST)", () => {
             )._unsafeUnwrap();
 
             // Warm the cache first. This is the case the cold-start scenario
-            // above cannot reach: destroying the version leaves the row
+            // below cannot reach: destroying the version leaves the row
             // untouched, so a signer that already holds the material has
             // nothing to notice unless it revalidates.
             const warm = await mintIdToken(task, mintDeps, {

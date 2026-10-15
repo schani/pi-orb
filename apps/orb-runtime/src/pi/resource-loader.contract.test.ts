@@ -42,7 +42,8 @@ import { createOrbResourceLoader } from "./resource-loader.ts";
  *  5. `reload()` is mandatory: a freshly constructed loader has an empty
  *     append array and has never called the override.
  *  6. `additionalSkillPaths` really discovers the image-baked skills directory
- *     through `getSkills()`, and an absent directory stays harmless.
+ *     through `getSkills()`, and a configured but missing directory fails
+ *     initialization instead of being silently dropped.
  *
  * Every control-equality test passes `skillsDir: null` explicitly so it
  * compares the same skill set as the control loader. Production defaults to
@@ -51,7 +52,7 @@ import { createOrbResourceLoader } from "./resource-loader.ts";
  */
 
 const PREVIEW_HOST = "pi-orb-test.tailabc.ts.net";
-/** Repository source of what the Dockerfile bakes at `BAKED_SKILLS_DIR`. */
+/** Repository source of what `apps/orb-runtime/Dockerfile` copies to `/opt/pi-orb/skills`. */
 const BAKED_SKILLS_SOURCE = join(import.meta.dirname, "../../skills");
 /** `CONFIG_DIR_NAME` in the SDK (`config.js`), i.e. the project-scoped `.pi/`. */
 const PROJECT_CONFIG_DIR = ".pi";
@@ -348,9 +349,9 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     if (section === undefined) throw new Error("unreachable");
     expect(section.indexOf(PROJECT_APPEND)).toBeLessThan(section.indexOf("## Port exposure"));
 
-    // The rest of the loader's surface is untouched: we override only the
-    // append array, so SYSTEM.md, AGENTS.md context files, and the discovered
-    // resources must match the control exactly.
+    // The rest of the loader's surface must match the control exactly: the
+    // agents-file and skills overrides reproduce what the SDK discovers here,
+    // and SYSTEM.md and the remaining resources pass through untouched.
     expect(loader.getSystemPrompt()).toBe(control.getSystemPrompt());
     expect(loader.getSystemPrompt()).toBe("agent-dir SYSTEM.md marker");
     expect(loader.getAgentsFiles()).toEqual(control.getAgentsFiles());

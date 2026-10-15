@@ -29,7 +29,7 @@ type Landing = "turn" | "steer" | "rejected";
 /**
  * A schedulable stand-in for `AgentSession`, modelling the ordering the
  * pinned SDK actually has (verified against
- * `@earendil-works/pi-coding-agent@0.80.10`):
+ * `@earendil-works/pi-coding-agent@1.1.0`):
  *
  * - `sendUserMessage` → `prompt()` runs an async prologue (extension `input`
  *   hooks, auth check, compaction check) *before* `_runAgentPrompt` sets
@@ -203,8 +203,8 @@ function assertCorrelation(h: Harness): void {
   const turnStarters = h.pi.landings
     .filter((landing) => landing.landing === "turn")
     .map((landing) => landing.submitter);
-  // Pi announces turns in the order it begins them, and the runtime
-  // broadcasts one `operation_started` per announcement.
+  // Pi announces turns in the order it begins them; each claimed turn's
+  // `operation_started` was broadcast at its acceptance, in that same order.
   const announced = h.pi.announced;
   expect(announced).toEqual(turnStarters.slice(0, announced.length));
 

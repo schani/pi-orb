@@ -102,7 +102,6 @@ function makeProvider(overrides: ProviderOverrides = {}): DockerOrbHostProvider 
   });
 }
 
-/** Scripts a fresh (no existing container) provision against the CLI fake. */
 describe("execution bindings", () => {
   beforeEach(() => dockerFake.reset());
   it("returns authenticated immutable container binding", async () => {
@@ -165,6 +164,7 @@ describe("execution bindings", () => {
   });
 });
 
+/** Scripts a fresh (no existing container) provision against the CLI fake. */
 function installFreshHost(): void {
   let labels: Record<string, string> = {};
   dockerFake.install((args) => {
@@ -304,7 +304,7 @@ describe("DockerOrbHostProvider", () => {
     const run = await provisionArgv(makeProvider());
     expect(run).toContain("--add-host=host.docker.internal:host-gateway");
     expect(envValue(run, CONTROL_PLANE_URL_ENV)).toBe("http://host.docker.internal:3000");
-    // The gateway inspection this replaced is gone.
+    // Gateway resolution comes from --add-host, so no docker network inspection runs.
     expect(dockerFake.calls.some((args) => args[0] === "network")).toBe(false);
   });
 

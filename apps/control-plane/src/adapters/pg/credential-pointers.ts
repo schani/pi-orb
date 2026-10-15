@@ -90,7 +90,7 @@ class BoundPostgreSQLCredentialPointerStore implements CredentialPointerStore {
   }
 }
 
-/** User-bound PostgreSQL credential-pointer adapter. */
+/** PostgreSQL credential-pointer store factory; `forUser` binds one user's pointers. */
 export class PostgreSQLCredentialPointerStore implements CredentialPointerStoreFactory {
   private readonly db: PostgreSQLClient;
 

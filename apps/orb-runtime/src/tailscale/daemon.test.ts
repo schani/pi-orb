@@ -7,8 +7,8 @@ describe("tailscaleStateDir", () => {
   });
 
   it("cannot collide with the checkout or the clone staging dir", () => {
-    // agent.ts clones into `<workDir>/.clone-tmp` (removed wholesale on every
-    // fresh clone) and renames it onto `<workDir>/repo`.
+    // domain/checkout.ts clones into `<workDir>/.clone-tmp` (removed wholesale
+    // on every fresh clone) and renames it onto `<workDir>/repo`.
     const stateDir = tailscaleStateDir("/workspace");
     for (const reserved of [
       "/workspace/repo",

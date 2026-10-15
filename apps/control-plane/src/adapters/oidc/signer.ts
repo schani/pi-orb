@@ -23,8 +23,9 @@ export class OidcTokenSigner implements TokenSigner {
   private readonly deps: SigningKeyMaterialDeps;
   /**
    * Steady-state signing is one key-row read: the private material is reused
-   * while the active row still names the same `kid` and secret version, and a
-   * rotation is a cache miss by construction.
+   * while the active row still names the same `kid` and secret version and the
+   * material is younger than `signingKeyMaterialTtlMs`; a rotation is a cache
+   * miss by construction.
    */
   private readonly material = new SigningKeyMaterialCache();
 

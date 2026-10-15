@@ -16,11 +16,10 @@
 #   PI_ORB_GCP_PROJECT, PI_ORB_GCE_ZONE   where orb VMs live
 # Optional:
 #   PI_ORB_APP_ORIGIN, PI_ORB_ISSUER_URL     default to the tofu outputs
-#   PI_ORB_SMOKE_PROJECT_ID               reuse a fixed pi-orb project (the one
-#                                         a project-scoped WIF grant names).
-#                                         Creation is idempotent for identical
-#                                         content, and a reused project is left
-#                                         in place; a generated one is deleted.
+#   PI_ORB_SMOKE_PROJECT_ID               an existing pi-orb project to use (the
+#                                         one a project-scoped WIF grant names).
+#                                         It is never created or deleted; a
+#                                         generated project is deleted on pass.
 #   PI_ORB_SMOKE_SSH_FLAGS                extra `gcloud compute ssh` flags; the
 #                                         required IAP tunnel is always enabled
 #
@@ -108,9 +107,9 @@ trap cleanup EXIT
 
 # --- preflight --------------------------------------------------------------
 
-# node is not optional here the way jq is elsewhere: verifying an RS256
-# signature against the served JWKS is the point of the mint leg, and a shell
-# that cannot do that would be asserting nothing.
+# node is required: verifying an RS256 signature against the served JWKS is the
+# point of the mint leg, and a shell that cannot do that would be asserting
+# nothing.
 for command in curl gcloud node tofu uuidgen jq python3; do
   command -v "$command" >/dev/null 2>&1 ||
     fail "preflight" "missing required command '$command'"
@@ -121,7 +120,8 @@ done
 
 # `set -e` makes a failing command substitution abort the script *silently* at
 # the assignment, before the diagnostic that explains it can run — so every
-# assignment whose failure the operator must understand uses the `if !` form.
+# assignment whose failure the operator must understand is guarded with `||` or
+# the `if !` form.
 if [ -z "${PI_ORB_APP_ORIGIN:-}" ]; then
   if ! PI_ORB_APP_ORIGIN=$(cd "$DIR" && tofu output -raw app_url); then
     fail "preflight" "no app URL (set PI_ORB_APP_ORIGIN, or make 'tofu output -raw app_url' readable)"
@@ -156,7 +156,7 @@ fi
 chmod 700 "$WORK_DIR"
 
 # --- JSON access ------------------------------------------------------------
-# Same degradation as smoke.sh: python3 first (macOS ships it), jq as fallback.
+# python3 first (macOS ships it), jq as fallback.
 if command -v python3 >/dev/null 2>&1; then
   jget() { # jget <dotted.path> ; JSON on stdin ; prints "" when absent
     python3 -c '
@@ -292,8 +292,8 @@ const getJson = async (url) => {
 })().catch((error) => fail(String(error)));
 VERIFY_JS
 
-# Remote probe, run *inside another live orb* because the runtime service has
-# internal ingress and is unreachable from this machine. The bearer under test
+# Remote probe, run *inside another live orb* against the control-plane URL
+# that orb is configured with. The bearer under test
 # arrives on stdin; the mint URL is its only argument. Prints "<status> <code>".
 #
 # The mint route's error envelope is `{"error":"not_mintable"}` — the code *is*
@@ -354,7 +354,6 @@ create_orb() {
   say "orb created: $oid"
 }
 
-# wait_for_state <orb> <target> <timeout> <step>
 wait_for_state() {
   local oid=$1 target=$2 timeout=$3 step=$4
   local limit=$(($(date +%s) + timeout))
@@ -438,7 +437,7 @@ orb_ssh() { # orb_ssh <instance> <remote command>; stdin is forwarded
     ${PI_ORB_SMOKE_SSH_FLAGS:-} -- "$2"
 }
 
-wait_for_ssh() { # wait_for_ssh <instance>
+wait_for_ssh() {
   local instance=$1
   local limit=$(( $(date +%s) + SSH_READY_TIMEOUT ))
   local attempt=0
@@ -470,10 +469,7 @@ wait_for_ssh() { # wait_for_ssh <instance>
 # --- run --------------------------------------------------------------------
 
 PROJECT_ID=${PI_ORB_SMOKE_PROJECT_ID:-$(uuidgen | tr '[:upper:]' '[:lower:]')}
-# A supplied project id is the one a project-scoped WIF grant names, so it is
-# reused rather than recreated. Its name must then be stable too: project
-# creation is idempotent only for *identical* content, and a timestamped name
-# would turn every rerun into a 409.
+# A supplied project id must already exist: create_project only verifies it.
 PROJECT_NAME="wif-smoke"
 if [ -n "${PI_ORB_SMOKE_PROJECT_ID:-}" ]; then
   PROJECT_IS_DISPOSABLE=false
@@ -496,7 +492,7 @@ fi
 say "step 1/7: create the project and two orbs"
 # Two orbs, booted concurrently so the second costs a VM but almost no wall
 # clock. The second one exists because proving "a stopped orb cannot mint"
-# needs both a stopped orb and a caller inside the VPC — and a stopped orb has
+# needs both a stopped orb and a live orb to call from — and a stopped orb has
 # no compute left to be that caller.
 create_project "$PROJECT_ID" "$PROJECT_NAME"
 create_orb "$PROJECT_ID" "$MINT_ORB"
@@ -541,7 +537,7 @@ while :; do
   sleep "$POLL_INTERVAL"
 done
 
-mint() { # mint <audience> <out-file>
+mint() {
   local audience=$1 out=$2
   # The CLI's contract is that stdout carries only the JWT; gcloud's own chatter
   # goes to stderr. Isolating the one JWT-shaped line keeps an ssh banner from
@@ -585,7 +581,8 @@ data = "{\"audience\":\"$WIF_STS_AUDIENCE\",\"grantType\":\"urn:ietf:params:oaut
 EOF
     # `|| true`: a transport failure must reach the caller as the status `000`
     # curl already prints, not abort the script at this assignment under `set
-    # -e` before any diagnostic runs. Every caller distinguishes 000 explicitly.
+    # -e` before any diagnostic runs. Only the wrong-audience check tells 000
+    # apart from a real rejection.
     status=$(curl -s -K "$WORK_DIR/sts.conf" -o "$2" -w '%{http_code}' || true)
     rm -f "$WORK_DIR/sts.conf"
     printf '%s' "$status"
@@ -665,7 +662,7 @@ say "step 6/7: prove a stopped orb cannot mint"
 STOPPED_BEARER=$(instance_metadata "$STOPPED_INSTANCE" pi-orb-config | node -e 'let s=""; process.stdin.on("data", c => s += c); process.stdin.on("end", () => process.stdout.write(JSON.parse(s).PI_ORB_RUNTIME_TOKEN ?? ""))') ||
   fail "read-bearer" "gcloud could not describe $STOPPED_INSTANCE"
 [ -n "$STOPPED_BEARER" ] || fail "read-bearer" "no runtime token on $STOPPED_INSTANCE"
-# The runtime service's URL as orbs see it, straight from the runtime environment the
+# The control plane's URL as orbs see it, straight from the runtime environment the
 # provider configured — no assumption about the deployment's topology. The
 # `if !` form matters: `pipefail` makes a failed ssh fail the whole pipeline,
 # and a plain assignment would abort the script before `fail` could say why.

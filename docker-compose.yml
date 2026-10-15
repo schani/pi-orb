@@ -1,4 +1,4 @@
-# Local development services (DESIGN.md §17): PostgreSQL plus the shared
+# Local development services: PostgreSQL plus the shared
 # Docker network that orb containers join. The control plane and web UI run
 # on the host during development:
 #   docker compose up -d

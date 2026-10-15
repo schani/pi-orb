@@ -117,7 +117,7 @@ export class McpOAuth {
     const result = await this.secrets.readSecret<StoredMcpOAuth>(task, MCP_OAUTH_SECRETS, version);
     return result.isErr() || !result.value ? err(oauthError("unavailable")) : ok(result.value);
   }
-  /** A lost CAS acknowledgement is resolved by exact secret-version readback. */
+  /** A lost CAS acknowledgement is resolved by reading the row back and matching the intended state. */
   private async publish(
     task: SimulationTask,
     binding: McpOAuthBinding,

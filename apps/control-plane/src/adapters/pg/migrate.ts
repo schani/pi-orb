@@ -20,7 +20,6 @@ const readMigrations = Result.fromThrowable(
   }),
 );
 
-/** Numbered hand-written SQL migrations with a tiny runner (docs/stack.md). */
 export type MigrationObserver = (name: string, stage: "started" | "applied") => void;
 export type MigrationOwnerResolutionObserver = (
   source: "users",
@@ -45,6 +44,7 @@ export interface MigrationOptions {
   readonly observeOwnerResolution?: MigrationOwnerResolutionObserver;
 }
 
+/** Numbered hand-written SQL migrations with a tiny runner (docs/stack.md). */
 export function runMigrations(
   db: PostgreSQLClient,
   options: MigrationOptions = {},

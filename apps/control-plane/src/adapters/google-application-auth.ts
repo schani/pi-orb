@@ -61,7 +61,7 @@ export function admittedGoogleIdentity(
     return err({ type: "forbidden", message: "Workspace membership required" });
   return ok({ issuer, subject: claims.sub, email: claims.email });
 }
-/** Google endpoints are fixed; tests inject the domain provider port instead. */
+/** Google endpoints are fixed; tests override them through this transport. */
 export interface GoogleLoginTransport {
   readonly metadata?: oidc.ServerMetadata;
   readonly customFetch?: oidc.CustomFetch;

@@ -24,8 +24,8 @@ export type RequestDecision =
     };
 
 /**
- * Pure docs/runtime-protocol.md request gate. All mutating requests pass through one serial
- * executor, so the view is consistent at decision time.
+ * Pure docs/runtime-protocol.md request gate, evaluated synchronously on the event loop so the
+ * view is consistent at decision time.
  */
 export function decideRequest(view: AgentGateView, action: ClientAction): RequestDecision {
   if (!view.acceptingWork)
@@ -107,8 +107,8 @@ function actionsEqual(a: ClientAction, b: ClientAction): boolean {
 
 /**
  * In-memory request identity, scoped to one runtime process (docs/runtime-protocol.md). A resent
- * known ID with an identical action replays the original result with
- * `duplicate: true`; a known ID with a different action is a conflict. The map
+ * known ID with an identical action replays the original result, marked `duplicate: true` when
+ * accepted or settings_applied; a known ID with a different action is a conflict. The map
  * lives for the life of the process; `server.welcome.runtimeInstanceId` tells
  * browsers when it has been emptied by a restart.
  */

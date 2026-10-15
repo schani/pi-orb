@@ -321,8 +321,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   }
 
   /**
-   * Make `operation` fail with an `invariant` store error until cleared: the
-   * shape of a wrong-SQL/wrong-parameter bug, which no retry can survive.
+   * Make `operation` fail with an `invariant` store error for the rest of the
+   * run: the shape of a wrong-SQL/wrong-parameter bug, which no retry can survive.
    */
   failWithInvariant(operation: InvariantOperation): void {
     this.invariantOperations.add(operation);

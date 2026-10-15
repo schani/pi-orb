@@ -9,8 +9,8 @@ function text(value: string | undefined): string | null {
   return value !== undefined && value.trim() !== "" ? value : null;
 }
 
-/** Root receipt fields only: never load or link a private child session. */
 type DisplayEvent = Extract<DisplayRecord, { type: "event" }>;
+/** Root receipt fields only: never load or link a private child session. */
 export function SubagentNotice({
   record,
   detailContext,
