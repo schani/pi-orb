@@ -1,12 +1,10 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { createRegistry, MemoryStorage } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { okAsync } from "neverthrow";
-import { assert, describe, expect, it } from "vitest";
-import { DurableAgent } from "./agent.ts";
+import { assert, describe, expect, it, vi } from "vitest";
+import { DurableAgent, type DurableAgentOptions } from "./agent.ts";
 import { MemoryAgentPersistence } from "./memory-persistence.testkit.ts";
 import { createDurableModels } from "./models.ts";
 
@@ -21,6 +19,7 @@ async function models() {
 describe("Durable public model catalog", () => {
   it("offers the four shared friendly aliases with canonical IDs and SDK capabilities", async () => {
     const runtime = await models();
+    const availability = vi.spyOn(runtime, "getAvailable").mockResolvedValue([]);
     const agent = (
       await DurableAgent.open({
         orbId: "catalog",
@@ -32,6 +31,7 @@ describe("Durable public model catalog", () => {
         instructions: "",
       })
     )._unsafeUnwrap();
+    availability.mockRestore();
     try {
       const settings = agent.snapshot()._unsafeUnwrap().settings;
       assert(settings);
@@ -72,12 +72,12 @@ describe("Durable public model catalog", () => {
 
   it("restores an older saved canonical selection without resolving it to the current alias", async () => {
     const runtime = await models();
-    const directory = await mkdtemp(join(tmpdir(), "durable-catalog-"));
     const authority = new MemoryAgentPersistence();
-    const open = async (id: string) =>
+    const open = async (id: string, storage?: DurableAgentOptions["storage"]) =>
       DurableAgent.open({
         orbId: "saved-catalog",
-        storage: (await authority.openOrb("saved-catalog", false))._unsafeUnwrap().storage,
+        storage:
+          storage ?? (await authority.openOrb("saved-catalog", false))._unsafeUnwrap().storage,
         models: runtime,
         registry: createRegistry(),
         env: new NodeExecutionEnv({ cwd: "/tmp" }),
@@ -86,17 +86,55 @@ describe("Durable public model catalog", () => {
         initialSettings: { model: { provider: "openai-codex", id }, thinkingLevel: "high" },
       });
     const original = (await open("gpt-6-sol"))._unsafeUnwrap();
+    expect(original.snapshot()._unsafeUnwrap().settings?.settings.model).toEqual({
+      provider: "openai-codex",
+      id: "gpt-6-sol",
+    });
     await original.close();
-    const resumed = (await open("gpt-6-astra"))._unsafeUnwrap();
+    const resumed = (await open("removed-initial-intent"))._unsafeUnwrap();
     try {
       const settings = resumed.snapshot()._unsafeUnwrap().settings;
       expect(settings?.settings.model).toEqual({ provider: "openai-codex", id: "gpt-6-sol" });
       expect(settings?.models.map(({ name }) => name)).toEqual(["Astra", "Sol", "Terra", "Luna"]);
       expect(settings?.models.find(({ name }) => name === "Sol")?.id).toBe("gpt-6.1-sol");
+      const stream = vi.spyOn(runtime, "streamSimple");
+      const storage = new MemoryStorage();
+      const fresh = (await open("removed-after-spawn", storage))._unsafeUnwrap();
+      try {
+        expect(fresh.snapshot()._unsafeUnwrap().settings?.settings.model.id).toBe(
+          "removed-after-spawn",
+        );
+        (
+          await fresh.deliver({
+            baseUrl: "unused",
+            messageId: "first",
+            messageIds: ["first"],
+            content: [{ type: "text", text: "work" }],
+          })
+        )._unsafeUnwrap();
+        await fresh.waitForIdle();
+        expect(
+          (await storage.scanTasks({}, 100, undefined, BACKGROUND_CONTEXT)).items,
+        ).toContainEqual(
+          expect.objectContaining({
+            state: expect.objectContaining({
+              outcome: {
+                status: "failed",
+                error: {
+                  message: "Model openai-codex/removed-after-spawn is not available",
+                  detail: { reason: "no_model" },
+                },
+              },
+            }),
+          }),
+        );
+      } finally {
+        await fresh.close();
+      }
+      expect(stream).not.toHaveBeenCalled();
     } finally {
       await resumed.close();
       await authority.close();
-      await rm(directory, { recursive: true, force: true });
     }
   });
 });

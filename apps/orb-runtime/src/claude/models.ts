@@ -2,9 +2,10 @@ import type { ModelInfo } from "@anthropic-ai/claude-agent-sdk";
 import type { ModelOption } from "@pi-orb/protocol";
 
 export const DEFAULT_CLAUDE_MODEL = "opus";
+export const CLAUDE_MODEL_FAMILIES = ["fable", "opus", "sonnet", "haiku"] as const;
 
 export function latestClaudeModels(models: readonly ModelInfo[]): ModelOption[] {
-  return ["fable", "opus", "sonnet", "haiku"].flatMap((family) => {
+  return CLAUDE_MODEL_FAMILIES.flatMap((family) => {
     const model = models.find((model) => model.value === family);
     return model === undefined
       ? []

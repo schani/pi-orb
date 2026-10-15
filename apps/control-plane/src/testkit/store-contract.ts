@@ -34,6 +34,7 @@ const orb: OrbRow = {
   id: "00000000-0000-4000-8000-000000000002",
   projectId: project.id,
   harness: "pi",
+  initialModel: null,
   name: null,
   userTimeZone: null,
   autoNameLeaseUntil: null,
@@ -1049,7 +1050,11 @@ export function storeSemanticsContractTests(
       expect((await store.getSpawnCaller(task, childId))._unsafeUnwrap()).toBe(orb.id);
     });
 
-    it("atomically spawns with immutable retry identity and fences retired callers", async () => {
+    it.each([
+      null,
+      { provider: "claude", id: "opus" },
+      { provider: "openai-codex", id: "gpt-6.1-sol" },
+    ])("atomically spawns with intent %j and fences retired callers", async (initialModel) => {
       expect((await store.insertProject(task, project)).isOk()).toBe(true);
       const caller = {
         ...orb,
@@ -1058,23 +1063,39 @@ export function storeSemanticsContractTests(
         hostIncarnation: 1,
         userTimeZone: "America/New_York",
         harness: "claude" as const,
+        initialModel: { provider: "claude", id: "sonnet" },
       };
       expect((await store.insertOrb(task, caller)).isOk()).toBe(true);
-      const child = { ...orb, id: "00000000-0000-4000-8000-000000000003" };
+      const child = {
+        ...orb,
+        id: "00000000-0000-4000-8000-000000000003",
+        initialModel,
+        harness: initialModel?.provider === "claude" ? ("claude" as const) : ("pi" as const),
+      };
       const params = {
         callerOrbId: caller.id,
+        expectedOwnerUserId: project.ownerUserId,
         caller: { runtimeTokenHash: "caller-token", hostIncarnation: 1 },
         orb: child,
         prompt: "Do the work",
         requestHash: "immutable-request",
       };
+      const ownerDenied = await store.spawnOrb(task, {
+        ...params,
+        expectedOwnerUserId: "previous-owner",
+      });
+      expect(ownerDenied.isErr() && ownerDenied.error.type).toBe("spawn_conflict");
+      expect((await store.getOrb(task, child.id))._unsafeUnwrap()).toBeNull();
+      expect((await store.getSpawnCaller(task, child.id))._unsafeUnwrap()).toBeNull();
+      expect((await store.listOrbMessages(task, child.id))._unsafeUnwrap()).toEqual([]);
       const accepted = await store.spawnOrb(task, params);
       expect(accepted.isOk() && accepted.value.duplicate).toBe(false);
       expect((await store.getSpawnCaller(task, child.id))._unsafeUnwrap()).toBe(caller.id);
       expect((await store.getSpawnCaller(task, caller.id))._unsafeUnwrap()).toBeNull();
       expect((await store.getOrb(task, child.id))._unsafeUnwrap()).toMatchObject({
         state: "creating",
-        harness: "claude",
+        harness: initialModel === null ? "claude" : child.harness,
+        initialModel,
         userTimeZone: "America/New_York",
       });
       expect((await store.listOrbMessages(task, child.id))._unsafeUnwrap()).toMatchObject([

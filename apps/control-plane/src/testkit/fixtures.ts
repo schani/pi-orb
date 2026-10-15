@@ -115,6 +115,7 @@ export function makeHarness(options?: {
   });
   const deps: ControlPlaneDeps = {
     store,
+    checkSpawnModel: () => okAsync(undefined),
     hostProvider: new FakeOrbHostProvider(world),
     resourceCleaner: { cleanupOrb: () => okAsync(undefined) },
     runtimeClient: new FakeRuntimeClient(world),
@@ -285,6 +286,7 @@ export function makeOrbRow(
     id,
     projectId,
     harness: "pi",
+    initialModel: null,
     name: null,
     userTimeZone: null,
     autoNameLeaseUntil: null,

@@ -41,17 +41,26 @@ describe("boot context client", () => {
     );
   });
 
-  it("reads the time zone even without a sleep-wake context", async () => {
+  it("reads time zone and model intent without a sleep-wake context", async () => {
     vi.stubGlobal(
       "fetch",
       async () =>
-        new Response(JSON.stringify({ v: 1, context: null, userTimeZone: "Europe/Paris" }), {
-          status: 200,
-        }),
+        new Response(
+          JSON.stringify({
+            v: 1,
+            context: null,
+            initialModel: { provider: "claude", id: "sonnet" },
+            userTimeZone: "Europe/Paris",
+          }),
+          {
+            status: 200,
+          },
+        ),
     );
     expect((await fetchBootContext(broker))._unsafeUnwrap()).toEqual({
       v: 1,
       context: null,
+      initialModel: { provider: "claude", id: "sonnet" },
       userTimeZone: "Europe/Paris",
     });
   });

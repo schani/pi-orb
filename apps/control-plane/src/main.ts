@@ -56,6 +56,7 @@ import { SdkAgentPlane } from "./adapters/sdk-agent-plane.ts";
 import { createSealedAuthCookies } from "./adapters/sealed-auth-cookies.ts";
 import { FileSecretStore } from "./adapters/secrets/file-store.ts";
 import { GsmSecretStore } from "./adapters/secrets/gsm-store.ts";
+import { createSpawnModelCheck } from "./adapters/spawn-models.ts";
 import {
   FetchTailscaleApiTransport,
   HttpTailscaleAuthKeyMinter,
@@ -521,6 +522,7 @@ export async function main(
       finish: (row) => uploadRequest(task, deps, row, "finish"),
     }),
     store: database.store,
+    checkSpawnModel: createSpawnModelCheck(brokerForUser, claudeAuth),
     hostProvider,
     resourceCleaner:
       tailscaleForProvider && tailscaleClient !== null

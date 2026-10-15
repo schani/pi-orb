@@ -28,6 +28,13 @@ it("defaults fresh sessions to Sol 6.1/high and preserves saved Astra settings",
   saved.appendModelChange("openai-codex", "gpt-6-astra");
   saved.appendThinkingLevelChange("low");
   expect(restoreSessionSettings(saved, catalog)).toEqual({ model: astra, thinkingLevel: "low" });
+  const initial = { provider: astra.provider, id: astra.id };
+  expect(restoreSessionSettings(fresh, catalog, initial)?.model).toEqual(astra);
+  expect(restoreSessionSettings(saved, catalog, { provider: sol.provider, id: sol.id })).toEqual({
+    model: astra,
+    thinkingLevel: "low",
+  });
+  expect(restoreSessionSettings(SessionManager.inMemory(), [sol], initial)).toBeUndefined();
 });
 
 it("restores exact Sol 6.1 IDs and reports older Sol as unavailable, without aliases", () => {

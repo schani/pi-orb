@@ -2439,7 +2439,7 @@ describe("full slice E2E", () => {
     const spawnedOrbId = randomUUID();
     scenarioEvidence.target = spawnedOrbId;
     additionalOrbIds.push(spawnedOrbId);
-    const spawnCommand = `pi-orb spawn --id ${spawnedOrbId} --prompt 'Do the spawned E2E task' --name 'Spawned E2E task' --json`;
+    const spawnCommand = `pi-orb spawn --id ${spawnedOrbId} --prompt 'Do the spawned E2E task' --name 'Spawned E2E task' --model openai-codex/gpt-6-astra --json`;
     const spawned = await terminalRun(
       secondOrbId,
       `${spawnCommand}; printf '\\123\\120\\101\\127\\116\\137\\104\\117\\116\\105\\012'`,
@@ -2447,18 +2447,17 @@ describe("full slice E2E", () => {
     );
     expect(spawned).toContain(`"orbId":"${spawnedOrbId}"`);
     await waitFor(
-      "spawned first model request carries inherited time zone",
+      "spawned first model request uses initial model and inherited time zone",
       async () => {
         const calls: unknown = await fakeControl(fake.sessionKey, "/requests");
-        return Array.isArray(calls) &&
-          calls.some(
-            (call) =>
-              call.matchedRuleIndex === (PROCESS_BACKEND ? 8 : 6) &&
-              call.status === 200 &&
-              effectiveOpenAIResponseInstructions(call.body).includes(timezoneLine),
-          )
-          ? true
-          : null;
+        if (!Array.isArray(calls)) return null;
+        const first = calls.find(
+          (call) => call.matchedRuleIndex === (PROCESS_BACKEND ? 8 : 6) && call.status === 200,
+        );
+        if (!first) return null;
+        expect(first.body.model).toBe("gpt-6-astra");
+        expect(effectiveOpenAIResponseInstructions(first.body)).toContain(timezoneLine);
+        return true;
       },
       { timeoutMs: 60_000, intervalMs: 200 },
     );

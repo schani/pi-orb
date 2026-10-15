@@ -48,6 +48,7 @@ if (parsed.isErr()) {
     : await requestSpawn(env, args.id ?? randomUUID(), {
         prompt: prompt.value,
         ...(args.name === undefined ? {} : { name: args.name }),
+        ...(args.model === undefined ? {} : { model: args.model }),
       });
   if (result.isErr()) {
     process.stderr.write(`pi-orb: ${result.error.message}\n`);

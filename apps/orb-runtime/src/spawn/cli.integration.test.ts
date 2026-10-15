@@ -64,6 +64,16 @@ describe("spawn CLI entry point", () => {
     expect(result).toEqual({ code: 0, stdout: `${url}\n`, stderr: "" });
     expect(received).toEqual([{ prompt: "multi\nline π\n" }]);
   });
+  it.each(["claude/opus", "openai-codex/gpt-6.1-sol"])(
+    "sends model %s as canonical settings",
+    async (model) => {
+      const result = await run(base, ["--id", id, "--prompt", "work", "--model", model]);
+      expect(result).toEqual({ code: 0, stdout: `${url}\n`, stderr: "" });
+      expect(received).toEqual([
+        { prompt: "work", model: { provider: model.split("/")[0], id: model.split("/")[1] } },
+      ]);
+    },
+  );
   it("reads a file and renders JSON", async () => {
     const file = join(directory, "task.md");
     await writeFile(file, "work");

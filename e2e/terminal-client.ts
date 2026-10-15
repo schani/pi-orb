@@ -7,10 +7,13 @@ export async function runTerminal(
   orbId: string,
   command: string,
   until: string,
+  headers?: Readonly<Record<string, string>>,
 ): Promise<string> {
-  const socket = new WebSocket(`${baseUrl.replace(/^http/, "ws")}/api/v1/orbs/${orbId}/terminal`, [
-    TERMINAL_SUBPROTOCOL,
-  ]);
+  const socket = new WebSocket(
+    `${baseUrl.replace(/^http/, "ws")}/api/v1/orbs/${orbId}/terminal`,
+    [TERMINAL_SUBPROTOCOL],
+    { headers },
+  );
   let output = "";
   let ready = false;
   try {

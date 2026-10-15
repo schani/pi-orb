@@ -60,6 +60,29 @@ describe("orb sleep protocol", () => {
     ).toBe(true);
   });
 
+  it("accepts absent or exact initial model intent and rejects malformed present values", () => {
+    const response = { v: 1, context: null, userTimeZone: null };
+    expect(Check(OrbBootContextResponseSchema, response)).toBe(true);
+    expect(
+      Check(OrbBootContextResponseSchema, {
+        ...response,
+        initialModel: { provider: "claude", id: "sonnet" },
+      }),
+    ).toBe(true);
+    for (const initialModel of [
+      null,
+      {},
+      { provider: "claude" },
+      { id: "sonnet" },
+      { provider: "", id: "sonnet" },
+      { provider: "claude", id: "" },
+      { provider: "claude", id: 1 },
+      { provider: "claude", id: "sonnet", extra: true },
+      "claude/sonnet",
+    ])
+      expect(Check(OrbBootContextResponseSchema, { ...response, initialModel })).toBe(false);
+  });
+
   it("allows inbox identity on event records", () => {
     expect(
       Check(HistoryRecordSchema, {

@@ -9,6 +9,7 @@ const orb: OrbRow = {
   id: "orb-1",
   projectId: "proj-1",
   harness: "pi",
+  initialModel: null,
   name: "Reconnect Repair",
   userTimeZone: null,
   autoNameLeaseUntil: null,

@@ -173,6 +173,7 @@ export interface EnqueueOrbMessageParams {
 }
 
 export interface SpawnOrbParams {
+  readonly expectedOwnerUserId?: string;
   readonly callerOrbId: string;
   readonly caller: ArchiveCaller;
   readonly orb: OrbRow;
@@ -1217,6 +1218,7 @@ export interface OrbResourceCleaner {
 }
 
 export interface ControlPlaneDeps {
+  readonly checkSpawnModel: import("./orb-spawning.ts").CheckSpawnModel;
   readonly workspaceUploadRuntime?: (
     task: SimulationTask,
   ) => import("./workspace-uploads.ts").UploadRuntime;

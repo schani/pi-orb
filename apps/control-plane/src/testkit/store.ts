@@ -782,7 +782,12 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       )
         return { reason: "unauthorized" as const };
       const project = this.projects.get(params.orb.projectId);
-      if (project?.state !== "active" || caller.projectId !== params.orb.projectId)
+      if (
+        project?.state !== "active" ||
+        caller.projectId !== params.orb.projectId ||
+        (params.expectedOwnerUserId !== undefined &&
+          project.ownerUserId !== params.expectedOwnerUserId)
+      )
         return { reason: "conflict" as const };
       const existing = this.spawns.get(params.orb.id);
       const child = this.orbs.get(params.orb.id);
@@ -800,7 +805,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       this.orbs.set(params.orb.id, {
         ...params.orb,
         userTimeZone: caller.userTimeZone,
-        harness: caller.harness,
+        harness: params.orb.initialModel === null ? caller.harness : params.orb.harness,
         lastBusyAt: params.orb.createdAt,
       });
       this.messages.set(params.orb.id, [

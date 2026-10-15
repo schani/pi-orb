@@ -1,4 +1,5 @@
 import type {
+  AgentSettings,
   HarnessKind,
   HarnessSessionMetadata,
   MessageInputBlock,
@@ -23,6 +24,7 @@ export interface OrbRow {
   readonly id: string;
   readonly projectId: string;
   readonly harness: HarnessKind;
+  readonly initialModel: AgentSettings["model"] | null;
   readonly name: string | null;
   readonly userTimeZone: string | null;
   readonly autoNameLeaseUntil: number | null;

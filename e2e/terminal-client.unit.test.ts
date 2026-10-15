@@ -67,3 +67,30 @@ it("rejects a refused terminal immediately without sending a command", async () 
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+it("routes the owned direct terminal socket with its configured public host", async () => {
+  const server = createServer();
+  const sockets = new WebSocketServer({ server });
+  let host: string | undefined;
+  sockets.on("connection", (socket, request) => {
+    host = request.headers.host;
+    socket.on("message", (_data, binary) => {
+      if (binary) socket.send(Buffer.from("DONE"));
+      else socket.send(JSON.stringify({ v: 1, type: "terminal.ready" }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("Missing owned port");
+    expect(
+      await runTerminal(`http://127.0.0.1:${address.port}`, "orb", "echo DONE", "DONE", {
+        host: "app.example.test",
+      }),
+    ).toBe("DONE");
+    expect(host).toBe("app.example.test");
+  } finally {
+    await new Promise<void>((resolve) => sockets.close(() => resolve()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

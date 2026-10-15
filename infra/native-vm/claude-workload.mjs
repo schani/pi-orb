@@ -332,7 +332,15 @@ async function run() {
           if (request.method === "GET" && path === "/runtime/v1/git-identity")
             return json(response, 200, { name: "", email: "" });
           if (request.method === "POST" && path === "/runtime/v1/orb/boot-context")
-            return json(response, 200, { v: 1, context: null, userTimeZone: null });
+            return json(response, 200, {
+              v: 1,
+              context: null,
+              userTimeZone: null,
+              initialModel: {
+                provider: "claude",
+                id: phase === "boot" ? "sonnet" : "removed-initial-intent",
+              },
+            });
           if (request.method === "POST" && path === "/runtime/v1/claude-subscription") {
             assert.equal(text, "{}");
             grants++;
@@ -413,6 +421,11 @@ async function run() {
         assert.equal(request.headers.authorization, `Bearer ${syntheticBearer}`);
         assert.equal(request.headers["x-api-key"], undefined);
         const body = JSON.parse(text);
+        assert.match(
+          body.model,
+          /^claude-sonnet-/,
+          "fresh intent and retained native model must not fall back",
+        );
         const history = JSON.stringify(body.messages);
         requestCount++;
         persistProgress();
@@ -504,6 +517,10 @@ async function run() {
   assert.equal(requestCount, 0, "boot performed automatic inference");
   checks.subscriptionSource = boot.accountChecked;
   checks.nativeBoot = true;
+  assert.equal(
+    JSON.parse(await readFile(join(workDir, "claude", "session.json"), "utf8")).model,
+    "sonnet",
+  );
 
   advance("native-tools-and-drain");
   await runtime.call("deliver", {
@@ -554,6 +571,10 @@ async function run() {
   assert.deepEqual(
     retained.snapshot.records.slice(0, completed.snapshot.records.length),
     completed.snapshot.records,
+  );
+  assert.equal(
+    JSON.parse(await readFile(join(workDir, "claude", "session.json"), "utf8")).model,
+    "sonnet",
   );
   const settled = await runtime.call("drained");
   advance("settled-restart-drained");

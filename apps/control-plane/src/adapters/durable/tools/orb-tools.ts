@@ -5,6 +5,7 @@ import {
   ROOT_CONVERSATION_ID,
   type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
+import { OrbSpawnRequestSchema } from "@pi-orb/protocol";
 import { errAsync, type ResultAsync } from "neverthrow";
 import type {
   OrbAgentError,
@@ -54,10 +55,7 @@ export function createOrbTools(service: OrbAgentOperations, notifyParent?: Paren
     defineTool({
       name: "orb_spawn",
       description: "Create a same-project orb with a prompt.",
-      parameters: Type.Object(
-        { prompt: Type.String(), name: Type.Optional(Type.String()) },
-        { additionalProperties: false },
-      ),
+      parameters: OrbSpawnRequestSchema,
       replay: "safe",
       execute: async (args, api) => output({ kind: "spawn", ...args }, api),
     }),

@@ -86,6 +86,7 @@ describe("runtime broker routes", () => {
   let gitIdentity: FakeGitIdentityStore;
   let projectInstructions: FakeProjectInstructionsStore;
   let brokerUsers: string[];
+  const spawnNudge = vi.fn();
   const initialCheckoutCommit = vi.fn(() => okAsync<string | null, StoreError>(null));
   const alertWriter = {
     appendAlert: vi.fn(() => okAsync({ recordId: "alert-record", duplicate: false })),
@@ -355,8 +356,11 @@ describe("runtime broker routes", () => {
     routeStore: ControlPlaneStore = store,
     tailnetDnsName: string | null = "tail.test.ts.net",
     hostingGuard = false,
+    checkSpawnModel = makeHarness().deps.checkSpawnModel,
   ): Promise<void> {
     app = Fastify();
+    const spawnDeps = { ...makeHarness().deps, store: routeStore, checkSpawnModel };
+    vi.spyOn(spawnDeps.control, "nudgeNextAttemptAt").mockImplementation(spawnNudge);
     if (hostingGuard)
       registerHostingAccessGuard(
         app,
@@ -372,8 +376,7 @@ describe("runtime broker routes", () => {
       ...(tailnetDnsName === null ? {} : { tailnetDnsName }),
       send: (task, caller, request) =>
         sendGuestOrbMessage(task, { ...makeHarness().deps, store: routeStore }, caller, request),
-      spawn: (task, caller, orbId, request) =>
-        spawnOrb(task, { ...makeHarness().deps, store: routeStore }, caller, orbId, request),
+      spawn: (task, caller, orbId, request) => spawnOrb(task, spawnDeps, caller, orbId, request),
       sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
         requestOrbSleep(
           task,
@@ -681,6 +684,47 @@ describe("runtime broker routes", () => {
         headers: { authorization: `Bearer ${token}`, host: "untrusted.test" },
         payload,
       });
+    it.each([
+      ["invalid", 400],
+      ["disconnected", 400],
+      ["unavailable", 503],
+      ["owner-change", 409],
+    ] as const)("returns %s before creating work", async (reason, status) => {
+      spawnNudge.mockClear();
+      await app.close();
+      await startApp(TEST_ISSUER_CONSTANTS, store, null, false, () => {
+        if (reason === "owner-change") {
+          store.seedProject({ ...makeProjectRow(PROJECT), ownerUserId: "replacement" });
+          return okAsync(undefined);
+        }
+        return errAsync({
+          type: "spawn_model_error",
+          reason,
+          message: "Model lookup unavailable.",
+        });
+      });
+      store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+      expect(
+        (await spawn({ prompt: "work", model: { provider: "claude", id: "sonnet" } })).statusCode,
+      ).toBe(status);
+      expect(store.orbSnapshot(id)).toBeNull();
+      expect((await store.getSpawnCaller(task, id))._unsafeUnwrap()).toBeNull();
+      expect(store.messageSnapshots(id)).toHaveLength(0);
+      expect(spawnNudge).not.toHaveBeenCalled();
+    });
+
+    it("accepts canonical initial settings after availability validation", async () => {
+      store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+      const request = { prompt: "work", model: { provider: "claude", id: "sonnet" } };
+      expect((await spawn(request)).statusCode).toBe(202);
+      expect(store.orbSnapshot(id)).toMatchObject({
+        harness: "claude",
+        initialModel: request.model,
+      });
+      expect((await spawn(request)).statusCode).toBe(202);
+      expect(store.messageSnapshots(id)).toHaveLength(1);
+    });
+
     it("atomically accepts a prompt, returns the configured browser URL and retries once", async () => {
       store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
       const response = await spawn();
@@ -916,8 +960,13 @@ describe("runtime broker routes", () => {
       },
     );
 
-    it("exposes an unknown time zone even without wake context", async () => {
-      store.seedOrb(makeOrbRow(ORB, PROJECT, "starting", { runtimeTokenHash: sha256(TOKEN) }));
+    it.each([null, { provider: "claude", id: "sonnet" }])("boot context %j", async (model) => {
+      store.seedOrb(
+        makeOrbRow(ORB, PROJECT, "starting", {
+          runtimeTokenHash: sha256(TOKEN),
+          initialModel: model,
+        }),
+      );
       const response = await app.inject({
         method: "POST",
         url: "/runtime/v1/orb/boot-context",
@@ -925,7 +974,12 @@ describe("runtime broker routes", () => {
         payload: { v: 1 },
       });
       expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ v: 1, context: null, userTimeZone: null });
+      expect(response.json()).toEqual({
+        v: 1,
+        context: null,
+        ...(model === null ? {} : { initialModel: model }),
+        userTimeZone: null,
+      });
     });
 
     it("returns only a FIFO-head sleep wake and does not acknowledge it", async () => {

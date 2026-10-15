@@ -728,6 +728,11 @@ export function createProcessAgentContext(
       return ok({
         env,
         models: models.value,
+        ...(orb.initialModel === null
+          ? {}
+          : {
+              initialSettings: { model: orb.initialModel, thinkingLevel: "high" as const },
+            }),
         recordModelCall,
         ...(summaryModel
           ? {

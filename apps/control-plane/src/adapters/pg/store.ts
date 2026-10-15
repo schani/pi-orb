@@ -84,6 +84,7 @@ function mapOrbRow(row: PgRow): OrbRow {
     id: String(row["id"]),
     projectId: String(row["project_id"]),
     harness: row["harness"] as OrbRow["harness"],
+    initialModel: (row["initial_model"] ?? null) as OrbRow["initialModel"],
     name: row["name"] === null ? null : String(row["name"]),
     userTimeZone: row["user_time_zone"] == null ? null : String(row["user_time_zone"]),
     autoNameLeaseUntil:
@@ -778,8 +779,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            checkout_commit, harness_session_id, harness_session_header, last_error,
            runtime_token_hash, replication_cursor, replicated_head_id, last_busy_at,
            stop_reason, sleep_id, sleep_until, last_mint_at,
-           state_changed_at, created_at, updated_at, user_time_zone, harness, agent_admission_version, last_ready_at, claude_recovery, auto_restart_times)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::json,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb,$39)
+           state_changed_at, created_at, updated_at, user_time_zone, harness, agent_admission_version, last_ready_at, claude_recovery, auto_restart_times, initial_model)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::json,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb,$39,$40::jsonb)
          ON CONFLICT (id) DO NOTHING RETURNING *`,
         [
           orb.id,
@@ -821,6 +822,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           orb.lastReadyAt === null ? null : new Date(orb.lastReadyAt),
           jsonParam(orb.claudeRecovery ?? null),
           arrayParam(orb.autoRestartTimes.map((at) => new Date(at))),
+          jsonParam(orb.initialModel),
         ],
       );
       if (inserted.isErr()) return err(inserted.error);
@@ -866,6 +868,11 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         if (project.isErr()) return err(project.error);
         if (project.value.rows[0]?.["state"] !== "active")
           return err({ type: "spawn_conflict", reason: "conflict" });
+        if (
+          params.expectedOwnerUserId !== undefined &&
+          project.value.rows[0]?.["owner_user_id"] !== params.expectedOwnerUserId
+        )
+          return err({ type: "spawn_conflict", reason: "conflict" });
         const caller = await query("SELECT * FROM orbs WHERE id = $1 FOR UPDATE", [
           params.callerOrbId,
         ]);
@@ -904,8 +911,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         }
         const now = new Date(params.orb.createdAt);
         const inserted = await query(
-          `INSERT INTO orbs (id, project_id, name, user_time_zone, state, host_kind, last_busy_at, state_changed_at, created_at, updated_at, harness)
-        VALUES ($1,$2,$3,$4,'creating',$5,$6,$6,$6,$6,$7) ON CONFLICT (id) DO NOTHING RETURNING id`,
+          `INSERT INTO orbs (id, project_id, name, user_time_zone, state, host_kind, last_busy_at, state_changed_at, created_at, updated_at, harness, initial_model)
+        VALUES ($1,$2,$3,$4,'creating',$5,$6,$6,$6,$6,$7,$8::jsonb) ON CONFLICT (id) DO NOTHING RETURNING id`,
           [
             params.orb.id,
             params.orb.projectId,
@@ -913,7 +920,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
             source["user_time_zone"],
             params.orb.hostKind,
             now,
-            source["harness"],
+            params.orb.initialModel === null ? source["harness"] : params.orb.harness,
+            jsonParam(params.orb.initialModel),
           ],
         );
         if (inserted.isErr()) return err(inserted.error);

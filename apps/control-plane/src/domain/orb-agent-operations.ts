@@ -1,4 +1,4 @@
-import { previewHost } from "@pi-orb/protocol";
+import { type OrbSpawnRequest, previewHost } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, ResultAsync } from "neverthrow";
 import { acceptsCentralAgentCaller } from "./agent-authorization.ts";
@@ -20,7 +20,7 @@ export interface OrbAgentIdentity {
 export type OrbAgentRequest =
   | { kind: "self" | "list" | "archive" | "delete" | "notification_admission" }
   | { kind: "transcript"; orbId: string }
-  | { kind: "spawn"; prompt: string; name?: string }
+  | ({ kind: "spawn" } & OrbSpawnRequest)
   | { kind: "alert"; message: string }
   | { kind: "send"; orbId: string; message: string }
   | { kind: "sleep"; durationSeconds: number };
@@ -170,6 +170,7 @@ export function createOrbAgentOperations(
                 {
                   prompt: request.prompt,
                   ...(name?.isOk() ? { name: name.value } : {}),
+                  ...(request.model === undefined ? {} : { model: request.model }),
                 },
                 caller,
               );
@@ -177,7 +178,12 @@ export function createOrbAgentOperations(
                 return err(
                   result.error.type === "spawn_conflict"
                     ? failure("conflict", "spawn conflicts with existing work")
-                    : unavailable(),
+                    : result.error.type === "spawn_model_error"
+                      ? failure(
+                          result.error.reason === "unavailable" ? "unavailable" : "invalid_request",
+                          result.error.message,
+                        )
+                      : unavailable(),
                 );
               return ok({ orbId: id, projectId: orb.projectId, messageId: id, url: url(id) });
             }

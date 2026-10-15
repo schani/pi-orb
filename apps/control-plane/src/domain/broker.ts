@@ -179,6 +179,18 @@ export async function getToken(
       continue;
     }
 
+    if (
+      provider === CODEX_PROVIDER &&
+      (typeof credential.access !== "string" ||
+        !credential.access ||
+        typeof credential.refresh !== "string" ||
+        !credential.refresh ||
+        typeof credential.accountId !== "string" ||
+        !credential.accountId ||
+        !Number.isFinite(credential.expiresAt))
+    )
+      return err(retryable("owner model credential malformed"));
+
     const now = task.wallNow();
     const expired = credential.expiresAt <= now;
     const nearExpiry = credential.expiresAt - now <= constants.refreshThresholdMs;

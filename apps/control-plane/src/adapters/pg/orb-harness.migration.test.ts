@@ -51,6 +51,39 @@ describe.each(["PGlite", ...(url ? ["PostgreSQL"] : [])])("%s orb harness migrat
       ).toBe(true);
       expect((await database.migrate())._unsafeUnwrap()).toEqual(["029_orb_harness.sql"]);
       expect((await database.store.getOrb(task, orb.id))._unsafeUnwrap()?.harness).toBe("pi");
+      (await client.query("ALTER TABLE orbs DROP COLUMN initial_model"))._unsafeUnwrap();
+      (
+        await client.query("DELETE FROM schema_migrations WHERE name = '046_orb_initial_model.sql'")
+      )._unsafeUnwrap();
+      expect((await database.migrate())._unsafeUnwrap()).toEqual(["046_orb_initial_model.sql"]);
+      expect((await database.store.getOrb(task, orb.id))._unsafeUnwrap()?.initialModel).toBeNull();
+      for (const invalid of [
+        null,
+        [],
+        {},
+        { provider: "", id: "opus" },
+        { provider: "claude", id: "" },
+        { provider: "claude", id: "opus", extra: true },
+        { provider: 1, id: "opus" },
+      ])
+        expect(
+          (
+            await client.query("UPDATE orbs SET initial_model=$2::jsonb WHERE id=$1", [
+              orb.id,
+              JSON.stringify(invalid),
+            ])
+          ).isErr(),
+        ).toBe(true);
+      const initialModel = { provider: "claude", id: "sonnet" };
+      (
+        await client.query("UPDATE orbs SET initial_model=$2::jsonb WHERE id=$1", [
+          orb.id,
+          jsonParam(initialModel),
+        ])
+      )._unsafeUnwrap();
+      expect((await database.store.getOrb(task, orb.id))._unsafeUnwrap()?.initialModel).toEqual(
+        initialModel,
+      );
       const claude = {
         ...orb,
         id: "00000000-0000-4000-8000-000000000013",
