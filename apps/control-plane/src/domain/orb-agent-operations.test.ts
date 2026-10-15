@@ -429,7 +429,23 @@ it.each(["runtime", "central"] as const)(
   "%s spawn atomically accepts initial model and retries",
   async (kind) => {
     const h = seed();
-    const deps = h.deps;
+    const checkSpawnModel = vi.fn<import("./orb-spawning.ts").CheckSpawnModel>(() =>
+      okAsync(undefined),
+    );
+    const deps = { ...h.deps, checkSpawnModel };
+    const model =
+      kind === "runtime"
+        ? { provider: "claude", id: "sonnet" }
+        : { provider: "openai-codex", id: "gpt-6-astra" };
+    const harness = kind === "runtime" ? "claude" : "pi";
+    h.store.seedOrb(
+      makeOrbRow("caller", "project", "running", {
+        harness: kind === "runtime" ? "pi" : "claude",
+        runtimeTokenHash: "token",
+        hostIncarnation: 1,
+        userTimeZone: "America/Los_Angeles",
+      }),
+    );
     const task = new NoSimulationTask("model ingress", false);
     const options = { appOrigin: "http://app", appendAlert: () => okAsync({ recordId: "a" }) };
     const service =
@@ -449,14 +465,24 @@ it.each(["runtime", "central"] as const)(
     const request = {
       kind: "spawn",
       prompt: "work",
-      model: { provider: "claude", id: "sonnet" },
+      model,
     } as const;
     const first = (await service.invoke(request, "chosen"))._unsafeUnwrap() as { orbId: string };
     expect(h.store.orbSnapshot(first.orbId)).toMatchObject({
-      harness: "claude",
-      initialModel: { provider: "claude", id: "sonnet" },
+      harness,
+      initialModel: model,
+      userTimeZone: "America/Los_Angeles",
     });
+    checkSpawnModel.mockImplementation(() =>
+      errAsync({ type: "spawn_model_error", reason: "disconnected", message: "Disconnected." }),
+    );
     expect((await service.invoke(request, "chosen"))._unsafeUnwrap()).toEqual(first);
+    expect(
+      (
+        await service.invoke({ ...request, model: { ...model, id: "changed" } }, "chosen")
+      )._unsafeUnwrapErr().code,
+    ).toBe("conflict");
+    expect(checkSpawnModel).toHaveBeenCalledTimes(1);
     expect(h.store.messageSnapshots(first.orbId)).toHaveLength(1);
   },
 );

@@ -30,16 +30,26 @@ it("real SDK: per-session model/thinking survive reopen before inference without
     const created = createPersistentSession(dir, join(dir, "sessions"));
     expect(created.isOk()).toBe(true);
     if (created.isErr()) return;
-    const defaults = SettingsManager.inMemory({ defaultThinkingLevel: "high" });
+    const defaults = SettingsManager.inMemory({
+      defaultProvider: second.provider,
+      defaultModel: second.id,
+      defaultThinkingLevel: "high",
+    });
     const { session } = await createAgentSession({
       cwd: dir,
       agentDir: dir,
       sessionManager: created.value,
       modelRuntime: models,
       settingsManager: defaults,
-      model: first,
+      ...restoreSessionSettings(created.value, candidates, {
+        provider: first.provider,
+        id: first.id,
+      }),
       thinkingLevel: "high",
     });
+    expect(session.model?.id).toBe(first.id);
+    expect(session.thinkingLevel).toBe("high");
+    expect(defaults.getDefaultModel()).toBe(second.id);
     const observed: string[] = [];
     session.subscribe((event) => observed.push(event.type));
     await session.setModel(second);
@@ -57,7 +67,10 @@ it("real SDK: per-session model/thinking survive reopen before inference without
       provider: second.provider,
       modelId: second.id,
     });
-    const selection = restoreSessionSettings(reopened, candidates);
+    const selection = restoreSessionSettings(reopened, candidates, {
+      provider: first.provider,
+      id: "removed-initial-intent",
+    });
     expect(selection?.model.id).toBe(second.id);
     const beforeBinding = reopened.getEntries();
     const restored = await createAgentSession({

@@ -107,7 +107,7 @@ export interface RuntimeRouteDeps {
     request: OrbSpawnRequest,
   ) => ResultAsync<
     void,
-    StoreError | SpawnConflict | import("../domain/orb-spawn-model.ts").SpawnModelError
+    StoreError | SpawnConflict | import("../domain/orb-spawning.ts").SpawnModelError
   >;
   readonly sleepSelf: (
     task: SimulationTask,

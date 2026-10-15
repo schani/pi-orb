@@ -1218,7 +1218,7 @@ export interface OrbResourceCleaner {
 }
 
 export interface ControlPlaneDeps {
-  readonly checkSpawnModel: import("./orb-spawn-model.ts").CheckSpawnModel;
+  readonly checkSpawnModel: import("./orb-spawning.ts").CheckSpawnModel;
   readonly workspaceUploadRuntime?: (
     task: SimulationTask,
   ) => import("./workspace-uploads.ts").UploadRuntime;

@@ -1,6 +1,6 @@
 import type { SimulationTask } from "determined";
 import { errAsync, type Result, ResultAsync } from "neverthrow";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
   FakePointerStore,
   FakeSecretStore,
@@ -87,6 +87,21 @@ describe("credential broker (DST)", () => {
             );
             expect(grant.accessToken).toBe(credential.access);
             expect(grant.generation).toBe(1);
+            const pointer = harness.pointers.snapshot(PROVIDER);
+            assert(pointer);
+            harness.pointers.seedRow({
+              ...pointer,
+              secretVersion: harness.secrets.seedSecret(PROVIDER, {
+                kind: "claude_subscription",
+                token: "not-codex",
+                createdAt: 0,
+              }),
+            });
+            expect(
+              (
+                await getToken(task, harness.deps, PROVIDER, { reason: "startup" })
+              )._unsafeUnwrapErr(),
+            ).toMatchObject({ type: "token_retryable" });
           },
         },
       ]);

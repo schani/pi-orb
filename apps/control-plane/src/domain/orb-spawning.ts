@@ -6,8 +6,18 @@ import type { StoreError } from "./errors.ts";
 import { logOrbEvent } from "./log.ts";
 import { newOrbRow } from "./new-orb.ts";
 import type { OrbRow } from "./orb.ts";
-import { type SpawnModelError, spawnModelHarness } from "./orb-spawn-model.ts";
 import type { ArchiveCaller, ControlPlaneDeps, ControlPlaneStore, SpawnConflict } from "./ports.ts";
+
+export interface SpawnModelError {
+  readonly type: "spawn_model_error";
+  readonly reason: "invalid" | "disconnected" | "unavailable";
+  readonly message: string;
+}
+export type CheckSpawnModel = (
+  task: SimulationTask,
+  ownerUserId: string,
+  model: NonNullable<OrbSpawnRequest["model"]>,
+) => ResultAsync<void, SpawnModelError>;
 
 export function spawnOrb(
   task: SimulationTask,
@@ -19,7 +29,13 @@ export function spawnOrb(
 ): ResultAsync<void, StoreError | SpawnConflict | SpawnModelError> {
   const initialModel = request.model ?? null;
   const selectedHarness =
-    initialModel === null ? caller.harness : spawnModelHarness(initialModel.provider);
+    initialModel === null
+      ? caller.harness
+      : initialModel.provider === "openai-codex"
+        ? "pi"
+        : initialModel.provider === "claude"
+          ? "claude"
+          : null;
   if (selectedHarness === null)
     return errAsync({
       type: "spawn_model_error",

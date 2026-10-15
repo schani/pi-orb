@@ -353,23 +353,6 @@ export class DurableAgent implements AgentSessionFacade {
             thinkingLevel: initial.thinkingLevel,
           },
         });
-        if (options.initialSettings !== undefined) {
-          stage = "model";
-          const effective = (await root.agent(context)).model;
-          if (effective === undefined)
-            return err(durableError("central model unavailable at startup"));
-          const available = await ResultAsync.fromThrowable(
-            () => models.getAvailable(effective.provider),
-            () => durableError("central model availability lookup failed", true),
-          )();
-          if (available.isErr()) return err(available.error);
-          if (
-            !available.value.some(
-              (model) => model.provider === effective.provider && model.id === effective.modelId,
-            )
-          )
-            return err(durableError("central model unavailable at startup"));
-        }
         stage = "identity";
         const priorIdentity = await options.storage.findDocument(
           { kind: "orb.identity", scope: { kind: "conversation", conversationId: root.id } },

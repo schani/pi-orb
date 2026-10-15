@@ -4,7 +4,7 @@
 
 **Status: implemented and locally qualified, revised 2026-09-16.** The user approved the simplified design and required DST/tests first. Lifecycle cluster, the title-free anchored picker, live-only settings display, idle-only mutation and last-applied-wins are selected; `docs/open-questions.md`, agent-settings question 62 is resolved. Initial implementation was qualified without deployment. The user subsequently authorized pushing to `main` and dispatching the production GitHub Actions Deploy workflow (2026-09-14); its release transaction reruns checks and full Docker-backed E2E before applying. Typecheck, lint, unit/DST/infra and full process-backed E2E pass locally; exact coverage and platform skips are recorded in `docs/testing.md`.
 
-**Spawn initial intent (decided 2026-10-14):** nullable immutable `orbs.initial_model` is bootstrap input, not current settings. Fresh central/Pi/Claude sessions apply it before input; restored native choices win. Missing initial intent retains existing defaults. Contract and atomic admission: `docs/orb-spawning.md`.
+**Spawn initial intent (decided 2026-10-14):** nullable immutable `orbs.initial_model` is bootstrap input, not current settings. Fresh central/Pi/Claude sessions apply it through their existing settings initialization before input; restored native choices win, even when the initial model is no longer available. Missing initial intent retains existing defaults. Contract and atomic admission: `docs/orb-spawning.md`.
 
 ## The smallest useful design
 

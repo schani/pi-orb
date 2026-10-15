@@ -1,3 +1,4 @@
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { createRegistry, MemoryStorage } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
@@ -15,31 +16,22 @@ async function models() {
   )._unsafeUnwrap();
 }
 
-function openAgent(
-  models: DurableAgentOptions["models"],
-  storage: DurableAgentOptions["storage"],
-  id?: string,
-) {
-  return DurableAgent.open({
-    orbId: "catalog",
-    models,
-    storage,
-    registry: createRegistry(),
-    env: new NodeExecutionEnv({ cwd: "/tmp" }),
-    checkoutCommit: "commit",
-    instructions: "",
-    ...(id === undefined
-      ? {}
-      : {
-          initialSettings: { model: { provider: "openai-codex", id }, thinkingLevel: "high" },
-        }),
-  });
-}
-
 describe("Durable public model catalog", () => {
   it("offers the four shared friendly aliases with canonical IDs and SDK capabilities", async () => {
     const runtime = await models();
-    const agent = (await openAgent(runtime, new MemoryStorage()))._unsafeUnwrap();
+    const availability = vi.spyOn(runtime, "getAvailable").mockResolvedValue([]);
+    const agent = (
+      await DurableAgent.open({
+        orbId: "catalog",
+        storage: new MemoryStorage(),
+        models: runtime,
+        registry: createRegistry(),
+        env: new NodeExecutionEnv({ cwd: "/tmp" }),
+        checkoutCommit: "commit",
+        instructions: "",
+      })
+    )._unsafeUnwrap();
+    availability.mockRestore();
     try {
       const settings = agent.snapshot()._unsafeUnwrap().settings;
       assert(settings);
@@ -78,63 +70,71 @@ describe("Durable public model catalog", () => {
     }
   });
 
-  it.each([
-    ["gpt-6-sol", "gpt-6-astra"],
-    ["gpt-6.1-sol", "removed-initial-intent"],
-  ])("restores exact native %s over initial intent %s", async (saved, intent) => {
+  it("restores an older saved canonical selection without resolving it to the current alias", async () => {
     const runtime = await models();
     const authority = new MemoryAgentPersistence();
-    const open = async (id: string) =>
-      openAgent(runtime, (await authority.openOrb("catalog", false))._unsafeUnwrap().storage, id);
-    try {
-      const original = (await open(saved))._unsafeUnwrap();
-      expect(original.snapshot()._unsafeUnwrap().settings?.settings.model).toEqual({
-        provider: "openai-codex",
-        id: saved,
+    const open = async (id: string, storage?: DurableAgentOptions["storage"]) =>
+      DurableAgent.open({
+        orbId: "saved-catalog",
+        storage:
+          storage ?? (await authority.openOrb("saved-catalog", false))._unsafeUnwrap().storage,
+        models: runtime,
+        registry: createRegistry(),
+        env: new NodeExecutionEnv({ cwd: "/tmp" }),
+        checkoutCommit: "commit",
+        instructions: "",
+        initialSettings: { model: { provider: "openai-codex", id }, thinkingLevel: "high" },
       });
-      await original.close();
-      const resumed = (await open(intent))._unsafeUnwrap();
+    const original = (await open("gpt-6-sol"))._unsafeUnwrap();
+    expect(original.snapshot()._unsafeUnwrap().settings?.settings.model).toEqual({
+      provider: "openai-codex",
+      id: "gpt-6-sol",
+    });
+    await original.close();
+    const resumed = (await open("removed-initial-intent"))._unsafeUnwrap();
+    try {
+      const settings = resumed.snapshot()._unsafeUnwrap().settings;
+      expect(settings?.settings.model).toEqual({ provider: "openai-codex", id: "gpt-6-sol" });
+      expect(settings?.models.map(({ name }) => name)).toEqual(["Astra", "Sol", "Terra", "Luna"]);
+      expect(settings?.models.find(({ name }) => name === "Sol")?.id).toBe("gpt-6.1-sol");
+      const stream = vi.spyOn(runtime, "streamSimple");
+      const storage = new MemoryStorage();
+      const fresh = (await open("removed-after-spawn", storage))._unsafeUnwrap();
       try {
-        const settings = resumed.snapshot()._unsafeUnwrap().settings;
-        expect(settings?.settings.model).toEqual({ provider: "openai-codex", id: saved });
-        expect(settings?.models.map(({ name }) => name)).toEqual(["Astra", "Sol", "Terra", "Luna"]);
-        expect(settings?.models.find(({ name }) => name === "Sol")?.id).toBe("gpt-6.1-sol");
+        expect(fresh.snapshot()._unsafeUnwrap().settings?.settings.model.id).toBe(
+          "removed-after-spawn",
+        );
+        (
+          await fresh.deliver({
+            baseUrl: "unused",
+            messageId: "first",
+            messageIds: ["first"],
+            content: [{ type: "text", text: "work" }],
+          })
+        )._unsafeUnwrap();
+        await fresh.waitForIdle();
+        expect(
+          (await storage.scanTasks({}, 100, undefined, BACKGROUND_CONTEXT)).items,
+        ).toContainEqual(
+          expect.objectContaining({
+            state: expect.objectContaining({
+              outcome: {
+                status: "failed",
+                error: {
+                  message: "Model openai-codex/removed-after-spawn is not available",
+                  detail: { reason: "no_model" },
+                },
+              },
+            }),
+          }),
+        );
       } finally {
-        await resumed.close();
+        await fresh.close();
       }
+      expect(stream).not.toHaveBeenCalled();
     } finally {
+      await resumed.close();
       await authority.close();
     }
   });
-});
-
-it.each(["removed", "disconnected", "lookup-throws"] as const)(
-  "rejects %s explicit initial model before readiness without inference",
-  async (failure) => {
-    const runtime = await models();
-    const available = vi.spyOn(runtime, "getAvailable");
-    if (failure === "disconnected") available.mockResolvedValue([]);
-    if (failure === "lookup-throws") available.mockRejectedValue(new Error("credential-secret"));
-    const stream = vi.spyOn(runtime, "streamSimple");
-    const result = await openAgent(
-      runtime,
-      new MemoryStorage(),
-      failure === "removed" ? "removed" : "gpt-6-astra",
-    );
-    if (result.isOk()) await result.value.close();
-    expect(result.isErr()).toBe(true);
-    expect(result._unsafeUnwrapErr()).toMatchObject({
-      type: "runtime_client_error",
-      retryable: failure === "lookup-throws",
-    });
-    expect(result._unsafeUnwrapErr().message).not.toContain("credential-secret");
-    expect(stream).not.toHaveBeenCalled();
-  },
-);
-
-it("keeps omitted default bootstrap available before owner login", async () => {
-  const runtime = await models();
-  vi.spyOn(runtime, "getAvailable").mockResolvedValue([]);
-  const agent = (await openAgent(runtime, new MemoryStorage()))._unsafeUnwrap();
-  await agent.close();
 });

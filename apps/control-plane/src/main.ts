@@ -18,7 +18,6 @@ import { NoSimulationTask, type SimulationTask } from "determined";
 import Fastify from "fastify";
 import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
 import { ClaudePtyAuthTransport } from "./adapters/claude-auth-pty.ts";
-import { checkClaudeSpawnModel } from "./adapters/claude-model-catalog.ts";
 import { openControlPlaneDatabase } from "./adapters/database.ts";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
 import { DurableAgentPlane } from "./adapters/durable/manager.ts";
@@ -523,7 +522,7 @@ export async function main(
       finish: (row) => uploadRequest(task, deps, row, "finish"),
     }),
     store: database.store,
-    checkSpawnModel: createSpawnModelCheck(brokerForUser, checkClaudeSpawnModel),
+    checkSpawnModel: createSpawnModelCheck(brokerForUser, claudeAuth),
     hostProvider,
     resourceCleaner:
       tailscaleForProvider && tailscaleClient !== null

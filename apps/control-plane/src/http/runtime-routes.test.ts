@@ -86,6 +86,7 @@ describe("runtime broker routes", () => {
   let gitIdentity: FakeGitIdentityStore;
   let projectInstructions: FakeProjectInstructionsStore;
   let brokerUsers: string[];
+  const spawnNudge = vi.fn();
   const initialCheckoutCommit = vi.fn(() => okAsync<string | null, StoreError>(null));
   const alertWriter = {
     appendAlert: vi.fn(() => okAsync({ recordId: "alert-record", duplicate: false })),
@@ -358,6 +359,8 @@ describe("runtime broker routes", () => {
     checkSpawnModel = makeHarness().deps.checkSpawnModel,
   ): Promise<void> {
     app = Fastify();
+    const spawnDeps = { ...makeHarness().deps, store: routeStore, checkSpawnModel };
+    vi.spyOn(spawnDeps.control, "nudgeNextAttemptAt").mockImplementation(spawnNudge);
     if (hostingGuard)
       registerHostingAccessGuard(
         app,
@@ -373,14 +376,7 @@ describe("runtime broker routes", () => {
       ...(tailnetDnsName === null ? {} : { tailnetDnsName }),
       send: (task, caller, request) =>
         sendGuestOrbMessage(task, { ...makeHarness().deps, store: routeStore }, caller, request),
-      spawn: (task, caller, orbId, request) =>
-        spawnOrb(
-          task,
-          { ...makeHarness().deps, store: routeStore, checkSpawnModel },
-          caller,
-          orbId,
-          request,
-        ),
+      spawn: (task, caller, orbId, request) => spawnOrb(task, spawnDeps, caller, orbId, request),
       sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
         requestOrbSleep(
           task,
@@ -688,21 +684,33 @@ describe("runtime broker routes", () => {
         headers: { authorization: `Bearer ${token}`, host: "untrusted.test" },
         payload,
       });
-    it("returns availability errors without creating work", async () => {
+    it.each([
+      ["invalid", 400],
+      ["disconnected", 400],
+      ["unavailable", 503],
+      ["owner-change", 409],
+    ] as const)("returns %s before creating work", async (reason, status) => {
+      spawnNudge.mockClear();
       await app.close();
-      await startApp(TEST_ISSUER_CONSTANTS, store, null, false, () =>
-        errAsync({
+      await startApp(TEST_ISSUER_CONSTANTS, store, null, false, () => {
+        if (reason === "owner-change") {
+          store.seedProject({ ...makeProjectRow(PROJECT), ownerUserId: "replacement" });
+          return okAsync(undefined);
+        }
+        return errAsync({
           type: "spawn_model_error",
-          reason: "unavailable",
+          reason,
           message: "Model lookup unavailable.",
-        }),
-      );
+        });
+      });
       store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
       expect(
         (await spawn({ prompt: "work", model: { provider: "claude", id: "sonnet" } })).statusCode,
-      ).toBe(503);
+      ).toBe(status);
       expect(store.orbSnapshot(id)).toBeNull();
+      expect((await store.getSpawnCaller(task, id))._unsafeUnwrap()).toBeNull();
       expect(store.messageSnapshots(id)).toHaveLength(0);
+      expect(spawnNudge).not.toHaveBeenCalled();
     });
 
     it("accepts canonical initial settings after availability validation", async () => {
