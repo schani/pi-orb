@@ -305,6 +305,7 @@ Reference material:
 - [docs/postmortems/2026-10-09-native-runtime-entry-acceptance.md](docs/postmortems/2026-10-09-native-runtime-entry-acceptance.md) — stale child-process matcher blocked native acceptance before apply
 - [docs/postmortems/2026-10-09-resource-fetch-main-branch.md](docs/postmortems/2026-10-09-resource-fetch-main-branch.md) — central resource fetch assumed `main`, failing non-`main` repositories
 - [docs/postmortems/2026-10-11-webkit-index-click-layout-shift.md](docs/postmortems/2026-10-11-webkit-index-click-layout-shift.md) — loading orb lists moved an index link mid-click; WebKit dropped the create
+- [docs/postmortems/2026-10-15-webkit-tab-close-libsoup.md](docs/postmortems/2026-10-15-webkit-tab-close-libsoup.md) — closing a loading WebKit tab corrupted its network process; later requests never completed
 - [docs/postmortems/2026-10-09-control-plane-cpu-429.md](docs/postmortems/2026-10-09-control-plane-cpu-429.md) — saturated shared control-plane CPU coincided with Cloud Run ingress refusals below configured concurrency
 - [docs/references/amp-orb-lessons.md](docs/references/amp-orb-lessons.md) — lessons from Amp's “Putting an Agent in an Orb”
 - [docs/EXE-DEV.md](docs/EXE-DEV.md) — the full exe.dev host-provider evaluation

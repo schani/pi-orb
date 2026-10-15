@@ -460,6 +460,8 @@ async function checkOrbLinks(page: Page, origin: string) {
         await expect(
           tab.getByRole("heading", { name: "Orb doesn't exist", exact: true }),
         ).toBeVisible();
+      // Closing a loading WebKit tab corrupts its network process (docs/postmortems/2026-10-15-webkit-tab-close-libsoup.md).
+      await tab.waitForLoadState("networkidle");
       await tab.close();
       await expect(page).toHaveURL(origin + "/usage");
     }
@@ -499,6 +501,7 @@ async function checkOrbLinks(page: Page, origin: string) {
   const tab = await newPage;
   await expect(tab).toHaveURL(origin + href);
   await expect(page).toHaveURL(origin + "/usage");
+  await tab.waitForLoadState("networkidle");
   await tab.close();
   await page.mouse.move(0, 0);
   await page.getByLabel("Measure").focus();
