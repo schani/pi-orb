@@ -3,6 +3,7 @@ import type { ServerFrame } from "@pi-orb/protocol";
 import * as protocol from "@pi-orb/protocol";
 import { expect, it, vi } from "vitest";
 import { ClaudeOrbAgent } from "./agent.ts";
+import { ClaudeDiagnostics } from "./diagnostics.ts";
 
 it("Claude text starts replace and deltas append without parsing reasoning or adding its metadata", () => {
   const headline = vi.spyOn(protocol, "reasoningHeadline");
@@ -18,13 +19,16 @@ it("Claude text starts replace and deltas append without parsing reasoning or ad
     const frames: ServerFrame[] = [];
     agent.subscribe((frame) => frames.push(frame));
     const send = (event: unknown) =>
-      agent["onMessage"]({
-        type: "stream_event",
-        uuid: "00000000-0000-0000-0000-000000000000",
-        session_id: "session",
-        parent_tool_use_id: null,
-        event,
-      } as SDKMessage);
+      agent["onMessage"](
+        {
+          type: "stream_event",
+          uuid: "00000000-0000-0000-0000-000000000000",
+          session_id: "session",
+          parent_tool_use_id: null,
+          event,
+        } as SDKMessage,
+        new ClaudeDiagnostics([]),
+      );
     send({
       type: "content_block_start",
       index: 4,
@@ -78,13 +82,16 @@ it("Claude suppresses empty thinking and publishes content-free initial, heading
   const frames: ServerFrame[] = [];
   agent.subscribe((frame) => frames.push(frame));
   const send = (event: unknown) =>
-    agent["onMessage"]({
-      type: "stream_event",
-      uuid: "00000000-0000-0000-0000-000000000000",
-      session_id: "session",
-      parent_tool_use_id: null,
-      event,
-    } as SDKMessage);
+    agent["onMessage"](
+      {
+        type: "stream_event",
+        uuid: "00000000-0000-0000-0000-000000000000",
+        session_id: "session",
+        parent_tool_use_id: null,
+        event,
+      } as SDKMessage,
+      new ClaudeDiagnostics([]),
+    );
   send({
     type: "content_block_start",
     index: 0,

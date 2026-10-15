@@ -31,6 +31,12 @@ Persist the steer flag, native input UUID, inbox identities and operation ID bef
 
 Existing control-plane `message-batch-dispatched` edges record turn/steer delivery. Hidden replicated `claude.steering_result` edges retain query/operation/result identities, answered and pending input UUIDs and native queued-turn count; no prompts or tool output. User messages and operation outcomes remain visible in ordinary history. Non-steered operations emit no steering diagnostics.
 
+**Observed behavior (2026-10-15):** an SDK `is_error` result makes the aggregate operation fail; a later successful result does not clear it. Final-result success alone cannot establish operation success. The triggering error in this incident is unidentified: `docs/postmortems/2026-10-15-claude-success-failed-operation.md`.
+
+**Decision — 2026-10-15; local, undeployed:** persist each root SDK assistant error and each error result in existing replicated history as `claude.assistant_error` / `claude.result_error`, including during shutdown or Abort. Visible rows show the category and HTTP status when supplied. Assistant categories come from SDK `error`; result categories retain error subtypes, or `api_error` for `success` with `is_error`. Separate records avoid assigning a stale assistant category to a later result. Child assistant errors stay private.
+
+Overflow retains session/native-session/query/operation/message/result identities, subtype, error flag, error strings/count, error text and explicit nullable `apiErrorStatus`; never infer status from text. SDK 0.3.300 error variants supply `errors[]`; its success variant supplies `result` and optional `api_error_status`. Only error text blocks enter assistant diagnostics, not reasoning, tools or arbitrary SDK fields. Reuse credential-aware initialization redaction before bounding: up to 16 error strings of 1,024 characters each, or 8,192 characters of error text; `truncated` and `errorCount` expose loss. No healthy-result logging, database schema or new journal. History publication failure fails health with `history_unavailable`. Aggregate failure/Abort and next-operation reset semantics are unchanged; later success cannot erase earlier diagnostics.
+
 Native priority semantics and pinned-version evidence: `docs/claude-sdk-capabilities.md`. Qualification: `docs/testing.md`.
 
 ## Manual compaction (decided 2026-10-06; local, undeployed)

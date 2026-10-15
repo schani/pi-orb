@@ -1091,7 +1091,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.exited = started.value.exited;
     this.stdoutEnded = started.value.stdoutEnded;
     this.requestShutdown = started.value.requestShutdown;
-    this.consuming = this.consume(sdk);
+    this.consuming = this.consume(sdk, diagnostics);
     return ResultAsync.fromThrowable(
       async () => {
         progress.stage = "account";
@@ -1154,10 +1154,10 @@ export class ClaudeOrbAgent implements OrbAgent {
   waitForStream(): Promise<void> {
     return this.consuming;
   }
-  private async consume(sdk: ClaudeQuery): Promise<void> {
+  private async consume(sdk: ClaudeQuery, diagnostics: ClaudeDiagnostics): Promise<void> {
     const result = await ResultAsync.fromThrowable(
       async () => {
-        for await (const message of sdk) this.onMessage(message);
+        for await (const message of sdk) this.onMessage(message, diagnostics);
       },
       () => ({ message: "Claude SDK stream failed; retained native state requires inspection." }),
     )();
@@ -1180,7 +1180,37 @@ export class ClaudeOrbAgent implements OrbAgent {
       );
     }
   }
-  private onMessage(message: SDKMessage): void {
+  private onMessage(message: SDKMessage, diagnostics: ClaudeDiagnostics): void {
+    const diagnostic =
+      message.type === "result" && (message.is_error || message.subtype !== "success")
+        ? diagnostics.result(message)
+        : message.type === "assistant" &&
+            message.parent_tool_use_id === null &&
+            message.error !== undefined
+          ? diagnostics.assistant(message)
+          : null;
+    if (diagnostic !== null) {
+      const status = diagnostic.apiErrorStatus;
+      const recorded = this.platformEvent(
+        `claude.${message.type}_error`,
+        `Claude error: ${diagnostic.category}${status === null ? "" : ` (HTTP ${status})`}.`,
+        {
+          sessionId: this.state?.id ?? null,
+          nativeSessionId: message.session_id ?? null,
+          queryId: this.queryId,
+          operationId: this.activity.operationId,
+          messageId: message.uuid ?? null,
+          resultId: message.type === "result" ? (message.uuid ?? null) : null,
+          subtype: message.type === "result" ? message.subtype : null,
+          isError: message.type === "result" ? message.is_error : true,
+          ...diagnostic,
+        },
+      );
+      if (recorded.isErr()) {
+        this.fail("history_unavailable", recorded.error.message);
+        return;
+      }
+    }
     if (
       this.closing !== null &&
       ((message.type === "system" &&
