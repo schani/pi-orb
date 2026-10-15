@@ -23,7 +23,7 @@ it("logs initialization details once before disposal and persists the user expla
           retryable: false,
           message: "Claude initialization failed at account: Connection refused",
           diagnostics:
-            "Error: Connection refused\\n at SDK.accountInfo\\nstderr: TLS handshake failed",
+            "queryId=query-1 operationId=operation-1\\nError: Connection refused\\n at SDK.accountInfo\\nexitCode=17 signal=none\\nstderr: TLS handshake failed",
         },
       };
       const result = await sim.runTasks([
@@ -38,6 +38,10 @@ it("logs initialization details once before disposal and persists the user expla
             expect(h.world.hostCount("orb")).toBe(1);
             expect(log.matching("runtime-failed")[0]).toContain(health.error.message);
             expect(log.matching("runtime-failed")[0]).toContain("TLS handshake failed");
+            expect(log.matching("runtime-failed")[0]).toContain(
+              "queryId=query-1 operationId=operation-1",
+            );
+            expect(log.matching("runtime-failed")[0]).toContain("exitCode=17 signal=none");
             expect(h.store.orbSnapshot("orb")?.lastError).toContain("account: Connection refused");
             expect((await handleFailedRuntime(task, h.deps, row, health))._unsafeUnwrap()).toBe(
               false,
