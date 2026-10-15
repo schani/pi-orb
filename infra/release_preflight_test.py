@@ -58,7 +58,7 @@ class PreflightTest(unittest.TestCase):
             self.assertLess(script.index("npm ci"), script.index("npm run test:e2e:install"))
             self.assertLess(script.index("npm run test:e2e:install"), script.index(command))
 
-    def test_release_workflows_cache_only_dependencies_and_do_not_prebuild_runtime(self):
+    def test_release_dependency_caches_and_single_e2e_runtime_build(self):
         key = "key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}"
         e2e = Path(".github/workflows/e2e.yml").read_text()
         self.assertIn("path: ~/.cache/ms-playwright", e2e)
@@ -67,7 +67,8 @@ class PreflightTest(unittest.TestCase):
         for path in [".github/workflows/deploy.yml", ".github/workflows/e2e.yml"]:
             workflow = Path(path).read_text()
             self.assertIn("cache: npm", workflow)
-            self.assertNotIn("apps/orb-runtime/Dockerfile", workflow)
+        self.assertEqual(e2e.count("file: apps/orb-runtime/Dockerfile"), 1)
+        self.assertNotIn("apps/orb-runtime/Dockerfile", Path(".github/workflows/deploy.yml").read_text())
         self.assertNotIn("apps/orb-runtime/Dockerfile", Path("infra/release.sh").read_text())
 
     def test_ci_builds_control_plane_without_deployment_authority(self):

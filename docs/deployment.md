@@ -213,12 +213,13 @@ Typecheck, lint, database migration, apply, retirement, activation, and
 post-deploy smokes remain serial; short npm children are not parallelized because
 terminating npm does not guarantee termination of its tool subprocess. E2E owns its one runtime image
 build rather than release wrappers rebuilding it. Deploy and E2E cache npm data;
-E2E caches Playwright browser binaries by OS and exact lockfile only. Release records,
-test output, credentials, and other mutable state are not cached.
+E2E caches Playwright browser binaries by OS and exact lockfile, plus trusted
+runtime Docker build layers as decided below. Host npm caches do not enter Docker.
+Release records, test output, credentials, and other mutable state are not cached.
 
 ## Deployment-speed decisions and proposals (2026-10-05)
 
-**Items 1 and 5 approved and implemented; four-runner E2E is hosted-qualified, release reuse is not live-validated. Not deployed. Other items remain unapproved.** The
+**Items 1, 2 and 5 approved and implemented; four-runner E2E is hosted-qualified, release reuse and Docker layer caching are not live-validated. Not deployed. Other items remain unapproved.** The
 September 18 example above took 62m15s: checks 33m14s, build/acceptance/publication
 9m51s, smokes 10m36s, and all remaining stages 8m34s (roughly nine minutes).
 These historical timings identify candidates, not measured savings.
@@ -250,9 +251,20 @@ In priority order:
    GitHub runners, 16m32s workflow elapsed. The historical serial 35m12s / 407-test
    run is not a controlled same-source benchmark; no isolated speedup is claimed.
    Evidence and shard timings are in `docs/testing.md`.
-2. **Persist a trusted BuildKit layer cache.** Reuse build layers without treating
-   cache hits as acceptance. Restrict cache writers to trusted workflows, retain
-   input/digest provenance, and exclude credentials and mutable test/release state.
+2. **Approved: trusted BuildKit layer cache (decided 2026-10-15; hosted validation pending).**
+   Each E2E runner builds the current checkout with pinned Buildx actions, imports
+   GHA scope `e2e-runtime-linux-amd64-v1`, and loads `pi-orb-runtime:dev` locally.
+   Only shard 1 of `push`/`main` exports (`mode=max`); PRs and manual runs import
+   only. GitHub's branch-scoped cache isolation prevents PR-written caches from
+   reaching main qualification. No registry publication or cloud credentials.
+   Setup requires the loaded image ID to match the successful build action's
+   exact ID; missing/malformed/mismatched images fail without a fallback build.
+   Local runs retain their current-tree Docker build. The ten-minute build budget,
+   four isolated serial shards, assertions and full qualification gates remain.
+   Build progress records layer hits/misses; the job summary records source SHA,
+   image ID, scope and writer policy. Automatic build-record artifacts are disabled;
+   credentials, logs and mutable test/release state are not cache inputs. This is
+   layer reuse, not accepted-image reuse; no speedup or hosted cache-hit proof yet.
 3. **Overlap the remote native build with checks.** Native and control-plane
    builds already run together; the additional overlap is with qualification.
    No publication or deployment before all required checks and acceptance pass.

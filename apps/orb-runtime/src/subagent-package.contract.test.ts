@@ -6,6 +6,8 @@ import { UPLOADED_SOURCE_PATHS } from "../../../packages/native-image/src/snapsh
 it("includes the immutable fork artifact in both runtime installation paths", () => {
   const dockerfile = readFileSync(fileURLToPath(new URL("../Dockerfile", import.meta.url)), "utf8");
   expect(dockerfile.indexOf("COPY vendor vendor")).toBeGreaterThan(-1);
-  expect(dockerfile.indexOf("COPY vendor vendor")).toBeLessThan(dockerfile.indexOf("RUN npm ci"));
+  expect(dockerfile.indexOf("COPY vendor vendor")).toBeLessThan(
+    dockerfile.indexOf("npm ci --workspace @pi-orb/orb-runtime"),
+  );
   expect(UPLOADED_SOURCE_PATHS).toContain("vendor");
 });

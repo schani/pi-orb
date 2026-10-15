@@ -259,8 +259,9 @@ export function docker(args: string[], timeoutMs = 120_000): Promise<string> {
       args,
       { timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 16e6 },
       (error, stdout, stderr) => {
-        if (error !== null) reject(new Error(`docker ${args[0]}: ${stderr || error.message}`));
-        else resolve(stdout.trim());
+        if (error !== null) {
+          reject(new Error(`docker ${args[0]}: ${stderr || error.message}`, { cause: error }));
+        } else resolve(stdout.trim());
       },
     );
   });
