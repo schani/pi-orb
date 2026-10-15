@@ -232,7 +232,7 @@ describe("orb native file drop", () => {
         page.getByRole("textbox", { name: "Message the orb" }),
       );
       const point = await page.evaluate(() => {
-        // Empty transcript content has no native hit box; expose the containing main.
+        // Empty history has no native hit box; hide it so the transcript pane is hit.
         const doc = (
           globalThis as unknown as {
             document: {

@@ -18,7 +18,7 @@ import type { ControlPlaneDeps } from "./ports.ts";
 const ORB = "orb-hooks";
 const PROJECT = "project-hooks";
 
-/** Two modeled host boots plus the longest setup any scenario scripts. */
+/** Generous bound for any boot wait: well past the setup hold and the create/start deadline. */
 const CONVERGE_MS = 1_200_000;
 
 function seedCreatingOrb(task: SimulationTask, harness: TestHarness): void {
@@ -217,9 +217,9 @@ describe("orb boot hooks (DST)", () => {
           /deadline_exceeded|runtime_never_answered/,
         );
         // This is what distinguishes silence from a hook that is still working:
-        // an identically configured setup that keeps reporting survives all the
-        // way to `setupHookHoldMs` (the scenario above), while a silent runtime
-        // is failed well inside it.
+        // an identically configured setup that keeps reporting is failed only
+        // once it outlasts `setupHookHoldMs` (the scenario above), while a silent
+        // runtime is failed well inside it.
         expect(failedAfterSilenceMs, capture.lines().join("\n")).toBeLessThan(
           TEST_CONSTANTS.setupHookHoldMs,
         );
@@ -568,8 +568,8 @@ describe("orb boot hook races (DST)", () => {
                 { timeoutMs: CONVERGE_MS },
               );
               // The launch specification changes under a boot whose hook is
-              // still working: that compute is stale before it ever ran
-              // (docs/compute-replacement.md).
+              // still working: that compute is stale, so its unfinished boot is
+              // discarded rather than completed (docs/compute-replacement.md).
               harness.world.setDesiredSpec("spec-updated");
               await waitForRunning(task, harness);
               stop.abort();

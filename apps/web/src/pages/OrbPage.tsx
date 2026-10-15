@@ -1393,9 +1393,7 @@ function OrbConversation({
     notificationPermission(),
   );
 
-  // Ask as soon as an orb page opens. The header button remains as a fallback for browsers that
-  // require a user gesture or suppress the first prompt; denied permission still requires the
-  // user to change browser site settings.
+  // Ask once when an orb page opens. Denied permission can only be changed in site settings.
   useEffect(() => {
     if (notifications !== "default") return;
     let cancelled = false;

@@ -93,9 +93,9 @@ describe("boot-failure detection (DST)", () => {
           name: "driver",
           f: async (task) => {
             // Health answers as soon as the container is up (~65s of modeled
-            // boot latency) but reports ready only 40s later — together well
-            // past the 120s unreachable sub-deadline, which only counts hosts
-            // whose runtime has never answered at all.
+            // boot latency) and reports initializing for 40s more, so ready
+            // lands ~105s after start. The 120s unreachable sub-deadline counts
+            // only hosts whose runtime has never answered, so it must not trip.
             harness.world.configureOrb(ORB, { initDurationMs: 40_000 });
             seedCreatingOrb(task, harness);
             await waitUntil(

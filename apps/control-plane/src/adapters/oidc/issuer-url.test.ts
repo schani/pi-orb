@@ -63,7 +63,6 @@ describe("readIssuerUrl", () => {
     const missing = readIssuerUrl("", null);
     expect(missing.isErr()).toBe(true);
     expect(missing._unsafeUnwrapErr()).toContain("required");
-    // An explicit value always wins over the fallback.
     expect(readIssuerUrl("https://issuer.example", LOCAL)._unsafeUnwrap()).toBe(
       "https://issuer.example",
     );

@@ -12,7 +12,7 @@ const DISK = `pi-orb-data-${ORB}`;
 
 const instanceName = (incarnation: number): string => `pi-orb-${ORB}-i${incarnation}`;
 
-/** Seed the orb's modeled compute: one instance per incarnation, plus the data disk. */
+/** Seed modeled compute: an instance per incarnation, and the data disk unless `disk: false`. */
 function seedOrbCompute(
   model: DeterministicGceApiModel,
   incarnations: number[],

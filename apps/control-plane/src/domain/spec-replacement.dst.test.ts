@@ -42,7 +42,7 @@ async function sleepInSteps(task: SimulationTask, totalMs: number, reason: strin
   }
 }
 
-/** A user-driven stop/start round trip — the only replacement trigger there is. */
+/** A user-driven stop/start round trip: the ordinary Start replaces stale compute. */
 async function stopStartCycle(
   task: SimulationTask,
   deps: ControlPlaneDeps,
@@ -821,7 +821,7 @@ describe("host-spec replacement (DST)", () => {
                 400,
               );
               // The request preserves retained evidence: it is not this
-              // episode's to clear (docs/compute-replacement.md rule 5).
+              // episode's to clear (docs/compute-replacement.md).
               expect(harness.store.orbSnapshot(ORB)).toMatchObject({
                 hostDiscardThroughIncarnation: 0,
                 hostDiscardEvidence: evidence,

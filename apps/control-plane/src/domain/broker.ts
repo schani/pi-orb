@@ -345,17 +345,17 @@ export async function getToken(
   return err(retryable("token request deadline exceeded"));
 }
 
-/**
- * Commits a freshly logged-in credential. Last-writer-wins among concurrent
- * logins, fenced by `rowVersion` so no write is ever silently dropped —
- * a conflicting write is re-read and retried on top of the newer state.
- */
 export interface LoginCommitUncertain {
   readonly type: "login_commit_uncertain";
   readonly message: string;
   readonly retryable: true;
 }
 
+/**
+ * Commits a freshly logged-in credential. Last-writer-wins among concurrent
+ * logins, fenced by `rowVersion` so no write is ever silently dropped —
+ * a conflicting write is re-read and retried on top of the newer state.
+ */
 export async function commitLoginCredential(
   task: SimulationTask,
   deps: BrokerDeps,

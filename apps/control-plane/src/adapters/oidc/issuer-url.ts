@@ -13,7 +13,7 @@ const LOOPBACK_ISSUER_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
  * `PI_ORB_OIDC_ISSUER_URL` validated and canonicalized
  * (docs/workload-identity.md). Any role that mints or publishes issuer
  * metadata refuses to boot without a usable value, before any side effect —
- * the digest-pin precedent in `adapters/gce/image-pin.ts`.
+ * the exact-image pin precedent in `adapters/gce/image-pin.ts`.
  *
  * The canonical form is the URL's origin: scheme, host, and non-default port,
  * with no trailing slash and no path. That exact string is served as `issuer`,

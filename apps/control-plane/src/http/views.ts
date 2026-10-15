@@ -4,8 +4,8 @@ import type { OrbRow, ProjectDeletionProgress, ProjectRow } from "../domain/orb.
 
 /**
  * Static deployment configuration the view layer derives fields from. It is
- * deliberately separate from `ControlPlaneDeps`: the domain knows nothing
- * about tailscale.
+ * deliberately separate from `ControlPlaneDeps`, which carries no tailnet
+ * configuration.
  */
 export interface ViewConfig {
   readonly centralAgent?: boolean;

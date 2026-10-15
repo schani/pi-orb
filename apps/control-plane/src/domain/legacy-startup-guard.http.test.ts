@@ -50,7 +50,6 @@ function setup(
   const checkStartup = vi.fn<StartupCheck>((_task, orb, context) => {
     expect(context.signal.aborted).toBe(false);
     if (orb.harnessSessionId === null) return okAsync(undefined);
-    // The agreed port code is intentionally injected before its union is implemented.
     return errAsync({
       type: "runtime_client_error",
       code: "legacy_backend",

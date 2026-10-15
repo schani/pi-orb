@@ -30,7 +30,7 @@ interface Dependencies {
   failed(): void;
 }
 
-/** Decorate native hooks without changing their arguments, results or rejection contract. */
+/** Audit native hook calls; arguments and rejections pass through unchanged. */
 export function installInferenceStages(
   agent: Agent,
   deps: Dependencies,

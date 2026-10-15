@@ -32,10 +32,10 @@ export class HttpIdTokenEndpoint implements IdTokenEndpoint {
       audience: request.audience,
       ...(request.ttlSeconds === undefined ? {} : { ttlSeconds: request.ttlSeconds }),
     };
-    // Spend the caller's remaining budget on headers AND body. A separate short
-    // attempt cap abandons requests queued behind a cold start; they can still
-    // mint server-side and throttle the caller's retries. See the 2026-09-08
-    // cold-start incident in docs/postmortems/2026-09-08-identity-cold-start.md.
+    // Spend the caller's remaining budget on headers AND body. No separate short
+    // attempt cap: it abandons requests queued behind a cold start, and those
+    // still mint server-side and throttle the caller's retries. See the
+    // 2026-09-08 cold-start incident in docs/postmortems/2026-09-08-identity-cold-start.md.
     const deadline = AbortSignal.timeout(timeoutMs);
     return fetch(`${this.env.controlPlaneUrl}${ID_TOKEN_PATH}`, {
       method: "POST",

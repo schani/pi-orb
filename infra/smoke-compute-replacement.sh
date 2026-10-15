@@ -15,7 +15,7 @@ set -euo pipefail
 
 # Outer budget: every bounded wait below derives from one provision + native
 # Debian boot + runtime-ready pass (the slowest provider operation this smoke performs).
-# Three lifecycle waits use it in full; stop and disposal are pure provider
+# Lifecycle create/start/failure waits use it in full; stop and disposal are pure provider
 # operations and get a fraction. The two 65-second negative-observation windows
 # — no autonomous replacement after failure, and no running orb touched by a
 # deployed specification change — are the only deliberate elapsed-time

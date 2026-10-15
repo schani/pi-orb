@@ -1,4 +1,4 @@
-# Control-plane image (DESIGN.md §3.6): serves the API, the live proxy, the
+# Control-plane image (docs/deployment.md): serves the API, the live proxy, the
 # runtime broker routes, and the built web UI. Build from the repository root:
 #   docker build -f apps/control-plane/Dockerfile -t pi-orb-control-plane:dev .
 

@@ -920,11 +920,11 @@ function updateOrb(orb: OrbView, state: OrbView["state"]): OrbView {
   };
 }
 
-// Opt-in transport fixture: production projection stays canonical; only the control
-// endpoint may inject the artificial marker used to prove generic frontend behavior.
 function fixtureSessionId(state: MockState, orbId: string) {
   return orbId === HEADLINE_ORB_ID ? state.headlines.sessionId : `fixture-session-${orbId}`;
 }
+// Opt-in transport fixture: production projection stays canonical; only the control
+// endpoint may inject the artificial marker used to prove generic frontend behavior.
 function headlineDisplay(state: MockState, orbId: string, record: HistoryRecord, cached: boolean) {
   if (orbId === "frontend-mixed-tool-states") {
     const display = projectDisplayRecord(record);

@@ -266,7 +266,7 @@ export const EventRecordSchema = Type.Object(
       ),
     ),
     content: Type.Optional(Type.Array(ContentBlockSchema)),
-    /** Present iff `eventType` is `pi.custom_message`. */
+    /** Set on `pi.custom_message` and orb-emitted custom events such as MCP status. */
     custom: Type.Optional(CustomMessageSchema),
     subagentTask: Type.Optional(
       Type.Object({ id: Type.String(), prompt: Type.String(), description: Type.String() }, closed),

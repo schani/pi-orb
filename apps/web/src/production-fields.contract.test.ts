@@ -53,7 +53,7 @@ describe("production text fields", () => {
     ]);
   });
 
-  /** Clients read typed record fields; only the Pi adapter knows native shapes. */
+  /** Clients read typed record fields; only harness adapters know native shapes. */
   it("does not read the native overflow blob", () => {
     const offenders = productionSources(import.meta.dirname).filter((path) =>
       /overflow\s*(\?\.)?\s*\[\s*["']native["']\s*\]|overflow\s*\??\.\s*native/.test(

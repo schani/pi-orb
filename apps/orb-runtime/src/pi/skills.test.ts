@@ -74,7 +74,7 @@ const skillNames = readdirSync(skillsDir, { withFileTypes: true })
 
 const skillBody = (name: string): string => readFileSync(join(skillsDir, name, "SKILL.md"), "utf8");
 
-/** One numbered step of a skill, from its heading to the next one at that level. */
+/** One numbered step of a skill, from its heading to the next heading of level 2–4. */
 const section = (body: string, heading: string): string => {
   const start = body.indexOf(heading);
   if (start < 0) throw new Error(`the skill no longer has a "${heading}" section`);

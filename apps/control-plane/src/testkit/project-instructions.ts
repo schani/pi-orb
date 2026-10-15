@@ -6,7 +6,11 @@ import type {
   ProjectInstructionsStore,
 } from "../domain/project-instructions.ts";
 
-/** The commit callback is the simulation's atomic project-row transaction. */
+/**
+ * `state` is the simulated project row: the state check and the commit in
+ * `operation` run with no await between them, so a write is atomic against
+ * deletion.
+ */
 export class FakeProjectInstructionsStore implements ProjectInstructionsStore {
   readonly snapshots = new Map<string, ProjectInstructions>();
   readonly commits: { projectId: string; snapshot: ProjectInstructions }[] = [];

@@ -276,7 +276,6 @@ describe("history replication (DST)", () => {
             expect(cursor === null || cursorIndex !== -1).toBe(true);
             const live = entries.slice(cursorIndex + 1);
             const combined = [...snapshot, ...live];
-            // No gaps, no duplicates: combined must equal the full history.
             expect(combined.map((record) => record.id)).toEqual(entries.map((record) => record.id));
             await waitUntil(
               task,

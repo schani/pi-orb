@@ -606,7 +606,7 @@ export function projectDisplayRecords(records: readonly HistoryRecord[]): Displa
   return records.map(createDisplayRecordProjector());
 }
 
-/** Returns only renderable detail. Null means the manifest key does not exist. */
+/** Renderable detail only; null when the key is absent or its block has no detail body. */
 export function projectRecordDetail(
   record: HistoryRecord,
   detailKey: string,

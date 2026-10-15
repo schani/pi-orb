@@ -151,7 +151,7 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, Tails
     }
   }
 
-  /** The single exception boundary of this adapter. */
+  /** Exception boundary for POST requests; `send` is the GET/DELETE twin. */
   private post(
     url: string,
     headers: Readonly<Record<string, string>>,
@@ -307,8 +307,9 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, Tails
   /**
    * Auth keys are non-reusable and incarnation-scoped: each host-create
    * attempt gets a fresh key. Minting revokes only strictly older
-   * incarnations; racing attempts may leave unused keys until a higher
-   * incarnation, expiry, or deletion-grade cleanup. Device identity is
+   * incarnations and legacy incarnation-less keys; racing attempts may leave
+   * unused keys until a higher incarnation, expiry, or deletion-grade
+   * cleanup. Device identity is
    * separate from the keys: tailscaled state lives on the orb's retained
    * workspace, so a restart or compute replacement resumes the same device
    * without consuming a key, and the non-ephemeral device record survives the

@@ -93,7 +93,7 @@ describe("id-token argument parsing", () => {
         `--audience must be at most ${MAX_AUDIENCE_BYTES} UTF-8 bytes`,
         ["--audience", "x".repeat(MAX_AUDIENCE_BYTES + 1)],
       ],
-      // The cap is bytes, not characters: 256 two-byte characters exceed 512.
+      // The cap is bytes, not characters: 257 two-byte characters exceed 512.
       [
         `--audience must be at most ${MAX_AUDIENCE_BYTES} UTF-8 bytes`,
         ["--audience", "é".repeat(MAX_AUDIENCE_BYTES / 2 + 1)],

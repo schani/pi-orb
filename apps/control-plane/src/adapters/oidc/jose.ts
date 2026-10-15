@@ -31,9 +31,9 @@ export interface GeneratedRsaKey {
 }
 
 /**
- * 2048 bits: the floor every OIDC federation endpoint we target accepts
- * (Google STS, AWS IAM OIDC providers) and the size RS256 verifiers assume.
- * Larger keys buy nothing here — the tokens live ten minutes — and cost
+ * The floor every OIDC federation endpoint we target accepts (Google STS,
+ * AWS IAM OIDC providers) and the size RS256 verifiers assume.
+ * Larger keys buy nothing here — tokens default to ten minutes — and cost
  * signing latency on every mint.
  */
 const MODULUS_LENGTH = 2048;

@@ -1,5 +1,6 @@
 #!/bin/bash
-# Split state ownership without applying or changing any GCP resource.
+# Split state ownership between the application and foundation roots; rewrites
+# only state objects, never applies or changes a managed GCP resource.
 set -euo pipefail
 umask 077
 

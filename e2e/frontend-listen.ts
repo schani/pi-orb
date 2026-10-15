@@ -2,7 +2,7 @@ import { ResultAsync } from "neverthrow";
 import type { ViteDevServer } from "vite";
 import { expect } from "vitest";
 
-/** Vite treats listen(0) as its default preview port. Bind the owned Node server instead. */
+/** Vite falls back to its default dev port (5173) for listen(0); bind the owned server. */
 export async function listenFrontend(vite: Pick<ViteDevServer, "httpServer">): Promise<void> {
   const server = vite.httpServer;
   if (server === null) expect.fail("Frontend fixture requires an HTTP server");

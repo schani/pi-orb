@@ -31,7 +31,7 @@ export function cacheShare(row: UsageTotals): number | null {
   return prompt === 0 ? null : row.cacheRead / prompt;
 }
 
-/** Rolling hours for day/week, clamped calendar months, one civil-time edge per long-range day. */
+/** Rolling hours for day/week, clamped calendar months for month/six_months; six_months edges fall on local days, the rest on fixed hour steps. */
 export function usageBoundaries(period: UsagePeriod, now: number): number[] {
   const end = new Date(now);
   const start = new Date(now);

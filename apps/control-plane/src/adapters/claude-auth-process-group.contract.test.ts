@@ -28,7 +28,7 @@ const evidence = resolve(".context/claude-production-hardening/auth/process-grou
 const fixture = fileURLToPath(new URL("./claude-auth-process-group.fixture.mjs", import.meta.url));
 const nested = process.env["CLAUDE_AUTH_GROUP_NAMESPACE"] === "1";
 
-// Only spawn, scratch ownership/removal, and signal-failure injection are interposed.
+// Only spawn, scratch ownership/removal, timers, and signal-failure injection are interposed.
 // The PTY, all PIDs, signals, and negative-PID kill(0) queries are genuine.
 vi.mock("node-pty", async (importOriginal) => {
   const native = await importOriginal<typeof import("node-pty")>();
@@ -105,7 +105,7 @@ vi.mock("node:process", async (importOriginal) => {
 import type { ClaudeAuthEvent } from "../domain/claude-auth.ts";
 import { ClaudePtyAuthTransport } from "./claude-auth-pty.ts";
 
-// Saved native process.kill bypasses the fault injection for fixture teardown.
+// The global process.kill is not interposed; only the adapter's node:process import is.
 function probe(pid: number) {
   return Result.fromThrowable(
     () => process.kill(pid, 0),

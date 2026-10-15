@@ -267,7 +267,7 @@ describe("OutboundWriter", () => {
     const writer = new OutboundWriter(sink, { maxCriticalBufferedBytes: 500, highWaterMark: 100 });
     writer.enqueueSyncBatch([]);
     sink.bufferedAmount = 1_000;
-    writer.enqueue(historyFrame("rec-1")); // ~300 bytes serialized
+    writer.enqueue(historyFrame("rec-1")); // ~430 bytes serialized
     expect(sink.closedWith).toBeNull();
     writer.enqueue(historyFrame("rec-2"));
     expect(sink.closedWith).not.toBeNull();

@@ -10,15 +10,15 @@ import type {
   StopReason,
 } from "@pi-orb/protocol";
 
-/**
- * Domain view of an orb row (docs/history-replication.md). Timestamps are wall-clock
- * milliseconds; adapters convert to/from `timestamptz`.
- */
 export type HostDiscardReason = "failed" | "host_spec_changed" | "claude_recovery";
 
 export type BootHook = "setup" | "resume";
 export type BootHookFailureReason = "failed" | "timeout" | "hook_not_executable";
 
+/**
+ * Domain view of an orb row (docs/history-replication.md). Timestamps are wall-clock
+ * milliseconds; adapters convert to/from `timestamptz`.
+ */
 export interface OrbRow {
   readonly id: string;
   readonly projectId: string;
@@ -72,7 +72,11 @@ export interface OrbRow {
   readonly uploadActiveUntil: number | null;
   /** Durable stop authority; manual and sleep inhibit autonomous demand. */
   readonly stopReason: StopReason | null;
-  /** Revokes central callers on explicit global stops, never VM phase changes. */
+  /**
+   * Central-caller revocation generation (docs/lifecycle.md): advanced by explicit
+   * Stop, clearing manual/sleep inhibition, archive completion and delete; never by
+   * VM phase changes.
+   */
   readonly agentAdmissionVersion: number;
   readonly sleepId: string | null;
   readonly sleepUntil: number | null;

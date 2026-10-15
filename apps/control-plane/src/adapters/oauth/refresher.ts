@@ -28,8 +28,8 @@ class RefreshFailure extends Error {
 /**
  * The control plane's upstream OAuth refresh (docs/credentials.md): the standard
  * rotating `refresh_token` grant, form-encoded, against the real Codex OAuth
- * origin or the fake service. This is the only place a refresh token crosses
- * the network, and it never leaves this process in any other direction.
+ * origin or the fake service. This is the only place a Codex refresh token is
+ * sent upstream; it is never sent to orbs.
  */
 export class OAuthUpstreamRefresher implements UpstreamRefresher {
   private readonly oauthBaseUrl: string;

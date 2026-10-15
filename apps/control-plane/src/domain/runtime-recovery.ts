@@ -7,7 +7,10 @@ import { logOrbEvent } from "./log.ts";
 import type { OrbRow } from "./orb.ts";
 import type { ControlPlaneDeps } from "./ports.ts";
 
-/** Only the typed ownership guard can authorize an automatic replacement. */
+/**
+ * Only Claude's `claude_child_recovery_required` episode, with whole-compute
+ * disposal proof, may authorize an automatic replacement (docs/lifecycle.md).
+ */
 export async function handleFailedRuntime(
   task: SimulationTask,
   deps: ControlPlaneDeps,

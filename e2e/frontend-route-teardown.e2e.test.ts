@@ -85,7 +85,7 @@ describe("owned route teardown", () => {
           async close() {
             events.push("close entered");
             cleanupEntered.release();
-            // Navigation is owned too: release it before closing its page.
+            // Navigation is owned too: settle it before closing its page.
             await navigation;
             await page.close();
           },

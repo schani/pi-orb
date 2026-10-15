@@ -18,7 +18,7 @@ export interface ReleaseActivationReader {
 /**
  * Startup barrier, not a lease. The release publishes authority only AFTER
  * proving every older browser process has retired. HTTP remains available
- * while all five autonomous loops wait. No mutation can have started here.
+ * while the autonomous loops wait. No mutation can have started here.
  */
 export async function waitForReleaseActivation(
   task: SimulationTask,

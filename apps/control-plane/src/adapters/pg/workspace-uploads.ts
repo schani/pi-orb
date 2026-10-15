@@ -137,7 +137,8 @@ export class PgWorkspaceUploads implements WorkspaceUploadStore {
         [orbId, spec.id, spec.name, spec.size, o.host_incarnation, activeUntil, new Date(now)],
       );
       if (inserted.isErr()) return err(inserted.error);
-      // The epoch bump fences an idle decision made before admission/renewal.
+      // The epoch bump (only when no live lease protected the orb) fences an
+      // idle decision made before this admission.
       const touch = await query(
         `UPDATE orbs SET upload_active_until=GREATEST(COALESCE(upload_active_until,$2),$2),
         last_busy_at=GREATEST(COALESCE(last_busy_at,$3),$3), state_version=state_version+

@@ -179,7 +179,7 @@ export class PgStorage implements Storage {
     this.nextId = nextId;
   }
 
-  /** Initialize storage over an transaction-scoped PostgreSQL facade. */
+  /** Initialize storage over a transaction-scoped PostgreSQL facade. */
   static async open(db: SqlDatabase): Promise<PgStorage> {
     try {
       const metadata = await db.get<MetadataRow>(

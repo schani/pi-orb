@@ -21,9 +21,9 @@ export const TAILSCALE_HOSTNAME_ENV = "PI_ORB_TAILSCALE_HOSTNAME";
 
 /**
  * MagicDNS FQDN the user reaches the orb by,
- * `pi-orb-<orbId>.<tailnet dns name>`. Presence of this variable is what
- * tells the runtime the feature is on; it is surfaced to the agent in the
- * session's system prompt.
+ * `pi-orb-<orbId>.<tailnet dns name>`. Surfaced to the agent in the session's
+ * system prompt. The runtime enables the feature only when all three
+ * variables are present (`apps/orb-runtime/src/tailscale/env.ts`).
  */
 export const PREVIEW_HOST_ENV = "PI_ORB_PREVIEW_HOST";
 

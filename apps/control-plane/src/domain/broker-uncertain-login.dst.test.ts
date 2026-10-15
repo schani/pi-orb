@@ -23,12 +23,7 @@ const unavailable = (message: string): StoreError => ({
   retryable: true,
 });
 
-/**
- * Makes the first CAS land, then withholds its acknowledgement until a second
- * login has superseded it and completed cleanup. The first caller therefore
- * cannot know whether its version was ever published when its CAS reports an
- * outage.
- */
+/** Refuses every CAS as a conflict, and fails every read when `failReads` is set. */
 class ExhaustedLoginPointerStore implements CredentialPointerStore {
   private readonly failReads: boolean;
 
@@ -52,6 +47,12 @@ class ExhaustedLoginPointerStore implements CredentialPointerStore {
   }
 }
 
+/**
+ * Makes the first CAS land, then withholds its acknowledgement until a second
+ * login has superseded it and completed cleanup. The first caller therefore
+ * cannot know whether its version was ever published when its CAS reports an
+ * outage.
+ */
 class AmbiguousFirstCommitStore implements CredentialPointerStore {
   private readonly inner = new FakePointerStore();
   private firstCasStarted = false;

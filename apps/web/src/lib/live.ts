@@ -25,8 +25,8 @@ export interface LiveConnectionOptions {
   onFrame: (frame: ServerFrame) => void;
   onStatus: (status: LiveConnectionStatus) => void;
   /**
-   * An unacknowledged request was dropped because the runtime instance
-   * changed across a reconnect, so auto-resending is unsafe (docs/runtime-protocol.md).
+   * An unacknowledged request was dropped because the runtime instance or
+   * session changed across a reconnect, so auto-resending is unsafe (docs/runtime-protocol.md).
    */
   onRequestLost: (requestId: string, action: ClientAction) => void;
   /**
@@ -58,8 +58,8 @@ interface PendingRequest {
 
 /**
  * WebSocket state machine for one orb's live channel: hello/sync handshake,
- * frame validation, 2s reconnect backoff (including 1013 "try again later"),
- * and instance-guarded resend of unacknowledged requests.
+ * frame validation, fixed 2s reconnect delay after any close (including 1013
+ * "try again later"), and instance-guarded resend of unacknowledged requests.
  */
 export function openLiveConnection(options: LiveConnectionOptions): LiveConnection {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";

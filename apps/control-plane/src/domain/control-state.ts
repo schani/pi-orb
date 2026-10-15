@@ -9,7 +9,7 @@ export interface HookFailure {
 }
 
 export interface LivenessEntry {
-  /** Monotonic ms of the last successful pull (or seeded baseline). */
+  /** Monotonic ms of the last runtime answer (pull or other answered request), or the seeded baseline. */
   lastSuccessAt: number;
   /** First runtime request since that success which has not received an answer. */
   unansweredSinceAt: number | null;
@@ -19,8 +19,8 @@ export interface LivenessEntry {
   hostStartedAt: number | null;
   /**
    * Non-null only while the baseline rests on a host restart rather than on a
-   * pull: the entitled grace must then outlast a boot, and a second expiry
-   * with no pull success in between is evidence the restart did not help
+   * runtime answer: the entitled grace must then outlast a boot, and a second expiry
+   * with no runtime answer in between is evidence the restart did not help
    * (docs/lifecycle.md).
    */
   restartGraceMs: number | null;
@@ -51,9 +51,10 @@ export interface BootProbe {
   /** Whether the runtime has answered health at all this boot. */
   everAnswered: boolean;
   /**
-   * Monotonic ms of the first health report of this boot that said the
-   * repository's setup hook is running (docs/orb-setup-hook.md), or null if
-   * none did. It anchors the deadline hold and is deliberately sticky for the
+   * Monotonic ms when this boot's setup hook started (docs/orb-setup-hook.md):
+   * the first health report that said it was running, or after a control-plane
+   * restart the start time the runtime persisted; null if neither. It anchors
+   * the deadline hold and is deliberately sticky for the
    * episode: the hold has to cover the hook *and* the boot that follows it,
    * and its own bound — not the next probe — is what ends it, so a runtime
    * that stops reporting is still a dead runtime, just on a longer clock.
@@ -133,8 +134,10 @@ export class ControlState {
    * `mixed-generation.dst.test.ts`. Deriving the window from the row instead
    * of from an observed transition makes it hold for every reconciler.
    *
-   * Forgetting is always safe: it is exactly the state a control-plane restart
-   * loses, and every path reseeds it from the row on the next pass.
+   * Forgetting is safe: it is the state a control-plane restart loses, and
+   * every path reseeds it from the row on the next pass. The one exception is
+   * the setup-hook anchor, which the runtime's persisted start time reseeds
+   * after a restart (see `recordBootProbe`).
    */
   noteStateEpisode(orbId: string, stateChangedAt: number): void {
     if (this.episodes.get(orbId) === stateChangedAt) return;
@@ -166,8 +169,9 @@ export class ControlState {
   }
 
   /**
-   * The runtime answered a non-pull control-plane request — currently an inbox
-   * delivery. That is the same evidence a successful pull carries, so it
+   * The runtime answered a control-plane request other than a successful pull
+   * (a health probe, an inbox delivery, a prepare fence, an answered pull
+   * error). That is the same evidence a successful pull carries, so it
    * refreshes the baseline: the reconciler must never declare a runtime
    * unreachable in the same second it is demonstrably serving us
    * (docs/lifecycle.md). Only an existing entry is refreshed; the baseline is
@@ -435,9 +439,10 @@ export class ControlState {
       /**
        * Wall ms at which this incarnation's setup hook started, as the runtime
        * itself reports it once the hook has finished. It reseeds the anchor
-       * after a control-plane restart, which is the one loss `noteStateEpisode`
-       * cannot call safe: without it a restart lands on a boot whose ordinary
-       * deadline the hook legitimately outlasted, and fails a healthy orb.
+       * after a control-plane restart, the one restart loss that is not safe to
+       * forget (see `noteStateEpisode`): without it a restart lands on a boot
+       * whose ordinary deadline the hook legitimately outlasted, and fails a
+       * healthy orb.
        */
       setupStartedAtWall?: number;
       /** Clocks of this probe; required to time and display a setup hold. */
@@ -547,7 +552,11 @@ export class ControlState {
 
   // -- stopping / drain presentation --
 
-  /** While set, the HTTP layer rejects new live connections for the orb. */
+  /**
+   * Marks the orb as stopping as of `stateVersion`, never cleared: observations
+   * at that version or older read as stopping (the HTTP layer rejects new live
+   * connections and execution leases are refused), a later start does not.
+   */
   markStopping(orbId: string, stateVersion: number): void {
     const previous = this.stoppingOrbs.get(orbId) ?? -1;
     if (stateVersion > previous) this.stoppingOrbs.set(orbId, stateVersion);

@@ -7,7 +7,7 @@ interface Key {
   readonly description: string;
 }
 
-/** Shared remote state, not a fake minter: real adapters decide what to revoke. */
+/** Shared remote state driven by the real Tailscale adapter, which decides what to revoke. */
 export class DeterministicTailscaleApiModel implements TailscaleApiTransport {
   private readonly keys = new Map<string, Key>();
   private readonly devices = new Map<string, string>();

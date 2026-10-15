@@ -252,8 +252,8 @@ function idTokenFailure(error: MintError): IdTokenFailure {
 /**
  * The runtime-facing surface (`docs/credentials.md`, `docs/control-plane-api.md`).
  * It contains the parameterized credential broker, workload identity, naming,
- * read-only sibling inspection, and self-archival. Registered only when the deployment role
- * includes runtime routes — a hard allowlist, not a hidden path.
+ * read-only sibling inspection, and self-archival. Every route is listed here
+ * explicitly: this is the runtime allowlist, not a hidden path.
  * Authentication is the per-host-incarnation orb token, honored only while
  * the calling orb's lifecycle state says its host should be up.
  */

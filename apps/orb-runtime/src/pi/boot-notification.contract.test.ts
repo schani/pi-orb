@@ -499,7 +499,7 @@ it.each([false, true])(
       { summarize: () => okAsync("") },
     );
     expect(interruptedSubagents(reopened.getEntries())).toEqual([]);
-    // A failed append leaves the ordinary root restart notification unclaimed;
+    // A failed append leaves the ordinary root restart notification unclaimed.
     // A committed notice claims one of three attempts; a failed append claims none.
     expect(turns).toBe(1);
     const acknowledgements = reopened

@@ -54,11 +54,11 @@ export interface HookFileError {
 }
 
 /**
- * The two durable files a hook run leaves behind — the status beside the log
- * and the incarnation stamp on the workspace. It is a port for the same reason
- * the spawner is: a disk that refuses one of these writes is a schedule a
- * scenario has to be able to choose (docs/testing.md), and neither failure may
- * take the boot with it.
+ * The durable files the runtime writes around a hook run — the status beside
+ * the log, the incarnation stamp on the workspace, and the env status file. It is a port for the
+ * same reason the spawner is: a disk that refuses one of these writes is a
+ * schedule a scenario has to be able to choose (docs/testing.md), and no write
+ * failure may take the boot with it.
  */
 export interface HookFileStore {
   /** File contents, or null when it is missing or unreadable. */

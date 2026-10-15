@@ -28,7 +28,7 @@ type ReconcileJob = {
 
 /**
  * `determined` models concurrency with distinct SimulationTasks. Production
- * creates one real-time task per dispatched orb; this mailbox gives each
+ * creates one real-time task per dispatched lane; this mailbox gives each
  * statically declared DST worker its own task while exercising the same
  * dispatcher contract.
  */

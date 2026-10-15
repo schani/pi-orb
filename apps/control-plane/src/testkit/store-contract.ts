@@ -1495,7 +1495,6 @@ export function storeSemanticsContractTests(
         stateChangedAt: 2_000,
       });
 
-      // Inside the interval: refused, with the remaining wait.
       const throttled = await store.claimMintSlot(task, {
         orbId: orb.id,
         at: 5_500,

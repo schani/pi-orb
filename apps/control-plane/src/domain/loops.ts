@@ -77,7 +77,7 @@ export async function pollAllOnce(
   dispatcher?.check();
   if (orbsResult.isErr()) {
     // Store outage: retry on the next tick. Logged on the edge only — the tick
-    // is ~10s and an outage lasts minutes.
+    // is about a second (reconcileTickMs) and an outage lasts minutes.
     if (deps.control.noteCondition("poll-loop:list", true)) {
       logEvent(task, "poll-loop-blind", { error: orbsResult.error.message });
     }
@@ -150,8 +150,8 @@ async function pollHistoryOnce(
     deps.control.clearRetryAttempts(key);
   }
   // Retryable failures retry at the ordinary polling cadence (docs/history-replication.md); an
-  // integrity failure removed the orb from the pollable set, and an invariant
-  // failure parks this orb's pulls until the fix is deployed.
+  // integrity failure has already failed the orb and requested compute discard
+  // (replication.ts), and an invariant failure parks this orb's pulls until the fix is deployed.
   deps.control.setNextAttemptAt(
     key,
     outcome.type === "retryable" && outcome.invariant === true
@@ -262,7 +262,7 @@ function reconcileDelayMs(
   switch (outcome.type) {
     case "retryable": {
       const attempts = deps.control.bumpRetryAttempts(retryKey);
-      // Edge only: backoff retries this every few seconds until it clears.
+      // Edge only: capped backoff keeps retrying this until it clears.
       if (attempts === 1) {
         logOrbEvent(task, orbId, "reconcile-retry", {
           state,
@@ -499,12 +499,6 @@ export async function reconcileLoop(
   }
 }
 
-/**
- * One orphan-host sweep (docs/lifecycle.md): stop any managed host whose orb row
- * is missing entirely, or terminal with a lost `host_ref`. The provider lists
- * only pi-orb-labeled hosts, so nothing else in the project is ever touched;
- * the sweep only moves hosts toward "stopped" and never starts or deletes.
- */
 /** One sweep over durable project deletion intents. */
 export async function projectDeletionAllOnce(
   task: SimulationTask,
@@ -559,6 +553,13 @@ export async function projectDeletionLoop(
   }
 }
 
+/**
+ * One orphan-host sweep (docs/lifecycle.md). Stops managed hosts whose orb row
+ * is missing, or is terminal with a `host_ref` that no longer matches; destroys
+ * or discards hosts resurrected after archival or incarnation retirement. The
+ * provider lists only pi-orb-labeled hosts, so nothing else in the project is
+ * touched. Live orbs are left to the reconciler.
+ */
 export async function orphanSweepOnce(task: SimulationTask, deps: ControlPlaneDeps): Promise<void> {
   const listed = await withDeadline(
     task,

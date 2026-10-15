@@ -43,7 +43,10 @@ export class AgentSettingsController {
       writable: !this.blocksInput,
     };
   }
-  /** Supported SDK-originated changes use the same full-state publication; never expose an in-flight setter. */
+  /**
+   * A failed SDK-originated persist or flush blocks input for the rest of the process;
+   * publish the same full-state view.
+   */
   invalidate(error: SettingsError): void {
     this.failed = true;
     this.options.onFailure?.(error);

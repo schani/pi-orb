@@ -4327,7 +4327,7 @@ describe("frontend-only browser behavior", () => {
       expectPage(await composerNode?.evaluate((node) => node.isConnected)).toBe(true);
       await expectPage(composer).toHaveValue("keep this draft while creating");
       expectPage(await page.locator(".history").innerText()).toBe(transcript);
-      // Snapshot an empty list before acceptance; it must not erase the accepted row later.
+      // Snapshot the list before acceptance; a stale copy must not erase the accepted row later.
       await page.clock.runFor(2000);
       await listRequested;
       releaseCreate();

@@ -81,7 +81,8 @@ export function buildExecutionServer(options: ExecutionServerOptions) {
     const expected = Buffer.from(`Bearer ${options.token}`);
     if (received.length !== expected.length || !timingSafeEqual(received, expected))
       return reply.code(401).send(failure("permission_denied", "invalid execution token"));
-    // The retained local CLI authenticates with the incarnation-scoped runtime token.
+    // The local `pi-orb alert` CLI sends no incarnation header; its runtime token is already
+    // incarnation-scoped.
     if (request.url === RUNTIME_ALERT_PATH) return;
     if (request.headers["x-orb-incarnation"] !== options.incarnation)
       return reply.code(409).send(failure("invalid", "stale execution incarnation"));

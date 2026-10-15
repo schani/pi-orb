@@ -274,7 +274,7 @@ export function cleanupHostedFiles(
   return new ResultAsync(run());
 }
 
-/** One bounded pass for replacement/removal garbage while the orb remains live. */
+/** One bounded pass over queued cleanup items, optionally scoped to one orb. */
 export function cleanupRetiredHostedFiles(
   task: SimulationTask,
   deps: HostingDeps,
