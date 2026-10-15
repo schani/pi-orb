@@ -471,7 +471,9 @@ async function checkOrbLinks(page: Page, origin: string) {
         await page.keyboard.press("Enter");
       }
       await expect(page).toHaveURL(origin + "/orbs/" + encodeURIComponent(namedOrb.id));
+      await expect(page.locator(".orb-identity")).toContainText(namedOrb.name ?? namedOrb.id);
       await page.goBack();
+      await expect(page).toHaveURL(origin + "/usage");
       await page.getByLabel("Breakdown").selectOption("orb");
     }
   }
@@ -489,6 +491,7 @@ async function checkOrbLinks(page: Page, origin: string) {
     await expect(page).toHaveURL(origin + href);
     await expect(page.locator(".orb-identity")).toContainText(named.name);
     await page.goBack();
+    await expect(page).toHaveURL(origin + "/usage");
     await expect(rows).toHaveCount(5);
   }
   const newPage = page.context().waitForEvent("page");
@@ -522,6 +525,7 @@ async function checkOrbLinks(page: Page, origin: string) {
   await expect(page.getByRole("heading", { name: "Orb doesn't exist", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Back to dashboard" })).toHaveAttribute("href", "/");
   await page.goBack();
+  await expect(page).toHaveURL(origin + "/usage");
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     await expect(rows).toHaveCount(5);
