@@ -55,16 +55,27 @@ export function subscribeNavigation(onChange: () => void): () => void {
   const onClick = (event: MouseEvent) => {
     const target = event.target;
     const anchor = target instanceof Element ? target.closest<HTMLAnchorElement>("a[href]") : null;
+    if (!anchor) return;
+    // Attributes, not properties: SVG anchors expose `href`/`target` as SVGAnimatedString.
+    const resolved = Result.fromThrowable(
+      () => new URL(anchor.getAttribute("href") ?? "", document.baseURI).href,
+      () => null,
+    )();
+    if (resolved.isErr()) return;
+    const href = resolved.value;
     if (
-      !anchor ||
       !shouldNavigate(
         event,
-        { href: anchor.href, target: anchor.target, download: anchor.hasAttribute("download") },
+        {
+          href,
+          target: anchor.getAttribute("target") ?? "",
+          download: anchor.hasAttribute("download"),
+        },
         window.location.origin,
       )
     )
       return;
-    const url = new URL(anchor.href);
+    const url = new URL(href);
     // Native fragment-only and query-only navigation retains its browser semantics.
     if (url.pathname === window.location.pathname) {
       if (url.search !== window.location.search || url.hash !== window.location.hash) return;
