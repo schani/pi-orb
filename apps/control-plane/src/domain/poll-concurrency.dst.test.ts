@@ -518,19 +518,23 @@ for (const ending of ["shutdown", "fatal"] as const) {
   });
 }
 
-// In-memory atomic-stage boundaries, not PostgreSQL isolation.
+// In-memory atomic-stage boundaries, not PostgreSQL isolation. The held first commit is
+// either A's history pull or A's input-lane projection, whichever reaches the store first;
+// `history` forces the pull to own it.
 const boundaryCases = (["stop", "delete"] as const).flatMap(
   (ending) =>
     [
-      { ending, fault: "before", order: "lifecycle-first" },
-      { ending, fault: "after", order: "commit-first" },
-      { ending, fault: "cas", order: "lifecycle-first" },
-      { ending, fault: "cas", order: "commit-first" },
+      { ending, fault: "before", order: "lifecycle-first", owner: "any" },
+      { ending, fault: "after", order: "commit-first", owner: "any" },
+      { ending, fault: "after", order: "commit-first", owner: "history" },
+      { ending, fault: "cas", order: "lifecycle-first", owner: "any" },
+      { ending, fault: "cas", order: "commit-first", owner: "any" },
+      { ending, fault: "cas", order: "commit-first", owner: "history" },
     ] as const,
 );
 it.each(boundaryCases)(
-  "composes poll $fault/$ending/$order at the commit boundary",
-  async ({ fault, ending, order }) => {
+  "composes poll $fault/$ending/$order ($owner owner) at the commit boundary",
+  async ({ fault, ending, order, owner }) => {
     const logs = new LogCapture();
     const before = FAILPOINTS.storeCommitBefore,
       after = FAILPOINTS.storeCommitAfter;
@@ -544,7 +548,7 @@ it.each(boundaryCases)(
         : "store_error";
     await runDst(
       {
-        name: `poll-boundary-${fault}-${ending}-${order}`,
+        name: `poll-boundary-${fault}-${ending}-${order}${owner === "any" ? "" : `-${owner}`}`,
         iterations: 10,
         lateTimerProbability: 0,
         logCapture: logs,
@@ -564,6 +568,12 @@ it.each(boundaryCases)(
         const ids = ["a", "b", "c"];
         const gate = new ConditionVariable("atomic stage");
         let captured: CommitPullBatchParams | undefined;
+        let heldOwner: "input" | "history" | undefined;
+        const projecting = new Set<SimulationTask>();
+        // While the boundary commit is held, A's input lane either parks in a commit or,
+        // when its projection finds the held commit already public, is free to admit more.
+        let input: "free" | "parked" | undefined;
+        let admitted = ["a-first"];
         let ready = false,
           boundary = false,
           command = false,
@@ -645,8 +655,11 @@ it.each(boundaryCases)(
           new ResultAsync(
             (async () => {
               const first = request.orbId === "a" && captured === undefined;
-              if (first) captured = request;
-              else if (request.orbId === "a")
+              if (request.orbId === "a" && projecting.has(task) && !completed) input ??= "parked";
+              if (first) {
+                captured = request;
+                heldOwner = projecting.has(task) ? "input" : "history";
+              } else if (request.orbId === "a")
                 while (!completed) await gate.wait(task, "recovery admission");
               const result = await original(scoped(task, first), request);
               if (first) {
@@ -689,14 +702,24 @@ it.each(boundaryCases)(
                 const session = h.world.sessionHeaderOf(orb.id);
                 if (session === null) throw new Error("seeded session missing");
                 const records = [...h.world.entriesOf(orb.id)];
-                return commitAgentHistory(task, h.deps, {
-                  orbId: orb.id,
-                  runtimeInstanceId: orb.id,
-                  session,
-                  records,
-                  headId: records.at(-1)?.id ?? null,
-                  activity: "busy",
-                }).map(() => response);
+                return new ResultAsync(
+                  (async () => {
+                    if (orb.id === "a" && owner === "history")
+                      while (!boundary) await gate.wait(task, "history pull owns the boundary");
+                    projecting.add(task);
+                    const projected = await commitAgentHistory(task, h.deps, {
+                      orbId: orb.id,
+                      runtimeInstanceId: orb.id,
+                      session,
+                      records,
+                      headId: records.at(-1)?.id ?? null,
+                      activity: "busy",
+                    });
+                    projecting.delete(task);
+                    if (orb.id === "a" && projected.isOk() && !completed) input ??= "free";
+                    return projected.map(() => response);
+                  })(),
+                );
               });
             },
             pullHistory: sdk.pullHistory.bind(sdk),
@@ -753,7 +776,7 @@ it.each(boundaryCases)(
                 permitted = trace
                   .filter((e) => e.edge === "guest-accepted" && e.version === openAdmissionVersion)
                   .flatMap((e) => e.ids);
-                expect(permitted, JSON.stringify(trace)).toEqual(["a-first"]);
+                expect(permitted, JSON.stringify(trace)).toEqual(admitted);
                 if (fault === "cas") {
                   if (captured === undefined) throw new Error("missing pending CAS");
                   const competitor = await original(scoped(task), captured);
@@ -802,15 +825,28 @@ it.each(boundaryCases)(
                     }
                     await task.sleep(80, "future dispatcher ticks");
                   }
-                  expect(entered, JSON.stringify(trace)).toEqual(["a-first"]);
+                  await until(task, "A input lane settles", () => input !== undefined);
+                  // Same-orb input independence (docs/history-replication.md): only a held
+                  // history pull whose commit is already public leaves A's input lane free.
+                  if (input === "free")
+                    expect([heldOwner, order], JSON.stringify(trace)).toEqual([
+                      "history",
+                      "commit-first",
+                    ]);
+                  if (owner === "history") expect(input).toBe("free");
+                  if (input === "free") {
+                    admitted = ["a-first", "a-later"];
+                    await until(task, "free A input admits a-later", () => entered.length === 2);
+                  }
+                  expect(entered, JSON.stringify(trace)).toEqual(admitted);
                   expect(messages("a").find((r) => r.messageId === "a-later")).toMatchObject({
-                    status: "queued",
+                    status: input === "free" ? "delivering" : "queued",
                     autoStart: false,
                   });
                   command = true;
                   gate.notifyAll(task, "lifecycle command admitted");
                   await until(task, "command during pending commit", () => lifecycle);
-                  expect(permitted, JSON.stringify(trace)).toEqual(["a-first"]);
+                  expect(permitted, JSON.stringify(trace)).toEqual(admitted);
                   const calls = runner.calls;
                   await task.sleep(80, "live dispatch across durable fence");
                   expect(runner.calls).toBeGreaterThan(calls);
@@ -821,7 +857,9 @@ it.each(boundaryCases)(
                   await until(task, "old transaction settles", () => completed);
                   await until(task, "live lifecycle reaches terminal", () => state() === terminal);
                   if (ending === "stop") {
-                    await until(task, "admitted final flush", () => delivered("a", "first"));
+                    await until(task, "admitted final flush", () =>
+                      admitted.every((m) => delivered("a", m.slice("a-".length))),
+                    );
                     expect(receipts("a"), JSON.stringify(trace)).toEqual(permitted);
                     await enqueue(task, "a", "fenced", false);
                   } else {
@@ -862,7 +900,7 @@ it.each(boundaryCases)(
                   expect(receipts("a"), JSON.stringify(trace)).toEqual(permitted);
                   expect(messages("a").every((r) => !r.autoStart)).toBe(true);
                   expect(messages("a").find((r) => r.messageId === "a-later")).toMatchObject({
-                    status: "queued",
+                    status: admitted.includes("a-later") ? "delivered" : "queued",
                     autoStart: false,
                   });
                   expect(messages("a").find((r) => r.messageId === "a-fenced")).toMatchObject({
