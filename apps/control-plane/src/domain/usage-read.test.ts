@@ -11,6 +11,7 @@ it("reads only the selected owner and reconciles totals across grouped buckets",
       buckets: [
         {
           at: 0,
+          orbId: "a",
           use: "root" as const,
           provider: "p",
           model: "m",
@@ -22,6 +23,7 @@ it("reads only the selected owner and reconciles totals across grouped buckets",
         },
         {
           at: 900000,
+          orbId: "b",
           use: "subagent" as const,
           provider: "p",
           model: "m",

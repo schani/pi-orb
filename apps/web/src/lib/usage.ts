@@ -2,7 +2,7 @@ import type { BarChart, LineChart, ModelCallUse, UsageTotals, UsageView } from "
 import type { ChartXAxis } from "./chart-spec.ts";
 
 export type UsagePeriod = "day" | "week" | "month" | "six_months";
-export type UsageBreakdown = "token_kind" | "use" | "model";
+export type UsageBreakdown = "token_kind" | "use" | "model" | "orb";
 export type UsageMeasure = "total" | "input" | "output" | "cacheRead" | "cacheWrite";
 export const USE_LABELS: Record<ModelCallUse, string> = {
   root: "Root",
@@ -81,7 +81,13 @@ export function usageAxis(period: UsagePeriod, boundaries: readonly number[]): C
   };
 }
 
-export function usageTimeline(data: UsageView, breakdown: UsageBreakdown): LineChart {
+type TimelineTarget = { measure: UsageMeasure } | { orbId: string };
+
+export function usageTimeline(
+  data: UsageView,
+  breakdown: UsageBreakdown,
+): { spec: LineChart; targets: ReadonlyMap<string, TimelineTarget> } {
+  const targets = new Map<string, TimelineTarget>();
   const times = data.boundaries.slice(0, -1);
   const groups = new Map<string, Map<number, number>>();
   const add = (name: string, at: number, value: number) => {
@@ -90,7 +96,10 @@ export function usageTimeline(data: UsageView, breakdown: UsageBreakdown): LineC
     groups.set(name, points);
   };
   if (breakdown === "token_kind")
-    for (const name of Object.values(TOKEN_LABELS)) groups.set(name, new Map());
+    for (const key of Object.keys(TOKEN_LABELS) as (keyof typeof TOKEN_LABELS)[]) {
+      groups.set(TOKEN_LABELS[key], new Map());
+      targets.set(TOKEN_LABELS[key], { measure: key });
+    }
   if (breakdown === "use")
     for (const name of Object.values(USE_LABELS)) groups.set(name, new Map());
   for (const row of data.buckets) {
@@ -99,15 +108,32 @@ export function usageTimeline(data: UsageView, breakdown: UsageBreakdown): LineC
         add(TOKEN_LABELS[key], row.at, row[key]);
     } else
       add(
-        breakdown === "use" ? USE_LABELS[row.use] : row.provider + " / " + row.model,
+        breakdown === "use"
+          ? USE_LABELS[row.use]
+          : breakdown === "orb"
+            ? row.orbId
+            : row.provider + " / " + row.model,
         row.at,
         totalTokens(row),
       );
   }
   let entries = [...groups.entries()];
-  if (breakdown === "model") {
+  if (breakdown === "model" || breakdown === "orb") {
     const sum = (points: Map<number, number>) => [...points.values()].reduce((a, b) => a + b, 0);
     entries.sort((a, b) => sum(b[1]) - sum(a[1]) || a[0].localeCompare(b[0]));
+    if (breakdown === "orb") {
+      const names = new Map(data.orbs.map((row) => [row.id, row.name ?? row.id]));
+      const labels = entries.map(([id]) => names.get(id) ?? id);
+      entries = entries.map(([id, points], index) => {
+        const label = labels[index] ?? id;
+        const name =
+          label === "Other" || labels.filter((name) => name === label).length > 1
+            ? label + " · " + id
+            : label;
+        if (entries.length <= 6 || index < 5) targets.set(name, { orbId: id });
+        return [name, points];
+      });
+    }
     if (entries.length > 6) {
       const other = new Map<number, number>();
       for (const [, points] of entries.slice(5))
@@ -117,13 +143,16 @@ export function usageTimeline(data: UsageView, breakdown: UsageBreakdown): LineC
   }
   if (entries.length === 0) entries = [["All tokens", new Map()]];
   return {
-    kind: "line",
-    title: "Consumption over time",
-    unit: "tokens",
-    series: entries.map(([name, points]) => ({
-      name,
-      points: times.map((at) => [at, points.get(at) ?? 0]),
-    })),
+    spec: {
+      kind: "line",
+      title: "Consumption over time",
+      unit: "tokens",
+      series: entries.map(([name, points]) => ({
+        name,
+        points: times.map((at) => [at, points.get(at) ?? 0]),
+      })),
+    },
+    targets,
   };
 }
 

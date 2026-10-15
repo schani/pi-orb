@@ -96,6 +96,7 @@ it.each(["chromium", "webkit"] as const)(
                   {
                     ...totals,
                     at: boundaries[0] ?? 0,
+                    orbId: "00000000-0000-4000-8000-000000000001",
                     use: "root",
                     provider: "openai",
                     model: "example",
@@ -196,6 +197,28 @@ it.each(["chromium", "webkit"] as const)(
             (ns) => ns.filter((n) => Number(n.getAttribute("opacity") ?? 1) < 0.5).length,
           );
       await expect.poll(dimmed).toBe(3);
+      for (const [name, measure] of [
+        ["Uncached input", "input"],
+        ["Cached input", "cacheRead"],
+        ["Cache write", "cacheWrite"],
+        ["Output", "output"],
+      ] as const) {
+        const control = timeline.getByRole("button", { name, exact: true });
+        await control.click();
+        await expect(page.getByLabel("Measure")).toHaveValue(measure);
+      }
+      const cachedControl = timeline.getByRole("button", { name: "Cached input", exact: true });
+      await cachedControl.focus();
+      await page.keyboard.press("Enter");
+      await expect(page.getByLabel("Measure")).toHaveValue("cacheRead");
+      await expect.poll(dimmed).toBe(3);
+      await cachedControl.blur();
+      const desktopOutput = timeline.getByRole("button", { name: "Output", exact: true });
+      await desktopOutput.focus();
+      await page.keyboard.press("Space");
+      await expect(page.getByLabel("Measure")).toHaveValue("output");
+      await desktopOutput.blur();
+
       const svgBox = await timeline.locator(".chart-canvas svg").boundingBox();
       if (svgBox === null) throw new Error("No plot bounds");
       await page.mouse.move(svgBox.x + svgBox.width * 0.4, svgBox.y + svgBox.height * 0.5);
@@ -210,6 +233,18 @@ it.each(["chromium", "webkit"] as const)(
       await expect(timeline.locator("g.mark-line path")).toHaveCount(6);
       await page.getByLabel("Breakdown").selectOption("model");
       await expect(timeline.locator("g.mark-line path")).toHaveCount(1);
+      await page.getByLabel("Breakdown").selectOption("orb");
+      await expect(timeline.locator("g.mark-line path")).toHaveAttribute(
+        "aria-label",
+        /Recorded orb/,
+      );
+      await expect(
+        timeline.getByRole("link", { name: "Recorded orb", exact: true }),
+      ).toHaveAttribute("href", "/orbs/00000000-0000-4000-8000-000000000001");
+      const orbPlot = await timeline.locator(".chart-canvas svg").boundingBox();
+      if (orbPlot === null) throw new Error("No orb plot bounds");
+      await page.mouse.move(orbPlot.x + orbPlot.width * 0.4, orbPlot.y + orbPlot.height * 0.5);
+      await expect(page.locator(".chart-tip")).toContainText("Recorded orb");
       await page.getByLabel("Breakdown").selectOption("token_kind");
       expect(windows.length).toBe(readsBeforeFilters);
       await page.screenshot({ path: "/tmp/usage-implemented-1440.png", fullPage: true });
@@ -258,7 +293,22 @@ it.each(["chromium", "webkit"] as const)(
         await page.setViewportSize({ width, height: 900 });
         const key = timeline.locator(".chart-key");
         await expect(key).toBeVisible();
+        expect(
+          await key
+            .locator("a, button")
+            .evaluateAll((nodes) =>
+              nodes.every((node) => node.getBoundingClientRect().height >= 44),
+            ),
+        ).toBe(true);
         await key.locator('[data-series="Output"]').hover();
+        await key.getByRole("button", { name: "Uncached input", exact: true }).click();
+        await expect(page.getByLabel("Measure")).toHaveValue("input");
+        const output = key.getByRole("button", { name: "Output", exact: true });
+        await output.focus();
+        await page.keyboard.press("Space");
+        await expect(page.getByLabel("Measure")).toHaveValue("output");
+        await output.hover();
+
         await expect.poll(dimmed).toBe(3);
         expect(
           await page
@@ -341,6 +391,7 @@ it.each(["chromium", "webkit"] as const)(
       ).toBe(true);
       await page.unroute("**/api/v1/usage?*");
       await checkOrbLinks(page, origin);
+      await checkAggregateLegend(page);
       expect(errors).toEqual([]);
     } finally {
       await browser?.close();
@@ -366,6 +417,65 @@ async function checkOrbLinks(page: Page, origin: string) {
       page.locator('.usage-orb-row[href="/orbs/' + encodeURIComponent(orb.id) + '"]'),
     ).toHaveCount(1);
   }
+  const timeline = page.locator(".usage-timeline");
+  await page.getByLabel("Breakdown").selectOption("orb");
+  await expect(timeline.locator("g.mark-line path")).toHaveCount(5);
+  for (const orb of metadata)
+    await expect(timeline.locator("svg text", { hasText: orb.name ?? orb.id })).toHaveCount(1);
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(timeline.locator(".chart-key [data-series]")).toHaveCount(5);
+    expect(
+      await timeline
+        .locator(".chart-key a")
+        .evaluateAll((nodes) => nodes.every((node) => node.getBoundingClientRect().height >= 44)),
+    ).toBe(true);
+    for (const orb of metadata)
+      await expect(
+        timeline.locator('.chart-key [data-series="' + (orb.name ?? orb.id) + '"]'),
+      ).toBeVisible();
+    expect(
+      await page
+        .locator("html")
+        .evaluate((n) => n.scrollWidth <= (n.ownerDocument.defaultView?.innerWidth ?? 0)),
+    ).toBe(true);
+  }
+  // Desktop SVG anchors and phone HTML anchors keep native new-tab and keyboard behavior.
+  for (const width of [1440, 320]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const namedOrb = metadata.find((orb) => orb.name !== null);
+    const deletedOrb = metadata.find((orb) => orb.name === null);
+    if (!namedOrb || !deletedOrb) throw new Error("Missing legend fixture metadata");
+    for (const orb of [namedOrb, deletedOrb]) {
+      const link = timeline.getByRole("link", { name: orb.name ?? orb.id, exact: true });
+      const href = "/orbs/" + encodeURIComponent(orb.id);
+      await expect(link).toHaveAttribute("href", href);
+      await link.focus();
+      await expect(link).toBeFocused();
+      const opened = page.context().waitForEvent("page");
+      await link.click({ modifiers: ["ControlOrMeta"] });
+      const tab = await opened;
+      await expect(tab).toHaveURL(origin + href);
+      if (orb.name === null)
+        await expect(
+          tab.getByRole("heading", { name: "Orb doesn't exist", exact: true }),
+        ).toBeVisible();
+      await tab.close();
+      await expect(page).toHaveURL(origin + "/usage");
+    }
+    for (const activation of ["click", "keyboard"]) {
+      const link = timeline.getByRole("link", { name: namedOrb.name ?? namedOrb.id, exact: true });
+      if (activation === "click") await link.click();
+      else {
+        await link.focus();
+        await page.keyboard.press("Enter");
+      }
+      await expect(page).toHaveURL(origin + "/orbs/" + encodeURIComponent(namedOrb.id));
+      await page.goBack();
+      await page.getByLabel("Breakdown").selectOption("orb");
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
   const named = metadata.find((orb) => orb.name !== null);
   if (!named || named.name === null) throw new Error("No named usage fixture orb");
   const href = "/orbs/" + encodeURIComponent(named.id);
@@ -434,5 +544,68 @@ async function checkOrbLinks(page: Page, origin: string) {
           ),
         ),
     ).toBe(true);
+  }
+}
+
+async function checkAggregateLegend(page: Page) {
+  const ids = Array.from({ length: 7 }, (_, i) => "00000000-0000-4000-8000-00000000000" + (i + 1));
+  await page.route("**/api/v1/usage?*", async (route) => {
+    const boundaries = JSON.parse(
+      new URL(route.request().url()).searchParams.get("boundaries") ?? "[]",
+    ) as number[];
+    const totals = { input: 10, output: 0, cacheRead: 0, cacheWrite: 0, calls: 1 };
+    await route.fulfill({
+      json: {
+        boundaries,
+        summary: { ...totals, input: 70, calls: 7 },
+        buckets: ids.map((orbId) => ({
+          ...totals,
+          orbId,
+          at: boundaries[0],
+          use: "root",
+          provider: "p",
+          model: "m",
+        })),
+        orbs: ids.map((id, i) => ({
+          ...totals,
+          id,
+          name: i === 0 ? "Other" : i === 1 ? null : "Same",
+        })),
+      },
+    });
+  });
+  await page.reload();
+  await page.getByLabel("Breakdown").selectOption("orb");
+  const timeline = page.locator(".usage-timeline");
+  for (const width of [1440, 320]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await expect(timeline.getByRole("link")).toHaveCount(5);
+    await expect(
+      timeline.getByRole("link", { name: "Other · " + ids[0], exact: true }),
+    ).toHaveAttribute("href", "/orbs/" + ids[0]);
+    await expect(timeline.getByRole("link", { name: ids[1]!, exact: true })).toHaveAttribute(
+      "href",
+      "/orbs/" + ids[1],
+    );
+    await expect(
+      timeline.getByRole("link", { name: "Same · " + ids[2], exact: true }),
+    ).toHaveAttribute("href", "/orbs/" + ids[2]);
+    await expect(timeline.getByRole("link", { name: "Other", exact: true })).toHaveCount(0);
+    await expect(timeline.getByRole("button", { name: "Other", exact: true })).toHaveCount(0);
+    const aggregate =
+      width === 1440
+        ? timeline.locator("svg text", { hasText: /^Other [0-9]/ })
+        : timeline.locator('.chart-key [data-series="Other"]');
+    // Use the painted center for inert SVG text; action entries use normal locator clicks above.
+    await aggregate.scrollIntoViewIfNeeded();
+    const point = await aggregate.evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      return { x, y, hitsLabel: node.contains(node.ownerDocument.elementFromPoint(x, y)) };
+    });
+    expect(point.hitsLabel).toBe(true);
+    await page.mouse.click(point.x, point.y);
+    await expect(page).toHaveURL(/\/usage$/);
   }
 }

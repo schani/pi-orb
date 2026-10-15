@@ -19,6 +19,11 @@ describe("mock usage", () => {
     expect(
       new Set(data.buckets.filter((row) => row.use === "root").map((row) => row.input)).size,
     ).toBeGreaterThan(1);
+    for (const orb of data.orbs) {
+      const rows = data.buckets.filter((row) => row.orbId === orb.id);
+      expect(rows.length).toBeGreaterThan(0);
+      for (const key of keys) expect(rows.reduce((sum, row) => sum + row[key], 0)).toBe(orb[key]);
+    }
     for (const key of keys) {
       expect(data.buckets.reduce((sum, row) => sum + row[key], 0)).toBe(data.summary[key]);
       expect(data.orbs.reduce((sum, row) => sum + row[key], 0)).toBe(data.summary[key]);

@@ -36,6 +36,7 @@ export const UsageViewSchema = Type.Object(
         {
           ...UsageTotalsSchema.properties,
           at: timestamp,
+          orbId: Type.String(),
           use: ModelCallUseSchema,
           provider: Type.String(),
           model: Type.String(),

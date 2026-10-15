@@ -2,7 +2,7 @@ import type { ChartSpec } from "@pi-orb/protocol";
 import { Result, ResultAsync } from "neverthrow";
 import { useEffect, useRef, useState } from "react";
 import type { ChartRenderError, MountedChart } from "../lib/chart-render.ts";
-import { type ChartXAxis, seriesStyles } from "../lib/chart-spec.ts";
+import { type ChartSeriesActions, type ChartXAxis, seriesStyles } from "../lib/chart-spec.ts";
 import { usePhoneLayout } from "../lib/use-phone-layout.ts";
 
 const CHART_HEIGHT = 180;
@@ -76,7 +76,9 @@ function Key({
   spec,
   highlighted,
   onHighlight,
+  seriesActions,
 }: {
+  seriesActions?: ChartSeriesActions;
   spec: Extract<ChartSpec, { kind: "line" }>;
   highlighted: string | null;
   onHighlight: (series: string | null) => void;
@@ -84,28 +86,48 @@ function Key({
   const { colors, dash } = seriesStyles(spec.series.length);
   return (
     <div className="chart-key" data-highlighted={highlighted === null ? undefined : ""}>
-      {spec.series.map((series, index) => (
-        <span
-          key={series.name}
-          data-series={series.name}
-          data-on={highlighted === series.name ? "" : undefined}
-          onPointerEnter={() => onHighlight(series.name)}
-          onPointerLeave={() => onHighlight(null)}
-        >
-          <svg width="14" height="2" aria-hidden="true">
-            <line
-              x1="0"
-              y1="1"
-              x2="14"
-              y2="1"
-              stroke={colors[index]}
-              strokeWidth="2"
-              strokeDasharray={dash[index]?.join(" ")}
-            />
-          </svg>
-          {series.name}
-        </span>
-      ))}
+      {spec.series.map((series, index) => {
+        const action = seriesActions?.get(series.name);
+        const props = {
+          "data-series": series.name,
+          "data-on": highlighted === series.name ? "" : undefined,
+          onPointerEnter: () => onHighlight(series.name),
+          onPointerLeave: () => onHighlight(null),
+        };
+        const content = (
+          <>
+            <svg width="14" height="2" aria-hidden="true">
+              <line
+                x1="0"
+                y1="1"
+                x2="14"
+                y2="1"
+                stroke={colors[index]}
+                strokeWidth="2"
+                strokeDasharray={dash[index]?.join(" ")}
+              />
+            </svg>
+            {series.name}
+          </>
+        );
+        const focus = {
+          onFocus: () => onHighlight(series.name),
+          onBlur: () => onHighlight(null),
+        };
+        return action === undefined ? (
+          <span key={series.name} {...props}>
+            {content}
+          </span>
+        ) : "href" in action ? (
+          <a key={series.name} {...props} {...focus} href={action.href}>
+            {content}
+          </a>
+        ) : (
+          <button key={series.name} {...props} {...focus} type="button" onClick={action.onSelect}>
+            {content}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -115,11 +137,13 @@ export function Chart({
   identity,
   height = CHART_HEIGHT,
   xAxis,
+  seriesActions,
 }: {
   spec: ChartSpec;
   identity: Readonly<Record<string, string | number>>;
   height?: number;
   xAxis?: ChartXAxis;
+  seriesActions?: ChartSeriesActions;
 }) {
   const phone = usePhoneLayout();
   const ref = useRef<HTMLDivElement>(null);
@@ -140,6 +164,7 @@ export function Chart({
           narrow: phone,
           height,
           ...(xAxis === undefined ? {} : { xAxis }),
+          ...(seriesActions === undefined ? {} : { seriesActions }),
           onHighlight: (series) => {
             if (active) setHighlighted(series);
           },
@@ -174,17 +199,20 @@ export function Chart({
       chart.current = null;
       host.remove();
     };
-  }, [spec, phone, identity, height, xAxis]);
+  }, [spec, phone, identity, height, xAxis, seriesActions]);
   const source = spec.source === undefined ? null : sourceLabel(spec.source);
   return (
     <>
-      {phone && spec.kind === "line" && spec.series.length > 1 && (
-        <Key
-          spec={spec}
-          highlighted={highlighted}
-          onHighlight={(series) => chart.current?.highlight(series)}
-        />
-      )}
+      {phone &&
+        spec.kind === "line" &&
+        (spec.series.length > 1 || (seriesActions?.size ?? 0) > 0) && (
+          <Key
+            spec={spec}
+            highlighted={highlighted}
+            {...(seriesActions === undefined ? {} : { seriesActions })}
+            onHighlight={(series) => chart.current?.highlight(series)}
+          />
+        )}
       <div className="chart-canvas" ref={ref} hidden={error !== null} />
       {error !== null && (
         <p className="chart-error" role="alert">

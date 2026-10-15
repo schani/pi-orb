@@ -4,6 +4,7 @@ import { Chart } from "../components/Chart.tsx";
 import { Icon } from "../components/Icons.tsx";
 import { UsageOrbRankings } from "../components/UsageOrbRankings.tsx";
 import { type ApiError, describeApiError, getModelUsage } from "../lib/api.ts";
+import type { ChartSeriesActions } from "../lib/chart-spec.ts";
 import {
   cacheShare,
   formatUsageCount,
@@ -45,6 +46,18 @@ function LoadedUsage({
 }: { data: UsageView; period: UsagePeriod } & FilterProps) {
   const { breakdown, measure } = filters;
   const timeline = useMemo(() => usageTimeline(data, breakdown), [data, breakdown]);
+  const seriesActions = useMemo<ChartSeriesActions>(
+    () =>
+      new Map(
+        [...timeline.targets].map(([name, target]) => [
+          name,
+          "orbId" in target
+            ? { href: "/orbs/" + encodeURIComponent(target.orbId) }
+            : { onSelect: () => onFiltersChange({ breakdown, measure: target.measure }) },
+        ]),
+      ),
+    [timeline, breakdown, onFiltersChange],
+  );
   const ranks = useMemo(() => usageRankings(data, measure), [data, measure]);
   const identity = useMemo(
     () => ({
@@ -105,10 +118,17 @@ function LoadedUsage({
                   <option value="token_kind">Token kind</option>
                   <option value="use">Use</option>
                   <option value="model">Model</option>
+                  <option value="orb">Orb</option>
                 </select>
               </label>
             </header>
-            <Chart spec={timeline} identity={identity} height={280} xAxis={xAxis} />
+            <Chart
+              spec={timeline.spec}
+              identity={identity}
+              height={280}
+              xAxis={xAxis}
+              seriesActions={seriesActions}
+            />
           </section>
         )}
       </div>
