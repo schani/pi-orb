@@ -10,8 +10,6 @@ import {
 
 type Value = { stringValue: string } | { intValue: number | string } | { doubleValue: number };
 const record = (event: string, attributes: Record<string, Value>) => ({
-  timeUnixNano: "1791911708519000000",
-  body: { stringValue: `claude_code.${event}` },
   attributes: Object.entries({ "event.name": { stringValue: event }, ...attributes }).map(
     ([key, value]) => ({ key, value }),
   ),
@@ -24,93 +22,72 @@ const logs = (service: string, ...records: ReturnType<typeof record>[]) => ({
     },
   ],
 });
-// Shape captured from Claude Code 2.1.289 (`model-usage.contract.test.ts` pins it).
+// Shape from Claude Code 2.1.289; `model-usage.contract.test.ts` pins it against the real binary.
 const apiRequest = record("api_request", {
-  "session.id": { stringValue: "f43095cd-78db-42ed-9322-20130857ddec" },
   "event.timestamp": { stringValue: "2026-10-13T17:15:08.519Z" },
-  "prompt.id": { stringValue: "4e313ac0-c6f5-4f29-b0b9-0e472ed38b49" },
   model: { stringValue: "claude-sonnet-5-5" },
+  query_source: { stringValue: "agent:custom" },
   input_tokens: { intValue: 101 },
   output_tokens: { intValue: 7 },
   cache_read_tokens: { intValue: "1000" },
   cache_creation_tokens: { intValue: 50 },
   cost_usd: { doubleValue: 0.000597 },
   duration_ms: { intValue: 18 },
-  ttft_ms: { intValue: 11 },
-  request_id: { stringValue: "req_1" },
-  speed: { stringValue: "normal" },
-  query_source: { stringValue: "agent:custom" },
-  "agent.name": { stringValue: "custom" },
-  effort: { stringValue: "medium" },
 });
 const apiError = record("api_error", {
-  "session.id": { stringValue: "f43095cd-78db-42ed-9322-20130857ddec" },
   "event.timestamp": { stringValue: "2026-10-13T17:15:09.000Z" },
   model: { stringValue: "claude-sonnet-5-5" },
   error: { stringValue: "Overloaded" },
-  status_code: { stringValue: "529" },
-  duration_ms: { intValue: 40 },
-  attempt: { intValue: 2 },
-  query_source: { stringValue: "sdk" },
-});
-const userPrompt = record("user_prompt", {
-  prompt: { stringValue: "<REDACTED>" },
 });
 
 describe("parseOtlpLogs", () => {
-  it("extracts every api_request and api_error field, ignoring other events", () => {
-    const parsed = parseOtlpLogs(logs("claude-code", userPrompt, apiRequest, apiError));
-    // The replicated record contract the control plane validates (docs/model-usage.md).
-    for (const call of parsed._unsafeUnwrap())
-      expect(Check(ClaudeModelCallSchema, call)).toBe(true);
-    expect(parsed._unsafeUnwrap()).toEqual<ClaudeModelCall[]>([
+  it("extracts api_request and api_error calls, ignoring other events and services", () => {
+    const calls = parseOtlpLogs(
+      logs("claude-code", record("user_prompt", {}), apiRequest, apiError),
+    )._unsafeUnwrap();
+    expect(calls).toEqual<ClaudeModelCall[]>([
       {
-        outcome: "ok",
         at: "2026-10-13T17:15:08.519Z",
-        sessionId: "f43095cd-78db-42ed-9322-20130857ddec",
-        promptId: "4e313ac0-c6f5-4f29-b0b9-0e472ed38b49",
         model: "claude-sonnet-5-5",
         querySource: "agent:custom",
-        agentName: "custom",
+        outcome: "ok",
         input: 101,
         output: 7,
         cacheRead: 1000,
         cacheWrite: 50,
         costUsd: 0.000597,
         durationMs: 18,
-        ttftMs: 11,
-        requestId: "req_1",
-        speed: "normal",
-        effort: "medium",
       },
       {
-        outcome: "error",
         at: "2026-10-13T17:15:09.000Z",
-        sessionId: "f43095cd-78db-42ed-9322-20130857ddec",
         model: "claude-sonnet-5-5",
-        querySource: "sdk",
-        error: "Overloaded",
-        statusCode: "529",
-        durationMs: 40,
-        attempt: 2,
+        outcome: "error",
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
       },
     ]);
-  });
-
-  it("ignores logs from other services sharing the endpoint", () => {
+    // The replicated record contract the control plane validates (docs/model-usage.md).
+    for (const call of calls) expect(Check(ClaudeModelCallSchema, call)).toBe(true);
     expect(parseOtlpLogs(logs("user-app", apiRequest))._unsafeUnwrap()).toEqual([]);
   });
 
-  it("rejects a payload that is not OTLP logs", () => {
-    expect(parseOtlpLogs({ resourceLogs: "nope" }).isErr()).toBe(true);
-    expect(parseOtlpLogs(null).isErr()).toBe(true);
-  });
-
-  it("rejects an api_request without token counts", () => {
-    const broken = record("api_request", {
-      model: { stringValue: "claude-sonnet-5-5" },
-    });
-    expect(parseOtlpLogs(logs("claude-code", broken)).isErr()).toBe(true);
+  it.each([
+    ["non-OTLP payload", null],
+    ["malformed resourceLogs", { resourceLogs: "nope" }],
+    [
+      "api_request without counts",
+      logs(
+        "claude-code",
+        record("api_request", {
+          "event.timestamp": { stringValue: "2026-10-13T17:15:08.519Z" },
+          model: { stringValue: "claude-sonnet-5-5" },
+        }),
+      ),
+    ],
+  ])("rejects a %s", (_, body) => {
+    expect(parseOtlpLogs(body).isErr()).toBe(true);
   });
 });
 
@@ -133,14 +110,12 @@ describe("model usage receiver", () => {
           body,
         });
       const payload = JSON.stringify(logs("claude-code", apiRequest));
-
       expect((await post({}, payload)).status).toBe(401);
       expect((await post({ authorization: "Bearer wrong" }, payload)).status).toBe(401);
-      expect(calls).toEqual([]);
-
       expect((await post({ authorization }, "{")).status).toBe(400);
+      expect(calls).toEqual([]);
       expect((await post({ authorization }, payload)).status).toBe(200);
-      expect(calls.map((call) => call.requestId)).toEqual(["req_1"]);
+      expect(calls.map((call) => call.input)).toEqual([101]);
     } finally {
       await receiver.close();
     }

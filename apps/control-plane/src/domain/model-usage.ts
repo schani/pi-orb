@@ -50,23 +50,6 @@ export function claudeModelCall(
   if (!Check(ClaudeModelCallSchema, call)) return null;
   const at = Date.parse(call.at);
   if (Number.isNaN(at)) return null;
-  const counts =
-    call.outcome === "ok"
-      ? {
-          input: call.input,
-          output: call.output,
-          cacheRead: call.cacheRead,
-          cacheWrite: call.cacheWrite,
-          costUsd: call.costUsd,
-        }
-      : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-  return {
-    at,
-    use: claudeUse(call.querySource),
-    provider: "anthropic",
-    model: call.model,
-    outcome: call.outcome,
-    ...counts,
-    ...(call.durationMs === undefined ? {} : { durationMs: call.durationMs }),
-  };
+  const { querySource: _, at: _at, ...counts } = call;
+  return { ...counts, at, use: claudeUse(call.querySource), provider: "anthropic" };
 }

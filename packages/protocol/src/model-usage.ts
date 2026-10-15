@@ -16,39 +16,20 @@ export type ModelCallUse =
 export const CLAUDE_MODEL_CALL_EVENT = "claude.model_call";
 // `model_calls` columns are `integer`; an out-of-range value must not fail the history commit.
 const int = Type.Integer({ minimum: 0, maximum: 2_147_483_647 });
-const callBase = {
+/** One Claude Code `api_request` (`ok`) or `api_error` (`error`, zero tokens) OpenTelemetry event. */
+export const ClaudeModelCallSchema = Type.Object({
   at: Type.String(),
-  sessionId: Type.Optional(Type.String()),
-  promptId: Type.Optional(Type.String()),
   model: Type.String(),
   /** `sdk` (root), `agent:*` (subagent), `compact`, or an auxiliary source such as `generate_session_title`. */
   querySource: Type.Optional(Type.String()),
-  agentName: Type.Optional(Type.String()),
+  outcome: Type.Union([Type.Literal("ok"), Type.Literal("error")]),
+  input: int,
+  output: int,
+  cacheRead: int,
+  cacheWrite: int,
+  costUsd: Type.Optional(Type.Number({ minimum: 0 })),
   durationMs: Type.Optional(int),
-  requestId: Type.Optional(Type.String()),
-  speed: Type.Optional(Type.String()),
-  effort: Type.Optional(Type.String()),
-};
-/** One Claude Code `api_request` (`ok`) or `api_error` (`error`) OpenTelemetry event. */
-export const ClaudeModelCallSchema = Type.Union([
-  Type.Object({
-    ...callBase,
-    outcome: Type.Literal("ok"),
-    input: int,
-    output: int,
-    cacheRead: int,
-    cacheWrite: int,
-    costUsd: Type.Number({ minimum: 0 }),
-    ttftMs: Type.Optional(int),
-  }),
-  Type.Object({
-    ...callBase,
-    outcome: Type.Literal("error"),
-    error: Type.String(),
-    statusCode: Type.Optional(Type.String()),
-    attempt: Type.Optional(int),
-  }),
-]);
+});
 export type ClaudeModelCall = Static<typeof ClaudeModelCallSchema>;
 const closed = { additionalProperties: false } as const;
 const timestamp = Type.Integer({ minimum: 0, maximum: 8_640_000_000_000_000 });

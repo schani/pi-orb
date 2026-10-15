@@ -111,6 +111,8 @@ export async function probeNativeSdk({
   cancelAt,
   withRestart,
   onRoot,
+  env: extraEnv = {},
+  allowPorts = [],
 } = {}) {
   const home = await mkdtemp(join(tmpdir(), "claude-native-contract-"));
   const cwd = join(home, "workspace");
@@ -193,6 +195,7 @@ export async function probeNativeSdk({
     DISABLE_TELEMETRY: "1",
     DISABLE_ERROR_REPORTING: "1",
     ...(withSubagent ? { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1" } : {}),
+    ...extraEnv,
   };
   const sessionId = randomUUID();
   const submittedUuid = randomUUID();
@@ -341,7 +344,7 @@ export async function probeNativeSdk({
           ],
           {
             cwd: options.cwd,
-            env: { ...options.env, NATIVE_CONTRACT_PORT: String(port) },
+            env: { ...options.env, NATIVE_CONTRACT_PORT: [port, ...allowPorts].join(",") },
             detached: true,
             stdio: ["pipe", "pipe", "pipe"],
           },

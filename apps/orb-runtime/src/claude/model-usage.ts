@@ -39,49 +39,23 @@ const number = (attrs: Attributes, key: string): number | undefined => {
   const parsed = typeof value === "string" && value !== "" ? Number(value) : value;
   return typeof parsed === "number" && Number.isFinite(parsed) ? parsed : undefined;
 };
-const optional = <K extends string, V>(key: K, value: V | undefined) =>
-  (value === undefined ? {} : { [key]: value }) as Partial<Record<K, V>>;
-
-function modelCall(
-  attrs: Attributes,
-  time: unknown,
-): Result<ClaudeModelCall | null, OtlpParseError> {
+function modelCall(attrs: Attributes): Result<ClaudeModelCall | null, OtlpParseError> {
   const event = text(attrs, "event.name");
   if (event !== "api_request" && event !== "api_error") return ok(null);
+  const at = text(attrs, "event.timestamp");
   const model = text(attrs, "model");
-  const at =
-    text(attrs, "event.timestamp") ??
-    (typeof time === "string" && /^\d+$/.test(time)
-      ? new Date(Number(BigInt(time) / 1_000_000n)).toISOString()
-      : undefined);
-  if (model === undefined || at === undefined)
+  const querySource = text(attrs, "query_source");
+  const durationMs = number(attrs, "duration_ms");
+  if (at === undefined || model === undefined)
     return err({ code: "invalid_otlp_logs", message: `${event} lacks model or time.` });
   const base = {
     at,
     model,
-    ...optional("sessionId", text(attrs, "session.id")),
-    ...optional("promptId", text(attrs, "prompt.id")),
-    ...optional("querySource", text(attrs, "query_source")),
-    ...optional("agentName", text(attrs, "agent.name")),
-    ...optional("durationMs", number(attrs, "duration_ms")),
-  };
-  const shared = {
-    ...optional("requestId", text(attrs, "request_id")),
-    ...optional("speed", text(attrs, "speed")),
-    ...optional("effort", text(attrs, "effort")),
+    ...(querySource === undefined ? {} : { querySource }),
+    ...(durationMs === undefined ? {} : { durationMs }),
   };
   if (event === "api_error")
-    return ok({
-      ...base,
-      outcome: "error",
-      error: text(attrs, "error") ?? "",
-      ...optional(
-        "statusCode",
-        text(attrs, "status_code") ?? number(attrs, "status_code")?.toString(),
-      ),
-      ...optional("attempt", number(attrs, "attempt")),
-      ...shared,
-    });
+    return ok({ ...base, outcome: "error", input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   const input = number(attrs, "input_tokens");
   const output = number(attrs, "output_tokens");
   const cacheRead = number(attrs, "cache_read_tokens");
@@ -95,17 +69,7 @@ function modelCall(
     costUsd === undefined
   )
     return err({ code: "invalid_otlp_logs", message: "api_request lacks token counts or cost." });
-  return ok({
-    ...base,
-    outcome: "ok",
-    input,
-    output,
-    cacheRead,
-    cacheWrite,
-    costUsd,
-    ...optional("ttftMs", number(attrs, "ttft_ms")),
-    ...shared,
-  });
+  return ok({ ...base, outcome: "ok", input, output, cacheRead, cacheWrite, costUsd });
 }
 
 /** Model calls in an OTLP/JSON logs export (`ExportLogsServiceRequest`); other events and services are ignored. */
@@ -132,11 +96,7 @@ export function parseOtlpLogs(body: unknown): Result<ClaudeModelCall[], OtlpPars
       const records = (scope as { logRecords?: unknown })?.logRecords;
       if (!Array.isArray(records)) return invalid("logRecords is not an array.");
       for (const log of records) {
-        const { attributes: list, timeUnixNano } = (log ?? {}) as {
-          attributes?: unknown;
-          timeUnixNano?: unknown;
-        };
-        const call = modelCall(attributes(list), timeUnixNano);
+        const call = modelCall(attributes((log as { attributes?: unknown } | null)?.attributes));
         if (call.isErr()) return err(call.error);
         if (call.value !== null) calls.push(call.value);
       }
