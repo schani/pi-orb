@@ -1,5 +1,15 @@
 # Testing
 
+## Seeded lifecycle campaign (decision 2026-10-14)
+
+`lifecycle-campaign.dst.test.ts` runs two concurrent callers with independent compute/history workers over reachable lifecycle histories. A commit ledger tracks admission order, content, provenance, Sleep deadlines and explicit revocations independently of responses. Every still-authorized input requires a durable session receipt and replicated delivered status; failed rows/states never waive delivery.
+
+Fair quiescence joins actors, removes injected faults and budgets remaining Sleep, boot/setup, drain/retry, quarantine and FIFO-page deadlines. Late timers remain active. Coverage floors require consumed fault effects and actual admissions/receipts, not selected commands or installed scripts.
+
+CI runs 64 seeds per placement, 96 commands each. `LIFECYCLE_CAMPAIGN_SEEDS` expands the range; `LIFECYCLE_CAMPAIGN_FIRST_SEED` chooses its start. Replay matching source with `DST_REPLAY=<trace> LIFECYCLE_CAMPAIGN_FIRST_SEED=<seed> LIFECYCLE_CAMPAIGN_SEEDS=1 npx vitest run apps/control-plane/src/domain/lifecycle-campaign.dst.test.ts -t '<placement> seed <seed>$'`.
+
+Scope is memory/FakeWorld orchestration, not PostgreSQL, Native admission/suspension, runtime HTTP or browsers. The central fake supplies no authority guard. Its pre-dispatch checkpoint/read witnesses independent authority and carried version; Native must fence revocation between that read and acceptance. Dedicated store, Native and runtime safety tests remain required.
+
 ## DST boundary compositions (decision 2026-10-14)
 
 - Writer expectations are authored semantic facts: ordered records, ancestry, roles/receipts, distinct block text/revisions and tool identities/names/states. Reducer/projector/sync results supply actual observations only. Unrelated history preserves live blocks; partial retirement removes exactly its named subset. Real retry resumes from an advanced cursor after interrupted sync; runtime output and commits continue while final sync drains. Retired sockets/cache owners cannot publish.

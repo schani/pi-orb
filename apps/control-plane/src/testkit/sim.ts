@@ -62,6 +62,8 @@ export class LogCapture implements Logger {
 export interface DstOptions {
   readonly name: string;
   readonly iterations?: number;
+  /** Reproducible command and scheduler exploration; recorded traces remain authoritative. */
+  readonly seed?: number;
   /** Failure probability per failpoint name; unnamed failpoints never fire. */
   readonly failpointProbabilities?: Readonly<Record<string, number>>;
   readonly maxSchedulingSteps?: number;
@@ -118,8 +120,18 @@ export function makeSimulation(options: DstOptions, entropy: EntropySource): Sim
       maxSchedulingSteps: options.maxSchedulingSteps ?? 200_000,
       maxVirtualDurationMs: options.maxVirtualDurationMs ?? 24 * 3_600_000,
       failOnLateCompletion: false,
-      pickTimerIndex: (timers, now, random) =>
-        pickTimerBiasedEarliest(timers, now, random, options.lateTimerProbability ?? 0.05),
+      pickTimerIndex: (timers, now, random) => {
+        const index = pickTimerBiasedEarliest(
+          timers,
+          now,
+          random,
+          options.lateTimerProbability ?? 0.05,
+        );
+        const chosen = timers[index];
+        if (chosen && timers.some((timer) => timer.deadline < chosen.deadline))
+          options.logCapture?.log(`dst: non-earliest timer deadline=${chosen.deadline} now=${now}`);
+        return index;
+      },
     },
   );
 }
@@ -152,7 +164,19 @@ export async function runDst(
   const iterations = options.iterations ?? 30;
   for (let i = 0; i < iterations; i++) {
     options.signal?.throwIfAborted();
-    const recording = new RecordingTraceSource(new SimpleEntropySource());
+    let seed = ((options.seed ?? 0) + i) >>> 0;
+    const entropy: EntropySource =
+      options.seed === undefined
+        ? new SimpleEntropySource()
+        : {
+            random: () => {
+              seed = (seed + 0x6d2b79f5) >>> 0;
+              let value = Math.imul(seed ^ (seed >>> 15), seed | 1);
+              value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+              return ((value ^ (value >>> 14)) >>> 0) / 0x100000000;
+            },
+          };
+    const recording = new RecordingTraceSource(entropy);
     options.logCapture?.reset();
     const sim = makeSimulation(options, recording);
     try {
@@ -183,8 +207,22 @@ export async function runDst(
         const replaySim = makeSimulation(options, new ReplayingTraceSource(recording.getTrace()));
         options.logCapture?.reset();
         await scenario(replaySim);
-      } catch {
-        reproduced = true;
+      } catch (replayError) {
+        // Match the invariant and its origin, not this helper's recording/replay stack.
+        const identity = (failure: unknown) => {
+          const detail = failure instanceof Error ? failure.message : String(failure);
+          const origin = (
+            detail.includes("\n    at ")
+              ? detail
+              : failure instanceof Error
+                ? failure.stack
+                : detail
+          )
+            ?.split("\n    at ")[1]
+            ?.split("\n")[0];
+          return `${detail.split("\n    at ")[0]}\n${origin ?? ""}`;
+        };
+        reproduced = identity(replayError) === identity(error);
       }
       throw new Error(
         `DST scenario "${options.name}" failed at iteration ${i} ` +
