@@ -33,6 +33,10 @@ Persist the steer flag, native input UUID, inbox identities and operation ID bef
 
 Existing control-plane `message-batch-dispatched` edges record turn/steer delivery. Hidden replicated `claude.steering_result` edges retain query/operation/result identities, answered and pending input UUIDs and native queued-turn count; no prompts or tool output. User messages and operation outcomes remain visible in ordinary history. Non-steered operations emit no steering diagnostics.
 
+**Decision — 2026-10-15; local, undeployed:** record each root assistant error and error result at SDK consumption, before shutdown filtering, in existing replicated history (`claude.assistant_error` / `claude.result_error`). Visible rows show category and supplied HTTP status. Assistant categories come from SDK `error`; results use their error subtype, or `api_error` for `success` with `is_error`. Separate records prevent stale category attribution; child assistant errors and healthy results are excluded.
+
+Overflow retains session/native-session/query/operation/message/result identities, subtype, error flag, error strings/count, error text and nullable `apiErrorStatus` (never inferred). Reuse credential-aware redaction before bounding: 16 strings of 1,024 characters, 8,192 characters of text; `truncated` exposes loss. SDK 0.3.300 supplies `errors[]` on error variants and `result` / optional `api_error_status` on success variants. Assistant diagnostics include only text blocks, never reasoning, tools or arbitrary fields. History failure sets `history_unavailable` and skips message handling. No new journal or schema; aggregate failure/Abort semantics are unchanged. Later success neither clears aggregate failure nor erases diagnostics. Evidence: `docs/postmortems/2026-10-15-claude-success-failed-operation.md`.
+
 Native priority semantics and pinned-version evidence: `docs/claude-sdk-capabilities.md`. Qualification: `docs/testing.md`.
 
 ## Manual compaction (decided 2026-10-06; local, undeployed)

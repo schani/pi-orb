@@ -8,7 +8,7 @@ import type {
   SDKMessage,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { ServerFrame } from "@pi-orb/protocol";
+import { projectDisplayRecord, type ServerFrame } from "@pi-orb/protocol";
 import { err, ok } from "neverthrow";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -161,6 +161,7 @@ function fixture(
   agent.subscribe((frame) => frames.push(frame));
   return {
     agent,
+    dir,
     state,
     history,
     frames,
@@ -762,6 +763,7 @@ it.each(["status", "assistant"] as const)(
             parent_tool_use_id: null,
             uuid: "event",
             session_id: f.state.id,
+            error: "rate_limit",
             message: { content: [] },
           }) as unknown as SDKMessage,
     );
@@ -799,6 +801,15 @@ it.each(["status", "assistant"] as const)(
       },
     });
     expect(JSON.stringify(failure)).not.toContain("private-result");
+    if (source === "assistant")
+      expect(
+        f.history.view.find(
+          (record) => record.type === "event" && record.eventType === "claude.assistant_error",
+        ),
+      ).toMatchObject({
+        custom: { display: true },
+        overflow: { category: "rate_limit", messageId: "event" },
+      });
   },
 );
 it.each(["rotation", "interrupt"] as const)(
@@ -992,3 +1003,134 @@ it("initialization remains busy until its probe subprocess and stdout have drain
   expect(f.agent.gateView().activity).toBe("idle");
   expect(f.agent.prepareIdleStop()._unsafeUnwrap()).toBe(true);
 });
+
+it("retains visible SDK error diagnostics across later success and history reopen", async () => {
+  const f = fixture();
+  await f.attach();
+  await f.agent.submitMessage([{ type: "text", text: "hello" }], "op");
+  const delivery = Object.values(f.state.deliveries)[0];
+  f.persist({ type: "user", uuid: delivery?.uuid, message: { content: "hello" } });
+  const emit = (message: object) =>
+    f.emit({ uuid: "error", session_id: f.state.id, ...message } as unknown as SDKMessage);
+  const assistant = {
+    type: "assistant",
+    parent_tool_use_id: null,
+    error: "rate_limit",
+    message: { content: [{ type: "text", text: "Rate limited; Bearer private-token" }] },
+  };
+  const errors = () =>
+    f.history.view.filter(
+      (record) =>
+        record.type === "event" && /claude\.(assistant|result)_error/.test(record.eventType),
+    );
+  await emit({ ...assistant, parent_tool_use_id: "child" });
+  await emit({ ...assistant, error: undefined });
+  expect(errors()).toEqual([]);
+  await emit(assistant);
+  expect(errors()[0]).toMatchObject({
+    overflow: {
+      category: "rate_limit",
+      errorText: "Rate limited; [redacted]",
+      apiErrorStatus: null,
+    },
+  });
+  for (const subtype of [
+    "error_during_execution",
+    "error_max_turns",
+    "error_max_budget_usd",
+    "error_max_structured_output_retries",
+  ]) {
+    await emit({
+      ...rootResult,
+      subtype,
+      is_error: subtype !== "error_max_turns",
+      errors: ["socket failed"],
+    });
+    expect(errors().at(-1)).toMatchObject({
+      overflow: {
+        category: subtype,
+        errors: ["socket failed"],
+        errorText: null,
+        apiErrorStatus: null,
+      },
+    });
+  }
+  await emit({ ...rootResult, is_error: true, result: "Overloaded", api_error_status: 529 });
+  expect(errors().at(-1)).toMatchObject({
+    overflow: {
+      category: "api_error",
+      subtype: "success",
+      isError: true,
+      errorText: "Overloaded",
+      apiErrorStatus: 529,
+      errors: [],
+    },
+  });
+  await f.emit(rootResult);
+  f.exit();
+  await f.agent.closeExtensions();
+  expect(errors()).toHaveLength(6);
+  for (const record of errors()) {
+    expect(record.overflow).toMatchObject({
+      sessionId: f.state.id,
+      nativeSessionId: f.state.id,
+      operationId: "op",
+      queryId: expect.any(String),
+      messageId: "error",
+      truncated: false,
+    });
+    expect(projectDisplayRecord(record)).toMatchObject({
+      custom: { display: true },
+      content: [
+        {
+          type: "text",
+          text: `Claude error: ${record.overflow.category}${record.overflow.apiErrorStatus === null ? "" : " (HTTP 529)"}.`,
+        },
+      ],
+    });
+    expect(f.frames).toContainEqual(
+      expect.objectContaining({ type: "history.record", record: projectDisplayRecord(record) }),
+    );
+  }
+  const retained = new ClaudeHistory(join(f.dir, "claude"), f.state.id, f.state.timestamp);
+  expect(
+    retained.view.filter((record) => errors().some((error) => error.id === record.id)),
+  ).toEqual(errors());
+  expect(
+    f.history.view.find(
+      (record) => record.type === "event" && record.eventType === "claude.operation_finished",
+    ),
+  ).toMatchObject({ overflow: { outcome: "failed" } });
+});
+
+it.each(["result", "assistant"] as const)(
+  "fails closed if %s diagnostics cannot be committed",
+  async (type) => {
+    const f = fixture();
+    await f.attach();
+    await f.agent.submitMessage([{ type: "text", text: "hello" }], "op");
+    const append = vi
+      .spyOn(f.history, "appendPlatform")
+      .mockReturnValue(
+        err({ type: "claude_history_error", message: "injected diagnostic commit failure" }),
+      );
+    await f.emit({
+      type,
+      ...(type === "result"
+        ? { subtype: "success", is_error: true, result: "API failed", api_error_status: 500 }
+        : { parent_tool_use_id: null, error: "rate_limit", message: { content: [] } }),
+    } as SDKMessage);
+    expect(f.agent.getHealth()).toMatchObject({
+      status: "failed",
+      error: { code: "history_unavailable" },
+    });
+    expect(f.frames).not.toContainEqual(
+      expect.objectContaining({
+        event: expect.objectContaining({ type: "operation_finished", outcome: "completed" }),
+      }),
+    );
+    append.mockRestore();
+    f.exit();
+    await f.agent.closeExtensions();
+  },
+);

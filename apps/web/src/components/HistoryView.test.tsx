@@ -779,11 +779,12 @@ describe("HistoryView turn structure", () => {
         const aborting = outcome === "aborted" ? f.agent.abortOperation() : undefined;
         if (outcome === "failed")
           await query.emit(task, {
-            type: "result",
-            subtype: "error_during_execution",
-            is_error: true,
+            type: "system",
+            subtype: "status",
+            status: null,
+            compact_result: "failed",
           } as typeof rootResult);
-        else await query.emit(task, rootResult);
+        await query.emit(task, rootResult);
         query.exit();
         query.endOutput();
         await aborting;
