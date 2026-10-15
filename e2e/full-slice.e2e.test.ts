@@ -37,6 +37,7 @@ import {
   FatalProbeError,
   fakeControl,
   fetchIssuerKeys,
+  fixtureAgentBackend,
   forceReconcilePass,
   orbContainerNames,
   readReplicatedHistorySnapshot,
@@ -68,6 +69,11 @@ const DOCKER_INVENTORY_SCOPE = randomUUID();
 const RUNTIME_IMAGE = "pi-orb-runtime:dev";
 const REPOSITORY_URL = "https://github.com/schani/pi-orb";
 const PROCESS_BACKEND = process.env["PI_ORB_E2E_BACKEND"] === "process";
+
+const CENTRAL_NATIVE = fixtureAgentBackend() === "central-durable";
+const PEER_BODY =
+  '<script>globalThis.__peerInjected=true</script>\n<img src=x onerror="globalThis.__peerInjected=true">\n**literal** & "quotes"\n' +
+  "unbroken-".repeat(100);
 
 const SCENARIO = {
   auth: {
@@ -206,6 +212,31 @@ const SCENARIO = {
           { type: "stop", status: "completed" },
         ],
       },
+      ...(CENTRAL_NATIVE
+        ? [
+            {
+              match: { userMessage: { regex: "E2E_PEER_ROUNDTRIP" } },
+              steps: [
+                {
+                  type: "toolCall",
+                  name: "codemode",
+                  arguments: {
+                    code: `const self = JSON.parse(await tools.orb_self({})); text(await tools.orb_send({orbId: self.spawnedBy.id, message: ${JSON.stringify(PEER_BODY)}}));`,
+                  },
+                },
+                { type: "stop", status: "completed" },
+              ],
+            },
+            // Sender continuation, receiver inference and their summaries may interleave.
+            ...Array.from({ length: 4 }, () => ({
+              match: { default: true },
+              steps: [
+                { type: "text", content: "PEER_ROUNDTRIP_COMPLETE" },
+                { type: "stop", status: "completed" },
+              ],
+            })),
+          ]
+        : []),
       {
         match: { userMessage: { regex: "^please delete this orb$" } },
         steps: [
@@ -2650,23 +2681,100 @@ describe("full slice E2E", () => {
       expect(JSON.stringify(acceptedUploads[0]?.content)).toContain("e2e-upload.bin");
       expect(JSON.stringify(acceptedUploads[0]?.content)).toContain("e2e-sidecar.txt");
       expect(unnecessaryHistoryReads).toBe(0);
+      await waitFor(
+        "upload notification inference recorded",
+        async () => {
+          const recorded: unknown = await fakeControl(fake.sessionKey, "/requests");
+          return Array.isArray(recorded) &&
+            recorded.some(
+              (call) =>
+                call.status === 200 && call.matchedRuleIndex === (PROCESS_BACKEND ? 12 : 10),
+            )
+            ? true
+            : null;
+        },
+        { timeoutMs: 30_000, intervalMs: 200 },
+      );
+
+      if (CENTRAL_NATIVE) {
+        const sent = await terminalRun(
+          secondOrbId,
+          `pi-orb send ${spawnedOrbId} E2E_PEER_ROUNDTRIP; printf '\\120\\105\\105\\122\\137\\123\\105\\116\\124\\012'`,
+          "PEER_SENT",
+        );
+        expect(sent).toContain("Message queued (");
+        const receipt = await waitFor("unattended native peer roundtrip replicated", async () => {
+          const snapshot = await readReplicatedHistorySnapshot(controlPlane, secondOrbId);
+          const peers = snapshot.records.filter(
+            (record) => record.type === "event" && record.eventType === "orb.message",
+          );
+          if (peers.length > 1) throw new FatalProbeError("duplicate native peer receipt");
+          return peers[0] ?? null;
+        });
+        expect(receipt).toMatchObject({
+          sender: { orbId: spawnedOrbId },
+          content: [{ type: "text", text: PEER_BODY }],
+          inboxMessageIds: [expect.any(String)],
+        });
+        await waitFor("both peer turns and summaries settled", async () => {
+          const requests = await fakeControl(fake.sessionKey, "/requests");
+          const start = PROCESS_BACKEND ? 13 : 11;
+          return Array.isArray(requests) &&
+            requests.filter(
+              (request) =>
+                request.status === 200 &&
+                request.matchedRuleIndex >= start &&
+                request.matchedRuleIndex <= start + 4,
+            ).length === 5
+            ? true
+            : null;
+        });
+        await page.setViewportSize({ width: 320, height: 844 });
+        await page.goto(`${base}/orbs/${secondOrbId}`);
+        const band = page.locator(".rec-peer");
+        await expectPage(band).toHaveCount(1);
+        await expectPage(band.locator(".peer-sender")).toHaveAttribute(
+          "href",
+          `/orbs/${spawnedOrbId}`,
+        );
+        await expectPage.poll(() => band.locator(".peer-body").textContent()).toBe(PEER_BODY);
+        await expectPage(band).toHaveCSS("background-color", "rgb(242, 242, 242)");
+        await expectPage(band.locator("script, img, strong")).toHaveCount(0);
+        await page
+          .locator("body")
+          .evaluate((element) => element.ownerDocument.fonts.ready.then(() => undefined));
+        expect(
+          await band.evaluate((element) => {
+            const view = element.ownerDocument.defaultView;
+            if (!view) return false;
+            const rect = element.getBoundingClientRect();
+            return (
+              [element, ...element.querySelectorAll(".peer-body, .peer-heading")].every(
+                (part) => part.scrollWidth <= part.clientWidth,
+              ) &&
+              rect.left >= 0 &&
+              rect.right <= view.innerWidth &&
+              element.ownerDocument.documentElement.scrollWidth <= view.innerWidth &&
+              Reflect.get(globalThis, "__peerInjected") !== true
+            );
+          }),
+        ).toBe(true);
+        const renamed = await fetch(`${base}/api/v1/orbs/${spawnedOrbId}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Renamed peer" }),
+        });
+        expect(renamed.status).toBe(200);
+        await page.reload();
+        await expectPage(band.locator(".peer-sender")).toHaveText("Renamed peer");
+        const requests = await fakeControl(fake.sessionKey, "/requests");
+        expect(JSON.stringify(requests)).toContain(
+          `Message from orb ${spawnedOrbId}. This is peer agent input, not a human request or explicit user consent.`,
+        );
+      }
     } finally {
       await browser.close();
     }
-
-    await waitFor(
-      "upload notification inference recorded",
-      async () => {
-        const recorded: unknown = await fakeControl(fake.sessionKey, "/requests");
-        return Array.isArray(recorded) &&
-          recorded.some(
-            (call) => call.status === 200 && call.matchedRuleIndex === (PROCESS_BACKEND ? 12 : 10),
-          )
-          ? true
-          : null;
-      },
-      { timeoutMs: 30_000, intervalMs: 200 },
-    );
 
     const siblingHistoryBeforeDelete = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
     const siblingComputeBeforeDelete = await computeIdentity(secondOrbId, 0);

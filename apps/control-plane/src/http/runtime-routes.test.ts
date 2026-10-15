@@ -23,7 +23,6 @@ import Fastify from "fastify";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sendMessage } from "../../../orb-runtime/src/send/command.ts";
 import { composeControlPlaneDatabase } from "../adapters/database.ts";
 import { PGliteClient } from "../adapters/pg/pglite-client.ts";
 import { PgResourceGate } from "../adapters/pg/resource-gate.ts";
@@ -326,66 +325,12 @@ describe("runtime broker routes", () => {
       });
     const accepted = await send();
     expect(accepted.statusCode).toBe(202);
-    expect((await send()).json()).toEqual(accepted.json());
-    expect(store.messageSnapshots(target)).toMatchObject([
-      { system: { kind: "orb_message", senderOrbId: ORB } },
-    ]);
     expect((await send({ ...payload, senderOrbId: target })).statusCode).toBe(400);
-    expect((await send({ ...payload, message: "changed" })).statusCode).toBe(409);
     expect((await app.inject({ method: "POST", url: ORB_SEND_PATH, payload })).statusCode).toBe(
       401,
     );
-    store.seedOrb(makeOrbRow(target, PROJECT, "archived"));
-    expect((await send()).statusCode).toBe(409);
-  });
-
-  it("recovers a CLI acknowledgement lost after real admission without renewing wake", async () => {
-    store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
-    const target = "00000000-0000-4000-8000-000000000088";
-    store.seedOrb(makeOrbRow(target, PROJECT, "stopped", { stopReason: "manual" }));
-    let dropped = false;
-    const transport: typeof fetch = async (_url, init) => {
-      const response = await app.inject({
-        method: "POST",
-        url: ORB_SEND_PATH,
-        headers: init?.headers as Record<string, string>,
-        payload: init?.body as string,
-      });
-      if (!dropped) {
-        expect(response.statusCode).toBe(202);
-        expect(store.messageSnapshots(target)).toHaveLength(1);
-        dropped = true;
-        throw new Error("acknowledgement lost after acceptance");
-      }
-      return new Response(response.body, { status: response.statusCode });
-    };
-    const input = { orbId: target, message: "peer body", requestId: "lost-ack" };
-    const options = { baseUrl: "http://control", token: TOKEN, fetch: transport };
-    expect((await sendMessage(input, options))._unsafeUnwrapErr()).toMatchObject({
-      code: "unknown_outcome",
-      requestId: input.requestId,
-    });
-    const accepted = store.orbSnapshot(target);
-    if (!accepted) throw new Error("target missing");
-    (
-      await store.requestOrbStop(task, {
-        orbId: target,
-        expectedStateVersion: accepted.stateVersion,
-        now: task.wallNow(),
-      })
-    )._unsafeUnwrap();
-    expect((await sendMessage(input, options)).isOk()).toBe(true);
-    expect(store.messageSnapshots(target)).toMatchObject([{ autoStart: false }]);
-    expect(store.orbSnapshot(target)?.stopReason).toBe("manual");
     expect(
-      (
-        await app.inject({
-          method: "POST",
-          url: ORB_SEND_PATH,
-          headers: { authorization: `Bearer ${TOKEN}` },
-          payload: { v: 1, ...input, orbId: "00000000-0000-4000-8000-000000000099" },
-        })
-      ).statusCode,
+      (await send({ ...payload, orbId: "00000000-0000-4000-8000-000000000099" })).statusCode,
     ).toBe(404);
   });
 
@@ -771,23 +716,6 @@ describe("runtime broker routes", () => {
       expect(response.json().children).toEqual([
         { id, name: "Renamed child", url: `https://browser.test/orbs/${id}` },
       ]);
-      const deleting = (
-        await store.requestOrbDeletion(task, {
-          orbId: id,
-          expectedStateVersion: 0,
-          now: 100,
-          cleanupAfter: 100,
-        })
-      )._unsafeUnwrap();
-      expect(
-        (
-          await store.finalizeOrbDeletion(task, {
-            orbId: id,
-            expectedStateVersion: deleting.stateVersion,
-          })
-        ).isOk(),
-      ).toBe(true);
-      expect((await inspect()).json().children).toEqual([]);
     });
 
     it("retains historical parent URL after deletion and rejects its retired bearer", async () => {

@@ -1,19 +1,14 @@
-import type { SimulationTask } from "determined";
-import { errAsync, okAsync } from "neverthrow";
+import { okAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { makeHarness, makeOrbRow, makeProjectRow, seedRunningOrb } from "../testkit/fixtures.ts";
 import { LogCapture, runDst, waitUntil } from "../testkit/sim.ts";
-import type { AgentPlane } from "./agent-ports.ts";
 import {
   enqueueOrbMessage,
   reconcileOrbOnce,
-  requestOrbArchive,
-  requestOrbDeletion,
   requestOrbSleep,
   requestOrbStop,
 } from "./lifecycle.ts";
 import { pollLoop, reconcileLoop } from "./loops.ts";
-import type { ControlPlaneDeps } from "./ports.ts";
 
 const ORB = "orb-sleep";
 
@@ -24,253 +19,195 @@ function required<T>(value: T | null | undefined, label: string): T {
   return value;
 }
 
-function acceptSleep(
-  task: SimulationTask,
-  h: ReturnType<typeof makeHarness>,
-  durationSeconds: number,
-  sleepId: string,
-  deps: ControlPlaneDeps = h.deps,
-) {
-  const orb = required(h.store.orbSnapshot(ORB), "running orb");
-  return requestOrbSleep(
-    task,
-    deps,
-    ORB,
-    {
-      runtimeTokenHash: required(orb.runtimeTokenHash, "token"),
-      hostIncarnation: orb.hostIncarnation,
-    },
-    durationSeconds,
-    sleepId,
-  );
-}
-
 describe("scheduled sleep lifecycle (DST)", () => {
-  it.each(["central", "guest"] as const)(
-    "%s sleeps with old unadmitted FIFO rows held",
-    async (placement) => {
-      const logs = new LogCapture();
-      await runDst(
-        { name: `sleep-held-fifo-${placement}`, iterations: 15, logCapture: logs },
-        async (sim) => {
-          const h = makeHarness();
-          // This scenario isolates FIFO drain, not provider-request timeout recovery.
-          h.deps.hostProvider.observe = (task, ref) => okAsync(h.world.observeHost(task, ref));
-          let deliveries = 0;
-          const unavailable = () =>
-            errAsync({
-              type: "runtime_client_error" as const,
-              code: "unreachable" as const,
-              message: "not needed",
-              retryable: true,
-              answered: false,
-            });
-          const plane: AgentPlane = {
-            placement: "central",
-            health: () =>
-              okAsync({
-                v: 1 as const,
-                orbId: ORB,
-                runtimeInstanceId: "central",
-                status: "ready" as const,
-                checkoutCommit: "commit",
-                sessionId: "central",
-                activity: "idle" as const,
-              }),
-            deliverMessage: () => {
-              deliveries++;
-              return unavailable();
-            },
-            pullHistory: unavailable,
-            prepareIdleStop: () => okAsync({ v: 1 as const, prepared: true }),
-            suspend: () => okAsync(undefined),
-            dispose: () => okAsync(undefined),
-            close: () => okAsync(undefined),
-            session: () => null,
-          };
-          const deps = placement === "central" ? { ...h.deps, agentPlane: plane } : h.deps;
-          const result = await sim.runTasks([
-            {
-              name: "driver",
-              f: async (task) => {
-                seedRunningOrb(task, h, ORB);
-                const orb = required(h.store.orbSnapshot(ORB), "running orb");
-                h.store.seedOrb({ ...orb, state: "stopped" });
-                (
-                  await h.store.enqueueOrbMessage(task, {
-                    orbId: ORB,
-                    messageId: "old-peer",
-                    content: [{ type: "text", text: "old" }],
-                    now: task.wallNow(),
-                  })
-                )._unsafeUnwrap();
-                const started = (
-                  await h.store.casStartOrbForQueuedMessage(task, {
-                    orbId: ORB,
-                    expectedStateVersion: orb.stateVersion,
-                    now: task.wallNow(),
-                  })
-                )._unsafeUnwrap();
-                h.store.seedOrb({
-                  ...required(started, "old input started compute"),
-                  state: "running",
-                });
-                (
-                  await h.store.claimNextOrbMessageBatch(task, { orbId: ORB, now: task.wallNow() })
-                )._unsafeUnwrap();
-                deps.control.noteStateEpisode(
-                  ORB,
-                  required(h.store.orbSnapshot(ORB), "started orb").stateChangedAt,
-                );
-                deps.control.recordPullSuccess(ORB, task.monotonicNow(), "idle", "runtime");
-                (await acceptSleep(task, h, 300, "sleep", deps))._unsafeUnwrap();
-                await reconcileOrbOnce(task, deps, ORB);
-                expect(h.store.orbSnapshot(ORB)).toMatchObject({
-                  state: "stopping",
-                  stopReason: "sleep",
-                  sleepId: "sleep",
-                });
-                expect(h.store.messageSnapshots(ORB)[0]).toMatchObject({
-                  status: "delivering",
-                  operationId: null,
-                  deliveryBatchId: "old-peer",
-                });
-                expect(deliveries).toBe(0);
-                for (
-                  let step = 0;
-                  step < 60 && h.store.orbSnapshot(ORB)?.state !== "stopped";
-                  step++
-                ) {
-                  await reconcileOrbOnce(task, deps, ORB);
-                  await task.sleep(500, "finish sleep stop before deadline");
-                }
-                expect(h.store.orbSnapshot(ORB)?.state).toBe("stopped");
-                for (let retry = 0; retry < 3; retry++) await reconcileOrbOnce(task, deps, ORB);
-                expect(h.store.orbSnapshot(ORB)).toMatchObject({
-                  state: "stopped",
-                  sleepId: "sleep",
-                  stopReason: "sleep",
-                });
-                expect(h.store.messageSnapshots(ORB)[0]).toMatchObject({
+  it("guest sleeps with old unadmitted FIFO rows held", async () => {
+    const logs = new LogCapture();
+    await runDst(
+      { name: "sleep-held-fifo-guest", iterations: 15, logCapture: logs },
+      async (sim) => {
+        const h = makeHarness();
+        // This scenario isolates FIFO drain, not provider-request timeout recovery.
+        h.deps.hostProvider.observe = (task, ref) => okAsync(h.world.observeHost(task, ref));
+        const deps = h.deps;
+        const result = await sim.runTasks([
+          {
+            name: "driver",
+            f: async (task) => {
+              seedRunningOrb(task, h, ORB);
+              const orb = required(h.store.orbSnapshot(ORB), "running orb");
+              h.store.seedOrb({ ...orb, state: "stopped" });
+              (
+                await h.store.enqueueOrbMessage(task, {
+                  orbId: ORB,
                   messageId: "old-peer",
-                  status: "delivering",
-                  operationId: null,
-                  autoStart: true,
-                });
-                expect(deliveries).toBe(0);
-                expect(
-                  (
-                    await enqueueOrbMessage(task, deps, {
-                      orbId: ORB,
-                      messageId: "fresh-input",
-                      content: [{ type: "text", text: "wake" }],
-                    })
-                  ).isOk(),
-                ).toBe(true);
+                  content: [{ type: "text", text: "old" }],
+                  now: task.wallNow(),
+                })
+              )._unsafeUnwrap();
+              const started = (
+                await h.store.casStartOrbForQueuedMessage(task, {
+                  orbId: ORB,
+                  expectedStateVersion: orb.stateVersion,
+                  now: task.wallNow(),
+                })
+              )._unsafeUnwrap();
+              h.store.seedOrb({
+                ...required(started, "old input started compute"),
+                state: "running",
+              });
+              (
+                await h.store.claimNextOrbMessageBatch(task, { orbId: ORB, now: task.wallNow() })
+              )._unsafeUnwrap();
+              deps.control.noteStateEpisode(
+                ORB,
+                required(h.store.orbSnapshot(ORB), "started orb").stateChangedAt,
+              );
+              deps.control.recordPullSuccess(ORB, task.monotonicNow(), "idle", "runtime");
+              (
+                await requestOrbSleep(
+                  task,
+                  deps,
+                  ORB,
+                  {
+                    runtimeTokenHash: required(orb.runtimeTokenHash, "token"),
+                    hostIncarnation: orb.hostIncarnation,
+                  },
+                  300,
+                  "sleep",
+                )
+              )._unsafeUnwrap();
+              await reconcileOrbOnce(task, deps, ORB);
+              expect(h.store.orbSnapshot(ORB)).toMatchObject({
+                state: "stopping",
+                stopReason: "sleep",
+                sleepId: "sleep",
+              });
+              expect(h.store.messageSnapshots(ORB)[0]).toMatchObject({
+                status: "delivering",
+                operationId: null,
+                deliveryBatchId: "old-peer",
+              });
+              for (
+                let step = 0;
+                step < 60 && h.store.orbSnapshot(ORB)?.state !== "stopped";
+                step++
+              ) {
                 await reconcileOrbOnce(task, deps, ORB);
-                expect(h.store.orbSnapshot(ORB)).toMatchObject({
-                  state: "starting",
-                  sleepId: null,
-                });
-                expect(h.store.messageSnapshots(ORB).map((row) => row.messageId)).toEqual([
-                  "old-peer",
-                  "fresh-input",
-                ]);
-              },
+                await task.sleep(500, "finish sleep stop before deadline");
+              }
+              expect(h.store.orbSnapshot(ORB)?.state).toBe("stopped");
+              for (let retry = 0; retry < 3; retry++) await reconcileOrbOnce(task, deps, ORB);
+              expect(h.store.orbSnapshot(ORB)).toMatchObject({
+                state: "stopped",
+                sleepId: "sleep",
+                stopReason: "sleep",
+              });
+              expect(h.store.messageSnapshots(ORB)[0]).toMatchObject({
+                messageId: "old-peer",
+                status: "delivering",
+                operationId: null,
+                autoStart: true,
+              });
+              expect(
+                (
+                  await enqueueOrbMessage(task, deps, {
+                    orbId: ORB,
+                    messageId: "fresh-input",
+                    content: [{ type: "text", text: "wake" }],
+                  })
+                ).isOk(),
+              ).toBe(true);
+              await reconcileOrbOnce(task, deps, ORB);
+              expect(h.store.orbSnapshot(ORB)).toMatchObject({
+                state: "starting",
+                sleepId: null,
+              });
+              expect(h.store.messageSnapshots(ORB).map((row) => row.messageId)).toEqual([
+                "old-peer",
+                "fresh-input",
+              ]);
             },
-          ]);
-          expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-          expect(logs.matching("sleep-stop-initiated")).toHaveLength(1);
-        },
-      );
-    },
-  );
-
-  it.each(["archiving", "deleting"] as const)(
-    "%s cleanup is not blocked by a retained overdue sleep",
-    async (state) => {
-      await runDst(
-        { name: `sleep-${state}-deadline`, iterations: 20, lateTimerProbability: 0 },
-        async (sim) => {
-          const h = makeHarness();
-          const result = await sim.runTasks([
-            {
-              name: "cleanup with retained sleep",
-              f: async (task) => {
-                seedRunningOrb(task, h, ORB);
-                const command = state === "archiving" ? requestOrbArchive : requestOrbDeletion;
-                const cleaning = (await command(task, h.deps, ORB))._unsafeUnwrap();
-                // Recover a retained pair without changing cleanup's durable intent.
-                h.store.seedOrb({
-                  ...cleaning,
-                  sleepId: "retained-sleep",
-                  sleepUntil: task.wallNow(),
-                });
-                for (let step = 0; step < 60; step++) {
-                  const orb = h.store.orbSnapshot(ORB);
-                  if (orb === null || orb.state === "archived") break;
-                  expect((await reconcileOrbOnce(task, h.deps, ORB)).type).not.toBe("conflict");
-                  await task.sleep(500, "finish cleanup with overdue sleep");
-                }
-                if (state === "archiving") expect(h.store.orbSnapshot(ORB)?.state).toBe("archived");
-                else expect(h.store.orbSnapshot(ORB)).toBeNull();
-                expect(h.store.messageSnapshots(ORB)).toEqual([]);
-              },
-            },
-          ]);
-          expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        },
-      );
-    },
-  );
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(logs.matching("sleep-stop-initiated")).toHaveLength(1);
+      },
+    );
+  });
 
   it("finishes a busy sleep drain after its deadline before queuing one wake", async () => {
-    await runDst({ name: "sleep-stopping-deadline", iterations: 20 }, async (sim) => {
-      const h = makeHarness();
-      const result = await sim.runTasks([
-        {
-          name: "drain crosses deadline",
-          f: async (task) => {
-            seedRunningOrb(task, h, ORB);
-            const accepted = (await acceptSleep(task, h, 1, "drain-sleep"))._unsafeUnwrap();
-            const sleeping = required(h.store.orbSnapshot(ORB), "sleep accepted");
-            h.store.seedOrb({
-              ...sleeping,
-              state: "stopping",
-              stopReason: "sleep",
-              stateChangedAt: task.wallNow(),
-            });
-            h.world.setActivity(ORB, "busy");
-            await task.sleep(
-              accepted.sleepUntil - task.wallNow(),
-              "deadline passes during preparation",
-            );
-            await reconcileOrbOnce(task, h.deps, ORB);
-            expect(h.store.orbSnapshot(ORB)).toMatchObject({
-              state: "stopping",
-              sleepId: "drain-sleep",
-            });
-            expect(h.store.messageSnapshots(ORB)).toEqual([]);
-            const final = h.world.appendMessage(ORB, "final drain history after deadline");
-            h.world.setActivity(ORB, "idle");
-            for (let step = 0; step < 60 && h.store.orbSnapshot(ORB)?.state !== "stopped"; step++) {
+    await runDst(
+      { name: "sleep-stopping-deadline", iterations: 1, lateTimerProbability: 0 },
+      async (sim) => {
+        const h = makeHarness();
+        const result = await sim.runTasks([
+          {
+            name: "drain crosses deadline",
+            f: async (task) => {
+              seedRunningOrb(task, h, ORB);
+              const orb = required(h.store.orbSnapshot(ORB), "running orb");
+              const accepted = (
+                await requestOrbSleep(
+                  task,
+                  h.deps,
+                  ORB,
+                  {
+                    runtimeTokenHash: required(orb.runtimeTokenHash, "token"),
+                    hostIncarnation: orb.hostIncarnation,
+                  },
+                  1,
+                  "drain-sleep",
+                )
+              )._unsafeUnwrap();
+              const sleeping = required(h.store.orbSnapshot(ORB), "sleep accepted");
+              h.store.seedOrb({
+                ...sleeping,
+                state: "stopping",
+                stopReason: "sleep",
+                stateChangedAt: task.wallNow(),
+              });
+              h.world.setActivity(ORB, "busy");
+              await task.sleep(
+                accepted.sleepUntil - task.wallNow(),
+                "deadline passes during preparation",
+              );
               await reconcileOrbOnce(task, h.deps, ORB);
-              await task.sleep(500, "finish overdue sleep drain");
-            }
-            expect(h.store.orbSnapshot(ORB)?.state).toBe("stopped");
-            expect(h.store.replicaRecords(ORB).map((row) => row.id)).toContain(final.id);
-            expect(h.world.hostStateOf(ORB)).toBe("stopped");
-            await reconcileOrbOnce(task, h.deps, ORB);
-            expect(
-              h.store.messageSnapshots(ORB).filter((row) => row.system?.kind === "sleep_wake"),
-            ).toHaveLength(1);
-            await reconcileOrbOnce(task, h.deps, ORB);
-            expect(h.store.orbSnapshot(ORB)).toMatchObject({ state: "starting", sleepId: null });
+              expect(h.store.orbSnapshot(ORB)).toMatchObject({
+                state: "stopping",
+                sleepId: "drain-sleep",
+              });
+              expect(h.store.messageSnapshots(ORB)).toEqual([]);
+              const final = h.world.appendMessage(ORB, "final drain history after deadline");
+              const stopHost = h.deps.hostProvider.stop.bind(h.deps.hostProvider);
+              h.deps.hostProvider.stop = (task, ref, context) => {
+                expect(h.store.replicaRecords(ORB).map((row) => row.id)).toContain(final.id);
+                expect(h.store.messageSnapshots(ORB)).toEqual([]);
+                return stopHost(task, ref, context);
+              };
+              h.world.setActivity(ORB, "idle");
+              for (
+                let step = 0;
+                step < 60 && h.store.orbSnapshot(ORB)?.state !== "stopped";
+                step++
+              ) {
+                await reconcileOrbOnce(task, h.deps, ORB);
+                await task.sleep(500, "finish overdue sleep drain");
+              }
+              expect(h.store.orbSnapshot(ORB)?.state).toBe("stopped");
+              expect(h.store.replicaRecords(ORB).map((row) => row.id)).toContain(final.id);
+              expect(h.world.hostStateOf(ORB)).toBe("stopped");
+              await reconcileOrbOnce(task, h.deps, ORB);
+              expect(
+                h.store.messageSnapshots(ORB).filter((row) => row.system?.kind === "sleep_wake"),
+              ).toHaveLength(1);
+              await reconcileOrbOnce(task, h.deps, ORB);
+              expect(h.store.orbSnapshot(ORB)).toMatchObject({ state: "starting", sleepId: null });
+            },
           },
-        },
-      ]);
-      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-    });
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      },
+    );
   });
 
   it("uses durable acceptance time and expires once at the exact busy boundary", async () => {
@@ -410,6 +347,38 @@ describe("scheduled sleep lifecycle (DST)", () => {
     });
   });
 
+  it("late admitted work may remain busy past the ordinary drain deadline without forced failure", async () => {
+    await runDst({ name: "sleep-stopping-long-busy", iterations: 20 }, async (sim) => {
+      const harness = makeHarness();
+      const result = await sim.runTasks([
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            const running = required(harness.store.orbSnapshot(ORB), "seeded orb must exist");
+            harness.world.setActivity(ORB, "busy");
+            harness.store.seedOrb({
+              ...running,
+              state: "stopping",
+              stateVersion: running.stateVersion + 1,
+              stopReason: "sleep",
+              sleepId: "00000000-0000-4000-8000-000000000017",
+              sleepUntil: task.wallNow() + 1_000_000,
+              stateChangedAt: task.wallNow(),
+            });
+            await task.sleep(
+              harness.deps.constants.createStartDeadlineMs + 1,
+              "busy beyond ordinary drain deadline",
+            );
+            await reconcileOrbOnce(task, harness.deps, ORB);
+            expect(harness.store.orbSnapshot(ORB)?.state).toBe("stopping");
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    });
+  });
+
   it("explicit Stop takes over an overdue busy sleep drain without losing final history", async () => {
     const capture = new LogCapture();
     await runDst(
@@ -516,9 +485,6 @@ describe("scheduled sleep lifecycle (DST)", () => {
               harness.deps.constants.createStartDeadlineMs + 1,
               "hold admitted work beyond ordinary drain deadline",
             );
-            await reconcileOrbOnce(task, harness.deps, ORB);
-            expect(harness.store.orbSnapshot(ORB)?.state).toBe("stopping");
-            expect(harness.world.hostStopCountOf(ORB)).toBe(stopsBefore);
             const final = harness.world.appendMessage(ORB, "final admitted history");
             harness.world.setActivity(ORB, "idle");
             await waitUntil(

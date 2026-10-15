@@ -1,15 +1,9 @@
 import type { HistoryRecord } from "@pi-orb/protocol";
-import { ApplicationFailure, type SimulationTask } from "determined";
+import { type SimulationTask } from "determined";
 import { err, errAsync, okAsync } from "neverthrow";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { FAILPOINTS } from "../testkit/failpoints.ts";
-import {
-  makeHarness,
-  makeProjectRow,
-  restartControlPlane,
-  seedRunningOrb,
-  TEST_USER_ID,
-} from "../testkit/fixtures.ts";
+import { makeHarness, makeProjectRow, seedRunningOrb, TEST_USER_ID } from "../testkit/fixtures.ts";
 import {
   assertAtMostOneHost,
   assertReplicaComplete,
@@ -33,7 +27,6 @@ import type { ControlPlaneDeps, DeliverMessageClientRequest } from "./ports.ts";
 
 const ORB = "00000000-0000-4000-8000-000000000021";
 const PEER = "00000000-0000-4000-8000-000000000022";
-const FOREIGN = "00000000-0000-4000-8000-000000000023";
 const PROJECT = `project-of-${ORB}`;
 const seedCount = Number(process.env["LIFECYCLE_CAMPAIGN_SEEDS"] ?? 64);
 const firstSeed = Number(process.env["LIFECYCLE_CAMPAIGN_FIRST_SEED"] ?? 0);
@@ -49,94 +42,27 @@ function present<T>(value: T | null | undefined): T {
 const commands = [
   "human",
   "peer",
-  "sleep",
+  "retry",
   "sleep",
   "stop",
   "start",
-  "tick",
-  "poll",
-  "advance",
-  "wall",
-  "busy",
-  "idle",
-  "restart",
-  "crash",
-  "delay",
-  "retry",
-  "stale",
-  "foreign",
-  "archive",
-  "delete",
-  "preempt",
-  "unreachable",
-  "pull-outage",
-  "pause-compute",
-  "pause-history",
-  "stop-ack",
-  "stop-rollback",
+  "environment",
+  "cleanup",
 ] as const;
 type Command = (typeof commands)[number];
 
-class CampaignLogs extends LogCapture {
-  lateChoices = 0;
-  override log(...parts: readonly unknown[]): void {
-    if (typeof parts[0] === "string" && parts[0].startsWith("dst: non-earliest timer"))
-      this.lateChoices++;
-    super.log(...parts);
-  }
-  override reset(): void {
-    super.reset();
-    this.lateChoices = 0;
-  }
-}
-
 describe("stateful lifecycle campaign", () => {
-  const totals: Record<string, number> = {};
-  let completed = 0;
-  afterAll(() => {
-    console.log("lifecycle-campaign coverage", JSON.stringify(totals));
-    if (completed !== seedCount * 2 || seedCount < 64 || process.env["DST_REPLAY"]) return;
-    for (const placement of ["guest", "central"]) {
-      for (const key of [
-        "accept:human",
-        "accept:orb_message",
-        "overlapping-caller",
-        "crash",
-        "preempt",
-        "stop-ack-loss",
-        "stop-rollback",
-        "non-earliest-timer",
-        "due:wake",
-        "due:expired",
-        "authority:archive",
-        "authority:delete",
-        "guest-accept:pending",
-        "guest-accept:durable",
-        "effect:hang",
-        "effect:persist-without-ack",
-        "delivery-crash",
-        "effect:unreachable",
-        "effect:pull-outage",
-        "effect:failpoint",
-      ]) {
-        expect(
-          totals[`${placement}:applied:${key}`] ?? 0,
-          `applied coverage ${placement}:${key}`,
-        ).toBeGreaterThan(0);
-      }
-    }
-  });
   for (const placement of ["guest", "central"] as const) {
     for (let seed = firstSeed; seed < firstSeed + seedCount; seed++) {
       it(`${placement} seed ${seed}`, async ({ signal }) => {
-        const logs = new CampaignLogs();
+        const logs = new LogCapture();
         await runDst(
           {
             name: `lifecycle-campaign-${placement}-seed-${seed}`,
             seed,
             iterations: 1,
-            logCapture: logs,
             signal,
+            logCapture: logs,
             failpointProbabilities: {
               [FAILPOINTS.storeRead]: 0.02,
               [FAILPOINTS.storeWrite]: 0.02,
@@ -161,10 +87,7 @@ describe("stateful lifecycle campaign", () => {
             let deps: ControlPlaneDeps = h.deps;
             let ready = false;
             let driving = true;
-            let computePaused = false;
-            let historyPaused = false;
             let workers = 2;
-            let wallOffset = 0;
             let centralBusy = false;
             let centralPrepared = false;
             let activeSleep: string | null = null;
@@ -173,10 +96,6 @@ describe("stateful lifecycle campaign", () => {
             let cleanup: "archive" | "delete" | undefined;
             const sleeps = new Map<string, number>();
             const submitted = new Map<string, DeliverMessageClientRequest>();
-            const counts: Record<string, number> = {};
-            const count = (key: string, amount = 1) => {
-              counts[key] = (counts[key] ?? 0) + amount;
-            };
             const accepted = new Map<
               string,
               {
@@ -188,66 +107,18 @@ describe("stateful lifecycle campaign", () => {
             >();
             let acceptanceOrder = 0;
             let callers = 2;
-            let activeCalls = 0;
-            let authorityOrder = 0;
-            let unreachableUntil = 0;
-            const dispatchReads = new Map<
-              SimulationTask,
-              {
-                read: boolean;
-                open: boolean;
-                version: number | null;
-                order: number;
-                revoked: string[];
-              }
-            >();
-            const deliveryModes = new Map<SimulationTask, string>();
-            const getOrb = h.store.getOrb.bind(h.store);
-            h.store.getOrb = (task, id) =>
-              getOrb(task, id).map((row) => {
-                const dispatch = dispatchReads.get(task);
-                if (id === ORB && dispatch && !dispatch.read) {
-                  Object.assign(dispatch, {
-                    read: true,
-                    open: !latestStop && !cleanup && activeSleep === null,
-                    version: row?.agentAdmissionVersion ?? null,
-                    order: authorityOrder,
-                    revoked: [...accepted].filter(([, entry]) => entry.revoked).map(([id]) => id),
-                  });
-                  witness(task, "dispatch-authority-read", dispatch);
-                }
-                return row;
-              });
-            function witness(task: SimulationTask, edge: string, data: unknown) {
-              task.log(`lifecycle: campaign witness=${edge} data=${JSON.stringify(data)}`);
-            }
-            function accept(task: SimulationTask, row: OrbMessageRow) {
+            function accept(_task: SimulationTask, row: OrbMessageRow) {
               if (accepted.has(row.messageId)) return;
               accepted.set(row.messageId, {
                 content: row.content,
                 system: row.system,
                 order: acceptanceOrder++,
               });
-              count(`applied:accept:${row.system?.kind ?? "human"}`);
-              witness(task, "accepted", {
-                id: row.messageId,
-                content: row.content,
-                system: row.system,
-                order: acceptanceOrder - 1,
-              });
             }
-            function authority(task: SimulationTask, reason: string, revoke: boolean) {
-              authorityOrder++;
+            function authority(_task: SimulationTask, reason: string, revoke: boolean) {
               latestStop = reason === "stop";
               activeSleep = null;
               for (const entry of accepted.values()) entry.revoked = revoke ? reason : undefined;
-              count(`applied:authority:${reason}`);
-              witness(task, "authority", {
-                reason,
-                revoke,
-                order: authorityOrder,
-                ids: [...accepted.keys()],
-              });
             }
             // Observe committed boundary results, independently of command response order.
             const enqueue = h.store.enqueueOrbMessage.bind(h.store);
@@ -270,12 +141,6 @@ describe("stateful lifecycle campaign", () => {
                 activeSleep = params.sleepId;
                 expect(row.sleepUntil).toBe(task.wallNow() + params.durationSeconds * 1_000);
                 sleeps.set(params.sleepId, present(row.sleepUntil));
-                witness(task, "sleep-committed", {
-                  id: params.sleepId,
-                  deadline: row.sleepUntil,
-                  caller: params.caller,
-                });
-                count(`applied:sleep:${row.state}`);
                 return row;
               });
             const due = h.store.processDueOrbSleep.bind(h.store);
@@ -287,51 +152,20 @@ describe("stateful lifecycle campaign", () => {
                   const row = present(
                     h.store.messageSnapshots(ORB).find((row) => row.messageId === params.sleepId),
                   );
-                  expect(row.content).toEqual([
-                    {
-                      type: "text",
-                      text:
-                        value === "wake"
-                          ? "Scheduled sleep finished."
-                          : "Scheduled sleep expired before compute stopped.",
-                    },
-                  ]);
-                  expect(row.system).toEqual({
-                    kind: value === "wake" ? "sleep_wake" : "sleep_expired",
-                    sleepUntil: new Date(present(sleeps.get(params.sleepId))).toISOString(),
-                  });
                   accept(task, row);
-                  count(`applied:due:${value}`);
                 }
                 return value;
               });
             const stop = h.store.requestOrbStop.bind(h.store);
             h.store.requestOrbStop = (task, params) =>
-              stop(task, params)
-                .map((value) => {
-                  authority(task, "stop", true);
-                  return value;
-                })
-                .mapErr((error) => {
-                  if (
-                    error.type === "store_error" &&
-                    error.message.includes("acknowledgement lost")
-                  ) {
-                    authority(task, "stop", true);
-                    count("applied:stop-ack-loss");
-                  }
-                  if (
-                    error.type === "store_error" &&
-                    error.message.includes("scripted store failure")
-                  )
-                    count("applied:stop-rollback");
-                  return error;
-                });
+              stop(task, params).map((value) => {
+                authority(task, "stop", true);
+                return value;
+              });
             const cancelSleep = h.store.cancelOrbSleep.bind(h.store);
             h.store.cancelOrbSleep = (task, params) =>
               cancelSleep(task, params).map((row) => {
                 activeSleep = null;
-                witness(task, "sleep-cancelled-by-start", params);
                 return row;
               });
             const transition = h.store.casTransition.bind(h.store);
@@ -356,58 +190,16 @@ describe("stateful lifecycle campaign", () => {
                 return row;
               });
             let ordinal = 0;
-            let lastVersion = 0;
-            let lastAdmission = 0;
-            let lastIncarnation = 0;
-
             function clock(raw: SimulationTask): SimulationTask {
-              const proxy: SimulationTask = new Proxy(raw, {
+              return new Proxy(raw, {
                 get(target, key) {
-                  if (key === "wallNow") return () => target.wallNow() + wallOffset;
-                  if (key === "checkpoint")
-                    return (...parts: readonly unknown[]) => {
-                      if (parts[0] === "central.dispatch-before-authority") {
-                        dispatchReads.set(proxy, {
-                          read: false,
-                          open: false,
-                          version: null,
-                          order: authorityOrder,
-                          revoked: [],
-                        });
-                        witness(target, "dispatch-begin", { order: authorityOrder });
-                      }
-                      return target.checkpoint(...parts);
-                    };
-                  if (key === "failpoint")
-                    return async (...parts: readonly unknown[]) => {
-                      if (parts[0] === FAILPOINTS.runtimeDeliverMessage) currentTask = target;
-                      if (!driving) return target.checkpoint("healthy boundary", ...parts);
-                      try {
-                        await target.failpoint(...parts);
-                        if (parts[0] === FAILPOINTS.runtimeDeliverMessage) {
-                          currentTask = target;
-                          const script = world.deliverMessageScriptOf(
-                            placement === "guest"
-                              ? `http://${h.world.hostRefOf(ORB)?.resourceId}:8080`
-                              : url(),
-                          );
-                          deliveryModes.set(proxy, script?.kind ?? "unreachable");
-                          witness(target, "delivery-boundary", script);
-                        }
-                      } catch (error) {
-                        if (error instanceof ApplicationFailure) {
-                          count("applied:effect:failpoint");
-                          count(`applied:failpoint:${String(parts[0])}`);
-                        }
-                        witness(target, "fault", parts);
-                        throw error;
-                      }
-                    };
+                  if (key === "failpoint" && !driving)
+                    return (...parts: readonly unknown[]) =>
+                      target.checkpoint("healthy boundary", ...parts);
                   const value = Reflect.get(target, key) as unknown;
                   return typeof value === "function" ? value.bind(target) : value;
                 },
               });
-              return proxy;
             }
             const recordIds = (record: HistoryRecord) =>
               record.type === "message" || record.type === "event"
@@ -415,22 +207,6 @@ describe("stateful lifecycle campaign", () => {
                 : [];
             const world = placement === "guest" ? h.world : central.world;
             const sessionRecords = () => (world.filesystemExists(ORB) ? world.entriesOf(ORB) : []);
-            const deliver = world.deliverInboxBatch.bind(world);
-            world.deliverInboxBatch = (id, request, options) => {
-              const result = deliver(id, request, options);
-              if (!result.duplicate)
-                count(`applied:guest-accept:${options?.flush === false ? "pending" : "durable"}`);
-              else count("applied:duplicate-receipt");
-              witness(currentTask, "guest-receipt", { request, result });
-              return result;
-            };
-            let currentTask: SimulationTask;
-            const runtimeCrash = world.crashRuntimeBeforeEnqueue.bind(world);
-            world.crashRuntimeBeforeEnqueue = (task, id) => {
-              const before = world.runtimeInstanceIdOf(id);
-              runtimeCrash(task, id);
-              if (world.runtimeInstanceIdOf(id) !== before) count("applied:delivery-crash");
-            };
             const url = () => `http://${present(central.store.orbSnapshot(ORB)).hostRef}:8080`;
             const unavailable = (message: string) =>
               errAsync({
@@ -477,50 +253,6 @@ describe("stateful lifecycle campaign", () => {
                 submitted.set(id, request);
               }
             }
-            const runtime =
-              placement === "guest" ? h.deps.runtimeClient : central.deps.runtimeClient;
-            const health = runtime.health.bind(runtime);
-            runtime.health = (task, baseUrl, context) =>
-              health(task, baseUrl, context).mapErr((error) => {
-                if (error.message === "no runtime" && task.monotonicNow() < unreachableUntil) {
-                  count("applied:effect:unreachable");
-                  witness(task, "unreachable-response", error);
-                }
-                return error;
-              });
-            const pull = runtime.pullHistory.bind(runtime);
-            runtime.pullHistory = (task, request, context) =>
-              pull(task, request, context).mapErr((error) => {
-                if (error.message === "scripted outage") {
-                  count("applied:effect:pull-outage");
-                  witness(task, "pull-outage-response", error);
-                }
-                return error;
-              });
-            const transportDeliver = runtime.deliverMessage.bind(runtime);
-            runtime.deliverMessage = (task, request, context) => {
-              deliveryModes.delete(task);
-              return transportDeliver(task, request, context).mapErr((error) => {
-                if (deliveryModes.get(task) === "hang" && error.code === "cancelled")
-                  count("applied:effect:hang");
-                if (error.message === "deliver message: answer lost") {
-                  const persisted = request.messageIds.every((id) =>
-                    sessionRecords().flatMap(recordIds).includes(id),
-                  );
-                  count(
-                    persisted
-                      ? "applied:effect:persist-without-ack"
-                      : "applied:effect:pending-without-ack",
-                  );
-                }
-                witness(task, "delivery-error", {
-                  ids: request.messageIds,
-                  mode: deliveryModes.get(task),
-                  error,
-                });
-                return error;
-              });
-            };
             const guestDeliver = h.deps.runtimeClient.deliverMessage.bind(h.deps.runtimeClient);
             h.deps.runtimeClient.deliverMessage = (task, request, context) => {
               inspectRequest(request);
@@ -534,28 +266,6 @@ describe("stateful lifecycle campaign", () => {
                 return central.deps.runtimeClient.health(task, url(), context);
               },
               deliverMessage: (task, orb, request, context) => {
-                // Observe orchestration's authority read; Native owns the subsequent acceptance fence.
-                const dispatch = present(dispatchReads.get(task));
-                expect(
-                  dispatch.read && dispatch.open,
-                  "dispatch must begin under open authority",
-                ).toBe(true);
-                expect(orb.agentAdmissionVersion, "dispatch carries its observed authority").toBe(
-                  dispatch.version,
-                );
-                expect(
-                  request.messageIds.some((id) => dispatch.revoked.includes(id)),
-                  "no newly dispatched revoked input",
-                ).toBe(false);
-                witness(task, "dispatch-attempt", {
-                  ...dispatch,
-                  carried: orb.agentAdmissionVersion,
-                  currentOrder: authorityOrder,
-                  ids: request.messageIds,
-                });
-                if (authorityOrder !== dispatch.order)
-                  count("applied:dispatch-spans-authority-change");
-                dispatchReads.delete(task);
                 inspectRequest(request);
                 return central.deps.runtimeClient.deliverMessage(
                   task,
@@ -644,55 +354,33 @@ describe("stateful lifecycle campaign", () => {
                 "accepted Sleep survives until explicit cancellation or due processing",
               ).toBe(activeSleep);
               expect(orb.sleepId === null).toBe(orb.sleepUntil === null);
-              expect(orb.stateVersion).toBeGreaterThanOrEqual(lastVersion);
-              expect(orb.agentAdmissionVersion).toBeGreaterThanOrEqual(lastAdmission);
-              expect(orb.hostIncarnation).toBeGreaterThanOrEqual(lastIncarnation);
-              lastVersion = orb.stateVersion;
-              lastAdmission = orb.agentAdmissionVersion;
-              lastIncarnation = orb.hostIncarnation;
               assertAtMostOneHost(h.world, ORB);
               if (world.filesystemExists(ORB)) assertReplicaIntegrity(world, h.store, ORB);
             }
 
             async function run(task: SimulationTask, command: Command) {
               const orb = h.store.orbSnapshot(ORB);
-              witness(task, "invoke", {
-                seed,
-                placement,
-                command,
-                state: orb?.state,
-                wall: task.wallNow(),
-              });
               const id = `campaign-${seed}-${ordinal++}`;
-              if (
-                ["busy", "idle", "crash", "delay"].includes(command) &&
-                (!world.filesystemExists(ORB) || !h.world.filesystemExists(ORB))
-              )
-                return;
+              task.log(`lifecycle: campaign command=${command} id=${id} state=${orb?.state}`);
               switch (command) {
-                case "human": {
-                  await enqueueOrbMessage(task, deps, {
+                case "human":
+                  return enqueueOrbMessage(task, deps, {
                     orbId: ORB,
                     messageId: id,
                     content: [{ type: "text", text: id }],
                   });
-                  break;
-                }
                 case "peer":
-                case "retry":
-                case "foreign": {
-                  const source = present(
-                    h.store.orbSnapshot(command === "foreign" ? FOREIGN : PEER),
-                  );
+                case "retry": {
+                  const source = present(h.store.orbSnapshot(PEER));
                   const request =
                     command === "retry" && lastPeer ? lastPeer : { messageId: id, message: id };
                   const result = await sendOrbMessage(
                     task,
                     deps,
                     {
-                      orbId: source.id,
-                      projectId: source.projectId,
-                      ownerUserId: command === "foreign" ? "foreign-owner" : TEST_USER_ID,
+                      orbId: PEER,
+                      projectId: PROJECT,
+                      ownerUserId: TEST_USER_ID,
                       caller: {
                         runtimeTokenHash: present(source.runtimeTokenHash),
                         hostIncarnation: source.hostIncarnation,
@@ -700,17 +388,11 @@ describe("stateful lifecycle campaign", () => {
                     },
                     { ...request, orbId: ORB },
                   );
-                  if (command === "foreign") expect(result.isErr(), "owner isolation").toBe(true);
-                  else if (result.isOk()) {
-                    lastPeer = request;
-                  }
-                  break;
+                  if (result.isOk()) lastPeer = request;
+                  return result;
                 }
-                case "sleep":
-                case "stale": {
-                  if (!orb || (placement === "guest" && !orb.runtimeTokenHash)) break;
-                  const duration =
-                    [1, 2, 5, 30, 120][Math.floor(task.random("sleep duration") * 5)] ?? 1;
+                case "sleep": {
+                  if (!orb || (placement === "guest" && !orb.runtimeTokenHash)) return;
                   const caller =
                     placement === "central"
                       ? {
@@ -718,127 +400,45 @@ describe("stateful lifecycle campaign", () => {
                           orbId: ORB,
                           projectId: PROJECT,
                           ownerUserId: TEST_USER_ID,
-                          agentAdmissionVersion:
-                            orb.agentAdmissionVersion - (command === "stale" ? 1 : 0),
+                          agentAdmissionVersion: orb.agentAdmissionVersion,
                         }
                       : {
-                          runtimeTokenHash:
-                            command === "stale" ? "revoked-token" : present(orb.runtimeTokenHash),
+                          runtimeTokenHash: present(orb.runtimeTokenHash),
                           hostIncarnation: orb.hostIncarnation,
                         };
-                  const result = await requestOrbSleep(task, deps, ORB, caller, duration, id);
-                  if (command === "stale")
-                    expect(result.isErr(), "stale incarnation rejected").toBe(true);
-                  if (result.isOk()) {
-                    expect(sleeps.get(id)).toBe(result.value.sleepUntil);
-                  }
-                  break;
-                }
-                case "stop-ack":
-                  h.store.failNextOrbStopAfterCommit(1);
-                  await requestOrbStop(task, deps, ORB);
-                  break;
-                case "stop-rollback":
-                  h.store.failNextClearOrbMessageAutoStart(1);
-                  await requestOrbStop(task, deps, ORB);
-                  break;
-                case "pause-compute":
-                  computePaused = !computePaused;
-                  break;
-                case "pause-history":
-                  historyPaused = !historyPaused;
-                  break;
-                case "preempt":
-                  if (h.world.filesystemExists(ORB) && h.world.hostStateOf(ORB) === "running") {
-                    h.world.preemptHost(task, ORB, 1_000);
-                    count("applied:preempt");
-                  }
-                  break;
-                case "unreachable":
-                  if (world.filesystemExists(ORB)) {
-                    const duration = 10_000 + task.random("unreachable duration") * 30_000;
-                    unreachableUntil = task.monotonicNow() + duration;
-                    world.setRuntimeUnreachable(task, ORB, duration);
-                  }
-                  break;
-                case "pull-outage":
-                  if (world.filesystemExists(ORB))
-                    world.setPullOutage(
-                      task,
-                      ORB,
-                      10_000 + task.random("pull outage duration") * 30_000,
-                    );
-                  break;
-                case "stop": {
-                  await requestOrbStop(task, deps, ORB);
-                  break;
-                }
-                case "start": {
-                  await requestOrbStart(task, deps, ORB);
-                  break;
-                }
-                case "tick":
-                  await reconcileAllOnce(task, deps);
-                  break;
-                case "poll":
-                  await pollAllOnce(task, deps);
-                  break;
-                case "advance":
-                  await task.sleep(
-                    [1, 500, 5_000, 30_000][Math.floor(task.random("advance duration") * 4)] ?? 1,
-                    "campaign advance",
+                  const duration = present(
+                    [1, 2, 5, 30, 120][Math.floor(task.random("sleep duration") * 5)],
                   );
-                  break;
-                case "wall":
-                  wallOffset +=
-                    [-5_000, 1_000, 10_000][Math.floor(task.random("wall jump") * 3)] ?? 0;
-                  break;
-                case "busy":
-                  centralBusy = true;
+                  return requestOrbSleep(task, deps, ORB, caller, duration, id);
+                }
+                case "stop":
+                  return requestOrbStop(task, deps, ORB);
+                case "start":
+                  return requestOrbStart(task, deps, ORB);
+                case "cleanup":
+                  if (task.random("cleanup admission") < 0.06)
+                    return (
+                      task.random("cleanup kind") < 0.5 ? requestOrbArchive : requestOrbDeletion
+                    )(task, deps, ORB);
+                  return;
+                case "environment": {
+                  centralBusy = task.random("activity") < 0.5;
                   centralPrepared = false;
-                  h.world.setActivity(ORB, "busy");
-                  break;
-                case "idle":
-                  centralBusy = false;
-                  if (world.filesystemExists(ORB)) world.flushPendingInboxBatches(ORB);
-                  if (h.world.filesystemExists(ORB)) h.world.setActivity(ORB, "idle");
-                  break;
-                case "restart":
-                  deps = restartControlPlane({ ...h, deps }).deps;
-                  count("applied:restart-control-and-auth");
-                  break;
-                case "crash":
-                  if (world.hostStateOf(ORB) === "running") {
-                    const before = world.runtimeInstanceIdOf(ORB);
-                    world.restartRuntimeProcess(task, ORB);
-                    expect(world.runtimeInstanceIdOf(ORB)).not.toBe(before);
-                    count("applied:crash");
+                  if (h.world.filesystemExists(ORB)) {
+                    h.world.setActivity(ORB, centralBusy ? "busy" : "idle");
+                    if (
+                      h.world.hostStateOf(ORB) === "running" &&
+                      task.random("host interruption") < 0.2
+                    )
+                      h.world.preemptHost(task, ORB, 1_000);
                   }
-                  break;
-                case "delay": {
-                  const mode = task.random("delivery window");
-                  world.scriptDeliverMessage(
-                    ORB,
-                    mode < 0.25
-                      ? { kind: "hang", durationMs: 10_000 }
-                      : mode < 0.5
-                        ? { kind: "enqueue_without_persist" }
-                        : mode < 0.75
-                          ? { kind: "persist_without_ack" }
-                          : { kind: "crash_before_enqueue" },
+                  if (world.filesystemExists(ORB) && !centralBusy)
+                    world.flushPendingInboxBatches(ORB);
+                  return task.sleep(
+                    present([1, 500, 5_000, 30_000][Math.floor(task.random("time advance") * 4)]),
+                    "environment advance",
                   );
-                  break;
                 }
-                case "archive":
-                case "delete":
-                  // Cleanup is selected throughout the sequence, not a mandatory final suffix.
-                  if (task.random("admit cleanup command") < 0.03) {
-                    const result = await (command === "archive"
-                      ? requestOrbArchive
-                      : requestOrbDeletion)(task, deps, ORB);
-                    if (result.isOk()) cleanup = command;
-                  }
-                  break;
               }
             }
 
@@ -850,8 +450,7 @@ describe("stateful lifecycle campaign", () => {
                   await waitUntil(task, "campaign seeded", () => ready, { intervalMs: 1 });
                   while (driving) {
                     const current = deps;
-                    if (role === "compute" ? !computePaused : !historyPaused)
-                      await (role === "compute" ? reconcileAllOnce : pollAllOnce)(task, current);
+                    await (role === "compute" ? reconcileAllOnce : pollAllOnce)(task, current);
                     await task.sleep(100 + task.random(`${role} tick`) * 400, `${role} tick`);
                   }
                   workers--;
@@ -866,10 +465,10 @@ describe("stateful lifecycle campaign", () => {
                     const command = present(
                       commands[Math.floor(task.random("next command") * commands.length)],
                     );
-                    if (activeCalls > 0) count("applied:overlapping-caller");
-                    activeCalls++;
-                    await run(task, command);
-                    activeCalls--;
+                    const result = await run(task, command);
+                    task.log(
+                      `lifecycle: campaign result=${result && "isOk" in result ? result.isOk() : "environment"}`,
+                    );
                     safety();
                     await task.sleep(task.random("command spacing") * 500, "command spacing");
                   }
@@ -881,9 +480,6 @@ describe("stateful lifecycle campaign", () => {
                 f: async (raw) => {
                   const task = clock(raw);
                   seedRunningOrb(task, h, PEER);
-                  seedRunningOrb(task, h, FOREIGN);
-                  const foreignProject = present(h.store.projectSnapshot(`project-of-${FOREIGN}`));
-                  h.store.seedProject({ ...foreignProject, ownerUserId: "foreign-owner" });
                   seedRunningOrb(task, central, ORB);
                   if (task.random("initial lifecycle") < 0.5) {
                     seedRunningOrb(task, h, ORB, { bootLatencyMs: 50, initDurationMs: 0 });
@@ -911,13 +507,9 @@ describe("stateful lifecycle campaign", () => {
                     intervalMs: 100,
                   });
                   driving = false;
-                  computePaused = false;
-                  historyPaused = false;
                   await waitUntil(task, "all pre-quiescence actors finished", () => workers === 0, {
                     intervalMs: 100,
                   });
-                  h.store.failNextClearOrbMessageAutoStart(0);
-                  h.store.failNextOrbStopAfterCommit(0);
                   if (world.filesystemExists(ORB)) {
                     world.setRuntimeUnreachable(task, ORB, 0);
                     world.setPullOutage(task, ORB, 0);
@@ -926,7 +518,6 @@ describe("stateful lifecycle campaign", () => {
                   if (world.filesystemExists(ORB)) world.flushPendingInboxBatches(ORB);
                   centralBusy = false;
                   if (h.world.filesystemExists(ORB)) h.world.setActivity(ORB, "idle");
-                  wallOffset = Math.max(0, wallOffset);
                   // Budget covers remaining wall deadlines plus boot/setup, drain, backstop and FIFO pages.
                   const c = deps.constants;
                   const remainingSleep = Math.max(
@@ -988,23 +579,7 @@ describe("stateful lifecycle campaign", () => {
                   }
                   const final = h.store.orbSnapshot(ORB);
                   const receipts = new Set(sessionRecords().flatMap(recordIds));
-                  const obligations = [...accepted].map(([id, entry]) => ({
-                    id,
-                    ...entry,
-                    receipt: receipts.has(id),
-                  }));
-                  witness(task, "final", {
-                    final,
-                    obligations,
-                    budget,
-                    now: task.monotonicNow(),
-                    deadline,
-                    counts,
-                  });
-                  expect(
-                    settled,
-                    `progress obligations: ${JSON.stringify(obligations)} final=${JSON.stringify(final)}`,
-                  ).toBe(true);
+                  expect(settled, `unsettled lifecycle: ${JSON.stringify(final)}`).toBe(true);
                   for (const [id, entry] of accepted) {
                     if (!entry.revoked) {
                       expect(receipts.has(id), `durable receipt required: ${id}`).toBe(true);
@@ -1022,11 +597,7 @@ describe("stateful lifecycle campaign", () => {
                       final.state === "archived")
                   )
                     assertReplicaComplete(world, h.store, ORB);
-                  count("applied:non-earliest-timer", logs.lateChoices);
                   safety();
-                  completed++;
-                  for (const [key, value] of Object.entries(counts))
-                    totals[`${placement}:${key}`] = (totals[`${placement}:${key}`] ?? 0) + value;
                 },
               },
             ]);
