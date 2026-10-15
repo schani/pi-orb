@@ -8,6 +8,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Qualify PR 122 main cache export and fresh-runner hit** (2026-10-15; `docs/postmortems/2026-10-15-runtime-dependency-qualification.md`). Feature/fixture head `cf91bc86022b51aa43190dc67262645736bb1801` passed full isolated local and all eleven first-attempt hosted checks. Complete trusted main cache export and a subsequent fresh-runner hit through normal authorized gates; any new documentation head still requires all eleven exact-head checks. Preserve first failures and same-host isolation. The user waived only the historical Deploy `38800758118` image-build explanation; original stall/CPU causes remain unproven. No merge/deploy authorization or speedup/stall-fix claim.
+
 - **Diagnose identity-smoke cleanup before release validation** (2026-10-14; `docs/postmortems/2026-10-14-identity-smoke-cleanup.md`). Preserve Deploy 38596107385's failed identity gate; owned fixtures are now verified absent, but its original auth/transport/rejection cause is unknown. Correct premature success and silent DELETE failure diagnostics with token-safe phase/exit/HTTP/code evidence and tests-first coverage. Deferred candidate `43f059be` rejects successful array responses and is not approved for merge. Any later validation requires an explicit decision; no rerun or historical waiver is implied.
 
 - **Validate transcript target UUIDs before store lookup** (2026-10-13; `docs/postmortems/2026-10-13-rollout-monitor-anomalies.md`). Return a typed client-visible invalid-target response, not PostgreSQL 22P02 → internal 500. Test the HTTP boundary with real PostgreSQL; retain content-free route/error correlation for unexpected lookup failures.

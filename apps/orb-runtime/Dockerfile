@@ -56,12 +56,21 @@ COPY packages/protocol/package.json packages/protocol/
 COPY packages/mock-openai/package.json packages/mock-openai/
 COPY packages/luna/package.json packages/luna/
 COPY apps/orb-runtime/package.json apps/orb-runtime/
-RUN npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts \
+RUN start="$(date +%s)" \
+  && echo "runtime-deps:npm-install:start" \
+  && npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts \
+  && echo "runtime-deps:npm-install:complete elapsed_s=$(($(date +%s) - start))" \
+  && start="$(date +%s)" \
+  && echo "runtime-deps:patch:start" \
   && node scripts/apply-dependency-patches.mjs \
-  && ln -s /app/node_modules/.bin/agent-browser /usr/local/bin/agent-browser \
+  && echo "runtime-deps:patch:complete elapsed_s=$(($(date +%s) - start))" \
+  && ln -s /app/node_modules/.bin/agent-browser /usr/local/bin/agent-browser
+RUN --network=none start="$(date +%s)" \
+  && echo "runtime-deps:pty-rebuild:start" \
   && rm -rf node_modules/node-pty/prebuilds \
-  && npm rebuild node-pty \
-  && node -e "const pty = require('node-pty'); const child = pty.spawn('/bin/sh', ['-c', 'exit 0']); child.onExit(({ exitCode }) => process.exit(exitCode))"
+  && npm_config_nodedir=/usr/local npm rebuild node-pty \
+  && node -e "const pty = require('node-pty'); const child = pty.spawn('/bin/sh', ['-c', 'exit 0']); child.onExit(({ exitCode }) => process.exit(exitCode))" \
+  && echo "runtime-deps:pty-rebuild:complete elapsed_s=$(($(date +%s) - start))"
 
 COPY packages/protocol/src packages/protocol/src
 COPY packages/mock-openai/src packages/mock-openai/src

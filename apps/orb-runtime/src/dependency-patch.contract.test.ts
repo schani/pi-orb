@@ -87,7 +87,7 @@ describe("Pi dependency patch installation", () => {
       ["apps/control-plane/Dockerfile", "@pi-orb/control-plane"],
     ] as const) {
       const dockerfile = read(path);
-      const install = dockerfile.indexOf(`RUN npm ci --workspace ${workspace}`);
+      const install = dockerfile.indexOf(`npm ci --workspace ${workspace}`);
       expect(install).toBeGreaterThan(-1);
 
       expect(dockerfile.indexOf("COPY vendor vendor")).toBeGreaterThan(-1);
@@ -137,7 +137,7 @@ describe("Pi dependency patch installation", () => {
     const runtime = read("apps/orb-runtime/Dockerfile");
     expect(runtime.indexOf("COPY patches patches")).toBeGreaterThan(-1);
     expect(runtime.indexOf("COPY patches patches")).toBeLessThan(
-      runtime.indexOf("RUN npm ci --workspace @pi-orb/orb-runtime"),
+      runtime.indexOf("npm ci --workspace @pi-orb/orb-runtime"),
     );
   });
 
