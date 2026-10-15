@@ -510,7 +510,10 @@ async function checkOrbLinks(page: Page, origin: string) {
   await row.focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(origin + href);
+  await expect(page.locator(".orb-identity")).toContainText(named.name);
   await page.goBack();
+  await expect(page).toHaveURL(origin + "/usage");
+  await expect(rows).toHaveCount(5);
   const missing = metadata.find((orb) => orb.name === null);
   if (!missing) throw new Error("No deleted usage fixture orb");
   const missingHref = "/orbs/" + encodeURIComponent(missing.id);
