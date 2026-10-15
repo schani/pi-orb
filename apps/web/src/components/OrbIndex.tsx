@@ -163,12 +163,14 @@ export function OrbIndex({
   orbId,
   pending,
   onProjectChange,
+  onSenderNamesChange,
   onSelect,
 }: {
   projectId: string | null;
   orbId: string;
   pending: boolean;
   onProjectChange: (project: { id: string; name: string } | null) => void;
+  onSenderNamesChange?: (names: ReadonlyMap<string, string | null>) => void;
   onSelect: () => void;
 }) {
   const [projects, setProjects] = useState<ProjectView[] | null>(null);
@@ -208,6 +210,18 @@ export function OrbIndex({
         : { ...lists, [addressedId]: addressedOrbs },
     [addressedId, addressedOrbs, addressedProject, lists],
   );
+  const senderNames = useMemo(
+    () =>
+      new Map(
+        (visibleProjects ?? []).flatMap((project) =>
+          (visibleLists[project.id]?.items ?? []).map((orb) => [orb.id, orb.name] as const),
+        ),
+      ),
+    [visibleProjects, visibleLists],
+  );
+  useEffect(() => {
+    onSenderNamesChange?.(senderNames);
+  }, [onSenderNamesChange, senderNames]);
   const searchSource = useMemo(
     () => ({
       ...buildDashboardSearchSource({

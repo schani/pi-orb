@@ -1,5 +1,9 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { ROOT_CONVERSATION_ID, type StorageWrite } from "@earendil-works/pi-durable";
+import {
+  ROOT_CONVERSATION_ID,
+  type StorageWrite,
+  type SubmissionId,
+} from "@earendil-works/pi-durable";
 import type { MessageInputBlock, OrbMessageSystem } from "@pi-orb/protocol";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 import { jsonEqual } from "../../domain/json-equal.ts";
@@ -21,6 +25,7 @@ export async function projectNativeInboxCommit(
   query: Query,
   orbId: string,
   writes: readonly StorageWrite[],
+  admittedSubmissions: ReadonlySet<SubmissionId>,
 ) {
   const submissions = writes.flatMap((write) =>
     write.type === "submission" &&
@@ -29,9 +34,10 @@ export async function projectNativeInboxCommit(
     (write.value.status === "queued" ||
       write.value.status === "placed" ||
       (write.value.status === "unanswered" && write.value.entry === undefined)) &&
-    /^inbox:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
+    (/^inbox:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
       write.value.requestId ?? "",
-    )
+    ) ||
+      write.value.requestId?.startsWith("inbox:browser:"))
       ? [write.value]
       : [],
   );
@@ -64,8 +70,8 @@ export async function projectNativeInboxCommit(
           const ids = Array.isArray(captured?.messageIds)
             ? captured.messageIds.filter((id): id is string => typeof id === "string")
             : [batchId];
-          if (ids.length === 0) continue;
           if (submission.status === "unanswered") {
+            if (ids.length === 0) continue;
             const outcome = await query(
               `UPDATE orb_messages SET status='failed',last_error=$4,auto_start=false,updated_at=now()
               WHERE orb_id=$1 AND message_id=ANY($2::uuid[]) AND delivery_batch_id=$3 AND status IN ('queued','delivering')`,
@@ -81,8 +87,31 @@ export async function projectNativeInboxCommit(
             if (outcome.isErr()) return err(outcome.error);
             continue;
           }
-          // Receipt finalization follows native admission; later placement must not re-admit it.
-          if (captured?.submissionId === submission.id) continue;
+          // Native admission can precede receipt finalization; placement is not new input.
+          if (admittedSubmissions.has(submission.id) || captured?.submissionId === submission.id)
+            continue;
+          const orb = await query("SELECT sleep_id,stop_reason FROM orbs WHERE id=$1", [orbId]);
+          if (orb.isErr()) return err(orb.error);
+          if (orb.value.rows[0]?.sleep_id != null || orb.value.rows[0]?.stop_reason === "sleep")
+            return err<never, AuthorityError>({
+              type: "authority_error",
+              code: "busy",
+              message: "Input admission paused by sleep",
+            });
+          if (ids.length === 0) {
+            const held = await query(
+              "SELECT 1 FROM orb_messages WHERE orb_id=$1 AND status IN ('queued','delivering') AND operation_id IS NULL LIMIT 1",
+              [orbId],
+            );
+            if (held.isErr()) return err(held.error);
+            if (held.value.rows.length > 0)
+              return err<never, AuthorityError>({
+                type: "authority_error",
+                code: "busy",
+                message: "Input admission waits for queued messages",
+              });
+            continue;
+          }
           const rows = await query(
             "SELECT message_id,content,system,status,delivery_batch_id,operation_id FROM orb_messages WHERE orb_id=$1 AND message_id=ANY($2::uuid[]) ORDER BY ordinal FOR UPDATE",
             [orbId, arrayParam(ids)],
@@ -105,7 +134,11 @@ export async function projectNativeInboxCommit(
             rows.value.rows.map((row) => ({ content: row.content as MessageInputBlock[] })),
           );
           const system = rows.value.rows[0]?.system as OrbMessageSystem | null;
-          if (rows.value.rows.some((row) => !jsonEqual(row.system, system))) return err(rejected());
+          if (
+            (system !== null && ids.length !== 1) ||
+            rows.value.rows.some((row) => !jsonEqual(row.system, system))
+          )
+            return err(rejected());
           const fingerprint = Result.fromThrowable(
             () => JSON.parse(captured.fingerprint as string),
             rejected,

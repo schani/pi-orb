@@ -152,4 +152,20 @@ it("keeps optimistic rows, deduplicates new rows, and does not advance on error"
   expect((await poller.poll(() => true)).isErr()).toBe(true);
   await poller.poll(() => true);
   expect(fetch).toHaveBeenLastCalledWith(7, ["m1"]);
+  const peer = {
+    ...message,
+    id: "peer-inbox",
+    system: { kind: "orb_message" as const, senderOrbId: "629e53de-a2c9-4f1b-87a6-437fd415e8de" },
+  };
+  fetch.mockResolvedValueOnce(ok({ ...delta, items: [peer] }));
+  await poller.poll(() => true);
+  fetch.mockResolvedValueOnce(err({ type: "network", message: "offline" }));
+  expect((await poller.poll(() => true)).isErr()).toBe(true);
+  expect(poller.rows()).toEqual([message, peer]);
+  const { content: _content, system: _system, ...update } = peer;
+  fetch.mockResolvedValueOnce(
+    ok({ items: [], updates: [{ ...update, status: "delivered" }], cursor: 7 }),
+  );
+  await poller.poll(() => true);
+  expect(poller.rows()).toEqual([message, { ...peer, status: "delivered" }]);
 });

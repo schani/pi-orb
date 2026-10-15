@@ -1,7 +1,19 @@
 import type { ConversationId, EntryRecord, TaskGraph } from "@earendil-works/pi-durable";
-import { type ActiveSubagent, capHeadline, type HistoryRecord } from "@pi-orb/protocol";
+import {
+  type ActiveSubagent,
+  capHeadline,
+  type HistoryRecord,
+  OrbMessageSystemSchema,
+  type SystemInput,
+  systemInputEvent,
+} from "@pi-orb/protocol";
 import { err, ok, Result } from "neverthrow";
-import { type MappingError, mapPiEntry } from "../../../../orb-runtime/src/pi/mapping.ts";
+import { Check } from "typebox/value";
+import {
+  type MappingError,
+  mapPiEntry,
+  mapUserContent,
+} from "../../../../orb-runtime/src/pi/mapping.ts";
 
 export function activeSubagents(
   graph: TaskGraph,
@@ -58,6 +70,7 @@ export function projectEntry(
   entry: EntryRecord,
   parentId: string | null,
   sessionId: string,
+  peer?: Pick<SystemInput, "sender" | "inboxMessageIds">,
 ): Result<HistoryRecord | null, MappingError> {
   const id = `${sessionId}:${entry.id}`;
   if (entry.kind === "pi.system" || entry.kind === "pi.reset" || entry.kind === "orb.identity")
@@ -165,6 +178,17 @@ export function projectEntry(
     (message.role !== "user" && message.role !== "assistant" && message.role !== "toolResult")
   )
     return ok(null);
+  if (peer)
+    return ok(
+      systemInputEvent({
+        id,
+        parentId,
+        timestamp: new Date(message.timestamp).toISOString(),
+        overflow: {},
+        ...peer,
+        content: mapUserContent(message.content),
+      }),
+    );
   return mapPiEntry({
     id,
     parentId,
@@ -227,7 +251,7 @@ function projectNotification(
 
 export interface PublicEntryReceipt {
   readonly messageIds: readonly string[];
-  readonly system?: { readonly kind: string };
+  readonly system?: unknown;
 }
 
 export function projectHistory(
@@ -239,12 +263,30 @@ export function projectHistory(
   const records: HistoryRecord[] = [];
   for (const entry of entries) {
     const parentId = records.at(-1)?.id ?? null;
+    const receipt = receipts.get(entry.id);
+    const system = receipt?.system;
+    if (
+      system !== undefined &&
+      (!Check(OrbMessageSystemSchema, system) ||
+        (system.kind === "orb_message" && receipt?.messageIds.length !== 1))
+    )
+      return err({
+        type: "history_mapping_error",
+        code: "mapping_failure",
+        message: "Invalid inbox system receipt",
+      });
     const projected = notifications.has(entry.id)
       ? projectNotification(entry, parentId, sessionId)
-      : projectEntry(entry, parentId, sessionId);
+      : projectEntry(
+          entry,
+          parentId,
+          sessionId,
+          receipt && system?.kind === "orb_message"
+            ? { sender: { orbId: system.senderOrbId }, inboxMessageIds: [...receipt.messageIds] }
+            : undefined,
+        );
     if (projected.isErr()) return err(projected.error);
     if (!projected.value) continue;
-    const receipt = receipts.get(entry.id);
     const record = projected.value;
     records.push(
       record.type === "message" && receipt?.system
@@ -257,9 +299,7 @@ export function projectHistory(
             content: record.content,
             custom: {
               customType:
-                receipt.system.kind === "sleep_wake"
-                  ? "pi-orb.sleep-wake"
-                  : "pi-orb.system-message",
+                system?.kind === "sleep_wake" ? "pi-orb.sleep-wake" : "pi-orb.system-message",
               display: true,
             },
             inboxMessageIds: [...receipt.messageIds],

@@ -15,6 +15,7 @@ import {
   ORB_SELF_DELETE_PATH,
   ORB_SELF_PATH,
   ORB_SELF_SLEEP_PATH,
+  ORB_SEND_PATH,
   ORB_SPAWN_MAX_BYTES,
   ORB_SPAWN_PATH,
   ORB_SPAWN_UUID,
@@ -25,6 +26,8 @@ import {
   type OrbInspectionItem,
   type OrbNameTriggerResponse,
   OrbNameTriggerSchema,
+  type OrbSendRequest,
+  OrbSendRequestSchema,
   OrbSleepRequestSchema,
   type OrbSpawnRequest,
   OrbSpawnRequestSchema,
@@ -57,6 +60,7 @@ import type { McpStore } from "../domain/mcp.ts";
 import type { McpOAuth } from "../domain/mcp-oauth.ts";
 import type { OrbRow } from "../domain/orb.ts";
 import { generateOrbName, normalizeOrbName } from "../domain/orb-naming.ts";
+import { getOrbSpawnRelations } from "../domain/orb-spawning.ts";
 import type { PersonalInstructionsStore } from "../domain/personal-instructions.ts";
 import type {
   ArchiveCaller,
@@ -79,6 +83,14 @@ import { sendMcpError } from "./mcp-routes.ts";
 import { sendProjectInstructionsError } from "./project-instructions.ts";
 
 export interface RuntimeRouteDeps {
+  readonly send: (
+    task: SimulationTask,
+    caller: OrbRow,
+    request: OrbSendRequest,
+  ) => ResultAsync<
+    { orbId: string; messageId: string },
+    import("../domain/orb-agent-operations.ts").OrbAgentError
+  >;
   readonly claudeCredential?: (
     task: SimulationTask,
     orb: OrbRow,
@@ -777,6 +789,35 @@ export function registerRuntimeRoutes(
     return reply.send(snapshot.value);
   });
 
+  app.post(ORB_SEND_PATH, async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind === "unavailable")
+      return reply.status(503).send({
+        error: { code: "unavailable", message: "messaging unavailable", retryable: true },
+      });
+    if (auth.kind !== "orb") return sendUnauthorized(reply);
+    if (!Check(OrbSendRequestSchema, request.body))
+      return reply.status(400).send({
+        error: { code: "invalid_request", message: "invalid send request", retryable: false },
+      });
+    const result = await deps.send(task, auth.orb, request.body);
+    if (result.isErr()) {
+      const status = {
+        unauthorized: 401,
+        not_found: 404,
+        conflict: 409,
+        invalid_request: 400,
+        unavailable: 503,
+        internal: 500,
+      }[result.error.code];
+      return reply
+        .status(status)
+        .send({ error: { ...result.error, retryable: result.error.code === "unavailable" } });
+    }
+    return reply.status(202).send({ v: 1, ...result.value, requestId: request.body.requestId });
+  });
+
   app.get(ORB_SELF_PATH, async (request, reply) => {
     const auth = await authenticate(request.headers.authorization);
     if (auth.kind === "unavailable") return sendInspectionStoreError(reply, auth.error);
@@ -785,8 +826,8 @@ export function registerRuntimeRoutes(
     if (project.isErr()) return sendInspectionStoreError(reply, project.error);
     if (project.value === null)
       return reply.status(500).send(inspectionError("internal", "orb project is missing", false));
-    const caller = await deps.store.getSpawnCaller(task, auth.orb.id);
-    if (caller.isErr()) return sendInspectionStoreError(reply, caller.error);
+    const relations = await getOrbSpawnRelations(task, deps.store, auth.orb.id, deps.appOrigin);
+    if (relations.isErr()) return sendInspectionStoreError(reply, relations.error);
     const url = (id: string) => `${deps.appOrigin}/orbs/${id}`;
     reply.header("cache-control", "no-store");
     return reply.send({
@@ -802,7 +843,7 @@ export function registerRuntimeRoutes(
         name: project.value.name,
         repositoryUrl: project.value.repositoryUrl,
       },
-      spawnedBy: caller.value === null ? null : { id: caller.value, url: url(caller.value) },
+      ...relations.value,
       previewHost:
         deps.tailnetDnsName === undefined ? null : previewHost(auth.orb.id, deps.tailnetDnsName),
     });

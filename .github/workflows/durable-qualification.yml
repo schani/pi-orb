@@ -57,6 +57,11 @@ jobs:
           name: central-process-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             test-failures/*.json
+            .context/cross-orb/messaging/*/failure.txt
+            .context/cross-orb/messaging/*/manifest.json
+            .context/cross-orb/messaging/*/fake-requests.json
+            .context/cross-orb/messaging/*/control-plane.log
+            .context/cross-orb/messaging/*/*-native-history.json
             test-failures/profile-login/failure.json
             test-failures/full-slice-upload/failure.json
             test-failures/subagent-*/failure.json
@@ -97,6 +102,7 @@ jobs:
             test-failures/durable-independent-process/*/early-output.png
             test-failures/durable-independent-process/*/waiting.png
             test-failures/durable-independent-process/*/final-page.png
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 14
 

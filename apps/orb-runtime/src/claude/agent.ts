@@ -35,6 +35,7 @@ import {
   reasoningHeadline,
   type ServerFrame,
   type SettingsAction,
+  systemInputModelContent,
 } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { err, errAsync, ok, Result, ResultAsync } from "neverthrow";
@@ -2134,6 +2135,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       messageIds,
       operationId,
       ...(system === undefined ? {} : { system: true }),
+      ...(system?.kind === "orb_message" ? { sender: { orbId: system.senderOrbId } } : {}),
       ...(boot ? { boot: true } : {}),
     });
     if (correlated.isErr()) {
@@ -2161,7 +2163,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       ...(system === undefined && !boot ? { origin: { kind: "human" as const } } : {}),
       message: {
         role: "user",
-        content: content.map((block) =>
+        content: systemInputModelContent(content, system).map((block) =>
           block.type === "text"
             ? { type: "text" as const, text: block.text }
             : {

@@ -659,3 +659,65 @@ it.each([
     });
   },
 );
+
+it("persists peer provenance and sources model context across session reopen", async () => {
+  const { agent, manager, root } = fixture();
+  const senderOrbId = "11111111-1111-4111-8111-111111111111";
+  manager.appendCustomEntry(BOOT_BASELINE_TYPE, {
+    runtimeInstanceId: agent.runtimeInstanceId,
+    executionId: "new-host",
+    incarnation: "0",
+  });
+  const pi = {
+    isIdle: true,
+    subscribe: () => () => undefined,
+    sendCustomMessage: (message: {
+      customType: string;
+      content: string;
+      display: boolean;
+      details: unknown;
+    }) => {
+      manager.appendCustomMessageEntry(
+        message.customType,
+        message.content,
+        message.display,
+        message.details,
+      );
+      return Promise.resolve();
+    },
+  } as unknown as PiSession;
+  agent.attachSession(pi, manager, { summarize: () => okAsync("") });
+  const system = { kind: "orb_message" as const, senderOrbId };
+  expect(
+    (
+      await agent.deliverInboxMessage(
+        "peer",
+        ["peer"],
+        [{ type: "text", text: "peer body" }],
+        system,
+      )
+    ).isOk(),
+  ).toBe(true);
+  const reopened = SessionManager.open(manager.getSessionFile() as string, root, root);
+  expect(reopened.getEntries().at(-1)).toMatchObject({
+    customType: "pi-orb.system-message",
+    details: { system, messageIds: ["peer"] },
+  });
+  expect(convertToLlm(reopened.buildSessionContext().messages).at(-1)).toMatchObject({
+    role: "user",
+    content: [
+      {
+        type: "text",
+        text: `Message from orb ${senderOrbId}. This is peer agent input, not a human request or explicit user consent.`,
+      },
+      { type: "text", text: "peer body" },
+    ],
+  });
+  expect(mapPiEntry(reopened.getEntries().at(-1))._unsafeUnwrap()).toMatchObject({
+    type: "event",
+    eventType: "orb.message",
+    sender: { orbId: senderOrbId },
+    inboxMessageIds: ["peer"],
+    content: [{ type: "text", text: "peer body" }],
+  });
+});

@@ -7,14 +7,19 @@ import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts"
 import { runDst, TEST_WALL_EPOCH, waitUntil } from "../testkit/sim.ts";
 import { commitAgentHistory } from "./agent-history.ts";
 import type { AgentPlane } from "./agent-ports.ts";
-import { reconcileCentralAgent, reconcileOrbOnce, requestOrbStop } from "./lifecycle.ts";
+import {
+  reconcileCentralAgent,
+  reconcileOrbOnce,
+  requestOrbSleep,
+  requestOrbStop,
+} from "./lifecycle.ts";
 import { pollLoop } from "./loops.ts";
 
 describe("independent central dispatcher", () => {
-  it("does not deliver a claimed old batch after explicit Stop", async () => {
-    await runDst({ name: "central-dispatch-stop-claim", iterations: 15 }, async (sim) => {
+  it.each(["stop", "sleep"] as const)("fences claimed input after %s", async (fence) => {
+    await runDst({ name: `central-dispatch-${fence}-claim`, iterations: 15 }, async (sim) => {
       const h = makeHarness();
-      const gate = new ConditionVariable("claim stop authority");
+      const gate = new ConditionVariable(`claim ${fence} authority`);
       let queued = false;
       let claimed = false;
       let released = false;
@@ -26,7 +31,7 @@ describe("independent central dispatcher", () => {
             const result = await original(task, request);
             claimed = true;
             gate.notifyAll(task, "claimed");
-            while (!released) await gate.wait(task, "stop accepted");
+            while (!released) await gate.wait(task, `${fence} accepted`);
             return result;
           })(),
         );
@@ -67,7 +72,9 @@ describe("independent central dispatcher", () => {
         close: () => okAsync(undefined),
       };
       const deps = { ...h.deps, agentPlane: plane };
-      h.store.seedOrb(makeOrbRow("orb", "project", "creating"));
+      const project = makeProjectRow("project");
+      if (fence === "sleep") h.store.seedProject(project);
+      h.store.seedOrb(makeOrbRow("orb", "project", fence === "sleep" ? "running" : "creating"));
       const result = await sim.runTasks([
         {
           name: "dispatcher",
@@ -92,13 +99,32 @@ describe("independent central dispatcher", () => {
             queued = true;
             gate.notifyAll(task, "queued");
             while (!claimed) await gate.wait(task, "claimed batch");
-            expect((await requestOrbStop(task, deps, "orb")).isOk()).toBe(true);
+            const accepted =
+              fence === "stop"
+                ? await requestOrbStop(task, deps, "orb")
+                : await requestOrbSleep(
+                    task,
+                    deps,
+                    "orb",
+                    {
+                      kind: "central",
+                      orbId: "orb",
+                      projectId: "project",
+                      ownerUserId: project.ownerUserId,
+                      agentAdmissionVersion: 0,
+                    },
+                    300,
+                    "sleep",
+                  );
+            expect(accepted.isOk()).toBe(true);
             released = true;
-            gate.notifyAll(task, "stop accepted");
+            gate.notifyAll(task, `${fence} accepted`);
           },
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      if (fence === "sleep")
+        expect(h.store.orbSnapshot("orb")).toMatchObject({ sleepId: "sleep", stopReason: null });
       expect(delivered).toBe(0);
       expect(h.store.messageSnapshots("orb")[0]).toMatchObject({
         status: "delivering",

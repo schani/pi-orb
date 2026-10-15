@@ -27,6 +27,12 @@ export const OrbSelfSchema = Type.Object(
       Type.Object({ id: Type.String(), url: Type.String() }, closed),
       Type.Null(),
     ]),
+    children: Type.Array(
+      Type.Object(
+        { id: Type.String(), name: Type.Union([Type.String(), Type.Null()]), url: Type.String() },
+        closed,
+      ),
+    ),
     previewHost: Type.Union([Type.String(), Type.Null()]),
   },
   closed,

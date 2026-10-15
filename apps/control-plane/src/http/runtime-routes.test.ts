@@ -7,6 +7,7 @@ import {
   ORB_INSPECTION_LIST_PATH,
   ORB_NAME_TRIGGER_PATH,
   ORB_SELF_PATH,
+  ORB_SEND_PATH,
   OrbInspectionErrorSchema,
   OrbInspectionListSchema,
   OrbSelfSchema,
@@ -33,6 +34,7 @@ import {
   requestOrbDeletion,
   requestOrbSleep,
 } from "../domain/lifecycle.ts";
+import { sendGuestOrbMessage } from "../domain/orb-messaging.ts";
 import { spawnOrb } from "../domain/orb-spawning.ts";
 import type { BrokerDeps, ControlPlaneStore, OrbNameGenerator } from "../domain/ports.ts";
 import { putProjectSecret } from "../domain/project-secrets.ts";
@@ -309,6 +311,36 @@ describe("runtime broker routes", () => {
     expect((await post()).statusCode).toBe(401);
   });
 
+  it("queues authenticated peer sends with trusted provenance and stable retries", async () => {
+    store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+    const target = "00000000-0000-4000-8000-000000000088";
+    store.seedOrb(makeOrbRow(target, PROJECT, "stopped", { stopReason: "manual" }));
+    const payload = { v: 1, orbId: target, message: "literal peer text", requestId: "fixed" };
+    const send = (body: unknown = payload) =>
+      app.inject({
+        method: "POST",
+        url: ORB_SEND_PATH,
+        headers: { authorization: `Bearer ${TOKEN}` },
+        payload: body as object,
+      });
+    const accepted = await send();
+    expect(accepted.statusCode).toBe(202);
+    for (const invalid of [
+      { ...payload, senderOrbId: target },
+      { ...payload, system: { kind: "orb_message" } },
+      { ...payload, requestId: "" },
+      { ...payload, orbId: "bad" },
+      { ...payload, message: "" },
+    ])
+      expect((await send(invalid)).statusCode).toBe(400);
+    expect((await app.inject({ method: "POST", url: ORB_SEND_PATH, payload })).statusCode).toBe(
+      401,
+    );
+    expect(
+      (await send({ ...payload, orbId: "00000000-0000-4000-8000-000000000099" })).statusCode,
+    ).toBe(404);
+  });
+
   const nameGenerator: OrbNameGenerator = {
     generate: () => okAsync("Repair Runtime Auth"),
   };
@@ -338,6 +370,8 @@ describe("runtime broker routes", () => {
     registerRuntimeRoutes(app, task, {
       appOrigin: "https://browser.test",
       ...(tailnetDnsName === null ? {} : { tailnetDnsName }),
+      send: (task, caller, request) =>
+        sendGuestOrbMessage(task, { ...makeHarness().deps, store: routeStore }, caller, request),
       spawn: (task, caller, orbId, request) =>
         spawnOrb(task, { ...makeHarness().deps, store: routeStore }, caller, orbId, request),
       sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
@@ -672,6 +706,25 @@ describe("runtime broker routes", () => {
       expect(self.json().orb.id).toBe(id);
       expect((await spawn({ prompt: "Different" })).statusCode).toBe(409);
     });
+    it("self includes accepted direct children, archived targets and current names, not unrelated or deleted orbs", async () => {
+      store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+      expect((await spawn()).statusCode).toBe(202);
+      store.seedOrb(makeOrbRow(id, PROJECT, "archived", { name: "Renamed child" }));
+      store.seedOrb(makeOrbRow("unrelated", PROJECT, "archived"));
+      const inspect = () =>
+        app.inject({
+          method: "GET",
+          url: ORB_SELF_PATH,
+          headers: { authorization: `Bearer ${TOKEN}`, host: "untrusted.test" },
+        });
+      const response = await inspect();
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(Check(OrbSelfSchema, response.json())).toBe(true);
+      expect(response.json().children).toEqual([
+        { id, name: "Renamed child", url: `https://browser.test/orbs/${id}` },
+      ]);
+    });
+
     it("retains historical parent URL after deletion and rejects its retired bearer", async () => {
       store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
       expect((await spawn()).statusCode).toBe(202);
@@ -1112,7 +1165,12 @@ describe("runtime broker routes", () => {
   });
 
   function storeFailing(
-    operation: "listProjects" | "listProjectsByOwner" | "readHistorySnapshot" | "getSpawnCaller",
+    operation:
+      | "listProjects"
+      | "listProjectsByOwner"
+      | "readHistorySnapshot"
+      | "getSpawnCaller"
+      | "listSpawnChildren",
     error: StoreError,
   ): ControlPlaneStore {
     return new Proxy(store, {
@@ -1522,30 +1580,34 @@ describe("runtime broker routes", () => {
           repositoryUrl: "https://github.com/owner/repo",
         },
         spawnedBy: null,
+        children: [],
         previewHost: `pi-orb-${ORB}.tail.test.ts.net`,
       });
       expect((await inspect(ORB_SELF_PATH, null)).statusCode).toBe(401);
       expect((await inspect(ORB_SELF_PATH, "wrong")).statusCode).toBe(401);
     });
 
-    it("reports absent preview configuration and sanitized store errors", async () => {
-      await app.close();
-      await startApp(TEST_ISSUER_CONSTANTS, store, null);
-      expect((await inspect(ORB_SELF_PATH)).json().previewHost).toBeNull();
-      await app.close();
-      await startApp(
-        TEST_ISSUER_CONSTANTS,
-        storeFailing("getSpawnCaller", {
-          type: "store_error",
-          code: "unavailable",
-          message: "raw database host",
-          retryable: true,
-        }),
-      );
-      const response = await inspect(ORB_SELF_PATH);
-      expect(response.statusCode).toBe(503);
-      expect(response.body).not.toContain("raw database host");
-    });
+    it.each(["getSpawnCaller", "listSpawnChildren"] as const)(
+      "reports absent preview configuration and sanitized %s errors",
+      async (operation) => {
+        await app.close();
+        await startApp(TEST_ISSUER_CONSTANTS, store, null);
+        expect((await inspect(ORB_SELF_PATH)).json().previewHost).toBeNull();
+        await app.close();
+        await startApp(
+          TEST_ISSUER_CONSTANTS,
+          storeFailing(operation, {
+            type: "store_error",
+            code: "unavailable",
+            message: "raw database host",
+            retryable: true,
+          }),
+        );
+        const response = await inspect(ORB_SELF_PATH);
+        expect(response.statusCode).toBe(503);
+        expect(response.body).not.toContain("raw database host");
+      },
+    );
 
     it("lists sibling orbs with project context and identifies the caller", async () => {
       const response = await inspect(ORB_INSPECTION_LIST_PATH);

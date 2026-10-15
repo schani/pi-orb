@@ -244,7 +244,22 @@ describe("frontend-only browser behavior", () => {
             }
             return code.replace(
               anchor,
-              `Reflect.set(globalThis, "__historyObservedConnected", detailContext.connected); Reflect.set(globalThis, "__historyRenders", (Reflect.get(globalThis, "__historyRenders") ?? 0) + 1); ${anchor}`,
+              `
+                const renderInputs = { records, liveBlocks, tools, busy, compacting, compaction,
+                  queuedMessages, orbState, senderNames, detailContext, detailAliases,
+                  viewportRef, onCompensatedRef };
+                const previousInputs = Reflect.get(globalThis, "__historyRenderInputs");
+                const changes = Object.keys(renderInputs).filter(
+                  (key) => !previousInputs || !Object.is(previousInputs[key], renderInputs[key]),
+                );
+                Reflect.set(globalThis, "__historyRenderInputs", renderInputs);
+                Reflect.set(globalThis, "__historyRenderChanges", [
+                  ...(Reflect.get(globalThis, "__historyRenderChanges") ?? []).slice(-31), changes,
+                ]);
+                Reflect.set(globalThis, "__historyObservedConnected", detailContext.connected);
+                Reflect.set(globalThis, "__historyRenders", (Reflect.get(globalThis, "__historyRenders") ?? 0) + 1);
+                ${anchor}
+              `,
             );
           },
         },
@@ -3910,9 +3925,11 @@ describe("frontend-only browser behavior", () => {
         .poll(() => page.evaluate(() => Reflect.get(globalThis, "__inboxRefreshes") ?? 0))
         .toBeGreaterThan(before.inboxRefreshes);
 
-      expectPage(await page.evaluate(() => Reflect.get(globalThis, "__historyRenders"))).toBe(
-        before.historyRenders,
-      );
+      const after = await page.evaluate(() => ({
+        renders: Reflect.get(globalThis, "__historyRenders"),
+        changes: Reflect.get(globalThis, "__historyRenderChanges"),
+      }));
+      expectPage(after.renders, JSON.stringify(after.changes)).toBe(before.historyRenders);
     } finally {
       await page.close();
     }

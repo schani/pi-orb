@@ -11,7 +11,9 @@ export function storageAuthorityError(error: unknown): AuthorityError | undefine
     !("type" in cause) ||
     cause.type !== "authority_error" ||
     !("code" in cause) ||
-    (cause.code !== "legacy_backend" && cause.code !== "history_integrity") ||
+    (cause.code !== "legacy_backend" &&
+      cause.code !== "history_integrity" &&
+      cause.code !== "busy") ||
     !("message" in cause) ||
     typeof cause.message !== "string"
   )

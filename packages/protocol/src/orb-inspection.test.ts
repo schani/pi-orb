@@ -40,6 +40,7 @@ describe("orb inspection schemas", () => {
     },
     project: { id: "project-a", name: "Project", repositoryUrl: "https://github.com/o/r" },
     spawnedBy: null,
+    children: [],
     previewHost: null,
   };
 
@@ -50,6 +51,10 @@ describe("orb inspection schemas", () => {
         ...self,
         orb: { ...self.orb, name: "Work" },
         spawnedBy: { id: "parent", url: "https://app.test/orbs/parent" },
+        children: [
+          { id: "child", name: "Work", url: "https://app.test/orbs/child" },
+          { id: "unnamed", name: null, url: "https://app.test/orbs/unnamed" },
+        ],
         previewHost: "orb.tail.ts.net",
       }),
     ).toBe(true);
@@ -64,6 +69,13 @@ describe("orb inspection schemas", () => {
       { ...self, orb: { ...self.orb, id: 42 } },
       { ...self, project: { ...self.project, name: null } },
       { ...self, spawnedBy: { id: "parent", url: 42 } },
+      { ...self, children: undefined },
+      { ...self, children: null },
+      { ...self, children: [{ id: "child", url: "https://app.test/orbs/child" }] },
+      { ...self, children: [{ id: 42, name: null, url: "https://app.test/orbs/child" }] },
+      { ...self, children: [{ id: "child", name: 42, url: "https://app.test/orbs/child" }] },
+      { ...self, children: [{ id: "child", name: null, url: 42 }] },
+      { ...self, children: [{ id: "child", name: null, url: "url", extra: true }] },
       { ...self, previewHost: 42 },
       { ...self, orb: { id: "orb-a" } },
     ])

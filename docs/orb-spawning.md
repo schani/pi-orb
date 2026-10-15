@@ -28,6 +28,8 @@ For simplicity the CLI makes **one** request with a 10-second deadline and no au
 
 `pi-orb orbs` and `pi-orb transcript <id>` already provide discovery and replicated progress inspection. The returned browser URL shows existing startup, inbox, failure, and transcript state. There is no completion notification back to the caller.
 
+**Spawn relations (2026-10-14):** native `orb_self` and `pi-orb self [--json]` expose historical `spawnedBy:{id,url}|null` and required `children:[{id,name:string|null,url}]`, existing direct accepted targets ordered by ID. Archived/deleting children remain until removed; deleted targets and grandchildren are omitted; empty means `[]`. Both paths use a shared application service/store port over existing `orb_spawns`, with no new persistence or lifecycle coupling (`docs/control-plane-api.md`). Alerts address the issuing orb's user, not its parent; inspect child progress with `orb_transcript` or `pi-orb transcript <id>`.
+
 ## Runtime API
 
 ```text

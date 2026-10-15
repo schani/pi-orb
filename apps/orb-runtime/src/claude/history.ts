@@ -17,6 +17,8 @@ import {
   type JsonObject,
   JsonObjectSchema,
   type JsonValue,
+  OrbMessageSenderSchema,
+  systemInputEvent,
 } from "@pi-orb/protocol";
 import { err, ok, Result } from "neverthrow";
 import { Type } from "typebox";
@@ -28,13 +30,17 @@ const IndexSchema = Type.Object({
 });
 const ProvenanceSchema = Type.Record(
   Type.String(),
-  Type.Object({
-    messageIds: Type.Array(Type.String()),
-    operationId: Type.String(),
-    system: Type.Optional(Type.Boolean()),
-    compaction: Type.Optional(Type.Boolean()),
-    boot: Type.Optional(Type.Boolean()),
-  }),
+  Type.Object(
+    {
+      messageIds: Type.Array(Type.String()),
+      operationId: Type.String(),
+      system: Type.Optional(Type.Boolean()),
+      compaction: Type.Optional(Type.Boolean()),
+      boot: Type.Optional(Type.Boolean()),
+      sender: Type.Optional(OrbMessageSenderSchema),
+    },
+    { additionalProperties: false },
+  ),
 );
 
 export interface ClaudeHistoryError {
@@ -45,8 +51,19 @@ export interface Provenance {
   readonly messageIds: readonly string[];
   readonly operationId: string;
   readonly system?: boolean;
+  readonly sender?: { readonly orbId: string };
   readonly compaction?: boolean;
   readonly boot?: boolean;
+}
+function validProvenance(value: Provenance): boolean {
+  return (
+    !Object.hasOwn(value, "sender") ||
+    (value.sender !== undefined &&
+      value.system === true &&
+      value.messageIds.length === 1 &&
+      !Object.hasOwn(value, "boot") &&
+      !Object.hasOwn(value, "compaction"))
+  );
 }
 export interface HistoryFiles {
   read(path: string): string | null;
@@ -174,7 +191,7 @@ export class ClaudeHistory {
         const provenance = files.read(this.provenancePath);
         if (provenance !== null) {
           const value: unknown = JSON.parse(provenance);
-          if (!Check(ProvenanceSchema, value)) {
+          if (!Check(ProvenanceSchema, value) || !Object.values(value).every(validProvenance)) {
             this.loadError = {
               type: "claude_history_error",
               message: "Malformed Claude provenance index.",
@@ -223,6 +240,8 @@ export class ClaudeHistory {
   }
   correlate(uuid: string, provenance: Provenance): Result<void, ClaudeHistoryError> {
     if (this.loadError !== null) return err(this.loadError);
+    if (!Check(ProvenanceSchema, { [uuid]: provenance }) || !validProvenance(provenance))
+      return err({ type: "claude_history_error", message: "Invalid Claude input provenance." });
     const existing = this.provenance[uuid];
     if (existing !== undefined)
       return JSON.stringify(existing) === JSON.stringify(provenance)
@@ -339,6 +358,14 @@ export class ClaudeHistory {
             eventType: "claude.native_metadata",
             overflow: { native: { type: native.type, uuid: id, isMeta: true } },
           };
+        } else if (native.type === "user" && provenance?.sender !== undefined) {
+          record = systemInputEvent({
+            ...base,
+            overflow: { native },
+            sender: provenance.sender,
+            content: claudeContent(message.content),
+            inboxMessageIds: [...provenance.messageIds],
+          });
         } else if (native.type === "user" || native.type === "assistant") {
           const content = claudeContent(message.content);
           const role =

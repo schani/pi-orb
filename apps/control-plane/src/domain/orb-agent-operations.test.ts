@@ -1,5 +1,5 @@
 import { NoSimulationTask } from "determined";
-import { okAsync } from "neverthrow";
+import { errAsync, okAsync } from "neverthrow";
 import { describe, expect, it, vi } from "vitest";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
 import { runDst } from "../testkit/sim.ts";
@@ -35,11 +35,31 @@ describe("central orb operations", () => {
     const self = (await service.invoke({ kind: "self" }, "self"))._unsafeUnwrap() as {
       orb: { url: string };
     };
-    expect(self.orb.url).toBe("http://app/orbs/caller");
+    expect(self).toMatchObject({
+      orb: { url: "http://app/orbs/caller" },
+      spawnedBy: null,
+      children: [],
+    });
     const spawned = (
       await service.invoke({ kind: "spawn", prompt: "work" }, "spawn")
     )._unsafeUnwrap() as { orbId: string; url: string };
     expect(spawned.url).toBe(`http://app/orbs/${spawned.orbId}`);
+    expect((await service.invoke({ kind: "self" }, "family"))._unsafeUnwrap()).toMatchObject({
+      spawnedBy: null,
+      children: [{ id: spawned.orbId, name: null, url: spawned.url }],
+    });
+    vi.spyOn(h.store, "listSpawnChildren").mockReturnValue(
+      errAsync({
+        type: "store_error",
+        code: "unavailable",
+        message: "raw database host",
+        retryable: true,
+      }),
+    );
+    expect((await service.invoke({ kind: "self" }, "self"))._unsafeUnwrapErr()).toEqual({
+      code: "unavailable",
+      message: "orb operation unavailable",
+    });
   });
   it.each(["creating", "starting", "failed"] as const)(
     "admits central spawn and alert during %s without guest identity",
@@ -353,3 +373,54 @@ describe("central orb operations", () => {
     });
   });
 });
+
+it.each(["guest", "central"] as const)(
+  "binds %s send identity and target-scoped request IDs",
+  async (kind) => {
+    const h = seed();
+    const task = new NoSimulationTask("peer send", false);
+    const options = { appOrigin: "http://app", appendAlert: () => okAsync({ recordId: "a" }) };
+    const service =
+      kind === "guest"
+        ? createOrbAgentOperations(task, h.deps, identity, options)
+        : createCentralOrbAgentOperations(
+            task,
+            h.deps,
+            {
+              ownerUserId: identity.ownerUserId,
+              projectId: identity.projectId,
+              orbId: identity.orbId,
+              agentAdmissionVersion: 0,
+            },
+            options,
+          );
+    const enqueue = vi.spyOn(h.store, "enqueueOrbMessage");
+    const ids = [];
+    for (const orbId of [
+      "00000000-0000-4000-8000-000000000001",
+      "00000000-0000-4000-8000-000000000002",
+    ]) {
+      h.store.seedOrb(makeOrbRow(orbId, identity.projectId, "stopped"));
+      const request = { kind: "send" as const, orbId, message: "literal <human>" };
+      const receipt = (await service.invoke(request, "fixed"))._unsafeUnwrap();
+      expect((await service.invoke(request, "fixed"))._unsafeUnwrap()).toEqual(receipt);
+      const params = enqueue.mock.calls.at(-1)?.[1];
+      expect(params).toMatchObject({
+        orbId,
+        content: [{ type: "text", text: request.message }],
+        sender: {
+          orbId: identity.orbId,
+          projectId: identity.projectId,
+          ownerUserId: identity.ownerUserId,
+          caller:
+            kind === "guest"
+              ? { runtimeTokenHash: "token", hostIncarnation: 1 }
+              : { kind: "central", orbId: identity.orbId, agentAdmissionVersion: 0 },
+        },
+      });
+      ids.push(params?.messageId);
+    }
+    expect(ids[0]).toBeDefined();
+    expect(ids[0]).toBe(ids[1]);
+  },
+);

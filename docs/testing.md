@@ -1,5 +1,15 @@
 # Testing
 
+## Seeded lifecycle campaign (decision 2026-10-14)
+
+`lifecycle-campaign.dst.test.ts` runs two concurrent callers with independent compute/history workers over reachable lifecycle histories. A commit ledger tracks admission order, content, provenance, Sleep deadlines and explicit revocations independently of responses. Sleep notice expectations use committed Sleep IDs and request-derived deadlines plus the due commit outcome, never queued rows or production content builders (oracle correction 2026-10-15). Every still-authorized input requires a durable session receipt and replicated delivered status; failed rows/states never waive delivery.
+
+Fair quiescence joins actors, removes injected faults and budgets remaining Sleep, boot/setup, drain/retry, quarantine and FIFO-page deadlines. Late timers remain active. Commands/results and the normal runDst failure trace retain reproduction evidence. Generic failpoint probabilities and host interruptions explore environmental failures.
+
+CI runs 64 seeds per placement, 96 commands each. `LIFECYCLE_CAMPAIGN_SEEDS` expands the range; `LIFECYCLE_CAMPAIGN_FIRST_SEED` chooses its start. Replay matching source with `DST_REPLAY=<trace> LIFECYCLE_CAMPAIGN_FIRST_SEED=<seed> LIFECYCLE_CAMPAIGN_SEEDS=1 npx vitest run apps/control-plane/src/domain/lifecycle-campaign.dst.test.ts -t '<placement> seed <seed>$'`.
+
+**Boundary ownership (decision 2026-10-15):** shared PG/memory contracts own atomic ownership, retry identity and Sleep FIFO. Native inbox-abort and sleep-fence fixtures own busy peer/human admission and browser/SQL admission-to-receipt gaps. The campaign owns orchestration and input/receipt conservation, not a second Native admission model. The existing full-slice central E2E owns CLI-to-child/native-to-parent unattended delivery, replicated provenance and literal gray rendering; focused CLI/runtime/UI contracts own their distinct boundaries. Effect censuses and exhaustive environment-command catalogs add no distinct safety invariant at the lifecycle boundary and are rejected.
+
 ## PR 118 CI fixtures (2026-10-15)
 
 Poll's held transaction now explicitly belongs to delivery, not the independent history lane. Both CI traces replay red before correction; fixed seed3 reproduces red then passes after correction. Changed synchronization causes strict replay divergence, not a green replay. HistoryView now emits native compaction failure status plus a complete SDK result instead of malformed input. Usage navigation waits for destination rendering and restored rows; its historical WebKit failure remains unexplained, not claimed fixed by a rerun.
@@ -44,6 +54,12 @@ Final local evidence: 795 web units, four Chromium/WebKit usage/transcript-chart
 Independent semantic facts avoid common-mode agreement; mutation failures establish sensitivity, not specification validity. Current-source focused tests and root typecheck/lint passed. The pre-assertion broad run hit its unchanged 1,200-second cap (exit 124), without a reported failure or final totals: incomplete, not qualification. Full current-head CI remains pending.
 
 [Evidence and replay](../test-failures/2026-10-14-dst-compositions.md). Memory adapters, serialized transport and narrow hook mocks do not prove PostgreSQL, Native SDK admission/suspension, real network/browser/DOM or concurrent React. No production changes, merge or deployment.
+
+## Orb messaging (2026-10-14; qualification partial)
+
+`docs/orb-messaging.md` defines the contract. Tests must cover trusted singleton peer provenance across all harnesses, forged text/native-origin rejection, human-only guard and consent isolation, same-owner/same-project authority, FIFO, replay/conflicting IDs and lost acknowledgements. Store/DST scenarios must fence Stop, sleep, replacement and deletion races; replay recorded DST failures before changes. The central full-slice E2E verifies an installed CLI send to its unattended spawned child and an actual Native `orb_send` reply to its parent, including exact sender, literal body and singleton replicated receipt. Sleep cancellation/FIFO and retry identity are shared store contracts; visible delivery alone is not a replication barrier.
+
+Historical scoped backend/harness/UI and both actual-process messaging cases passed; this is not qualification of the structural rewrite. The full-slice owner reuses its provider, process and Chromium fixtures to render the replicated receipt and a real API sender rename. Four equivalent bounded fake responses allow sender continuation, receiver inference and their summaries in either order; the test awaits all five successful peer requests. Unit HistoryView tests own pending/history merging, missing sender IDs and human/reply colors; the unchanged-human-history render assertion retains its exact count with bounded prop-identity diagnostics. First failures and receipts remain under `.context/cross-orb/`. Historical non-UI PGlite anomalies and infrastructure fixture failures are not cleared. Pending full gates: `TODO.md`.
 
 ## Release SSH rendered contract (decision 2026-10-14)
 

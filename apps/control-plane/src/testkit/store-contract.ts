@@ -8,6 +8,7 @@ import { jsonParam, type PostgreSQLClient } from "../adapters/pg/client.ts";
 import type { StoreError } from "../domain/errors.ts";
 import type { OrbRow, ProjectRow } from "../domain/orb.ts";
 import type {
+  CentralAgentCaller,
   ControlPlaneStore,
   CredentialPointerStore,
   ProjectSecretPointerStore,
@@ -549,6 +550,503 @@ export function storeSemanticsContractTests(
       );
       expect((await store.enqueueOrbMessage(task, message))._unsafeUnwrap().duplicate).toBe(true);
       expect((await store.listOrbMessages(task, orb.id))._unsafeUnwrap()).toHaveLength(1);
+    });
+
+    function peerCentralCaller(orbId: string): CentralAgentCaller {
+      return {
+        kind: "central",
+        ownerUserId: OWNER,
+        projectId: project.id,
+        orbId,
+        agentAdmissionVersion: 0,
+      };
+    }
+
+    it("canonicalizes existing human uppercase UUID targets without changing dedupe", async () => {
+      await seed();
+      const human = { ...orb, id: "abcdef00-0000-4000-8000-000000000009" };
+      (await store.insertOrb(task, human))._unsafeUnwrap();
+      const params = {
+        orbId: human.id.toUpperCase(),
+        messageId: "00000000-0000-4000-8000-000000000008",
+        content: [{ type: "text" as const, text: "human" }],
+        now: 2000,
+      };
+      expect((await store.enqueueOrbMessage(task, params))._unsafeUnwrap().message.orbId).toBe(
+        human.id,
+      );
+      expect(
+        (await store.enqueueOrbMessage(task, { ...params, orbId: human.id }))._unsafeUnwrap()
+          .duplicate,
+      ).toBe(true);
+      expect((await store.listOrbMessages(task, human.id))._unsafeUnwrap()).toHaveLength(1);
+    });
+
+    it("serializes reciprocal peer sends and deletion without duplicate receipts", async () => {
+      await seed();
+      const peer = { ...orb, id: "00000000-0000-4000-8000-000000000003" };
+      (await store.insertOrb(task, peer))._unsafeUnwrap();
+      const sender = (id: string) => ({
+        orbId: id,
+        projectId: project.id,
+        ownerUserId: OWNER,
+        caller: peerCentralCaller(id),
+      });
+      const params = {
+        orbId: orb.id,
+        messageId: "00000000-0000-4000-8000-000000000004",
+        content: [{ type: "text" as const, text: "peer" }],
+        now: 2000,
+        sender: sender(peer.id),
+      };
+      const results = await Promise.all([
+        store.enqueueOrbMessage(task, params),
+        store.enqueueOrbMessage(task, { ...params, orbId: peer.id, sender: sender(orb.id) }),
+      ]);
+      expect(results.every((result) => result.isOk())).toBe(true);
+      const race = await Promise.all([
+        store.enqueueOrbMessage(task, {
+          ...params,
+          messageId: "00000000-0000-4000-8000-000000000005",
+        }),
+        store.requestProjectDeletion(task, {
+          projectId: project.id,
+          now: 3000,
+          cleanupAfter: 3000,
+        }),
+      ]);
+      expect(race[1]?.isOk()).toBe(true);
+      const inbox = (await store.listOrbMessages(task, orb.id))._unsafeUnwrap();
+      expect(inbox.some((row) => row.messageId === "00000000-0000-4000-8000-000000000005")).toBe(
+        race[0]?.isOk(),
+      );
+      expect((await store.enqueueOrbMessage(task, params)).isErr()).toBe(true);
+    });
+
+    it("atomically admits trusted peer provenance, dedupes without renewing wake, and fences callers", async () => {
+      await seed();
+      (
+        await store.casTransition(task, {
+          orbId: orb.id,
+          expectedStateVersion: 0,
+          toState: "stopped",
+          stopReason: "manual",
+          now: 1500,
+        })
+      )._unsafeUnwrap();
+      const source = {
+        ...orb,
+        id: "00000000-0000-4000-8000-000000000003",
+        state: "running" as const,
+        runtimeTokenHash: "peer-token",
+        hostIncarnation: 1,
+      };
+      expect((await store.insertOrb(task, source)).isOk()).toBe(true);
+      const params = {
+        orbId: orb.id,
+        messageId: "00000000-0000-4000-8000-000000000004",
+        content: [{ type: "text" as const, text: "private peer content" }],
+        now: 2000,
+        sender: {
+          orbId: source.id,
+          projectId: project.id,
+          ownerUserId: OWNER,
+          caller: { runtimeTokenHash: "peer-token", hostIncarnation: 1 },
+        },
+      };
+      const results = await Promise.all([
+        store.enqueueOrbMessage(task, params),
+        store.enqueueOrbMessage(task, params),
+      ]);
+      expect(results.map((r) => r._unsafeUnwrap().duplicate).sort()).toEqual([false, true]);
+      const accepted = results[0];
+      expect(accepted).toBeDefined();
+      if (!accepted) return;
+      expect(accepted._unsafeUnwrap().message.system).toEqual({
+        kind: "orb_message",
+        senderOrbId: source.id,
+      });
+      const incompatibleRetries = [
+        { ...params, content: [{ type: "text" as const, text: "changed" }] },
+        {
+          orbId: params.orbId,
+          messageId: params.messageId,
+          content: params.content,
+          now: params.now,
+        },
+      ];
+      for (const retry of incompatibleRetries)
+        expect((await store.enqueueOrbMessage(task, retry)).isErr()).toBe(true);
+      for (const sender of [
+        { ...params.sender, ownerUserId: "wrong" },
+        { ...params.sender, projectId: "00000000-0000-4000-8000-000000000005" },
+        { ...params.sender, caller: { runtimeTokenHash: "old", hostIncarnation: 1 } },
+        { ...params.sender, caller: { runtimeTokenHash: "peer-token", hostIncarnation: 2 } },
+        {
+          ...params.sender,
+          caller: { ...peerCentralCaller(source.id), agentAdmissionVersion: 9 },
+        },
+      ])
+        expect((await store.enqueueOrbMessage(task, { ...params, sender })).isErr()).toBe(true);
+      const target = accepted._unsafeUnwrap().orb;
+      expect(accepted._unsafeUnwrap().message.autoStart).toBe(true);
+      const stopped = (
+        await store.requestOrbStop(task, {
+          orbId: orb.id,
+          expectedStateVersion: target.stateVersion,
+          now: 3000,
+        })
+      )._unsafeUnwrap().orb;
+      expect((await store.enqueueOrbMessage(task, params))._unsafeUnwrap().duplicate).toBe(true);
+      const retried = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+      expect(retried?.stopReason).toBe("manual");
+      expect(retried?.stateVersion).toBe(stopped.stateVersion);
+      expect((await store.listOrbMessages(task, orb.id))._unsafeUnwrap()).toMatchObject([
+        { autoStart: false },
+      ]);
+      await store.requestProjectDeletion(task, {
+        projectId: project.id,
+        now: 4000,
+        cleanupAfter: 4000,
+      });
+      expect((await store.enqueueOrbMessage(task, params)).isErr()).toBe(true);
+    });
+
+    it.each(["sender", "target"] as const)(
+      "orders peer admission against %s Stop",
+      async (side) => {
+        await seed();
+        const source = { ...orb, id: "00000000-0000-4000-8000-000000000003" };
+        (await store.insertOrb(task, source))._unsafeUnwrap();
+        const params = {
+          orbId: orb.id,
+          messageId: "00000000-0000-4000-8000-000000000004",
+          content: [{ type: "text" as const, text: "peer" }],
+          now: 2000,
+          sender: {
+            orbId: source.id,
+            projectId: project.id,
+            ownerUserId: OWNER,
+            caller: peerCentralCaller(source.id),
+          },
+        };
+        const [admitted, stopped] = await Promise.all([
+          store.enqueueOrbMessage(task, params),
+          store.requestOrbStop(task, {
+            orbId: side === "sender" ? source.id : orb.id,
+            expectedStateVersion: 0,
+            now: 2001,
+          }),
+        ]);
+        expect(stopped.isOk()).toBe(true);
+        const rows = (await store.listOrbMessages(task, orb.id))._unsafeUnwrap();
+        expect(rows).toHaveLength(admitted.isOk() ? 1 : 0);
+        const before = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+        const replay = await store.enqueueOrbMessage(task, params);
+        expect(replay.isOk()).toBe(side === "target");
+        if (side === "target") {
+          expect(admitted.isOk()).toBe(true);
+          expect(replay._unsafeUnwrap().duplicate).toBe(true);
+          expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toEqual(before);
+        }
+      },
+    );
+
+    it.each(
+      (["running", "stopped", "failed"] as const).flatMap((state) =>
+        [false, true].flatMap((claimed) =>
+          ["central", "runtime"].map((caller) => ({ state, claimed, caller })),
+        ),
+      ),
+    )(
+      "preserves mixed FIFO through Sleep/Stop: $state $caller claimed=$claimed",
+      async ({ state, claimed, caller }) => {
+        await seed();
+        const running = {
+          ...orb,
+          state: "running" as const,
+          runtimeTokenHash: "peer-token",
+          hostIncarnation: 1,
+        };
+        (
+          await store.casTransition(task, {
+            orbId: orb.id,
+            expectedStateVersion: 0,
+            toState: "stopped",
+            now: 1,
+          })
+        )._unsafeUnwrap();
+        const source = { ...running, id: "00000000-0000-4000-8000-000000000003" };
+        (await store.insertOrb(task, source))._unsafeUnwrap();
+        const sender = {
+          orbId: source.id,
+          projectId: project.id,
+          ownerUserId: OWNER,
+          caller:
+            caller === "central"
+              ? peerCentralCaller(source.id)
+              : { runtimeTokenHash: "peer-token", hostIncarnation: 1 },
+        };
+        const enqueue = (messageId: string) =>
+          store.enqueueOrbMessage(task, {
+            orbId: orb.id,
+            messageId,
+            sender,
+            content: [{ type: "text" as const, text: messageId }],
+            now: 1,
+          });
+        const oldId = "00000000-0000-4000-8000-000000000004",
+          freshId = "00000000-0000-4000-8000-000000000005",
+          sleepId = "00000000-0000-4000-8000-000000000006";
+        expect((await enqueue(oldId))._unsafeUnwrap().message.autoStart).toBe(true);
+        for (const [index, toState] of (["starting", "running"] as const).entries())
+          (
+            await store.casTransition(task, {
+              orbId: orb.id,
+              expectedStateVersion: index + 1,
+              toState,
+              now: 1,
+            })
+          )._unsafeUnwrap();
+        const humanId = "00000000-0000-4000-8000-000000000007";
+        (
+          await store.enqueueOrbMessage(task, {
+            orbId: orb.id,
+            messageId: humanId,
+            content: [{ type: "text", text: "human" }],
+            now: 2,
+          })
+        )._unsafeUnwrap();
+        if (claimed)
+          expect(
+            (await store.claimNextOrbMessageBatch(task, { orbId: orb.id, now: 2 }))
+              ._unsafeUnwrap()
+              .map((row) => row.messageId),
+          ).toEqual([oldId]);
+        const sleepCaller = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+        assert(sleepCaller !== null);
+        const sleeping = (
+          await store.scheduleOrbSleep(task, {
+            orbId: orb.id,
+            caller: {
+              ...peerCentralCaller(orb.id),
+              agentAdmissionVersion: sleepCaller.agentAdmissionVersion,
+            },
+            sleepId,
+            durationSeconds: 300,
+          })
+        )._unsafeUnwrap();
+        const terminal =
+          state === "running"
+            ? sleeping
+            : (
+                await store.casTransition(task, {
+                  orbId: orb.id,
+                  expectedStateVersion: sleeping.stateVersion,
+                  toState: state,
+                  now: 2,
+                })
+              )._unsafeUnwrap();
+        for (const now of [(sleeping.sleepUntil ?? 0) - 1, (sleeping.sleepUntil ?? 0) + 1]) {
+          const start = await store.casStartOrbForQueuedMessage(task, {
+            orbId: orb.id,
+            expectedStateVersion: terminal.stateVersion,
+            now,
+          });
+          if (state === "running")
+            expect(start._unsafeUnwrapErr()).toMatchObject({ type: "state_conflict" });
+          else expect(start._unsafeUnwrap()).toBeNull();
+        }
+        expect((await enqueue(oldId))._unsafeUnwrap().duplicate).toBe(true);
+        expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.sleepId).toBe(sleepId);
+        expect(
+          (await store.claimNextOrbMessageBatch(task, { orbId: orb.id, now: 3 }))._unsafeUnwrap(),
+        ).toEqual([]);
+        const fresh = (await enqueue(freshId))._unsafeUnwrap();
+        expect(fresh.orb).toMatchObject({ sleepId: null, sleepUntil: null });
+        if (state !== "running")
+          (
+            await store.casStartOrbForQueuedMessage(task, {
+              orbId: orb.id,
+              expectedStateVersion: fresh.orb.stateVersion,
+              now: 4,
+            })
+          )._unsafeUnwrap();
+        expect(
+          (await store.claimNextOrbMessageBatch(task, { orbId: orb.id, now: 5 }))
+            ._unsafeUnwrap()
+            .map((row) => row.messageId),
+        ).toEqual([oldId]);
+        (
+          await store.commitPullBatch(task, {
+            orbId: orb.id,
+            expectedCursor: null,
+            session,
+            records: [
+              {
+                ...first,
+                type: "event",
+                eventType: "orb.message",
+                id: "peer-receipt",
+                content: [{ type: "text", text: oldId }],
+                sender: { orbId: source.id },
+                inboxMessageIds: [oldId],
+              },
+            ],
+            nextCursor: "peer-receipt",
+            nextHeadId: "peer-receipt",
+          })
+        )._unsafeUnwrap();
+        expect(
+          (await store.claimNextOrbMessageBatch(task, { orbId: orb.id, now: 5 }))
+            ._unsafeUnwrap()
+            .map((row) => row.messageId),
+        ).toEqual([humanId]);
+        const beforeSleep = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+        assert(beforeSleep !== null);
+        if (beforeSleep.state !== "running")
+          (
+            await store.casTransition(task, {
+              orbId: orb.id,
+              expectedStateVersion: beforeSleep.stateVersion,
+              toState: "running",
+              now: 5,
+            })
+          )._unsafeUnwrap();
+        const laterSleepCaller = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+        assert(laterSleepCaller !== null);
+        const laterSleep = (
+          await store.scheduleOrbSleep(task, {
+            orbId: orb.id,
+            caller: {
+              ...peerCentralCaller(orb.id),
+              agentAdmissionVersion: laterSleepCaller.agentAdmissionVersion,
+            },
+            sleepId: freshId,
+            durationSeconds: 300,
+          })
+        )._unsafeUnwrap();
+        expect((await enqueue(freshId))._unsafeUnwrap().duplicate).toBe(true);
+        expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toMatchObject({
+          sleepId: freshId,
+          sleepUntil: laterSleep.sleepUntil,
+        });
+        expect(
+          (await store.listOrbMessages(task, orb.id))._unsafeUnwrap().map((row) => row.system),
+        ).toEqual([
+          { kind: "orb_message", senderOrbId: source.id },
+          null,
+          { kind: "orb_message", senderOrbId: source.id },
+        ]);
+        const current = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+        if (!current) throw new Error("seeded orb missing");
+        (
+          await store.requestOrbStop(task, {
+            orbId: orb.id,
+            expectedStateVersion: current.stateVersion,
+            now: 6,
+          })
+        )._unsafeUnwrap();
+        expect((await enqueue(freshId))._unsafeUnwrap().duplicate).toBe(true);
+        expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.stopReason).toBe("manual");
+        expect(
+          (await store.listOrbMessages(task, orb.id))
+            ._unsafeUnwrap()
+            .every((row) => !row.autoStart),
+        ).toBe(true);
+        expect(
+          (await store.listOrbMessages(task, orb.id))
+            ._unsafeUnwrap()
+            .find((row) => row.messageId === freshId),
+        ).toMatchObject({
+          status: "queued",
+          autoStart: false,
+          system: { kind: "orb_message", senderOrbId: source.id },
+        });
+      },
+    );
+
+    it("lists existing direct spawn children with current names, including archived targets", async () => {
+      await seed();
+      const childId = "00000000-0000-4000-8000-000000000003";
+      const unnamedId = "00000000-0000-4000-8000-000000000004";
+      const grandchildId = "00000000-0000-4000-8000-000000000005";
+      const unrelatedId = "00000000-0000-4000-8000-000000000006";
+      expect((await store.listSpawnChildren(task, orb.id))._unsafeUnwrap()).toEqual([]);
+      expect((await store.insertOrb(task, { ...orb, id: unrelatedId })).isOk()).toBe(true);
+      for (const [id, callerOrbId] of [
+        [unnamedId, orb.id],
+        [childId, orb.id],
+        [grandchildId, childId],
+      ] as const) {
+        expect(
+          (
+            await store.spawnOrb(task, {
+              callerOrbId,
+              caller: peerCentralCaller(callerOrbId),
+              orb: { ...orb, id },
+              prompt: "work",
+              requestHash: id,
+            })
+          ).isOk(),
+        ).toBe(true);
+      }
+      expect(
+        (
+          await store.setOrbName(task, {
+            orbId: childId,
+            name: "Renamed",
+            now: 2000,
+            onlyIfNull: false,
+          })
+        ).isOk(),
+      ).toBe(true);
+      expect(
+        (
+          await store.casTransition(task, {
+            orbId: childId,
+            expectedStateVersion: 0,
+            toState: "archived",
+            now: 2001,
+          })
+        ).isOk(),
+      ).toBe(true);
+      const expected = [
+        { id: childId, name: "Renamed" },
+        { id: unnamedId, name: null },
+      ];
+      expect((await store.listSpawnChildren(task, orb.id))._unsafeUnwrap()).toEqual(expected);
+      expect((await store.listSpawnChildren(task, childId))._unsafeUnwrap()).toEqual([
+        { id: grandchildId, name: null },
+      ]);
+      for (const [orbId, now] of [
+        [unnamedId, 2002],
+        [orb.id, 2003],
+      ] as const) {
+        const deleting = (
+          await store.requestOrbDeletion(task, {
+            orbId,
+            expectedStateVersion: 0,
+            now,
+            cleanupAfter: now,
+          })
+        )._unsafeUnwrap();
+        if (orbId === unnamedId)
+          expect((await store.listSpawnChildren(task, orb.id))._unsafeUnwrap()).toEqual(expected);
+        expect(
+          (
+            await store.finalizeOrbDeletion(task, {
+              orbId,
+              expectedStateVersion: deleting.stateVersion,
+            })
+          ).isOk(),
+        ).toBe(true);
+        if (orbId === unnamedId)
+          expect((await store.listSpawnChildren(task, orb.id))._unsafeUnwrap()).toEqual([
+            { id: childId, name: "Renamed" },
+          ]);
+      }
+      expect((await store.getSpawnCaller(task, childId))._unsafeUnwrap()).toBe(orb.id);
     });
 
     it("atomically spawns with immutable retry identity and fences retired callers", async () => {
@@ -2793,6 +3291,41 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
       expect((await store.insertProject(task, project)).isOk()).toBe(true);
       expect((await store.insertOrb(task, orb)).isOk()).toBe(true);
     }
+
+    it("enforces exact sleep/peer metadata shapes including SQL NULL fields", async () => {
+      await seed();
+      let ordinal = 10;
+      for (const system of [
+        null,
+        { kind: "sleep_wake", sleepUntil: "deadline" },
+        { kind: "sleep_expired", sleepUntil: "deadline" },
+        { kind: "orb_message", senderOrbId: orb.id },
+        {},
+        { kind: null },
+        { kind: "orb_message" },
+        { kind: "orb_message", senderOrbId: null },
+        { kind: "orb_message", senderOrbId: "bad" },
+        { kind: "orb_message", senderOrbId: 1 },
+        { kind: "orb_message", senderOrbId: orb.id, extra: true },
+        { kind: "sleep_wake", sleepUntil: null },
+        { kind: "sleep_wake" },
+        { kind: "unknown", sleepUntil: "deadline" },
+      ]) {
+        const valid = ordinal < 14;
+        const result = await client.query(
+          `INSERT INTO orb_messages
+          (orb_id, message_id, content, system, created_at, updated_at)
+          VALUES ($1,$2,$3::jsonb,$4::jsonb,now(),now())`,
+          [
+            orb.id,
+            `00000000-0000-4000-8000-0000000000${ordinal++}`,
+            jsonParam([{ type: "text", text: "peer" }]),
+            jsonParam(system),
+          ],
+        );
+        expect(result.isOk(), JSON.stringify(system)).toBe(valid);
+      }
+    });
 
     it
       .skipIf(!name.startsWith("node-postgres"))

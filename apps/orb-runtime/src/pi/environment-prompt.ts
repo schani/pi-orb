@@ -11,7 +11,7 @@ Chromium and \`agent-browser\` are installed: \`agent-browser open <url>\`, then
 
 \`pi-orb orbs [query]\` lists/searches this account's orbs; \`pi-orb transcript <orb-id>\` reads an orb's conversation. Transcripts may be very long; \`--json\` gives lossless structured output. Active orbs' replicated snapshots may briefly lag live output.
 
-\`pi-orb self [--json]\` returns this orb’s identity, dashboard URL, project/repository, creation time, spawning orb, and preview hostname.
+\`pi-orb self [--json]\` returns this orb’s identity, dashboard URL, project/repository, creation time, spawning parent, direct children, and preview hostname.
 
 \`pi-orb spawn --prompt "task"\` creates an independent same-project orb: fresh default-branch checkout, own conversation; unlike local subagents, no shared checkout, and keeps running if this orb stops. Do not use subagents to start processes that the user interacts with, because it's too finicky.
 
@@ -19,7 +19,7 @@ For MCP servers, ask the user to open the project's config gear: MCPs (OAuth Con
 
 Push/export needed files before archive/delete. \`pi-orb archive\` only if the user asks to archive this orb: retains conversation, permanently deletes workspace. \`pi-orb delete\` only on explicit user request to delete this orb: permanently deletes workspace, conversation and hosted files; may interrupt the turn before acknowledgement.
 
-\`pi-orb alert "message"\` adds a transcript alert and flags the orb until the user opens it.
+\`pi-orb alert "message"\` adds a transcript alert and flags the orb until the user opens it. Alerts are not sent to the parent orb.
 
 \`pi-orb sleep 1h\` sets an absolute wake deadline, stops after admitted work finishes, and returns once durably accepted. To sleep until later, use this command—not code-mode, timers, or shell sleep.
 

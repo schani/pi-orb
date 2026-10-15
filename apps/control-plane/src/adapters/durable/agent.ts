@@ -10,6 +10,7 @@ import {
   AgentDoc,
   type AgentState,
   type Conversation,
+  ConversationBusy,
   type ConversationId,
   type ConversationView,
   type Cursor,
@@ -1028,7 +1029,13 @@ export class DurableAgent implements AgentSessionFacade {
     const existing = this.receipts[request.messageId];
     if (existing && existing.fingerprint !== fingerprint)
       return err(durableError("message ID conflicts with persisted content"));
-    const delivery = existing?.delivery ?? (this.operationId ? "steer" : "turn");
+    const peer = request.system?.kind === "orb_message";
+    const delivery =
+      existing?.submissionId !== undefined
+        ? existing.delivery
+        : !peer && this.operationId
+          ? "steer"
+          : "turn";
     const wasBusy = this.operationId;
     const content = nativeInputContent(request.content, request.system);
     if (!existing) {
@@ -1049,10 +1056,27 @@ export class DurableAgent implements AgentSessionFacade {
       return err(
         stillAdmitted?.isErr() ? stillAdmitted.error : durableError("Harness admissions closed"),
       );
-    const submitted = await this.root.submit(
-      { type: "input", content, requestId: `inbox:${request.messageId}`, whenBusy: "steer" },
-      context,
+    const admitted = await ResultAsync.fromPromise(
+      this.root.submit(
+        {
+          type: "input",
+          content,
+          requestId: `inbox:${request.messageId}`,
+          whenBusy: peer ? "reject" : "steer",
+        },
+        context,
+      ),
+      (error) => {
+        const authority = storageAuthorityError(error);
+        return peer && error instanceof ConversationBusy
+          ? durableError("Peer input waits for the current turn", true)
+          : authority
+            ? startupRuntimeError(authority)
+            : durableError("Native input admission failed");
+      },
     );
+    if (admitted.isErr()) return err(admitted.error);
+    const submitted = admitted.value;
     const operationId =
       existing?.submissionId !== undefined
         ? existing.operationId
@@ -1075,7 +1099,7 @@ export class DurableAgent implements AgentSessionFacade {
       status: "persisted",
       operationId,
       delivery,
-      duplicate: existing !== undefined,
+      duplicate: existing?.submissionId !== undefined,
     });
   }
 

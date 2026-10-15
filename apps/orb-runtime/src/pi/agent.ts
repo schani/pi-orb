@@ -38,6 +38,7 @@ import {
   reasoningHeadline,
   type ServerFrame,
   type SettingsAction,
+  systemInputModelContent,
 } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { err, errAsync, ok, Result, ResultAsync } from "neverthrow";
@@ -2259,7 +2260,7 @@ export class PiOrbAgent {
         this.startAgentOperation(operationId, manager.getEntries().length);
       this.beginTurnStart();
     }
-    const piContent = content.map((block) =>
+    const piContent = systemInputModelContent(content, system).map((block) =>
       block.type === "text"
         ? { type: "text" as const, text: block.text }
         : { type: "image" as const, data: block.data, mimeType: block.mediaType },

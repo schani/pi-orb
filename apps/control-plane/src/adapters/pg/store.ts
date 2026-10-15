@@ -30,9 +30,11 @@ import type {
   CasUpdateFieldsParams,
   CommitPullBatchParams,
   ControlPlaneStore,
+  EnqueueOrbMessageParams,
   FailOrbAndRequestComputeDiscardParams,
   FinalizeHostDiscardParams,
   MintSlotClaim,
+  OrbMessageTargetNotFound,
   RecordHostDiscardStatusParams,
   RequestHostSpecReplacementParams,
   RequestOrbArchiveParams,
@@ -834,6 +836,22 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       .map((result) => (result.rows[0]?.["caller_orb_id"] as string | undefined) ?? null);
   }
 
+  listSpawnChildren(
+    _task: SimulationTask,
+    callerOrbId: string,
+  ): ResultAsync<Pick<OrbRow, "id" | "name">[], StoreError> {
+    return this.db
+      .query(
+        `SELECT o.id, o.name FROM orb_spawns s
+         JOIN orbs o ON o.id = s.orb_id
+         WHERE s.caller_orb_id = $1 ORDER BY o.id`,
+        [callerOrbId],
+      )
+      .map((result) =>
+        result.rows.map((row) => ({ id: row["id"] as string, name: row["name"] as string | null })),
+      );
+  }
+
   spawnOrb(
     _task: SimulationTask,
     params: SpawnOrbParams,
@@ -991,38 +1009,69 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
 
   enqueueOrbMessage(
     _task: SimulationTask,
-    params: {
-      orbId: string;
-      messageId: string;
-      content: OrbMessageRow["content"];
-      now: number;
-      wake?: boolean;
-      cancelSleep?: boolean;
-    },
+    params: EnqueueOrbMessageParams,
   ): ResultAsync<
     { message: OrbMessageRow; orb: OrbRow; duplicate: boolean },
-    StoreError | StateConflict
+    StoreError | StateConflict | OrbMessageTargetNotFound
   > {
+    const targetId = params.orbId.toLowerCase();
     return this.db.transaction<
       { message: OrbMessageRow; orb: OrbRow; duplicate: boolean },
-      StoreError | StateConflict
+      StoreError | StateConflict | OrbMessageTargetNotFound
     >(async (query) => {
-      const locked = await query("SELECT * FROM orbs WHERE id = $1 FOR UPDATE", [params.orbId]);
+      const sender = params.sender;
+      if (sender !== undefined) {
+        // Project before sorted orb locks matches project deletion and reciprocal sends.
+        const project = await query(
+          "SELECT state, owner_user_id FROM projects WHERE id = $1 FOR UPDATE",
+          [sender.projectId],
+        );
+        if (project.isErr()) return err(project.error);
+        if (
+          project.value.rows[0]?.["state"] !== "active" ||
+          project.value.rows[0]?.["owner_user_id"] !== sender.ownerUserId
+        )
+          return err(stateConflict());
+      }
+      const locked = await query(
+        "SELECT * FROM orbs WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE",
+        [arrayParam(sender === undefined ? [targetId] : [targetId, sender.orbId])],
+      );
       if (locked.isErr()) return err(locked.error);
-      let orbRow = locked.value.rows[0];
-      if (orbRow === undefined) return err(stateConflict());
+      if (sender !== undefined) {
+        const source = locked.value.rows.find((row) => row["id"] === sender.orbId);
+        if (
+          source === undefined ||
+          source["project_id"] !== sender.projectId ||
+          !acceptsOrbAgentCaller(mapOrbRow(source), sender.ownerUserId, sender.caller)
+        )
+          return err(stateConflict());
+      }
+      let orbRow = locked.value.rows.find((row) => row["id"] === targetId);
+      if (orbRow === undefined) return err({ type: "orb_message_target_not_found" });
+      if (sender !== undefined && orbRow["project_id"] !== sender.projectId)
+        return err(stateConflict());
       const state = String(orbRow["state"]) as OrbState;
       if (state === "deleting" || state === "archiving" || state === "archived") {
         return err(stateConflict(state));
       }
       const existing = await query(
         "SELECT * FROM orb_messages WHERE orb_id = $1 AND message_id = $2",
-        [params.orbId, params.messageId],
+        [targetId, params.messageId],
       );
       if (existing.isErr()) return err(existing.error);
       const existingRow = existing.value.rows[0];
       if (existingRow !== undefined) {
-        if (!jsonEqual(existingRow["content"], params.content)) return err(stateConflict(state));
+        if (
+          !jsonEqual(existingRow["content"], params.content) ||
+          !jsonEqual(
+            existingRow["system"] ?? null,
+            params.sender === undefined
+              ? null
+              : { kind: "orb_message", senderOrbId: params.sender.orbId },
+          )
+        )
+          return err(stateConflict(state));
         return ok({ message: mapMessageRow(existingRow), orb: mapOrbRow(orbRow), duplicate: true });
       }
       if (
@@ -1037,7 +1086,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
              agent_admission_version = agent_admission_version + CASE WHEN stop_reason IN ('manual', 'sleep') THEN 1 ELSE 0 END,
              state_version = state_version + 1, updated_at = $2
            WHERE id = $1 RETURNING *`,
-          [params.orbId, new Date(params.now)],
+          [targetId, new Date(params.now)],
         );
         if (cancelled.isErr()) return err(cancelled.error);
         orbRow = cancelled.value.rows[0] ?? orbRow;
@@ -1055,15 +1104,20 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       const inserted = await query(
         `INSERT INTO orb_messages
            (orb_id, message_id, content, status, auto_start, wake_state_version,
-            created_at, updated_at)
-         VALUES ($1,$2,$3::jsonb,'queued',$4,$5,$6,$6) RETURNING *`,
+            created_at, updated_at, system)
+         VALUES ($1,$2,$3::jsonb,'queued',$4,$5,$6,$6,$7::jsonb) RETURNING *`,
         [
-          params.orbId,
+          targetId,
           params.messageId,
           jsonParam(params.content),
           autoStart,
           autoStart ? Number(orbRow["state_version"]) : null,
           new Date(params.now),
+          jsonParam(
+            params.sender === undefined
+              ? null
+              : { kind: "orb_message", senderOrbId: params.sender.orbId },
+          ),
         ],
       );
       if (inserted.isErr()) return err(inserted.error);
@@ -1072,7 +1126,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       const touched = await query(
         `UPDATE orbs SET last_busy_at = CASE WHEN last_busy_at IS NULL OR last_busy_at < $2
            THEN $2 ELSE last_busy_at END, updated_at = $2 WHERE id = $1 RETURNING *`,
-        [params.orbId, new Date(params.now)],
+        [targetId, new Date(params.now)],
       );
       if (touched.isErr()) return err(touched.error);
       orbRow = touched.value.rows[0] ?? orbRow;
@@ -1290,6 +1344,15 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     params: { orbId: string; now: number },
   ): ResultAsync<OrbMessageRow[], StoreError> {
     return this.db.transaction<OrbMessageRow[], StoreError>(async (query) => {
+      const current = await query("SELECT sleep_id,stop_reason FROM orbs WHERE id=$1 FOR UPDATE", [
+        params.orbId,
+      ]);
+      if (current.isErr()) return err(current.error);
+      if (
+        current.value.rows[0]?.["sleep_id"] != null ||
+        current.value.rows[0]?.["stop_reason"] === "sleep"
+      )
+        return ok([]);
       const outstanding = await query(
         `SELECT * FROM orb_messages WHERE orb_id = $1
            AND status IN ('queued', 'delivering') ORDER BY ordinal FOR UPDATE`,
@@ -1517,9 +1580,10 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     params: { orbId: string; expectedStateVersion: number; now: number },
   ): ResultAsync<OrbRow | null, StoreError | StateConflict> {
     return this.db.transaction<OrbRow | null, StoreError | StateConflict>(async (query) => {
-      const locked = await query("SELECT state, state_version FROM orbs WHERE id = $1 FOR UPDATE", [
-        params.orbId,
-      ]);
+      const locked = await query(
+        "SELECT state, state_version, sleep_id FROM orbs WHERE id = $1 FOR UPDATE",
+        [params.orbId],
+      );
       if (locked.isErr()) return err(locked.error);
       const orbRow = locked.value.rows[0];
       if (orbRow === undefined) return err(stateConflict());
@@ -1530,6 +1594,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       ) {
         return err(stateConflict(state));
       }
+      if (orbRow["sleep_id"] !== null) return ok(null);
       // `FOR UPDATE` on the intent rows makes this decision exclusive with the
       // clear an explicit stop performs: whichever commits first wins, and the
       // loser reads the committed answer. A `stopped` orb wakes for any

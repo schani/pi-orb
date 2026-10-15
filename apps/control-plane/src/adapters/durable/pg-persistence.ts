@@ -94,7 +94,8 @@ export class PgAgentPersistence implements AgentPersistence {
         authority
           .open(owner, {
             admit: (query) => checkNativeStartup(query, orb.id),
-            project: (query, writes) => projectNativeCommit(query, orb.id, writes),
+            project: (query, writes, _seq, admittedSubmissions) =>
+              projectNativeCommit(query, orb.id, writes, admittedSubmissions),
           })
           .mapErr(startupRuntimeError)
           .map((storage) => {

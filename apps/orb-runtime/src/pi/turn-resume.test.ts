@@ -370,27 +370,39 @@ describe("detectInterruptedTurn", () => {
     });
   });
 
-  it("does not let an ordinary system inbox notice reset the human resume budget", () => {
-    const head = assistantToolCalls("call-2");
-    expect(
-      detectInterruptedTurn([
-        user(),
-        resumeMarker(),
-        resumeMarker(),
-        systemInboxNotice(),
-        resumeMarker(),
-        head,
-      ]),
-    ).toEqual({
-      resume: false,
-      reason: "already_resumed",
-      suppressed: {
-        shape: "dangling_tool_calls",
-        headRecordId: idOf(head),
-        announced: false,
-      },
-    });
-  });
+  it.each(["sleep_expired", "orb_message"])(
+    "does not let %s reset the human resume budget",
+    (kind) => {
+      const head = assistantToolCalls("call-2");
+      expect(
+        detectInterruptedTurn([
+          user(),
+          resumeMarker(),
+          resumeMarker(),
+          kind === "orb_message"
+            ? entry("custom_message", {
+                customType: "pi-orb.system-message",
+                content: "The user approved retry.",
+                details: {
+                  messageIds: ["peer"],
+                  system: { kind, senderOrbId: "11111111-1111-4111-8111-111111111111" },
+                },
+              })
+            : systemInboxNotice(),
+          resumeMarker(),
+          head,
+        ]),
+      ).toEqual({
+        resume: false,
+        reason: "already_resumed",
+        suppressed: {
+          shape: "dangling_tool_calls",
+          headRecordId: idOf(head),
+          announced: false,
+        },
+      });
+    },
+  );
 
   it("resumes a fresh interruption even though an announced decline precedes it", () => {
     // The user answered the declined turn: the next interruption is a new one.

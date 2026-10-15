@@ -2,7 +2,7 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ClaudeHistory, nativeHistoryFiles } from "./history.ts";
+import { ClaudeHistory, nativeHistoryFiles, type Provenance } from "./history.ts";
 
 const dirs: string[] = [];
 const fixture = () => {
@@ -479,4 +479,27 @@ describe("native Claude root authority", () => {
       ),
     ).not.toContain("private");
   });
+});
+
+it.each([
+  { system: false, messageIds: ["inbox"] },
+  { messageIds: ["inbox"] },
+  { system: true, messageIds: [] },
+  { system: true, messageIds: ["one", "two"] },
+  { system: true, messageIds: ["inbox"], boot: true },
+  { system: true, messageIds: ["inbox"], boot: false },
+  { system: true, messageIds: ["inbox"], compaction: true },
+  { system: true, messageIds: ["inbox"], compaction: false },
+  { system: true, messageIds: ["inbox"], sender: undefined },
+  { system: true, messageIds: ["inbox"], boot: undefined },
+])("rejects peer provenance without a singleton non-human receipt: %j", (invalid) => {
+  const dir = fixture();
+  const sender = { orbId: "11111111-1111-4111-8111-111111111111" };
+  const provenance = { operationId: "op", sender, ...invalid };
+  const history = new ClaudeHistory(dir, "session", "t");
+  expect(history.correlate("peer", provenance as unknown as Provenance).isErr()).toBe(true);
+  if (!Object.values(invalid).includes(undefined)) {
+    writeFileSync(join(dir, "provenance.json"), JSON.stringify({ peer: provenance }));
+    expect(new ClaudeHistory(dir, "session", "t").scan(null).isErr()).toBe(true);
+  }
 });

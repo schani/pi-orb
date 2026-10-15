@@ -118,6 +118,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Follow-ups
 
+- **Complete orb-messaging qualification** (local 2026-10-14; `docs/orb-messaging.md`, `docs/testing.md`; PR https://github.com/schani/pi-orb/pull/112). Complete new-head full unit/infra, Python/native-VM, whole E2E and exact-head CI gates. Resolve historical PGlite attribution and infrastructure fixture failures; neither is cleared. Preserve first evidence under `.context/cross-orb/`. Scoped/composed receipts grant no merge or deployment clearance.
+
 - **Complete Claude steering release qualification** (2026-10-12; `docs/testing.md`). Immediate input is implemented locally; native/HTTP/DST checks pass. Complete the final full unit run, full process/Docker E2E and PostgreSQL gates before release. No deployment.
 - **Charts for the Claude harness.** Transcript charts (`docs/web-ui.md`) exist only for central Pi code mode. Claude orbs need their own path to `details.charts`-equivalent chart leaves, e.g. a pi-orb MCP tool whose result carries the chart spec outside the model-visible content.
 - **Remove unreachable non-Linux process-host paths** (2026-10-11; `docs/host-provider.md`). `launch()` refuses non-Linux hosts, so `process/provider.ts`'s unsupervised spawn, `ps`-based zombie probe (`liveProcessRows`) and non-Linux termination ladder can no longer run.

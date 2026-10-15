@@ -33,6 +33,18 @@ describe("control-plane Dockerfile workspace contract", () => {
     expect(runtime).toContain("pty.spawn('/bin/sh', ['-c', 'exit 0'])");
     expect(runtime).not.toMatch(/build-essential|npm ci|npm rebuild/);
   });
+  it("rebuilds PTYs offline using the matching installed Node headers", () => {
+    const dependencies = dockerfile
+      .split(/^FROM /m)
+      .find((stage) => stage.startsWith("node:24-bookworm-slim AS dependencies\n"));
+    const rebuild = dependencies?.match(/^RUN --network=none .*?(?=\n(?:\S|$))/ms)?.[0];
+    expect(rebuild).toBeDefined();
+    expect(rebuild).toMatch(
+      /rm -rf node_modules\/node-pty\/prebuilds\s*\\\n\s*&& npm_config_nodedir=\/usr\/local npm rebuild node-pty/,
+    );
+    expect(rebuild).toContain("pty.spawn('/bin/sh', ['-c', 'exit 0'])");
+    expect(rebuild).not.toMatch(/npm ci|apply-dependency-patches/);
+  });
   it("applies only installed package patches and retains code-mode attribution", () => {
     for (const name of ["pi-ai", "pi-coding-agent", "pi-codemode"]) {
       const patch = `@earendil-works+${name}+1.1.0.patch`;

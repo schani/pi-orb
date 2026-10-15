@@ -34,9 +34,11 @@ import type {
   CasUpdateFieldsParams,
   CommitPullBatchParams,
   ControlPlaneStore,
+  EnqueueOrbMessageParams,
   FailOrbAndRequestComputeDiscardParams,
   FinalizeHostDiscardParams,
   MintSlotClaim,
+  OrbMessageTargetNotFound,
   RecordHostDiscardStatusParams,
   RequestHostSpecReplacementParams,
   RequestOrbArchiveParams,
@@ -752,6 +754,18 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     );
   }
 
+  listSpawnChildren(
+    task: SimulationTask,
+    callerOrbId: string,
+  ): ResultAsync<Pick<OrbRow, "id" | "name">[], StoreError> {
+    return this.access(task, FAILPOINTS.storeRead, "list spawn children", () =>
+      [...this.orbs.values()]
+        .filter((orb) => this.spawns.get(orb.id)?.callerOrbId === callerOrbId)
+        .map(({ id, name }) => ({ id, name }))
+        .sort((a, b) => a.id.localeCompare(b.id)),
+    );
+  }
+
   spawnOrb(
     task: SimulationTask,
     params: SpawnOrbParams,
@@ -898,30 +912,45 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
 
   enqueueOrbMessage(
     task: SimulationTask,
-    params: {
-      orbId: string;
-      messageId: string;
-      content: OrbMessageRow["content"];
-      now: number;
-      wake?: boolean;
-      cancelSleep?: boolean;
-    },
+    params: EnqueueOrbMessageParams,
   ): ResultAsync<
     { message: OrbMessageRow; orb: OrbRow; duplicate: boolean },
-    StoreError | StateConflict
+    StoreError | StateConflict | OrbMessageTargetNotFound
   > {
+    const targetId = params.orbId.toLowerCase();
     const scripted = this.scriptedInvariant("enqueueOrbMessage");
     if (scripted !== null) return errAsync(scripted);
     return this.access(task, FAILPOINTS.storeWrite, "enqueue orb message", () => {
-      const orb = this.orbs.get(params.orbId);
-      if (orb === undefined) return { conflict: true as const };
+      const sender = params.sender;
+      if (sender !== undefined) {
+        const project = this.projects.get(sender.projectId);
+        const source = this.orbs.get(sender.orbId);
+        if (
+          project?.state !== "active" ||
+          project.ownerUserId !== sender.ownerUserId ||
+          source?.projectId !== sender.projectId ||
+          !acceptsOrbAgentCaller(source, project.ownerUserId, sender.caller)
+        )
+          return { conflict: true as const };
+      }
+      const orb = this.orbs.get(targetId);
+      if (orb === undefined) return { conflict: true as const, missing: true as const };
+      if (sender !== undefined && orb.projectId !== sender.projectId)
+        return { conflict: true as const };
       if (["deleting", "archiving", "archived"].includes(orb.state)) {
         return { conflict: true as const };
       }
-      const rows = this.messages.get(params.orbId) ?? [];
+      const rows = this.messages.get(targetId) ?? [];
       const existing = rows.find((row) => row.messageId === params.messageId);
       if (existing !== undefined) {
-        if (!jsonEqual(existing.content, params.content)) return { conflict: true as const };
+        if (
+          !jsonEqual(existing.content, params.content) ||
+          !jsonEqual(
+            existing.system,
+            sender === undefined ? null : { kind: "orb_message", senderOrbId: sender.orbId },
+          )
+        )
+          return { conflict: true as const };
         return { conflict: false as const, message: existing, orb, duplicate: true };
       }
       // Admission is durable content plus, for an orb that cannot take
@@ -949,11 +978,11 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
           admittedOrb.state === "stopped" ||
           admittedOrb.state === "failed");
       const message: OrbMessageRow = {
-        orbId: params.orbId,
+        orbId: targetId,
         messageId: params.messageId,
         ordinal: this.nextMessageOrdinal++,
         content: params.content,
-        system: null,
+        system: sender === undefined ? null : { kind: "orb_message", senderOrbId: sender.orbId },
         status: "queued",
         delivery: null,
         operationId: null,
@@ -965,7 +994,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         updatedAt: params.now,
       };
       rows.push(message);
-      this.messages.set(params.orbId, rows);
+      this.messages.set(targetId, rows);
       const updated: OrbRow = {
         ...admittedOrb,
         lastBusyAt: Math.max(admittedOrb.lastBusyAt ?? 0, params.now),
@@ -975,7 +1004,9 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       return { conflict: false as const, message, orb: updated, duplicate: false };
     }).andThen((outcome) =>
       outcome.conflict
-        ? errAsync({ type: "state_conflict" as const })
+        ? "missing" in outcome
+          ? errAsync({ type: "orb_message_target_not_found" as const })
+          : errAsync({ type: "state_conflict" as const })
         : okAsync({ message: outcome.message, orb: outcome.orb, duplicate: outcome.duplicate }),
     );
   }
@@ -1195,6 +1226,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     params: { orbId: string; now: number },
   ): ResultAsync<OrbMessageRow[], StoreError> {
     return this.access(task, FAILPOINTS.storeWrite, "claim orb message batch", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (orb?.sleepId != null || orb?.stopReason === "sleep") return [];
       const rows = this.messages.get(params.orbId) ?? [];
       const outstanding = rows.filter(
         (row) => row.status === "queued" || row.status === "delivering",
@@ -1424,6 +1457,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       ) {
         return { outcome: "conflict" as const };
       }
+      if (orb.sleepId !== null) return { outcome: "no_intent" as const };
       // A `stopped` orb wakes for any outstanding intent; a `failed` orb only
       // for an intent admitted against this very failure, and the version bump
       // below retires that privilege (docs/lifecycle.md).

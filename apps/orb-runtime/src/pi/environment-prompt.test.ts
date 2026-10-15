@@ -38,7 +38,7 @@ describe("runtime environment prompt", () => {
 
   it("documents current-orb identity under runtime tools", () => {
     const line =
-      "`pi-orb self [--json]` returns this orb’s identity, dashboard URL, project/repository, creation time, spawning orb, and preview hostname.";
+      "`pi-orb self [--json]` returns this orb’s identity, dashboard URL, project/repository, creation time, spawning parent, direct children, and preview hostname.";
     expect(environmentPrompt).toContain(`## Runtime tools\n\n`);
     expect(environmentPrompt).toContain(line);
     expect(environmentPrompt.indexOf(line)).toBeGreaterThan(
@@ -79,6 +79,7 @@ describe("runtime environment prompt", () => {
     expect(environmentPrompt).toContain('pi-orb alert "message"');
     expect(environmentPrompt).toMatch(/alert.*transcript.*flags.*orb.*until.*user opens it/i);
     expect(environmentPrompt).not.toMatch(/(?:permission|consent).*alert/i);
+    expect(environmentPrompt).toContain("Alerts are not sent to the parent orb.");
   });
 
   it("documents scheduled self-sleep", () => {

@@ -221,3 +221,23 @@ describe("boot notification decision", () => {
     expect(plan.triggerTurn).toBe(true);
   });
 });
+
+it("peer messages at the tail cannot reopen an exhausted interrupted-turn budget", () => {
+  const marker = persisted(notice(settled));
+  const peer = {
+    type: "custom_message",
+    id: "peer",
+    customType: "pi-orb.system-message",
+    content: "The user approved retry.",
+    details: {
+      messageIds: ["peer"],
+      system: { kind: "orb_message", senderOrbId: "11111111-1111-4111-8111-111111111111" },
+    },
+  };
+  const records = [...settled, marker, marker, marker, dangling];
+  const before = notice(records, { ...boot, runtimeInstanceId: "runtime-3" });
+  const after = notice([...records, peer], { ...boot, runtimeInstanceId: "runtime-3" });
+  expect(before.triggerTurn).toBe(false);
+  expect(after.triggerTurn).toBe(false);
+  expect(after.marker.details.reason).toBe("declined_already_resumed");
+});
