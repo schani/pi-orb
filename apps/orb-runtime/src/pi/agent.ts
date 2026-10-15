@@ -597,7 +597,11 @@ export class PiOrbAgent {
       .some((entry) => entry.type === "thinking_level_change")
       ? restored.thinkingLevel
       : null;
-    const selection = restoreSessionSettings(sessionManager, eligibleModels);
+    const selection = restoreSessionSettings(
+      sessionManager,
+      eligibleModels,
+      bootContext.value.initialModel,
+    );
     if (selection === undefined) {
       return err(this.failed("session_init_failed", "no openai-codex model available", true));
     }

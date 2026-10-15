@@ -4,11 +4,21 @@
 
 An agent can create an independent orb in its own project, provide its initial prompt, and receive its browser URL through `pi-orb spawn`. Implemented as a narrow runtime-authenticated mutation plus the existing lifecycle and durable inbox—no new worker, orchestration loop, or Pi transport.
 
-The new orb gets a fresh default-branch checkout, normal project secrets, boot hooks, and agent configuration. It inherits the caller orb's immutable harness (`pi | claude`, POC 2026-10-04) and stored user time zone (including `NULL`) from the same transaction-fenced caller row, but nothing from its workspace or conversation. The prompt must include needed context and identify any pushed commits/artifacts. The orb continues if the caller stops, exits, is archived, or is deleted. Project deletion removes both.
+The new orb gets a fresh default-branch checkout, normal project secrets, boot hooks, and agent configuration. Without explicit model selection it inherits the caller orb's immutable harness (`pi | claude`); its stored user time zone (including `NULL`) always comes from the same transaction-fenced caller row. It inherits neither model settings, workspace nor conversation. The prompt must include needed context and identify any pushed commits/artifacts. The orb continues if the caller stops, exits, is archived, or is deleted. Project deletion removes both.
 
 This is not a parent/child lifecycle, result callback, worktree handoff, wait/cancel protocol, or scheduler. Cross-project creation, recursive delegation, cost quotas, and TTLs are outside this slice. The broader orchestration question remains in `docs/open-questions.md`, question 29. Agent instructions describe requested delegation, warn about fresh checkouts and compute independence, and prohibit recursive fan-out without user direction.
 
 **Browser nesting (implemented locally 2026-10-14; not deployed):** project orb-list and individual-orb GETs expose the existing immutable caller ID as optional `OrbView.spawnedBy`, retaining provenance after caller archival/deletion and omitting it for non-spawned orbs. Mutation responses may omit it. Nesting is derived presentation only: same-project working parents, including stopped/failed orbs, retain working children; a missing or shelved parent releases direct working children to roots without reparenting writes. Archive membership remains independent. Rules and observability: `docs/web-ui.md`; API shape: `docs/control-plane-api.md`. No new persisted state or schema.
+
+## Model selection (decided 2026-10-14; user-approved, not deployed)
+
+Optional `model` accepts canonical `{provider,id}` or a selector string. `orb_spawn({prompt:"…",model:{provider:"claude",id:"sonnet"}})` and `pi-orb spawn --prompt '…' --model Sonnet` share owner-scoped validation before child/inbox/acceptance writes. Qualified selectors (`openai-codex/gpt-6.1-sol`, `claude/opus`) avoid ambiguous names. Pi's shared Astra/Sol/Terra/Luna policy and Claude's SDK-advertised Fable/Opus/Sonnet/Haiku families supply labels; resolved Claude SDK IDs canonicalize to the advertised family. Explicit selection chooses its harness automatically. Omission preserves inherited harness/time zone and fresh-session defaults, never the caller's model.
+
+Migration `046_orb_initial_model.sql` adds only nullable `orbs.initial_model` JSONB, a closed canonical `{provider,id}`. This immutable intent commits atomically with creation and applies before fresh central/Pi/Claude input. Retained native settings override it; an uninitialized Pi header has no settings to override. Explicit-intent startup validates the effective restored model before readiness: unavailable intent fails for a fresh session, while an available retained choice starts even if the initial intent is unavailable. Omitted defaults still permit bootstrap before provider login. Effective settings and failures use existing user-visible settings/history and lifecycle paths.
+
+Catalog admission reads the owner's credential pointers/secrets without refresh or credential writes. Pi uses its offline registry; Claude uses an isolated ephemeral SDK `supportedModels()` control query with `persistSession:false`, no prompt input, provider turn or retained session. Only relevant providers are consulted. Unknown/unadvertised/ambiguous/disconnected selection returns a specific `invalid_request`; catalog lookup failure returns retryable `unavailable`. Neither creates work. Explicit admission captures the project owner before discovery and rechecks that owner under the existing project lock before writes. The atomic project/caller fence also rejects stopped, replaced or deleted authority. Accepted retries bypass discovery but still recheck caller authority.
+
+The existing immutable acceptance hash covers prompt, normalized name, selector identity and canonical model. Accepted identical retries reconstruct it using child initial intent and bypass mutable catalogs/connection status, then recheck atomic authority/target state. Changing selector spelling (including alias versus canonical ref) conflicts; current child settings/name never reinterpret a retry. No additional selector snapshot, settings queue or catalog table is needed. Native settings alone were rejected as initial intent storage: a crash between acceptance and bootstrap would lose the assignment. Model text in prompts and a post-acceptance setter were rejected for the same atomicity/authority reason.
 
 ## CLI
 
@@ -16,6 +26,7 @@ This is not a parent/child lifecycle, result callback, worktree handoff, wait/ca
 pi-orb spawn --prompt 'Implement the parser tests and push your branch.'
 pi-orb spawn --prompt-file task.md --name 'Parser tests' --json
 pi-orb spawn --prompt-file - < task.md
+pi-orb spawn --prompt 'Review the parser.' --model Sol
 ```
 
 Exactly one prompt source is required. Input is nonempty UTF-8 text; the serialized request has a 1 MiB byte limit, below the existing inbox limit. File/stdin reads are bounded. `--name` uses normal name validation and normalization.
@@ -24,7 +35,7 @@ Default stdout is one absolute browser URL and a newline. `--json` returns `{ or
 
 `--id <uuid>` selects the new orb ID and doubles as the retry key. Without it, the CLI generates a UUID before sending. The initial message ID equals the orb ID (inbox IDs are scoped to an orb). UUIDs are canonicalized to lowercase.
 
-For simplicity the CLI makes **one** request with a 10-second deadline and no automatic retry/backoff loop. A network error, malformed response, or lost response reports **unknown acceptance** and the `--id` to reuse with the same prompt/name. A retryable server error also reports that ID. A definite validation, authority, or lifecycle conflict is a nonzero exit, not success. Exit classes are 2 invalid input, 3 unauthorized, 4 conflict/missing, 6 retryable/unknown, and 7 internal failure. This replaces the initial proposal for bounded internal retries: explicit stable-ID retries need no new scheduling machinery.
+For simplicity the CLI makes **one** request with a 10-second deadline and no automatic retry/backoff loop. A network error, malformed response, or lost response reports **unknown acceptance** and the `--id` to reuse with the same prompt/name/model. A retryable server error also reports that ID. A definite validation, authority, or lifecycle conflict is a nonzero exit, not success. Exit classes are 2 invalid input, 3 unauthorized, 4 conflict/missing, 6 retryable/unknown, and 7 internal failure. This replaces the initial proposal for bounded internal retries: explicit stable-ID retries need no new scheduling machinery.
 
 `pi-orb orbs` and `pi-orb transcript <id>` already provide discovery and replicated progress inspection. The returned browser URL shows existing startup, inbox, failure, and transcript state. There is no completion notification back to the caller.
 
@@ -36,7 +47,7 @@ For simplicity the CLI makes **one** request with a 10-second deadline and no au
 PUT /runtime/v1/orbs/:orbId/spawn
 Authorization: Bearer <existing per-incarnation runtime bearer>
 
-{ "prompt": "...", "name": "optional name" }
+{ "prompt": "...", "name": "optional name", "model": { "provider": "claude", "id": "opus" } }
 
 202, Cache-Control: no-store
 { "orbId": "...", "projectId": "...", "url": "https://browser.example/orbs/...", "messageId": "..." }
@@ -46,7 +57,7 @@ Extra body fields are rejected. The caller and project come from the bearer, not
 
 The transaction locks the project first, matching project deletion's lock order, then the caller. A deleting project cannot gain work. It inserts the `creating` orb with the caller's stored `user_time_zone`, its queued inbox row, and an immutable `orb_spawns` acceptance record together. Retry uses the accepted orb rather than resampling the caller's zone; no extra snapshot table or column is needed. `creating` already means startup is requested, so the inbox row has the ordinary creating-orb `auto_start = false`; it does not carry an extra future restart intent. Normal reconciliation and delivery survive process loss, including death before the post-commit nudge.
 
-Migration `014_orb_spawns.sql` adds the acceptance table. It records source ID/incarnation, target ID, project ID, acceptance time, and SHA-256 of the canonical prompt/normalized-name request. No prompt or bearer value appears in the acceptance log/table. The prompt lives only in the inbox and ordinary replicated history. The target ID is also the message ID, so no redundant message column is required.
+Migration `014_orb_spawns.sql` adds the acceptance table. It records source ID/incarnation, target ID, project ID, acceptance time, and SHA-256 of the prompt/normalized-name/selector/canonical-model request. No prompt or bearer value appears in the acceptance log/table. The prompt lives only in the inbox and ordinary replicated history. The target ID is also the message ID, so no redundant message column is required.
 
 Identical retries by the same currently authorized caller return the original IDs without inserting or redelivering. Comparison uses the immutable acceptance fingerprint, not mutable orb names or delivery state. A changed body/caller, unrelated target ID collision, deleted target, or archiving/archived/deleting target returns 409. Caller incarnation is recorded as provenance but not the retry key: a currently authorized replacement incarnation of the same caller may recover an ambiguous operation. A retired bearer never regains authority.
 
@@ -65,7 +76,7 @@ Expected failures use Result/ResultAsync and the existing sanitized runtime comm
 
 ## Observability and validation
 
-`orb_spawns` is durable, queryable acceptance/provenance, committed with the work. `lifecycle: ... spawn-accepted` adds a source/target/message/project edge only on first acceptance; retries produce no duplicate edge. Existing user-visible lifecycle and inbox errors explain boot/delivery failure at the URL. CLI diagnostics distinguish rejection from unknown acceptance.
+`orb_spawns` is durable, queryable acceptance/provenance, committed with the work. `lifecycle: ... spawn-accepted` adds a source/target/message/project/harness/model edge only on first acceptance; retries produce no duplicate edge. Existing user-visible lifecycle and inbox errors explain boot/delivery failure at the URL. CLI diagnostics distinguish rejection from unknown acceptance.
 
 Tests cover concurrent identical/conflicting submissions, write failpoints, response loss and process restart, caller stop/replacement/discard, project deletion, and unattended startup/delivery after caller archival and loss of the nudge. Shared in-memory/PGlite/PostgreSQL store contracts verify retry stability after rename/delivery changes and authority fencing. Driver tests force the last SQL write to fail and prove rollback leaves neither orb nor message, then verify provenance retention and deletion-safe retry tombstones. CLI/HTTP tests cover parsing, file/stdin limits, stdout/JSON, bearer use, URL origin, and sanitized failures. Full-slice E2E spawns through the installed in-orb shim, observes the mock agent finish without a browser connection, retries without duplicate input, opens the real browser URL, and deletes all work through project deletion.
 

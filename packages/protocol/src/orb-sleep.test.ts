@@ -38,12 +38,29 @@ describe("orb sleep protocol", () => {
       content: [{ type: "text", text: "Sleep finished." }],
       system,
     };
-    expect(Check(OrbBootContextResponseSchema, { v: 1, context, userTimeZone: null })).toBe(true);
-    expect(Check(OrbBootContextResponseSchema, { v: 1, context: null, userTimeZone: null })).toBe(
-      true,
-    );
     expect(
-      Check(OrbBootContextResponseSchema, { v: 1, context, userTimeZone: "America/New_York" }),
+      Check(OrbBootContextResponseSchema, {
+        v: 1,
+        context,
+        initialModel: null,
+        userTimeZone: null,
+      }),
+    ).toBe(true);
+    expect(
+      Check(OrbBootContextResponseSchema, {
+        v: 1,
+        context: null,
+        initialModel: null,
+        userTimeZone: null,
+      }),
+    ).toBe(true);
+    expect(
+      Check(OrbBootContextResponseSchema, {
+        v: 1,
+        context,
+        initialModel: null,
+        userTimeZone: "America/New_York",
+      }),
     ).toBe(true);
     expect(Check(OrbBootContextResponseSchema, { v: 1, context: null })).toBe(false);
     expect(Check(DeliverOrbMessageRequestSchema, { v: 1, ...context })).toBe(true);

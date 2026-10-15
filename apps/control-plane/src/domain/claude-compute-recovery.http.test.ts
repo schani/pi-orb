@@ -48,7 +48,7 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
       [MCP_RUNTIME_PATH]: { revision: 0, servers: [] },
       [PERSONAL_INSTRUCTIONS_RUNTIME_PATH]: { revision: 0, content: "" },
       [PROJECT_INSTRUCTIONS_RUNTIME_PATH]: { revision: 0, content: "" },
-      [ORB_BOOT_CONTEXT_PATH]: { v: 1, context: null, userTimeZone: null },
+      [ORB_BOOT_CONTEXT_PATH]: { v: 1, context: null, userTimeZone: null, initialModel: null },
       [runtimeClaudeSubscriptionPath]: { token: "synthetic-no-inference", generation: 1 },
     };
     const broker = createServer((request, response) => {

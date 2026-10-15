@@ -528,7 +528,15 @@ export class ClaudeOrbAgent implements OrbAgent {
         const saved = this.files.read(this.statePath());
         const value: unknown =
           saved === null
-            ? { id: randomUUID(), timestamp: new Date().toISOString(), cwd, deliveries: {} }
+            ? {
+                id: randomUUID(),
+                timestamp: new Date().toISOString(),
+                cwd,
+                deliveries: {},
+                ...(context.value.initialModel === null
+                  ? {}
+                  : { model: context.value.initialModel.id }),
+              }
             : JSON.parse(saved);
         this.state = Check(NativeStateSchema, value) ? value : null;
         if (this.options.skillsDir !== null) {

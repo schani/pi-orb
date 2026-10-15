@@ -1,4 +1,5 @@
 import { type Static, Type } from "typebox";
+import { ModelRefSchema } from "./agent-settings.ts";
 import { MessageInputBlockSchema } from "./frames.ts";
 import { OrbMessageSenderIdSchema } from "./orb-message-context.ts";
 
@@ -59,6 +60,7 @@ export const OrbBootContextResponseSchema = Type.Object(
     v: Type.Literal(1),
     context: Type.Union([OrbBootContextSchema, Type.Null()]),
     userTimeZone: Type.Union([Type.String(), Type.Null()]),
+    initialModel: Type.Union([ModelRefSchema, Type.Null()]),
   },
   closed,
 );

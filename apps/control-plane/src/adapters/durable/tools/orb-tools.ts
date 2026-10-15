@@ -55,7 +55,19 @@ export function createOrbTools(service: OrbAgentOperations, notifyParent?: Paren
       name: "orb_spawn",
       description: "Create a same-project orb with a prompt.",
       parameters: Type.Object(
-        { prompt: Type.String(), name: Type.Optional(Type.String()) },
+        {
+          prompt: Type.String(),
+          name: Type.Optional(Type.String()),
+          model: Type.Optional(
+            Type.Union([
+              Type.String({ minLength: 1 }),
+              Type.Object(
+                { provider: Type.String({ minLength: 1 }), id: Type.String({ minLength: 1 }) },
+                { additionalProperties: false },
+              ),
+            ]),
+          ),
+        },
         { additionalProperties: false },
       ),
       replay: "safe",

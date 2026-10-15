@@ -355,6 +355,7 @@ describe("runtime broker routes", () => {
     routeStore: ControlPlaneStore = store,
     tailnetDnsName: string | null = "tail.test.ts.net",
     hostingGuard = false,
+    spawnModels = makeHarness().deps.spawnModels,
   ): Promise<void> {
     app = Fastify();
     if (hostingGuard)
@@ -373,7 +374,13 @@ describe("runtime broker routes", () => {
       send: (task, caller, request) =>
         sendGuestOrbMessage(task, { ...makeHarness().deps, store: routeStore }, caller, request),
       spawn: (task, caller, orbId, request) =>
-        spawnOrb(task, { ...makeHarness().deps, store: routeStore }, caller, orbId, request),
+        spawnOrb(
+          task,
+          { ...makeHarness().deps, store: routeStore, spawnModels },
+          caller,
+          orbId,
+          request,
+        ),
       sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
         requestOrbSleep(
           task,
@@ -681,6 +688,39 @@ describe("runtime broker routes", () => {
         headers: { authorization: `Bearer ${token}`, host: "untrusted.test" },
         payload,
       });
+    it("resolves explicit model through owner admission and returns unavailable without writes", async () => {
+      const read = vi.fn<ReturnType<typeof makeHarness>["deps"]["spawnModels"]["read"]>(() =>
+        errAsync({
+          type: "spawn_model_error",
+          reason: "unavailable",
+          message: "Catalog unavailable.",
+        }),
+      );
+      await app.close();
+      await startApp(TEST_ISSUER_CONSTANTS, store, null, false, { read });
+      store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+      expect((await spawn({ prompt: "work", model: "Sonnet" })).statusCode).toBe(503);
+      expect(store.orbSnapshot(id)).toBeNull();
+      expect(store.messageSnapshots(id)).toHaveLength(0);
+      expect((await store.getSpawnAcceptance(task, id))._unsafeUnwrap()).toBeNull();
+      read.mockReturnValue(
+        okAsync({
+          models: [{ provider: "claude", id: "sonnet", name: "Sonnet", thinkingLevels: [] }],
+          disconnected: [],
+        }),
+      );
+      expect((await spawn({ prompt: "work", model: "Sonnet" })).statusCode).toBe(202);
+      expect(read).toHaveBeenCalledWith(task, TEST_USER_ID, "Sonnet");
+      expect(store.orbSnapshot(id)).toMatchObject({
+        harness: "claude",
+        initialModel: { provider: "claude", id: "sonnet" },
+      });
+      read.mockReturnValue(okAsync({ models: [], disconnected: ["claude"] }));
+      expect((await spawn({ prompt: "work", model: "Sonnet" })).statusCode).toBe(202);
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(store.messageSnapshots(id)).toHaveLength(1);
+    });
+
     it("atomically accepts a prompt, returns the configured browser URL and retries once", async () => {
       store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
       const response = await spawn();
@@ -925,7 +965,12 @@ describe("runtime broker routes", () => {
         payload: { v: 1 },
       });
       expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ v: 1, context: null, userTimeZone: null });
+      expect(response.json()).toEqual({
+        v: 1,
+        context: null,
+        initialModel: null,
+        userTimeZone: null,
+      });
     });
 
     it("returns only a FIFO-head sleep wake and does not acknowledge it", async () => {

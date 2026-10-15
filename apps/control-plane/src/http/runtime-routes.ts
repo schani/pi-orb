@@ -105,7 +105,10 @@ export interface RuntimeRouteDeps {
     caller: OrbRow,
     orbId: string,
     request: OrbSpawnRequest,
-  ) => ResultAsync<void, StoreError | SpawnConflict>;
+  ) => ResultAsync<
+    void,
+    StoreError | SpawnConflict | import("../domain/orb-spawn-model.ts").SpawnModelError
+  >;
   readonly sleepSelf: (
     task: SimulationTask,
     orbId: string,
@@ -423,6 +426,7 @@ export function registerRuntimeRoutes(
       const accepted = await deps.spawn(task, auth.orb, orbId, {
         prompt: request.body.prompt,
         ...(name?.isOk() ? { name: name.value } : {}),
+        ...(request.body.model === undefined ? {} : { model: request.body.model }),
       });
       if (accepted.isErr()) {
         const error = accepted.error;
@@ -430,6 +434,10 @@ export function registerRuntimeRoutes(
           return error.reason === "unauthorized"
             ? fail(401, "unauthorized", "runtime identity rejected")
             : fail(409, "conflict", "spawn conflicts with existing work or project lifecycle");
+        if (error.type === "spawn_model_error")
+          return error.reason === "unavailable"
+            ? fail(503, "unavailable", error.message, true)
+            : fail(400, "invalid_request", error.message);
         const internal = error.code === "invariant" || error.code === "corruption";
         return fail(
           internal ? 500 : 503,
@@ -527,7 +535,12 @@ export function registerRuntimeRoutes(
           retryable: context.error.retryable,
         },
       });
-    return reply.send({ v: 1, context: context.value, userTimeZone: auth.orb.userTimeZone });
+    return reply.send({
+      v: 1,
+      context: context.value,
+      userTimeZone: auth.orb.userTimeZone,
+      initialModel: auth.orb.initialModel,
+    });
   });
 
   app.post(ORB_SELF_ARCHIVE_PATH, async (request, reply) => {

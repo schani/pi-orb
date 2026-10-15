@@ -11,7 +11,7 @@ import { Check } from "typebox/value";
 import type { BrokerEnv } from "../broker/endpoint.ts";
 
 export const SPAWN_USAGE =
-  "usage: pi-orb spawn (--prompt <text> | --prompt-file <path|->) [--name <name>] [--id <uuid>] [--json]";
+  "usage: pi-orb spawn (--prompt <text> | --prompt-file <path|->) [--name <name>] [--model <label|provider/id>] [--id <uuid>] [--json]";
 export type SpawnFailure = {
   readonly type: "spawn_failure";
   readonly message: string;
@@ -21,6 +21,7 @@ export type SpawnArgs = {
   source: { text: string } | { file: string };
   id?: string;
   name?: string;
+  model?: string;
   json: boolean;
 };
 const invalid = (message: string): SpawnFailure => ({
@@ -33,6 +34,7 @@ export function parseSpawnArgs(args: readonly string[]): Result<SpawnArgs, Spawn
   let source: SpawnArgs["source"] | undefined;
   let id: string | undefined;
   let name: string | undefined;
+  let model: string | undefined;
   let json = false;
   const seen = new Set<string>();
   for (let i = 0; i < args.length; i++) {
@@ -55,6 +57,9 @@ export function parseSpawnArgs(args: readonly string[]): Result<SpawnArgs, Spawn
         if (!ORB_SPAWN_UUID.test(value)) return err(invalid("--id must be a UUID"));
         id = value.toLowerCase();
         break;
+      case "--model":
+        model = value;
+        break;
       case "--name":
         name = value;
         break;
@@ -67,6 +72,7 @@ export function parseSpawnArgs(args: readonly string[]): Result<SpawnArgs, Spawn
     source,
     ...(id === undefined ? {} : { id }),
     ...(name === undefined ? {} : { name }),
+    ...(model === undefined ? {} : { model }),
     json,
   });
 }
@@ -82,7 +88,7 @@ export function requestSpawn(
   const unknown = (): SpawnFailure => ({
     type: "spawn_failure",
     exitCode: 6,
-    message: `spawn acceptance is unknown; retry with --id ${id} and the same prompt/name arguments`,
+    message: `spawn acceptance is unknown; retry with --id ${id} and the same prompt/name/model arguments`,
   });
   return ResultAsync.fromThrowable(async () => {
     const response = await fetch(`${env.controlPlaneUrl}/runtime/v1/orbs/${id}/spawn`, {
@@ -116,7 +122,7 @@ export function requestSpawn(
                 : code === "internal"
                   ? 7
                   : 6,
-        message: `${payload.error.message}${payload.error.retryable ? `; retry with --id ${id} and the same prompt/name arguments` : ""}`,
+        message: `${payload.error.message}${payload.error.retryable ? `; retry with --id ${id} and the same prompt/name/model arguments` : ""}`,
       });
     }
     return err(unknown());

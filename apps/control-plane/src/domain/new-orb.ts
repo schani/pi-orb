@@ -8,6 +8,7 @@ export function newOrbRow(
     name?: string;
     userTimeZone?: string;
     harness?: HarnessKind;
+    initialModel?: OrbRow["initialModel"];
   },
   hostKind: string,
   now: number,
@@ -16,6 +17,7 @@ export function newOrbRow(
     id: params.orbId,
     projectId: params.projectId,
     harness: params.harness ?? "pi",
+    initialModel: params.initialModel ?? null,
     name: params.name ?? null,
     userTimeZone: params.userTimeZone ?? null,
     autoNameLeaseUntil: null,

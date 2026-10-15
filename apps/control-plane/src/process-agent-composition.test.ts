@@ -58,7 +58,10 @@ function createProcessAgentContext(
 describe("process agent composition", () => {
   it("uses fresh SDK auth admission after the opening operation is cancelled", async () => {
     const harness = makeHarness();
-    const orb = makeOrbRow("central", "project", "starting", { hostRef: "executor" });
+    const orb = makeOrbRow("central", "project", "starting", {
+      hostRef: "executor",
+      initialModel: { provider: "openai-codex", id: "gpt-6-astra" },
+    });
     harness.store.seedProject(makeProjectRow("project"));
     harness.store.seedOrb(orb);
     const opening = new AbortController();
@@ -84,6 +87,10 @@ describe("process agent composition", () => {
       } as never);
       const result = await open(task, orb, { signal: opening.signal });
       expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap().initialSettings).toEqual({
+        model: { provider: "openai-codex", id: "gpt-6-astra" },
+        thinkingLevel: "high",
+      });
       const options = models.mock.calls[0]?.[0];
       expect(options).toBeDefined();
       await options?.token(options.signal);

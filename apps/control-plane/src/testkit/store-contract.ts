@@ -34,6 +34,7 @@ const orb: OrbRow = {
   id: "00000000-0000-4000-8000-000000000002",
   projectId: project.id,
   harness: "pi",
+  initialModel: null,
   name: null,
   userTimeZone: null,
   autoNameLeaseUntil: null,
@@ -1049,6 +1050,80 @@ export function storeSemanticsContractTests(
       expect((await store.getSpawnCaller(task, childId))._unsafeUnwrap()).toBe(orb.id);
     });
 
+    it("fences explicit catalog ownership under the atomic project lock", async () => {
+      (await store.insertProject(task, project))._unsafeUnwrap();
+      const source = { ...orb, state: "running" as const, runtimeTokenHash: "token" };
+      (await store.insertOrb(task, source))._unsafeUnwrap();
+      const child = {
+        ...orb,
+        id: "00000000-0000-4000-8000-000000000003",
+        harness: "claude" as const,
+        initialModel: { provider: "claude", id: "opus" },
+      };
+      const params = {
+        callerOrbId: source.id,
+        caller: { runtimeTokenHash: "token", hostIncarnation: 0 },
+        orb: child,
+        prompt: "work",
+        requestHash: "chosen-model",
+        expectedOwnerUserId: "previous-owner",
+      };
+      const denied = await store.spawnOrb(task, params);
+      expect(denied.isErr() && denied.error).toMatchObject({ type: "spawn_conflict" });
+      expect((await store.getOrb(task, child.id))._unsafeUnwrap()).toBeNull();
+      expect((await store.getSpawnAcceptance(task, child.id))._unsafeUnwrap()).toBeNull();
+      expect((await store.listOrbMessages(task, child.id))._unsafeUnwrap()).toEqual([]);
+      expect(
+        (
+          await store.spawnOrb(task, { ...params, expectedOwnerUserId: project.ownerUserId })
+        )._unsafeUnwrap(),
+      ).toEqual({ duplicate: false });
+    });
+
+    it.each([
+      ["pi", "claude", { provider: "claude", id: "opus" }],
+      ["claude", "pi", { provider: "openai-codex", id: "gpt-6.1-sol" }],
+    ] as const)(
+      "atomically commits %s caller -> %s model intent",
+      async (sourceHarness, targetHarness, initialModel) => {
+        expect((await store.insertProject(task, project)).isOk()).toBe(true);
+        const caller = {
+          ...orb,
+          harness: sourceHarness,
+          state: "running" as const,
+          runtimeTokenHash: "caller-token",
+          userTimeZone: "Europe/Paris",
+        };
+        expect((await store.insertOrb(task, caller)).isOk()).toBe(true);
+        const child = {
+          ...orb,
+          id: "00000000-0000-4000-8000-000000000003",
+          harness: targetHarness,
+          initialModel,
+        };
+        const params = {
+          callerOrbId: caller.id,
+          caller: { runtimeTokenHash: "caller-token", hostIncarnation: 0 },
+          orb: child,
+          prompt: "work",
+          requestHash: "chosen-model",
+        };
+        expect((await store.spawnOrb(task, params))._unsafeUnwrap()).toEqual({ duplicate: false });
+        expect((await store.getOrb(task, child.id))._unsafeUnwrap()).toMatchObject({
+          harness: targetHarness,
+          initialModel,
+          userTimeZone: "Europe/Paris",
+        });
+        expect((await store.getSpawnAcceptance(task, child.id))._unsafeUnwrap()).toEqual({
+          callerOrbId: caller.id,
+          requestHash: "chosen-model",
+          initialModel,
+        });
+        expect((await store.spawnOrb(task, params))._unsafeUnwrap()).toEqual({ duplicate: true });
+        expect((await store.listOrbMessages(task, child.id))._unsafeUnwrap()).toHaveLength(1);
+      },
+    );
+
     it("atomically spawns with immutable retry identity and fences retired callers", async () => {
       expect((await store.insertProject(task, project)).isOk()).toBe(true);
       const caller = {
@@ -1058,6 +1133,7 @@ export function storeSemanticsContractTests(
         hostIncarnation: 1,
         userTimeZone: "America/New_York",
         harness: "claude" as const,
+        initialModel: { provider: "claude", id: "sonnet" },
       };
       expect((await store.insertOrb(task, caller)).isOk()).toBe(true);
       const child = { ...orb, id: "00000000-0000-4000-8000-000000000003" };
@@ -1075,6 +1151,7 @@ export function storeSemanticsContractTests(
       expect((await store.getOrb(task, child.id))._unsafeUnwrap()).toMatchObject({
         state: "creating",
         harness: "claude",
+        initialModel: null,
         userTimeZone: "America/New_York",
       });
       expect((await store.listOrbMessages(task, child.id))._unsafeUnwrap()).toMatchObject([

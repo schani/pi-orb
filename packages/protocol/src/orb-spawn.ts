@@ -1,4 +1,5 @@
 import { type Static, Type } from "typebox";
+import { ModelRefSchema } from "./agent-settings.ts";
 import { OrbArchiveErrorSchema } from "./orb-archive.ts";
 import { ORB_NAME_MAX_CHARS } from "./orb-naming.ts";
 
@@ -10,6 +11,7 @@ export const OrbSpawnRequestSchema = Type.Object(
   {
     prompt: Type.String({ minLength: 1, maxLength: ORB_SPAWN_MAX_BYTES }),
     name: Type.Optional(Type.String({ minLength: 1, maxLength: ORB_NAME_MAX_CHARS })),
+    model: Type.Optional(Type.Union([ModelRefSchema, Type.String({ minLength: 1 })])),
   },
   { additionalProperties: false },
 );

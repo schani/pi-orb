@@ -27,12 +27,17 @@ export function settingsFallbackMessage(
 export function restoreSessionSettings<M extends { provider: string; id: string; input: string[] }>(
   manager: Pick<SessionManager, "buildSessionContext" | "getEntries">,
   models: readonly M[],
+  initialModel: AgentSettings["model"] | null = null,
 ) {
   const restored = manager.buildSessionContext();
+  const freshIntent = manager.getEntries().length === 0 ? initialModel : null;
   const model =
-    models.find(
-      (item) => item.provider === restored.model?.provider && item.id === restored.model.modelId,
-    ) ?? pickCodexModel(models);
+    freshIntent !== null
+      ? models.find((item) => item.provider === freshIntent.provider && item.id === freshIntent.id)
+      : (models.find(
+          (item) =>
+            item.provider === restored.model?.provider && item.id === restored.model.modelId,
+        ) ?? pickCodexModel(models));
   if (!model) return undefined;
   const thinkingLevel =
     manager.getEntries().some((entry) => entry.type === "thinking_level_change") &&

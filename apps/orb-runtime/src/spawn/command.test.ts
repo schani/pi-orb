@@ -5,6 +5,22 @@ const id = "00000000-0000-4000-8000-000000000003";
 const env = { controlPlaneUrl: "https://runtime.test", runtimeToken: "private-token" };
 afterEach(() => vi.unstubAllGlobals());
 describe("spawn command", () => {
+  it.each(["Sol", "Opus", "openai-codex/gpt-6.1-sol", "claude/opus"])(
+    "forwards model selector %s unchanged",
+    (model) => {
+      expect(parseSpawnArgs(["--prompt", "work", "--model", model])._unsafeUnwrap()).toEqual({
+        source: { text: "work" },
+        model,
+        json: false,
+      });
+    },
+  );
+  it("rejects empty or repeated model selectors", () => {
+    expect(parseSpawnArgs(["--prompt", "work", "--model", ""]).isErr()).toBe(true);
+    expect(parseSpawnArgs(["--prompt", "work", "--model", "Sol", "--model", "Opus"]).isErr()).toBe(
+      true,
+    );
+  });
   it("parses prompt sources, retry ID, name and JSON", () => {
     expect(
       parseSpawnArgs([
