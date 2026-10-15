@@ -8,6 +8,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Clear PR 122 qualification blockers** (2026-10-15; `docs/postmortems/2026-10-15-runtime-dependency-qualification.md`). Attribute and correct the local Sleep-matrix setup timeout, then complete affected full-suite gates without overlapping the E2E wrapper. Preserve first failures; diagnostic/hosted greens do not clear the unit failure. Qualify trusted main cache export and a subsequent fresh-runner hit through normal authorized gates; retain exact-head CI/E2E/Durable requirements. No merge/deploy authorization or speedup/stall-fix claim.
+
 - **Diagnose identity-smoke cleanup before release validation** (2026-10-14; `docs/postmortems/2026-10-14-identity-smoke-cleanup.md`). Preserve Deploy 38596107385's failed identity gate; owned fixtures are now verified absent, but its original auth/transport/rejection cause is unknown. Correct premature success and silent DELETE failure diagnostics with token-safe phase/exit/HTTP/code evidence and tests-first coverage. Deferred candidate `43f059be` rejects successful array responses and is not approved for merge. Any later validation requires an explicit decision; no rerun or historical waiver is implied.
 
 - **Validate transcript target UUIDs before store lookup** (2026-10-13; `docs/postmortems/2026-10-13-rollout-monitor-anomalies.md`). Return a typed client-visible invalid-target response, not PostgreSQL 22P02 → internal 500. Test the HTTP boundary with real PostgreSQL; retain content-free route/error correlation for unexpected lookup failures.

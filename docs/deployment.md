@@ -219,7 +219,7 @@ Release records, test output, credentials, and other mutable state are not cache
 
 ## Deployment-speed decisions and proposals (2026-10-05)
 
-**Items 1, 2 and 5 approved and implemented; four-runner E2E is hosted-qualified, release reuse and Docker layer caching are not live-validated. Not deployed. Other items remain unapproved.** The
+**Items 1, 2 and 5 approved and implemented; four-runner E2E is hosted-qualified; release reuse and trusted-main Docker cache reuse remain unvalidated. Not deployed. Other items remain unapproved.** The
 September 18 example above took 62m15s: checks 33m14s, build/acceptance/publication
 9m51s, smokes 10m36s, and all remaining stages 8m34s (roughly nine minutes).
 These historical timings identify candidates, not measured savings.
@@ -251,7 +251,7 @@ In priority order:
    GitHub runners, 16m32s workflow elapsed. The historical serial 35m12s / 407-test
    run is not a controlled same-source benchmark; no isolated speedup is claimed.
    Evidence and shard timings are in `docs/testing.md`.
-2. **Approved: trusted BuildKit layer cache (decided 2026-10-15; hosted validation pending).**
+2. **Approved: trusted BuildKit layer cache (decided 2026-10-15; PR cold builds qualified, main reuse unvalidated).**
    Each E2E runner builds the current checkout with pinned Buildx actions, imports
    GHA scope `e2e-runtime-linux-amd64-v1`, and loads `pi-orb-runtime:dev` locally.
    Only shard 1 of `push`/`main` exports (`mode=max`); PRs and manual runs import
@@ -264,7 +264,16 @@ In priority order:
    Build progress records layer hits/misses; the job summary records source SHA,
    image ID, scope and writer policy. Automatic build-record artifacts are disabled;
    credentials, logs and mutable test/release state are not cache inputs. This is
-   layer reuse, not accepted-image reuse; no speedup or hosted cache-hit proof yet.
+   layer reuse, not accepted-image reuse. PR 122 code head `1110e7e0` passed
+   first-attempt hosted CI/E2E/Durable: all four cold runtime builds executed the
+   offline PTY smoke, verified exact image IDs and exported no PR cache. Trusted
+   main export and subsequent hits remain unvalidated; no measured speedup or
+   historical-stall fix is claimed. An unexplained local unit setup timeout still
+   blocks qualification; infrastructure passed after eliminating a wrapper port
+   collision. Redundant local full E2E was cancelled/incomplete, not a local pass.
+   Evidence and limits:
+   `docs/testing.md`, `docs/postmortems/2026-10-15-runtime-dependency-qualification.md`.
+   No merge or deployment; later docs commits require their own exact-head gates.
 3. **Overlap the remote native build with checks.** Native and control-plane
    builds already run together; the additional overlap is with qualification.
    No publication or deployment before all required checks and acceptance pass.
