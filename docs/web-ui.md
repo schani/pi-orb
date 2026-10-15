@@ -35,7 +35,9 @@ Race found while qualifying (2026-10-13): two overlapping `vega-embed` mounts on
 
 **Approved 2026-10-14:** Top Orbs uses native whole-row ID links with full accessible labels, exact counts, proportional bars, gray hover, visible keyboard focus and mobile/coarse targets ≥44px. Rationale, missing-resource behavior, prototype and validation: `docs/model-usage.md`.
 
-Trend beside Settings opens `/usage`: Comparison lines with a left summary, last day/week/month/6 months, token-kind/use/model breakdowns and top-orb/use bars. Period changes preserve filters. Owner-scoped `/api/v1/usage` reads recorded Pi + Luna usage; errors offer Retry, empty reads show no recorded calls. No persisted state changes.
+Trend beside Settings opens `/usage`: Comparison lines with a left summary, last day/week/month/6 months, token-kind/use/model/orb breakdowns and top-orb/use bars. Period changes preserve filters. Owner-scoped `/api/v1/usage` reads recorded Pi + Luna usage; errors offer Retry, empty reads show no recorded calls. No persisted state changes.
+
+**Decided 2026-10-14:** Usage token-kind labels/phone keys select Measure; Orb labels/keys are native ID links, including deleted-name fallbacks. Aggregate Other is inert. Keyboard activation and hover isolation coexist; actionable phone keys are ≥44px tall. Actions are render-only props, not persisted chart data. Details: `docs/model-usage.md`.
 
 Transcript charts, the usage timeline and Use ranking share `Chart.tsx`, spec builders, renderer and CSS. Hover shows exact point values; end-label/phone-key hover isolates series. Dense 15-minute/hourly/6-hour/daily ticks retain every point; labels sit on local civil boundaries. At ≤900 CSS px, the summary and rankings stack; phones use 44px controls. Bounds use browser-local civil time, including DST. API, coverage, rationale and validation: `docs/model-usage.md`. Not deployed.
 

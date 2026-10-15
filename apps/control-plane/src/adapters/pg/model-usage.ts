@@ -31,6 +31,7 @@ function usageRows(rows: PgRow[], boundaries: readonly number[]): Result<UsageRe
       const bucket = {
         ...totals,
         at: typeof index === "number" ? times[index] : undefined,
+        orbId: row["orbId"],
         use: row["use"],
         provider: row["provider"],
         model: row["model"],
@@ -75,12 +76,12 @@ export class PostgreSQLModelUsageLedger implements ModelUsageLedger, ModelUsageR
        ), owned_orbs AS (
          SELECT o.id, o.name FROM orbs o JOIN projects p ON p.id = o.project_id WHERE p.owner_user_id::text = $1
        )
-       SELECT 'bucket' AS kind, bucket, use, provider, model, NULL::text AS id, NULL::text AS name,
+       SELECT 'bucket' AS kind, bucket, use, provider, model, orb_id::text AS "orbId", NULL::text AS id, NULL::text AS name,
          sum(input)::float8 AS input, sum(output)::float8 AS output,
          sum(cache_read)::float8 AS "cacheRead", sum(cache_write)::float8 AS "cacheWrite", count(*)::float8 AS calls
-       FROM usage GROUP BY bucket, use, provider, model
+       FROM usage GROUP BY bucket, use, provider, model, orb_id
        UNION ALL
-       SELECT 'orb', NULL, NULL, NULL, NULL, u.orb_id::text, o.name,
+       SELECT 'orb', NULL, NULL, NULL, NULL, NULL, u.orb_id::text, o.name,
          sum(input)::float8, sum(output)::float8, sum(cache_read)::float8, sum(cache_write)::float8, count(*)::float8
        FROM usage u LEFT JOIN owned_orbs o ON o.id = u.orb_id GROUP BY u.orb_id, o.name`,
         [ownerUserId, arrayParam(boundaries.map((at) => new Date(at)))],

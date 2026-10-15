@@ -18,6 +18,7 @@ const data: UsageView = {
   buckets: [
     {
       at,
+      orbId: "a",
       use: "root",
       provider: "p",
       model: "m",
@@ -29,6 +30,7 @@ const data: UsageView = {
     },
     {
       at: at + 900000,
+      orbId: "b",
       use: "subagent",
       provider: "p",
       model: "m",
@@ -93,19 +95,120 @@ describe("usage presentation", () => {
     expect(cacheShare(empty)).toBeNull();
   });
   it("fills every interval, preserves token composition and reconciles use/model lines", () => {
-    const token = usageTimeline(data, "token_kind");
+    const token = usageTimeline(data, "token_kind").spec;
     expect(token.series).toHaveLength(4);
     expect(token.series.find((s) => s.name === "Cached input")?.points).toEqual([
       [at, 80],
       [at + 900000, 0],
     ]);
     for (const breakdown of ["token_kind", "use", "model"] as const) {
-      const chart = usageTimeline(data, breakdown);
+      const chart = usageTimeline(data, breakdown).spec;
       expect(chart.series.every((s) => s.points.length === 2)).toBe(true);
       expect(chart.series.flatMap((s) => s.points).reduce((sum, point) => sum + point[1], 0)).toBe(
         127,
       );
     }
+  });
+  it("groups orb lines by ID, disambiguates names and fills missing intervals", () => {
+    const buckets = [
+      ...data.buckets,
+      { ...data.buckets[0]!, orbId: "a", use: "headline" as const },
+      { ...data.buckets[1]!, orbId: "deleted" },
+    ];
+    const chart = usageTimeline(
+      { ...data, buckets, orbs: [...data.orbs, { ...empty, id: "deleted", name: null }] },
+      "orb",
+    ).spec;
+    expect(chart.series).toEqual([
+      {
+        name: "Same · a",
+        points: [
+          [at, 204],
+          [at + 900000, 0],
+        ],
+      },
+      {
+        name: "Same · b",
+        points: [
+          [at, 0],
+          [at + 900000, 25],
+        ],
+      },
+      {
+        name: "deleted",
+        points: [
+          [at, 0],
+          [at + 900000, 25],
+        ],
+      },
+    ]);
+    expect(
+      usageTimeline({ ...data, buckets: [...buckets].reverse(), orbs: data.orbs }, "orb").spec,
+    ).toEqual(chart);
+  });
+  it("limits orb lines by volume then ID and preserves totals in Other", () => {
+    const orbs = ["h", "g", "f", "e", "d", "c", "b", "a"].map((id) => ({
+      ...empty,
+      id,
+      name: id === "a" ? "Other" : "Same",
+    }));
+    const buckets = orbs.map((orb) => ({
+      ...data.buckets[0]!,
+      ...empty,
+      orbId: orb.id,
+      input: 10,
+      calls: 1,
+    }));
+    const chart = usageTimeline({ ...data, buckets, orbs }, "orb").spec;
+    expect(chart.series.map((s) => s.name)).toEqual([
+      "Other · a",
+      "Same · b",
+      "Same · c",
+      "Same · d",
+      "Same · e",
+      "Other",
+    ]);
+    expect(chart.series.find((s) => s.name === "Other")?.points).toEqual([
+      [at, 30],
+      [at + 900000, 0],
+    ]);
+    expect(chart.series.flatMap((s) => s.points).reduce((sum, p) => sum + p[1], 0)).toBe(80);
+    expect(usageTimeline({ ...data, buckets: [], orbs: [] }, "orb").spec.series).toEqual([
+      {
+        name: "All tokens",
+        points: [
+          [at, 0],
+          [at + 900000, 0],
+        ],
+      },
+    ]);
+  });
+  it("keeps legend targets beside the chart: measures or IDs, never aggregate names", () => {
+    expect([...usageTimeline(data, "token_kind").targets]).toEqual([
+      ["Uncached input", { measure: "input" }],
+      ["Cached input", { measure: "cacheRead" }],
+      ["Cache write", { measure: "cacheWrite" }],
+      ["Output", { measure: "output" }],
+    ]);
+    const orbs = ["a/b", "b", "c", "d", "e", "f", "g"].map((id) => ({
+      ...empty,
+      id,
+      name: id === "a/b" ? "Other" : id === "b" ? null : "Same",
+    }));
+    const buckets = orbs.map((orb) => ({ ...data.buckets[0]!, orbId: orb.id }));
+    const presentation = usageTimeline({ ...data, orbs, buckets }, "orb");
+    expect([...presentation.targets]).toEqual([
+      ["Other · a/b", { orbId: "a/b" }],
+      ["b", { orbId: "b" }],
+      ["Same · c", { orbId: "c" }],
+      ["Same · d", { orbId: "d" }],
+      ["Same · e", { orbId: "e" }],
+    ]);
+    expect(presentation.targets.has("Other")).toBe(false);
+    expect(presentation.spec.series).toHaveLength(6);
+    for (const breakdown of ["use", "model"] as const)
+      expect(usageTimeline(data, breakdown).targets.size).toBe(0);
+    expect(usageTimeline({ ...data, buckets: [], orbs: [] }, "orb").targets.size).toBe(0);
   });
   it("limits model lines to five leaders plus Other without discarding usage", () => {
     const buckets = Array.from({ length: 8 }, (_, i) => ({
@@ -116,7 +219,7 @@ describe("usage presentation", () => {
       cacheRead: 0,
       cacheWrite: 0,
     }));
-    const chart = usageTimeline({ ...data, buckets }, "model");
+    const chart = usageTimeline({ ...data, buckets }, "model").spec;
     expect(chart.series).toHaveLength(6);
     expect(chart.series.find((s) => s.name === "Other")?.points).toEqual([
       [at, 30],

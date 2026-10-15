@@ -143,6 +143,30 @@ describe("line chart spec", () => {
     expect(JSON.stringify(lines[0]?.encoding?.["opacity"])).toContain("datum.s == hl");
   });
 
+  it("keeps actions out of Vega data and exposes actionable single-series labels", () => {
+    const input = line(3);
+    const seriesActions = new Map([
+      ["zone-0", { href: "/orbs/a%2Fb" }],
+      ["zone-1", { onSelect: () => {} }],
+    ]);
+    const spec = lineChartSpec(input, { narrow: false, height: 180, seriesActions });
+    const label = flatten(spec.layer ?? []).find(
+      (layer) => layer.encoding?.["text"] && (layer as { name?: string }).name === "end_labels",
+    );
+    expect(label).toBeDefined();
+    expect(label?.encoding?.["href"]).toBeUndefined();
+    expect(label?.data?.values).toBeUndefined();
+    expect(JSON.stringify(spec)).not.toMatch(/href|onSelect/);
+    expect(JSON.stringify(input)).not.toMatch(/href|onSelect/);
+    expect(() => compile(spec as Parameters<typeof compile>[0])).not.toThrow();
+    const single = lineChartSpec(line(1), {
+      narrow: false,
+      height: 180,
+      seriesActions: new Map([["zone-0", { href: "/orbs/a" }]]),
+    });
+    expect(JSON.stringify(single)).toContain('"field":"label"');
+  });
+
   it("replaces end labels with the key at phone width", () => {
     const spec = lineChartSpec(line(3), { narrow: true, height: 180 });
     expect(JSON.stringify(spec)).not.toContain('"field":"label"');
