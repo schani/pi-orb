@@ -114,3 +114,19 @@ it("redacts and bounds SDK errors without serializing unrelated fields or stderr
   expect(assistant.errorText).toContain("Denied [redacted]");
   expect(JSON.stringify([api, errors, assistant])).not.toMatch(/opaque-secret|private/);
 });
+
+it("redacts complete credentials before summary, stack and stderr truncation boundaries", () => {
+  const secret = "opaque-boundary-credential";
+  const diagnostic = new ClaudeDiagnostics([secret]);
+  const message = "a".repeat(1018) + secret;
+  const error = new Error(message);
+  error.stack = "b".repeat(8186) + secret;
+  diagnostic.stderr(secret + "d".repeat(8186));
+  const captured = diagnostic.capture(error, "e".repeat(1018) + secret);
+  expect(captured.message).toHaveLength(1024);
+  expect(captured.message).toBe(`${"a".repeat(1018)}[redac`);
+  expect(captured.diagnostics.split("\n")[0]).toBe(`${"e".repeat(1018)}[redac`);
+  expect(captured.diagnostics).toContain(`${"b".repeat(8186)}[redac`);
+  expect(captured.diagnostics).toContain("stderr:\nacted]");
+  expect(JSON.stringify(captured)).not.toContain("opaque");
+});

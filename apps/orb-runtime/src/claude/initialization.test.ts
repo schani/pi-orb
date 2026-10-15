@@ -98,6 +98,7 @@ function fixture(autoDrain = true, factory?: ClaudeOrbAgentOptions["sdkFactory"]
   let settingsFailure: "set_model" | "flags" | "persistence" | undefined;
   let failHistory = false;
   let failClose = false;
+  let streamFailure: Error | undefined;
   let scans = 0;
   let current = { exit: gate(), close: gate() };
   let stream: ScheduledClaudeQuery | undefined;
@@ -130,6 +131,7 @@ function fixture(autoDrain = true, factory?: ClaudeOrbAgentOptions["sdkFactory"]
         const sdk: ClaudeQuery = {
           async *[Symbol.asyncIterator]() {
             yield* output;
+            if (streamFailure) throw streamFailure;
           },
           close() {
             output.close();
@@ -194,6 +196,10 @@ function fixture(autoDrain = true, factory?: ClaudeOrbAgentOptions["sdkFactory"]
     frames,
     nativePath,
     dir,
+    failStream(error: Error) {
+      streamFailure = error;
+      stream?.endOutput();
+    },
     failClose: () => {
       failClose = true;
     },
@@ -327,6 +333,87 @@ it("captures production-spawner stderr, exit and SDK cause without credentials",
   expect(health.error.diagnostics).toContain("exitCode=17");
   expect(JSON.stringify({ health, records: f.history.view })).not.toContain(secret);
 });
+
+it.each([
+  ["iterator", "none"],
+  ["payload_listener", "none"],
+  ["all_listener", "none"],
+  ["iterator", "sdk"],
+  ["iterator", "history"],
+] as const)(
+  "retains stream failure diagnostics after %s exceptions and %s cleanup failure",
+  async (origin, cleanup) => {
+    const cause = Object.assign(new Error(`socket refused ${secret}`), { code: "ECONNRESET" });
+    const original = new Error(`stream consumption rejected ${secret}`, { cause });
+    const f = fixture();
+    expect((await f.attach()).isOk()).toBe(true);
+    expect(
+      (await f.agent.submitMessage([{ type: "text", text: "private prompt" }], "stream-op")).isOk(),
+    ).toBe(true);
+    const failedHealthAtNotification: unknown[] = [];
+    f.agent.subscribe((frame) => {
+      if (frame.type !== "runtime.event") return;
+      if (frame.event.type === "tool_state") throw original;
+      if (origin === "all_listener") {
+        failedHealthAtNotification.push(f.agent.getHealth());
+        throw new Error("secondary listener failure");
+      }
+    });
+    if (origin === "iterator") f.failStream(original);
+    else
+      void f.emit(new NoSimulationTask("stream-failure", false), {
+        type: "assistant",
+        uuid: "failing-assistant",
+        session_id: f.state.id,
+        parent_tool_use_id: null,
+        message: { content: [{ type: "tool_use", id: "call", name: "Bash", input: {} }] },
+      } as unknown as SDKMessage);
+    await expect(f.agent.waitForStream()).resolves.toBeUndefined();
+    const health = f.agent.getHealth();
+    expect(health).toMatchObject({
+      status: "failed",
+      orbId: "o",
+      error: {
+        code: "claude_stream_failed",
+        retryable: true,
+        message: expect.stringContaining("stream consumption rejected [redacted]"),
+        diagnostics: expect.stringContaining("ECONNRESET"),
+      },
+    });
+    if (health.status !== "failed") return;
+    expect(health.error.message).toContain("socket refused [redacted]");
+    expect(health.error.diagnostics).toContain("initialization.test.ts");
+    const identity = JSON.parse(health.error.diagnostics?.split("\n")[0] ?? "{}");
+    expect(identity).toEqual({
+      stage: origin === "iterator" ? "sdk_iteration" : "message_processing",
+      sessionId: f.state.id,
+      queryId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      operationId: "stream-op",
+    });
+    expect(health.error.message.length).toBeLessThanOrEqual(1024);
+    expect(health.error.diagnostics?.length).toBeLessThanOrEqual(16384);
+    expect(JSON.stringify({ health, frames: f.frames, records: f.history.view })).not.toMatch(
+      /private-provider-secret|private prompt|secondary listener failure/,
+    );
+    expect(f.agent.gateView().acceptingWork).toBe(false);
+    expect(
+      (await f.agent.submitMessage([{ type: "text", text: "blocked" }], "blocked")).isErr(),
+    ).toBe(true);
+    expect(
+      (await f.agent.changeSettings({ type: "set_thinking", thinkingLevel: "low" })).isErr(),
+    ).toBe(true);
+    expect(f.factories()).toBe(2);
+    if (cleanup !== "none") {
+      if (cleanup === "sdk") f.failClose();
+      else f.failHistory();
+      await expect(f.agent.closeExtensions()).resolves.toBeUndefined();
+      expect(f.agent.getHealth()).toEqual(health);
+      expect(f.agent.gateView().acceptingWork).toBe(false);
+    }
+    expect(failedHealthAtNotification).toEqual(origin === "all_listener" ? [health] : []);
+    expect(settings(f)).toMatchObject({ event: { writable: false } });
+  },
+);
 
 it.each(failures)(
   "seals settings after %s failure while rotating a ready session",

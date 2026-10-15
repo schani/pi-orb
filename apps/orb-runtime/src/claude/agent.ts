@@ -332,25 +332,14 @@ export class ClaudeOrbAgent implements OrbAgent {
     };
   }
   private fail(code: string, message: string, retryable = false, diagnostics?: string): void {
+    // Cleanup/history failures must not replace the initiating stream exception.
+    if (this.health.status === "failed" && this.health.error.code === "claude_stream_failed")
+      return;
     this.accepting = false;
     this.outcome = "failed";
     this.operationError = message;
-    if (this.settings !== null) {
-      this.settings = { ...this.settings, writable: false };
-      this.event(this.settings);
-    }
-    if (this.compaction !== null && this.health.status !== "failed")
-      this.emit({
-        v: 1,
-        type: "server.error",
-        at: new Date().toISOString(),
-        error: {
-          code: "internal",
-          message: "Context compaction could not be safely completed; restart required.",
-          retryable: false,
-        },
-      });
-    this.compaction?.finish(err({ code: "internal", message }));
+    const notifyCompaction = this.compaction !== null && this.health.status !== "failed";
+    if (this.settings !== null) this.settings = { ...this.settings, writable: false };
     this.health = {
       v: 1,
       orbId: this.options.orbId,
@@ -361,6 +350,25 @@ export class ClaudeOrbAgent implements OrbAgent {
         : {}),
       error: { code, message, retryable, ...(diagnostics === undefined ? {} : { diagnostics }) },
     };
+    this.compaction?.finish(err({ code: "internal", message }));
+    // Subscriber failures must not prevent health polling from retaining the original failure.
+    Result.fromThrowable(
+      () => {
+        if (this.settings !== null) this.event(this.settings);
+        if (notifyCompaction)
+          this.emit({
+            v: 1,
+            type: "server.error",
+            at: new Date().toISOString(),
+            error: {
+              code: "internal",
+              message: "Context compaction could not be safely completed; restart required.",
+              retryable: false,
+            },
+          });
+      },
+      () => ({ code: "listener_failed" as const }),
+    )();
   }
   private emit(frame: ServerFrame): void {
     for (const listener of this.listeners) listener(frame);
@@ -1155,9 +1163,12 @@ export class ClaudeOrbAgent implements OrbAgent {
     return this.consuming;
   }
   private async consume(sdk: ClaudeQuery, diagnostics: ClaudeDiagnostics): Promise<void> {
+    const queryId = this.queryId;
+    let stage = "sdk_iteration";
     const result = await ResultAsync.fromThrowable(
       async () => {
         for await (const message of sdk) {
+          stage = "message_processing";
           const diagnostic =
             message.type === "result" && (message.is_error || message.subtype !== "success")
               ? diagnostics.result(message)
@@ -1185,13 +1196,24 @@ export class ClaudeOrbAgent implements OrbAgent {
             );
             if (recorded.isErr()) {
               this.fail("history_unavailable", recorded.error.message);
+              stage = "sdk_iteration";
               continue;
             }
           }
           this.onMessage(message);
+          stage = "sdk_iteration";
         }
       },
-      () => ({ message: "Claude SDK stream failed; retained native state requires inspection." }),
+      (error) =>
+        diagnostics.capture(
+          error,
+          JSON.stringify({
+            stage,
+            sessionId: this.state?.id ?? null,
+            queryId,
+            operationId: this.activity.operationId,
+          }),
+        ),
     )();
     if (
       result.isErr() &&
@@ -1201,9 +1223,15 @@ export class ClaudeOrbAgent implements OrbAgent {
     ) {
       this.activity.rootFinished();
     } else if (result.isErr()) {
-      this.outcome = "failed";
-      this.operationError = result.error.message;
-      this.fail("claude_stream_failed", result.error.message, true);
+      this.fail(
+        "claude_stream_failed",
+        `Claude stream failed during ${stage === "sdk_iteration" ? "SDK iteration" : "message processing"}: ${result.error.message}`.slice(
+          0,
+          1024,
+        ),
+        true,
+        result.error.diagnostics,
+      );
     } else if (this.closing === null && !(this.compaction !== null && this.outcome === "aborted")) {
       this.fail(
         "claude_stream_ended",

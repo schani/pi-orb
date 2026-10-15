@@ -89,7 +89,7 @@ export class ClaudeDiagnostics {
     };
   }
 
-  capture(error: unknown): { message: string; diagnostics: string } {
+  capture(error: unknown, context?: string): { message: string; diagnostics: string } {
     const extracted = Result.fromThrowable(
       () => {
         const messages: string[] = [];
@@ -120,12 +120,13 @@ export class ClaudeDiagnostics {
     )().unwrapOr({ message: "Unknown error", diagnostics: "Unreadable error" });
     const stderr = this.redact(this.tail);
     const stderrLine = stderr.trim().split("\n").at(-1);
+    const prefix = context === undefined ? "" : `${this.redact(context).slice(0, 1024)}\n`;
     return {
       message: this.redact(extracted.message + (stderrLine ? `; stderr: ${stderrLine}` : ""))
         .replace(/\s+/g, " ")
         .slice(0, 1024),
       diagnostics:
-        `${this.redact(extracted.diagnostics).slice(0, 8192)}\n${this.exit}\nstderr:\n${stderr.slice(-8192)}`.slice(
+        `${prefix}${this.redact(extracted.diagnostics).slice(0, 8192)}\n${this.exit}\nstderr:\n${stderr.slice(-8192)}`.slice(
           0,
           16384,
         ),
