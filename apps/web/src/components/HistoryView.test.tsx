@@ -1,4 +1,4 @@
-import { type HistoryRecord, projectRecordDetail } from "@pi-orb/protocol";
+import { type HistoryRecord, type OrbMessageView, projectRecordDetail } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import type { ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -1492,4 +1492,133 @@ describe("HistoryView", () => {
       ),
     ).toContain("Loading…");
   });
+});
+
+describe("orb correspondence", () => {
+  const idle = { liveBlocks: [], tools: [], busy: false };
+  const senderId = "629e53de-a2c9-4f1b-87a6-437fd415e8de";
+  const body =
+    '<script>bad()</script>\n<img src=x onerror="bad()"> & "quotes"\n**literal**\n' +
+    "snapshot-".repeat(90);
+  const content = [
+    { type: "text" as const, text: body },
+    { type: "text" as const, text: "second" },
+  ];
+  const pending: OrbMessageView = {
+    id: "peer-inbox",
+    orbId: "receiver",
+    status: "queued",
+    content,
+    system: { kind: "orb_message", senderOrbId: senderId },
+    createdAt: "now",
+    updatedAt: "now",
+  };
+  const receipt: HistoryRecord = {
+    id: "peer-record",
+    parentId: null,
+    timestamp: "now",
+    overflow: {},
+    type: "event",
+    eventType: "orb.message",
+    sender: { orbId: senderId },
+    content,
+    inboxMessageIds: [pending.id],
+  };
+
+  it.each([false, true])("renders full literal correspondence once, pending=%s", (queued) => {
+    const html = renderToStaticMarkup(
+      <HistoryView
+        {...idle}
+        records={
+          queued
+            ? []
+            : [
+                message("before", "assistant", "before"),
+                receipt,
+                message("after", "assistant", "after"),
+              ]
+        }
+        queuedMessages={[pending]}
+        senderNames={new Map([[senderId, "runtime handshake"]])}
+      />,
+    );
+    expect(html.match(/class="rec rec-peer(?: rec-q)?"/g)).toHaveLength(1);
+    expect(html).toContain(`href="/orbs/${senderId}">runtime handshake</a>`);
+    expect(html).toContain(
+      "&lt;script&gt;bad()&lt;/script&gt;\n&lt;img src=x onerror=&quot;bad()&quot;&gt; &amp; &quot;quotes&quot;\n**literal**\n" +
+        "snapshot-".repeat(90) +
+        "\nsecond",
+    );
+    expect(html).not.toMatch(/<script>|<img|<strong>literal<\/strong>|rec-you/);
+    const band = html.match(/<article class="rec rec-peer[^"]*"[^>]*>([\s\S]*?)<\/article>/)?.[1];
+    expect(band).toBeDefined();
+    expect(band).not.toContain("chat-markdown");
+    if (!queued) {
+      expect(html.match(/class="rec rec-orb"/g)).toHaveLength(2);
+      expect(html.indexOf("before")).toBeLessThan(html.indexOf("peer-body"));
+      expect(html.indexOf("peer-body")).toBeLessThan(html.indexOf("after"));
+      expect(html).not.toMatch(/rec-q|rec-status/);
+    }
+  });
+
+  it("requires trusted provenance, not human text, correlation or another event type", () => {
+    const human = {
+      ...message("human", "user", `orb.message from ${senderId}`),
+      inboxMessageIds: [pending.id],
+    };
+    const { system: _system, ...humanPending } = pending;
+    const html = renderToStaticMarkup(
+      <HistoryView
+        {...idle}
+        records={[human, { ...receipt, eventType: "custom.message" }]}
+        queuedMessages={[humanPending]}
+      />,
+    );
+    expect(html).toContain('class="rec rec-you"');
+    expect(html).not.toMatch(/rec-peer|href="\/orbs\//);
+  });
+
+  it.each([
+    ["queued", "running", "queued"],
+    ["delivering", "running", "delivering"],
+    ["queued", "failed", "blocked"],
+    ["delivering", "failed", "blocked"],
+    ["queued", "stopped", "paused"],
+    ["delivered", "failed", "delivered"],
+    ["failed", "running", "failed"],
+  ] as const)("preserves attribution for %s while %s", (status, state, label) => {
+    const html = renderToStaticMarkup(
+      <HistoryView
+        {...idle}
+        records={[]}
+        orbState={state}
+        queuedMessages={[
+          { ...pending, status, ...(status === "failed" ? { error: "Rejected <token>" } : {}) },
+        ]}
+        senderNames={new Map([[senderId, "runtime handshake"]])}
+      />,
+    );
+    expect(html).toContain(`class="rec-status">${label}</span>`);
+    expect(html).toContain(`href="/orbs/${senderId}">runtime handshake</a>`);
+    expect(html).toContain("peer-body");
+    if (status === "failed") expect(html.match(/Rejected &lt;token&gt;/g)).toHaveLength(1);
+  });
+
+  it.each(["renamed <sender>", null, "", undefined])(
+    "resolves current names without mutating attribution: %s",
+    (name) => {
+      const before = JSON.stringify(receipt);
+      const html = renderToStaticMarkup(
+        <HistoryView
+          {...idle}
+          records={[receipt]}
+          senderNames={name === undefined ? new Map() : new Map([[senderId, name]])}
+        />,
+      );
+      expect(html).toContain(
+        `href="/orbs/${senderId}">${name ? "renamed &lt;sender&gt;" : senderId}</a>`,
+      );
+      expect(JSON.stringify(receipt)).toBe(before);
+    },
+  );
 });

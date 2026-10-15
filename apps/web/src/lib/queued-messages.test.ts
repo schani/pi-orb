@@ -151,6 +151,18 @@ describe("queued message list updates", () => {
     expect(hasDeliveredMessageAwaitingHistory([delivered], [displayRecord(represented)])).toBe(
       false,
     );
+    const peer: HistoryRecord = {
+      ...represented,
+      eventType: "orb.message",
+      sender: { orbId: "629e53de-a2c9-4f1b-87a6-437fd415e8de" },
+    };
+    expect(messagesAwaitingHistory([delivered], [displayRecord(peer)])).toEqual([]);
+    expect(
+      messagesAwaitingHistory(
+        [delivered],
+        [displayRecord({ ...peer, inboxMessageIds: ["unrelated"] })],
+      ),
+    ).toEqual([delivered]);
   });
 
   it("does not read inbox identity from native overflow", () => {

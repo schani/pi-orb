@@ -25,7 +25,6 @@ import {
   type OrbBootContext,
   type OrbMessageSystem,
   OrbMessageSystemSchema,
-  orbMessageContext,
   projectDisplayRecord,
   projectRecordDetail,
   projectRecordImage,
@@ -36,6 +35,7 @@ import {
   reasoningHeadline,
   type ServerFrame,
   type SettingsAction,
+  systemInputModelContent,
 } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { err, errAsync, ok, Result, ResultAsync } from "neverthrow";
@@ -2103,27 +2103,22 @@ export class ClaudeOrbAgent implements OrbAgent {
       ...(system === undefined && !boot ? { origin: { kind: "human" as const } } : {}),
       message: {
         role: "user",
-        content: [
-          ...(system?.kind === "orb_message"
-            ? [{ type: "text" as const, text: orbMessageContext(system.senderOrbId) }]
-            : []),
-          ...content.map((block) =>
-            block.type === "text"
-              ? { type: "text" as const, text: block.text }
-              : {
-                  type: "image" as const,
-                  source: {
-                    type: "base64" as const,
-                    media_type: block.mediaType as
-                      | "image/png"
-                      | "image/jpeg"
-                      | "image/gif"
-                      | "image/webp",
-                    data: block.data,
-                  },
+        content: systemInputModelContent(content, system).map((block) =>
+          block.type === "text"
+            ? { type: "text" as const, text: block.text }
+            : {
+                type: "image" as const,
+                source: {
+                  type: "base64" as const,
+                  media_type: block.mediaType as
+                    | "image/png"
+                    | "image/jpeg"
+                    | "image/gif"
+                    | "image/webp",
+                  data: block.data,
                 },
-          ),
-        ],
+              },
+        ),
       },
     });
     return ok(undefined);

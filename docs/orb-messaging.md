@@ -32,6 +32,8 @@ Trusted `OrbMessageSystem` provenance traverses delivery, native receipts, histo
 
 Stable sender ID is not incarnation-scoped; no sender name/owner/project/incarnation snapshots or sender FK. Sender deletion preserves received messages; attribution survives sender/inbox removal. Inbox retention/dedupe lasts until receiver deletion, history follows receiver retention/archive; no TTLs/tombstones. Receiver deletion does not remove copies sent elsewhere.
 
+**Projection decision (2026-10-15; prototype, unqualified):** codecs decode authenticated delivery or committed receipts into transient `SystemInput`; one constructor owns peer event fields and public-body formatting, and one renderer adds model-only context before provider image encoding. Native peers project directly from placed input, without an intermediate human record. SQL/wire/native formats, Sleep and #108 notification constructors remain unchanged. A broader shared Sleep/platform/child constructor was rejected: baseline churn increased owned production review from 239 to 290 lines against Main `6d1cecb`, including the new helper. Evidence: `.context/cross-orb/redesign112/`.
+
 ## Presentation and observability
 
 Tool responses identify target/inbox record or typed rejection/unknown acceptance. Pending/history bands retain sender/body and visible durable errors (`docs/web-ui.md`). One content-free `lifecycle: orb=<target> message-accepted sender=<sender> message=<message-id>` edge correlates each new acceptance; retries emit none. Existing wake/delivery/failure edges, native history and inbox status/errors explain subsequent outcomes without logging message text.

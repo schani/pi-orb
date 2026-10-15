@@ -134,7 +134,11 @@ it("maps trusted peer receipts to attributed events, not human messages", () => 
       ],
     ]),
   )._unsafeUnwrap();
-  expect(records[0]).toMatchObject({
+  expect(records[0]).toEqual({
+    id: "session:2",
+    parentId: null,
+    timestamp: new Date(1).toISOString(),
+    overflow: {},
     type: "event",
     eventType: "orb.message",
     sender: { orbId: senderOrbId },

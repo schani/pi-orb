@@ -18,7 +18,7 @@ import {
   JsonObjectSchema,
   type JsonValue,
   OrbMessageSenderSchema,
-  orbMessageBody,
+  systemInputEvent,
 } from "@pi-orb/protocol";
 import { err, ok, Result } from "neverthrow";
 import { Type } from "typebox";
@@ -28,7 +28,8 @@ const IndexSchema = Type.Object({
   records: Type.Array(HistoryRecordSchema),
   fingerprints: Type.Array(Type.String()),
 });
-const ProvenanceEntrySchema = Type.Union([
+const ProvenanceSchema = Type.Record(
+  Type.String(),
   Type.Object(
     {
       messageIds: Type.Array(Type.String()),
@@ -36,20 +37,11 @@ const ProvenanceEntrySchema = Type.Union([
       system: Type.Optional(Type.Boolean()),
       compaction: Type.Optional(Type.Boolean()),
       boot: Type.Optional(Type.Boolean()),
+      sender: Type.Optional(OrbMessageSenderSchema),
     },
     { additionalProperties: false },
   ),
-  Type.Object(
-    {
-      messageIds: Type.Array(Type.String(), { minItems: 1, maxItems: 1 }),
-      operationId: Type.String(),
-      system: Type.Literal(true),
-      sender: OrbMessageSenderSchema,
-    },
-    { additionalProperties: false },
-  ),
-]);
-const ProvenanceSchema = Type.Record(Type.String(), ProvenanceEntrySchema);
+);
 
 export interface ClaudeHistoryError {
   readonly type: "claude_history_error";
@@ -62,6 +54,16 @@ export interface Provenance {
   readonly sender?: { readonly orbId: string };
   readonly compaction?: boolean;
   readonly boot?: boolean;
+}
+function validProvenance(value: Provenance): boolean {
+  return (
+    !Object.hasOwn(value, "sender") ||
+    (value.sender !== undefined &&
+      value.system === true &&
+      value.messageIds.length === 1 &&
+      !Object.hasOwn(value, "boot") &&
+      !Object.hasOwn(value, "compaction"))
+  );
 }
 export interface HistoryFiles {
   read(path: string): string | null;
@@ -189,7 +191,7 @@ export class ClaudeHistory {
         const provenance = files.read(this.provenancePath);
         if (provenance !== null) {
           const value: unknown = JSON.parse(provenance);
-          if (!Check(ProvenanceSchema, value)) {
+          if (!Check(ProvenanceSchema, value) || !Object.values(value).every(validProvenance)) {
             this.loadError = {
               type: "claude_history_error",
               message: "Malformed Claude provenance index.",
@@ -238,7 +240,7 @@ export class ClaudeHistory {
   }
   correlate(uuid: string, provenance: Provenance): Result<void, ClaudeHistoryError> {
     if (this.loadError !== null) return err(this.loadError);
-    if (!Check(ProvenanceEntrySchema, provenance))
+    if (!Check(ProvenanceSchema, { [uuid]: provenance }) || !validProvenance(provenance))
       return err({ type: "claude_history_error", message: "Invalid Claude input provenance." });
     const existing = this.provenance[uuid];
     if (existing !== undefined)
@@ -356,6 +358,14 @@ export class ClaudeHistory {
             eventType: "claude.native_metadata",
             overflow: { native: { type: native.type, uuid: id, isMeta: true } },
           };
+        } else if (native.type === "user" && provenance?.sender !== undefined) {
+          record = systemInputEvent({
+            ...base,
+            overflow: { native },
+            sender: provenance.sender,
+            content: claudeContent(message.content),
+            inboxMessageIds: [...provenance.messageIds],
+          });
         } else if (native.type === "user" || native.type === "assistant") {
           const content = claudeContent(message.content);
           const role =
@@ -375,17 +385,10 @@ export class ClaudeHistory {
               ? {
                   ...base,
                   type: "event",
-                  eventType:
-                    provenance.sender === undefined ? "claude.platform_message" : "orb.message",
-                  ...(provenance.sender === undefined ? {} : { sender: provenance.sender }),
-                  content:
-                    provenance.sender === undefined
-                      ? content
-                      : orbMessageBody(content, provenance.sender.orbId),
+                  eventType: "claude.platform_message",
+                  content,
                   inboxMessageIds: [...provenance.messageIds],
-                  ...(provenance.sender === undefined
-                    ? { custom: { customType: "pi-orb.system-message", display: true } }
-                    : {}),
+                  custom: { customType: "pi-orb.system-message", display: true },
                   overflow: { native },
                 }
               : {

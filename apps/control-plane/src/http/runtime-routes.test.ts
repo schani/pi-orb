@@ -325,7 +325,14 @@ describe("runtime broker routes", () => {
       });
     const accepted = await send();
     expect(accepted.statusCode).toBe(202);
-    expect((await send({ ...payload, senderOrbId: target })).statusCode).toBe(400);
+    for (const invalid of [
+      { ...payload, senderOrbId: target },
+      { ...payload, system: { kind: "orb_message" } },
+      { ...payload, requestId: "" },
+      { ...payload, orbId: "bad" },
+      { ...payload, message: "" },
+    ])
+      expect((await send(invalid)).statusCode).toBe(400);
     expect((await app.inject({ method: "POST", url: ORB_SEND_PATH, payload })).statusCode).toBe(
       401,
     );

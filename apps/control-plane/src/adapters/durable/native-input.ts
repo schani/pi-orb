@@ -1,15 +1,17 @@
 import type { UserMessage } from "@earendil-works/pi-ai";
-import { type MessageInputBlock, type OrbMessageSystem, orbMessageContext } from "@pi-orb/protocol";
+import {
+  type MessageInputBlock,
+  type OrbMessageSystem,
+  systemInputModelContent,
+} from "@pi-orb/protocol";
 
 export function nativeInputContent(
   content: readonly MessageInputBlock[],
   system?: OrbMessageSystem,
 ): UserMessage["content"] {
-  const blocks: UserMessage["content"] = content.map((block) =>
+  const blocks: UserMessage["content"] = systemInputModelContent(content, system).map((block) =>
     block.type === "text" ? block : { type: "image", data: block.data, mimeType: block.mediaType },
   );
-  if (system?.kind === "orb_message")
-    blocks.unshift({ type: "text", text: orbMessageContext(system.senderOrbId) });
   if (system?.kind === "sleep_wake")
     blocks.unshift({
       type: "text",

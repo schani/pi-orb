@@ -27,7 +27,6 @@ import {
   type OrbBootContext,
   type OrbBootContextResponse,
   type OrbMessageSystem,
-  orbMessageContext,
   projectRecordDetail,
   projectRecordImage,
   type RuntimeAlertRequest,
@@ -39,6 +38,7 @@ import {
   reasoningHeadline,
   type ServerFrame,
   type SettingsAction,
+  systemInputModelContent,
 } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { err, errAsync, ok, Result, ResultAsync } from "neverthrow";
@@ -2260,13 +2260,11 @@ export class PiOrbAgent {
         this.startAgentOperation(operationId, manager.getEntries().length);
       this.beginTurnStart();
     }
-    const piContent = content.map((block) =>
+    const piContent = systemInputModelContent(content, system).map((block) =>
       block.type === "text"
         ? { type: "text" as const, text: block.text }
         : { type: "image" as const, data: block.data, mimeType: block.mediaType },
     );
-    if (system?.kind === "orb_message")
-      piContent.unshift({ type: "text", text: orbMessageContext(system.senderOrbId) });
     if (system === undefined) this.triggerAutoName(content);
     return ResultAsync.fromPromise(
       session.sendCustomMessage(

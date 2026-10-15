@@ -1,5 +1,5 @@
 import type { HistoryRecord } from "@pi-orb/protocol";
-import { type SimulationTask } from "determined";
+import type { SimulationTask } from "determined";
 import { err, errAsync, okAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { FAILPOINTS } from "../testkit/failpoints.ts";
@@ -107,7 +107,10 @@ describe("stateful lifecycle campaign", () => {
             >();
             let acceptanceOrder = 0;
             let callers = 2;
-            function accept(_task: SimulationTask, row: OrbMessageRow) {
+            function accept(
+              _task: SimulationTask,
+              row: Pick<OrbMessageRow, "messageId" | "content" | "system">,
+            ) {
               if (accepted.has(row.messageId)) return;
               accepted.set(row.messageId, {
                 content: row.content,
@@ -131,7 +134,11 @@ describe("stateful lifecycle campaign", () => {
                   expect(value.message.system).toEqual(
                     params.sender ? { kind: "orb_message", senderOrbId: PEER } : null,
                   );
-                  accept(task, value.message);
+                  accept(task, {
+                    messageId: params.messageId,
+                    content: params.content,
+                    system: params.sender ? { kind: "orb_message", senderOrbId: PEER } : null,
+                  });
                 }
                 return value;
               });
@@ -139,20 +146,32 @@ describe("stateful lifecycle campaign", () => {
             h.store.scheduleOrbSleep = (task, params) =>
               schedule(task, params).map((row) => {
                 activeSleep = params.sleepId;
-                expect(row.sleepUntil).toBe(task.wallNow() + params.durationSeconds * 1_000);
-                sleeps.set(params.sleepId, present(row.sleepUntil));
+                const deadline = task.wallNow() + params.durationSeconds * 1_000;
+                expect(row.sleepUntil).toBe(deadline);
+                sleeps.set(params.sleepId, deadline);
                 return row;
               });
             const due = h.store.processDueOrbSleep.bind(h.store);
             h.store.processDueOrbSleep = (task, params) =>
               due(task, params).map((value) => {
                 if (value === "wake" || value === "expired") {
-                  expect(activeSleep).toBe(params.sleepId);
+                  const sleepId = present(activeSleep);
+                  expect(params.sleepId).toBe(sleepId);
+                  const sleepUntil = new Date(present(sleeps.get(sleepId))).toISOString();
                   activeSleep = null;
-                  const row = present(
-                    h.store.messageSnapshots(ORB).find((row) => row.messageId === params.sleepId),
-                  );
-                  accept(task, row);
+                  accept(task, {
+                    messageId: sleepId,
+                    content: [
+                      {
+                        type: "text",
+                        text:
+                          value === "wake"
+                            ? "Scheduled sleep finished."
+                            : "Scheduled sleep expired before compute stopped.",
+                      },
+                    ],
+                    system: { kind: value === "wake" ? "sleep_wake" : "sleep_expired", sleepUntil },
+                  });
                 }
                 return value;
               });

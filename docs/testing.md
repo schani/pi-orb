@@ -2,7 +2,7 @@
 
 ## Seeded lifecycle campaign (decision 2026-10-14)
 
-`lifecycle-campaign.dst.test.ts` runs two concurrent callers with independent compute/history workers over reachable lifecycle histories. A commit ledger tracks admission order, content, provenance, Sleep deadlines and explicit revocations independently of responses. Every still-authorized input requires a durable session receipt and replicated delivered status; failed rows/states never waive delivery.
+`lifecycle-campaign.dst.test.ts` runs two concurrent callers with independent compute/history workers over reachable lifecycle histories. A commit ledger tracks admission order, content, provenance, Sleep deadlines and explicit revocations independently of responses. Sleep notice expectations use committed Sleep IDs and request-derived deadlines plus the due commit outcome, never queued rows or production content builders (oracle correction 2026-10-15). Every still-authorized input requires a durable session receipt and replicated delivered status; failed rows/states never waive delivery.
 
 Fair quiescence joins actors, removes injected faults and budgets remaining Sleep, boot/setup, drain/retry, quarantine and FIFO-page deadlines. Late timers remain active. Commands/results and the normal runDst failure trace retain reproduction evidence. Generic failpoint probabilities and host interruptions explore environmental failures.
 

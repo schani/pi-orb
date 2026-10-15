@@ -8,7 +8,7 @@ import {
   type JsonValue,
   type MessageRecord,
   OrbMessageSystemSchema,
-  orbMessageBody,
+  systemInputEvent,
 } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
 import { Check } from "typebox/value";
@@ -169,7 +169,7 @@ function inboxMessageIds(rawDetails: unknown): string[] {
   return typeof single === "string" ? [single] : [];
 }
 
-function mapUserContent(content: unknown): ContentBlock[] {
+export function mapUserContent(content: unknown): ContentBlock[] {
   if (typeof content === "string") return [textBlock(content)];
   if (!Array.isArray(content)) return [];
   const blocks: ContentBlock[] = [];
@@ -578,14 +578,14 @@ export function mapPiEntry(entry: unknown): Result<HistoryRecord, MappingError> 
           ids.length !== 1
         )
           return fail("Invalid peer inbox receipt");
-        return ok({
-          ...identity,
-          type: "event",
-          eventType: "orb.message",
-          sender: { orbId: system.senderOrbId },
-          content: orbMessageBody(mapUserContent(entry["content"]), system.senderOrbId),
-          inboxMessageIds: ids,
-        });
+        return ok(
+          systemInputEvent({
+            ...identity,
+            sender: { orbId: system.senderOrbId },
+            content: mapUserContent(entry["content"]),
+            inboxMessageIds: ids,
+          }),
+        );
       }
       return ok({
         ...identity,

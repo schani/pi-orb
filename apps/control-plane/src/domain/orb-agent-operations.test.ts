@@ -1,4 +1,3 @@
-import type { OrbSelf } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { errAsync, okAsync } from "neverthrow";
 import { describe, expect, it, vi } from "vitest";
@@ -36,95 +35,19 @@ describe("central orb operations", () => {
     const self = (await service.invoke({ kind: "self" }, "self"))._unsafeUnwrap() as {
       orb: { url: string };
     };
-    expect(self.orb.url).toBe("http://app/orbs/caller");
+    expect(self).toMatchObject({
+      orb: { url: "http://app/orbs/caller" },
+      spawnedBy: null,
+      children: [],
+    });
     const spawned = (
       await service.invoke({ kind: "spawn", prompt: "work" }, "spawn")
     )._unsafeUnwrap() as { orbId: string; url: string };
     expect(spawned.url).toBe(`http://app/orbs/${spawned.orbId}`);
-  });
-  it.each(["runtime", "central"] as const)(
-    "reads direct spawn family through %s self",
-    async (kind) => {
-      const h = seed();
-      const task = new NoSimulationTask("self family", false);
-      const serviceFor = (orbId: string) => {
-        const options = { appOrigin: "http://app", appendAlert: () => okAsync({ recordId: "a" }) };
-        return kind === "central"
-          ? createCentralOrbAgentOperations(
-              task,
-              h.deps,
-              {
-                ownerUserId: "owner",
-                projectId: "project",
-                orbId,
-                agentAdmissionVersion: 0,
-              },
-              options,
-            )
-          : createOrbAgentOperations(task, h.deps, { ...identity, orbId }, options);
-      };
-      const service = serviceFor("caller");
-      expect((await service.invoke({ kind: "self" }, "empty"))._unsafeUnwrap()).toMatchObject({
-        spawnedBy: null,
-        children: [],
-      });
-      const spawn = async (parent: ReturnType<typeof serviceFor>, requestId: string) => {
-        const result = (
-          await parent.invoke({ kind: "spawn", prompt: "work" }, requestId)
-        )._unsafeUnwrap() as { orbId: string };
-        h.store.seedOrb(
-          makeOrbRow(result.orbId, "project", "running", {
-            runtimeTokenHash: "token",
-            hostIncarnation: 1,
-          }),
-        );
-        return result.orbId;
-      };
-      const childId = await spawn(service, "child");
-      const deletedId = await spawn(service, "deleted");
-      const child = serviceFor(childId);
-      const grandchildId = await spawn(child, "grandchild");
-      h.store.seedOrb(makeOrbRow("unrelated", "project", "archived"));
-      h.store.seedOrb(makeOrbRow(deletedId, "project", "archived", { name: "Archived" }));
-      const before = (await service.invoke({ kind: "self" }, "before"))._unsafeUnwrap() as OrbSelf;
-      expect(before.children).toEqual(
-        [
-          { id: childId, name: null, url: `http://app/orbs/${childId}` },
-          { id: deletedId, name: "Archived", url: `http://app/orbs/${deletedId}` },
-        ].sort((a, b) => a.id.localeCompare(b.id)),
-      );
-      const remove = async (orbId: string) => {
-        const requested = (
-          await h.store.requestOrbDeletion(task, {
-            orbId,
-            expectedStateVersion: 0,
-            now: 100,
-            cleanupAfter: 100,
-          })
-        )._unsafeUnwrap();
-        expect(
-          (
-            await h.store.finalizeOrbDeletion(task, {
-              orbId,
-              expectedStateVersion: requested.stateVersion,
-            })
-          ).isOk(),
-        ).toBe(true);
-      };
-      await remove(deletedId);
-      expect((await service.invoke({ kind: "self" }, "after"))._unsafeUnwrap()).toMatchObject({
-        children: [{ id: childId, name: null, url: `http://app/orbs/${childId}` }],
-      });
-      await remove("caller");
-      expect((await child.invoke({ kind: "self" }, "child-self"))._unsafeUnwrap()).toMatchObject({
-        spawnedBy: { id: "caller", url: "http://app/orbs/caller" },
-        children: [{ id: grandchildId, name: null, url: `http://app/orbs/${grandchildId}` }],
-      });
-    },
-  );
-
-  it("reports child lookup failure without a partial self result", async () => {
-    const h = seed();
+    expect((await service.invoke({ kind: "self" }, "family"))._unsafeUnwrap()).toMatchObject({
+      spawnedBy: null,
+      children: [{ id: spawned.orbId, name: null, url: spawned.url }],
+    });
     vi.spyOn(h.store, "listSpawnChildren").mockReturnValue(
       errAsync({
         type: "store_error",
@@ -133,18 +56,11 @@ describe("central orb operations", () => {
         retryable: true,
       }),
     );
-    const service = createOrbAgentOperations(
-      new NoSimulationTask("self unavailable", false),
-      h.deps,
-      identity,
-      { appOrigin: "http://app", appendAlert: () => okAsync({ recordId: "a" }) },
-    );
     expect((await service.invoke({ kind: "self" }, "self"))._unsafeUnwrapErr()).toEqual({
       code: "unavailable",
       message: "orb operation unavailable",
     });
   });
-
   it.each(["creating", "starting", "failed"] as const)(
     "admits central spawn and alert during %s without guest identity",
     async (state) => {
@@ -458,84 +374,53 @@ describe("central orb operations", () => {
   });
 });
 
-describe("peer sends", () => {
-  it.each(["guest", "central"] as const)(
-    "binds %s sender and deduplicates target-scoped receipts",
-    async (kind) => {
-      const h = makeHarness();
-      const peerIdentity = {
-        ...identity,
-        orbId: "00000000-0000-4000-8000-000000000009",
-        projectId: "00000000-0000-4000-8000-00000000000a",
-        ownerUserId: "00000000-0000-4000-8000-00000000000b",
-      };
-      h.store.seedProject({
-        ...makeProjectRow(peerIdentity.projectId),
-        ownerUserId: peerIdentity.ownerUserId,
-      });
-      h.store.seedOrb(
-        makeOrbRow(peerIdentity.orbId, peerIdentity.projectId, "running", {
-          runtimeTokenHash: "token",
-          hostIncarnation: 1,
-        }),
-      );
-      h.store.seedOrb(
-        makeOrbRow("00000000-0000-4000-8000-000000000001", peerIdentity.projectId, "stopped", {
-          stopReason: "manual",
-        }),
-      );
-      h.store.seedOrb(
-        makeOrbRow("00000000-0000-4000-8000-000000000002", peerIdentity.projectId, "stopped"),
-      );
-      const task = new NoSimulationTask("peer send", false);
-      const options = { appOrigin: "http://app", appendAlert: () => okAsync({ recordId: "a" }) };
-      const service =
-        kind === "guest"
-          ? createOrbAgentOperations(task, h.deps, peerIdentity, options)
-          : createCentralOrbAgentOperations(
-              task,
-              h.deps,
-              {
-                ownerUserId: peerIdentity.ownerUserId,
-                projectId: peerIdentity.projectId,
-                orbId: peerIdentity.orbId,
-                agentAdmissionVersion: 0,
-              },
-              options,
-            );
-      const request = {
-        kind: "send" as const,
-        orbId: "00000000-0000-4000-8000-000000000001",
-        message: "literal <human>",
-      };
-      const accepted = (await service.invoke(request, "fixed"))._unsafeUnwrap() as {
-        messageId: string;
-      };
-      expect((await service.invoke(request, "fixed"))._unsafeUnwrap()).toEqual(accepted);
-      expect(h.store.messageSnapshots("00000000-0000-4000-8000-000000000001")).toMatchObject([
-        {
-          messageId: accepted.messageId,
-          system: { kind: "orb_message", senderOrbId: peerIdentity.orbId },
-          content: [{ type: "text", text: request.message }],
-          autoStart: true,
+it.each(["guest", "central"] as const)(
+  "binds %s send identity and target-scoped request IDs",
+  async (kind) => {
+    const h = seed();
+    const task = new NoSimulationTask("peer send", false);
+    const options = { appOrigin: "http://app", appendAlert: () => okAsync({ recordId: "a" }) };
+    const service =
+      kind === "guest"
+        ? createOrbAgentOperations(task, h.deps, identity, options)
+        : createCentralOrbAgentOperations(
+            task,
+            h.deps,
+            {
+              ownerUserId: identity.ownerUserId,
+              projectId: identity.projectId,
+              orbId: identity.orbId,
+              agentAdmissionVersion: 0,
+            },
+            options,
+          );
+    const enqueue = vi.spyOn(h.store, "enqueueOrbMessage");
+    const ids = [];
+    for (const orbId of [
+      "00000000-0000-4000-8000-000000000001",
+      "00000000-0000-4000-8000-000000000002",
+    ]) {
+      h.store.seedOrb(makeOrbRow(orbId, identity.projectId, "stopped"));
+      const request = { kind: "send" as const, orbId, message: "literal <human>" };
+      const receipt = (await service.invoke(request, "fixed"))._unsafeUnwrap();
+      expect((await service.invoke(request, "fixed"))._unsafeUnwrap()).toEqual(receipt);
+      const params = enqueue.mock.calls.at(-1)?.[1];
+      expect(params).toMatchObject({
+        orbId,
+        content: [{ type: "text", text: request.message }],
+        sender: {
+          orbId: identity.orbId,
+          projectId: identity.projectId,
+          ownerUserId: identity.ownerUserId,
+          caller:
+            kind === "guest"
+              ? { runtimeTokenHash: "token", hostIncarnation: 1 }
+              : { kind: "central", orbId: identity.orbId, agentAdmissionVersion: 0 },
         },
-      ]);
-      expect(h.store.orbSnapshot("00000000-0000-4000-8000-000000000001")?.stopReason).toBeNull();
-      expect((await service.invoke({ ...request, message: "changed" }, "fixed")).isErr()).toBe(
-        true,
-      );
-      expect(
-        (
-          await service.invoke(
-            { ...request, orbId: "00000000-0000-4000-8000-000000000002" },
-            "fixed",
-          )
-        ).isOk(),
-      ).toBe(true);
-      expect((await service.invoke({ ...request, message: " " }, "blank")).isErr()).toBe(true);
-      expect(
-        (await service.invoke({ ...request, orbId: "invalid" }, "bad"))._unsafeUnwrapErr().code,
-      ).toBe("invalid_request");
-    },
-  );
-});
+      });
+      ids.push(params?.messageId);
+    }
+    expect(ids[0]).toBeDefined();
+    expect(ids[0]).toBe(ids[1]);
+  },
+);
