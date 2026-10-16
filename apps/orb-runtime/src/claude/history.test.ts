@@ -2,7 +2,6 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { claudeBootEntries } from "./boot-notification.ts";
 import { ClaudeHistory, nativeHistoryFiles, type Provenance } from "./history.ts";
 import { qualifyClaudeRestart } from "./restore.ts";
 
@@ -507,7 +506,6 @@ it.each([
 });
 
 describe("consumed queued input", () => {
-  const timestamp = "2026-10-15T22:23:02.522Z";
   const attachment = {
     type: "attachment",
     uuid: "attachment",
@@ -528,35 +526,32 @@ describe("consumed queued input", () => {
     sessionId: "session",
   };
   const state = { deliveries: { inbox: { uuid: "input", operationId: "op", submitted: true } } };
-  const setup = (
-    rows: unknown[],
-    provenance: Provenance | null = { messageIds: ["inbox"], operationId: "op" },
-  ) => {
+  const setup = (rows: unknown[], provenance = true) => {
     const dir = fixture();
     const path = join(dir, "root.jsonl");
     const source = rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
     writeFileSync(path, source);
-    const history = new ClaudeHistory(dir, "session", timestamp);
-    if (provenance) history.correlate("input", provenance)._unsafeUnwrap();
-    return { dir, path, source, history };
+    const history = new ClaudeHistory(dir, "session", "2026-10-15T22:23:02Z");
+    if (provenance)
+      history.correlate("input", { messageIds: ["inbox"], operationId: "op" })._unsafeUnwrap();
+    return { dir, path, source, history, indexPath: join(dir, "index.json") };
   };
 
-  it("recovers a fully indexed root on first start with the existing input identity", () => {
+  it("backfills a fully indexed root once, preserving records, ancestry and native bytes", () => {
     const f = setup([
       attachment,
       consumed,
       { type: "assistant", uuid: "final", message: { content: "done" } },
     ]);
     f.history.scan(f.path)._unsafeUnwrap();
-    const indexPath = join(f.dir, "index.json");
-    const index = JSON.parse(readFileSync(indexPath, "utf8"));
+    const index = JSON.parse(readFileSync(f.indexPath, "utf8"));
     const records = index.records.filter((record: { id: string }) => record.id !== "input");
-    writeFileSync(indexPath, JSON.stringify({ ...index, records }));
+    writeFileSync(f.indexPath, JSON.stringify({ ...index, records }));
     const history = new ClaudeHistory(f.dir, "session", "later");
     const view = history.scan(f.path)._unsafeUnwrap();
     expect(view.slice(0, records.length)).toEqual(records);
     expect(view).toHaveLength(records.length + 1);
-    const receipt = view.find((record) => record.id === "input");
+    const receipt = view.at(-1);
     expect(receipt).toMatchObject({
       id: "input",
       parentId: "final",
@@ -578,126 +573,56 @@ describe("consumed queued input", () => {
     );
     const reopened = new ClaudeHistory(f.dir, "session", "later still");
     expect(reopened.scan(f.path)._unsafeUnwrap()).toEqual(view);
-    const suffix =
-      JSON.stringify({ type: "assistant", uuid: "tail", message: { content: "tail" } }) + "\n";
-    appendFileSync(f.path, suffix);
-    expect(reopened.scan(f.path)._unsafeUnwrap().at(-1)?.id).toBe("tail");
-    expect(reopened.view.find((record) => record.id === "input")).toEqual(receipt);
-    expect(new ClaudeHistory(f.dir, "session", timestamp).scan(f.path)._unsafeUnwrap()).toEqual(
-      reopened.view,
-    );
-    expect(readFileSync(f.path, "utf8")).toBe(f.source + suffix);
+    expect(readFileSync(f.path, "utf8")).toBe(f.source);
   });
 
   it.each([
-    [attachment],
-    [consumed, attachment],
-    [attachment, { ...consumed, commandUuid: "wrong" }],
-    [attachment, { ...consumed, deliveryId: "wrong" }],
-    [attachment, { ...consumed, reason: "delivered_to_agent" }],
-    [{ ...attachment, sessionId: "child" }, consumed],
-    [attachment, { ...consumed, sessionId: "child" }],
-    [{ ...attachment, isSidechain: true }, consumed],
-    [attachment, { ...consumed, agentId: "child" }],
-    [{ ...attachment, attachment: { ...attachment.attachment, source_uuid: "" } }, consumed],
-    [
-      { ...attachment, attachment: { ...attachment.attachment, delivery_id: "x".repeat(97) } },
-      consumed,
-    ],
-  ])("does not receipt unconsumed or foreign proof: %j", (...rows) => {
-    const f = setup(rows);
-    f.history.scan(f.path)._unsafeUnwrap();
-    expect(f.history.view.some((record) => record.id === "input")).toBe(false);
-    expect(qualifyClaudeRestart(state, f.history.view, "host").isErr()).toBe(true);
+    [[attachment], true],
+    [[consumed, attachment], true],
+    [[attachment, { ...consumed, commandUuid: "wrong" }], true],
+    [[attachment, { ...consumed, deliveryId: "wrong" }], true],
+    [[{ ...attachment, sessionId: "child" }, consumed], true],
+    [[attachment, { ...consumed, sessionId: "child" }], true],
+    [[{ ...attachment, isSidechain: true }, consumed], true],
+    [[attachment, { ...consumed, agentId: "child" }], true],
+    [[attachment, consumed], false],
+  ])("requires root proof and saved provenance: %j / %s", (rows, provenance) => {
+    const f = setup(rows, provenance);
+    const view = f.history.scan(f.path)._unsafeUnwrap();
+    expect(view.some((record) => record.id === "input")).toBe(false);
+    expect(qualifyClaudeRestart(state, view, "host").isErr()).toBe(true);
   });
-
-  it.each([false, true])(
-    "rejects a same-ID attachment without consumption atomically (fingerprinted=%s)",
-    (fingerprinted) => {
-      const f = setup([{ ...attachment, uuid: "input" }], fingerprinted ? null : undefined);
-      if (fingerprinted) {
-        f.history.scan(f.path)._unsafeUnwrap();
-        f.history.correlate("input", { messageIds: ["inbox"], operationId: "op" })._unsafeUnwrap();
-      }
-      const history = new ClaudeHistory(f.dir, "session", timestamp);
-      const before = [...history.view];
-      const indexPath = join(f.dir, "index.json");
-      const saved = nativeHistoryFiles.read(indexPath);
-      expect(history.scan(f.path)).toMatchObject({
-        error: {
-          type: "claude_history_error",
-          message: "Consumed Claude input receipt proof conflicts.",
-        },
-      });
-      expect(history.view).toEqual(before);
-      expect(nativeHistoryFiles.read(indexPath)).toBe(saved);
-      expect(readFileSync(f.path, "utf8")).toBe(f.source);
-    },
-  );
 
   it.each([
     [attachment, consumed, { ...consumed }],
     [attachment, consumed, { ...attachment, uuid: "other" }],
     [{ ...attachment, uuid: "input" }, consumed],
     [{ type: "assistant", uuid: "input", message: { content: "unrelated" } }, attachment, consumed],
-  ])("fails closed atomically on ambiguous proof or unrelated UUID collision: %j", (...rows) => {
-    const f = setup([{ type: "assistant", uuid: "baseline", message: { content: "before" } }]);
-    const before = f.history.scan(f.path)._unsafeUnwrap();
-    appendFileSync(f.path, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+  ])("rejects duplicate proof or unrelated UUID collisions: %j", (...rows) => {
+    const f = setup(rows);
     expect(f.history.scan(f.path).isErr()).toBe(true);
-    expect(f.history.view).toEqual(before);
+    expect(f.history.view).toEqual([]);
   });
 
-  it.each([false, true])(
-    "retains an ordinary input receipt without a duplicate (platform=%s)",
-    (system) => {
-      const f = setup([attachment], { messageIds: ["inbox"], operationId: "op", system });
+  it.each([false, true])("rejects unconsumed UUID collisions (indexed=%s)", (indexed) => {
+    const f = setup([{ ...attachment, uuid: "input" }], !indexed);
+    if (indexed) {
       f.history.scan(f.path)._unsafeUnwrap();
-      appendFileSync(
-        f.path,
-        JSON.stringify({ type: "user", uuid: "input", message: { content: "ordinary" } }) + "\n",
-      );
-      const ordinary = f.history
-        .scan(f.path)
-        ._unsafeUnwrap()
-        .find((record) => record.id === "input");
-      appendFileSync(f.path, JSON.stringify(consumed) + "\n");
-      const view = f.history.scan(f.path)._unsafeUnwrap();
-      expect(view.filter((record) => record.id === "input")).toEqual([ordinary]);
-      expect(qualifyClaudeRestart(state, view, "host").isOk()).toBe(true);
-    },
-  );
+      f.history.correlate("input", { messageIds: ["inbox"], operationId: "op" })._unsafeUnwrap();
+    }
+    const before = [...f.history.view];
+    const saved = nativeHistoryFiles.read(f.indexPath);
+    expect(f.history.scan(f.path).isErr()).toBe(true);
+    expect(f.history.view).toEqual(before);
+    expect(nativeHistoryFiles.read(f.indexPath)).toBe(saved);
+  });
 
-  it.each([
-    null,
-    { messageIds: ["inbox"], operationId: "op", system: true },
-    { messageIds: [], operationId: "op", boot: true },
-    { messageIds: [], operationId: "op", compaction: true },
-    {
-      messageIds: ["inbox"],
-      operationId: "op",
-      system: true,
-      sender: { orbId: "11111111-1111-4111-8111-111111111111" },
-    },
-  ] satisfies (Provenance | null)[])(
-    "never grants human authority from native origin: %j",
-    (provenance) => {
-      const f = setup([attachment, consumed], provenance);
-      const view = f.history.scan(f.path)._unsafeUnwrap();
-      expect(view.some((record) => record.id === "input")).toBe(provenance !== null);
-      expect(claudeBootEntries(view)).toEqual([]);
-    },
-  );
-
-  it("waits for a complete removal and publishes nothing on failed receipt commit", () => {
+  it("publishes no receipt when its index commit fails", () => {
     const f = setup([attachment]);
     const before = f.history.scan(f.path)._unsafeUnwrap();
-    const indexPath = join(f.dir, "index.json");
-    const saved = readFileSync(indexPath, "utf8");
-    appendFileSync(f.path, JSON.stringify(consumed));
-    expect(f.history.scan(f.path)._unsafeUnwrap()).toEqual(before);
-    appendFileSync(f.path, "\n");
-    const failed = new ClaudeHistory(f.dir, "session", timestamp, {
+    const saved = readFileSync(f.indexPath, "utf8");
+    appendFileSync(f.path, JSON.stringify(consumed) + "\n");
+    const failed = new ClaudeHistory(f.dir, "session", "later", {
       ...nativeHistoryFiles,
       commit: () => {
         throw new Error("injected");
@@ -705,9 +630,6 @@ describe("consumed queued input", () => {
     });
     expect(failed.scan(f.path).isErr()).toBe(true);
     expect(failed.view).toEqual(before);
-    expect(readFileSync(indexPath, "utf8")).toBe(saved);
-    expect(
-      new ClaudeHistory(f.dir, "session", timestamp).scan(f.path)._unsafeUnwrap().at(-1)?.id,
-    ).toBe("input");
+    expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
   });
 });

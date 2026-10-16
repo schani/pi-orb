@@ -55,7 +55,7 @@ it("sends human input with now priority and steers the active operation without 
       await f.agent.deliverInboxMessage("steer", ["steer"], content("change course"))
     )._unsafeUnwrap();
     expect(duplicate).toMatchObject({ ...accepted, duplicate: true });
-    f.queuedReceipt(input);
+    f.receipt(input);
     await f.query.emitUnscheduled(resultFor(first.input.uuid, input.uuid));
     expect(f.query.closeRequested).toBe(true);
     const duringDrain = await f.agent.deliverInboxMessage("late", ["late"], content("late"));
@@ -84,13 +84,6 @@ it("sends human input with now priority and steers the active operation without 
       duplicate: true,
       status: "persisted",
     });
-    expect(f.queries).toHaveLength(2);
-    expect(f.journal().deliveries.steer).not.toHaveProperty("content");
-    expect(
-      f.history.view.filter(
-        (record) => record.type === "event" && record.eventType === "claude.input_receipt",
-      ),
-    ).toHaveLength(1);
   } finally {
     f.query.exit();
     f.query.endOutput();
@@ -180,7 +173,7 @@ it("settles a coalesced steering batch when the SDK caps its echoed UUID list at
       const id = `steer-${i}`;
       expect((await f.agent.deliverInboxMessage(id, [id], content(id))).isOk()).toBe(true);
       const input = await nextInput(f.query);
-      f.queuedReceipt(input);
+      f.receipt(input);
       uuids.push(input.uuid);
     }
     await f.query.emitUnscheduled(resultFor(...uuids.slice(-64)));

@@ -57,7 +57,7 @@ it("steering races root completion without dropping accepted input or releasing 
               const steer = (await f.query.input.next()).value;
               if (steer === undefined) throw new Error("Accepted steer missing.");
               expect(steer).toMatchObject({ priority: "now", origin: { kind: "human" } });
-              f.queuedReceipt(steer);
+              f.receipt(steer);
               await task.checkpoint("durable steering receipt before final result");
               await f.query.emit(task, {
                 ...rootResult,
