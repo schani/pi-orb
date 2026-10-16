@@ -25,6 +25,23 @@ test("live smoke deadlines cover native lifecycle bounds", () => {
     seconds(identity, "OVERALL_TIMEOUT") >= 2 * identityRunning + 2 * identityStopped + 2 * ssh,
   );
 
+  for (const source of [smoke, identity]) {
+    assert.match(source, /export PI_ORB_SMOKE_HTTP=1/);
+    assert.match(source, /export PI_ORB_SMOKE_DEADLINE=\$DEADLINE/);
+    assert.match(source, /\[ "\$limit" -le "\$DEADLINE" \] \|\| limit=\$DEADLINE/);
+    assert.match(source, /PI_ORB_SMOKE_DEADLINE="\$limit" api/);
+    assert.match(source, /smoke_sleep "\$limit"/);
+    const command = source.match(/^command_orb\(\)[\s\S]*?^\}/m)?.[0];
+    assert.equal((command?.match(/\$\(api /g) ?? []).length, 1);
+  }
+  const fixtures = readFileSync(new URL("./smoke-fixtures.sh", import.meta.url), "utf8");
+  assert.match(fixtures, /deadline=\$\(\( \$\(date \+%s\) \+ 300 \)\)/);
+  assert.match(
+    fixtures,
+    /\[ "\$deadline" -le "\$\{DEADLINE:-\$deadline\}" \] \|\| deadline=\$DEADLINE/,
+  );
+  assert.equal((fixtures.match(/PI_ORB_SMOKE_DEADLINE="\$deadline"/g) ?? []).length, 2);
+
   const replacement = readFileSync(
     new URL("./smoke-compute-replacement.sh", import.meta.url),
     "utf8",

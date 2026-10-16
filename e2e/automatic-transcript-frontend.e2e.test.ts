@@ -350,7 +350,7 @@ it.each(["chromium", "webkit"] as const)(
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
       const beforeWheel = await pane.evaluate((node) => node.scrollTop);
       await page.mouse.wheel(0, -1);
-      await expect.poll(() => pane.evaluate((node) => node.scrollTop)).toBeLessThan(beforeWheel);
+      await expect.poll(() => pane.evaluate((node) => node.scrollTop)).toBe(beforeWheel - 1);
       await layout();
 
       // Browser-native image decoding changes a newly prepended row's intrinsic height.
@@ -365,10 +365,17 @@ it.each(["chromium", "webkit"] as const)(
       await layout();
       // Downward reader intent must replace the anchor, not abandon off-tail anchoring.
       const beforeDownward = await pane.evaluate((node) => node.scrollTop);
+      await pane.evaluate((node, target) => {
+        const settled = () => {
+          if (node.scrollTop !== target) return;
+          node.removeEventListener("scroll", settled);
+          queueMicrotask(() => node.setAttribute("data-wheel-settled", "true"));
+        };
+        node.addEventListener("scroll", settled);
+      }, beforeDownward + 100);
       await page.mouse.wheel(0, 100);
-      await expect
-        .poll(() => pane.evaluate((node) => node.scrollTop))
-        .toBeGreaterThan(beforeDownward);
+      await expect(pane).toHaveAttribute("data-wheel-settled", "true");
+      expect(await pane.evaluate((node) => node.scrollTop)).toBe(beforeDownward + 100);
       await layout();
       await expect(rows).toHaveCount(40);
       expect(
