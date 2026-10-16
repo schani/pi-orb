@@ -456,6 +456,8 @@ not a per-mutation lease. The supported release must establish retirement before
 publishing authority; out-of-band deployments and late-side-effect compensation
 remain distinct from this operational boundary.
 
+**Prior-serving baseline (decided 2026-10-15):** an observed desired rollout with Ready=False and ConfigurationsReady=False/HealthCheckContainerError may use its distinct, immutable, owned Ready revision serving exactly 100% files traffic, with verified image/env identity and matching active-pointer generation; postapply readiness, retirement and activation remain strict.
+
 **Retirement sample rule (revised 2026-10-06; local, undeployed):** before apply,
 inventory records revision resources separately from observed processes. Process
 targets are revisions with unresolved positive Monitoring samples in the existing

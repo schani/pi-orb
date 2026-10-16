@@ -85,6 +85,15 @@ def utc_epoch(value):
         return None
 
 
+def positive_integer(value):
+    if not str(value).isdigit():
+        return False
+    try:
+        return int(value) > 0
+    except ValueError:
+        return False
+
+
 def valid_retirement(retirement):
     if retirement is not None:
         if not isinstance(retirement, dict) or set(retirement) != {"after", "resources", "resourcesRetired", "revisions", "zeroes", "excluded", "operations"}:
@@ -309,24 +318,93 @@ def summarize_service(name, body):
         return fail("invalid", f"{name} does not serve exactly one revision")
     if name not in SERVICES or traffic[0].get("tag") != "files":
         return fail("invalid", "application files routing is not enabled")
+    return summarize_container(name, revision, containers)
+
+
+def summarize_container(name, revision, containers):
     if not isinstance(containers, list) or len(containers) != 1 or not isinstance(containers[0], dict) or not isinstance(containers[0].get("env", []), list) or not all(isinstance(item, dict) for item in containers[0].get("env", [])):
         return fail("invalid", "unexpected Cloud Run container inventory")
     auth_modes = [item.get("value") for item in containers[0].get("env", []) if item.get("name") == "PI_ORB_AUTH_MODE"]
     if auth_modes != ["google"] or any(item.get("name") == "PI_ORB_ROLE" for item in containers[0].get("env", [])):
         return fail("invalid", "production Google authentication is required")
     generations = [item.get("value") for item in containers[0].get("env", []) if item.get("name") == "PI_ORB_HOST_SPEC_GENERATION"]
-    if (len(generations) != 1 or not isinstance(generations[0], str) or not generations[0].isdigit()):
+    if (len(generations) != 1 or not isinstance(generations[0], str) or not positive_integer(generations[0])):
         return fail("invalid", "missing deployment generation")
     return Result({"service": name, "revision": revision, "image": containers[0].get("image"), "generation": int(generations[0])})
 
 
-def snapshot(cloud, project, region):
+def prior_service(cloud, name, project, region):
+    service = cloud.json(["run", "services", "describe", name, "--project", project, "--region", region])
+    if service.error:
+        return service
+    checked = summarize_service(name, service.value)
+    if not checked.error:
+        return Result((checked.value, service.value["spec"]["template"]["spec"]["containers"][0]))
+    body = service.value
+    if not isinstance(body, dict):
+        return checked
+    metadata, status = body.get("metadata", {}), body.get("status", {})
+    if not isinstance(metadata, dict) or not isinstance(status, dict):
+        return checked
+    conditions, traffic = status.get("conditions", []), status.get("traffic", [])
+    if not isinstance(conditions, list) or not all(isinstance(item, dict) for item in conditions):
+        return checked
+    revision, created = status.get("latestReadyRevisionName"), status.get("latestCreatedRevisionName")
+    if (not valid_id(revision) or not valid_id(created) or revision == created
+            or not positive_integer(metadata.get("generation"))
+            or str(metadata["generation"]) != str(status.get("observedGeneration"))
+            or [item.get("status") for item in conditions if item.get("type") == "Ready"] != ["False"]
+            or [(item.get("status"), item.get("reason")) for item in conditions if item.get("type") == "ConfigurationsReady"] != [("False", "HealthCheckContainerError")]):
+        return fail("invalid", "prior rollout is not an observed startup failure")
+    if (name not in SERVICES or not isinstance(traffic, list) or len(traffic) != 1 or not isinstance(traffic[0], dict)
+            or traffic[0].get("percent") != 100 or traffic[0].get("revisionName") != revision or traffic[0].get("tag") != "files"):
+        return fail("invalid", "prior service does not serve exactly one files revision")
+    selected = cloud.json(["run", "revisions", "describe", revision, "--project", project, "--region", region])
+    if selected.error:
+        return selected
+    if not isinstance(selected.value, dict):
+        return fail("invalid", "invalid prior revision")
+    owner, ready, spec = (selected.value.get(key, {}) for key in ("metadata", "status", "spec"))
+    if not all(isinstance(item, dict) for item in (owner, ready, spec)) or not isinstance(owner.get("labels", {}), dict):
+        return fail("invalid", "invalid prior revision fields")
+    labels = owner.get("labels", {})
+    conditions = ready.get("conditions", [])
+    if (owner.get("name") != revision or not isinstance(metadata.get("namespace"), str) or not metadata["namespace"]
+            or owner.get("namespace") != metadata["namespace"] or labels.get("serving.knative.dev/service") != name
+            or not isinstance(metadata.get("uid"), str) or not metadata["uid"] or labels.get("serving.knative.dev/serviceUid") != metadata["uid"]
+            or not positive_integer(owner.get("generation"))
+            or str(owner["generation"]) != str(ready.get("observedGeneration"))
+            or not isinstance(conditions, list) or not all(isinstance(item, dict) for item in conditions)
+            or [item.get("status") for item in conditions if item.get("type") == "Ready"] != ["True"]):
+        return fail("invalid", "prior revision ownership or readiness is not verified")
+    checked = summarize_container(name, revision, spec.get("containers", []))
+    if checked.error:
+        return checked
+    if not valid_snapshot([checked.value]) or checked.value["image"] != ready.get("imageDigest"):
+        return fail("invalid", "invalid prior revision image identity")
+    container = spec["containers"][0]
+    if not valid_artifacts(container_vars(checked.value, container)):
+        return fail("invalid", "invalid prior revision release variables")
+    authority = cloud.object(f"pi-orb-tfstate-{project}", "static-plane/releases/active.json")
+    if authority.error:
+        return authority
+    pointer = None if authority.value is None else authority.value["body"]
+    if not isinstance(pointer, dict) or type(pointer.get("generation")) is not int or pointer["generation"] != checked.value["generation"]:
+        return fail("invalid", "prior revision does not match active generation")
+    return Result((checked.value, container))
+
+
+def snapshot(cloud, project, region, *, prior=False):
     result = []
     for name in SERVICES:
-        service = cloud.json(["run", "services", "describe", name, "--project", project, "--region", region])
-        if service.error:
-            return service
-        summary = summarize_service(name, service.value)
+        if prior:
+            selected = prior_service(cloud, name, project, region)
+            summary = selected if selected.error else Result(selected.value[0])
+        else:
+            service = cloud.json(["run", "services", "describe", name, "--project", project, "--region", region])
+            if service.error:
+                return service
+            summary = summarize_service(name, service.value)
         if summary.error:
             return summary
         result.append(summary.value)
@@ -377,22 +455,22 @@ def write_vars(path, values):
     return Result()
 
 
-def current_vars(cloud, record, path):
-    service = cloud.json(["run", "services", "describe", "pi-orb-issuer", "--project", record["project"], "--region", record["region"]])
-    if service.error:
-        return service
-    checked = summarize_service("pi-orb-issuer", service.value)
-    if checked.error:
-        return checked
-    container = service.value["spec"]["template"]["spec"]["containers"][0]
+def container_vars(summary, container):
     env = {item["name"]: item.get("value") for item in container.get("env", []) if isinstance(item, dict) and isinstance(item.get("name"), str)}
-    values = {"control_plane_image": checked.value["image"], "deploy_generation": checked.value["generation"]}
+    values = {"control_plane_image": summary["image"], "deploy_generation": summary["generation"]}
     for key, name in {
         "native_image_resource": "PI_ORB_GCE_IMAGE_RESOURCE", "native_image_id": "PI_ORB_GCE_IMAGE_ID",
         "workspace_image_resource": "PI_ORB_GCE_WORKSPACE_IMAGE_RESOURCE", "workspace_image_id": "PI_ORB_GCE_WORKSPACE_IMAGE_ID",
     }.items():
         values[key] = env.get(name)
-    return write_vars(path, values)
+    return values
+
+
+def current_vars(cloud, record, path):
+    selected = prior_service(cloud, "pi-orb-issuer", record["project"], record["region"])
+    if selected.error:
+        return selected
+    return write_vars(path, container_vars(*selected.value))
 
 
 def recover(cloud, record, release_id):
@@ -529,7 +607,7 @@ def main(argv):
                     if not result.error:
                         result = save(path, record)
             elif action in ("snapshot", "check", "previous", "check-previous"):
-                result = snapshot(cloud, record["project"], record["region"])
+                result = snapshot(cloud, record["project"], record["region"], prior=action in ("previous", "check-previous"))
                 if not result.error:
                     if action in ("check", "check-previous") and result.value != record["previousServing" if action == "check-previous" else "serving"]:
                         result = fail("conflict", "serving deployment no longer matches this release")
