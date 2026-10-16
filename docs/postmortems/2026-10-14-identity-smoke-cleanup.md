@@ -14,6 +14,8 @@ No `Fixture cleanup not confirmed` message appeared. That narrows the failure to
 
 Missing rows do not distinguish authentication, transport or ingress/application rejection. **The historical cleanup cause remains unproven.** The premature success banner and missing diagnostics are established harness defects, not a proven cause of the failed deletion requests. The PR 92 historical CI waiver does not cover this failure. Nothing was rerun or manually marked validated.
 
+**User-approved exception (2026-10-15):** “I waive that, continue with the deployment!” waives only the historical cleanup-cause explanation. Diagnostics remain deferred (`TODO.md`); original failed record unchanged, no root-cause fix claimed. Normal new-deployment gates, assertions and verified fixture cleanup remain mandatory.
+
 ## Authorized fixture cleanup
 
 The user authorized one ordinary service-API DELETE per exact owned fixture after fresh ownership/state checks:

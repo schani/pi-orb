@@ -48,7 +48,11 @@ class RetirementTest(unittest.TestCase):
                 if args[0] == 'compute': return Result([])
                 self.assert_service(args[4])
                 name = 'pi-orb-issuer-old' if self.before_apply else 'pi-orb-issuer-new'
-                return Result([{'metadata': {'name': name}}])
+                revisions = [{'metadata': {'name': name}}]
+                if self.before_apply:
+                    revisions.append({'metadata': {'name': 'pi-orb-issuer-failed'},
+                                      'status': {'conditions': [{'type': 'Ready', 'status': 'False'}]}})
+                return Result(revisions)
             def assert_service(self, name):
                 if name != 'pi-orb-issuer':
                     raise AssertionError('unexpected service entered controller retirement')
@@ -64,7 +68,7 @@ class RetirementTest(unittest.TestCase):
         value = self.pending_record()
         inventoried = inventory(cloud, value, wall=lambda: '2026-09-09T12:02:00Z')
         self.assertIsNone(inventoried.error)
-        self.assertEqual(value['retirement']['resources'], ['pi-orb-issuer-old'])
+        self.assertEqual(value['retirement']['resources'], ['pi-orb-issuer-failed', 'pi-orb-issuer-old'])
         self.assertEqual(value['retirement']['revisions'], ['pi-orb-issuer-old'])
         cloud.before_apply = False
         clock = [0]

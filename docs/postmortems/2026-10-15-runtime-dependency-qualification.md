@@ -10,6 +10,8 @@ Deploy [38800758118](https://github.com/schani/pi-orb/actions/runs/38800758118) 
 
 Main `96ef6af9`: [Deploy 38834054839](https://github.com/schani/pi-orb/actions/runs/38834054839) failed October 15, 6:51 PM PDT. Schema passed; apply failed when candidate `00058-lh8` hit `ERR_MODULE_NOT_FOUND`: control-plane `adapters/spawn-models.ts` imported undeclared `@anthropic-ai/claude-agent-sdk`. Release: `applied-but-unvalidated`; monitor never ran. Previous revision `00057-gqf` retained 100% traffic, health 200. Evidence: `.context/deploy-38834054839/{receipt.json,startup-diagnostic/}`, [release artifact](https://github.com/schani/pi-orb/actions/runs/38834054839/artifacts/12019477735). [PR 127](https://github.com/schani/pi-orb/pull/127) declares SDK/zod dependencies and checks the actual adapter import in the isolated image.
 
+Deploy [38846470999](https://github.com/schani/pi-orb/actions/runs/38846470999) (`56cbbdff`) failed-before-apply: desired revision 58 failed despite healthy 57 serving 100% files traffic. No apply; monitor skipped. Correction reads immutable Ready identity; neither shipped nor validated.
+
 | Source | Evidence / boundary |
 |---|---|
 | Initial main `8371a577` | [CI](https://github.com/schani/pi-orb/actions/runs/38823365031), [E2E](https://github.com/schani/pi-orb/actions/runs/38823365316), [Durable](https://github.com/schani/pi-orb/actions/runs/38823365070): all eleven checkout logs confirm the exact merge SHA. [Export receipt](https://github.com/schani/pi-orb/pull/122#issuecomment-6204665110), originals in `.context/pr122-main-cache/`. |

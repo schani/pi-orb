@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from infra.release_state import Cloud, Result, SERVICES, activate, fail, main, publish, recover, snapshot, summarize_service, validate_record
+from infra.release_state import Cloud, Result, SERVICES, activate, current_vars, fail, main, publish, recover, snapshot, summarize_service, validate_record
 
 IMAGE = "us-central1-docker.pkg.dev/test-project/pi-orb/control-plane@sha256:" + "a" * 64
 STAMP = "2026-09-09T12:00:00Z"
@@ -66,16 +66,26 @@ class FakeCloud:
         self.writes = []
         self.source = None
         self.changed = False
+        self.service_body = None
+        self.revision_body = None
+        self.reads = []
+        self.authority_error = None
 
     def json(self, args):
+        self.reads.append(args)
+        if args[:3] == ["run", "revisions", "describe"]:
+            return Result(copy.deepcopy(self.revision_body))
+        if self.service_body is not None:
+            return Result(copy.deepcopy(self.service_body))
         value = service(args[3])
         if self.changed:
             value["spec"]["template"]["spec"]["containers"][0]["image"] = IMAGE.replace("a", "c")
         return Result(value)
 
     def object(self, _bucket, key):
+        self.reads.append(key)
         if key.endswith("active.json"):
-            return Result(self.authority)
+            return self.authority_error or Result(self.authority)
         return Result(None if self.source is None else {"generation": "8", "body": self.source})
 
     def put(self, bucket, key, body, generation):
@@ -111,6 +121,158 @@ class SmokeFixtureShellTest(unittest.TestCase):
 
 
 class ReleaseStateTest(unittest.TestCase):
+    def failed_rollout(self):
+        cloud = FakeCloud()
+        body = service("pi-orb-issuer", 43)
+        body["metadata"].update(generation=58, namespace="123456", uid="service-uid")
+        body["status"].update(observedGeneration=58, latestCreatedRevisionName="pi-orb-issuer-failed",
+                              conditions=[{"type": "Ready", "status": "False"},
+                                          {"type": "ConfigurationsReady", "status": "False", "reason": "HealthCheckContainerError"}])
+        container = body["spec"]["template"]["spec"]["containers"][0]
+        container["image"] = IMAGE.replace("a" * 64, "c" * 64)
+        for key, name in {
+            "native_image_resource": "PI_ORB_GCE_IMAGE_RESOURCE", "native_image_id": "PI_ORB_GCE_IMAGE_ID",
+            "workspace_image_resource": "PI_ORB_GCE_WORKSPACE_IMAGE_RESOURCE", "workspace_image_id": "PI_ORB_GCE_WORKSPACE_IMAGE_ID",
+        }.items():
+            container["env"].append({"name": name, "value": record()["artifacts"][key]})
+        revision = {"metadata": {"name": "pi-orb-issuer-new", "namespace": "123456", "generation": 1,
+                                 "labels": {"serving.knative.dev/service": "pi-orb-issuer", "serving.knative.dev/serviceUid": "service-uid"}},
+                    "spec": copy.deepcopy(body["spec"]["template"]["spec"]),
+                    "status": {"observedGeneration": 1, "conditions": [{"type": "Ready", "status": "True"}], "imageDigest": IMAGE}}
+        revision["spec"]["containers"][0]["image"] = IMAGE
+        revision["spec"]["containers"][0]["env"][1]["value"] = "42"
+        for item in container["env"][2:]:
+            item["value"] += "9"
+        cloud.service_body, cloud.revision_body = body, revision
+        cloud.authority["body"]["generation"] = 42
+        return cloud
+
+    def test_failed_startup_prior_and_vars_use_immutable_serving_revision(self):
+        cloud = self.failed_rollout()
+        with tempfile.TemporaryDirectory() as directory, patch("infra.release_state.Cloud", return_value=cloud):
+            path, variables = Path(directory) / "record.json", Path(directory) / "current.tfvars"
+            path.write_text(json.dumps(record()))
+            self.assertEqual(main(["release_state", "previous", str(path)]), 0)
+            self.assertEqual(json.loads(path.read_text())["previousServing"], record()["serving"])
+            self.assertEqual(main(["release_state", "preflight-vars", str(path), str(variables)]), 0)
+            expected = record()["artifacts"]
+            self.assertEqual(dict((key, json.loads(value)) for key, value in
+                                  (line.split(" = ") for line in variables.read_text().splitlines())), expected)
+            self.assertEqual(main(["release_state", "check-previous", str(path)]), 0)
+        self.assertEqual(sum(isinstance(call, list) and call[:3] == ["run", "revisions", "describe"] for call in cloud.reads), 3)
+        self.assertIn("static-plane/releases/active.json", cloud.reads)
+        self.assertTrue(all(call[:3] in (["run", "services", "describe"], ["run", "revisions", "describe"])
+                            and call[-4:] == ["--project", "test-project", "--region", "us-central1"]
+                            for call in cloud.reads if isinstance(call, list)))
+        self.assertEqual(cloud.writes, [])
+
+    def test_ready_prior_preserves_normal_baseline_policy(self):
+        cloud = self.failed_rollout()
+        cloud.service_body = service("pi-orb-issuer")
+        cloud.service_body["spec"]["template"]["spec"] = cloud.revision_body["spec"]
+        cloud.authority = None
+        self.assertEqual(snapshot(cloud, "test-project", "us-central1", prior=True).value, record()["serving"])
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertIsNone(current_vars(cloud, record(), Path(directory) / "current.tfvars").error)
+        self.assertTrue(all(call[:3] == ["run", "services", "describe"] for call in cloud.reads))
+        self.assertEqual(cloud.writes, [])
+
+    def test_failed_startup_does_not_relax_postapply_or_validation(self):
+        cloud = self.failed_rollout()
+        cloud.source = record()
+        self.assertIsNotNone(snapshot(cloud, "test-project", "us-central1").error)
+        self.assertIsNotNone(activate(cloud, record()).error)
+        self.assertIsNotNone(recover(cloud, record(), "release-42").error)
+        with tempfile.TemporaryDirectory() as directory, patch("infra.release_state.Cloud", return_value=cloud):
+            path = Path(directory) / "record.json"
+            path.write_text(json.dumps(record()))
+            for action in ("snapshot", "check"):
+                self.assertEqual(main(["release_state", action, str(path)]), 1)
+        self.assertFalse(any(isinstance(call, list) and call[1] == "revisions" for call in cloud.reads))
+        self.assertEqual(cloud.writes, [])
+
+    def test_failed_startup_prior_rejects_unverified_sources(self):
+        cases = [
+            ("service_body", ("status", "traffic"), [{"percent": 50, "revisionName": "pi-orb-issuer-new", "tag": "files"}]),
+            ("service_body", ("status", "traffic"), [{"percent": 100, "revisionName": "pi-orb-issuer-new", "tag": "files"}, {"percent": 0}]),
+            ("service_body", ("status", "traffic", 0, "revisionName"), "pi-orb-issuer-failed"),
+            ("service_body", ("status", "traffic", 0, "tag"), None),
+            ("service_body", ("status", "traffic", 0, "tag"), "other"),
+            ("service_body", ("status", "latestReadyRevisionName"), None),
+            ("service_body", ("status", "latestCreatedRevisionName"), None),
+            ("service_body", ("status", "observedGeneration"), 57),
+            ("service_body", ("metadata", "generation"), "²"),
+            ("service_body", ("status", "conditions"), []),
+            ("service_body", ("status", "conditions"), [{"type": "Ready", "status": "False"}]),
+            ("service_body", ("status", "conditions"), [{"type": "Ready", "status": "False"}, {"type": "Ready", "status": "True"},
+                                                       {"type": "ConfigurationsReady", "status": "False", "reason": "HealthCheckContainerError"}]),
+            ("service_body", ("status", "conditions", 0, "status"), "Unknown"),
+            ("service_body", ("status", "conditions", 0, "status"), "True"),
+            ("service_body", ("status", "conditions", 1, "status"), "Unknown"),
+            ("service_body", ("status", "conditions", 1, "status"), "True"),
+            ("service_body", ("status", "conditions", 1, "reason"), "OtherFailure"),
+            ("service_body", ("status", "conditions", 1, "type"), "RoutesReady"),
+            ("service_body", ("metadata", "uid"), ""),
+            ("service_body", ("metadata", "namespace"), None),
+            ("revision_body", ("metadata", "name"), "pi-orb-issuer-wrong"),
+            ("revision_body", ("metadata", "namespace"), "wrong"),
+            ("revision_body", ("metadata", "labels", "serving.knative.dev/service"), "wrong"),
+            ("revision_body", ("metadata", "labels", "serving.knative.dev/serviceUid"), "wrong"),
+            ("revision_body", ("metadata", "generation"), 0),
+            ("revision_body", ("metadata", "generation"), "²"),
+            ("revision_body", ("status", "observedGeneration"), 2),
+            ("revision_body", ("status", "conditions", 0, "status"), "False"),
+            ("revision_body", ("status", "conditions"), []),
+            ("revision_body", ("status", "conditions"), [{"type": "Ready", "status": "True"}, {"type": "Ready", "status": "False"}]),
+            ("revision_body", ("spec", "containers"), []),
+            ("revision_body", ("spec", "containers", 0, "env"), [{"name": "PI_ORB_AUTH_MODE", "value": "google"}, {"name": "PI_ORB_ROLE", "value": "browser"}]),
+            ("revision_body", ("spec", "containers", 0, "image"), "not-pinned"),
+            ("revision_body", ("status", "imageDigest"), IMAGE.replace("a" * 64, "c" * 64)),
+            ("revision_body", ("spec", "containers", 0, "env", 0, "value"), "local"),
+            ("revision_body", ("spec", "containers", 0, "env", 0, "name"), "PI_ORB_ROLE"),
+            ("revision_body", ("spec", "containers", 0, "env", 1, "value"), "invalid"),
+            ("revision_body", ("spec", "containers", 0, "env", 1, "value"), "²"),
+            ("revision_body", ("spec", "containers", 0, "env", 1, "value"), "9" * 5000),
+            ("revision_body", ("spec", "containers", 0, "env", 1, "value"), "0"),
+            ("revision_body", ("spec", "containers", 0, "env", 1, "name"), "missing-generation"),
+            ("revision_body", ("spec", "containers", 0, "env", 2, "value"), "bad-native-resource"),
+            ("authority", ("body",), None),
+            ("authority", ("body",), {}),
+            ("authority", ("body", "generation"), True),
+            ("authority", ("body", "generation"), "42"),
+            ("authority", ("body", "generation"), 43),
+        ]
+        for source, path, value in cases:
+            with self.subTest(source=source, path=path, value=value):
+                cloud = self.failed_rollout()
+                target = getattr(cloud, source)
+                for key in path[:-1]:
+                    target = target[key]
+                target[path[-1]] = value
+                self.assertIsNotNone(snapshot(cloud, "test-project", "us-central1", prior=True).error)
+                self.assertEqual(cloud.writes, [])
+        for authority, error in ((None, None), (None, fail("http", "authority unavailable"))):
+            cloud = self.failed_rollout()
+            cloud.authority, cloud.authority_error = authority, error
+            self.assertIsNotNone(snapshot(cloud, "test-project", "us-central1", prior=True).error)
+            self.assertEqual(cloud.writes, [])
+
+    def test_failed_startup_preapply_rechecks_revision_image_and_generation(self):
+        for field in ("revision", "image", "generation"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                cloud = self.failed_rollout()
+                previous = record()["serving"]
+                if field == "revision": previous[0][field] = "pi-orb-issuer-different"
+                if field == "image": previous[0][field] = IMAGE.replace("a" * 64, "d" * 64)
+                if field == "generation": previous[0][field] = 41
+                value = record()
+                value["previousServing"] = previous
+                path = Path(directory) / "record.json"
+                path.write_text(json.dumps(value))
+                with patch("infra.release_state.Cloud", return_value=cloud):
+                    self.assertEqual(main(["release_state", "check-previous", str(path)]), 1)
+                self.assertEqual(cloud.writes, [])
+
     def test_only_allowlisted_records_can_be_published(self):
         value = record()
         self.assertTrue(validate_record(value))
