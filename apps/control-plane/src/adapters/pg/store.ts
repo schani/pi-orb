@@ -374,7 +374,7 @@ export async function commitHistoryTransaction(
   return ok({ row: mapOrbRow(row), publishedAlertId: newestAlertId });
 }
 
-/** PostgreSQL `ControlPlaneStore` (docs/history-replication.md, docs/stack.md). */
+/** See docs/history-replication.md and docs/stack.md. */
 export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   private readonly db: PostgreSQLClient;
   readonly uploads: PgWorkspaceUploads;
@@ -1998,8 +1998,9 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       params.orbId,
       params.expectedStateVersion,
       [
-        // Replacement disposal fences stale provisioning passes. Failed
-        // disposal preserves the failed wake's one-shot state_version.
+        // Host-spec and Claude-recovery discards bump state_version to fence
+        // stale provisioning passes; a 'failed' discard keeps it, so the failed
+        // orb's one-shot wake intent still matches.
         "state_version = state_version + CASE WHEN host_discard_reason IN ('host_spec_changed', 'claude_recovery') THEN 1 ELSE 0 END",
         "claude_recovery = CASE WHEN host_discard_reason = 'claude_recovery' THEN jsonb_set(claude_recovery, '{verified}', 'true') ELSE claude_recovery END",
         "updated_at = $3",

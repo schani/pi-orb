@@ -169,8 +169,8 @@ it("real SDK: retrying an unpersisted inbox steer after abort must make progress
         );
       expect(recovery).toHaveLength(1);
       expect(JSON.stringify(recovery)).not.toContain("What’s happening???");
-      // Regression invariant: an idle retry must drain the existing steer, not
-      // acknowledge it indefinitely without persisting a single inbox record.
+      // An idle retry must drain the existing steer, not acknowledge it indefinitely
+      // without persisting an inbox record.
       expect(persisted()).toHaveLength(1);
       const receipt = persisted()[0];
       expect(receipt?.type === "custom_message" && receipt.details).toMatchObject({

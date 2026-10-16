@@ -87,7 +87,6 @@ describe("native image release manifest", () => {
   });
 });
 
-// The shell stage is exercised with process adapters, including its publication order.
 describe("native build release stage", () => {
   it.each(["accepted", "failed", "wrong-commit", "container-failed"])(
     "publishes only after an accepted build: %s",

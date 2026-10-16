@@ -91,7 +91,7 @@ describe("mapPgError", () => {
   });
 
   it("classifies a data exception as a non-retryable invariant", () => {
-    // 22P02: what a JS array bound to a jsonb column produced in production.
+    // 22P02: a JS array bound to a jsonb column (docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md).
     const mapped = mapPgError(
       Object.assign(new Error("invalid input syntax for type json"), { code: "22P02" }),
     );

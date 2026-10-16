@@ -4,7 +4,6 @@
 -- native value of the wrong JSON type is absent rather than coerced, so no row
 -- can become schema-invalid and no shape can abort the migration.
 
--- Custom-message identity and visibility.
 UPDATE history_records SET record = record || jsonb_build_object(
   'custom', jsonb_build_object(
     'customType', CASE
@@ -20,7 +19,6 @@ WHERE record->>'type' = 'event'
   AND record->'custom' IS NULL
   AND jsonb_typeof(record->'overflow'->'native') = 'object';
 
--- Subagent receipts: the kind, the receipt's string details, and its duration.
 UPDATE history_records SET record = record || jsonb_build_object(
   'subagent',
     jsonb_build_object('kind', CASE record->'overflow'->'native'->>'customType'
@@ -79,7 +77,6 @@ WHERE record->>'type' = 'message'
   AND jsonb_typeof(record->'overflow'->'native'->'details'->'messageIds') IS DISTINCT FROM 'array'
   AND jsonb_typeof(record->'overflow'->'native'->'details'->'messageId') = 'string';
 
--- Assistant failures and their diagnostic types.
 UPDATE history_records SET record = record || jsonb_build_object(
   'failure', jsonb_build_object(
     'message', record->'overflow'->'native'->'message'->'errorMessage',
@@ -106,7 +103,6 @@ WHERE record->>'type' = 'message'
     U&'\0009\000A\000B\000C\000D\0020\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\2028\2029\202F\205F\3000\FEFF'
   ) <> '';
 
--- Edit patches, onto the tool_result block that carries the result.
 UPDATE history_records SET record = jsonb_set(record, '{content}', (
   SELECT jsonb_agg(CASE
     WHEN block->>'type' = 'tool_result'

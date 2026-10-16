@@ -301,7 +301,6 @@ it.each(["chromium", "webkit"] as const)(
       check(unexpectedHistory).toBe(0);
       check(hellos.length).toBeGreaterThan(0);
       check(hellos.every((cursor) => cursor === expectedCursor)).toBe(true);
-      // The cached view still owns a normal live session and can send.
       await composer.press("Control+Enter");
       await check(page.locator(".history .rec-orb").last()).toContainText("retain cache draft");
       await check
@@ -309,7 +308,6 @@ it.each(["chromium", "webkit"] as const)(
         .toBe(true);
       await check(page.locator(".history .bit-register")).toHaveCount(0);
       check(unexpectedHistory).toBe(0);
-      // The app-owned cache survives dashboard navigation, including the phone layout.
       await page.setViewportSize({ width: 390, height: 844 });
       await page.getByRole("link", { name: "Dashboard", exact: true }).click();
       const dashboardSettings = nextSettings();

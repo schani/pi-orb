@@ -10,7 +10,6 @@ import type { TailscaleError } from "../../domain/errors.ts";
  * an expiry edge.
  */
 
-/** What the host providers need from this adapter. */
 export interface TailscaleAuthKeyMinter {
   mintAuthKey(
     orbId: string,
@@ -71,7 +70,7 @@ export class FetchTailscaleApiTransport implements TailscaleApiTransport {
 export interface TailscaleOAuthConfig {
   readonly clientId: string;
   readonly clientSecret: string;
-  /** API origin override (tests); defaults to the public Tailscale API. */
+  /** API origin override (tests). */
   readonly baseUrl?: string;
   /** Provision/cleanup edges only. IDs are API identifiers, never auth secrets. */
   readonly onKeyEvent?: (event: {
@@ -238,7 +237,6 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, Tails
       if (typeof description !== "string") {
         // Some API responses omit descriptions from the list; deciding
         // "no match" on that omission would silently break revoke-before-mint.
-        // Fetch the key detail before deciding.
         const detail = await this.send(
           "GET",
           this.url(`/api/v2/tailnet/-/keys/${encodeURIComponent(key["id"])}`),
@@ -306,16 +304,16 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, Tails
 
   /**
    * Auth keys are non-reusable and incarnation-scoped: each host-create
-   * attempt gets a fresh key. Minting revokes only strictly older
-   * incarnations and legacy incarnation-less keys; racing attempts may leave
-   * unused keys until a higher incarnation, expiry, or deletion-grade
-   * cleanup. Device identity is
-   * separate from the keys: tailscaled state lives on the orb's retained
-   * workspace, so a restart or compute replacement resumes the same device
-   * without consuming a key, and the non-ephemeral device record survives the
-   * offline stretches a stopped orb spends. Keys are preauthorized and tagged
-   * so no admin has to approve a node and the tailnet ACLs scope what
-   * `tag:pi-orb` may reach. `cleanupOrb` is deletion-grade (archive/delete):
+   * attempt gets a fresh key. Minting revokes only strictly older incarnations
+   * and legacy incarnation-less keys; racing attempts may leave unused keys
+   * until a higher incarnation, expiry, or deletion-grade cleanup.
+   *
+   * Device identity is separate from the keys: tailscaled state lives on the
+   * orb's retained workspace, so a restart or compute replacement resumes the
+   * same device without consuming a key, and the non-ephemeral device record
+   * survives the offline stretches a stopped orb spends. Keys are preauthorized
+   * and tagged so no admin has to approve a node and the tailnet ACLs scope
+   * what `tag:pi-orb` may reach. `cleanupOrb` is deletion-grade (archive/delete):
    * it removes every exact-orb key and the orb's tagged device record.
    */
   cleanupOrb(orbId: string, signal: AbortSignal): ResultAsync<void, TailscaleError> {

@@ -124,7 +124,6 @@ describe("OidcTokenSigner composed with real key material", () => {
       token_use: "exchanged",
     });
     expect(claims["exp"]).toBe((claims["iat"] as number) + mintDeps.constants.defaultTtlSeconds);
-    // A v4 `jti`, unique per mint and carrying nothing about the orb.
     expect(String(claims["jti"])).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );

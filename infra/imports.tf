@@ -1,8 +1,6 @@
-# Adoption of the live 2026-07-30 deployment into the fresh GCS-backed state
-# (the original local state was lost). Import blocks are no-ops once the
-# resource is in state. Foundation adoption projects the existing application
-# state rather than rebuilding it, so the database password and secret version
-# remain in the application state.
+# Import blocks adopt pre-existing resources on first apply; no-ops once in state.
+# foundation/adopt.sh projects the application state rather than rebuilding it, so the
+# database password and secret version stay in the application state.
 
 import {
   to = google_compute_firewall.control_plane_to_runtime

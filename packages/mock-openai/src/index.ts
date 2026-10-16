@@ -38,8 +38,6 @@ export function readMockOpenAiEnv(
   return { oauthBaseUrl, inferenceBaseUrl };
 }
 
-// -- structural copies of the Pi types this override plugs into -------------
-
 export interface OAuthCredentialsShape {
   refresh: string;
   access: string;
@@ -69,8 +67,6 @@ export interface MockProviderConfig {
     getApiKey(credentials: OAuthCredentialsShape): string;
   };
 }
-
-// -- implementation ---------------------------------------------------------
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 

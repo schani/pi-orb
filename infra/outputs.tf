@@ -12,22 +12,18 @@ output "sql_private_ip" {
   value = google_sql_database_instance.pi_orb.private_ip_address
 }
 
-# The public OIDC issuer origin: the exact `iss` of every minted token, the
-# `--issuer-uri` the workload-identity bootstrap must register, and the base the
-# federation smoke fetches discovery and JWKS from. Cloud Run's canonical
-# `.uri` is a different, hashed origin; the service postcondition proves the
-# deterministic trust anchor below is one of the origins Cloud Run assigned.
+# Public OIDC issuer origin: the exact `iss` of every minted token, the
+# `--issuer-uri` the workload-identity bootstrap registers, and the base for the
+# federation smoke's discovery and JWKS fetches. Cloud Run's `.uri` is a hashed
+# origin instead; the issuer service postcondition checks this one is among them.
 output "issuer_url" {
   value      = local.oidc_issuer_url
   depends_on = [google_cloud_run_v2_service.issuer]
 }
 
-# The zone orb VMs are actually created in — `var.zone`, which is its own
-# variable and not derivable from `var.region`. The live smokes look for an
-# orb's instance by zone, so release.sh reads it from the foundation outputs
-# (exported as PI_ORB_GCE_ZONE) instead of guessing `<region>-a`: a guess that
-# is wrong finds no instances and fails a release for a reason that has nothing
-# to do with the release.
+# The zone orb VMs are created in (`var.zone`, not derivable from `var.region`).
+# release.sh exports it as PI_ORB_GCE_ZONE for the live smokes; guessing
+# `<region>-a` finds no instances and fails releases for an unrelated reason.
 output "zone" {
   value = var.zone
 }

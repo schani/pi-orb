@@ -242,7 +242,6 @@ export class FakeTokenSigner implements TokenSigner {
   }
 }
 
-/** The claims a `FakeTokenSigner` JWT carries, as the relying party would read them. */
 export function decodeFakeIdToken(jwt: string): IdTokenClaims {
   const segments = jwt.split(".");
   const payload = segments[1];
@@ -358,7 +357,6 @@ export class KeyStoreBackedTokenSigner implements TokenSigner {
   }
 }
 
-/** The private material a `KeyStoreBackedTokenSigner` token was signed with. */
 export function decodeFakeSignatureMaterial(jwt: string): string {
   const signature = jwt.split(".")[2];
   if (signature === undefined) throw new Error(`not a JWT-shaped token: ${jwt}`);

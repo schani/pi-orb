@@ -1060,7 +1060,6 @@ describe("GceOrbHostProvider host specification", () => {
     repositoryUrl: provisionRequest.bootstrap.repositoryUrl,
   };
 
-  /** A provider whose configuration differs from the shared one by `overrides`. */
   function reconfigured(overrides: Partial<GceOrbHostProviderOptions>): GceOrbHostProvider {
     return new GceOrbHostProvider(new FakeTransport([]), {
       projectId: "proj",
@@ -1079,7 +1078,6 @@ describe("GceOrbHostProvider host specification", () => {
   const fingerprintWith = (overrides: Partial<GceOrbHostProviderOptions>): string =>
     reconfigured(overrides).desiredSpecFingerprint(specInput);
 
-  /** An instance whose metadata carries only the given items. */
   const instanceWithItems = (
     items: { key: string; value: string }[],
     overrides: Record<string, unknown> = {},

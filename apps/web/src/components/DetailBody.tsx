@@ -163,7 +163,7 @@ export function DetailContent({
   }
 }
 
-/** Mounted only while the owning disclosure is open. Failed reads remain scoped, with explicit retry. */
+/** Failed reads remain scoped, with explicit retry. */
 export function CommittedBody({
   context,
   recordId,

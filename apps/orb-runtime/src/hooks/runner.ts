@@ -305,7 +305,7 @@ export class BootHookRunner {
     return parseHookEnvFile(raw, this.managedEnvironmentNames).entries;
   }
 
-  /** What `applyHookEnv` did, for the agent's prompt fragment. Null before it ran. */
+  /** What `applyHookEnv` did, for the agent's prompt fragment. Null before it ran or when it found no file. */
   envReport(): HookEnvReport | null {
     return this.envApplied;
   }
@@ -559,7 +559,7 @@ export class BootHookRunner {
   /**
    * The durable "setup has run for this incarnation" marker. It lives in the
    * workspace, which survives the container layer, so a runtime restart does
-   * not re-run a twenty-minute hook while a new incarnation always does.
+   * not re-run setup while a new incarnation always does.
    */
   private stampedIncarnation(): string | null {
     return this.files.readText(this.stampPath())?.trim() ?? null;

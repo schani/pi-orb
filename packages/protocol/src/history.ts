@@ -75,9 +75,8 @@ const OtherBlockSchema = Type.Object(
 );
 
 /**
- * `tool_result` nests further blocks; one level of nesting is typed exactly
- * and deeper levels are impossible in practice (tool results contain leaf
- * text/image blocks). The nested array reuses the non-recursive leaf union.
+ * `tool_result` content is leaf blocks only; the leaf union is non-recursive,
+ * so nesting is one level deep.
  */
 const LeafBlockSchema = Type.Union([
   TextBlockSchema,

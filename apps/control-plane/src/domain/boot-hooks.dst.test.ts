@@ -391,7 +391,6 @@ describe("orb boot hooks (DST)", () => {
             );
             expect(harness.world.setupIncarnationOf(ORB)).toBe(0);
 
-            // Stop/start of the retained incarnation: resume only.
             await stopStartCycle(task, harness.deps, harness);
             expect(harness.world.hostIncarnationOf(ORB)).toBe(0);
             expect(harness.world.setupIncarnationOf(ORB)).toBe(0);
@@ -535,7 +534,6 @@ describe("orb boot hook races (DST)", () => {
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      // Same compute, and its single setup is the one that finished.
       expect(harness.world.hostIncarnationOf(ORB)).toBe(0);
       expect(harness.world.setupRunsOf(ORB)).toEqual([0]);
       expect(view(harness)?.stateDetail).toBeUndefined();

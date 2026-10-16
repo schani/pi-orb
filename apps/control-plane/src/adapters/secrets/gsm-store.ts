@@ -17,10 +17,10 @@ const toStoreError = (reason: string) => (error: unknown) =>
 export interface GsmSecretStoreOptions {
   readonly projectId: string;
   /**
-   * The parent secret's id per provider, e.g. "pi-orb-credential". The
-   * secret itself is created by the OpenTofu plane (adding a version cannot
-   * create the parent); this adapter only adds, reads, and destroys
-   * versions on it.
+   * Prefix of each provider's parent secret id, e.g. "pi-orb-credential" for
+   * "pi-orb-credential-openai-codex". The secrets are created by the OpenTofu
+   * plane (adding a version cannot create the parent); this adapter only adds,
+   * reads, and destroys versions on them.
    */
   readonly secretPrefix: string;
 }

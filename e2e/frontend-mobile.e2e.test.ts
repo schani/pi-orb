@@ -1454,7 +1454,6 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         .toBeLessThanOrEqual(1);
       await composer.getByRole("button", { name: "Write message" }).tap();
       await composer.getByRole("textbox").fill("keep this draft while the keyboard moves");
-      // Tail pin follows a keyboard resize, without moving the document.
       await page.evaluate("window.setPhoneViewport(390, 61)");
       await expectPage(app).toHaveCSS("top", "61px");
       await expectPage(app).toHaveCSS("height", "390px");
@@ -1506,7 +1505,6 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       await expectPage(composer.getByRole("textbox")).toHaveValue(
         "keep this draft while the keyboard moves",
       );
-      // Leaving the phone breakpoint restores document scrolling and removes overrides.
       await page.setViewportSize({ width: 1280, height: 900 });
       await expectPage(app).toHaveCSS("position", "static");
       await expectPage(scroller).toHaveCSS("display", "block");

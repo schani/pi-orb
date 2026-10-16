@@ -31,7 +31,7 @@ export function issuedDeviceLoginChallenge(
     : null;
 }
 
-/** Hold the immutable result, not main's resolution; production persists it after release. */
+/** Gate an already-resolved immutable snapshot; production stores it only after the gate succeeds. */
 export function afterAcquireGate(
   source: ResourceSource,
   gate: (snapshot: ResourceSnapshot, signal: AbortSignal) => ResultAsync<unknown, ResourceError>,

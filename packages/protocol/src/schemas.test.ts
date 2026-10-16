@@ -457,7 +457,6 @@ describe("frame schemas", () => {
   it("accepts presence frames and rejects malformed ones (idle auto-stop)", () => {
     expect(Check(ClientFrameSchema, { v: 1, type: "client.presence", visible: true })).toBe(true);
     expect(Check(ClientFrameSchema, { v: 1, type: "client.presence", visible: false })).toBe(true);
-    // Closed schema: the visibility flag is required and must be boolean.
     expect(Check(ClientFrameSchema, { v: 1, type: "client.presence" })).toBe(false);
     expect(Check(ClientFrameSchema, { v: 1, type: "client.presence", visible: "visible" })).toBe(
       false,
@@ -494,11 +493,9 @@ describe("frame schemas", () => {
         ]),
       ),
     ).toBe(true);
-    // Image-only messages are valid.
     expect(
       Check(ClientFrameSchema, request([{ type: "image", mediaType: "image/png", data: "x" }])),
     ).toBe(true);
-    // Closed schemas: missing fields and data-URL-style extras are rejected.
     expect(Check(ClientFrameSchema, request([{ type: "image", data: "x" }]))).toBe(false);
     expect(Check(ClientFrameSchema, request([{ type: "image", mediaType: "image/png" }]))).toBe(
       false,
@@ -774,8 +771,6 @@ describe("control-plane API schemas", () => {
   });
 
   it("never allows OAuth credential fields to serialize (docs/credentials.md)", () => {
-    // Walk every browser-facing schema: every object must be closed and no
-    // property may be named `access` or `refresh`.
     const browserSchemas = [
       ProjectViewSchema,
       OrbViewSchema,

@@ -15,17 +15,15 @@ const LOOPBACK_ISSUER_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
  * metadata refuses to boot without a usable value, before any side effect —
  * the exact-image pin precedent in `adapters/gce/image-pin.ts`.
  *
- * The canonical form is the URL's origin: scheme, host, and non-default port,
- * with no trailing slash and no path. That exact string is served as `issuer`,
- * stamped into every token's `iss`, and prefixed to `jwks_uri`, so
- * `https://issuer.example` and `https://issuer.example/` cannot become two
- * different trust identities. A path is refused rather than silently dropped:
- * the well-known endpoints are registered at the origin root, so an issuer URL
- * carrying a path would advertise documents that are not there.
+ * The canonical form is the bare origin: scheme, host, and non-default port.
+ * That string is served as `issuer`, stamped into every token's `iss`, and
+ * prefixed to `jwks_uri`, so `https://issuer.example/` must not become a second
+ * trust identity. Paths are refused rather than dropped: the well-known
+ * documents live at the origin root, so a path would advertise documents that
+ * are not there.
  *
- * `fallback` is the value to use when the variable is unset — the loopback
- * origin for the single-process `all` role, and null for a split deployment,
- * which has no truthful default and must be told.
+ * `fallback` applies when the variable is unset: the loopback origin for the
+ * single-process `all` role, null for a split deployment (no truthful default).
  */
 export function readIssuerUrl(configured: string, fallback: string | null): Result<string, string> {
   const raw = configured !== "" ? configured : fallback;

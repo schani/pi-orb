@@ -161,7 +161,7 @@ describe("OutboundWriter", () => {
 
   it("sends the sync batch synchronously regardless of size (budget exemption)", () => {
     const sink = new FakeSink();
-    sink.bufferedAmount = 10_000_000; // heavily backpressured socket
+    sink.bufferedAmount = 10_000_000;
     const writer = new OutboundWriter(sink, {
       maxCriticalBufferedBytes: 1_000,
       highWaterMark: 100,
@@ -192,7 +192,7 @@ describe("OutboundWriter", () => {
       highWaterMark: 100,
     });
     writer.enqueueSyncBatch([]);
-    sink.bufferedAmount = 1_000; // busy socket
+    sink.bufferedAmount = 1_000;
     writer.enqueue(historyFrame("rec-1"));
     writer.enqueue(historyFrame("rec-2"));
     expect(sink.sent).toHaveLength(0);
@@ -218,7 +218,6 @@ describe("OutboundWriter", () => {
     writer.enqueue(statusFrame("idle"));
     sink.bufferedAmount = 0;
     writer.onDrain();
-    // One coalesced patch (newest replace) and one status (newest).
     const events = sink.sent
       .filter((frame) => frame.type === "runtime.event")
       .map((frame) => (frame.type === "runtime.event" ? frame.event : null));

@@ -43,8 +43,8 @@ API="$DIR/api.sh"
 source "$DIR/smoke-fixtures.sh"
 
 OVERALL_TIMEOUT=${OVERALL_TIMEOUT:-3600} # two lifecycle boots, stops, SSH and federation
-RUNNING_TIMEOUT=${RUNNING_TIMEOUT:-900}  # lifecycle create/start deadline
-STOPPED_TIMEOUT=${STOPPED_TIMEOUT:-300}  # 5 minutes per stop
+RUNNING_TIMEOUT=${RUNNING_TIMEOUT:-900}
+STOPPED_TIMEOUT=${STOPPED_TIMEOUT:-300}
 SSH_READY_TIMEOUT=${SSH_READY_TIMEOUT:-180} # SSH daemon + metadata key propagation
 POLL_INTERVAL=${POLL_INTERVAL:-5}
 
@@ -230,9 +230,9 @@ const getJson = async (url) => {
   const header = decode(parts[0]);
   const claims = decode(parts[1]);
 
-  // 1. Discovery is fetched from the configured issuer origin, and must claim
-  //    to be that issuer. A document naming someone else is a misconfiguration
-  //    a verifier must never follow.
+  // Discovery is fetched from the configured issuer origin and must claim to be
+  // that issuer. A document naming someone else is a misconfiguration a verifier
+  // must never follow.
   const discovery = await getJson(`${issuer}/.well-known/openid-configuration`);
   if (discovery.issuer !== issuer) fail(`discovery issuer ${discovery.issuer} != ${issuer}`);
   if (!String(discovery.jwks_uri).startsWith(issuer)) {
@@ -242,7 +242,6 @@ const getJson = async (url) => {
     fail("discovery does not advertise RS256");
   }
 
-  // 2. Signature, by `kid`, against the served key set.
   if (header.alg !== "RS256") fail(`unexpected alg ${header.alg}`);
   if (!header.kid) fail("no kid in the JWT header");
   const jwks = await getJson(discovery.jwks_uri);
@@ -255,13 +254,9 @@ const getJson = async (url) => {
     fail("signature does not verify against the published key");
   }
 
-  // 3. The claim rules a relying party owns. `iss`/`aud` exactly; a live
-  //    lifetime; the workload token class; and the immutable pi-orb identity
-  //    the caller could not have chosen — project, orb, and the compute
-  //    incarnation, each cross-checked against what the control plane and GCE
-  //    say the minting orb actually is. Asserting a claim is merely *present*
-  //    would pass for any orb of the deployment, which is precisely the
-  //    authorization mistake the recipes warn about.
+  // Claims must equal the minting orb's real identity, not merely be present:
+  // asserting presence would pass for any orb of the deployment, which is the
+  // authorization mistake the recipes warn about.
   const now = Math.floor(Date.now() / 1000);
   const skew = 60;
   if (claims.iss !== issuer) fail(`iss ${claims.iss} != ${issuer}`);
@@ -293,14 +288,12 @@ const getJson = async (url) => {
 VERIFY_JS
 
 # Remote probe, run *inside another live orb* against the control-plane URL
-# that orb is configured with. The bearer under test
-# arrives on stdin; the mint URL is its only argument. Prints "<status> <code>".
+# that orb is configured with. The bearer under test arrives on stdin; the mint
+# URL is its only argument. Prints "<status> <code>".
 #
-# The mint route's error envelope is `{"error":"not_mintable"}` — the code *is*
-# the `error` field, a bare string (packages/protocol/src/workload-identity.ts).
-# It is not the `{"error":{"code":...}}` shape the browser API uses, and reading
-# `.error.code` here silently printed an empty code for every refusal, so the
-# step-6 assertion could never match and the release gate could never pass.
+# The mint route's error is a bare string (`{"error":"not_mintable"}`, see
+# packages/protocol/src/workload-identity.ts), not the `{"error":{"code":...}}`
+# shape of the browser API, so the code is read from `error` directly.
 cat > "$WORK_DIR/probe.js" <<'PROBE_JS'
 let bearer = "";
 process.stdin.setEncoding("utf8");
@@ -569,8 +562,8 @@ say "step 5/7: exchange through GCP STS and call a read-only API"
 if [ "$FEDERATE" != true ]; then
   note "steps 5 (STS exchange, read-only API call, wrong-audience rejection) skipped"
 else
-  # The exchange itself. curl reads its request from a mode-0600 config file so
-  # the subject token never enters an argument list.
+  # curl reads its request from a mode-0600 config file so the subject token
+  # never enters an argument list.
   sts_exchange() { # sts_exchange <token-file> <out-file> ; prints the HTTP status
     local token status
     token=$(tr -d '\n' < "$1")

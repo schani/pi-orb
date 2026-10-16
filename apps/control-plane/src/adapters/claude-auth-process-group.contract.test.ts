@@ -29,7 +29,7 @@ const fixture = fileURLToPath(new URL("./claude-auth-process-group.fixture.mjs",
 const nested = process.env["CLAUDE_AUTH_GROUP_NAMESPACE"] === "1";
 
 // Only spawn, scratch ownership/removal, timers, and signal-failure injection are interposed.
-// The PTY, all PIDs, signals, and negative-PID kill(0) queries are genuine.
+// The PTY, PIDs, signal delivery, and negative-PID kill(0) queries are genuine.
 vi.mock("node-pty", async (importOriginal) => {
   const native = await importOriginal<typeof import("node-pty")>();
   return {

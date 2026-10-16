@@ -50,7 +50,6 @@ const MAX_TRACKED_DENIALS = 1_024;
 export class MintDenialLog {
   private readonly lastCode = new Map<string, MintDenialCode>();
 
-  /** Logs the edge into a new code; a repeat of the same code is silent. */
   denied(
     task: SimulationTask,
     orb: { readonly id: string; readonly hostIncarnation: number },
@@ -65,7 +64,6 @@ export class MintDenialLog {
     });
   }
 
-  /** A healthy mint logs nothing and re-arms the edge for the next denial. */
   succeeded(orbId: string): void {
     this.lastCode.delete(orbId);
   }
@@ -114,7 +112,6 @@ function isNonRetryable(error: StoreError): boolean {
   return error.code === "invariant" || error.code === "corruption";
 }
 
-/** A store failure as a mint failure; a non-retryable one is `internal`. */
 function mapStoreError(error: StoreError): MintError {
   return isNonRetryable(error)
     ? { type: "internal", message: error.message }
@@ -125,10 +122,9 @@ function mapStoreError(error: StoreError): MintError {
  * Mints one identity token for the orb the bearer hash resolves to. The
  * decisions run in the order of docs/workload-identity.md's request path:
  * authenticate, then check the lifecycle state, then validate the request,
- * then claim the rate-limit slot, then sign. A denial is reported to the
- * caller as a typed error and nowhere else: `deps.denials` turns the ones that
- * belong to a resolved orb into a deduplicated operator log edge, and the
- * control plane keeps no record of the attempt.
+ * then claim the rate-limit slot, then sign. A denial is returned as a typed
+ * error; for a resolved orb, `deps.denials` also logs one deduplicated edge.
+ * Nothing durable records the attempt.
  */
 export function mintIdToken(
   task: SimulationTask,
@@ -158,8 +154,9 @@ export function mintIdToken(
       return err({ type: "not_mintable", state: orb.state });
     }
 
-    // Validated after the orb resolves so the denial names an orb; the
-    // protocol schema and the CLI reject these shapes earlier anyway.
+    // Validated after the orb resolves so the denial names an orb. The protocol
+    // schema rejects an empty audience and an out-of-range ttl earlier, but not
+    // the byte cap.
     const constants = deps.constants;
     const audienceBytes = utf8Bytes(request.audience);
     if (audienceBytes === 0 || audienceBytes > constants.maxAudienceBytes) {

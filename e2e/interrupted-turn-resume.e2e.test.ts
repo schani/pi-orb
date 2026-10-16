@@ -129,7 +129,6 @@ const NAME_SCENARIO = {
   },
 };
 
-/** Just enough of one recorded fake request to inspect the resumed turn. */
 interface ModelRequest {
   surface?: string;
   body?: { input?: Record<string, unknown>[] };
@@ -369,7 +368,6 @@ describe("interrupted-turn resume E2E", () => {
     );
     expect(accepted.type === "request.result" && accepted.result.type).toBe("accepted");
 
-    // The bash tool is live inside the orb...
     await untilFrame(
       "bash tool running",
       () =>
@@ -382,9 +380,9 @@ describe("interrupted-turn resume E2E", () => {
         ),
       180_000,
     );
-    // ...and, decisively, the assistant message holding the tool call is on
-    // disk and replicated. Without this the kill could land before the entry is
-    // persisted and the tail would be an unanswered user message instead.
+    // The assistant message holding the tool call must be on disk and replicated
+    // first. Without this the kill could land before the entry is persisted and
+    // the tail would be an unanswered user message instead.
     await waitFor(
       "assistant tool call replicated",
       async () => {
@@ -437,7 +435,6 @@ describe("interrupted-turn resume E2E", () => {
     );
     console.log(`[resume] turn completed ${Date.now() - killedAt} ms after the kill`);
 
-    // Exactly one resume, never a second one, and never a decline.
     expect(resumed.markers.length, "exactly one resume marker").toBe(1);
     expect(customRecords(resumed.records, DECLINE_CUSTOM_TYPE).length, "no decline marker").toBe(0);
 

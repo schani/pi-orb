@@ -50,7 +50,6 @@ try {
   }), { columns: '32px', gap: '12px' });
   assert.equal(await page.locator('[data-variant="ink"] .composer-field').evaluate(el => el.getBoundingClientRect().height), 80);
 
-  // Focus decoration cannot move or resize any field.
   await page.locator('#preview-toggle').click();
   for (const slug of slugs) {
     for (const kind of ['composer', 'name', 'instructions']) {
@@ -87,7 +86,6 @@ try {
   assert.equal(await page.locator('#preview-toggle').getAttribute('aria-pressed'), 'true');
   assert.equal(await page.locator('.candidate.is-preview').count(), 5);
 
-  // Every option expands through the selector, deep-links, and retains local drafts.
   const draft = page.locator('[data-variant="carbon"] [data-draft="instructions"]');
   await draft.fill('Retained carbon instructions.');
   for (const slug of slugs) {

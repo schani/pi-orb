@@ -47,10 +47,9 @@ export class OidcTokenSigner implements TokenSigner {
 }
 
 /**
- * RSA key generation for the boot hook and for rotation. Generation is
- * synchronous and takes tens of milliseconds, which is acceptable where it
- * runs: once at boot when no key exists, and on an operator's rotation. It is
- * never on the mint path.
+ * RSA key generation for the boot hook and for rotation. It blocks the event
+ * loop for the whole keygen, which is acceptable only there: at boot when no
+ * key exists, and on an operator's rotation. It is never on the mint path.
  */
 export class NodeCryptoSigningKeyGenerator implements SigningKeyGenerator {
   generate(_task: SimulationTask): ResultAsync<GeneratedSigningKey, SignerError> {

@@ -164,7 +164,6 @@ describe("execution bindings", () => {
   });
 });
 
-/** Scripts a fresh (no existing container) provision against the CLI fake. */
 function installFreshHost(): void {
   let labels: Record<string, string> = {};
   dockerFake.install((args) => {
@@ -186,7 +185,6 @@ function installFreshHost(): void {
   });
 }
 
-/** Provisions a fresh orb against the scripted CLI and returns the `run` argv. */
 async function provisionArgv(provider: DockerOrbHostProvider): Promise<string[]> {
   installFreshHost();
   const result = await provider.provision(task, request, context);
@@ -196,7 +194,6 @@ async function provisionArgv(provider: DockerOrbHostProvider): Promise<string[]>
   return run ?? [];
 }
 
-/** The value of `--env NAME=…` in a `docker run` argv. */
 function envValue(argv: string[], name: string): string | null {
   for (let index = 0; index < argv.length - 1; index += 1) {
     const entry = argv[index + 1];
@@ -207,7 +204,6 @@ function envValue(argv: string[], name: string): string | null {
   return null;
 }
 
-/** A `docker inspect` payload for a running orb container. */
 function inspectPayload(networkSettings: Record<string, unknown>): string {
   return JSON.stringify([
     {
@@ -389,10 +385,7 @@ describe("DockerOrbHostProvider", () => {
   });
 
   it("provision never starts an existing container carrying a stale host spec", async () => {
-    // Regression: the spec stamp is checked on the same footing as the
-    // incarnation, *before* any `docker start`. Resurrecting a stale-spec
-    // container in place is exactly the mutation this design forbids
-    // (docs/compute-replacement.md).
+    // A stale-spec container is never restarted in place (docs/compute-replacement.md).
     dockerFake.install((args) => {
       if (args[0] === "inspect") {
         return {
@@ -805,7 +798,6 @@ describe("DockerOrbHostProvider host specification", () => {
   const desired = (overrides: ProviderOverrides = {}): string =>
     makeProvider(overrides).desiredSpecFingerprint(specInput);
 
-  /** A `docker inspect` payload for the orb's incarnation-0 container. */
   function containerPayload(
     labels: Record<string, string>,
     status = "running",
@@ -876,7 +868,6 @@ describe("DockerOrbHostProvider host specification", () => {
     expect(makeProvider({ specGeneration: 7 }).specGeneration).toBe(7);
   });
 
-  /** The value of `--label NAME=…` in a `docker run` argv. */
   function labelValue(argv: string[], name: string): string | null {
     for (let index = 0; index < argv.length - 1; index += 1) {
       const entry = argv[index + 1];

@@ -93,7 +93,6 @@ class FakePiSession {
     return Promise.resolve();
   }
 
-  /** Let the pending `sendUserMessage` prologue finish. */
   completePrologue(): void {
     const resolve = this.prologue;
     this.prologue = null;
@@ -108,7 +107,6 @@ class FakePiSession {
     return this.unannounced !== null;
   }
 
-  /** Emit `agent_start` for the turn Pi has begun. */
   announceStart(): void {
     const submitter = this.unannounced;
     if (submitter === null) return;
@@ -237,10 +235,9 @@ function assertCorrelation(h: Harness): void {
  * where the other submitter lands relative to them.
  */
 async function piTask(task: SimulationTask, h: Harness, expectedLandings: number): Promise<void> {
-  // Do not finish merely because the submitters' native-Promise continuations
-  // have not run yet. That left the inbox awaiting an unmanaged promise with
-  // no simulated task available to complete Pi's prologue. The modeled Pi
-  // task owns this gate until every expected submission has actually landed.
+  // Stay until every expected submission has landed: returning on an unmanaged
+  // native-Promise continuation would leave the inbox awaiting a prologue that
+  // no simulated task can complete.
   for (let step = 0; step < 20; step++) {
     await task.checkpoint(`pi step ${step}`);
     if (h.pi.hasPendingPrologue()) h.pi.completePrologue();

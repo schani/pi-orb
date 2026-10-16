@@ -227,7 +227,6 @@ const ActivateSigningKeyRequestSchema = Type.Object(
   { additionalProperties: false },
 );
 
-/** What an operator needs to see after each stage: which key, and where it stands. */
 function signingKeyView(row: SigningKeyRow) {
   return {
     kid: row.kid,
@@ -615,8 +614,8 @@ export function registerRoutes(
       if (deleted.isErr()) return sendCommandError(reply, deleted.error);
       const progress = await deps.store.getProjectDeletionProgress(task, deleted.value.id);
       if (progress.isErr()) {
-        // A zero-child project can finalize between the accepted command and
-        // this presentation read. The command still returns its required 202.
+        // The project can finalize between the accepted command and this read.
+        // The command still returns its required 202.
         if (progress.error.type === "project_conflict" && progress.error.reason === "not_found") {
           return reply.status(202).send(
             projectView(deleted.value, {

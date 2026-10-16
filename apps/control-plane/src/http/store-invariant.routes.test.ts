@@ -9,10 +9,7 @@ const MESSAGE_ID = "00000000-0000-4000-8000-000000000042";
 
 /**
  * A deterministic store bug must not be advertised as retryable
- * (docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md): the
- * shipped enqueue failure answered 503 `unavailable` with `retryable: true`, so
- * every client — the UI included — kept re-sending a request that could never
- * succeed.
+ * (docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md).
  */
 describe("store invariant HTTP mapping", () => {
   let harness: ReturnType<typeof makeHarness>;

@@ -29,10 +29,8 @@ export function bindUserBroker(deps: UserBrokerDeps, userId: string): BrokerDeps
  * credential. The refresh token itself never appears in a return value.
  */
 
-/** The model-credential slot of the first slice. */
 export const CODEX_PROVIDER = "openai-codex";
 
-/** The GitHub user-credential slot (docs/credentials.md). */
 export const GITHUB_PROVIDER = "github";
 
 /**
@@ -272,9 +270,8 @@ export async function getToken(
         }
       }
       if (version === null) {
-        // Acknowledged loss window: the rotation may only exist in memory.
-        // Surface loudly; if the old refresh token is already dead this ends
-        // in auth_required on a later attempt.
+        // Acknowledged loss window: the rotation may only exist in memory. If the
+        // old refresh token is already dead, a later attempt ends in auth_required.
         await releaseLease(task, deps, provider, leased);
         return err(retryable("credential write failed after upstream refresh"));
       }

@@ -137,7 +137,7 @@ describe("credential broker (DST)", () => {
         {
           name: "seeder",
           f: async (task) => {
-            // Near expiry: under the 5-minute proactive threshold.
+            // Near expiry: inside refreshThresholdMs.
             seedCredential(task, harness, { expiresInMs: 2 * 60_000 });
           },
         },

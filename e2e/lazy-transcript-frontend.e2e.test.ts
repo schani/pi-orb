@@ -254,7 +254,7 @@ it.each(["chromium", "webkit"] as const)(
           "LAZY_RESULT_SECRET output 1",
         );
         expect(heldReads).toBe(1);
-        // A cache return preserves the immutable detail without a second transfer.
+        // A cache return reuses the transcript without refetching history.
         await page.locator(`.orb-index a[href="/orbs/frontend-fixture-orb"]`).click();
         await expect(page.locator(".orb-name")).toHaveText("Frontend Playground");
         const previousReads = historyCalls;

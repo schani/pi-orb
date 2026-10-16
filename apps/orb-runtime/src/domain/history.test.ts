@@ -136,7 +136,6 @@ describe("gateUnflushedSnapshot", () => {
     const gated = gateUnflushedSnapshot(snap, false);
     expect(gated.records).toEqual([]);
     expect(gated.headId).toBeNull();
-    // Identity, activity, and session metadata still flow.
     expect(gated.orbId).toBe(snap.orbId);
     expect(gated.runtimeInstanceId).toBe(snap.runtimeInstanceId);
     expect(gated.session).toBe(snap.session);

@@ -39,10 +39,9 @@ import type {
 export const SIGNING_KEY_SECRET_PROVIDER = "oidc-signing-key";
 
 /**
- * How many times a convergence loop re-reads after losing a race. Every
- * iteration is provoked by another instance having made progress, so a small
- * bound is enough; exhausting it is reported as unavailable rather than
- * spinning.
+ * Bounds how often a convergence loop re-reads after a refused write. A refusal
+ * normally means another instance made progress, so a small bound is enough;
+ * exhausting it reports unavailable rather than spinning.
  */
 const MAX_CONVERGENCE_ATTEMPTS = 4;
 
@@ -83,7 +82,6 @@ function fromStore(reason: string, error: StoreError | SigningKeyConflict): Sign
   return unavailable(`${reason}: ${error.message}`);
 }
 
-/** The most recently published key awaiting activation, if any. */
 function newestPending(rows: readonly SigningKeyRow[]): SigningKeyRow | undefined {
   let newest: SigningKeyRow | undefined;
   for (const row of rows) {
@@ -397,7 +395,6 @@ export interface RotationRefused {
    */
   readonly reason: "nothing_published" | "soak";
   readonly message: string;
-  /** How much longer the soak window has to run. */
   readonly remainingMs?: number;
 }
 
@@ -433,7 +430,7 @@ export type RotationError = SignerError | RotationRefused;
  * and activated in the same breath is published in name only, since no
  * verifier has re-fetched JWKS in between. `force` skips it for the case the
  * window is wrong for — a leaked key, where a few rejected tokens are cheaper
- * than one more minute of signing.
+ * than waiting out the soak with it still signing.
  */
 export function activatePublishedSigningKey(
   task: SimulationTask,
@@ -474,10 +471,10 @@ export function activatePublishedSigningKey(
 
 /**
  * Publish and activate in one call, with no soak in between. This is the
- * unstaged form: it is what the recovery scenarios and the composition tests
- * drive, and what a `force` rotation collapses to. Operators use the two
- * stages above, because publishing and signing in the same instant gives
- * verifier caches nothing to turn over in (docs/workload-identity.md).
+ * unstaged form: the recovery scenarios and the composition tests drive it.
+ * Operators use the two stages above, because publishing and signing in the
+ * same instant gives verifier caches nothing to turn over in
+ * (docs/workload-identity.md).
  */
 export function rotateSigningKey(
   task: SimulationTask,
@@ -622,7 +619,6 @@ export function assembleJwks(
   });
 }
 
-/** The private half of the key the issuer signs with right now. */
 export interface ActiveSigningKeyMaterial {
   readonly kid: string;
   /** The exact secret version the material came from; part of the cache key. */

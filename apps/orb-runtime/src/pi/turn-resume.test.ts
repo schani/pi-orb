@@ -111,7 +111,6 @@ const systemInboxNotice = () =>
     },
   });
 
-/** The record ID detection reports as the interrupted head. */
 const idOf = (record: Record<string, unknown>): string => {
   const value = record["id"];
   if (typeof value !== "string") throw new Error("entry without an id");

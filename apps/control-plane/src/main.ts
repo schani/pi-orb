@@ -803,7 +803,6 @@ export async function main(
       logEvent(httpTask, "auth-hosting-denied", { reason, surface, requestId, method, route }),
   );
   app.get("/health", async () => ({ status: "ok" }));
-  // Key management dependencies are shared by the boot hook and authenticated rotation routes.
   const signingKeyDeps: SigningKeyDeps = {
     keys: database.signingKeys,
     secrets,
@@ -1037,8 +1036,8 @@ export async function main(
   // issuer behind it (see `ensureSigningKeyInBackground`).
   void ensureSigningKeyInBackground();
 
-  // Background loops: history polling and lifecycle reconciliation
-  // (docs/history-replication.md). Same domain code as the simulations, on real time.
+  // Background loops: same domain code as the simulations, on real time
+  // (docs/history-replication.md, docs/lifecycle.md).
   if (activationBucket !== "") {
     const activated = await waitForReleaseActivation(
       new ControlPlaneTask("release-activation"),

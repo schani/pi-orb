@@ -777,7 +777,7 @@ export class ClaudeOrbAgent implements OrbAgent {
         },
       };
     if (operationId !== null) {
-      // submit claims synchronously; its epoch fence also cancels pre-inference recovery.
+      // submit claims synchronously; an abort during startQuery bumps submissionEpoch and cancels enqueueing.
       void this.submit(
         [{ type: "text", text: plan.marker.content }],
         operationId,

@@ -68,7 +68,7 @@ it.each(["chromium", "webkit"] as const)(
         )
           errors.push(message.text());
       });
-      // The mock serves activity headlines only for its headline orb.
+      // Headlines are served only for frontend-activity-headlines, so ORB's headline requests may fail.
       page.on("response", (response) => {
         const path = new URL(response.url()).pathname;
         if (response.status() >= 400 && !path.startsWith(`/api/v1/orbs/${ORB}/headlines/`))
@@ -121,7 +121,6 @@ it.each(["chromium", "webkit"] as const)(
       await page.mouse.move(0, 0);
       await expect(tip).toBeHidden();
 
-      // Hovering an end label isolates that series.
       const zones = row(page, "checkout-api p95 by zone").locator(".chart-canvas svg");
       expect(await dimmedLines(zones)).toBe(0);
       await hover(page, zones.locator("text", { hasText: /^us-west-2b / }), 0.3, 0.5);
@@ -129,12 +128,10 @@ it.each(["chromium", "webkit"] as const)(
       await page.mouse.move(0, 0);
       await expect.poll(() => dimmedLines(zones)).toBe(0);
 
-      // Folding keeps the summary.
       await latency.locator("summary").click();
       await expect(latency.locator(".chart-canvas")).toBeHidden();
       await expect(latency.locator(".chart-strip-value")).toBeVisible();
 
-      // Phone width swaps end labels for a hoverable key.
       await page.setViewportSize({ width: 390, height: 844 });
       const narrowZones = row(page, "checkout-api p95 by zone");
       const key = narrowZones.locator(".chart-key");

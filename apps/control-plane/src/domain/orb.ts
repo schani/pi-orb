@@ -51,7 +51,7 @@ export interface OrbRow {
   readonly hostDiscardRequestedAt: number | null;
   /** HEAD reported at the last ready; null also for a repository without commits. */
   readonly checkoutCommit: string | null;
-  /** Wall-clock ms of the last runtime ready; the "has ever been ready" marker. */
+  /** Wall-clock ms of the most recent runtime ready; null before the first. */
   readonly lastReadyAt: number | null;
   readonly harnessSessionId: string | null;
   readonly harnessSessionHeader: HarnessSessionMetadata | null;
@@ -159,7 +159,7 @@ export interface ProjectDeletionProgress {
   readonly blocked: number;
 }
 
-/** True when the orb has never reached runtime-ready (docs/lifecycle.md drain skip). */
+/** Never reached runtime-ready and has no harness session (docs/lifecycle.md drain skip). */
 export function hasNeverBeenReady(orb: OrbRow): boolean {
   return orb.lastReadyAt === null && orb.harnessSessionId === null;
 }

@@ -53,7 +53,7 @@ export interface OrbGlyph {
   /** Selects the hue for the glyph and the entry's left border. */
   state: OrbGlyphState;
   iconHref: string;
-  /** The state word, used as the glyph's alt text and title. */
+  /** Alt text and title: the state word, except for alert, busy and sleeping. */
   label: string;
 }
 
@@ -161,11 +161,10 @@ export interface DashboardTotals {
 }
 
 /**
- * The four counts on the dashboard's totals strip, taken from whatever has
- * loaded: every project including one being deleted, and the working-set orbs
- * of the projects whose lists have arrived. A project whose orbs are still in
- * flight simply contributes nothing yet, which is why the strip needs no
- * placeholder.
+ * Dashboard totals strip, counted from whatever has loaded: every project
+ * (including one being deleted) and the working-set orbs of projects whose
+ * lists have arrived. Projects still loading contribute nothing yet, so the
+ * strip needs no placeholder.
  */
 export function dashboardTotals(
   projects: readonly ProjectView[],

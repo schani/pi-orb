@@ -296,7 +296,6 @@ export async function probeNestedContinuation(options = {}) {
             throw new Error("Private worker tool content leaked to root provider.");
           if (turn > 1) rootLaunchConsumed = true;
           if (messages.includes("Waiting for my nested children.")) rootSawReviewer = true;
-          // Only scripted marker/tool IDs survive request parsing.
           for (const id of ["toolu_nested_0", "toolu_nested_1", "toolu_nested_2"]) {
             if (messages.includes(`<tool-use-id>${id}</tool-use-id>`)) leafNotices.add(id);
           }

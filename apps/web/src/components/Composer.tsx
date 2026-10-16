@@ -25,7 +25,6 @@ import { TextFieldFrame } from "./TextFieldFrame.tsx";
 
 export interface ComposerImage {
   id: string;
-  /** e.g. "image/png". */
   mediaType: string;
   /** Base64 payload without a data-URL prefix. */
   data: string;
@@ -47,13 +46,12 @@ interface ComposerProps {
   onImageRemove: (id: string) => void;
   onAttachmentError?: (message: string) => void;
   dropLabel?: string | null;
-  /** Orb not deleting or archived, settings writable, history loaded, and no request in flight. */
+  /** Orb not deleting, archiving, or archived; no request in flight; history loaded; settings writable or central agent. */
   canSend: boolean;
   onSend: () => void;
-  /** An operation is running and can be aborted. */
   canAbort: boolean;
   onAbort: () => void;
-  /** Phone-only operation feedback, beside the initiating control. */
+  /** Operation feedback. Phone always shows it; desktop only while settings are pending or the command picker is open. */
   feedback?: string;
   settings?: AgentSettingsEvent | null;
   effortLabel?: "thinking" | "effort";

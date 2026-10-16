@@ -13,7 +13,7 @@ export interface ToolSearchMatch {
   score: number;
 }
 
-/** Ranks tools for a query. BM25 today; a hybrid ranker with embeddings can replace it. */
+/** Ranks tools for a query. */
 export interface ToolRanker {
   rank(query: string, documents: readonly ToolSearchDocument[], limit: number): ToolSearchMatch[];
 }
@@ -50,7 +50,6 @@ function stem(term: string): string {
   return term;
 }
 
-/** Lowercase terms, split at camelCase boundaries and non-alphanumerics, without stop words. */
 export function tokenize(text: string): string[] {
   return text
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
@@ -65,7 +64,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Schema descriptions and property names, recursively. */
 function schemaText(schema: unknown, parts: string[]): void {
   if (!isObject(schema)) return;
   if (typeof schema.description === "string") parts.push(schema.description);
@@ -82,11 +80,6 @@ function schemaText(schema: unknown, parts: string[]): void {
   }
 }
 
-/**
- * Search text of a tool: the name, the name with `_`
- * as spaces, the description, schema descriptions and property names, and the namespace with its
- * description and instructions.
- */
 export function createToolSearchDocument(
   tool: Pick<PolicyTool, "name" | "description" | "parameters">,
   namespace?: ToolNamespace,

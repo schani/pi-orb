@@ -3,7 +3,6 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, expect, it } from "vitest";
-// Test-owned JavaScript preload runs directly in Node, without a transpiler.
 // @ts-expect-error JavaScript preload has no declaration file.
 import { startAudit } from "./native-inference-audit.mjs";
 

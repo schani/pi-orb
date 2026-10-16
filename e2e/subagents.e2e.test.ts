@@ -481,7 +481,6 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
     const replicated = JSON.stringify(await readReplicatedHistorySnapshot(cp, orb));
     expect(replicated).toContain("interruptedSubagents");
     expect(replicated).not.toContain("PRIVATE_CHILD_TRANSCRIPT_ONLY");
-    // Resume the retained workspace, then archive with an actually blocked child.
     phase = "archive";
     audit.bracket(phase);
     expect((await api(cp.baseUrl, "POST", `/api/v1/orbs/${orb}/start`)).status).toBe(202);
@@ -541,8 +540,7 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
         (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}`)).body["state"] === "archived"
           ? true
           : null,
-      // The first run's 60s watchdog was shorter than the mandatory 65s
-      // quarantine, independently of child work. Budget that policy explicitly.
+      // The wait must outlast the deletion quarantine, which runs regardless of child work.
       { timeoutMs: DEFAULT_LIFECYCLE_CONSTANTS.deletionQuarantineMs + 60_000 },
     );
     expect(existsSync(workspace)).toBe(false);

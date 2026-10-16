@@ -81,7 +81,6 @@ export type ProjectDeletionOutcome =
     }
   | { readonly type: "finalized" };
 
-/** Classify a store failure into the retry channel, preserving `invariant`. */
 const storeRetry = (error: StoreError): ProjectDeletionOutcome =>
   error.code === "invariant"
     ? { type: "retryable", message: error.message, invariant: true }

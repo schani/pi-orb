@@ -3196,7 +3196,7 @@ export function signingKeyStoreContractTests(
 /**
  * The full contract for a PostgreSQL-backed store: the shared semantics above
  * plus the driver-level expectations that need the raw client and the
- * credential pointer store.
+ * credential and project-secret pointer stores.
  */
 export function storeContractTests(name: string, open: () => Promise<StoreContractSubject>): void {
   storeSemanticsContractTests(name, async () => {
@@ -3630,7 +3630,6 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
       ]);
       expect(bareObject.isErr() && bareObject.error.code).toBe("invariant");
       expect(bareObject.isErr() && bareObject.error.message).toContain("$2");
-      // The guard also holds inside a transaction-scoped query.
       const inTransaction = await client.transaction<void, StoreError>(async (query) => {
         const guarded = await query("SELECT $1::jsonb AS value", [[1, 2]]);
         return guarded.isErr() ? err(guarded.error) : ok(undefined);
