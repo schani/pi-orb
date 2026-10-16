@@ -142,6 +142,108 @@ it("stream events avoid history reads/fsyncs; meaningful messages, snapshots, du
   }
 });
 
+it.each(["duplicate delivery", "replication snapshot"] as const)(
+  "%s discovers late native steering proof after only buffered stream events",
+  async (probe) => {
+    const f = new ComposedClaudeFixture();
+    try {
+      expect((await f.attach()).isOk()).toBe(true);
+      await admit(f);
+      await f.query.enqueue(rootRequest);
+      await f.query.enqueue(start);
+      const content = [{ type: "text" as const, text: "change course" }];
+      const messageIds = ["steer-1", "steer-2"] as const;
+      const accepted = (
+        await f.agent.deliverInboxMessage(messageIds[0], messageIds, content)
+      )._unsafeUnwrap();
+      const input = await f.query.input.next();
+      if (input.done === true || input.value.uuid === undefined)
+        throw new Error("native steering input missing UUID");
+      const uuid = input.value.uuid;
+      expect(accepted).toMatchObject({ status: "queued", delivery: "steer", duplicate: false });
+      const query = f.query;
+      const operationId = f.agent.gateView().activeOperationId;
+      expect(accepted.operationId).toBe(operationId);
+      const prefix = structuredClone(f.history.view);
+      const before = { ...f.historyIO };
+      let patches = 0;
+      f.agent.subscribe((frame) => {
+        if (frame.type !== "runtime.event" || frame.event.type !== "output_patch") return;
+        if (++patches !== 1) return;
+        // Native persistence arrives during the buffered burst, without a subsequent SDK echo.
+        f.append({
+          type: "attachment",
+          uuid: "steer-attachment",
+          sessionId: f.state.id,
+          attachment: {
+            type: "queued_command",
+            source_uuid: uuid,
+            delivery_id: "native-steer-delivery",
+            prompt: "change course",
+          },
+        });
+        f.append({
+          type: "queue-operation",
+          operation: "remove",
+          reason: "absorbed_mid_turn",
+          commandUuid: uuid,
+          deliveryId: "native-steer-delivery",
+          sessionId: f.state.id,
+        });
+      });
+      await Promise.all(Array.from({ length: 16 }, () => query.enqueue(delta)));
+      expect(patches).toBe(16);
+      expect(f.historyIO).toEqual(before);
+      expect(f.history.view.some((record) => record.id === uuid)).toBe(false);
+      const nextInput = query.input.next();
+      if (probe === "duplicate delivery") {
+        const duplicate = (
+          await f.agent.deliverInboxMessage(messageIds[0], messageIds, content)
+        )._unsafeUnwrap();
+        expect(duplicate).toEqual({ ...accepted, status: "persisted", duplicate: true });
+      } else {
+        const snapshot = f.agent.replicationSnapshot()._unsafeUnwrap();
+        expect(snapshot.records.some((record) => record.id === uuid)).toBe(true);
+      }
+      expect(f.historyIO.reads).toBeGreaterThan(before.reads);
+      expect(f.historyIO.syncs).toBeGreaterThan(before.syncs);
+      expect(f.history.view.slice(0, prefix.length)).toEqual(prefix);
+      expect(f.history.view.filter((record) => record.id === uuid)).toEqual([
+        expect.objectContaining({
+          id: uuid,
+          type: "event",
+          eventType: "claude.input_receipt",
+          inboxMessageIds: messageIds,
+          overflow: expect.objectContaining({
+            sessionId: f.state.id,
+            operationId,
+            attachmentId: "steer-attachment",
+            deliveryId: "native-steer-delivery",
+            inputKind: "human",
+          }),
+        }),
+      ]);
+      expect(f.history.correlation(uuid)).toMatchObject({ messageIds, operationId });
+      expect(f.agent.gateView()).toMatchObject({
+        activity: "busy",
+        activeOperationId: operationId,
+      });
+      expect(f.query).toBe(query);
+      expect(f.queries).toHaveLength(2);
+      expect(
+        f.frames.filter(
+          (frame) => frame.type === "runtime.event" && frame.event.type === "operation_started",
+        ),
+      ).toHaveLength(1);
+      await finish(f);
+      expect(await nextInput).toEqual({ done: true, value: undefined });
+    } finally {
+      await finish(f);
+      f.dispose();
+    }
+  },
+);
+
 it("yields even when diagnostic persistence takes the consume-loop continue path", async () => {
   let yields = 0;
   const f = new ComposedClaudeFixture(Promise.resolve(), {
