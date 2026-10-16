@@ -1,5 +1,17 @@
 # Testing
 
+## Smoke HTTP retries (2026-10-16; local, undeployed)
+
+Smoke curl/fetch boundaries use injected clocks, sleeps and transports for deterministic retry/deadline tests. Coverage includes transient HTTP/transport recovery, explicit nonretryability, certificate failures, array/empty successes, Retry-After timing telemetry, independent wall/monotonic clocks, headers/body deadlines, terminal redirects, transport/deadline failures carrying 404, bounded peer SSH with process-group cleanup and late-success rejection, exhaustion, negative-assertion rate limits, private bearer transport, fixed-ID create wiring, cleanup deadlines, and single-shot Start/Stop observation without hiding failed boots. The mint CLI retains its existing bounded retry contract; no product protocol changed.
+
+Tests-first RED evidence: `/tmp/smoke-{http-red,http-wiring-red,unsafe-red,late-red,fetch-red,fetch-late-red,fetch-body-red,wire-internal-red,preview-deadline-red,auth-red,negative-rate-red}.log`. The added preview fixture initially double-escaped CRLF; correcting those literal bytes restored the intended HTTP-body assertion, without changing production parsing or weakening the assertion.
+
+Review RED evidence: `/tmp/smoke-review-{http,fetch,preview,ssh-group,redirect}-red.log`. The initial local SSH wrapper bounded only gcloud; the process-group regression required terminating its SSH/IAP children too. An intermediate implementation redeclared a JS local and shortened a fixed preview timeout by a real-clock delta; the syntax failure and deterministic assertion failures are retained in `/tmp/smoke-review-{fetch,python}-green.log`, corrected before final qualification.
+
+Before the workspace restart, after `npm ci`, `npm run test:infra` passed **102 Node, 195 Python and 32 native-VM tests**, plus filesystem/service checks (`/tmp/smoke-review-final-infra-3.log`). Root typecheck and lint pass (306 existing warnings, 79 infos); shell syntax, embedded verifier/probe syntax and `git diff --check` pass. Receipts: `/tmp/smoke-review-final-{typecheck,lint}-3.log` and `/tmp/smoke-review-final-syntax-3.log`. No full unit/E2E, cloud smoke, deployment, historical root-cause fix or validation-gate clearance is claimed. Policy: `docs/deployment.md`.
+
+The restart discarded those `/tmp` receipts. Fresh PR qualification after `npm ci` again passes 102 Node, 195 Python and 32 native-VM tests, typecheck and lint (306 warnings, 79 infos). Receipts: `/tmp/smoke-pr-{npm-ci,infra,typecheck,lint}.log`. Shell, Python and embedded verifier/probe syntax also pass.
+
 ## Busy peer steering qualification (2026-10-16; local, undeployed)
 
 The existing native Sleep fixture asserts peer `whenBusy:steer`, current-operation metadata, attribution and deduplication; it fails against Main's busy rejection (`/tmp/pr136-trim-red.log`). Seven Sleep cases plus existing waiter, Sleep/FIFO and messaging tests pass **43 tests** (`/tmp/pr136-trim-targeted.log`); waiter DST covers steering before/during waits without child cancellation. Workspace/E2E typecheck and targeted lint pass (`/tmp/pr136-trim-{typecheck,lint}.log`).

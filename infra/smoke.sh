@@ -12,6 +12,8 @@ STOPPED_TIMEOUT=${STOPPED_TIMEOUT:-300}
 POLL_INTERVAL=${POLL_INTERVAL:-5}
 START_TS=$(date +%s)
 DEADLINE=$((START_TS + OVERALL_TIMEOUT))
+export PI_ORB_SMOKE_HTTP=1
+export PI_ORB_SMOKE_DEADLINE=$DEADLINE
 PROJECT_ID=""
 ORB_ID=""
 
@@ -42,21 +44,28 @@ api() { "$API" "$@"; }
 wait_for_state() {
   local target=$1 timeout=$2 step=$3 limit last="" view state
   limit=$(( $(date +%s) + timeout ))
+  [ "$limit" -le "$DEADLINE" ] || limit=$DEADLINE
   while :; do
     if [ "$(date +%s)" -ge "$DEADLINE" ]; then fail "$step: overall timeout"; fi
-    view=$(api "/api/v1/orbs/$ORB_ID") || fail "$step: API unavailable"
+    view=$(PI_ORB_SMOKE_DEADLINE="$limit" api "/api/v1/orbs/$ORB_ID") || fail "$step: API unavailable"
     state=$(jq -er '.state' <<<"$view") || fail "$step: no orb state"
     if [ "$state" != "$last" ]; then say "$step: $state"; last=$state; fi
     if [ "$state" = "$target" ]; then return 0; fi
     if [ "$state" = failed ]; then fail "$step: $(jq -r '.lastError' <<<"$view")"; fi
     if [ "$(date +%s)" -ge "$limit" ]; then fail "$step: $state after ${timeout}s (wanted $target)"; fi
-    sleep "$POLL_INTERVAL"
+    smoke_sleep "$limit"
   done
 }
 
 command_orb() {
-  local response
-  response=$(api "/api/v1/orbs/$ORB_ID/$1" '{}') || fail "$1: API unavailable"
+  local response status
+  if response=$(api "/api/v1/orbs/$ORB_ID/$1" '{}'); then :; else
+    status=$?
+    [ "$status" -eq 75 ] || fail "$1: API unavailable"
+    response=$(api "/api/v1/orbs/$ORB_ID") || fail "$1: cannot observe ambiguous command"
+    jq -e --arg verb "$1" 'if $verb == "start" then (.state == "starting" or .state == "running") else (.state == "stopping" or .state == "stopped") end' <<<"$response" >/dev/null || fail "$1: acceptance unconfirmed; not replaying"
+    say "$1: accepted state observed after ambiguous response; command not replayed"
+  fi
   jq -e '.error == null' <<<"$response" >/dev/null || fail "$1 refused"
 }
 
@@ -67,10 +76,10 @@ ORB_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 fixture_record project "$PROJECT_ID" requested
 fixture_record orb "$ORB_ID" requested
 say "lifecycle smoke: project=$PROJECT_ID orb=$ORB_ID"
-response=$(api /api/v1/projects "$(jq -nc --arg id "$PROJECT_ID" '{id:$id,name:("smoke-"+$id),repositoryUrl:"https://github.com/octocat/Hello-World"}')") || fail "create-project unavailable"
+response=$(PI_ORB_SMOKE_REPLAY_SAFE=1 api /api/v1/projects "$(jq -nc --arg id "$PROJECT_ID" '{id:$id,name:("smoke-"+$id),repositoryUrl:"https://github.com/octocat/Hello-World"}')") || fail "create-project unavailable"
 jq -e --arg id "$PROJECT_ID" '.id == $id' <<<"$response" >/dev/null || fail "create-project refused"
 fixture_record project "$PROJECT_ID" created
-response=$(api "/api/v1/projects/$PROJECT_ID/orbs" "$(jq -nc --arg id "$ORB_ID" '{id:$id}')") || fail "create-orb unavailable"
+response=$(PI_ORB_SMOKE_REPLAY_SAFE=1 api "/api/v1/projects/$PROJECT_ID/orbs" "$(jq -nc --arg id "$ORB_ID" '{id:$id}')") || fail "create-orb unavailable"
 jq -e --arg id "$ORB_ID" '.id == $id' <<<"$response" >/dev/null || fail "create-orb refused"
 fixture_record orb "$ORB_ID" created
 wait_for_state running "$RUNNING_TIMEOUT" first-boot

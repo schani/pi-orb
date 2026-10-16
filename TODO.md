@@ -8,6 +8,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Diagnose lifecycle-smoke old-revision HTTP 500** (2026-10-16; `docs/postmortems/2026-10-16-lifecycle-smoke-http500.md`). Deploy 38961777202 remains applied-but-unvalidated; no retry clears it. Establish why the restart GET was attributed to deleted revision `00060-kfk`; retain response-shape and trace correlation evidence. Bounded smoke retries and token-safe status/content-type-class/attempt/outcome diagnostics are implemented locally (`docs/testing.md`), not a historical root-cause fix.
+
 - **Own direct runtime/build/type dependencies explicitly** (2026-10-16; `docs/dependency-audit.md`). Resolve runtime imports of undeclared Pi AI/agent-core/Chord and native-image/fork build use of hoisted esbuild. Review runtime `ws` and native-image `determined` as dev-only declarations; preserve plugin peers and DST coverage. Qualify isolated package installs/builds and types; do not rely on incidental hoisting.
 
 - **Triage Undici security-release coverage** (2026-10-16; `docs/dependency-audit.md`). Compare direct `7.29.1` and Pi-owned nested `8.10.2` against the fixes in [7.30.1](https://github.com/nodejs/undici/releases/tag/v7.30.1) and [8.12.2](https://github.com/nodejs/undici/releases/tag/v8.12.2); establish reachable-path applicability and qualify remediation at each owning boundary. Applicability is not fully proven; zero npm advisory findings do not clear this finding.
