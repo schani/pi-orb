@@ -191,14 +191,16 @@ export function projectOrbActions(state: OrbState): {
   };
 }
 
-/**
- * Dashboard column order: the project whose working set moved most recently
- * comes first, projects with no working orbs follow, and a deleting project
- * sinks to the end. Equal projects keep their incoming order.
- */
+export type ProjectOrderCache = Map<
+  string,
+  { rank: number; latest: number | null; position: number }
+>;
+
+/** First-observed activity/deletion rank, retained for one mounted dashboard. */
 export function orderProjects(
   projects: readonly ProjectView[],
   orbsByProject: Readonly<Record<string, readonly OrbView[] | undefined>>,
+  order: ProjectOrderCache = new Map(),
 ): ProjectView[] {
   const latestWorkingUpdate = (project: ProjectView): number | null => {
     const times = (orbsByProject[project.id] ?? [])
@@ -209,15 +211,29 @@ export function orderProjects(
   };
 
   return projects
-    .map((project, index) => ({ project, index, latest: latestWorkingUpdate(project) }))
-    .sort((left, right) => {
-      const rank = (entry: typeof left) =>
-        entry.project.state === "deleting" ? 2 : entry.latest === null ? 1 : 0;
-      if (rank(left) !== rank(right)) return rank(left) - rank(right);
-      if (left.latest !== right.latest && left.latest !== null && right.latest !== null) {
-        return right.latest - left.latest;
+    .map((project) => {
+      let key = order.get(project.id);
+      if (key === undefined) {
+        const latest = latestWorkingUpdate(project);
+        key = {
+          rank: project.state === "deleting" ? 2 : latest === null ? 1 : 0,
+          latest,
+          position: order.size,
+        };
+        order.set(project.id, key);
       }
-      return left.index - right.index;
+      return { project, key };
+    })
+    .sort((left, right) => {
+      if (left.key.rank !== right.key.rank) return left.key.rank - right.key.rank;
+      if (
+        left.key.latest !== right.key.latest &&
+        left.key.latest !== null &&
+        right.key.latest !== null
+      ) {
+        return right.key.latest - left.key.latest;
+      }
+      return left.key.position - right.key.position;
     })
     .map((entry) => entry.project);
 }
