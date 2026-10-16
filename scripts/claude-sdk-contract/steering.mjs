@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -64,6 +64,13 @@ export async function probeSteering(mode) {
   const ready = latch();
   const releaseTool = latch();
   const endInput = latch();
+  const sessionId = randomUUID();
+  const rootPath = join(
+    config,
+    "projects",
+    cwd.replace(/[^a-zA-Z0-9]/g, "-"),
+    `${sessionId}.jsonl`,
+  );
   const firstUuid = randomUUID();
   const steerUuid = randomUUID();
   const marker = "NATIVE_STEER_CHANGE_COURSE";
@@ -163,6 +170,7 @@ export async function probeSteering(mode) {
       prompt: input,
       options: {
         cwd,
+        sessionId,
         settingSources: [],
         tools: [],
         plugins: [],
@@ -255,7 +263,8 @@ export async function probeSteering(mode) {
         `Native steering ${mode} exceeded its owned deadline: ${JSON.stringify({ requests, results, steeredWhileToolBlocked })}`,
       );
     if (unexpectedRequest) throw new Error(`Unexpected local request: ${unexpectedRequest}`);
-    return { requests, results, steeredWhileToolBlocked, toolCompleted };
+    const root = { source: await readFile(rootPath, "utf8"), sessionId, steerUuid };
+    return { requests, results, steeredWhileToolBlocked, toolCompleted, root };
   } finally {
     clearTimeout(timer);
     ready.resolve();

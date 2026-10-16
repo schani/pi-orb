@@ -150,6 +150,7 @@ Subsystem designs:
 Tracking:
 
 - [docs/postmortems/2026-10-15-runtime-dependency-qualification.md](docs/postmortems/2026-10-15-runtime-dependency-qualification.md) — runtime cache cold-build evidence; local setup blocker, fixed-port collision and unvalidated main reuse
+- [docs/postmortems/2026-10-15-claude-delivery-uncertain-c9a30a6d.md](docs/postmortems/2026-10-15-claude-delivery-uncertain-c9a30a6d.md) — consumed mid-turn steering loses receipt identity during normalization; read-only disk proof
 - [docs/postmortems/2026-10-15-control-plane-node-headers.md](docs/postmortems/2026-10-15-control-plane-node-headers.md) — offline PTY rebuild avoids npm-bundled Undici header-download assertion
 - [docs/postmortems/2026-10-15-claude-stream-failed-4647.md](docs/postmortems/2026-10-15-claude-stream-failed-4647.md) — stream-consumption exception discarded; native inspection IAM-blocked, initiating cause unknown
 - [docs/postmortems/2026-10-15-claude-success-failed-operation.md](docs/postmortems/2026-10-15-claude-success-failed-operation.md) — sticky operation failure despite final SDK success; triggering error unidentified

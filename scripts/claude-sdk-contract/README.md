@@ -53,7 +53,7 @@ Root can resume a named reviewer through its ordinary native `SendMessage({to: n
 npx vitest run apps/orb-runtime/src/claude/steering-native.test.ts
 ```
 
-`steering.mjs` uses the same network guard and isolated dummy authentication, with no Agent tools. A held SDK MCP tool admits human `priority: "now"` input only after its handler starts. The next provider request must contain that input before the tool is released. A separate response-stream barrier verifies interruption of an unfinished response, followed by a successful result for the new input. Native result UUID echoes distinguish the old interrupted turn from the steering result. Return values contain only counts and booleans. These probes establish native delivery, not production model reasoning, subscription behavior or aggregate idle.
+`steering.mjs` uses the same network guard and isolated dummy authentication, with no Agent tools. A held SDK MCP tool admits human `priority: "now"` input only after its handler starts. The next provider request must contain that input before tool release. A separate response-stream barrier verifies interruption and the new input's successful result. Result UUID echoes distinguish the turns. The held-tool test feeds the actual root JSONL through production `ClaudeHistory`, requiring a consumed-queue receipt with saved inbox provenance, not just an SDK echo. These probes establish native delivery, not production reasoning, subscription behavior or aggregate idle.
 
 ## Zero-turn task acknowledgment
 

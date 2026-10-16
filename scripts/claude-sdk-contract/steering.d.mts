@@ -1,4 +1,9 @@
 export interface SteeringProbeResult {
+  readonly root: {
+    readonly source: string;
+    readonly sessionId: string;
+    readonly steerUuid: string;
+  };
   readonly requests: number;
   readonly results: readonly {
     readonly subtype: string;
