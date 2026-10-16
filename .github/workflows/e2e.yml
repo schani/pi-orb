@@ -14,7 +14,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: f43eff0f84a27eacd48f7aa30d5148e78463778c
 
@@ -73,7 +73,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: f43eff0f84a27eacd48f7aa30d5148e78463778c
 
@@ -94,7 +94,7 @@ jobs:
         run: python3 infra/artifact_guard.py
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '24.6.0'
           package-manager-cache: false
@@ -169,7 +169,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: f43eff0f84a27eacd48f7aa30d5148e78463778c
 
@@ -203,7 +203,7 @@ jobs:
           CONFIG
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '24.6.0'
           package-manager-cache: false
@@ -394,7 +394,7 @@ jobs:
       PI_ORB_AGENT_BACKEND: central-durable
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: f43eff0f84a27eacd48f7aa30d5148e78463778c
 
@@ -428,7 +428,7 @@ jobs:
           CONFIG
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '24.6.0'
           package-manager-cache: false
@@ -538,7 +538,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: f43eff0f84a27eacd48f7aa30d5148e78463778c
 
