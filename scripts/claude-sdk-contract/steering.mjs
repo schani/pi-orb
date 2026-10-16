@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -55,7 +55,7 @@ function startResponse(response, block) {
 }
 
 /** Genuine pinned SDK/CLI; owned loopback provider, explicit barriers, no agents or credentials. */
-export async function probeSteering(mode, { onRoot } = {}) {
+export async function probeSteering(mode) {
   const home = await mkdtemp(join(tmpdir(), "claude-steering-contract-"));
   const cwd = join(home, "workspace");
   const config = join(home, "config");
@@ -263,8 +263,8 @@ export async function probeSteering(mode, { onRoot } = {}) {
         `Native steering ${mode} exceeded its owned deadline: ${JSON.stringify({ requests, results, steeredWhileToolBlocked })}`,
       );
     if (unexpectedRequest) throw new Error(`Unexpected local request: ${unexpectedRequest}`);
-    await onRoot?.({ home, rootPath, sessionId, steerUuid });
-    return { requests, results, steeredWhileToolBlocked, toolCompleted };
+    const root = { source: await readFile(rootPath, "utf8"), sessionId, steerUuid };
+    return { requests, results, steeredWhileToolBlocked, toolCompleted, root };
   } finally {
     clearTimeout(timer);
     ready.resolve();

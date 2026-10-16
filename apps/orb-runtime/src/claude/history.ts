@@ -103,34 +103,6 @@ const object = (value: JsonValue | undefined): JsonObject =>
 const text = (value: JsonValue | undefined): string | undefined =>
   typeof value === "string" ? value : undefined;
 
-/** Shared lookup for committed ordinary and consumed-queue receipts. */
-export function claudeInputReceipt(
-  records: readonly HistoryRecord[],
-  uuid: string,
-): HistoryRecord | undefined {
-  return (
-    records.find(
-      (record) =>
-        record.id === uuid &&
-        ((record.type === "message" && record.role === "user") ||
-          (record.type === "event" &&
-            [
-              "claude.boot_receipt",
-              "claude.compact_command",
-              "claude.platform_message",
-              "orb.message",
-            ].includes(record.eventType))),
-    ) ??
-    records.find(
-      (record) =>
-        record.id === `claude.input-receipt:${uuid}` &&
-        record.type === "event" &&
-        record.eventType === "claude.input_receipt" &&
-        record.overflow.inputUuid === uuid,
-    )
-  );
-}
-
 const boundedIdentifier = (value: JsonValue | undefined): value is string =>
   typeof value === "string" && /^[A-Za-z0-9._:-]{1,96}$/.test(value);
 
@@ -242,9 +214,6 @@ export class ClaudeHistory {
   get view(): readonly HistoryRecord[] {
     return this.records;
   }
-  inputReceipt(uuid: string): HistoryRecord | undefined {
-    return claudeInputReceipt(this.records, uuid);
-  }
   correlation(uuid: string): Provenance | undefined {
     return this.provenance[uuid];
   }
@@ -295,7 +264,6 @@ export class ClaudeHistory {
   }
   private deriveInputReceipts(
     natives: readonly JsonObject[],
-    fingerprints: readonly string[],
     records: readonly HistoryRecord[],
   ): Result<HistoryRecord[], ClaudeHistoryError> {
     const root = (native: JsonObject) =>
@@ -332,7 +300,6 @@ export class ClaudeHistory {
         : [],
     );
     const additions: HistoryRecord[] = [];
-    const verified = new Set<string>();
     const conflict = (): Result<never, ClaudeHistoryError> =>
       err({
         type: "claude_history_error",
@@ -341,6 +308,23 @@ export class ClaudeHistory {
     for (const attachment of attachments) {
       const provenance = this.provenance[attachment.inputUuid];
       if (provenance === undefined) continue;
+      const id = attachment.inputUuid;
+      const existing = records.find((item) => item.id === id);
+      if (
+        existing !== undefined &&
+        !(existing.type === "message" && existing.role === "user") &&
+        !(
+          existing.type === "event" &&
+          [
+            "claude.input_receipt",
+            "claude.boot_receipt",
+            "claude.compact_command",
+            "claude.platform_message",
+            "orb.message",
+          ].includes(existing.eventType)
+        )
+      )
+        return conflict();
       const related = removals.filter(
         (removal) =>
           removal.inputUuid === attachment.inputUuid ||
@@ -364,7 +348,6 @@ export class ClaudeHistory {
       if (!boundedIdentifier(this.session) || !boundedIdentifier(provenance.operationId))
         return conflict();
       if (removal.index <= attachment.index) continue;
-      const id = `claude.input-receipt:${attachment.inputUuid}`;
       const record: HistoryRecord = {
         id,
         parentId: additions.at(-1)?.id ?? records.at(-1)?.id ?? null,
@@ -378,13 +361,10 @@ export class ClaudeHistory {
         overflow: {
           sessionId: this.session,
           operationId: provenance.operationId,
-          inputUuid: attachment.inputUuid,
           deliveryId: attachment.deliveryId,
           attachmentId: attachment.id,
           attachmentLine: attachment.index + 1,
           consumptionLine: removal.index + 1,
-          attachmentHash: fingerprints[attachment.index] ?? "",
-          consumptionHash: fingerprints[removal.index] ?? "",
           inputKind: provenance.boot
             ? "boot"
             : provenance.compaction
@@ -396,32 +376,15 @@ export class ClaudeHistory {
                   : "human",
         },
       };
-      const existing = records.find((item) => item.id === id);
-      if (existing !== undefined) {
-        // Reopening may add native suffix records; retain the first append's ancestry and clock.
-        const position = records.indexOf(existing);
+      if (existing === undefined) additions.push(record);
+      else if (existing.type === "event" && existing.eventType === "claude.input_receipt") {
         if (
-          existing.parentId !== (records[position - 1]?.id ?? null) ||
-          JSON.stringify(existing) !==
-            JSON.stringify({
-              ...record,
-              parentId: existing.parentId,
-              timestamp: existing.timestamp,
-            })
+          JSON.stringify(existing.overflow) !== JSON.stringify(record.overflow) ||
+          JSON.stringify(existing.inboxMessageIds) !== JSON.stringify(record.inboxMessageIds)
         )
           return conflict();
-      } else additions.push(record);
-      verified.add(id);
+      }
     }
-    if (
-      records.some(
-        (record) =>
-          record.type === "event" &&
-          record.eventType === "claude.input_receipt" &&
-          !verified.has(record.id),
-      )
-    )
-      return conflict();
     return ok(additions);
   }
   scan(path: string | null): Result<readonly HistoryRecord[], ClaudeHistoryError> {
@@ -457,7 +420,7 @@ export class ClaudeHistory {
         });
       const next = [...this.records];
       const natives: JsonObject[] = [];
-      // Receipt derivation must include already fingerprinted legacy attachment lines.
+      // Queued-input proof can already be fully fingerprinted on first start.
       for (let index = 0; index < lines.length; index++) {
         const parsed: Result<JsonObject, ClaudeHistoryError> = Result.fromThrowable(
           (): JsonObject => JSON.parse(lines[index] ?? "") as JsonObject,
@@ -605,7 +568,7 @@ export class ClaudeHistory {
           });
         next.push(record);
       }
-      const receipts = this.deriveInputReceipts(natives, fingerprints, next);
+      const receipts = this.deriveInputReceipts(natives, next);
       if (receipts.isErr()) return err(receipts.error);
       next.push(...receipts.value);
       if (next.length === this.records.length) return ok(this.records);

@@ -148,6 +148,34 @@ describe("Claude uses Pi's boot decision", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  it("projects consumed human authority at its attachment, never at the appended tail", () => {
+    const attachment: HistoryRecord = {
+      ...base,
+      id: "attachment",
+      type: "event",
+      eventType: "claude.attachment",
+    };
+    const receipt: HistoryRecord = {
+      ...base,
+      id: "input",
+      type: "event",
+      eventType: "claude.input_receipt",
+      overflow: { attachmentId: attachment.id, inputKind: "human" },
+    };
+    expect(claudeBootEntries([attachment, assistant, receipt])).toMatchObject([
+      { id: "input", message: { role: "user" } },
+      { id: "assistant" },
+    ]);
+    expect(plan([attachment, assistant, boot("a"), boot("b"), boot("c"), receipt])).toMatchObject({
+      triggerTurn: false,
+      marker: { customType: "pi-orb.turn-resume-declined" },
+    });
+    expect(
+      plan([attachment, { ...assistant, content: [], finishReason: "end_turn" }, receipt]),
+    ).toMatchObject({
+      marker: { customType: "pi-orb.host-restarted" },
+    });
+  });
   it("does not resume explicitly aborted or failed operations", () => {
     for (const outcome of ["aborted", "failed"]) {
       const terminal: HistoryRecord = {

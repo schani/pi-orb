@@ -1,4 +1,9 @@
 export interface SteeringProbeResult {
+  readonly root: {
+    readonly source: string;
+    readonly sessionId: string;
+    readonly steerUuid: string;
+  };
   readonly requests: number;
   readonly results: readonly {
     readonly subtype: string;
@@ -10,14 +15,4 @@ export interface SteeringProbeResult {
   readonly toolCompleted: boolean;
 }
 
-export function probeSteering(
-  mode: "tool" | "response",
-  options?: {
-    readonly onRoot?: (context: {
-      readonly home: string;
-      readonly rootPath: string;
-      readonly sessionId: string;
-      readonly steerUuid: string;
-    }) => Promise<void> | void;
-  },
-): Promise<SteeringProbeResult>;
+export function probeSteering(mode: "tool" | "response"): Promise<SteeringProbeResult>;

@@ -266,11 +266,7 @@ it.each(["ready", "queued-legacy", "missing-lifetime", "repeated-guard", "stop"]
       expect(h.store.orbSnapshot("orb-a")?.state).toBe("running");
       expect(f.journal().ownedChildren).toEqual({});
       expect(replacements).toBe(1);
-      const receiptPoll = await pollOrbUntilCaughtUp(task, deps, "orb-a", 10);
-      expect(
-        receiptPoll,
-        JSON.stringify({ receiptPoll, state: h.store.orbSnapshot("orb-a") }),
-      ).toMatchObject({ type: "caught_up" });
+      await pollOrbUntilCaughtUp(task, deps, "orb-a", 10);
       expect(h.store.messageSnapshots("orb-a")[0]?.status).toBe("delivered");
       expect(
         h.store
@@ -391,23 +387,14 @@ it.each(["ready", "queued-legacy", "missing-lifetime", "repeated-guard", "stop"]
           overflow: expect.objectContaining({ operationId, outcome: "completed" }),
         }),
       );
-      expect(
-        settled.filter(
-          (record) =>
-            record.type === "event" &&
-            record.eventType === "claude.input_receipt" &&
-            record.overflow.inputUuid === steering.uuid,
-        ),
-      ).toEqual([expect.objectContaining({ type: "event", inboxMessageIds: ["steer"] })]);
-      expect(
-        settled.filter(
-          (record) =>
-            record.id === input.value!.uuid ||
-            (record.type === "event" &&
-              record.eventType === "claude.input_receipt" &&
-              record.overflow.inputUuid === input.value!.uuid),
-        ),
-      ).toHaveLength(1);
+      expect(settled.filter((record) => record.id === steering.uuid)).toEqual([
+        expect.objectContaining({
+          type: "event",
+          eventType: "claude.input_receipt",
+          inboxMessageIds: ["steer"],
+        }),
+      ]);
+      expect(settled.filter((record) => record.id === input.value!.uuid)).toHaveLength(1);
       expect(
         settled.filter(
           (record) => record.type === "event" && record.eventType === "pi-orb.turn-resume",

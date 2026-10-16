@@ -65,7 +65,7 @@ it("sends human input with now priority and steers the active operation without 
     f.query.endOutput();
     await f.agent.closeExtensions();
     expect(f.agent.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
-    expect(f.history.inputReceipt(input.uuid)).toMatchObject({
+    expect(f.history.view.find((record) => record.id === input.uuid)).toMatchObject({
       inboxMessageIds: ["steer"],
     });
     expect(f.history.correlation(input.uuid)).toMatchObject({
