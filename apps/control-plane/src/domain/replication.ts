@@ -10,9 +10,8 @@ import { inspectFailedRuntime } from "./runtime-recovery.ts";
 
 /**
  * The classified result of pulling one orb until it is caught up
- * (docs/history-replication.md). Failures are values, not exceptions; integrity
- * failures have already been acted on (orb failed, compute discard requested)
- * when this returns.
+ * (docs/history-replication.md). Integrity failures have already been acted on
+ * (orb failed, compute discard requested) when this returns.
  */
 export type PollOutcome =
   | { readonly type: "caught_up"; readonly committedRecords: number }
@@ -25,7 +24,6 @@ export type PollOutcome =
   | { readonly type: "integrity"; readonly reason: ReplicationIntegrityError["reason"] }
   | { readonly type: "orb_gone" };
 
-/** Classify a store failure into the retry channel, preserving `invariant`. */
 const retryableStore = (error: StoreError): PollOutcome =>
   error.code === "invariant"
     ? { type: "retryable", message: error.message, invariant: true }

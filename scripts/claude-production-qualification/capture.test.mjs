@@ -50,7 +50,7 @@ test("failed health still captures native identity; failed reads retain the last
     assert.deepEqual(unhealthy.nativeRows, ready.nativeRows);
     assert.equal(unhealthy.nativeRows[0].uuid, uuid);
     assert.equal(unhealthy.nativeRows[0].stopReason, "end_turn");
-    await writeFile(file, "invalid-json\n"); // controlled parse failure
+    await writeFile(file, "invalid-json\n");
     const unavailable = await capture();
     assert.equal(unavailable.nativeCapture.status, "error");
     assert.equal(unavailable.nativeCapture.code, "qualification_native_trace_unavailable");

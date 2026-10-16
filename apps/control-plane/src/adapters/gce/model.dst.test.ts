@@ -68,7 +68,6 @@ async function instanceStatus(
   return response.status === 200 ? String(response.body["status"] ?? "") : null;
 }
 
-/** The orb's instances as the API would list them. */
 async function listOrbInstances(model: DeterministicGceApiModel): Promise<string[]> {
   const response = await model.request({
     method: "GET",

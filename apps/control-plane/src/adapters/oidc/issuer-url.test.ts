@@ -2,11 +2,9 @@ import { describe, expect, it } from "vitest";
 import { readIssuerUrl } from "./issuer-url.ts";
 
 /**
- * Boot validation of the deployment's issuer identity
- * (docs/workload-identity.md). Changing this URL is a breaking trust
- * migration, so the value that reaches the signer and the discovery document
- * has to be one canonical string — and a misconfigured deployment has to
- * refuse to boot rather than publish a trust anchor nobody meant.
+ * Boot validation of the issuer identity (docs/workload-identity.md). Changing
+ * the URL is a breaking trust migration, so it must canonicalize to one string,
+ * and a bad value must refuse boot.
  */
 
 const LOCAL = "http://127.0.0.1:7100";
@@ -15,10 +13,8 @@ describe("readIssuerUrl", () => {
   it("canonicalizes to a bare origin so one deployment has one identity", () => {
     for (const [configured, expected] of [
       ["https://issuer.example", "https://issuer.example"],
-      // A trailing slash must not become a second trust identity.
       ["https://issuer.example/", "https://issuer.example"],
       ["https://ISSUER.example", "https://issuer.example"],
-      // A default port is not part of the origin; a non-default one is.
       ["https://issuer.example:443", "https://issuer.example"],
       ["https://issuer.example:8443", "https://issuer.example:8443"],
     ] as const) {
@@ -59,7 +55,6 @@ describe("readIssuerUrl", () => {
   it("falls back only where a truthful default exists", () => {
     // `role=all` serves the issuer from the process it mints in.
     expect(readIssuerUrl("", LOCAL)._unsafeUnwrap()).toBe(LOCAL);
-    // A split deployment has no such default and must be told.
     const missing = readIssuerUrl("", null);
     expect(missing.isErr()).toBe(true);
     expect(missing._unsafeUnwrapErr()).toContain("required");

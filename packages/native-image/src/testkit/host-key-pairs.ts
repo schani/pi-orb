@@ -9,7 +9,7 @@ export const hostKeyAlgorithms = [
   ["rsa", "ssh-rsa"],
 ] as const;
 
-// One real keypair per algorithm per file; only isolated copies enter a scenario.
+// One real keypair per algorithm per call; only isolated copies enter a scenario.
 export function generateHostKeyPairs(onGenerate: () => void) {
   const source = mkdtempSync(join(tmpdir(), "pi-orb-host-key-source-"));
   try {

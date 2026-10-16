@@ -16,7 +16,7 @@ export const TURN_RESUME_CUSTOM_TYPE = "pi-orb.turn-resume";
 /** Custom type of the record announcing a resume the loop guard declined. */
 export const TURN_RESUME_DECLINED_CUSTOM_TYPE = "pi-orb.turn-resume-declined";
 
-/** Decline text. Addressed to the user: nothing will happen without them. */
+/** Addressed to the user: nothing will happen without them. */
 export const TURN_RESUME_DECLINED_CONTENT =
   "The previous turn was interrupted again after three automatic attempts, so it will not be resumed automatically. Send a message to continue.";
 
@@ -25,7 +25,7 @@ export type InterruptedTurnShape =
   | "trailing_tool_result"
   /** The assistant asked for tools; no result was ever recorded. */
   | "dangling_tool_calls"
-  /** A user message with no assistant reply at all (lost first bytes). */
+  /** A user message or boot marker with no assistant reply (lost first bytes). */
   | "unanswered_user_message";
 
 /** The interrupted tail a decision is about: its shape and its head entry. */
@@ -54,8 +54,6 @@ export type TurnResumeDecision =
        */
       readonly suppressed: SuppressedResume | null;
     };
-
-// -- tail classification ------------------------------------------------------
 
 type TailEntry =
   | { readonly kind: "user"; readonly id: string | null }
@@ -110,7 +108,6 @@ function classify(entry: unknown): TailEntry | null {
         case "toolResult":
           return { kind: "tool_result", id };
         default:
-          // Unknown roles are not agent turn boundaries.
           return { kind: "other", id };
       }
     }
@@ -179,9 +176,9 @@ function interruptedTail(tail: readonly TailEntry[]): InterruptedTail | null {
 }
 
 /**
- * Decide, from the session's active branch (root→leaf, e.g.
- * `SessionManager.buildContextEntries()`), whether a turn was interrupted and
- * has fewer than three turn-triggering boot records after the last real user.
+ * Decide, from the session's full entries root→leaf (not compacted model
+ * context), whether a turn was interrupted and has fewer than three
+ * turn-triggering boot records after the last real user.
  */
 export function detectInterruptedTurn(entries: readonly unknown[]): TurnResumeDecision {
   const tail: TailEntry[] = [];

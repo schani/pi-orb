@@ -187,8 +187,6 @@ else
   principal_set="principalSet://iam.googleapis.com/$pool_root/*"
 fi
 
-# --- reconciling the two bindings this script owns ---------------------------
-#
 # `add-iam-policy-binding` is additive, and that is a trap for a script whose
 # whole purpose is to express a scope: re-running with a *narrower* scope prints
 # the narrow principalSet as `admitted:` while the previous, broader grant —
@@ -203,7 +201,7 @@ fi
 # test account, which exists for nothing else. No other member, role, resource,
 # or conditional binding is ever touched, and nothing is deleted anywhere else.
 
-stale_admissions() { # principalSets from this pool other than the requested one
+stale_admissions() {
   [ -n "$project_number" ] || return 0
   # Not created yet on a first run: nothing to reconcile. Under pipefail a failed
   # policy read would otherwise abort the script before it prints its plan.
@@ -220,7 +218,7 @@ stale_admissions() { # principalSets from this pool other than the requested one
     done
 }
 
-stale_test_sa_roles() { # project roles on the test account other than the requested one
+stale_test_sa_roles() {
   gcloud projects get-iam-policy "$PROJECT" --flatten='bindings[].members' \
     --filter="bindings.members:$TEST_SA_EMAIL" \
     --format='value(bindings.role,bindings.members)' 2>/dev/null |
@@ -313,10 +311,9 @@ if ! gcloud iam service-accounts describe "$TEST_SA_EMAIL" \
   echo "created service account $TEST_SA_EMAIL" >&2
 fi
 
-# Read-only by construction. The requirements admit a read-only test grant
-# before any deployment-capable role: this account exists to prove the exchange
-# works, so the worst outcome of a mistake here is that someone reads project
-# metadata they could already see.
+# The default TEST_SA_ROLE (roles/browser) is read-only. This account exists only
+# to prove the exchange works, so the worst outcome of a mistake here is that
+# someone reads project metadata they could already see.
 gcloud projects add-iam-policy-binding "$PROJECT" \
   --member="serviceAccount:$TEST_SA_EMAIL" --role="$TEST_SA_ROLE" \
   --condition=None --quiet >/dev/null

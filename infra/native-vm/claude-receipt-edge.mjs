@@ -283,7 +283,7 @@ async function nativeRoot(directory, sessionId, depth = 0, budget = { remaining:
   return null;
 }
 
-/** Native identity capture remains available when the public snapshot rejects. */
+/** Falls back to the last native rows of the same session when a later read fails. */
 export function createNativeEvidenceCapture(agent, directory) {
   let last = null;
   return async () => {

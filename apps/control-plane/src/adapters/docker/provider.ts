@@ -29,7 +29,6 @@ import type { TailscaleHostOptions } from "../tailscale/client.ts";
 
 export interface DockerOrbHostProviderOptions {
   readonly runtimeMode?: "pi" | "execution";
-  /** Orb runtime image, e.g. "pi-orb-runtime:dev". */
   readonly image: string;
   /** Docker network shared by orb containers (and the control plane when containerized). */
   readonly network: string;
@@ -41,13 +40,12 @@ export interface DockerOrbHostProviderOptions {
    * `http://host.docker.internal:<port>` via the `host-gateway` host entry.
    */
   readonly controlPlaneUrl?: string;
-  /** Port for the gateway-derived control-plane URL. */
   readonly controlPlanePort: number;
   /** Extra environment passed to every orb container (e.g. E2E mock-OpenAI URLs). */
   readonly extraEnv?: Readonly<Record<string, string>>;
   /**
-   * Tailscale port exposure (docs/ports.md). When absent the container is
-   * created exactly as before and the runtime never sees the feature.
+   * Tailscale port exposure (docs/ports.md). Absent means no tailscale env is
+   * passed to the container.
    */
   readonly tailscale?: TailscaleHostOptions;
   readonly specGeneration?: number;
@@ -90,7 +88,7 @@ export function publishedRuntimePort(info: Record<string, unknown>): string | nu
     const hostIp = entry["HostIp"];
     const hostPort = entry["HostPort"];
     if (typeof hostPort !== "string" || hostPort === "") continue;
-    // Only IPv4 bindings reachable on loopback; `""` means all interfaces.
+    // Host-reachable IPv4 bindings: loopback, or all interfaces (`0.0.0.0` or `""`).
     if (hostIp === "127.0.0.1" || hostIp === "0.0.0.0" || hostIp === "") return hostPort;
   }
   return null;
@@ -100,7 +98,6 @@ function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-/** Read the runtime token back from a container's `Config.Env` list. */
 function tokenFromInspect(info: Record<string, unknown>): string | null {
   const config = info["Config"] as Record<string, unknown> | undefined;
   const env = config?.["Env"];
@@ -151,7 +148,6 @@ function incarnationFromInspect(info: Record<string, unknown>): number | null {
   return Number.isSafeInteger(incarnation) ? incarnation : null;
 }
 
-/** The committed host-spec stamp, or null when the container carries none. */
 function specFingerprintFromInspect(info: Record<string, unknown>): string | null {
   const config = info["Config"] as Record<string, unknown> | undefined;
   const labels = (config?.["Labels"] ?? {}) as Record<string, unknown>;
@@ -185,9 +181,7 @@ function mapContainerState(state: string): OrbHostState {
 /**
  * Docker CLI host provider (docs/host-provider.md, docs/stack.md): one container plus one
  * persistent volume per orb, driven through `execFile` with every call caught
- * at this boundary. The runtime address prefers the published host-loopback
- * mapping, falling back to the bridge IP and then the container name on the
- * shared Docker network.
+ * at this boundary.
  */
 export class DockerOrbHostProvider implements OrbHostProvider {
   readonly kind = "docker";
@@ -226,12 +220,9 @@ export class DockerOrbHostProvider implements OrbHostProvider {
   }
 
   /**
-   * The broker URL orb containers use. Unless configured explicitly, containers
-   * reach the control plane through `host.docker.internal`, published into the
-   * container by `--add-host=host.docker.internal:host-gateway`. The bridge
-   * gateway IP this used to inspect is the host only on Linux; on Docker Desktop
-   * it is the VM's internal gateway where nothing listens, so the runtime's
-   * credential-broker call hangs and the orb never reaches `running`.
+   * The broker URL orb containers use. Not the bridge gateway IP: that is the
+   * host only on Linux; on Docker Desktop nothing listens there and the broker
+   * call hangs.
    */
   private controlPlaneUrl(): string {
     const { controlPlaneUrl, controlPlanePort } = this.options;
@@ -612,7 +603,6 @@ export class DockerOrbHostProvider implements OrbHostProvider {
           // Linux a loopback publication is harmless.
           "--publish",
           `127.0.0.1:0:${RUNTIME_PORT}`,
-          // Reach the host-run control plane from inside the container.
           `--add-host=${DOCKER_HOST_ALIAS}:host-gateway`,
           "--restart",
           "unless-stopped",
@@ -739,7 +729,6 @@ export class DockerOrbHostProvider implements OrbHostProvider {
       if (inspected.value === null) return ok(undefined);
       const stopped = await this.exec("stop", ["stop", "--time", "10", ref.resourceId], context);
       if (stopped.isErr()) {
-        // Stopping an absent or already-stopped container is idempotent success.
         if (/no such (object|container)|is not running/i.test(stopped.error.message)) {
           return ok(undefined);
         }

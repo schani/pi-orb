@@ -93,7 +93,7 @@ export class HttpBrokerEndpoint implements BrokerEndpoint {
       }
       const response = fetched.value;
       if (response.status !== 200) {
-        // Status-only outcomes do not wait for a possibly stalled error body.
+        // Only the status matters: cancel the error body rather than read it, which could stall.
         const body = response.body;
         if (body) {
           const cancelled = await ResultAsync.fromThrowable(() => body.cancel(), failed)();

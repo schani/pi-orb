@@ -313,12 +313,6 @@ function processHostDirectory(id: string): string {
   return join(localStateDirectory, "process-hosts", id);
 }
 
-/**
- * Compute is gone while the durable workspace remains. Docker backend: no
- * container labeled for the orb, any incarnation. Process backend: host
- * metadata gone while the workspace (optionally a specific surviving file)
- * is still on disk.
- */
 async function computeIncarnation(id: string): Promise<number | null> {
   if (PROCESS_BACKEND) {
     const path = join(processHostDirectory(id), "host.json");
@@ -350,7 +344,6 @@ async function computeIdentity(id: string, incarnation: number): Promise<string>
   return await docker(["inspect", "-f", "{{.Id}}", `pi-orb-${id}-i${incarnation}`]);
 }
 
-/** The runtime token the given incarnation actually carries. */
 async function readRuntimeToken(id: string, incarnation: number): Promise<string> {
   if (PROCESS_BACKEND) {
     const metadata = JSON.parse(
@@ -369,9 +362,9 @@ async function readRuntimeToken(id: string, incarnation: number): Promise<string
 }
 
 /**
- * The durable lifecycle edges for one orb, in emission order, out of the log
- * tail the harness captures. Chunks are joined before splitting: a stdout
- * chunk boundary can fall inside a line.
+ * The lifecycle edges for one orb, in emission order, from the log tail the
+ * harness captures. Chunks are joined before splitting: a stdout chunk
+ * boundary can fall inside a line.
  */
 function lifecycleLines(id: string): string[] {
   return controlPlane.logs
@@ -381,10 +374,9 @@ function lifecycleLines(id: string): string[] {
 }
 
 /**
- * A bounded wait on the orb's lifecycle edges. The edges are written to stdout
- * slightly before the API view catches up, so asserting them directly after a
- * state wait would race the pipe; the timeout dumps the same diagnostics as
- * every other wait through `withOrbDiagnostics`.
+ * A bounded wait on the orb's lifecycle edges. The edges reach stdout slightly
+ * before the API view catches up, so asserting them directly after a state wait
+ * would race the pipe. A timeout throws into the caller's `withOrbDiagnostics`.
  */
 async function waitForLifecycleEdges(
   what: string,
@@ -397,6 +389,12 @@ async function waitForLifecycleEdges(
   });
 }
 
+/**
+ * Compute is gone while the durable workspace remains. Docker backend: no
+ * container labeled for the orb, any incarnation. Process backend: host
+ * metadata gone while the workspace (optionally a specific surviving file)
+ * is still on disk.
+ */
 async function computeAbsent(id: string, workspaceFile?: string): Promise<boolean> {
   if (PROCESS_BACKEND) {
     const hostDirectory = processHostDirectory(id);
@@ -413,7 +411,7 @@ async function computeAbsent(id: string, workspaceFile?: string): Promise<boolea
  * The discard fence has completed: views synthesize the
  * `discarding_failed_compute` state detail only while the orb row still
  * carries a non-null discard fence, so its disappearance from the API proves
- * the fence cleared (views.ts).
+ * the fence cleared (apps/control-plane/src/http/views.ts).
  */
 async function waitForDiscardFenceCleared(id: string): Promise<void> {
   await waitFor(
@@ -427,7 +425,7 @@ async function waitForDiscardFenceCleared(id: string): Promise<void> {
   );
 }
 
-/** Three completed terminal reconciliation passes replace elapsed negative observation. */
+/** Three forced reconcile passes prove a negative without waiting out a time window. */
 async function assertNoAutonomousReplacement(id: string, workspaceFile?: string): Promise<void> {
   for (let pass = 0; pass < 3; pass += 1) {
     await forceReconcilePass(controlPlane, id);
@@ -558,7 +556,10 @@ async function captureOrbFailure(orbId: string, error: unknown): Promise<void> {
   );
 }
 
-/** Where the runtime writes a hook's log, in the orb's own filesystem terms. */
+/**
+ * Where the runtime reports a hook's log: `/workspace/…` in Docker, a host path
+ * under the process workspace otherwise.
+ */
 function hookLogPath(id: string, hook: "setup" | "resume"): string {
   const workDir = PROCESS_BACKEND ? join(processHostDirectory(id), "workspace") : "/workspace";
   return join(workDir, "home", ".cache", "pi-orb", "logs", `${hook}.log`);
@@ -654,7 +655,6 @@ async function dumpOrbDiagnostics(id: string): Promise<void> {
   console.error(controlPlane.logs.join("").split("\n").slice(-40).join("\n"));
 }
 
-/** Run a test body and dump the shared diagnostics on any failure. */
 async function withOrbDiagnostics(id: () => string, body: () => Promise<void>): Promise<void> {
   try {
     await body();
@@ -992,7 +992,6 @@ describe("full slice E2E", () => {
             }).ok,
           ).toBe(false);
 
-          // An explicit lifetime, and a lifetime the CLI must refuse locally.
           const custom = await mintViaCli(replacementOrbId, 0, [
             "--audience",
             IDENTITY_AUDIENCE,
@@ -1537,7 +1536,7 @@ describe("full slice E2E", () => {
       ).status,
     ).toBe(200);
 
-    // Project + orb through the real API (docs/testing.md steps 1-2).
+    // Project + orb through the real API (docs/testing.md).
     const projectId = randomUUID();
     const project = await api(base, "POST", "/api/v1/projects", {
       id: projectId,
@@ -1603,7 +1602,7 @@ describe("full slice E2E", () => {
       user_code: challenge,
     });
 
-    // Clone + session + auth resolve inside the container (docs/testing.md steps 3-4).
+    // Clone + session + auth resolve inside the container (docs/testing.md).
     await waitFor(
       "orb running",
       async () => {
@@ -1718,7 +1717,7 @@ describe("full slice E2E", () => {
       "HOSTING_REPUBLISHED",
     );
 
-    // Live connection through the content-agnostic proxy (docs/testing.md steps 5-6).
+    // Live connection through the content-agnostic proxy (docs/testing.md).
     const history = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
     const cursor = (history.body["cursor"] as string | null) ?? null;
 
@@ -1832,7 +1831,6 @@ describe("full slice E2E", () => {
         .at(-1),
     ).toMatchObject({ event: { settings: { thinkingLevel: "low" } } });
 
-    // One scripted turn: reasoning + real bash tool + final text.
     let headId = syncCompleted.type === "sync.completed" ? syncCompleted.headId : null;
     for (const frame of frames) {
       if (frame.type === "history.record") headId = frame.record.id;
@@ -2008,8 +2006,8 @@ describe("full slice E2E", () => {
     expect(resultDetail.status).toBe(200);
     expect(JSON.stringify(resultDetail.body)).toContain("E2E_TOOL_OK");
 
-    // The fake saw exactly the two scripted inference turns, the second one
-    // carrying the real tool output produced inside the orb.
+    // The fake's ledger holds the scripted inference turns; the second carries
+    // the real tool output produced inside the orb.
     const requests = await fakeControl(fake.sessionKey, "/requests");
     const inferenceCalls = JSON.stringify(requests);
     expect(inferenceCalls).toContain("E2E_TOOL_OK");
@@ -2174,7 +2172,7 @@ describe("full slice E2E", () => {
     ).toHaveLength(centralCompaction ? 0 : 1);
     socket.close();
 
-    // Controlled stop: drain, then host stop (docs/testing.md step 8).
+    // Controlled stop: drain, then host stop (docs/testing.md).
     expect(terminalClosedBeforeStop, "terminal stayed open until deliberate stop").toBe(false);
     stopRequested = true;
     const stop = await api(base, "POST", `/api/v1/orbs/${orbId}/stop`);
@@ -2194,7 +2192,7 @@ describe("full slice E2E", () => {
       ),
     ]);
 
-    // Stopped-orb history serves from the database alone (docs/testing.md step 9).
+    // Stopped-orb history serves from the database alone (docs/testing.md).
     const stopped = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
     const stoppedRecords = stopped.body["records"] as { id: string }[];
     expect(stoppedRecords.length).toBe(compactedRecords.length);
@@ -2623,8 +2621,8 @@ describe("full slice E2E", () => {
       expect(unnecessaryHistoryReads).toBe(0);
       expect(browserPayloads.join("\n")).not.toContain('"overflow"');
       expect(browserPayloads.join("\n")).not.toContain('"arguments"');
-      // The following upload submits a real inbox message and completes inference
-      // after cached browser→runtime handoff, without another model script rule.
+      // The upload submits a real inbox message after the cached browser→runtime
+      // handoff; its inference is matched by the upload rules in SCENARIO.
       uploadPhases = new UploadContinuationPhases();
       const choosing = page.waitForEvent("filechooser");
       await page.getByRole("button", { name: "Upload files", exact: true }).click();

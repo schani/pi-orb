@@ -58,8 +58,8 @@ interface PendingRequest {
 
 /**
  * WebSocket state machine for one orb's live channel: hello/sync handshake,
- * frame validation, fixed 2s reconnect delay after any close (including 1013
- * "try again later"), and instance-guarded resend of unacknowledged requests.
+ * frame validation, reconnect after any close (including 1013 "try again later"),
+ * and instance-guarded resend of unacknowledged requests.
  */
 export function openLiveConnection(options: LiveConnectionOptions): LiveConnection {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
@@ -245,10 +245,9 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
           outcome: "invalid_json",
           textLength: data.length,
         });
-        return; // ignore malformed frames
+        return;
       }
-      // Ignore frames failing validation; well-formed unknown event types
-      // also fail the closed-union check and are ignored the same way.
+      // Well-formed unknown event types also fail the closed-union check and are dropped.
       if (!Check(ServerFrameSchema, parsed)) {
         devConsoleDebug.record({
           event: "frame_rejected",

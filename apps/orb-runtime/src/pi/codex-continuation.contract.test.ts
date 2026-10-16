@@ -53,7 +53,7 @@ function mockTransport(failure?: "connect" | "after-start" | "missing-continuati
           : failure === "after-start"
             ? [{ type: "response.created", response: { id: "resp_partial" } }]
             : completed(`resp_${requests.length}`);
-      // The parser installs listeners synchronously after send; no sleeps or network.
+      // Dispatch after send returns: the parser attaches listeners synchronously.
       queueMicrotask(() => {
         for (const event of events)
           this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(event) }));

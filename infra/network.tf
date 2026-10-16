@@ -9,10 +9,9 @@ resource "google_compute_firewall" "control_plane_to_runtime" {
   }
 }
 
-# Release smoke reaches disposable orb VMs through Identity-Aware Proxy, never
-# over their public address. The source range is Google's fixed TCP-forwarding
-# range, and the target service account limits the rule to pi-orb hosts rather
-# than every VM attached to this VPC.
+# Release smoke reaches orb VMs only through IAP, never their public addresses.
+# The source range is Google's fixed TCP-forwarding range; target_service_accounts
+# limits the rule to pi-orb VMs rather than every VM on this VPC.
 resource "google_compute_firewall" "iap_to_orb_ssh" {
   name                    = "pi-orb-iap-to-orb-ssh"
   network                 = local.pi_orb_network

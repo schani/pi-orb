@@ -102,7 +102,7 @@ export class CallableCatalog {
   private readonly meta: Map<string, CallableMetadata>;
   private readonly namespaces: Map<string, ToolNamespace>;
   private readonly hidden: ReadonlySet<string>;
-  /** These callables without `names`; later additions, such as discovered MCP tools, reach both. */
+  /** Same entries minus `names`; later additions, such as discovered MCP tools, reach both. */
   without(names: readonly string[]): CallableCatalog {
     return new CallableCatalog([], this.authorize, { catalog: this, hide: names });
   }

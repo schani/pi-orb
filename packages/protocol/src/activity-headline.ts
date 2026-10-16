@@ -52,7 +52,7 @@ function quoted(fields: Record<string, string | boolean>): string {
   return JSON.stringify(selected);
 }
 
-/** Public root code only, preserving whitespace within the existing header byte bound. */
+/** Root code or command argument only, untrimmed, capped to the header byte bound. */
 export function activityCallCode(name: string, args: unknown): string | undefined {
   if (name !== "codemode" && name !== "bash") return undefined;
   if (typeof args !== "object" || args === null || Array.isArray(args)) return undefined;
@@ -92,7 +92,7 @@ export function activityResultEligible(
   );
 }
 
-/** Select immutable normalized data only; native overflow and nested child transcripts are never read. */
+/** Select immutable normalized data only: never native overflow; tool text is cut before any nested agent transcript. */
 export function getActivityHeadlineSource(
   records: readonly HistoryRecord[],
   recordId: string,

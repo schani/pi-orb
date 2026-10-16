@@ -40,16 +40,13 @@ export interface LifecycleConstants {
   readonly unreachableBootDeadlineMs: number;
   /** Approximate history-pull interval per active orb. */
   readonly historyPullIntervalMs: number;
-  /** Reconciler wake-up tick. */
   readonly reconcileTickMs: number;
   /** Exponential retry backoff for retryable provider/network failures. */
   readonly retryBackoffBaseMs: number;
   readonly retryBackoffCapMs: number;
   /** Deadline for a single runtime HTTP request (health or pull). */
   readonly runtimeRequestTimeoutMs: number;
-  /** Deadline for a single provider operation. */
   readonly providerOperationTimeoutMs: number;
-  /** Page size for history pulls. */
   readonly pullLimit: number;
   /** How often stopped/failed orbs are checked for stray running hosts. */
   readonly hostBackstopIntervalMs: number;
@@ -69,11 +66,9 @@ export interface BrokerConstants {
   readonly minRefreshIntervalMs: number;
   /** Refresh-coalescing lease duration; must exceed the upstream deadline. */
   readonly leaseMs: number;
-  /** Deadline for one upstream refresh call. */
   readonly upstreamTimeoutMs: number;
   /** Poll interval while waiting on another instance's lease. */
   readonly waiterPollMs: number;
-  /** Overall deadline for one token request. */
   readonly requestDeadlineMs: number;
 }
 
@@ -110,13 +105,11 @@ export interface IssuerConstants {
    */
   readonly jwksOverlapMs: number;
   /**
-   * How long a signer may keep reusing private key material it has already
-   * read. The active *row* is read per signature, so a rotation takes effect
-   * immediately; this bounds the other revocation the row cannot express —
-   * destroying the secret version under a still-active key, which is how an
-   * operator kills a leaked key without waiting for a rotation to converge.
-   * A warm signer would otherwise keep signing with destroyed material
-   * indefinitely, so this is the revocation window for that case.
+   * Maximum age of private key material a signer reuses. Rotation takes effect
+   * at once (the active row is read per signature); this bounds revocation by
+   * destroyed secret version — how an operator kills a leaked key without
+   * waiting for a rotation to converge — which the row cannot express and a
+   * warm signer would otherwise sign with indefinitely.
    */
   readonly signingKeyMaterialTtlMs: number;
   /**

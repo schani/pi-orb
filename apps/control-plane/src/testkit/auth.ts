@@ -30,13 +30,12 @@ export class FakeAuthGate implements AuthGate {
     this.state = mode.kind === "always_ok" ? "ok" : "unauthenticated";
   }
 
-  /** Manually complete the pending login (test driver). */
   completeLogin(): void {
     this.flow = null;
     this.state = "ok";
   }
 
-  /** Drop the credential so the next ensureAuth requires login again. */
+  /** Next ensureAuth requires login again (requires_login mode only). */
   invalidateCredential(): void {
     this.state = "unauthenticated";
   }
@@ -54,7 +53,6 @@ export class FakeAuthGate implements AuthGate {
       const mode = this.mode;
       const now = task.monotonicNow();
       if (this.flow !== null) {
-        // Existing global flow: auto-complete, expire, or keep waiting.
         const elapsed = now - this.flow.startedAtMonotonic;
         if (mode.failFlow === true && elapsed >= mode.challengeTtlMs) {
           // The flow is gone; a later start request may initiate a new one.

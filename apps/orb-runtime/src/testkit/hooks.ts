@@ -13,9 +13,8 @@ import { HOOK_FAILPOINTS } from "./failpoints.ts";
 
 export interface FakeHookRun {
   readonly request: HookSpawnRequest;
-  /** Settle the hook with an exit code, as the real adapter would. */
   exit(code: number | null, signal?: string | null): void;
-  /** Feed a line of output, mirroring the adapter's line splitting. */
+  /** Feed one output line, as the adapter does after splitting. */
   emit(line: string): void;
   killed: boolean;
 }
@@ -61,7 +60,7 @@ export class FakeHookSpawner implements HookSpawner {
     });
   }
 
-  /** The single run of `hook`, asserted to exist. */
+  /** The first run of `hook`, asserted to exist. */
   runOf(hook: string): FakeHookRun {
     const run = this.runs.find((candidate) => candidate.request.executable.endsWith(`/${hook}`));
     if (run === undefined) throw new Error(`no ${hook} hook was spawned`);
@@ -69,7 +68,6 @@ export class FakeHookSpawner implements HookSpawner {
   }
 }
 
-/** Which durable artifact a path is, so failures can be aimed at one of them. */
 const artifactOf = (path: string): "stamp" | "status" =>
   path.endsWith("setup-incarnation") ? "stamp" : "status";
 
@@ -85,12 +83,10 @@ export class FakeHookFileStore implements HookFileStore {
   /** When set, the log directory cannot be created and no hook can run. */
   ensureDirError: string | null = null;
 
-  /** Fail the next `count` writes of the incarnation stamp, deterministically. */
   failNextStampWrites(count: number): void {
     this.stampWriteFailures = count;
   }
 
-  /** Fail the next `count` writes of a hook status file, deterministically. */
   failNextStatusWrites(count: number): void {
     this.statusWriteFailures = count;
   }
@@ -138,10 +134,9 @@ export class FakeHookFileStore implements HookFileStore {
     this.files.delete(path);
   }
 
-  /** A map has no modes; the real store's `chmod` is covered against a real disk. */
+  /** A map has no modes; `chmod` is exercised only by the real-disk runner tests. */
   hardenFile(_path: string): void {}
 
-  /** Every path that currently exists, for whole-disk assertions. */
   paths(): readonly string[] {
     return [...this.files.keys()].sort();
   }

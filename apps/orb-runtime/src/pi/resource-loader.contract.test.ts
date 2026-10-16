@@ -45,8 +45,9 @@ import { createOrbResourceLoader } from "./resource-loader.ts";
  *     through `getSkills()`, and a configured but missing directory fails
  *     initialization instead of being silently dropped.
  *
- * Every control-equality test passes `skillsDir: null` explicitly so it
- * compares the same skill set as the control loader. Production defaults to
+ * Control-equality tests pass `skillsDir: null` so both loaders see the same
+ * skill set; the baked-skills test below asserts extra skills on top of the
+ * control's. Production defaults to
  * `/opt/pi-orb/skills` in the image and the trusted runtime-relative source
  * directory for process installs.
  */
@@ -54,7 +55,7 @@ import { createOrbResourceLoader } from "./resource-loader.ts";
 const PREVIEW_HOST = "pi-orb-test.tailabc.ts.net";
 /** Repository source of what `apps/orb-runtime/Dockerfile` copies to `/opt/pi-orb/skills`. */
 const BAKED_SKILLS_SOURCE = join(import.meta.dirname, "../../skills");
-/** `CONFIG_DIR_NAME` in the SDK (`config.js`), i.e. the project-scoped `.pi/`. */
+/** Mirrors the SDK's `CONFIG_DIR_NAME` (`config.js`). */
 const PROJECT_CONFIG_DIR = ".pi";
 const PROJECT_APPEND = "project-scoped APPEND_SYSTEM.md marker";
 const GLOBAL_APPEND = "agent-dir APPEND_SYSTEM.md marker";
@@ -67,14 +68,10 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
   const home = process.env.HOME;
 
   /**
-   * The control: byte-for-byte what `createAgentSession` constructs when no
-   * `resourceLoader` is supplied (`sdk.js`:
-   * `new DefaultResourceLoader({ cwd, agentDir, settingsManager })` then
-   * `await reload()`). The session's `settingsManager` is
-   * `SettingsManager.create(cwd, agentDir)`, which is also what the loader
-   * defaults to when the option is omitted — so omitting it here keeps the
-   * control equivalent while matching how the runtime calls us in production
-   * (no shared manager outside the mock-OpenAI path).
+   * The control: what `createAgentSession` builds without a `resourceLoader`
+   * (`sdk.js`). Omitting `settingsManager` is equivalent, since the loader
+   * defaults to the same `SettingsManager.create(cwd, agentDir)`, and matches
+   * production outside the mock-OpenAI path.
    */
   const implicitLoader = async (): Promise<ResourceLoader> => {
     const loader = new DefaultResourceLoader({ cwd: repoDir, agentDir });

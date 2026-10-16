@@ -80,9 +80,10 @@ export function fetchClaudeSubscription(
 }
 
 /**
- * Variables that can replace the subscription credential. Cloud credentials
- * (`AWS_*`, `GOOGLE_APPLICATION_CREDENTIALS`) select nothing without
- * `CLAUDE_CODE_USE_*`, so they stay available to the agent's tools.
+ * Variables that can replace the subscription credential, directly or via shell
+ * startup files (`BASH_ENV`, `ENV`). Cloud credentials (`AWS_*`,
+ * `GOOGLE_APPLICATION_CREDENTIALS`) select nothing without `CLAUDE_CODE_USE_*`,
+ * so they stay available to the agent's tools.
  */
 export const CLAUDE_AUTH_ENV = /^(ANTHROPIC_|CLAUDE_CODE_|CLAUDE_CONFIG_DIR$|BASH_ENV$|ENV$)/;
 

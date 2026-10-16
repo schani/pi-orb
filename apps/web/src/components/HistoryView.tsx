@@ -383,7 +383,6 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
   return nodes;
 }
 
-/** One transcript row: a user turn, grouped agent turn, alert or compaction. */
 type Turn =
   | { kind: "user"; record: MessageRecord }
   | { kind: "peer"; record: EventRecord; senderId: string }
@@ -391,7 +390,7 @@ type Turn =
   | { kind: "alert"; record: EventRecord; message: string }
   | { kind: "compaction"; record: CompactionRecord | EventRecord };
 
-/** Per docs/pi-adapter.md, only a custom message the harness marked displayed is shown. */
+/** Per docs/pi-adapter.md: custom messages need `display`; settings-fallback and compaction notices always show. */
 function isDisplayedCustomMessage(record: EventRecord): boolean {
   return (
     record.eventType === "agent.settings_fallback" ||

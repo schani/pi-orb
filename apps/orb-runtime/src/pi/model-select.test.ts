@@ -2,12 +2,10 @@ import { describe, expect, it } from "vitest";
 import { codexModelDisplayName, eligibleCodexModels, pickCodexModel } from "./model-select.ts";
 
 /**
- * The runtime advertises `input.image`, so the pinned Codex model must be
- * able to receive images: pi-ai serializes image content only when
- * `model.input` includes "image" and silently drops it otherwise — which is
- * exactly how a pasted screenshot reached the session but never the model
- * (2026-08-01 incident, text-only gpt-5.3-codex-spark was first in the
- * catalog).
+ * The runtime advertises `input.image`, so the pinned Codex model must accept
+ * images: pi-ai silently drops image content unless `model.input` includes
+ * "image". A text-only model first in the catalog once let a pasted screenshot
+ * reach the session but not the model (2026-08-01 incident).
  */
 
 interface CatalogModel {

@@ -42,7 +42,6 @@ function inboxMessageIdsOf(record: HistoryRecord): readonly string[] {
   return record.type === "message" ? (record.inboxMessageIds ?? []) : [];
 }
 
-/** The replicated inbox records carrying `messageId`, in replica order. */
 function inboxRecordsFor(records: readonly HistoryRecord[], messageId: string): HistoryRecord[] {
   return records.filter((record) => inboxMessageIdsOf(record).includes(messageId));
 }
@@ -82,7 +81,6 @@ function assertInboxDeliveredExactlyOnce(
   expect(new Set(session).size, "no message delivered twice").toBe(session.length);
 }
 
-/** FIFO: the replicated records carrying `messageIds` are in that order. */
 function assertInboxFifo(
   harness: ReturnType<typeof makeHarness>,
   orbId: string,
@@ -401,7 +399,6 @@ describe("orb lifecycle (DST)", () => {
         authMode: { kind: "requires_login", autoCompleteAfterMs: null, challengeTtlMs: 600_000 },
       });
       const stopBefore = new AbortController();
-      // Phase 1: reconcile until the challenge is pending, then "crash".
       const phase1 = await sim.runTasks([
         { name: "reconciler-1", f: (task) => reconcileLoop(task, before.deps, stopBefore.signal) },
         {
@@ -419,8 +416,7 @@ describe("orb lifecycle (DST)", () => {
       expect(phase1.isOk(), phase1.isErr() ? phase1.error.message : "").toBe(true);
       expect(before.authGate.flowStartCount).toBe(1);
 
-      // Phase 2: fresh in-memory state, durable rows drive recovery. The
-      // second flow waits for a login, which the driver completes below.
+      // Phase 2: fresh in-memory state, durable rows drive recovery.
       const after = restartControlPlane(before);
       after.authGate.invalidateCredential();
       const stopAfter = new AbortController();
@@ -621,7 +617,6 @@ describe("orb lifecycle (DST)", () => {
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       assertReplicaComplete(harness.world, harness.store, ORB);
       expect(harness.world.hostStateOf(ORB)).toBe("stopped");
-      // The stop is fully narrated, and the terminal transition exactly once.
       expect(capture.matching("drain-caught-up").length).toBeGreaterThanOrEqual(1);
       expect(capture.matching("to=stopped").length).toBe(1);
       expect(capture.matching("to=stopping reason=stop_requested").length).toBe(1);
@@ -1007,10 +1002,8 @@ describe("orb lifecycle (DST)", () => {
   });
 
   it("a message sent to a failed orb starts it and is delivered", async () => {
-    // The product contract the raw-SQL transition in `enqueueOrbMessage` used
-    // to carry (removed 2026-08-11): a user who sends into a failed orb is
-    // asking for it back, and the wake now runs through the same backstop CAS
-    // as every other message-driven start.
+    // A user who sends into a failed orb is asking for it back, so the wake
+    // runs through the same backstop CAS as every other message-driven start.
     await runDst({ name: "failed-orb-send-wakes", iterations: 10 }, async (sim) => {
       const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
       const stop = new AbortController();
@@ -1061,7 +1054,6 @@ describe("orb lifecycle (DST)", () => {
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       const orb = harness.store.orbSnapshot(ORB);
       expect(orb?.state).toBe("running");
-      // The start cleared the failure the user was looking at.
       expect(orb?.lastError).toBeNull();
       expect(inboxRecordsFor(harness.store.replicaRecords(ORB), messageId)).toHaveLength(1);
     });
@@ -1549,9 +1541,9 @@ describe("orb lifecycle (DST)", () => {
   });
 
   it("a boot that fails again is never retried by the intent that woke it", async () => {
-    // The other half of the same rule: the wake is one-shot per failure, so a
-    // permanent boot failure plus a standing intent cannot become an unbounded
-    // provision loop. Only a *new* send buys another attempt.
+    // A wake is one-shot per failure: a permanent boot failure plus a standing
+    // intent cannot become an unbounded provision loop. Only a new send buys
+    // another attempt.
     const capture = new LogCapture();
     await runDst(
       { name: "failed-orb-wake-is-one-shot", iterations: 8, logCapture: capture },
@@ -1700,7 +1692,6 @@ describe("orb lifecycle (DST)", () => {
               () => harness.store.orbSnapshot(ORB)?.state === "stopped",
               { timeoutMs: 600_000 },
             );
-            // ...and stays stopped: several backstop passes with no restart.
             for (let round = 0; round < 10; round++) {
               await task.sleep(
                 TEST_CONSTANTS.hostBackstopIntervalMs,
@@ -2262,7 +2253,6 @@ describe("orb lifecycle (DST)", () => {
                 () => harness.store.messageSnapshots(ORB)[0]?.status === "delivered",
                 { timeoutMs: 600_000 },
               );
-              // Still nothing idle-stopped while the user's work was in flight.
               expect(idleStops()).toBe(0);
               // The agent finishes the turn the message started; the countdown
               // resumes from the delivery and the block converges rather than
@@ -2454,7 +2444,6 @@ describe("orb lifecycle (DST)", () => {
           f: async (task) => {
             harness.world.configureOrb(ORB, { initOutcome: "never_ready" });
             seedCreatingOrb(task, harness);
-            // Give reconciliation a moment to provision the host.
             await waitUntil(task, "host exists", () => harness.world.hostStateOf(ORB) !== null, {
               timeoutMs: 120_000,
             });
@@ -2796,24 +2785,18 @@ describe("orb lifecycle (DST)", () => {
     );
   });
 
-  // The reproducer for docs/postmortems/2026-08-05-unreachable-restart-livelock.md:
-  // before the 2026-08-06 fix the reconciler stopped and started the host every
-  // `unreachableGraceMs` (10s here) while the replacement boot needs the modeled
-  // 65s, so it never observed a success — 14 of 15 recorded schedules livelocked
-  // in the 38-cycle production shape. Recovery now runs through `starting`.
+  // Reproducer for docs/postmortems/2026-08-05-unreachable-restart-livelock.md:
+  // the reconciler must not stop and restart a host every `unreachableGraceMs`
+  // while the replacement boot takes longer than that. Recovery runs through
+  // `starting`.
   it("a preempted host recovers without a restart storm", async () => {
     const capture = new LogCapture();
     await runDst(
       { name: "preemption-while-running", iterations: 15, logCapture: capture },
       async (sim) => {
-        // Idle auto-stop is deliberately out of scope: recovering from a
-        // preemption legitimately takes longer than the 30s test idle window (a
-        // modeled boot alone is 65s), so leaving it on would stop the orb for an
-        // unrelated and correct reason and hide what is under test. In
-        // production it was idle-stop that eventually dragged the livelocking
-        // orb into `stopping` and then into `drain_runtime_unrecoverable`; the
-        // `running`-state loop it escaped from has no deadline of its own, which
-        // is precisely the defect this scenario pins down.
+        // Idle auto-stop is out of scope: recovery from a preemption outlasts the
+        // test idle window, and an idle stop would end the orb for an unrelated
+        // reason and hide what is under test.
         const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
         const stop = new AbortController();
         let totalStops = 0;
@@ -2942,15 +2925,11 @@ describe("orb lifecycle (DST)", () => {
     });
   });
 
-  // The compounding failure of docs/postmortems/2026-08-07-preemption-lost-turn.md,
-  // from the control plane's side: recovery worked (96s, no storm), but the
-  // runtime came back idle with a truncated turn and the idle reaper — working
-  // exactly as designed against a genuinely idle orb — collected it 15 minutes
-  // later. With the runtime's interrupted-turn resume (docs/lifecycle.md,
-  // decided 2026-08-07) the recovered runtime is busy again, so the reaper
-  // never fires. This scenario therefore runs on the DEFAULT idle window,
-  // unlike its restart-cluster neighbours: *not* idle-stopping the resumed orb
-  // is the property under test, and opting out would erase it.
+  // Postmortem docs/postmortems/2026-08-07-preemption-lost-turn.md: the runtime
+  // resumes the interrupted turn (docs/lifecycle.md), so the recovered orb is
+  // busy and the idle reaper must not collect it. Runs on the default idle
+  // window, unlike its restart-cluster neighbours, because not idle-stopping the
+  // resumed orb is the property under test.
   it("a preemption mid-turn resumes the turn and the orb is never idle-stopped", async () => {
     const capture = new LogCapture();
     await runDst(
@@ -3038,8 +3017,6 @@ describe("orb lifecycle (DST)", () => {
               // Two full default idle windows, watched in pull-sized steps (a
               // single long sleep would let the scheduler leap virtual time
               // past the liveness grace): the orb must never head for a stop.
-              // Before resume existed this is where the incident's second half
-              // happened — one idle window after the recovery, `idle_for_`.
               const rounds = Math.ceil(
                 (2 * TEST_CONSTANTS.idleStopAfterMs) / TEST_CONSTANTS.historyPullIntervalMs,
               );
@@ -3065,7 +3042,6 @@ describe("orb lifecycle (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        // One interruption, one resume — for the whole scenario.
         expect(harness.world.resumeMarkersOf(ORB).length).toBe(1);
         assertReplicaComplete(harness.world, harness.store, ORB);
         assertAtMostOneHost(harness.world, ORB);
@@ -3179,11 +3155,9 @@ describe("orb lifecycle (DST)", () => {
     );
   });
 
-  // The `stopping` half of the same postmortem: before the 2026-08-06 fix the
-  // inline restart livelocked here too and the drain deadline turned it into a
-  // terminal `drain_runtime_unrecoverable` with three undrained records — the
-  // exact ending of the production incident. The single restart now gets a
-  // boot-sized grace, so the drain completes on the rebooted runtime.
+  // The `stopping` half of docs/postmortems/2026-08-05-unreachable-restart-livelock.md:
+  // one restart gets a boot-sized grace, so a drain whose runtime dies completes
+  // on the rebooted runtime.
   it("a runtime that dies during a drain still completes the stop", async () => {
     const capture = new LogCapture();
     await runDst(
@@ -3477,13 +3451,11 @@ describe("idle auto-stop (DST)", () => {
         expect(orb?.state).toBe("stopped");
         expect(orb?.stopReason).toBe("idle");
         expect(harness.world.hostStateOf(ORB)).toBe("stopped");
-        // The stop must not fire before the idle deadline has elapsed.
         expect(firstStopSeenAt).not.toBeNull();
         expect((firstStopSeenAt ?? 0) - seededAt).toBeGreaterThanOrEqual(
           TEST_CONSTANTS.idleStopAfterMs,
         );
-        // An unexplained stop was the worst part of the 2026-08-05 incident: the
-        // idle decision names itself and its stop_reason.
+        // An idle stop names its decision and stop_reason in the log.
         expect(capture.matching("to=stopping reason=idle_for_").length).toBeGreaterThanOrEqual(1);
         expect(capture.matching("stop_reason=idle").length).toBeGreaterThanOrEqual(1);
       },
@@ -3574,7 +3546,7 @@ describe("idle auto-stop (DST)", () => {
               "orb stopped after tab hidden",
               () => {
                 const state = harness.store.orbSnapshot(ORB)?.state;
-                // As above: `starting` is a restart, not a stop.
+                // `starting` is a restart, not a stop.
                 if ((state === "stopping" || state === "stopped") && firstStopSeenAt === null) {
                   firstStopSeenAt = task.wallNow();
                 }

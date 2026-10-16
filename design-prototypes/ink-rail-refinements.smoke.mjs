@@ -22,14 +22,13 @@ try {
   assert.match(await page.locator('.footer-note').textContent(), /production is unchanged/);
   assert.equal(await page.locator('[placeholder]').count(), 0);
 
-  // Explicit preview paints only the five name rows; the toggle supplies a blurred comparison.
+  // Study-focus preview paints rails on the five name rows only; the toggle turns it off.
   assert.equal(await page.locator('.name-row .focus-frame').evaluateAll(frames => frames.filter(frame => getComputedStyle(frame, '::before').content === '""').length), 5);
   assert.equal(await page.locator('.instructions .focus-frame, .composer .focus-frame').evaluateAll(frames => frames.filter(frame => getComputedStyle(frame, '::before').content === '""').length), 0);
   await page.locator('#preview-toggle').click();
   assert.equal(await page.locator('.focus-frame').evaluateAll(frames => frames.filter(frame => getComputedStyle(frame, '::before').content === '""').length), 0);
   assert.equal(await page.locator('#preview-toggle').getAttribute('aria-pressed'), 'false');
 
-  // Every real focus mark ends before the field's outer left edge, including bracket ticks.
   for (const slug of slugs) {
     for (const kind of ['name', 'instructions', 'composer']) {
       const field = page.locator(`[data-variant="${slug}"] [data-draft="${kind}"]`);
@@ -110,7 +109,6 @@ try {
   assert.equal(await page.locator('#preview-toggle').getAttribute('aria-pressed'), 'false');
   assert.equal(await page.evaluate(() => document.activeElement?.parentElement && getComputedStyle(document.activeElement.parentElement, '::before').content), '""');
 
-  // Selector, full-width single view, query state, and drafts all remain local.
   const draft = page.locator('[data-variant=heavy] [data-draft=instructions]');
   await draft.fill('Retained local instructions.');
   for (const slug of slugs) {
@@ -154,7 +152,6 @@ try {
     }
   }
 
-  // Reload discards drafts and leaves a clean, initially focused-name comparison for screenshots.
   await page.locator('[data-select=all]').click();
   await page.reload();
   assert.equal(await page.locator('[data-variant=heavy] [data-draft=instructions]').inputValue(), 'White field. Focus mark stays outside.');

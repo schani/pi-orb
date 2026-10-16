@@ -15,7 +15,6 @@ function seedCreatingOrb(task: SimulationTask, harness: TestHarness): void {
   harness.store.seedOrb(makeOrbRow(ORB, PROJECT, "creating", { stateChangedAt: task.wallNow() }));
 }
 
-/** The committed hash must always describe the token the host actually carries. */
 function assertHashMatchesHost(harness: TestHarness): string {
   const orb = harness.store.orbSnapshot(ORB);
   const token = harness.world.hostTokenOf(ORB);
@@ -73,7 +72,6 @@ describe("runtime-token provisioning (DST)", () => {
             );
             firstToken = assertHashMatchesHost(harness);
 
-            // Same host incarnation across stop/start: the token survives.
             expect((await requestOrbStop(task, harness.deps, ORB)).isOk()).toBe(true);
             await waitUntil(
               task,
@@ -90,7 +88,6 @@ describe("runtime-token provisioning (DST)", () => {
             );
             expect(assertHashMatchesHost(harness)).toBe(firstToken);
 
-            // Host replacement is a new incarnation: the token rotates.
             expect((await requestOrbStop(task, harness.deps, ORB)).isOk()).toBe(true);
             await waitUntil(
               task,

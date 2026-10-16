@@ -14,9 +14,9 @@ import {
  *   cli.ts print             print a fresh GitHub access token to stdout
  *   cli.ts credential get    answer git's credential-helper protocol
  *
- * Exit codes: 0 with output on success (or on a request this helper does not
- * serve), 1 with a stderr message when a token was needed and unavailable.
- * This is a process boundary: outcomes leave as exit codes, not exceptions.
+ * Exit 0 on success or on a request this helper does not serve; exit 1 with a
+ * stderr message on any other failure. This is a process boundary, so outcomes
+ * leave as exit codes, not exceptions.
  */
 
 async function readStdin(): Promise<string> {

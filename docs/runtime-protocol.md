@@ -87,7 +87,7 @@ The browser opens `/api/orbs/{orbId}/live` only after the normal control-plane H
 
 Deployed stages 1–2 authenticate the browser WebSocket request before this handler. Trusted-company direct orb access remains unchanged; runtime authentication is a separate surface. The control plane resolves the orb, opens its runtime WebSocket, then forwards text frames and close/backpressure signals without parsing application frames. Because the browser sends `client.hello` immediately after its upgrade completes, the proxy installs browser message handlers synchronously before awaiting orb lookup or host observation, queues text frames during routing, and flushes them in order once the runtime socket opens. It emits no control-plane data frame into the runtime stream. Runtime endpoints should still remain reachable only from the control plane's local Docker network so the browser topology does not accidentally become a direct-browser/runtime API.
 
-A connection race or unavailable runtime closes with `1013 Try Again Later`; the browser returns to the HTTP lifecycle API before retrying. Binary frames are not accepted.
+A connection race or unavailable runtime closes with `1013 Try Again Later`; the browser reconnects. Binary frames are not accepted.
 
 This makes the runtime's `client.hello` the first application frame and avoids two nested handshakes or mixed control-plane/runtime frame namespaces. Authentication can later be added at the HTTP/WebSocket upgrade and control-plane-to-runtime connection without changing agent frames.
 

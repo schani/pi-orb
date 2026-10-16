@@ -6,8 +6,8 @@
 #   printf '%s' "$CLIENT_SECRET" | \
 #     gcloud secrets versions add pi-orb-github-client-secret --data-file=-
 
-# Parent secret for the broker's GitHub user credential; the GsmSecretStore
-# only adds/reads/destroys versions on it (same pattern as the Codex one).
+# Parent secret for the broker's GitHub user credential; GsmSecretStore only
+# adds, reads and destroys versions on it.
 resource "google_secret_manager_secret" "github_credential" {
   secret_id = "pi-orb-credential-github"
   replication {

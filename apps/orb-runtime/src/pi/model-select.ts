@@ -1,9 +1,8 @@
 /**
  * Pinned-model selection for the hardcoded `openai-codex` provider
- * (docs/credentials.md). If a future Pi catalog drops the pinned id, fall
- * back to the first image-capable model — the runtime advertises
- * `input.image`, and pi-ai's request serializers include image content only
- * when `model.input` contains "image" — and only then to the catalog head.
+ * (docs/credentials.md). If the pinned id leaves the Pi catalog, fall back to
+ * the first image-capable model (the runtime advertises `input.image`, and
+ * pi-ai drops image content for models without it), then to the catalog head.
  */
 export const PINNED_CODEX_MODEL_ID = "gpt-6.1-sol";
 

@@ -31,7 +31,7 @@ export interface LazyExecutionOptions {
   ) => ResultAsync<void, RuntimeClientError>;
 }
 
-/** One immutable binding per invocation; construction never waits for compute. */
+/** One binding per invocation; construction never waits for compute. */
 export class LazyExecutionEnv implements ExecutionEnv {
   readonly id: string;
   cwd: string;

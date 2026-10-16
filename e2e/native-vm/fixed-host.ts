@@ -18,8 +18,7 @@ interface Fixture {
   runtimeUrl: string;
 }
 
-// The experiment driver owns real VM operations. This adapter only admits its
-// one prepared fixture; it cannot enumerate or mutate cloud resources.
+// Experiment VM operations belong to the external driver; this adapter admits only its prepared fixture.
 export class DockerOrbHostProvider implements OrbHostProvider {
   readonly kind = "native-vm-experiment";
   readonly specGeneration = 1;

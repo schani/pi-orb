@@ -59,7 +59,6 @@ describe("staged signing-key rotation routes", () => {
     app = Fastify();
     registerRoutes(app, task, makeHarness().deps, {}, TEST_SYSTEM_VIEW, signingKeys);
     await app.ready();
-    // The steady state an operator rotates *from*.
     expect((await ensureActiveSigningKey(task, signingKeys, { now: task.wallNow() })).isOk()).toBe(
       true,
     );
@@ -77,7 +76,6 @@ describe("staged signing-key rotation routes", () => {
     expect(first.statusCode).toBe(200);
     expect(first.json().state).toBe("pending");
     expect(first.json().activatedAt).toBeUndefined();
-    // Publishing changes nothing about who signs.
     expect(activeKid()).toBe(original);
 
     // Re-running the stage resumes the rotation instead of stacking a second
@@ -103,7 +101,6 @@ describe("staged signing-key rotation routes", () => {
     expect(activeKid()).toBe(original);
     expect(keys.snapshot(published.json().kid)?.state).toBe("pending");
 
-    // One millisecond short is still short.
     task.advance(soakMs - 1);
     expect((await activate()).statusCode).toBe(409);
     expect(activeKid()).toBe(original);

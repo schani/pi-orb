@@ -4,7 +4,7 @@ export function observeProjectCreates(
   context: Pick<BrowserContext, "on" | "off">,
   posts: Record<string, unknown>[],
 ): () => void {
-  // Count requests without intercepting traffic.
+  // Record POST bodies from request events; nothing is routed.
   const requested = (request: Request) => {
     if (
       request.method() === "POST" &&

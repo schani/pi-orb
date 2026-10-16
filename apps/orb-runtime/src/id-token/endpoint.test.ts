@@ -143,16 +143,14 @@ describe("id-token HTTP endpoint", () => {
   });
 
   it("gives up on a control plane that accepts the connection and never answers", async () => {
-    // The worst failure for an executable credential source is not an error,
-    // it is a hang: the SDK calling `pi-orb id-token` waits on a socket that a
-    // half-dead control plane will never write to. The upper bound is enforced
-    // by the suite's own test timeout — if the request were unbounded this test
-    // could not pass at all — so nothing here is asserted against wall time
-    // except the lower bound. That bound carries one millisecond of slack: the
-    // deadline is armed on libuv's event-loop clock, whose start time is
-    // truncated to whole milliseconds, while `Date.now()` reads the wall clock,
-    // so a correctly armed timer can legitimately measure one millisecond
-    // short (observed under full-suite load: 2999 for a 3000 ms deadline).
+    // A hang is the worst failure for an executable credential source: the SDK
+    // calling `pi-orb id-token` waits on a socket a half-dead control plane never
+    // writes to. The upper bound is the suite's test timeout (an unbounded request
+    // could not finish), so only the lower bound is asserted against wall time.
+    // That bound allows 1 ms of slack: the deadline runs on libuv's event-loop
+    // clock, whose start time is truncated to whole milliseconds, while
+    // `Date.now()` reads the wall clock (observed under full-suite load: 2999 for
+    // a 3000 ms deadline).
     const sockets: Socket[] = [];
     const silent = createServer(() => {
       // Accepted, parsed, and deliberately never answered.

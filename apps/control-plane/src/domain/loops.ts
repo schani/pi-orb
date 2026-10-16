@@ -76,8 +76,7 @@ export async function pollAllOnce(
   );
   dispatcher?.check();
   if (orbsResult.isErr()) {
-    // Store outage: retry on the next tick. Logged on the edge only — the tick
-    // is about a second (reconcileTickMs) and an outage lasts minutes.
+    // Store outage: retry on the next tick; logged on the edge only, since outages span many ticks.
     if (deps.control.noteCondition("poll-loop:list", true)) {
       logEvent(task, "poll-loop-blind", { error: orbsResult.error.message });
     }

@@ -207,7 +207,7 @@ function seedRunningOnRevision(
   }
 }
 
-/** A user-driven stop/start round trip: the window the incident lost. */
+/** A user-driven stop/start round trip. */
 async function stopStartCycle(
   task: SimulationTask,
   deps: ControlPlaneDeps,
@@ -245,46 +245,33 @@ async function stopStartCycle(
 
 /**
  * Version skew is part of the model (docs/testing.md, decided 2026-08-06): a
- * deploy briefly runs a heterogeneous fleet. The 2026-08-06 repair war was
- * emergent behavior of exactly that: two reconcilers each treated the other's
- * expected script as damage. Immutable replacement removes mutation, while
- * the committed generation prevents the old revision from replacing the new
- * revision's compute backward.
+ * deploy briefly runs a heterogeneous fleet, and no reconciler may treat the
+ * other revision's expected script as damage. Immutable replacement removes
+ * mutation, while the committed generation prevents the old revision from
+ * replacing the new revision's compute backward.
  *
- * Falsifiability evidence (mutation testing; re-verify by mutating, running,
- * and reverting — never leave a mutation behind):
+ * Falsifiability (mutation testing; re-verify by mutating, running, and
+ * reverting — never leave a mutation behind):
  *
  * - disabling the `hostRef === null` early-return guard in
  *   `reconcileCreateStart` (the draining revision must park a row whose
- *   pre-written fingerprint it is too old to own) originally failed at
- *   iteration 5 with "expected 2 to be less than or equal to 1": the stale
- *   revision provisions its own specification onto the advanced incarnation
- *   and the survivor has to replace it again. Re-verified 2026-08-16 by
- *   short-circuiting that condition to `false`, which now fails at iteration 3
- *   with `waitUntil timed out: orb running` — with both revisions carrying
- *   *different* effective specifications (rather than merely different
- *   generations) the unguarded reprovision is not one extra replacement but an
- *   unbounded replacement war, so the orb never converges at all;
+ *   pre-written fingerprint it is too old to own) lets the stale revision
+ *   provision its own specification onto the advanced incarnation. With
+ *   different effective specifications that is an unbounded replacement war,
+ *   not one extra replacement, so the orb never converges;
  * - disabling the store's `declined` branch (so a lower generation may request
  *   replacement) livelocks as a replacement war: each revision discards the
- *   other's compute forever and the scenario never converges.
+ *   other's compute forever.
  *
- * The premise is seeded rather than raced. An earlier version started both
- * revisions against a `creating` orb and let them race the first provision,
- * which left the outcome — and therefore the correct number of replacements —
- * dependent on who won: roughly half of the sampled schedules replaced nothing
- * and asserted nothing about the fence. Seeding the fleet as it actually
- * stands when a deploy begins (running on the old specification) makes every
- * schedule assert the exact same thing: exactly one forward replacement, one
+ * The premise is seeded rather than raced: the fleet starts running on the old
+ * specification, so every schedule asserts exactly one forward replacement, one
  * new incarnation, and never a backward one.
  *
  * The create race is modeled separately below: the revision that loses a
  * provision race receives the winner's non-retryable `conflict` while the
- * winner's commit may not have landed yet, so `failOrb` would still CAS
- * cleanly and discard the winner's fresh compute. The start path therefore
- * treats a racing conflict as a reason to re-read and reconcile, never as
- * damage (first observed 2026-08-16 as a terminal `provider_failed` during an
- * ordinary rollover; trace retained under `test-failures/`).
+ * winner's commit may not have landed yet, so `failOrb` would still CAS cleanly
+ * and discard the winner's fresh compute. The start path therefore treats a racing conflict
+ * as a reason to re-read and reconcile, never as damage.
  */
 describe("mixed-generation reconcilers (DST)", () => {
   it("parks an older revision while a newer generation exceeds its boot deadline", async () => {
@@ -636,7 +623,6 @@ describe("mixed-generation reconcilers (DST)", () => {
               expect(harness.world.specFingerprintOf(ORB)).toBe(oldFingerprint);
               // The ordinary stop/start is the only replacement trigger.
               await stopStartCycle(task, newRevision, harness, capture, "replacement cycle");
-              // The deploy finishes: the drained revision goes away.
               drainOld.abort();
               // The survivor must now own the host outright, and a second
               // stop/start of an already-current specification replaces

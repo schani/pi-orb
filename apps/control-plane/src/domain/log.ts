@@ -43,7 +43,6 @@ export function logOrbEvent(
   task.log(format(event, fields, `orb=${orbId}`));
 }
 
-/** One grep-friendly line per project-scoped lifecycle decision. */
 export function logProjectEvent(
   task: SimulationTask,
   projectId: string,

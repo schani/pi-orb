@@ -51,7 +51,7 @@ export type IdTokenResponseBody = Static<typeof IdTokenResponseSchema>;
  * `retryable`. Folding it into `retryable` would tell every CLI to keep
  * re-sending a request that can never succeed, which is the defect
  * `docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md` names
- * (added 2026-08-21, docs/workload-identity.md).
+ * (docs/workload-identity.md).
  */
 export const IdTokenErrorSchema = Type.Union([
   Type.Object(

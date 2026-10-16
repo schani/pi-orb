@@ -113,7 +113,6 @@ it.runIf(fixtureAgentBackend() === "central-durable")(
       );
       expect((await view())["stopReason"]).toBe("idle");
 
-      // What the orb page does: open the live socket, report a visible tab, sync.
       const frames: ServerFrame[] = [];
       socket = new WebSocket(`ws://127.0.0.1:${PORT}/api/v1/orbs/${orbId}/live`, [
         RUNTIME_SUBPROTOCOL,

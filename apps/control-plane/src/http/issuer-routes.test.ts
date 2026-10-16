@@ -118,7 +118,6 @@ describe("issuer discovery and JWKS", () => {
         "token_use",
       ],
     });
-    // The advertised key set is exactly where the endpoint really is.
     expect(response.json().jwks_uri.endsWith(JWKS_PATH)).toBe(true);
   });
 
@@ -192,7 +191,7 @@ describe("issuer discovery and JWKS", () => {
     ]);
   });
 
-  /** An issuer whose key rows always fail to read with `error`. */
+  /** An issuer whose every signing-key store call fails with `error`. */
   async function issuerOverBrokenKeys(error: StoreError): Promise<ReturnType<typeof Fastify>> {
     const brokenKeys: SigningKeyStore = {
       listSigningKeys: () => errAsync(error),
@@ -223,7 +222,6 @@ describe("issuer discovery and JWKS", () => {
     expect(response.statusCode).toBe(503);
     expect(response.json().error).toBe("unavailable");
     expect(response.headers["cache-control"]).toBe("no-store");
-    // Discovery is static configuration and stays available regardless.
     expect(
       (await broken.inject({ method: "GET", url: OPENID_CONFIGURATION_PATH })).statusCode,
     ).toBe(200);

@@ -32,7 +32,6 @@ export function isOrbSleeping(orbState: OrbState | null, sleepUntil: string | un
   return orbState === "stopped" && sleepUntil !== undefined;
 }
 
-/** Derives tab status from durable lifecycle state plus current live activity. */
 export function deriveOrbFaviconStatus(
   orbState: OrbState | null,
   connection: LiveConnectionStatus,

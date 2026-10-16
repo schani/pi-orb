@@ -103,7 +103,7 @@ try {
   await page.locator('#research details summary').nth(1).click();
   await page.locator('#research img').nth(1).evaluate((image) => image.decode());
   await page.locator('#research-toggle').click();
-  // On a narrower desktop, every design still exposes all projects through its canvas.
+  // At 1024px, every design still reaches a project orb through its canvas.
   await page.setViewportSize({ width: 1024, height: 768 });
   for (let mode = 1; mode <= 5; mode++) {
     await page.locator(`[data-choice="${mode}"]`).click();

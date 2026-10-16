@@ -70,7 +70,6 @@ try {
       await editor.press('Escape');
       await page.getByRole('button', { name: 'Open editor', exact: true }).click();
       check(await editor.inputValue() === '', 'empty save clears document');
-      // Other project content is neither copied from nor overwritten by the first project.
       await editor.press('Escape');
       if (variant < 4) {
         if (variant < 2) await frame.getByRole('button', { name: 'Configure field-notes', exact: true }).click();

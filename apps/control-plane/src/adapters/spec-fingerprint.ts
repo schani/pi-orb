@@ -1,13 +1,12 @@
 import { createHash } from "node:crypto";
 
 /**
- * Canonical JSON: object keys sorted recursively, array order preserved,
- * primitives untouched. `JSON.stringify` encodes keys in insertion order, so
- * two revisions that build the same effective specification through different
- * code paths would serialize differently and disagree about the fingerprint.
- * The fingerprint must be a pure function of the effective specification —
- * anything else replaces the whole fleet's compute on the next Start for no
- * reason (docs/compute-replacement.md).
+ * Canonical JSON: object keys sorted recursively, array order preserved.
+ * `JSON.stringify` follows insertion order, so the same specification built by
+ * two code paths would otherwise fingerprint differently — and a fingerprint
+ * that is not a pure function of the effective specification replaces the
+ * whole fleet's compute on the next Start for no reason
+ * (docs/compute-replacement.md).
  */
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);

@@ -5,9 +5,9 @@ import type { SignerError } from "../../domain/errors.ts";
 /**
  * The JOSE surface the issuer needs, written first-party over `node:crypto`
  * rather than pulling in `jose` (decided 2026-08-21, docs/stack.md). Every
- * function here is pure: it takes and returns values, touches no store, and
- * catches every platform throw at this boundary, so nothing above it ever sees
- * an exception (AGENTS.md, "Error handling").
+ * function here takes and returns values, touches no store, and catches every
+ * platform throw at this boundary, so nothing above it ever sees an exception
+ * (AGENTS.md, "Error handling").
  */
 
 /** A published JWKS entry. Nothing here is secret. */
@@ -53,7 +53,7 @@ const signerError = (code: SignerError["code"], message: string): SignerError =>
 const describeFailure = (error: unknown): string =>
   error instanceof Error ? error.message : "unknown error";
 
-/** base64url, unpadded: the only encoding JOSE uses. */
+/** base64url, unpadded, as JWS requires. */
 export function base64url(value: string | Buffer): string {
   return (typeof value === "string" ? Buffer.from(value, "utf8") : value).toString("base64url");
 }

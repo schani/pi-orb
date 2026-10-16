@@ -3,7 +3,10 @@ import { err, errAsync, ok, type Result, ResultAsync } from "neverthrow";
 import type { SealedCookies } from "../domain/application-auth.ts";
 import type { IdentityVerificationError } from "../domain/identity.ts";
 
-/** Expiry is authenticated inside the envelope and checked using the service clock. */
+/**
+ * Iron's ttl is off: expiry lives in the sealed payload and is checked by
+ * callers against the service clock.
+ */
 export function createSealedAuthCookies(
   secret: string,
 ): Result<SealedCookies, IdentityVerificationError> {

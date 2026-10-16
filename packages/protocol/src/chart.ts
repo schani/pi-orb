@@ -54,7 +54,7 @@ export type ChartSpec = Static<typeof ChartSpecSchema>;
 export type LineChart = Extract<ChartSpec, { kind: "line" }>;
 export type BarChart = Extract<ChartSpec, { kind: "bar" }>;
 
-/** What a script may pass to chart(): ISO or epoch-ms timestamps, null points (dropped). */
+/** What a script may pass to chart(): epoch-ms or Date.parse-able timestamps, null points (dropped). */
 const LineInputSchema = line(
   Type.Union([Type.Number(), Type.String()]),
   Type.Union([value, Type.Null()]),

@@ -9,10 +9,9 @@ import {
 } from "./jose.ts";
 
 /**
- * The RSA example of RFC 7638 section 3.1 together with its published
- * thumbprint. This is the one `kid` derivation a relying party can reproduce
- * independently, so it is asserted against the RFC's own vector rather than
- * against whatever this implementation happens to produce.
+ * RFC 7638 section 3.1's RSA example and its published thumbprint. Asserted
+ * against the RFC's vector rather than this implementation's output, since it
+ * is the one `kid` derivation a relying party can reproduce independently.
  */
 const RFC_7638_JWK = {
   kty: "RSA",
@@ -85,7 +84,6 @@ describe("generateRsaSigningKey", () => {
       kid: key.kid,
       e: "AQAB",
     });
-    // 2048 bits of modulus, exactly what the JWKS consumer will verify with.
     expect(Buffer.from(key.publicJwk.n, "base64url").length).toBe(256);
     // The public half is derivable from the PEM alone: the JWK adds no secret.
     const exported = createPublicKey({ key: key.privateKeyPem, format: "pem" }).export({
@@ -118,8 +116,7 @@ describe("signJwtRS256", () => {
     expect(decodeSegment(header)).toEqual({ alg: "RS256", typ: "JWT", kid: key.kid });
     expect(decodeSegment(payload)).toEqual(CLAIMS);
 
-    // The relying party's path: import the published JWK, verify the signature
-    // over the exact signing input. No padding characters may appear anywhere.
+    // No padding characters may appear anywhere.
     const publicKey = createPublicKey({ key: key.publicJwk as object, format: "jwk" });
     expect(jwt).not.toContain("=");
     expect(

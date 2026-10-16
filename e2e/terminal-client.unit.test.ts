@@ -53,7 +53,7 @@ it("rejects a refused terminal immediately without sending a command", async () 
       () => "resolved",
       (error) => String(error),
     );
-    // Fake timers hold the 30 s client timeout, so only the close can settle this.
+    // Fake timers hold the client timeout, so only the close can settle this.
     const result = await outcome;
     expect(result).toContain("1013");
     expect(result).toContain("orb is not running");

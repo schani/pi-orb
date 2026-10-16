@@ -83,7 +83,7 @@ export type DeliverMessageScript =
   | { readonly kind: "persist_without_ack" };
 
 export interface FakeOrbConfig {
-  /** Time from runtime start until the runtime becomes ready. */
+  /** Time from the end of any setup hold until the runtime becomes ready. */
   initDurationMs?: number;
   initOutcome?: InitOutcome;
   /** Null models a repository without commits. */
@@ -264,7 +264,7 @@ interface OrbWorldState {
   host: FakeHost | null;
   runtimeInstanceCounter: number;
   sessionCounter: number;
-  /** While > monotonic now, pulls return 503 history_unavailable. */
+  /** While > monotonic now, pulls fail with `history_unavailable`. */
   pullOutageUntil: number;
   /** While > monotonic now, the runtime does not answer HTTP at all. */
   runtimeUnreachableUntil: number;
@@ -366,7 +366,6 @@ export class FakeWorld {
     this.desiredSpecInput = spec;
   }
 
-  /** The effective specification the fleet currently deploys. */
   desiredSpec(): string {
     return this.desiredSpecInput;
   }
@@ -659,12 +658,10 @@ export class FakeWorld {
     return record;
   }
 
-  /** Every resume marker the runtime has appended to this orb's session. */
   resumeMarkersOf(orbId: string): readonly HistoryRecord[] {
     return this.orbState(orbId).filesystem.entries.filter(isResumeMarker);
   }
 
-  /** Every declined-resume record the runtime has appended to this session. */
   declineMarkersOf(orbId: string): readonly HistoryRecord[] {
     return this.orbState(orbId).filesystem.entries.filter(isDeclineMarker);
   }
@@ -691,7 +688,7 @@ export class FakeWorld {
     return this.orbState(orbId).host?.runtime?.instanceId ?? null;
   }
 
-  /** Whether the orb's runtime answers HTTP right now (boot latency elapsed). */
+  /** Whether the runtime has finished booting; ignores `runtimeUnreachableUntil`. */
   isRuntimeServing(task: SimulationTask, orbId: string): boolean {
     const state = this.orbState(orbId);
     const host = state.host;
@@ -700,12 +697,10 @@ export class FakeWorld {
     return host.runtime !== null && host.runtime.startedAtMonotonic <= task.monotonicNow();
   }
 
-  /** Provider stop operations applied to the orb's host so far. */
   hostStopCountOf(orbId: string): number {
     return this.orbState(orbId).hostStopCount;
   }
 
-  /** Provider start operations applied to the orb's host so far. */
   hostStartCountOf(orbId: string): number {
     return this.orbState(orbId).hostStartCount;
   }
@@ -946,7 +941,6 @@ export class FakeWorld {
     };
   }
 
-  /** The orb's host reference, or null when it has none. */
   hostRefOf(orbId: string): OrbHostRef | null {
     return this.orbState(orbId).host?.ref ?? null;
   }
@@ -965,7 +959,6 @@ export class FakeWorld {
     return this.orbState(orbId).host?.specFingerprint ?? null;
   }
 
-  /** Every compute incarnation this world has created for the orb, in order. */
   createdHostsOf(orbId: string): readonly HostCreation[] {
     return this.orbState(orbId).createdHosts;
   }
@@ -990,7 +983,6 @@ export class FakeWorld {
     return [...this.orbState(orbId).filesystem.setupRuns];
   }
 
-  /** How many times `.agents/resume` has run for this orb. */
   resumeRunsOf(orbId: string): number {
     return this.orbState(orbId).filesystem.resumeRuns;
   }
@@ -1367,8 +1359,6 @@ export class FakeWorld {
   }
 }
 
-// ---------------------------------------------------------------------------
-
 const providerError = (
   operation: OrbHostProviderError["operation"],
   code: OrbHostProviderError["code"],
@@ -1568,8 +1558,6 @@ export class FakeOrbHostProvider implements OrbHostProvider {
     });
   }
 }
-
-// ---------------------------------------------------------------------------
 
 const clientError = (
   code: RuntimeClientError["code"],

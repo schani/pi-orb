@@ -450,7 +450,6 @@ describe("live proxy", () => {
     // The presence frame was consumed by the proxy, everything else forwarded.
     expect(runtimeReceived).toEqual([hello, request]);
     expect(harness.deps.control.hasVisibleBrowser(orbId)).toBe(true);
-    // The client request refreshed the advisory activity timestamp.
     await until(() => harness.store.orbSnapshot(orbId)?.lastBusyAt != null);
 
     browser.send(JSON.stringify({ v: 1, type: "client.presence", visible: false }));

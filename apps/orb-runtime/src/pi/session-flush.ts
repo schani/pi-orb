@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs";
 
-/** The one SessionManager capability the flush gate needs. */
 export interface SessionFileSource {
   getSessionFile(): string | null | undefined;
 }

@@ -347,7 +347,7 @@ export function ProjectMcpSettings({
       secretRead.current++;
     };
   }, [projectId]);
-  // Each return from Secrets gets fresh suggestions, without owning the draft or input focus.
+  // Refresh secret suggestions whenever this tab activates, without owning the draft or focus.
   useEffect(() => {
     if (!active) return;
     let current = true;

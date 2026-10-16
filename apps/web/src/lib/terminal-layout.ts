@@ -40,8 +40,8 @@ export function terminalShadeLayout(
     cols,
     rows,
     maxRows,
-    // Clip only whole rows when even the protocol's five-row minimum does
-    // not fit. Neither padding nor a fractional row belongs in scrollback.
+    // Clip whole rows only when the protocol's minimum row count does not fit.
+    // Neither padding nor a fractional row belongs in scrollback.
     height: Math.min(allowedHeight, visibleRows * metrics.cellHeight + metrics.verticalChrome),
     contentHeight,
   };

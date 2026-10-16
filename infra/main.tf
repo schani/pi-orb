@@ -2,9 +2,8 @@
 # created by GceOrbHostProvider and are never managed here. Images are built
 # and pushed by build-push.sh, digests passed as vars.
 #
-# State lives in GCS (versioned bucket) — the original local state was lost
-# with its working directory, so pre-existing resources are adopted via the
-# import blocks in imports.tf on the first apply.
+# State lives in a versioned GCS bucket. Resources predating that state are
+# adopted via the import blocks in imports.tf.
 
 terraform {
   backend "gcs" {

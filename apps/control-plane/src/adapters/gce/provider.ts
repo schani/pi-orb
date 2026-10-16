@@ -31,9 +31,9 @@ export interface GceOrbHostProviderOptions {
   readonly runtimeMode?: "pi" | "execution";
   readonly projectId: string;
   readonly zone: string;
-  /** e.g. "n2d-highmem-2"; provisioned as Spot with STOP on preemption. */
+  /** e.g. "n2d-highmem-2". */
   readonly machineType: string;
-  /** Full or partial subnetwork URL, e.g. "regions/us-central1/subnetworks/pi-orb-us-central1". */
+  /** Subnetwork path under the project, e.g. "regions/us-central1/subnetworks/pi-orb-us-central1". */
   readonly subnetwork: string;
   /** Dedicated minimal service account for orb VMs (docs/credentials.md). */
   readonly serviceAccount: string;
@@ -43,7 +43,6 @@ export interface GceOrbHostProviderOptions {
   readonly imageId: string;
   /** Exact empty-ext4 image used only to create a missing workspace disk. */
   readonly workspaceImageResource: string;
-  /** Numeric identity of the accepted workspace image. */
   readonly workspaceImageId: string;
   /** Broker base URL as reachable from orb VMs (the runtime-role service). */
   readonly controlPlaneUrl: string;
@@ -69,17 +68,13 @@ const DATA_DEVICE = "pi-orb-data";
 /** The boot disk is disposable — the workspace lives on the data disk. */
 const BOOT_DISK_SIZE_GB = "20";
 const WORKSPACE_DISK_SIZE_GB = 50;
-/** Spot with STOP on preemption; the retained data disk survives the stop. */
+/** The retained data disk survives a preemption stop. */
 const SCHEDULING = {
   provisioningModel: "SPOT",
   instanceTerminationAction: "STOP",
 } as const;
 const SERVICE_ACCOUNT_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"] as const;
-/**
- * Guest attribute the VM writes and this provider reads back. A guest
- * attribute is `namespace/key`, so it lives directly under the `pi-orb`
- * namespace and its `getGuestAttributes?queryPath=…` returns one item.
- */
+/** Guest attribute the VM writes and diagnose() reads back; path is namespace/key. */
 const BOOT_STATUS_ATTRIBUTE = {
   path: "pi-orb/boot-status",
   key: "boot-status",
@@ -413,9 +408,6 @@ export class GceOrbHostProvider implements OrbHostProvider {
     }
   }
 
-  /**
-   * The insert body and fingerprint share this configuration composition.
-   */
   private expectedConfig(
     orbId: string,
     incarnation: number,
@@ -609,7 +601,6 @@ export class GceOrbHostProvider implements OrbHostProvider {
         );
       }
 
-      // Ensure the persistent data disk (autoDelete=false; survives the VM).
       const disk = await this.request(
         "provision",
         "GET",
@@ -908,7 +899,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
         context,
       );
       if (stopped.isErr()) return err(stopped.error);
-      // Absent or already-stopped is idempotent success.
+      // Absent instance: idempotent success.
       if (stopped.value.status === 404) return ok(undefined);
       if (stopped.value.status !== 200) {
         return err(

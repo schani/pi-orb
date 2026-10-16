@@ -17,7 +17,7 @@ it.each(["chromium", "webkit"] as const)(
         {
           name: "observe-unchanged-markdown",
           transform(code, id) {
-            // Deliver geometry/content changes before either native scroll handler.
+            // Lets tests hold scroll handling (__holdTailScroll) while geometry changes land.
             if (id.endsWith("/pages/OrbPage.tsx") || id.endsWith("/lib/use-history-tail.ts")) {
               const handler = "const onScroll = () => {";
               if (!code.includes(handler)) throw new Error("Scroll checkpoint missing");
@@ -324,7 +324,6 @@ it.each(["chromium", "webkit"] as const)(
       for (const { top } of editorKeys) expect(top).toBeLessThanOrEqual(160);
       await page.locator("#history-intent-editor").evaluate((node) => node.remove());
 
-      // Native phone-width keyboard scrolling reveals one batch from the initial tail.
       await pane.evaluate((node) => {
         node.scrollTop = node.scrollHeight;
         node.setAttribute("tabindex", "0");

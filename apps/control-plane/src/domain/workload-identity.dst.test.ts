@@ -26,7 +26,6 @@ const AUDIENCE = "urn:example:service";
 
 type MintOutcome = Result<{ token: string }, MintError>;
 
-/** One attempt, with the wall time at which it entered the mint path. */
 interface Attempt {
   readonly startedAt: number;
   readonly outcome: MintOutcome;
@@ -144,8 +143,6 @@ describe("identity minting across lifecycle states (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        // The caller got the typed error; the operator gets exactly one line,
-        // and the rate-limit slot was never consumed.
         expect(deniedLines(log)).toEqual([deniedLine("not_mintable")]);
         expect(harness.store.orbSnapshot(ORB)?.lastMintAt).toBeNull();
         expect(harness.signer.calls).toBe(0);
@@ -205,8 +202,7 @@ describe("identity minting across lifecycle states (DST)", () => {
             const bearer = seedOrbWithBearer(task, harness, ORB, "stopped");
             expect(errorType(await mint(task, harness, bearer))).toBe("not_mintable");
 
-            // The orb comes back and mints successfully. A success is silent,
-            // and it re-arms the edge.
+            // A success is silent and re-arms the edge.
             const stopped = harness.store.orbSnapshot(ORB);
             if (stopped === null) throw new Error("seed missing");
             harness.store.seedOrb({ ...stopped, state: "running" });
@@ -240,7 +236,6 @@ describe("identity minting across lifecycle states (DST)", () => {
           f: async (task) => {
             const bearer = seedOrbWithBearer(task, harness, ORB, "running");
 
-            // A bearer no orb holds.
             expect(errorType(await mint(task, harness, fakeTokenHash("never-issued")))).toBe(
               "unauthorized",
             );
@@ -250,7 +245,6 @@ describe("identity minting across lifecycle states (DST)", () => {
             if (running === null) throw new Error("seed missing");
             harness.store.seedOrb({ ...running, hostDiscardThroughIncarnation: 0 });
             expect(errorType(await mint(task, harness, bearer))).toBe("unauthorized");
-            // And the same orb with no committed hash at all.
             harness.store.seedOrb({ ...running, runtimeTokenHash: null });
             expect(errorType(await mint(task, harness, bearer))).toBe("unauthorized");
           },
@@ -445,7 +439,6 @@ describe("identity minting racing lifecycle transitions (DST)", () => {
           attempt.outcome.error.type,
         );
       }
-      // The lifecycle itself is undisturbed by the mint traffic beside it.
       expect(harness.store.orbSnapshot(ORB)?.state).toBe("stopped");
     });
   });
@@ -772,8 +765,8 @@ describe("identity minting under throttling and signer failure (DST)", () => {
       expect(burst.isOk(), burst.isErr() ? burst.error.message : "").toBe(true);
       expect(jtis.length).toBe(1);
 
-      // A sustained storm over four intervals cannot force more mints than the
-      // floor allows, whatever the schedule.
+      // A sustained storm cannot force more mints than the floor allows, whatever
+      // the schedule.
       const storm = await sim.runTasks(
         Array.from({ length: 8 }, (_, index) => ({
           name: `attacker-${index}`,

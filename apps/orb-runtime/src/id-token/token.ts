@@ -83,7 +83,7 @@ export type IdTokenObservation =
 export interface IdTokenClientConstants {
   /**
    * The whole invocation's budget. A CLI must answer fast, so this is the
-   * `gh` helper's 10 s rather than the runtime's 30–60 s boot windows — long
+   * `gh` helper's budget rather than the runtime's 30–60 s boot windows — long
    * enough to ride out the first-boot window before the bearer hash commits
    * and the 2 s per-orb mint floor, short enough that a credential chain
    * calling this helper does not hang.

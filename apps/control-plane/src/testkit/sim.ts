@@ -24,8 +24,7 @@ const silentLogger: Logger = {
  * on what the control plane would have written to Cloud Logging
  * (docs/testing.md). The simulation logger also receives the scheduler's own
  * timer/checkpoint/entropy chatter; only lines carrying `LIFECYCLE_LOG_PREFIX`
- * are retained, which is what makes "a healthy fleet logs nothing" a testable
- * property rather than a wish.
+ * are retained, so "a healthy fleet logs nothing" is assertable.
  */
 export class LogCapture implements Logger {
   private readonly captured: string[] = [];
@@ -144,7 +143,7 @@ export function makeRecordingSimulation(options: DstOptions): SimulationImpl {
 /**
  * Runs `scenario` under many recorded entropy schedules. On failure the full
  * trace is saved to `test-failures/`, replayed once to prove the failure
- * reproduces, and rethrown with the trace path. Set the `DST_REPLAY`
+ * reproduces, and rethrown wrapped with the trace path. Set the `DST_REPLAY`
  * environment variable to a saved trace file to re-run only that schedule.
  */
 export async function runDst(

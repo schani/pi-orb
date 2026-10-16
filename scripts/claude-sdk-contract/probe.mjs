@@ -402,7 +402,7 @@ export async function probeNativeSdk({
         preCompactSource = await readFile(root, "utf8");
         preCompactMessageCount = messages.length;
         if (cancelAt === "before-enqueue") {
-          // Caller-side fence: an accepted interrupt cannot revoke future input.
+          // Caller-side fence: once interrupt is accepted, compact input is never enqueued.
           await interrupt();
           break;
         }
@@ -697,7 +697,7 @@ export async function probeNativeSdk({
   }
 }
 
-/** Verify denied destinations never reach connect(), before any native probe. */
+/** Self-test: network-guard.py denies external and UDP traffic and other loopback ports. */
 export async function probeNetworkGuard() {
   const server = createServer();
   server.listen(0, "127.0.0.1");

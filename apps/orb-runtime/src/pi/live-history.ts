@@ -22,8 +22,8 @@ type PersistenceBoundary = AgentSessionEvent["type"];
 
 /**
  * Publishes newly persisted Pi entries without relying on `entry_appended`.
- * Pi emits that event only for extension-created custom entries; ordinary
- * messages are persisted immediately after subscribers receive `message_end`.
+ * Pi emits that event for some custom and bookkeeping entries, not for ordinary
+ * messages, which are persisted immediately after subscribers receive `message_end`.
  */
 export class LiveHistoryPublisher {
   private readonly source: PiEntrySource;

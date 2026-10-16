@@ -1,6 +1,6 @@
 import type { RecordedFakeRequest } from "./harness.ts";
 
-/** The public history snapshot already excludes raw provider diagnostics. */
+/** Keeps allowlisted failure fields; raw provider diagnostics are dropped. */
 export function mcpFailureHistory(snapshot: unknown) {
   if (typeof snapshot !== "object" || snapshot === null || !("records" in snapshot)) return [];
   const records = snapshot.records;
@@ -32,7 +32,7 @@ export function mcpFailureHistory(snapshot: unknown) {
     }));
 }
 
-/** Failure-only mock ledger: transport outcome and event shape, never prompts or credentials. */
+/** Failure artifact: mock model transport outcome and event types, no prompts or credentials. */
 export function mcpFailureRequests(requests: readonly RecordedFakeRequest[]) {
   return requests
     .filter((request) => request.surface === "model")

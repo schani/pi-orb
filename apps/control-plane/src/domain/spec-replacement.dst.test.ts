@@ -24,7 +24,6 @@ const ORB = "orb-spec";
 const PROJECT = `project-of-${ORB}`;
 const REPOSITORY_URL = makeProjectRow(PROJECT).repositoryUrl;
 
-/** The specification the fleet deploys after an effective host-spec update. */
 const UPDATED_SPEC = "spec-updated";
 
 /** Convergence crosses the modeled 65 s host boot, twice in some scenarios. */
@@ -114,7 +113,6 @@ function revisionOf(
   };
 }
 
-/** Seed the orb already `running` on one specific revision's specification. */
 function seedRunningOnRevision(
   task: SimulationTask,
   harness: TestHarness,
@@ -162,15 +160,12 @@ describe("host-spec replacement (DST)", () => {
     await runDst(
       { name: "spec-change-replaces-on-next-start", iterations: 20, logCapture: capture },
       async (sim) => {
-        // The orb is deliberately held running with no activity across long
-        // virtual stretches, so idle auto-stop is out of scope. So is the
-        // unreachable-runtime restart: a scheduler-legal cancelled `observe`
-        // plus a lapsed pull is a 10 s liveness gap that correctly restarts the
-        // host *through `starting`*, where the stale specification is then
-        // replaced exactly as designed (trace-diagnosed 2026-08-16). That is a
-        // different premise — this scenario's invariant is that a *deploy*
-        // alone never bounces a healthy running orb — so the liveness window is
-        // pushed beyond the observation window instead of being raced.
+        // The orb is held running with no activity, so idle auto-stop is out of
+        // scope. So is the unreachable-runtime restart: a scheduler-legal
+        // cancelled `observe` plus a lapsed pull restarts the host through
+        // `starting`, a different premise: this scenario's invariant is that a
+        // deploy alone never bounces a healthy running orb. The liveness window
+        // is pushed beyond the observation window instead of being raced.
         const harness = makeHarness({
           constants: { idleStopAfterMs: 3_600_000, unreachableGraceMs: 600_000 },
         });
@@ -198,14 +193,10 @@ describe("host-spec replacement (DST)", () => {
               const beforeToken = harness.store.orbSnapshot(ORB)?.runtimeTokenHash ?? null;
               const workspace = workspaceIdentity(harness);
 
-              // The deploy lands: every later reconcile pass computes a
-              // different desired fingerprint for this orb.
               harness.world.setDesiredSpec(UPDATED_SPEC);
               const afterSpec = desiredSpecFingerprintOf(harness, ORB, REPOSITORY_URL);
               expect(afterSpec).not.toBe(beforeSpec);
 
-              // Many reconcile passes later the running incarnation is still
-              // the authoritative one, untouched in every respect.
               await sleepInSteps(task, 20_000, "reconcile the running orb under a new spec");
               expect(harness.store.orbSnapshot(ORB)).toMatchObject({
                 state: "running",
@@ -220,7 +211,6 @@ describe("host-spec replacement (DST)", () => {
               expect(capture.matching("compute-discard-requested")).toEqual([]);
               expect(harness.world.createdHostsOf(ORB)).toHaveLength(1);
 
-              // Only an ordinary stop/start replaces it.
               await stopStartCycle(task, harness.deps, harness);
 
               const orb = harness.store.orbSnapshot(ORB);
@@ -229,7 +219,6 @@ describe("host-spec replacement (DST)", () => {
                 hostIncarnation: 1,
                 hostSpecFingerprint: afterSpec,
                 hostSpecGeneration: harness.deps.hostProvider.specGeneration,
-                // The old fence is fully cleared by finalization.
                 hostDiscardThroughIncarnation: null,
                 hostDiscardReason: null,
                 hostDiscardError: null,
@@ -237,17 +226,14 @@ describe("host-spec replacement (DST)", () => {
                 hostDiscardRequestedAt: null,
               });
               expect(orb?.hostRef).not.toBe(beforeRef);
-              // The compute is genuinely new and genuinely restamped.
               expect(harness.world.specFingerprintOf(ORB)).toBe(afterSpec);
               expect(harness.world.hostIncarnationOf(ORB)).toBe(1);
               expect(harness.world.createdHostsOf(ORB)).toEqual([
                 { incarnation: 0, specFingerprint: beforeSpec },
                 { incarnation: 1, specFingerprint: afterSpec },
               ]);
-              // A fresh incarnation carries a fresh runtime token.
               expect(orb?.runtimeTokenHash).not.toBe(beforeToken);
               expect(orb?.runtimeTokenHash).not.toBeNull();
-              // The authoritative workspace is the same one.
               expect(workspaceIdentity(harness)).toEqual(workspace);
               stop.abort();
             },
@@ -285,8 +271,6 @@ describe("host-spec replacement (DST)", () => {
 
               await stopStartCycle(task, harness.deps, harness);
 
-              // Nothing changed effectively, so nothing was replaced: same
-              // incarnation, same compute identity, same token.
               expect(harness.store.orbSnapshot(ORB)).toMatchObject({
                 state: "running",
                 hostRef: ref,
@@ -392,11 +376,10 @@ describe("host-spec replacement (DST)", () => {
           {
             name: "driver",
             f: async (task) => {
-              // The pre-Stage-2 cohort: no committed fingerprint, no stamp on
-              // the resource. The start path must send `null` and the adapter
-              // must match it against the unstamped resource, or every legacy
-              // orb wedges on a non-retryable conflict the moment its runtime
-              // goes quiet.
+              // Legacy orb: no committed fingerprint, no stamp on the resource.
+              // The start path must send `null` and the adapter must match it
+              // against the unstamped resource, or every legacy orb wedges on a
+              // non-retryable conflict the moment its runtime goes quiet.
               seedRunningOrb(task, harness, ORB, undefined, { legacy: true });
               expect(harness.store.orbSnapshot(ORB)).toMatchObject({
                 hostSpecFingerprint: null,
@@ -442,8 +425,6 @@ describe("host-spec replacement (DST)", () => {
                 400,
               );
               if (harness.world.hostIncarnationOf(ORB) === 0) {
-                // The very same unstamped compute was started again: no
-                // conflict, no replacement, no new host.
                 inPlaceRestarts += 1;
                 expect(harness.world.hostRefOf(ORB)?.resourceId).toBe(legacyRef);
                 expect(harness.world.specFingerprintOf(ORB)).toBeNull();
@@ -752,7 +733,6 @@ describe("host-spec replacement (DST)", () => {
                 hostDiscardThroughIncarnation: null,
               });
 
-              // The surviving revision converges the same compute.
               await drive(
                 task,
                 current,
