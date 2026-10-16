@@ -1,24 +1,226 @@
-# Isolated serial shards: one frontend gate and Docker lifecycle qualification.
-name: E2E
+name: Controlled benchmark optimized
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
   workflow_dispatch:
-    inputs:
-      subagent_continuation_diagnostic:
-        description: Capture the first subagent continuation failure (not qualification)
-        type: boolean
-        default: false
 
 permissions:
   contents: read
 
 jobs:
+  ci-control-plane-image:
+    name: CI control-plane image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          ref: f43eff0f84a27eacd48f7aa30d5148e78463778c
+
+      - name: Record frozen payload and controller identity
+        env:
+          CONTROLLER_SHA: ${{ github.sha }}
+          CONTROLLER_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = f43eff0f84a27eacd48f7aa30d5148e78463778c
+          test -z "$(git status --porcelain)"
+          printf 'controller=%s ref=%s source=%s\n' "$CONTROLLER_SHA" "$CONTROLLER_REF" "$(git rev-parse HEAD)"
+          printf 'runner_image=%s runner_version=%s\n' "$ImageOS" "$ImageVersion"
+          git ls-files -z | xargs -0 sha256sum | sha256sum
+          sha256sum apps/orb-runtime/Dockerfile package-lock.json
+
+      - name: Reject tracked deployment credentials, plans and state
+        run: python3 infra/artifact_guard.py
+
+      - name: Check image-build disk headroom
+        run: |
+          df -h .
+          available=$(df -PB1 . | awk 'NR == 2 { print $4 }')
+          if ! (( available >= 15 * 1024 * 1024 * 1024 )); then
+            echo 'Control-plane image build requires 15 GiB free disk.' >&2
+            exit 1
+          fi
+
+      - name: Build control-plane image
+        run: docker build -f apps/control-plane/Dockerfile -t "pi-orb-control-plane:ci-f43eff0f84a27eacd48f7aa30d5148e78463778c" .
+
+      - name: Report image-build disk usage
+        if: always()
+        run: |
+          df -h .
+          docker system df
+
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          ref: f43eff0f84a27eacd48f7aa30d5148e78463778c
+
+      - name: Record frozen payload and controller identity
+        env:
+          CONTROLLER_SHA: ${{ github.sha }}
+          CONTROLLER_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = f43eff0f84a27eacd48f7aa30d5148e78463778c
+          test -z "$(git status --porcelain)"
+          printf 'controller=%s ref=%s source=%s\n' "$CONTROLLER_SHA" "$CONTROLLER_REF" "$(git rev-parse HEAD)"
+          printf 'runner_image=%s runner_version=%s\n' "$ImageOS" "$ImageVersion"
+          git ls-files -z | xargs -0 sha256sum | sha256sum
+          sha256sum apps/orb-runtime/Dockerfile package-lock.json
+
+      - name: Reject tracked deployment credentials, plans and state
+        run: python3 infra/artifact_guard.py
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24.6.0'
+          package-manager-cache: false
+
+
+      - name: Locate npm cache
+        id: npm-cache-dir
+        run: echo "path=$(npm config get cache)" >> "$GITHUB_OUTPUT"
+      - name: Restore npm cache without saving
+        id: npm-cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ steps.npm-cache-dir.outputs.path }}
+          key: node-cache-${{ runner.os }}-x64-npm-${{ hashFiles('package-lock.json') }}
+      - name: Report npm cache match
+        env:
+          CACHE_HIT: ${{ steps.npm-cache.outputs.cache-hit }}
+          CACHE_MATCH: ${{ steps.npm-cache.outputs.cache-matched-key }}
+        run: printf 'npm cache hit=%s key=%s; exports disabled\n' "$CACHE_HIT" "$CACHE_MATCH"
+
+      - name: Use the signed Ubuntu archive
+        run: sudo python3 infra/runner_apt.py /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt.conf.d/99pi-orb-force-ipv4
+
+      - name: Install native addon prerequisites
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 build-essential
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install OpenTofu
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/tofu_1.12.6_linux_amd64.zip"
+          curl --fail --silent --show-error --location https://github.com/opentofu/opentofu/releases/download/v1.12.6/tofu_1.12.6_linux_amd64.zip -o "$archive"
+          printf '5dc43da4f750f33873dc25e94587128709e819e544b7be9016b255316153c3a8  %s\n' "$archive" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/tofu-bin"
+          unzip -q "$archive" tofu -d "$RUNNER_TEMP/tofu-bin"
+          echo "$RUNNER_TEMP/tofu-bin" >> "$GITHUB_PATH"
+
+      - name: Test foundation contracts
+        run: infra/foundation/test.sh
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test infrastructure contracts
+        run: npm run test:infra
+
+  unit:
+    name: Unit/DST (${{ matrix.shard }}/4)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: qualification
+          POSTGRES_PASSWORD: qualification
+          POSTGRES_DB: qualification
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U qualification -d qualification"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PI_ORB_TEST_DATABASE_URL: postgres://qualification:qualification@127.0.0.1:5432/qualification
+      PI_ORB_DURABLE_PG_TEST_URL: postgres://qualification:qualification@127.0.0.1:5432/qualification
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          ref: f43eff0f84a27eacd48f7aa30d5148e78463778c
+
+      - name: Record frozen payload and controller identity
+        env:
+          CONTROLLER_SHA: ${{ github.sha }}
+          CONTROLLER_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = f43eff0f84a27eacd48f7aa30d5148e78463778c
+          test -z "$(git status --porcelain)"
+          printf 'controller=%s ref=%s source=%s\n' "$CONTROLLER_SHA" "$CONTROLLER_REF" "$(git rev-parse HEAD)"
+          printf 'runner_image=%s runner_version=%s\n' "$ImageOS" "$ImageVersion"
+          git ls-files -z | xargs -0 sha256sum | sha256sum
+          sha256sum apps/orb-runtime/Dockerfile package-lock.json
+
+      - name: Reject tracked deployment credentials, plans and state
+        run: python3 infra/artifact_guard.py
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24.6.0'
+          package-manager-cache: false
+
+
+      - name: Locate npm cache
+        id: npm-cache-dir
+        run: echo "path=$(npm config get cache)" >> "$GITHUB_OUTPUT"
+      - name: Restore npm cache without saving
+        id: npm-cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ steps.npm-cache-dir.outputs.path }}
+          key: node-cache-${{ runner.os }}-x64-npm-${{ hashFiles('package-lock.json') }}
+      - name: Report npm cache match
+        env:
+          CACHE_HIT: ${{ steps.npm-cache.outputs.cache-hit }}
+          CACHE_MATCH: ${{ steps.npm-cache.outputs.cache-matched-key }}
+        run: printf 'npm cache hit=%s key=%s; exports disabled\n' "$CACHE_HIT" "$CACHE_MATCH"
+
+      - name: Use the signed Ubuntu archive
+        run: sudo python3 infra/runner_apt.py /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt.conf.d/99pi-orb-force-ipv4
+
+      - name: Install native addon prerequisites
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 build-essential
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test unit and deterministic simulation contracts
+        run: npx vitest run --maxWorkers=1 --no-file-parallelism --shard=${{ matrix.shard }}/4
+
+      - name: Upload deterministic failure traces
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: ci-dst-failure-traces-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-failures/*.json
+          if-no-files-found: ignore
+          retention-days: 14
+
   e2e:
-    name: E2E (${{ matrix.shard }}/4)${{ github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic && ' diagnostic' || '' }}
+    name: Docker E2E (${{ matrix.shard }}/4)
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
@@ -32,12 +234,43 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
+        with:
+          ref: f43eff0f84a27eacd48f7aa30d5148e78463778c
+
+      - name: Record frozen payload and controller identity
+        env:
+          CONTROLLER_SHA: ${{ github.sha }}
+          CONTROLLER_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = f43eff0f84a27eacd48f7aa30d5148e78463778c
+          test -z "$(git status --porcelain)"
+          printf 'controller=%s ref=%s source=%s\n' "$CONTROLLER_SHA" "$CONTROLLER_REF" "$(git rev-parse HEAD)"
+          printf 'runner_image=%s runner_version=%s\n' "$ImageOS" "$ImageVersion"
+          git ls-files -z | xargs -0 sha256sum | sha256sum
+          sha256sum apps/orb-runtime/Dockerfile package-lock.json
 
       - name: Set up Node.js
         uses: actions/setup-node@v5
         with:
           node-version: '24.6.0'
-          cache: npm
+          package-manager-cache: false
+
+
+      - name: Locate npm cache
+        id: npm-cache-dir
+        run: echo "path=$(npm config get cache)" >> "$GITHUB_OUTPUT"
+      - name: Restore npm cache without saving
+        id: npm-cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ steps.npm-cache-dir.outputs.path }}
+          key: node-cache-${{ runner.os }}-x64-npm-${{ hashFiles('package-lock.json') }}
+      - name: Report npm cache match
+        env:
+          CACHE_HIT: ${{ steps.npm-cache.outputs.cache-hit }}
+          CACHE_MATCH: ${{ steps.npm-cache.outputs.cache-matched-key }}
+        run: printf 'npm cache hit=%s key=%s; exports disabled\n' "$CACHE_HIT" "$CACHE_MATCH"
 
       - name: Use the signed Ubuntu archive
         run: sudo python3 infra/runner_apt.py /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt.conf.d/99pi-orb-force-ipv4
@@ -49,7 +282,7 @@ jobs:
         run: npm ci
 
       - name: Cache Playwright browsers
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
@@ -64,6 +297,8 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          cache-binary: false
 
       - name: Build E2E runtime image
         id: runtime-image
@@ -79,18 +314,16 @@ jobs:
           load: true
           push: false
           cache-from: type=gha,scope=e2e-runtime-linux-amd64-v1
-          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 1 && 'type=gha,scope=e2e-runtime-linux-amd64-v1,mode=max' || '' }}
 
       - name: Report runtime image build
         env:
-          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_SHA: f43eff0f84a27eacd48f7aa30d5148e78463778c
           IMAGE_ID: ${{ steps.runtime-image.outputs.imageid }}
-          CACHE_WRITE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 1 }}
+          CACHE_WRITE: 'false'
         run: |
           printf '### E2E runtime image\n\nSource: `%s`\n\nImage: `%s`\n\nCache: `e2e-runtime-linux-amd64-v1`; write: `%s`\n' "$SOURCE_SHA" "$IMAGE_ID" "$CACHE_WRITE" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run end-to-end test
-        if: github.event_name != 'workflow_dispatch' || !inputs.subagent_continuation_diagnostic
         env:
           DEBUG: pw:browser
           PI_ORB_LOCAL_FAKE_EVIDENCE: ${{ runner.temp }}/local-fake-provider
@@ -130,12 +363,6 @@ jobs:
             test-failures/cross-axis-*/retained-docker.json
           if-no-files-found: ignore
           retention-days: 14
-      - name: Diagnose subagent continuation
-        if: github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic
-        env:
-          DEBUG: pw:browser
-          PI_ORB_E2E_RUNTIME_IMAGE_ID: ${{ steps.runtime-image.outputs.imageid }}
-        run: npm run test:e2e -- --project lifecycle e2e/subagents.e2e.test.ts
 
       - name: Capture browser failure host diagnostics
         if: failure()
@@ -170,7 +397,6 @@ jobs:
 
   frontend:
     name: Frontend (${{ matrix.shard }}/4)
-    if: github.event_name != 'workflow_dispatch' || !inputs.subagent_continuation_diagnostic
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     strategy:
@@ -180,28 +406,66 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: f43eff0f84a27eacd48f7aa30d5148e78463778c
+
+      - name: Record frozen payload and controller identity
+        env:
+          CONTROLLER_SHA: ${{ github.sha }}
+          CONTROLLER_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = f43eff0f84a27eacd48f7aa30d5148e78463778c
+          test -z "$(git status --porcelain)"
+          printf 'controller=%s ref=%s source=%s\n' "$CONTROLLER_SHA" "$CONTROLLER_REF" "$(git rev-parse HEAD)"
+          printf 'runner_image=%s runner_version=%s\n' "$ImageOS" "$ImageVersion"
+          git ls-files -z | xargs -0 sha256sum | sha256sum
+          sha256sum apps/orb-runtime/Dockerfile package-lock.json
+
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '24.6.0'
-          cache: npm
+          package-manager-cache: false
+
+      - name: Locate npm cache
+        id: npm-cache-dir
+        run: echo "path=$(npm config get cache)" >> "$GITHUB_OUTPUT"
+      - name: Restore npm cache without saving
+        id: npm-cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ steps.npm-cache-dir.outputs.path }}
+          key: node-cache-${{ runner.os }}-x64-npm-${{ hashFiles('package-lock.json') }}
+      - name: Report npm cache match
+        env:
+          CACHE_HIT: ${{ steps.npm-cache.outputs.cache-hit }}
+          CACHE_MATCH: ${{ steps.npm-cache.outputs.cache-matched-key }}
+        run: printf 'npm cache hit=%s key=%s; exports disabled\n' "$CACHE_HIT" "$CACHE_MATCH"
+
       - name: Use the signed Ubuntu archive
         run: sudo python3 infra/runner_apt.py /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt.conf.d/99pi-orb-force-ipv4
+
       - name: Install native addon prerequisites
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 build-essential
+
       - name: Install dependencies
         run: npm ci
+
       - name: Cache Playwright browsers
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
       - name: Install pinned browser engines and system dependencies
         run: npm run test:e2e:install
+
       - name: Run shared frontend tests
         env:
           DEBUG: pw:browser
         run: npm run test:e2e -- --project frontend --shard=${{ matrix.shard }}/4
+
       - name: Capture browser failure host diagnostics
         if: failure()
         run: |
@@ -210,6 +474,7 @@ jobs:
           ps -eo pid,ppid,comm,rss
           sudo dmesg --ctime | grep -Ei 'webkit|MiniBrowser|segfault|out of memory|oom-kill|killed process' || true
           dpkg-query -W 'libglib2.0-*' 'libsoup-*' || true
+
       - name: Upload frontend failure evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
@@ -255,5 +520,196 @@ jobs:
           name: e2e-browser-failure-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: .context/claude-production-hardening/browser-failure
           include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+  process:
+    name: Central process (${{ matrix.shard }}/4)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      PI_ORB_E2E_BACKEND: process
+      PI_ORB_AGENT_BACKEND: central-durable
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          ref: f43eff0f84a27eacd48f7aa30d5148e78463778c
+
+      - name: Record frozen payload and controller identity
+        env:
+          CONTROLLER_SHA: ${{ github.sha }}
+          CONTROLLER_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = f43eff0f84a27eacd48f7aa30d5148e78463778c
+          test -z "$(git status --porcelain)"
+          printf 'controller=%s ref=%s source=%s\n' "$CONTROLLER_SHA" "$CONTROLLER_REF" "$(git rev-parse HEAD)"
+          printf 'runner_image=%s runner_version=%s\n' "$ImageOS" "$ImageVersion"
+          git ls-files -z | xargs -0 sha256sum | sha256sum
+          sha256sum apps/orb-runtime/Dockerfile package-lock.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24.6.0'
+          package-manager-cache: false
+
+      - name: Locate npm cache
+        id: npm-cache-dir
+        run: echo "path=$(npm config get cache)" >> "$GITHUB_OUTPUT"
+      - name: Restore npm cache without saving
+        id: npm-cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ steps.npm-cache-dir.outputs.path }}
+          key: node-cache-${{ runner.os }}-x64-npm-${{ hashFiles('package-lock.json') }}
+      - name: Report npm cache match
+        env:
+          CACHE_HIT: ${{ steps.npm-cache.outputs.cache-hit }}
+          CACHE_MATCH: ${{ steps.npm-cache.outputs.cache-matched-key }}
+        run: printf 'npm cache hit=%s key=%s; exports disabled\n' "$CACHE_HIT" "$CACHE_MATCH"
+
+      - name: Use the signed Ubuntu archive
+        run: sudo python3 infra/runner_apt.py /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt.conf.d/99pi-orb-force-ipv4
+
+      - name: Install native addon prerequisites
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 build-essential
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install pinned browser engines and system dependencies
+        run: npm run test:e2e:install
+
+      - name: Run central process end-to-end tests
+        env:
+          PI_ORB_LOCAL_FAKE_EVIDENCE: ${{ runner.temp }}/local-fake-provider
+        run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project lifecycle --shard=${{ matrix.shard }}/4
+
+      - name: Upload local provider provenance
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: local-fake-process-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/local-fake-provider/manifest.json
+            ${{ runner.temp }}/local-fake-provider/phases.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: central-process-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-failures/*.json
+            .context/cross-orb/messaging/*/failure.txt
+            .context/cross-orb/messaging/*/manifest.json
+            .context/cross-orb/messaging/*/fake-requests.json
+            .context/cross-orb/messaging/*/control-plane.log
+            .context/cross-orb/messaging/*/*-native-history.json
+            test-failures/profile-login/failure.json
+            test-failures/full-slice-upload/failure.json
+            test-failures/subagent-*/failure.json
+            test-failures/lazy-return-*/failure.json
+            test-failures/lazy-return-*/failure.png
+            test-failures/lazy-return-*/trace.zip
+            test-failures/cross-axis-*/failure.txt
+            test-failures/cross-axis-*/result.json
+            test-failures/cross-axis-*/pin.json
+            test-failures/cross-axis-*/execution-ready.json
+            test-failures/cross-axis-*/control-plane.log
+            test-failures/cross-axis-*/relay-requests.json
+            test-failures/cross-axis-*/model-requests.json
+            test-failures/cross-axis-*/retained-docker.json
+            test-failures/durable-process-*/failure.txt
+            test-failures/durable-process-*/control-plane.log
+            test-failures/durable-process-*/model-requests.json
+            test-failures/durable-process-*/login-view.json
+            test-failures/durable-process-*/gated-view.json
+            test-failures/durable-process-*/acceptance-history.json
+            test-failures/durable-process-*/teardown.json
+            test-failures/durable-independent-process/*/failure.txt
+            test-failures/durable-independent-process/*/control-plane.log
+            test-failures/durable-independent-process/*/browser-frames.json
+            test-failures/durable-independent-process/*/model-requests.json
+            test-failures/durable-independent-process/*/original-model-requests.json
+            test-failures/durable-independent-process/*/model-stream-fence.json
+            test-failures/durable-independent-process/*/barrier.json
+            test-failures/durable-independent-process/*/waiting-phases.json
+            test-failures/durable-independent-process/*/held-setup-readiness.json
+            test-failures/durable-independent-process/*/before-ready-history.json
+            test-failures/durable-independent-process/*/resource-ready-history.json
+            test-failures/durable-independent-process/*/final-view.json
+            test-failures/durable-independent-process/*/final-history.json
+            test-failures/durable-independent-process/*/spill-history.json
+            test-failures/durable-independent-process/*/capture-outcomes.json
+            test-failures/durable-independent-process/*/teardown-outcomes.json
+            test-failures/durable-independent-process/*/early-output.png
+            test-failures/durable-independent-process/*/waiting.png
+            test-failures/durable-independent-process/*/final-page.png
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+  durable-control-plane-image:
+    name: Durable control-plane image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          ref: f43eff0f84a27eacd48f7aa30d5148e78463778c
+
+      - name: Record frozen payload and controller identity
+        env:
+          CONTROLLER_SHA: ${{ github.sha }}
+          CONTROLLER_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = f43eff0f84a27eacd48f7aa30d5148e78463778c
+          test -z "$(git status --porcelain)"
+          printf 'controller=%s ref=%s source=%s\n' "$CONTROLLER_SHA" "$CONTROLLER_REF" "$(git rev-parse HEAD)"
+          printf 'runner_image=%s runner_version=%s\n' "$ImageOS" "$ImageVersion"
+          git ls-files -z | xargs -0 sha256sum | sha256sum
+          sha256sum apps/orb-runtime/Dockerfile package-lock.json
+
+      - name: Check Docker disk budget
+        run: |
+          df -h
+          test "$(df -Pk . | awk 'NR == 2 {print $4}')" -ge 15728640
+
+      - name: Build control-plane image
+        run: docker build -f apps/control-plane/Dockerfile -t pi-orb-control-plane:qualification .
+
+      - name: Prove packaged worker, Git and skills without network
+        run: |
+          set -euo pipefail
+          container=$(docker create --network none pi-orb-control-plane:qualification node /app/image-proof.mjs)
+          trap 'docker rm -f "$container"' EXIT
+          docker cp scripts/control-plane-image-proof.mjs "$container:/app/image-proof.mjs"
+          docker start --attach "$container" 2>&1 | tee "$RUNNER_TEMP/control-plane-image-proof.log"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$container")" = 0
+
+      - name: Report image and disk provenance
+        if: always()
+        run: |
+          df -h
+          docker system df
+          docker image inspect pi-orb-control-plane:qualification --format '{{.Id}} {{.Size}}' || true
+
+      - name: Upload image proof
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: control-plane-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/control-plane-image-proof.log
           if-no-files-found: ignore
           retention-days: 14
