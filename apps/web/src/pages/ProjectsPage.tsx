@@ -40,6 +40,7 @@ import {
   formatProjectOrbAge,
   type OrbOrderCache,
   orderProjects,
+  type ProjectOrderCache,
   projectOrbActions,
   projectOrbGlyph,
   splitProjectOrbs,
@@ -160,6 +161,7 @@ export function ProjectsPage({
   const [archivingOrb, setArchivingOrb] = useState<string | null>(null);
   const [ageNow, setAgeNow] = useState(() => Date.now());
   const [orbOrder] = useState<OrbOrderCache>(() => new Map());
+  const [projectOrder] = useState<ProjectOrderCache>(() => new Map());
   const [orbCreateError, setOrbCreateError] = useState<{
     projectId: string;
     message: string;
@@ -395,7 +397,8 @@ export function ProjectsPage({
       list?.type === "loaded" ? list.items : [],
     ]),
   );
-  const ordered = settledProjects === null ? [] : orderProjects(settledProjects, loadedOrbs);
+  const ordered =
+    settledProjects === null ? [] : orderProjects(settledProjects, loadedOrbs, projectOrder);
   const totals = dashboardTotals(visibleProjects ?? [], loadedOrbs);
   const configProject = mcpConfigOpen
     ? visibleProjects?.find((project) => project.id === focusedProjectId)

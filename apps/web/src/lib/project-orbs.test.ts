@@ -261,6 +261,76 @@ describe("dashboard project order", () => {
     expect(ordered.map((entry) => entry.id)).toEqual(["a", "b", "c"]);
   });
 
+  it("freezes activity and deletion rank while returning fresh project metadata", () => {
+    const order = new Map();
+    const initial: [ProjectView, ProjectView] = [project("stale"), project("hot")];
+    const lists = {
+      stale: [orb("stale-orb", "running", old)],
+      hot: [orb("hot-orb", "running", recent)],
+    };
+    expect(orderProjects(initial, lists, order).map((item) => item.id)).toEqual(["hot", "stale"]);
+    const refreshed = { ...initial[0], name: "Refreshed" };
+    const deleting = { ...initial[1], state: "deleting" as const };
+    const result = orderProjects(
+      [refreshed, deleting],
+      {
+        stale: [orb("new-work", "running", "2100-01-01T00:00:00Z")],
+        hot: [orb("hot-orb", "deleting", recent)],
+      },
+      order,
+    );
+    expect(result.map((item) => item.id)).toEqual(["hot", "stale"]);
+    expect(result).toEqual([deleting, refreshed]);
+    expect(result[0]).toBe(deleting);
+    expect(initial.map((item) => item.id)).toEqual(["stale", "hot"]);
+    expect(orderProjects([refreshed, deleting], lists, new Map()).map((item) => item.id)).toEqual([
+      "stale",
+      "hot",
+    ]);
+  });
+
+  it("retains tied positions through reordered input, absence, and newcomers", () => {
+    const order = new Map();
+    const lists = {
+      a: [orb("a-orb", "running", old)],
+      b: [orb("b-orb", "running", old)],
+      new: [orb("new-orb", "running", recent)],
+      tie: [orb("tie-orb", "running", old)],
+    };
+    orderProjects([project("a"), project("b")], lists, order);
+    expect(orderProjects([project("b")], lists, order).map((item) => item.id)).toEqual(["b"]);
+    expect(
+      orderProjects([project("b"), project("tie"), project("new"), project("a")], lists, order).map(
+        (item) => item.id,
+      ),
+    ).toEqual(["new", "a", "b", "tie"]);
+  });
+
+  it("freezes empty or invalid working sets through new work and shelf changes", () => {
+    const order = new Map();
+    const projects = [project("quiet"), project("invalid"), project("working")];
+    orderProjects(
+      projects,
+      {
+        quiet: [orb("archived", "archived", recent)],
+        invalid: [orb("invalid", "running", "invalid")],
+        working: [orb("working", "stopped", old)],
+      },
+      order,
+    );
+    expect(
+      orderProjects(
+        projects,
+        {
+          quiet: [orb("new-work", "running", recent)],
+          invalid: [orb("invalid", "running", recent)],
+          working: [],
+        },
+        order,
+      ).map((item) => item.id),
+    ).toEqual(["working", "quiet", "invalid"]);
+  });
+
   it("treats a project whose orbs have not loaded as having no working set", () => {
     const ordered = orderProjects([project("unknown"), project("known")], {
       known: [orb("known-orb", "running", old)],

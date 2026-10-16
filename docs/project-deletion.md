@@ -43,7 +43,7 @@ interface ProjectDeletionProgress {
 }
 ```
 
-`total` is the child count captured when deletion is first accepted; `remaining` is the current orb-row count; `blocked` counts cleanup intents with a persisted error. The dashboard exposes **Delete project** with confirmation that the project, every orb, all checkouts/files/compute, and all conversation history will be permanently deleted. While deleting, disable new-orb creation and all project actions, show progress and sanitized child blockers, and poll until the project disappears. A failed API request leaves the project in place with visible feedback. There is no optimistic disappearance and no silent redirect for a stale resource URL (`docs/web-ui.md`).
+`total` is the child count captured when deletion is first accepted; `remaining` is the current orb-row count; `blocked` counts cleanup intents with a persisted error. The dashboard exposes **Delete project** with confirmation that the project, every orb, all checkouts/files/compute, and all conversation history will be permanently deleted. While deleting, disable new-orb creation and all project actions, show progress and sanitized child blockers, and poll until the project disappears. **Dashboard placement (2026-10-16):** retain the column's first-observed ordering keys throughout deletion; only projects already deleting on first appearance rank last (`docs/web-ui.md`). A failed API request leaves the project in place with visible feedback. There is no optimistic disappearance and no silent redirect for a stale resource URL (`docs/web-ui.md`).
 
 ## Atomic intent and race fence
 

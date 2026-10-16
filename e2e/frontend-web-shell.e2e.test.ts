@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type OrbView, OrbViewSchema, type SessionProbe } from "@pi-orb/protocol";
+import { type OrbView, OrbViewSchema, type ProjectView, type SessionProbe } from "@pi-orb/protocol";
 import { chromium, expect as expectPage } from "@playwright/test";
 import Fastify from "fastify";
 import { Errors } from "typebox/value";
@@ -102,6 +102,87 @@ it.each(["/", "/orbs/missing-orb"])(
     }
   },
 );
+
+it("freezes dashboard project order after list loading, while polling metadata and resetting on reload", async () => {
+  const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
+  const page = await browser.newPage();
+  const olderProject = {
+    id: "older-project",
+    name: "Older project",
+    state: "active" as const,
+    repositoryUrl: "https://github.com/example/ordering",
+    createdAt: "2026-10-01T00:00:00Z",
+    updatedAt: "2026-10-01T00:00:00Z",
+  };
+  const newerProject = { ...olderProject, id: "newer-project", name: "Newer project" };
+  const older: OrbView = {
+    id: "older",
+    projectId: olderProject.id,
+    harness: "pi",
+    name: "Older",
+    state: "running",
+    stateVersion: 1,
+    stateChangedAt: olderProject.createdAt,
+    createdAt: olderProject.createdAt,
+    updatedAt: "2026-10-02T00:00:00Z",
+    activity: "idle",
+  };
+  const newer = {
+    ...older,
+    id: "newer",
+    projectId: newerProject.id,
+    name: "Newer",
+    updatedAt: "2026-10-03T00:00:00Z",
+  };
+  let projects: ProjectView[] = [olderProject, newerProject];
+  let olderItems = [older];
+  let releaseLists!: () => void;
+  const listsReady = new Promise<void>((resolve) => {
+    releaseLists = resolve;
+  });
+  try {
+    await page.route("**/api/v1/projects", (route) => route.fulfill({ json: { items: projects } }));
+    await page.route("**/api/v1/projects/older-project/orbs", async (route) => {
+      await listsReady;
+      await route.fulfill({ json: { items: olderItems } });
+    });
+    await page.route("**/api/v1/projects/newer-project/orbs", async (route) => {
+      await listsReady;
+      await route.fulfill({ json: { items: [newer] } });
+    });
+    await page.goto(origin);
+    await expectPage(page.locator(".dashboard-total").first()).toContainText("2");
+    await expectPage(page.locator(".project-column")).toHaveCount(0);
+    releaseLists();
+    const headings = page.locator(".project-column .project-name");
+    await expectPage(headings).toHaveText(["Newer project", "Older project"]);
+    olderItems = [
+      { ...older, name: "Fresh work", activity: "busy", updatedAt: "2100-01-01T00:00:00Z" },
+    ];
+    projects = [{ ...olderProject, name: "Renamed project" }, newerProject];
+    await expectPage(page.locator(".orb-entry-link").filter({ hasText: "Fresh work" })).toHaveCount(
+      1,
+    );
+    await expectPage(headings).toHaveText(["Newer project", "Renamed project"]);
+    await expectPage(
+      page.locator("#project-older-project img[src='/favicons/busy.svg']"),
+    ).toHaveCount(1);
+    projects = [
+      { ...olderProject, name: "Renamed project" },
+      { ...newerProject, name: "Deleting project", state: "deleting" },
+    ];
+    await expectPage(page.locator("#project-newer-project")).toHaveClass(
+      "project-column project-column-deleting",
+    );
+    await expectPage(headings).toHaveText(["Deleting project", "Renamed project"]);
+    await page.reload();
+    await expectPage(headings).toHaveText(["Renamed project", "Deleting project"]);
+  } finally {
+    releaseLists();
+    await page.unrouteAll({ behavior: "wait" });
+    await page.close();
+  }
+});
 
 it.each(["schani/pi-orb", "github.com/schani/pi-orb"])(
   "creates a project from GitHub shorthand %s with a canonical API URL",
