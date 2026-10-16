@@ -47,4 +47,15 @@ describe("single control-plane composition", () => {
       expect(source.lastIndexOf(`${loop}(`)).toBeGreaterThan(activation);
     }
   });
+  it("runs socket retirement beside the unchanged startup barrier and joins it on shutdown", () => {
+    const watcher = source.indexOf("rolloutWatcher = watchRolloutSockets(");
+    expect(watcher).toBeGreaterThan(source.indexOf("control plane listening on"));
+    expect(watcher).toBeLessThan(source.indexOf("await waitForReleaseActivation("));
+    expect(source).toContain('env("K_SERVICE", "") === "pi-orb-issuer"');
+    expect(source).toContain('const revision = env("K_REVISION", "")');
+    expect(source).toContain("await rolloutWatcher;");
+    expect(source).toContain(
+      "registerLiveProxy(browser, httpTask, deps, undefined, rolloutSockets)",
+    );
+  });
 });

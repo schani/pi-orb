@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { DurationBalancedSequencer } from "./duration-sequencer.ts";
 
 const frontendFiles = [
   "e2e/application-auth.e2e.test.ts",
@@ -11,11 +12,14 @@ const frontendFiles = [
 const shared = {
   testTimeout: 720_000,
   hookTimeout: 720_000,
+  fileParallelism: false,
 } as const;
 
 export default defineConfig({
   test: {
     maxWorkers: 1,
+    fileParallelism: false,
+    sequence: { sequencer: DurationBalancedSequencer },
     projects: [
       {
         test: {

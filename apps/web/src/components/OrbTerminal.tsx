@@ -61,6 +61,12 @@ function copySelection(event: React.ClipboardEvent<HTMLDivElement>): void {
 }
 
 /** Render directly in the orb header's shared action row. */
+export function terminalCloseMessage(event: Pick<CloseEvent, "code" | "reason">): string {
+  return event.code === 1012 && event.reason === "deployment rollover"
+    ? "Terminal interrupted by deployment."
+    : "Terminal connection closed.";
+}
+
 export function OrbTerminal({
   orbId,
   enabled,
@@ -286,12 +292,12 @@ export function OrbTerminal({
           },
         );
       };
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         if (socketRef.current !== socket) return;
         socketRef.current = null;
         readyRef.current = false;
         setStatus("ended");
-        setError((current) => current ?? "Terminal connection closed.");
+        setError((current) => current ?? terminalCloseMessage(event));
       };
       socket.onerror = () => {
         if (socketRef.current === socket) setError("Terminal connection failed.");

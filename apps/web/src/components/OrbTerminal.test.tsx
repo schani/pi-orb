@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { OrbTerminal } from "./OrbTerminal.tsx";
+import { OrbTerminal, terminalCloseMessage } from "./OrbTerminal.tsx";
 
 describe("OrbTerminal", () => {
   it("starts as an accessible header icon without creating a terminal", () => {
@@ -18,5 +18,16 @@ describe("OrbTerminal", () => {
     expect(
       renderToStaticMarkup(<OrbTerminal orbId="orb-1" enabled={false} onClose={() => {}} />),
     ).toBe("");
+  });
+  it("identifies only the fixed rollout close without reopening a terminal", () => {
+    expect(terminalCloseMessage({ code: 1012, reason: "deployment rollover" })).toBe(
+      "Terminal interrupted by deployment.",
+    );
+    expect(terminalCloseMessage({ code: 1012, reason: "untrusted close detail" })).toBe(
+      "Terminal connection closed.",
+    );
+    expect(terminalCloseMessage({ code: 1006, reason: "deployment rollover" })).toBe(
+      "Terminal connection closed.",
+    );
   });
 });

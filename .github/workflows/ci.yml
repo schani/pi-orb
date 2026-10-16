@@ -30,34 +30,71 @@ jobs:
             exit 1
           fi
 
-      - name: Build control-plane image
-        run: docker build -f apps/control-plane/Dockerfile -t "pi-orb-control-plane:ci-$GITHUB_SHA" .
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-      - name: Report image-build disk usage
-        if: always()
+      - name: Build control-plane image
+        id: control-plane-image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
+        with:
+          context: .
+          file: apps/control-plane/Dockerfile
+          platforms: linux/amd64
+          tags: pi-orb-control-plane:ci-${{ github.sha }}
+          load: true
+          push: false
+          cache-from: type=gha,scope=control-plane-linux-amd64-v1
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,scope=control-plane-linux-amd64-v1,mode=max' || '' }}
+
+      - name: Prove packaged worker, Git and skills without network
+        env:
+          IMAGE_ID: ${{ steps.control-plane-image.outputs.imageid }}
         run: |
-          df -h .
-          docker system df
+          set -euo pipefail
+          if ! [[ "$IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo 'Build returned no valid control-plane image ID.' >&2
+            exit 1
+          fi
+          test "$(docker image inspect "$IMAGE_ID" --format '{{.Id}}')" = "$IMAGE_ID"
+          container=$(docker create --network none "$IMAGE_ID" node /app/image-proof.mjs)
+          trap 'docker rm -f "$container"' EXIT
+          docker cp scripts/control-plane-image-proof.mjs "$container:/app/image-proof.mjs"
+          docker start --attach "$container" 2>&1 | tee "$RUNNER_TEMP/control-plane-image-proof.log"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$container")" = 0
+
+      - name: Report image and disk provenance
+        if: always()
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          IMAGE_ID: ${{ steps.control-plane-image.outputs.imageid }}
+          CACHE_WRITE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: |
+          set -euo pipefail
+          {
+            printf '### Control-plane image\n\nSource: `%s`\n\nImage: `%s`\n\nCache: `control-plane-linux-amd64-v1`; write: `%s`\n' "$SOURCE_SHA" "$IMAGE_ID" "$CACHE_WRITE"
+            df -h .
+            docker system df
+            if [[ "$IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              docker image inspect "$IMAGE_ID" --format '{{.Id}} {{.Size}}'
+            fi
+          } | tee "$RUNNER_TEMP/control-plane-image-provenance.log" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload image proof
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: control-plane-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/control-plane-image-proof.log
+            ${{ runner.temp }}/control-plane-image-provenance.log
+          if-no-files-found: ignore
+          retention-days: 14
 
   checks:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: qualification
-          POSTGRES_PASSWORD: qualification
-          POSTGRES_DB: qualification
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U qualification -d qualification"
-          --health-interval 5s --health-timeout 5s --health-retries 12
-    env:
-      PI_ORB_TEST_DATABASE_URL: postgres://qualification:qualification@127.0.0.1:5432/qualification
-      PI_ORB_DURABLE_PG_TEST_URL: postgres://qualification:qualification@127.0.0.1:5432/qualification
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -99,14 +136,63 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Test
-        run: npx vitest run --maxWorkers=1 --no-file-parallelism && npm run test:infra
+      - name: Test infrastructure contracts
+        run: npm run test:infra
+
+  unit:
+    name: Unit/DST (${{ matrix.shard }}/4)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: qualification
+          POSTGRES_PASSWORD: qualification
+          POSTGRES_DB: qualification
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U qualification -d qualification"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PI_ORB_TEST_DATABASE_URL: postgres://qualification:qualification@127.0.0.1:5432/qualification
+      PI_ORB_DURABLE_PG_TEST_URL: postgres://qualification:qualification@127.0.0.1:5432/qualification
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Reject tracked deployment credentials, plans and state
+        run: python3 infra/artifact_guard.py
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24.22.0'
+          cache: npm
+
+      - name: Use the signed Ubuntu archive
+        run: sudo python3 infra/runner_apt.py /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt.conf.d/99pi-orb-force-ipv4
+
+      - name: Install native addon prerequisites
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 build-essential
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test unit and deterministic simulation contracts
+        run: npx vitest run --maxWorkers=1 --no-file-parallelism --shard=${{ matrix.shard }}/4
 
       - name: Upload deterministic failure traces
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
         with:
-          name: ci-dst-failure-traces-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ci-dst-failure-traces-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-failures/*.json
           if-no-files-found: ignore
           retention-days: 14

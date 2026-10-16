@@ -142,3 +142,28 @@ test("legacy broad network and IAP grants are explicitly adopted for removal", (
   assert.match(roles, /roles\/iap\.admin/);
   assert.match(roles, /roles\/servicenetworking\.networksAdmin/);
 });
+
+test("rollout reads latest and r-prefixed JSON, preserving activation-only authority", () => {
+  const activation = iam.match(
+    /resource "google_storage_bucket_iam_member" "control_plane_release_activation" \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert(activation);
+  assert.match(activation, /resource\.name == '[^']*\/static-plane\/releases\/active\.json'/);
+  assert.doesNotMatch(activation, /startsWith|matches|\|\|/);
+  const rollout = iam.match(
+    /resource "google_storage_bucket_iam_member" "control_plane_release_rollout" \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert(rollout, "pending approved scoped rollout read policy");
+  assert.match(rollout, /bucket = var\.state_bucket/);
+  assert.match(rollout, /role\s+= "roles\/storage\.objectViewer"/);
+  assert.match(
+    rollout,
+    /member\s+= "serviceAccount:\$\{google_service_account\.control_plane\.email\}"/,
+  );
+  const releases = "projects/_/buckets/${var.state_bucket}/objects/static-plane/releases";
+  assert.equal(
+    rollout.match(/expression\s*=\s*"([^"\n]*)"/)?.[1],
+    `resource.name == '${releases}/latest.json' || (resource.name.startsWith('${releases}/r-') && resource.name.endsWith('.json'))`,
+  );
+  assert.doesNotMatch(rollout, /matches|objectAdmin|objectCreator|tfstate|\.tflock|secrets/);
+});

@@ -6,15 +6,84 @@ import math
 import os
 from pathlib import Path
 import re
+import signal
+import subprocess
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from infra.release_state import Cloud, Result, fail, load, now, parse_json, save, valid_id
+from infra.release_state import Cloud, PHASES, Result, fail, load, now, parse_json, save, valid_id, validate_record, utc_epoch
 
 WINDOW_SECONDS = 900
 METRIC_LAG_SECONDS = 180
+
+
+MONITOR_SIGNALS = (signal.SIGHUP, signal.SIGINT, signal.SIGTERM)
+
+
+def stop_command(child):
+    try:
+        try:
+            os.killpg(child.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            child.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        finally:
+            # The leader can exit and close its pipes while descendants still own the group.
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        child.communicate()
+    except OSError:
+        return fail('command', 'cannot stop and join monitor command')
+    return Result()
+
+
+def monitor_command(args, *, data=None, timeout=120):
+    child, cleanup = None, Result()
+    try:
+        # Defer cancellation until ownership is published; children must not inherit a blocked signal mask.
+        pending = []
+        previous = {received: signal.signal(received, lambda signum, _frame: pending.append(signum))
+                    for received in MONITOR_SIGNALS}
+        try:
+            child = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE, start_new_session=True)
+        finally:
+            for received, handler in previous.items():
+                signal.signal(received, handler)
+            if pending:
+                cancel_monitor(pending[0], None)
+        output, stderr = child.communicate(input=data, timeout=timeout)
+        classification = re.search(rb'\b(PERMISSION_DENIED|UNAUTHENTICATED|RESOURCE_EXHAUSTED|NOT_FOUND)\b', stderr)
+        suffix = f' ({classification.group().decode()})' if classification else ''
+        result = fail('command', f'{args[0]} command exited {child.returncode}{suffix}') if child.returncode else Result(output)
+    except subprocess.TimeoutExpired:
+        result = fail('timeout', f'{args[0]} command timed out')
+    except OSError:
+        result = fail('command', f'cannot execute {args[0]}')
+    finally:
+        if child is not None:
+            previous = signal.pthread_sigmask(signal.SIG_BLOCK, MONITOR_SIGNALS)
+            try:
+                cleanup = stop_command(child)
+                if cleanup.error:
+                    print('rollout monitor: command cleanup failed', file=sys.stderr)
+            finally:
+                signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+    return cleanup if cleanup.error else result
+
+
+def cancel_monitor(signum, _frame):
+    for received in MONITOR_SIGNALS:
+        signal.signal(received, signal.SIG_IGN)
+    # CLI termination unwinds the command adapter's ownership cleanup.
+    raise SystemExit(128 + signum)
 
 
 def placement(service, image):
@@ -125,7 +194,7 @@ def api(cloud, path):
 
 
 
-def fleet_inventory(cloud, central=True):
+def fleet_inventory(cloud, central=True, fixtures=None):
     projects = api(cloud, '/api/v1/projects')
     if projects.error:
         return projects
@@ -139,6 +208,14 @@ def fleet_inventory(cloud, central=True):
         orbs = api(cloud, '/api/v1/projects/' + project_id + '/orbs')
         if orbs.error:
             return orbs
+        if (isinstance(orbs.value, dict) and isinstance(orbs.value.get('error'), dict) and
+                orbs.value['error'].get('code') == 'not_found' and fixtures is not None):
+            known = fixtures()
+            if known.error:
+                return known
+            if any(item['kind'] == 'project' and item['id'] == project_id and
+                   item['outcome'] in ('requested', 'created', 'deleted') for item in known.value):
+                continue
         if not isinstance(orbs.value, dict) or not isinstance(orbs.value.get('items'), list):
             return fail('invalid', 'orb inventory unavailable')
         for orb in orbs.value['items']:
@@ -162,6 +239,45 @@ def fleet_inventory(cloud, central=True):
                    'ownerUserId': os.environ.get('PI_ORB_USER_ID')})
 
 
+def live_record(path, expected):
+    current = load(path)
+    if current.error:
+        return current
+    if not validate_record(current.value):
+        return fail('invalid', 'invalid live release record')
+    if any(current.value[key] != expected.get(key) for key in
+           ('releaseId', 'commit', 'project', 'region', 'artifacts', 'serving')):
+        return fail('conflict', 'monitored release identity changed')
+    if (current.value['artifacts'] is None or current.value['serving'] is None or
+            current.value['exitCode'] is not None or
+            current.value['phase'] not in ('activate', 'lifecycle', 'identity', 'complete') or
+            any(value == 'failed' for value in current.value['gates'].values())):
+        return fail('conflict', 'monitored release is not active')
+    return current
+
+
+def release_identity(cloud, record, lock_generation=None):
+    pointer = cloud.object('pi-orb-tfstate-' + record['project'], 'static-plane/releases/active.json')
+    if pointer.error:
+        return pointer
+    if (pointer.value is None or not isinstance(pointer.value.get('body'), dict) or
+            pointer.value['body'].get('releaseId') != record['releaseId'] or
+            pointer.value['body'].get('generation') != record['artifacts']['deploy_generation']):
+        return fail('conflict', 'active release changed')
+    lock = cloud.object('pi-orb-tfstate-' + record['project'], 'static-plane/release.lock')
+    if lock.error:
+        return lock
+    if lock_generation is not None:
+        if (lock.value is None or lock.value.get('generation') != lock_generation or
+                not isinstance(lock.value.get('body'), dict) or
+                lock.value['body'].get('releaseId') != record['releaseId'] or
+                lock.value['body'].get('commit') != record['commit']):
+            return fail('conflict', 'release lock ownership changed')
+    elif lock.value is not None:
+        return fail('conflict', 'release lock present after completion')
+    return Result()
+
+
 def sample(cloud, record, start):
     service = cloud.json(['run', 'services', 'describe', 'pi-orb-issuer',
                           '--project', record['project'], '--region', record['region']])
@@ -170,23 +286,18 @@ def sample(cloud, record, start):
     selected = placement(service.value, record['artifacts']['control_plane_image'])
     if selected.error:
         return selected
+    if not any(item['service'] == 'pi-orb-issuer' and item['revision'] == selected.value['revision']
+               for item in record['serving']):
+        return fail('conflict', 'serving revision changed')
     if selected.value['generation'] != str(record['artifacts']['deploy_generation']):
         return fail('conflict', 'serving generation changed')
     traffic = service.value.get('status', {}).get('traffic', [])
     if sum(item.get('percent', 0) for item in traffic
            if item.get('revisionName') == selected.value['revision']) != 100:
         return fail('conflict', 'serving traffic changed')
-    pointer = cloud.object('pi-orb-tfstate-' + record['project'], 'static-plane/releases/active.json')
-    if pointer.error:
-        return pointer
-    if (pointer.value is None or pointer.value['body'].get('releaseId') != record['releaseId'] or
-            pointer.value['body'].get('generation') != record['artifacts']['deploy_generation']):
-        return fail('conflict', 'active release changed')
-    lock = cloud.object('pi-orb-tfstate-' + record['project'], 'static-plane/release.lock')
-    if lock.error:
-        return lock
-    if lock.value is not None:
-        return fail('conflict', 'release lock present after completion')
+    identity = release_identity(cloud, record, record.get('_monitorLockGeneration'))
+    if identity.error:
+        return identity
     containers = service.value['spec']['template']['spec']['containers']
     origin = next((entry.get('value') for entry in containers[0]['env']
                    if entry.get('name') == 'PI_ORB_APP_ORIGIN'), None)
@@ -205,7 +316,10 @@ def sample(cloud, record, start):
         return sql
     if not isinstance(sql.value, dict) or sql.value.get('state') != 'RUNNABLE':
         return fail('conflict', 'database not runnable')
-    fleet = fleet_inventory(cloud)
+    def fixtures():
+        current = live_record(record['_monitorRecordPath'], record)
+        return current if current.error else Result(current.value['fixtures'])
+    fleet = fleet_inventory(cloud, fixtures=fixtures if record.get('_monitorRecordPath') else None)
     if fleet.error:
         return fleet
     baseline = record.get('_monitorBaseline', {})
@@ -245,9 +359,16 @@ def sample(cloud, record, start):
                    'lifecycle': lifecycle_counts(logs.value), 'metrics': metrics})
 
 
-def observe(record, output, cloud=None, clock=time.monotonic, sleep=time.sleep):
-    cloud = cloud or Cloud()
-    began = clock()
+def regressed(observed):
+    return (any(observed.get('logs', {}).get(code, 0) > 0 for code in ('errors', 'http5xx', 'http429')) or
+            any(observed.get('lifecycle', {}).get(code, 0) > 0 for code in (
+                'history_integrity', 'drain-integrity', 'drain-restart-cap',
+                'central-agent-unavailable', 'central-delivery-blocked',
+                'agent.startup_cleanup_failed', 'agent.owner_lost')))
+
+
+def observe(record, output, cloud=None, clock=time.monotonic, sleep=time.sleep, record_path=None):
+    cloud = cloud or Cloud(run=monitor_command)
     evidence = {'releaseId': record.get('releaseId'), 'commit': record.get('commit'),
                 'generation': record.get('artifacts', {}).get('deploy_generation'),
                 'startedAt': now(), 'durationSeconds': 0, 'samples': [], 'outcome': 'observing',
@@ -255,19 +376,20 @@ def observe(record, output, cloud=None, clock=time.monotonic, sleep=time.sleep):
     saved = save(output, evidence)
     if saved.error:
         return saved
+    began = clock()
     failed, regression = False, False
     while True:
-        captured = sample(cloud, record, evidence['startedAt'])
+        current = live_record(record_path, record) if record_path is not None else Result(record)
+        if current.error:
+            captured = current
+        else:
+            current.value.update({key: value for key, value in record.items() if key.startswith('_monitor')})
+            if record_path is not None:
+                current.value['_monitorRecordPath'] = record_path
+            captured = sample(cloud, current.value, evidence['startedAt'])
         failed = failed or captured.error is not None
         if captured.error is None:
-            observed = captured.value
-            regression = regression or observed.get('logs', {}).get('http5xx', 0) > 0 or (
-                observed.get('logs', {}).get('errors', 0) > 0) or (
-                observed.get('logs', {}).get('http429', 0) > 0) or any(
-                observed.get('lifecycle', {}).get(code, 0) > 0 for code in (
-                    'history_integrity', 'drain-integrity', 'drain-restart-cap',
-                    'central-agent-unavailable', 'central-delivery-blocked',
-                    'agent.startup_cleanup_failed', 'agent.owner_lost'))
+            regression = regression or regressed(captured.value)
         evidence['samples'].append({'at': now(), 'outcome': 'unavailable', 'category': captured.error.kind,
                                     'message': captured.error.message}
                                    if captured.error else {'at': now(), 'outcome': 'observed', **captured.value})
@@ -285,11 +407,53 @@ def observe(record, output, cloud=None, clock=time.monotonic, sleep=time.sleep):
         sleep(60)
 
 
+def verify(record, evidence, cloud=None):
+    if (not validate_record(record) or record['outcome'] != 'validated' or
+            record['phase'] != 'complete' or record['exitCode'] != 0 or
+            not record['finishedAt'] or not record['gates'] or
+            record['artifacts'] is None or record['serving'] is None or not record['applyAttempted'] or
+            any(value != 'passed' for value in record['gates'].values()) or
+            any(item['outcome'] != 'deleted' for item in record['fixtures'])):
+        return fail('invalid', 'validated release and deleted fixtures required')
+    required_gates = set(PHASES) - {'maintenance'}
+    if record['validatesRelease'] is not None:
+        required_gates -= {'checks', 'build', 'plan', 'schema', 'apply'}
+    if not required_gates <= record['gates'].keys():
+        return fail('invalid', 'required release gates have not passed')
+    if (not isinstance(evidence, dict) or evidence.get('outcome') != 'observed' or
+            utc_epoch(evidence.get('startedAt')) is None or
+            type(evidence.get('durationSeconds')) is not int or
+            evidence['durationSeconds'] < WINDOW_SECONDS + METRIC_LAG_SECONDS or
+            evidence.get('metricLagSeconds') != METRIC_LAG_SECONDS or
+            evidence.get('releaseId') != record['releaseId'] or
+            evidence.get('commit') != record['commit'] or
+            evidence.get('generation') != record['artifacts']['deploy_generation']):
+        return fail('invalid', 'complete matching rollout observation required')
+    start, end = utc_epoch(evidence['startedAt']), utc_epoch(evidence.get('finishedAt'))
+    rows = evidence.get('samples')
+    if (end is None or end - start < WINDOW_SECONDS + METRIC_LAG_SECONDS or
+            not isinstance(rows, list) or len(rows) < 2 or
+            any(not isinstance(row, dict) or row.get('outcome') != 'observed' or
+                utc_epoch(row.get('at')) is None for row in rows)):
+        return fail('invalid', 'complete timestamped rollout samples required')
+    stamps = [utc_epoch(row['at']) for row in rows]
+    if stamps != sorted(stamps) or stamps[0] < start or stamps[-1] > end or stamps[-1] - stamps[0] < WINDOW_SECONDS:
+        return fail('invalid', 'rollout samples do not cover observation window')
+    captured = sample(cloud or Cloud(run=monitor_command), record, evidence['startedAt'])
+    if not captured.error and regressed(captured.value):
+        return fail('conflict', 'final rollout observation requires review')
+    return captured
+
+
 def main():
     if len(sys.argv) == 3 and sys.argv[1] == '--preflight':
-        cloud = Cloud()
+        cloud = Cloud(run=monitor_command)
+        project, region = os.environ.get('PROJECT'), os.environ.get('REGION')
+        if not valid_id(project) or not valid_id(region):
+            print('rollout monitor preflight: PROJECT and REGION required', file=sys.stderr)
+            return 2
         service = cloud.json(['run', 'services', 'describe', 'pi-orb-issuer', '--project',
-                              os.environ['PROJECT'], '--region', os.environ['REGION']])
+                              project, '--region', region])
         if service.error:
             return 1
         containers = service.value.get('spec', {}).get('template', {}).get('spec', {}).get('containers', [])
@@ -305,24 +469,38 @@ def main():
         saved = save(Path(sys.argv[2]), fleet.value)
         print('rollout monitor preflight: owner metadata inventory verified')
         return 1 if saved.error else 0
-    if len(sys.argv) != 4:
+    if len(sys.argv) == 4 and sys.argv[1] == '--verify':
+        record, evidence = load(Path(sys.argv[2])), load(Path(sys.argv[3]))
+        result = record if record.error else evidence if evidence.error else verify(record.value, evidence.value)
+        print(f'rollout monitor: final verification failed: {result.error.kind}: {result.error.message}' if result.error else
+              'rollout monitor: validated release, observation and absent lock verified')
+        return 1 if result.error else 0
+    if len(sys.argv) != 6 or sys.argv[1] != '--active' or not re.fullmatch(r'[1-9][0-9]*', sys.argv[5]):
         return 2
-    record = load(Path(sys.argv[1]))
-    if record.error or not isinstance(record.value, dict) or record.value.get('outcome') != 'validated':
-        print('rollout monitor: validated release record required', file=sys.stderr)
+    path = Path(sys.argv[2])
+    record = load(path)
+    if record.error or not validate_record(record.value):
+        print('rollout monitor: valid active release record required', file=sys.stderr)
         return 1
-    baseline = load(Path(sys.argv[3]))
+    baseline = load(Path(sys.argv[4]))
     if baseline.error:
         return 1
     record.value['_monitorBaseline'] = baseline.value
-    result = observe(record.value, Path(sys.argv[2]))
-    summary = 'rollout monitor: requires review' if result.error else 'rollout monitor: 15-minute observation retained'
+    record.value['_monitorLockGeneration'] = sys.argv[5]
+    result = observe(record.value, Path(sys.argv[3]), record_path=path)
+    summary = 'rollout monitor: requires review' if result.error else 'rollout monitor: 15-minute observation plus metric lag retained'
     print(summary)
     if os.environ.get('GITHUB_STEP_SUMMARY'):
-        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
-            stream.write('\n' + summary + '; central inference unobserved. See rollout-monitor artifact.\n')
+        try:
+            with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+                stream.write('\n' + summary + '; central inference unobserved. See rollout-monitor artifact.\n')
+        except OSError:
+            print('rollout monitor: cannot write job summary', file=sys.stderr)
+            return 1
     return 1 if result.error else 0
 
 
 if __name__ == '__main__':
+    for received in MONITOR_SIGNALS:
+        signal.signal(received, cancel_monitor)
     sys.exit(main())

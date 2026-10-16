@@ -10,10 +10,15 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def steps(workflow):
+def jobs(workflow):
     body = (ROOT / '.github/workflows' / workflow).read_text()
+    return dict(re.findall(r'^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)',
+                           body.split('\njobs:\n', 1)[1], re.M | re.S))
+
+
+def steps(workflow, job):
     return {name: text for name, text in re.findall(
-        r'      - name: ([^\n]+)\n(.*?)(?=      - name: |\Z)', body, re.S
+        r'      - name: ([^\n]+)\n(.*?)(?=      - name: |\Z)', jobs(workflow)[job], re.S
     )}
 
 
@@ -30,16 +35,17 @@ class BrowserEvidenceTest(unittest.TestCase):
         qualification = (ROOT / '.github/workflows/durable-qualification.yml').read_text()
         for value in ('pull_request:', 'contents: read', 'shard: [1, 2, 3, 4]',
                       'PI_ORB_E2E_BACKEND: process', 'PI_ORB_AGENT_BACKEND: central-durable',
-                      'npm run test:e2e -- --shard=',
-                      'docker build -f apps/control-plane/Dockerfile',
-                      '--network none', 'control-plane-image-proof.mjs',
-                      'retention-days: 14', 'df -h', '15728640'):
+                      'npm run test:e2e -- --project lifecycle --shard=', 'retention-days: 14'):
             self.assertIn(value, qualification)
+        for value in ('file: apps/control-plane/Dockerfile', '--network none',
+                      'control-plane-image-proof.mjs', 'df -h',
+                      'available >= 15 * 1024 * 1024 * 1024'):
+            self.assertIn(value, ci)
         for value in ('id-token: write', 'google-github-actions', 'infra/release.sh'):
             self.assertNotIn(value, qualification)
 
     def test_durable_failure_evidence_is_explicit_and_captures_stderr(self):
-        process = steps('durable-qualification.yml')['Upload failure evidence']
+        process = steps('durable-qualification.yml', 'process')['Upload failure evidence']
         for pattern in (
             'test-failures/durable-process-*/failure.txt',
             'test-failures/durable-process-*/control-plane.log',
@@ -52,13 +58,13 @@ class BrowserEvidenceTest(unittest.TestCase):
             'test-failures/durable-independent-process/*/waiting-phases.json',
         ):
             self.assertIn(pattern, process)
-        for upload in (process, steps('e2e.yml')['Upload Durable failure diagnostics']):
+        for upload in (process, steps('e2e.yml', 'e2e')['Upload Durable failure diagnostics']):
             for filename in ('control-plane.log', 'relay-requests.json', 'model-requests.json',
                              'retained-docker.json', 'execution-ready.json'):
                 self.assertIn('test-failures/cross-axis-*/' + filename, upload)
             self.assertNotIn('/**', upload)
             self.assertNotRegex(upload, r'(?m)^            .*/\\*\\s*$')
-        proof = steps('durable-qualification.yml')['Prove packaged worker, Git and skills without network']
+        proof = steps('ci.yml', 'control-plane-image')['Prove packaged worker, Git and skills without network']
         self.assertIn('2>&1 | tee', proof)
 
     def test_ci_exercises_provider_supervisor_contracts(self):
@@ -67,14 +73,14 @@ class BrowserEvidenceTest(unittest.TestCase):
         self.assertNotIn('scripts/local-fake-provider.smoke.test.mjs', scripts['test:infra'])
 
     def test_acceptance_jobs_own_their_pinned_fake_provider(self):
-        for workflow, step_name in (
-            ('e2e.yml', 'Run end-to-end test'),
-            ('durable-qualification.yml', 'Run central process end-to-end tests'),
+        for workflow, job, step_name in (
+            ('e2e.yml', 'e2e', 'Run end-to-end test'),
+            ('durable-qualification.yml', 'process', 'Run central process end-to-end tests'),
         ):
             with self.subTest(workflow=workflow):
-                inventory = steps(workflow)
+                inventory = steps(workflow, job)
                 run = inventory[step_name]
-                self.assertIn('node scripts/local-fake-provider.mjs -- npm run test:e2e -- --shard=', run)
+                self.assertIn('node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project lifecycle --shard=', run)
                 self.assertIn('PI_ORB_LOCAL_FAKE_EVIDENCE:', run)
                 upload = inventory['Upload local provider provenance']
                 self.assertIn('if: always()', upload)
@@ -96,15 +102,53 @@ class BrowserEvidenceTest(unittest.TestCase):
         self.assertIn('    runs-on: ubuntu-24.04', body)
         self.assertIn('    timeout-minutes: 40', body)
         self.assertIn('        shard: [1, 2, 3, 4]', body)
-        workflow_steps = steps('e2e.yml')
+        workflow_steps = steps('e2e.yml', 'e2e')
         self.assertIn("node-version: '24.22.0'", workflow_steps['Set up Node.js'])
         self.assertIn('run: npm ci', workflow_steps['Install dependencies'])
         self.assertIn('run: npm run test:e2e:install', workflow_steps['Install pinned browser engines and system dependencies'])
         full = workflow_steps['Run end-to-end test']
         self.assertIn("if: github.event_name != 'workflow_dispatch' || !inputs.subagent_continuation_diagnostic", full)
         self.assertIn('DEBUG: pw:browser', full)
-        self.assertIn('run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --shard=${{ matrix.shard }}/4', full)
-        self.assertEqual(len(re.findall(r'^        run: (?:node scripts/local-fake-provider.mjs -- )?npm run test:e2e --', body, re.M)), 2)
+        self.assertIn('run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project lifecycle --shard=${{ matrix.shard }}/4', full)
+        self.assertEqual(len(re.findall(r'^        run: (?:node scripts/local-fake-provider.mjs -- )?npm run test:e2e --', jobs('e2e.yml')['e2e'], re.M)), 2)
+
+    def test_shared_frontend_gate_runs_once_without_lifecycle_dependencies(self):
+        frontend = jobs('e2e.yml')['frontend']
+        for value in ('name: Frontend (${{ matrix.shard }}/4)', 'fail-fast: false',
+                      'shard: [1, 2, 3, 4]', 'runs-on: ubuntu-24.04'):
+            self.assertIn(value, frontend)
+        self.assertNotRegex(frontend, r'(?m)^    (?:needs|continue-on-error):')
+        self.assertNotRegex(frontend, r'(?m)^\s+(?:path: )?test-failures/(?:\*\*|\*|)$')
+        for value in ('PI_ORB_E2E_BACKEND:', 'PI_ORB_AGENT_BACKEND:', 'Dockerfile',
+                      'local-fake-provider.mjs', 'id-token:'):
+            self.assertNotIn(value, frontend)
+        run = steps('e2e.yml', 'frontend')['Run shared frontend tests']
+        self.assertIn('DEBUG: pw:browser', run)
+        self.assertIn('run: npm run test:e2e -- --project frontend --shard=${{ matrix.shard }}/4', run)
+        guard = re.search(r'^    if: (.+)$', frontend, re.M).group(1)
+        self.assertEqual(guard, "github.event_name != 'workflow_dispatch' || !inputs.subagent_continuation_diagnostic")
+        for event in ('push', 'pull_request', 'workflow_dispatch'):
+            for enabled in (True, False):
+                expression = guard.replace('github.event_name', repr(event)).replace(
+                    'inputs.subagent_continuation_diagnostic', str(enabled)).replace('||', 'or')
+                expression = re.sub(r'!(?!=)', 'not ', expression)
+                self.assertEqual(eval(expression, {'__builtins__': {}}),
+                                 not (event == 'workflow_dispatch' and enabled))
+
+    def test_frontend_failure_upload_is_an_explicit_safe_projection(self):
+        step = steps('e2e.yml', 'frontend')['Upload frontend failure evidence']
+        self.assertIn('if: failure()', step)
+        paths = re.search(r'^          path: \|\n((?:            [^\n]+\n)+)', step, re.M)
+        self.assertIsNotNone(paths)
+        self.assertEqual(set(paths.group(1).split()), {
+            'test-failures/image-collapse-*.json',
+            'test-failures/read-fallback-*.json',
+            'test-failures/stopped-cache-*/evidence.json',
+            'test-failures/stopped-cache-*/failure.png',
+            'test-failures/stopped-cache-*/trace.zip',
+        })
+        self.assertIn('if-no-files-found: ignore', step)
+        self.assertIn('retention-days: 14', step)
 
     def test_diagnostic_check_names_cannot_replace_required_checks(self):
         body = (ROOT / '.github/workflows/e2e.yml').read_text()
@@ -124,8 +168,8 @@ class BrowserEvidenceTest(unittest.TestCase):
                         expected += ' diagnostic'
                     self.assertEqual(rendered, expected)
 
-    def test_manual_diagnostic_runs_original_shard_two_once_on_every_runner(self):
-        workflow_steps = steps('e2e.yml')
+    def test_manual_diagnostic_runs_subagent_file_once_on_every_runner(self):
+        workflow_steps = steps('e2e.yml', 'e2e')
         diagnostic = workflow_steps['Diagnose subagent continuation']
         normal = workflow_steps['Run end-to-end test']
         guards = [re.search(r'^        if: (.+)$', step, re.M).group(1)
@@ -145,7 +189,7 @@ class BrowserEvidenceTest(unittest.TestCase):
                     self.assertEqual(selected, [not manual, manual])
         self.assertIn('DEBUG: pw:browser', diagnostic)
         commands = re.findall(r'^        run: (.+)$', diagnostic, re.M)
-        self.assertEqual(commands, ['npm run test:e2e -- --shard=2/4'])
+        self.assertEqual(commands, ['npm run test:e2e -- --project lifecycle e2e/subagents.e2e.test.ts'])
         script = commands[0]
         with tempfile.TemporaryDirectory() as directory:
             stub = Path(directory) / 'npm'
@@ -159,10 +203,10 @@ class BrowserEvidenceTest(unittest.TestCase):
                                              'CALLS': str(calls), 'STATUS': str(status)})
                 self.assertEqual(result.returncode, status, result.stderr)
                 self.assertEqual(calls.read_text().splitlines(),
-                                 ['run test:e2e -- --shard=2/4'])
+                                 ['run test:e2e -- --project lifecycle e2e/subagents.e2e.test.ts'])
 
     def test_native_transport_success_upload_is_always_and_exactly_safe_projection(self):
-        step = steps('e2e.yml')['Upload subagent native transport success audits']
+        step = steps('e2e.yml', 'e2e')['Upload subagent native transport success audits']
         self.assertIn('if: always()', step)
         self.assertIn('uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a', step)
         self.assertEqual(re.search(r'^          path: (.+)$', step, re.M).group(1),
@@ -174,7 +218,7 @@ class BrowserEvidenceTest(unittest.TestCase):
             self.assertNotIn(forbidden, step)
 
     def test_deploy_uploads_only_sanitized_mcp_failure_summaries(self):
-        step = steps('deploy.yml')['Upload MCP failure summaries']
+        step = steps('deploy.yml', 'release')['Upload MCP failure summaries']
         self.assertIn('if: failure()', step)
         self.assertIn('uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a', step)
         self.assertEqual(re.search(r'^          path: (.+)$', step, re.M).group(1),
@@ -199,9 +243,9 @@ class BrowserEvidenceTest(unittest.TestCase):
         self.assertIn('await page.reload()', source)
         self.assertIn('reloadBoot.wait(', source)
         self.assertIn('await rm(evidence, { recursive: true', source)
-        for workflow in ('e2e.yml', 'deploy.yml'):
+        for workflow, job in (('e2e.yml', 'frontend'), ('deploy.yml', 'release')):
             with self.subTest(workflow=workflow):
-                step = steps(workflow)['Upload missing-orb navigation failure evidence']
+                step = steps(workflow, job)['Upload missing-orb navigation failure evidence']
                 self.assertIn('if: failure()', step)
                 path = re.search(r'^          path: \|\n((?:            [^\n]+\n)+)', step, re.M)
                 self.assertIsNotNone(path)
@@ -210,33 +254,35 @@ class BrowserEvidenceTest(unittest.TestCase):
                     for name in ('failure.json', 'desktop.png', 'geometry.json')
                 })
                 self.assertIn('if-no-files-found: ignore', step)
-        self.assertIn('DEBUG: pw:browser', steps('e2e.yml')['Run end-to-end test'])
+        self.assertIn('DEBUG: pw:browser', steps('e2e.yml', 'frontend')['Run shared frontend tests'])
 
     def test_e2e_failure_captures_native_fault_and_resource_diagnostics_without_arguments(self):
-        step = steps('e2e.yml')['Capture browser failure host diagnostics']
-        self.assertIn('if: failure()', step)
-        for command in ('df -h', 'free -m', 'ps -eo pid,ppid,comm,rss',
-                        'sudo dmesg --ctime', 'dpkg-query -W'):
-            self.assertIn(command, step)
-        self.assertIn('segfault|out of memory|oom-kill|killed process', step)
-        self.assertNotIn('args', step)
-        self.assertNotIn('ulimit', step)
+        for job in ('e2e', 'frontend'):
+            with self.subTest(job=job):
+                step = steps('e2e.yml', job)['Capture browser failure host diagnostics']
+                self.assertIn('if: failure()', step)
+                for command in ('df -h', 'free -m', 'ps -eo pid,ppid,comm,rss',
+                                'sudo dmesg --ctime', 'dpkg-query -W'):
+                    self.assertIn(command, step)
+                self.assertIn('segfault|out of memory|oom-kill|killed process', step)
+                self.assertNotIn('args', step)
+                self.assertNotIn('ulimit', step)
 
     def test_workflows_upload_only_owned_browser_evidence(self):
         expected = {f'test-failures/lazy-return-*/{name}' for name in ('failure.json', 'failure.png', 'trace.zip')}
-        for workflow in ('e2e.yml', 'deploy.yml'):
+        for workflow, job in (('e2e.yml', 'frontend'), ('deploy.yml', 'release')):
             with self.subTest(workflow=workflow):
-                step = steps(workflow)['Upload lazy-return browser failure evidence']
+                step = steps(workflow, job)['Upload lazy-return browser failure evidence']
                 self.assertIn('if: failure()', step)
                 path = re.search(r'^          path: \|\n((?:            [^\n]+\n)+)', step, re.M)
                 self.assertIsNotNone(path)
                 self.assertEqual(set(path.group(1).split()), expected)
                 self.assertIn('if-no-files-found: ignore', step)
         self.assertEqual(
-            re.search(r'^          path: (.+)$', steps('deploy.yml')['Upload only the validated release record'], re.M).group(1),
+            re.search(r'^          path: (.+)$', steps('deploy.yml', 'release')['Upload only the validated release record'], re.M).group(1),
             '${{ runner.temp }}/release-artifact/release.json',
         )
-        step = steps('e2e.yml')['Upload deterministic failure traces']
+        step = steps('e2e.yml', 'e2e')['Upload deterministic failure traces']
         self.assertIn('if: failure()', step)
         path = re.search(r'^          path: \\|\n((?:            [^\n]+\n)+)', step, re.M)
         self.assertIsNotNone(path)
