@@ -8,7 +8,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Qualify PR 122 fresh-runner cache hit** (2026-10-15; `docs/postmortems/2026-10-15-runtime-dependency-qualification.md`). Inspect the next normal E2E run for trusted layer reuse; main export is verified.
+- **Qualify control-plane SDK packaging** (2026-10-15; `docs/postmortems/2026-10-15-runtime-dependency-qualification.md`). Complete fresh exact-head normal gates; require user review before merge and normal deployment.
 
 - **Diagnose identity-smoke cleanup before release validation** (2026-10-14; `docs/postmortems/2026-10-14-identity-smoke-cleanup.md`). Preserve Deploy 38596107385's failed identity gate; owned fixtures are now verified absent, but its original auth/transport/rejection cause is unknown. Correct premature success and silent DELETE failure diagnostics with token-safe phase/exit/HTTP/code evidence and tests-first coverage. Deferred candidate `43f059be` rejects successful array responses and is not approved for merge. Any later validation requires an explicit decision; no rerun or historical waiver is implied.
 
