@@ -199,8 +199,7 @@ api() { # api <path> [json-body] [method]
 # Local verifier: exactly the checks docs/workload-identity.md requires of a
 # relying party, run against the *deployed* issuer rather than a fixture. The
 # JWT arrives on stdin and never appears in argv, output, or a file.
-cat "$DIR/smoke-fetch.cjs" > "$WORK_DIR/verify.js"
-cat >> "$WORK_DIR/verify.js" <<'VERIFY_JS'
+cat > "$WORK_DIR/verify.js" <<'VERIFY_JS'
 const { createPublicKey, createVerify } = require("node:crypto");
 
 // Run as a file (`node verify.js …`), so the arguments start after argv[1].
@@ -221,10 +220,9 @@ const read = () =>
   });
 
 const getJson = async (url) => {
-  const result = await smokeFetch(url, {}, Number(process.env.PI_ORB_SMOKE_DEADLINE) * 1000);
-  if (result.error) fail(`issuer read failed: ${result.error.kind}`);
-  if (result.value.status !== 200) fail(`issuer read answered ${result.value.status}`);
-  return result.value.body;
+  const response = await fetch(url);
+  if (!response.ok) fail(`GET ${url} answered ${response.status}`);
+  return await response.json();
 };
 
 (async () => {
@@ -293,30 +291,24 @@ VERIFY_JS
 
 # Remote probe, run *inside another live orb* against the control-plane URL
 # that orb is configured with. The bearer under test arrives on stdin; the mint
-# URL and overall deadline are its arguments. Prints "<status> <code>".
+# URL is its only argument. Prints "<status> <code>".
 #
 # The mint route's error is a bare string (`{"error":"not_mintable"}`, see
 # packages/protocol/src/workload-identity.ts), not the `{"error":{"code":...}}`
 # shape of the browser API, so the code is read from `error` directly.
-cat "$DIR/smoke-fetch.cjs" > "$WORK_DIR/probe.js"
-cat >> "$WORK_DIR/probe.js" <<'PROBE_JS'
+cat > "$WORK_DIR/probe.js" <<'PROBE_JS'
 let bearer = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => (bearer += chunk));
 process.stdin.on("end", async () => {
-  const result = await smokeFetch(process.argv[1], {
+  const response = await fetch(process.argv[1], {
     method: "POST",
     headers: { authorization: `Bearer ${bearer.trim()}`, "content-type": "application/json" },
     body: JSON.stringify({ audience: "urn:pi-orb-smoke:revocation-probe" }),
-  }, Number(process.argv[2]) * 1000);
-  if (result.error) {
-    process.stderr.write(`token probe failed: ${result.error.kind}\n`);
-    process.exitCode = 1;
-    return;
-  }
-  const body = result.value.body;
-  const code = typeof body?.error === "string" ? body.error : "";
-  process.stdout.write(`${result.value.status} ${code}\n`);
+  });
+  const body = await response.json().catch(() => ({}));
+  const code = typeof body.error === "string" ? body.error : "";
+  process.stdout.write(`${response.status} ${code}\n`);
 });
 PROBE_JS
 
@@ -335,7 +327,7 @@ create_project() {
     return 0
   fi
   fixture_record project "$pid" requested
-  response=$(PI_ORB_SMOKE_REPLAY_SAFE=1 api /api/v1/projects \
+  response=$(api /api/v1/projects \
     "$(printf '{"id":"%s","name":"%s","repositoryUrl":"%s"}' \
       "$pid" "$name" "https://github.com/octocat/Hello-World")") ||
     fail "create-project" "api.sh failed"
@@ -348,7 +340,7 @@ create_project() {
 create_orb() {
   local pid=$1 oid=$2 response got
   fixture_record orb "$oid" requested
-  response=$(PI_ORB_SMOKE_REPLAY_SAFE=1 api "/api/v1/projects/$pid/orbs" "$(printf '{"id":"%s"}' "$oid")") ||
+  response=$(api "/api/v1/projects/$pid/orbs" "$(printf '{"id":"%s"}' "$oid")") ||
     fail "create-orb" "api.sh failed"
   got=$(printf '%s' "$response" | jget id) ||
     fail "create-orb" "unparseable response: $response"
@@ -386,14 +378,9 @@ wait_for_state() {
 }
 
 command_orb() { # command_orb <orb> <start|stop>
-  local oid=$1 verb=$2 response err status
-  if response=$(api "/api/v1/orbs/$oid/$verb" '{}'); then :; else
-    status=$?
-    [ "$status" -eq 75 ] || fail "$verb-orb" "api.sh failed"
-    response=$(api "/api/v1/orbs/$oid") || fail "$verb-orb" "cannot observe ambiguous command"
-    jq -e --arg verb "$verb" 'if $verb == "start" then (.state == "starting" or .state == "running") else (.state == "stopping" or .state == "stopped") end' <<<"$response" >/dev/null || fail "$verb-orb" "acceptance unconfirmed; not replaying"
-    say "$verb: accepted state observed after ambiguous response; command not replayed"
-  fi
+  local oid=$1 verb=$2 response err
+  response=$(api "/api/v1/orbs/$oid/$verb" '{}') ||
+    fail "$verb-orb" "api.sh failed"
   err=$(printf '%s' "$response" | jget error.code) ||
     fail "$verb-orb" "unparseable response: $response"
   [ -z "$err" ] || fail "$verb-orb" "control plane refused $verb: $response"
@@ -439,11 +426,9 @@ process.stdin.on("end", () => {
 ' "$2"
 }
 
-orb_ssh() { # orb_ssh <instance> <remote command> [wall-deadline]; stdin is forwarded
-  local -a prefix=()
-  if [ -n "${3:-}" ]; then prefix=(python3 "$DIR/smoke_preview.py" --ssh "$3"); fi
+orb_ssh() { # orb_ssh <instance> <remote command>; stdin is forwarded
   # shellcheck disable=SC2086  # PI_ORB_SMOKE_SSH_FLAGS is a deliberate word list
-  "${prefix[@]}" gcloud compute ssh "$1" --project "$PI_ORB_GCP_PROJECT" \
+  gcloud compute ssh "$1" --project "$PI_ORB_GCP_PROJECT" \
     --zone "$PI_ORB_GCE_ZONE" --tunnel-through-iap --quiet \
     ${PI_ORB_SMOKE_SSH_FLAGS:-} -- "$2"
 }
@@ -535,28 +520,17 @@ wait_for_ssh "$MINT_INSTANCE"
 preview=$(api "/api/v1/orbs/$STOPPED_ORB" | jget previewHost) || fail "peer-preview" "cannot read preview host"
 [[ "$preview" =~ ^[a-zA-Z0-9.-]+$ ]] && [ "${#preview}" -le 253 ] || fail "peer-preview" "invalid or absent preview host"
 preview_deadline=$(( $(date +%s) + 60 ))
-[ "$preview_deadline" -le "$DEADLINE" ] || preview_deadline=$DEADLINE
-preview_attempt=0
 while :; do
   check_deadline "peer-preview"
-  remaining=$((preview_deadline - $(date +%s)))
-  [ "$remaining" -gt 0 ] || fail "peer-preview" "peer never returned HTTP 200 ready"
-  preview_attempt=$((preview_attempt + 1))
-  preview_response=$(orb_ssh "$MINT_INSTANCE" "sudo python3 - /usr/bin/tailscale '$preview' '$preview_deadline'" "$preview_deadline" < "$DIR/smoke_preview.py" 2> "$WORK_DIR/preview.err") || preview_response=""
-  [ "$(date +%s)" -lt "$preview_deadline" ] || fail "peer-preview" "peer never returned HTTP 200 ready"
+  preview_response=$(orb_ssh "$MINT_INSTANCE" "sudo python3 - /usr/bin/tailscale '$preview'" < "$DIR/smoke_preview.py" 2> "$WORK_DIR/preview.err") || preview_response=""
   preview_code=$(printf '%s\n' "$preview_response" | tail -n1)
   preview_body=$(printf '%s\n' "$preview_response" | sed '$d')
   if [ "$preview_code" = 200 ] && jq -e '.status == "ready"' <<<"$preview_body" >/dev/null 2>&1; then
     say "peer preview health: HTTP 200 ready"
     break
   fi
-  case "$preview_code" in
-    ""|000|200|408|429|500|502|503|504) ;;
-    *) fail "peer-preview" "nonretryable HTTP $preview_code" ;;
-  esac
-  say "peer-preview: attempt=$preview_attempt http=${preview_code:-000} outcome=retry"
   [ "$(date +%s)" -lt "$preview_deadline" ] || fail "peer-preview" "peer never returned HTTP 200 ready"
-  smoke_sleep "$preview_deadline"
+  sleep "$POLL_INTERVAL"
 done
 
 mint() {
@@ -601,14 +575,18 @@ url = "https://sts.googleapis.com/v1/token"
 header = "content-type: application/json"
 data = "{\"audience\":\"$WIF_STS_AUDIENCE\",\"grantType\":\"urn:ietf:params:oauth:grant-type:token-exchange\",\"requestedTokenType\":\"urn:ietf:params:oauth:token-type:access_token\",\"scope\":\"https://www.googleapis.com/auth/cloud-platform\",\"subjectTokenType\":\"urn:ietf:params:oauth:token-type:jwt\",\"subjectToken\":\"$token\"}"
 EOF
-    status=$(python3 "$DIR/smoke_http.py" --status-output "$2" safe -- -K "$WORK_DIR/sts.conf") || return 1
+    # `|| true`: a transport failure must reach the caller as the status `000`
+    # curl already prints, not abort the script at this assignment under `set
+    # -e` before any diagnostic runs. Only the wrong-audience check tells 000
+    # apart from a real rejection.
+    status=$(curl -s -K "$WORK_DIR/sts.conf" -o "$2" -w '%{http_code}' || true)
     rm -f "$WORK_DIR/sts.conf"
     printf '%s' "$status"
   }
 
-  status=$(sts_exchange "$WORK_DIR/token" "$WORK_DIR/sts.json") || fail "sts-exchange" "request failed"
+  status=$(sts_exchange "$WORK_DIR/token" "$WORK_DIR/sts.json")
   [ "$status" = "200" ] ||
-    fail "sts-exchange" "STS refused the pi-orb token: HTTP $status"
+    fail "sts-exchange" "STS refused the pi-orb token: HTTP $status $(cat "$WORK_DIR/sts.json")"
   federated=$(jget access_token < "$WORK_DIR/sts.json") ||
     fail "sts-exchange" "unparseable STS response"
   [ -n "$federated" ] || fail "sts-exchange" "STS returned no access token"
@@ -622,10 +600,10 @@ header = "authorization: Bearer $federated"
 header = "content-type: application/json"
 data = "{\"scope\":[\"https://www.googleapis.com/auth/cloud-platform\"],\"lifetime\":\"300s\"}"
 EOF
-  status=$(python3 "$DIR/smoke_http.py" --status-output "$WORK_DIR/sa.json" safe -- -K "$WORK_DIR/impersonate.conf") || fail "impersonate" "request failed"
+  status=$(curl -s -K "$WORK_DIR/impersonate.conf" -o "$WORK_DIR/sa.json" -w '%{http_code}' || true)
   rm -f "$WORK_DIR/impersonate.conf"
   [ "$status" = "200" ] ||
-    fail "impersonate" "generateAccessToken answered HTTP $status"
+    fail "impersonate" "generateAccessToken answered HTTP $status $(cat "$WORK_DIR/sa.json")"
   sa_token=$(jget accessToken < "$WORK_DIR/sa.json") ||
     fail "impersonate" "unparseable generateAccessToken response"
   [ -n "$sa_token" ] || fail "impersonate" "no access token for $WIF_TEST_SA"
@@ -637,10 +615,10 @@ EOF
 url = "https://cloudresourcemanager.googleapis.com/v1/projects/$PI_ORB_GCP_PROJECT"
 header = "authorization: Bearer $sa_token"
 EOF
-  status=$(python3 "$DIR/smoke_http.py" --status-output "$WORK_DIR/read.json" safe -- -K "$WORK_DIR/read.conf") || fail "read-only-api" "request failed"
+  status=$(curl -s -K "$WORK_DIR/read.conf" -o "$WORK_DIR/read.json" -w '%{http_code}' || true)
   rm -f "$WORK_DIR/read.conf"
   [ "$status" = "200" ] ||
-    fail "read-only-api" "the read-only API call answered HTTP $status"
+    fail "read-only-api" "the read-only API call answered HTTP $status $(cat "$WORK_DIR/read.json")"
   got=$(jget projectId < "$WORK_DIR/read.json") ||
     fail "read-only-api" "unparseable API response"
   [ "$got" = "$PI_ORB_GCP_PROJECT" ] ||
@@ -651,14 +629,21 @@ EOF
   # allowed-audience list is the check; nothing downstream ever sees it.
   mint "$WRONG_AUDIENCE" "$WORK_DIR/wrong-token" ||
     fail "wrong-audience" "the CLI refused to mint for a syntactically valid audience"
-  status=$(sts_exchange "$WORK_DIR/wrong-token" "$WORK_DIR/wrong-sts.json") || fail "wrong-audience" "request failed; audience rejection unproven"
-  # Only a completed, nontransient STS rejection proves the negative assertion.
+  status=$(sts_exchange "$WORK_DIR/wrong-token" "$WORK_DIR/wrong-sts.json")
+  # This is the only negative federation assertion, so it must be an explicit
+  # rejection *by STS*. "anything that is not 200" also accepts curl's `000`
+  # transport failure, which would report a DNS blip or a proxy hiccup as proof
+  # that the audience check works — the one thing this step exists to prove.
   case "$status" in
     4??) ;;
     200) fail "wrong-audience" "STS accepted a token minted for '$WRONG_AUDIENCE'" ;;
+    000)
+      fail "wrong-audience" \
+        "could not reach STS at all (curl transport failure); the audience rejection is unproven"
+      ;;
     *)
       fail "wrong-audience" \
-        "expected a 4xx rejection of '$WRONG_AUDIENCE' from STS, got HTTP $status"
+        "expected a 4xx rejection of '$WRONG_AUDIENCE' from STS, got HTTP $status $(cat "$WORK_DIR/wrong-sts.json")"
       ;;
   esac
   say "  STS rejected the wrong-audience token (HTTP $status)"
@@ -687,7 +672,7 @@ MINT_ROUTE="${MINT_ROUTE%/}/runtime/v1/id-token"
 
 probe() { # probe <bearer> ; prints "<status> <code>"
   printf '%s' "$1" | orb_ssh "$MINT_INSTANCE" \
-    "sudo -u orb /usr/local/bin/node -e \"\$(printf %s $PROBE_B64 | base64 -d)\" '$MINT_ROUTE' '$DEADLINE'" |
+    "sudo -u orb /usr/local/bin/node -e \"\$(printf %s $PROBE_B64 | base64 -d)\" '$MINT_ROUTE'" |
     tr -d '\r' | tail -n 1
 }
 

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-DIR=$(cd "$(dirname "$0")" && pwd)
 
 # Disposable live-GCE acceptance smoke for docs/compute-replacement.md.
 # Required environment:
@@ -43,13 +42,11 @@ log_dir=${PI_ORB_SMOKE_LOG_DIR:-test-failures/compute-replacement-live-$(date +%
 mkdir -p "$log_dir"
 
 api() {
-  local method=$1 path=$2 body=${3-} policy=once
-  case "$method" in GET|DELETE) policy=safe ;; esac
-  if [[ "${PI_ORB_SMOKE_REPLAY_SAFE:-}" == 1 ]]; then policy=safe; fi
+  local method=$1 path=$2 body=${3-}
   if [[ -n "$body" ]]; then
-    python3 "$DIR/smoke_http.py" "$policy" -- -X "$method" -H 'content-type: application/json' --data "$body" "$base$path"
+    curl -fsS -X "$method" -H 'content-type: application/json' --data "$body" "$base$path"
   else
-    python3 "$DIR/smoke_http.py" "$policy" -- -X "$method" "$base$path"
+    curl -fsS -X "$method" "$base$path"
   fi
 }
 orb_row() { api GET "/api/v1/orbs/$orb_id"; }
@@ -77,9 +74,9 @@ data_disk_exists() {
 # HTTP status of a broker-authenticated runtime route (runtime-routes.ts) for
 # one bearer token. Never -f: the 401 is the assertion, not a curl failure.
 token_probe_status() {
-  printf 'header = "Authorization: Bearer %s"\n' "$1" |
-    python3 "$DIR/smoke_http.py" --status-output /dev/null safe -- -K - -X POST \
-    -H 'content-type: application/json' --data '{"reason":"startup"}' "$base/runtime/v1/tokens/model"
+  curl -sS -o /dev/null -w '%{http_code}' -X POST \
+    -H "authorization: Bearer $1" -H 'content-type: application/json' \
+    --data '{"reason":"startup"}' "$base/runtime/v1/tokens/model"
 }
 dump_failure() {
   orb_row >"$log_dir/orb.json" 2>&1 || true
@@ -100,9 +97,9 @@ on_exit() {
 trap on_exit EXIT
 
 wait_orb_state() {
-  local wanted=$1 deadline=$(( $(date +%s) + $2 )) row state
-  while (( $(date +%s) < deadline )); do
-    row=$(PI_ORB_SMOKE_DEADLINE="$deadline" orb_row) || return 1
+  local wanted=$1 deadline=$((SECONDS + $2)) row state
+  while (( SECONDS < deadline )); do
+    row=$(orb_row) || { sleep 2; continue; }
     state=$(jq -r .state <<<"$row")
     [[ "$state" == "$wanted" ]] && { printf '%s\n' "$row"; return; }
     [[ "$state" == failed && "$wanted" != failed ]] && {
@@ -126,9 +123,9 @@ wait_disposed() {
   return 1
 }
 
-PI_ORB_SMOKE_REPLAY_SAFE=1 api POST /api/v1/projects "$(jq -nc --arg id "$project_id" --arg repo "$repo" \
+api POST /api/v1/projects "$(jq -nc --arg id "$project_id" --arg repo "$repo" \
   '{id:$id,name:("compute-replacement-smoke-" + ($id|.[0:8])),repositoryUrl:$repo}')" >/dev/null
-PI_ORB_SMOKE_REPLAY_SAFE=1 api POST "/api/v1/projects/$project_id/orbs" "$(jq -nc --arg id "$orb_id" '{id:$id}')" >/dev/null
+api POST "/api/v1/projects/$project_id/orbs" "$(jq -nc --arg id "$orb_id" '{id:$id}')" >/dev/null
 wait_orb_state running "$boot_deadline_seconds" >"$log_dir/initial-running.json"
 old_instance=$(instances)
 [[ $(wc -w <<<"$old_instance") -eq 1 ]]
