@@ -20,7 +20,7 @@ The process POC uses Durable-owned child conversations, not gotgenes profiles. `
 
 Native child `orb_alert` retains trusted JSON parent steering and durable acceptance. **Selected 2026-10-14; implemented locally, not deployed:** its placed entry also projects as an existing notification receipt, with actual message preview and full plain-text details, no unread flag or private child-transcript access (`docs/orb-alerts.md`, `docs/history-replication.md`). Root/CLI alerts and legacy completion/update notices are unchanged.
 
-`get_subagent_result({agent_id,wait:true})` yields on **any pending parent steer**, including human input or another child's alert, not only input from the child being observed. Already-pending input and input arriving during the wait both qualify; `followUp` remains unchanged.
+`get_subagent_result({agent_id,wait:true})` yields on **any pending parent steer**, including human input, another child's alert, or an authenticated peer orb message (decision 2026-10-16), not only input from the child being observed. Already-pending input and input arriving during the wait both qualify; `followUp` remains unchanged. Peer steering retains its non-human/non-consent provenance (`docs/orb-messaging.md`).
 
 The parent inbox uses atomic snapshot-and-watch registration to prevent lost wakeups; this is not a simultaneous atomic observation of child state and inbox state. Pending steer triggers a child reread: if already terminal, return its actual receipt; otherwise return a normal result with `status: "running"` and `interrupted: "parent_input"`. The wait neither consumes the parent input nor cancels the child; native delivery retains authority.
 

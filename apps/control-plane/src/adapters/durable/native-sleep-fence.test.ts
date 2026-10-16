@@ -30,7 +30,15 @@ function barrier() {
   return { promise, resolve };
 }
 
-it.each(["peer", "human", "browser-sleep-gap", "browser-peer-gap", "human-gap"] as const)(
+it.each([
+  "peer",
+  "human",
+  "peer-held",
+  "browser-sleep-gap",
+  "browser-peer-gap",
+  "human-gap",
+  "peer-gap",
+] as const)(
   "keeps %s busy input ordered through Sleep without loss or duplicate inference",
   async (kind) => {
     const db = new PGliteClient();
@@ -172,8 +180,10 @@ it.each(["peer", "human", "browser-sleep-gap", "browser-peer-gap", "human-gap"] 
         const browser = kind.startsWith("browser");
         const messageId = browser ? "browser:gap" : randomUUID();
         const content = [{ type: "text" as const, text: "accepted steering" }];
+        const system =
+          kind === "peer-gap" ? { kind: "orb_message" as const, senderOrbId: peer.id } : undefined;
         if (!browser) {
-          (await queue(messageId, content))._unsafeUnwrap();
+          (await queue(messageId, content, kind === "peer-gap"))._unsafeUnwrap();
           (
             await database.store.claimNextOrbMessageBatch(task, { orbId: orb.id, now: 0 })
           )._unsafeUnwrap();
@@ -195,6 +205,7 @@ it.each(["peer", "human", "browser-sleep-gap", "browser-peer-gap", "human-gap"] 
           messageId,
           messageIds: browser ? [] : [messageId],
           content,
+          ...(system ? { system } : {}),
         };
         const admission = browser
           ? agent.request("gap", {
@@ -257,9 +268,10 @@ it.each(["peer", "human", "browser-sleep-gap", "browser-peer-gap", "human-gap"] 
       }
       const messageId = randomUUID();
       const content = [{ type: "text" as const, text: "queued peer" }];
-      const system =
-        kind === "peer" ? { kind: "orb_message" as const, senderOrbId: peer.id } : undefined;
-      (await queue(messageId, content, kind === "peer"))._unsafeUnwrap();
+      const system = kind.startsWith("peer")
+        ? { kind: "orb_message" as const, senderOrbId: peer.id }
+        : undefined;
+      (await queue(messageId, content, kind.startsWith("peer")))._unsafeUnwrap();
       (
         await database.store.claimNextOrbMessageBatch(task, { orbId: orb.id, now: 0 })
       )._unsafeUnwrap();
@@ -270,33 +282,37 @@ it.each(["peer", "human", "browser-sleep-gap", "browser-peer-gap", "human-gap"] 
         content,
         ...(system ? { system } : {}),
       };
-      const admission = await agent.deliver(request);
-      if (kind === "human") {
+      if (kind !== "peer-held") {
+        const admission = await agent.deliver(request);
         expect(admission._unsafeUnwrap()).toMatchObject({ delivery: "steer", duplicate: false });
         expect(await readSubmission(messageId)).toMatchObject({ status: "queued" });
       } else {
-        const deferred = admission;
-        expect(deferred.isErr()).toBe(true);
-        expect(deferred._unsafeUnwrapErr()).toMatchObject({ retryable: true });
         const browser = await agent.request("later-human", {
           type: "message",
           content: [{ type: "text", text: "later human" }],
-          expectedHeadId: agent.snapshot()._unsafeUnwrap().records.at(-1)?.id ?? null,
+          expectedHeadId: agent.snapshot()._unsafeUnwrap().headId,
         });
         expect(browser.isErr()).toBe(true);
         expect(browser._unsafeUnwrapErr()).toMatchObject({ retryable: true });
-        expect((await readSubmission(messageId)) !== undefined).toBe(false);
+        expect(await readSubmission(messageId)).toBeUndefined();
       }
       (await sleep())._unsafeUnwrap();
       release.resolve();
       (await agent.waitForIdle())._unsafeUnwrap();
       expect(faux.state.callCount).toBe(2);
       expect(lease.signal.aborted).toBe(false);
-      if (kind === "human") {
+      if (kind !== "peer-held") {
         expect(
           (await database.store.listOrbMessages(task, orb.id))._unsafeUnwrap()[0],
         ).toMatchObject({ status: "delivered", lastError: null });
         expect(peerRecords(messageId)).toHaveLength(1);
+        if (kind === "peer")
+          expect(peerRecords(messageId)[0]).toMatchObject({
+            type: "event",
+            eventType: "orb.message",
+            sender: { orbId: peer.id },
+            content,
+          });
         expect((await agent.deliver(request))._unsafeUnwrap()).toMatchObject({
           delivery: "steer",
           duplicate: true,

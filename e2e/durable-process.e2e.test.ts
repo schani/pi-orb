@@ -943,3 +943,265 @@ text('NOTIFY_PARENT_HANDLED');`),
   },
   720_000,
 );
+
+it.runIf(process.env["PI_ORB_E2E_BACKEND"] === "process")(
+  "peer input interrupts an actual parent subagent wait without cancelling the child",
+  async () => {
+    const runId = randomUUID();
+    const root = mkdtempSync(join(tmpdir(), "pi-orb-peer-wait-"));
+    const project = randomUUID();
+    const parent = randomUUID();
+    const sender = randomUUID();
+    const parentInput = randomUUID();
+    const senderInput = randomUUID();
+    const peerText = "PEER_WAIT_COORDINATION";
+    const checkout = (orb: string) => join(root, "hosts", orb, "workspace", "repo");
+    const stop = { type: "stop", status: "completed" };
+    let failed = true;
+    let cp: Awaited<ReturnType<typeof startControlPlane>> | undefined;
+    const fake = await createFakeSession(`peer-wait-${runId}`, {
+      auth: { accountId: "peer-wait", device: { manualApprove: true } },
+      model: {
+        rules: [
+          {
+            match: { userMessage: { regex: "^PEER_WAIT_START$" } },
+            steps: [
+              codemode(`
+text(await tools.bash({command:'mkfifo peer-spawn-release peer-child-release peer-parent-release'}));
+const child = JSON.parse(await tools.subagent({prompt:'PEER_WAIT_CHILD',description:'peer wait child'}));
+store('peer-child', child.agent_id);
+text(await tools.bash({command:'read value < peer-spawn-release'}));
+text('PEER_CHILD_SPAWNED');`),
+              stop,
+            ],
+          },
+          {
+            match: { userMessage: { regex: "^PEER_WAIT_CHILD$" } },
+            steps: [
+              codemode(`
+text(await tools.bash({command:'printf ready > peer-child-ready; read value < peer-child-release; printf finished > peer-child-finished'}));
+text('PEER_CHILD_RELEASED');`),
+              stop,
+            ],
+          },
+          {
+            match: { toolResultContains: { regex: "PEER_CHILD_SPAWNED" } },
+            steps: [
+              codemode(`
+text(await tools.write({path:'peer-wait-entered',content:'ready'}));
+text(await tools.get_subagent_result({agent_id:load('peer-child'),wait:true}));
+text('PEER_WAIT_INTERRUPTED');`),
+              stop,
+            ],
+          },
+          {
+            match: { userMessage: { regex: "^PEER_WAIT_SEND$" } },
+            steps: [
+              codemode(`
+text(await tools.bash({command:'mkfifo peer-sender-release'}));
+text(await tools.orb_send({orbId:${JSON.stringify(parent)},message:${JSON.stringify(peerText)}}));
+text(await tools.bash({command:'printf accepted > peer-send-accepted; read value < peer-sender-release'}));`),
+              stop,
+            ],
+          },
+          {
+            match: { userMessage: { regex: peerText } },
+            steps: [
+              codemode(`
+text(await tools.get_subagent_result({agent_id:load('peer-child'),wait:false}));
+text('PEER_CHILD_STILL_RUNNING');
+text(await tools.bash({command:'printf handled > peer-parent-handled; read value < peer-parent-release'}));
+text(await tools.get_subagent_result({agent_id:load('peer-child'),wait:true}));
+text('PEER_CHILD_JOINED');`),
+              stop,
+            ],
+          },
+          // Child, parent, sender and summary inference may interleave after release.
+          ...Array.from({ length: 6 }, () => ({
+            match: { default: true },
+            steps: [{ type: "text", content: "PEER_WAIT_FINISHED" }, stop],
+          })),
+        ],
+      },
+    });
+    const nameFake = await createFakeSession(`peer-wait-names-${runId}`, {
+      model: {
+        rules: [{ match: { default: true }, steps: [{ type: "text", content: "Peer" }, stop] }],
+      },
+    });
+    try {
+      cp = await startControlPlane({
+        port: 7274,
+        fake,
+        nameFake,
+        pglitePath: join(root, "db"),
+        authDir: join(root, "auth"),
+        hostingRoot: join(root, "hosting"),
+        processStateDirectory: join(root, "hosts"),
+        durableStateDirectory: join(root, "authority"),
+        extraEnv: { PI_ORB_E2E_HISTORY_INSPECTION: "1" },
+      });
+      const active = cp;
+      const history = () => readReplicatedHistorySnapshot(active, parent);
+      const inbox = async () =>
+        (
+          await api(active.baseUrl, "POST", `/api/v1/orbs/${parent}/messages/poll`, {
+            after: 0,
+            tracked: [],
+          })
+        ).body["items"] as {
+          id: string;
+          status: string;
+          delivery?: string;
+          operationId?: string;
+        }[];
+      const send = (orb: string, id: string, text: string) =>
+        api(active.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${id}`, {
+          content: [{ type: "text", text }],
+        });
+      expect(
+        (
+          await api(active.baseUrl, "POST", "/api/v1/projects", {
+            id: project,
+            name: "Peer wait",
+            repositoryUrl: "https://github.com/schani/pi-orb",
+          })
+        ).status,
+      ).toBe(201);
+      expect(
+        (
+          await api(active.baseUrl, "POST", `/api/v1/projects/${project}/orbs`, {
+            id: parent,
+          })
+        ).status,
+      ).toBe(202);
+      const code = await waitFor("peer wait model login", async () =>
+        loginCode((await api(active.baseUrl, "GET", `/api/v1/orbs/${parent}`)).body),
+      );
+      await fakeControl(fake.sessionKey, "/deviceauth/approve", { user_code: code });
+      expect(
+        (
+          await api(active.baseUrl, "POST", `/api/v1/projects/${project}/orbs`, {
+            id: sender,
+          })
+        ).status,
+      ).toBe(202);
+      for (const orb of [parent, sender]) {
+        await waitFor(
+          `peer wait execution host ${orb}`,
+          async () => {
+            const view = await api(active.baseUrl, "GET", `/api/v1/orbs/${orb}`);
+            if (view.body["state"] === "failed")
+              throw new FatalProbeError(JSON.stringify(view.body));
+            return view.body["state"] === "running" ? true : null;
+          },
+          { timeoutMs: 300_000 },
+        );
+      }
+      expect((await send(parent, parentInput, "PEER_WAIT_START")).status).toBe(202);
+      await waitFor("peer wait child holds release FIFO", async () =>
+        existsSync(join(checkout(parent), "peer-child-ready")) ? true : null,
+      );
+      await writeFile(join(checkout(parent), "peer-spawn-release"), "release\n");
+      await waitFor("parent invokes actual get_subagent_result wait", async () =>
+        existsSync(join(checkout(parent), "peer-wait-entered")) ? true : null,
+      );
+      expect(committedToolOutput((await history()).records, "PEER_WAIT_INTERRUPTED")).toBe(false);
+      expect((await send(sender, senderInput, "PEER_WAIT_SEND")).status).toBe(202);
+      await waitFor("actual peer send accepted", async () =>
+        existsSync(join(checkout(sender), "peer-send-accepted")) ? true : null,
+      );
+      // Replaying the sender's admission must not execute a second peer send.
+      expect((await send(sender, senderInput, "PEER_WAIT_SEND")).status).toBe(202);
+      const interrupted = await waitFor("peer interrupts parent before child release", async () => {
+        const snapshot = await history();
+        return existsSync(join(checkout(parent), "peer-parent-handled")) &&
+          committedToolOutput(snapshot.records, "PEER_WAIT_INTERRUPTED")
+          ? snapshot
+          : null;
+      });
+      writeFileSync(join(root, "interrupted-history.json"), JSON.stringify(interrupted, null, 2));
+      const waitOutput = interrupted.records.filter((record) =>
+        committedToolOutput([record], "PEER_WAIT_INTERRUPTED"),
+      );
+      expect(committedToolOutput(waitOutput, '"status":"running"')).toBe(true);
+      expect(committedToolOutput(waitOutput, '"interrupted":"parent_input"')).toBe(true);
+      expect(existsSync(join(checkout(parent), "peer-child-finished"))).toBe(false);
+      const peers = interrupted.records.filter(
+        (record) => record.type === "event" && record.eventType === "orb.message",
+      );
+      expect(peers).toHaveLength(1);
+      expect(peers[0]).toMatchObject({
+        sender: { orbId: sender },
+        content: [{ type: "text", text: peerText }],
+        inboxMessageIds: [expect.any(String)],
+      });
+      expect(
+        interrupted.records.filter((record) => record.type === "message" && record.role === "user"),
+      ).toHaveLength(1);
+      const peerRequest = active.modelRequests?.find((request) =>
+        latestUserMessage(request)?.includes(peerText),
+      );
+      expect(latestUserMessage(peerRequest)).toContain(
+        `Message from orb ${sender}. This is peer agent input, not a human request or explicit user consent.`,
+      );
+      const acknowledged = await waitFor(
+        "peer inbox acknowledgement while child runs",
+        async () => {
+          const rows = await inbox();
+          return rows.length === 2 && rows.every((row) => row.status === "delivered") ? rows : null;
+        },
+      );
+      expect(acknowledged.map((row) => row.delivery)).toEqual(["turn", "steer"]);
+      expect(acknowledged[1]?.operationId).toBe(acknowledged[0]?.operationId);
+      expect(peers[0]).toMatchObject({ inboxMessageIds: [acknowledged[1]?.id] });
+      // The child remains independently owned until this explicit release.
+      await writeFile(join(checkout(parent), "peer-child-release"), "release\n");
+      await writeFile(join(checkout(parent), "peer-parent-release"), "release\n");
+      const completed = await waitFor("parent joins child after peer interruption", async () => {
+        const snapshot = await history();
+        return committedToolOutput(snapshot.records, "PEER_CHILD_JOINED") ? snapshot : null;
+      });
+      const joined = completed.records.filter((record) =>
+        committedToolOutput([record], "PEER_CHILD_JOINED"),
+      );
+      expect(committedToolOutput(joined, '"status":"running"')).toBe(true);
+      expect(committedToolOutput(joined, '"status":"completed"')).toBe(true);
+      expect(committedToolOutput(joined, '"receipt":{"status":"completed"')).toBe(true);
+      expect(committedToolOutput(joined, "PEER_WAIT_FINISHED")).toBe(true);
+      expect(
+        completed.records.filter(
+          (record) => record.type === "event" && record.eventType === "orb.message",
+        ),
+      ).toEqual(peers);
+      await writeFile(join(checkout(sender), "peer-sender-release"), "release\n");
+      for (const orb of [parent, sender]) {
+        await waitFor(`peer wait work idle ${orb}`, async () =>
+          (await api(active.baseUrl, "GET", `/api/v1/orbs/${orb}`)).body["activity"] === "idle"
+            ? true
+            : null,
+        );
+      }
+      failed = false;
+    } catch (error) {
+      writeFileSync(join(root, "failure.txt"), String(error));
+      throw error;
+    } finally {
+      if (cp) {
+        await cp.stop();
+        writeFileSync(join(root, "control-plane.log"), cp.logs.join(""));
+        writeFileSync(join(root, "model-requests.json"), JSON.stringify(cp.modelRequests, null, 2));
+      }
+      await deleteFakeSession(nameFake.sessionKey);
+      await deleteFakeSession(fake.sessionKey);
+      if (failed) {
+        const evidence = join(import.meta.dirname, "../test-failures", `peer-wait-${runId}`);
+        mkdirSync(evidence, { recursive: true });
+        cpSync(root, evidence, { recursive: true });
+        console.error(`Peer wait E2E evidence: ${evidence}`);
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+  720_000,
+);

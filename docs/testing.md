@@ -1,5 +1,15 @@
 # Testing
 
+## Busy peer steering qualification (2026-10-16; local, undeployed)
+
+`PI_ORB_E2E_BACKEND=process npm run test:e2e -- e2e/durable-process.e2e.test.ts -t 'peer input interrupts'` passes **1 test**, with two filtered out. Two real orbs exercise `orb_send` interrupting `get_subagent_result(wait:true)`, trusted nonhuman attribution, same-operation steering acknowledgement, admission replay deduplication and child completion only after FIFO release. Existing helpers are reused; no synchronization timers or browser/MCP fixture changes. Passing log: `test-failures/peer-wait-qualification/selector-fixed.log`.
+
+The first E2E reached peer handling but used invalid inbox selector `after:null`. Captured HTTP 400 and `after:0` responses prove the fixture error; the latter already shows both messages delivered. Only the selector changed. Evidence: `test-failures/peer-wait-qualification/{first-run.log,invalid-selector-response.json,valid-selector-response.json}` and `test-failures/peer-wait-7c565ca5-c01d-476e-9c96-6d76b1ffa111/`.
+
+Native baseline RED: `/tmp/peer-red.log`. Initial DST fixture failures used the wrong root conversation ID, then assumed root idle joined its child; `ROOT_CONVERSATION_ID` and an explicit child-task join correct those assumptions, not product defects. First failures: `/tmp/peer-first-green-attempt.log`; preserved traces: `test-failures/native-peer-steering-before-1792179455762-0.json` and `test-failures/native-peer-steering-pending-1792179455853-0.json`. Explicit pre-fix, intermediate and passing replays: `/tmp/peer-replay-{before,pending}{,-fixed,-final}.log`. Final native run passes **9 tests** (seven Sleep cases; two DST cases, 20 schedules each): `/tmp/peer-final-native.log`. Overlapping targeted runs pass 21 and 36 tests: `/tmp/peer-targeted.log`, `/tmp/peer-targeted-tests.log`; whole-repository typecheck passes: `/tmp/peer-typecheck.log`.
+
+These are focused local receipts, not full E2E, image, browser-handshake, live-provider or deployment qualification.
+
 ## Toolchain upgrade qualification (2026-10-16; local, undeployed)
 
 Node 24.22.0/npm 11.19.1, Vite 8.3.4/React plugin 6.1.2 and Vitest 5.0.5: clean `npm ci` added 603 packages, audited 611 and found zero vulnerabilities; full/production audits also report zero. Full workspace/E2E typecheck, lint (306 warnings, 79 infos) and production web build pass; build retains large-chunk warnings. Focused sequencing/sharding/browser-config/mock/timer/DST/patch contracts pass **138 tests / 10 files**. A broader overlapping run passed 293 with eight PostgreSQL skips and one native-fixture failure; its corrected fixture passes separately, not a claimed 294-pass run. Affected JWK tests pass 27/27. Node infrastructure contracts pass 19 and native-guest contracts 27.

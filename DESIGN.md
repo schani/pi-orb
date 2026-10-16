@@ -150,6 +150,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-16-peer-input-turn-deferral.md](docs/postmortems/2026-10-16-peer-input-turn-deferral.md) — confirmed busy-peer deferral during root subagent waits; likely rollout-handover activity projection gap
 - [docs/postmortems/2026-10-16-c9a30a6d-restart-loop.md](docs/postmortems/2026-10-16-c9a30a6d-restart-loop.md) — unreachable recovery and separate Spot preemptions; restart-budget precheck, silence unexplained
 - [docs/postmortems/2026-10-16-dependency-audit-validation-collision.md](docs/postmortems/2026-10-16-dependency-audit-validation-collision.md) — shared install/check ownership collision during dependency cleanup validation
 
