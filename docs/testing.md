@@ -21,6 +21,7 @@ These overlapping local receipts are **not full updated-toolchain qualification*
 ## Dependency cleanup qualification (2026-10-16; local, undeployed)
 
 **Pre-toolchain-upgrade cleanup baseline only:** these receipts do not qualify Node 24.22.0, Vite 8.3.4, React plugin 6.1.2 or Vitest 5.0.5. Final frozen-source validation: clean `npm ci` added 734 packages, audited 742 and found zero vulnerabilities; typecheck passed; lint passed with 306 warnings and 79 infos. Full `npm test` passed: 5,050 unit/DST tests, 38 skipped across 704 files (691 passed, 13 skipped); infrastructure passed 92 Node, 171 Python and 27 native-VM tests, plus filesystem/service checks. Skips: 31 unconfigured real-PostgreSQL cases, four PostgreSQL-only PGlite cases and three live-GCS cases. Two package-list assertions first reproduced the redundant `apt-transport-https` dependency; removing it from setup and the skill example produced 30/30 focused skills passes and the full pass above. The initial full run was transport-interrupted after five minutes and is not qualification. The separate installer-test ownership collision and retained first-failure evidence are documented in `docs/postmortems/2026-10-16-dependency-audit-validation-collision.md`. No E2E, cloud, image-build or deployment qualification; Docker daemon unavailable.
+
 ## CI topology (decision 2026-10-16; implemented, undeployed)
 
 **Historical PR acceptance receipt:** source `8d6a0559c325f0bb73a550073f901431a7e010ac`

@@ -28,7 +28,7 @@ it("runs four isolated serial unit/DST shards with both real-PG contracts and fi
     "      PI_ORB_TEST_DATABASE_URL: postgres://qualification:qualification@127.0.0.1:5432/qualification",
     "      PI_ORB_DURABLE_PG_TEST_URL: postgres://qualification:qualification@127.0.0.1:5432/qualification",
   ]);
-  expect(unit).toContain("node-version: '24.6.0'");
+  expect(unit).toContain("node-version: '24.22.0'");
   expect(unit).toContain("run: npm ci");
   expect(unit?.indexOf("run: npm ci")).toBeLessThan(unit?.indexOf("run: npx vitest") ?? 0);
   expect(unit?.match(/^ {8}run: npx vitest .+$/gmu)).toEqual([
@@ -64,7 +64,7 @@ it("runs non-unit gates once outside the shard matrix", () => {
 });
 
 it("the actual unit sequencer assigns every file exactly once without changing seeds or contracts", async () => {
-  const ctx = await createVitest("test", {
+  const ctx = await createVitest({
     root,
     config: resolve(root, "vitest.config.ts"),
     watch: false,

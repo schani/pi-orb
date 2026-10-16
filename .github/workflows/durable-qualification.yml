@@ -66,6 +66,9 @@ jobs:
             .context/cross-orb/messaging/*/*-native-history.json
             test-failures/profile-login/failure.json
             test-failures/full-slice-upload/failure.json
+            test-failures/full-slice-browser/*/browser.json
+            test-failures/full-slice-browser/*/dom.json
+            test-failures/full-slice-browser/*/page.png
             test-failures/subagent-*/failure.json
             test-failures/lazy-return-*/failure.json
             test-failures/lazy-return-*/failure.png

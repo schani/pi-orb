@@ -172,3 +172,27 @@ Evidence: `.context/pr133-controlled-benchmark/failure-rca/corrective-validation
 This establishes local corrective validation, not B’s unique cause, a performance
 result or exact-head CI/release qualification. The shipping gate remains in
 `TODO.md`. No additional CI, commit, push, merge or deployment occurred.
+
+## Main integration — 2026-10-16
+
+The corrective tests and PR 133 features were rebased onto main
+`e6710059313ceb8b90ad363acc61ca62297717ec` (#134–#136). Upstream runtime
+unreachability diagnostics, busy-peer steering and the Node 24.22.0/dependency
+upgrade are preserved. New CI jobs and discovery tests adopt that toolchain;
+both independent control-plane image builds remain. The first integrated unit
+contract correctly rejected its stale Node 24.6.0 expectation; it now requires
+24.22.0. Discovery uses the current `createVitest(options)` API. The upstream runtime
+version contract also expected one Node setup per workflow; it now checks exact
+CI/E2E counts of two and Deploy/Durable counts of one, all at 24.22.0.
+
+The earlier 421-input equality and original Docker receipt apply only to the
+pre-rebase correction at `f43eff0f`, not this changed runtime/dependency closure.
+Normal exact-head PR qualification is required; no new performance comparison
+or historical-B cause is inferred from the rebase.
+
+Both normal lifecycle workflows retain the pre-close browser ledger, structural
+DOM JSON and masked screenshot through three explicit
+`test-failures/full-slice-browser/*/{browser.json,dom.json,page.png}` paths, in
+addition to upload diagnostics. No private-provider directory is added. A
+workflow contract first failed for both missing allowlists, then passed with
+these paths; job inventory and application semantics are unchanged.

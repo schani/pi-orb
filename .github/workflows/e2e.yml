@@ -128,6 +128,9 @@ jobs:
             test-failures/cross-axis-*/relay-requests.json
             test-failures/cross-axis-*/model-requests.json
             test-failures/cross-axis-*/retained-docker.json
+            test-failures/full-slice-browser/*/browser.json
+            test-failures/full-slice-browser/*/dom.json
+            test-failures/full-slice-browser/*/page.png
           if-no-files-found: ignore
           retention-days: 14
       - name: Diagnose subagent continuation

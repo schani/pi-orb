@@ -66,6 +66,29 @@ class BrowserEvidenceTest(unittest.TestCase):
         proof = steps('durable-qualification.yml', 'control-plane-image')['Prove packaged worker, Git and skills without network']
         self.assertIn('2>&1 | tee', proof)
 
+    def test_lifecycle_jobs_retain_only_allowlisted_cold_navigation_capture(self):
+        expected = {
+            'test-failures/full-slice-browser/*/browser.json',
+            'test-failures/full-slice-browser/*/dom.json',
+            'test-failures/full-slice-browser/*/page.png',
+        }
+        for workflow, job, step_name in (
+            ('e2e.yml', 'e2e', 'Upload Durable failure diagnostics'),
+            ('durable-qualification.yml', 'process', 'Upload failure evidence'),
+        ):
+            with self.subTest(workflow=workflow):
+                upload = steps(workflow, job)[step_name]
+                paths = re.search(r'^          path: \|\n((?:            [^\n]+\n)+)', upload, re.M)
+                self.assertIsNotNone(paths)
+                self.assertEqual({path for path in paths.group(1).split()
+                                  if 'full-slice-browser' in path}, expected)
+                self.assertIn('if: failure()', upload)
+                self.assertIn('if-no-files-found: ignore', upload)
+                self.assertIn('retention-days: 14', upload)
+                body = jobs(workflow)[job]
+                self.assertIn('test-failures/full-slice-upload/failure.json', body)
+                self.assertNotRegex(body, r'(?m)^\s+(?:path: )?(?:test-failures/\*\*|test-failures/full-slice-browser/\*?\*?/?|.*private-provider.*)$')
+
     def test_ci_exercises_provider_supervisor_contracts(self):
         scripts = json.loads((ROOT / 'package.json').read_text())['scripts']
         self.assertIn('scripts/local-fake-provider.test.mjs', scripts['test:infra'])

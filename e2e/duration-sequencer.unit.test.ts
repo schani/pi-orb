@@ -56,7 +56,7 @@ it("actual production shards and order match checked-in axis weights, not poison
   try {
     for (const backend of ["docker", "process"] as const) {
       process.env["PI_ORB_E2E_BACKEND"] = backend;
-      const ctx = await createVitest("test", {
+      const ctx = await createVitest({
         root,
         config: resolve(root, "e2e/vitest.config.ts"),
         watch: false,
