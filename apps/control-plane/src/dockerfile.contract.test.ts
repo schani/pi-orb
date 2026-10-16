@@ -63,6 +63,9 @@ describe("control-plane Dockerfile workspace contract", () => {
     expect(runtime).toContain("apt-get install -y --no-install-recommends git ca-certificates");
     expect(dockerfile).toContain("COPY apps/orb-runtime/skills apps/orb-runtime/skills");
     expect(dockerfile).toContain("COPY apps/control-plane/src apps/control-plane/src");
+    expect(runtime).toMatch(
+      /COPY apps\/control-plane\/src apps\/control-plane\/src[\s\S]*RUN node .*import\('\.\/apps\/control-plane\/src\/adapters\/spawn-models\.ts'\)/,
+    );
     expect(
       readFileSync(
         join(repositoryRoot, "apps/control-plane/src/adapters/durable/tools/bounded-worker.js"),
@@ -96,7 +99,7 @@ describe("control-plane Dockerfile workspace contract", () => {
       for (const [, specifier = ""] of imports) {
         if (specifier.startsWith(".")) {
           pending.push(join(dirname(path), specifier));
-        } else if (path.startsWith("apps/orb-runtime/src/") && !specifier.startsWith("node:")) {
+        } else if (!specifier.startsWith("node:")) {
           const packageName = specifier.startsWith("@")
             ? specifier.split("/").slice(0, 2).join("/")
             : (specifier.split("/")[0] ?? specifier);
@@ -107,7 +110,9 @@ describe("control-plane Dockerfile workspace contract", () => {
       }
     }
     expect([...missing].sort(), "static source imports missing from the final image").toEqual([]);
-    expect([...undeclared].sort(), "shared helpers need control-plane dependencies").toEqual([]);
+    expect([...undeclared].sort(), "production imports need control-plane dependencies").toEqual(
+      [],
+    );
   });
 
   it("copies every local control-plane dependency's package metadata and source", () => {

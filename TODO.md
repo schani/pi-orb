@@ -8,7 +8,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Qualify PR 122 fresh-runner cache hit** (2026-10-15; `docs/postmortems/2026-10-15-runtime-dependency-qualification.md`). Inspect the next normal E2E run for trusted layer reuse; main export is verified.
+- **Qualify control-plane SDK packaging** (2026-10-15; `docs/postmortems/2026-10-15-runtime-dependency-qualification.md`). Complete fresh exact-head normal gates and post-merge qualification before normal deployment and monitoring.
 
 - **Explain the unreplicated final tail before target recovery** (2026-10-15; `docs/postmortems/2026-10-15-claude-delivery-uncertain-c9a30a6d.md`). The approved consumed-steering receipt correction is implemented locally with append-only proof events and no replay. Why this orb's replica stopped before its retained final reply/result remains unknown. Preserve the failed orb/disk; target restart/reconciliation and deployment remain unauthorized.
 

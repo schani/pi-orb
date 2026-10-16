@@ -8,17 +8,17 @@ Deploy [38800758118](https://github.com/schani/pi-orb/actions/runs/38800758118) 
 
 ## Qualification receipts
 
-PR 122 is merged. All eleven exact-main checks passed on attempt 1; no new deployment occurred. Current receipts and earlier head-scoped records:
+Main `96ef6af9`: [Deploy 38834054839](https://github.com/schani/pi-orb/actions/runs/38834054839) failed October 15, 6:51 PM PDT. Schema passed; apply failed when candidate `00058-lh8` hit `ERR_MODULE_NOT_FOUND`: control-plane `adapters/spawn-models.ts` imported undeclared `@anthropic-ai/claude-agent-sdk`. Release: `applied-but-unvalidated`; monitor never ran. Previous revision `00057-gqf` retained 100% traffic, health 200. Evidence: `.context/deploy-38834054839/{receipt.json,startup-diagnostic/}`, [release artifact](https://github.com/schani/pi-orb/actions/runs/38834054839/artifacts/12019477735). [PR 127](https://github.com/schani/pi-orb/pull/127) declares SDK/zod dependencies and checks the actual adapter import in the isolated image.
 
 | Source | Evidence / boundary |
 |---|---|
-| Main `8371a577` | [CI](https://github.com/schani/pi-orb/actions/runs/38823365031), [E2E](https://github.com/schani/pi-orb/actions/runs/38823365316), [Durable](https://github.com/schani/pi-orb/actions/runs/38823365070): all eleven checkout logs confirm the exact merge SHA. [Export receipt](https://github.com/schani/pi-orb/pull/122#issuecomment-6204665110), originals in `.context/pr122-main-cache/`. |
+| Initial main `8371a577` | [CI](https://github.com/schani/pi-orb/actions/runs/38823365031), [E2E](https://github.com/schani/pi-orb/actions/runs/38823365316), [Durable](https://github.com/schani/pi-orb/actions/runs/38823365070): all eleven checkout logs confirm the exact merge SHA. [Export receipt](https://github.com/schani/pi-orb/pull/122#issuecomment-6204665110), originals in `.context/pr122-main-cache/`. |
 | Earlier PR heads | First-attempt greens and checkout/log/artifact hashes: [initial code](https://github.com/schani/pi-orb/pull/122#issuecomment-6202934012), [docs](https://github.com/schani/pi-orb/pull/122#issuecomment-6203374477), [fixture](https://github.com/schani/pi-orb/pull/122#issuecomment-6203950883), [final waiver docs](https://github.com/schani/pi-orb/pull/122#issuecomment-6204363503). Each receipt qualifies only its recorded head. |
 | Local fixture head `cf91bc86` | `.context/pglite-hook/full-qualification/run-20261015-152847-RXB7GM/`: unit 4975 passed/38 skipped (699 files: 686 passed/13 skipped); infrastructure 285 passed (92 Node/166 Python/27 native); typecheck/lint passed, baseline 304 warnings/74 infos. Completed 3:54:39 PM PDT, serially with free ports and clean teardown; scope/skips and failure/trace inventory unchanged. |
 
 Initial hosted PR builds executed uncached install/patch/offline PTY smoke, with one Buildx invocation per runner, exact build/setup image-ID matches and no PR exports. Import was requested but no dependency reuse observed. Main then verified shard-1-only GHA export (`mode=max`), import-only shards 2–4, matching image IDs and the scope index under `refs/heads/main`.
 
-**Fresh-runner reuse remains unvalidated.** GitHub rejected the immutable-SHA workflow dispatch with HTTP 422; no run was created. This is not a test failure or pass. Remaining qualification: `TODO.md`; policy: `docs/testing.md`.
+**Fresh-runner reuse verified:** [PR 125 E2E](https://github.com/schani/pi-orb/actions/runs/38827483517) cached npm/patch and offline PTY on all four fresh readers, with matching action/load/setup image IDs (`4a2bd6…fa2f46`) and no exports. [Main E2E](https://github.com/schani/pi-orb/actions/runs/38833867380) reused both layers on all four shards; only shard 1 exported. Receipts: `.context/pr125-merge/{cache-review.json,main-receipt.json}`. No historical stall-cause fix is claimed.
 
 ## First failures and corrections
 
@@ -33,6 +33,8 @@ Local originals below are `.context/` paths, not durable download links. Committ
 | `test-infra-after-fix.log` | Changed-test retry: Node 90/92; two preparation-signal fixtures missed `ready`. Python/native phases not reached. Port ownership established harness collision, not broken signal cleanup. |
 | `test-infra-isolated.{log,exit,envproof}` | One authorized replay after verified port release passed all 285 infrastructure tests, with no implementation/test change from the collision. |
 | `.context/e2e-first/full.log` | Parent-authorized cancellation after hosted qualification: exit 130 after 3541s at 2:48 PM PDT, no local failure observed. Partial local E2E is not a full pass; `cancellation.json` and process/port snapshots retain the receipt. |
+
+Head `94ae9a71`: [Durable 38841534575](https://github.com/schani/pi-orb/actions/runs/38841534575) failed WebKit’s initial image assertion before collapse. Invalid fixture IDAT CRC repaired with deterministic RED/GREEN; both browsers’ assertions unchanged. Old local WebKit also passed: historical decoder path unproven. Evidence: `.context/cp-sdk-packaging/pr127-refreshed/asset-fix/`.
 
 ### PGlite setup budget
 

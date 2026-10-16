@@ -50,6 +50,7 @@ COPY apps/control-plane/src apps/control-plane/src
 COPY apps/orb-runtime/src apps/orb-runtime/src
 COPY apps/orb-runtime/skills apps/orb-runtime/skills
 COPY --from=web-build /app/apps/web/dist apps/web/dist
+RUN node --input-type=module -e "await import('./apps/control-plane/src/adapters/spawn-models.ts')"
 
 ENV PI_ORB_WEB_DIST=/app/apps/web/dist
 EXPOSE 8080
