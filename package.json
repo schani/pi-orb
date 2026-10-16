@@ -30,8 +30,10 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.4",
     "@playwright/test": "1.63.0",
+    "@types/node": "24.19.2",
     "typescript": "7.0.2",
-    "vitest": "4.1.11"
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
   },
   "allowScripts": {
     "node-pty@1.1.0": true

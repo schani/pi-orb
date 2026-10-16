@@ -23,6 +23,20 @@ const helperPath = "scripts/apply-dependency-patches.mjs";
 const patchPath = `patches/@earendil-works+pi-coding-agent+${piVersion}.patch`;
 
 describe("Pi dependency patch installation", () => {
+  it("ships only active vendor archives", () => {
+    expect(readdirSync(join(root, "vendor")).sort()).toEqual([
+      "gotgenes-pi-subagents-21.7.0-orb.8.tgz",
+    ]);
+  });
+
+  it("uses Iron's bundled declarations", () => {
+    expect(
+      json("apps/control-plane/package.json").devDependencies?.["@types/hapi__iron"],
+    ).toBeUndefined();
+    const lock = JSON.parse(read("package-lock.json")) as { packages: Record<string, unknown> };
+    expect(lock.packages["node_modules/@types/hapi__iron"]).toBeUndefined();
+  });
+
   it("pins the patched SDK without vulnerable patch tooling in every installing workspace", () => {
     expect(json("package.json").devDependencies?.["patch-package"]).toBeUndefined();
     for (const manifest of ["apps/orb-runtime/package.json", "apps/control-plane/package.json"]) {

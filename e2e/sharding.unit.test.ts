@@ -10,7 +10,7 @@ const workflow = (name: string) =>
 it("uses the same declared Node and OS versions for CI, E2E and Deploy", () => {
   for (const name of ["ci", "e2e", "deploy"]) {
     expect(workflow(name)).toContain("runs-on: ubuntu-24.04");
-    expect(workflow(name)).toContain("node-version: '24.6.0'");
+    expect(workflow(name)).toContain("node-version: '24.22.0'");
   }
 });
 
@@ -84,7 +84,7 @@ it("keeps manual diagnostics distinct from required E2E checks", () => {
 });
 
 it("the actual Vitest sequencer partitions every E2E file exactly once across four shards", async () => {
-  const ctx = await createVitest("test", {
+  const ctx = await createVitest({
     root,
     config: resolve(root, "e2e/vitest.config.ts"),
     watch: false,

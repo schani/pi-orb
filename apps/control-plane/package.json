@@ -40,7 +40,6 @@
     "zod": "4.5.4"
   },
   "devDependencies": {
-    "@types/hapi__iron": "^5.1.0",
     "@types/pg": "^8.11.0",
     "@types/ws": "^8.5.0"
   }

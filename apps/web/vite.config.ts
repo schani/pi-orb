@@ -3,6 +3,7 @@ import { defineConfig } from "vite";
 import { mockBackendPlugin } from "./dev/mock-backend.ts";
 
 export default defineConfig(({ mode }) => ({
+  build: { target: ["chrome107", "edge107", "firefox104", "safari16"] },
   plugins: [
     react(),
     ...(mode === "frontend"
