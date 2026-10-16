@@ -9,7 +9,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 
-function reply(response, turn, withSubagent) {
+function reply(response, turn, withSubagent, withWorkflow) {
   response.writeHead(200, {
     "content-type": "text/event-stream",
     "cache-control": "no-cache",
@@ -28,13 +28,13 @@ function reply(response, turn, withSubagent) {
       usage: { input_tokens: 16, output_tokens: 0 },
     },
   });
-  if (withSubagent && turn === 1) {
+  if ((withSubagent || withWorkflow) && turn === 1) {
     emit("content_block_start", {
       index: 0,
       content_block: {
         type: "tool_use",
         id: "toolu_contract_agent",
-        name: "Agent",
+        name: withWorkflow ? "Workflow" : "Agent",
         input: {},
       },
     });
@@ -42,14 +42,21 @@ function reply(response, turn, withSubagent) {
       index: 0,
       delta: {
         type: "input_json_delta",
-        partial_json: JSON.stringify({
-          subagent_type: "contract-child",
-          prompt: "Run the fixed Bash contract marker, then finish.",
-          description: "Native contract child",
-        }),
+        partial_json: JSON.stringify(
+          withWorkflow
+            ? {
+                script:
+                  'export const meta = { name: "ownership-probe", description: "Fixed child ownership probe", phases: [] };\nreturn await agent("Return the fixed workflow child marker.");',
+              }
+            : {
+                subagent_type: "contract-child",
+                prompt: "Run the fixed Bash contract marker, then finish.",
+                description: "Native contract child",
+              },
+        ),
       },
     });
-  } else if (turn === (withSubagent ? 2 : 1)) {
+  } else if (!withWorkflow && turn === (withSubagent ? 2 : 1)) {
     emit("content_block_start", {
       index: 0,
       content_block: {
@@ -106,11 +113,14 @@ async function files(dir) {
 /** Only dummy API credentials, isolated native configuration, and a loopback endpoint. */
 export async function probeNativeSdk({
   withSubagent = false,
+  withWorkflow = false,
   withCompact = false,
   compactInstructions = "",
   cancelAt,
   withRestart,
   onRoot,
+  beforeQuery,
+  onMessage,
   env: extraEnv = {},
   allowPorts = [],
 } = {}) {
@@ -166,7 +176,7 @@ export async function probeNativeSdk({
             return;
           }
         }
-        reply(response, requestCount, withSubagent);
+        reply(response, requestCount, withSubagent, withWorkflow);
       });
     } else if (request.url?.split("?")[0] === "/v1/messages/count_tokens") {
       response.writeHead(200, { "content-type": "application/json" });
@@ -195,6 +205,7 @@ export async function probeNativeSdk({
     DISABLE_TELEMETRY: "1",
     DISABLE_ERROR_REPORTING: "1",
     ...(withSubagent ? { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1" } : {}),
+    ...(withWorkflow ? { CLAUDE_CODE_WORKFLOWS: "1" } : {}),
     ...extraEnv,
   };
   const sessionId = randomUUID();
@@ -293,7 +304,7 @@ export async function probeNativeSdk({
       env,
       sessionId,
       settingSources: [],
-      tools: withSubagent ? ["Bash", "Agent"] : ["Bash"],
+      tools: withWorkflow ? ["Workflow"] : withSubagent ? ["Bash", "Agent"] : ["Bash"],
       plugins: [],
       ...(cancelAt === "before-dispatch" || cancelAt === "queued"
         ? {
@@ -357,6 +368,7 @@ export async function probeNativeSdk({
         return child;
       },
     };
+    await beforeQuery?.(options);
     sdk = query({ prompt: input, options });
     interrupt = async () => {
       cancelled = true;
@@ -389,7 +401,21 @@ export async function probeNativeSdk({
         },
       };
     }
+    let workflowCompleted = false;
     for await (const message of sdk) {
+      await onMessage?.(message);
+      if (
+        message.type === "system" &&
+        message.subtype === "task_notification" &&
+        message.status === "completed"
+      )
+        workflowCompleted = true;
+      if (
+        withWorkflow &&
+        message.type === "result" &&
+        (!workflowCompleted || message.num_turns === 0 || message.stop_reason !== "end_turn")
+      )
+        continue;
       messages.push(message);
       if (message.type !== "result") continue;
       if (withCompact && preCompactSource === undefined) {

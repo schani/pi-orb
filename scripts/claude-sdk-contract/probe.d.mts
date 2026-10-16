@@ -1,3 +1,5 @@
+import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+
 export interface Shape {
   type: string;
   subtype?: string;
@@ -79,6 +81,9 @@ export interface NativeProbeResult extends NativeCancellationResult {
 }
 export interface NativeProbeOptions {
   withSubagent?: boolean;
+  withWorkflow?: boolean;
+  beforeQuery?: (options: Options) => void | Promise<void>;
+  onMessage?: (message: SDKMessage) => void | Promise<void>;
   /** Merged over the probe's isolated native environment. */
   env?: Record<string, string>;
   /** Loopback ports the network guard admits besides the fake API. */

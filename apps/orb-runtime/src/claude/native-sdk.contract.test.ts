@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type HistoryRecord, projectDisplayRecord } from "@pi-orb/protocol";
 import { expect, it } from "vitest";
@@ -591,3 +591,54 @@ nativeIt(
   },
   30_000,
 );
+
+nativeIt("a genuine Workflow result retires its production-admitted child", async () => {
+  const f = new ComposedClaudeFixture();
+  const admissions = new Set<string>();
+  try {
+    expect((await f.attach()).isOk()).toBe(true);
+    expect(
+      (await f.agent.submitMessage([{ type: "text", text: "hello" }], "operation")).isOk(),
+    ).toBe(true);
+    const hooks = f.query.options.hooks;
+    if (!hooks) throw new Error("Production hooks missing.");
+    expect(hooks.SubagentStart).toHaveLength(1);
+    const native = await probeNativeSdk({
+      withWorkflow: true,
+      beforeQuery: (options) => {
+        const config = options.env?.["CLAUDE_CONFIG_DIR"];
+        if (!config || !options.cwd || !options.sessionId) throw new Error("Native paths missing.");
+        const project = join(config, "projects", options.cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+        symlinkSync(join(project, options.sessionId), join(f.nativeDir, f.state.id));
+        symlinkSync(join(project, `${options.sessionId}.jsonl`), f.nativePath);
+        options.hooks = hooks;
+      },
+      onMessage: async (message) => {
+        for (const id of Object.keys(f.journal().ownedChildren ?? {})) admissions.add(id);
+        expect(await f.query.emitUnscheduled(message)).toBe(true);
+      },
+      onRoot: () => {
+        expect(f.agent.replicationSnapshot().isOk()).toBe(true);
+        expect(admissions.size).toBe(1);
+        const proofs = f.history.view.filter(
+          (r) => r.type === "event" && r.eventType === "claude.workflow_child_terminal",
+        );
+        expect(proofs).toHaveLength(1);
+        expect(proofs[0]).toMatchObject({
+          overflow: {
+            agentId: [...admissions][0],
+            sessionId: f.state.id,
+            operationId: "operation",
+          },
+        });
+        expect(f.journal().ownedChildren).toEqual({});
+      },
+    });
+    expect(native.result).toEqual({ subtype: "success", isError: false });
+  } finally {
+    f.query.exit();
+    f.query.endOutput();
+    await f.agent.closeExtensions();
+    f.dispose();
+  }
+});
