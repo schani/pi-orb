@@ -10,6 +10,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 - **Qualify PR 122 fresh-runner cache hit** (2026-10-15; `docs/postmortems/2026-10-15-runtime-dependency-qualification.md`). Inspect the next normal E2E run for trusted layer reuse; main export is verified.
 
+- **Explain the unreplicated final tail before target recovery** (2026-10-15; `docs/postmortems/2026-10-15-claude-delivery-uncertain-c9a30a6d.md`). The approved consumed-steering receipt correction is implemented locally with append-only proof events and no replay. Why this orb's replica stopped before its retained final reply/result remains unknown. Preserve the failed orb/disk; target restart/reconciliation and deployment remain unauthorized.
+
 - **Diagnose identity-smoke cleanup before release validation** (2026-10-14; `docs/postmortems/2026-10-14-identity-smoke-cleanup.md`). Preserve Deploy 38596107385's failed identity gate; owned fixtures are now verified absent, but its original auth/transport/rejection cause is unknown. Correct premature success and silent DELETE failure diagnostics with token-safe phase/exit/HTTP/code evidence and tests-first coverage. Deferred candidate `43f059be` rejects successful array responses and is not approved for merge. Any later validation requires an explicit decision; no rerun or historical waiver is implied.
 
 - **Validate transcript target UUIDs before store lookup** (2026-10-13; `docs/postmortems/2026-10-13-rollout-monitor-anomalies.md`). Return a typed client-visible invalid-target response, not PostgreSQL 22P02 → internal 500. Test the HTTP boundary with real PostgreSQL; retain content-free route/error correlation for unexpected lookup failures.

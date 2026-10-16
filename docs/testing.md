@@ -1180,3 +1180,9 @@ The first vertical slice should demonstrate:
 11. Deterministically simulate temporary runtime/database failures, repeated pulls, worker crashes, concurrent pollers, and shutdown races, asserting idempotent and gap-free persistence.
 
 “Deterministically simulate failures” means testing the replication state machine with `determined`: for example, a database transaction fails, so the stored cursor must remain unchanged and the next poll must safely return and commit the same stable record IDs. It does not mean injecting failures into the manual browser demo itself.
+
+## Consumed Claude steering receipts (2026-10-15; local, undeployed)
+
+Focused coverage checks indexed-root backfill/immutability, proof exclusions/conflicts, atomic commit and original-position boot authority. The held-MCP native regression passes its actual root through production `ClaudeHistory` with saved provenance. Existing steering, DST and restore checks remain unchanged. First-failure evidence is retained in `/workspace/evidence/claude-input-receipt/`; earlier qualification does not qualify a changed head.
+
+**Recorded CI crash; investigation waived (user-approved 2026-10-15, America/Los_Angeles):** PR 124 head `d56f89b1`, [run 38823555927, shard 3/4](https://github.com/schani/pi-orb/actions/runs/38823555927/job/116725597504), exited 139 at 2026-10-15 16:33:03 PDT after both reported browser cases passed. Crashing component/cause is unproven; no stack, PID or core was supplied. All 19 uploaded DST traces match committed historical traces; no new DST trace identifies this crash. Logs/artifacts and comparison remain in `ci-first-failure/` under the evidence directory. The user explicitly approved waiving investigation of this recorded crash for PR 124; no cause or fix is claimed. Fresh exact-head qualification and investigation of any new failure remain mandatory; a passing rerun alone clears neither. No deployment, recovery or target mutation is authorized.
