@@ -8,7 +8,7 @@ Deploy [38800758118](https://github.com/schani/pi-orb/actions/runs/38800758118) 
 
 ## Qualification receipts
 
-Main `96ef6af9`: [Deploy 38834054839](https://github.com/schani/pi-orb/actions/runs/38834054839) failed October 15, 6:51 PM PDT. Schema passed; apply failed when candidate `00058-lh8` hit `ERR_MODULE_NOT_FOUND`: control-plane `adapters/spawn-models.ts` imported undeclared `@anthropic-ai/claude-agent-sdk`. Release: `applied-but-unvalidated`; monitor never ran. Previous revision `00057-gqf` retained 100% traffic, health 200. Evidence: `.context/deploy-38834054839/{receipt.json,startup-diagnostic/}`, [release artifact](https://github.com/schani/pi-orb/actions/runs/38834054839/artifacts/12019477735). Packaging correction awaits exact-head qualification and user review.
+Main `96ef6af9`: [Deploy 38834054839](https://github.com/schani/pi-orb/actions/runs/38834054839) failed October 15, 6:51 PM PDT. Schema passed; apply failed when candidate `00058-lh8` hit `ERR_MODULE_NOT_FOUND`: control-plane `adapters/spawn-models.ts` imported undeclared `@anthropic-ai/claude-agent-sdk`. Release: `applied-but-unvalidated`; monitor never ran. Previous revision `00057-gqf` retained 100% traffic, health 200. Evidence: `.context/deploy-38834054839/{receipt.json,startup-diagnostic/}`, [release artifact](https://github.com/schani/pi-orb/actions/runs/38834054839/artifacts/12019477735). [PR 127](https://github.com/schani/pi-orb/pull/127) declares SDK/zod dependencies and checks the actual adapter import in the isolated image.
 
 | Source | Evidence / boundary |
 |---|---|
@@ -33,6 +33,8 @@ Local originals below are `.context/` paths, not durable download links. Committ
 | `test-infra-after-fix.log` | Changed-test retry: Node 90/92; two preparation-signal fixtures missed `ready`. Python/native phases not reached. Port ownership established harness collision, not broken signal cleanup. |
 | `test-infra-isolated.{log,exit,envproof}` | One authorized replay after verified port release passed all 285 infrastructure tests, with no implementation/test change from the collision. |
 | `.context/e2e-first/full.log` | Parent-authorized cancellation after hosted qualification: exit 130 after 3541s at 2:48 PM PDT, no local failure observed. Partial local E2E is not a full pass; `cancellation.json` and process/port snapshots retain the receipt. |
+
+Head `94ae9a71`: [Durable 38841534575](https://github.com/schani/pi-orb/actions/runs/38841534575) failed WebKit’s initial image assertion before collapse. Invalid fixture IDAT CRC repaired with deterministic RED/GREEN; both browsers’ assertions unchanged. Old local WebKit also passed: historical decoder path unproven. Evidence: `.context/cp-sdk-packaging/pr127-refreshed/asset-fix/`.
 
 ### PGlite setup budget
 

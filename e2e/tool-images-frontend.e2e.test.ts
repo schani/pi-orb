@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { crc32 } from "node:zlib";
 import type { HistoryRecord } from "@pi-orb/protocol";
 import { type Browser, chromium, expect as expectPage, type Page, webkit } from "@playwright/test";
 import { createServer, type ViteDevServer } from "vite";
@@ -12,6 +13,18 @@ import { projectFixtureHistory } from "./testkit/projected-history.ts";
 
 const WEB_ROOT = join(import.meta.dirname, "../apps/web");
 const ORB_ID = "frontend-fixture-orb";
+const COLLAPSE_IMAGE =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
+
+it("collapse PNG fixture has valid chunk checksums", () => {
+  const png = Buffer.from(COLLAPSE_IMAGE, "base64");
+  for (let offset = 8; offset < png.length; ) {
+    const end = offset + 8 + png.readUInt32BE(offset);
+    const type = png.toString("ascii", offset + 4, offset + 8);
+    expectPage(png.readUInt32BE(end), `${type} CRC`).toBe(crc32(png.subarray(offset + 4, end)));
+    offset = end + 4;
+  }
+});
 
 function imageActivity(page: Page, text: string) {
   return page.locator("details.tool-image-activity").filter({ hasText: text });
@@ -225,7 +238,7 @@ describe.each(["chromium", "webkit"] as const)("tool-returned image previews · 
     await page.addInitScript(`(() => {
       const events = [];
       Reflect.set(globalThis, "__imageCollapseEvents", events);
-      for (const type of ["pointerdown", "pointerup", "click", "toggle"])
+      for (const type of ["pointerdown", "pointerup", "click", "toggle", "load", "error"])
         document.addEventListener(
           type,
           (event) => {
@@ -279,7 +292,7 @@ describe.each(["chromium", "webkit"] as const)("tool-returned image previews · 
               {
                 type: "image",
                 mediaType: "image/png",
-                data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jD1sAAAAASUVORK5CYII=",
+                data: COLLAPSE_IMAGE,
               },
             ],
           },
@@ -299,6 +312,12 @@ describe.each(["chromium", "webkit"] as const)("tool-returned image previews · 
     let releaseImage!: () => void;
     const imageGate = new Promise<void>((resolve) => {
       releaseImage = resolve;
+    });
+    let imageResponse: { status: number; path: string } | undefined;
+    page.on("response", (response) => {
+      const path = new URL(response.url()).pathname;
+      if (path.includes(`/orbs/${ORB_ID}/images/`))
+        imageResponse = { status: response.status(), path };
     });
     const imageRequested = page.waitForRequest((request) =>
       new URL(request.url()).pathname.includes(`/orbs/${ORB_ID}/images/`),
@@ -374,6 +393,10 @@ describe.each(["chromium", "webkit"] as const)("tool-returned image previews · 
       const evidence = await page
         .evaluate(`({
           events: Reflect.get(globalThis, "__imageCollapseEvents"),
+          images: [...document.querySelectorAll("details.tool-image-activity img")].map(image => ({
+            complete: image.complete, naturalWidth: image.naturalWidth,
+          })),
+          failed: document.body.textContent.includes("image failed to load"),
           drawers: [...document.querySelectorAll("details.tool-image-activity")].map(element => ({
             open: element.hasAttribute("open"), connected: element.isConnected,
           })),
@@ -382,7 +405,7 @@ describe.each(["chromium", "webkit"] as const)("tool-returned image previews · 
       await mkdir("test-failures", { recursive: true });
       await writeFile(
         `test-failures/image-collapse-${engine}-${Date.now()}.json`,
-        JSON.stringify({ replayable: false, engine, refreshed, evidence }, null, 2),
+        JSON.stringify({ replayable: false, engine, refreshed, imageResponse, evidence }, null, 2),
       );
       throw error;
     } finally {
