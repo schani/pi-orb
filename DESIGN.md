@@ -149,6 +149,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-16-frontend-focus-geometry.md](docs/postmortems/2026-10-16-frontend-focus-geometry.md) — settled-geometry focus readiness; controlled barrier correction and lost first-failure assertion limits
 - [docs/postmortems/2026-10-15-runtime-dependency-qualification.md](docs/postmortems/2026-10-15-runtime-dependency-qualification.md) — runtime cache cold-build evidence; local setup blocker, fixed-port collision and unvalidated main reuse
 - [docs/postmortems/2026-10-15-claude-delivery-uncertain-c9a30a6d.md](docs/postmortems/2026-10-15-claude-delivery-uncertain-c9a30a6d.md) — consumed mid-turn steering loses receipt identity during normalization; read-only disk proof
 - [docs/postmortems/2026-10-15-control-plane-node-headers.md](docs/postmortems/2026-10-15-control-plane-node-headers.md) — offline PTY rebuild avoids npm-bundled Undici header-download assertion

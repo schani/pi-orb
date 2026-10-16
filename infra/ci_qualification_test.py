@@ -9,13 +9,22 @@ from unittest.mock import patch
 from infra.ci_qualification import EXPECTED, REPOSITORY, GitHub, Result, inspect, wait, valid_evidence, main
 
 SHA = 'a' * 40
+REQUIRED = {
+    'ci.yml': ('CI', ('checks', 'control-plane-image',
+                      'Unit/DST (1/4)', 'Unit/DST (2/4)', 'Unit/DST (3/4)', 'Unit/DST (4/4)')),
+    'e2e.yml': ('E2E', ('E2E (1/4)', 'E2E (2/4)', 'E2E (3/4)', 'E2E (4/4)',
+                       'Frontend (1/4)', 'Frontend (2/4)', 'Frontend (3/4)', 'Frontend (4/4)')),
+    'durable-qualification.yml': ('Durable qualification',
+                                ('Central process (1/4)', 'Central process (2/4)',
+                                 'Central process (3/4)', 'Central process (4/4)')),
+}
 
 
 class FakeAPI:
     def __init__(self):
         self.runs = {}
         self.jobs = {}
-        for index, (path, (name, names)) in enumerate(EXPECTED.items(), 1):
+        for index, (path, (name, names)) in enumerate(REQUIRED.items(), 1):
             self.runs[path] = [{'id': index, 'workflow_id': index + 10, 'name': name,
                                 'path': '.github/workflows/' + path, 'event': 'push',
                                 'head_branch': 'main', 'head_sha': SHA, 'run_attempt': 1,
@@ -35,28 +44,32 @@ class FakeAPI:
 
 
 class QualificationTest(unittest.TestCase):
-    def two_job_ci(self):
-        api = FakeAPI()
-        # Independent of EXPECTED: CI 37636936479 had both successful jobs.
-        api.jobs[1] = [{'id': 100 + n, 'name': name, 'run_id': 1,
-                        'run_attempt': 1, 'head_sha': SHA,
-                        'status': 'completed', 'conclusion': 'success'}
-                       for n, name in enumerate(('checks', 'control-plane-image'))]
-        return api
+    def test_exact_job_inventory(self):
+        self.assertEqual(EXPECTED, REQUIRED)
 
-    def test_successful_two_job_ci_run_qualifies(self):
-        result = inspect(self.two_job_ci(), SHA)
+    def test_successful_sharded_ci_run_qualifies(self):
+        result = inspect(FakeAPI(), SHA)
         self.assertIsNone(result.error)
         self.assertTrue(valid_evidence(result.value, SHA))
         self.assertEqual([job['name'] for job in result.value['runs'][0]['jobs']],
-                         ['checks', 'control-plane-image'])
+                         sorted(REQUIRED['ci.yml'][1]))
 
-    def test_ci_workflow_jobs_match_qualification_inventory(self):
-        workflow = Path('.github/workflows/ci.yml').read_text().split('\njobs:\n', 1)[1]
-        job_ids = re.findall(r'^  ([\w-]+):$', workflow, re.MULTILINE)
-        self.assertCountEqual(job_ids, EXPECTED['ci.yml'][1])
-        # CI uses default job names; explicit display names would change the API contract.
-        self.assertNotRegex(workflow, r'(?m)^    name:')
+    def test_workflow_jobs_match_qualification_inventory(self):
+        diagnostic = "${{ github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic && ' diagnostic' || '' }}"
+        for path, (_, names) in REQUIRED.items():
+            with self.subTest(workflow=path):
+                workflow = Path('.github/workflows/' + path).read_text().split('\njobs:\n', 1)[1]
+                jobs = re.findall(r'^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)', workflow, re.M | re.S)
+                rendered = []
+                for job_id, body in jobs:
+                    display = re.search(r'^    name: (.+)$', body, re.M)
+                    name = display.group(1).replace(diagnostic, '') if display else job_id
+                    if '${{ matrix.shard }}' in name:
+                        self.assertIn('shard: [1, 2, 3, 4]', body)
+                        rendered.extend(name.replace('${{ matrix.shard }}', str(i)) for i in range(1, 5))
+                    else:
+                        rendered.append(name)
+                self.assertCountEqual(rendered, names)
 
     def test_ci_image_job_and_exact_inventory_fail_closed(self):
         for field, values in {
@@ -67,19 +80,19 @@ class QualificationTest(unittest.TestCase):
         }.items():
             for value in values:
                 with self.subTest(field=field, value=value):
-                    api = self.two_job_ci()
+                    api = FakeAPI()
                     api.jobs[1][1][field] = value
                     self.assertIsNotNone(inspect(api, SHA).error)
         for indices in [(0,), (1,), (0, 0), (0, 1, 1)]:
             with self.subTest(indices=indices):
-                api = self.two_job_ci()
+                api = FakeAPI()
                 api.jobs[1] = [api.jobs[1][i] for i in indices]
                 self.assertIsNotNone(inspect(api, SHA).error)
 
     def test_ci_jobs_listing_rejects_incomplete_page(self):
         api = GitHub('secret')
         with patch.object(api, 'get', return_value=Result(
-                {'total_count': 2, 'jobs': self.two_job_ci().jobs[1][:1]})):
+                {'total_count': len(REQUIRED['ci.yml'][1]), 'jobs': FakeAPI().jobs[1][:1]})):
             self.assertIsNotNone(api.list_jobs(1).error)
 
     def test_every_required_workflow_runs_on_exact_main_push(self):
@@ -89,21 +102,40 @@ class QualificationTest(unittest.TestCase):
                 self.assertRegex(source, r'(?m)^  push:\n    branches:\n      - main$')
         source = Path('.github/workflows/durable-qualification.yml').read_text()
         self.assertIn('  workflow_dispatch:', source)
-        self.assertIn('  control-plane-image:', source)
+        self.assertNotIn('  control-plane-image:', source)
         self.assertIn('name: Central process (${{ matrix.shard }}/4)', source)
         self.assertIn('shard: [1, 2, 3, 4]', source)
 
-    def test_missing_central_image_cannot_be_substituted_by_ci_image(self):
+    def test_every_required_job_fails_closed(self):
+        for run_id, (_, (_, names)) in enumerate(REQUIRED.items(), 1):
+            for index, name in enumerate(names):
+                for mutation in ('missing', 'duplicate', 'foreign', 'failed', 'rerun', 'wrong_sha'):
+                    with self.subTest(job=name, mutation=mutation):
+                        api = FakeAPI()
+                        jobs = api.jobs[run_id]
+                        if mutation == 'missing':
+                            jobs.pop(index)
+                        elif mutation == 'duplicate':
+                            jobs[index] = jobs[(index + 1) % len(jobs)]
+                        else:
+                            key, value = {
+                                'foreign': ('name', name + ' diagnostic'),
+                                'failed': ('conclusion', 'failure'),
+                                'rerun': ('run_attempt', 2),
+                                'wrong_sha': ('head_sha', 'b' * 40),
+                            }[mutation]
+                            jobs[index][key] = value
+                        self.assertIsNotNone(inspect(api, SHA).error)
+
+    def test_single_control_plane_image_proof_is_required_in_ci(self):
         api = FakeAPI()
-        central_run = api.runs['durable-qualification.yml'][0]['id']
-        api.jobs[central_run] = [job for job in api.jobs[central_run]
-                                 if job['name'] != 'control-plane-image']
+        api.jobs[1] = [job for job in api.jobs[1] if job['name'] != 'control-plane-image']
+        self.assertIsNotNone(inspect(api, SHA).error)
+        api = FakeAPI()
+        api.jobs[3].append({**api.jobs[1][1], 'run_id': 3})
         self.assertIsNotNone(inspect(api, SHA).error)
 
     def test_central_qualification_is_required_for_production(self):
-        self.assertEqual(EXPECTED.get('durable-qualification.yml'),
-                         ('Durable qualification', ('control-plane-image',
-                          *(f'Central process ({i}/4)' for i in range(1, 5)))))
         api = FakeAPI()
         api.runs['durable-qualification.yml'] = []
         self.assertEqual(inspect(api, SHA).error.kind, 'pending')
@@ -113,7 +145,7 @@ class QualificationTest(unittest.TestCase):
         self.assertIsNone(result.error)
         self.assertTrue(valid_evidence(result.value, SHA))
         self.assertEqual(len(result.value['runs']), 3)
-        self.assertEqual(len(result.value['runs'][1]['jobs']), 4)
+        self.assertEqual([len(run['jobs']) for run in result.value['runs']], [6, 8, 4])
         self.assertFalse(valid_evidence({**result.value, 'token': 'secret'}, SHA))
         self.assertFalse(valid_evidence(result.value, 'b' * 40))
 
@@ -129,10 +161,14 @@ class QualificationTest(unittest.TestCase):
                 api.runs['ci.yml'][0][key] = value
                 self.assertIsNotNone(inspect(api, SHA).error)
 
-    def test_dispatch_e2e_never_qualifies_even_with_four_successful_jobs(self):
-        api = FakeAPI()
-        api.runs['e2e.yml'][0]['event'] = 'workflow_dispatch'
-        self.assertIsNotNone(inspect(api, SHA).error)
+    def test_manual_and_rerun_workflows_never_qualify(self):
+        for path in REQUIRED:
+            for field, value in [('event', 'workflow_dispatch'), ('run_attempt', 2),
+                                 ('conclusion', 'failure')]:
+                with self.subTest(workflow=path, field=field):
+                    api = FakeAPI()
+                    api.runs[path][0][field] = value
+                    self.assertIsNotNone(inspect(api, SHA).error)
         evidence = inspect(FakeAPI(), SHA).value
         self.assertFalse(valid_evidence({**evidence, 'event': 'workflow_dispatch'}, SHA))
 

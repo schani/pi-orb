@@ -110,16 +110,19 @@ class RunnerAptTests(unittest.TestCase):
     def test_workflows_prepare_mirror_before_first_apt_operation(self):
         command = ('sudo python3 infra/runner_apt.py /etc/apt/sources.list.d/ubuntu.sources '
                    '/etc/apt/apt.conf.d/' + CONFIG_NAME)
-        for workflow, job in [('ci', 'checks'), ('e2e', 'e2e'), ('deploy', 'release')]:
-            with self.subTest(workflow=workflow):
+        for workflow, job, count in [('ci', 'checks', 2), ('ci', 'unit', 2),
+                                     ('e2e', 'e2e', 2), ('e2e', 'frontend', 2),
+                                     ('durable-qualification', 'process', 1), ('deploy', 'release', 1)]:
+            with self.subTest(workflow=workflow, job=job):
                 text = (ROOT / f'.github/workflows/{workflow}.yml').read_text()
                 jobs = dict(re.findall(r'^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)',
                                        text.split('\njobs:\n', 1)[1], re.M | re.S))
                 self.assertIn('runs-on: ubuntu-24.04', jobs[job])
-                self.assertEqual(text.count(command), 1)
+                self.assertEqual(text.count(command), count)
+                self.assertEqual(jobs[job].count(command), 1)
                 self.assertLess(jobs[job].index(command), jobs[job].index('sudo apt-get'))
-        e2e = (ROOT / '.github/workflows/e2e.yml').read_text()
-        self.assertLess(e2e.index(command), e2e.index('npm run test:e2e:install'))
+                if 'npm run test:e2e:install' in jobs[job]:
+                    self.assertLess(jobs[job].index(command), jobs[job].index('npm run test:e2e:install'))
         ci = (ROOT / '.github/workflows/ci.yml').read_text()
         image_job = ci.split('  control-plane-image:\n', 1)[1].split('\n  checks:', 1)[0]
         self.assertNotIn('runner_apt.py', image_job)

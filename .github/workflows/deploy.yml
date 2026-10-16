@@ -125,6 +125,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PI_ORB_CI_QUALIFICATION: ${{ needs.qualify.outputs.evidence }}
           PI_ORB_RELEASE_RESULT_DIR: ${{ runner.temp }}/release-result
+          PI_ORB_ROLLOUT_MONITOR_BASELINE: ${{ inputs.validate_release == '' && format('{0}/rollout-baseline.json', runner.temp) || '' }}
+          PI_ORB_ROLLOUT_MONITOR_OUTPUT: ${{ runner.temp }}/rollout-monitor.json
           PI_ORB_USER_ID: ${{ vars.PI_ORB_USER_ID }}
         run: |
           set -euo pipefail
@@ -133,12 +135,11 @@ jobs:
           if [ "$FIRST_CONSOLIDATION" = true ]; then args+=(--first-consolidation); fi
           exec ./infra/release.sh "${args[@]}"
 
-      - name: Observe central rollout independently for fifteen minutes
+      - name: Verify completed rollout independently after lock cleanup
         if: inputs.validate_release == ''
-        timeout-minutes: 25
         env:
           PI_ORB_USER_ID: ${{ vars.PI_ORB_USER_ID }}
-        run: python3 -m infra.rollout_monitor "$RUNNER_TEMP/release-result/release.json" "$RUNNER_TEMP/rollout-monitor.json" "$RUNNER_TEMP/rollout-baseline.json"
+        run: python3 -m infra.rollout_monitor --verify "$RUNNER_TEMP/release-result/release.json" "$RUNNER_TEMP/rollout-monitor.json"
       - name: Upload rollout monitor
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
