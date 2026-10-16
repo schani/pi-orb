@@ -108,7 +108,7 @@ it.each([
         },
         { once: true },
       );
-      (
+      const initial = (
         await agent.deliver({
           baseUrl: "central",
           messageId: randomUUID(),
@@ -283,8 +283,17 @@ it.each([
         ...(system ? { system } : {}),
       };
       if (kind !== "peer-held") {
+        const submit = vi.spyOn(Reflect.get(agent, "root") as Conversation, "submit");
         const admission = await agent.deliver(request);
-        expect(admission._unsafeUnwrap()).toMatchObject({ delivery: "steer", duplicate: false });
+        expect(submit).toHaveBeenCalledWith(
+          expect.objectContaining({ whenBusy: "steer", requestId: `inbox:${messageId}` }),
+          expect.anything(),
+        );
+        expect(admission._unsafeUnwrap()).toMatchObject({
+          delivery: "steer",
+          operationId: initial.operationId,
+          duplicate: false,
+        });
         expect(await readSubmission(messageId)).toMatchObject({ status: "queued" });
       } else {
         const browser = await agent.request("later-human", {

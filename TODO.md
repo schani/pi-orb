@@ -8,8 +8,6 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Qualify central busy status across rollout handover** (2026-10-16; `docs/postmortems/2026-10-16-peer-input-turn-deferral.md`). New-revision list GETs before `02f4fd87` owner recovery support absent process-local busy state projecting idle as the screenshot's cause; its exact HTTP response is unverified. Correlate serving revision, `OrbView.activity` sample and owner attachment, then test and correct misleading handover status without treating unknown activity as settled work or changing peer deferral.
-
 - **Own direct runtime/build/type dependencies explicitly** (2026-10-16; `docs/dependency-audit.md`). Resolve runtime imports of undeclared Pi AI/agent-core/Chord and native-image/fork build use of hoisted esbuild. Review runtime `ws` and native-image `determined` as dev-only declarations; preserve plugin peers and DST coverage. Qualify isolated package installs/builds and types; do not rely on incidental hoisting.
 
 - **Triage Undici security-release coverage** (2026-10-16; `docs/dependency-audit.md`). Compare direct `7.29.1` and Pi-owned nested `8.10.2` against the fixes in [7.30.1](https://github.com/nodejs/undici/releases/tag/v7.30.1) and [8.12.2](https://github.com/nodejs/undici/releases/tag/v8.12.2); establish reachable-path applicability and qualify remediation at each owning boundary. Applicability is not fully proven; zero npm advisory findings do not clear this finding.
