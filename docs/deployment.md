@@ -251,29 +251,19 @@ In priority order:
    GitHub runners, 16m32s workflow elapsed. The historical serial 35m12s / 407-test
    run is not a controlled same-source benchmark; no isolated speedup is claimed.
    Evidence and shard timings are in `docs/testing.md`.
-2. **Approved: trusted BuildKit layer cache (decided 2026-10-15; PR cold builds qualified, main reuse unvalidated).**
-   Each E2E runner builds the current checkout with pinned Buildx actions, imports
-   GHA scope `e2e-runtime-linux-amd64-v1`, and loads `pi-orb-runtime:dev` locally.
-   Only shard 1 of `push`/`main` exports (`mode=max`); PRs and manual runs import
-   only. GitHub's branch-scoped cache isolation prevents PR-written caches from
-   reaching main qualification. No registry publication or cloud credentials.
-   Setup requires the loaded image ID to match the successful build action's
-   exact ID; missing/malformed/mismatched images fail without a fallback build.
-   Local runs retain their current-tree Docker build. The ten-minute build budget,
-   four isolated serial shards, assertions and full qualification gates remain.
-   Build progress records layer hits/misses; the job summary records source SHA,
-   image ID, scope and writer policy. Automatic build-record artifacts are disabled;
-   credentials, logs and mutable test/release state are not cache inputs. This is
-   layer reuse, not accepted-image reuse. PR 122 code head `1110e7e0` passed
-   first-attempt hosted CI/E2E/Durable: all four cold runtime builds executed the
-   offline PTY smoke, verified exact image IDs and exported no PR cache. Trusted
-   main export and subsequent hits remain unvalidated; no measured speedup or
-   historical-stall fix is claimed. An unexplained local unit setup timeout still
-   blocks qualification; infrastructure passed after eliminating a wrapper port
-   collision. Redundant local full E2E was cancelled/incomplete, not a local pass.
-   Evidence and limits:
-   `docs/testing.md`, `docs/postmortems/2026-10-15-runtime-dependency-qualification.md`.
-   No merge or deployment; later docs commits require their own exact-head gates.
+2. **Approved: trusted BuildKit layer cache (decided 2026-10-15).**
+   Each E2E runner builds its checkout with pinned Buildx actions, imports GHA
+   scope `e2e-runtime-linux-amd64-v1`, and loads `pi-orb-runtime:dev` locally.
+   Only shard 1 of `push`/`main` exports (`mode=max`); PR/manual runs import only.
+   GitHub branch isolation keeps PR-written caches out of main qualification.
+   Setup requires the exact build-action image ID, without fallback; local runs
+   rebuild the current tree. Ten-minute builds, isolated serial shards and all
+   qualification gates remain. This reuses layers, not accepted images.
+   Build progress retains layer hits/misses; summaries retain source SHA, image
+   ID, scope and writer policy. Build-record artifacts are disabled. No registry
+   publication or cloud credentials; credentials, logs and mutable state are not
+   cache inputs. Export evidence and unvalidated fresh-runner reuse:
+   `docs/postmortems/2026-10-15-runtime-dependency-qualification.md`.
 3. **Overlap the remote native build with checks.** Native and control-plane
    builds already run together; the additional overlap is with qualification.
    No publication or deployment before all required checks and acceptance pass.
