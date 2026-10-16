@@ -34,7 +34,10 @@ it.skipIf(process.platform !== "linux" || process.arch !== "x64")(
         () => "unexpected-success",
         (error: { stderr: string }) => error.stderr,
       );
-      expect(denied).toContain("Cannot find module 'neverthrow'");
+      expect(denied).toContain(
+        `Cannot read package config ${join(restricted, "package.json")}: permission denied.`,
+      );
+      expect(denied).toContain("code: 'ERR_INVALID_PACKAGE_CONFIG'");
       await asRoot(["chown", `${process.getuid?.() ?? 0}:0`, restricted]);
       const fixture = await materializeClaudeAcceptanceFixture(directory, checkout);
       await asRoot(["chown", "0:0", restricted]);

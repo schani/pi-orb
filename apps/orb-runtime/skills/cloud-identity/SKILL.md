@@ -423,7 +423,7 @@ set -euo pipefail
 # gcloud ships in the pi-orb image; the guard keeps this file correct elsewhere.
 if ! command -v gcloud >/dev/null 2>&1; then
   sudo apt-get update
-  sudo apt-get install -y apt-transport-https ca-certificates gnupg curl
+  sudo apt-get install -y ca-certificates gnupg curl
   curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
     | gpg --dearmor | sudo tee /usr/share/keyrings/cloud.google.gpg >/dev/null
   echo 'deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main' \

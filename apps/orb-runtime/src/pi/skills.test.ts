@@ -246,6 +246,16 @@ describe("baked agent skills", () => {
       }
     });
 
+    it.each([
+      ["repository setup", readFileSync(join(repoRoot, ".agents/setup"), "utf8")],
+      ["skill setup example", hookFences(body, "setup").join("\n")],
+    ])("installs only required gcloud packages in %s", (_name, setup) => {
+      const packages = [...setup.matchAll(/apt-get install -y ([^\n]+)/g)].map((match) =>
+        match[1]?.trim().split(/\s+/),
+      );
+      expect(packages).toEqual([["ca-certificates", "gnupg", "curl"], ["google-cloud-cli"]]);
+    });
+
     it("federates in resume and never in setup", () => {
       // `gcloud auth login --cred-file` needs `pi-orb id-token` on every
       // refresh, and setup has no identity: the split is the whole point of

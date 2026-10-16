@@ -117,7 +117,7 @@ describe("signJwtRS256", () => {
     expect(decodeSegment(payload)).toEqual(CLAIMS);
 
     // No padding characters may appear anywhere.
-    const publicKey = createPublicKey({ key: key.publicJwk as object, format: "jwk" });
+    const publicKey = createPublicKey({ key: { ...key.publicJwk }, format: "jwk" });
     expect(jwt).not.toContain("=");
     expect(
       verify(
@@ -138,7 +138,7 @@ describe("signJwtRS256", () => {
     })._unsafeUnwrap();
     const [header, , signature] = jwt.split(".") as [string, string, string];
     const forged = base64url(JSON.stringify({ ...CLAIMS, orb_id: "orb-someone-else" }));
-    const publicKey = createPublicKey({ key: key.publicJwk as object, format: "jwk" });
+    const publicKey = createPublicKey({ key: { ...key.publicJwk }, format: "jwk" });
     expect(
       verify(
         "sha256",
@@ -162,7 +162,7 @@ describe("signJwtRS256", () => {
       verify(
         "sha256",
         Buffer.from(`${header}.${payload}`, "ascii"),
-        createPublicKey({ key: other.publicJwk as object, format: "jwk" }),
+        createPublicKey({ key: { ...other.publicJwk }, format: "jwk" }),
         Buffer.from(signature, "base64url"),
       ),
     ).toBe(false);
