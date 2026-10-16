@@ -362,3 +362,56 @@ describe("FetchRuntimeClient status contracts", () => {
     });
   });
 });
+
+describe("runtime transport failure evidence", () => {
+  class ClockTask extends NoSimulationTask {
+    now = 100;
+    override monotonicNow() {
+      return this.now;
+    }
+  }
+
+  it("records header failures without request or exception content", async () => {
+    const clock = new ClockTask("headers", false);
+    vi.stubGlobal("fetch", async () => {
+      clock.now += 25;
+      return Promise.reject(withCause("PRIVATE", coded("ECONNREFUSED")));
+    });
+    const result = await new FetchRuntimeClient().pullHistory(
+      clock,
+      { baseUrl: "http://user:PRIVATE@runtime.test/PRIVATE", after: "PRIVATE", limit: 5 },
+      { signal: new AbortController().signal },
+    );
+    expect(result._unsafeUnwrapErr()).toEqual({
+      type: "runtime_client_error",
+      code: "unreachable",
+      retryable: true,
+      answered: false,
+      message:
+        "runtime request failed origin=http://runtime.test phase=headers elapsed_ms=25 http_status=none syscall=ECONNREFUSED aborted=false",
+    });
+  });
+
+  it.each([false, true])("records incomplete body evidence (aborted: %s)", async (aborted) => {
+    const clock = new ClockTask("body", false);
+    const controller = new AbortController();
+    vi.stubGlobal("fetch", async () => ({
+      status: 503,
+      text: async () => {
+        clock.now += 50;
+        if (aborted) controller.abort(new Error("PRIVATE"));
+        return Promise.reject(withCause("PRIVATE", coded("PRIVATE content")));
+      },
+    }));
+    const result = await new FetchRuntimeClient().health(clock, "http://runtime.test", {
+      signal: controller.signal,
+    });
+    expect(result._unsafeUnwrapErr()).toEqual({
+      type: "runtime_client_error",
+      code: aborted ? "cancelled" : "unreachable",
+      retryable: true,
+      answered: false,
+      message: `runtime request failed origin=http://runtime.test phase=body elapsed_ms=50 http_status=503 syscall=unknown aborted=${aborted}`,
+    });
+  });
+});

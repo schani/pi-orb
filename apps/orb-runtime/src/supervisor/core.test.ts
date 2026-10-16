@@ -23,7 +23,11 @@ interface Child {
 
 class FakePorts implements SupervisorPorts<Child> {
   readonly child = { pid: 123 };
-  readonly reports: Array<{ status: "ready" | "failed"; code?: string; details?: object }> = [];
+  readonly reports: Array<{
+    status: "ready" | "failed" | "telemetry";
+    code?: string;
+    details?: object;
+  }> = [];
   readonly forwarded: NodeJS.Signals[] = [];
   healthResults: Array<Result<Health, SupervisorError>> = [ok({ status: "ready" })];
   exit: ChildExit | null = null;
@@ -53,11 +57,17 @@ class FakePorts implements SupervisorPorts<Child> {
     const result = this.healthResults.shift() ?? ok<Health>({ status: "initializing" });
     return result.isOk() ? okAsync(result.value) : errAsync(result.error);
   }
-  sleep(): ResultAsyncType<void, SupervisorError> {
+  sleep(
+    _task?: unknown,
+    _milliseconds?: number,
+    _child?: Child,
+  ): ResultAsyncType<void, SupervisorError> {
     this.sleeps += 1;
+    if (this.reports.some((report) => report.status === "ready") && this.healthResults.length === 0)
+      this.exit = this.waitedExit;
     return okAsync(undefined);
   }
-  report(status: "ready" | "failed", code?: string, details?: object) {
+  report(status: "ready" | "failed" | "telemetry", code?: string, details?: object) {
     this.reports.push({
       status,
       ...(code === undefined ? {} : { code }),
@@ -76,7 +86,14 @@ describe("runtime supervisor", () => {
     ports.waitedExit = { type: "exit", code: 17 };
     const result = await supervise(new NoSimulationTask("supervisor test", false), ports);
     expect(result._unsafeUnwrap()).toEqual({ type: "exit", code: 17 });
-    expect(ports.reports).toEqual([{ status: "ready" }]);
+    expect(ports.reports).toEqual([
+      { status: "ready" },
+      {
+        status: "telemetry",
+        code: "runtime_child_exited",
+        details: expect.objectContaining({ exitCode: 17, lastLocalSuccessAt: expect.any(Number) }),
+      },
+    ]);
   });
 
   it("has no readiness deadline and retries bad or initializing health", async () => {
@@ -88,7 +105,7 @@ describe("runtime supervisor", () => {
     ];
     const result = await supervise(new NoSimulationTask("supervisor test", false), ports);
     expect(result.isOk()).toBe(true);
-    expect(ports.sleeps).toBe(602);
+    expect(ports.sleeps).toBe(603);
   });
 
   it("publishes bounded typed failure and stays alive until the child exits", async () => {
@@ -97,7 +114,14 @@ describe("runtime supervisor", () => {
     ports.waitedExit = { type: "signal", signal: "SIGABRT", number: 6 };
     const result = await supervise(new NoSimulationTask("supervisor test", false), ports);
     expect(result._unsafeUnwrap()).toEqual({ type: "signal", signal: "SIGABRT", number: 6 });
-    expect(ports.reports).toEqual([{ status: "failed", code: "clone_failed" }]);
+    expect(ports.reports).toEqual([
+      { status: "failed", code: "clone_failed" },
+      {
+        status: "telemetry",
+        code: "runtime_child_exited",
+        details: expect.objectContaining({ signal: 6, lastLocalSuccessAt: null }),
+      },
+    ]);
   });
 
   it.each(["ready", "failed"] as const)(
@@ -110,12 +134,23 @@ describe("runtime supervisor", () => {
           : ok({ status: "failed", code: "clone_failed" }),
       ];
       let release: ((exit: ChildExit) => void) | undefined;
-      ports.wait = () =>
-        new ResultAsync(
-          new Promise<Result<ChildExit, SupervisorError>>((resolve) => {
-            release = (exit) => resolve(ok(exit));
-          }),
-        );
+      if (status === "ready")
+        ports.sleep = () =>
+          new ResultAsync(
+            new Promise((resolve) => {
+              release = (exit) => {
+                ports.exit = exit;
+                resolve(ok(undefined));
+              };
+            }),
+          );
+      if (status === "failed")
+        ports.wait = () =>
+          new ResultAsync(
+            new Promise<Result<ChildExit, SupervisorError>>((resolve) => {
+              release = (exit) => resolve(ok(exit));
+            }),
+          );
       let settled = false;
       const running = supervise(new NoSimulationTask("supervisor test", false), ports).then(
         (result) => {
@@ -140,6 +175,11 @@ describe("runtime supervisor", () => {
     expect(result._unsafeUnwrap()).toEqual(exit);
     expect(ports.reports).toEqual([
       { status: "failed", code: "runtime_exited_before_ready", details },
+      {
+        status: "telemetry",
+        code: "runtime_child_exited",
+        details: expect.objectContaining({ ...details, lastLocalSuccessAt: null }),
+      },
     ]);
   });
 
@@ -152,6 +192,11 @@ describe("runtime supervisor", () => {
     await supervise(new NoSimulationTask("supervisor test", false), ports);
     expect(ports.reports).toEqual([
       { status: "failed", code: "runtime_exited_before_ready", details: { exitCode: 7 } },
+      {
+        status: "telemetry",
+        code: "runtime_child_exited",
+        details: expect.objectContaining({ exitCode: 7, lastLocalSuccessAt: null }),
+      },
     ]);
   });
 
@@ -161,6 +206,49 @@ describe("runtime supervisor", () => {
     ports.reportFails = true;
     const result = await supervise(new NoSimulationTask("supervisor test", false), ports);
     expect(result._unsafeUnwrap()).toEqual({ type: "exit", code: 31 });
+  });
+
+  it("probes after ready and logs only failure/recovery edges and exit", async () => {
+    const ports = new FakePorts();
+    ports.healthResults = [
+      ok({ status: "ready", runtimeInstanceId: "runtime-1" }),
+      err({ type: "health_failed", message: "timeout" }),
+      err({ type: "health_failed", message: "timeout again" }),
+      ok({ status: "ready", runtimeInstanceId: "runtime-1" }),
+      ok({ status: "ready", runtimeInstanceId: "runtime-1" }),
+    ];
+    const delays: number[] = [];
+    const sleep = ports.sleep.bind(ports);
+    ports.sleep = (task, milliseconds, child) => {
+      delays.push(milliseconds ?? 0);
+      return sleep(task, milliseconds, child);
+    };
+    await supervise(new NoSimulationTask("supervisor telemetry test", false), ports);
+    expect(ports.reports.map((report) => [report.status, report.code])).toEqual([
+      ["ready", undefined],
+      ["telemetry", "runtime_health_failed"],
+      ["telemetry", "runtime_health_recovered"],
+      ["telemetry", "runtime_child_exited"],
+    ]);
+    expect(delays).toEqual([10_000, 10_000, 10_000, 10_000, 10_000]);
+    for (const report of ports.reports.slice(1))
+      expect(report.details).toMatchObject({
+        runtimeInstanceId: "runtime-1",
+        lastLocalSuccessAt: expect.any(Number),
+      });
+    expect(ports.forwarded).toEqual([]);
+  });
+
+  it("does not turn a post-ready failed health status into a boot failure", async () => {
+    const ports = new FakePorts();
+    ports.healthResults = [
+      ok({ status: "ready" }),
+      ok({ status: "failed", code: "broken" }),
+      ok({ status: "ready" }),
+    ];
+    await supervise(new NoSimulationTask("supervisor telemetry test", false), ports);
+    expect(ports.reports.filter((report) => report.status === "failed")).toEqual([]);
+    expect(ports.reports.map((report) => report.code)).toContain("runtime_health_failed");
   });
 
   it("forwards TERM and INT and checks current child state before every signal", async () => {
@@ -174,5 +262,9 @@ describe("runtime supervisor", () => {
     };
     await supervise(new NoSimulationTask("supervisor test", false), ports);
     expect(ports.forwarded).toEqual(["SIGTERM", "SIGINT"]);
+    expect(ports.reports.at(-1)).toMatchObject({
+      code: "runtime_child_exited",
+      details: { exitCode: 0, requestedStop: true },
+    });
   });
 });

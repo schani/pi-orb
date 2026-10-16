@@ -70,33 +70,39 @@ export function describeFetchError(error: unknown): string {
  */
 export class FetchRuntimeClient implements OrbRuntimeClient {
   private request(
+    task: SimulationTask,
     url: string,
     context: OperationContext,
     init?: Omit<RequestInit, "signal">,
     acceptedStatuses: readonly number[] = [200],
   ): ResultAsync<{ status: number; body: unknown }, RuntimeClientError> {
+    const startedAt = task.monotonicNow();
+    const transportError = (
+      phase: "headers" | "body",
+      error: unknown,
+      status?: number,
+    ): RuntimeClientError => {
+      const code = causeCode(error);
+      const syscall = code !== null && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? code : "unknown";
+      return clientError(
+        context.signal.aborted ? "cancelled" : "unreachable",
+        `runtime request failed origin=${URL.parse(url)?.origin ?? "unknown"} phase=${phase} elapsed_ms=${Math.max(0, Math.round(task.monotonicNow() - startedAt))} http_status=${status ?? "none"} syscall=${syscall} aborted=${context.signal.aborted}`,
+        true,
+        false,
+      );
+    };
     const run = async (): Promise<
       Result<{ status: number; body: unknown }, RuntimeClientError>
     > => {
       const response = await ResultAsync.fromPromise(
         fetch(url, { ...init, signal: context.signal }),
-        (error) => {
-          const message = describeFetchError(error);
-          if (context.signal.aborted) return clientError("cancelled", message, true, false);
-          return clientError("unreachable", message, true, false);
-        },
+        (error) => transportError("headers", error),
       );
       if (response.isErr()) return err(response.error);
       const { status } = response.value;
       const text = await ResultAsync.fromThrowable(
         () => response.value.text(),
-        (error) =>
-          clientError(
-            context.signal.aborted ? "cancelled" : "unreachable",
-            `runtime HTTP ${status} body read ${context.signal.aborted ? "cancelled" : "failed"} (cause: ${causeCode(error) ?? "unknown"})`,
-            true,
-            false,
-          ),
+        (error) => transportError("body", error, status),
       )();
       if (text.isErr()) return err(text.error);
       const body = Result.fromThrowable(
@@ -126,13 +132,14 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
   }
 
   deliverMessage(
-    _task: SimulationTask,
+    task: SimulationTask,
     request: DeliverMessageClientRequest,
     context: OperationContext,
   ): ResultAsync<import("@pi-orb/protocol").DeliverOrbMessageResponse, RuntimeClientError> {
     // The runtime keys a batch by its first message id, not the control plane's batch id.
     const messageId = request.messageIds[0] ?? request.messageId;
     return this.request(
+      task,
       `${request.baseUrl}/v1/messages/${encodeURIComponent(messageId)}`,
       context,
       {
@@ -159,11 +166,11 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
   }
 
   health(
-    _task: SimulationTask,
+    task: SimulationTask,
     baseUrl: string,
     context: OperationContext,
   ): ResultAsync<RuntimeHealth, RuntimeClientError> {
-    return this.request(`${baseUrl}/v1/health`, context).andThen(({ status, body }) => {
+    return this.request(task, `${baseUrl}/v1/health`, context).andThen(({ status, body }) => {
       if (status !== 200) {
         return err<RuntimeHealth, RuntimeClientError>(this.mapErrorResponse(status, body));
       }
@@ -177,11 +184,11 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
   }
 
   prepareIdleStop(
-    _task: SimulationTask,
+    task: SimulationTask,
     baseUrl: string,
     context: OperationContext,
   ): ResultAsync<PrepareIdleStopResponse, RuntimeClientError> {
-    return this.request(`${baseUrl}/v1/prepare-idle-stop`, context, {
+    return this.request(task, `${baseUrl}/v1/prepare-idle-stop`, context, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ v: 1 }),
@@ -201,7 +208,7 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
   }
 
   readDisplayDetail(
-    _task: SimulationTask,
+    task: SimulationTask,
     baseUrl: string,
     sessionId: string,
     recordId: string,
@@ -209,6 +216,7 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
     context: OperationContext,
   ): ResultAsync<import("@pi-orb/protocol").CommittedDisplayDetail, RuntimeClientError> {
     return this.request(
+      task,
       `${baseUrl}/v1/details/${encodeURIComponent(recordId)}/${encodeURIComponent(detailKey)}?sessionId=${encodeURIComponent(sessionId)}`,
       context,
     ).andThen(({ status, body }) =>
@@ -221,13 +229,14 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
   }
 
   readLiveDisplayDetail(
-    _task: SimulationTask,
+    task: SimulationTask,
     baseUrl: string,
     operationId: string,
     blockId: string,
     context: OperationContext,
   ): ResultAsync<import("@pi-orb/protocol").LiveDisplayDetail, RuntimeClientError> {
     return this.request(
+      task,
       `${baseUrl}/v1/details/live/${encodeURIComponent(operationId)}/${encodeURIComponent(blockId)}`,
       context,
     ).andThen(({ status, body }) =>
@@ -278,25 +287,27 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
   }
 
   pullHistory(
-    _task: SimulationTask,
+    task: SimulationTask,
     request: PullHistoryClientRequest,
     context: OperationContext,
   ): ResultAsync<PullHistoryResponse, RuntimeClientError> {
     const params = new URLSearchParams();
     if (request.after !== null) params.set("after", request.after);
     params.set("limit", String(request.limit));
-    return this.request(`${request.baseUrl}/v1/history?${params.toString()}`, context).andThen(
-      ({ status, body }) => {
-        if (status !== 200) {
-          return err<PullHistoryResponse, RuntimeClientError>(this.mapErrorResponse(status, body));
-        }
-        if (!Check(PullHistoryResponseSchema, body)) {
-          return err<PullHistoryResponse, RuntimeClientError>(
-            clientError("invalid_response", "pull response failed schema validation", false, true),
-          );
-        }
-        return ok(body);
-      },
-    );
+    return this.request(
+      task,
+      `${request.baseUrl}/v1/history?${params.toString()}`,
+      context,
+    ).andThen(({ status, body }) => {
+      if (status !== 200) {
+        return err<PullHistoryResponse, RuntimeClientError>(this.mapErrorResponse(status, body));
+      }
+      if (!Check(PullHistoryResponseSchema, body)) {
+        return err<PullHistoryResponse, RuntimeClientError>(
+          clientError("invalid_response", "pull response failed schema validation", false, true),
+        );
+      }
+      return ok(body);
+    });
   }
 }

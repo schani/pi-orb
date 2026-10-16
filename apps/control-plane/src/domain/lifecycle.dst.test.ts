@@ -2547,6 +2547,92 @@ describe("orb lifecycle (DST)", () => {
     });
   });
 
+  it.each(["exhausted", "last_slot", "stop_race"] as const)(
+    "unreachable recovery checks the restart budget before provider effects: %s",
+    async (budget) => {
+      const capture = new LogCapture();
+      await runDst(
+        {
+          name: `unreachable-restart-budget-${budget}`,
+          iterations: 10,
+          seed: 160_016,
+          lateTimerProbability: 0,
+          logCapture: capture,
+        },
+        async (sim) => {
+          const harness = makeHarness();
+          if (budget === "stop_race") {
+            const health = harness.deps.runtimeClient.health.bind(harness.deps.runtimeClient);
+            harness.deps.runtimeClient.health = (...args) =>
+              new ResultAsync(
+                (async () => {
+                  expect((await requestOrbStop(args[0], harness.deps, ORB)).isOk()).toBe(true);
+                  return health(...args);
+                })(),
+              );
+          }
+          const result = await sim.runTasks([
+            {
+              name: "recovery",
+              f: async (task) => {
+                seedRunningOrb(task, harness, ORB);
+                const running = harness.store.orbSnapshot(ORB);
+                expect(running).not.toBeNull();
+                if (running === null) return;
+                const admitted = budget === "last_slot";
+                const times = Array.from(
+                  { length: admitted ? 4 : 5 },
+                  (_, i) => task.wallNow() - i,
+                );
+                harness.store.seedOrb({ ...running, autoRestartTimes: times });
+                harness.deps.control.noteStateEpisode(ORB, running.stateChangedAt);
+                harness.deps.control.resetLivenessBaseline(ORB, task.monotonicNow());
+                harness.deps.control.noteRuntimeRequestStarted(ORB, task.monotonicNow());
+                harness.world.killRuntimeProcess(ORB);
+                await task.sleep(TEST_CONSTANTS.unreachableGraceMs + 1, "runtime silence");
+                const stops = harness.world.hostStopCountOf(ORB);
+                const starts = harness.world.hostStartCountOf(ORB);
+                const outcome = await reconcileOrbOnce(task, harness.deps, ORB);
+                const current = harness.store.orbSnapshot(ORB);
+                expect(
+                  capture.matching(' runtime-health-failed message="no runtime"'),
+                ).toHaveLength(1);
+                expect(harness.world.hostStopCountOf(ORB)).toBe(stops + Number(admitted));
+                expect(harness.world.hostStartCountOf(ORB)).toBe(starts + Number(admitted));
+                expect(harness.deps.control.isRestartPending(ORB)).toBe(false);
+                expect(capture.matching(" unreachable-restart ")).toHaveLength(Number(admitted));
+                if (admitted) {
+                  expect(outcome).toEqual({ type: "transitioned", toState: "starting" });
+                  expect(current?.autoRestartTimes).toEqual([...times, expect.any(Number)]);
+                } else {
+                  expect(current?.autoRestartTimes).toEqual(times);
+                  expect(current?.agentAdmissionVersion).toBe(running.agentAdmissionVersion + 1);
+                  expect(current?.stopReason).toBe("manual");
+                  expect(capture.matching("to=failed code=restart_budget_exhausted")).toHaveLength(
+                    Number(budget === "exhausted"),
+                  );
+                  if (budget === "stop_race") {
+                    expect(outcome.type).toBe("conflict");
+                    expect(current?.state).toBe("stopping");
+                    expect(current?.lastError).toBeNull();
+                    expect(current?.hostDiscardThroughIncarnation).toBeNull();
+                  } else {
+                    expect(outcome).toEqual({ type: "transitioned", toState: "failed" });
+                    expect(current?.lastError).toMatch(
+                      /^restart_budget_exhausted: 5 automatic restarts within an hour; next was unreachable_restart/,
+                    );
+                    expect(current?.hostDiscardThroughIncarnation).toBe(running.hostIncarnation);
+                  }
+                }
+              },
+            },
+          ]);
+          expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        },
+      );
+    },
+  );
+
   it("provider stalls cannot turn one missed runtime answer into a restart", async () => {
     const capture = new LogCapture();
     await runDst(

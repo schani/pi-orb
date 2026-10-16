@@ -32,11 +32,13 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
+import { runDst } from "../testkit/sim.ts";
 import { NodeSupervisorPorts, parseHealth } from "./adapters.ts";
 
 const children: Array<ReturnType<NodeSupervisorPorts["spawn"]>> = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   execControls.calls.length = 0;
   execControls.error = null;
   for (const result of children) {
@@ -184,6 +186,61 @@ describe("runtime supervisor adapters", () => {
     ]);
   });
 
+  it("exports runtime edges through log-only diagnostics", async () => {
+    const result = await new NodeSupervisorPorts({ diagnostic: "/test/diagnostic" }).report(
+      "telemetry",
+      "runtime_child_exited",
+      { exitCode: 0, requestedStop: true },
+    );
+    expect(result.isOk()).toBe(true);
+    expect(execControls.calls[0]?.args.slice(0, 2)).toEqual([
+      "runtime-event",
+      "runtime_child_exited",
+    ]);
+    expect(JSON.parse(execControls.calls[0]?.args[2] ?? "null")).toEqual({
+      exitCode: 0,
+      requestedStop: true,
+    });
+    expect(execControls.calls[0]?.options).toEqual({ timeout: 4_000, killSignal: "SIGKILL" });
+  });
+
+  it("retains runtime correlation from health", () => {
+    expect(
+      parseHealth({ status: "ready", runtimeInstanceId: "runtime-1" })._unsafeUnwrap(),
+    ).toEqual({ status: "ready", runtimeInstanceId: "runtime-1" });
+  });
+
+  it("bounds a stalled response body with a deterministic whole-probe deadline", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            init?.signal?.addEventListener(
+              "abort",
+              () => controller.error(new Error("probe deadline")),
+              { once: true },
+            );
+          },
+        }),
+      );
+    });
+    await runDst({ name: "supervisor-probe-body-deadline", iterations: 20 }, async (sim) => {
+      const results = await sim.runTasks([
+        {
+          name: "probe",
+          f: async (task) => {
+            const started = task.monotonicNow();
+            const result = await new NodeSupervisorPorts().health(task);
+            expect(result.isErr()).toBe(true);
+            expect(task.monotonicNow() - started).toBe(2_000);
+          },
+        },
+      ]);
+      expect(results.isOk()).toBe(true);
+    });
+  });
+
   it.each([
     ["missing executable", Object.assign(new Error("missing"), { code: "ENOENT", cmd: "/test" })],
     ["bounded timeout", Object.assign(new Error("timed out"), { code: "ETIMEDOUT", cmd: "/test" })],
@@ -193,5 +250,6 @@ describe("runtime supervisor adapters", () => {
       "ready",
     );
     expect(result.isErr() && result.error.type).toBe("diagnostic_failed");
+    expect(JSON.stringify(result)).not.toContain("/test");
   });
 });
