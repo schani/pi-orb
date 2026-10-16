@@ -50,6 +50,8 @@ POLL_INTERVAL=${POLL_INTERVAL:-5}
 
 START_TS=$(date +%s)
 DEADLINE=$((START_TS + OVERALL_TIMEOUT))
+export PI_ORB_SMOKE_HTTP=1
+export PI_ORB_SMOKE_DEADLINE=$DEADLINE
 
 MINT_ORB=""
 STOPPED_ORB=""
@@ -350,10 +352,11 @@ create_orb() {
 wait_for_state() {
   local oid=$1 target=$2 timeout=$3 step=$4
   local limit=$(($(date +%s) + timeout))
+  [ "$limit" -le "$DEADLINE" ] || limit=$DEADLINE
   local last="" view state
   while :; do
     check_deadline "$step"
-    view=$(api "/api/v1/orbs/$oid") || fail "$step" "api.sh failed while polling"
+    view=$(PI_ORB_SMOKE_DEADLINE="$limit" api "/api/v1/orbs/$oid") || fail "$step" "api.sh failed while polling"
     state=$(printf '%s' "$view" | jget state) ||
       fail "$step" "unparseable orb view: $view"
     [ -n "$state" ] || fail "$step" "orb view carried no state: $view"
@@ -370,7 +373,7 @@ wait_for_state() {
     if [ "$(date +%s)" -ge "$limit" ]; then
       fail "$step" "orb $oid stuck in '$state' after ${timeout}s (wanted '$target')"
     fi
-    sleep "$POLL_INTERVAL"
+    smoke_sleep "$limit"
   done
 }
 

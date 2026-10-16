@@ -6,10 +6,19 @@ fixture_record() {
   fi
 }
 
+smoke_sleep() {
+  local remaining=$(( $1 - $(date +%s) )) delay=${POLL_INTERVAL:-5}
+  [ "$remaining" -gt 0 ] || return 0
+  [ "$delay" -le "$remaining" ] || delay=$remaining
+  sleep "$delay"
+}
+
 fixture_delete() {
   local kind=$1 id=$2 response deadline path
   path="/api/v1/${kind}s/$id"
-  if ! response=$("$API" "$path" '' DELETE); then
+  deadline=$(( $(date +%s) + 300 ))
+  [ "$deadline" -le "${DEADLINE:-$deadline}" ] || deadline=$DEADLINE
+  if ! response=$(PI_ORB_SMOKE_DEADLINE="$deadline" "$API" "$path" '' DELETE); then
     fixture_record "$kind" "$id" cleanup-failed || true
     return 1
   fi
@@ -17,16 +26,15 @@ fixture_delete() {
     fixture_record "$kind" "$id" cleanup-failed || true
     return 1
   fi
-  deadline=$(( $(date +%s) + 300 ))
   while :; do
-    if ! response=$("$API" "$path"); then break; fi
+    if ! response=$(PI_ORB_SMOKE_DEADLINE="$deadline" "$API" "$path"); then break; fi
     if jq -e '.error.code == "not_found"' <<<"$response" >/dev/null; then
       fixture_record "$kind" "$id" deleted
       return $?
     fi
     if ! jq -e --arg id "$id" '.id == $id and .error == null' <<<"$response" >/dev/null; then break; fi
     if [ "$(date +%s)" -ge "$deadline" ]; then break; fi
-    sleep "${POLL_INTERVAL:-5}"
+    smoke_sleep "$deadline"
   done
   echo "Fixture cleanup not confirmed: $kind=$id; inspect before deleting anything else." >&2
   fixture_record "$kind" "$id" cleanup-failed || true

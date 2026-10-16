@@ -12,6 +12,8 @@ STOPPED_TIMEOUT=${STOPPED_TIMEOUT:-300}
 POLL_INTERVAL=${POLL_INTERVAL:-5}
 START_TS=$(date +%s)
 DEADLINE=$((START_TS + OVERALL_TIMEOUT))
+export PI_ORB_SMOKE_HTTP=1
+export PI_ORB_SMOKE_DEADLINE=$DEADLINE
 PROJECT_ID=""
 ORB_ID=""
 
@@ -42,15 +44,16 @@ api() { "$API" "$@"; }
 wait_for_state() {
   local target=$1 timeout=$2 step=$3 limit last="" view state
   limit=$(( $(date +%s) + timeout ))
+  [ "$limit" -le "$DEADLINE" ] || limit=$DEADLINE
   while :; do
     if [ "$(date +%s)" -ge "$DEADLINE" ]; then fail "$step: overall timeout"; fi
-    view=$(api "/api/v1/orbs/$ORB_ID") || fail "$step: API unavailable"
+    view=$(PI_ORB_SMOKE_DEADLINE="$limit" api "/api/v1/orbs/$ORB_ID") || fail "$step: API unavailable"
     state=$(jq -er '.state' <<<"$view") || fail "$step: no orb state"
     if [ "$state" != "$last" ]; then say "$step: $state"; last=$state; fi
     if [ "$state" = "$target" ]; then return 0; fi
     if [ "$state" = failed ]; then fail "$step: $(jq -r '.lastError' <<<"$view")"; fi
     if [ "$(date +%s)" -ge "$limit" ]; then fail "$step: $state after ${timeout}s (wanted $target)"; fi
-    sleep "$POLL_INTERVAL"
+    smoke_sleep "$limit"
   done
 }
 
