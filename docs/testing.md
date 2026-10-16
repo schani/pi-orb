@@ -4,6 +4,14 @@
 
 `infra/smoke_http_test.py` scripts curl/auth results and time to cover transient recovery, typed terminal errors, replay safety, completed 404s, authentication/deadline bounds, Retry-After, exhaustion and token-safe diagnostics. Existing smoke contracts cover phase/cleanup wiring and failed-fixture retention. Tests-first red: `/tmp/pr138-minimal-red.log`; a missing deadline in the timeout test fixture was corrected (`/tmp/pr138-minimal-green.log`). After `npm ci`, infra passes 92 Node, 182 Python and 32 native-VM tests; typecheck, lint, shell/Python/embedded-JS syntax and artifact guard pass (`/tmp/pr138-minimal-{infra,typecheck,lint-final,syntax-artifact}.log`). Lint retains 306 warnings and 79 infos. No cloud smoke, deployment or historical root-cause fix is claimed.
 
+## PR 138 native wheel synchronization (2026-10-16; undeployed)
+
+[E2E attempt 1, shard 4](https://github.com/schani/pi-orb/actions/runs/38977339275/job/117229843521), source `3fa64c88`, failed WebKit's delayed-image anchor assertion: expected ≤1px, received 597px. First log and [uploaded traces](https://github.com/schani/pi-orb/actions/runs/38977339275/artifacts/12079952604) are retained under `.context/pr138-babysit/`; the uploaded JSON files are existing DST traces, not a new DST failure. No Actions rerun.
+
+Instrumented WebKit demonstrates that wheel(100) delivers multiple scroll offsets: 3323→3365→3398→3403→3408→3409 from baseline 3309. First movement plus two animation frames does not establish completion. The browser regression now waits for the full −1px upward movement and a native scroll acknowledgement at the full +100px downward offset; a queued microtask lets product listeners finish before the image baseline is sampled. Product anchoring and the final ≤1px assertion are unchanged. The original CI interleaving was not traced; this corrects the demonstrated synchronization gap, not a proven production defect.
+
+After `npm ci`, all four automatic-transcript cases pass across Chromium/WebKit; scoped lint passes (`automatic-ack-fixed.log`, `biome-ui.log` in the evidence directory). Exact-head CI/E2E/Durable remain the merge gate; no deployment.
+
 ## Busy peer steering qualification (2026-10-16; local, undeployed)
 
 The existing native Sleep fixture asserts peer `whenBusy:steer`, current-operation metadata, attribution and deduplication; it fails against Main's busy rejection (`/tmp/pr136-trim-red.log`). Seven Sleep cases plus existing waiter, Sleep/FIFO and messaging tests pass **43 tests** (`/tmp/pr136-trim-targeted.log`); waiter DST covers steering before/during waits without child cancellation. Workspace/E2E typecheck and targeted lint pass (`/tmp/pr136-trim-{typecheck,lint}.log`).
