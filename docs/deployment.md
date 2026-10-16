@@ -37,15 +37,13 @@ and always-uploaded 14-day proof/provenance artifacts retain source SHA, image I
 cache writer policy and disk/image usage. Build-record uploads are disabled.
 No registry publication or cloud credentials. Layer hits never replace exact-source
 qualification; the complete required job inventory is in `docs/testing.md`.
-Local cold and fresh-builder/local-cache warm builds passed the extracted offline
-proof against both literal action `iidfile` IDs; all 1,281 input hashes matched.
-The initial wrapper exit 1 demanded absent OCI metadata `containerimage.config.digest`;
-using the pinned action's `iidfile` required neither rebuild nor tag fallback.
-Cache export exited 0 despite retained content-lock `Unavailable` diagnostics;
-fresh-builder import cached every build step and passed proof. No diagnostic
-root cause is claimed. The 72s warm build is local, not a hosted speed measurement.
-Provenance: `.context/ci-speed-implementation/control-plane-qualification-report.json`;
-hosted cache qualification and deployment remain pending.
+Local cold/warm offline proofs passed; the 72s warm result is local only.
+The PR's hosted build showed no cached steps, so no hosted CP cache payoff is evidenced.
+[Local proof history](https://github.com/schani/pi-orb/blob/8d6a0559c325f0bb73a550073f901431a7e010ac/docs/deployment.md#L29-L48)
+retains the initial missing-metadata wrapper failure and unresolved cache-export
+diagnostics; original provenance remains in
+`.context/ci-speed-implementation/control-plane-qualification-report.json`.
+PR acceptance is recorded in `docs/testing.md`; deployment remains unperformed.
 
 **Blocked qualification (2026-10-07):** [Deploy 37642849345](https://github.com/schani/pi-orb/actions/runs/37642849345) rejected `a41359b`: [CI 37636936479](https://github.com/schani/pi-orb/actions/runs/37636936479) passed both jobs, but the qualifier still expected only `checks`; [E2E 37636936502](https://github.com/schani/pi-orb/actions/runs/37636936502) passed all four shards. Release was skipped before cloud credentials, lock, build, migration, apply or activation. The inventory correction adds an independent two-job fixture and a workflow/qualifier contract test; fresh exact-main qualification remains required. The preceding GitHub API HTTP 500 during the public partial outage was separate from this deterministic rejection. Evidence: `.context/deploy-pr61-20261007/qualified-report.md` and `first-run-full.log`.
 
@@ -335,23 +333,12 @@ Build/publication took 13m52s, retirement **37m27s**, lifecycle/identity stages
 [Deploy 38665042043](https://github.com/schani/pi-orb/actions/runs/38665042043)
 spent **38m26s** in retirement. These are measured durations, not optimization results.
 
-Cloud Logging identifies the latest delay: revision `pi-orb-issuer-00057-gqf`
-served an HTTP 101 `/api/v1/orbs/:orbId/live` request starting October 15 at
-22:08:13.835358 PDT, lasting 3601.001645s. Its derived end,
-23:08:14.837003 PDT, preceded the application's SIGTERM-handler log,
-23:08:14.844776 PDT, by **7.8ms**. Cloud Run had logged
-“Shutting down user disabled instance” at 22:32:07.856727 PDT; deletion completed
-at 22:32:25.029040 PDT. Retirement cleared at 23:09:49.760100 PDT.
-The hour-long WebSocket held shutdown, not 37 minutes of Monitoring lag.
-The prior success independently shows the same hour-long socket/SIGTERM correlation.
-
-`infra/run.tf` allows 3600-second requests. Healthy sockets in
-`apps/control-plane/src/http/live-proxy.ts` have no maximum age.
-`apps/control-plane/src/domain/release-activation.ts` is a startup-only barrier:
-after activation, old autonomous loops do not reread authority.
-Host-spec generation checks are not comprehensive lifecycle fences.
-Keep revision absence, explicit active/idle zeros, visibility coverage and pending
-Compute-operation checks in `infra/release_retire.py`; SIGTERM-only drain is too late.
+Cloud Logging correlates an old revision's 3601-second live WebSocket with
+SIGTERM 7.8ms after its derived end; the preceding success shows the same pattern.
+SIGTERM-only drain is too late. The 3600-second request allowance and startup-only
+activation barrier do not fence already-active autonomous loops; host-generation
+checks are not comprehensive lifecycle fences. Independent retirement proof remains
+mandatory. [Timing evidence and reproduction commands](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/4e48bb90-21cd-4555-a7c7-dd02e9421e7d/ci-speed/deploy-speed-evidence.json).
 
 **Rollout-specific socket retirement:** the application polls the existing
 `static-plane/releases/latest.json` and its exact release record every five seconds.
@@ -400,47 +387,15 @@ workflow step verifies the validated record, every gate, deleted fixtures,
 matching full observation and absent lock, then takes a fresh final sample.
 Failure blocks workflow success; it never triggers automatic rollback.
 
-**Deferred:** exact-input native-image reuse remains high-complexity work, not an
-implemented optimization. Current `infra/native-image-vars.mjs` requires the
-release commit; provenance or persisted-contract changes require separate discussion.
-
-**Native-input frequency, independently checked 2026-10-16:** the latest 20 Deploy
-attempts span dispatches **2026-10-09 14:08:53–2026-10-16 05:08:26 UTC**
-(**October 9, 07:08:53–October 15, 22:08:26 PDT**). Thirteen started native builds;
-all thirteen passed acceptance. **Three matched the preceding actual build's
-committed inputs: 3/12 comparable build transitions**; seven attempts never built.
-The latest ten attempts contained four builds and **zero repeats**. Six full
-workflows succeeded, with **zero unchanged pairs among their five successive
-comparisons**. Eight release transactions validated: two subsequently failed the
-independent rollout monitor, so those workflows are not green deployments.
-
-The repeated builds were [38099575437](https://github.com/schani/pi-orb/actions/runs/38099575437),
-[38108891619](https://github.com/schani/pi-orb/actions/runs/38108891619) and
-[38484755289](https://github.com/schani/pi-orb/actions/runs/38484755289).
-Their respective predecessors were [38059954991](https://github.com/schani/pi-orb/actions/runs/38059954991)
-(applied/activated, then lifecycle failed), 38099575437 (transaction validated,
-then monitor failed), and [38478055943](https://github.com/schani/pi-orb/actions/runs/38478055943)
-(migration failed before apply). Thus these are not three matches against
-accepted-but-never-deployed images; only the last predecessor stopped before apply.
-
-Method: compare `gh run list --workflow deploy.yml --limit 20` with each run's
-`gh run view RUN_ID --json jobs` and `--log`; compare SHA-256 of
-`git ls-tree -r -z COMMIT -- PATHS`, using each commit's
-`UPLOADED_SOURCE_PATHS` and `TOOLING_SOURCE_PATHS` from
-`packages/native-image/src/snapshot.ts`, plus `infra/build-push.sh`. This closure
-is already runtime-specific; retain included tests/docs and the root lockfile.
-All sampled path declarations and the named Debian base-image default were
-unchanged. These are committed path/mode/content matches, not historical tar-byte
-or final-image matches: checkout metadata, release identity and mutable APT inputs
-can differ; resolved numeric base-image identities were not rechecked. Historical
-manifests were not downloaded. Current exact-commit gates permit no cross-commit
-reuse; this measures a proposal's opportunity, not safe reuse or upstream qualification.
-
-**Projected payoffs, not measured or additive:** rollout-specific socket closure could save **~30–35 minutes** against 37m27s retirement, conditional on bounding other holdouts and retaining independent cloud/Monitoring proof. Monitor overlap could save **~9–11 minutes**. Exact-input native reuse could save **~10–13 minutes only when relevant inputs are unchanged** (zero when changed); the 13m52s build phase still needs ~1–2 minutes for CP build/publication. A combined **~45–50-minute deploy**, or **~35–40 minutes with qualifying reuse**, remains a conditional target, not a promise. Deploy time excludes pre-deploy CI; CP consolidation/cache mainly save runner work, not current qualification latency (`docs/testing.md`).
-
-Sanitized timings, correlation and reproduction commands: [sanitized deployment evidence](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/4e48bb90-21cd-4555-a7c7-dd02e9421e7d/ci-speed/deploy-speed-evidence.json).
-No hosted payoff measurement, full current-tree validation or deployment is claimed;
-all savings above are estimates.
+**Deferred:** exact-input native-image reuse is not implemented. Current
+`infra/native-image-vars.mjs` requires the release commit; provenance or persisted
+contract changes require separate discussion. In 20 historical Deploy attempts,
+13 built native images: 3/12 comparable committed-input transitions matched,
+but the latest ten attempts had four builds and no repeats. Committed inputs do
+not establish identical tar bytes, resolved base images or mutable APT inputs.
+[Frequency study and conditional payoff models](https://github.com/schani/pi-orb/blob/8d6a0559c325f0bb73a550073f901431a7e010ac/docs/deployment.md#rollout-speed-decision-2026-10-16-implemented-undeployed)
+preserve the method, run identities, rejected reuse assumptions and estimates.
+No deployment payoff is measured; CI PR acceptance is recorded in `docs/testing.md`.
 
 ## Native runtime VM image release (implemented 2026-09-05; first deployed 2026-09-07)
 

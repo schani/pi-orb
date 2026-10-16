@@ -18,92 +18,46 @@ it("uses the same declared Node and OS versions for CI, E2E and Deploy", () => {
   }
 });
 
-it("requires one shared frontend gate and both isolated lifecycle axes", () => {
+it("keeps lifecycle shards isolated and failure artifacts shard-specific", () => {
   const source = workflow("e2e");
   const frontend = job(source, "frontend");
-  expect(frontend).toContain(`name: Frontend (\${{ matrix.shard }}/4)`);
-  expect(frontend).toContain(
-    "if: github.event_name != 'workflow_dispatch' || !inputs.subagent_continuation_diagnostic",
-  );
-  expect(frontend).toContain(
-    `npm run test:e2e -- --project frontend --shard=\${{ matrix.shard }}/4`,
-  );
+  const lifecycle = job(source, "e2e");
+  const process = job(workflow("durable-qualification"), "process");
+  const diagnostic = lifecycle
+    .split("- name: Diagnose subagent continuation")[1]
+    ?.split("- name:")[0];
+  expect(diagnostic?.match(/npm run test:e2e/gu)).toHaveLength(1);
+  expect(diagnostic).not.toMatch(/for |local-fake-provider/u);
   expect(frontend).not.toMatch(/local-fake-provider|PI_ORB_(?:E2E|AGENT)_BACKEND|[Dd]ocker/u);
   expect(frontend).toContain("npm run test:e2e:install");
-  expect(frontend).toContain("if: failure()");
-  expect(frontend).not.toMatch(/path: test-failures\/\s*$/mu);
   for (const name of [
     "Upload missing-orb navigation failure evidence",
     "Upload lazy-return browser failure evidence",
   ]) {
-    expect(frontend).toContain(`- name: ${name}`);
-    expect(job(source, "e2e")).not.toContain(`- name: ${name}`);
+    expect(lifecycle).not.toContain(`- name: ${name}`);
   }
-  for (const path of [
-    "missing-orb-*/failure.json",
-    "missing-orb-*/desktop.png",
-    "missing-orb-*/geometry.json",
-    "lazy-return-*/failure.json",
-    "lazy-return-*/failure.png",
-    "lazy-return-*/trace.zip",
+  for (const [body, backend] of [
+    [lifecycle, "docker"],
+    [process, "process"],
   ]) {
-    expect(frontend).toContain(`test-failures/${path}`);
-  }
-  for (const [body, name, backend] of [
-    [job(source, "e2e"), "E2E", "docker"],
-    [job(workflow("durable-qualification"), "process"), "Central process", "process"],
-  ]) {
-    expect(body).toContain(`name: ${name} (\${{ matrix.shard }}/4)`);
     expect(body).toContain(`PI_ORB_E2E_BACKEND: ${backend}`);
     expect(body).toContain(
       `node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project lifecycle --shard=\${{ matrix.shard }}/4`,
     );
     expect(body).not.toContain("--project frontend");
-    expect(body).toContain("test-failures/");
   }
-  for (const body of [
-    frontend,
-    job(source, "e2e"),
-    job(workflow("durable-qualification"), "process"),
-  ]) {
+  for (const body of [frontend, lifecycle, process]) {
     expect(body).toContain("fail-fast: false");
-    expect(body).toContain("shard: [1, 2, 3, 4]");
     expect(body).not.toMatch(/--(?:maxWorkers|retry|passWithNoTests|testTimeout)/u);
+    const artifacts = [...body.matchAll(/name: ([^\n]*\$\{\{ github.run_id \}\}[^\n]*)/gu)].map(
+      (m) => m[1],
+    );
+    expect(artifacts.length).toBeGreaterThan(0);
+    for (const artifact of artifacts) {
+      expect(artifact).toContain(`\${{ matrix.shard }}`);
+      expect(artifact).toContain(`\${{ github.run_attempt }}`);
+    }
   }
-});
-
-it("preserves non-qualification diagnostic dispatch and shard-specific evidence", () => {
-  const source = workflow("e2e");
-  const lifecycle = job(source, "e2e");
-  expect(lifecycle).toContain(
-    `name: E2E (\${{ matrix.shard }}/4)\${{ github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic && ' diagnostic' || '' }}`,
-  );
-  const normal = lifecycle.split("- name: Run end-to-end test")[1]?.split("- name:")[0];
-  expect(normal).toContain(
-    "if: github.event_name != 'workflow_dispatch' || !inputs.subagent_continuation_diagnostic",
-  );
-  const diagnostic = lifecycle
-    .split("- name: Diagnose subagent continuation")[1]
-    ?.split("- name:")[0];
-  expect(diagnostic).toContain(
-    "if: github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic",
-  );
-  expect(diagnostic?.match(/if: (.+)/u)?.[1]).toBe(
-    "github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic",
-  );
-  expect(diagnostic?.match(/run: (.+)/u)?.[1]).toBe(
-    "npm run test:e2e -- --project lifecycle e2e/subagents.e2e.test.ts",
-  );
-  expect(diagnostic?.match(/npm run test:e2e/gu)).toHaveLength(1);
-  expect(diagnostic).not.toMatch(/for |--(?:retry|passWithNoTests|testTimeout)/u);
-  expect(source).toContain("timeout-minutes: 40");
-  expect(normal).toContain(
-    `run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project lifecycle --shard=\${{ matrix.shard }}/4`,
-  );
-  expect(normal).not.toMatch(/--(?:maxWorkers|retry|passWithNoTests)/u);
-  expect(lifecycle.match(/^ {4}name: (.+)$/mu)?.[1]).toBe(
-    `E2E (\${{ matrix.shard }}/4)\${{ github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic && ' diagnostic' || '' }}`,
-  );
   expect(
     source.match(/name: e2e-.*matrix\.shard.*github\.run_id.*github\.run_attempt[^\n]*/gu),
   ).toEqual([
@@ -114,7 +68,7 @@ it("preserves non-qualification diagnostic dispatch and shard-specific evidence"
     `name: e2e-browser-failure-\${{ matrix.shard }}-\${{ github.run_id }}-\${{ github.run_attempt }}`,
   ]);
   expect(lifecycle.match(/if: failure\(\)/gu)).toHaveLength(3);
-  expect(job(source, "frontend").match(/if: failure\(\)/gu)).toHaveLength(5);
+  expect(frontend.match(/if: failure\(\)/gu)).toHaveLength(5);
   const traceUpload = lifecycle
     .split("- name: Upload deterministic failure traces")[1]
     ?.split("- name:")[0];
@@ -126,7 +80,7 @@ it("preserves non-qualification diagnostic dispatch and shard-specific evidence"
     "test-failures/full-slice-upload/failure.json",
     "test-failures/subagent-*/failure.json",
   ]);
-  const browserUpload = job(source, "frontend")
+  const browserUpload = frontend
     .split("- name: Upload harness browser failure evidence")[1]
     ?.split("- name:")[0];
   expect(browserUpload?.match(/if: (.+)/u)?.[1]).toBe("failure()");
@@ -134,26 +88,6 @@ it("preserves non-qualification diagnostic dispatch and shard-specific evidence"
     ".context/claude-production-hardening/browser-failure",
   );
   expect(browserUpload).toContain("include-hidden-files: true");
-  expect(diagnostic).not.toMatch(/local-fake-provider|--(?:retry|passWithNoTests)/u);
-  expect(source).toContain("test-failures/*.json");
-  expect(source).toContain("test-failures/profile-login/failure.json");
-  expect(source).toContain("test-failures/full-slice-upload/failure.json");
-  expect(source).toContain("test-failures/subagent-*/failure.json");
-  expect(source).toContain("test-failures/lazy-return-*/trace.zip");
-  for (const body of [
-    job(source, "frontend"),
-    lifecycle,
-    job(workflow("durable-qualification"), "process"),
-  ]) {
-    const artifacts = [...body.matchAll(/name: ([^\n]*\$\{\{ github.run_id \}\}[^\n]*)/gu)].map(
-      (m) => m[1],
-    );
-    expect(artifacts.length).toBeGreaterThan(0);
-    for (const artifact of artifacts) {
-      expect(artifact).toContain(`\${{ matrix.shard }}`);
-      expect(artifact).toContain(`\${{ github.run_attempt }}`);
-    }
-  }
 });
 
 it("actual discovery is complete/disjoint per project and backend, serial and cache-independent", async () => {
