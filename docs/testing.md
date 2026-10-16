@@ -39,6 +39,12 @@ fell 19m35s → 12m35s at `8d6a0559`; runner work 130m50s → 125m43s. This sing
 comparison differs in code, runners, caches and push/PR event; it is not a controlled
 benchmark. Evidence: `.context/pr133-performance/summary-20261016T161709Z.json`.
 
+Controlled pair at `f43eff0f`: A passed 11/11 in 20m01s; B failed (18/19 jobs passed) in 11m46s.
+B is not proof of faster passing CI; its new UI failure blocks shipping.
+Evidence and limits: `docs/postmortems/2026-10-16-ci-layout-comparison.md`.
+
+**Cold readiness (2026-10-16; reviewed, locally validated, qualification pending):** full-slice awaits the applied child/session/cursor/head (30s), then rendering (5s), within its existing 720s case bound. This corrects an accidental cold-start deadline; historical B’s exact schedule remains unknown.
+
 **Unit/DST:** four isolated runners each own PostgreSQL 16 with both
 `PI_ORB_TEST_DATABASE_URL` and `PI_ORB_DURABLE_PG_TEST_URL`; files remain serial
 (`--maxWorkers=1 --no-file-parallelism`). The separate `checks` job runs foundation,
