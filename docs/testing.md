@@ -62,15 +62,34 @@ of duplicated frontend execution and ~1–1.5 runner-minutes of duplicate CP bui
 work could be removed. These estimates overlap and are not measured payoffs.
 No hosted speedup, full current-tree validation or deployment is claimed.
 
-**Local validation (2026-10-16):** logs, exits and input manifests: `.context/ci-speed-implementation/`.
+**Historical local validation (2026-10-16; pre-rebase):** logs, exits and input manifests: `.context/ci-speed-implementation/`.
 Unit/DST exited 0: 5,307 passed/7 skipped, 709 files passed/1 skipped; 2,465.25s local serial, not hosted timing. This does not qualify later `.e2e` edits.
 Both CI PostgreSQL URLs (`PI_ORB_TEST_DATABASE_URL`, `PI_ORB_DURABLE_PG_TEST_URL`) were set, plus non-CI `DATABASE_URL`, `PI_ORB_DURABLE_TEST_DATABASE_URL` and `PI_ORB_PENDING_ABORT_TEST_DATABASE_URL`; environment differs (`unit-environment-note.txt`).
 Root typecheck and lint exited 0; lint reported 306 warnings/80 infos.
-Infrastructure exited 1: Node 92 passed/one intentional IAM failure; independently completed remaining Python 186 tests and native script (27 tests plus filesystem/contracts), both exit 0.
-Foundation `test.sh` exited 1: format/init/validate and one mocked OpenTofu test passed, then Node 17 passed/one intentional IAM failure. IAM remains pending explicit human approval; Terraform is unchanged. The separately observed negative IAM scan self-match is a pre-existing ineffective guard (`!` is exempt from Bash `set -e`), not another script exit cause; tracked in `TODO.md`.
+Infrastructure exited 1 before approval: Node 92 passed/one intentional IAM failure; independently completed remaining Python 186 tests and native script (27 tests plus filesystem/contracts), both exit 0.
+Foundation `test.sh` exited 1: format/init/validate and one mocked OpenTofu test passed, then Node 17 passed/one intentional IAM failure before approval. The separately observed negative IAM scan self-match is a pre-existing ineffective guard (`!` is exempt from Bash `set -e`), not another script exit cause; tracked in `TODO.md`.
 Targeted `full-main-auth` real-runtime live WebSocket + PTY passed once each on Docker/host-pi and process/central-durable (exit 0; `.context/ci-speed-implementation/full-main-validation-report.json` and `full-main-{docker,process}.first.exit`), not full backend qualification.
 Mobile passed 96 tests at frozen source `416ec906…`; the later capture-only typed-boundary edit has typecheck/lint evidence only. First failure and scope: `docs/postmortems/2026-10-16-frontend-focus-geometry.md`.
 Full 47-file frontend, lifecycle and hosted qualification remain pending; control-plane image proof: `docs/deployment.md`. No measured hosted payoff or deployment.
+
+**Scoped IAM qualification (2026-10-16, PDT; approved, implemented, not applied):**
+`.context/pr133-iam-approval/` retains input hashes, exits and the focused pre-fix
+RED (9 passed, one absent-binding failure). The original hosted failure remains in
+`.context/pr133-ci/38926890733-attempt1-checks-117060614897.log`.
+The approved policy and its limits are in `docs/deployment.md`. The exact-expression
+contract and positive/negative object-name table cover both bucket-qualified
+branches, activation, locks, state, secrets, foreign buckets, other namespaces and
+bucket-list denial. These are text/string-subset contracts, not CEL execution or
+live IAM proof.
+Focused Node: 10 passed. Unmodified `infra/foundation/test.sh`: format, backend-disabled
+init, validate, one mocked OpenTofu plan and 18 Node tests passed with official,
+SHA-256-verified OpenTofu 1.12.6. `npm run test:infra`: 93 Node, 186 Python and
+27 native tests plus filesystem/contracts passed. Unit/E2E workflow contracts:
+seven passed in two files. Scoped Biome (one existing warning) and diff checks passed.
+Dependencies were already installed; Node 24.6.0. Disk remained 23 GiB free.
+These checks cover only this IAM change atop rebased `1d29e52d`, not full current-head
+unit/DST, frontend/lifecycle E2E or hosted acceptance. No cloud credentials, IAM
+linter, apply, deployment, new stored objects or schema fields.
 
 ## Claude Workflow ownership (2026-10-15; local, undeployed)
 

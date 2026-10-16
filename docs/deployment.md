@@ -374,10 +374,18 @@ revision absence, explicit active/idle zeros, visibility and Compute-operation
 proof remain required. The first deployment cannot retrofit the watcher into an
 already-running old binary, so its old sockets may still hold retirement.
 
-**IAM prerequisite, pending user approval:** the runtime identity needs narrowly
-scoped read access to the existing latest pointer and release records. No grant
-is implemented or claimed; the permission request is unanswered. No new objects,
-release-record fields or other persisted state are introduced.
+**IAM prerequisite (approved 2026-10-16, PDT; implemented, not applied):**
+`google_storage_bucket_iam_member.control_plane_release_rollout` grants the existing
+control-plane service account `roles/storage.objectViewer` on `var.state_bucket`,
+conditioned on exact bucket-qualified `static-plane/releases/latest.json` equality
+OR (bucket-qualified `static-plane/releases/r-` prefix AND `.json` suffix).
+This is a prefix/suffix subset, not full release-ID validation; the reader rejects
+IDs containing slashes and requires exact service/project/revision identity and a
+newer generation excluding the serving revision. The activation-only binding is
+unchanged. The new binding grants no activation, lock, state, secret, foreign-bucket,
+other-namespace or bucket-list access. No regex CEL, new objects, release-record
+fields or other persisted state are introduced. No cloud apply or IAM validation
+has run.
 
 **Monitor overlap:** immediately after activation, `infra/release.sh` starts the
 owned monitor while lifecycle and identity smokes remain sequential. The complete

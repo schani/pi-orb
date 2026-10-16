@@ -15,6 +15,16 @@ resource "google_storage_bucket_iam_member" "control_plane_release_activation" {
   }
 }
 
+resource "google_storage_bucket_iam_member" "control_plane_release_rollout" {
+  bucket = var.state_bucket
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.control_plane.email}"
+  condition {
+    title      = "release-rollout-only"
+    expression = "resource.name == 'projects/_/buckets/${var.state_bucket}/objects/static-plane/releases/latest.json' || (resource.name.startsWith('projects/_/buckets/${var.state_bucket}/objects/static-plane/releases/r-') && resource.name.endsWith('.json'))"
+  }
+}
+
 resource "google_service_account" "control_plane" {
   account_id   = "pi-orb-control-plane"
   display_name = "pi-orb control plane"
