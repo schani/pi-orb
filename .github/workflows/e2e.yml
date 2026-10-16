@@ -1,259 +1,216 @@
-# Isolated serial shards: one frontend gate and Docker lifecycle qualification.
-name: E2E
-
-on:
-  pull_request:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
-    inputs:
-      subagent_continuation_diagnostic:
-        description: Capture the first subagent continuation failure (not qualification)
-        type: boolean
-        default: false
-
+name: One cold-navigation diagnostic (not qualification)
+'on':
+  workflow_dispatch: null
 permissions:
   contents: read
-
 jobs:
-  e2e:
-    name: E2E (${{ matrix.shard }}/4)${{ github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic && ' diagnostic' || '' }}
+  diagnostic:
+    name: One instrumented Docker cold-navigation diagnostic (not qualification)
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
       PI_ORB_E2E_BACKEND: docker
       PI_ORB_AGENT_BACKEND: host-pi
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
-
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: '24.6.0'
-          cache: npm
-
-      - name: Use the signed Ubuntu archive
-        run: sudo python3 infra/runner_apt.py /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt.conf.d/99pi-orb-force-ipv4
-
-      - name: Install native addon prerequisites
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 build-essential
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-
-      - name: Install pinned browser engines and system dependencies
-        run: npm run test:e2e:install
-
-      - name: Check Docker disk budget
-        run: |
+    - name: Check out repository
+      uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      with:
+        ref: 3e7195f2e301bb0e413cb7306f557e839c76c7fa
+    - name: Record frozen payload and controller identity
+      env:
+        CONTROLLER_SHA: ${{ github.sha }}
+        CONTROLLER_REF: ${{ github.ref }}
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = 3e7195f2e301bb0e413cb7306f557e839c76c7fa
+        test -z "$(git status --porcelain)"
+        mkdir -p "$RUNNER_TEMP/cold-navigation-diagnostic"
+        {
+          printf 'controller=%s ref=%s source=%s base=%s\n' "$CONTROLLER_SHA" "$CONTROLLER_REF" "$(git rev-parse HEAD)" "f43eff0f84a27eacd48f7aa30d5148e78463778c"
+          printf 'runner_image=%s runner_version=%s\n' "$ImageOS" "$ImageVersion"
+          git ls-files -z | xargs -0 sha256sum | sha256sum
+          sha256sum apps/orb-runtime/Dockerfile package-lock.json
+        } | tee "$RUNNER_TEMP/cold-navigation-diagnostic/identity.txt"
+        test "$(git ls-files -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)" = 80dde699d5671a5084626b2094609856b82d11a618e093f33f15c2b36db2b4d0
+        python3 - <<'PY'
+        import hashlib,json,pathlib,os,subprocess
+        roots=["apps/orb-runtime","infra/runtime_apt.sh","package-lock.json","package.json","patches","scripts/apply-dependency-patches.mjs","scripts/pi-orb-gcp-identity","vendor","packages/luna","packages/mock-openai","packages/protocol"]
+        paths=subprocess.check_output(["git","ls-files","-z","--",*roots]).decode().strip("\0").split("\0")
+        actual=[{"path":p,"sha256":hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()} for p in paths]
+        digest=hashlib.sha256(json.dumps(actual,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+        assert len(actual)==421 and digest=="5f599fdcb5775fff9f2263a5dbb5a38fcdca162da45a3ae84d9a79761a42edb9"
+        path=pathlib.Path(os.environ["RUNNER_TEMP"])/"cold-navigation-diagnostic/runtime-source-closure.json"
+        path.write_text(json.dumps({"base":"f43eff0f84a27eacd48f7aa30d5148e78463778c","source":"3e7195f2e301bb0e413cb7306f557e839c76c7fa","closureSHA256":digest,"files":actual},indent=2)+"\n")
+        print("421 unchanged runtime input files verified",digest)
+        PY
+    - name: Record fresh runner resources before setup
+      run: |
+        set -euo pipefail
+        {
+          date -u +%FT%TZ
+          printf 'runner_image=%s runner_version=%s\n' "$ImageOS" "$ImageVersion"
+          uname -a
+          lscpu
+          free -m
           df -h
-          test "$(df -Pk . | awk 'NR == 2 {print $4}')" -ge 15728640
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-
-      - name: Build E2E runtime image
-        id: runtime-image
-        timeout-minutes: 10
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        env:
-          DOCKER_BUILD_RECORD_UPLOAD: false
-        with:
-          context: .
-          file: apps/orb-runtime/Dockerfile
-          platforms: linux/amd64
-          tags: pi-orb-runtime:dev
-          load: true
-          push: false
-          cache-from: type=gha,scope=e2e-runtime-linux-amd64-v1
-          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 1 && 'type=gha,scope=e2e-runtime-linux-amd64-v1,mode=max' || '' }}
-
-      - name: Report runtime image build
-        env:
-          SOURCE_SHA: ${{ github.sha }}
-          IMAGE_ID: ${{ steps.runtime-image.outputs.imageid }}
-          CACHE_WRITE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 1 }}
-        run: |
-          printf '### E2E runtime image\n\nSource: `%s`\n\nImage: `%s`\n\nCache: `e2e-runtime-linux-amd64-v1`; write: `%s`\n' "$SOURCE_SHA" "$IMAGE_ID" "$CACHE_WRITE" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Run end-to-end test
-        if: github.event_name != 'workflow_dispatch' || !inputs.subagent_continuation_diagnostic
-        env:
-          DEBUG: pw:browser
-          PI_ORB_LOCAL_FAKE_EVIDENCE: ${{ runner.temp }}/local-fake-provider
-          PI_ORB_E2E_RUNTIME_IMAGE_ID: ${{ steps.runtime-image.outputs.imageid }}
-        run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project lifecycle --shard=${{ matrix.shard }}/4
-
-      - name: Upload local provider provenance
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
-        with:
-          name: local-fake-docker-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/local-fake-provider/manifest.json
-            ${{ runner.temp }}/local-fake-provider/phases.json
-          if-no-files-found: ignore
-          retention-days: 14
-
-      - name: Report Docker disk use
-        if: always()
-        run: |
+          docker version
+          docker info --format '{{json .Driver}} {{json .Architecture}} {{json .NCPU}} {{json .MemTotal}}'
+        } | tee "$RUNNER_TEMP/cold-navigation-diagnostic/runner-before-setup.txt"
+    - name: Set up Node.js
+      uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+      with:
+        node-version: 24.6.0
+        package-manager-cache: false
+    - name: Locate npm cache
+      id: npm-cache-dir
+      run: echo "path=$(npm config get cache)" >> "$GITHUB_OUTPUT"
+    - name: Restore npm cache without saving
+      id: npm-cache
+      uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809
+      with:
+        path: ${{ steps.npm-cache-dir.outputs.path }}
+        key: node-cache-${{ runner.os }}-x64-npm-${{ hashFiles('package-lock.json') }}
+    - name: Report npm cache match
+      env:
+        CACHE_HIT: ${{ steps.npm-cache.outputs.cache-hit }}
+        CACHE_MATCH: ${{ steps.npm-cache.outputs.cache-matched-key }}
+        CACHE_REQUESTED: ${{ steps.npm-cache.outputs.cache-primary-key }}
+      run: |
+        printf 'npm cache hit=%s requested=%s matched=%s; exports disabled\n' "$CACHE_HIT" "$CACHE_REQUESTED" "$CACHE_MATCH" | tee "$RUNNER_TEMP/cold-navigation-diagnostic/npm-cache.txt"
+    - name: Use the signed Ubuntu archive
+      run: sudo python3 infra/runner_apt.py /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt.conf.d/99pi-orb-force-ipv4
+    - name: Install native addon prerequisites
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 build-essential
+    - name: Install dependencies
+      run: npm ci
+    - name: Cache Playwright browsers
+      uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      id: browser-cache
+    - name: Install pinned browser engines and system dependencies
+      run: npm run test:e2e:install
+    - name: Record browser cache and actual setup versions
+      env:
+        CACHE_REQUESTED: ${{ steps.browser-cache.outputs.cache-primary-key }}
+        CACHE_MATCH: ${{ steps.browser-cache.outputs.cache-matched-key }}
+        CACHE_HIT: ${{ steps.browser-cache.outputs.cache-hit }}
+      run: |
+        set -euo pipefail
+        {
+          printf 'browser cache hit=%s requested=%s matched=%s; exports disabled\n' "$CACHE_HIT" "$CACHE_REQUESTED" "$CACHE_MATCH"
+          node --version
+          npm --version
+          npx playwright --version
+          dpkg-query -W 'chromium*' 'libglib2.0-*' 'libsoup-*' || true
+        } | tee "$RUNNER_TEMP/cold-navigation-diagnostic/setup-versions.txt"
+    - name: Check Docker disk budget
+      run: |
+        df -h
+        test "$(df -Pk . | awk 'NR == 2 {print $4}')" -ge 15728640
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      with:
+        cache-binary: false
+    - name: Build E2E runtime image
+      id: runtime-image
+      timeout-minutes: 10
+      uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+      env:
+        DOCKER_BUILD_RECORD_UPLOAD: false
+      with:
+        context: .
+        file: apps/orb-runtime/Dockerfile
+        platforms: linux/amd64
+        tags: pi-orb-runtime:dev
+        load: true
+        push: false
+        cache-from: type=gha,scope=e2e-runtime-linux-amd64-v1
+    - name: Report runtime image build
+      env:
+        SOURCE_SHA: 3e7195f2e301bb0e413cb7306f557e839c76c7fa
+        IMAGE_ID: ${{ steps.runtime-image.outputs.imageid }}
+        CACHE_WRITE: 'false'
+      run: |
+        printf '### E2E runtime image\n\nSource: `%s`\n\nImage: `%s`\n\nCache: `e2e-runtime-linux-amd64-v1`; write: `%s`\n' "$SOURCE_SHA" "$IMAGE_ID" "$CACHE_WRITE" >> "$GITHUB_STEP_SUMMARY"
+    - name: Record normal runtime image and pre-test resources
+      env:
+        IMAGE_ID: ${{ steps.runtime-image.outputs.imageid }}
+      run: |
+        set -euo pipefail
+        docker image inspect pi-orb-runtime:dev > "$RUNNER_TEMP/cold-navigation-diagnostic/runtime-image.json"
+        test "$(docker image inspect pi-orb-runtime:dev --format '{{.Id}}')" = "$IMAGE_ID"
+        {
+          date -u +%FT%TZ
+          docker buildx version
+          docker buildx inspect
+          nproc
+          free -m
+          df -h
+          docker ps -a --format '{{.ID}} {{.Image}} {{.Names}} {{.Status}}'
+        } | tee "$RUNNER_TEMP/cold-navigation-diagnostic/pre-test.txt"
+    - name: Run end-to-end test
+      env:
+        DEBUG: pw:browser
+        PI_ORB_LOCAL_FAKE_EVIDENCE: ${{ runner.temp }}/local-fake-provider
+        PI_ORB_E2E_RUNTIME_IMAGE_ID: ${{ steps.runtime-image.outputs.imageid }}
+      run: |
+        set -euo pipefail
+        date -u +%FT%TZ > "$RUNNER_TEMP/cold-navigation-diagnostic/test-started.txt"
+        node scripts/local-fake-provider.mjs -- npx vitest run --config e2e/vitest.config.ts --project lifecycle e2e/full-slice.e2e.test.ts -t 'runs login, a scripted tool round trip, replication, and drain' 2>&1 | tee "$RUNNER_TEMP/cold-navigation-diagnostic/first-test.log"
+    - name: Upload local provider provenance
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: local-fake-docker-single-${{ github.run_id }}-${{ github.run_attempt }}
+        path: |
+          ${{ runner.temp }}/local-fake-provider/manifest.json
+          ${{ runner.temp }}/local-fake-provider/phases.json
+        if-no-files-found: ignore
+        retention-days: 14
+    - name: Report Docker disk use
+      if: always()
+      run: |
+        df -h
+        docker system df
+    - name: Capture browser failure host diagnostics
+      if: failure()
+      run: |
+        df -h
+        free -m
+        ps -eo pid,ppid,comm,rss
+        sudo dmesg --ctime | grep -Ei 'webkit|MiniBrowser|segfault|out of memory|oom-kill|killed process' || true
+        dpkg-query -W 'libglib2.0-*' 'libsoup-*' || true
+    - name: Record final image, resource and fixture inventory
+      if: always()
+      run: |
+        set -euo pipefail
+        date -u +%FT%TZ > "$RUNNER_TEMP/cold-navigation-diagnostic/final-capture.txt"
+        {
+          free -m
           df -h
           docker system df
-
-      - name: Upload Durable failure diagnostics
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
-        with:
-          name: e2e-durable-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            test-failures/cross-axis-*/failure.txt
-            test-failures/cross-axis-*/result.json
-            test-failures/cross-axis-*/execution-ready.json
-            test-failures/cross-axis-*/pin.json
-            test-failures/cross-axis-*/control-plane.log
-            test-failures/cross-axis-*/relay-requests.json
-            test-failures/cross-axis-*/model-requests.json
-            test-failures/cross-axis-*/retained-docker.json
-          if-no-files-found: ignore
-          retention-days: 14
-      - name: Diagnose subagent continuation
-        if: github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic
-        env:
-          DEBUG: pw:browser
-          PI_ORB_E2E_RUNTIME_IMAGE_ID: ${{ steps.runtime-image.outputs.imageid }}
-        run: npm run test:e2e -- --project lifecycle e2e/subagents.e2e.test.ts
-
-      - name: Capture browser failure host diagnostics
-        if: failure()
-        run: |
-          df -h
-          free -m
-          ps -eo pid,ppid,comm,rss
-          sudo dmesg --ctime | grep -Ei 'webkit|MiniBrowser|segfault|out of memory|oom-kill|killed process' || true
-          dpkg-query -W 'libglib2.0-*' 'libsoup-*' || true
-
-      - name: Upload deterministic failure traces
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
-        with:
-          name: e2e-dst-failure-traces-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            test-failures/*.json
-            test-failures/profile-login/failure.json
-            test-failures/full-slice-upload/failure.json
-            test-failures/subagent-*/failure.json
-          if-no-files-found: ignore
-          retention-days: 14
-
-      - name: Upload subagent native transport success audits
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
-        with:
-          name: subagent-native-transport-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: test-failures/subagent-*/success.json
-          if-no-files-found: ignore
-          retention-days: 14
-
-  frontend:
-    name: Frontend (${{ matrix.shard }}/4)
-    if: github.event_name != 'workflow_dispatch' || !inputs.subagent_continuation_diagnostic
-    runs-on: ubuntu-24.04
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Set up Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
-        with:
-          node-version: '24.6.0'
-          cache: npm
-      - name: Use the signed Ubuntu archive
-        run: sudo python3 infra/runner_apt.py /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt.conf.d/99pi-orb-force-ipv4
-      - name: Install native addon prerequisites
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 build-essential
-      - name: Install dependencies
-        run: npm ci
-      - name: Cache Playwright browsers
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-      - name: Install pinned browser engines and system dependencies
-        run: npm run test:e2e:install
-      - name: Run shared frontend tests
-        env:
-          DEBUG: pw:browser
-        run: npm run test:e2e -- --project frontend --shard=${{ matrix.shard }}/4
-      - name: Capture browser failure host diagnostics
-        if: failure()
-        run: |
-          df -h
-          free -m
-          ps -eo pid,ppid,comm,rss
-          sudo dmesg --ctime | grep -Ei 'webkit|MiniBrowser|segfault|out of memory|oom-kill|killed process' || true
-          dpkg-query -W 'libglib2.0-*' 'libsoup-*' || true
-      - name: Upload frontend failure evidence
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
-        with:
-          name: frontend-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            test-failures/image-collapse-*.json
-            test-failures/read-fallback-*.json
-            test-failures/stopped-cache-*/evidence.json
-            test-failures/stopped-cache-*/failure.png
-            test-failures/stopped-cache-*/trace.zip
-          if-no-files-found: ignore
-          retention-days: 14
-
-      - name: Upload missing-orb navigation failure evidence
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
-        with:
-          name: e2e-missing-orb-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            test-failures/missing-orb-*/failure.json
-            test-failures/missing-orb-*/desktop.png
-            test-failures/missing-orb-*/geometry.json
-          if-no-files-found: ignore
-          retention-days: 14
-
-      - name: Upload lazy-return browser failure evidence
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
-        with:
-          name: e2e-lazy-return-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            test-failures/lazy-return-*/failure.json
-            test-failures/lazy-return-*/failure.png
-            test-failures/lazy-return-*/trace.zip
-          if-no-files-found: ignore
-          retention-days: 14
-
-      - name: Upload harness browser failure evidence
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
-        with:
-          name: e2e-browser-failure-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: .context/claude-production-hardening/browser-failure
-          include-hidden-files: true
-          if-no-files-found: ignore
-          retention-days: 14
+          docker ps -a --format '{{.ID}} {{.Image}} {{.Names}} {{.Status}}'
+        } | tee "$RUNNER_TEMP/cold-navigation-diagnostic/final-resources.txt"
+        if docker image inspect postgres:16 >/dev/null 2>&1; then
+          docker image inspect postgres:16 > "$RUNNER_TEMP/cold-navigation-diagnostic/postgres-image.json"
+        fi
+        if docker image inspect pi-orb-runtime:dev >/dev/null 2>&1; then
+          docker image inspect pi-orb-runtime:dev > "$RUNNER_TEMP/cold-navigation-diagnostic/runtime-image-final.json"
+        fi
+    - name: Always preserve first cold-navigation and provenance evidence
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: cold-navigation-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+        path: |
+          test-failures/full-slice-upload/failure.json
+          test-failures/full-slice-browser/*/browser.json
+          test-failures/full-slice-browser/*/dom.json
+          test-failures/full-slice-browser/*/page.png
+          ${{ runner.temp }}/cold-navigation-diagnostic/
+          ${{ runner.temp }}/local-fake-provider/manifest.json
+          ${{ runner.temp }}/local-fake-provider/phases.json
+        if-no-files-found: warn
+        retention-days: 14
