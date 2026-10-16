@@ -60,6 +60,7 @@ export class ComposedClaudeFixture {
   readonly history: ClaudeHistory;
   readonly agent: ClaudeOrbAgent;
   failCommit = false;
+  failStateCommit = false;
   failSync = false;
   private readonly queryWaiters: ((query: ScheduledClaudeQuery) => void)[] = [];
   readonly accountReady: Promise<void>;
@@ -90,7 +91,17 @@ export class ComposedClaudeFixture {
       skillsDir: null,
       broker: null,
       incarnation: "0",
-      files: this.files,
+      files: {
+        ...this.files,
+        commit: (path, text) => {
+          if (this.failStateCommit) throw new Error("injected state commit failure");
+          this.files.commit(path, text);
+        },
+        sync: (path) => {
+          if (this.failSync) throw new Error("injected workflow sync failure");
+          this.files.sync(path);
+        },
+      },
       sdkFactory: (input, options) => {
         const query = new ScheduledClaudeQuery(input, options, this.queries.length === 0);
         this.queries.push(query);
@@ -316,14 +327,18 @@ export async function submitReceipt(task: SimulationTask, fixture: ComposedClaud
   return message.value;
 }
 
-export async function childHook(task: SimulationTask, fixture: ComposedClaudeFixture) {
+export async function childHook(
+  task: SimulationTask,
+  fixture: ComposedClaudeFixture,
+  id = "child",
+) {
   await task.checkpoint("native SubagentStart before inference");
   const callback = fixture.query.options.hooks?.SubagentStart?.[0]?.hooks[0];
   if (callback === undefined) throw new Error("production child hook missing");
   await callback(
     {
       hook_event_name: "SubagentStart",
-      agent_id: "child",
+      agent_id: id,
       agent_type: "general-purpose",
       session_id: fixture.state.id,
       transcript_path: fixture.nativePath,

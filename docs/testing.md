@@ -1,5 +1,14 @@
 # Testing
 
+## Claude Workflow ownership (2026-10-15; local, undeployed)
+
+The Workflow regression in `native-sdk.contract.test.ts` uses production admission and the real private journal reader; existing cases cover ordinary Agent.
+Result-only parser and focused admission/failure tests cover ownership release; three two-actor DST scenarios run 30 schedules each. Generic shutdown coverage stays in `composed-lifecycle.dst.test.ts`.
+Standalone-reader/current-child RED and explicit pre-fix DST replay are retained under `.context/claude-workflow-ownership/redesign/`; original tests/runners/traces are archived unchanged.
+Current tree: 66 tests pass across `workflow-journal.test.ts` (12), `workflow-child-terminal.dst.test.ts` (11; 90 randomized schedules), `native-sdk.contract.test.ts` (34) and `composed-lifecycle.dst.test.ts` (9); full typecheck and lint pass. Final logs: `.context/claude-workflow-ownership/redesign/finish/`.
+Old-head PR CI is not qualification of this redesign; no full-suite, Docker E2E or deployment claim.
+Contract/evidence: `docs/claude-agent-sdk.md`, `docs/postmortems/2026-10-15-claude-stale-subagent-ownership.md`.
+
 ## Runtime cache qualification (decision 2026-10-15)
 
 Cache hits never waive exact-head qualification. Each runner builds once; setup requires the exact build-action image ID and fails without fallback. Local setup rebuilds the current tree. Writer policy and build telemetry: `docs/deployment.md`.

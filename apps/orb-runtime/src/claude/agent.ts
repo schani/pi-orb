@@ -95,6 +95,7 @@ import {
   reconcileClaudeComputeOwnership,
   reconcileClaudeHandoffs,
 } from "./restore.ts";
+import { readWorkflowChildTerminals, workflowTerminalIdentity } from "./workflow-journal.ts";
 
 const NativeStateSchema = Type.Object({
   id: Type.String({ pattern: "^[a-f0-9-]{36}$" }),
@@ -324,6 +325,7 @@ export class ClaudeOrbAgent implements OrbAgent {
   private mcp: ClaudeMcpRuntime | null = null;
   private readonly options: ClaudeOrbAgentOptions;
   private readonly files: HistoryFiles;
+  private readonly workflowAdmissions = new Map<string, ReadonlySet<string> | null>();
   constructor(options: ClaudeOrbAgentOptions) {
     this.options = options;
     this.files = options.files ?? nativeHistoryFiles;
@@ -969,6 +971,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.continuationEdges = 0;
     this.continuationSuppressed = 0;
     this.closingTaskStarts.clear();
+    this.workflowAdmissions.clear();
     let resolveExit: () => void = () => undefined;
     let resolveStdout: (result: Result<void, { message: string }>) => void = () => undefined;
     const exited = new Promise<void>((resolve) => {
@@ -1102,6 +1105,10 @@ export class ClaudeOrbAgent implements OrbAgent {
                 const callback = (async () => {
                   if (!("agent_id" in input)) return {};
                   const id = String(input.agent_id);
+                  const duplicate =
+                    this.workflowAdmissions.has(id) ||
+                    Object.hasOwn(this.state?.ownedChildren ?? {}, id);
+                  this.workflowAdmissions.set(id, null);
                   this.activity.childAdmitted(id, "Native Claude agent");
                   if (this.state !== null) {
                     this.state.guardLifetime = this.lifetime();
@@ -1114,6 +1121,22 @@ export class ClaudeOrbAgent implements OrbAgent {
                   if (saved.isErr()) {
                     this.fail("claude_child_guard_failed", saved.error.message);
                     return { continue: false, stopReason: saved.error.message };
+                  }
+                  if (
+                    !duplicate &&
+                    this.queryId === queryId &&
+                    this.closing === null &&
+                    this.activity.operationId !== null
+                  ) {
+                    const baseline = this.workflowJournal([id]);
+                    if (baseline.isErr()) {
+                      this.fail("claude_workflow_child_terminal_failed", baseline.error.message);
+                      return { continue: false, stopReason: baseline.error.message };
+                    }
+                    this.workflowAdmissions.set(
+                      id,
+                      new Set(baseline.value.map(workflowTerminalIdentity)),
+                    );
                   }
                   this.publishChildren();
                   return {};
@@ -1286,6 +1309,52 @@ export class ClaudeOrbAgent implements OrbAgent {
         true,
       );
     }
+  }
+  private workflowJournal(ids: readonly string[]) {
+    return this.nativePath().andThen((path) =>
+      path === null ? ok([]) : readWorkflowChildTerminals(path, ids, this.files),
+    );
+  }
+  private reconcileWorkflowChildren(): Result<void, { message: string }> {
+    if (this.closing !== null || this.state === null || this.activity.operationId === null)
+      return ok(undefined);
+    const ids = Object.keys(this.state.ownedChildren ?? {}).filter(
+      (id) => this.workflowAdmissions.get(id) != null,
+    );
+    if (ids.length === 0) return ok(undefined);
+    const snapshot = this.workflowJournal(ids);
+    if (snapshot.isErr()) return err(snapshot.error);
+    const proofs = snapshot.value.filter(
+      (proof) => !this.workflowAdmissions.get(proof.agentId)?.has(workflowTerminalIdentity(proof)),
+    );
+    if (proofs.length === 0) return ok(undefined);
+    for (const proof of proofs) {
+      const recorded = this.platformEvent(
+        "claude.workflow_child_terminal",
+        "Native Workflow child result accounted for.",
+        {
+          sessionId: this.state.id,
+          queryId: this.queryId,
+          operationId: this.activity.operationId,
+          ...proof,
+        },
+        `claude.workflow-child-terminal:${this.state.id}:${workflowTerminalIdentity(proof)}`,
+        false,
+      );
+      if (recorded.isErr()) return err(recorded.error);
+    }
+    const previous = this.state.ownedChildren ?? {};
+    const remaining = { ...previous };
+    for (const proof of proofs) delete remaining[proof.agentId];
+    this.state.ownedChildren = remaining;
+    const saved = this.saveState();
+    if (saved.isErr()) {
+      this.state.ownedChildren = previous;
+      return err(saved.error);
+    }
+    for (const proof of proofs) this.activity.childTerminal(proof.agentId);
+    this.publishChildren();
+    return ok(undefined);
   }
   private onMessage(message: SDKMessage): void {
     if (
@@ -2018,8 +2087,14 @@ export class ClaudeOrbAgent implements OrbAgent {
   snapshot(): Result<HarnessSnapshot, SnapshotError> {
     if (this.health.status !== "ready" || this.state === null || this.history === null)
       return err({ type: "snapshot_error", message: "Claude session is not ready." });
+    const reconciled = this.reconcileWorkflowChildren();
+    if (reconciled.isErr()) {
+      this.fail("claude_workflow_child_terminal_failed", reconciled.error.message);
+      return err({ type: "snapshot_error", message: reconciled.error.message });
+    }
     const flushed = this.flushHistory();
     if (flushed.isErr()) return err({ type: "snapshot_error", message: flushed.error.message });
+    if (this.activity.canDrain && this.closing === null) void this.drainOperation();
     return ok({
       orbId: this.options.orbId,
       runtimeInstanceId: this.runtimeInstanceId,
