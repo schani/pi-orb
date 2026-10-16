@@ -8,7 +8,6 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
 import { gotoFrontendFixture, gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
 import { waitForFixtureMedia } from "./testkit/media-ready.ts";
-import { armNativeWheel } from "./testkit/native-wheel.ts";
 
 const WEB_ROOT = join(import.meta.dirname, "../apps/web");
 const ORB_PATH = "/orbs/frontend-fixture-orb";
@@ -1333,12 +1332,10 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     }
   });
 
-  it("keeps phone transcript pixels after a native wheel scroll round trip", async (ctx) => {
+  it("keeps phone transcript pixels after a native wheel scroll round trip", async () => {
     // WebKit's mobile automation does not implement wheel input. Use its desktop
     // input backend at phone width to exercise native scrolling and raster output.
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
-    ctx.onTestFinished(() => page.close());
-    const captures = join("test-failures", `mobile-wheel-${engine}-${randomUUID()}`);
     try {
       const scroller = page.locator(".orb-transcript-scroll");
       const write = page.getByRole("button", { name: "Write message" });
@@ -1379,19 +1376,13 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
               view.requestAnimationFrame(frame);
             }),
         );
-      const wheel = async (deltaY: number) => {
-        await scroller.evaluate(armNativeWheel);
-        await page.mouse.wheel(0, deltaY);
-        await scroller.evaluate((element) => Reflect.get(element, "wheelFinished"));
-        await stableLayout();
-      };
       await expectPage(rows).toHaveCount(20);
       await stableLayout();
       await page.mouse.move(195, 350);
       // Native upward crossings prepend twenty-row batches and preserve the old anchor.
       let count = 20;
       while (count < 200) {
-        await wheel(-1000000);
+        await page.mouse.wheel(0, -1000000);
         await expectPage.poll(() => rows.count()).toBeGreaterThan(count);
         await expectPage
           .poll(() => scroller.evaluate((element) => element.scrollTop))
@@ -1407,18 +1398,18 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         await expectPage(rows).toHaveCount(count);
       }
       await expectPage(rows.first()).toHaveAttribute("data-history-row", "long-history-0");
-      if ((await scroller.evaluate((element) => element.scrollTop)) > 0) await wheel(-1000000);
+      await page.mouse.wheel(0, -1000000);
       await expectPage.poll(() => scroller.evaluate((element) => element.scrollTop)).toBe(0);
       await stableLayout();
-      const before = await scroller.screenshot({ path: join(captures, "before.png") });
-      await wheel(1200);
+      const before = await scroller.screenshot();
+      await page.mouse.wheel(0, 1200);
       await expectPage
         .poll(() => scroller.evaluate((element) => element.scrollTop))
         .toBeGreaterThan(0);
-      await wheel(-1000000);
+      await page.mouse.wheel(0, -1000000);
       await expectPage.poll(() => scroller.evaluate((element) => element.scrollTop)).toBe(0);
       await stableLayout();
-      expectPage(await scroller.screenshot({ path: join(captures, "after.png") })).toEqual(before);
+      expectPage(await scroller.screenshot()).toEqual(before);
     } finally {
       await page.close();
     }

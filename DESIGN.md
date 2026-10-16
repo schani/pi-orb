@@ -150,8 +150,6 @@ Subsystem designs:
 
 Tracking:
 
-- [docs/postmortems/2026-10-16-release-retired-revision-500.md](docs/postmortems/2026-10-16-release-retired-revision-500.md) — post-activation smoke HTTP 500 attributed to deleted revision; historical explanation narrowly waived, cause unproven
-- [docs/postmortems/2026-10-16-claude-delivery-uncertain-c9a30a6d.md](docs/postmortems/2026-10-16-claude-delivery-uncertain-c9a30a6d.md) — separate unreceipted batch; offline disposition and fresh-exchange recovery verified after automatic restart, causes unknown
 - [docs/postmortems/2026-10-16-c9a30a6d-restart-loop.md](docs/postmortems/2026-10-16-c9a30a6d-restart-loop.md) — unreachable recovery and separate Spot preemptions; restart-budget precheck, silence unexplained
 - [docs/postmortems/2026-10-16-dependency-audit-validation-collision.md](docs/postmortems/2026-10-16-dependency-audit-validation-collision.md) — shared install/check ownership collision during dependency cleanup validation
 

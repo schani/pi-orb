@@ -211,7 +211,3 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 ## Claude model usage forwarding — 80
 
 80. **Resolved (2026-10-14; user decision):** Claude orbs' per-call usage (`docs/model-usage.md`) reaches `model_calls` as one hidden replicated `claude.model_call` history record per call, inserted by the control plane in the history commit transaction. Rejected: a runtime→control-plane endpoint — a new route, client and loss handling, where history replication already provides durable, authenticated, exactly-once delivery; the cost is roughly 20% more history records in busy Claude orbs. `query_source` maps `sdk` → `root`, `agent:*` → `subagent`, `compact` → `compaction`, others verbatim. `cost_usd` is stored for Pi and Claude calls.
-
-## Claude durable native acceptance — 81
-
-81. **Open (2026-10-16):** which native contract can guarantee session-scoped stable input IDs, atomic durable acceptance before action, recoverable pending input, restart/compaction-safe status lookup and duplicate suppression? Pinned SDK 0.3.300 / CLI 2.1.300 public APIs do not establish this contract. Determine whether upstream can supply it or select an owned harness; neither implementation nor new persisted acceptance state is approved. Proposal, constraints and rejected wrapper-only alternatives: `docs/claude-agent-sdk.md`.
