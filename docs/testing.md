@@ -1,5 +1,13 @@
 # Testing
 
+## Busy peer steering qualification (2026-10-16; local, undeployed)
+
+The existing native Sleep fixture asserts peer `whenBusy:steer`, current-operation metadata, attribution and deduplication; it fails against Main's busy rejection (`/tmp/pr136-trim-red.log`). Seven Sleep cases plus existing waiter, Sleep/FIFO and messaging tests pass **43 tests** (`/tmp/pr136-trim-targeted.log`); waiter DST covers steering before/during waits without child cancellation. Workspace/E2E typecheck and targeted lint pass (`/tmp/pr136-trim-{typecheck,lint}.log`).
+
+`PI_ORB_E2E_BACKEND=process npm run test:e2e -- e2e/durable-process.e2e.test.ts` passes both existing tests, including Chromium handshake, remote tools and child-alert interruption of a parent wait (`/tmp/pr136-trim-process-e2e.log`). Peer admission is covered by the native fixture, not this process scenario. Full E2E, image, live-provider and deployment gates remain unrun.
+
+Earlier fixture failures and corrections remain evidenced: wrong root ID and missing explicit child join (`/tmp/peer-first-green-attempt.log`, `test-failures/native-peer-steering-{before-1792179455762,pending-1792179455853}-0.json`, pre-fix/intermediate/final `/tmp/peer-replay-{before,pending}{,-fixed,-final}.log`); invalid E2E `after:null` corrected to `after:0` (`test-failures/peer-wait-qualification/`, `test-failures/peer-wait-7c565ca5-c01d-476e-9c96-6d76b1ffa111/`). No product defect is claimed for those fixture failures.
+
 ## Toolchain upgrade qualification (2026-10-16; local, undeployed)
 
 Node 24.22.0/npm 11.19.1, Vite 8.3.4/React plugin 6.1.2 and Vitest 5.0.5: clean `npm ci` added 603 packages, audited 611 and found zero vulnerabilities; full/production audits also report zero. Full workspace/E2E typecheck, lint (306 warnings, 79 infos) and production web build pass; build retains large-chunk warnings. Focused sequencing/sharding/browser-config/mock/timer/DST/patch contracts pass **138 tests / 10 files**. A broader overlapping run passed 293 with eight PostgreSQL skips and one native-fixture failure; its corrected fixture passes separately, not a claimed 294-pass run. Affected JWK tests pass 27/27. Node infrastructure contracts pass 19 and native-guest contracts 27.
