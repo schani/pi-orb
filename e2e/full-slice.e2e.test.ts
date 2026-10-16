@@ -49,6 +49,10 @@ import {
 } from "./harness.ts";
 import { holdModelStream } from "./held-model-stream.ts";
 import { runTerminal } from "./terminal-client.ts";
+import {
+  captureColdNavigation,
+  observeColdNavigation,
+} from "./testkit/cold-navigation-evidence.ts";
 import { FailureEvidence } from "./testkit/failure-evidence.ts";
 import { restartNoticePattern } from "./testkit/restart-notice-rule.ts";
 import { UploadContinuationPhases } from "./testkit/upload-continuation-phases.ts";
@@ -2561,8 +2565,24 @@ describe("full slice E2E", () => {
       ...(executablePath === undefined ? {} : { executablePath }),
       args: ["--no-sandbox"],
     });
+    console.info("Cold navigation environment", {
+      node: process.version,
+      nodeEnv: process.env["NODE_ENV"] ?? null,
+      chromium: browser.version(),
+      assets: readdirSync(join(webDistDirectory, "assets"))
+        .filter((name) => /^index-.*\.js$/.test(name))
+        .map((name) => ({
+          name,
+          sha256: createHash("sha256")
+            .update(readFileSync(join(webDistDirectory, "assets", name)))
+            .digest("hex"),
+        })),
+    });
+    let stopNavigationEvidence: (() => void) | undefined;
     try {
       const page = await browser.newPage();
+      const navigationEvidence = observeColdNavigation(page);
+      stopNavigationEvidence = navigationEvidence.dispose;
       let blockCachedHistory = false;
       let unnecessaryHistoryReads = 0;
       let appliedCursor: string | null = null;
@@ -2579,11 +2599,25 @@ describe("full slice E2E", () => {
           unnecessaryHistoryReads++;
           return route.abort();
         }
+        navigationEvidence.stage("history", "entered", undefined, route.request());
+        navigationEvidence.stage("history", "upstream-fetch", undefined, route.request());
         const response = await route.fetch();
+        navigationEvidence.stage("history", "upstream-body-complete", undefined, route.request());
         const body = await response.text();
+        const history = JSON.parse(body);
+        navigationEvidence.stage(
+          "history",
+          "buffer-summary",
+          {
+            records: history.records.length,
+            marker: body.includes("SPAWNED_TASK_COMPLETE"),
+          },
+          route.request(),
+        );
         browserPayloads.push(body);
-        appliedCursor = JSON.parse(body).cursor;
-        return route.fulfill({ response, body });
+        appliedCursor = history.cursor;
+        await route.fulfill({ response, body });
+        navigationEvidence.stage("history", "fulfill-acknowledged", undefined, route.request());
       });
       page.on("websocket", (transport) => {
         if (!transport.url().endsWith(`/orbs/${spawnedOrbId}/live`)) return;
@@ -2600,8 +2634,33 @@ describe("full slice E2E", () => {
             cachedHellos.push(frame.afterRecordId);
         });
       });
-      await page.goto(`${base}/orbs/${spawnedOrbId}`);
-      await expectPage(page.getByText("SPAWNED_TASK_COMPLETE", { exact: true })).toBeVisible();
+      navigationEvidence.stage("navigation", "goto");
+      try {
+        await page.goto(`${base}/orbs/${spawnedOrbId}`);
+        navigationEvidence.stage("navigation", "goto-complete");
+        await expectPage(page.getByText("SPAWNED_TASK_COMPLETE", { exact: true })).toBeVisible();
+        navigationEvidence.stage("navigation", "cold-navigation-visible");
+        console.info("Cold navigation completed", JSON.stringify(navigationEvidence.snapshot()));
+      } catch (error) {
+        navigationEvidence.stage("navigation", "cold-navigation-failed");
+        scenarioEvidence?.observations.push({
+          resource: "browser-cold-navigation",
+          ...navigationEvidence.snapshot(),
+        });
+        const directory = join(
+          import.meta.dirname,
+          "../test-failures/full-slice-browser",
+          `${Date.now()}`,
+        );
+        const captured = await captureColdNavigation(page, navigationEvidence, directory);
+        if (captured.isOk())
+          scenarioEvidence?.observations.push({
+            resource: "browser-cold-navigation-dom",
+            ...captured.value,
+          });
+        console.error("Cold navigation diagnostics", { directory, captured: captured.isOk() });
+        throw error;
+      }
       await expectPage(
         page.getByRole("button", { name: "Change thinking", exact: true }),
       ).toBeEnabled();
@@ -2771,6 +2830,7 @@ describe("full slice E2E", () => {
         );
       }
     } finally {
+      stopNavigationEvidence?.();
       await browser.close();
     }
 
