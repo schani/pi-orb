@@ -23,7 +23,7 @@ These overlapping local receipts are **not full updated-toolchain qualification*
 **Pre-toolchain-upgrade cleanup baseline only:** these receipts do not qualify Node 24.22.0, Vite 8.3.4, React plugin 6.1.2 or Vitest 5.0.5. Final frozen-source validation: clean `npm ci` added 734 packages, audited 742 and found zero vulnerabilities; typecheck passed; lint passed with 306 warnings and 79 infos. Full `npm test` passed: 5,050 unit/DST tests, 38 skipped across 704 files (691 passed, 13 skipped); infrastructure passed 92 Node, 171 Python and 27 native-VM tests, plus filesystem/service checks. Skips: 31 unconfigured real-PostgreSQL cases, four PostgreSQL-only PGlite cases and three live-GCS cases. Two package-list assertions first reproduced the redundant `apt-transport-https` dependency; removing it from setup and the skill example produced 30/30 focused skills passes and the full pass above. The initial full run was transport-interrupted after five minutes and is not qualification. The separate installer-test ownership collision and retained first-failure evidence are documented in `docs/postmortems/2026-10-16-dependency-audit-validation-collision.md`. No E2E, cloud, image-build or deployment qualification; Docker daemon unavailable.
 ## CI topology (decision 2026-10-16; implemented, undeployed)
 
-**PR acceptance receipt:** source `8d6a0559c325f0bb73a550073f901431a7e010ac`
+**Historical PR acceptance receipt:** source `8d6a0559c325f0bb73a550073f901431a7e010ac`
 passed all 18 jobs on attempt 1: [CI 38928852083](https://github.com/schani/pi-orb/actions/runs/38928852083),
 [E2E 38928852034](https://github.com/schani/pi-orb/actions/runs/38928852034),
 [Durable 38928851928](https://github.com/schani/pi-orb/actions/runs/38928851928).
@@ -35,7 +35,7 @@ Logs/artifacts: `.context/pr133-monitor/20261016T161649Z/REPORT.md`.
 Against successful `785fdcbb` [CI](https://github.com/schani/pi-orb/actions/runs/38852408508),
 [E2E](https://github.com/schani/pi-orb/actions/runs/38852408496) and
 [Durable](https://github.com/schani/pi-orb/actions/runs/38852408826), all-gates elapsed
-fell 19m35s → 12m35s; runner work 130m50s → 125m43s. This single historical
+fell 19m35s → 12m35s at `8d6a0559`; runner work 130m50s → 125m43s. This single historical
 comparison differs in code, runners, caches and push/PR event; it is not a controlled
 benchmark. Evidence: `.context/pr133-performance/summary-20261016T161709Z.json`.
 
@@ -68,11 +68,12 @@ guaranteed standalone savings.
 
 **Release admission:** `infra/ci_qualification.py` requires closed successful job
 inventories: CI six (`checks`, `control-plane-image`, four `Unit/DST`), E2E eight
-(four `E2E`, four `Frontend`), Durable qualification four `Central process`.
+(four `E2E`, four `Frontend`), Durable qualification five (four `Central process`,
+`control-plane-image`): 19 required jobs.
 Only the exact SHA's first-attempt, same-repository trusted `push`/`main` runs
 qualify. Missing, duplicate, extra, foreign, skipped or unsuccessful jobs fail
-closed; manual/diagnostic dispatches never qualify. One CI control-plane image
-build/offline proof and its cache policy are specified in `docs/deployment.md`.
+closed; manual/diagnostic dispatches never qualify. Both control-plane image
+builds and Durable's offline proof are specified in `docs/deployment.md`.
 
 **Scope:** suite splitting and exact-input native-image reuse remain deferred
 (`docs/deployment.md`). No seeds, assertions, gates or retry budgets are weakened;

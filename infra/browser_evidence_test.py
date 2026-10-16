@@ -35,12 +35,11 @@ class BrowserEvidenceTest(unittest.TestCase):
         qualification = (ROOT / '.github/workflows/durable-qualification.yml').read_text()
         for value in ('pull_request:', 'contents: read', 'shard: [1, 2, 3, 4]',
                       'PI_ORB_E2E_BACKEND: process', 'PI_ORB_AGENT_BACKEND: central-durable',
-                      'npm run test:e2e -- --project lifecycle --shard=', 'retention-days: 14'):
+                      'npm run test:e2e -- --project lifecycle --shard=',
+                      'docker build -f apps/control-plane/Dockerfile',
+                      '--network none', 'control-plane-image-proof.mjs',
+                      'retention-days: 14', 'df -h', '15728640'):
             self.assertIn(value, qualification)
-        for value in ('file: apps/control-plane/Dockerfile', '--network none',
-                      'control-plane-image-proof.mjs', 'df -h',
-                      'available >= 15 * 1024 * 1024 * 1024'):
-            self.assertIn(value, ci)
         for value in ('id-token: write', 'google-github-actions', 'infra/release.sh'):
             self.assertNotIn(value, qualification)
 
@@ -64,7 +63,7 @@ class BrowserEvidenceTest(unittest.TestCase):
                 self.assertIn('test-failures/cross-axis-*/' + filename, upload)
             self.assertNotIn('/**', upload)
             self.assertNotRegex(upload, r'(?m)^            .*/\\*\\s*$')
-        proof = steps('ci.yml', 'control-plane-image')['Prove packaged worker, Git and skills without network']
+        proof = steps('durable-qualification.yml', 'control-plane-image')['Prove packaged worker, Git and skills without network']
         self.assertIn('2>&1 | tee', proof)
 
     def test_ci_exercises_provider_supervisor_contracts(self):

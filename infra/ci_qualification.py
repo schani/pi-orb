@@ -19,7 +19,8 @@ EXPECTED = {
     'e2e.yml': ('E2E', (*(f'E2E ({i}/4)' for i in range(1, 5)),
                        *(f'Frontend ({i}/4)' for i in range(1, 5)))),
     'durable-qualification.yml': ('Durable qualification',
-                                tuple(f'Central process ({i}/4)' for i in range(1, 5))),
+                                (*(f'Central process ({i}/4)' for i in range(1, 5)),
+                                 'control-plane-image')),
 }
 
 
