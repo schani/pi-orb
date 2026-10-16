@@ -16,7 +16,7 @@ REQUIRED = {
                        'Frontend (1/4)', 'Frontend (2/4)', 'Frontend (3/4)', 'Frontend (4/4)')),
     'durable-qualification.yml': ('Durable qualification',
                                 ('Central process (1/4)', 'Central process (2/4)',
-                                 'Central process (3/4)', 'Central process (4/4)')),
+                                 'Central process (3/4)', 'Central process (4/4)', 'control-plane-image')),
 }
 
 
@@ -102,7 +102,7 @@ class QualificationTest(unittest.TestCase):
                 self.assertRegex(source, r'(?m)^  push:\n    branches:\n      - main$')
         source = Path('.github/workflows/durable-qualification.yml').read_text()
         self.assertIn('  workflow_dispatch:', source)
-        self.assertNotIn('  control-plane-image:', source)
+        self.assertIn('  control-plane-image:', source)
         self.assertIn('name: Central process (${{ matrix.shard }}/4)', source)
         self.assertIn('shard: [1, 2, 3, 4]', source)
 
@@ -127,13 +127,13 @@ class QualificationTest(unittest.TestCase):
                             jobs[index][key] = value
                         self.assertIsNotNone(inspect(api, SHA).error)
 
-    def test_single_control_plane_image_proof_is_required_in_ci(self):
-        api = FakeAPI()
-        api.jobs[1] = [job for job in api.jobs[1] if job['name'] != 'control-plane-image']
-        self.assertIsNotNone(inspect(api, SHA).error)
-        api = FakeAPI()
-        api.jobs[3].append({**api.jobs[1][1], 'run_id': 3})
-        self.assertIsNotNone(inspect(api, SHA).error)
+    def test_control_plane_image_builds_are_required_in_both_workflows(self):
+        for run_id in (1, 3):
+            with self.subTest(run_id=run_id):
+                api = FakeAPI()
+                api.jobs[run_id] = [job for job in api.jobs[run_id]
+                                    if job['name'] != 'control-plane-image']
+                self.assertIsNotNone(inspect(api, SHA).error)
 
     def test_central_qualification_is_required_for_production(self):
         api = FakeAPI()
@@ -145,7 +145,7 @@ class QualificationTest(unittest.TestCase):
         self.assertIsNone(result.error)
         self.assertTrue(valid_evidence(result.value, SHA))
         self.assertEqual(len(result.value['runs']), 3)
-        self.assertEqual([len(run['jobs']) for run in result.value['runs']], [6, 8, 4])
+        self.assertEqual([len(run['jobs']) for run in result.value['runs']], [6, 8, 5])
         self.assertFalse(valid_evidence({**result.value, 'token': 'secret'}, SHA))
         self.assertFalse(valid_evidence(result.value, 'b' * 40))
 

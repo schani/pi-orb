@@ -26,24 +26,15 @@ Evidence: authoritative `gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/re
 
 **Control-plane PTY build (decided 2026-10-15, PDT):** after dependency installation and patching, remove PTY prebuilds and rebuild with `npm_config_nodedir=/usr/local` in a separate `RUN --network=none`. The official Node image supplies matching headers and binary; header acquisition must not depend on the network. Dependency-stage and final-image PTY spawn smokes remain mandatory; build failures persist in Actions logs. Evidence and proof limits: `docs/postmortems/2026-10-15-control-plane-node-headers.md`.
 
-**Control-plane image qualification (decision 2026-10-16; implemented):** one
-CI job builds `apps/control-plane/Dockerfile` from the repository-root context
-with pinned Buildx actions, loads the local image and proves the packaged worker,
-Git and skills without network against the exact build-action image ID. Invalid
-or missing IDs fail without fallback. All runs import GHA cache scope
-`control-plane-linux-amd64-v1`; only trusted `push`/`main` exports (`mode=max`).
-The tracked-artifact guard and 15 GiB free-disk check precede the build; summaries
-and always-uploaded 14-day proof/provenance artifacts retain source SHA, image ID,
-cache writer policy and disk/image usage. Build-record uploads are disabled.
-No registry publication or cloud credentials. Layer hits never replace exact-source
-qualification; the complete required job inventory is in `docs/testing.md`.
-Local cold/warm offline proofs passed; the 72s warm result is local only.
-The PR's hosted build showed no cached steps, so no hosted CP cache payoff is evidenced.
-[Local proof history](https://github.com/schani/pi-orb/blob/8d6a0559c325f0bb73a550073f901431a7e010ac/docs/deployment.md#L29-L48)
-retains the initial missing-metadata wrapper failure and unresolved cache-export
-diagnostics; original provenance remains in
-`.context/ci-speed-implementation/control-plane-qualification-report.json`.
-PR acceptance is recorded in `docs/testing.md`; deployment remains unperformed.
+**Control-plane image qualification:** CI and Durable qualification each build
+`apps/control-plane/Dockerfile` from the repository-root context with `docker build`
+on isolated runners. Both builds exercise the dependency-stage/final-image PTY
+smokes and import check. CI's tracked-artifact guard and both jobs' 15 GiB
+free-disk checks precede their builds; disk/image usage remains in Actions logs.
+Durable qualification additionally proves the packaged bounded worker, Git and
+skills in a network-disabled container, checks its exit status and always retains
+combined stdout/stderr in a 14-day proof artifact. No registry publication or
+cloud credentials. The required job inventory is in `docs/testing.md`.
 
 **Blocked qualification (2026-10-07):** [Deploy 37642849345](https://github.com/schani/pi-orb/actions/runs/37642849345) rejected `a41359b`: [CI 37636936479](https://github.com/schani/pi-orb/actions/runs/37636936479) passed both jobs, but the qualifier still expected only `checks`; [E2E 37636936502](https://github.com/schani/pi-orb/actions/runs/37636936502) passed all four shards. Release was skipped before cloud credentials, lock, build, migration, apply or activation. The inventory correction adds an independent two-job fixture and a workflow/qualifier contract test; fresh exact-main qualification remains required. The preceding GitHub API HTTP 500 during the public partial outage was separate from this deterministic rejection. Evidence: `.context/deploy-pr61-20261007/qualified-report.md` and `first-run-full.log`.
 

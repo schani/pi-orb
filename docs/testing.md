@@ -2,7 +2,7 @@
 
 ## CI topology (decision 2026-10-16; implemented, undeployed)
 
-**PR acceptance receipt:** source `8d6a0559c325f0bb73a550073f901431a7e010ac`
+**Historical PR acceptance receipt:** source `8d6a0559c325f0bb73a550073f901431a7e010ac`
 passed all 18 jobs on attempt 1: [CI 38928852083](https://github.com/schani/pi-orb/actions/runs/38928852083),
 [E2E 38928852034](https://github.com/schani/pi-orb/actions/runs/38928852034),
 [Durable 38928851928](https://github.com/schani/pi-orb/actions/runs/38928851928).
@@ -14,7 +14,7 @@ Logs/artifacts: `.context/pr133-monitor/20261016T161649Z/REPORT.md`.
 Against successful `785fdcbb` [CI](https://github.com/schani/pi-orb/actions/runs/38852408508),
 [E2E](https://github.com/schani/pi-orb/actions/runs/38852408496) and
 [Durable](https://github.com/schani/pi-orb/actions/runs/38852408826), all-gates elapsed
-fell 19m35s → 12m35s; runner work 130m50s → 125m43s. This single historical
+fell 19m35s → 12m35s at `8d6a0559`; runner work 130m50s → 125m43s. This single historical
 comparison differs in code, runners, caches and push/PR event; it is not a controlled
 benchmark. Evidence: `.context/pr133-performance/summary-20261016T161709Z.json`.
 
@@ -47,11 +47,12 @@ guaranteed standalone savings.
 
 **Release admission:** `infra/ci_qualification.py` requires closed successful job
 inventories: CI six (`checks`, `control-plane-image`, four `Unit/DST`), E2E eight
-(four `E2E`, four `Frontend`), Durable qualification four `Central process`.
+(four `E2E`, four `Frontend`), Durable qualification five (four `Central process`,
+`control-plane-image`): 19 required jobs.
 Only the exact SHA's first-attempt, same-repository trusted `push`/`main` runs
 qualify. Missing, duplicate, extra, foreign, skipped or unsuccessful jobs fail
-closed; manual/diagnostic dispatches never qualify. One CI control-plane image
-build/offline proof and its cache policy are specified in `docs/deployment.md`.
+closed; manual/diagnostic dispatches never qualify. Both control-plane image
+builds and Durable's offline proof are specified in `docs/deployment.md`.
 
 **Scope:** suite splitting and exact-input native-image reuse remain deferred
 (`docs/deployment.md`). No seeds, assertions, gates or retry budgets are weakened;
