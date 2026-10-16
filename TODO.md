@@ -12,7 +12,11 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 - **Triage Undici security-release coverage** (2026-10-16; `docs/dependency-audit.md`). Compare direct `7.29.1` and Pi-owned nested `8.10.2` against the fixes in [7.30.1](https://github.com/nodejs/undici/releases/tag/v7.30.1) and [8.12.2](https://github.com/nodejs/undici/releases/tag/v8.12.2); establish reachable-path applicability and qualify remediation at each owning boundary. Applicability is not fully proven; zero npm advisory findings do not clear this finding.
 
+- **Qualify controlled-B full-slice child UI correction** (2026-10-16; `docs/postmortems/2026-10-16-ci-layout-comparison.md`): reviewed causal application barrier passes controlled regressions and one original Docker/host-Pi case locally. Preserve first evidence and assertions; normal exact-head CI qualification remains a shipping gate. B’s unique historical cause remains unknown.
+
 - **Fix WebKit harness-icons navigation readiness** ([first failure](https://github.com/schani/pi-orb/actions/runs/38865297828/job/116856612635)): cause unresolved; first browser diagnostics were not uploaded. Artifact retention does not clear this deployment blocker.
+
+- **Repair the foundation negative IAM guard** (2026-10-16; `infra/foundation/test.sh:19`). Constrain the scan to Terraform inputs and explicitly enforce failure on forbidden IAM matches; add a regression proving clean inputs pass and forbidden inputs fail despite Bash's `!`/`set -e` exemption. The current recursive scan self-matches the script and does not enforce failure.
 
 - **Explain the unreplicated final tail before target recovery** (2026-10-15; `docs/postmortems/2026-10-15-claude-delivery-uncertain-c9a30a6d.md`). The approved consumed-steering receipt correction is implemented locally with append-only proof events and no replay. Why this orb's replica stopped before its retained final reply/result remains unknown. Preserve the failed orb/disk; target restart/reconciliation and deployment remain unauthorized.
 

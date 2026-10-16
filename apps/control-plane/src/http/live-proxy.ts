@@ -6,12 +6,14 @@ import {
   TERMINAL_SUBPROTOCOL,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { Check } from "typebox/value";
 import { WebSocket } from "ws";
 import { withDeadline } from "../domain/dst.ts";
 import { agentPlacement } from "../domain/harness-agent-plane.ts";
+import { logOrbEvent } from "../domain/log.ts";
 import type { ControlPlaneDeps } from "../domain/ports.ts";
+import { RolloutSocketRetirement, type SocketRetirementCause } from "../domain/rollout-sockets.ts";
 import { attachCentralLive } from "./central-live.ts";
 import { type SessionExpiryScheduler, watchSessionExpiry } from "./session-expiry.ts";
 import { monitorWebSocketLiveness } from "./websocket-heartbeat.ts";
@@ -21,6 +23,50 @@ const UNSUPPORTED_DATA = 1003;
 const TERMINAL_PROXY_BUFFER_BYTES = 1024 * 1024;
 
 let connectionCounter = 0;
+
+/** Graceful rollout close is bounded even when the peer never acknowledges. */
+export function closeRolloutSocket(
+  socket: WebSocket,
+  forced: () => void,
+  schedule: SessionExpiryScheduler = (delay, callback) => {
+    const timer = setTimeout(callback, delay);
+    timer.unref();
+    return () => clearTimeout(timer);
+  },
+): void {
+  if (socket.readyState === WebSocket.CLOSED) return;
+  const terminate = (): void => {
+    forced();
+    try {
+      socket.terminate();
+    } catch {
+      /* already closed */
+    }
+  };
+  if (socket.readyState === WebSocket.CONNECTING) {
+    terminate();
+    return;
+  }
+  let stopped = false;
+  let cancel = (): void => undefined;
+  const cleanup = (): void => {
+    if (stopped) return;
+    stopped = true;
+    cancel();
+    socket.off("close", cleanup);
+  };
+  socket.once("close", cleanup);
+  cancel = schedule(1_000, () => {
+    cleanup();
+    if (socket.readyState !== WebSocket.CLOSED) terminate();
+  });
+  try {
+    socket.close(1012, "deployment rollover");
+  } catch {
+    cleanup();
+    terminate();
+  }
+}
 
 /**
  * Live routing (docs/runtime-protocol.md/docs/history-replication.md): host-native
@@ -41,7 +87,19 @@ export async function registerLiveProxy(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   scheduleSessionExpiry?: SessionExpiryScheduler,
+  rollout: RolloutSocketRetirement = new RolloutSocketRetirement(),
 ): Promise<void> {
+  const rejectRetired = async (_request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (rollout.retirement !== null) {
+      reply
+        .header("cache-control", "no-store")
+        .header("retry-after", "1")
+        .status(503)
+        .send({
+          error: { code: "unavailable", message: "Deployment in progress", retryable: true },
+        });
+    }
+  };
   await app.register(websocketPlugin, {
     options: {
       handleProtocols: (protocols: Set<string>) =>
@@ -55,7 +113,7 @@ export async function registerLiveProxy(
 
   app.get<{ Params: { orbId: string } }>(
     "/api/v1/orbs/:orbId/live",
-    { websocket: true },
+    { websocket: true, preValidation: rejectRetired },
     async (browserSocket, request) => {
       const orbId = request.params.orbId;
       connectionCounter += 1;
@@ -64,6 +122,7 @@ export async function registerLiveProxy(
       let upstreamOpen = false;
       let browserClosed = false;
       let centralAttached = false;
+      let detachCentral = (): void => undefined;
       const pendingToUpstream: string[] = [];
       const closeBoth = (code: number, reason: string): void => {
         try {
@@ -101,7 +160,7 @@ export async function registerLiveProxy(
       // as its upgrade completes, while routing below crosses async adapter
       // boundaries. Queue frames until the runtime socket is open.
       browserSocket.on("message", (data: Buffer, isBinary: boolean) => {
-        if (!session.admit()) return;
+        if (browserClosed || !session.admit()) return;
         if (isBinary) {
           closeBoth(UNSUPPORTED_DATA, "binary frames are not accepted");
           return;
@@ -150,7 +209,38 @@ export async function registerLiveProxy(
         }
       });
 
+      const retireConnection = (cause: SocketRetirementCause): void => {
+        browserClosed = true;
+        session.stop();
+        pendingToUpstream.length = 0;
+        detachCentral();
+        deps.control.unregisterBrowserConnection(orbId, connectionId, task.wallNow());
+        const force = (leg: string) => () =>
+          logOrbEvent(task, orbId, "rollout-socket-forced", {
+            ...cause,
+            connectionId,
+            leg,
+            socketCount: 1,
+            cause: "close_deadline_or_connecting",
+          });
+        closeRolloutSocket(browserSocket, force("browser"));
+        if (upstream !== null) closeRolloutSocket(upstream, force("runtime"));
+      };
+      const unregisterRollout = rollout.register(retireConnection);
+      if (unregisterRollout === null) {
+        if (rollout.retirement !== null) retireConnection(rollout.retirement);
+        return;
+      }
+      const untrack = (): void => {
+        unregisterRollout();
+        browserSocket.off("close", untrack);
+        browserSocket.off("error", untrack);
+      };
+      browserSocket.once("close", untrack);
+      browserSocket.once("error", untrack);
+
       const orbResult = await deps.store.getOrb(task, orbId);
+      if (browserClosed) return;
       const agentPlane = deps.agentPlane;
       if (
         agentPlane &&
@@ -185,11 +275,15 @@ export async function registerLiveProxy(
         const session = opened.value;
         if (browserClosed) return;
         centralAttached = true;
-        attachCentralLive(browserSocket, session, pendingToUpstream, (requestId, retryable) =>
-          request.log.warn(
-            { orbId, connectionId, requestId, retryable },
-            "central agent request failed",
-          ),
+        detachCentral = attachCentralLive(
+          browserSocket,
+          session,
+          pendingToUpstream,
+          (requestId, retryable) =>
+            request.log.warn(
+              { orbId, connectionId, requestId, retryable },
+              "central agent request failed",
+            ),
         );
         pendingToUpstream.length = 0;
         return;
@@ -239,7 +333,7 @@ export async function registerLiveProxy(
       });
 
       runtimeSocket.on("open", () => {
-        if (!session.admit()) {
+        if (browserClosed || !session.admit()) {
           closeBoth(1008, "session expired");
           return;
         }
@@ -248,7 +342,7 @@ export async function registerLiveProxy(
         pendingToUpstream.length = 0;
       });
       runtimeSocket.on("message", (data, isBinary) => {
-        if (!session.admit()) return;
+        if (browserClosed || !session.admit()) return;
         if (isBinary) {
           closeBoth(UNSUPPORTED_DATA, "binary frames are not accepted");
           return;
@@ -273,7 +367,7 @@ export async function registerLiveProxy(
 
   app.get<{ Params: { orbId: string } }>(
     "/api/v1/orbs/:orbId/terminal",
-    { websocket: true },
+    { websocket: true, preValidation: rejectRetired },
     async (browserSocket, request) => {
       const orbId = request.params.orbId;
       let upstream: WebSocket | null = null;
@@ -315,7 +409,7 @@ export async function registerLiveProxy(
       );
 
       browserSocket.on("message", (data: Buffer, isBinary: boolean) => {
-        if (!session.admit()) return;
+        if (browserClosed || !session.admit()) return;
         const copy = Buffer.from(data);
         if (copy.byteLength > TERMINAL_MAX_INPUT_BYTES) {
           closeBoth(1009, "terminal frame is too large");
@@ -359,7 +453,38 @@ export async function registerLiveProxy(
         }
       });
 
+      const retireConnection = (cause: SocketRetirementCause): void => {
+        browserClosed = true;
+        session.stop();
+        pending.length = 0;
+        pendingBytes = 0;
+        deps.control.unregisterBrowserConnection(orbId, connectionId, task.wallNow());
+        const force = (leg: string) => () =>
+          logOrbEvent(task, orbId, "rollout-socket-forced", {
+            ...cause,
+            connectionId,
+            leg,
+            socketCount: 1,
+            cause: "close_deadline_or_connecting",
+          });
+        closeRolloutSocket(browserSocket, force("browser"));
+        if (upstream !== null) closeRolloutSocket(upstream, force("runtime"));
+      };
+      const unregisterRollout = rollout.register(retireConnection);
+      if (unregisterRollout === null) {
+        if (rollout.retirement !== null) retireConnection(rollout.retirement);
+        return;
+      }
+      const untrack = (): void => {
+        unregisterRollout();
+        browserSocket.off("close", untrack);
+        browserSocket.off("error", untrack);
+      };
+      browserSocket.once("close", untrack);
+      browserSocket.once("error", untrack);
+
       const orbResult = await deps.store.getOrb(task, orbId);
+      if (browserClosed) return;
       if (
         orbResult.isErr() ||
         orbResult.value === null ||
@@ -431,7 +556,7 @@ export async function registerLiveProxy(
       );
       upstream = runtimeSocket;
       runtimeSocket.on("open", () => {
-        if (!session.admit()) {
+        if (browserClosed || !session.admit()) {
           closeBoth(1008, "session expired");
           return;
         }
@@ -445,7 +570,7 @@ export async function registerLiveProxy(
         pendingBytes = 0;
       });
       runtimeSocket.on("message", (data, isBinary) => {
-        if (!session.admit()) return;
+        if (browserClosed || !session.admit()) return;
         if (browserSocket.bufferedAmount > TERMINAL_PROXY_BUFFER_BYTES) {
           closeBoth(TRY_AGAIN_LATER, "terminal output consumer is too slow");
           return;

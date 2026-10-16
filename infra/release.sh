@@ -295,6 +295,13 @@ stage retire
 release_run_child python3 -m infra.release_retire wait "$RECORD"
 stage activate
 state activate
+monitor_pid=""
+if [ -z "$VALIDATE" ] && [ -n "${PI_ORB_ROLLOUT_MONITOR_BASELINE:-}" ]; then
+  : "${PI_ORB_ROLLOUT_MONITOR_OUTPUT:?monitor output path required}"
+  release_start_child python3 -m infra.rollout_monitor --active "$RECORD" \
+    "$PI_ORB_ROLLOUT_MONITOR_OUTPUT" "$PI_ORB_ROLLOUT_MONITOR_BASELINE" "$REMOTE_LOCK_GENERATION"
+  monitor_pid=$RELEASE_STARTED_PID
+fi
 stage lifecycle
 export PI_ORB_RELEASE_RECORD="$RECORD"
 release_run_child "$INFRA/smoke.sh"
@@ -308,5 +315,6 @@ export PI_ORB_SMOKE_WIF_STS_AUDIENCE="//iam.googleapis.com/$(jq -r '.pi_orb_work
 export PI_ORB_SMOKE_WIF_TEST_SA=$(jq -r '.deployer_service_account_email.value' <<<"$foundation")
 release_run_child "$INFRA/smoke-workload-identity.sh"
 state check
+if [ -n "$monitor_pid" ]; then release_wait_child "$monitor_pid"; fi
 stage complete
 echo "RELEASE VALIDATED: $(jq -r '.commit' "$RECORD") (generation $(jq -r '.artifacts.deploy_generation' "$RECORD"))"

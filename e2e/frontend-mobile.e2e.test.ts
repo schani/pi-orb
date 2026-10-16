@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type HistoryRecord, projectDisplayRecord } from "@pi-orb/protocol";
 import { type Browser, chromium, expect as expectPage, webkit } from "@playwright/test";
+import { ResultAsync } from "neverthrow";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
@@ -870,6 +871,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     "preserves reader position after %s intent and content growth",
     async (intent) => {
       const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      let completed = false;
       try {
         await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb");
         await waitForFixtureMedia(page);
@@ -895,11 +897,48 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
           });
           await page.mouse.up();
         } else if (intent === "focus") {
+          const target = await scroller.evaluate(async (pane) => {
+            const doc = pane.ownerDocument;
+            const view = doc.defaultView;
+            const content = pane.querySelector(".orb-transcript-content");
+            if (!view || !content) throw new Error("Missing reader geometry target");
+            await doc.fonts.ready;
+            const growth = doc.createElement("div");
+            growth.style.height = "140px";
+            content.append(growth);
+            // Observe the tail follower consuming growth before native focus reveals a reader target.
+            await new Promise<void>((resolve) => {
+              const observer = new view.ResizeObserver(() => {
+                if (pane.scrollHeight - pane.clientHeight - pane.scrollTop > 1) return;
+                observer.disconnect();
+                view.requestAnimationFrame(() => resolve());
+              });
+              observer.observe(content);
+            });
+            const first = pane.querySelector(".rec");
+            return {
+              bottom: first?.getBoundingClientRect().bottom,
+              viewportTop: pane.getBoundingClientRect().top,
+            };
+          });
+          expectPage(target.bottom).toBeLessThan(target.viewportTop);
           await scroller.evaluate((pane) => {
             const first = pane.querySelector(".rec") as (typeof pane & { focus(): void }) | null;
             first?.setAttribute("tabindex", "0");
             first?.focus();
           });
+          await expectPage
+            .poll(() =>
+              page.evaluate(() =>
+                Reflect.get(globalThis, "window")
+                  .piOrbDebug.dump()
+                  .trace.some(
+                    (entry: { event: string; outcome: string }) =>
+                      entry.event === "scroll_pin" && entry.outcome === "released:scroll",
+                  ),
+              ),
+            )
+            .toBe(true);
         } else if (intent === "ArrowUp") {
           // macOS WebKit animates keyboard scrolls: a release before movement
           // cancels one and a press during one is dropped.
@@ -952,7 +991,41 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         );
         expectPage(pinEdges.some((entry) => entry.outcome.startsWith("released:"))).toBe(true);
         expectPage(pinEdges.every((entry) => entry.contentHeight > 0)).toBe(true);
+        completed = true;
       } finally {
+        if (intent === "focus" && !completed) {
+          const captured = await ResultAsync.fromPromise(
+            page.evaluate(() => {
+              const doc = Reflect.get(globalThis, "document");
+              const pane = doc.querySelector(".orb-transcript-scroll");
+              const first = pane?.querySelector(".rec");
+              return {
+                scrollTop: pane?.scrollTop,
+                scrollHeight: pane?.scrollHeight,
+                clientHeight: pane?.clientHeight,
+                viewportTop: pane?.getBoundingClientRect().top,
+                targetTop: first?.getBoundingClientRect().top,
+                targetHeight: first?.getBoundingClientRect().height,
+                activeElement: doc.activeElement?.className,
+                fonts: doc.fonts.status,
+                pinEdges: Reflect.get(globalThis, "window")
+                  .piOrbDebug?.dump()
+                  .trace.filter((entry: { event: string }) => entry.event === "scroll_pin"),
+              };
+            }),
+            (cause) => ({
+              type: "focus_diagnostic_unavailable" as const,
+              message: cause instanceof Error ? cause.message : String(cause),
+            }),
+          );
+          console.error(
+            "focus reader failure",
+            JSON.stringify({
+              engine,
+              evidence: captured.isOk() ? captured.value : captured.error,
+            }),
+          );
+        }
         await page.close();
       }
     },

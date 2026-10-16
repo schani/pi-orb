@@ -26,7 +26,15 @@ Evidence: authoritative `gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/re
 
 **Control-plane PTY build (decided 2026-10-15, PDT):** after dependency installation and patching, remove PTY prebuilds and rebuild with `npm_config_nodedir=/usr/local` in a separate `RUN --network=none`. The official Node image supplies matching headers and binary; header acquisition must not depend on the network. Dependency-stage and final-image PTY spawn smokes remain mandatory; build failures persist in Actions logs. Evidence and proof limits: `docs/postmortems/2026-10-15-control-plane-node-headers.md`.
 
-**Nondeploy image qualification (2026-10-07):** CI independently builds `apps/control-plane/Dockerfile` from the repository-root context on Ubuntu 24.04, after the tracked-artifact guard and a 15 GiB free-disk check. The job reports final Docker/disk usage, uses only `contents: read`, and neither publishes images nor obtains cloud credentials. This checks the web/dependency/runtime image closure; it does not alone qualify a release or replace Docker/PostgreSQL E2E and native acceptance. Release qualification requires the exact CI inventory `checks` and `control-plane-image`, both successful on the first exact-SHA push/main attempt, plus all four E2E shards. Workflow job changes must update the qualifier inventory; missing, duplicate, foreign or unsuccessful jobs fail closed.
+**Control-plane image qualification:** CI and Durable qualification each build
+`apps/control-plane/Dockerfile` from the repository-root context with `docker build`
+on isolated runners. Both builds exercise the dependency-stage/final-image PTY
+smokes and import check. CI's tracked-artifact guard and both jobs' 15 GiB
+free-disk checks precede their builds; disk/image usage remains in Actions logs.
+Durable qualification additionally proves the packaged bounded worker, Git and
+skills in a network-disabled container, checks its exit status and always retains
+combined stdout/stderr in a 14-day proof artifact. No registry publication or
+cloud credentials. The required job inventory is in `docs/testing.md`.
 
 **Blocked qualification (2026-10-07):** [Deploy 37642849345](https://github.com/schani/pi-orb/actions/runs/37642849345) rejected `a41359b`: [CI 37636936479](https://github.com/schani/pi-orb/actions/runs/37636936479) passed both jobs, but the qualifier still expected only `checks`; [E2E 37636936502](https://github.com/schani/pi-orb/actions/runs/37636936502) passed all four shards. Release was skipped before cloud credentials, lock, build, migration, apply or activation. The inventory correction adds an independent two-job fixture and a workflow/qualifier contract test; fresh exact-main qualification remains required. The preceding GitHub API HTTP 500 during the public partial outage was separate from this deterministic rejection. Evidence: `.context/deploy-pr61-20261007/qualified-report.md` and `first-run-full.log`.
 
@@ -276,14 +284,14 @@ In priority order:
    permission to select an arbitrary older image. Uncertain or changed inputs
    require rebuilding and acceptance; host-spec generation fencing remains intact.
 5. **Approved: reuse trusted exact-SHA CI and E2E qualification.** Keep manual
-   Deploy. Before acquiring the release lock, wait for both workflows' successful
+   Deploy. Before acquiring the release lock, wait for CI, E2E and Durable qualification's successful
    same-repository `push`/`main` runs at the exact dispatched SHA; record run IDs
    and attempts. Accept only one matching push run per workflow, on its first
    attempt; reruns cannot mask an earlier failure. CI, E2E and Deploy are aligned
    on `ubuntu-24.04` and Node `24.22.0`.
    This removes duplicate checks, not coverage. Failed or cancelled runs block;
    pending or missing runs must succeed within 60 minutes (65-minute job limit).
-   Require the CI checks job and all four E2E jobs. Before the release lock,
+   Require the closed inventories specified in `docs/testing.md`. Before the release lock,
    `release.sh` re-verifies the exact evidence and checkout at the immutable
    selected SHA, then removes the qualification token from its
    environment. Run/job identities are retained in the optional `qualification`
@@ -304,13 +312,81 @@ Counts and logs are recorded in `docs/testing.md`. The hosted E2E run was a
 feature-branch dispatch, not eligible `push`/`main` production qualification.
 Live release reuse and deployment gates remain unvalidated; no deployment was performed.
 
-**Proposed instrumentation:** extend the token-free release record with per-stage
-start/end/duration, shard coverage, cache hits/misses, artifact-input identities,
-qualification provenance and explicit reuse/rebuild decisions. Measure critical
-path and resource cost before claiming improvement. Serialized deployment,
-migration, IAP, retirement, activation and applicable production smoke gates remain
-required; none of these proposals authorizes skipping them or retrying failures
-until green.
+Migration, IAP, independent retirement, activation and production smoke gates
+remain mandatory. Current CI admission is specified in `docs/testing.md`.
+
+### Rollout speed (decision 2026-10-16; implemented, undeployed)
+
+Read-only inspection of [Deploy 38854219880](https://github.com/schani/pi-orb/actions/runs/38854219880)
+(`785fdcbb`) found **91m11s** total: October 15, 22:08:26–23:39:37 PDT.
+Build/publication took 13m52s, retirement **37m27s**, lifecycle/identity stages
+10m23s, and the subsequent monitor 18m55s. The preceding successful
+[Deploy 38665042043](https://github.com/schani/pi-orb/actions/runs/38665042043)
+spent **38m26s** in retirement. These are measured durations, not optimization results.
+
+Cloud Logging correlates an old revision's 3601-second live WebSocket with
+SIGTERM 7.8ms after its derived end; the preceding success shows the same pattern.
+SIGTERM-only drain is too late. The 3600-second request allowance and startup-only
+activation barrier do not fence already-active autonomous loops; host-generation
+checks are not comprehensive lifecycle fences. Independent retirement proof remains
+mandatory. [Timing evidence and reproduction commands](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/4e48bb90-21cd-4555-a7c7-dd02e9421e7d/ci-speed/deploy-speed-evidence.json).
+
+**Rollout-specific socket retirement:** the application polls the existing
+`static-plane/releases/latest.json` and its exact release record every five seconds.
+Only an in-progress `retire` phase after successful repair, a newer generation,
+a distinct replacement serving revision and explicit inclusion of this exact old
+revision in the retirement inventory trigger closure. Missing, malformed or
+unavailable reads grant no retirement authority. The watcher closes live and
+terminal sockets with 1012 (`deployment rollover`), forces unacknowledged closure
+after one second, and rejects new upgrades on the retired revision. Durable
+`lifecycle:` edges record read failure/recovery, retirement and forced closure;
+healthy polling is silent.
+
+Live reconnect uses the existing synchronization and accepted/uncertain-input
+handling. Terminal PTYs are ephemeral: disconnect kills the shell and the UI
+shows the ended session without automatic reconnect. The user accepts this
+rollout-only loss; routine periodic terminal rotation is not approved. Agent
+ownership/lifecycle authority fences and the startup activation barrier are
+unchanged; this is socket admission, not cooperative controller drain. Independent
+revision absence, explicit active/idle zeros, visibility and Compute-operation
+proof remain required. The first deployment cannot retrofit the watcher into an
+already-running old binary, so its old sockets may still hold retirement.
+
+**IAM prerequisite (approved 2026-10-16, PDT; implemented, not applied):**
+`google_storage_bucket_iam_member.control_plane_release_rollout` grants the existing
+control-plane service account `roles/storage.objectViewer` on `var.state_bucket`,
+conditioned on exact bucket-qualified `static-plane/releases/latest.json` equality
+OR (bucket-qualified `static-plane/releases/r-` prefix AND `.json` suffix).
+This is a prefix/suffix subset, not full release-ID validation; the reader rejects
+IDs containing slashes and requires exact service/project/revision identity and a
+newer generation excluding the serving revision. The activation-only binding is
+unchanged. The new binding grants no activation, lock, state, secret, foreign-bucket,
+other-namespace or bucket-list access. No regex CEL, new objects, release-record
+fields or other persisted state are introduced. No cloud apply or IAM validation
+has run.
+
+**Monitor overlap:** immediately after activation, `infra/release.sh` starts the
+owned monitor while lifecycle and identity smokes remain sequential. The complete
+900-second window plus 180-second Monitoring ingestion allowance is unchanged;
+the monitor must join successfully before `complete`. During observation it
+verifies the exact active release and held lock's object generation/release/SHA,
+rereads the existing record for dynamic smoke-fixture IDs and tolerates a removed
+project only when that exact project is an owned fixture. It neither suppresses
+other fleet failures nor adds prompts, fixtures or record fields. Cancellation
+joins owned work. After transaction completion and lock cleanup, an independent
+workflow step verifies the validated record, every gate, deleted fixtures,
+matching full observation and absent lock, then takes a fresh final sample.
+Failure blocks workflow success; it never triggers automatic rollback.
+
+**Deferred:** exact-input native-image reuse is not implemented. Current
+`infra/native-image-vars.mjs` requires the release commit; provenance or persisted
+contract changes require separate discussion. In 20 historical Deploy attempts,
+13 built native images: 3/12 comparable committed-input transitions matched,
+but the latest ten attempts had four builds and no repeats. Committed inputs do
+not establish identical tar bytes, resolved base images or mutable APT inputs.
+[Frequency study and conditional payoff models](https://github.com/schani/pi-orb/blob/8d6a0559c325f0bb73a550073f901431a7e010ac/docs/deployment.md#rollout-speed-decision-2026-10-16-implemented-undeployed)
+preserve the method, run identities, rejected reuse assumptions and estimates.
+No deployment payoff is measured; CI PR acceptance is recorded in `docs/testing.md`.
 
 ## Native runtime VM image release (implemented 2026-09-05; first deployed 2026-09-07)
 
@@ -596,11 +672,11 @@ STS tier or add identity authority.
 
 Production Terraform selects `central-durable` for every Pi orb; Claude remains host-native. Existing host-Pi conversations refuse initialization/new messages with `legacy_backend`, retaining readable public history and the retained workspace disk. No private-context import or adoption flag. Ordinary compute replacement deletes the disposable instance, not its `autoDelete:false` workspace; existing repository checkout is not reset. Existing owned drain still obeys its original fences. Adoption decision: `docs/pi-durable-evaluation.md`, question 72 (Pi Durable) in `docs/open-questions.md`.
 
-Deployment requires fresh exact-source CI (both control-plane images), all four Docker shards and all four central-process shards, followed by the normal manual main-only transaction (`first_consolidation=false` for the already-consolidated production). Existing lifecycle/identity smoke fixtures remain required; monitoring adds no prompts or orbs. Share the external Actions run URL before cutover: the deploying legacy Pi conversation may lose publication or compute.
+Deployment requires the complete exact-source qualification inventory in `docs/testing.md`, followed by the normal manual main-only transaction (`first_consolidation=false` for the already-consolidated production). Existing lifecycle/identity smoke fixtures remain required; monitoring adds no prompts or orbs. Share the external Actions run URL before cutover: the deploying legacy Pi conversation may lose publication or compute.
 
-The external release job verifies its owner metadata inventory before rollout, then runs `infra/rollout_monitor.py` after a validated transaction. It persists an initial partial artifact before probing and samples for at least fifteen minutes plus the 180-second Monitoring ingestion allowance, with a 25-minute step budget. The always-uploaded, 30-day `rollout-monitor-<run>-<attempt>` JSON is separate from the authoritative release record. It retains exact release/SHA/generation, timestamps, health, revision/image/backend/traffic/active-pointer checks, lock absence, owner fleet placement/state counts, SQL RUNNABLE, timestamped SQL CPU/memory/disk/connections and revision/region-scoped Run instances/memory/startup distributions. Instance count is not restart count; startup distributions retain their observed count or unknown. Required missing/nonnumeric metrics or read failures are `incomplete`, never invented zero. Logs are revision/region-scoped and export only classified counts: expected `legacy_backend` is separate from integrity/authority/drain/delivery failures, generic ERRORs and HTTP5xx. A detected regression requires review, not automatic rollback. Unavailable samples retain the category and the monitor's fixed failure message (2026-10-11). No prompts, tokens, payloads or free-form errors enter the artifact. No natural central turn means central inference remains unobserved; Native ownership/drain detail is not independently queried from SQL.
+The external release job verifies its owner metadata inventory before rollout. The 2026-10-16 rollout decision above defines monitor overlap and independent final verification. `infra/rollout_monitor.py` persists an initial partial artifact before probing. The always-uploaded, 30-day `rollout-monitor-<run>-<attempt>` JSON is separate from the authoritative release record. It retains exact release/SHA/generation, timestamps, health, revision/image/backend/traffic/active-pointer checks, lock ownership during observation and absence at final verification, owner fleet placement/state counts, SQL RUNNABLE, timestamped SQL CPU/memory/disk/connections and revision/region-scoped Run instances/memory/startup distributions. Instance count is not restart count; startup distributions retain their observed count or unknown. Required missing/nonnumeric metrics or read failures are `incomplete`, never invented zero. Logs are revision/region-scoped and export only classified counts: expected `legacy_backend` is separate from integrity/authority/drain/delivery failures, generic ERRORs and HTTP5xx. A detected regression requires review, not automatic rollback. Unavailable samples retain the category and the monitor's fixed failure message (2026-10-11). No prompts, tokens, payloads or free-form errors enter the artifact. No natural central turn means central inference remains unobserved; Native ownership/drain detail is not independently queried from SQL.
 
-**Recovery:** the pre-activation host-Pi image is not a central-preserving rollback. After central history exists, never silently flip the global selector back. Prefer a qualified forward fix retaining central placement, private authority, public history and workspaces. A retained-image rollback requires a qualified central-capable CP/native/config/schema combination and a new forward generation with the normal release fences/gates. Preserve failed release/lock/migration evidence; no automatic SQL DOWN, DB restore, history overwrite, user archival/deletion or old-controller revival. Backup/PITR readiness is not a rehearsed restore. Monitoring failure leaves a validated release record intact and reports incomplete observation.
+**Recovery:** the pre-activation host-Pi image is not a central-preserving rollback. After central history exists, never silently flip the global selector back. Prefer a qualified forward fix retaining central placement, private authority, public history and workspaces. A retained-image rollback requires a qualified central-capable CP/native/config/schema combination and a new forward generation with the normal release fences/gates. Preserve failed release/lock/migration evidence; no automatic SQL DOWN, DB restore, history overwrite, user archival/deletion or old-controller revival. Backup/PITR readiness is not a rehearsed restore. An observation failure prevents transaction completion; independent post-completion verification failure leaves the validated release record intact and fails the workflow.
 
 ## Manual GitHub Actions deployment
 

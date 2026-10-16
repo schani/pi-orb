@@ -51,6 +51,7 @@ import { PiActivityHeadlineGenerator } from "./adapters/pi-headline-generator.ts
 import { PiOrbNameGenerator } from "./adapters/pi-name-generator.ts";
 import { ProcessOrbHostProvider } from "./adapters/process/provider.ts";
 import { createReleaseActivationReader } from "./adapters/release-activation.ts";
+import { createRolloutReader } from "./adapters/rollout-reader.ts";
 import { FetchRuntimeClient } from "./adapters/runtime-client/fetch-client.ts";
 import { SdkAgentPlane } from "./adapters/sdk-agent-plane.ts";
 import { createSealedAuthCookies } from "./adapters/sealed-auth-cookies.ts";
@@ -107,6 +108,7 @@ import { getProjectSecretSnapshot } from "./domain/project-secrets.ts";
 import { cancelQueuedUserTurn } from "./domain/queued-turn-cancellation.ts";
 import { waitForReleaseActivation } from "./domain/release-activation.ts";
 import { resourceError } from "./domain/resources.ts";
+import { RolloutSocketRetirement, watchRolloutSockets } from "./domain/rollout-sockets.ts";
 import { createSigningKeyBootstrapState, ensureActiveSigningKey } from "./domain/signing-keys.ts";
 import { UserScope } from "./domain/user-scope.ts";
 import { MintDenialLog } from "./domain/workload-identity.ts";
@@ -860,6 +862,7 @@ export async function main(
   const principalResolver =
     adapters.requestPrincipalResolverFactory?.(httpTask, database.users) ??
     configuredPrincipalResolver.value;
+  const rolloutSockets = new RolloutSocketRetirement();
   registerAuthenticatedBrowserRoutes(
     app,
     principalResolver,
@@ -870,7 +873,7 @@ export async function main(
         filesOrigin: hostingOrigin,
         appOrigin,
       });
-      await registerLiveProxy(browser, httpTask, deps);
+      await registerLiveProxy(browser, httpTask, deps, undefined, rolloutSockets);
       registerRoutes(browser, httpTask, deps, viewConfig, systemView, signingKeyDeps);
       registerMcpOAuthRoutes(browser, httpTask, database.mcp, mcpOAuth, appOrigin);
       registerMcpRoutes(browser, httpTask, database.mcp, async (projectId, config) => {
@@ -988,6 +991,7 @@ export async function main(
   };
 
   const stop = new AbortController();
+  let rolloutWatcher: Promise<void> = Promise.resolve();
   let appClosePromise: Promise<void> | null = null;
   let resourceClosePromise: Promise<void> | null = null;
   const closeApp = (): Promise<void> => {
@@ -998,6 +1002,7 @@ export async function main(
   };
   const closeResources = (): Promise<void> => {
     resourceClosePromise ??= (async () => {
+      await rolloutWatcher;
       await closeApp();
       if (centralPlane) {
         const closed = await centralPlane.close();
@@ -1035,6 +1040,22 @@ export async function main(
   // Fire and forget: the socket is already accepting, and this repairs the
   // issuer behind it (see `ensureSigningKeyInBackground`).
   void ensureSigningKeyInBackground();
+
+  const revision = env("K_REVISION", "");
+  if (activationBucket !== "" && env("K_SERVICE", "") === "pi-orb-issuer" && revision !== "") {
+    rolloutWatcher = watchRolloutSockets(
+      new ControlPlaneTask("rollout-sockets"),
+      createRolloutReader(
+        activationBucket,
+        env("PI_ORB_GCP_PROJECT", ""),
+        createGcsTokenProvider(),
+      ),
+      revision,
+      specGeneration,
+      rolloutSockets,
+      stop.signal,
+    );
+  }
 
   // Background loops: same domain code as the simulations, on real time
   // (docs/history-replication.md, docs/lifecycle.md).

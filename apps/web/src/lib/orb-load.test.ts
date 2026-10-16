@@ -298,3 +298,46 @@ it("mismatched response identities and retryable errors are not cache successes"
   expect((await failed.result)?.history.isErr()).toBe(true);
   expect(cache.stats.entries).toBe(0);
 });
+
+it.each(["metadata", "history"] as const)(
+  "cold %s gate distinguishes a pending load from a cancelled load and late acceptance",
+  async (held) => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const diagnostic = vi.fn();
+    const cache = new TranscriptCache();
+    const makeLoad = () =>
+      startOrbLoad({
+        orbId: "a",
+        cache,
+        diagnostic,
+        getOrb: async () => {
+          if (held === "metadata") await gate;
+          return ok(orb());
+        },
+        getHistory: async () => {
+          if (held === "history") await gate;
+          return ok(history());
+        },
+      });
+    const cancelled = makeLoad();
+    cancelled.cancel();
+    const current = makeLoad();
+    expect(current.initial).toBeNull();
+    const pending = await Promise.race([current.result, Promise.resolve("pending")]);
+    expect(pending).toBe("pending");
+    expect(diagnostic.mock.calls.map(([data]) => data.phase)).toEqual(
+      held === "metadata" ? [] : ["metadata_completion"],
+    );
+    release();
+    expect(await cancelled.result).toBeNull();
+    const result = await current.result;
+    expect(result?.orbId).toBe("a");
+    expect(result?.history.isOk()).toBe(true);
+    expect(current.accept(result)).toBe(result);
+    current.cancel();
+    expect(current.accept(result)).toBeNull();
+  },
+);

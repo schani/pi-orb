@@ -1,19 +1,33 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type OrbView, OrbViewSchema, type ProjectView, type SessionProbe } from "@pi-orb/protocol";
+import { PassThrough } from "node:stream";
+import {
+  type DisplayHistoryView,
+  type OrbView,
+  OrbViewSchema,
+  type ProjectView,
+  type SessionProbe,
+} from "@pi-orb/protocol";
 import { chromium, expect as expectPage } from "@playwright/test";
 import Fastify from "fastify";
 import { Errors } from "typebox/value";
 import { build } from "vite";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { registerWebAssets } from "../apps/control-plane/src/http/web-assets.ts";
+import { waitForAppliedHistory } from "./testkit/applied-history.ts";
+import {
+  captureColdNavigation,
+  observeColdNavigation,
+} from "./testkit/cold-navigation-evidence.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pi-orb-built-shell-"));
 const app = Fastify({ logger: false });
 let browser: Awaited<ReturnType<typeof chromium.launch>>;
+let metadataBodyRelease: Promise<void> | null = null;
 
 beforeAll(async () => {
+  console.info("built-shell environment", { nodeEnv: process.env["NODE_ENV"] });
   await build({
     root: join(import.meta.dirname, "../apps/web"),
     configFile: join(import.meta.dirname, "../apps/web/vite.config.ts"),
@@ -26,6 +40,16 @@ beforeAll(async () => {
       principal: { kind: "user", user: { id: "built-shell-user", email: null } },
     }),
   );
+  app.get("/api/v1/orbs/cold-child", (_, reply) => {
+    if (metadataBodyRelease === null) return coldOrb;
+    const stream = new PassThrough();
+    const body = JSON.stringify(coldOrb);
+    stream.write(body.slice(0, 1));
+    void metadataBodyRelease.then(() => stream.end(body.slice(1)));
+    reply.type("application/json");
+    return stream;
+  });
+  app.get("/api/v1/orbs/cold-child/history", () => coldHistory);
   await registerWebAssets(app, root);
   await app.listen({ host: "127.0.0.1", port: 0 });
   browser = await chromium.launch({
@@ -289,3 +313,231 @@ it("boots the production shell and loads its built JS, CSS and favicon on direct
     await page.close();
   }
 });
+
+const coldOrb: OrbView = {
+  id: "cold-child",
+  projectId: "cold-project",
+  harness: "pi",
+  name: "Cold child",
+  state: "running",
+  stateVersion: 1,
+  activity: "idle",
+  stateChangedAt: "2026-10-16T00:00:00Z",
+  createdAt: "2026-10-16T00:00:00Z",
+  updatedAt: "2026-10-16T00:00:00Z",
+};
+const coldHistory: DisplayHistoryView = {
+  orbId: coldOrb.id,
+  session: { id: "cold-session" },
+  cursor: "completion",
+  headId: "completion",
+  records: [
+    {
+      id: "completion",
+      parentId: null,
+      timestamp: "2026-10-16T00:00:00Z",
+      type: "message",
+      role: "assistant",
+      finishReason: "stop",
+      content: [{ type: "text", text: "SPAWNED_TASK_COMPLETE" }],
+    },
+  ],
+};
+
+it.each([
+  "projects",
+  "metadata",
+  "history-before-fetch",
+  "history-after-body",
+  "metadata-body",
+] as const)("cold navigation controlled gate: %s", async (held) => {
+  const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
+  const page = await browser.newPage();
+  const evidence = observeColdNavigation(page);
+  const signal = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
+  };
+  const gate = signal();
+  const entered = signal();
+  const historyFulfilled = signal();
+  const metadataFulfilled = signal();
+  let metadataHeaders: ReturnType<typeof page.waitForResponse> | null = null;
+  const hold = async () => {
+    entered.resolve();
+    await gate.promise;
+  };
+  try {
+    await page.route("**/api/v1/projects", async (route) => {
+      if (held === "projects") await hold();
+      await route.fulfill({ json: { items: [] } });
+    });
+    if (held === "metadata-body") {
+      metadataBodyRelease = gate.promise;
+      metadataHeaders = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/v1/orbs/cold-child",
+      );
+    } else {
+      await page.route("**/api/v1/orbs/cold-child", async (route) => {
+        if (held === "metadata") await hold();
+        await route.fulfill({ json: coldOrb });
+        metadataFulfilled.resolve();
+      });
+    }
+    await page.route("**/api/v1/orbs/cold-child/history", async (route) => {
+      evidence.stage("history", "entered", undefined, route.request());
+      if (held === "history-before-fetch") await hold();
+      evidence.stage("history", "upstream-fetch", undefined, route.request());
+      const response = await route.fetch();
+      evidence.stage("history", "upstream-body-complete", undefined, route.request());
+      const body = await response.text();
+      evidence.stage(
+        "history",
+        "buffer-summary",
+        {
+          records: coldHistory.records.length,
+          marker: body.includes("SPAWNED_TASK_COMPLETE"),
+        },
+        route.request(),
+      );
+      if (held === "history-after-body") await hold();
+      await route.fulfill({ response, body });
+      evidence.stage("history", "fulfill-acknowledged", undefined, route.request());
+      historyFulfilled.resolve();
+    });
+    await page.goto(`${origin}/orbs/${coldOrb.id}`);
+    if (metadataHeaders !== null) await metadataHeaders;
+    else await entered.promise;
+    if (held === "projects") {
+      await Promise.all([metadataFulfilled.promise, historyFulfilled.promise]);
+      await expectPage(page.getByText("SPAWNED_TASK_COMPLETE", { exact: true })).toBeVisible();
+      await expectPage(page.getByRole("status")).toHaveText("loading projects…");
+    } else {
+      await (held === "metadata" || held === "metadata-body"
+        ? historyFulfilled.promise
+        : metadataFulfilled.promise);
+      await expectPage(page.locator(".orb-main[aria-busy=true]")).toHaveCount(1);
+      await expectPage(page.getByText("SPAWNED_TASK_COMPLETE", { exact: true })).toHaveCount(0);
+    }
+    console.info("cold-navigation held", held, JSON.stringify(evidence.snapshot()));
+    if (held === "metadata-body") {
+      const directory = join(
+        import.meta.dirname,
+        "../test-failures/cold-navigation",
+        `${Date.now()}`,
+      );
+      const captured = await captureColdNavigation(page, evidence, directory);
+      expect(captured.isOk()).toBe(true);
+      expect(JSON.parse(readFileSync(join(directory, "dom.json"), "utf8"))).toMatchObject({
+        mainBusy: "true",
+        mainChildren: 0,
+        debug: { navigation: [], current: null },
+      });
+      console.info("cold-navigation capture", directory);
+    }
+    const acceptance = waitForAppliedHistory(page, coldHistory);
+    gate.resolve();
+    await acceptance;
+    await expectPage(page.getByText("SPAWNED_TASK_COMPLETE", { exact: true })).toBeVisible();
+    console.info("cold-navigation released", held, JSON.stringify(evidence.snapshot()));
+  } finally {
+    gate.resolve();
+    metadataBodyRelease = null;
+    await page.unrouteAll({ behavior: "wait" });
+    evidence.dispose();
+    await page.close();
+  }
+});
+
+it.each(["cancelled-first", "active-first", "crossed"] as const)(
+  "cold navigation owns each StrictMode request: %s",
+  async (order) => {
+    const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
+    const page = await browser.newPage();
+    const pending: { metadata: (() => Promise<void>)[]; history: (() => Promise<void>)[] } = {
+      metadata: [],
+      history: [],
+    };
+    let acceptance: Promise<void> | undefined;
+    try {
+      await page.route("**/api/v1/projects", (route) => route.fulfill({ json: { items: [] } }));
+      for (const kind of ["metadata", "history"] as const) {
+        const path = `**/api/v1/orbs/cold-child${kind === "history" ? "/history" : ""}`;
+        await page.route(path, async (route) => {
+          const index = pending[kind].length;
+          let release!: () => void;
+          let fulfilled!: () => void;
+          const held = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          const completed = new Promise<void>((resolve) => {
+            fulfilled = resolve;
+          });
+          pending[kind].push(async () => {
+            release();
+            await completed;
+          });
+          await held;
+          const json =
+            kind === "metadata"
+              ? coldOrb
+              : index === 0
+                ? {
+                    ...coldHistory,
+                    records: [
+                      {
+                        ...coldHistory.records[0],
+                        content: [{ type: "text", text: "CANCELLED_LOAD" }],
+                      },
+                    ],
+                  }
+                : coldHistory;
+          await route.fulfill({ json });
+          fulfilled();
+        });
+      }
+      await page.goto(`${origin}/orbs/${coldOrb.id}`);
+      await expectPage
+        .poll(() => [pending.metadata.length, pending.history.length])
+        .toEqual([2, 2]);
+      const marker = page.getByText("SPAWNED_TASK_COMPLETE", { exact: true });
+      if (order === "cancelled-first") {
+        await Promise.all([pending.metadata[0]?.(), pending.history[0]?.()]);
+      } else if (order === "crossed") {
+        await Promise.all([pending.metadata[0]?.(), pending.history[1]?.()]);
+      } else {
+        await Promise.all([pending.metadata[1]?.(), pending.history[1]?.()]);
+        await expectPage(marker).toBeVisible();
+      }
+      let applied = false;
+      acceptance = waitForAppliedHistory(page, coldHistory).then(() => {
+        applied = true;
+      });
+      if (order !== "active-first") {
+        await page.evaluate(() => undefined);
+        expect(applied).toBe(false);
+        await expectPage(page.locator(".orb-main[aria-busy=true]")).toHaveCount(1);
+        await expectPage(marker).toHaveCount(0);
+      }
+      await Promise.all([pending.metadata[1]?.(), pending.history[1]?.()]);
+      await acceptance;
+      await expectPage(marker).toBeVisible();
+      await Promise.all([pending.metadata[0]?.(), pending.history[0]?.()]);
+      await page.unrouteAll({ behavior: "wait" });
+      await expectPage(marker).toBeVisible();
+      await expectPage(page.getByText("CANCELLED_LOAD", { exact: true })).toHaveCount(0);
+    } finally {
+      await Promise.all(
+        Object.values(pending)
+          .flat()
+          .map((release) => release()),
+      );
+      await acceptance;
+      await page.unrouteAll({ behavior: "wait" });
+      await page.close();
+    }
+  },
+);

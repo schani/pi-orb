@@ -50,13 +50,22 @@ class PreflightTest(unittest.TestCase):
         package = json.loads(Path("package.json").read_text())
         self.assertEqual(package["scripts"]["test:e2e:install"],
                          "playwright install --with-deps chromium webkit")
-        for path, command in [
-            ("infra/release.sh", "npm run test:e2e\n"),
-            (".github/workflows/e2e.yml", "npm run test:e2e -- --shard=${{ matrix.shard }}/4\n"),
-        ]:
-            script = Path(path).read_text()
-            self.assertLess(script.index("npm ci"), script.index("npm run test:e2e:install"))
-            self.assertLess(script.index("npm run test:e2e:install"), script.index(command))
+        import re
+        release = Path("infra/release.sh").read_text()
+        self.assertLess(release.index("npm ci"), release.index("npm run test:e2e:install"))
+        self.assertLess(release.index("npm run test:e2e:install"), release.index("npm run test:e2e\n"))
+        for workflow, job_ids in [("e2e", ("e2e", "frontend")),
+                                  ("durable-qualification", ("process",))]:
+            source = Path(f".github/workflows/{workflow}.yml").read_text().split("\njobs:\n", 1)[1]
+            jobs = dict(re.findall(r'^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)', source, re.M | re.S))
+            for job_id in job_ids:
+                with self.subTest(workflow=workflow, job=job_id):
+                    job = jobs[job_id]
+                    self.assertLess(job.index("npm ci"), job.index("npm run test:e2e:install"))
+                    commands = re.findall(r'^        run: .*npm run test:e2e --[^\n]+$', job, re.M)
+                    self.assertTrue(commands)
+                    for command in commands:
+                        self.assertLess(job.index("npm run test:e2e:install"), job.index(command))
 
     def test_release_dependency_caches_and_single_e2e_runtime_build(self):
         key = "key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}"

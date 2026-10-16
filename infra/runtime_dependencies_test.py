@@ -17,10 +17,11 @@ class RuntimeDependenciesTests(unittest.TestCase):
         self.rebuild = next(step for step in self.steps if 'npm rebuild node-pty' in step)
 
     def test_node_version_is_pinned_across_ci_and_container_stages(self):
-        for name in ['ci', 'e2e', 'deploy', 'durable-qualification']:
+        for name, count in [('ci', 2), ('e2e', 2), ('deploy', 1), ('durable-qualification', 1)]:
             with self.subTest(workflow=name):
                 source = (ROOT / f'.github/workflows/{name}.yml').read_text()
-                self.assertEqual(re.findall(r"node-version: '([^']+)'", source), ['24.22.0'])
+                self.assertEqual(re.findall(r"node-version: '([^']+)'", source),
+                                 ['24.22.0'] * count)
         for app, count in [('control-plane', 3), ('orb-runtime', 1)]:
             with self.subTest(app=app):
                 source = (ROOT / f'apps/{app}/Dockerfile').read_text()

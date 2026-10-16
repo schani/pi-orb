@@ -142,3 +142,63 @@ test("legacy broad network and IAP grants are explicitly adopted for removal", (
   assert.match(roles, /roles\/iap\.admin/);
   assert.match(roles, /roles\/servicenetworking\.networksAdmin/);
 });
+
+test("rollout reads latest and r-prefixed JSON, preserving activation-only authority", () => {
+  const activation = iam.match(
+    /resource "google_storage_bucket_iam_member" "control_plane_release_activation" \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert(activation);
+  assert.match(activation, /resource\.name == '[^']*\/static-plane\/releases\/active\.json'/);
+  assert.doesNotMatch(activation, /startsWith|matches|\|\|/);
+  const rollout = iam.match(
+    /resource "google_storage_bucket_iam_member" "control_plane_release_rollout" \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert(rollout, "missing approved scoped rollout read policy");
+  assert.match(rollout, /bucket = var\.state_bucket/);
+  assert.match(rollout, /role\s+= "roles\/storage\.objectViewer"/);
+  assert.match(
+    rollout,
+    /member\s+= "serviceAccount:\$\{google_service_account\.control_plane\.email\}"/,
+  );
+  const releases = "projects/_/buckets/${var.state_bucket}/objects/static-plane/releases";
+  assert.equal(
+    rollout.match(/expression\s*=\s*"([^"\n]*)"/)?.[1],
+    `resource.name == '${releases}/latest.json' || (resource.name.startsWith('${releases}/r-') && resource.name.endsWith('.json'))`,
+  );
+  assert.doesNotMatch(rollout, /matches|objectAdmin|objectCreator|tfstate|\.tflock|secrets/);
+  const expression = rollout.match(/expression\s*=\s*"([^"\n]*)"/)?.[1];
+  const terms = expression?.match(
+    /^resource\.name == '([^']+)' \|\| \(resource\.name\.startsWith\('([^']+)'\) && resource\.name\.endsWith\('([^']+)'\)\)$/,
+  );
+  assert(terms);
+  const [, latest, prefix, suffix] = terms;
+  const bucket = releases.slice(0, releases.indexOf("/objects/"));
+  for (const [name, allowed] of [
+    [`${releases}/latest.json`, true],
+    [`${releases}/r-1791935519-4b99cc0b-7365-4fc7-a485-2a795ca6d660.json`, true],
+    [`${releases}/r-example.json`, true],
+    [`${releases}/active.json`, false],
+    [`${releases}/latest.json.bak`, false],
+    [`${releases}/latest.json/other`, false],
+    [`${releases}/r-example.txt`, false],
+    [`${releases}/r-example.json.bak`, false],
+    [`${releases}/other.json`, false],
+    [`${releases}/r.json`, false],
+    [`${bucket}/objects/static-plane/release.lock`, false],
+    [`${releases}/release.lock`, false],
+    [`${bucket}/objects/static-plane/default.tfstate`, false],
+    [`${bucket}/objects/static-plane/default.tflock`, false],
+    [`${bucket}/objects/secrets/r-example.json`, false],
+    [`${bucket}/objects/other/releases/latest.json`, false],
+    [`${bucket}/objects/other/releases/r-example.json`, false],
+    ["projects/_/buckets/foreign/objects/static-plane/releases/latest.json", false],
+    ["projects/_/buckets/foreign/objects/static-plane/releases/r-example.json", false],
+    [bucket, false],
+  ]) {
+    assert.equal(
+      name === latest || (name.startsWith(prefix) && name.endsWith(suffix)),
+      allowed,
+      name,
+    );
+  }
+});
