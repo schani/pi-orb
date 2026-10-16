@@ -81,7 +81,6 @@ for (const variant of ['regular', 'inverted']) {
   }
 }
 
-// Scene and variant changes retain in-memory drafts.
 await page.locator('[data-scene="personal"]').click();
 const personal = page.locator('[data-field="personal-markdown"]');
 await personal.fill('# retained\n\nAcross scene and variant changes.');

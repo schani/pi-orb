@@ -3,11 +3,11 @@ import { dirname } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { err, Result } from "neverthrow";
 
-/** Opening an exclusively reserved empty file makes the public SDK initialize and own an eager session. */
 const failure = () => ({
   type: "settings_error" as const,
   message: "Cannot initialize persistent session",
 });
+/** Opening an exclusively reserved empty file makes the public SDK initialize and own an eager session. */
 export function createPersistentSession(cwd: string, sessionDir: string) {
   return Result.fromThrowable(() => SessionManager.create(cwd, sessionDir), failure)().andThen(
     (manager) => {

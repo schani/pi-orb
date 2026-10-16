@@ -28,7 +28,6 @@ import { mintIdToken } from "./workload-identity.ts";
 const ORB = "orb-a";
 const AUDIENCE = "urn:example:service";
 
-/** A fresh durable substrate: one key table and one secret store per scenario. */
 function makeSubstrate(): { keys: FakeSigningKeyStore; secrets: FakeSecretStore } {
   return {
     keys: new FakeSigningKeyStore(),
@@ -147,7 +146,6 @@ describe("establishing the issuer's signing key (DST)", () => {
         );
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
 
-        // Both instances sign with the same key, whichever of them created it.
         expect(booted.length).toBe(2);
         expect(new Set(booted).size).toBe(1);
         expect(theActiveKey(substrate.keys).kid).toBe(booted[0]);
@@ -346,8 +344,6 @@ describe("rotating the issuer's signing key (DST)", () => {
             const second = rotated._unsafeUnwrap();
             expect(second.kid).not.toBe(first.kid);
 
-            // The new key signs, the old one keeps verifying, and the active
-            // key is served first.
             const kids = await publishedKids(task, harness);
             expect(kids[0]).toBe(second.kid);
             expect(kids).toContain(first.kid);
@@ -554,7 +550,6 @@ describe("rotating the issuer's signing key (DST)", () => {
         );
         expect(race.isOk(), race.isErr() ? race.error.message : "").toBe(true);
 
-        // Exactly one key signs, and it is not the one the rotations replaced.
         const winner = theActiveKey(substrate.keys);
         expect(winner.kid).not.toBe(original);
         expect(substrate.keys.snapshot(original)?.state).toBe("retired");
@@ -575,10 +570,9 @@ describe("rotating the issuer's signing key (DST)", () => {
           expect(row.state, `${row.kid} should still be awaiting adoption`).toBe("pending");
         }
 
-        // Nothing ever *attempted* a row shape the schema forbids outright —
-        // above all `retired` → `active`, the escalation the old convergence
-        // loop could reach after retiring a fresh key. Recovering from your own
-        // impossible write is not the same as never making it.
+        // Nothing ever *attempted* a row shape the schema forbids outright,
+        // above all `retired` → `active`. Recovering from your own impossible
+        // write is not the same as never making it.
         //
         // A "would be a second active key" refusal is deliberately *not*
         // forbidden here: two rotations that each read no active key and then
@@ -644,7 +638,6 @@ describe("rotating the issuer's signing key (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        // Never two active keys, whatever failed and whenever it failed.
         expect(substrate.keys.activeRows().length).toBeLessThanOrEqual(1);
       },
     );
@@ -727,7 +720,7 @@ describe("minting across a key rotation (DST)", () => {
 
       const secondKid = theActiveKey(substrate.keys).kid;
       expect(secondKid).not.toBe(firstKid);
-      // Tokens signed before the rotation stay verifiable throughout it.
+      // Every token signed so far stays verifiable after the rotation.
       const after = await sim.runTasks([
         {
           name: "post-rotation",
@@ -847,9 +840,7 @@ describe("minting across a key rotation (DST)", () => {
 
             // The accepted staleness: inside the window the material is still
             // reused, which is the price of not reading a secret per token.
-            // The 100 ms margins keep the assertions about the TTL rather than
-            // about how many bounded store latencies the schedule chose to put
-            // on either side of it.
+            // The margins keep the assertions about the TTL, not about store latency.
             await task.sleep(ttlMs - 100, "inside the material TTL");
             const stale = await mintIdToken(task, mintDeps, {
               tokenHash: bearer,

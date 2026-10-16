@@ -193,8 +193,8 @@ describe("baked agent skills", () => {
       for (const name of HOOK_ENV_DENIED) {
         expect(body, `the skill must say ${name} cannot be set from a hook`).toContain(name);
       }
-      // The guidance this replaced (2026-08-26): neither shell the agent has
-      // reads a profile, so a hook writing there sets nothing anyone sees.
+      // Neither shell the agent has reads a profile, so a hook writing there
+      // sets nothing anyone sees.
       expect(body).toMatch(/bash -c/);
       expect(body).toMatch(/--noprofile --norc/);
     });

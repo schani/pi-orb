@@ -7,7 +7,6 @@ import { OrbMessageSystemSchema } from "./orb-sleep.ts";
 
 const closed = { additionalProperties: false } as const;
 
-/** Authenticated application principal. */
 export const SessionProbeSchema = Type.Object(
   {
     status: Type.Literal("ok"),

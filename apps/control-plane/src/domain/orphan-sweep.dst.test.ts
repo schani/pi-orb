@@ -53,7 +53,6 @@ describe("orphan-host sweep (DST)", () => {
         // Stopped, never deleted: the filesystem is authoritative.
         expect(harness.world.hostCount(ORB)).toBe(1);
         expect(harness.world.hostStateOf(ORB)).toBe("stopped");
-        // The integrity signal names the orb and why the host was stopped.
         const orphanLines = capture.matching("orphan-host ");
         expect(orphanLines.length).toBeGreaterThanOrEqual(1);
         expect(orphanLines[0]).toContain(`orb=${ORB}`);
@@ -133,15 +132,9 @@ describe("orphan-host sweep (DST)", () => {
     );
   });
 
-  // The subject is what the *sweep* does, which is why the assertions are about
-  // the sweep's decisions rather than about the host's state at an arbitrary
-  // instant. Asserting "host running" after the tasks stopped made this
-  // scenario flaky before 2026-08-06 (2 failures in 6 full-suite runs, trace
-  // `sweep-leaves-live-orbs`): a scheduler-legal 10 s liveness lapse lets the
-  // reconciler start an unreachable-runtime restart whose `start` half is then
-  // cancelled by its own deadline, so the scenario can legitimately end with a
-  // stopped host mid-recovery. The reconciler's own log made that diagnosis a
-  // one-line read (docs/lifecycle.md).
+  // Assert the sweep's decisions, not the host's state at an arbitrary instant: a liveness
+  // lapse can start an unreachable-runtime restart that its own deadline cancels mid-start,
+  // legitimately ending with a stopped host.
   it("never touches the host of a live running orb", async () => {
     const capture = new LogCapture();
     await runDst(
@@ -167,7 +160,6 @@ describe("orphan-host sweep (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        // The sweep never claimed this host as an orphan, on any schedule.
         expect(capture.matching("orphan-host")).toEqual([]);
         expect(harness.world.hostCount(ORB)).toBe(1);
       },

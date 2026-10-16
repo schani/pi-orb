@@ -1,4 +1,4 @@
--- Credential pointer for the broker (DESIGN.md §15.1). Holds no secret
+-- Credential pointer for the broker (docs/credentials.md). Holds no secret
 -- material: the credential itself lives in the secret store, addressed by
 -- (provider, secret_version). Timestamps are wall-clock milliseconds to
 -- match the domain type exactly.

@@ -94,9 +94,7 @@ function stateDetailOf(
     bootProbe.lastProbeAnswered &&
     bootProbe.setupRunningSinceWall !== null
   ) {
-    // More specific than "waiting for the runtime": the runtime is up and
-    // answering, and the repository's own script is what the orb waits on
-    // (docs/orb-setup-hook.md).
+    // The repository's own setup script is what the orb waits on (docs/orb-setup-hook.md).
     return {
       type: "running_setup",
       secondsRunning: Math.max(
@@ -119,12 +117,9 @@ function stateDetailOf(
   }
   const hookFailure = orb.state === "running" ? control.getHookFailure(orb.id) : null;
   if (hookFailure !== null) {
-    // Only while running: the verdict is the one this process last heard from
-    // the runtime and describes the boot that is serving right now. On a
-    // stopped orb, or during the next boot before its first health report, it
-    // would describe compute that is not there. The orb is running regardless
-    // (docs/orb-setup-hook.md); this only says the environment its hooks were
-    // meant to prepare may be incomplete.
+    // Only while running: the verdict describes the boot serving right now. On a
+    // stopped orb, or before the next boot's first health report, it would describe
+    // absent compute. The orb stays running regardless (docs/orb-setup-hook.md).
     return {
       type: "setup_failed",
       hook: hookFailure.hook,

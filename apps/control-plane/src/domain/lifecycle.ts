@@ -421,7 +421,7 @@ async function collectDiscardEvidence(
     : `diagnosis unavailable: ${boundedDiscardText(diagnosed.error.message)}`;
 }
 
-/** CAS the orb to `failed` and atomically invalidate its compute incarnation. */
+/** CAS the orb to `failed` and atomically request discard of its compute incarnation. */
 async function failOrb(
   task: SimulationTask,
   deps: ControlPlaneDeps,
@@ -653,9 +653,6 @@ async function transitionTo(
   return { type: "transitioned", toState };
 }
 
-// ---------------------------------------------------------------------------
-// creating / starting
-
 async function reconcileCreateStart(
   task: SimulationTask,
   deps: ControlPlaneDeps,
@@ -729,7 +726,7 @@ async function reconcileCreateStart(
     deps.control.noteCondition(declinedCondition, false);
   }
 
-  // 1. Selected harness auth is a prerequisite for host work (docs/credentials.md).
+  // Selected harness auth is a prerequisite for host work (docs/credentials.md).
   const auth = await deps.authGate.ensureAuth(task, project.ownerUserId, orb.harness);
   if (auth.isErr()) return retryable(auth.error);
   const resolution = auth.value;
@@ -797,7 +794,7 @@ async function reconcileCreateStart(
     orb = reentered.value;
   }
 
-  // 2. Create/start deadline (docs/lifecycle.md deadline_exceeded rule), held
+  // Create/start deadline (docs/lifecycle.md deadline_exceeded rule), held
   // off while the repository's setup hook is running (docs/orb-setup-hook.md).
   // The hold is anchored at the first `setup_running` report of the episode
   // and covers the hook plus the boot that follows it; it survives a single
@@ -823,7 +820,6 @@ async function reconcileCreateStart(
     );
   }
 
-  // 3. Ensure a host exists.
   let hostResourceId = orb.hostRef;
   if (hostResourceId === null) {
     const current = await deps.store.getOrb(task, orb.id);
@@ -892,7 +888,6 @@ async function reconcileCreateStart(
     }
   }
 
-  // 4. Drive the host toward a ready runtime.
   const observed = await observeHost(task, deps, hostResourceId);
   if (observed.isErr()) {
     return observed.error.retryable
@@ -1010,12 +1005,10 @@ async function reconcileCreateStart(
       return waiting("host_transition");
     case "stopped":
     case "failed": {
-      // The host is down, so any "running since" this probe carries belongs to
-      // a boot that is already over; null resets it and the boot sub-deadline
-      // times the incarnation the start below creates. Without this reset a
-      // reconciler that watched an earlier boot — a draining revision that
-      // never made the `running` transition itself, so never cleared its probe
-      // — fails the next start as `runtime_never_answered` the moment the old
+      // Null resets any "running since" from a boot that is already over, so the
+      // boot sub-deadline times the incarnation the start below creates. Without
+      // it, a reconciler that never cleared an earlier boot's probe (a draining
+      // revision) fails the next start as `runtime_never_answered` when the old
       // clock runs out (found by `mixed-generation.dst.test.ts`).
       deps.control.recordBootProbe(orb.id, {
         hostState: observation.state,
@@ -1258,9 +1251,6 @@ async function reconcileCreateStart(
   }
 }
 
-// ---------------------------------------------------------------------------
-// running
-
 /** Ordinary grace, unless the baseline came from a restart that must boot first. */
 function livenessGraceMs(deps: ControlPlaneDeps, liveness: LivenessEntry): number {
   return liveness.restartGraceMs ?? deps.constants.unreachableGraceMs;
@@ -1422,10 +1412,10 @@ async function reconcileRunning(
       deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
     if (health === null) deps.control.noteRuntimeRequestStarted(orb.id, task.monotonicNow());
   }
-  // Host running: derive runtime liveness from the history pull. Liveness is
-  // judged on every `running` pass, ahead of any inbox work: a delivery that
-  // hangs against a dead runtime must not be able to preempt the restart that
-  // revives it (docs/lifecycle.md, 2026-08-10).
+  // Liveness is fed by history pulls (and, for central agents, the health probe
+  // above) and judged on every `running` pass, ahead of any inbox work: a
+  // delivery that hangs against a dead runtime must not be able to preempt the
+  // restart that revives it (docs/lifecycle.md, 2026-08-10).
   const liveness = deps.control.getLiveness(orb.id);
   if (liveness === null) {
     // Fresh process (control-plane restart): seed the baseline now.
@@ -1736,16 +1726,13 @@ async function dispatchQueuedMessages(
         delivery: delivered.value.delivery,
       });
     }
-    // An undelivered message is user work in flight, so the idle countdown
-    // below is deliberately not reached while a batch is outstanding.
+    // A dispatched batch is user work in flight, so the idle countdown
+    // below is not reached while it is outstanding.
     return { type: "noop" };
   }
 
   return null;
 }
-
-// ---------------------------------------------------------------------------
-// stopping
 
 async function reconcileStopping(
   task: SimulationTask,
@@ -1761,7 +1748,7 @@ async function reconcileStopping(
   );
 
   if (orb.hostRef === null) {
-    // Nothing was ever provisioned; nothing to drain or stop.
+    // No compute reference, so nothing to drain or stop.
     return transitionTo(task, deps, orb, "stopped", { reason: "no_host_ref" });
   }
   const observed = await observeHost(task, deps, orb.hostRef);
@@ -1813,7 +1800,6 @@ async function reconcileStopping(
     return waiting("host_transition");
   }
 
-  // Host is running.
   if (hasNeverBeenReady(orb)) {
     // Never reached ready and has no session: no user request could have been
     // accepted, so the drain is skipped (docs/lifecycle.md).
@@ -2106,9 +2092,6 @@ async function reconcileStopping(
       return { type: "conflict" };
   }
 }
-
-// ---------------------------------------------------------------------------
-// shared irreversible resource disposal (delete + archive)
 
 async function reconcileResourceDisposal(
   task: SimulationTask,
@@ -2494,9 +2477,6 @@ async function reconcileArchiving(
   return { type: "transitioned", toState: "archived" };
 }
 
-// ---------------------------------------------------------------------------
-// stopped / failed backstop
-
 async function reconcileTerminalBackstop(
   task: SimulationTask,
   deps: ControlPlaneDeps,
@@ -2557,8 +2537,6 @@ async function reconcileTerminalBackstop(
   if (stopped.isErr()) return retryable(stopped.error);
   return { type: "progressed" };
 }
-
-// ---------------------------------------------------------------------------
 
 /** Central admission and dispatch never await compute operations. */
 export async function reconcileCentralAgent(
@@ -2776,9 +2754,6 @@ async function reconcileComputeOnce(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Commands (docs/lifecycle.md)
-
 export interface CommandError {
   readonly type: "command_error";
   /**
@@ -2802,7 +2777,6 @@ function commandError(
   return { type: "command_error", code, message, retryable: retryable_ };
 }
 
-/** A store failure as a command failure: `invariant` is internal, never retryable. */
 function mapStoreError(error: StoreError): CommandError {
   return error.code === "invariant"
     ? commandError("internal", error.message, false)

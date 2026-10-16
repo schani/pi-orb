@@ -179,7 +179,7 @@ export interface DurableAgentOptions {
   readonly recordModelCall?: (use: ModelCallUse, response: AssistantMessage) => void;
   readonly registry: Registry;
   readonly modelTools?: readonly ToolRegistration[];
-  /** Installed for subagent conversations only; the root never selects it. */
+  /** Child-only tools; the root conversation removes it on open. */
   readonly childExtension?: Extension;
   readonly checkoutCommit: string | null;
   readonly hooks?: RuntimeHooks;

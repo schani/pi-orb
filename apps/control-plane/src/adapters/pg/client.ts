@@ -82,7 +82,6 @@ export function mapPgError(error: unknown): StoreError {
 // tests, and on real PostgreSQL instead of only in production
 // (docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md).
 
-/** A value destined for a `json`/`jsonb` column. */
 export class JsonParam {
   readonly value: unknown;
   constructor(value: unknown) {
@@ -103,7 +102,6 @@ export const jsonParam = (value: unknown): JsonParam => new JsonParam(value);
 
 export const arrayParam = (values: readonly unknown[]): SqlArrayParam => new SqlArrayParam(values);
 
-/** Which driver a prepared parameter list is destined for. */
 export type ParamDriver = "node-postgres" | "pglite";
 
 /** A bare `{}`-literal object (or `Object.create(null)`), not a `Date`/`Buffer`/class instance. */
@@ -157,7 +155,6 @@ export function prepareParams(
   return ok(prepared);
 }
 
-/** Prepare `values` for `driver`, or short-circuit the query with the guard error. */
 export function withPreparedParams(
   values: readonly unknown[],
   driver: ParamDriver,

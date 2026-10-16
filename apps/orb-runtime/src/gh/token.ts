@@ -22,7 +22,6 @@ const CLI_CONSTANTS: BrokerClientConstants = {
   backoffCapMs: 2_000,
 };
 
-/** Parse git's credential-helper key=value request lines. */
 export function parseCredentialRequest(input: string): Record<string, string> {
   const attrs: Record<string, string> = {};
   for (const line of input.split("\n")) {
@@ -34,7 +33,6 @@ export function parseCredentialRequest(input: string): Record<string, string> {
   return attrs;
 }
 
-/** Only https to github.com gets a credential; everything else stays silent. */
 export function shouldServeCredential(attrs: Record<string, string>): boolean {
   return attrs["protocol"] === "https" && attrs["host"] === "github.com";
 }

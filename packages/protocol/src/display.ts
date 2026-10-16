@@ -407,7 +407,7 @@ function userDelivery(
     return null;
   const native = nativeClaudeUser(record);
   const kind = deliveryKind(native);
-  // Native metadata (skill bodies, command caveats) stays hidden.
+  // Injected native metadata (skill bodies, command caveats) stays hidden.
   if (kind === "injected" && native?.isMeta === true) return null;
   const text = record.content
     .filter((block) => block.type === "text")

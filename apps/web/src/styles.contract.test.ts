@@ -188,7 +188,7 @@ describe("dashboard layout contract", () => {
   });
 
   it("rules the board from the totals strip to the bottom-pinned footer", () => {
-    // 24px + 24px of chrome, so a one-orb column still draws full-height rules.
+    // Subtracts the totals strip and footer so one-orb columns still draw full-height rules.
     expect(rule(".dashboard")).toContain("min-height: calc(100dvh - 48px)");
     expect(rule(".dashboard-totals")).toContain("height: 24px");
     expect(rule(".dashboard-totals")).toContain("border-bottom: 1px solid var(--k)");

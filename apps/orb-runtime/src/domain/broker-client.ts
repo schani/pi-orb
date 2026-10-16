@@ -47,8 +47,8 @@ export interface BrokerEndpoint {
 
 export interface BrokerClientConstants {
   /**
-   * How long startup fetches tolerate 401s: the host can be running before
-   * the control plane commits its token hash (docs/credentials.md read-back).
+   * Retry window for startup fetches: boot 401s are expected until the control
+   * plane commits the token hash (docs/credentials.md read-back).
    */
   readonly bootRetryWindowMs: number;
   /** Retry window for non-startup fetches (503s, transient network). */

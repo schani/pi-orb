@@ -27,7 +27,7 @@ let connectionCounter = 0;
  * text frames and close signals are forwarded to/from the runtime without
  * application interpretation, except for the idle-auto-stop sniffs below.
  * The browser's `client.hello` is the first application frame. A connection race
- * or unavailable runtime closes with 1013; the browser returns to the HTTP API.
+ * or unavailable runtime closes with 1013, and the browser reconnects.
  * Central placement uses central-live.ts instead: it validates client frames,
  * handles the hello/synchronization handshake locally, and dispatches requests
  * through the agent session facade without a guest socket.

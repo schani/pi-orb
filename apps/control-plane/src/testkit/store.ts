@@ -56,7 +56,6 @@ const BOOT_CONTEXT_STATES: readonly OrbState[] = [
   "archiving",
 ];
 
-/** Store operations that can be scripted to fail deterministically. */
 export type InvariantOperation = "getOrb" | "getOrbByRuntimeTokenHash" | "enqueueOrbMessage";
 
 interface OrbReplica {
@@ -248,7 +247,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   private hostDiscardFinalizeFailures = 0;
   /** External replacement provision landed, but committing its ref/token fails. */
   private hostReplacementCommitFailures = 0;
-  /** Operations scripted to fail with a deterministic `invariant` store error. */
   private readonly invariantOperations = new Set<InvariantOperation>();
   /** Gate the next `noteOrbMessageDelivery` until this predicate holds. */
   private noteDeliveryHold: (() => boolean) | null = null;
@@ -350,8 +348,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     });
   }
 
-  // -- plumbing -------------------------------------------------------------
-
   private scriptedInvariant(operation: InvariantOperation): StoreError | null {
     return this.invariantOperations.has(operation)
       ? invariant(`${operation}: parameter $3 is a bare JavaScript array`)
@@ -452,8 +448,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       return { ...winner };
     });
   }
-
-  // -- projects/orbs --------------------------------------------------------
 
   getProject(task: SimulationTask, projectId: string): ResultAsync<ProjectRow | null, StoreError> {
     return this.access(task, FAILPOINTS.storeRead, "get project", () => {
@@ -1751,8 +1745,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     );
   }
 
-  // -- lifecycle CAS --------------------------------------------------------
-
   failOrbAndRequestComputeDiscard(
     task: SimulationTask,
     params: FailOrbAndRequestComputeDiscardParams,
@@ -1854,8 +1846,9 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       }
       const updated: OrbRow = {
         ...orb,
-        // A specification replacement fences stale provisioning passes. A
-        // failed-compute cleanup preserves the failed wake's one-shot version.
+        // A specification replacement or Claude recovery fences stale
+        // provisioning passes; a failed-compute cleanup keeps the failed wake's
+        // one-shot version.
         stateVersion:
           orb.hostDiscardReason === "host_spec_changed" ||
           orb.hostDiscardReason === "claude_recovery"
@@ -2151,8 +2144,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         : okAsync(outcome.row),
     );
   }
-
-  // -- replication ----------------------------------------------------------
 
   private verifySession(
     orb: OrbRow,

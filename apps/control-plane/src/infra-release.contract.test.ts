@@ -567,8 +567,6 @@ print(json.dumps(inspect(api, '${selected}').value))
     );
     expect(calls).toMatch(/npm:ci[\s\S]*npm:test\n[\s\S]*npm:run test:e2e[\s\S]*\nbuild\n/);
     expect(calls).not.toContain("docker:build");
-    // The workload-identity smoke runs inside the lock, after the lifecycle
-    // smoke, and is handed the project and zone its GCE legs need.
     expect(calls).toContain("wif-smoke:test-project:us-central1-a");
     expect(calls).toContain(
       "--set-env-vars=^@^PI_ORB_USER_ID=00000000-0000-4000-8000-000000000001",

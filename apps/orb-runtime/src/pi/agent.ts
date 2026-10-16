@@ -365,8 +365,6 @@ export class PiOrbAgent {
     this.broadcast({ v: 1, type: "runtime.event", at: new Date().toISOString(), event });
   }
 
-  // -- boot -----------------------------------------------------------------
-
   /** Typed init failures become `status: "failed"`; a thrown exception rejects this promise. */
   async boot(): Promise<void> {
     const result = await this.bootSteps();
@@ -646,7 +644,6 @@ export class PiOrbAgent {
       mockOpenAi !== null
         ? SettingsManager.inMemory({ transport: "sse", compaction: { keepRecentTokens: 1 } })
         : undefined;
-    // Optional tier-1 port exposure composes through the resource loader.
     const loaderResult = await createOrbResourceLoader({
       cwd: repoDir,
       agentDir,
@@ -1222,7 +1219,7 @@ export class PiOrbAgent {
         // and Pi re-emits agent_start for continuations inside the same run
         // (auto-retry, auto-compaction): neither may restart the operation or
         // change its ID. Only an SDK/extension turn nobody claimed allocates
-        // here; boot notifications now claim their operation before Pi starts.
+        // here; boot notifications claim their operation before Pi starts.
         if (this.operationId === null) this.startAgentOperation(randomUUID(), null);
         this.settleTurnStart();
         break;
@@ -1625,8 +1622,6 @@ export class PiOrbAgent {
     }
     return buildTurnSummaryInput(records);
   }
-
-  // -- synchronous views ----------------------------------------------------
 
   /**
    * The snapshot served to the control plane's history pull

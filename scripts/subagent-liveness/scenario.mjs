@@ -7,7 +7,7 @@ import { assertSubagentActivity } from "../../apps/orb-runtime/src/testkit/subag
 
 // Executable characterization test. Assertion exceptions are the test framework
 // contract, not recoverable domain errors. Third-party promise failures are
-// captured at each call boundary by checked(). No production adapter is changed.
+// captured at each call boundary by checked().
 async function checked(promise) {
   const result = await ResultAsync.fromPromise(promise, (error) => ({ message: String(error) }));
   assert.equal(result.isOk(), true, result.isErr() ? result.error.message : "");

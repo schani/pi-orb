@@ -117,8 +117,6 @@ describe("TerminalManager", () => {
         return okAsync(new FakeProcess());
       },
     };
-    // What the boot merge already put in `process.env`, plus what a hook wrote
-    // afterwards — the case a restart used to be the only way to pick up.
     let file: ReadonlyMap<string, string> | null = new Map([["FROM_BOOT", "yes"]]);
     const manager = new TerminalManager({
       cwd: "/repo",

@@ -61,7 +61,6 @@ export interface AppSearchActivationModifiers {
   altKey: boolean;
 }
 
-/** Only ordinary same-tab activation closes the current card. */
 export function shouldCloseAppSearchForActivation(
   activation: AppSearchActivationModifiers,
 ): boolean {

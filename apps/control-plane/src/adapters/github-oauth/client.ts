@@ -33,9 +33,9 @@ const FALLBACK_ACCESS_TTL_S = 8 * 3600;
 export interface GithubOAuthConfig {
   readonly clientId: string;
   readonly clientSecret: string;
-  /** OAuth origin override (tests). */
+  /** OAuth origin override, from PI_ORB_GITHUB_OAUTH_URL. */
   readonly oauthBaseUrl?: string;
-  /** REST API origin override (tests). */
+  /** REST API origin override, from PI_ORB_GITHUB_API_URL. */
   readonly apiBaseUrl?: string;
 }
 

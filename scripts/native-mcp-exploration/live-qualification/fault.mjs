@@ -21,7 +21,6 @@ export function installOneRejectedReadPost(serverUrl) {
     toolPosts++;
     const headers = new Headers(init.headers);
     if (injected === 0) {
-      // This fetch hook must reject a request lacking the proved grant, not forward it.
       if (!headers.get("Authorization")?.startsWith("Bearer "))
         throw new Error("MCP grant not present at fault boundary");
       headers.set("Authorization", "Bearer pi-orb-qualification-invalid");

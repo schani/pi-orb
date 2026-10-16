@@ -130,7 +130,7 @@ interface OrbPageState {
   historyEpoch: number;
   /** Last complete record id applied; sent as `afterRecordId` in hello. */
   afterRecordId: string | null;
-  /** Current conversation head used for `expectedHeadId`. */
+  /** Head id of the applied conversation: last record or sync.completed. */
   headId: string | null;
   historyLoaded: boolean;
   historyError: ApiError | null;
@@ -806,7 +806,6 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
   }
 }
 
-/** Copies the device-login code without replacing the icon with text. */
 function CopyCodeButton({ code }: { code: string }) {
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   useEffect(() => {
@@ -1408,7 +1407,7 @@ function OrbConversation({
     notificationPermission(),
   );
 
-  // Ask once when an orb page opens. Denied permission can only be changed in site settings.
+  // Denied permission can only be changed in site settings.
   useEffect(() => {
     if (notifications !== "default") return;
     let cancelled = false;
@@ -1440,7 +1439,7 @@ function OrbConversation({
     return () => window.clearInterval(timer);
   }, []);
 
-  // Poll the orb resource every 2s (docs/control-plane-api.md).
+  // Poll the orb resource (docs/control-plane-api.md).
   useEffect(() => {
     if (orbNotFound || !metadataComplete) return;
     let cancelled = false;
@@ -1704,7 +1703,7 @@ function OrbConversation({
       window.removeEventListener("pointercancel", pointerSettled);
     };
   }, [orbId]);
-  // Live connection while running; hello carries the latest applied cursor.
+  // Live connection while canConnectLive allows; hello carries the latest applied cursor.
   const afterRecordIdRef = useRef<string | null>(null);
   useEffect(() => {
     afterRecordIdRef.current = state.afterRecordId;
@@ -1725,7 +1724,7 @@ function OrbConversation({
         if (frame.type === "runtime.event" && frame.event.type === "turn_notification") {
           const event = frame.event;
           // Auto-naming runs concurrently with the first turn. Refresh once at notification time
-          // so a just-committed display name wins even if the ordinary 2s orb poll has not seen it.
+          // so a just-committed display name wins even if the ordinary orb poll has not seen it.
           const revision = metadataRevision.current;
           void getOrb(orbId).then((latest) => {
             if (!active || missingRef.current) return;

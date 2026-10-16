@@ -821,7 +821,7 @@ describe("ProcessOrbHostProvider", () => {
         }
 
         // Drive deadline expiry explicitly; successful drain follows the receipt,
-        // not the scheduler's ability to kill, reap and fsync within 150 ms.
+        // not the scheduler's ability to kill, reap and fsync within the grace period.
         const discard = () =>
           provider.discardCompute(task, { orbId: request.orbId, throughIncarnation: 0 }, context);
         let discarded: Awaited<ReturnType<typeof discard>> | undefined;

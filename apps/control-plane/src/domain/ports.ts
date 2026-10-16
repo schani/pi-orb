@@ -41,9 +41,6 @@ export interface OperationContext {
   readonly signal: AbortSignal;
 }
 
-// ---------------------------------------------------------------------------
-// Store
-
 export interface CasTransitionParams {
   readonly orbId: string;
   readonly expectedStateVersion: number;
@@ -1137,8 +1134,6 @@ export interface SigningKeyDeps extends SigningKeyMaterialDeps, JwksDeps {
   /** Owned by this instance, never recreated inside its boot retry loop. */
   readonly bootstrap: SigningKeyBootstrapState;
 }
-
-// ---------------------------------------------------------------------------
 
 export interface ActivityHeadlineFailureDiagnostics {
   readonly reason?:

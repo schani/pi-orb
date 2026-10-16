@@ -4,8 +4,8 @@ import type { CodemodeOutputItem } from "@earendil-works/pi-codemode";
 const CHARS_PER_TOKEN = 4;
 /**
  * Apply the token budget: when the combined text exceeds it, the text items become one
- * item that keeps the start and end of the text, and images follow it. The full text is written to
- * a temp file.
+ * item that keeps the start and end of the text, and images follow it. The full text is passed to
+ * `spillOutput`.
  */
 export async function truncateOutput(
   items: CodemodeOutputItem[],

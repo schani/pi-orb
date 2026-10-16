@@ -266,11 +266,9 @@ function idTokenFailure(error: MintError): IdTokenFailure {
 
 /**
  * The runtime-facing surface (`docs/credentials.md`, `docs/control-plane-api.md`).
- * It contains the parameterized credential broker, workload identity, naming,
- * read-only sibling inspection, and self-archival. Every route is listed here
- * explicitly: this is the runtime allowlist, not a hidden path.
- * Authentication is the per-host-incarnation orb token, honored only while
- * the calling orb's lifecycle state says its host should be up.
+ * Every route is listed here explicitly: this is the runtime allowlist, not a
+ * hidden path. Authentication is the per-host-incarnation orb token, honored only
+ * while the calling orb's lifecycle state says its host should be up.
  */
 export function registerRuntimeRoutes(
   app: FastifyInstance,
@@ -278,12 +276,8 @@ export function registerRuntimeRoutes(
   deps: RuntimeRouteDeps,
 ): void {
   /**
-   * The one bearer check every runtime route shares: hash the presented token,
-   * resolve the orb it names, and accept it only when all five conditions hold
-   * — the row exists, it still carries a bearer hash, no discard fence covers
-   * its incarnation, the hashes match in constant time, and the lifecycle state
-   * still authorizes runtime credentials. A store failure is reported as such
-   * so each route can answer it honestly.
+   * The one bearer check every runtime route shares. A store failure is reported
+   * as `unavailable`, never as unauthorized, so each route can answer it honestly.
    */
   const authenticate = async (authorization: unknown): Promise<BearerAuth> => {
     const tokenHash = bearerHash(authorization);
@@ -1018,7 +1012,7 @@ export function registerRuntimeRoutes(
     // Naming folds a store outage into the same 401 it always has: it is a
     // cosmetic, fire-and-forget trigger the runtime replays on its next boot,
     // and nothing downstream distinguishes the two answers (TODO.md tracks
-    // giving it the honest 503 the other two routes return).
+    // giving it the honest 503 the token and id-token routes return).
     const auth = await authenticate(request.headers.authorization);
     if (auth.kind !== "orb") return sendUnauthorized(reply);
     const orb = auth.orb;
@@ -1061,13 +1055,13 @@ export function registerRuntimeRoutes(
   });
 
   /**
-   * Identity minting (docs/workload-identity.md). Unlike the two routes above
-   * this one does *not* run `authenticate` first: `mintIdToken` resolves the
-   * bearer itself, because its snapshot read of the orb row is the mint's
+   * Identity minting (docs/workload-identity.md). Unlike the other routes, this
+   * one does *not* run `authenticate` first: `mintIdToken` resolves the bearer
+   * itself, because its snapshot read of the orb row is the mint's
    * linearization point against stop, replacement, archive, and delete. A
    * route-level check would be a second, earlier read whose answer the domain
-   * would then have to ignore. The route's job is the hash, the request
-   * schema, and the status fold.
+   * would then have to ignore. The route's job is the hash, the request schema,
+   * and the status fold.
    */
   app.post(ID_TOKEN_PATH, async (request, reply) => {
     const tokenHash = bearerHash(request.headers.authorization);

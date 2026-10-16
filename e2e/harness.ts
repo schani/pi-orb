@@ -87,7 +87,7 @@ export async function fakeRequest(
 
 export type FixtureAgentBackend = "central-durable" | "host-pi";
 
-/** Legacy Docker/GCE acceptance keeps SDK behavior; central cases select it explicitly. */
+/** Defaults to host-pi, or central-durable for the process backend; an override or PI_ORB_AGENT_BACKEND wins. */
 export function fixtureAgentBackend(override?: FixtureAgentBackend): FixtureAgentBackend {
   const selected = process.env["PI_ORB_AGENT_BACKEND"];
   return (
@@ -299,7 +299,7 @@ export interface IssuerKeySet {
 
 /**
  * The relying party's half of docs/workload-identity.md: everything an
- * external verifier is told to do, done with `node:crypto` alone — read
+ * external verifier is told to do, done with `fetch` and `node:crypto` only — read
  * discovery, fetch the advertised JWKS, and verify signature and claims
  * offline. No pi-orb code participates, which is the point: a token this
  * rejects would be rejected by GCP STS too.

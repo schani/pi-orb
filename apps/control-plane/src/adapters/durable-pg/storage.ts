@@ -99,7 +99,6 @@ const scanStart = (
     rejectStorage(`The cursor continues a ${order} scan; the query asks for ${requested}`);
   return { order, after };
 };
-/** The ID condition, its parameter, and the `ORDER BY` direction of a table scan. */
 const scanSql = (start: ScanStart) =>
   start.order === "ascending"
     ? { clause: "id > ?", param: start.after ?? -1, direction: "ASC" }

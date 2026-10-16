@@ -107,7 +107,7 @@ test("actual runtime resolver drives native SDK transport across cache, expiry, 
   await call(); // explicit call gets next broker generation, never replays the rejected POST
   fixture.rejectOnce = 401;
   await assert.rejects(call());
-  await call(); // accepted() cleared recovery state, permitting a new rejected generation
+  await call(); // the second 401 is a new rejected generation because accepted() had cleared recovery state
   assert.deepEqual(requests, [undefined, undefined, 2, 3]);
   assert.deepEqual(
     fixture.calls.filter((c) => c.method === "tools/call").map((c) => c.token),

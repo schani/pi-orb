@@ -16,13 +16,13 @@ set -euo pipefail
 # Outer budget: every bounded wait below derives from one provision + native
 # Debian boot + runtime-ready pass (the slowest provider operation this smoke performs).
 # Lifecycle create/start/failure waits use it in full; stop and disposal are pure provider
-# operations and get a fraction. The two 65-second negative-observation windows
+# operations and get a fraction. The two negative-observation windows
 # — no autonomous replacement after failure, and no running orb touched by a
 # deployed specification change — are the only deliberate elapsed-time
 # assertions in this script.
-boot_deadline_seconds=900             # lifecycle create/start deadline
-stop_deadline_seconds=$((boot_deadline_seconds / 3))    # graceful stop drain
-dispose_deadline_seconds=$((boot_deadline_seconds / 3)) # instance + boot-disk disposal
+boot_deadline_seconds=900
+stop_deadline_seconds=$((boot_deadline_seconds / 3))
+dispose_deadline_seconds=$((boot_deadline_seconds / 3))
 negative_window_seconds=65            # more than two 30s terminal-backstop intervals
 
 for command in curl jq gcloud base64 python3; do
@@ -164,8 +164,6 @@ wait_orb_state stopped "$stop_deadline_seconds" >/dev/null
 api POST "/api/v1/orbs/$orb_id/start" >/dev/null
 wait_orb_state failed "$boot_deadline_seconds" >"$log_dir/injected-failure.json"
 
-# Disposal: the suspect instance and its disposable boot disk are gone, the
-# workspace disk survives, and the incarnation-0 token no longer authenticates.
 wait_disposed "$old_instance" "$old_boot_disk"
 data_disk_exists
 [[ "$(token_probe_status "$old_token")" == 401 ]]
@@ -199,8 +197,6 @@ new_spec=$(jq -r '.metadata.items[] | select(.key == "pi-orb-host-spec-fingerpri
 [[ -n "$new_token" && "$new_token" != null && "$new_token" != "$old_token" ]]
 [[ -n "$new_spec" && "$new_spec" != null ]]
 
-# The workspace survived replacement, exactly one compute identity remains,
-# and the orb is still running through the replacement incarnation.
 gcloud compute ssh "$new_instance" --project "$PI_ORB_GCP_PROJECT" --zone "$PI_ORB_GCE_ZONE" --tunnel-through-iap -- \
   "sudo grep -Fx '$sentinel' /workspace/replacement-sentinel"
 [[ "$(instances)" == "$new_instance" ]]
@@ -243,9 +239,9 @@ if [[ -n "${PI_ORB_SMOKE_STAGE2_DEPLOY_COMMAND:-}" ]]; then
   stage2_boot_disk=$(jq -r '.disks[] | select(.boot == true) | .source | split("/") | last' \
     <<<"$stage2_description")
   # Replacement, not repair: a new instance ID, a new disposable boot disk, and
-  # a new specification stamp around the one retained workspace disk. The new
-  # code contains no in-place repair path at all, so the identity change is
-  # what this leg proves; there is no repair event to observe.
+  # a new specification stamp around the one retained workspace disk. No
+  # in-place repair path exists, so the identity change is what this leg
+  # proves; there is no repair event to observe.
   [[ "$stage2_id" != "$new_instance_id" ]]
   [[ "$stage2_spec" != "$new_spec" ]]
   [[ -n "$stage2_boot_disk" && "$stage2_boot_disk" != "$new_boot_disk" ]]

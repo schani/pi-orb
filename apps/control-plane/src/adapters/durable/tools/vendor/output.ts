@@ -12,9 +12,7 @@ export interface NestedCall {
   total?: number;
   diagnostics?: { code: string; severity: string }[];
 }
-/** Default token budget for script output. */
 export const DEFAULT_MAX_OUTPUT_TOKENS = 10_000;
-/** Characters per token when estimating. */
 const CHARS_PER_TOKEN = 4;
 
 /** Like the script's `text()`: strings as is, other values as compact JSON. */

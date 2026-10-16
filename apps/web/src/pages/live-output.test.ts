@@ -59,7 +59,7 @@ it("reduces live headline replacements independently of hidden reasoning text", 
   }
 });
 
-// Exhaust the finite schedules: next response before/after publication,
+// Exhaust the finite schedules: next response before/after retirement,
 // immediate/backpressured delivery, snapshot/microtask flush, and a mapping
 // failpoint before the committed response. Inspect every delivered frame.
 it.each(

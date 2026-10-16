@@ -61,7 +61,6 @@ test("only attested fixture IP:8080 uses tunnel; HTTP/WS retain original Host an
     assert.deepEqual(upgrade, { host: `${ip}:8080`, origin: "http://browser.example" });
     ws.close();
     await once(ws, "close");
-    // Wrong nonce and unrelated destination must never be rewritten.
     writeMap(path, { ...fixture, connectionNonce: "wrong", privateIp: ip });
     assert.equal(fixtureTarget({ ...fixture, connectionMap: path }, ip, 8080), null);
     assert.equal(fixtureTarget({ ...fixture, connectionMap: path }, "10.10.0.8", 8080), null);

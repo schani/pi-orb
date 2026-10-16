@@ -89,7 +89,6 @@ RUN chmod 755 /usr/local/bin/gh /usr/local/bin/pi-orb-git-credential /usr/local/
 # orb's persistent volume is mounted there and would shadow them.
 COPY apps/orb-runtime/skills /opt/pi-orb/skills
 
-# The persistent orb filesystem is mounted here (Docker volume).
 VOLUME /workspace
 EXPOSE 8080
 

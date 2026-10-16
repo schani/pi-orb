@@ -118,9 +118,10 @@ async function expectTextFieldCropMarks(page: Page, scope = page.locator("body")
 }
 
 /**
- * Browser E2E for the exact cross-boundary path that unit tests cannot prove:
- * Vite fixture control -> HTML 401 -> shared API adapter -> React
- * ribbon -> same-tab top-level auth round trip -> draft/session restoration.
+ * Browser-only frontend behavior that unit tests cannot prove. The session-recovery
+ * test covers the cross-boundary path: Vite fixture control -> HTML 401 -> shared
+ * API adapter -> React ribbon -> same-tab top-level auth round trip -> draft/session
+ * restoration.
  */
 describe("frontend-only browser behavior", () => {
   beforeAll(async () => {
@@ -3559,7 +3560,7 @@ describe("frontend-only browser behavior", () => {
             return { x: box.x, width: box.width };
           }),
         );
-      // Lifecycle cluster moves Stop beside status; the four utility controls retain 20px hits / 28px pitch.
+      // Start/Stop are lifecycle controls, excluded here.
       expectPage(actionBoxes).toHaveLength(4);
       actionBoxes.forEach((box, index) => {
         expectPage(box.width).toBe(20);
@@ -3620,7 +3621,7 @@ describe("frontend-only browser behavior", () => {
       );
       expectPage(await geometry()).toEqual(before);
       // Fill scrollback: scrollTop being a multiple of 20 alone is not
-      // sufficient if padding scrolls with the grid (the old first row was -7px).
+      // sufficient if padding scrolls with the grid.
       for (let line = 0; line < 30; line += 1) await page.keyboard.press("Enter");
       await page.keyboard.type("SCROLLBACK_READY");
       await expectPage(panel).toContainText("SCROLLBACK_READY");

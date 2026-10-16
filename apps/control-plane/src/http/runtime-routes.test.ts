@@ -347,9 +347,8 @@ describe("runtime broker routes", () => {
   };
 
   /**
-   * Builds the app over the already-constructed dependencies. Split out of the
-   * hook so a describe block can rebuild the routes with its own issuer
-   * constants without duplicating the wiring.
+   * Builds the app over the already-constructed dependencies, so a describe
+   * block can rebuild it with its own issuer constants.
    */
   async function startApp(
     issuerConstants = TEST_ISSUER_CONSTANTS,
@@ -1804,22 +1803,19 @@ describe("runtime broker routes", () => {
 
   /**
    * The identity-mint boundary (docs/workload-identity.md). The domain's own
-   * decisions are covered by `workload-identity.dst.test.ts`; what matters here
-   * is that each typed denial reaches the caller as a distinguishable HTTP
-   * answer whose body is on the wire contract, and that a successful token is
-   * never cached.
+   * decisions are covered by `domain/workload-identity.dst.test.ts`; what
+   * matters here is that each typed denial reaches the caller as a
+   * distinguishable HTTP answer whose body is on the wire contract, and that a
+   * successful token is never cached.
    */
   describe("id-token minting", () => {
     /**
-     * The domain stamps the slot claim from real wall time here, so with the
-     * fixture's 1 s floor the throttle assertion would really be an assertion
-     * about how fast the machine runs two injections — green on a laptop,
-     * intermittently red on a loaded CI box, which is exactly the
-     * un-reproducible failure AGENTS.md forbids. An hour is a floor elapsed
-     * real time cannot plausibly cross, so what is under test is the
-     * throttle logic alone. Every other case in this block mints at most once
-     * against a store the hook rebuilds, so the larger floor is invisible to
-     * them.
+     * The mint slot is stamped from real wall time, so with the fixture's 1 s
+     * floor the throttle assertion would depend on how fast the machine runs two
+     * injections: an un-reproducible failure AGENTS.md forbids. An hour is a
+     * floor real time cannot plausibly cross, so only the throttle logic is under
+     * test. The other cases here mint at most once per store, so the larger floor
+     * is invisible to them.
      */
     const HOUR_LONG_MINT_FLOOR = { ...TEST_ISSUER_CONSTANTS, minMintIntervalMs: 3_600_000 };
 
@@ -1856,8 +1852,7 @@ describe("runtime broker routes", () => {
         host_incarnation: 0,
         token_use: "exchanged",
       });
-      // The requested lifetime is honored exactly, and the token names the key
-      // that signed it so a verifier can find it in the published set.
+      // kid names the signing key so a verifier can find it in the published set.
       expect(claims.exp - claims.iat).toBe(900);
       expect(decodeFakeIdTokenKid(body.token)).toBe("route-key-1");
       // Nothing durable records the token itself; only the rate-limit stamp.
@@ -1925,8 +1920,8 @@ describe("runtime broker routes", () => {
       expect(body.retryAfterMs).toBeGreaterThan(floor - 60_000);
       expect(body.retryAfterMs).toBeLessThanOrEqual(floor);
       expect(Check(IdTokenErrorSchema, body)).toBe(true);
-      // Whole seconds, rounded up: a client honoring the header never returns
-      // before the floor has actually passed.
+      // Retry-After is rounded up, so a client honoring it never retries before
+      // the floor passes.
       expect(Number(response.headers["retry-after"])).toBe(Math.ceil(body.retryAfterMs / 1000));
       expect(signer.calls).toBe(1);
     });

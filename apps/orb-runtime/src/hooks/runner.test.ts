@@ -245,7 +245,6 @@ describe("boot hook runner", () => {
     writeHook(orb, "resume");
     const spawner = new FakeHookSpawner();
 
-    // Each leg drives whatever the runner actually spawned to a clean exit.
     const boot = async (incarnation: string): Promise<void> => {
       const runner = makeRunner(orb, spawner, task, { incarnation });
       const setup = runner.runSetup();
@@ -257,7 +256,6 @@ describe("boot hook runner", () => {
     };
 
     await boot("0");
-    // Same incarnation, second boot: resume runs again, setup does not.
     await boot("0");
     const counts = (hook: string): number =>
       spawner.runs.filter((run) => run.request.env["PI_ORB_HOOK"] === hook).length;
@@ -305,7 +303,7 @@ describe("boot hook runner", () => {
     const spawner = new FakeHookSpawner();
     const runner = makeRunner(orb, spawner, task);
     // The spawn happens before `runSetup` first awaits, so the stop below is
-    // ordered after it without racing the hook's own 20-minute deadline.
+    // ordered after it without racing the hook's own deadline.
     const running = runner.runSetup();
     expect(spawner.runs).toHaveLength(1);
     runner.shutdown();
@@ -372,7 +370,7 @@ describe("boot hook runner", () => {
 describe("the hook env file", () => {
   const task = new NoSimulationTask("hook-env-test", false);
 
-  /** Write the env file the way a hook would, with the hook's own umask. */
+  /** Writes the env file at exactly `mode`, whatever the umask. */
   const writeEnvFile = (orb: Orb, contents: string, mode = 0o644): void => {
     const path = hookEnvPath(orb.home);
     mkdirSync(dirname(path), { recursive: true });

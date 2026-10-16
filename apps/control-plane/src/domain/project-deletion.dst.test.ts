@@ -19,7 +19,7 @@ const ORBS = ["project-orb-running", "project-orb-stopped", "project-orb-archive
 
 // Seed directly so all children share one project while exercising different
 // lifecycle starting points. The running/stopped hosts both own filesystems;
-// the archived row deliberately has no host and still must lose its replica row.
+// the archived row deliberately has no host, and deletion must still clear its replica records.
 function seed(
   task: import("determined").SimulationTask,
   harness: ReturnType<typeof makeHarness>,

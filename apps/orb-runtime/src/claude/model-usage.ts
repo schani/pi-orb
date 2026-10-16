@@ -116,7 +116,6 @@ export interface ModelUsageReceiverError {
   readonly message: string;
 }
 
-/** Claude Code exporter configuration pointing its OpenTelemetry log events at `receiver`. */
 export function telemetryEnvironment(receiver: ModelUsageReceiver): Record<string, string> {
   return {
     CLAUDE_CODE_ENABLE_TELEMETRY: "1",

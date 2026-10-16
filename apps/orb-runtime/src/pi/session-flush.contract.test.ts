@@ -69,7 +69,6 @@ describe("Pi session flush contract", () => {
     const fileName = files[0];
     if (fileName === undefined) throw new Error("unreachable");
     const lines = readFileSync(join(sessionDir, fileName), "utf8").trim().split("\n");
-    // Header plus every in-memory entry, in order.
     expect(lines.length).toBe(1 + manager.getEntries().length);
     const fileIds = lines
       .map((line) => JSON.parse(line) as { id?: string; type: string })

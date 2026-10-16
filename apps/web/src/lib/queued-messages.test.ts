@@ -53,7 +53,7 @@ function orbPageQueue() {
     unmount: () => {
       cancelled = true;
     },
-    /** Starts a poll; the returned promise settles when the response is applied. */
+    /** Starts a poll; settles once the response is applied or discarded. */
     poll: (response: Promise<ListResult>): Promise<void> => {
       const token = epoch.begin();
       return response.then((result) => {
@@ -61,7 +61,7 @@ function orbPageQueue() {
         queued = messagesAwaitingHistory(result.value.items, []);
       });
     },
-    /** Starts an enqueue; commits the epoch and appends when it resolves. */
+    /** Starts an enqueue; on success, commits the epoch and appends. */
     send: (response: Promise<EnqueueResult>): Promise<void> =>
       response.then((result) => {
         if (result.isErr()) return;
@@ -245,13 +245,11 @@ describe("queued message poll/enqueue race", () => {
     const list = deferred<ListResult>();
     const enqueue = deferred<EnqueueResult>();
 
-    // 1. The poll request starts while the queue is still empty.
     const polled = queue.poll(list.promise);
-    // 2. The enqueue commits and the optimistic append renders.
     enqueue.resolve(ok(message("m2", "queued")));
     await queue.send(enqueue.promise);
     expect(queue.messages.map((entry) => entry.id)).toEqual(["m2"]);
-    // 3. The stale snapshot — taken before the enqueue — resolves last.
+    // The stale snapshot — taken before the enqueue — resolves last.
     list.resolve(ok({ items: [message("m1", "queued")] }));
     await polled;
 

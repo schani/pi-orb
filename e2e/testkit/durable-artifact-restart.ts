@@ -81,7 +81,7 @@ export async function runArtifactRestart(f: RestartFixture): Promise<void> {
       JSON.stringify(record).includes("PRIVATE_SPILL_FILLER_"),
   );
   expect(spilled).toBeDefined();
-  // Includes projection metadata, not only the excerpt. The full ~106KiB
+  // Includes projection metadata, not only the excerpt. The full ~106 KB
   // output cannot be hidden in overflow.native or another public field.
   expect(JSON.stringify(spilled).length).toBeLessThan(16_384);
   expect(serialized).not.toContain("x".repeat(1024));

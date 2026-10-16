@@ -14,18 +14,13 @@ import { parseDockerLoopbackPort } from "./docker-port.ts";
 import { docker, waitForPostgres } from "./harness.ts";
 
 /**
- * The store contract against a real PostgreSQL server, over the same
- * node-postgres driver production uses.
+ * The store contract against a real PostgreSQL server, over the node-postgres
+ * driver production uses. PGlite binds parameters by OID and accepts values
+ * node-postgres would encode differently; see
+ * `docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md`.
  *
- * This is the gate the incident in
- * `docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md` was missing:
- * every store test ran on PGlite, which binds parameters by OID and therefore
- * accepted a `jsonb` parameter that node-postgres encoded as a PostgreSQL
- * array literal — 100% of message enqueues failed in production while the
- * suite was green.
- *
- * `PI_ORB_TEST_DATABASE_URL` (a throwaway database — each test drops and
- * recreates schema `public`) replaces the container; the Docker-free
+ * `PI_ORB_TEST_DATABASE_URL` (a throwaway database; each test drops and
+ * recreates schema `public`) replaces the container. The Docker-free
  * `PI_ORB_E2E_BACKEND=process` gate skips this file unless that variable
  * supplies a server.
  */

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run as orb, with HOME=/workspace/home, after runtime initialization.
+# Run as orb after runtime initialization.
 set -euo pipefail
 export HOME=/workspace/home RUSTUP_HOME=/workspace/home/.rustup CARGO_HOME=/workspace/home/.cargo
 export AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium

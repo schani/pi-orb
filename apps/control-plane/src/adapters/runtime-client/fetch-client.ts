@@ -55,7 +55,7 @@ function causeCode(error: unknown, depth = 0): string | null {
   return causeCode(record.cause, depth + 1);
 }
 
-/** Adapter-boundary rendering of a fetch rejection: message plus its cause code. */
+/** Adapter-boundary rendering of a fetch rejection. */
 export function describeFetchError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   const code = causeCode(error);

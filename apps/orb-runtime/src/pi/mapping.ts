@@ -16,8 +16,8 @@ import { Check } from "typebox/value";
 /**
  * Lossless Pi-entry → normalized-record mapping (docs/pi-adapter.md). Every
  * persisted entry maps one-to-one; a failure here fails the whole pull rather
- * than silently omitting an entry. Native conversation entries land complete
- * in `overflow.native`; Pi system prompt/tool state is identity-only.
+ * than silently omitting an entry. Native entries land in `overflow.native`,
+ * sanitized by `nativeForHistory`.
  */
 
 export interface MappingError {
@@ -46,7 +46,10 @@ function systemMessageIdentity(message: Record<string, unknown>): JsonObject {
   };
 }
 
-/** Keep Pi's model configuration local while retaining its history identity. */
+/**
+ * Reduce Pi system messages to their identity and codex-failure diagnostics to
+ * their sanitized context; everything else passes through.
+ */
 function nativeForHistory(entry: Record<string, unknown>): JsonObject {
   const native = asJson(entry) as JsonObject;
   if (entry["type"] === "message") {

@@ -219,7 +219,6 @@ export interface SigningKeyHarness {
 export function makeSigningKeyHarness(options?: {
   keys?: FakeSigningKeyStore;
   secrets?: FakeSecretStore;
-  /** Distinguishes this instance's generated `kid`s from another's. */
   kidPrefix?: string;
   issuerConstants?: Partial<IssuerConstants>;
 }): SigningKeyHarness {
@@ -345,9 +344,8 @@ export function desiredSpecFingerprintOf(
 
 /**
  * Provision a host for a seeded orb through the world directly, stamped the
- * way the harness's provider stamps it — or deliberately unstamped
- * (`legacy: true`) to seed the pre-fingerprint cohort of
- * docs/compute-replacement.md rule 1.
+ * way the harness's provider stamps it — or unstamped (`legacy: true`) to seed
+ * the pre-fingerprint cohort described in docs/compute-replacement.md.
  */
 export function seedProvisionedHost(
   task: SimulationTask,
@@ -371,9 +369,9 @@ export function seedProvisionedHost(
  * boot is behind us, so the configured boot latency is fast-forwarded here; it
  * still applies in full to every later restart of this host.
  *
- * `legacy: true` seeds the pre-Stage-2 cohort instead: an unstamped host under
- * a row with no committed fingerprint or generation, which must keep starting
- * in place until an ordinary stop/start replaces it.
+ * `legacy: true` seeds the pre-fingerprint cohort instead: an unstamped host
+ * under a row with no committed fingerprint or generation, which must keep
+ * starting in place until an ordinary stop/start replaces it.
  */
 export function seedRunningOrb(
   task: SimulationTask,

@@ -1,4 +1,4 @@
--- pi-orb initial schema (DESIGN.md §8.6). Three tables only.
+-- pi-orb initial schema. Three tables only.
 
 CREATE TABLE projects (
   id uuid PRIMARY KEY,

@@ -1,15 +1,13 @@
 import { type Static, Type } from "typebox";
 
 /**
- * Runtime-facing credential-broker contract (docs/credentials.md).
- * Versioned separately from the browser API: this surface is
- * deployment-internal between the control plane and orb runtimes. One
- * parameterized route serves every token; `{name}` is a logical token name,
- * not an upstream provider id — which provider backs a name is the control
- * plane's business. The response carries a short-lived access token by
- * design — the browser-facing no-credential-serialization guard does not
- * apply to this schema — and refresh tokens have no representation here at
- * all.
+ * Runtime-facing credential-broker contract (docs/credentials.md), versioned
+ * separately from the browser API and internal to the control plane and orb
+ * runtimes. One parameterized route serves every token; `{name}` is a logical
+ * token name, not an upstream provider id (the control plane decides which
+ * provider backs it). The response carries a short-lived access token by
+ * design, so the browser-facing no-credential-serialization guard does not
+ * apply here. Refresh tokens have no representation in this module.
  */
 
 export const CONTROL_PLANE_URL_ENV = "PI_ORB_CONTROL_PLANE_URL";

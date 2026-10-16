@@ -35,7 +35,7 @@ parent, child_socket = socket.socketpair()
 pid = os.fork()
 if pid == 0:
     parent.close()
-    # Refuse non-x86-64 syscalls; notify on connect and destination-bearing sendto.
+    # Kill non-x86-64 syscalls; notify on connect and destination-bearing sendto.
     rules = [Filter(0x20, 0, 0, 4), Filter(0x15, 1, 0, 0xC000003E), Filter(0x06, 0, 0, 0),
              Filter(0x20, 0, 0, 0),
              # Internet sockets must be TCP streams; no UDP/raw DNS or sendmsg escape.

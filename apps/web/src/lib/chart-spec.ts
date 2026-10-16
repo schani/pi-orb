@@ -78,7 +78,7 @@ export function niceTop(value: number): number {
   return Number(((step ?? 10) * magnitude).toPrecision(12));
 }
 
-/** Pixel positions → non-overlapping positions within [0, height], same order. */
+/** Pixel positions → at least `gap` apart and at most `height`, in input order. */
 export function spreadLabels(ys: readonly number[], height: number, gap = LABEL_GAP): number[] {
   const order = ys.map((y, index) => ({ y, index })).sort((a, b) => a.y - b.y);
   for (let k = 1; k < order.length; k++) {
@@ -361,7 +361,7 @@ export function barChartSpec(spec: BarChart): VegaSpec {
   return {
     $schema: "https://vega.github.io/schema/vega-lite/v6.json",
     width: "container",
-    // A numeric height (20px per bar) rather than a step, so fitting the width leaves height alone.
+    // Numeric height rather than a step, so fitting the width leaves height alone.
     height: spec.bars.length * 20,
     autosize: { type: "fit-x", contains: "padding" },
     padding: { top: 0, right: 4, bottom: 0, left: 0 },

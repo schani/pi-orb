@@ -61,7 +61,7 @@ function fail(
 }
 
 function isIpLiteral(hostname: string): boolean {
-  if (hostname.startsWith("[")) return true; // IPv6 literal
+  if (hostname.startsWith("[")) return true;
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname);
 }
 

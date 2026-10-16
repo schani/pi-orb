@@ -13,7 +13,7 @@ const DESCRIPTION_INTRO = `Run JavaScript that calls other tools. The input is r
 - \`await tools.<name>({ ...args })\` resolves to a string, or an object if the tool's declaration says so, and rejects with an Error on failure. Calls still running when the script ends are cancelled.
 - Optional first line: \`// @options: {"max_output_tokens": 10000, "timeout_ms": 60000}\``;
 
-/** One line per global. The details live in {@link CODEMODE_DOCS_PATH}. */
+/** One line per group of globals. */
 function describeGlobals(models: boolean): string {
   const lines = [
     "Globals:",
@@ -29,7 +29,6 @@ function describeGlobals(models: boolean): string {
 
 /** Default for {@link CodemodeDescriptionOptions.inlineBudget}, in estimated tokens. */
 export const DEFAULT_CODEMODE_INLINE_BUDGET = 3000;
-/** Characters per token when estimating the cost of a tool section. */
 const CHARS_PER_TOKEN = 4;
 
 /** What a script sees of a tool. Tools without an output schema resolve to their text output. */
@@ -42,21 +41,19 @@ export function toCodemodeDeclaration(tool: PolicyTool): Omit<CodemodeTool, "exe
   };
 }
 
-/** Tools a script may call: every given tool except the codemode tool itself. */
 export function getCodemodeCallableTools(tools: readonly PolicyTool[]): PolicyTool[] {
   return tools.filter((tool) => tool.name !== "codemode");
 }
 
 export interface CodemodeDescriptionOptions {
-  /** Declare the `models` namespace; only for tools created with model access. */
   models?: boolean;
   /** Namespace of each tool, by tool name. Tools of one namespace are listed under one heading. */
   namespaces?: ReadonlyMap<string, ToolNamespace>;
   /** Tools that are callable but never listed with their declaration (`deferred` exposure). */
   deferred?: ReadonlySet<string>;
   /**
-   * Estimated tokens (characters / 4) the tool sections may use. Tools that do not fit are left
-   * out, like deferred tools. Unset lists every tool that is not deferred.
+   * Estimated tokens the tool sections may use. Tools that do not fit are left out, like deferred
+   * tools. Unset lists every tool that is not deferred.
    */
   inlineBudget?: number;
 }
@@ -108,8 +105,8 @@ function selectCatalog(groups: readonly CatalogGroup[], budget: number | undefin
 
 /**
  * Model-facing description: the helper list, guidance for finding tools that are not listed, the
- * shared MCP types when listed tools need them, the `models` API, and one section per listed tool,
- * grouped by namespace. Deferred tools are never listed and do not affect the description at all, so
+ * shared MCP types when listed tools need them, and one section per listed tool, grouped by
+ * namespace. Deferred tools are never listed and do not affect the description at all, so
  * it stays the same while MCP servers connect or change their tools. Tool sections are limited to
  * `inlineBudget`.
  */

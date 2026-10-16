@@ -156,8 +156,7 @@ describe("subagent terminal ownership", () => {
       finished = true;
     });
     expect(h.abortSources).toEqual(["shutdown"]);
-    // Checkpoint through the resolved abort and both shutdown hooks before
-    // releasing the child; without a drain wait, the observer has run by then.
+    // Flush the resolved abort and both shutdown hooks: shutdown must still wait for the child.
     for (let step = 0; step < 5; step++) await Promise.resolve();
     expect(finished).toBe(false);
     expect(h.released).toEqual([]);

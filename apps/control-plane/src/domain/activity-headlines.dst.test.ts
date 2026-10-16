@@ -48,8 +48,8 @@ async function replicate(task: SimulationTask, h: ReturnType<typeof harness>) {
   });
 }
 
-// Source/publication success isolate timing: the retained first traces demonstrate
-// that default late scheduling can legitimately exhaust admission before inference.
+// Default late scheduling can legitimately exhaust admission before inference;
+// tests that need the success path disable it (lateTimerProbability: 0).
 describe("headline request lifetimes DST", () => {
   it("holds the same request until its missing source replicates", async () => {
     await runDst(

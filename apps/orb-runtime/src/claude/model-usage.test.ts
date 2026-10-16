@@ -22,7 +22,7 @@ const logs = (service: string, ...records: ReturnType<typeof record>[]) => ({
     },
   ],
 });
-// Shape from Claude Code 2.1.289; `model-usage.contract.test.ts` pins it against the real binary.
+// Shape pinned to the real Claude Code binary by `model-usage.contract.test.ts`.
 const apiRequest = record("api_request", {
   "event.timestamp": { stringValue: "2026-10-13T17:15:08.519Z" },
   model: { stringValue: "claude-sonnet-5-5" },

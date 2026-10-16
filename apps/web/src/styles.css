@@ -186,7 +186,6 @@ button.text-action:disabled:hover {
   color: var(--g2);
 }
 
-/* Icon-only actions: a 20px hit area on the 20px line. */
 button.icon-button,
 a.icon-button {
   width: 20px;
@@ -404,8 +403,6 @@ button.text-action.error-text {
   color: var(--st-del);
 }
 
-/* ---------- banners ---------- */
-
 .banner {
   border: 1px solid var(--k);
   padding: 0 8px;
@@ -416,8 +413,6 @@ button.text-action.error-text {
   background: var(--bad-bg);
   border-color: var(--bad);
 }
-
-/* ---------- session ribbon ---------- */
 
 .session-ribbon {
   position: sticky;
@@ -445,8 +440,6 @@ button.text-action.error-text {
   color: var(--w);
 }
 
-/* ---------- plain pages ---------- */
-
 .page {
   display: flex;
   flex-direction: column;
@@ -457,8 +450,6 @@ button.text-action.error-text {
   padding: 20px 12px;
   align-items: flex-start;
 }
-
-/* ---------- usage ---------- */
 
 .usage-page {
   padding: 0 16px 20px;
@@ -658,8 +649,6 @@ button.text-action.error-text {
   }
 }
 
-/* ---------- dashboard ---------- */
-
 .projects-page {
   display: flex;
   flex: 1;
@@ -729,10 +718,8 @@ button.text-action.error-text {
   color: var(--g2);
 }
 
-/* Fixed 316px project columns, left-aligned, each row closed by a black rule;
-   the page itself scrolls. The board holds the viewport height the two 24px
-   lines leave it and its rows stretch into it, so a column with one orb still
-   rules from the totals strip down to the footer. */
+/* Rows stretch to fill the height between the totals strip and the footer, so a
+   column with one orb still rules down to the footer. */
 .dashboard {
   display: grid;
   grid-template-columns: repeat(auto-fill, 316px);
@@ -778,7 +765,7 @@ button.text-action.error-text {
   white-space: nowrap;
 }
 
-/* Shared dashboard/index identity: 18px on a 24px line, with matching utility icons. */
+/* Shared by the dashboard and orb index project heads. */
 .project-head-name {
   height: 24px;
 }
@@ -890,7 +877,6 @@ a.project-new-orb-icon:focus-visible {
   border-top: 1px solid var(--g2);
 }
 
-/* orb entry: a 22px name line over a 20px meta line, behind a 2px state hue */
 .orb-entry {
   flex: none;
   padding: 4px 10px 4px 8px;
@@ -1092,8 +1078,6 @@ a.project-new-orb-icon:focus-visible {
   gap: 10px;
 }
 
-/* ---------- find ---------- */
-
 .app-search-backdrop {
   position: fixed;
   z-index: 80;
@@ -1218,7 +1202,6 @@ a.project-new-orb-icon:focus-visible {
   color: var(--g2);
 }
 
-/* ---------- personal instructions ---------- */
 button.personal-instructions-gear {
   margin-left: auto;
   width: 28px;
@@ -1343,8 +1326,6 @@ button.personal-instructions-gear {
     font-size: 16px;
   }
 }
-
-/* ---------- project config ---------- */
 
 .project-secrets-backdrop {
   position: fixed;
@@ -1588,8 +1569,6 @@ button.modal-close:focus-visible {
   align-items: stretch;
 }
 
-/* ---------- orb page: two panes filling the viewport ---------- */
-
 html:has(.orb-page),
 body:has(.orb-page) {
   overflow: hidden;
@@ -1610,7 +1589,6 @@ body:has(.orb-page) {
   grid-template-columns: 236px minmax(0, 1fr);
 }
 
-/* The index scrolls independently of the transcript. */
 .orb-index {
   position: fixed;
   top: 0;
@@ -1701,8 +1679,6 @@ body:has(.orb-page) {
 .ix-row-current .ix-age {
   color: var(--w);
 }
-
-/* ---------- orb header ---------- */
 
 .orb-main {
   grid-column: 2;
@@ -1818,8 +1794,6 @@ body:has(.orb-page) {
   flex: none;
   line-height: 16px;
 }
-
-/* ---------- transcript ---------- */
 
 .history {
   display: flex;
@@ -1947,8 +1921,6 @@ body:has(.orb-page) {
   margin: 4px 0 0;
   border: 1px solid var(--k);
 }
-
-/* ---------- chat markdown ---------- */
 
 .chat-markdown {
   overflow-wrap: anywhere;
@@ -2734,8 +2706,6 @@ pre,
   overflow-wrap: anywhere;
 }
 
-/* ---------- compaction, custom events ---------- */
-
 .record-custom {
   padding: 0 8px;
   border-left: 2px solid var(--st-start);
@@ -2802,8 +2772,6 @@ pre,
   padding: 0 12px;
 }
 
-/* ---------- lifecycle and auth diagnostics ---------- */
-
 .notice {
   padding: 0 8px;
   border: 1px solid var(--k);
@@ -2866,8 +2834,6 @@ pre,
   padding: 4px 8px;
   background: var(--w);
 }
-
-/* ---------- composer ---------- */
 
 /* Pinned to the viewport bottom, above the transcript scrolling behind it. */
 .composer {
@@ -3353,7 +3319,6 @@ button.orb-phone-menu {
   }
 }
 
-/* Lifecycle cluster: native controls, one consistent desktop cell rule. */
 .orb-identity {
   display: contents;
 }

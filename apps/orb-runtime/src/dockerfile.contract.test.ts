@@ -96,7 +96,6 @@ describe("orb runtime Dockerfile contract", () => {
     for (const shim of shims) {
       expect(chmodTargets, `${shim} must be made executable`).toContain(`/usr/local/bin/${shim}`);
     }
-    // Each shim dispatches to source the image actually carries.
     const piOrbShim = readFileSync(join(repositoryRoot, "apps/orb-runtime/docker/pi-orb"), "utf8");
     expect(piOrbShim).toContain("apps/orb-runtime/src/id-token/cli.ts");
     expect(piOrbShim).toContain("apps/orb-runtime/src/inspection/cli.ts");

@@ -64,7 +64,6 @@ export interface BootProbe {
   setupRunningSinceWall: number | null;
   /** Whether the *latest* answered probe still said setup is running. */
   setupRunning: boolean;
-  /** Whether the most recent probe got any answer at all. */
   lastProbeAnswered: boolean;
   /** Monotonic ms of the most recent answered probe; null before the first. */
   lastAnswerMono: number | null;
@@ -315,8 +314,6 @@ export class ControlState {
     return this.lastVisibleAt.get(orbId) ?? null;
   }
 
-  // -- per-orb scheduling --
-
   setNextAttemptAt(orbId: string, at: number): void {
     this.nextAttemptAt.set(orbId, at);
   }
@@ -367,8 +364,6 @@ export class ControlState {
   hasRetryAttempts(orbId: string): boolean {
     return this.retryAttempts.has(orbId);
   }
-
-  // -- OAuth device flow --
 
   markAuthBlocked(orbId: string, userId: string, provider: string | null = null): void {
     this.authBlocked.set(orbId, { ownerUserId: userId, provider });
@@ -424,7 +419,6 @@ export class ControlState {
 
   private readonly bootProbes = new Map<string, BootProbe>();
 
-  /** Record one readiness-probe outcome while the orb boots. */
   recordBootProbe(
     orbId: string,
     outcome: {
@@ -528,15 +522,13 @@ export class ControlState {
     return at;
   }
 
-  // -- host restart tracking --
-
   private readonly restartPending = new Set<string>();
 
   /**
    * Set between the stop and start halves of an unreachable-runtime host
    * restart, so a stopped host mid-restart is completed rather than being
-   * mistaken for an externally stopped host. Lost on process restart, which
-   * falls back to the accepted replication caveat.
+   * mistaken for an externally stopped host. Lost on process restart; the
+   * replication caveat in docs/history-replication.md applies.
    */
   markRestartPending(orbId: string): void {
     this.restartPending.add(orbId);
@@ -549,8 +541,6 @@ export class ControlState {
   isRestartPending(orbId: string): boolean {
     return this.restartPending.has(orbId);
   }
-
-  // -- stopping / drain presentation --
 
   /**
    * Marks the orb as stopping as of `stateVersion`, never cleared: observations

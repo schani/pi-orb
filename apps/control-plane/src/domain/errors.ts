@@ -17,16 +17,12 @@ export interface StoreError {
   readonly retryable: boolean;
 }
 
-/** The optimistic compare-and-swap on `replication_cursor` affected zero rows. */
+/** The orb's `replication_cursor` differs from the caller's expected cursor. */
 export interface CursorConflict {
   readonly type: "cursor_conflict";
 }
 
-/**
- * A replication problem no retry can repair (docs/history-replication.md): unknown cursor,
- * session-header mismatch, conflicting immutable record, mapping/validation
- * failure.
- */
+/** A replication problem no retry can repair (docs/history-replication.md). */
 export interface ReplicationIntegrityError {
   readonly type: "replication_integrity";
   readonly reason:
@@ -109,7 +105,7 @@ export interface StateConflict {
   readonly currentState?: OrbState;
 }
 
-/** The parent project disappeared or no longer accepts child creation. */
+/** Project write refused; `reason` says why. */
 export interface ProjectConflict {
   readonly type: "project_conflict";
   readonly reason:

@@ -5,7 +5,7 @@ import { pollOrbUntilCaughtUp } from "./replication.ts";
 
 export type AckAlertError = { type: "orb_not_found" | "alert_not_replicated" | "unavailable" };
 
-/** One bounded pull gives a just-observed live alert a chance to become verifiable. */
+/** At most two pull attempts give a just-observed live alert a chance to become verifiable. */
 export function ackOrbAlert(
   task: SimulationTask,
   deps: ControlPlaneDeps,
