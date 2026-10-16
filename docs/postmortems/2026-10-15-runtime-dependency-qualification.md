@@ -10,7 +10,9 @@ Deploy [38800758118](https://github.com/schani/pi-orb/actions/runs/38800758118) 
 
 Main `96ef6af9`: [Deploy 38834054839](https://github.com/schani/pi-orb/actions/runs/38834054839) failed October 15, 6:51 PM PDT. Schema passed; apply failed when candidate `00058-lh8` hit `ERR_MODULE_NOT_FOUND`: control-plane `adapters/spawn-models.ts` imported undeclared `@anthropic-ai/claude-agent-sdk`. Release: `applied-but-unvalidated`; monitor never ran. Previous revision `00057-gqf` retained 100% traffic, health 200. Evidence: `.context/deploy-38834054839/{receipt.json,startup-diagnostic/}`, [release artifact](https://github.com/schani/pi-orb/actions/runs/38834054839/artifacts/12019477735). [PR 127](https://github.com/schani/pi-orb/pull/127) declares SDK/zod dependencies and checks the actual adapter import in the isolated image.
 
-Deploy [38846470999](https://github.com/schani/pi-orb/actions/runs/38846470999) (`56cbbdff`) failed-before-apply: desired revision 58 failed despite healthy 57 serving 100% files traffic. No apply; monitor skipped. Correction reads immutable Ready identity; neither shipped nor validated.
+Deploy [38846470999](https://github.com/schani/pi-orb/actions/runs/38846470999) (`56cbbdff`) failed-before-apply: desired revision 58 failed despite healthy 57 serving 100% files traffic. No apply; monitor skipped. The SDK fix remained unvalidated.
+
+**Rollout complete (2026-10-15):** [Deploy 38854219880](https://github.com/schani/pi-orb/actions/runs/38854219880) shipped `785fdcbb` as `00059-9bp`: all eleven fresh-main checks, twelve release gates and the full [15-minute monitor](https://github.com/schani/pi-orb/actions/runs/38854219880/artifacts/12030320719) passed. Files traffic 100%; canonical health 200. Central inference was unobserved. Evidence: `.context/recovery129-main/`.
 
 | Source | Evidence / boundary |
 |---|---|
