@@ -164,7 +164,7 @@ async function fixture(status: number, body: string, held = false) {
 
 describe("runtime pull transport and replication authority (HTTP)", () => {
   it.each([
-    ["deadline", "cancelled", false, "body read cancelled"],
+    ["deadline", "cancelled", false, /phase=body .*http_status=200 .*aborted=true/],
     ["socket", "unreachable", false, "UND_ERR_SOCKET"],
     ["503", "http_error", true, "runtime returned HTTP 503"],
   ] as const)(
@@ -193,7 +193,7 @@ describe("runtime pull transport and replication authority (HTTP)", () => {
           code,
           retryable: true,
           answered,
-          message: expect.stringContaining(diagnostic),
+          message: expect.stringMatching(diagnostic),
         }),
       ]);
       expect.soft(f.errors[0]?.message).not.toContain(PRIVATE);
