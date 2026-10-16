@@ -1281,7 +1281,10 @@ async function runtimeSilenceCorroborated(
     });
     return false;
   }
-  if (deps.control.getLiveness(orbId)?.unansweredSinceAt === expectedUnansweredSinceAt) return true;
+  if (deps.control.getLiveness(orbId)?.unansweredSinceAt === expectedUnansweredSinceAt) {
+    logOrbEvent(task, orbId, "runtime-health-failed", { message: health.error.message });
+    return true;
+  }
   logOrbEvent(task, orbId, "unreachable-restart-deferred", {
     reason: "silence_episode_changed",
   });
@@ -1437,6 +1440,9 @@ async function reconcileRunning(
       ))
     ) {
       return { type: "noop" };
+    }
+    if (chargeAutoRestart(task, orb) === null) {
+      return failRestartBudget(task, deps, orb, "unreachable_restart");
     }
     logOrbEvent(task, orb.id, "unreachable-restart", {
       host: orb.hostRef,

@@ -15,7 +15,7 @@ interface Shared {
   handler?: (signal: NodeJS.Signals) => void;
   forwarded: NodeJS.Signals[];
   reports: Array<{
-    status: "ready" | "failed";
+    status: "ready" | "failed" | "telemetry";
     code?: string;
     details?: object;
     exitAtReport: ChildExit | null;
@@ -66,7 +66,7 @@ class SimPorts implements SupervisorPorts<{ pid: number }> {
     return ResultAsync.fromSafePromise(this.task.checkpoint("simulated health retry"));
   }
   report(
-    status: "ready" | "failed",
+    status: "ready" | "failed" | "telemetry",
     code?: string,
     details?: object,
   ): ResultAsyncType<void, SupervisorError> {
@@ -132,8 +132,15 @@ describe("runtime supervisor scheduling", () => {
         const supervisor = results.value[0];
         expect(supervisor?.isOk()).toBe(true);
         if (supervisor?.isOk()) expect(supervisor.value).toEqual({ type: "exit", code: 19 });
-        expect(shared.reports).toHaveLength(1);
-        const report = shared.reports[0];
+        const bootReports = shared.reports.filter((report) => report.status !== "telemetry");
+        expect(bootReports).toHaveLength(1);
+        expect(shared.reports.filter((report) => report.code === "runtime_child_exited")).toEqual([
+          expect.objectContaining({
+            status: "telemetry",
+            details: expect.objectContaining({ exitCode: 19 }),
+          }),
+        ]);
+        const report = bootReports[0];
         if (report?.status === "ready") expect(report.exitAtReport).toBeNull();
         else
           expect(report).toEqual({
@@ -197,6 +204,12 @@ describe("runtime supervisor scheduling", () => {
         expect(results.value[0]?._unsafeUnwrap()).toEqual({ type: "exit", code: 37 });
         expect(shared.reports).toEqual([
           { status: "failed", code: "clone_failed", exitAtReport: null },
+          {
+            status: "telemetry",
+            code: "runtime_child_exited",
+            details: { exitCode: 37, requestedStop: false, lastLocalSuccessAt: null },
+            exitAtReport: { type: "exit", code: 37 },
+          },
         ]);
       },
     );

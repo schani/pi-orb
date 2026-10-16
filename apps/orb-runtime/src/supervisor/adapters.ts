@@ -51,7 +51,15 @@ export function parseHealth(value: unknown): ResultType<Health, SupervisorError>
   if (typeof value !== "object" || value === null || !("status" in value))
     return err({ type: "health_failed", message: "health response is not an object with status" });
   const status = value.status;
-  if (status === "ready") return ok({ status });
+  if (status === "ready") {
+    const runtimeInstanceId =
+      "runtimeInstanceId" in value &&
+      typeof value.runtimeInstanceId === "string" &&
+      /^[a-zA-Z0-9_-]{1,80}$/.test(value.runtimeInstanceId)
+        ? value.runtimeInstanceId
+        : undefined;
+    return ok({ status, ...(runtimeInstanceId === undefined ? {} : { runtimeInstanceId }) });
+  }
   if (status === "initializing") return ok({ status });
   if (status !== "failed")
     return err({ type: "health_failed", message: "health response has an unknown status" });
@@ -154,40 +162,72 @@ export class NodeSupervisorPorts implements SupervisorPorts<RuntimeChild> {
     return ResultAsync.fromPromise(
       (async () => {
         await task.failpoint("runtime-supervisor.health");
-        return fetch(this.healthUrl, { signal: AbortSignal.timeout(2_000) });
+        const deadline = task.createDeadline(2_000, "runtime supervisor health deadline");
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        deadline.signal.addEventListener("abort", abort, { once: true });
+        try {
+          const response = await fetch(this.healthUrl, { signal: controller.signal });
+          const value: unknown = await response.json();
+          if (!response.ok)
+            return err<Health, SupervisorError>({
+              type: "health_failed",
+              message: `health returned HTTP ${response.status}`,
+            });
+          return parseHealth(value);
+        } finally {
+          deadline.signal.removeEventListener("abort", abort);
+          deadline.cancel();
+        }
       })(),
       (cause) => failure("health_failed", cause),
-    ).andThen((response) => {
-      if (!response.ok)
-        return err<Health, SupervisorError>({
-          type: "health_failed",
-          message: `health returned HTTP ${response.status}`,
-        });
-      return ResultAsync.fromPromise(response.json() as Promise<unknown>, (cause) =>
-        failure("health_failed", cause),
-      ).andThen(parseHealth);
-    });
+    ).andThen((result) => result);
   }
 
-  sleep(task: SimulationTask): ResultAsync<void, SupervisorError> {
-    return ResultAsync.fromPromise(task.sleep(1_000, "runtime supervisor health retry"), (cause) =>
-      failure("sleep_failed", cause),
-    );
-  }
-
-  report(status: "ready" | "failed", code?: string, details?: object) {
-    const args = ["runtime", status];
-    if (code !== undefined) args.push(code);
-    if (details !== undefined) args.push("", JSON.stringify(details));
+  sleep(
+    task: SimulationTask,
+    milliseconds = 1_000,
+    child?: RuntimeChild,
+  ): ResultAsync<void, SupervisorError> {
+    if (child !== undefined && child.terminal !== null) return okAsync(undefined);
+    const controller = new AbortController();
+    const wake = () => controller.abort();
+    child?.waiters.push(wake);
     return ResultAsync.fromPromise(
-      execFileAsync(this.diagnostic, args, { timeout: 30_000, killSignal: "SIGKILL" }).then(
-        () => undefined,
-      ),
-      (cause) => failure("diagnostic_failed", cause),
-    );
+      task.sleep(milliseconds, "runtime supervisor health retry", { signal: controller.signal }),
+      (cause) => failure("sleep_failed", cause),
+    )
+      .orElse((error) => (controller.signal.aborted ? okAsync(undefined) : errAsync(error)))
+      .andThen(() => {
+        if (child !== undefined) {
+          const index = child.waiters.indexOf(wake);
+          if (index >= 0) child.waiters.splice(index, 1);
+        }
+        return ok(undefined);
+      });
+  }
+
+  report(status: "ready" | "failed" | "telemetry", code?: string, details?: object) {
+    let args: string[];
+    if (status === "telemetry") {
+      args = ["runtime-event", code ?? "", JSON.stringify(details ?? {})];
+    } else {
+      args = ["runtime", status];
+      if (code !== undefined) args.push(code);
+      if (details !== undefined) args.push("", JSON.stringify(details));
+    }
+    return ResultAsync.fromThrowable(
+      async () => {
+        await execFileAsync(this.diagnostic, args, {
+          timeout: status === "telemetry" ? 4_000 : 30_000,
+          killSignal: "SIGKILL",
+        });
+      },
+      () => ({ type: "diagnostic_failed" as const, message: "diagnostic export failed" }),
+    )();
   }
 
   logDiagnosticFailure(error: SupervisorError): void {
-    console.error(`runtime supervisor: ${error.type}: ${error.message}`);
+    console.error(`runtime supervisor: ${error.type}`);
   }
 }

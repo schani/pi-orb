@@ -5,10 +5,11 @@ export type ChildExit =
   | { readonly type: "exit"; readonly code: number }
   | { readonly type: "signal"; readonly signal: NodeJS.Signals; readonly number: number };
 
-export type Health =
+export type Health = (
   | { readonly status: "initializing" }
   | { readonly status: "ready" }
-  | { readonly status: "failed"; readonly code: string };
+  | { readonly status: "failed"; readonly code: string }
+) & { readonly runtimeInstanceId?: string };
 
 export type SupervisorError = {
   readonly type:
@@ -28,9 +29,13 @@ export interface SupervisorPorts<Child> {
   wait(child: Child): ResultAsync<ChildExit, SupervisorError>;
   forward(child: Child, signal: NodeJS.Signals): Result<void, SupervisorError>;
   health(task: SimulationTask): ResultAsync<Health, SupervisorError>;
-  sleep(task: SimulationTask): ResultAsync<void, SupervisorError>;
+  sleep(
+    task: SimulationTask,
+    milliseconds?: number,
+    child?: Child,
+  ): ResultAsync<void, SupervisorError>;
   report(
-    status: "ready" | "failed",
+    status: "ready" | "failed" | "telemetry",
     code?: string,
     details?: object,
   ): ResultAsync<void, SupervisorError>;
@@ -43,7 +48,7 @@ function exitDetails(exit: ChildExit): object {
 
 async function reportBestEffort<Child>(
   ports: SupervisorPorts<Child>,
-  status: "ready" | "failed",
+  status: "ready" | "failed" | "telemetry",
   code?: string,
   details?: object,
 ): Promise<void> {
@@ -56,8 +61,27 @@ export async function supervise<Child>(
   ports: SupervisorPorts<Child>,
 ): Promise<Result<ChildExit, SupervisorError>> {
   let child: Child | undefined;
+  let ready = false;
+  let unhealthy = false;
+  let requestedStop = false;
+  let lastLocalSuccessAt: number | null = null;
+  let runtimeInstanceId: string | undefined;
+  const correlation = () => ({
+    lastLocalSuccessAt,
+    requestedStop,
+    ...(runtimeInstanceId === undefined ? {} : { runtimeInstanceId }),
+  });
+  const finished = async (outcome: Result<ChildExit, SupervisorError>) => {
+    if (outcome.isOk())
+      await reportBestEffort(ports, "telemetry", "runtime_child_exited", {
+        ...exitDetails(outcome.value),
+        ...correlation(),
+      });
+    return outcome;
+  };
   const installed = ports.installSignalHandlers((signal) => {
     if (child === undefined || ports.poll(child) !== null) return;
+    requestedStop = true;
     const forwarded = ports.forward(child, signal);
     if (forwarded.isErr()) ports.logDiagnosticFailure(forwarded.error);
   });
@@ -72,37 +96,65 @@ export async function supervise<Child>(
     const beforeHealth = ports.poll(child);
     if (beforeHealth !== null) {
       if (beforeHealth.isErr()) return err(beforeHealth.error);
-      await reportBestEffort(
-        ports,
-        "failed",
-        "runtime_exited_before_ready",
-        exitDetails(beforeHealth.value),
-      );
-      return beforeHealth;
+      if (!ready)
+        await reportBestEffort(
+          ports,
+          "failed",
+          "runtime_exited_before_ready",
+          exitDetails(beforeHealth.value),
+        );
+      return finished(beforeHealth);
     }
 
+    const started = task.monotonicNow();
     const health = await ports.health(task);
+    const probeElapsedMs = Math.max(0, task.monotonicNow() - started);
     await task.checkpoint("runtime-supervisor", "after-health");
     const afterHealth = ports.poll(child);
     if (afterHealth !== null) {
       if (afterHealth.isErr()) return err(afterHealth.error);
-      await reportBestEffort(
-        ports,
-        "failed",
-        "runtime_exited_before_ready",
-        exitDetails(afterHealth.value),
-      );
-      return afterHealth;
+      if (!ready)
+        await reportBestEffort(
+          ports,
+          "failed",
+          "runtime_exited_before_ready",
+          exitDetails(afterHealth.value),
+        );
+      return finished(afterHealth);
     }
 
-    if (health.isOk() && health.value.status !== "initializing") {
-      if (health.value.status === "ready") await reportBestEffort(ports, "ready");
-      else await reportBestEffort(ports, "failed", health.value.code);
-      const waited = await ports.wait(child);
-      return waited;
+    if (!ready) {
+      if (health.isOk() && health.value.status !== "initializing") {
+        runtimeInstanceId = health.value.runtimeInstanceId;
+        if (health.value.status === "failed") {
+          await reportBestEffort(ports, "failed", health.value.code);
+          return finished(await ports.wait(child));
+        }
+        ready = true;
+        lastLocalSuccessAt = task.wallNow();
+        await reportBestEffort(ports, "ready");
+      }
+    } else if (health.isOk() && health.value.status === "ready") {
+      lastLocalSuccessAt = task.wallNow();
+      runtimeInstanceId = health.value.runtimeInstanceId ?? runtimeInstanceId;
+      if (unhealthy)
+        await reportBestEffort(ports, "telemetry", "runtime_health_recovered", {
+          ...correlation(),
+          probeElapsedMs,
+          probeDeadlineMs: 2_000,
+        });
+      unhealthy = false;
+    } else if (!unhealthy) {
+      unhealthy = true;
+      await reportBestEffort(ports, "telemetry", "runtime_health_failed", {
+        ...correlation(),
+        probeElapsedMs,
+        probeDeadlineMs: 2_000,
+        healthFailure: health.isErr() ? "transport" : health.value.status,
+      });
     }
 
-    const slept = await ports.sleep(task);
+    const slept = await ports.sleep(task, ready ? 10_000 : 1_000, child);
     if (slept.isErr()) return err(slept.error);
   }
 }

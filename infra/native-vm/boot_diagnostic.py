@@ -1,7 +1,9 @@
 #!/usr/bin/python3
 """Publish a secret-free boot edge to the serial journal and durable GCE stores."""
+import http.client
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -27,7 +29,7 @@ def filesystem_details():
     return details
 
 
-def payload(phase, status, code=None, message=None, details=None):
+def payload(phase, status, code=None, message=None, details=None, filesystem=True):
     record = {
         'schemaVersion': 1,
         'phase': phase,
@@ -38,7 +40,7 @@ def payload(phase, status, code=None, message=None, details=None):
         record['code'] = code[:80]
     if message:
         record['message'] = message.replace('\n', ' ')[:500]
-    bounded = {**filesystem_details(), **(details or {})}
+    bounded = {**(filesystem_details() if filesystem else {}), **(details or {})}
     if bounded:
         record['details'] = bounded
     return record
@@ -53,7 +55,7 @@ def publish(record, urlopen=urllib.request.urlopen, write_attribute=True):
             with urlopen(request, timeout=5) as response:
                 identity[key] = response.read().decode().strip().rsplit('/', 1)[-1]
         record.update(identity)
-    except OSError:
+    except (OSError, http.client.HTTPException, UnicodeError):
         pass
     encoded = json.dumps(record, separators=(',', ':'), sort_keys=True)
     print(encoded, flush=True)
@@ -83,8 +85,9 @@ def publish(record, urlopen=urllib.request.urlopen, write_attribute=True):
         })
         with urlopen(request, timeout=10):
             pass
-    except (OSError, KeyError, TypeError, ValueError):
-        pass
+        return True
+    except (OSError, http.client.HTTPException, KeyError, TypeError, ValueError):
+        return False
 
 
 def phase_for_unit(unit):
@@ -133,7 +136,44 @@ def publish_unit_failure(unit, command=subprocess.run, urlopen=urllib.request.ur
     return 0
 
 
+def runtime_details(details):
+    safe = {}
+    for key, value in details.items():
+        if key in ('exitCode', 'signal', 'probeElapsedMs', 'probeDeadlineMs', 'lastLocalSuccessAt'):
+            numeric = type(value) is int if key in ('exitCode', 'signal') else type(value) in (int, float)
+            if numeric and 0 <= value <= 10**16:
+                safe[key] = value
+            elif key == 'lastLocalSuccessAt' and value is None:
+                safe[key] = None
+        elif key == 'runtimeInstanceId' and isinstance(value, str) and re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', value):
+            safe[key] = value
+        elif key == 'requestedStop' and type(value) is bool:
+            safe[key] = value
+        elif key == 'healthFailure' and value in ('transport', 'failed', 'initializing'):
+            safe[key] = value
+    return safe
+
+
 def main(arguments=sys.argv[1:]):
+    if len(arguments) == 3 and arguments[0] == 'runtime-event':
+        code = arguments[1]
+        if code not in ('runtime_health_failed', 'runtime_health_recovered', 'runtime_child_exited'):
+            return 2
+        try:
+            details = json.loads(arguments[2])
+        except ValueError:
+            return 2
+        if not isinstance(details, dict):
+            return 2
+        details = runtime_details(details)
+        status = 'recovered' if code == 'runtime_health_recovered' else 'failed'
+        if code == 'runtime_child_exited' and (details.get('requestedStop') or details.get('exitCode') == 0):
+            status = 'stopped'
+        record = {**payload('runtime', status, code, details=details, filesystem=False), 'kind': 'runtime_event'}
+        if publish(record, write_attribute=False):
+            return 0
+        print('pi-orb diagnostic export_failed stage=runtime_event', file=sys.stderr, flush=True)
+        return 1
     if len(arguments) == 2 and arguments[0] == 'unit-failure':
         return publish_unit_failure(arguments[1])
     if len(arguments) < 2 or arguments[1] not in ('starting', 'ready', 'failed'):

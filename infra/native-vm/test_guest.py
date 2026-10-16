@@ -357,5 +357,71 @@ class DiagnosticTest(unittest.TestCase):
         self.assertEqual(records[1][1], {'write_attribute': False})
 
 
+    def test_runtime_events_are_log_only_and_skip_filesystem_sampling(self):
+        details = {'exitCode': 1, 'signal': 9, 'requestedStop': False,
+                   'runtimeInstanceId': 'runtime-1', 'lastLocalSuccessAt': None,
+                   'error': 'Bearer secret', 'argv': ['secret'], 'childRssBytes': 123}
+        with patch.object(diagnostic, 'filesystem_details', side_effect=AssertionError('disk access')), \
+             patch.object(diagnostic, 'publish', return_value=True) as publish:
+            self.assertEqual(diagnostic.main(['runtime-event', 'runtime_child_exited', json.dumps(details)]), 0)
+        record = publish.call_args.args[0]
+        self.assertEqual(publish.call_args.kwargs, {'write_attribute': False})
+        self.assertEqual(record['kind'], 'runtime_event')
+        self.assertEqual(record['details'], {key: details[key] for key in (
+            'exitCode', 'signal', 'requestedStop', 'runtimeInstanceId', 'lastLocalSuccessAt')})
+        self.assertNotIn('secret', json.dumps(record))
+
+    def test_runtime_event_validates_fixed_typed_fields(self):
+        valid = {'exitCode': 1, 'signal': 9, 'requestedStop': True, 'lastLocalSuccessAt': 123,
+                 'probeElapsedMs': 2000.5, 'probeDeadlineMs': 2000,
+                 'runtimeInstanceId': 'runtime-1', 'healthFailure': 'transport'}
+        self.assertEqual(diagnostic.runtime_details(valid), valid)
+        for value in (True, -1, float('nan'), float('inf'), 'secret', 10**400):
+            self.assertEqual(diagnostic.runtime_details({'probeElapsedMs': value}), {})
+        self.assertEqual(diagnostic.runtime_details({'exitCode': 1.5, 'signal': 9.5}), {})
+        self.assertEqual(diagnostic.runtime_details({'runtimeInstanceId': 'secret space',
+                         'requestedStop': 'yes', 'healthFailure': ['secret']}), {})
+        with patch.object(diagnostic, 'publish') as publish:
+            for args in (['secret', '{}'], ['runtime_health_failed', '[]'], ['runtime_health_failed', 'invalid']):
+                self.assertEqual(diagnostic.main(['runtime-event', *args]), 2)
+            publish.assert_not_called()
+
+    def test_runtime_event_status_does_not_replace_boot_readiness(self):
+        cases = [('runtime_health_failed', {}, 'failed'),
+                 ('runtime_health_recovered', {}, 'recovered'),
+                 ('runtime_child_exited', {'exitCode': 0}, 'stopped'),
+                 ('runtime_child_exited', {'signal': 15, 'requestedStop': True}, 'stopped'),
+                 ('runtime_child_exited', {'signal': 9}, 'failed')]
+        for code, details, status in cases:
+            with self.subTest(code=code, details=details), patch.object(diagnostic, 'publish', return_value=True) as publish:
+                self.assertEqual(diagnostic.main(['runtime-event', code, json.dumps(details)]), 0)
+                self.assertEqual(publish.call_args.args[0]['status'], status)
+
+    def test_runtime_export_failure_is_sanitized(self):
+        with patch.object(diagnostic, 'publish', return_value=False), patch('sys.stderr', new_callable=io.StringIO) as stderr:
+            self.assertEqual(diagnostic.main(['runtime-event', 'runtime_health_failed', '{}']), 1)
+        self.assertEqual(stderr.getvalue(), 'pi-orb diagnostic export_failed stage=runtime_event\n')
+
+    def test_runtime_export_reuses_existing_publisher_without_guest_attribute(self):
+        requests = []
+        def opened(request, timeout):
+            requests.append(request)
+            if request.full_url == diagnostic.TOKEN_URL:
+                return Response(b'{"access_token":"secret"}')
+            if request.full_url == diagnostic.LOGGING_URL:
+                raise OSError('Bearer secret request body')
+            return Response(b'123')
+        original = diagnostic.publish
+        with patch.object(diagnostic, 'publish', side_effect=lambda record, **kwargs: original(record, opened, **kwargs)), \
+             patch('sys.stderr', new_callable=io.StringIO) as stderr:
+            self.assertEqual(diagnostic.main(['runtime-event', 'runtime_health_failed', '{}']), 1)
+        self.assertNotIn(diagnostic.ATTRIBUTE_URL, [request.full_url for request in requests])
+        self.assertEqual(requests[-1].full_url, diagnostic.LOGGING_URL)
+        self.assertNotIn('secret', stderr.getvalue())
+        entry = json.loads(requests[-1].data)['entries'][0]
+        self.assertEqual(entry['severity'], 'ERROR')
+        self.assertEqual(entry['jsonPayload']['instanceId'], '123')
+
+
 if __name__ == '__main__':
     unittest.main()
