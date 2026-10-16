@@ -52,8 +52,9 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
     `name: e2e-dst-failure-traces-\${{ matrix.shard }}-\${{ github.run_id }}-\${{ github.run_attempt }}`,
     `name: e2e-missing-orb-\${{ matrix.shard }}-\${{ github.run_id }}-\${{ github.run_attempt }}`,
     `name: e2e-lazy-return-\${{ matrix.shard }}-\${{ github.run_id }}-\${{ github.run_attempt }}`,
+    `name: e2e-browser-failure-\${{ matrix.shard }}-\${{ github.run_id }}-\${{ github.run_attempt }}`,
   ]);
-  expect(source.match(/if: failure\(\)/gu)).toHaveLength(5);
+  expect(source.match(/if: failure\(\)/gu)).toHaveLength(6);
   const traceUpload = source
     .split("- name: Upload deterministic failure traces")[1]
     ?.split("- name:")[0];
@@ -66,6 +67,14 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
     "test-failures/subagent-*/failure.json",
   ]);
   expect(source).toContain("test-failures/lazy-return-*/trace.zip");
+  const browserUpload = source
+    .split("- name: Upload harness browser failure evidence")[1]
+    ?.split("- name:")[0];
+  expect(browserUpload?.match(/if: (.+)/u)?.[1]).toBe("failure()");
+  expect(browserUpload?.match(/path: (.+)/u)?.[1]).toBe(
+    ".context/claude-production-hardening/browser-failure",
+  );
+  expect(browserUpload).toContain("include-hidden-files: true");
 });
 
 it("keeps manual diagnostics distinct from required E2E checks", () => {
