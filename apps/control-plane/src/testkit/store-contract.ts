@@ -2422,7 +2422,7 @@ export function storeSemanticsContractTests(
       expect(wokenAgain.isOk() && wokenAgain.value?.state).toBe("starting");
     });
 
-    it("records a delivery note that replication already marked delivered", async () => {
+    it.each(["user", "receipt"])("records delivered %s before its note", async (kind) => {
       await seed();
       const messageId = "00000000-0000-4000-8000-000000000105";
       const content = [{ type: "text" as const, text: "how was this delivered?" }];
@@ -2438,9 +2438,9 @@ export function storeSemanticsContractTests(
         id: "inbox-record-late-note",
         parentId: null,
         timestamp: "2026-08-10T00:00:00.000Z",
-        type: "message",
-        role: "user",
-        content,
+        ...(kind === "user"
+          ? { type: "message" as const, role: "user" as const, content }
+          : { type: "event" as const, eventType: "claude.input_receipt" }),
         inboxMessageIds: [messageId],
         overflow: {},
       };

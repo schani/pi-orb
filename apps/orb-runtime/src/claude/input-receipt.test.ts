@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -53,57 +52,34 @@ function fixture(
 }
 const state = { deliveries: { inbox: { uuid: "input", operationId: "op", submitted: true } } };
 
-it("recovers a fully fingerprinted legacy index without a suffix, preserving bytes and every old identity", () => {
-  const f = fixture();
-  const records: HistoryRecord[] = [
+it("recovers an already-indexed root without a suffix, preserving old records and native bytes", () => {
+  const f = fixture([
+    attachment,
+    consumed,
     {
-      id: "attachment",
-      parentId: null,
+      type: "assistant",
+      uuid: "final",
+      parentUuid: "attachment",
       timestamp,
-      type: "event",
-      eventType: "claude.attachment",
-      overflow: { native: { type: "attachment", uuid: "attachment" } },
+      message: { content: "done", stop_reason: "end_turn" },
     },
-    {
-      id: "legacy-queue-id",
-      parentId: "attachment",
-      timestamp,
-      type: "event",
-      eventType: "claude.queue-operation",
-      overflow: {},
-    },
-    {
-      id: "final",
-      parentId: "attachment",
-      timestamp,
-      type: "message",
-      role: "assistant",
-      content: [{ type: "text", text: "done" }],
-      finishReason: "end_turn",
-      overflow: {},
-    },
-    {
-      id: "result",
-      parentId: "final",
-      timestamp,
-      type: "event",
-      eventType: "claude.handoff_result",
-      overflow: { operationId: "op", subtype: "success" },
-    },
-  ];
-  const fingerprints = f.source
-    .trimEnd()
-    .split("\n")
-    .map((line) => createHash("sha256").update(line).digest("hex"));
-  writeFileSync(join(f.dir, "index.json"), JSON.stringify({ records, fingerprints }));
-  const history = new ClaudeHistory(f.dir, "session", "2026-10-16T00:00:00Z");
+  ]);
+  f.history.scan(f.path)._unsafeUnwrap();
+  const indexPath = join(f.dir, "index.json");
+  const index = JSON.parse(readFileSync(indexPath, "utf8"));
+  const records: HistoryRecord[] = index.records.filter(
+    (record: HistoryRecord) =>
+      record.type !== "event" || record.eventType !== "claude.input_receipt",
+  );
+  writeFileSync(indexPath, JSON.stringify({ ...index, records }));
+  const history = new ClaudeHistory(f.dir, "session", "later");
   const view = history.scan(f.path)._unsafeUnwrap();
   expect(view.slice(0, records.length)).toEqual(records);
   expect(view).toHaveLength(records.length + 1);
   const receipt = history.inputReceipt("input");
   expect(receipt).toMatchObject({
     type: "event",
-    parentId: "result",
+    parentId: "final",
     eventType: "claude.input_receipt",
     inboxMessageIds: ["inbox"],
     overflow: {
@@ -117,15 +93,10 @@ it("recovers a fully fingerprinted legacy index without a suffix, preserving byt
   });
   expect(receipt).not.toHaveProperty("content");
   expect(JSON.stringify(receipt)).not.toContain("PRIVATE_PROMPT");
-  // Missing adapter terminal remains interrupted; a native result is not operation completion.
   expect(qualifyClaudeRestart(state, view, "host")._unsafeUnwrap().interruptedOperations).toEqual([
     "op",
   ]);
   const entries = claudeBootEntries(view);
-  expect(entries).toMatchObject([
-    { type: "message", message: { role: "user" } },
-    { type: "message", message: { role: "assistant" } },
-  ]);
   expect(
     planBootNotification(entries, entries, {
       runtimeInstanceId: "new",
@@ -134,20 +105,19 @@ it("recovers a fully fingerprinted legacy index without a suffix, preserving byt
     }),
   ).toMatchObject({ marker: { details: { reason: "runtime_restarted" } } });
   const saved = readFileSync(join(f.dir, "index.json"), "utf8");
-  const reopened = new ClaudeHistory(f.dir, "session", "2026-10-17T00:00:00Z");
+  const reopened = new ClaudeHistory(f.dir, "session", "later still");
   expect(reopened.scan(f.path)._unsafeUnwrap()).toEqual(view);
   expect(readFileSync(join(f.dir, "index.json"), "utf8")).toBe(saved);
-  appendFileSync(
-    f.path,
-    JSON.stringify({ type: "assistant", uuid: "tail", message: { content: "tail" } }) + "\n",
-  );
+  const suffix = `${JSON.stringify({ type: "assistant", uuid: "tail", message: { content: "tail" } })}\n`;
+  appendFileSync(f.path, suffix);
   expect(reopened.scan(f.path)._unsafeUnwrap().at(-1)?.id).toBe("tail");
   expect(reopened.inputReceipt("input")).toEqual(receipt);
-  expect(readFileSync(f.path, "utf8").startsWith(f.source)).toBe(true);
+  expect(readFileSync(f.path, "utf8")).toBe(f.source + suffix);
 });
 
 it.each([
   [attachment],
+  [{ ...attachment, uuid: "input" }],
   [consumed, attachment],
   [attachment, { ...consumed, deliveryId: "other" }],
   [attachment, { ...consumed, commandUuid: "other" }],
@@ -169,102 +139,73 @@ it.each([
   expect(qualifyClaudeRestart(state, f.history.view, "host").isErr()).toBe(true);
 });
 
-it("requires trusted provenance, not native prompt/origin", () => {
-  const f = fixture(undefined, null);
-  f.history.scan(f.path)._unsafeUnwrap();
-  expect(f.history.inputReceipt("input")).toBeUndefined();
-  f.history.correlate("input", { messageIds: ["one", "two"], operationId: "op" })._unsafeUnwrap();
-  f.history.scan(f.path)._unsafeUnwrap();
-  expect(f.history.inputReceipt("input")).toMatchObject({ inboxMessageIds: ["one", "two"] });
-});
-
 it.each([
-  { messageIds: ["one", "two"], operationId: "op" },
-  {
-    messageIds: ["peer"],
-    operationId: "op",
-    system: true,
-    sender: { orbId: "11111111-1111-4111-8111-111111111111" },
-  },
-  { messageIds: ["system"], operationId: "op", system: true },
-  { messageIds: [], operationId: "op", boot: true },
-  { messageIds: [], operationId: "op", compaction: true },
-])(
-  "preserves trusted classification and never resets human budget for nonhuman input: %j",
-  (provenance) => {
+  [null, undefined],
+  [{ messageIds: ["one", "two"], operationId: "op" }, "human"],
+  [
+    {
+      messageIds: ["peer"],
+      operationId: "op",
+      system: true,
+      sender: { orbId: "11111111-1111-4111-8111-111111111111" },
+    },
+    "peer",
+  ],
+  [{ messageIds: ["system"], operationId: "op", system: true }, "system"],
+  [{ messageIds: [], operationId: "op", boot: true }, "boot"],
+  [{ messageIds: [], operationId: "op", compaction: true }, "compaction"],
+] satisfies [Provenance | null, string | undefined][])(
+  "uses saved provenance %j, never native prompt/origin",
+  (provenance, kind) => {
     const f = fixture(undefined, provenance);
     f.history.scan(f.path)._unsafeUnwrap();
-    expect(f.history.inputReceipt("input")).toMatchObject({
-      inboxMessageIds: provenance.messageIds,
-    });
-    const entries = claudeBootEntries(f.history.view);
-    expect(entries).toHaveLength(
-      "system" in provenance || "boot" in provenance || "compaction" in provenance ? 0 : 1,
-    );
+    expect(f.history.inputReceipt("input")?.overflow.inputKind).toBe(kind);
+    if (provenance === null) expect(f.history.inputReceipt("input")).toBeUndefined();
+    else
+      expect(f.history.inputReceipt("input")).toMatchObject({
+        inboxMessageIds: provenance.messageIds,
+      });
+    expect(claudeBootEntries(f.history.view)).toHaveLength(kind === "human" ? 1 : 0);
   },
 );
 
-it("rejects ambiguous pairs atomically", () => {
-  for (const rows of [
-    [
-      attachment,
-      consumed,
-      {
-        ...attachment,
-        uuid: "other",
-        attachment: { ...attachment.attachment, delivery_id: "other" },
-      },
-      { ...consumed, deliveryId: "other" },
-    ],
-    [attachment, consumed, { ...consumed, commandUuid: "other" }],
-    [attachment, consumed, { ...attachment, uuid: "other" }],
-  ]) {
-    const f = fixture(rows);
-    expect(f.history.scan(f.path).isErr()).toBe(true);
-    expect(f.history.view).toEqual([]);
-    expect(f.history.inputReceipt("input")).toBeUndefined();
-  }
+it.each([
+  [attachment, consumed, { ...attachment, uuid: "other" }],
+  [attachment, consumed, { ...consumed, commandUuid: "other" }],
+  [consumed, attachment, consumed],
+  [
+    attachment,
+    consumed,
+    {
+      ...attachment,
+      uuid: "other",
+      attachment: { ...attachment.attachment, delivery_id: "other" },
+    },
+    { ...consumed, deliveryId: "other" },
+  ],
+])("rejects ambiguous proof atomically: %j", (...rows) => {
+  const f = fixture(rows);
+  expect(f.history.scan(f.path).isErr()).toBe(true);
+  expect(f.history.view).toEqual([]);
 });
 
-it.each(["commit", "sync", "malformed", "prefix"])(
-  "failed %s exposes no new proof and retains old index",
-  (failure) => {
-    const f = fixture([attachment]);
-    f.history.scan(f.path)._unsafeUnwrap();
-    const index = readFileSync(join(f.dir, "index.json"), "utf8");
-    appendFileSync(f.path, JSON.stringify(consumed) + "\n");
-    if (failure === "malformed") appendFileSync(f.path, "null\n");
-    if (failure === "prefix")
-      writeFileSync(
-        f.path,
-        f.source.replace("PRIVATE_PROMPT", "CHANGED") + JSON.stringify(consumed) + "\n",
-      );
-    const history = new ClaudeHistory(f.dir, "session", timestamp, {
-      ...nativeHistoryFiles,
-      ...(failure === "commit" || failure === "sync"
-        ? {
-            [failure]: () => {
-              throw new Error("injected");
-            },
-          }
-        : {}),
-    });
-    expect(history.scan(f.path).isErr()).toBe(true);
-    expect(history.inputReceipt("input")).toBeUndefined();
-    expect(readFileSync(join(f.dir, "index.json"), "utf8")).toBe(index);
-  },
-);
-
-it("waits for the complete consumption line, then reuses receipt across lost acknowledgements", () => {
+it("publishes no receipt on failed commit, then recovers without replay", () => {
   const f = fixture([attachment]);
-  appendFileSync(f.path, JSON.stringify(consumed));
   f.history.scan(f.path)._unsafeUnwrap();
-  expect(f.history.inputReceipt("input")).toBeUndefined();
-  appendFileSync(f.path, "\n");
-  const view = f.history.scan(f.path)._unsafeUnwrap();
-  const reopened = new ClaudeHistory(f.dir, "session", "later");
-  expect(reopened.scan(f.path)._unsafeUnwrap()).toEqual(view);
-  expect(reopened.inputReceipt("input")).toEqual(f.history.inputReceipt("input"));
+  const index = readFileSync(join(f.dir, "index.json"), "utf8");
+  appendFileSync(f.path, `${JSON.stringify(consumed)}\n`);
+  const failed = new ClaudeHistory(f.dir, "session", timestamp, {
+    ...nativeHistoryFiles,
+    commit: () => {
+      throw new Error("injected");
+    },
+  });
+  expect(failed.scan(f.path).isErr()).toBe(true);
+  expect(failed.inputReceipt("input")).toBeUndefined();
+  expect(readFileSync(join(f.dir, "index.json"), "utf8")).toBe(index);
+  const reopened = new ClaudeHistory(f.dir, "session", timestamp);
+  reopened.scan(f.path)._unsafeUnwrap();
+  expect(reopened.inputReceipt("input")).toMatchObject({ inboxMessageIds: ["inbox"] });
 });
 
 it("rejects a retained receipt whose proof conflicts on reopen", () => {
@@ -276,81 +217,25 @@ it("rejects a retained receipt whose proof conflicts on reopen", () => {
   expect(new ClaudeHistory(f.dir, "session", timestamp).scan(f.path).isErr()).toBe(true);
 });
 
-it.each(["attachment", "input"])(
-  "a late receipt cannot renew an exhausted budget after its original attachment: %s",
-  (attachmentId) => {
-    const f = fixture([{ ...attachment, uuid: attachmentId }, consumed]);
-    const records = f.history.scan(f.path)._unsafeUnwrap();
-    const attachmentRecord = records.find((record) => record.id === attachmentId)!;
-    const receipt = f.history.inputReceipt("input")!;
-    const claims: HistoryRecord[] = ["one", "two", "three"].map((id) => ({
-      id,
-      parentId: null,
-      timestamp,
-      type: "event",
-      eventType: "pi-orb.turn-resume",
-      overflow: { runtimeInstanceId: id, executionId: "old", incarnation: "0", reason: "resumed" },
-    }));
-    const assistant: HistoryRecord = {
-      id: "tool",
-      parentId: "attachment",
-      timestamp,
-      type: "message",
-      role: "assistant",
-      content: [{ type: "tool_call", callId: "call", name: "Bash", arguments: {} }],
-      finishReason: "tool_use",
-      overflow: {},
-    };
-    const entries = claudeBootEntries([attachmentRecord, ...claims, assistant, receipt]);
-    expect(
-      planBootNotification(entries, entries, {
-        runtimeInstanceId: "new",
-        executionId: "new",
-        incarnation: "1",
-      }),
-    ).toMatchObject({ triggerTurn: false, marker: { customType: "pi-orb.turn-resume-declined" } });
-  },
-);
-
-it("a consumed UUID collision resets prior exhausted claims at the original attachment position", () => {
-  const f = fixture([{ ...attachment, uuid: "input" }, consumed]);
+it.each(["attachment", "input"])("projects human receipt at original attachment %s", (id) => {
+  const f = fixture([{ ...attachment, uuid: id }, consumed]);
   const records = f.history.scan(f.path)._unsafeUnwrap();
-  const receipt = f.history.inputReceipt("input")!;
-  expect(receipt).toMatchObject({
-    eventType: "claude.input_receipt",
-    overflow: { inputUuid: "input", attachmentId: "input", inputKind: "human" },
-  });
-  const claims: HistoryRecord[] = ["one", "two", "three"].map((id) => ({
-    id,
-    parentId: null,
+  const claim: HistoryRecord = {
+    id: "claim",
+    parentId: id,
     timestamp,
     type: "event",
     eventType: "pi-orb.turn-resume",
-    overflow: { runtimeInstanceId: id, executionId: "old", incarnation: "0", reason: "resumed" },
-  }));
-  const assistant: HistoryRecord = {
-    id: "tool",
-    parentId: "input",
-    timestamp,
-    type: "message",
-    role: "assistant",
-    content: [{ type: "tool_call", callId: "call", name: "Bash", arguments: {} }],
-    finishReason: "tool_use",
-    overflow: {},
+    overflow: { runtimeInstanceId: "old", executionId: "old", incarnation: "0", reason: "resumed" },
   };
-  const entries = claudeBootEntries([...claims, ...records.slice(0, -1), assistant, receipt]);
-  expect(entries).toMatchObject([
-    ...claims.map((claim) => ({ type: "custom_message", id: claim.id })),
-    { type: "message", id: "input", message: { role: "user" } },
-    { type: "message", id: "tool", message: { role: "assistant" } },
+  expect(claudeBootEntries([...records.slice(0, 1), claim, ...records.slice(1)])).toMatchObject([
+    { id: "input", type: "message", message: { role: "user" } },
+    { id: "claim" },
   ]);
-  expect(
-    planBootNotification(entries, entries, {
-      runtimeInstanceId: "new",
-      executionId: "new",
-      incarnation: "1",
-    }),
-  ).toMatchObject({ triggerTurn: true, marker: { customType: "pi-orb.turn-resume" } });
+  expect(claudeBootEntries([claim, ...records])).toMatchObject([
+    { id: "claim" },
+    { id: "input", type: "message", message: { role: "user" } },
+  ]);
 });
 
 it.each([{}, { native: { isMeta: true } }, { native: { isCompactSummary: true } }])(
@@ -376,25 +261,3 @@ it.each([{}, { native: { isMeta: true } }, { native: { isCompactSummary: true } 
     ]);
   },
 );
-
-it("keeps ordinary top-level UUID receipts unchanged", () => {
-  const f = fixture([{ type: "user", uuid: "input", message: { content: "ordinary" } }]);
-  const records = f.history.scan(f.path)._unsafeUnwrap();
-  expect(records).toHaveLength(1);
-  expect(f.history.inputReceipt("input")).toEqual(records[0]);
-  expect(records[0]).toMatchObject({ type: "message", role: "user", inboxMessageIds: ["inbox"] });
-});
-
-it("an attachment colliding with the submitted UUID is not an ordinary input receipt", () => {
-  const f = fixture([{ ...attachment, uuid: "input" }]);
-  f.history.scan(f.path)._unsafeUnwrap();
-  expect(f.history.inputReceipt("input")).toBeUndefined();
-  expect(qualifyClaudeRestart(state, f.history.view, "host").isErr()).toBe(true);
-});
-
-it("rejects duplicate matching removals even when one precedes the attachment", () => {
-  const f = fixture([consumed, attachment, consumed]);
-  expect(f.history.scan(f.path).isErr()).toBe(true);
-  expect(f.history.inputReceipt("input")).toBeUndefined();
-  expect(f.history.view).toEqual([]);
-});

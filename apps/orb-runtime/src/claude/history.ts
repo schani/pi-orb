@@ -341,33 +341,28 @@ export class ClaudeHistory {
     for (const attachment of attachments) {
       const provenance = this.provenance[attachment.inputUuid];
       if (provenance === undefined) continue;
-      const matches = removals.filter(
+      const related = removals.filter(
         (removal) =>
-          removal.inputUuid === attachment.inputUuid &&
+          removal.inputUuid === attachment.inputUuid ||
           removal.deliveryId === attachment.deliveryId,
       );
-      if (matches.length === 0) continue;
+      const removal = related.find(
+        (item) =>
+          item.inputUuid === attachment.inputUuid && item.deliveryId === attachment.deliveryId,
+      );
+      if (removal === undefined) continue;
       if (
-        matches.length !== 1 ||
+        related.length !== 1 ||
         attachments.some(
           (other) =>
             other !== attachment &&
             (other.inputUuid === attachment.inputUuid ||
               other.deliveryId === attachment.deliveryId),
-        ) ||
-        removals.some(
-          (other) =>
-            (other.inputUuid === attachment.inputUuid ||
-              other.deliveryId === attachment.deliveryId) &&
-            (other.inputUuid !== attachment.inputUuid ||
-              other.deliveryId !== attachment.deliveryId),
         )
       )
         return conflict();
       if (!boundedIdentifier(this.session) || !boundedIdentifier(provenance.operationId))
         return conflict();
-      const removal = matches[0];
-      if (removal === undefined) return conflict();
       if (removal.index <= attachment.index) continue;
       const id = `claude.input-receipt:${attachment.inputUuid}`;
       const record: HistoryRecord = {
