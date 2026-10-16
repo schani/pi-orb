@@ -328,7 +328,7 @@ jobs:
           DEBUG: pw:browser
           PI_ORB_LOCAL_FAKE_EVIDENCE: ${{ runner.temp }}/local-fake-provider
           PI_ORB_E2E_RUNTIME_IMAGE_ID: ${{ steps.runtime-image.outputs.imageid }}
-        run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project lifecycle --shard=${{ matrix.shard }}/4
+        run: node scripts/local-fake-provider.mjs -- npx vitest run --config e2e/vitest.config.ts --project lifecycle --shard=${{ matrix.shard }}/4
 
       - name: Upload local provider provenance
         if: always()
@@ -464,7 +464,7 @@ jobs:
       - name: Run shared frontend tests
         env:
           DEBUG: pw:browser
-        run: npm run test:e2e -- --project frontend --shard=${{ matrix.shard }}/4
+        run: npx vitest run --config e2e/vitest.config.ts --project frontend --shard=${{ matrix.shard }}/4
 
       - name: Capture browser failure host diagnostics
         if: failure()
@@ -589,7 +589,7 @@ jobs:
       - name: Run central process end-to-end tests
         env:
           PI_ORB_LOCAL_FAKE_EVIDENCE: ${{ runner.temp }}/local-fake-provider
-        run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project lifecycle --shard=${{ matrix.shard }}/4
+        run: node scripts/local-fake-provider.mjs -- npx vitest run --config e2e/vitest.config.ts --project lifecycle --shard=${{ matrix.shard }}/4
 
       - name: Upload local provider provenance
         if: always()
