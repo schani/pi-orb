@@ -23,22 +23,21 @@ These overlapping local receipts are **not full updated-toolchain qualification*
 **Pre-toolchain-upgrade cleanup baseline only:** these receipts do not qualify Node 24.22.0, Vite 8.3.4, React plugin 6.1.2 or Vitest 5.0.5. Final frozen-source validation: clean `npm ci` added 734 packages, audited 742 and found zero vulnerabilities; typecheck passed; lint passed with 306 warnings and 79 infos. Full `npm test` passed: 5,050 unit/DST tests, 38 skipped across 704 files (691 passed, 13 skipped); infrastructure passed 92 Node, 171 Python and 27 native-VM tests, plus filesystem/service checks. Skips: 31 unconfigured real-PostgreSQL cases, four PostgreSQL-only PGlite cases and three live-GCS cases. Two package-list assertions first reproduced the redundant `apt-transport-https` dependency; removing it from setup and the skill example produced 30/30 focused skills passes and the full pass above. The initial full run was transport-interrupted after five minutes and is not qualification. The separate installer-test ownership collision and retained first-failure evidence are documented in `docs/postmortems/2026-10-16-dependency-audit-validation-collision.md`. No E2E, cloud, image-build or deployment qualification; Docker daemon unavailable.
 ## CI topology (decision 2026-10-16; implemented, undeployed)
 
-**Measured baseline:** same-SHA `785fdcbb` [CI 38852408508](https://github.com/schani/pi-orb/actions/runs/38852408508),
-[E2E 38852408496](https://github.com/schani/pi-orb/actions/runs/38852408496) and
-[Durable 38852408826](https://github.com/schani/pi-orb/actions/runs/38852408826) succeeded in 770/1,175/1,031s.
-Latest `9e5e5f13` [CI 38865297920](https://github.com/schani/pi-orb/actions/runs/38865297920),
-[E2E 38865297828](https://github.com/schani/pi-orb/actions/runs/38865297828) and
-[Durable 38865297770](https://github.com/schani/pi-orb/actions/runs/38865297770) took 1,224/1,152/1,000s.
-Durations cover creation through the final job; workflows overlap, so do not add them.
-**Latest E2E failed:** WebKit `harness-icons-frontend.e2e.test.ts` request-readiness timeout; no diagnosis or latest-head qualification claimed.
+**PR acceptance receipt:** source `8d6a0559c325f0bb73a550073f901431a7e010ac`
+passed all 18 jobs on attempt 1: [CI 38928852083](https://github.com/schani/pi-orb/actions/runs/38928852083),
+[E2E 38928852034](https://github.com/schani/pi-orb/actions/runs/38928852034),
+[Durable 38928851928](https://github.com/schani/pi-orb/actions/runs/38928851928).
+All checked out synthetic PR merge `114e6f8a6ab1813a2e69b1f3ccb991f5b7016b0e`
+onto base `563cb320aff03e3d3ac1c168d343b0eb580876dc`. This is PR acceptance,
+not trusted-main release qualification or qualification of subsequent edits.
+Logs/artifacts: `.context/pr133-monitor/20261016T161649Z/REPORT.md`.
 
-**CI culprit:** `Test` grew **688 → 1,128s**; intervening PR run 38863148014 took 1,132s.
-Vitest accounts for **677.60 → 1,113.22s**; infrastructure plus command overhead only 10.40 → 14.78s.
-Both passed 5,233 cases/703 files, with seven cases/one file skipped.
-Test execution grew 500.33 → 805.43s; imports 127.63 → 226.02s.
-Slowest file `apps/control-plane/src/adapters/pg/stores.test.ts`: 57.35 → 105.42s;
-`apps/control-plane/src/adapters/durable-pg/conformance.test.ts`: 31.69 → 57.15s.
-Broad Vitest slowdown, not one dominant file or infrastructure; underlying runner/resource cause unproven.
+Against successful `785fdcbb` [CI](https://github.com/schani/pi-orb/actions/runs/38852408508),
+[E2E](https://github.com/schani/pi-orb/actions/runs/38852408496) and
+[Durable](https://github.com/schani/pi-orb/actions/runs/38852408826), all-gates elapsed
+fell 19m35s → 12m35s; runner work 130m50s → 125m43s. This single historical
+comparison differs in code, runners, caches and push/PR event; it is not a controlled
+benchmark. Evidence: `.context/pr133-performance/summary-20261016T161709Z.json`.
 
 **Unit/DST:** four isolated runners each own PostgreSQL 16 with both
 `PI_ORB_TEST_DATABASE_URL` and `PI_ORB_DURABLE_PG_TEST_URL`; files remain serial
@@ -52,8 +51,9 @@ artifacts and `fail-fast: false` remain unchanged.
 four-shard `frontend` gate, retaining Chromium/WebKit coverage. Its 20-file
 `lifecycle` inventory runs on both Docker/host-Pi (four E2E shards) and
 process/central-Durable (four Durable qualification shards). Files remain serial
-on isolated runners. Inventory, project dependency/isolation and workflow
-contracts in `e2e/sharding.unit.test.ts` require complete, disjoint coverage;
+on isolated runners. Actual discovery, shard partition and recursive dependency audits in
+`e2e/sharding.unit.test.ts` require complete, disjoint coverage; static browser
+workflow contracts and diagnostic event truth tables live in `infra/browser_evidence_test.py`;
 `e2e/unit-sharding.unit.test.ts` checks the actual unit/DST partition.
 
 `e2e/duration-sequencer.ts` uses deterministic longest-processing-time-first
@@ -74,43 +74,23 @@ qualify. Missing, duplicate, extra, foreign, skipped or unsuccessful jobs fail
 closed; manual/diagnostic dispatches never qualify. One CI control-plane image
 build/offline proof and its cache policy are specified in `docs/deployment.md`.
 
-**Scope:** approved low/medium-complexity changes are implemented except suite
-splitting; high-complexity native-image reuse remains deferred
-(`docs/deployment.md`). No seeds, assertions or gates are weakened; no retries
-or new persisted state. Historical models projected ~12–13 minutes with shared
-frontend and balanced lifecycle gates versus ~20 minutes; ~22.6 runner-minutes
-of duplicated frontend execution and ~1–1.5 runner-minutes of duplicate CP build
-work could be removed. These estimates overlap and are not measured payoffs.
-No hosted speedup, full current-tree validation or deployment is claimed.
+**Scope:** suite splitting and exact-input native-image reuse remain deferred
+(`docs/deployment.md`). No seeds, assertions, gates or retry budgets are weakened;
+no new persisted state. No deployment payoff has been measured.
 
-**Historical local validation (2026-10-16; pre-rebase):** logs, exits and input manifests: `.context/ci-speed-implementation/`.
-Unit/DST exited 0: 5,307 passed/7 skipped, 709 files passed/1 skipped; 2,465.25s local serial, not hosted timing. This does not qualify later `.e2e` edits.
-Both CI PostgreSQL URLs (`PI_ORB_TEST_DATABASE_URL`, `PI_ORB_DURABLE_PG_TEST_URL`) were set, plus non-CI `DATABASE_URL`, `PI_ORB_DURABLE_TEST_DATABASE_URL` and `PI_ORB_PENDING_ABORT_TEST_DATABASE_URL`; environment differs (`unit-environment-note.txt`).
-Root typecheck and lint exited 0; lint reported 306 warnings/80 infos.
-Infrastructure exited 1 before approval: Node 92 passed/one intentional IAM failure; independently completed remaining Python 186 tests and native script (27 tests plus filesystem/contracts), both exit 0.
-Foundation `test.sh` exited 1: format/init/validate and one mocked OpenTofu test passed, then Node 17 passed/one intentional IAM failure before approval. The separately observed negative IAM scan self-match is a pre-existing ineffective guard (`!` is exempt from Bash `set -e`), not another script exit cause; tracked in `TODO.md`.
-Targeted `full-main-auth` real-runtime live WebSocket + PTY passed once each on Docker/host-pi and process/central-durable (exit 0; `.context/ci-speed-implementation/full-main-validation-report.json` and `full-main-{docker,process}.first.exit`), not full backend qualification.
-Mobile passed 96 tests at frozen source `416ec906…`; the later capture-only typed-boundary edit has typecheck/lint evidence only. First failure and scope: `docs/postmortems/2026-10-16-frontend-focus-geometry.md`.
-Full 47-file frontend, lifecycle and hosted qualification remain pending; control-plane image proof: `docs/deployment.md`. No measured hosted payoff or deployment.
+**Preserved investigation:** broad historical Vitest slowdown had no established
+runner/resource cause; the failed `9e5e5f13` WebKit readiness run was not qualification.
+[Research and pre-rebase validation](https://github.com/schani/pi-orb/blob/8d6a0559c325f0bb73a550073f901431a7e010ac/docs/testing.md#ci-topology-decision-2026-10-16-implemented-undeployed)
+retain the measurements, estimates and scope limits. Original local logs/manifests
+remain in `.context/ci-speed-implementation/`; mobile failure evidence remains in
+`docs/postmortems/2026-10-16-frontend-focus-geometry.md`.
 
-**Scoped IAM qualification (2026-10-16, PDT; approved, implemented, not applied):**
-`.context/pr133-iam-approval/` retains input hashes, exits and the focused pre-fix
-RED (9 passed, one absent-binding failure). The original hosted failure remains in
-`.context/pr133-ci/38926890733-attempt1-checks-117060614897.log`.
-The approved policy and its limits are in `docs/deployment.md`. The exact-expression
-contract and positive/negative object-name table cover both bucket-qualified
-branches, activation, locks, state, secrets, foreign buckets, other namespaces and
-bucket-list denial. These are text/string-subset contracts, not CEL execution or
-live IAM proof.
-Focused Node: 10 passed. Unmodified `infra/foundation/test.sh`: format, backend-disabled
-init, validate, one mocked OpenTofu plan and 18 Node tests passed with official,
-SHA-256-verified OpenTofu 1.12.6. `npm run test:infra`: 93 Node, 186 Python and
-27 native tests plus filesystem/contracts passed. Unit/E2E workflow contracts:
-seven passed in two files. Scoped Biome (one existing warning) and diff checks passed.
-Dependencies were already installed; Node 24.6.0. Disk remained 23 GiB free.
-These checks cover only this IAM change atop rebased `1d29e52d`, not full current-head
-unit/DST, frontend/lifecycle E2E or hosted acceptance. No cloud credentials, IAM
-linter, apply, deployment, new stored objects or schema fields.
+**Scoped IAM (approved 2026-10-16, PDT; implemented, not applied):** policy and
+limits are in `docs/deployment.md`. Exact-expression/object-name contracts are
+text/string-subset checks, not CEL execution or live IAM proof. Original focused
+RED/GREEN, foundation and infrastructure receipts remain in `.context/pr133-iam-approval/`;
+the first hosted failure is `.context/pr133-ci/38926890733-attempt1-checks-117060614897.log`.
+No cloud apply, IAM validation, new stored objects or schema fields.
 
 ## Claude Workflow ownership (2026-10-15; local, undeployed)
 
