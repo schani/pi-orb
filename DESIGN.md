@@ -155,6 +155,7 @@ Tracking:
 - [docs/postmortems/2026-10-16-lifecycle-smoke-http500.md](docs/postmortems/2026-10-16-lifecycle-smoke-http500.md) — lifecycle restart poll HTTP 500 attributed to deleted revision; applied release remains unvalidated
 - [docs/postmortems/2026-10-16-e2e-relay-upgrade-socket-ownership.md](docs/postmortems/2026-10-16-e2e-relay-upgrade-socket-ownership.md) — rejected-upgrade raw socket ownership, real-peer reset evidence and joined fixture shutdown
 - [docs/postmortems/2026-10-16-image-validation-buffer-comparator-oom.md](docs/postmortems/2026-10-16-image-validation-buffer-comparator-oom.md) — full-buffer equality allocation crashes image validation; exact-byte correction and separate decoder controls
+- [docs/postmortems/2026-10-16-claude-compaction-scrollback.md](docs/postmortems/2026-10-16-claude-compaction-scrollback.md) — Claude compaction scrollback loss and read-only correction
 - [docs/postmortems/2026-10-16-c9a30a6d-restart-loop.md](docs/postmortems/2026-10-16-c9a30a6d-restart-loop.md) — unreachable recovery and separate Spot preemptions; restart-budget precheck, silence unexplained
 - [docs/postmortems/2026-10-16-dependency-audit-validation-collision.md](docs/postmortems/2026-10-16-dependency-audit-validation-collision.md) — shared install/check ownership collision during dependency cleanup validation
 

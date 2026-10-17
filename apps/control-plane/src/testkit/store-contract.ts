@@ -2557,6 +2557,62 @@ export function storeSemanticsContractTests(
       expect((await store.readHistorySnapshot(task, orb.id))._unsafeUnwrap()).toEqual(current);
     });
 
+    it.each(["pi", "claude"] as const)(
+      "preserves %s snapshot semantics across null-parent compactions",
+      async (harness) => {
+        (await store.insertProject(task, project))._unsafeUnwrap();
+        (await store.insertOrb(task, { ...orb, harness, state: "stopped" }))._unsafeUnwrap();
+        const user = {
+          ...first,
+          timestamp: "2026-08-04T00:00:00.000Z",
+          inboxMessageIds: ["00000000-0000-4000-8000-000000000055"],
+        };
+        const compact1: HistoryRecord = {
+          id: "compact-1",
+          parentId: null,
+          timestamp: "2026-08-07T00:00:00.000Z",
+          type: "event",
+          eventType: "claude.compact_boundary",
+          overflow: {},
+        };
+        const compact2 = { ...compact1, id: "compact-2", timestamp: "2026-08-08T00:00:00.000Z" };
+        const child = {
+          ...second,
+          id: "backdated-child",
+          parentId: compact1.id,
+          timestamp: "2026-08-06T00:00:00.000Z",
+        };
+        const cursor = {
+          ...second,
+          id: "cursor",
+          parentId: compact2.id,
+          timestamp: "2026-08-05T00:00:00.000Z",
+        };
+        const records = [user, compact1, child, compact2, cursor];
+        (
+          await store.commitPullBatch(task, {
+            orbId: orb.id,
+            expectedCursor: null,
+            session,
+            records,
+            nextCursor: cursor.id,
+            nextHeadId: compact2.id,
+          })
+        )._unsafeUnwrap();
+        const current = (await store.readHistorySnapshot(task, orb.id))._unsafeUnwrap();
+        expect(current).toEqual({
+          session,
+          cursor: cursor.id,
+          headId: compact2.id,
+          records: harness === "claude" ? records : [compact2, cursor],
+        });
+        expect((await store.readHistorySnapshot(task, orb.id, child.id))._unsafeUnwrap()).toEqual({
+          ...current,
+          records: [compact1, child],
+        });
+      },
+    );
+
     it("rejects cursor and immutable-record conflicts without partial advancement", async () => {
       await seed();
       const unicode: HistoryRecord = { ...first, overflow: { "\udfff": "\u0000\ud800" } };

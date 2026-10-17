@@ -1,5 +1,7 @@
 # Testing
 
+**Owner-connection fixture navigation (2026-10-17):** returning Home uses the SPA link and asserts no new document request; explicit reload still verifies persistence. Tests-first evidence and investigation limits: `docs/postmortems/2026-10-16-claude-compaction-scrollback.md`.
+
 ## Usage mock connection ownership (decision 2026-10-16)
 
 The Vite usage mock closes each HTTP/1 response: no idle API connection survives for the request context to reuse. The first successful fixture GET asserts `Connection: close`; existing browser assertions and deadlines remain unchanged. Remove the pooled resource rather than retrying a missed idle lease. Header-contract RED (`keep-alive`), then both original Chromium/WebKit cases GREEN; E2E typecheck and scoped lint pass.
