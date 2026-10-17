@@ -5,7 +5,7 @@ import {
   UPLOAD_LEASE_MS,
 } from "@pi-orb/protocol";
 import { ApplicationFailure, type SimulationTask } from "determined";
-import { errAsync, okAsync, ResultAsync } from "neverthrow";
+import { errAsync, ok, okAsync, ResultAsync } from "neverthrow";
 import type {
   ActivityHeadlineRef,
   StoredActivityHeadline,
@@ -18,6 +18,7 @@ import type {
   StateConflict,
   StoreError,
 } from "../domain/errors.ts";
+import { orderHistoryForPresentation } from "../domain/history-presentation.ts";
 import { jsonEqual } from "../domain/json-equal.ts";
 import { logOrbEvent } from "../domain/log.ts";
 import { messageBatchId } from "../domain/message-batch.ts";
@@ -2409,9 +2410,24 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     return this.access(task, FAILPOINTS.storeRead, "read history snapshot", () => {
       const orb = this.orbs.get(orbId);
       if (orb === undefined || orb.state === "deleting") {
-        return { session: null, cursor: null, headId: null, records: [] };
+        return ok({ session: null, cursor: null, headId: null, records: [] });
       }
       const replica = this.replicas.get(orbId);
+      if (orb.harness === "claude" && atRecordId === undefined) {
+        const ordered =
+          orb.replicationCursor === null
+            ? ok<HistoryRecord[], StoreError>([])
+            : orderHistoryForPresentation(
+                [...(replica?.records.values() ?? [])],
+                orb.replicationCursor,
+              );
+        return ordered.map((records) => ({
+          session: orb.harnessSessionHeader,
+          cursor: orb.replicationCursor,
+          headId: orb.replicatedHeadId,
+          records,
+        }));
+      }
       const records: HistoryRecord[] = [];
       let id = atRecordId ?? orb.replicationCursor;
       while (id !== null) {
@@ -2420,12 +2436,12 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         records.push(record);
         id = record.parentId;
       }
-      return {
+      return ok({
         session: orb.harnessSessionHeader,
         cursor: orb.replicationCursor,
         headId: orb.replicatedHeadId,
         records: records.reverse(),
-      };
-    });
+      });
+    }).andThen((snapshot) => snapshot);
   }
 }
