@@ -128,6 +128,32 @@ describe("queued message list updates", () => {
     );
   });
 
+  it("restored pre-compaction records retire delivered inbox rows but retain failures", () => {
+    const delivered = message("delivered-before-compaction", "delivered");
+    const failed = message("failed-without-replay", "failed");
+    const earlier = displayRecord({
+      id: "earlier-user",
+      parentId: null,
+      timestamp: delivered.createdAt,
+      type: "message",
+      role: "user",
+      content: delivered.content,
+      inboxMessageIds: [delivered.id],
+      overflow: {},
+    });
+    const compact = displayRecord({
+      id: "compact",
+      parentId: null,
+      timestamp: "2026-08-10T00:01:00.000Z",
+      type: "event",
+      eventType: "claude.compact_boundary",
+      overflow: {},
+    });
+    expect(messagesAwaitingHistory([delivered, failed], [compact])).toEqual([delivered, failed]);
+    expect(messagesAwaitingHistory([delivered, failed], [earlier, compact])).toEqual([failed]);
+    expect(hasDeliveredMessageAwaitingHistory([delivered, failed], [earlier, compact])).toBe(false);
+  });
+
   it("retires a delivered system notice when an event names its inbox identity", () => {
     const delivered: OrbMessageView = {
       ...message("sleep-1", "delivered"),

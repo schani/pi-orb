@@ -152,6 +152,7 @@ Tracking:
 
 - [docs/postmortems/2026-10-16-usage-mock-idle-connection.md](docs/postmortems/2026-10-16-usage-mock-idle-connection.md) — usage mock HTTP ownership; controlled stale-lease class, historical close owner unknown
 - [docs/postmortems/2026-10-16-lifecycle-smoke-http500.md](docs/postmortems/2026-10-16-lifecycle-smoke-http500.md) — lifecycle restart poll HTTP 500 attributed to deleted revision; applied release remains unvalidated
+- [docs/postmortems/2026-10-16-claude-compaction-scrollback.md](docs/postmortems/2026-10-16-claude-compaction-scrollback.md) — retained Claude history hidden by cursor ancestry; full-replica read correction locally qualified, undeployed
 - [docs/postmortems/2026-10-16-c9a30a6d-restart-loop.md](docs/postmortems/2026-10-16-c9a30a6d-restart-loop.md) — unreachable recovery and separate Spot preemptions; restart-budget precheck, silence unexplained
 - [docs/postmortems/2026-10-16-dependency-audit-validation-collision.md](docs/postmortems/2026-10-16-dependency-audit-validation-collision.md) — shared install/check ownership collision during dependency cleanup validation
 
