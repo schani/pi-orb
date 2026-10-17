@@ -1429,6 +1429,7 @@ async function handleApi(
 
   if (method === "GET" && path === USAGE_PATH) {
     response.setHeader("cache-control", "no-store");
+    response.setHeader("connection", "close");
     const query = parseUsageQuery(Object.fromEntries(url.searchParams));
     if (query.isErr()) {
       sendJson(response, 400, {
