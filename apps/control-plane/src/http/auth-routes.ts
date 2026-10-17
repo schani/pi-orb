@@ -112,7 +112,7 @@ export function registerAuthRoutes(
       if (result.isErr()) return sendAuthFailure(reply, result.error.type);
       if (origin === origins.filesOrigin && !/^\/s\/[^/]+\//u.test(result.value.returnTo))
         return sendAuthFailure(reply, "unauthenticated");
-      const cookie = authCookie(SESSION_COOKIE_NAME, result.value.sessionCookieValue, 43200);
+      const cookie = authCookie(SESSION_COOKIE_NAME, result.value.sessionCookieValue, 604800);
       if (cookie.isErr()) return sendAuthFailure(reply, "internal");
       return reply
         .header("cache-control", "no-store")
