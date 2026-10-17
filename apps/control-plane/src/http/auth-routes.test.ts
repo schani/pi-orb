@@ -52,6 +52,9 @@ it("scopes login/callback to configured hosts and protects app-only logout", asy
     expect(callback.statusCode).toBe(302);
     expect(callback.headers.location).toBe("/s/orb/page#hash");
     expect(callback.headers["set-cookie"]?.toString()).toContain("HttpOnly");
+    expect(callback.headers["set-cookie"]).toContainEqual(
+      expect.stringContaining("__Host-pi-orb-session=sealed; Max-Age=604800;"),
+    );
   }
   expect(complete).toBe(2);
   expect(outcomes).toHaveLength(4);

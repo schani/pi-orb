@@ -12,7 +12,7 @@ import type {
 export const LOGIN_COOKIE_NAME = "__Host-pi-orb-login";
 export const SESSION_COOKIE_NAME = "__Host-pi-orb-session";
 export const LOGIN_LIFETIME_MS = 10 * 60_000;
-export const SESSION_LIFETIME_MS = 12 * 60 * 60_000;
+export const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60_000;
 export const LOGIN_CALLBACK_PATH = "/auth/callback";
 type Failure = IdentityVerificationError;
 export type OpsPrincipal = Extract<RequestPrincipal, { kind: "ops" }>;

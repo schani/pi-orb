@@ -10,8 +10,17 @@ import {
 
 const origin = "https://app.example";
 describe("stateless application auth", () => {
+  it("uses a seven-day session lifetime", () => {
+    expect(SESSION_LIFETIME_MS).toBe(604_800_000);
+  });
+
   it("single-use exchange across instances, durable UUID, fixed expiry and origin isolation", async () => {
-    await runDst({ name: "application-auth-callback-race", iterations: 20 }, async (sim) => {
+    const options = {
+      name: "application-auth-callback-race",
+      iterations: 20,
+      maxVirtualDurationMs: 604_800_000,
+    };
+    await runDst(options, async (sim) => {
       const values = new Map<string, unknown>();
       const cookies: SealedCookies = {
         seal: (value) => {
@@ -84,9 +93,7 @@ describe("stateless application auth", () => {
               completed.value.sessionCookieValue,
             );
             expect(session.isOk() && session.value.principal.user.id).toBe("existing-uuid");
-            expect(session.isOk() && session.value.expiresAt).toBe(
-              task.wallNow() + SESSION_LIFETIME_MS,
-            );
+            expect(session.isOk() && session.value.expiresAt).toBe(task.wallNow() + 604_800_000);
             expect(
               (
                 await auth.authenticateSession(
@@ -103,7 +110,18 @@ describe("stateless application auth", () => {
             ).toBe(true);
             expect((await auth.startLogin(origin, "//evil.example")).isErr()).toBe(true);
             expect((await auth.startLogin("https://evil.example", "/")).isErr()).toBe(true);
-            await task.sleep(SESSION_LIFETIME_MS, "session expiry");
+            const expiresAt = session.isOk() ? session.value.expiresAt : 0;
+            await task.sleep(12 * 60 * 60_000, "old twelve-hour cutoff");
+            const afterTwelveHours = await auth.authenticateSession(
+              origin,
+              completed.value.sessionCookieValue,
+            );
+            expect(afterTwelveHours.isOk() && afterTwelveHours.value.expiresAt).toBe(expiresAt);
+            await task.sleep(expiresAt - task.wallNow() - 1, "just before session expiry");
+            expect(
+              (await auth.authenticateSession(origin, completed.value.sessionCookieValue)).isOk(),
+            ).toBe(true);
+            await task.sleep(1, "exact session expiry");
             expect(
               (await auth.authenticateSession(origin, completed.value.sessionCookieValue)).isErr(),
             ).toBe(true);
