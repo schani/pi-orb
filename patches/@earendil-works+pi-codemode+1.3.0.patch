@@ -10,6 +10,11 @@ diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js b/nod
          const releaseWorker = options.acquireWorker?.();
          let worker;
          try {
+@@ -60,4 +60,2 @@
+             void worker.terminate().catch(() => undefined);
+-            // terminate() refs the worker internally; unref it after requesting termination.
+-            worker.unref();
+         };
 diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js b/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js
 --- a/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js
 +++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js

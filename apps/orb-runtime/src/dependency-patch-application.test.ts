@@ -278,7 +278,7 @@ describe("sealed dependency patch application", () => {
  e709d41ab45ae8e5847ffe96171751d8e7618afc0f54f47a6ca2ddb4c52d5abf  patches/@earendil-works+pi-ai+1.3.0.patch
  f60540cee8a74742c43b0bbe49c82a19836e9e6496bfef71bb2ef5f5fe9fe462  patches/@earendil-works+pi-agent-core+1.3.0.patch
  600c7ca7eab79eba58e45c5cdddd891ccbddac918432aa404581edecbbf5ae4b  patches/@earendil-works+pi-coding-agent+1.3.0.patch
- 25e9230ce5d154ec25ca5ce84509c2bd7613ea05499e3ae2b8897f89fcba5bbb  patches/@earendil-works+pi-codemode+1.3.0.patch
+ d4d7e968a23054b75e25603cc66906492ba8a2d2710a0cbbb5896bd56f0fa42a  patches/@earendil-works+pi-codemode+1.3.0.patch
  d6c02a98876d02f200dd4bea1ad6601e1befc61a0f67a2bba7942e2c5b665ff6  patches/@earendil-works+pi-durable+1.3.0.patch
  b3e48bde4e53ead071abf15eae78b26dc5ea01441d8946782ba2284f1da06f9a  patches/@gotgenes+pi-subagents+21.7.0-orb.8.patch`;
     for (const line of evidence.trim().split("\n")) {

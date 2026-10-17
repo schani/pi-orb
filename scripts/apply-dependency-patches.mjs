@@ -130,11 +130,11 @@ const packages = [
     package: "node_modules/@earendil-works/pi-codemode",
     version: "1.3.0",
     patch: "@earendil-works+pi-codemode+1.3.0.patch",
-    sha: "25e9230ce5d154ec25ca5ce84509c2bd7613ea05499e3ae2b8897f89fcba5bbb",
+    sha: "d4d7e968a23054b75e25603cc66906492ba8a2d2710a0cbbb5896bd56f0fa42a",
     files: {
       "node_modules/@earendil-works/pi-codemode/dist/runtime/host.js": [
         "74715f56e02642913caf8247abd9cf0c559f9ed1a5e7be210e43c104e8e70da4",
-        "44c1218e78ee73310e047055290c86e62ec9cac538c2822c1e4a594faf13226a",
+        "e9e50ef986e1889e57b16529f2c3b849c61ddc6e8d0c67e3f672fa335e920076",
       ],
       "node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js": [
         "2fc2886529c0a7e8a7c9ac16b7c96fb2bbf8d2dce562801c5a09d723a57ea6ca",
