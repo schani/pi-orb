@@ -978,6 +978,15 @@ The native VM production integration, including its image-regeneration command, 
 
 The native runtime supervisor has unit coverage for health parsing and retry, terminal ready/failed reporting, child-exit races, signals, and diagnostic failure. DST schedules health, exit, shutdown, and report failpoints and advances initialization past ten minutes without a supervisor deadline. Real subprocess tests verify exit-code and signal propagation plus descendant process-group cleanup. Image acceptance verifies the systemd main command, its runtime child, HTTP readiness, and the exact durable `runtime ready` guest attribute; disposable-image validation remains the Linux/systemd gate.
 
+**Supervisor fixture readiness (2026-10-14):** handlers precede readiness;
+held gates fence runtime execution and descendant readiness/exit. Failures retain phases, PID/group and bounded stderr.
+Teardown kills latched groups, always kills/waits fixtures, attempts all owned cleanup,
+and releases sockets/servers/directories even on error; it never waits for an unknown PID.
+Pre-spawn stall/group-kill witnesses fail before correction and pass afterwards.
+Controlled reds prove a fixture defect; the historical CI stalled phase remains unknown.
+On isolated `a60f497`, 40 supervisor tests, root types and lint pass; production is unchanged.
+[Evidence and ownership limit](../test-failures/2026-10-14-supervisor-readiness.md); no full-suite/E2E, remote CI or deployment qualification.
+
 Keep stateful logic behind testable boundaries so the documented rebuild command and production release path exercise the same tested implementation.
 
 Implemented coverage includes the GCE provider's exact image identity and metadata
