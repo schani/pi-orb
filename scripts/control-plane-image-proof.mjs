@@ -150,8 +150,8 @@ try {
     assert.equal(call.source, source, "Native source mismatch");
     assert.equal(call.callId, callId, "Native call ID mismatch");
     assert.equal(call.conversationId, root.id, "Native conversation mismatch");
-    assert.equal(typeof call.taskId, "string", "Missing native task ID");
-    assert(call.taskId.length > 0 && !taskIds.has(call.taskId), "Repeated native task ID");
+    assert(Number.isSafeInteger(call.taskId), "Invalid native task ID");
+    assert(!taskIds.has(call.taskId), "Repeated native task ID");
     taskIds.add(call.taskId);
     assert(call.result, "Native code-mode call did not return a result");
     return call.result;
@@ -184,6 +184,7 @@ try {
     rolledBack.output.some((block) => block.type === "text" && block.text === "true"),
     diagnostics(rolledBack),
   );
+  assert.equal(taskIds.size, 4, "Expected four distinct native task IDs");
   console.log(
     JSON.stringify({
       status: "PASS",
