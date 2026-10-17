@@ -2,11 +2,7 @@ import { parse, serialize } from "cookie";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { Result } from "neverthrow";
 import type { ApplicationAuth } from "../domain/application-auth.ts";
-import {
-  LOGIN_COOKIE_NAME,
-  SESSION_COOKIE_NAME,
-  SESSION_LIFETIME_MS,
-} from "../domain/application-auth.ts";
+import { LOGIN_COOKIE_NAME, SESSION_COOKIE_NAME } from "../domain/application-auth.ts";
 
 export interface AuthOrigins {
   readonly appOrigin: string;
@@ -116,11 +112,7 @@ export function registerAuthRoutes(
       if (result.isErr()) return sendAuthFailure(reply, result.error.type);
       if (origin === origins.filesOrigin && !/^\/s\/[^/]+\//u.test(result.value.returnTo))
         return sendAuthFailure(reply, "unauthenticated");
-      const cookie = authCookie(
-        SESSION_COOKIE_NAME,
-        result.value.sessionCookieValue,
-        SESSION_LIFETIME_MS / 1000,
-      );
+      const cookie = authCookie(SESSION_COOKIE_NAME, result.value.sessionCookieValue, 604800);
       if (cookie.isErr()) return sendAuthFailure(reply, "internal");
       return reply
         .header("cache-control", "no-store")
