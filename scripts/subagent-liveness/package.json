@@ -6,8 +6,8 @@
     "test": "node --test liveness.test.mjs"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "1.1.0",
-    "@earendil-works/pi-coding-agent": "1.1.0",
+    "@earendil-works/pi-ai": "1.3.0",
+    "@earendil-works/pi-coding-agent": "1.3.0",
     "@gotgenes/pi-subagents": "21.7.0",
     "neverthrow": "8.2.0"
   }

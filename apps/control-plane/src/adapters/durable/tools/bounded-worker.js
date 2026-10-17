@@ -5,6 +5,7 @@ import {
   MAX_CALLBACK_ARGUMENT_BYTES,
   MAX_CALLBACK_CALLS,
   MAX_CALLBACK_CONCURRENCY,
+  MAX_CALLBACK_REPLY_BYTES,
   OUTPUT_LIMIT_MESSAGE,
 } from "./callback-limits.js";
 import { createCpuCheckpoint } from "./cpu-checkpoint.js";
@@ -36,11 +37,23 @@ let items = 0;
 let stopped = false;
 let calls = 0;
 let argumentBytes = 0;
+let replyBytes = 0;
 const outstanding = new Set();
+const fail = (message) => {
+  stopped = true;
+  Atomics.store(new Int32Array(workerData.interrupt), 0, 1);
+  post({ type: "crash", message });
+};
 // Release only when the worker receives a reply, not when the host sends it.
 parentPort.on("message", (message) => {
   workerData.checkpoint();
-  if (message.type === "result") outstanding.delete(message.id);
+  if (message.type === "result") {
+    replyBytes +=
+      Buffer.byteLength(message.payload ?? "", "utf8") +
+      Buffer.byteLength(message.properties ?? "", "utf8");
+    if (replyBytes > MAX_CALLBACK_REPLY_BYTES) fail(CALLBACK_LIMIT_MESSAGE);
+    outstanding.delete(message.id);
+  }
 });
 parentPort.postMessage = (message, ...args) => {
   workerData.checkpoint();
@@ -53,9 +66,7 @@ parentPort.postMessage = (message, ...args) => {
       argumentBytes > MAX_CALLBACK_ARGUMENT_BYTES ||
       outstanding.size >= MAX_CALLBACK_CONCURRENCY
     ) {
-      stopped = true;
-      Atomics.store(new Int32Array(workerData.interrupt), 0, 1);
-      post({ type: "crash", message: CALLBACK_LIMIT_MESSAGE });
+      fail(CALLBACK_LIMIT_MESSAGE);
       return;
     }
     outstanding.add(message.id);
@@ -67,9 +78,7 @@ parentPort.postMessage = (message, ...args) => {
     if (item.type === "text") textBytes += size;
     items++;
     if (textBytes > MAX_TEXT_BYTES || bytes > MAX_OUTPUT_BYTES || items > MAX_OUTPUT_ITEMS) {
-      stopped = true;
-      Atomics.store(new Int32Array(workerData.interrupt), 0, 1);
-      post({ type: "crash", message: OUTPUT_LIMIT_MESSAGE });
+      fail(OUTPUT_LIMIT_MESSAGE);
       return;
     }
   }

@@ -1,7 +1,7 @@
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ToolExecutionApi } from "@earendil-works/pi-durable";
-import { okAsync, ResultAsync } from "neverthrow";
+import { ResultAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { runDst, waitUntil } from "../../../testkit/sim.ts";
 import { CallableCatalog } from "./catalog.ts";

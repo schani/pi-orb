@@ -12,7 +12,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
-test("released Pi 1.1.0 skips before_agent_start for idle triggered custom messages", {
+test("prepares user and idle custom runs with their native trigger types", {
   timeout: 10000,
 }, async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-custom-preflight-"));
@@ -33,7 +33,11 @@ test("released Pi 1.1.0 skips before_agent_start for idle triggered custom messa
       extensionFactories: [
         (pi) =>
           pi.on("before_agent_start", (event) => {
-            observed.push(event.prompt);
+            observed.push(
+              event.messageType === "custom"
+                ? { messageType: event.messageType, message: event.message }
+                : { messageType: event.messageType, prompt: event.prompt },
+            );
           }),
       ],
     });
@@ -54,17 +58,27 @@ test("released Pi 1.1.0 skips before_agent_start for idle triggered custom messa
     });
     try {
       await session.prompt("ordinary prompt");
-      assert.deepEqual(observed, ["ordinary prompt"], "ordinary prompt runs preflight");
+      assert.deepEqual(observed, [{ messageType: "user", prompt: "ordinary prompt" }]);
       assert.equal(session.isIdle, true);
       await session.sendCustomMessage(
         { customType: "preflight-probe", content: "custom trigger", display: true },
         { triggerTurn: true },
       );
-      assert.deepEqual(
-        observed,
-        ["ordinary prompt"],
-        "idle triggered custom turn bypasses preflight in released Pi 1.1.0",
-      );
+      assert.deepEqual(observed, [
+        { messageType: "user", prompt: "ordinary prompt" },
+        {
+          messageType: "custom",
+          message: {
+            role: "custom",
+            customType: "preflight-probe",
+            content: "custom trigger",
+            display: true,
+            details: undefined,
+            timestamp: observed[1]?.message?.timestamp,
+          },
+        },
+      ]);
+      assert.equal(typeof observed[1]?.message?.timestamp, "number");
       assert.equal(session.isIdle, true);
       assert.equal(settled, 2, "both prompts completed an agent turn");
     } finally {

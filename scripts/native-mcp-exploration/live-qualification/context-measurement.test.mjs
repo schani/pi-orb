@@ -144,7 +144,7 @@ test("installed SDK fixture manually emits hooks for independent root/child acti
     "../package.json",
     import.meta.resolve("@earendil-works/pi-coding-agent"),
   );
-  assert.equal(JSON.parse(await readFile(manifest, "utf8")).version, "1.1.0");
+  assert.equal(JSON.parse(await readFile(manifest, "utf8")).version, "1.3.0");
   const dir = await mkdtemp(join(tmpdir(), "native-mcp-context-"));
   const results = [];
   const sessions = [];

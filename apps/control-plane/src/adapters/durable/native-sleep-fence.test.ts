@@ -16,6 +16,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { NoSimulationTask } from "determined";
+import type { Result } from "neverthrow";
 import { expect, it, vi } from "vitest";
 import { makeOrbRow, makeProjectRow, seedTestUser } from "../../testkit/fixtures.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
@@ -60,7 +61,7 @@ it.each([
         toolCalls++;
         entered.resolve();
         await release.promise;
-        return { content: [{ type: "text" as const, text: "released" }] };
+        return { output: [{ type: "text" as const, text: "released" }] };
       },
     });
     registry.install(defineExtension({ name: "hold", tools: [hold] }));
@@ -82,6 +83,7 @@ it.each([
       const lease = (
         await database.agentPersistence.open(task, orb, { signal: new AbortController().signal })
       )._unsafeUnwrap();
+      const checkInputAdmission = vi.fn(lease.checkInputAdmission);
       agent = (
         await DurableAgent.open({
           orbId: orb.id,
@@ -95,6 +97,7 @@ it.each([
           initialSettings: { model: { provider: "faux", id: "faux-1" }, thinkingLevel: "off" },
           ownershipSignal: lease.signal,
           checkAdmission: lease.check,
+          checkInputAdmission,
           beginDrain: lease.beginDrain,
           closeResources: lease.release,
         })
@@ -253,7 +256,9 @@ it.each([
         expect(agent.health().status).toBe("ready");
         receiptRelease.resolve();
         expect((await admission).isOk()).toBe(true);
+        const preflights = checkInputAdmission.mock.calls.length;
         expect((await agent.deliver(request))._unsafeUnwrap().duplicate).toBe(true);
+        expect(checkInputAdmission).toHaveBeenCalledTimes(preflights);
         (await agent.waitForIdle())._unsafeUnwrap();
         expect(faux.state.callCount).toBe(2);
         if (!browser)
@@ -267,14 +272,30 @@ it.each([
         return;
       }
       const messageId = randomUUID();
+      const requireOk = <T, E>(phase: string, result: Result<T, E>): T => {
+        if (result.isErr())
+          expect.fail(
+            JSON.stringify({
+              phase,
+              error: result.error,
+              health: currentAgent.health(),
+              live: currentAgent.liveView(),
+              records: currentAgent.snapshot(),
+              modelCalls: faux.state.callCount,
+              toolCalls,
+            }),
+          );
+        return result._unsafeUnwrap();
+      };
       const content = [{ type: "text" as const, text: "queued peer" }];
       const system = kind.startsWith("peer")
         ? { kind: "orb_message" as const, senderOrbId: peer.id }
         : undefined;
-      (await queue(messageId, content, kind.startsWith("peer")))._unsafeUnwrap();
-      (
-        await database.store.claimNextOrbMessageBatch(task, { orbId: orb.id, now: 0 })
-      )._unsafeUnwrap();
+      requireOk("queue busy input", await queue(messageId, content, kind.startsWith("peer")));
+      requireOk(
+        "claim busy input",
+        await database.store.claimNextOrbMessageBatch(task, { orbId: orb.id, now: 0 }),
+      );
       const request = {
         baseUrl: "central",
         messageId,
@@ -299,15 +320,20 @@ it.each([
         const browser = await agent.request("later-human", {
           type: "message",
           content: [{ type: "text", text: "later human" }],
-          expectedHeadId: agent.snapshot()._unsafeUnwrap().headId,
+          expectedHeadId: requireOk("snapshot before later browser", agent.snapshot()).headId,
         });
         expect(browser.isErr()).toBe(true);
-        expect(browser._unsafeUnwrapErr()).toMatchObject({ retryable: true });
+        expect(browser._unsafeUnwrapErr()).toMatchObject({
+          code: "history_unavailable",
+          message: "Input admission waits for queued messages",
+          retryable: true,
+        });
+        expect(agent.health()).toMatchObject({ status: "ready", activity: "busy" });
         expect(await readSubmission(messageId)).toBeUndefined();
       }
-      (await sleep())._unsafeUnwrap();
+      requireOk("schedule Sleep", await sleep());
       release.resolve();
-      (await agent.waitForIdle())._unsafeUnwrap();
+      requireOk("finish held turn during Sleep", await agent.waitForIdle());
       expect(faux.state.callCount).toBe(2);
       expect(lease.signal.aborted).toBe(false);
       if (kind !== "peer-held") {
@@ -322,10 +348,12 @@ it.each([
             sender: { orbId: peer.id },
             content,
           });
+        const preflights = checkInputAdmission.mock.calls.length;
         expect((await agent.deliver(request))._unsafeUnwrap()).toMatchObject({
           delivery: "steer",
           duplicate: true,
         });
+        expect(checkInputAdmission).toHaveBeenCalledTimes(preflights);
         (await agent.waitForIdle())._unsafeUnwrap();
         expect(faux.state.callCount).toBe(2);
         expect(toolCalls).toBe(1);
@@ -348,39 +376,45 @@ it.each([
       }
 
       expect(peerRecords(messageId).length > 0).toBe(false);
-      expect((await database.store.listOrbMessages(task, orb.id))._unsafeUnwrap()[0]).toMatchObject(
-        {
-          status: "delivering",
-          operationId: null,
-          lastError: null,
-        },
-      );
+      expect(
+        requireOk("read held peer", await database.store.listOrbMessages(task, orb.id))[0],
+      ).toMatchObject({
+        status: "delivering",
+        operationId: null,
+        lastError: null,
+      });
       const retry = await agent.deliver(request);
       expect(retry.isErr()).toBe(true);
-      expect(retry._unsafeUnwrapErr()).toMatchObject({ retryable: true });
+      expect(retry._unsafeUnwrapErr()).toMatchObject({
+        code: "history_unavailable",
+        message: "Input admission paused by sleep",
+        retryable: true,
+      });
+      expect(agent.health()).toMatchObject({ status: "ready", activity: "idle" });
+      expect(lease.signal.aborted).toBe(false);
       expect((await readSubmission(messageId)) !== undefined).toBe(false);
       // Fresh peer admission is the legitimate wake; no receipt or request identity is replaced.
-      (await queue(randomUUID(), [{ type: "text", text: "wake" }], true, 1))._unsafeUnwrap();
-      const freshOrb = (await database.store.getOrb(task, orb.id))._unsafeUnwrap();
+      requireOk(
+        "queue fresh peer wake",
+        await queue(randomUUID(), [{ type: "text", text: "wake" }], true, 1),
+      );
+      const freshOrb = requireOk("read after wake", await database.store.getOrb(task, orb.id));
       if (freshOrb === null) throw new Error("seeded orb missing");
       expect(freshOrb.sleepId).toBeNull();
       faux.appendResponses([fauxAssistantMessage("peer answer")]);
-      expect((await agent.deliver(request))._unsafeUnwrap()).toMatchObject({
+      expect(requireOk("admit peer after wake", await agent.deliver(request))).toMatchObject({
         duplicate: false,
         delivery: "turn",
       });
-      (await agent.waitForIdle())._unsafeUnwrap();
+      requireOk("finish peer after wake", await agent.waitForIdle());
       expect(faux.state.callCount).toBe(3);
       expect(toolCalls).toBe(1);
-      expect((await agent.deliver(request))._unsafeUnwrap().duplicate).toBe(true);
-      (await agent.waitForIdle())._unsafeUnwrap();
+      expect(requireOk("redeliver peer", await agent.deliver(request)).duplicate).toBe(true);
+      requireOk("finish duplicate peer", await agent.waitForIdle());
       expect(faux.state.callCount).toBe(3);
-      expect((await database.store.listOrbMessages(task, orb.id))._unsafeUnwrap()[0]).toMatchObject(
-        {
-          status: "delivered",
-          lastError: null,
-        },
-      );
+      expect(
+        requireOk("read delivered peer", await database.store.listOrbMessages(task, orb.id))[0],
+      ).toMatchObject({ status: "delivered", lastError: null });
       expect(peerRecords(messageId)).toHaveLength(1);
     } finally {
       receiptRelease.resolve();

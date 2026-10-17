@@ -81,7 +81,7 @@ it.each(["denied", "unbound"] as const)(
     );
     expect(result.isError).toBe(true);
     if (binding === "denied") {
-      expect(JSON.stringify(result.content)).toContain("unauthorized");
+      expect(JSON.stringify(result.output)).toContain("unauthorized");
       expect(invoke).toHaveBeenCalledExactlyOnceWith(
         { kind: "notification_admission" },
         '[42,"outer:nested:0"]',
@@ -113,4 +113,15 @@ it("binds peer sends to durable tool call identity, never model sender input", a
     { kind: "send", orbId: "target", message: "hi" },
     JSON.stringify(["task", "call"]),
   );
+});
+
+it("returns model output without changing schema-less programmatic text", async () => {
+  const tool = createOrbTools({ invoke: () => okAsync({ accepted: true }) })[0];
+  assert.isDefined(tool);
+  const result = await tool.execute(
+    {},
+    { taskId: 42, callId: "call" } as ToolExecutionApi,
+    BACKGROUND_CONTEXT,
+  );
+  expect(result).toEqual({ output: [{ type: "text", text: '{"accepted":true}' }] });
 });

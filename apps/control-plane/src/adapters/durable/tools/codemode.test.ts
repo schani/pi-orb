@@ -1,30 +1,15 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
-import { createModels } from "@earendil-works/pi-ai/models";
-import {
-  type Conversation,
-  createRegistry,
-  defineTool,
-  Harness,
-  type ToolExecutionApi,
-} from "@earendil-works/pi-durable";
+import { defineTool } from "@earendil-works/pi-durable";
 import { NoSimulationTask } from "determined";
 import { okAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { MemoryAgentPersistence } from "../memory-persistence.testkit.ts";
 import { CallableCatalog } from "./catalog.ts";
-import { codemodeTool } from "./codemode.ts";
 import { codeModeMemory } from "./codemode-memory.ts";
 import { createOrbTools } from "./orb-tools.ts";
+import { openCodemodeHarness } from "./testkit/codemode.ts";
 
-const ctx = BACKGROUND_CONTEXT;
-function api(conversation: Conversation): ToolExecutionApi {
-  return {
-    conversationId: conversation.id,
-    commit: conversation.commit.bind(conversation),
-    callId: "call",
-  } as ToolExecutionApi;
-}
 function latch() {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => {
@@ -32,16 +17,11 @@ function latch() {
   });
   return { promise, resolve };
 }
-describe("Durable code-mode store", () => {
-  it("gives real nested native calls distinct stable request identities", async () => {
-    const { MemoryStorage } = await import("@earendil-works/pi-durable");
-    const harness = await Harness.open(
-      new MemoryStorage(),
-      { models: createModels(), registry: createRegistry() },
-      ctx,
-    );
+const output = (value: { output?: unknown }) => JSON.stringify(value.output);
+describe("Durable native code-mode store", () => {
+  it("gives real native calls stable request identities and caches the decided result", async () => {
     const requests: string[] = [];
-    const tool = codemodeTool(
+    const fixture = await openCodemodeHarness(
       new CallableCatalog(
         createOrbTools({
           invoke: (_action, requestId) => {
@@ -50,156 +30,115 @@ describe("Durable code-mode store", () => {
           },
         }),
       ),
-      new Set(),
+      { holdForReplay: true },
     );
     try {
-      const root = await harness.root(ctx);
-      const invocation = { ...api(root), taskId: 42, callId: "outer" } as ToolExecutionApi;
-      const code = 'await tools.orb_spawn({prompt:"one"}); await tools.orb_spawn({prompt:"two"});';
-      const result = await tool.execute({ code }, invocation, ctx);
+      const result = await fixture.run(
+        'await tools.orb_spawn({prompt:"one"}); await tools.orb_spawn({prompt:"two"});',
+      );
       expect(result.isError).toBe(false);
       expect(result.details).toMatchObject({ cpu: { budgetCores: 1 } });
       expect(Number((result.details as { cpu: { cpuMs: number } }).cpu.cpuMs)).toBeGreaterThan(0);
-      expect((await tool.execute({ code }, invocation, ctx)).isError).toBe(false);
-      expect(requests).toEqual([
-        '[42,"outer:nested:0"]',
-        '[42,"outer:nested:1"]',
-        '[42,"outer:nested:0"]',
-        '[42,"outer:nested:1"]',
-      ]);
+      expect((await fixture.replay()).isError).toBe(false);
+      expect(requests).toHaveLength(2);
+      expect(requests[0]).toMatch(/\/c1/);
+      expect(requests[1]).toMatch(/\/c2/);
+      expect(requests[0]).not.toBe(requests[1]);
     } finally {
-      await harness.close(ctx);
+      await fixture.close();
     }
   });
+
   it("persists successful writes and deletions through reopen, isolating conversations", async () => {
     const authority = new MemoryAgentPersistence();
-    const tool = codemodeTool(new CallableCatalog([]), new Set());
-    const open = async () =>
-      Harness.open(
-        (await authority.openOrb("orb", false))._unsafeUnwrap().storage,
-        { models: createModels(), registry: createRegistry() },
-        ctx,
-      );
-    let harness = await open();
+    const open = async (orb: string) =>
+      openCodemodeHarness(new CallableCatalog([]), {
+        storage: (await authority.openOrb(orb, false))._unsafeUnwrap().storage,
+      });
+    let fixture = await open("store");
     try {
-      let root = await harness.root(ctx);
-      const child = await harness.createConversation({ ownership: { kind: "ownerless" } }, ctx);
-      expect(
-        (
-          await tool.execute(
-            { code: 'store("kept", {n: 3}); store("deleted", 1);' },
-            api(root),
-            ctx,
-          )
-        ).isError,
-      ).toBe(false);
-      expect(
-        (await tool.execute({ code: 'text(load("kept"));' }, api(child), ctx)).content,
-      ).not.toContainEqual({ type: "text", text: '{"n":3}' });
-      await harness.close(ctx);
-      harness = await open();
-      root = await harness.root(ctx);
-      const loaded = await tool.execute(
-        { code: 'text(load("kept")); store("deleted", undefined);' },
-        api(root),
-        ctx,
+      expect((await fixture.run('store("kept",{n:3}); store("deleted",1);')).isError).toBe(false);
+      const other = await fixture.harness.createConversation(
+        {
+          ownership: { kind: "ownerless" },
+          agent: { model: { provider: "faux", modelId: "faux-1" } },
+        },
+        BACKGROUND_CONTEXT,
       );
-      expect(loaded.content).toContainEqual({ type: "text", text: '{"n":3}' });
-      await harness.close(ctx);
-      harness = await open();
-      root = await harness.root(ctx);
+      expect(output(await fixture.run('text(load("kept") === undefined);', other))).toContain(
+        "true",
+      );
+      await fixture.close();
+      fixture = await open("store");
       expect(
-        (await tool.execute({ code: 'text(load("deleted") === undefined);' }, api(root), ctx))
-          .content,
-      ).toContainEqual({ type: "text", text: "true" });
+        (await fixture.run('text(load("kept")); store("deleted",undefined);')).output,
+      ).toContainEqual({ type: "text", text: '{"n":3}' });
+      await fixture.close();
+      fixture = await open("store");
+      expect(output(await fixture.run('text(load("deleted") === undefined);'))).toContain("true");
     } finally {
-      await harness.close(ctx);
+      await fixture.close();
       await authority.close();
     }
   });
 
   it("does not persist failed script writes", async () => {
-    const { MemoryStorage } = await import("@earendil-works/pi-durable");
-    const harness = await Harness.open(
-      new MemoryStorage(),
-      { models: createModels(), registry: createRegistry() },
-      ctx,
-    );
-    const tool = codemodeTool(new CallableCatalog([]), new Set());
+    const fixture = await openCodemodeHarness(new CallableCatalog([]));
     try {
-      const root = await harness.root(ctx);
-      await tool.execute({ code: 'store("key", "original");' }, api(root), ctx);
-      expect(
-        (
-          await tool.execute(
-            { code: 'store("key", "bad"); throw new Error("script");' },
-            api(root),
-            ctx,
-          )
-        ).isError,
-      ).toBe(true);
-      expect(
-        (await tool.execute({ code: 'text(load("key"));' }, api(root), ctx)).content,
-      ).toContainEqual({ type: "text", text: "original" });
+      await fixture.run('store("key","original");');
+      expect((await fixture.run('store("key","bad"); throw new Error("script");')).isError).toBe(
+        true,
+      );
+      expect(output(await fixture.run('text(load("key"));'))).toContain("original");
     } finally {
-      await harness.close(ctx);
+      await fixture.close();
     }
   });
 
   it("merges only changed keys from concurrent successful scripts", async () => {
-    const { MemoryStorage } = await import("@earendil-works/pi-durable");
-    const harness = await Harness.open(
-      new MemoryStorage(),
-      { models: createModels(), registry: createRegistry() },
-      ctx,
-    );
-    const entered = latch();
-    const release = latch();
-    const tool = codemodeTool(
-      new CallableCatalog([
-        defineTool({
-          name: "hold",
-          description: "hold",
-          parameters: Type.Object({}),
-          execute: async () => {
-            entered.resolve();
-            await release.promise;
-            return { content: [] };
-          },
-        }),
-      ]),
-      new Set(),
-    );
+    const entered = latch(),
+      release = latch();
+    const fast = 'await tools.wait_slow({}); store("fast",2);';
+    const catalog = new CallableCatalog([
+      defineTool({
+        name: "hold",
+        description: "hold",
+        parameters: Type.Object({}),
+        execute: async () => {
+          entered.resolve();
+          await release.promise;
+          return { output: [] };
+        },
+      }),
+      defineTool({
+        name: "wait_slow",
+        description: "wait",
+        parameters: Type.Object({}),
+        execute: async () => {
+          await entered.promise;
+          return { output: [] };
+        },
+      }),
+    ]);
+    const fixture = await openCodemodeHarness(catalog, {
+      onResult: (source) => {
+        if (source === fast) release.resolve();
+      },
+    });
     try {
-      const root = await harness.root(ctx);
-      const slow = tool.execute(
-        { code: 'await tools.hold({}); store("slow", 1);' },
-        api(root),
-        ctx,
-      );
-      await entered.promise;
-      await tool.execute({ code: 'store("fast", 2);' }, api(root), ctx);
-      release.resolve();
-      await slow;
-      const result = await tool.execute(
-        { code: 'text([load("fast"), load("slow")]);' },
-        api(root),
-        ctx,
-      );
-      expect(result.content).toContainEqual({ type: "text", text: "[2,1]" });
+      const results = await fixture.runMany(['await tools.hold({}); store("slow",1);', fast]);
+      expect(results.every((result) => result.isError === false)).toBe(true);
+      expect((await fixture.run('text([load("fast"),load("slow")]);')).output).toContainEqual({
+        type: "text",
+        text: "[2,1]",
+      });
     } finally {
       release.resolve();
-      await harness.close(ctx);
+      await fixture.close();
     }
   });
 
-  it("tracks live workers and peak memory across concurrent success and resource failures", async () => {
-    const { MemoryStorage } = await import("@earendil-works/pi-durable");
-    const harness = await Harness.open(
-      new MemoryStorage(),
-      { models: createModels(), registry: createRegistry() },
-      ctx,
-    );
+  it("keeps per-invocation resource snapshots across concurrent success and failures", async () => {
     const lines: string[] = [];
     const task = new (class extends NoSimulationTask {
       override log(...parts: readonly unknown[]) {
@@ -207,42 +146,29 @@ describe("Durable code-mode store", () => {
       }
     })("codemode", false);
     let arrivals = 0;
-    const arrived = latch();
-    const release = latch();
-    const tool = codemodeTool(
-      new CallableCatalog([
-        defineTool({
-          name: "hold",
-          description: "hold",
-          parameters: Type.Object({}),
-          execute: async () => {
-            if (++arrivals === 2) arrived.resolve();
-            await release.promise;
-            return { content: [] };
-          },
-        }),
-      ]),
-      new Set(),
-      {},
-      { id: "orb-1", task },
-    );
-    const MiB = 1024 * 1024;
-    const peak = (result: { details?: unknown }) =>
-      (result.details as { memory: { peakBytes: number } }).memory.peakBytes;
+    const arrived = latch(),
+      release = latch();
+    const catalog = new CallableCatalog([
+      defineTool({
+        name: "hold",
+        description: "hold",
+        parameters: Type.Object({}),
+        execute: async () => {
+          if (++arrivals === 2) arrived.resolve();
+          await release.promise;
+          return { output: [] };
+        },
+      }),
+    ]);
+    const first = await openCodemodeHarness(catalog, { orb: { id: "orb-1", task } });
+    const second = await openCodemodeHarness(catalog, { orb: { id: "orb-1", task } });
     const baseline = codeModeMemory.active;
     try {
-      const root = await harness.root(ctx);
-      const holding = tool.execute(
-        { code: "const b = new Uint8Array(32 * 1024 * 1024).fill(1); await tools.hold({});" },
-        { ...api(root), callId: "holding" },
-        ctx,
+      const holding = first.run(
+        "const b=new Uint8Array(32*1024*1024).fill(1); await tools.hold({});",
       );
-      const exhausting = tool.execute(
-        {
-          code: "await tools.hold({}); const a = []; for (;;) a.push(new Uint8Array(16 * 1024 * 1024).fill(1));",
-        },
-        { ...api(root), callId: "exhausting" },
-        ctx,
+      const exhausting = second.run(
+        "await tools.hold({}); const a=[]; for (;;) a.push(new Uint8Array(16*1024*1024).fill(1));",
       );
       await arrived.promise;
       expect(codeModeMemory.active).toBe(baseline + 2);
@@ -250,23 +176,24 @@ describe("Durable code-mode store", () => {
       const [held, exhausted] = await Promise.all([holding, exhausting]);
       expect(codeModeMemory.active).toBe(baseline);
       expect(held.isError).toBe(false);
-      expect(peak(held)).toBeGreaterThan(32 * MiB);
-      expect(exhausted.isError).toBe(true);
-      expect(peak(exhausted)).toBeGreaterThan(200 * MiB);
-      const flooded = await tool.execute(
-        { code: 'const s = "x".repeat(600 * 1024); text(s); text(s);' },
-        { ...api(root), callId: "flooded" },
-        ctx,
+      expect((held.details as { memory: { peakBytes: number } }).memory.peakBytes).toBeGreaterThan(
+        32 * 1024 * 1024,
       );
+      expect(exhausted.isError).toBe(true);
+      expect(
+        (exhausted.details as { memory: { peakBytes: number } }).memory.peakBytes,
+      ).toBeGreaterThan(200 * 1024 * 1024);
+      const flooded = await first.run('const s="x".repeat(600*1024); text(s); text(s);');
       expect(flooded.isError).toBe(true);
       expect(codeModeMemory.active).toBe(baseline);
-      expect(lines.map((line) => line.replace(/peak_mib=\d+/, "peak_mib=N"))).toEqual([
-        `lifecycle: orb=orb-1 codemode.resource_failed kind=out_of_memory peak_mib=N conversation=${root.id} call=exhausting`,
-        `lifecycle: orb=orb-1 codemode.resource_failed kind=output_limit peak_mib=N conversation=${root.id} call=flooded`,
+      expect(lines.filter((line) => line.includes("codemode.resource_failed"))).toEqual([
+        expect.stringContaining("kind=out_of_memory"),
+        expect.stringContaining("kind=output_limit"),
       ]);
     } finally {
       release.resolve();
-      await harness.close(ctx);
+      await first.close();
+      await second.close();
     }
   });
 });

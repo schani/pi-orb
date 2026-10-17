@@ -16,6 +16,22 @@ import { expect, it } from "vitest";
 import { createDurableTools } from "./index.ts";
 
 const ctx = BACKGROUND_CONTEXT;
+function nativeCall(name: string, args: Record<string, unknown>) {
+  return fauxToolCall(
+    "codemode",
+    { code: `text(await tools.${name}(${JSON.stringify(args)}));` },
+    { id: name },
+  );
+}
+function nativeData(result: { content: readonly { type: string; text?: string }[] } | undefined) {
+  expect(result?.content[0]).toMatchObject({
+    type: "text",
+    text: expect.stringMatching(/^Script completed\n/),
+  });
+  const body = result?.content[1];
+  expect(body?.type).toBe("text");
+  return JSON.parse(body?.text ?? "");
+}
 it.each([
   { stopReason: "error" as const, status: "failed", output: "", reason: "model_error" },
   { stopReason: "aborted" as const, status: "aborted", output: "", reason: "aborted" },
@@ -48,35 +64,34 @@ it.each([
     }
     const last = request.messages.filter((message) => message.role === "toolResult").at(-1);
     if (!last) return fauxAssistantMessage("unexpected parent request");
-    const text = last.content[0];
-    const data = JSON.parse(text?.type === "text" ? text.text : "{}");
-    observed[last.toolName] = data;
-    if (last.toolName === "subagent") {
+    const data = nativeData(last);
+    expect(last.isError).toBe(false);
+    observed[last.toolCallId] = data;
+    if (last.toolCallId === "subagent") {
       id = data.agent_id;
       release();
       await started;
       return fauxAssistantMessage(
         scenario.status === "aborted"
-          ? fauxToolCall("cancel_subagent", { agent_id: id })
-          : fauxToolCall("get_subagent_result", { agent_id: id, wait: true }),
+          ? nativeCall("cancel_subagent", { agent_id: id })
+          : nativeCall("get_subagent_result", { agent_id: id, wait: true }),
         { stopReason: "toolUse" },
       );
     }
-    if (last.toolName === "cancel_subagent")
+    if (last.toolCallId === "cancel_subagent")
+      return fauxAssistantMessage(nativeCall("get_subagent_result", { agent_id: id, wait: true }), {
+        stopReason: "toolUse",
+      });
+    if (last.toolCallId === "get_subagent_result")
       return fauxAssistantMessage(
-        fauxToolCall("get_subagent_result", { agent_id: id, wait: true }),
-        { stopReason: "toolUse" },
-      );
-    if (last.toolName === "get_subagent_result")
-      return fauxAssistantMessage(
-        fauxToolCall("steer_subagent", { agent_id: id, message: "too late" }),
+        nativeCall("steer_subagent", { agent_id: id, message: "too late" }),
         { stopReason: "toolUse" },
       );
     return fauxAssistantMessage("parent done");
   };
   const faux = fauxProvider();
   faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("subagent", { prompt: "child prompt" }), {
+    fauxAssistantMessage(nativeCall("subagent", { prompt: "child prompt" }), {
       stopReason: "toolUse",
     }),
     ...Array(5).fill(respond),
@@ -86,6 +101,7 @@ it.each([
   const tools = createDurableTools();
   const registry = createRegistry();
   registry.install(tools.extension);
+  registry.install(tools.childExtension);
   const storage = new MemoryStorage();
   const harness = await Harness.open(
     storage,
@@ -98,7 +114,11 @@ it.each([
   );
   try {
     const root = await harness.root(ctx, {
-      agent: { model: { provider: "faux", modelId: "faux-1" } },
+      agent: {
+        model: { provider: "faux", modelId: "faux-1" },
+        modelTools: tools.modelTools,
+        extensions: { remove: [tools.childExtension] },
+      },
     });
     await (await root.submit({ type: "input", content: "parent" }, ctx)).wait(ctx);
     const entries = (

@@ -1,12 +1,71 @@
 import { createServer } from "node:http";
+import type { Duplex } from "node:stream";
 import { zstdDecompressSync } from "node:zlib";
+import { err, ok, Result, ResultAsync } from "neverthrow";
 import { matcherRequest, requestedToolEvents } from "./durable-model-fixture.ts";
+
+type UpgradeOutcome = { kind: "closed" | "peer_reset" };
+type UpgradeFailure = {
+  type: "upgrade_socket_failure";
+  operation: "end" | "stream";
+  code: string | undefined;
+  syscall: string | undefined;
+  message: string;
+};
+
+function upgradeFailure(operation: UpgradeFailure["operation"], cause: unknown): UpgradeFailure {
+  return {
+    type: "upgrade_socket_failure",
+    operation,
+    code:
+      cause instanceof Error && "code" in cause && typeof cause.code === "string"
+        ? cause.code
+        : undefined,
+    syscall:
+      cause instanceof Error && "syscall" in cause && typeof cause.syscall === "string"
+        ? cause.syscall
+        : undefined,
+    message: cause instanceof Error ? cause.message : "Unknown upgrade socket failure",
+  };
+}
+
+/** Node detaches its HTTP error handler before handing us this raw socket. */
+export function rejectUpgrade(socket: Duplex): ResultAsync<UpgradeOutcome, UpgradeFailure> {
+  return new ResultAsync(
+    new Promise<Result<UpgradeOutcome, UpgradeFailure>>((resolve) => {
+      let outcome: Result<UpgradeOutcome, UpgradeFailure> = ok({ kind: "closed" });
+      const onError = (cause: unknown) => {
+        const failure = upgradeFailure("stream", cause);
+        if (failure.code === "ECONNRESET" && failure.syscall === "read") {
+          if (outcome.isOk()) outcome = ok({ kind: "peer_reset" });
+        } else outcome = err(failure);
+      };
+      socket.on("error", onError);
+      socket.once("close", () => {
+        socket.off("error", onError);
+        resolve(outcome);
+      });
+      const ended = Result.fromThrowable(
+        () =>
+          socket.end(
+            "HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+          ),
+        (cause) => upgradeFailure("end", cause),
+      )();
+      if (ended.isErr()) {
+        outcome = err(ended.error);
+        socket.destroy();
+      }
+    }),
+  );
+}
 
 /** Adapt the legacy hosted fake, not the real provider or application protocol. */
 export async function durableFakeRelay(upstreamBase: string) {
   const upstream = new URL(upstreamBase);
   const requests: Record<string, unknown>[] = [];
   let failure: unknown;
+  const upgrades = new Map<Duplex, ResultAsync<UpgradeOutcome, UpgradeFailure>>();
   const server = createServer(async (request, response) => {
     if (request.method !== "POST") {
       response.writeHead(426).end();
@@ -82,23 +141,32 @@ export async function durableFakeRelay(upstreamBase: string) {
       response.destroy();
     }
   });
-  server.on("upgrade", (_request, socket) =>
-    socket.end("HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"),
-  );
+  server.on("upgrade", (_request, socket) => {
+    const closed = rejectUpgrade(socket).mapErr((fault) => {
+      failure ??= fault;
+      return fault;
+    });
+    upgrades.set(socket, closed);
+    void closed.then(() => upgrades.delete(socket));
+  });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("missing fake relay listener");
   return {
     baseUrl: `http://127.0.0.1:${address.port}${upstream.pathname}`,
     requests,
+    // Vitest fixture contract: check/close throw retained faults to fail the owning test.
     check: () => {
       if (failure) throw failure;
     },
     close: async () => {
+      const httpClosed = new Promise<Error | undefined>((resolve) => server.close(resolve));
+      const pending = [...upgrades.entries()];
       server.closeAllConnections();
-      await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
-      );
+      for (const [socket] of pending) socket.destroy();
+      await Promise.all(pending.map(([, closed]) => closed));
+      const closeError = await httpClosed;
+      if (closeError) throw closeError;
       if (failure) throw failure;
     },
   };

@@ -1,15 +1,8 @@
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { createModels } from "@earendil-works/pi-ai/models";
-import {
-  createRegistry,
-  Harness,
-  MemoryStorage,
-  type ToolExecutionApi,
-} from "@earendil-works/pi-durable";
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
 import { okAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { createDurableTools } from "./index.ts";
+import { openCodemodeHarness } from "./testkit/codemode.ts";
 
 it("preserves MCP structuredContent/isError/metadata in script results and declared output types", async () => {
   const bundle = createDurableTools({
@@ -58,36 +51,24 @@ it("preserves MCP structuredContent/isError/metadata in script results and decla
       },
     ],
   });
-  const harness = await Harness.open(
-    new MemoryStorage(),
-    { models: createModels(), registry: createRegistry() },
-    BACKGROUND_CONTEXT,
-  );
+  let fixture: Awaited<ReturnType<typeof openCodemodeHarness>> | undefined;
   try {
     await bundle.ready();
-    expect(bundle.catalog.describe("mcp__case__value")).toContain("CallToolResult");
-    const root = await harness.root(BACKGROUND_CONTEXT);
-    const result = await bundle.modelTools[0].execute(
-      {
-        code: "const r=await tools.mcp__case__value({}); text({n:r.structuredContent.n,error:r.isError,trace:r._meta.trace});",
-      },
-      {
-        conversationId: root.id,
-        commit: root.commit.bind(root),
-        callId: "call",
-        details: async () => {},
-        diagnostic: () => {},
-      } as unknown as ToolExecutionApi,
-      BACKGROUND_CONTEXT,
+    fixture = await openCodemodeHarness(bundle.catalog);
+    const declaration = await fixture.run('return await describeTool("mcp__case__value");');
+    expect(declaration.isError).toBe(false);
+    expect(JSON.stringify(declaration.output)).toContain("structuredContent");
+    const result = await fixture.run(
+      "const r=await tools.mcp__case__value({}); text({n:r.structuredContent.n,error:r.isError,trace:r._meta.trace});",
     );
     expect(result.isError).toBe(false);
-    expect(result.content).toContainEqual({
+    expect(result.output).toContainEqual({
       type: "text",
       text: '{"n":7,"error":true,"trace":"kept"}',
     });
     expect(JSON.stringify(result.details)).toContain('"status":"error"');
   } finally {
-    await harness.close(BACKGROUND_CONTEXT);
+    await fixture?.close();
     await bundle.close();
   }
 });

@@ -8,8 +8,19 @@ import { pathToFileURL } from "node:url";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
-import { createRegistry, defineTool, Harness, MemoryStorage } from "@earendil-works/pi-durable";
-import { okAsync } from "neverthrow";
+import {
+  fauxAssistantMessage,
+  fauxProvider,
+  fauxToolCall,
+} from "@earendil-works/pi-ai/providers/faux";
+import {
+  createRegistry,
+  defineExtension,
+  defineTool,
+  Harness,
+  MemoryStorage,
+} from "@earendil-works/pi-durable";
+import { okAsync, ResultAsync } from "neverthrow";
 import { loadPlatformResources } from "./apps/control-plane/src/adapters/durable/platform-resources.ts";
 import {
   CALLBACK_LIMIT_MESSAGE,
@@ -18,6 +29,15 @@ import {
 import { CallableCatalog } from "./apps/control-plane/src/adapters/durable/tools/catalog.ts";
 import { codemodeTool } from "./apps/control-plane/src/adapters/durable/tools/codemode.ts";
 import { GitResourceSource } from "./apps/control-plane/src/adapters/git-resources/git.ts";
+
+/** @template T @param {"open" | "root" | "resume" | "submit" | "wait" | "close"} operation @param {() => Promise<T>} run */
+const native = (operation, run) =>
+  ResultAsync.fromThrowable(run, () => ({ code: "image_proof_native_failed", operation }))();
+const diagnostics = (result) =>
+  JSON.stringify({
+    output: result.output?.filter((block) => block.type === "text"),
+    diagnostics: result.diagnostics,
+  });
 
 for (const file of ["bounded-worker.js", "callback-limits.js", "callback-limits.d.ts"])
   assert(existsSync(`./apps/control-plane/src/adapters/durable/tools/${file}`), file);
@@ -57,54 +77,114 @@ try {
         Buffer.from(file.bytes).toString() === "IMAGE_GIT_INSTRUCTIONS\n",
     ),
   );
-  harness = await Harness.open(
-    new MemoryStorage(),
-    { models: createModels(), registry: createRegistry() },
-    ctx,
-  );
-  const root = await harness.root(ctx);
-  const api = { conversationId: root.id, commit: root.commit.bind(root), callId: "image-proof" };
   const png = Buffer.alloc(20 * 1024 * 1024, 97);
   Buffer.from("89504e470d0a1a0a", "hex").copy(png);
   const data = png.toString("base64");
-  const tool = codemodeTool(
-    new CallableCatalog([
-      defineTool({
-        name: "picture",
-        description: "picture",
-        parameters: Type.Object({}),
-        execute: async () => ({ content: [{ type: "image", data, mimeType: "image/png" }] }),
+  const catalog = new CallableCatalog([
+    defineTool({
+      name: "picture",
+      description: "picture",
+      parameters: Type.Object({}),
+      execute: async () => ({ output: [{ type: "image", data, mimeType: "image/png" }] }),
+    }),
+  ]);
+  const tool = codemodeTool(catalog, new Set());
+  let calls = [];
+  const registry = createRegistry();
+  registry.install(
+    defineExtension({
+      name: "image-proof",
+      tools: [
+        ...catalog.registrations(),
+        defineTool({
+          ...tool,
+          execute: async (args, api, context) => {
+            const call = {
+              source: args.code,
+              callId: api.callId,
+              taskId: api.taskId,
+              conversationId: api.conversationId,
+            };
+            calls.push(call);
+            call.result = await tool.execute(args, api, context);
+            return call.result;
+          },
+        }),
+      ],
+    }),
+  );
+  const faux = fauxProvider();
+  const models = createModels();
+  models.setProvider(faux.provider);
+  const opened = await native("open", () =>
+    Harness.open(new MemoryStorage(), { models, registry }, ctx),
+  );
+  assert(opened.isOk(), JSON.stringify(opened.isErr() ? opened.error : undefined));
+  harness = opened.value;
+  const rooted = await native("root", () =>
+    harness.root(ctx, { agent: { model: { provider: "faux", modelId: "faux-1" } } }),
+  );
+  assert(rooted.isOk(), JSON.stringify(rooted.isErr() ? rooted.error : undefined));
+  const root = rooted.value;
+  const resumed = await native("resume", async () => harness.resume());
+  assert(resumed.isOk(), JSON.stringify(resumed.isErr() ? resumed.error : undefined));
+  const taskIds = new Set();
+  async function run(source) {
+    calls = [];
+    const callId = `image-proof-${taskIds.size + 1}`;
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("codemode", { code: source }, { id: callId }), {
+        stopReason: "toolUse",
       }),
-    ]),
-    new Set(),
+      fauxAssistantMessage("done"),
+    ]);
+    const submitted = await native("submit", () =>
+      root.submit({ type: "input", content: "run" }, ctx),
+    );
+    assert(submitted.isOk(), JSON.stringify(submitted.isErr() ? submitted.error : undefined));
+    const settled = await native("wait", () => submitted.value.wait(ctx));
+    assert(settled.isOk(), JSON.stringify(settled.isErr() ? settled.error : undefined));
+    assert.equal(settled.value.status, "done", "Native submission did not complete");
+    assert.equal(calls.length, 1, "Expected one executed native code-mode call");
+    const call = calls[0];
+    assert.equal(call.source, source, "Native source mismatch");
+    assert.equal(call.callId, callId, "Native call ID mismatch");
+    assert.equal(call.conversationId, root.id, "Native conversation mismatch");
+    assert(Number.isSafeInteger(call.taskId), "Invalid native task ID");
+    assert(!taskIds.has(call.taskId), "Repeated native task ID");
+    taskIds.add(call.taskId);
+    assert(call.result, "Native code-mode call did not return a result");
+    return call.result;
+  }
+  const result = await run('image((await tools.picture({}))[0]); store("passed",true);');
+  assert.equal(result.isError, false, diagnostics(result));
+  const images = result.output.filter((block) => block.type === "image");
+  assert.equal(images.length, 1, diagnostics(result));
+  assert.equal(images[0].data === data, true, diagnostics(result));
+  assert.equal(images[0].mimeType, "image/png", diagnostics(result));
+  const saved = await run('text(load("passed"));');
+  assert.equal(saved.isError, false, diagnostics(saved));
+  assert(
+    saved.output.some((block) => block.type === "text" && block.text === "true"),
+    diagnostics(saved),
   );
-  const result = await tool.execute(
-    { code: 'image((await tools.picture({}))[0]); store("passed",true);' },
-    api,
-    ctx,
+  const limited = await run(
+    `store("failed",true); await Promise.all(Array.from({length:${MAX_CALLBACK_CONCURRENCY + 1}},()=>describeNamespace("fixture")));`,
   );
-  assert.equal(
-    result.isError,
-    false,
-    JSON.stringify(result.content?.filter((block) => block.type === "text")),
+  assert.equal(limited.isError, true, diagnostics(limited));
+  assert(
+    limited.output.some(
+      (block) => block.type === "text" && block.text.includes(CALLBACK_LIMIT_MESSAGE),
+    ),
+    diagnostics(limited),
   );
-  const images = result.content.filter((block) => block.type === "image");
-  assert.equal(images.length, 1);
-  assert.equal(images[0].data, data);
-  assert.equal(images[0].mimeType, "image/png");
-  const saved = await tool.execute({ code: 'text(load("passed"));' }, api, ctx);
-  assert(saved.content.some((block) => block.type === "text" && block.text === "true"));
-  const limited = await tool.execute(
-    {
-      code: `store("failed",true); await Promise.all(Array.from({length:${MAX_CALLBACK_CONCURRENCY + 1}},()=>describeNamespace("fixture")));`,
-    },
-    api,
-    ctx,
+  const rolledBack = await run('text(load("failed")===undefined);');
+  assert.equal(rolledBack.isError, false, diagnostics(rolledBack));
+  assert(
+    rolledBack.output.some((block) => block.type === "text" && block.text === "true"),
+    diagnostics(rolledBack),
   );
-  assert.equal(limited.isError, true);
-  assert(JSON.stringify(limited.content).includes(CALLBACK_LIMIT_MESSAGE));
-  const rolledBack = await tool.execute({ code: 'text(load("failed")===undefined);' }, api, ctx);
-  assert(rolledBack.content.some((block) => block.type === "text" && block.text === "true"));
+  assert.equal(taskIds.size, 4, "Expected four distinct native task IDs");
   console.log(
     JSON.stringify({
       status: "PASS",
@@ -118,6 +198,9 @@ try {
     }),
   );
 } finally {
-  if (harness) await harness.close(ctx);
+  if (harness) {
+    const closed = await native("close", () => harness.close(ctx));
+    assert(closed.isOk(), JSON.stringify(closed.isErr() ? closed.error : undefined));
+  }
   rmSync(repo, { recursive: true, force: true });
 }

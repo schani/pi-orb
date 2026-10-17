@@ -2,14 +2,14 @@
 
 ## Offline checks
 
-Run from the repository root with Node 24.6 or later:
+Run from the repository root with Node 24.22.0 and the aligned Pi 1.3.0 SDK:
 
 ```sh
 npm ci
 node --test scripts/native-mcp-exploration/live-qualification/*.test.mjs
 ```
 
-Finish installation before testing. Do not install `scripts/native-mcp-exploration/` dependencies first: its unpatched SDK would shadow the root's patched SDK. These checks use the root installation and patches; synthetic providers do not qualify live accounts.
+Finish installation before testing. Do not install `scripts/native-mcp-exploration/` dependencies first: its separate SDK installation would shadow the root installation these checks qualify. These checks use the root installation and patches; synthetic providers do not qualify live accounts.
 
 - `runner.test.mjs` exercises reusable `runQualification`, including real SDK same-session reconnect against loopback providers; its one-shot fault test uses mocked fetch. [`native-auth-retry.test.mjs`](../native-auth-retry.test.mjs) covers real SDK authorization retry. `policy.mjs` bounds approved calls and retained summaries; `fault.mjs` changes one approved request header, forwarding the actual response without fabricating a 401.
 - `initial-auth.test.mjs` exercises `runInitialAuth`: initial broker denial exposes zero tools, then the next `before_agent_start` rediscovers and reads in the same SDK session.
@@ -64,4 +64,4 @@ Historical live results, immutable artifact identities, first failures and clean
 - `docs/postmortems/2026-09-30-native-mcp-qualification.md`
 - `docs/postmortems/2026-10-01-mcp-measurement-fixtures.md`
 
-Current provider acceptance scope: `TODO.md`. Qualification history: `docs/testing.md`. Historical Pi 0.99.1 results do not qualify the root's Pi 1.1.0 installation.
+Current provider acceptance scope: `TODO.md`. Qualification history: `docs/testing.md`. Historical Pi 0.99.1 results do not qualify Pi 1.3.0 or central native code-mode; current focused receipts and pending final-source gates remain separate in `docs/testing.md`.

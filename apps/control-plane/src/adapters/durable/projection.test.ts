@@ -147,3 +147,117 @@ it("projects child task headers independently of private child history", () => {
   ]);
   expect(JSON.stringify(records)).not.toContain("PRIVATE");
 });
+
+it.each(["ok", "error", "cancelled"])(
+  "whitelists explicit codemode argument keys for %s previews",
+  (status) => {
+    const secret = "PRIVATE_NESTED_ARGUMENT_CANARY";
+    for (const args of [
+      JSON.stringify({ token: secret }),
+      JSON.stringify([secret]),
+      `{"token":"${secret}`,
+    ]) {
+      const source = entry({
+        kind: "pi.tool-result",
+        model: [
+          {
+            role: "toolResult",
+            toolCallId: "outer",
+            toolName: "codemode",
+            content: [{ type: "text", text: "done" }],
+            details: {
+              calls: [
+                {
+                  id: 1,
+                  name: "inner",
+                  args,
+                  arguments: [secret],
+                  argumentKeys: ["token"],
+                  status,
+                  durationMs: 2,
+                  error: secret,
+                  private: { token: secret },
+                },
+                secret,
+              ],
+              omittedCalls: 0,
+            },
+            isError: status !== "ok",
+            timestamp: 1,
+          },
+        ],
+      });
+      const projected = projectEntry(source, null, "session")._unsafeUnwrap();
+      expect(JSON.stringify(projected)).not.toContain(secret);
+      expect(projected?.overflow.native).toMatchObject({
+        message: {
+          details: {
+            calls: [{ id: 1, name: "inner", argumentKeys: ["token"], status, durationMs: 2 }],
+          },
+        },
+      });
+      expect(JSON.stringify(source)).toContain(secret);
+    }
+  },
+);
+
+it("never infers safe key previews from raw arguments or malformed metadata", () => {
+  const secret = "PRIVATE_NESTED_ARGUMENT_CANARY";
+  for (const argumentKeys of [undefined, secret, ["token", { token: secret }]]) {
+    const projected = projectEntry(
+      entry({
+        kind: "pi.tool-result",
+        model: [
+          {
+            role: "toolResult",
+            toolCallId: "outer",
+            toolName: "codemode",
+            content: [],
+            details: {
+              calls: [
+                {
+                  id: 1,
+                  name: "inner",
+                  args: JSON.stringify([secret]),
+                  arguments: { token: secret },
+                  argumentKeys,
+                  status: "error",
+                },
+              ],
+            },
+            isError: true,
+            timestamp: 1,
+          },
+        ],
+      }),
+      null,
+      "session",
+    )._unsafeUnwrap();
+    expect(projected?.overflow.native).toMatchObject({
+      message: { details: { calls: [{ argumentKeys: [] }] } },
+    });
+    expect(JSON.stringify(projected)).not.toContain(secret);
+  }
+  const ordinary = projectEntry(
+    entry({
+      kind: "pi.assistant",
+      model: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "direct",
+              name: "bash",
+              arguments: { command: "echo intentional source" },
+            },
+          ],
+          timestamp: 1,
+        },
+      ],
+    }),
+    null,
+    "session",
+  )._unsafeUnwrap();
+  expect(JSON.stringify(ordinary)).toContain("echo intentional source");
+});

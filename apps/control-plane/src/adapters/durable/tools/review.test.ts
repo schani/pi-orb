@@ -1,4 +1,3 @@
-import type { JsonValue } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
@@ -8,6 +7,7 @@ import {
   createRegistry,
   defineTool,
   Harness,
+  LiveDoc,
   MemoryStorage,
   type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
@@ -15,9 +15,9 @@ import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
 import { okAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
-import { codemodeTool } from "./codemode.ts";
 import { createDurableTools } from "./index.ts";
 import { createOrbTools } from "./orb-tools.ts";
+import { openCodemodeHarness } from "./testkit/codemode.ts";
 
 it("advertises discovered resources-only instructions in ready and actual provider metadata", async () => {
   let connections = 0;
@@ -58,8 +58,6 @@ it("advertises discovered resources-only instructions in ready and actual provid
   let harness: Harness | undefined;
   try {
     expect((await bundle.ready()).isOk()).toBe(true);
-    expect(bundle.modelTools[0].description).toContain("docs");
-    expect(bundle.modelTools[0].description).toContain("Resolve project before reading");
     const registry = createRegistry();
     registry.install(bundle.extension);
     const faux = fauxProvider();
@@ -87,37 +85,39 @@ it("advertises discovered resources-only instructions in ready and actual provid
       ctx,
     );
     expect(resources.isOk()).toBe(true);
-    expect(bundle.catalog.describeNamespace("docs")?.instructions).toBe(
-      "Use refreshed project guidance",
-    );
-    const refreshed = await bundle.modelTools[0].execute(
-      { code: 'await tools.list_mcp_resources({}); text(await describeNamespace("docs"));' },
-      {
-        conversationId: root.id,
-        commit: root.commit.bind(root),
-        callId: "refresh",
-        details: async () => {},
-        diagnostic: () => {},
-      } as unknown as ToolExecutionApi,
-      ctx,
-    );
-    expect(JSON.stringify(refreshed.content)).toContain("Latest project guidance");
+    const fixture = await openCodemodeHarness(bundle.catalog);
+    try {
+      const discovery = await fixture.run('return (await describeNamespace("docs")).instructions;');
+      expect(discovery.isError).toBe(false);
+      expect(discovery.output).toContainEqual({
+        type: "text",
+        text: "Use refreshed project guidance",
+      });
+      const refreshed = await fixture.run(
+        'await tools.list_mcp_resources({}); text(await describeNamespace("docs"));',
+      );
+      expect(JSON.stringify(refreshed.output)).toContain("Use refreshed project guidance");
+      const next = await fixture.run('text(await describeNamespace("docs"));');
+      expect(JSON.stringify(next.output)).toContain("Latest project guidance");
+    } finally {
+      await fixture.close();
+    }
   } finally {
     await harness?.close(ctx);
     await bundle.close();
   }
 });
 
-it("preserves execution wait in UI details without exposing nested stdout to the model", async () => {
-  const harness = await Harness.open(
-    new MemoryStorage(),
-    { models: createModels(), registry: createRegistry() },
-    ctx,
-  );
-  const root = await harness.root(ctx);
-  const updates: unknown[] = [];
-  const stdout: unknown[] = [];
-  const tool = codemodeTool(
+it("preserves native execution wait details without exposing nested stdout to the model", async () => {
+  let entered!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const fixture = await openCodemodeHarness(
     new CallableCatalog([
       defineTool({
         name: "wait",
@@ -125,40 +125,34 @@ it("preserves execution wait in UI details without exposing nested stdout to the
         parameters: Type.Object({}),
         execute: async (_args, api) => {
           await api.details({ executionWait: true }, ctx);
+          entered();
+          await released;
           api.output("private nested stdout");
           await api.details({ executionWait: false }, ctx);
           return {};
         },
       }),
     ]),
-    new Set(),
   );
+  const pending = fixture.run('await tools.wait({}); text("filtered");');
   try {
-    const result = await tool.execute(
-      { code: 'await tools.wait({}); text("filtered");' },
-      {
-        conversationId: root.id,
-        commit: root.commit.bind(root),
-        callId: "outer",
-        output: (s: string | Uint8Array) => stdout.push(s),
-        details: async (d: JsonValue) => {
-          updates.push(d);
-        },
-        diagnostic: () => {},
-      } as unknown as ToolExecutionApi,
-      ctx,
+    await waiting;
+    const live = await fixture.harness.snapshot(LiveDoc, fixture.root.id, ctx);
+    expect(live?.nestedTools).toContainEqual(
+      expect.objectContaining({ name: "wait", details: { executionWait: true } }),
     );
-    expect(updates).toContainEqual(
-      expect.objectContaining({
-        executionWait: true,
-        calls: [expect.objectContaining({ executionWait: true })],
-      }),
-    );
-    expect(updates.at(-1)).toMatchObject({ executionWait: false });
-    expect(JSON.stringify(result.content)).not.toContain("private nested stdout");
-    expect(stdout).toEqual([]);
+    release();
+    const result = await pending;
+    expect(result.isError).toBe(false);
+    expect(JSON.stringify(result.output)).not.toContain("private nested stdout");
+    const completed = await fixture.harness.snapshot(LiveDoc, fixture.root.id, ctx);
+    expect(completed).toBeDefined();
+    expect(completed?.nestedTools ?? []).toEqual([]);
+    expect(result.details).toMatchObject({ executionWait: false });
+    expect(completed?.tools?.[0]?.output ?? "").not.toContain("private nested stdout");
   } finally {
-    await harness.close(ctx);
+    release();
+    await fixture.close();
   }
 });
 
@@ -198,83 +192,45 @@ it("limits empty output items and cancels outstanding callbacks through the real
 });
 
 it("declares and returns native JSON text as strings, not object schemas", async () => {
-  const harness = await Harness.open(
-    new MemoryStorage(),
-    { models: createModels(), registry: createRegistry() },
-    ctx,
-  );
-  const root = await harness.root(ctx);
   const bundle = createDurableTools({
     additionalTools: createOrbTools({ invoke: () => okAsync({ id: "orb-id" }) }),
   });
+  const fixture = await openCodemodeHarness(bundle.catalog);
   try {
-    expect(bundle.catalog.describe("orb_self")).toContain("Promise<string>");
-    expect(bundle.catalog.describe("subagent")).toContain("Promise<string>");
-    const result = await bundle.modelTools[0].execute(
-      {
-        code: "const identity=await tools.orb_self({}); text(typeof identity); text(JSON.parse(identity).id);",
-      },
-      {
-        conversationId: root.id,
-        commit: root.commit.bind(root),
-        callId: "shape",
-        details: async () => {},
-        diagnostic: () => {},
-      } as unknown as ToolExecutionApi,
-      ctx,
+    const result = await fixture.run(
+      'const identity=await tools.orb_self({}); text({type:typeof identity,id:JSON.parse(identity).id,orb:(await describeTool("orb_self")).includes("Promise<string>"),subagent:(await describeTool("subagent")).includes("Promise<string>")});',
     );
-    expect(result.content).toContainEqual({ type: "text", text: "string" });
-    expect(result.content).toContainEqual({ type: "text", text: "orb-id" });
+    expect(result.isError).toBe(false);
+    expect(result.output).toContainEqual({
+      type: "text",
+      text: '{"type":"string","id":"orb-id","orb":true,"subagent":true}',
+    });
   } finally {
-    await harness.close(ctx);
+    await fixture.close();
     await bundle.close();
   }
 });
 
 it("stops repeated worker output before aggregate host collection exceeds its bound", async () => {
-  const harness = await Harness.open(
-    new MemoryStorage(),
-    { models: createModels(), registry: createRegistry() },
-    ctx,
-  );
-  const root = await harness.root(ctx);
   let spilled = "";
-  const tool = codemodeTool(new CallableCatalog([]), new Set(), {
-    spill: (text) => {
-      spilled = text;
-      return okAsync("artifact:stress");
+  const fixture = await openCodemodeHarness(new CallableCatalog([]), {
+    files: {
+      spill: (text) => {
+        spilled = text;
+        return okAsync("artifact:stress");
+      },
     },
   });
   try {
-    const result = await tool.execute(
-      {
-        code: 'const chunk="x".repeat(16384); for(let i=0;i<128;i++) text(chunk); store("mustNotPersist",true);',
-      },
-      {
-        conversationId: root.id,
-        commit: root.commit.bind(root),
-        callId: "stress",
-        details: async () => {},
-        diagnostic: () => {},
-      } as unknown as ToolExecutionApi,
-      ctx,
+    const result = await fixture.run(
+      'const chunk="x".repeat(16384); for(let i=0;i<128;i++) text(chunk); store("mustNotPersist",true);',
     );
     expect(result.isError).toBe(true);
-    expect(JSON.stringify(result.content)).toContain("output limit");
+    expect(JSON.stringify(result.output)).toContain("output limit");
     expect(spilled.length).toBeLessThan(1100000);
-    const check = await tool.execute(
-      { code: 'return load("mustNotPersist") ?? "absent";' },
-      {
-        conversationId: root.id,
-        commit: root.commit.bind(root),
-        callId: "check",
-        details: async () => {},
-        diagnostic: () => {},
-      } as unknown as ToolExecutionApi,
-      ctx,
-    );
-    expect(check.content).toContainEqual({ type: "text", text: "absent" });
+    const check = await fixture.run('return load("mustNotPersist") ?? "absent";');
+    expect(check.output).toContainEqual({ type: "text", text: "absent" });
   } finally {
-    await harness.close(ctx);
+    await fixture.close();
   }
 });

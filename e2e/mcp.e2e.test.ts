@@ -422,9 +422,18 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
       user_code: challenge,
     });
     await waitRunning(first);
-    expect(calls.map((call) => call.method)).toEqual(
-      expect.arrayContaining(["initialize", "tools/list", "resources/list"]),
-    );
+    expect(
+      calls.map((call) => call.method),
+      "MCP startup discovery",
+    ).toEqual(expect.arrayContaining(["initialize", "tools/list"]));
+    expect(
+      calls.map((call) => call.method),
+      "MCP startup defers resource discovery",
+    ).not.toContain("resources/list");
+    expect(
+      calls.map((call) => call.method),
+      "MCP startup defers resource template discovery",
+    ).not.toContain("resources/templates/list");
     expect(calls.some((call) => call.method === "tools/call")).toBe(false);
     const page = await browser.newPage();
     await page.goto(`${cp.baseUrl}/orbs/${first}`);
@@ -548,6 +557,7 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
     expect(output).toContain("test://{id}");
     expect(replica).not.toContain("synthetic-first");
     expect(encoded).not.toContain("synthetic-first");
+    expect(calls.some((call) => call.method === "resources/list")).toBe(true);
     expect(calls.some((call) => call.method === "resources/read")).toBe(true);
     expect(calls.some((call) => call.method === "resources/templates/list")).toBe(true);
     expect(calls.filter((c) => c.method === "tools/call")).toHaveLength(1);
@@ -842,7 +852,12 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
             (value) => mcpFailureHistory(value),
             () => "unavailable",
           );
-        return { requests, history, inferenceRoutes: inferenceRouter?.snapshot() };
+        return {
+          requests,
+          history,
+          inferenceRoutes: inferenceRouter?.snapshot(),
+          mcpMethods: calls.map((call) => call.method),
+        };
       },
       close: () => browser.close(),
       removeProjects: async () => {

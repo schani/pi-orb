@@ -3,7 +3,6 @@ import {
   type Cursor,
   type EntryRecord,
   ROOT_CONVERSATION_ID,
-  StorageRejected,
   type StorageWrite,
   type SubmissionId,
 } from "@earendil-works/pi-durable";
@@ -11,6 +10,7 @@ import { err, ok, okAsync, ResultAsync } from "neverthrow";
 import { executor, type Query } from "../durable-pg/executor.ts";
 import type { AuthorityError } from "../durable-pg/index.ts";
 import { PgStorage } from "../durable-pg/storage.ts";
+import { StorageFailure } from "../durable-pg/storage-boundary.ts";
 import { arrayParam } from "../pg/client.ts";
 import { commitHistoryTransaction } from "../pg/store.ts";
 import { projectNativeInboxCommit } from "./inbox-admission.ts";
@@ -69,9 +69,9 @@ export async function projectNativeCommit(
       const storage = await PgStorage.open({
         ...sql,
         close: async () => undefined,
-        mintId: async () => Promise.reject(new StorageRejected("Projection is read-only")),
+        mintId: async () => Promise.reject(new StorageFailure("Projection is read-only")),
         transaction: (callback) => callback(sql),
-        project: async () => Promise.reject(new StorageRejected("Projection is read-only")),
+        project: async () => Promise.reject(new StorageFailure("Projection is read-only")),
       });
       try {
         const roots = await storage.scanConversations({}, 1, undefined, BACKGROUND_CONTEXT);

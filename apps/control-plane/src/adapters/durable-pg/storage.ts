@@ -2,11 +2,10 @@
 // Adapted executor, PostgreSQL allocation and atomic public publication.
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { apply, type Op } from "@earendil-works/chord/delta";
-import { StorageRejected } from "@earendil-works/pi-durable";
-import { rejectStorage } from "./storage-boundary.ts";
+import { rejectStorage, rejectStorageRequest, StorageFailure } from "./storage-boundary.ts";
 
 const idFromNumber = <I extends Id<string>>(value: number): I => {
-  if (!Number.isSafeInteger(value) || value < 0) rejectStorage("Invalid durable ID");
+  if (!Number.isSafeInteger(value) || value < 0) rejectStorageRequest("Invalid durable ID");
   return value as I;
 };
 const seqFromNumber = (value: number): Seq => Number(value) as Seq;
@@ -76,7 +75,7 @@ const cursorId = <I extends Id<string>>(cursor: Cursor | undefined): I | undefin
   const after = cursor?.after;
   if (after === undefined) return undefined;
   if (typeof after !== "number" || !Number.isSafeInteger(after))
-    rejectStorage("Invalid storage cursor");
+    rejectStorageRequest("Invalid storage cursor");
   return idFromNumber<I>(after);
 };
 
@@ -88,15 +87,15 @@ const scanStart = (
   fallback: ScanOrder,
 ): ScanStart => {
   if (requested !== undefined && requested !== "ascending" && requested !== "descending")
-    rejectStorage(`Invalid scan order: ${String(requested)}`);
+    rejectStorageRequest(`Invalid scan order: ${String(requested)}`);
   if (cursor === undefined) return { order: requested ?? fallback, after: undefined };
   const after = cursorId(cursor);
   const stored = cursor.order;
   if (stored !== undefined && stored !== "ascending" && stored !== "descending")
-    rejectStorage("Invalid storage cursor");
+    rejectStorageRequest("Invalid storage cursor");
   const order = stored ?? fallback;
   if (requested !== undefined && requested !== order)
-    rejectStorage(`The cursor continues a ${order} scan; the query asks for ${requested}`);
+    rejectStorageRequest(`The cursor continues a ${order} scan; the query asks for ${requested}`);
   return { order, after };
 };
 const scanSql = (start: ScanStart) =>
@@ -193,8 +192,8 @@ export class PgStorage implements Storage {
         // Preserve the initialization failure.
       }
       rejectStorage(
-        error instanceof StorageRejected ? error.message : "Durable storage open failed",
-        { cause: error instanceof StorageRejected ? error.cause : error },
+        error instanceof StorageFailure ? error.message : "Durable storage open failed",
+        { cause: error instanceof StorageFailure ? error.cause : error },
       );
     }
   }
@@ -334,12 +333,13 @@ export class PgStorage implements Storage {
         : typeof idOrContext === "number"
           ? idFromNumber<EntryId>(idOrContext)
           : undefined;
-    if (id === undefined) rejectStorage("Storage.entry() requires an entry ID");
+    if (id === undefined) rejectStorageRequest("Storage.entry() requires an entry ID");
     let conversation: ConversationRecord | undefined;
     if (context !== undefined) {
       const conversationId = idFromNumber<ConversationId>(idOrConversationId);
       conversation = await this.readConversation(conversationId);
-      if (conversation === undefined) rejectStorage(`Unknown conversation: ${conversationId}`);
+      if (conversation === undefined)
+        rejectStorageRequest(`Unknown conversation: ${conversationId}`);
     }
     const row = await this.db.get<EntryJsonRow>(
       "SELECT record, commit_seq FROM entries WHERE id = ?",
@@ -364,7 +364,7 @@ export class PgStorage implements Storage {
     atOrBeforeEntryId: EntryId | undefined,
   ): Promise<(EntryRecord & { readonly head: EntryId }) | undefined> {
     let conversation = await this.readConversation(conversationId);
-    if (conversation === undefined) rejectStorage(`Unknown conversation: ${conversationId}`);
+    if (conversation === undefined) rejectStorageRequest(`Unknown conversation: ${conversationId}`);
     let upper: number | undefined = atOrBeforeEntryId;
     while (true) {
       const row =
@@ -394,7 +394,8 @@ export class PgStorage implements Storage {
     const { order, after } = scanStart(query.order, cursor, "descending");
     if (order === "ascending") return this.readEntriesAscending(query, limit, after);
     let conversation = await this.readConversation(query.conversationId);
-    if (conversation === undefined) rejectStorage(`Unknown conversation: ${query.conversationId}`);
+    if (conversation === undefined)
+      rejectStorageRequest(`Unknown conversation: ${query.conversationId}`);
     let upper: number | undefined = query.maxEntryId;
     if (after !== undefined) upper = Math.min(upper ?? Number.MAX_SAFE_INTEGER, after - 1);
     const values: EntryRecord[] = [];
@@ -432,7 +433,8 @@ export class PgStorage implements Storage {
   ): Promise<Page<EntryRecord, Cursor>> {
     const segments: { conversationId: ConversationId; upper: number | undefined }[] = [];
     let conversation = await this.readConversation(query.conversationId);
-    if (conversation === undefined) rejectStorage(`Unknown conversation: ${query.conversationId}`);
+    if (conversation === undefined)
+      rejectStorageRequest(`Unknown conversation: ${query.conversationId}`);
     let upper: number | undefined = query.maxEntryId;
     while (true) {
       segments.push({ conversationId: conversation.id, upper });
@@ -684,7 +686,7 @@ export class PgStorage implements Storage {
     if (row === undefined) return undefined;
     const record = parseJson<DocumentRecord>(row.record);
     if (at !== "current" && isCurrentOnly(record)) {
-      rejectStorage(`Document ${id} does not retain historical content`);
+      rejectStorageRequest(`Document ${id} does not retain historical content`);
     }
     if (!isAliveAt(record, at)) return undefined;
     const upper = at === "current" ? Number.MAX_SAFE_INTEGER : at;
@@ -966,8 +968,7 @@ export class PgStorage implements Storage {
           }
           content = { kind: "base", version: stored.version, value: stored.value };
         } catch (error) {
-          if (error instanceof StorageRejected)
-            rejectStorage(error.message, { cause: error.cause });
+          if (error instanceof StorageFailure) rejectStorage(error.message, { cause: error.cause });
           rejectStorage(`Document copy ${id} was rejected`, { cause: error });
         }
       }

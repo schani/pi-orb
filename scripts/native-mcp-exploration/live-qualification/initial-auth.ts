@@ -107,9 +107,10 @@ export async function runInitialAuth(options: {
     const prompt = async () =>
       safe(
         () =>
-          active.extensionRunner.emitBeforeAgentStart("qualification", undefined, {
-            cwd: dir.value,
-          }),
+          active.extensionRunner.emitBeforeAgentStart(
+            { messageType: "user", prompt: "qualification" },
+            { cwd: dir.value },
+          ),
         "session",
         "prompt_failed",
       );

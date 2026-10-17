@@ -37,7 +37,7 @@ export const wait = subagentTools.find(
 ) as ToolRegistration;
 export const waitArgs = { agent_id: "child", wait: true };
 export function toolData(value: ToolExecutionResult) {
-  return JSON.parse(value.content?.find((block) => block.type === "text")?.text ?? "");
+  return JSON.parse(value.output?.find((block) => block.type === "text")?.text ?? "");
 }
 
 /** Native inbox watch; only the child waiter and injected boundary failures are controlled. */

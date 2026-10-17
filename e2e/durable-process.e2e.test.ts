@@ -22,6 +22,7 @@ import {
   type ServerFrame,
 } from "@pi-orb/protocol";
 import { type Browser, chromium, expect as expectPage } from "@playwright/test";
+import { err, ok, Result } from "neverthrow";
 import { Check } from "typebox/value";
 import { build } from "vite";
 import { expect, it } from "vitest";
@@ -52,6 +53,37 @@ const codemode = (code: string) => ({
   name: "codemode",
   arguments: { code },
 });
+
+function notificationSpawnReceipt(
+  texts: readonly string[],
+): Result<
+  { type: "text"; text: string; agent_id: string },
+  { type: "receipt_count"; count: number } | { type: "receipt_json" } | { type: "receipt_shape" }
+> {
+  const candidates = texts
+    .flatMap((text) => text.split(/^==> text [1-9]\d*\/[1-9]\d* <==\r?$/mu))
+    .map((text) => text.trim())
+    .filter((text) => text.includes('"agent_id"') && !text.includes('"status"'));
+  const text = candidates[0];
+  if (candidates.length !== 1 || text === undefined)
+    return err({ type: "receipt_count", count: candidates.length });
+  const parsed = Result.fromThrowable(
+    () => JSON.parse(text) as unknown,
+    () => ({ type: "receipt_json" as const }),
+  )();
+  if (parsed.isErr()) return err(parsed.error);
+  const value = parsed.value;
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    !("agent_id" in value) ||
+    typeof value.agent_id !== "string" ||
+    value.agent_id.trim().length === 0
+  )
+    return err({ type: "receipt_shape" });
+  return ok({ type: "text", text, agent_id: value.agent_id });
+}
 
 function loginCode(body: Record<string, unknown>): string | null {
   const action = body["actionRequired"] as
@@ -86,6 +118,44 @@ it("waits for a published Codex challenge, not the pending empty placeholder", (
       },
     }),
   ).toBe("usercode_2");
+});
+
+it("extracts the sole notification spawn receipt from native text items", () => {
+  const agentId = "128:call_30|ctc_29/c2";
+  const receipt = JSON.stringify({ agent_id: agentId });
+  const combined = [
+    "==> text 1/4 <==",
+    '{"output":"","truncated":false,"exit_code":0,"wall_time_seconds":0.1}',
+    "==> text 2/4 <==",
+    receipt,
+    "==> text 3/4 <==",
+    '{"output":"","truncated":false,"exit_code":0,"wall_time_seconds":1.7}',
+    "==> text 4/4 <==",
+    "NOTIFY_SPAWNED",
+  ].join("\n");
+  for (const texts of [
+    ["Script completed\nWall time 1.8 seconds\nOutput:\n", combined],
+    [receipt],
+  ]) {
+    expect(notificationSpawnReceipt(texts)).toEqual(
+      ok({ type: "text", text: receipt, agent_id: agentId }),
+    );
+  }
+  for (const texts of [
+    [],
+    ['{"agent_id":"child","status":"running"}'],
+    [receipt, receipt],
+    [combined, receipt],
+    ['{"agent_id":'],
+    [receipt + "\nNOTIFY_SPAWNED"],
+    ['{"agent_id":null}'],
+    ['{"agent_id":42}'],
+    ['{"agent_id":""}'],
+    ['[{"agent_id":"child"}]'],
+    ["prefix ==> text 1/1 <==\n" + receipt],
+  ]) {
+    expect(notificationSpawnReceipt(texts).isErr(), JSON.stringify(texts)).toBe(true);
+  }
 });
 
 it.runIf(process.env["PI_ORB_E2E_BACKEND"] === "process")(
@@ -738,21 +808,21 @@ text('NOTIFY_PARENT_HANDLED');`),
         latestUserMessage(request)?.includes("PRIVATE_CHILD_COORDINATION"),
       );
       expect(notification).toBeDefined();
-      const spawnReceipt = notificationRecords
-        .flatMap((record) =>
+      const parsedReceipt = notificationSpawnReceipt(
+        notificationRecords.flatMap((record) =>
           record.type === "message"
             ? record.content.flatMap((block) =>
                 block.type === "tool_result"
-                  ? block.content.filter(
-                      (item) => item.type === "text" && item.text.includes('"agent_id"'),
-                    )
+                  ? block.content.flatMap((item) => (item.type === "text" ? [item.text] : []))
                   : [],
               )
             : [],
-        )
-        .find((block) => block.type === "text" && !block.text.includes('"status"'));
+        ),
+      );
+      expect(parsedReceipt.isOk(), JSON.stringify(parsedReceipt)).toBe(true);
+      const spawnReceipt = parsedReceipt.isOk() ? parsedReceipt.value : undefined;
       expect(spawnReceipt?.type).toBe("text");
-      const agentId = spawnReceipt?.type === "text" ? JSON.parse(spawnReceipt.text).agent_id : null;
+      const agentId = spawnReceipt?.type === "text" ? spawnReceipt.agent_id : null;
       expect(agentId).toEqual(expect.any(String));
       expect(JSON.parse(latestUserMessage(notification) ?? "null")).toMatchObject({
         agent_id: agentId,

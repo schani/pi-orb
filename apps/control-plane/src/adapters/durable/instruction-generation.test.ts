@@ -56,8 +56,8 @@ it("a real generation re-evaluates before effects and keeps adopted instructions
           try {
             const result = await api.env!.exists("file", ctx);
             return result.ok
-              ? { content: [{ type: "text", text: "exists" }] }
-              : { isError: true, content: [{ type: "text", text: result.error.message }] };
+              ? { output: [{ type: "text", text: "exists" }] }
+              : { isError: true, output: [{ type: "text", text: result.error.message }] };
           } finally {
             await api.env!.cleanup(BACKGROUND_CONTEXT);
           }

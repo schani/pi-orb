@@ -43,7 +43,7 @@ it("offers only code-mode in root and child requests while retaining internal to
     const root = await harness.root(BACKGROUND_CONTEXT, {
       agent: {
         model: { provider: "faux", modelId: "faux-1" },
-        tools: bundle.modelTools,
+        modelTools: bundle.modelTools,
         extensions: { remove: [bundle.childExtension] },
       },
     });

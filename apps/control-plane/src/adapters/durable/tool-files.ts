@@ -27,7 +27,7 @@ function content(
   const mimeType = imageMime(bytes);
   if (mimeType)
     return okAsync({
-      content: [{ type: "image", mimeType, data: Buffer.from(bytes).toString("base64") }],
+      output: [{ type: "image", mimeType, data: Buffer.from(bytes).toString("base64") }],
     });
   const decoded = Result.fromThrowable(
     () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
@@ -70,7 +70,7 @@ function content(
   }
   const more = partial || offset - 1 + output.length < lines.length;
   return okAsync({
-    content: [{ type: "text", text: output.join("\n") }],
+    output: [{ type: "text", text: output.join("\n") }],
     diagnostics: more
       ? [
           {

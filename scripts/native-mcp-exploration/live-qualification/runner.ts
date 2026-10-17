@@ -150,9 +150,10 @@ export async function runQualification(options: {
     if (bound.isErr()) return bound;
     const started = await platform(
       () =>
-        activeSession.extensionRunner.emitBeforeAgentStart("qualification", undefined, {
-          cwd: dir,
-        }),
+        activeSession.extensionRunner.emitBeforeAgentStart(
+          { messageType: "user", prompt: "qualification" },
+          { cwd: dir },
+        ),
       "native_session",
       "startup_failed",
     );
