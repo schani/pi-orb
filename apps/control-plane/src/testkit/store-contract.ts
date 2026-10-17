@@ -2557,6 +2557,100 @@ export function storeSemanticsContractTests(
       expect((await store.readHistorySnapshot(task, orb.id))._unsafeUnwrap()).toEqual(current);
     });
 
+    it.each(["pi", "claude"] as const)(
+      "preserves %s snapshot semantics across null-parent compactions",
+      async (harness) => {
+        expect((await store.insertProject(task, project)).isOk()).toBe(true);
+        expect((await store.insertOrb(task, { ...orb, harness, state: "stopped" })).isOk()).toBe(
+          true,
+        );
+        const initialized = await store.initOrVerifySession(task, orb.id, session);
+        expect(initialized.isErr() ? initialized.error : null).toBeNull();
+        expect((await store.readHistorySnapshot(task, orb.id))._unsafeUnwrap()).toEqual({
+          session,
+          cursor: null,
+          headId: null,
+          records: [],
+        });
+        const user = {
+          ...first,
+          timestamp: "2026-08-04T00:00:00.000Z",
+          inboxMessageIds: ["00000000-0000-4000-8000-000000000055"],
+          overflow: unicodeOverflow,
+        };
+        const compact1: HistoryRecord = {
+          id: "compact-1",
+          parentId: null,
+          timestamp: "2026-08-07T00:00:00.000Z",
+          type: "event",
+          eventType: "claude.compact_boundary",
+          overflow: {},
+        };
+        const compact2: HistoryRecord = {
+          ...compact1,
+          id: "compact-2",
+          timestamp: "2026-08-08T00:00:00.000Z",
+        };
+        const child = {
+          ...second,
+          id: "backdated-child",
+          parentId: compact1.id,
+          timestamp: "2026-08-06T00:00:00.000Z",
+        };
+        const cursor = {
+          ...second,
+          id: "cursor",
+          parentId: compact2.id,
+          timestamp: "2026-08-05T00:00:00.000Z",
+        };
+        // Append order differs from both timestamp order and ID order.
+        const records = [user, compact1, child, compact2, cursor];
+        const committed = await store.commitPullBatch(task, {
+          orbId: orb.id,
+          expectedCursor: null,
+          session,
+          records,
+          nextCursor: cursor.id,
+          nextHeadId: compact2.id,
+        });
+        expect(committed.isErr() ? committed.error : null).toBeNull();
+        const current = (await store.readHistorySnapshot(task, orb.id))._unsafeUnwrap();
+        expect(current).toEqual({
+          session,
+          cursor: cursor.id,
+          headId: compact2.id,
+          records:
+            harness === "claude" ? [user, compact1, child, compact2, cursor] : [compact2, cursor],
+        });
+        expect((await store.readHistorySnapshot(task, orb.id, child.id))._unsafeUnwrap()).toEqual({
+          ...current,
+          records: [compact1, child],
+        });
+        expect((await store.readHistorySnapshot(task, orb.id, "missing"))._unsafeUnwrap()).toEqual({
+          ...current,
+          records: [],
+        });
+        expect(
+          (
+            await store.readHistorySnapshot(task, "00000000-0000-4000-8000-000000000088")
+          )._unsafeUnwrap(),
+        ).toEqual({ session: null, cursor: null, headId: null, records: [] });
+        const deleted = await store.requestOrbDeletion(task, {
+          orbId: orb.id,
+          expectedStateVersion: 0,
+          now: 2_000,
+          cleanupAfter: 3_000,
+        });
+        expect(deleted.isErr() ? deleted.error : null).toBeNull();
+        expect((await store.readHistorySnapshot(task, orb.id))._unsafeUnwrap()).toEqual({
+          session: null,
+          cursor: null,
+          headId: null,
+          records: [],
+        });
+      },
+    );
+
     it("rejects cursor and immutable-record conflicts without partial advancement", async () => {
       await seed();
       const unicode: HistoryRecord = { ...first, overflow: { "\udfff": "\u0000\ud800" } };

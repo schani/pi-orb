@@ -13,6 +13,7 @@ import type {
   StateConflict,
   StoreError,
 } from "../../domain/errors.ts";
+import { orderHistoryForPresentation } from "../../domain/history-presentation.ts";
 import { jsonEqual } from "../../domain/json-equal.ts";
 import { logOrbEvent } from "../../domain/log.ts";
 import { messageBatchId } from "../../domain/message-batch.ts";
@@ -2457,13 +2458,40 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       StoreError
     >(async (query) => {
       const orbResult = await query(
-        "SELECT state, harness_session_header, replication_cursor, replicated_head_id FROM orbs WHERE id = $1",
+        "SELECT state, harness, harness_session_header, replication_cursor, replicated_head_id FROM orbs WHERE id = $1",
         [orbId],
       );
       if (orbResult.isErr()) return err(orbResult.error);
       const row = orbResult.value.rows[0];
       if (row === undefined || row["state"] === "deleting") {
         return ok({ session: null, cursor: null, headId: null, records: [] });
+      }
+      if (row["harness"] === "claude" && atRecordId === undefined) {
+        // Metadata and records must share a statement snapshot, including concurrent commits/deletion.
+        const snapshotResult = await query(
+          `SELECT state, harness_session_header, replication_cursor, replicated_head_id,
+             (SELECT json_agg(record) FROM history_records WHERE orb_id = $1) AS records
+           FROM orbs WHERE id = $1`,
+          [orbId],
+        );
+        if (snapshotResult.isErr()) return err(snapshotResult.error);
+        const snapshot = snapshotResult.value.rows[0];
+        if (snapshot === undefined || snapshot["state"] === "deleting") {
+          return ok({ session: null, cursor: null, headId: null, records: [] });
+        }
+        const cursor =
+          snapshot["replication_cursor"] === null ? null : String(snapshot["replication_cursor"]);
+        const ordered =
+          cursor === null
+            ? ok<HistoryRecord[], StoreError>([])
+            : orderHistoryForPresentation((snapshot["records"] ?? []) as HistoryRecord[], cursor);
+        return ordered.map((records) => ({
+          session: (snapshot["harness_session_header"] ?? null) as HarnessSessionMetadata | null,
+          cursor,
+          headId:
+            snapshot["replicated_head_id"] === null ? null : String(snapshot["replicated_head_id"]),
+          records,
+        }));
       }
       const cursor = row["replication_cursor"] === null ? null : String(row["replication_cursor"]);
       // Follow the requested source or current cursor, oldest ancestor first.
