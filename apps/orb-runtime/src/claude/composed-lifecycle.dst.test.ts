@@ -390,6 +390,7 @@ it.each(["receipt", "uncertain", "child"] as const)(
               if (kind === "receipt") {
                 const queries: ScheduledClaudeQuery[] = [];
                 const replacement = new ClaudeOrbAgent({
+                  yieldMessage: async () => undefined,
                   orbId: "orb-a",
                   repositoryUrl: "https://example.com/repo",
                   workDir: f.dir,

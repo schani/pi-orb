@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
+import { setImmediate } from "node:timers/promises";
 import {
   type ModelInfo,
   type Options,
@@ -167,6 +168,8 @@ export interface ClaudeOrbAgentOptions {
   readonly claudeRecoveryProof?: ClaudeRecoveryProof | undefined;
   readonly testLaunchFailure?: boolean;
   readonly files?: HistoryFiles;
+  /** SDK iteration fairness; simulations supply a controlled scheduling boundary. */
+  readonly yieldMessage?: () => Promise<void>;
   /** Loopback OpenTelemetry receiver Claude Code exports model calls to. */
   readonly modelUsage?: Result<ModelUsageReceiver, ModelUsageReceiverError>;
   readonly sdkFactory?: (
@@ -1238,6 +1241,8 @@ export class ClaudeOrbAgent implements OrbAgent {
     const result = await ResultAsync.fromThrowable(
       async () => {
         for await (const message of sdk) {
+          await (this.options.yieldMessage ?? setImmediate)();
+          if (this.queryId !== queryId || this.sdk !== sdk) return;
           stage = "message_processing";
           const diagnostic =
             message.type === "result" && (message.is_error || message.subtype !== "success")
@@ -1285,6 +1290,7 @@ export class ClaudeOrbAgent implements OrbAgent {
           }),
         ),
     )();
+    if (this.queryId !== queryId || this.sdk !== sdk) return;
     if (
       result.isErr() &&
       this.compaction !== null &&
@@ -1725,10 +1731,12 @@ export class ClaudeOrbAgent implements OrbAgent {
         this.continuationObservation("decision", decision);
       }
     }
-    const flushed = this.flushHistory();
-    if (flushed.isErr()) {
-      this.fail("history_unavailable", flushed.error.message);
-      return;
+    if (message.type !== "stream_event") {
+      const flushed = this.flushHistory();
+      if (flushed.isErr()) {
+        this.fail("history_unavailable", flushed.error.message);
+        return;
+      }
     }
     if (this.activity.canDrain && this.closing === null) void this.drainOperation();
   }

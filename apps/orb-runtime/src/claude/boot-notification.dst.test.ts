@@ -17,6 +17,7 @@ it("a crash or abort after the durable boot claim cancels admission before the n
     });
     const queries: ScheduledClaudeQuery[] = [];
     const agent = new ClaudeOrbAgent({
+      yieldMessage: async () => undefined,
       orbId: "orb",
       repositoryUrl: "https://example.com/repo",
       workDir: f.dir,

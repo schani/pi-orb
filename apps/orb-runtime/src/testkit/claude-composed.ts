@@ -11,7 +11,12 @@ import type {
 import type { ServerFrame } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { ok } from "neverthrow";
-import { ClaudeOrbAgent, type ClaudeQuery, type NativeState } from "../claude/agent.ts";
+import {
+  ClaudeOrbAgent,
+  type ClaudeOrbAgentOptions,
+  type ClaudeQuery,
+  type NativeState,
+} from "../claude/agent.ts";
 import { ClaudeHistory, type HistoryFiles, nativeHistoryFiles } from "../claude/history.ts";
 
 function latch() {
@@ -57,6 +62,7 @@ export class ComposedClaudeFixture {
   readonly frames: ServerFrame[] = [];
   readonly queries: ScheduledClaudeQuery[] = [];
   readonly files = memoryHistoryFiles();
+  readonly historyIO = { reads: 0, syncs: 0 };
   readonly history: ClaudeHistory;
   readonly agent: ClaudeOrbAgent;
   failCommit = false;
@@ -64,7 +70,12 @@ export class ComposedClaudeFixture {
   failSync = false;
   private readonly queryWaiters: ((query: ScheduledClaudeQuery) => void)[] = [];
   readonly accountReady: Promise<void>;
-  constructor(accountReady: Promise<void> = Promise.resolve()) {
+  constructor(
+    accountReady: Promise<void> = Promise.resolve(),
+    scheduling: Pick<ClaudeOrbAgentOptions, "yieldMessage"> = {
+      yieldMessage: async () => undefined,
+    },
+  ) {
     this.accountReady = accountReady;
     mkdirSync(join(this.dir, "claude"));
     mkdirSync(this.nativeDir, { recursive: true });
@@ -74,17 +85,23 @@ export class ComposedClaudeFixture {
       this.state.timestamp,
       {
         ...this.files,
+        read: (path) => {
+          if (path === this.nativePath) this.historyIO.reads++;
+          return this.files.read(path);
+        },
         commit: (path, text) => {
           if (this.failCommit) throw new Error("injected history commit failure");
           this.files.commit(path, text);
         },
         sync: (path) => {
+          if (path === this.nativePath) this.historyIO.syncs++;
           if (this.failSync) throw new Error("injected native fsync failure");
           this.files.sync(path);
         },
       },
     );
     this.agent = new ClaudeOrbAgent({
+      ...scheduling,
       orbId: "orb-a",
       repositoryUrl: "https://example.com/repo",
       workDir: this.dir,

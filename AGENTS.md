@@ -58,6 +58,8 @@ No test may be flaky. A failure that does not reproduce on every run is evidence
 
 **PR 122 image-build exception (user-approved 2026-10-15):** explaining the historical 600s whole-image-build timeouts in Deploy run `38800758118` is not a merge/deployment requirement. Retained evidence cannot establish the stalled phase or cause; preserve it and claim no fix. This exception excludes the unrelated historical identity failure and all new failures. Exact-head qualification, assertions and DST replay/root-cause requirements remain unchanged. Evidence: `docs/postmortems/2026-10-15-runtime-dependency-qualification.md`.
 
+**PR 137 local-timeout exception (user-approved 2026-10-16):** explaining only the original local PostgreSQL MCP `beforeEach` 10s timeout and aggregate-image 30s timeout is not a merge/deployment requirement. Preserve evidence; no cause or fix is claimed. New failures, assertions, exact-head qualification and DST replay/root-cause requirements remain unchanged. Evidence: `docs/testing.md`.
+
 **Historical identity-cleanup exception (user-approved 2026-10-15):** Explaining Deploy `38596107385`’s cleanup cause is not a merge/deployment requirement; diagnostics remain deferred (`TODO.md`). Preserve first-failure evidence and the failed identity gate. New failures, exact-head gates, assertions and verified fixture cleanup remain mandatory. Evidence: `docs/postmortems/2026-10-14-identity-smoke-cleanup.md`.
 
 For a DST failure, replay the recorded trace from `test-failures/` (`DST_REPLAY=<trace> npx vitest run …`) before any fix, understand the interleaving, and only then decide whether the defect is in the product or in the scenario's assumptions. Never delete the trace to make the suite pass.
