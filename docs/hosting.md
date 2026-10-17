@@ -121,7 +121,7 @@ deletion removes every object `data` file; tests distinguish that byte namespace
 
 ## Serving and access
 
-**Implemented 2026-09-19; not deployed:** the single application accepts uploads with runtime incarnation bearers and serves private GET/HEAD using the files origin's own Google login and host-only sealed cookie. Only unauthenticated top-level file navigation initiates login; HEAD, API and asset requests fail with typed errors. The files host exposes hosted GET/HEAD and login/callback, never ordinary APIs or WebSockets. There is no shared-domain cookie, app-token handoff, signed public download or files logout UI; its fixed seven-day session expires independently of app logout. Authentication and exact-Origin checks: `docs/credentials.md`.
+**Implemented 2026-09-19; not deployed:** the single application accepts uploads with runtime incarnation bearers and serves private GET/HEAD using the files origin's own Google login and host-only sealed cookie. Only unauthenticated top-level file navigation initiates login; HEAD, API and asset requests fail with typed errors. The files host exposes hosted GET/HEAD and login/callback, never ordinary APIs or WebSockets. There is no shared-domain cookie, app-token handoff, signed public download or files logout UI; its session expires independently of app logout. Authentication and exact-Origin checks: `docs/credentials.md`.
 
 The GCS bucket remains private. Responses use `Cache-Control: private, no-cache` plus content-hash `ETag`; there is no public-sharing or CDN contract.
 A separate serving service would allow independent scaling and failure isolation with narrower

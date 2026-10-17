@@ -19,7 +19,7 @@ The initial 2026-09-15 assessment interpreted “customers” as unrelated, mutu
 
 ## Application identity (production validated 2026-10-06)
 
-`users` has a stable UUID, unique verified `(identity_issuer, identity_subject)` and nullable display email. Google login resolves the user before issuing a stateless seven-day sealed session. Email is presentation data, never identity or linking authority. No session table or per-request user lookup is required. Google company admission, cookies, logout's copied-cookie limitation and Origin-only CSRF are specified in `docs/credentials.md`.
+`users` has a stable UUID, unique verified `(identity_issuer, identity_subject)` and nullable display email. Google login resolves the user before issuing a stateless sealed session. Email is presentation data, never identity or linking authority. No session table or per-request user lookup is required. Google company admission, cookies, logout's copied-cookie limitation and Origin-only CSRF are specified in `docs/credentials.md`.
 
 Every protected application request receives one principal:
 
