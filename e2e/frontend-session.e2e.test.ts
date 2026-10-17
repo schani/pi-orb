@@ -4012,6 +4012,11 @@ describe("frontend-only browser behavior", () => {
       const ownedBrowser = engine === "webkit" ? await webkit.launch({ headless: true }) : browser;
       const page = await ownedBrowser.newPage();
       const fixture = await mockClaudeOwnerConnection(page);
+      let documentRequests = 0;
+      page.on("request", (request) => {
+        if (request.isNavigationRequest() && request.frame() === page.mainFrame())
+          documentRequests += 1;
+      });
       const barrier = () => {
         let resolve!: () => void;
         const promise = new Promise<void>((release) => {
@@ -4026,11 +4031,15 @@ describe("frontend-only browser behavior", () => {
         | { observed: ReturnType<typeof barrier>; release: ReturnType<typeof barrier> }
         | undefined;
       const openConnection = async () => {
-        await gotoFrontendFixture(
-          page,
-          `${origin}/`,
-          page.getByRole("button", { name: "Settings", exact: true }),
-        );
+        const before = documentRequests;
+        if (new URL(page.url()).pathname !== "/")
+          await page
+            .getByRole("navigation", { name: "All project orbs" })
+            .getByRole("link", { name: "pi-orb", exact: true })
+            .click();
+        await expectPage(page).toHaveURL(`${origin}/`);
+        await expectPage(page.getByRole("button", { name: "Settings", exact: true })).toBeVisible();
+        expectPage(documentRequests).toBe(before);
         await page.getByRole("button", { name: "Settings", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
         await dialog.getByRole("tab", { name: "Claude", exact: true }).click();
