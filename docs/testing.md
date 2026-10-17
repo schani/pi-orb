@@ -28,6 +28,8 @@ Earlier fixture failures and corrections remain evidenced: wrong root ID and mis
 
 ## Pi 1.3/native code-mode qualification (2026-10-16; local checkpoint)
 
+**Saved-value policy resolved (user-approved 2026-10-16, PDT):** `docs/open-questions.md`, question 81, now requires no legacy carryover/import; new native stores start without legacy keys. Existing legacy records and native stores remain untouched. This documentation-only decision needs no runtime or test change and does not qualify a new commit. Earlier checkpoints below retain their then-current Q81 holds as history; that policy hold is now removed. PR 140 remains Draft; no ready/merge/deploy is authorized. Completed history and task-recovery policy are unchanged.
+
 **Pre-upgrade baseline only:** `/tmp/pi-upgrade-logs/01-baseline-npm-ci.log` installed Pi 1.1.0, added 603 packages, audited 611 and reported zero vulnerabilities. `02-baseline-focused.log` passed 113 tests / 13 files. These receipts do not qualify Pi 1.3 or the native adapter.
 
 First RED evidence is retained under `/tmp/pi-upgrade-logs/`:
