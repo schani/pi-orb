@@ -1,5 +1,11 @@
 # Testing
 
+## Usage mock connection ownership (decision 2026-10-16)
+
+The Vite usage mock closes each HTTP/1 response: no idle API connection survives for the request context to reuse. The first successful fixture GET asserts `Connection: close`; existing browser assertions and deadlines remain unchanged. Remove the pooled resource rather than retrying a missed idle lease. Header-contract RED (`keep-alive`), then both original Chromium/WebKit cases GREEN; E2E typecheck and scoped lint pass.
+
+The controlled stale-lease reproduction does not identify the historical close owner or waive new failures. Evidence and qualification limits: `docs/postmortems/2026-10-16-usage-mock-idle-connection.md`.
+
 ## Smoke HTTP retries (2026-10-16; local, undeployed)
 
 `infra/smoke_http_test.py` scripts curl/auth results and time to cover transient recovery, typed terminal errors, replay safety, completed 404s, authentication/deadline bounds, Retry-After, exhaustion and token-safe diagnostics. Existing smoke contracts cover phase/cleanup wiring and failed-fixture retention. Tests-first red: `/tmp/pr138-minimal-red.log`; a missing deadline in the timeout test fixture was corrected (`/tmp/pr138-minimal-green.log`). After `npm ci`, infra passes 92 Node, 182 Python and 32 native-VM tests; typecheck, lint, shell/Python/embedded-JS syntax and artifact guard pass (`/tmp/pr138-minimal-{infra,typecheck,lint-final,syntax-artifact}.log`). Lint retains 306 warnings and 79 infos. No cloud smoke, deployment or historical root-cause fix is claimed.

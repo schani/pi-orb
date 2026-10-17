@@ -45,6 +45,7 @@ it.each(["chromium", "webkit"] as const)(
         origin + "/api/v1/usage?boundaries=" + encodeURIComponent(JSON.stringify([0, 900000])),
       );
       expect(fixtureUsage.status()).toBe(200);
+      expect(fixtureUsage.headers()["connection"]).toBe("close");
       expect(await fixtureUsage.json()).toMatchObject({
         boundaries: [0, 900000],
         summary: { calls: 0 },
