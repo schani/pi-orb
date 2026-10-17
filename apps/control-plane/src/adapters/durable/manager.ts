@@ -304,6 +304,7 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
                     storage: lease.storage,
                     ownershipSignal: lease.signal,
                     beginDrain: lease.beginDrain,
+                    checkInputAdmission: lease.checkInputAdmission,
                     checkAdmission: () =>
                       lease.check().andThen(() => options.checkAdmission?.() ?? okAsync(undefined)),
                     closeResources: () =>

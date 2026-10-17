@@ -26,7 +26,7 @@ function barrier() {
   return { promise, release };
 }
 
-async function fixture(unavailable = false, templates404 = false) {
+async function fixture(unavailable = false, templatesStatus?: 404 | 200) {
   const listed = barrier();
   const release = barrier();
   const calls: { method: string; token: string | undefined; static: string | undefined }[] = [];
@@ -108,12 +108,17 @@ async function fixture(unavailable = false, templates404 = false) {
       listed.release();
       await release.promise;
     }
-    if (templates404 && message.method === "resources/templates/list")
-      return void res.writeHead(404, { "content-type": "application/json" }).end(
+    // Session HTTP 404 expires the session; HTTP 200 carries the JSON-RPC method error.
+    if (templatesStatus && message.method === "resources/templates/list")
+      return void res.writeHead(templatesStatus, { "content-type": "application/json" }).end(
         JSON.stringify({
           jsonrpc: "2.0",
           id: message.id,
-          error: { code: -32601, message: "Method not found" },
+          error: {
+            code: -32601,
+            message: "Method not found",
+            ...(templatesStatus === 404 ? { data: "UPSTREAM_PRIVATE_ERROR" } : {}),
+          },
         }),
       );
     if (message.id === undefined) return void res.writeHead(202).end();
@@ -121,18 +126,18 @@ async function fixture(unavailable = false, templates404 = false) {
       message.method === "initialize"
         ? {
             protocolVersion: "2025-06-18",
-            capabilities: { tools: {}, ...(templates404 ? { resources: {} } : {}) },
+            capabilities: { tools: {}, ...(templatesStatus ? { resources: {} } : {}) },
             serverInfo: { name: "fixture", version: "1" },
           }
-        : templates404 && message.method === "resources/list"
+        : templatesStatus && message.method === "resources/list"
           ? { resources: [{ uri: "fixture://report", name: "report", mimeType: "text/plain" }] }
-          : templates404 && message.method === "resources/read"
+          : templatesStatus && message.method === "resources/read"
             ? {
                 contents: [
                   { uri: "fixture://report", mimeType: "text/plain", text: "fixture report" },
                 ],
               }
-            : templates404 && message.method === "tools/call"
+            : templatesStatus && message.method === "tools/call"
               ? { content: [{ type: "text", text: "echo works" }] }
               : { tools: [{ name: "echo", inputSchema: { type: "object", properties: {} } }] };
     res
@@ -205,7 +210,7 @@ it("first prompt waits for initial native discovery without blocking session rea
     await embedded.session.bindExtensions({});
     let prepared = false;
     const firstPrompt = embedded.session.extensionRunner
-      .emitBeforeAgentStart("hello", undefined, { cwd: process.cwd() })
+      .emitBeforeAgentStart({ messageType: "user", prompt: "hello" }, { cwd: process.cwd() })
       .then(() => {
         prepared = true;
       });
@@ -229,56 +234,133 @@ it("first prompt waits for initial native discovery without blocking session rea
   }
 });
 
-it("keeps native tools and resources available when optional templates return JSON-RPC -32601 over HTTP 404", async () => {
-  const upstream = await fixture(false, true);
-  upstream.release();
-  const events: OrbMcpState[] = [];
-  const embedded = await sessionFor(upstream.url, (event) => events.push(event));
-  try {
-    await embedded.session.bindExtensions({});
-    await embedded.session.extensionRunner.emitBeforeAgentStart("hello", undefined, {
-      cwd: process.cwd(),
-    });
-    expect(upstream.calls.map((call) => call.method)).toEqual(
-      expect.arrayContaining([
+it.each([404, 200] as const)(
+  "keeps native tools and resources available after an optional template query returns HTTP %i with JSON-RPC -32601",
+  async (templatesStatus) => {
+    const upstream = await fixture(false, templatesStatus);
+    upstream.release();
+    const events: OrbMcpState[] = [];
+    const embedded = await sessionFor(upstream.url, (event) => events.push(event));
+    try {
+      await embedded.session.bindExtensions({});
+      await embedded.session.extensionRunner.emitBeforeAgentStart(
+        { messageType: "user", prompt: "hello" },
+        { cwd: process.cwd() },
+      );
+      const methods = () => upstream.calls.map((call) => call.method);
+      expect(methods()).toEqual(expect.arrayContaining(["initialize", "tools/list"]));
+      expect(methods()).not.toContain("resources/list");
+      expect(methods()).not.toContain("resources/templates/list");
+      const tool = embedded.session.extensionRunner.getToolDefinition("mcp__fixture__echo");
+      const list = embedded.session.extensionRunner.getToolDefinition("list_mcp_resources");
+      const templates = embedded.session.extensionRunner.getToolDefinition(
+        "list_mcp_resource_templates",
+      );
+      const read = embedded.session.extensionRunner.getToolDefinition("read_mcp_resource");
+      expect(tool).toBeDefined();
+      expect(list).toBeDefined();
+      expect(templates).toBeDefined();
+      expect(read).toBeDefined();
+      const signal = new AbortController().signal;
+      const execute = (definition: typeof tool, params: Record<string, string>) =>
+        definition?.execute("call", params, signal, undefined, undefined as never);
+      // Pi 1.2+ lists resources lazily; query the optional method explicitly.
+      const [templateResult] = await Promise.allSettled([
+        execute(templates, { server: "fixture" }),
+      ]);
+      const trace = () => JSON.stringify(methods().slice(-32));
+      const discovery = ["initialize", "tools/list", "resources/templates/list"];
+      expect(
+        methods().filter((method) => discovery.includes(method)),
+        trace(),
+      ).toEqual(templatesStatus === 404 ? [...discovery, ...discovery] : discovery);
+      if (templatesStatus === 404) {
+        expect(templateResult, trace()).toMatchObject({
+          status: "rejected",
+          reason: {
+            name: "McpSessionExpiredError",
+            status: 404,
+            message: "MCP session expired",
+            body: "MCP upstream request failed",
+          },
+        });
+        if (templateResult.status === "rejected") {
+          expect(String(templateResult.reason)).not.toContain("UPSTREAM_PRIVATE_ERROR");
+          expect(JSON.stringify(templateResult.reason)).not.toContain("UPSTREAM_PRIVATE_ERROR");
+        }
+      } else {
+        expect(templateResult, trace()).toMatchObject({
+          status: "fulfilled",
+          value: { structuredContent: { server: "fixture", resourceTemplates: [] } },
+        });
+      }
+      expect((await execute(tool, {}))?.content).toEqual([{ type: "text", text: "echo works" }]);
+      expect((await execute(list, { server: "fixture" }))?.structuredContent).toEqual({
+        server: "fixture",
+        resources: [
+          { server: "fixture", uri: "fixture://report", name: "report", mimeType: "text/plain" },
+        ],
+      });
+      expect(
+        (await execute(read, { server: "fixture", uri: "fixture://report" }))?.structuredContent,
+      ).toEqual({
+        server: "fixture",
+        uri: "fixture://report",
+        contents: [{ uri: "fixture://report", mimeType: "text/plain", text: "fixture report" }],
+      });
+      expect(methods()).toEqual(
+        expect.arrayContaining([
+          "resources/templates/list",
+          "tools/call",
+          "resources/list",
+          "resources/read",
+        ]),
+      );
+      const afterCalls = methods();
+      const definitions = [tool, list, templates, read].map((original) => {
+        if (!original) return expect.fail("Initial MCP definition missing");
+        const current = embedded.session.extensionRunner.getToolDefinition(original.name);
+        if (!current) return expect.fail(`MCP definition missing after calls: ${original.name}`);
+        expect(current.name).toBe(original.name);
+        expect(current.parameters).toEqual(original.parameters);
+        expect(current.description).toBe(original.description);
+        if (templatesStatus === 200) expect(current).toBe(original);
+        return current;
+      });
+      for (const prompt of ["next turn", "another turn"]) {
+        await embedded.session.extensionRunner.emitBeforeAgentStart(
+          { messageType: "user", prompt },
+          { cwd: process.cwd() },
+        );
+        expect(events).toEqual([]);
+        for (const definition of definitions) {
+          expect(embedded.session.extensionRunner.getToolDefinition(definition.name)).toBe(
+            definition,
+          );
+        }
+        expect(methods(), trace()).toEqual(afterCalls);
+      }
+      for (const method of [
         "initialize",
         "tools/list",
-        "resources/list",
         "resources/templates/list",
-      ]),
-    );
-    const tool = embedded.session.extensionRunner.getToolDefinition("mcp__fixture__echo");
-    const list = embedded.session.extensionRunner.getToolDefinition("list_mcp_resources");
-    const read = embedded.session.extensionRunner.getToolDefinition("read_mcp_resource");
-    expect(tool).toBeDefined();
-    expect(list).toBeDefined();
-    expect(read).toBeDefined();
-    const signal = new AbortController().signal;
-    const execute = (definition: typeof tool, params: Record<string, string>) =>
-      definition?.execute("call", params, signal, undefined, undefined as never);
-    expect((await execute(tool, {}))?.content).toEqual([{ type: "text", text: "echo works" }]);
-    expect((await execute(list, { server: "fixture" }))?.structuredContent).toEqual({
-      server: "fixture",
-      resources: [
-        { server: "fixture", uri: "fixture://report", name: "report", mimeType: "text/plain" },
-      ],
-    });
-    expect(
-      (await execute(read, { server: "fixture", uri: "fixture://report" }))?.structuredContent,
-    ).toEqual({
-      server: "fixture",
-      uri: "fixture://report",
-      contents: [{ uri: "fixture://report", mimeType: "text/plain", text: "fixture report" }],
-    });
-    expect(upstream.calls.map((call) => call.method)).toEqual(
-      expect.arrayContaining(["tools/call", "resources/read"]),
-    );
-    expect(events).toEqual([]);
-  } finally {
-    await embedded.close();
-    await upstream.close();
-  }
-});
+        "tools/call",
+        "resources/list",
+        "resources/read",
+      ]) {
+        const expected = templatesStatus === 404 && discovery.includes(method) ? 2 : 1;
+        expect(
+          methods().filter((called) => called === method),
+          `${method}: ${trace()}`,
+        ).toHaveLength(expected);
+      }
+      expect(JSON.stringify(events)).not.toContain("UPSTREAM_PRIVATE_ERROR");
+    } finally {
+      await embedded.close();
+      await upstream.close();
+    }
+  },
+);
 
 it("shutdown fences a late native startup before tool registration", async () => {
   const upstream = await fixture();
@@ -338,9 +420,12 @@ it("same-SDK native retry bounds auth, reinitializes session 404, and never repl
   );
   try {
     await embedded.session.bindExtensions({});
-    await embedded.session.extensionRunner.emitBeforeAgentStart("hello", undefined, {
-      cwd: process.cwd(),
-    });
+    await embedded.session.extensionRunner.emitBeforeAgentStart(
+      { messageType: "user", prompt: "hello" },
+      {
+        cwd: process.cwd(),
+      },
+    );
     const tool = embedded.session.extensionRunner.getToolDefinition("mcp__fixture__echo");
     expect(tool).toBeDefined();
     const call = () =>
@@ -442,9 +527,12 @@ it("production broker endpoint vends per-request OAuth tokens without guest auth
   );
   try {
     await embedded.session.bindExtensions({});
-    await embedded.session.extensionRunner.emitBeforeAgentStart("hello", undefined, {
-      cwd: process.cwd(),
-    });
+    await embedded.session.extensionRunner.emitBeforeAgentStart(
+      { messageType: "user", prompt: "hello" },
+      {
+        cwd: process.cwd(),
+      },
+    );
     const tool = embedded.session.extensionRunner.getToolDefinition("mcp__fixture__echo");
     expect(tool).toBeDefined();
     upstream.state.rejectOnce = 401;
@@ -500,9 +588,12 @@ it("invalid approved static binding reports a safe named failure without network
   );
   try {
     await embedded.session.bindExtensions({});
-    await embedded.session.extensionRunner.emitBeforeAgentStart("hello", undefined, {
-      cwd: process.cwd(),
-    });
+    await embedded.session.extensionRunner.emitBeforeAgentStart(
+      { messageType: "user", prompt: "hello" },
+      {
+        cwd: process.cwd(),
+      },
+    );
     expect(events).toEqual([
       {
         server: "fixture",
@@ -528,12 +619,18 @@ it("two session factories attribute startup failure to their own Pi sessions", a
   try {
     await first.session.bindExtensions({});
     await second.session.bindExtensions({});
-    await first.session.extensionRunner.emitBeforeAgentStart("hello", undefined, {
-      cwd: process.cwd(),
-    });
-    await second.session.extensionRunner.emitBeforeAgentStart("hello", undefined, {
-      cwd: process.cwd(),
-    });
+    await first.session.extensionRunner.emitBeforeAgentStart(
+      { messageType: "user", prompt: "hello" },
+      {
+        cwd: process.cwd(),
+      },
+    );
+    await second.session.extensionRunner.emitBeforeAgentStart(
+      { messageType: "user", prompt: "hello" },
+      {
+        cwd: process.cwd(),
+      },
+    );
     expect(first.session.sessionManager.getSessionId()).not.toBe(
       second.session.sessionManager.getSessionId(),
     );
@@ -595,9 +692,12 @@ it("broker auth_required on startup reports needs-auth with its Pi session", asy
   );
   try {
     await embedded.session.bindExtensions({});
-    await embedded.session.extensionRunner.emitBeforeAgentStart("hello", undefined, {
-      cwd: process.cwd(),
-    });
+    await embedded.session.extensionRunner.emitBeforeAgentStart(
+      { messageType: "user", prompt: "hello" },
+      {
+        cwd: process.cwd(),
+      },
+    );
     expect(events).toEqual([
       {
         server: "fixture",
@@ -617,7 +717,7 @@ it("broker auth_required on startup reports needs-auth with its Pi session", asy
 });
 
 it("recovers broker-denied native tools and resources on the next ordinary turn without replaying calls", async () => {
-  const upstream = await fixture(false, true);
+  const upstream = await fixture(false, 404);
   upstream.release();
   let granted = false;
   let brokerRequests = 0;
@@ -663,9 +763,12 @@ it("recovers broker-denied native tools and resources on the next ordinary turn 
   try {
     await embedded.session.bindExtensions({});
     const turn = () =>
-      embedded.session.extensionRunner.emitBeforeAgentStart("ordinary user turn", undefined, {
-        cwd: embedded.dir,
-      });
+      embedded.session.extensionRunner.emitBeforeAgentStart(
+        { messageType: "user", prompt: "ordinary user turn" },
+        {
+          cwd: embedded.dir,
+        },
+      );
     await turn();
     expect(brokerRequests).toBe(1);
     expect(upstream.calls).toEqual([]);
@@ -744,9 +847,12 @@ it("recovers on the first prompt when startup failed before any prompt", async (
     await embedded.session.bindExtensions({});
     await denied.promise;
     granted = true;
-    await embedded.session.extensionRunner.emitBeforeAgentStart("first user prompt", undefined, {
-      cwd: embedded.dir,
-    });
+    await embedded.session.extensionRunner.emitBeforeAgentStart(
+      { messageType: "user", prompt: "first user prompt" },
+      {
+        cwd: embedded.dir,
+      },
+    );
     expect(requests).toBe(2);
     expect(embedded.session.extensionRunner.getToolDefinition("mcp__fixture__echo")).toBeDefined();
   } finally {
@@ -757,7 +863,7 @@ it("recovers on the first prompt when startup failed before any prompt", async (
 });
 
 it("coalesces concurrent recovery and fences late broker grant after shutdown", async () => {
-  const upstream = await fixture(false, true);
+  const upstream = await fixture(false, 404);
   upstream.release();
   const requested = barrier();
   const released = barrier();
@@ -809,9 +915,12 @@ it("coalesces concurrent recovery and fences late broker grant after shutdown", 
   try {
     await embedded.session.bindExtensions({});
     const turn = () =>
-      embedded.session.extensionRunner.emitBeforeAgentStart("coding", undefined, {
-        cwd: embedded.dir,
-      });
+      embedded.session.extensionRunner.emitBeforeAgentStart(
+        { messageType: "user", prompt: "coding" },
+        {
+          cwd: embedded.dir,
+        },
+      );
     await turn();
     expect(events.map((event) => event.state)).toEqual(["needs-auth"]);
     const first = turn();
@@ -861,9 +970,12 @@ it("does not retry failed static bindings on later turns", async () => {
   try {
     await embedded.session.bindExtensions({});
     const turn = () =>
-      embedded.session.extensionRunner.emitBeforeAgentStart("coding", undefined, {
-        cwd: embedded.dir,
-      });
+      embedded.session.extensionRunner.emitBeforeAgentStart(
+        { messageType: "user", prompt: "coding" },
+        {
+          cwd: embedded.dir,
+        },
+      );
     await turn();
     await turn();
     expect(events.map((event) => event.state)).toEqual(["failed"]);
@@ -917,9 +1029,12 @@ it("persistent startup 401 after native bounded retry reports needs-auth", async
   );
   try {
     await embedded.session.bindExtensions({});
-    await embedded.session.extensionRunner.emitBeforeAgentStart("hello", undefined, {
-      cwd: process.cwd(),
-    });
+    await embedded.session.extensionRunner.emitBeforeAgentStart(
+      { messageType: "user", prompt: "hello" },
+      {
+        cwd: process.cwd(),
+      },
+    );
     expect(upstream.calls.filter((call) => call.method === "initialize")).toHaveLength(2);
     expect(events).toEqual([
       {
@@ -944,9 +1059,12 @@ it("unavailable server does not fail coding readiness and yields a named failure
   const embedded = await sessionFor(upstream.url, (event) => events.push(event));
   try {
     await embedded.session.bindExtensions({});
-    await embedded.session.extensionRunner.emitBeforeAgentStart("hello", undefined, {
-      cwd: process.cwd(),
-    });
+    await embedded.session.extensionRunner.emitBeforeAgentStart(
+      { messageType: "user", prompt: "hello" },
+      {
+        cwd: process.cwd(),
+      },
+    );
     expect(events).toEqual([
       {
         server: "fixture",

@@ -75,6 +75,52 @@ it("surfaces scoped summary failure instead of waiting for impossible fixture pr
   ).toBe("failed");
 });
 
+it("keeps exact nested execution and outer browser identities for the single bash callback", () => {
+  const orb = "b9c685e8-519d-483e-83ee-eff7e6f4163a";
+  const operationId = `conversation:${orb}:submission:37`;
+  const callId = "call_16|ctc_15";
+  const executionCallId = `${callId}/c1`;
+  for (const event of [
+    "execution.tool_waiting",
+    "execution.tool_ready",
+    "execution.tool_wait_finished",
+  ]) {
+    const fields: Record<string, string> = { call_id: executionCallId };
+    if (event === "execution.tool_wait_finished") fields["outcome"] = "cancelled";
+    const logs = [
+      `lifecycle: orb=${orb} ${event} task_id=44 call_id="${executionCallId}"` +
+        (fields["outcome"] ? " outcome=cancelled\n" : "\n"),
+    ];
+    expect(lifecycleEdge(logs, orb, event, fields)).toMatchObject(fields);
+    for (const wrongCallId of [callId, "call_other/c1", `${callId}/c2`]) {
+      expect(lifecycleEdge(logs, orb, event, { ...fields, call_id: wrongCallId })).toBeUndefined();
+    }
+    expect(lifecycleEdge(logs, "other", event, fields)).toBeUndefined();
+    if (fields["outcome"]) {
+      expect(lifecycleEdge(logs, orb, event, { ...fields, outcome: "failed" })).toBeUndefined();
+    }
+  }
+  const event = {
+    type: "tool_state",
+    operationId,
+    callId,
+    name: "codemode",
+    state: "running",
+    message: "Waiting for execution.",
+  };
+  const frames = [
+    { direction: "received", payload: JSON.stringify({ type: "runtime.event", event }) },
+  ];
+  const fields = { callId, name: "codemode", state: "running", message: event.message };
+  expect(operationEvent(frames, operationId, "tool_state", fields)).toEqual(event);
+  for (const wrongCallId of [executionCallId, "call_other", `${callId}/c2`]) {
+    expect(
+      operationEvent(frames, operationId, "tool_state", { ...fields, callId: wrongCallId }),
+    ).toBeUndefined();
+  }
+  expect(operationEvent(frames, "other", "tool_state", fields)).toBeUndefined();
+});
+
 it("requires model tool publication and waiting for the same operation/call", () => {
   const event = {
     type: "tool_state",

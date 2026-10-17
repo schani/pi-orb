@@ -6,7 +6,7 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { SimulationTask } from "determined";
 import { ResultAsync } from "neverthrow";
 import { type AuthorizeTool, CallableCatalog, type ToolError } from "./catalog.ts";
-import { codemodeTool } from "./codemode.ts";
+import { codemodeExtension } from "./codemode.ts";
 import type { AgentToolFiles } from "./files.ts";
 import { type McpEndpoint, McpTools } from "./mcp.ts";
 
@@ -41,6 +41,23 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
     ],
     options.authorize,
   );
+  for (const name of [
+    "write",
+    "edit",
+    "mcp_status",
+    ...subagentTools.map((tool) => tool.name),
+    "orb_self",
+    "orb_list",
+    "orb_transcript",
+    "orb_spawn",
+    "orb_send",
+    "orb_alert",
+    "orb_sleep",
+    "orb_archive",
+    "orb_delete",
+  ]) {
+    catalog.metadata(name, { ...catalog.metadata(name), outputSchema: { type: "string" } });
+  }
   catalog.metadata("bash", {
     outputSchema: {
       type: "object",
@@ -78,16 +95,20 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
   catalog.add(mcp.statusTool());
   const child = catalog.without([...subagentTools.map((tool) => tool.name), "orb_spawn"]);
   const extensions = () => {
-    const code = codemodeTool(catalog, running, options.files, options.orb);
+    const native = codemodeExtension(catalog, running, options.files, options.orb);
+    const childNative = codemodeExtension(child, running, options.files, options.orb);
+    const code = native.tools![0]!;
     return {
       extension: defineExtension({
+        ...native,
         name: TOOLS_EXTENSION,
         tools: [...catalog.registrations(), code],
         tasks: [ChildAnchor],
       }),
       childExtension: defineExtension({
+        ...childNative,
         name: CHILD_TOOLS_EXTENSION,
-        tools: [codemodeTool(child, running, options.files, options.orb)],
+        tools: [...child.registrations(), ...childNative.tools!],
       }),
       modelTools: [code] as const,
     };
@@ -105,9 +126,7 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
         }),
     close: (): ResultAsync<void, ToolError> =>
       ResultAsync.fromPromise(
-        Promise.all([...running].map((s) => s.close())).then(() => {
-          running.clear();
-        }),
+        Promise.all([...running].map((s) => s.close())).then(() => undefined),
         () => ({ code: "unavailable" as const, message: "Sandbox cleanup failed" }),
       ).andThen(() => mcp.close()),
   };

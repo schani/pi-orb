@@ -1,503 +1,344 @@
-import type { JsonValue } from "@earendil-works/chord";
-import { withAbortSignal } from "@earendil-works/chord/context";
-import { Type, type Usage } from "@earendil-works/pi-ai";
+import { type Context, copyJson } from "@earendil-works/chord";
+import { CodemodeSandbox, parseCodemodeSource } from "@earendil-works/pi-codemode";
 import {
-  type CodemodeError,
-  CodemodeSandbox,
-  type CodemodeTool,
-  parseCodemodeSource,
-} from "@earendil-works/pi-codemode";
-import { CODEMODE_SOURCE_GRAMMAR } from "@earendil-works/pi-codemode/source";
-import {
-  defineDoc,
   defineTool,
+  type Extension,
+  type JsonObject,
+  LiveDoc,
   type ToolExecutionApi,
   type ToolExecutionResult,
 } from "@earendil-works/pi-durable";
+import {
+  CodemodeJournalDoc,
+  CodemodeRunDoc,
+  createCodemodeExtension,
+  createCodemodeTool,
+} from "@earendil-works/pi-durable/codemode";
+import { type ExecutionEnv, FileError } from "@earendil-works/pi-durable/env";
 import { CHART_MAX_PER_SCRIPT, type ChartSpec, parseChartSpec } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { err, Result, ResultAsync } from "neverthrow";
-import { logOrbEvent } from "../../../domain/log.ts";
-import {
-  CALLBACK_LIMIT_MESSAGE,
-  MAX_CALLBACK_CONCURRENCY,
-  MAX_CALLBACK_REPLY_BYTES,
-  OUTPUT_LIMIT_MESSAGE,
-} from "./callback-limits.js";
+import { Result, ResultAsync } from "neverthrow";
+import { CALLBACK_LIMIT_MESSAGE } from "./callback-limits.js";
 import { type CallableCatalog, errorResult } from "./catalog.ts";
-import { codeModeMemory } from "./codemode-memory.ts";
-import { codeModeCpuBudget } from "./cpu-budget.js";
+import { PiCodemodeSandbox } from "./codemode-sandbox.ts";
 import type { AgentToolFiles } from "./files.ts";
-import { createCodemodeDescription, DEFAULT_CODEMODE_INLINE_BUDGET } from "./vendor/description.ts";
-import { createDiscoveryGlobals } from "./vendor/discovery.ts";
-import {
-  DEFAULT_MAX_OUTPUT_TOKENS,
-  formatError,
-  type NestedCall,
-  valueText,
-} from "./vendor/output.ts";
-import { truncateOutput } from "./vendor/output-budget.ts";
-import { combineUsage } from "./vendor/usage.ts";
 
-const CodemodeStore = defineDoc<Record<string, JsonValue>>({
-  kind: "orb.codemode-store",
-  version: 1,
-  scope: "conversation",
-  history: "latest",
-  fork: "initial",
-  initial: () => ({}),
-});
-const MEMORY_LIMIT_BYTES = 256 * 1024 * 1024;
-const MAX_CAPTURE = 1024 * 1024;
-function textOf(result: ToolExecutionResult) {
-  return (result.content ?? [])
-    .filter((b) => b.type === "text")
-    .map((b) => b.text)
-    .join("\n");
+const POLICY =
+  "\nOnly codemode is offered to the model. Do not redeclare tools or other injected globals. Tool calls and discovery share an 8-outstanding limit; each script allows 256 callbacks, 8 MiB serialized arguments and 64 MiB serialized replies. Exceeding a resource limit cancels the script without saving store writes. The default deadline is five minutes; timeout_ms overrides it. Batch independent calls with Promise.allSettled in batches of at most 8. Native nested calls retain their own replay policy; failed scripts do not undo effects. Images must use image(), not text(). await chart(spec) shows the user a separate chart row; its data is not returned to the model. spec is {kind:'line',title,unit?,source?,series:[{name,points:[[time,value|null]]}],markers?:[{at:time,label}],thresholds?:[{value,label}]} (ISO or epoch-ms time, at most 6 series/5000 points) or {kind:'bar',title,unit?,source?,bars:[{label,value}]}. source is an http(s) origin link. At most 8 charts per script.";
+
+function object(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-function appendBounded(current: string, chunk: string) {
-  const combined = current + chunk;
-  if (Buffer.byteLength(combined) <= MAX_CAPTURE) return combined;
-  const bytes = Buffer.from(combined);
-  const marker = "\n…output omitted…\n";
-  const half = Math.floor((MAX_CAPTURE - Buffer.byteLength(marker)) / 2);
-  let headEnd = half;
-  let tailStart = bytes.length - half;
-  while ((bytes[headEnd]! & 0xc0) === 0x80) headEnd--;
-  while ((bytes[tailStart]! & 0xc0) === 0x80) tailStart++;
-  return bytes.toString("utf8", 0, headEnd) + marker + bytes.toString("utf8", tailStart);
+function argumentKeys(args: unknown): string {
+  return JSON.stringify(
+    object(args) || Array.isArray(args) ? Object.keys(args).slice(0, 16) : typeof args,
+  ).slice(0, 256);
 }
-function resourceFailure(error: CodemodeError) {
-  if (error.message === OUTPUT_LIMIT_MESSAGE) return "output_limit";
-  if (error.kind === "script")
-    return error.name === "InternalError" && error.message === "out of memory"
-      ? "out_of_memory"
-      : undefined;
-  if (error.kind !== "sandbox") return undefined;
-  return error.message.includes("out of memory") ? "out_of_memory" : "sandbox_exit";
+function chartEntries(entries: unknown): ChartSpec[] {
+  if (!Array.isArray(entries)) return [];
+  return entries.flatMap((entry: unknown) => {
+    if (
+      !object(entry) ||
+      !object(entry.global) ||
+      entry.global.name !== "chart" ||
+      !object(entry.global.outcome) ||
+      entry.global.outcome.ok !== true
+    )
+      return [];
+    const parsed = parseChartSpec(entry.global.args);
+    return parsed.isOk() ? [parsed.value] : [];
+  });
 }
 
+/** Native journal/scheduler; this adapter only decorates policy and presentation. */
 export function codemodeTool(
   catalog: CallableCatalog,
   running: Set<CodemodeSandbox>,
   files: AgentToolFiles = {},
   orb?: { id: string; task: SimulationTask },
 ) {
+  const options = {
+    sandbox: new PiCodemodeSandbox(),
+    models: false,
+    get namespaces() {
+      return catalog.nativeNamespaces();
+    },
+  };
+  const native = createCodemodeTool(options);
   return defineTool({
-    name: "codemode",
+    ...native,
     description:
-      createCodemodeDescription(catalog.policyTools(), {
-        inlineBudget: DEFAULT_CODEMODE_INLINE_BUDGET,
-        namespaces: new Map(
-          catalog.definitions().flatMap((t) => {
-            const ns = catalog.metadata(t.name).namespace;
-            return ns ? [[t.name, ns] as const] : [];
-          }),
-        ),
-        deferred: new Set(
-          catalog
-            .definitions()
-            .filter((t) => catalog.metadata(t.name).deferred)
-            .map((t) => t.name),
-        ),
-      }) +
-      catalog
-        .namespaceValues()
-        .map(
-          (ns) =>
-            `\nNamespace ${ns.name}: discover with describeNamespace(${JSON.stringify(ns.name)}).${ns.description ? ` ${ns.description}` : ""}${ns.instructions ? `\n${ns.instructions}` : ""}`,
-        )
-        .join("") +
-      "\nDo not redeclare tools or other injected globals. Only script output reaches the model. The default deadline is five minutes; timeout_ms overrides it. Batch independent calls with Promise.allSettled in batches of at most 8: tool calls and host discovery globals share the 8-outstanding limit. Each execution allows 256 total callbacks, 8 MiB serialized arguments, and 64 MiB serialized replies; exceeding a limit cancels the script and callbacks without saving store writes. Chain calls or filter results. Failed scripts do not undo earlier effects; nested operations are not independently replayed. Successful store writes persist per conversation. Images must use image(), not text(). `await chart(spec)` shows the user a chart as its own transcript row; its data never reaches you and styling is automatic. spec is {kind:'line', title, unit?, source?, series:[{name, points:[[time, value|null]]}], markers?:[{at:time, label}], thresholds?:[{value, label}]} (time: ISO string or epoch ms; at most 6 series and 5000 points) or {kind:'bar', title, unit?, source?, bars:[{label, value}]}. source is an http(s) link to the origin, e.g. the Datadog query. At most 8 charts per script.",
-    parameters: Type.Object({ code: Type.String() }, { additionalProperties: false }),
-    constrainedSampling: { type: "grammar", variants: { openai_lark: CODEMODE_SOURCE_GRAMMAR } },
-    replay: "unsafe",
-    execute: async (args, api, ctx) => {
-      const started = performance.now();
+      native.description.replace(
+        "`image()` also saves the image to a temp file and the result names its path.",
+        "Images are returned inline.",
+      ) + POLICY,
+    execute: async (args, api, context) => {
       const parsed = Result.fromThrowable(
         () => parseCodemodeSource(args.code),
-        (e) => ({
-          code: "invalid_arguments" as const,
-          message: e instanceof Error ? e.message : "Invalid source options",
-        }),
+        () => ({ code: "invalid_arguments" as const, message: "Invalid code-mode source options" }),
       )();
       if (parsed.isErr()) return errorResult(parsed.error);
-      const store = await ResultAsync.fromPromise(
-        api.commit(
-          async (tx) =>
-            JSON.parse(JSON.stringify(await tx.doc(CodemodeStore, api.conversationId))) as Record<
-              string,
-              JsonValue
-            >,
-          ctx,
-        ),
-        () => ({ code: "unavailable" as const, message: "Sandbox store read failed" }),
-      );
-      if (store.isErr()) return errorResult(store.error);
-      const calls: NestedCall[] = [];
-      const callbackAbort = new AbortController();
-      const executionSignal = ctx.abortSignal
-        ? AbortSignal.any([ctx.abortSignal, callbackAbort.signal])
-        : callbackAbort.signal;
-      let callbackLimit = false;
-      let activeCallbacks = 0;
-      let replyBytes = 0;
-      const limitCallbacks = () => {
-        callbackLimit = true;
-        callbackAbort.abort(new Error(CALLBACK_LIMIT_MESSAGE));
+      // Record the default deadline too, so a restart cannot extend it.
+      const source =
+        parsed.value.options.timeoutMs === undefined
+          ? `// @options: ${JSON.stringify({ timeout_ms: 300_000, ...(parsed.value.options.maxOutputTokens === undefined ? {} : { max_output_tokens: parsed.value.options.maxOutputTokens }) })}\n${parsed.value.code}`
+          : args.code;
+      const sandbox = new PiCodemodeSandbox({
+        running,
+        ...(orb ? { orb } : {}),
+        execution: { conversationId: String(api.conversationId), callId: api.callId },
+      });
+      const previews = new Map<number, { args: string; argumentKeys: string[] }>();
+      const paths = new Map<string, string>();
+      const directory = `/orb-artifacts/codemode-${api.taskId}`;
+      let charts: ChartSpec[] = [];
+      let chartCount = 0;
+      const replacePaths = (text: string) => {
+        for (const [path, replacement] of paths) text = text.replaceAll(path, replacement);
+        return text;
       };
-      const guardCallback = (tool: CodemodeTool): CodemodeTool => ({
-        ...tool,
-        execute: async (value, options) => {
-          if (executionSignal.aborted) return undefined;
-          if (activeCallbacks >= MAX_CALLBACK_CONCURRENCY) {
-            limitCallbacks();
-            return undefined;
-          }
-          activeCallbacks++;
-          try {
-            const called = await ResultAsync.fromPromise(
-              Promise.resolve().then(() => tool.execute(value, options)),
-              (error) => (error instanceof Error ? error.message : "Callback failed"),
-            );
-            if (executionSignal.aborted || options.signal.aborted) return undefined;
-            const serialized = called.isOk()
-              ? Result.fromThrowable(
-                  () => JSON.stringify(called.value),
-                  () => "Callback result serialization failed",
-                )()
-              : err<string | undefined, string>(called.error);
-            const payload = serialized.isOk() ? serialized.value : serialized.error;
-            replyBytes += Buffer.byteLength(payload ?? "", "utf8");
-            if (replyBytes > MAX_CALLBACK_REPLY_BYTES) {
-              limitCallbacks();
-              return undefined;
-            }
-            if (serialized.isErr()) {
-              // biome-ignore lint/plugin/no-throw: public QuickJS callback rejection contract
-              throw new Error(serialized.error);
-            }
-            // Snapshot the bounded JSON so upstream serialization cannot invoke getters again.
-            return payload === undefined ? undefined : JSON.parse(payload);
-          } finally {
-            activeCallbacks--;
-          }
+      const project = (value: ToolExecutionResult): ToolExecutionResult => {
+        const details = object(value.details) ? value.details : {};
+        const allCalls = Array.isArray(details.calls) ? details.calls.filter(object) : [];
+        const calls = allCalls.slice(-64).map((call) => ({
+          ...call,
+          ...(typeof call.id === "number" && previews.has(call.id) ? previews.get(call.id)! : {}),
+        }));
+        return {
+          ...value,
+          output: (value.output ?? []).map((item) =>
+            item.type !== "text"
+              ? item
+              : {
+                  ...item,
+                  text: item.text.startsWith("The script took a different path")
+                    ? "The script cannot resume: its call history changed."
+                    : replacePaths(item.text),
+                },
+          ),
+          details: {
+            ...details,
+            calls,
+            omittedCalls:
+              (typeof details.omittedCalls === "number" ? details.omittedCalls : 0) +
+              Math.max(0, allCalls.length - 64),
+            executionWait: false,
+            ...(typeof details.fullOutputPath === "string"
+              ? { fullOutputPath: replacePaths(details.fullOutputPath) }
+              : {}),
+            ...(charts.length ? { charts: copyJson(charts) } : {}),
+          },
+        };
+      };
+      const present = (value: ToolExecutionResult): ToolExecutionResult => {
+        const resources = sandbox.snapshot();
+        let result = project(value);
+        const cached = object(result.details) && "cpu" in result.details;
+        if (!cached)
+          result = {
+            ...result,
+            details: {
+              ...(object(result.details) ? result.details : {}),
+              cpu: resources.cpu,
+              memory: resources.memory,
+            },
+          };
+        const diagnostics = [...(result.diagnostics ?? [])];
+        if (resources.callbackLimit && !diagnostics.some((item) => item.code === "resource_limit"))
+          diagnostics.push({
+            severity: "error",
+            code: "resource_limit",
+            message: CALLBACK_LIMIT_MESSAGE,
+          });
+        const spilled = object(result.details) && typeof result.details.fullOutputPath === "string";
+        if (
+          !diagnostics.some((item) => item.code === "codemode_output_truncated") &&
+          (spilled ||
+            result.output?.some(
+              (item) => item.type === "text" && item.text.includes("Warning: truncated output"),
+            ))
+        )
+          diagnostics.push({
+            severity: spilled ? "info" : "warn",
+            code: "codemode_output_truncated",
+            message: spilled
+              ? "Code-mode output spilled to a private artifact."
+              : "Code-mode output truncated; artifact storage unavailable.",
+          });
+        if (resources.cpu.throttledMs >= 100 && !cached)
+          result = {
+            ...result,
+            output: (result.output ?? []).map((item, index) =>
+              index === 0 && item.type === "text"
+                ? {
+                    ...item,
+                    text: item.text.replace(
+                      "\nOutput:",
+                      `\nCPU budget wait ${(resources.cpu.throttledMs / 1000).toFixed(1)} seconds\nOutput:`,
+                    ),
+                  }
+                : item,
+            ),
+          };
+        result = { ...result, ...(diagnostics.length ? { diagnostics } : {}) };
+        return result;
+      };
+      const env = new Proxy(api.env ?? ({} as ExecutionEnv), {
+        get(target, key) {
+          if (key === "createTempDir") return async () => ({ ok: true as const, value: directory });
+          if (key === "writeFile")
+            return async (path: string, data: string | Uint8Array, ctx: Context) => {
+              if (path !== `${directory}/output.txt` || typeof data !== "string" || !files.spill)
+                return {
+                  ok: false as const,
+                  error: new FileError("not_supported", "scoped artifact storage unavailable"),
+                };
+              const spilled = await files.spill(data, api, ctx);
+              if (spilled.isErr())
+                return {
+                  ok: false as const,
+                  error: new FileError("unknown", "scoped artifact storage unavailable"),
+                };
+              paths.set(path, spilled.value);
+              return { ok: true as const, value: undefined };
+            };
+          const value = Reflect.get(target, key);
+          return typeof value === "function" ? value.bind(target) : value;
         },
       });
-      let invocation = 0;
-      let usage: Usage | undefined;
-      const charts: ChartSpec[] = [];
-      const chart: CodemodeTool = {
-        name: "chart",
-        execute: (value) => {
-          const parsed =
-            charts.length >= CHART_MAX_PER_SCRIPT
-              ? err({ message: `chart(): at most ${CHART_MAX_PER_SCRIPT} charts per script` })
-              : parseChartSpec(value);
-          if (parsed.isErr()) {
-            // biome-ignore lint/plugin/no-throw: QuickJS callback contract rejects into the script
-            throw new Error(parsed.error.message);
-          }
-          charts.push(parsed.value);
-          return undefined;
+      const decorated: ToolExecutionApi = {
+        ...api,
+        env,
+        executeTool: (name, value, ctx, callOptions) => {
+          const id = Number(callOptions?.key?.slice(1));
+          if (Number.isSafeInteger(id))
+            previews.set(id, {
+              args: argumentKeys(value),
+              argumentKeys:
+                object(value) || Array.isArray(value) ? Object.keys(value).slice(0, 16) : [],
+            });
+          return api.executeTool(name, value, ctx, callOptions).then((result) => ({
+            ...result,
+            diagnostics: result.diagnostics.map((diagnostic) =>
+              diagnostic.code === "invalid_arguments"
+                ? { ...diagnostic, message: `Invalid arguments for ${name}` }
+                : diagnostic,
+            ),
+          }));
         },
-      };
-      const publish = async () => {
-        if (!api.details) return;
-        const published = await ResultAsync.fromPromise(
-          api.details(
-            {
-              calls: calls.map((c) => ({ ...c })),
-              omittedCalls: Math.max(0, invocation - calls.length),
-              executionWait: calls.some((c) => c.status === "running" && c.executionWait === true),
-            },
-            ctx,
-          ),
-          () => ({ code: "unavailable" as const, message: "Nested progress publication failed" }),
-        );
-        if (published.isErr())
-          api.diagnostic?.({
-            severity: "warn",
-            code: "codemode_progress_failed",
-            message: published.error.message,
-          });
-      };
-      const cpu = codeModeCpuBudget.acquire();
-      const memory = codeModeMemory.acquire(orb?.id);
-      const created = Result.fromThrowable(
-        () =>
-          new CodemodeSandbox({
-            memoryLimitBytes: MEMORY_LIMIT_BYTES,
-            workerUrl: new URL("./bounded-worker.js", import.meta.url),
-            workerData: { ...cpu.workerData, ...memory.workerData },
-            tools: catalog
-              .definitions()
-              .map(
-                (t): CodemodeTool => ({
-                  name: t.name,
-                  description: catalog.describe(t.name) ?? t.description,
-                  execute: async (value, { signal }) => {
-                    const record: NestedCall = {
-                      id: `${api.callId}:nested:${invocation++}`,
-                      name: t.name,
-                      args: JSON.stringify(
-                        typeof value === "object" && value !== null
-                          ? Object.keys(value).slice(0, 16)
-                          : typeof value,
-                      ).slice(0, 256),
-                      status: "running",
-                    };
-                    calls.push(record);
-                    if (calls.length > 64) calls.shift();
-                    const began = performance.now();
-                    let output = "";
-                    let total = 0;
-                    let details: JsonValue | undefined;
-                    const diagnostics: NonNullable<ToolExecutionResult["diagnostics"]>[number][] =
-                      [];
-                    let exitCode: number | undefined;
-                    let spillPath: string | undefined;
-                    const env =
-                      t.name === "bash" && api.env
-                        ? new Proxy(api.env, {
-                            get(target, key) {
-                              if (key === "exec")
-                                return async (...args: Parameters<typeof target.exec>) => {
-                                  const result = await target.exec(...args);
-                                  if (result.ok) {
-                                    exitCode = result.value.exitCode;
-                                    spillPath = result.value.spillPath;
-                                  }
-                                  return result;
-                                };
-                              const v = Reflect.get(target, key);
-                              return typeof v === "function" ? v.bind(target) : v;
-                            },
-                          })
-                        : api.env;
-                    await publish();
-                    const nestedApi = {
-                      ...api,
-                      env,
-                      callId: record.id,
-                      output: (chunk: string | Uint8Array) => {
-                        const decoded =
-                          typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-                        total += Buffer.byteLength(decoded);
-                        output = appendBounded(output, decoded);
-                      },
-                      diagnostic: (d: NonNullable<ToolExecutionResult["diagnostics"]>[number]) => {
-                        if (diagnostics.length < 16) diagnostics.push(d);
-                      },
-                      details: async (d: JsonValue) => {
-                        details = d;
-                        if (typeof d === "object" && d !== null && !Array.isArray(d)) {
-                          if (typeof d.executionWait === "boolean")
-                            record.executionWait = d.executionWait;
-                          if (typeof d.progress === "number") record.progress = d.progress;
-                          if (typeof d.total === "number") record.total = d.total;
-                        }
-                        await publish();
-                      },
-                    } as ToolExecutionApi;
-                    const called = await catalog.invoke(
-                      t.name,
-                      value,
-                      nestedApi,
-                      withAbortSignal(signal, ctx),
-                    );
-                    if (called.isOk() && called.value.usage)
-                      usage = usage ? combineUsage(usage, called.value.usage) : called.value.usage;
-                    record.durationMs = performance.now() - began;
-                    record.status = signal.aborted
-                      ? "cancelled"
-                      : called.isErr() || called.value.isError
-                        ? "error"
-                        : "ok";
-                    if (called.isErr()) record.error = called.error.message.slice(0, 256);
-                    else if (called.value.isError) record.error = `${t.name} reported failure`;
-                    if (diagnostics.length)
-                      record.diagnostics = diagnostics.map((d) => ({
-                        code: d.code ?? "tool_diagnostic",
-                        severity: d.severity,
-                      }));
-                    await publish();
-                    if (t.name === "bash" && exitCode !== undefined) {
-                      return {
-                        output:
-                          output ||
-                          (called.isErr() ? (called.error.output ?? "") : textOf(called.value)),
-                        truncated: total > MAX_CAPTURE,
-                        ...(spillPath ? { full_output_path: spillPath } : {}),
-                        exit_code: exitCode,
-                        wall_time_seconds: record.durationMs / 1000,
-                      };
-                    }
-                    if (called.isErr()) {
-                      // QuickJS callback contract uses rejected promises; typed failure stops at this adapter boundary.
-                      // biome-ignore lint/plugin/no-throw: third-party QuickJS callback contract
-                      throw new Error(
-                        called.error.output
-                          ? `${called.error.output}\n${called.error.message}`
-                          : called.error.message,
-                      );
-                    }
-                    const final = {
-                      ...called.value,
-                      content: called.value.content ?? [{ type: "text" as const, text: output }],
-                      ...((called.value.details ?? details) === undefined
-                        ? {}
-                        : { details: called.value.details ?? details! }),
-                      diagnostics: [...diagnostics, ...(called.value.diagnostics ?? [])],
-                    };
-                    const project = catalog.metadata(t.name).project;
-                    if (project) {
-                      const projected = project(final);
-                      if (projected !== undefined) return projected;
-                    }
-                    if (final.isError) {
-                      // biome-ignore lint/plugin/no-throw: third-party QuickJS callback contract
-                      throw new Error(textOf(final) || `${t.name} failed`);
-                    }
-                    if (final.content.some((b) => b.type === "image")) return final.content;
-                    return textOf(final);
-                  },
-                }),
-              )
-              .map(guardCallback),
-            globals: [
-              ...createDiscoveryGlobals(
-                catalog.policyTools(),
-                new Map(catalog.definitions().map((t) => [t.name, catalog.describe(t.name) ?? ""])),
-                {
-                  getToolNamespace: (name) => catalog.metadata(name).namespace,
-                  getNamespaces: () => catalog.namespaceValues(),
-                },
-              ),
-              chart,
-            ].map(guardCallback),
-          }),
-        () => ({ code: "unavailable" as const, message: "Sandbox initialization failed" }),
-      )();
-      if (created.isErr()) {
-        cpu.release();
-        memory.release();
-        return errorResult(created.error);
-      }
-      const sandbox = created.value;
-      running.add(sandbox);
-      const run = await ResultAsync.fromPromise(
-        sandbox.execute(parsed.value.code, {
-          store: store.value,
-          ...(parsed.value.options.timeoutMs === undefined
-            ? {}
-            : { timeoutMs: parsed.value.options.timeoutMs }),
-          signal: executionSignal,
-        }),
-        () => ({ code: "unavailable" as const, message: "Sandbox execution failed" }),
-      );
-      const closed = await ResultAsync.fromPromise(sandbox.close(), () => ({
-        code: "unavailable" as const,
-        message: "Sandbox cleanup failed",
-      }));
-      running.delete(sandbox);
-      cpu.release();
-      memory.release();
-      const cpuStats = cpu.snapshot();
-      const peakBytes = memory.peakBytes();
-      if (run.isErr()) return errorResult(run.error);
-      if (closed.isErr()) return errorResult(closed.error);
-      const value = run.value;
-      const resourceLimit =
-        callbackLimit || (!value.ok && value.error.message === CALLBACK_LIMIT_MESSAGE);
-      const failure = resourceLimit
-        ? "callback_limit"
-        : value.ok
-          ? undefined
-          : resourceFailure(value.error);
-      if (failure && orb)
-        logOrbEvent(orb.task, orb.id, "codemode.resource_failed", {
-          kind: failure,
-          peak_mib: Math.round(peakBytes / 1024 / 1024),
-          conversation: api.conversationId,
-          call: api.callId,
-        });
-      for (const call of calls) if (call.status === "running") call.status = "cancelled";
-      if (
-        value.ok &&
-        (Object.keys(value.storeWrites.set).length || value.storeWrites.delete.length)
-      ) {
-        const saved = await ResultAsync.fromPromise(
+        commit: (change, ctx) =>
           api.commit(async (tx) => {
-            const doc = await tx.doc(CodemodeStore, api.conversationId);
-            for (const [key, item] of Object.entries(value.storeWrites.set))
-              doc[key] = item as JsonValue;
-            for (const key of value.storeWrites.delete) delete doc[key];
-          }, ctx),
-          () => ({ code: "unavailable" as const, message: "Sandbox store commit failed" }),
-        );
-        if (saved.isErr()) return errorResult(saved.error);
-      }
-      let items: NonNullable<ToolExecutionResult["content"]> = [
-        ...value.output,
-        ...(value.ok && value.value !== undefined
-          ? [{ type: "text" as const, text: valueText(value.value) }]
-          : []),
-        ...(!value.ok
-          ? [{ type: "text" as const, text: `Script error:\n${formatError(value, calls)}` }]
-          : []),
-      ];
-      const truncated = await truncateOutput(
-        items,
-        parsed.value.options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
-        async (text) => {
-          const spilled = files.spill ? await files.spill(text, api, ctx) : undefined;
-          return spilled?.isOk()
-            ? { path: spilled.value }
-            : { error: "scoped artifact storage unavailable" };
-        },
-      );
-      const fullOutputPath = truncated.fullOutputPath;
-      if (truncated.items !== items)
-        api.diagnostic?.({
-          severity: fullOutputPath ? "info" : "warn",
-          code: "codemode_output_truncated",
-          message: fullOutputPath
-            ? "Code-mode output spilled to a private artifact."
-            : "Code-mode output truncated; artifact storage unavailable.",
-        });
-      items = truncated.items;
-      return {
-        content: [
-          {
-            type: "text",
-            text: `${value.ok ? "Script completed" : "Script failed"}\nWall time ${((performance.now() - started) / 1000).toFixed(1)} seconds${cpuStats.throttledMs >= 100 ? `\nCPU budget wait ${(cpuStats.throttledMs / 1000).toFixed(1)} seconds` : ""}\nOutput:\n`,
-          },
-          ...items,
-        ],
-        isError: !value.ok,
-        ...(resourceLimit
-          ? {
-              diagnostics: [
-                {
-                  severity: "error" as const,
-                  code: "resource_limit",
-                  message: CALLBACK_LIMIT_MESSAGE,
-                },
-              ],
+            const result = await change(tx);
+            const run = await tx.doc(CodemodeRunDoc, api.taskId);
+            const recorded = chartEntries(
+              copyJson((await tx.doc(CodemodeJournalDoc, api.taskId)).entries),
+            );
+            if (recorded.length !== charts.length) {
+              charts = recorded;
+              const live = await tx.doc(LiveDoc, api.conversationId);
+              const slot = [...(live.tools ?? []), ...(live.nestedTools ?? [])].find(
+                (item) => item.taskId === api.taskId,
+              );
+              if (slot)
+                slot.details = {
+                  ...(object(slot.details) ? slot.details : {}),
+                  charts: copyJson(charts),
+                };
             }
-          : {}),
-        ...(usage ? { usage } : {}),
-        details: {
-          cpu: cpuStats,
-          memory: { peakBytes },
-          calls: calls.map((c) => ({ ...c })),
-          omittedCalls: Math.max(0, invocation - calls.length),
-          executionWait: false,
-          ...(fullOutputPath ? { fullOutputPath } : {}),
-          ...(charts.length ? { charts } : {}),
-        },
+            if (run.result !== undefined) {
+              // Artifact paths and chart rows commit with the native outcome, before it can be replayed.
+              run.result = copyJson(present(run.result as ToolExecutionResult), {
+                omitUndefinedProperties: true,
+              }) as JsonObject;
+            }
+            return object(result) && Array.isArray(result.output)
+              ? (copyJson(present(result as ToolExecutionResult), {
+                  omitUndefinedProperties: true,
+                }) as typeof result)
+              : result;
+          }, ctx),
       };
+      const executed = await ResultAsync.fromPromise(
+        (async () => {
+          const previous = await api.snapshot(CodemodeJournalDoc, api.taskId, context);
+          chartCount = chartEntries(previous?.entries ?? []).length;
+          const tool = createCodemodeTool({
+            ...options,
+            sandbox,
+            globals: [
+              {
+                name: "chart",
+                execute: async (value) => {
+                  const parsed = parseChartSpec(value);
+                  if (parsed.isErr() || chartCount >= CHART_MAX_PER_SCRIPT) {
+                    // biome-ignore lint/plugin/no-throw: native globals reject validation errors into the script
+                    throw new Error(
+                      parsed.isErr()
+                        ? parsed.error.message
+                        : `chart(): at most ${CHART_MAX_PER_SCRIPT} charts per script`,
+                    );
+                  }
+                  chartCount++;
+                  return undefined;
+                },
+              },
+            ],
+          });
+          return tool.execute({ code: source }, decorated, context);
+        })(),
+        () => ({
+          code: context.abortSignal?.aborted ? ("cancelled" as const) : ("unavailable" as const),
+          message: context.abortSignal?.aborted
+            ? "Code-mode cancelled"
+            : "Code-mode execution failed",
+        }),
+      );
+      const cleanup = await ResultAsync.fromPromise(
+        (async () => {
+          await sandbox.close();
+          await sandbox.drained();
+        })(),
+        () => ({ code: "unavailable" as const, message: "Code-mode cleanup failed" }),
+      );
+      if (executed.isErr())
+        return {
+          ...errorResult(executed.error),
+          ...(charts.length ? { details: { charts: copyJson(charts) } } : {}),
+        };
+      if (cleanup.isErr()) return errorResult(cleanup.error);
+      return present(executed.value);
     },
   });
+}
+
+export function codemodeExtension(
+  catalog: CallableCatalog,
+  running: Set<CodemodeSandbox>,
+  files?: AgentToolFiles,
+  orb?: { id: string; task: SimulationTask },
+): Extension {
+  const extension = createCodemodeExtension({
+    sandbox: new PiCodemodeSandbox(),
+    models: false,
+    get namespaces() {
+      return catalog.nativeNamespaces();
+    },
+  });
+  return {
+    ...extension,
+    tools: [codemodeTool(catalog, running, files, orb)],
+    sections: (extension.sections ?? []).map((section) => ({
+      ...section,
+      render: async (input, context) => {
+        const declarations = await section.render(input, context);
+        const namespaces = catalog
+          .namespaceValues()
+          .map(
+            (namespace) =>
+              `Namespace ${namespace.name}: discover with describeNamespace(${JSON.stringify(namespace.name)}).${namespace.instructions ? `\n${namespace.instructions}` : ""}`,
+          );
+        return [declarations, ...namespaces].filter(Boolean).join("\n\n") || undefined;
+      },
+    })),
+  };
 }

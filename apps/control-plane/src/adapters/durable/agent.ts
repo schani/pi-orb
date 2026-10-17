@@ -23,6 +23,7 @@ import {
   ProviderDoc,
   type Registry,
   type Storage,
+  StorageRequestError,
   type TaskGraph,
   type ToolExecutionApi,
   type ToolRegistration,
@@ -67,12 +68,14 @@ import type { RuntimeClientError } from "../../domain/errors.ts";
 import type { ModelCallUse } from "../../domain/model-usage.ts";
 import type { OrbAgentError } from "../../domain/orb-agent-operations.ts";
 import type { DeliverMessageClientRequest } from "../../domain/ports.ts";
+import type { AuthorityError } from "../durable-pg/index.ts";
 import { storageAuthorityError } from "../durable-pg/storage-boundary.ts";
 import { durableError } from "./manager.ts";
 import { fenceModels } from "./model-fence.ts";
 import { meterModels } from "./model-usage.ts";
 import { nativeInputContent } from "./native-input.ts";
 import { NOTIFICATION_REQUEST_PREFIX, submitParentNotification } from "./notifications.ts";
+import type { InputAdmissionError } from "./persistence.ts";
 import { activeSubagents, type PublicEntryReceipt, projectHistory } from "./projection.ts";
 import { promptExtension } from "./prompt.ts";
 import { startupRuntimeError } from "./startup.ts";
@@ -164,6 +167,7 @@ export interface DurableAgentOptions {
   readonly prompt?: (conversationId: string) => string;
   readonly resume?: boolean;
   readonly checkAdmission?: () => ResultAsync<void, RuntimeClientError>;
+  readonly checkInputAdmission?: (browser: boolean) => ResultAsync<void, InputAdmissionError>;
   /** Consulted before resuming unfinished work; an error leaves it suspended. */
   readonly admitRecovery?: () => ResultAsync<void, RuntimeClientError>;
   readonly beginDrain?: () => ResultAsync<void, RuntimeClientError>;
@@ -177,6 +181,7 @@ export interface DurableAgentOptions {
   /** Usage ledger tap; never awaited by the model call. */
   readonly recordModelCall?: (use: ModelCallUse, response: AssistantMessage) => void;
   readonly registry: Registry;
+  readonly bindNativeConversation?: (resolve: Harness["conversation"]) => void;
   readonly modelTools?: readonly ToolRegistration[];
   /** Child-only tools; the root conversation removes it on open. */
   readonly childExtension?: Extension;
@@ -311,6 +316,7 @@ export class DurableAgent implements AgentSessionFacade {
     let stage = "registry";
     let owner: DurableAgent | undefined;
     let reported = false;
+    let unexpectedClose = false;
     let resourceClose: ResultAsync<void, RuntimeClientError> | undefined;
     const closeResources = () =>
       (resourceClose ??= options.closeResources?.() ?? okAsync(undefined));
@@ -332,7 +338,11 @@ export class DurableAgent implements AgentSessionFacade {
             registry: options.registry,
             env: (target) => options.envFor?.(target) ?? options.env,
             ...(options.now === undefined ? {} : { now: options.now }),
-            onReport: () => {
+            onReport: (error) => {
+              if (unexpectedClose) {
+                owner?.storageFailed(error);
+                return;
+              }
               reported = true;
               owner?.reportFailure();
               void options.edge?.("harness.reported_failure", { orbId: options.orbId });
@@ -340,6 +350,7 @@ export class DurableAgent implements AgentSessionFacade {
           },
           context,
         );
+        options.bindNativeConversation?.(harness.conversation.bind(harness));
         const initial = options.initialSettings ?? {
           model: { provider: "openai-codex", id: PINNED_CODEX_MODEL_ID },
           thinkingLevel: "high" as const,
@@ -399,7 +410,7 @@ export class DurableAgent implements AgentSessionFacade {
         await root.configure(
           {
             cwd: options.env.cwd,
-            ...(options.modelTools ? { tools: options.modelTools } : {}),
+            ...(options.modelTools ? { tools: null, modelTools: options.modelTools } : {}),
             ...(options.childExtension ? { extensions: { remove: [options.childExtension] } } : {}),
           },
           context,
@@ -482,6 +493,12 @@ export class DurableAgent implements AgentSessionFacade {
           }
           if (changed) agent.queueProjection();
         });
+        harness.subscribeClose(() => {
+          if (!agent.closing) unexpectedClose = true;
+        });
+        void harness.closed.then((end) => {
+          if (end.reason === "failed") agent.storageFailed(end.error);
+        });
         const recoveredTasks = Object.keys(agent.tasks.tasks);
         if (recoveredTasks.length > 0 && options.resume !== false) {
           stage = "recovery budget";
@@ -552,6 +569,33 @@ export class DurableAgent implements AgentSessionFacade {
           })(),
         ).andThen((result) => result);
       });
+  }
+
+  private storageFailed(error: unknown): void {
+    this.failStorage(storageAuthorityError(error));
+  }
+
+  private failStorage(authority?: AuthorityError): void {
+    if (this.closing) return;
+    this.failure = authority
+      ? startupRuntimeError(authority)
+      : durableError("Agent storage failed; reopen the conversation");
+    this.operationOutcome = "failed";
+    this.publish({
+      v: 1,
+      type: "server.error",
+      at: new Date(this.now()).toISOString(),
+      error: {
+        code: "central_agent_storage_failed",
+        message: this.failure.message,
+        retryable: this.failure.retryable,
+      },
+    });
+    void this.options.edge?.("harness.storage_failed", {
+      orbId: this.options.orbId,
+      code: authority?.code ?? "unavailable",
+    });
+    void this.close();
   }
 
   private reportFailure(): void {
@@ -873,15 +917,23 @@ export class DurableAgent implements AgentSessionFacade {
           ]
         : [],
     );
+    const waiting = new Set<NonNullable<LiveState["nestedTools"]>[number]["taskId"]>();
+    const isWaiting = (tool: NonNullable<LiveState["tools"]>[number]) =>
+      tool.status === "running" &&
+      tool.details !== null &&
+      typeof tool.details === "object" &&
+      !Array.isArray(tool.details) &&
+      tool.details.executionWait === true;
+    for (const tool of [...(this.live.nestedTools ?? [])].reverse()) {
+      if (isWaiting(tool) || waiting.has(tool.taskId)) waiting.add(tool.parentTaskId);
+    }
     const tools = (this.live.tools ?? []).map((tool) => ({
       callId: tool.callId,
       name: tool.name,
       revision: this.revision,
       state: tool.status === "done" ? ("completed" as const) : ("running" as const),
-      ...(tool.details &&
-      typeof tool.details === "object" &&
-      !Array.isArray(tool.details) &&
-      tool.details.executionWait === true
+      ...(tool.status === "running" &&
+      (isWaiting(tool) || (tool.taskId !== undefined && waiting.has(tool.taskId)))
         ? { message: "Waiting for execution." }
         : tool.output === undefined
           ? {}
@@ -949,7 +1001,7 @@ export class DurableAgent implements AgentSessionFacade {
           receipts[requestId] = { message, entryId: entry.id };
           return ok({ entryId: entry.id, duplicate: false });
         }, context),
-        () => durableError("alert commit failed"),
+        (error) => this.storageError(error, "alert commit failed"),
       );
       if (committed.isErr()) return err(committed.error);
       if (committed.value.isErr()) return err(committed.value.error);
@@ -989,24 +1041,37 @@ export class DurableAgent implements AgentSessionFacade {
     };
   }
 
+  private immediateStorageFailure(error: unknown, message: string): RuntimeClientError {
+    if (!(error instanceof StorageRequestError)) this.storageFailed(error);
+    return this.storageError(error, message);
+  }
+
+  private storageError(error: unknown, message: string): RuntimeClientError {
+    const authority = storageAuthorityError(error);
+    return authority ? startupRuntimeError(authority) : (this.failure ?? durableError(message));
+  }
+
   private serial<T>(
     operation: () => Promise<Result<T, RuntimeClientError>>,
     requiresAdmission = true,
   ): ResultAsync<T, RuntimeClientError> {
-    if (this.closing || this.paused) return errAsync(durableError("Harness admissions closed"));
+    if (this.closing || this.paused)
+      return errAsync(this.failure ?? durableError("Harness admissions closed"));
     const result = this.mutations.then(async () => {
-      if (this.closing || this.paused) return err(durableError("Harness admissions closed"));
+      if (this.closing || this.paused)
+        return err(this.failure ?? durableError("Harness admissions closed"));
       const admitted = requiresAdmission ? await this.options.checkAdmission?.() : undefined;
       if (admitted?.isErr()) return err(admitted.error);
-      if (this.closing || this.paused) return err(durableError("Harness admissions closed"));
+      if (this.closing || this.paused)
+        return err(this.failure ?? durableError("Harness admissions closed"));
       return operation();
     });
     this.mutations = result.then(
       () => undefined,
       () => undefined,
     );
-    return ResultAsync.fromPromise(result, () =>
-      durableError("central agent operation failed"),
+    return ResultAsync.fromPromise(result, (error) =>
+      this.storageError(error, "central agent operation failed"),
     ).andThen((value) => value);
   }
 
@@ -1028,6 +1093,26 @@ export class DurableAgent implements AgentSessionFacade {
     const existing = this.receipts[request.messageId];
     if (existing && existing.fingerprint !== fingerprint)
       return err(durableError("message ID conflicts with persisted content"));
+    const nativeRequestId = `inbox:${request.messageId}`;
+    const lookup = ResultAsync.fromThrowable(
+      () => this.options.storage.submissionByRequest(this.root.id, nativeRequestId, context),
+      (error) => this.immediateStorageFailure(error, "Native input lookup failed"),
+    );
+    const native = await lookup();
+    if (native.isErr()) return err(native.error);
+    if (native.value === undefined) {
+      const admission = await this.options.checkInputAdmission?.(request.messageIds.length === 0);
+      if (admission?.isErr()) {
+        if (admission.error.type === "input_admission_failed") {
+          this.failStorage(admission.error.cause);
+          return err(startupRuntimeError(admission.error.cause));
+        }
+        // A concurrent native admission wins over an advisory policy refusal.
+        const latest = await lookup();
+        if (latest.isErr()) return err(latest.error);
+        if (latest.value === undefined) return err(admission.error.error);
+      }
+    }
     const delivery =
       existing?.submissionId !== undefined
         ? existing.delivery
@@ -1059,7 +1144,7 @@ export class DurableAgent implements AgentSessionFacade {
         {
           type: "input",
           content,
-          requestId: `inbox:${request.messageId}`,
+          requestId: nativeRequestId,
           whenBusy: "steer",
         },
         context,
@@ -1292,7 +1377,7 @@ export class DurableAgent implements AgentSessionFacade {
         await this.root.waitForIdle(context);
         await this.projection;
       })(),
-      () => durableError("Harness idle wait failed"),
+      (error) => this.storageError(error, "Harness idle wait failed"),
     ).andThen(() => (this.failure ? errAsync(this.failure) : okAsync(undefined)));
   }
 

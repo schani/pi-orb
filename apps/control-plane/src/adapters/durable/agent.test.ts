@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createAssistantMessageEventStream, Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
@@ -15,7 +16,10 @@ import {
   defineTool,
   GenerationTask,
   hook,
+  LiveDoc,
   MemoryStorage,
+  ROOT_CONVERSATION_ID,
+  type Storage,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { type ServerFrame, ServerFrameSchema } from "@pi-orb/protocol";
@@ -23,6 +27,7 @@ import { NoSimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
 import { describe, expect, it } from "vitest";
+import { StorageFailure } from "../durable-pg/storage-boundary.ts";
 import { DurableAgent } from "./agent.ts";
 import { durableError } from "./manager.ts";
 import { MemoryAgentPersistence } from "./memory-persistence.testkit.ts";
@@ -1075,7 +1080,7 @@ describe("central Durable agent", () => {
             description: "noop",
             parameters: Type.Object({}),
             replay: "safe",
-            execute: async () => ({ content: [{ type: "text", text: "done" }] }),
+            execute: async () => ({ output: [{ type: "text", text: "done" }] }),
           }),
         ],
       }),
@@ -1157,7 +1162,7 @@ describe("central Durable agent", () => {
                 await new Promise<void>((resolve) =>
                   ctx.abortSignal?.addEventListener("abort", () => resolve(), { once: true }),
                 );
-                return { content: [{ type: "text", text: "effect" }] };
+                return { output: [{ type: "text", text: "effect" }] };
               },
             }),
           ],
@@ -1295,3 +1300,196 @@ it("publishes a persisted Luna source for a child launched inside codemode", asy
     await tools.close();
   }
 });
+
+it.each([
+  { error: new Error("injected storage IO"), code: "unavailable" },
+  {
+    error: new StorageFailure("Owner revoked", {
+      cause: { type: "authority_error", code: "stale_owner", message: "Owner revoked" },
+    }),
+    code: "stale_owner",
+  },
+])("invalidates the agent and records a durable edge on fatal $code", async ({ error, code }) => {
+  const backend = new MemoryStorage();
+  let fail = false;
+  const storage = new Proxy(backend, {
+    get(target, key) {
+      if (key === "commit")
+        return (...args: Parameters<Storage["commit"]>) =>
+          fail ? Promise.reject(error) : target.commit(...args);
+      const value = Reflect.get(target, key);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  const models = createModels();
+  models.setProvider(fauxProvider().provider);
+  const recorded = barrier();
+  const released = barrier();
+  const edges: { code: string; facts: Readonly<Record<string, string | number | boolean>> }[] = [];
+  const frames: ServerFrame[] = [];
+  let invalidated = false;
+  const agent = (
+    await DurableAgent.open({
+      orbId: "orb",
+      storage,
+      models,
+      registry: createRegistry(),
+      env: new NodeExecutionEnv({ cwd: "/tmp" }),
+      checkoutCommit: "commit",
+      instructions: "",
+      initialSettings,
+      edge: (code, facts) => {
+        edges.push({ code, facts });
+        if (code === "harness.storage_failed") recorded.resolve();
+        return okAsync(undefined);
+      },
+      closeResources: () => {
+        released.resolve();
+        return okAsync(undefined);
+      },
+    })
+  )._unsafeUnwrap();
+  agent.subscribe(
+    (frame) => frames.push(frame),
+    () => {
+      invalidated = true;
+    },
+  );
+  try {
+    fail = true;
+    const failed = (await agent.appendAlert("failure", "fail commit"))._unsafeUnwrapErr();
+    expect(failed.retryable).toBe(false);
+    if (code === "stale_owner") expect(failed.message).toBe("Owner revoked");
+    expect(agent.accepting()).toBe(false);
+    await recorded.promise;
+    await released.promise;
+    expect(invalidated).toBe(true);
+    expect(agent.accepting()).toBe(false);
+    expect(agent.health()).toMatchObject({ status: "failed" });
+    expect(edges.filter((entry) => entry.code === "harness.storage_failed")).toEqual([
+      { code: "harness.storage_failed", facts: { orbId: "orb", code } },
+    ]);
+    expect(frames).toContainEqual(
+      expect.objectContaining({
+        type: "server.error",
+        error: expect.objectContaining({ code: "central_agent_storage_failed" }),
+      }),
+    );
+  } finally {
+    await agent.close();
+  }
+});
+
+it.each([false, true])(
+  "keeps native nested argument values private during live and final publication (error: %s)",
+  async (isError) => {
+    const secret = "PRIVATE_LIVE_NESTED_ARGUMENT_CANARY";
+    const entered = barrier(),
+      release = barrier();
+    const storage = new MemoryStorage();
+    const registry = createRegistry();
+    registry.install(
+      defineExtension({
+        name: "native-nested-privacy",
+        tools: [
+          defineTool({
+            name: "inner",
+            callers: ["tools"],
+            description: "private nested input",
+            parameters: Type.Object({ token: Type.String() }),
+            execute: async (_args, api, ctx) => {
+              api.output(secret);
+              await api.details({ arguments: { token: secret } }, ctx);
+              entered.resolve();
+              await release.promise;
+              return { output: [{ type: "text", text: "nested done" }] };
+            },
+          }),
+          defineTool({
+            name: "codemode",
+            callers: ["model"],
+            description: "parent",
+            parameters: Type.Object({}),
+            execute: async (_args, api, ctx) => {
+              await api.executeTool("inner", { token: secret }, ctx, { key: "inner" });
+              return {
+                isError,
+                output: [{ type: "text", text: "done" }],
+                details: {
+                  calls: [
+                    {
+                      id: 1,
+                      name: "inner",
+                      args: JSON.stringify({ token: secret }),
+                      argumentKeys: ["token"],
+                      status: isError ? "error" : "ok",
+                    },
+                  ],
+                },
+              };
+            },
+          }),
+        ],
+      }),
+    );
+    const faux = fauxProvider();
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("codemode", {}), { stopReason: "toolUse" }),
+      fauxAssistantMessage("finished"),
+    ]);
+    const models = createModels();
+    models.setProvider(faux.provider);
+    const agent = (
+      await DurableAgent.open({
+        orbId: "orb",
+        storage,
+        models,
+        registry,
+        env: new NodeExecutionEnv({ cwd: "/tmp" }),
+        checkoutCommit: null,
+        instructions: "",
+        initialSettings,
+      })
+    )._unsafeUnwrap();
+    const frames: ServerFrame[] = [];
+    agent.subscribe((frame) => frames.push(frame));
+    try {
+      (await agent.deliver(input))._unsafeUnwrap();
+      await entered.promise;
+      // Read the native document without creating a second owning Session over this backend.
+      const record = await storage.findDocument(
+        {
+          kind: LiveDoc.definition.kind,
+          scope: { kind: "conversation", conversationId: ROOT_CONVERSATION_ID },
+        },
+        "current",
+        BACKGROUND_CONTEXT,
+      );
+      expect(
+        JSON.stringify(
+          (await storage.document(record!.id, "current", BACKGROUND_CONTEXT))?.value.nestedTools,
+        ),
+      ).toContain(secret);
+      expect(JSON.stringify(agent.liveView())).not.toContain(secret);
+      expect(JSON.stringify(frames)).not.toContain(secret);
+      release.resolve();
+      (await agent.waitForIdle())._unsafeUnwrap();
+      expect(JSON.stringify(agent.snapshot()._unsafeUnwrap())).not.toContain(secret);
+      expect(JSON.stringify(frames)).not.toContain(secret);
+      const tasks = await storage.scanTasks({ kind: "pi.tool" }, 10, undefined, BACKGROUND_CONTEXT);
+      expect(tasks.items.every((task) => task.version === 2)).toBe(true);
+      expect(
+        tasks.items.some(
+          (task) =>
+            typeof task.input === "object" &&
+            task.input !== null &&
+            "kind" in task.input &&
+            task.input.kind === "nested",
+        ),
+      ).toBe(true);
+    } finally {
+      release.resolve();
+      await agent.close();
+    }
+  },
+);

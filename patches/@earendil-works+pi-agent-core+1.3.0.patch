@@ -1,8 +1,7 @@
 diff --git a/node_modules/@earendil-works/pi-agent-core/dist/agent.d.ts b/node_modules/@earendil-works/pi-agent-core/dist/agent.d.ts
-index 2429a21..053ad64 100644
 --- a/node_modules/@earendil-works/pi-agent-core/dist/agent.d.ts
 +++ b/node_modules/@earendil-works/pi-agent-core/dist/agent.d.ts
-@@ -90,6 +90,8 @@ export declare class Agent {
+@@ -90,6 +90,8 @@
      steer(message: AgentMessage): void;
      /** Queue a message to run only after the agent would otherwise stop. */
      followUp(message: AgentMessage): void;
@@ -12,10 +11,9 @@ index 2429a21..053ad64 100644
      clearSteeringQueue(): void;
      /** Remove all queued follow-up messages. */
 diff --git a/node_modules/@earendil-works/pi-agent-core/dist/agent.js b/node_modules/@earendil-works/pi-agent-core/dist/agent.js
-index a8ccfc0..fc4d273 100644
 --- a/node_modules/@earendil-works/pi-agent-core/dist/agent.js
 +++ b/node_modules/@earendil-works/pi-agent-core/dist/agent.js
-@@ -80,6 +80,13 @@ class PendingMessageQueue {
+@@ -80,6 +80,13 @@
          this.messages = this.messages.slice(drained.length);
          return drained;
      }
@@ -29,7 +27,7 @@ index a8ccfc0..fc4d273 100644
      clear() {
          this.messages = [];
      }
-@@ -188,6 +195,12 @@ export class Agent {
+@@ -188,6 +195,12 @@
      followUp(message) {
          this.followUpQueue.enqueue(message);
      }

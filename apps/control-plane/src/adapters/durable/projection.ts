@@ -1,3 +1,4 @@
+import type { JsonObject, JsonValue } from "@earendil-works/pi-ai";
 import type { ConversationId, EntryRecord, TaskGraph } from "@earendil-works/pi-durable";
 import {
   type ActiveSubagent,
@@ -63,6 +64,39 @@ export function activeSubagents(
     }
   }
   return [...children.values()];
+}
+
+function isJsonObject(value: JsonValue | undefined): value is JsonObject {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Nested execution inputs stay private even in the mapper's lossless native overflow. */
+function publicMessage(message: NonNullable<EntryRecord["model"]>[number]) {
+  if (message.role !== "toolResult" || message.toolName !== "codemode") return message;
+  const details = message.details;
+  if (!isJsonObject(details) || !Array.isArray(details.calls)) return message;
+  return {
+    ...message,
+    details: {
+      ...details,
+      calls: details.calls.flatMap((call: JsonValue) => {
+        if (!isJsonObject(call)) return [];
+        return [
+          {
+            ...(typeof call.id === "number" ? { id: call.id } : {}),
+            ...(typeof call.name === "string" ? { name: call.name } : {}),
+            ...(typeof call.status === "string" ? { status: call.status } : {}),
+            ...(typeof call.durationMs === "number" ? { durationMs: call.durationMs } : {}),
+            argumentKeys:
+              Array.isArray(call.argumentKeys) &&
+              call.argumentKeys.every((key: JsonValue) => typeof key === "string")
+                ? call.argumentKeys
+                : [],
+          },
+        ];
+      }),
+    },
+  };
 }
 
 /** Root transcript and child launch metadata are public history; native configuration stays private. */
@@ -194,7 +228,7 @@ export function projectEntry(
     parentId,
     timestamp: new Date(message.timestamp).toISOString(),
     type: "message",
-    message,
+    message: publicMessage(message),
   });
 }
 

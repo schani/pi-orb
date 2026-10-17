@@ -77,6 +77,7 @@ it("attributes durable and turn-summary calls to the orb and its owner", async (
       storage: new MemoryStorage(),
       signal: new AbortController().signal,
       check: () => okAsync(undefined),
+      checkInputAdmission: () => okAsync(undefined),
       beginDrain: () => okAsync(undefined),
       release: () => okAsync(undefined),
       artifacts: { read: () => okAsync(null), write: () => okAsync("/orb-artifacts/fixture") },

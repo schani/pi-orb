@@ -1,45 +1,24 @@
-import { BACKGROUND_CONTEXT as ctx, withAbortSignal } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
-import { createModels } from "@earendil-works/pi-ai/models";
-import {
-  createRegistry,
-  defineTool,
-  Harness,
-  MemoryStorage,
-  type ToolExecutionApi,
-} from "@earendil-works/pi-durable";
+import { defineTool, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import { expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
-import { codemodeTool } from "./codemode.ts";
+import { openCodemodeHarness } from "./testkit/codemode.ts";
 
-async function fixture(catalog: CallableCatalog) {
-  const harness = await Harness.open(
-    new MemoryStorage(),
-    { models: createModels(), registry: createRegistry() },
-    ctx,
-  );
-  const root = await harness.root(ctx);
-  const api = {
-    conversationId: root.id,
-    commit: root.commit.bind(root),
-    callId: "guard",
-  } as ToolExecutionApi;
-  const tool = codemodeTool(catalog, new Set());
-  return {
-    run: (code: string, context = ctx) => tool.execute({ code }, api, context),
-    close: () => harness.close(ctx),
-  };
-}
-function expectLimit(result: Awaited<ReturnType<ReturnType<typeof codemodeTool>["execute"]>>) {
+const fixture = openCodemodeHarness;
+function expectLimit(result: ToolExecutionResult) {
   expect(result.isError).toBe(true);
   expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: "resource_limit" }));
-  expect(JSON.stringify(result.content)).toContain("Reduce batch size or callback output");
+  expect(JSON.stringify(result.output)).toContain("Reduce batch size or callback output");
 }
 
 it("rejects excessive concurrent callbacks, cancels admitted I/O and does not commit writes", async () => {
   let active = 0;
   let peak = 0;
   let cancelled = 0;
+  let entered!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
   const f = await fixture(
     new CallableCatalog([
       defineTool({
@@ -50,29 +29,39 @@ it("rejects excessive concurrent callbacks, cancels admitted I/O and does not co
           new Promise((resolve) => {
             active++;
             peak = Math.max(peak, active);
+            if (active === 7) entered();
             context.abortSignal?.addEventListener(
               "abort",
               () => {
                 active--;
                 cancelled++;
-                resolve({ content: [] });
+                resolve({ output: [] });
               },
               { once: true },
             );
           }),
+      }),
+      defineTool({
+        name: "gate",
+        description: "gate",
+        parameters: Type.Object({}),
+        execute: async () => {
+          await ready;
+          return { output: [] };
+        },
       }),
     ]),
   );
   try {
     await f.run('store("key", "original");');
     const result = await f.run(
-      '// @options: {"timeout_ms":1000}\nstore("key", "bad"); await Promise.all(Array.from({length:9},()=>tools.hold({})));',
+      'store("key", "bad"); const held=Array.from({length:7},()=>tools.hold({})); await tools.gate({}); await Promise.all([...held,tools.hold({}),tools.hold({})]);',
     );
     expectLimit(result);
     expect(peak).toBeLessThanOrEqual(8);
     expect(active).toBe(0);
-    expect(cancelled).toBeGreaterThan(0);
-    expect((await f.run('text(load("key"));')).content).toContainEqual({
+    expect(cancelled).toBeGreaterThanOrEqual(7);
+    expect((await f.run('text(load("key"));')).output).toContainEqual({
       type: "text",
       text: "original",
     });
@@ -82,7 +71,6 @@ it("rejects excessive concurrent callbacks, cancels admitted I/O and does not co
 });
 
 it("settles an outstanding callback on caller abort without merging store writes", async () => {
-  const abort = new AbortController();
   let entered!: () => void;
   const ready = new Promise<void>((resolve) => {
     entered = resolve;
@@ -100,7 +88,7 @@ it("settles an outstanding callback on caller abort without merging store writes
               "abort",
               () => {
                 cancelled = true;
-                resolve({ content: [] });
+                resolve({ output: [] });
               },
               { once: true },
             );
@@ -111,15 +99,12 @@ it("settles an outstanding callback on caller abort without merging store writes
   );
   try {
     await f.run('store("key", "original");');
-    const pending = f.run(
-      'store("key", "bad"); await tools.hold({});',
-      withAbortSignal(abort.signal, ctx),
-    );
+    const pending = f.run('store("key", "bad"); await tools.hold({});');
     await ready;
-    abort.abort();
+    await f.abort();
     expect((await pending).isError).toBe(true);
     expect(cancelled).toBe(true);
-    expect((await f.run('text(load("key"));')).content).toContainEqual({
+    expect((await f.run('text(load("key"));')).output).toContainEqual({
       type: "text",
       text: "original",
     });
@@ -135,7 +120,7 @@ it("bounds cumulative calls including discovery and preserves completed summarie
         name: "small",
         description: "small",
         parameters: Type.Object({}),
-        execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
+        execute: async () => ({ output: [{ type: "text", text: "ok" }] }),
       }),
     ]),
   );
@@ -162,7 +147,7 @@ it("rejects serialized arguments before invoking a host callback", async () => {
         parameters: Type.Object({ data: Type.String() }),
         execute: async () => {
           calls++;
-          return { content: [] };
+          return { output: [] };
         },
       }),
     ]),
@@ -185,7 +170,7 @@ it("bounds cumulative argument traffic across individually admissible calls", as
         parameters: Type.Object({ data: Type.String() }),
         execute: async () => {
           calls++;
-          return { content: [] };
+          return { output: [] };
         },
       }),
     ]),
@@ -211,7 +196,7 @@ it("allows eight simultaneous callbacks with a deterministic release barrier", a
         parameters: Type.Object({}),
         execute: async () =>
           new Promise((resolve) => {
-            releases.push(() => resolve({ content: [{ type: "text", text: "ok" }] }));
+            releases.push(() => resolve({ output: [{ type: "text", text: "ok" }] }));
             peak = Math.max(peak, releases.length);
             if (releases.length === 8) for (const release of releases) release();
           }),
@@ -223,7 +208,7 @@ it("allows eight simultaneous callbacks with a deterministic release barrier", a
       "text((await Promise.all(Array.from({length:8},()=>tools.batch({})))).length);",
     );
     expect(result.isError).toBe(false);
-    expect(result.content).toContainEqual({ type: "text", text: "8" });
+    expect(result.output).toContainEqual({ type: "text", text: "8" });
     expect(peak).toBe(8);
   } finally {
     await f.close();
@@ -237,7 +222,7 @@ it("bounds cumulative serialized replies without script output and without losin
         name: "reply",
         description: "reply",
         parameters: Type.Object({}),
-        execute: async () => ({ content: [{ type: "text", text: "x".repeat(4 * 1024 * 1024) }] }),
+        execute: async () => ({ output: [{ type: "text", text: "x".repeat(4 * 1024 * 1024) }] }),
       }),
     ]),
   );
@@ -247,7 +232,7 @@ it("bounds cumulative serialized replies without script output and without losin
     expect(
       (result.details as { calls: { status: string }[] }).calls.some((c) => c.status === "ok"),
     ).toBe(true);
-    expect((await f.run('text(load("bad")===undefined);')).content).toContainEqual({
+    expect((await f.run('text(load("bad")===undefined);')).output).toContainEqual({
       type: "text",
       text: "true",
     });
@@ -277,26 +262,27 @@ it("preserves a real 20 MiB image callback and discovery parity", async () => {
         name: "picture",
         description: "picture",
         parameters: Type.Object({}),
-        execute: async () => ({ content: [{ type: "image", data, mimeType: "image/png" }] }),
+        execute: async () => ({ output: [{ type: "image", data, mimeType: "image/png" }] }),
       }),
     ]),
   );
   try {
-    // Upstream image() regexp validation exhausts QuickJS at 20 MiB; validate the full
-    // callback payload length, then exercise image output with a smaller prefix.
     const result = await f.run(
       'text((await searchTools("picture"))[0].name); const blocks=await tools.picture({}); text(blocks[0].data.length); image({...blocks[0],data:blocks[0].data.slice(0,4*1024*1024)});',
     );
-    expect(result.isError, JSON.stringify(result.content?.filter((b) => b.type === "text"))).toBe(
+    expect(result.isError, JSON.stringify(result.output?.filter((b) => b.type === "text"))).toBe(
       false,
     );
-    expect(result.content).toContainEqual({
+    expect(result.output).toContainEqual({
       type: "image",
       data: data.slice(0, 4 * 1024 * 1024),
       mimeType: "image/png",
     });
-    expect(result.content).toContainEqual({ type: "text", text: String(data.length) });
-    expect(result.content).toContainEqual({ type: "text", text: "picture" });
+    const lines = result.output?.flatMap((block) =>
+      block.type === "text" ? block.text.split("\n") : [],
+    );
+    expect(lines).toContain(String(data.length));
+    expect(lines).toContain("picture");
   } finally {
     await f.close();
   }

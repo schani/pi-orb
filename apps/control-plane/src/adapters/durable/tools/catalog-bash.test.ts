@@ -37,21 +37,22 @@ test("actual remote built-in bash failure retains stdout, stderr and safe exit d
         executionContext(),
       );
     expect(result.isError).toBe(true);
-    expect(result.content).toEqual([
-      { type: "text", text: expect.stringContaining("Command exited with code 23") },
-    ]);
-    expect(JSON.stringify(result.content)).toContain("stdout-detail");
-    expect(JSON.stringify(result.content)).toContain("stderr-detail");
+    expect(result.structuredOutput).toMatchObject({ exitCode: 23 });
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: "exit_code", message: "Command exited with code 23" }),
+    );
+    expect(JSON.stringify(result.output)).toContain("stdout-detail");
+    expect(JSON.stringify(result.output)).toContain("stderr-detail");
     expect(streamed.join("")).toContain("stderr-detail");
     await app.close();
     const failed = await catalog
       .registrations()[0]!
       .execute({ command: "echo INPUT_SECRET" }, api, executionContext());
     expect(failed.isError).toBe(true);
-    expect(JSON.stringify(failed.content)).toContain(
+    expect(JSON.stringify(failed.output)).toContain(
       "execution transport failed; effects may have occurred",
     );
-    expect(JSON.stringify(failed.content)).not.toContain("INPUT_SECRET");
+    expect(JSON.stringify(failed.output)).not.toContain("INPUT_SECRET");
   } finally {
     await app.close();
   }
@@ -100,6 +101,6 @@ test("untrusted tool exceptions remain sanitized, including unexpected bash fail
     const result = await catalog
       .registrations()[0]!
       .execute({}, {} as ToolExecutionApi, executionContext());
-    expect(result.content).toEqual([{ type: "text", text: `${name} failed` }]);
+    expect(result.output).toEqual([{ type: "text", text: `${name} failed` }]);
   }
 });

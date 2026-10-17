@@ -1,4 +1,5 @@
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
+import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { MemoryStorage } from "@earendil-works/pi-durable";
 import { NoSimulationTask } from "determined";
@@ -48,6 +49,7 @@ function createProcessAgentContext(
         storage: new MemoryStorage(),
         signal: new AbortController().signal,
         check: () => okAsync(undefined),
+        checkInputAdmission: () => okAsync(undefined),
         beginDrain: () => okAsync(undefined),
         release: () => okAsync(undefined),
         artifacts: { read: () => okAsync(null), write: () => okAsync("/orb-artifacts/fixture") },
@@ -383,6 +385,34 @@ describe("process agent composition", () => {
     expect(diagnostics).toEqual([
       { severity: "info", code: "mcp_status", message: "MCP fixture: needs-auth." },
     ]);
+  });
+
+  it("returns visible native output without executing code when MCP discovery fails", async () => {
+    const execute = vi.fn(async () => ({}));
+    const tool = refreshProcessMcpTool(
+      { name: "codemode", description: "code", parameters: Type.Object({}), execute },
+      () => errAsync({ code: "unavailable", message: "PRIVATE-DISCOVERY-FAILURE" }),
+    );
+    const result = await tool.execute({}, {} as never, BACKGROUND_CONTEXT);
+    expect(result).toEqual({
+      isError: true,
+      output: [{ type: "text", text: "MCP discovery cancelled or unavailable" }],
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("does not execute code when the native MCP view cannot refresh", async () => {
+    const execute = vi.fn(async () => ({}));
+    const tool = refreshProcessMcpTool(
+      { name: "codemode", description: "code", parameters: Type.Object({}), execute },
+      () => okAsync([]),
+      () => errAsync({ code: "unavailable", message: "PRIVATE-NATIVE-REFRESH-FAILURE" }),
+    );
+    expect(await tool.execute({}, {} as never, BACKGROUND_CONTEXT)).toEqual({
+      isError: true,
+      output: [{ type: "text", text: "MCP discovery cancelled or unavailable" }],
+    });
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("reports authorization-required when standalone MCP credentials are rejected", async () => {

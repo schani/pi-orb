@@ -5,6 +5,7 @@ import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
 import { okAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { createDurableTools } from "./index.ts";
+import { openCodemodeHarness } from "./testkit/codemode.ts";
 
 function barrier() {
   let resolve!: () => void;
@@ -69,8 +70,19 @@ it("cancels in-flight MCP requests and closes their scoped transports", async ()
     ],
   });
   await tools.ready();
-  expect(tools.catalog.describe("mcp__mock__wait")).not.toBeNull();
-  expect(tools.catalog.describe("mock_wait")).toBeUndefined();
+  const fixture = await openCodemodeHarness(tools.catalog);
+  try {
+    const discovery = await fixture.run(
+      'text({canonical: typeof await describeTool("mcp__mock__wait"), alias: typeof await describeTool("mock_wait")});',
+    );
+    expect(discovery.isError).toBe(false);
+    expect(discovery.output).toContainEqual({
+      type: "text",
+      text: '{"canonical":"string","alias":"undefined"}',
+    });
+  } finally {
+    await fixture.close();
+  }
   expect(closed).toBe(1);
   const scope = withCancel(BACKGROUND_CONTEXT);
   const api = {
@@ -91,9 +103,8 @@ it("cancels in-flight MCP requests and closes their scoped transports", async ()
   expect(closed).toBe(2);
   expect(progress).toContainEqual({ progress: 1, total: 2 });
   expect(stdout).toEqual([]);
-  expect(diagnostics).toEqual([
-    { severity: "info", code: "mcp_status", message: "MCP mock: unavailable." },
-  ]);
+  expect(diagnostics).toEqual([]);
+  expect(tools.mcpStatus()).toEqual([{ name: "mock", status: "available" }]);
   expect((await tools.close()).isOk()).toBe(true);
 });
 

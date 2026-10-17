@@ -9,6 +9,7 @@ import {
   getCurrentTools,
 } from "@earendil-works/pi-ai";
 import {
+  type BeforeAgentStartEvent,
   createAgentSession,
   DefaultResourceLoader,
   ModelRuntime,
@@ -53,7 +54,12 @@ async function loader(
               hooks.inputCount.value += 1;
             });
             pi.on("before_agent_start", (event) => {
-              hooks.beforePrompts.push(event.prompt);
+              expect(event.messageType).toBe("custom");
+              if (event.messageType !== "custom") return;
+              expect(event.message.customType).toBe("pi-orb.host-restarted");
+              expect(typeof event.message.content).toBe("string");
+              if (typeof event.message.content === "string")
+                hooks.beforePrompts.push(event.message.content);
               event.systemPromptOptions.sections["custom_turn_hook"] = HOOK_PROMPT;
               return {
                 message: {
@@ -625,6 +631,115 @@ it("real SDK: prepares current prompt, tools, and hooks before an idle custom-tr
       entries.filter((entry) => entry.type === "message" && entry.message.role === "user"),
     ).toHaveLength(1);
     reopened.session.dispose();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("real SDK: preserves string/image custom hook content and ordinary user hook fields", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-orb-custom-turn-event-contract-"));
+  try {
+    const runtime = await ModelRuntime.create({
+      authPath: join(dir, "auth.json"),
+      allowModelNetwork: false,
+    });
+    const faux = fauxProvider({ provider: "custom-turn-event-contract" });
+    runtime.registerNativeProvider(faux.provider);
+    const requests: Parameters<typeof getCurrentSystemPrompt>[0][] = [];
+    faux.setResponses([
+      (context) => {
+        requests.push(context.messages);
+        return fauxAssistantMessage("complete");
+      },
+      (context) => {
+        requests.push(context.messages);
+        return fauxAssistantMessage("complete");
+      },
+      (context) => {
+        requests.push(context.messages);
+        return fauxAssistantMessage("complete");
+      },
+    ]);
+    const events: BeforeAgentStartEvent[] = [];
+    let inputs = 0;
+    const resourceLoader = new DefaultResourceLoader({
+      cwd: dir,
+      agentDir: join(dir, "agent"),
+      systemPromptOverride: () => CURRENT_PROMPT,
+      extensionFactories: [
+        (pi) => {
+          pi.on("input", () => {
+            inputs += 1;
+          });
+          pi.on("before_agent_start", (event) => {
+            events.push(event);
+            event.systemPromptOptions.sections["custom_turn_hook"] = HOOK_PROMPT;
+            pi.setActiveTools(["custom_turn_contract"]);
+          });
+        },
+      ],
+    });
+    await resourceLoader.reload();
+    const manager = SessionManager.inMemory(dir);
+    const { session } = await createAgentSession({
+      cwd: dir,
+      agentDir: join(dir, "agent"),
+      sessionManager: manager,
+      modelRuntime: runtime,
+      settingsManager: SettingsManager.inMemory(),
+      resourceLoader,
+      model: faux.getModel(),
+      customTools: [contractTool(CURRENT_TOOL)],
+      tools: ["custom_turn_contract"],
+    });
+    const imageContent = [
+      { type: "text" as const, text: "custom image text" },
+      {
+        type: "image" as const,
+        mimeType: "image/png",
+        data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aY9kAAAAASUVORK5CYII=",
+      },
+    ];
+    await session.sendCustomMessage(
+      { customType: "string-content", content: "custom string text", display: true },
+      { triggerTurn: true },
+    );
+    await session.sendCustomMessage(
+      { customType: "image-content", content: imageContent, display: true },
+      { triggerTurn: true },
+    );
+    await session.prompt("ordinary user prompt");
+
+    expect(events).toHaveLength(3);
+    expect(events[0]).toMatchObject({
+      messageType: "custom",
+      message: {
+        customType: "string-content",
+        content: "custom string text",
+      },
+    });
+    expect(events[1]).toMatchObject({
+      messageType: "custom",
+      message: {
+        customType: "image-content",
+        content: imageContent,
+      },
+    });
+    expect(events[2]).toMatchObject({ messageType: "user", prompt: "ordinary user prompt" });
+    expect(inputs).toBe(1);
+    expect(requests).toHaveLength(3);
+    for (const messages of requests) {
+      expect(getCurrentSystemPrompt(messages)).toContain(CURRENT_PROMPT);
+      expect(getCurrentSystemPrompt(messages)).toContain(HOOK_PROMPT);
+      expect(getCurrentTools(messages)).toMatchObject([
+        { name: "custom_turn_contract", description: CURRENT_TOOL },
+      ]);
+    }
+    expect(manager.getEntries().filter((entry) => entry.type === "custom_message")).toMatchObject([
+      { customType: "string-content", content: "custom string text" },
+      { customType: "image-content", content: imageContent },
+    ]);
+    session.dispose();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -1,11 +1,12 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { MemoryStorage, type Storage, StorageRejected } from "@earendil-works/pi-durable";
+import { MemoryStorage, type Storage } from "@earendil-works/pi-durable";
 import type { SimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, type Result, ResultAsync } from "neverthrow";
 import type { AgentSnapshot } from "../../domain/agent-ports.ts";
 import type { RuntimeClientError } from "../../domain/errors.ts";
 import type { OrbRow } from "../../domain/orb.ts";
 import type { OperationContext } from "../../domain/ports.ts";
+import { StorageFailure } from "../durable-pg/storage-boundary.ts";
 import { durableError } from "./manager.ts";
 import { NOTIFICATION_REQUEST_PREFIX } from "./notifications.ts";
 import type { AgentPersistence, AgentStorageLease } from "./persistence.ts";
@@ -47,7 +48,7 @@ export class MemoryAgentPersistence implements AgentPersistence {
         return async (...args: unknown[]) => {
           if (check && !check()) {
             // biome-ignore lint/plugin/no-throw: Durable Storage methods reject on fenced writes.
-            throw new StorageRejected("test storage owner revoked");
+            throw new StorageFailure("test storage owner revoked");
           }
           return Reflect.apply(value, target, args);
         };
@@ -84,6 +85,7 @@ export class MemoryAgentPersistence implements AgentPersistence {
             owner.expires = this.clock() + this.ttl;
             return okAsync(undefined);
           },
+          checkInputAdmission: () => okAsync(undefined),
           beginDrain: () => okAsync(undefined),
           release: () => {
             owner.abort.abort();

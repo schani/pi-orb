@@ -9,9 +9,13 @@ import {
   type SkillFrontmatter,
 } from "@earendil-works/pi-coding-agent";
 import {
+  type Agent,
   createRegistry,
   type EnvTarget,
   type Extension,
+  type Harness,
+  ROOT_CONVERSATION_ID,
+  type ToolExecutionApi,
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { type AuthProvider, StreamableHttpTransport } from "@earendil-works/pi-mcp";
@@ -137,8 +141,9 @@ export function processAgentSystemContext(
 export function refreshProcessMcpTool(
   tool: ToolRegistration,
   discover: (context: Context) => ResultAsync<readonly McpServerStatus[], ToolError>,
+  currentAgent?: (api: ToolExecutionApi, context: Context) => ResultAsync<Agent, ToolError>,
+  reported = new Map<string, McpServerStatus["status"]>(),
 ): ToolRegistration {
-  const reported = new Map<string, McpServerStatus["status"]>();
   return {
     ...tool,
     execute: async (args, api, context) => {
@@ -146,7 +151,7 @@ export function refreshProcessMcpTool(
       if (statuses.isErr())
         return {
           isError: true,
-          content: [{ type: "text", text: "MCP discovery cancelled or unavailable" }],
+          output: [{ type: "text", text: "MCP discovery cancelled or unavailable" }],
         };
       for (const status of statuses.value) {
         const previous = reported.get(status.name);
@@ -158,7 +163,14 @@ export function refreshProcessMcpTool(
           });
         reported.set(status.name, status.status);
       }
-      return tool.execute(args, api, context);
+      if (!currentAgent) return tool.execute(args, api, context);
+      const agent = await currentAgent(api, context);
+      if (agent.isErr())
+        return {
+          isError: true,
+          output: [{ type: "text", text: "MCP discovery cancelled or unavailable" }],
+        };
+      return tool.execute(args, { ...api, agent: async () => agent.value }, context);
     },
   };
 }
@@ -671,12 +683,44 @@ export function createProcessAgentContext(
         }
       }
       const registry = createRegistry();
-      const instrument = (extension: Extension): Extension => ({
+      let conversation: Harness["conversation"] | undefined;
+      const rootMcpStatus = new Map<string, McpServerStatus["status"]>();
+      const childMcpStatus = new Map<string, McpServerStatus["status"]>();
+      const currentAgent = (api: ToolExecutionApi, ctx: Context): ResultAsync<Agent, ToolError> =>
+        ResultAsync.fromThrowable(
+          async () => {
+            installTools();
+            const native = await conversation?.(api.conversationId, ctx);
+            if (!native)
+              return err<Agent, ToolError>({
+                code: "unavailable",
+                message: "Native conversation unavailable",
+              });
+            if (api.conversationId !== ROOT_CONVERSATION_ID)
+              await native.configure(
+                {
+                  tools: tools.childExtension.tools ?? [],
+                  modelTools: (tools.childExtension.tools ?? []).filter(
+                    (tool) => tool.name === "codemode",
+                  ),
+                },
+                ctx,
+              );
+            return ok<Agent, ToolError>(await native.agent(ctx));
+          },
+          (): ToolError => ({ code: "unavailable", message: "Native tool refresh unavailable" }),
+        )().andThen((result) => result);
+      const instrument = (
+        extension: Extension,
+        reported: Map<string, McpServerStatus["status"]>,
+      ): Extension => ({
         ...extension,
         tools: (extension.tools ?? []).map((tool) =>
           (() => {
             const registration =
-              tool.name === "codemode" ? refreshProcessMcpTool(tool, tools.ready) : tool;
+              tool.name === "codemode"
+                ? refreshProcessMcpTool(tool, tools.ready, currentAgent, reported)
+                : tool;
             return {
               ...registration,
               execute: async (args, api, ctx) => {
@@ -715,8 +759,11 @@ export function createProcessAgentContext(
           })(),
         ),
       });
-      registry.install(instrument(tools.extension));
-      registry.install(instrument(tools.childExtension));
+      const installTools = () => {
+        registry.install(instrument(tools.extension, rootMcpStatus));
+        registry.install(instrument(tools.childExtension, childMcpStatus));
+      };
+      installTools();
       const recordModelCall = (use: ModelCallUse, response: AssistantMessage) =>
         options.modelUsage.record(task, modelCall({ ownerUserId, orbId: orb.id, use }, response));
       const summaryModel = models.value.getModel(CODEX_PROVIDER, "gpt-6-luna");
@@ -747,6 +794,9 @@ export function createProcessAgentContext(
             }
           : {}),
         registry,
+        bindNativeConversation: (resolve: Harness["conversation"]) => {
+          conversation = resolve;
+        },
         modelTools: tools.modelTools,
         childExtension: tools.childExtension,
         checkoutCommit: prepared.value.commitSha,

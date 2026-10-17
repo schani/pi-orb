@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
-import type { ToolExecutionApi } from "@earendil-works/pi-durable";
+import type { ToolDiagnostic, ToolExecutionApi } from "@earendil-works/pi-durable";
 import { NoSimulationTask } from "determined";
 import { okAsync, ResultAsync } from "neverthrow";
 import { assert, expect, it, vi } from "vitest";
@@ -183,16 +183,22 @@ async function invoke(bundle: Bundle, name: string, args: Record<string, unknown
       .find(({ tool }) => tool.name === name),
   ).tool;
   const abort = new AbortController();
+  const diagnostics: ToolDiagnostic[] = [];
   const api = {
+    agent: async () => ({}),
     env: required(bundle.envFor)({ conversationId: "root" } as never),
     taskId: 1,
     callId: "proof-call",
-    diagnostic: () => {},
+    diagnostic: (value: ToolDiagnostic) => diagnostics.push(value),
     details: async (value: { executionWait?: boolean }) => {
       if (value.executionWait) abort.abort();
     },
   } as unknown as ToolExecutionApi;
-  return tool.execute(args, api, { ...BACKGROUND_CONTEXT, abortSignal: abort.signal });
+  const result = await tool.execute(args, api, {
+    ...BACKGROUND_CONTEXT,
+    abortSignal: abort.signal,
+  });
+  return { ...result, diagnostics: [...diagnostics, ...(result.diagnostics ?? [])] };
 }
 
 it.each(["manual", "sleep"] as const)(
@@ -234,7 +240,7 @@ it.each(["manual", "sleep"] as const)(
       expect(
         (await new PgResourceSnapshots(f.db).get(f.snapshot.orbId))._unsafeUnwrap()?.commitSha,
       ).toBe(f.snapshot.commitSha);
-      expect((await invoke(first, "read", { path: skillPath })).content).toEqual([
+      expect((await invoke(first, "read", { path: skillPath })).output).toEqual([
         { type: "text", text: skill },
       ]);
       const initialResources = await persistedResources();
@@ -309,19 +315,19 @@ it.each(["manual", "sleep"] as const)(
           error_code: null,
         })),
       ]);
-      expect((await invoke(second, "read", { path: artifact })).content).toEqual([
+      expect((await invoke(second, "read", { path: artifact })).output).toEqual([
         { type: "text", text: "private persisted artifact" },
       ]);
       const identity = await invoke(second, "read", {
         path: "/opt/pi-orb/skills/cloud-identity/SKILL.md",
       });
       expect(identity.isError).not.toBe(true);
-      expect(JSON.stringify(identity.content)).toContain("boot-hooks");
+      expect(JSON.stringify(identity.output)).toContain("boot-hooks");
       expect(
         (await invoke(second, "read", { path: "/opt/pi-orb/skills/boot-hooks/SKILL.md" })).isError,
       ).not.toBe(true);
       expect(
-        (await invoke(second, "read", { path: "./.agents/skills/proof/reference.md" })).content,
+        (await invoke(second, "read", { path: "./.agents/skills/proof/reference.md" })).output,
       ).toEqual([{ type: "text", text: "offline reference" }]);
     } finally {
       f.releaseGit.resolve();
@@ -359,26 +365,27 @@ it("re-evaluates hook instruction offers and routes ready read/write/edit/read t
     });
     expect(f.bindings()).toBe(beforeBundledRead);
     expect(bundledAlias.isError).not.toBe(true);
-    expect(JSON.stringify(bundledAlias.content)).toContain("setup");
+    expect(JSON.stringify(bundledAlias.output)).toContain("setup");
     const escaped = await invoke(bundle, "read", {
       path: "/opt/pi-orb/skills/../../../../etc/passwd",
     });
     expect(escaped.isError).toBe(true);
-    expect(JSON.stringify(escaped.content)).toContain("Snapshot resource not found");
-    expect((await invoke(bundle, "read", { path: skillPath })).content).toEqual([
+    expect(JSON.stringify(escaped.output)).toContain("Snapshot resource not found");
+    expect((await invoke(bundle, "read", { path: skillPath })).output).toEqual([
       { type: "text", text: skill },
     ]);
     expect(
       (await invoke(bundle, "write", { path: skillPath, content: "live one" })).isError,
     ).not.toBe(true);
-    expect((await invoke(bundle, "read", { path: skillPath })).content).toEqual([
+    expect((await invoke(bundle, "read", { path: skillPath })).output).toEqual([
       { type: "text", text: "live one" },
     ]);
-    expect(
-      (await invoke(bundle, "edit", { path: skillPath, oldText: "live one", newText: "live two" }))
-        .isError,
-    ).not.toBe(true);
-    expect((await invoke(bundle, "read", { path: skillPath })).content).toEqual([
+    const edited = await invoke(bundle, "edit", {
+      path: skillPath,
+      edits: [{ oldText: "live one", newText: "live two" }],
+    });
+    expect(edited.isError, JSON.stringify(edited)).not.toBe(true);
+    expect((await invoke(bundle, "read", { path: skillPath })).output).toEqual([
       { type: "text", text: "live two" },
     ]);
     expect(await readFile(join(f.root, skillPath), "utf8")).toBe("live two");
@@ -401,7 +408,7 @@ it("re-evaluates hook instruction offers and routes ready read/write/edit/read t
     expect(bundle.prompt?.("root")).toContain("immutable Git instructions");
     expect(bundle.prompt?.("root")).not.toContain("hook instructions revised again");
     const priorBindings = f.bindings();
-    expect((await invoke(bundle, "read", { path: skillPath })).content).toEqual([
+    expect((await invoke(bundle, "read", { path: skillPath })).output).toEqual([
       { type: "text", text: skill },
     ]);
     expect(f.bindings()).toBe(priorBindings);

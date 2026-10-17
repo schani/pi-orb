@@ -21,17 +21,18 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY vendor vendor
 COPY scripts/apply-dependency-patches.mjs scripts/apply-dependency-patches.mjs
-COPY patches/@earendil-works+pi-agent-core+1.1.0.patch patches/@earendil-works+pi-agent-core+1.1.0.patch
-COPY patches/@earendil-works+pi-ai+1.1.0.patch patches/@earendil-works+pi-ai+1.1.0.patch
-COPY patches/@earendil-works+pi-coding-agent+1.1.0.patch patches/@earendil-works+pi-coding-agent+1.1.0.patch
-COPY patches/@earendil-works+pi-codemode+1.1.0.patch patches/@earendil-works+pi-codemode+1.1.0.patch
+COPY patches/@earendil-works+pi-agent-core+1.3.0.patch patches/@earendil-works+pi-agent-core+1.3.0.patch
+COPY patches/@earendil-works+pi-ai+1.3.0.patch patches/@earendil-works+pi-ai+1.3.0.patch
+COPY patches/@earendil-works+pi-coding-agent+1.3.0.patch patches/@earendil-works+pi-coding-agent+1.3.0.patch
+COPY patches/@earendil-works+pi-codemode+1.3.0.patch patches/@earendil-works+pi-codemode+1.3.0.patch
+COPY patches/@earendil-works+pi-durable+1.3.0.patch patches/@earendil-works+pi-durable+1.3.0.patch
 COPY patches/pi-codemode.* patches/
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/mock-openai/package.json packages/mock-openai/
 COPY packages/luna/package.json packages/luna/
 COPY apps/control-plane/package.json apps/control-plane/
 RUN npm ci --workspace @pi-orb/control-plane --include-workspace-root=false --ignore-scripts \
-  && node scripts/apply-dependency-patches.mjs --pi-only
+  && node scripts/apply-dependency-patches.mjs --pi-durable-only
 RUN --network=none rm -rf node_modules/node-pty/prebuilds \
   && npm_config_nodedir=/usr/local npm rebuild node-pty \
   && node -e "const pty = require('node-pty'); const child = pty.spawn('/bin/sh', ['-c', 'exit 0']); child.onExit(({ exitCode }) => process.exit(exitCode))"

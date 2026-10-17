@@ -1,15 +1,10 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import {
-  type Cursor,
-  type EntryRecord,
-  ROOT_CONVERSATION_ID,
-  StorageRejected,
-} from "@earendil-works/pi-durable";
+import { type Cursor, type EntryRecord, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable";
 import { err, ok, ResultAsync } from "neverthrow";
 import type { RuntimeClientError } from "../../domain/errors.ts";
 import type { Query } from "../durable-pg/executor.ts";
 import type { AuthorityError } from "../durable-pg/index.ts";
-import { storageAuthorityError } from "../durable-pg/storage-boundary.ts";
+import { StorageFailure, storageAuthorityError } from "../durable-pg/storage-boundary.ts";
 import { readTransactionStorage } from "../durable-pg/transaction-reader.ts";
 import { NOTIFICATION_REQUEST_PREFIX } from "./notifications.ts";
 import { projectHistory } from "./projection.ts";
@@ -29,7 +24,11 @@ export function startupRuntimeError(error: AuthorityError): RuntimeClientError {
         ? error.code
         : "history_unavailable",
     answered: true,
-    retryable: error.code !== "legacy_backend" && error.code !== "history_integrity",
+    retryable:
+      error.code !== "legacy_backend" &&
+      error.code !== "history_integrity" &&
+      error.code !== "stale_owner" &&
+      error.code !== "closed",
     message: error.message,
   };
 }
@@ -170,7 +169,7 @@ export async function checkNativeStartup(query: Query, orbId: string, startup = 
       if (typed) return typed;
       if (
         error instanceof SyntaxError ||
-        (error instanceof StorageRejected && error.cause === undefined)
+        (error instanceof StorageFailure && error.cause === undefined)
       )
         return integrity();
       return {

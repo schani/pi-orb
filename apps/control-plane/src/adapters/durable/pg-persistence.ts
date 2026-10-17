@@ -8,7 +8,8 @@ import type { ControlPlaneStore, OperationContext } from "../../domain/ports.ts"
 import { type AuthorityError, PgDurableAuthority } from "../durable-pg/index.ts";
 import type { PostgreSQLClient } from "../pg/client.ts";
 import { projectNativeCommit } from "./atomic-history.ts";
-import type { AgentPersistence, AgentStorageLease } from "./persistence.ts";
+import { checkNativeInputAdmission } from "./inbox-admission.ts";
+import type { AgentPersistence, AgentStorageLease, InputAdmissionError } from "./persistence.ts";
 import { PgAgentArtifacts } from "./pg-artifacts.ts";
 import { checkNativeStartup, startupRuntimeError } from "./startup.ts";
 
@@ -157,6 +158,29 @@ export class PgAgentPersistence implements AgentPersistence {
               storage,
               artifacts: new PgAgentArtifacts(authority, owner),
               check,
+              checkInputAdmission: (browser: boolean) =>
+                checkNativeInputAdmission(this.db.query.bind(this.db), orb.id, browser).mapErr(
+                  (error): InputAdmissionError =>
+                    error.type === "authority_error" && error.code === "busy"
+                      ? { type: "input_admission_refused", error: startupRuntimeError(error) }
+                      : {
+                          type: "input_admission_failed",
+                          cause:
+                            error.type === "authority_error"
+                              ? error
+                              : {
+                                  type: "authority_error",
+                                  code:
+                                    error.code === "unavailable"
+                                      ? "unavailable"
+                                      : "history_integrity",
+                                  message:
+                                    error.code === "unavailable"
+                                      ? "Durable authority database unavailable"
+                                      : "Durable storage integrity failure",
+                                },
+                        },
+                ),
               beginDrain: () =>
                 authority
                   .beginDrain(owner, storage)

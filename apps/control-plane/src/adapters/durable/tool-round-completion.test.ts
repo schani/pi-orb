@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { setImmediate } from "node:timers/promises";
 import { zstdDecompressSync } from "node:zlib";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
 import {
   createRegistry,
@@ -167,16 +168,17 @@ describe("native HTTP tool-round completion", () => {
               execute: async () => {
                 toolEntered.resolve();
                 await toolRelease.promise;
-                return { content: [{ type: "text", text: "E2E_TOOL_OK\n" }] };
+                return { output: [{ type: "text", text: "E2E_TOOL_OK\n" }] };
               },
             }),
           ],
         }),
       );
+      const storage = new MemoryStorage();
       const agent = (
         await DurableAgent.open({
           orbId: "orb",
-          storage: new MemoryStorage(),
+          storage,
           models,
           registry,
           env: new NodeExecutionEnv({ cwd: "/tmp" }),
@@ -217,6 +219,18 @@ describe("native HTTP tool-round completion", () => {
           })
         )._unsafeUnwrap();
         await toolEntered.promise;
+        const calls = await storage.scanTasks(
+          { kind: "pi.tool" },
+          10,
+          undefined,
+          BACKGROUND_CONTEXT,
+        );
+        expect(calls.items).toContainEqual(
+          expect.objectContaining({
+            version: 2,
+            input: expect.objectContaining({ kind: "model", callId: "call|fc" }),
+          }),
+        );
         await setImmediate();
         expect(completed()).toHaveLength(0);
         expect(summaries).toHaveLength(0);

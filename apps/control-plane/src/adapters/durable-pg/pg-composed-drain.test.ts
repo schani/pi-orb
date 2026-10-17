@@ -12,11 +12,12 @@ import {
   createRegistry,
   defineTool,
   type Storage,
+  type StorageWrite,
   type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { NoSimulationTask } from "determined";
-import { expect, it } from "vitest";
+import { expect, it, onTestFailed } from "vitest";
 import { makeOrbRow, makeProjectRow } from "../../testkit/fixtures.ts";
 import { runDst } from "../../testkit/sim.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
@@ -73,6 +74,22 @@ it.for([
     let resourcesClosed = 0;
     let agent: DurableAgent | undefined;
     let replacement: DurableAgent | undefined;
+    let phase = "fixture migration";
+    const requests: { child: boolean; tools: string[]; messages: string }[] = [];
+    const taskRecords = new Map<number, Extract<StorageWrite, { type: "task" }>["value"]>();
+    onTestFailed(() => {
+      console.error(
+        JSON.stringify({
+          kind,
+          abortBeforeStop,
+          phase,
+          dispatches,
+          resourcesClosed,
+          requests,
+          tasks: [...taskRecords.values()],
+        }),
+      );
+    });
     try {
       (await database.migrate())._unsafeUnwrap();
       (
@@ -94,7 +111,10 @@ it.for([
                 commitEntered.resolve();
                 await commitRelease.promise;
               }
-              return target.commit(...args);
+              const result = await target.commit(...args);
+              for (const write of args[0])
+                if (write.type === "task") taskRecords.set(write.value.id, write.value);
+              return result;
             };
           const value = Reflect.get(target, key);
           return typeof value === "function" ? value.bind(target) : value;
@@ -107,10 +127,20 @@ it.for([
         const child = JSON.stringify(
           request.messages.find((message) => message.role === "user")?.content,
         ).includes("held-child");
+        const offered = new Set<string>();
+        for (const message of request.messages)
+          if (message.role === "system") {
+            for (const tool of message.toolsAdded ?? []) offered.add(tool.name);
+            for (const tool of message.toolsRemoved ?? []) offered.delete(tool.name);
+          }
+        requests.push({ child, tools: [...offered], messages: JSON.stringify(request.messages) });
         if (!child && !request.messages.some((message) => message.role === "toolResult"))
-          return fauxAssistantMessage(fauxToolCall("subagent", { prompt: "held-child" }), {
-            stopReason: "toolUse",
-          });
+          return fauxAssistantMessage(
+            fauxToolCall("codemode", {
+              code: 'text(await tools.subagent({prompt:"held-child"}));',
+            }),
+            { stopReason: "toolUse" },
+          );
         (child ? childEntered : rootEntered).resolve();
         await new Promise<void>((resolve) => {
           if (options?.signal?.aborted) resolve();
@@ -139,19 +169,22 @@ it.for([
             replay: "safe",
             execute: async () => {
               effectsStarted++;
-              return { content: [{ type: "text", text: "effect started" }] };
+              return { output: [{ type: "text", text: "effect started" }] };
             },
           }),
         ],
       });
       const registry = createRegistry();
       registry.install(tools.extension);
+      registry.install(tools.childExtension);
       agent = (
         await DurableAgent.open({
           orbId: orb.id,
           storage,
           models: guardedModels,
           registry,
+          modelTools: tools.modelTools,
+          childExtension: tools.childExtension,
           env: new NodeExecutionEnv({ cwd: "/tmp" }),
           checkoutCommit: "commit",
           instructions: "",
@@ -195,7 +228,10 @@ it.for([
           content: [{ type: "text", text: "held-root" }],
         })
       )._unsafeUnwrap();
+      phase = "root/child provider entry";
       await Promise.all([rootEntered.promise, childEntered.promise]);
+      expect(requests.some((request) => request.child)).toBe(true);
+      expect(requests.every((request) => request.tools.join() === "codemode")).toBe(true);
       const active = (
         await db.query(
           "SELECT record::jsonb->>'kind' AS kind,status FROM durable_pg_tasks WHERE orb_id=$1 AND status<>'terminal'",
@@ -204,6 +240,14 @@ it.for([
       )._unsafeUnwrap().rows;
       expect(active.some((row) => row.kind === "orb.child")).toBe(true);
       expect(active.length).toBeGreaterThan(1);
+      const nativeTools = (
+        await db.query(
+          "SELECT record::jsonb->>'version' AS version,record::jsonb#>>'{input,kind}' AS input_kind FROM durable_pg_tasks WHERE orb_id=$1 AND record::jsonb->>'kind'='pi.tool'",
+          [orb.id],
+        )
+      )._unsafeUnwrap().rows;
+      expect(nativeTools.some((row) => row.input_kind === "nested")).toBe(true);
+      expect(nativeTools.every((row) => row.version === "2")).toBe(true);
       expect(
         (
           await db.query("SELECT id FROM durable_pg_conversations WHERE orb_id=$1", [orb.id])
@@ -213,6 +257,7 @@ it.for([
       const beforeSeq = (
         await db.query("SELECT next_seq FROM durable_pg_durable_metadata WHERE orb_id=$1", [orb.id])
       )._unsafeUnwrap().rows[0]?.next_seq;
+      phase = "admitted abort commit";
       holdCommit = abortBeforeStop;
       const admittedAbort = abortBeforeStop
         ? agent.request("admitted-abort", { type: "abort", operationId: `inbox:${messageId}` })
@@ -241,8 +286,10 @@ it.for([
       }
       const beforeCloseDispatches = dispatches;
       const oldAgent = agent;
+      phase = "begin drain";
       const closing = oldAgent.close();
       await drainEntered.promise;
+      phase = "owned commit release";
       await runDst(
         { name: `pg-composed-drain-${kind}-${abortBeforeStop}`, iterations: 1 },
         async (sim) => {
@@ -278,7 +325,9 @@ it.for([
       ).toBe(true);
       if (admittedAbort)
         expect((await admittedAbort)._unsafeUnwrap()).toMatchObject({ type: "accepted" });
+      phase = "native close";
       expect((await closing).isOk()).toBe(true);
+      phase = "root/child provider abort";
       await Promise.all([rootAborted.promise, childAborted.promise]);
       expect(resourcesClosed).toBe(1);
       expect(lease.signal.aborted).toBe(true);
@@ -335,12 +384,15 @@ it.for([
       const nextTools = createDurableTools();
       const nextRegistry = createRegistry();
       nextRegistry.install(nextTools.extension);
+      nextRegistry.install(nextTools.childExtension);
       const recoveredTasks = barrier();
       const nextStorage = new Proxy(nextLease.storage, {
         get(target, key) {
           if (key === "commit")
             return async (...args: Parameters<Storage["commit"]>) => {
               const result = await target.commit(...args);
+              for (const write of args[0])
+                if (write.type === "task") taskRecords.set(write.value.id, write.value);
               const pending = (
                 await db.query(
                   "SELECT id FROM durable_pg_tasks WHERE orb_id=$1 AND status<>'terminal'",
@@ -360,6 +412,8 @@ it.for([
           storage: nextStorage,
           models: nextModels,
           registry: nextRegistry,
+          modelTools: nextTools.modelTools,
+          childExtension: nextTools.childExtension,
           env: new NodeExecutionEnv({ cwd: "/tmp" }),
           checkoutCommit: "commit",
           instructions: "",
@@ -396,6 +450,7 @@ it.for([
           content: [{ type: "text", text: "new-start" }],
         })
       )._unsafeUnwrap();
+      phase = "replacement recovery";
       (await replacement.waitForIdle())._unsafeUnwrap();
       if (!abortBeforeStop) await recoveredTasks.promise;
       const recovered = (await database.agentPersistence.snapshot(task, nextOrb))._unsafeUnwrap();

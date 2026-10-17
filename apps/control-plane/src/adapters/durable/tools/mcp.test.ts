@@ -7,16 +7,23 @@ import {
 } from "@earendil-works/pi-ai/providers/faux";
 import {
   createRegistry,
+  defineTool,
   Harness,
+  hook,
   MemoryStorage,
   type ToolExecutionApi,
+  type ToolExecutionResult,
+  ToolTask,
 } from "@earendil-works/pi-durable";
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
 import { errAsync, okAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { refreshProcessMcpTool } from "../../../process-agent-composition.ts";
 import { projectHistory } from "../projection.ts";
+import { CallableCatalog } from "./catalog.ts";
 import { createDurableTools } from "./index.ts";
+import { McpTools } from "./mcp.ts";
+import { openCodemodeHarness } from "./testkit/codemode.ts";
 
 it("projects authorization-required diagnostics into durable user-visible history", async () => {
   const tools = createDurableTools();
@@ -112,7 +119,16 @@ it("retries authorization-required discovery after consent and exposes sanitized
     authorized = true;
     await tools.ready();
     expect(tools.mcpStatus()).toEqual([{ name: "fixture", status: "available" }]);
-    expect(tools.catalog.describe("mcp__fixture__read")).not.toBeNull();
+    const fixture = await openCodemodeHarness(tools.catalog);
+    try {
+      const discovery = await fixture.run(
+        'return typeof await describeTool("mcp__fixture__read");',
+      );
+      expect(discovery.isError).toBe(false);
+      expect(discovery.output).toContainEqual({ type: "text", text: "string" });
+    } finally {
+      await fixture.close();
+    }
     await tools.ready();
     expect(connections).toBe(2);
   } finally {
@@ -166,7 +182,16 @@ it("reports a failed MCP server without blocking healthy discovery and calls", a
     const ready = await tools.ready();
     expect(ready.isOk()).toBe(true);
     expect(JSON.stringify(ready)).not.toContain("secret-token");
-    expect(tools.catalog.describe("mcp__healthy__ping")).not.toBeNull();
+    const fixture = await openCodemodeHarness(tools.catalog);
+    try {
+      const discovery = await fixture.run(
+        'return typeof await describeTool("mcp__healthy__ping");',
+      );
+      expect(discovery.isError).toBe(false);
+      expect(discovery.output).toContainEqual({ type: "text", text: "string" });
+    } finally {
+      await fixture.close();
+    }
     const api = {} as ToolExecutionApi;
     const status = await tools.catalog.invoke("mcp_status", {}, api, BACKGROUND_CONTEXT);
     expect(status.isOk()).toBe(true);
@@ -189,6 +214,7 @@ it("reports a failed MCP server without blocking healthy discovery and calls", a
 it("discovers MCP, executes validated QuickJS calls with fresh scoped connections, forwards progress and errors", async () => {
   let auth = 0;
   let effects = 0;
+  const stages: { connection: number; method: string; arguments?: unknown }[] = [];
   const permits: string[] = [];
   const tools = createDurableTools({
     authorize: (name) => {
@@ -199,10 +225,18 @@ it("discovers MCP, executes validated QuickJS calls with fresh scoped connection
       {
         name: "mock",
         connect: () => {
-          auth++;
+          const connection = ++auth;
+          stages.push({ connection, method: "connect" });
           const { client, server } = createInMemoryTransportPair();
           server.onMessage((message) => {
             if (!("method" in message) || !("id" in message)) return;
+            stages.push({
+              connection,
+              method: message.method,
+              ...(message.method === "tools/call"
+                ? { arguments: (message.params as { arguments?: unknown })?.arguments }
+                : {}),
+            });
             const respond = (result: unknown) =>
               server.send({ jsonrpc: "2.0", id: message.id, result });
             if (message.method === "initialize")
@@ -251,11 +285,13 @@ it("discovers MCP, executes validated QuickJS calls with fresh scoped connection
     ],
   });
   expect((await tools.ready()).isOk()).toBe(true);
+  expect(auth).toBe(1);
+  expect(effects).toBe(0);
   const faux = fauxProvider();
   faux.setResponses([
     fauxAssistantMessage(
       fauxToolCall("codemode", {
-        code: 'try {await tools.mcp__mock__echo({value:42});} catch(e) {text("validated");} const r = await tools.mcp__mock__echo({value:"error"}); text(r.isError); text(r.content[0].text); text(describeTool("mcp__mock__echo"));',
+        code: 'try {await tools.mcp__mock__echo({value:42});} catch(e) {text("validated");} const r = await tools.mcp__mock__echo({value:"error"}); text(r.isError); text(r.content[0].text); text(await describeTool("mcp__mock__echo"));',
       }),
       { stopReason: "toolUse" },
     ),
@@ -264,7 +300,21 @@ it("discovers MCP, executes validated QuickJS calls with fresh scoped connection
   const models = createModels();
   models.setProvider(faux.provider);
   const registry = createRegistry();
-  registry.install(tools.extension);
+  let result: ToolExecutionResult | undefined;
+  registry.install({
+    ...tools.extension,
+    tools: tools.extension.tools!.map((tool) =>
+      tool.name !== "codemode"
+        ? tool
+        : defineTool({
+            ...tool,
+            execute: async (args, api, context) => {
+              result = await tool.execute(args, api, context);
+              return result;
+            },
+          }),
+    ),
+  });
   const harness = await Harness.open(new MemoryStorage(), { models, registry }, BACKGROUND_CONTEXT);
   try {
     const root = await harness.root(BACKGROUND_CONTEXT, {
@@ -277,11 +327,211 @@ it("discovers MCP, executes validated QuickJS calls with fresh scoped connection
     const records = await root.entries({}, 100, undefined, BACKGROUND_CONTEXT);
     expect(JSON.stringify(records.items)).toContain("validated");
     expect(JSON.stringify(records.items)).toContain("error");
-    expect(auth).toBe(2);
+    expect(auth, JSON.stringify(stages.slice(0, 16))).toBe(2);
+    expect(result?.isError).toBe(false);
+    expect(JSON.stringify(result?.output)).toContain("validated");
+    expect(JSON.stringify(result?.output)).toContain("error");
     expect(effects).toBe(1);
+    expect(stages.filter((stage) => stage.method === "tools/call")).toEqual([
+      { connection: 2, method: "tools/call", arguments: { value: "error" } },
+    ]);
     expect(permits).toContain("mcp__mock__echo");
   } finally {
     await harness.close(BACKGROUND_CONTEXT);
     expect((await tools.close()).isOk()).toBe(true);
+  }
+});
+
+it("rejects explicit null for parameterless MCP tools before hooks, authorization and credentials", async () => {
+  const canary = "NULL_MCP_ARGUMENT_CANARY_SECRET";
+  let credentials = 0,
+    authorizations = 0,
+    hooks = 0;
+  const calls: unknown[] = [];
+  const inputSchema = { type: "object", properties: {}, additionalProperties: false };
+  const catalog = new CallableCatalog([], () => {
+    authorizations++;
+    return okAsync(undefined);
+  });
+  const mcp = new McpTools(
+    [
+      {
+        name: "fixture",
+        connect: () => {
+          credentials++;
+          const { client, server } = createInMemoryTransportPair();
+          server.onMessage((message) => {
+            if (!("method" in message) || !("id" in message)) return;
+            const respond = (result: unknown) =>
+              server.send({ jsonrpc: "2.0", id: message.id, result });
+            if (message.method === "initialize")
+              void respond({
+                protocolVersion: "2025-11-25",
+                capabilities: { tools: {} },
+                serverInfo: { name: "fixture", version: "1" },
+              });
+            if (message.method === "tools/list")
+              void respond({ tools: [{ name: "ping", inputSchema }] });
+            if (message.method === "tools/call") {
+              calls.push((message.params as { arguments: unknown }).arguments);
+              void respond({ content: [{ type: "text", text: "pong" }] });
+            }
+          });
+          void server.start();
+          return okAsync(client);
+        },
+      },
+    ],
+    catalog,
+  );
+  try {
+    expect((await mcp.discover(BACKGROUND_CONTEXT)).isOk()).toBe(true);
+    expect(credentials).toBe(1);
+    expect(
+      catalog.definitions().find((tool) => tool.name === "mcp__fixture__ping")?.parameters,
+    ).toEqual(inputSchema);
+    const fixture = await openCodemodeHarness(catalog, {
+      hooks: [
+        hook(ToolTask, {
+          beforeTool: (call) => {
+            if (call.name === "mcp__fixture__ping") hooks++;
+          },
+        }),
+      ],
+    });
+    try {
+      for (const caught of [false, true]) {
+        const source = "await tools.mcp__fixture__ping(null);";
+        const result = await fixture.run(
+          `const privateCanary = ${JSON.stringify(canary)}; ` +
+            (caught ? `try { ${source} } catch (error) { text(String(error)); }` : source),
+        );
+        expect(result.isError).toBe(!caught);
+        expect(JSON.stringify(result.output)).toContain("Invalid arguments for mcp__fixture__ping");
+        for (const visible of [result.output, result.details, result.diagnostics])
+          expect(JSON.stringify(visible) ?? "").not.toContain(canary);
+        expect(authorizations).toBe(0);
+        expect(credentials).toBe(1);
+        expect(calls).toEqual([]);
+        expect(hooks).toBe(0);
+      }
+      for (const [index, args] of ["{}", "", "undefined"].entries()) {
+        const result = await fixture.run(`text(await tools.mcp__fixture__ping(${args}));`);
+        expect(result.isError).toBe(false);
+        expect(JSON.stringify(result.output)).toContain("pong");
+        expect(authorizations).toBe(index + 1);
+        expect(credentials).toBe(index + 2);
+        expect(calls).toEqual(Array.from({ length: index + 1 }, () => ({})));
+        expect(hooks).toBe(index + 1);
+      }
+    } finally {
+      await fixture.close();
+    }
+  } finally {
+    await mcp.close();
+  }
+});
+
+it("rejects raw MCP arguments before native coercion, hooks, authorization and credentials", async () => {
+  const canary = "RAW_MCP_ARGUMENT_CANARY_SECRET";
+  let credentials = 0,
+    authorizations = 0,
+    hooks = 0;
+  const calls: unknown[] = [];
+  const inputSchema = {
+    type: "object",
+    properties: { value: { type: "string" } },
+    required: ["value"],
+    additionalProperties: false,
+  };
+  const catalog = new CallableCatalog([], () => {
+    authorizations++;
+    return okAsync(undefined);
+  });
+  const mcp = new McpTools(
+    [
+      {
+        name: "strict",
+        connect: () => {
+          credentials++;
+          const { client, server } = createInMemoryTransportPair();
+          server.onMessage((message) => {
+            if (!("method" in message) || !("id" in message)) return;
+            const respond = (result: unknown) =>
+              server.send({ jsonrpc: "2.0", id: message.id, result });
+            if (message.method === "initialize")
+              void respond({
+                protocolVersion: "2025-11-25",
+                capabilities: { tools: {} },
+                serverInfo: { name: "strict", version: "1" },
+              });
+            if (message.method === "tools/list")
+              void respond({ tools: [{ name: "echo", inputSchema }] });
+            if (message.method === "tools/call") {
+              const args = (message.params as { arguments: unknown }).arguments;
+              calls.push(args);
+              void respond({ content: [{ type: "text", text: "accepted" }] });
+            }
+          });
+          void server.start();
+          return okAsync(client);
+        },
+      },
+    ],
+    catalog,
+  );
+  try {
+    expect((await mcp.discover(BACKGROUND_CONTEXT)).isOk()).toBe(true);
+    expect(credentials).toBe(1);
+    expect(
+      catalog.definitions().find((tool) => tool.name === "mcp__strict__echo")?.parameters,
+    ).toEqual(inputSchema);
+    const fixture = await openCodemodeHarness(catalog, {
+      hooks: [
+        hook(ToolTask, {
+          beforeTool: (call) => {
+            if (call.name === "mcp__strict__echo") hooks++;
+          },
+        }),
+      ],
+    });
+    try {
+      const invalid = [
+        { value: 42 },
+        { value: [canary] },
+        { value: "ok", extra: canary },
+        [canary],
+        null,
+      ];
+      for (const args of invalid) {
+        const source = `await tools.mcp__strict__echo(${JSON.stringify(args)});`;
+        for (const caught of [false, true]) {
+          const result = await fixture.run(
+            caught ? `try { ${source} } catch (error) { text(String(error)); }` : source,
+          );
+          expect(result.isError).toBe(!caught);
+          expect(JSON.stringify(result.output)).toContain(
+            "Invalid arguments for mcp__strict__echo",
+          );
+          for (const visible of [result.output, result.details, result.diagnostics])
+            expect(JSON.stringify(visible) ?? "").not.toContain(canary);
+          expect(authorizations).toBe(0);
+          expect(credentials).toBe(1);
+          expect(calls).toEqual([]);
+          expect(hooks).toBe(0);
+        }
+      }
+      const valid = await fixture.run('text(await tools.mcp__strict__echo({value:"exact"}));');
+      expect(valid.isError).toBe(false);
+      expect(JSON.stringify(valid.output)).toContain("accepted");
+      expect(authorizations).toBe(1);
+      expect(credentials).toBe(2);
+      expect(calls).toEqual([{ value: "exact" }]);
+      expect(hooks).toBe(1);
+    } finally {
+      await fixture.close();
+    }
+  } finally {
+    await mcp.close();
   }
 });

@@ -1,0 +1,99 @@
+diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js b/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js
+--- a/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js
++++ b/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js
+@@ -227,7 +227,12 @@
+             ...models.map((name) => ({ name, spread: true })),
+             ...(this.options.globals ?? []).map((global) => ({ name: global.name, spread: global.spread === true })),
+         ];
+-        const namespaces = [];
++        const namespaces = (this.options.namespaces ?? []).map((namespace) => ({
++            name: namespace.name,
++            ...(namespace.description === undefined ? {} : { description: namespace.description }),
++            ...(namespace.instructions === undefined ? {} : { instructions: namespace.instructions }),
++            tools: [],
++        }));
+         for (const tool of callable) {
+             const namespace = namespaceOf(tool.name, this.options.namespaces ?? []);
+             if (namespace === undefined)
+@@ -628,7 +633,7 @@
+         const made = input.call;
+         if (call.target === "tool" && made.name === call.name && sameJson(made.arguments, call.args ?? {}))
+             return undefined;
+-        return `tools.${made.name}(${JSON.stringify(made.arguments)})`;
++        return `tools.${made.name}(${argumentPreview(made.arguments)})`;
+     }
+     /** Run one live call and journal its result. */
+     launch(call) {
+@@ -660,7 +665,7 @@
+     }
+     async callTool(call) {
+         // Passed as the script gave them; validation reports arguments that are not an object.
+-        const args = (call.args ?? {});
++        const args = (call.args === undefined ? {} : call.args);
+         const model = call.name.startsWith(CODEMODE_INTERNAL_PREFIX);
+         if (model) {
+             await this.modelSlot();
+@@ -689,7 +694,7 @@
+     started(call) {
+         if (this.rows.has(call.id))
+             return;
+-        const args = call.args === undefined ? "" : (JSON.stringify(call.args) ?? "");
++        const args = call.args === undefined ? "" : argumentPreview(call.args);
+         const name = call.name.startsWith(CODEMODE_INTERNAL_PREFIX)
+             ? call.name.slice(CODEMODE_INTERNAL_PREFIX.length)
+             : call.name;
+@@ -753,7 +758,7 @@
+         const { namespaces } = this.start;
+         const tools = this.start.tools.filter((tool) => tool.hidden !== true);
+         const namespaceOfTool = (name) => namespaces.find((namespace) => namespace.tools.includes(name));
+-        const matchesNamespace = (namespace, query) => namespace.name === query || toCodemodeIdentifier(namespace.name) === toCodemodeIdentifier(query);
++        const matchesNamespace = (namespace, query) => namespace.name === query || toCodemodeIdentifier(namespace.name) === toCodemodeIdentifier(query) || namespace.name.split("__").at(-1) === query || toCodemodeIdentifier(namespace.name).split("__").at(-1) === toCodemodeIdentifier(query);
+         if (call.name === "describeTool") {
+             const [name] = args;
+             if (typeof name !== "string")
+@@ -867,8 +872,11 @@
+     const output = typeof value === "object" && value !== null ? value.output : undefined;
+     return Array.isArray(output) ? output.filter((item) => item?.type === "image").length : 0;
+ }
++function argumentPreview(value) {
++    return JSON.stringify(typeof value === "object" && value !== null ? Object.keys(value).slice(0, 16) : typeof value).slice(0, 256);
++}
+ function describe(call) {
+-    return `${call.target === "tool" ? "tools." : ""}${call.name}(${JSON.stringify(call.args) ?? ""})`;
++    return `${call.target === "tool" ? "tools." : ""}${call.name}(${argumentPreview(call.args)})`;
+ }
+ /** Structural JSON equality; key order does not matter. */
+ function sameJson(a, b) {
+diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts b/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts
+--- a/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts
++++ b/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts
+@@ -1,3 +1,3 @@
+-export { CODEMODE_MODULE_VERSION, CODEMODE_TOOL_NAME, type CodemodeGlobal, type CodemodeNestedCall, CodemodeStoreDoc, type CodemodeToolDetails, type CodemodeToolInput, type CodemodeToolOptions, createCodemodeExtension, createCodemodeTool, } from "./codemode.ts";
++export { CODEMODE_MODULE_VERSION, CODEMODE_TOOL_NAME, type CodemodeGlobal, type CodemodeNestedCall, CodemodeRunDoc, CodemodeJournalDoc, CodemodeStoreDoc, type CodemodeToolDetails, type CodemodeToolInput, type CodemodeToolOptions, createCodemodeExtension, createCodemodeTool, } from "./codemode.ts";
+ export { type CodemodeNamespace, DEFAULT_CODEMODE_INLINE_BUDGET } from "./describe.ts";
+ //# sourceMappingURL=index.d.ts.map
+\ No newline at end of file
+diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/index.js b/node_modules/@earendil-works/pi-durable/dist/codemode/index.js
+--- a/node_modules/@earendil-works/pi-durable/dist/codemode/index.js
++++ b/node_modules/@earendil-works/pi-durable/dist/codemode/index.js
+@@ -1,3 +1,3 @@
+-export { CODEMODE_MODULE_VERSION, CODEMODE_TOOL_NAME, CodemodeStoreDoc, createCodemodeExtension, createCodemodeTool, } from "./codemode.js";
++export { CODEMODE_MODULE_VERSION, CODEMODE_TOOL_NAME, CodemodeRunDoc, CodemodeJournalDoc, CodemodeStoreDoc, createCodemodeExtension, createCodemodeTool, } from "./codemode.js";
+ export { DEFAULT_CODEMODE_INLINE_BUDGET } from "./describe.js";
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file
+diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/output.js b/node_modules/@earendil-works/pi-durable/dist/codemode/output.js
+--- a/node_modules/@earendil-works/pi-durable/dist/codemode/output.js
++++ b/node_modules/@earendil-works/pi-durable/dist/codemode/output.js
+@@ -106,7 +106,10 @@
+ async function saveImages(items, write) {
+     const labels = new Map();
+     const label = async ({ data, mimeType }, index) => {
+-        const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
++        const binary = atob(data);
++        const bytes = new Uint8Array(binary.length);
++        for (let i = 0; i < binary.length; i++)
++            bytes[i] = binary.charCodeAt(i);
+         const kind = `${mimeType}, ${bytes.length} bytes`;
+         // A failed write must not discard the result of a script whose calls already ran: it becomes part of the label.
+         const saved = await write(`image-${index}${IMAGE_EXTENSIONS[mimeType] ?? ".bin"}`, bytes);

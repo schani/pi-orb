@@ -1,6 +1,6 @@
 # Subagent package / Pi runtime contracts
 
-Recovered from orb `b18fc524-632d-42cd-ab90-8b2ac55de80d`, then extended for the production adapter. Local runtime integration pins Pi 1.1.0; historical qualification used 0.87.1. The isolated characterization install pins unmodified gotgenes 21.7.0; evidence also retains the original 21.4.2 run. The runtime uses the immutable `vendor/gotgenes-pi-subagents-21.7.0-orb.8.tgz` fork plus `patches/@gotgenes+pi-subagents+21.7.0-orb.8.patch` for child-codemode allowlists and reserved MCP namespaces. Source is published at `https://github.com/schani/pi-packages`, branch `modelselection`, with immutable commit pins below.
+Recovered from orb `b18fc524-632d-42cd-ab90-8b2ac55de80d`, then extended for the production adapter. Local runtime integration pins Pi 1.3.0; historical qualification used 0.87.1. The isolated characterization install pins unmodified gotgenes 21.7.0; evidence also retains the original 21.4.2 run. The runtime uses the immutable `vendor/gotgenes-pi-subagents-21.7.0-orb.8.tgz` fork plus `patches/@gotgenes+pi-subagents+21.7.0-orb.8.patch` for child-codemode allowlists and reserved MCP namespaces. Source is published at `https://github.com/schani/pi-packages`, branch `modelselection`, with immutable commit pins below.
 
 ```bash
 npm ci

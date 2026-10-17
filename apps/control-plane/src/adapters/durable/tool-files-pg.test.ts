@@ -57,7 +57,7 @@ it("reads PG spills after owner reopen but not from another orb", async () => {
     });
     expect(
       (await reopened.read({ path, offset: 2, limit: 1 }, api, BACKGROUND_CONTEXT))._unsafeUnwrap()
-        ?.content,
+        ?.output,
     ).toEqual([{ type: "text", text: "two" }]);
     const otherOwner = (await authority.acquire(other.id, "other", 0, 0, 1000))._unsafeUnwrap();
     const foreign = createAgentToolFiles({
