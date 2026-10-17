@@ -123,7 +123,8 @@ it("provides a bounded example, relevant caps and stable bundled-manual guidance
     /Emitted output[\s\S]*1\s*MiB[\s\S]*32\s*MiB[\s\S]*4096/i,
     /bash[\s\S]*1\s*MiB[\s\S]*UTF-8[\s\S]*full_output_path/i,
     /2000[\s\S]*50\s*KiB[\s\S]*offset[\s\S]*limit/i,
-    /20\s*MiB[\s\S]*fallback/i,
+    /Images: PNG\/JPEG\/GIF\/WebP retain original bytes/i,
+    /up to 20\s*MiB raw, inclusive, independent of dimensions/i,
     /artifact[\s\S]*16\s*MiB/i,
     /remote[\s\S]*HTTP requests[\s\S]*whole-file reads[\s\S]*16\s*MiB[\s\S]*raw file[\s\S]*lower/i,
     /no[\s\S]*Node[\s\S]*filesystem[\s\S]*network[\s\S]*timers/i,
@@ -175,7 +176,8 @@ it.each([
     const resources = snapshotPromptResources(bundle)._unsafeUnwrap();
     const prompt = renderPrompt({ cwd, repository: [], skills: resources.skills });
     expect(resources.skills.filter(({ name }) => name.startsWith("codemode-"))).toHaveLength(2);
-    const limitsPath = manual.match(/\[Limits \(central wrapper\)\]\(([^)]+)\)/)?.[1] ?? "missing";
+    const limitsPath =
+      manual.match(/\[Limits \(central native code-mode\)\]\(([^)]+)\)/)?.[1] ?? "missing";
     expect(limitsPath).toBe(skillPath);
     expect(Buffer.from((await reader.read(limitsPath))._unsafeUnwrap()).toString()).toBe(skill);
     expect(manual).toContain("# Code-mode agent manual");

@@ -17,11 +17,12 @@ import { afterEach, describe, expect, it } from "vitest";
 const root = join(import.meta.dirname, "../../..");
 const helper = join(root, "scripts/apply-dependency-patches.mjs");
 const names = [
-  "@earendil-works+pi-agent-core+1.1.0.patch",
-  "@earendil-works+pi-ai+1.1.0.patch",
-  "@earendil-works+pi-coding-agent+1.1.0.patch",
+  "@earendil-works+pi-agent-core+1.3.0.patch",
+  "@earendil-works+pi-ai+1.3.0.patch",
+  "@earendil-works+pi-coding-agent+1.3.0.patch",
   "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
-  "@earendil-works+pi-codemode+1.1.0.patch",
+  "@earendil-works+pi-codemode+1.3.0.patch",
+  "@earendil-works+pi-durable+1.3.0.patch",
 ];
 const piNames = names.filter((name) => name.startsWith("@earendil-works+"));
 const scratch: string[] = [];
@@ -188,13 +189,37 @@ describe("sealed dependency patch application", () => {
     cpSync(join(root, path), join(dir, path));
     expect(run(dir).status).toBe(1);
   });
-  it("pi-only installs require all four Pi packages but not subagents", () => {
+  it("pi-only standalone installs require four packages without Durable or subagents", () => {
     const dir = fixture();
     rmSync(join(dir, "node_modules/@gotgenes"), { recursive: true });
     rmSync(join(dir, "patches", names[3] as string));
+    rmSync(join(dir, "node_modules/@earendil-works/pi-durable"), { recursive: true });
+    rmSync(join(dir, "patches/@earendil-works+pi-durable+1.3.0.patch"));
     expect(run(dir, "--pi-only").status).toBe(0);
+    expect(run(dir, "--pi-durable-only").status).toBe(1);
     expect(run(dir).status).toBe(1);
   });
+  it.each(["package", "patch", "file"])(
+    "requires Durable %s before changing any package",
+    (kind) => {
+      const dir = fixture();
+      const path =
+        kind === "package"
+          ? "node_modules/@earendil-works/pi-durable/package.json"
+          : kind === "patch"
+            ? "patches/@earendil-works+pi-durable+1.3.0.patch"
+            : "node_modules/@earendil-works/pi-durable/dist/codemode/index.js";
+      const target = join(dir, files(names[0] as string)[0] as string);
+      const before = sha(target);
+      rmSync(join(dir, path));
+      const result = run(dir, "--pi-durable-only");
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("input_unreadable");
+      expect(sha(target)).toBe(before);
+      expect(run(dir).status).toBe(1);
+      expect(sha(target)).toBe(before);
+    },
+  );
   it("installs from the control-plane Docker patch COPY inputs without Docker", () => {
     const dir = fixture();
     rmSync(join(dir, "patches"), { recursive: true });
@@ -205,25 +230,25 @@ describe("sealed dependency patch application", () => {
     );
     expect(inputs.sort()).toEqual(piNames.toSorted());
     for (const name of inputs) cpSync(join(root, "patches", name), join(dir, "patches", name));
-    const result = run(dir, "--pi-only");
+    const result = run(dir, "--pi-durable-only");
     expect(result.status, result.stderr).toBe(0);
     for (const name of inputs)
       for (const path of files(name)) expect(sha(join(dir, path))).toBe(sha(join(root, path)));
   });
-  it.each(piNames)("pi-only rejects changed patch bytes: %s", (name) => {
+  it.each(piNames)("pi-durable-only rejects changed patch bytes: %s", (name) => {
     const dir = fixture();
     writeFileSync(join(dir, "patches", name), "changed patch\n");
     const before = names.flatMap(files).map((path) => sha(join(dir, path)));
-    const result = run(dir, "--pi-only");
+    const result = run(dir, "--pi-durable-only");
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("patch checksum mismatch");
     expect(names.flatMap(files).map((path) => sha(join(dir, path)))).toEqual(before);
   });
-  it.each(piNames.flatMap(files))("pi-only rejects installed file drift: %s", (path) => {
+  it.each(piNames.flatMap(files))("pi-durable-only rejects installed file drift: %s", (path) => {
     const dir = fixture();
     writeFileSync(join(dir, path), `${readFileSync(join(dir, path), "utf8")}\n// drift\n`);
     const before = names.flatMap(files).map((target) => sha(join(dir, target)));
-    const result = run(dir, "--pi-only");
+    const result = run(dir, "--pi-durable-only");
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("installed bytes mismatch");
     expect(names.flatMap(files).map((target) => sha(join(dir, target)))).toEqual(before);
@@ -250,10 +275,11 @@ describe("sealed dependency patch application", () => {
   });
   it("preserves every vendor archive and shipped patch checksum", () => {
     const evidence = `d9afae712be5304e09a490f28b0493180c8565fe6585efe173b1daaab3e5cf2a  vendor/gotgenes-pi-subagents-21.7.0-orb.8.tgz
- 812225636f3c081e6e8497b0b7c98051baedea90b455f6e7f837ccc5a84be9c7  patches/@earendil-works+pi-ai+1.1.0.patch
- e817628f707f1d5ea2a3d0d27702919862b23303ba656dea8d30c6412da3e8e1  patches/@earendil-works+pi-agent-core+1.1.0.patch
- f1d54d120d0de92a0ae119e6588f43fb40114f66a3508fb57547034eddf0161e  patches/@earendil-works+pi-coding-agent+1.1.0.patch
- 698bac6a2644dd02f58961cfac801c30453eb6264306996ed25fec4388a44a84  patches/@earendil-works+pi-codemode+1.1.0.patch
+ e709d41ab45ae8e5847ffe96171751d8e7618afc0f54f47a6ca2ddb4c52d5abf  patches/@earendil-works+pi-ai+1.3.0.patch
+ f60540cee8a74742c43b0bbe49c82a19836e9e6496bfef71bb2ef5f5fe9fe462  patches/@earendil-works+pi-agent-core+1.3.0.patch
+ 600c7ca7eab79eba58e45c5cdddd891ccbddac918432aa404581edecbbf5ae4b  patches/@earendil-works+pi-coding-agent+1.3.0.patch
+ 25e9230ce5d154ec25ca5ce84509c2bd7613ea05499e3ae2b8897f89fcba5bbb  patches/@earendil-works+pi-codemode+1.3.0.patch
+ d6c02a98876d02f200dd4bea1ad6601e1befc61a0f67a2bba7942e2c5b665ff6  patches/@earendil-works+pi-durable+1.3.0.patch
  b3e48bde4e53ead071abf15eae78b26dc5ea01441d8946782ba2284f1da06f9a  patches/@gotgenes+pi-subagents+21.7.0-orb.8.patch`;
     for (const line of evidence.trim().split("\n")) {
       const [hash, path] = line.trim().split(/\s+/);

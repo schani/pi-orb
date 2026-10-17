@@ -1,17 +1,11 @@
-import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
-import { createModels } from "@earendil-works/pi-ai/models";
 import { CodemodeSandbox } from "@earendil-works/pi-codemode";
-import {
-  createRegistry,
-  defineTool,
-  Harness,
-  MemoryStorage,
-  type ToolExecutionApi,
-} from "@earendil-works/pi-durable";
+import { defineTool } from "@earendil-works/pi-durable";
+import { okAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
-import { codemodeTool } from "./codemode.ts";
+import { imageReadTool } from "./read.ts";
+import { openCodemodeHarness } from "./testkit/codemode.ts";
 
 const workerUrl = new URL("./bounded-worker.js", import.meta.url);
 const memoryLimitBytes = 256 * 1024 * 1024;
@@ -21,44 +15,64 @@ it("preserves every byte of a full 20 MiB image callback through image() and the
   const png = Buffer.alloc(20 * 1024 * 1024, 97);
   Buffer.from("89504e470d0a1a0a", "hex").copy(png);
   const data = png.toString("base64");
-  const harness = await Harness.open(
-    new MemoryStorage(),
-    { models: createModels(), registry: createRegistry() },
-    ctx,
-  );
-  const root = await harness.root(ctx);
-  const api = {
-    conversationId: root.id,
-    commit: root.commit.bind(root),
-    callId: "full-image",
-  } as ToolExecutionApi;
-  const tool = codemodeTool(
+  const fixture = await openCodemodeHarness(
     new CallableCatalog([
       defineTool({
         name: "picture",
         description: "picture",
         parameters: Type.Object({}),
-        execute: async () => ({ content: [{ type: "image", data, mimeType: "image/png" }] }),
+        execute: async () => ({ output: [{ type: "image", data, mimeType: "image/png" }] }),
       }),
     ]),
-    new Set(),
   );
   try {
-    const result = await tool.execute(
-      { code: 'image((await tools.picture({}))[0]); store("imagePassed",true);' },
-      api,
-      ctx,
+    const result = await fixture.run(
+      'image((await tools.picture({}))[0]); store("imagePassed",true);',
     );
-    expect(result.isError, JSON.stringify(result.content?.filter((b) => b.type === "text"))).toBe(
+    expect(result.isError, JSON.stringify(result.output?.filter((b) => b.type === "text"))).toBe(
       false,
     );
-    const images = result.content?.filter((b) => b.type === "image");
+    const images = result.output?.filter((b) => b.type === "image");
     expect(images).toHaveLength(1);
     expect(images?.[0]).toEqual({ type: "image", data, mimeType: "image/png" });
-    const saved = await tool.execute({ code: 'text(load("imagePassed"));' }, api, ctx);
-    expect(saved.content).toContainEqual({ type: "text", text: "true" });
+    const decoded = Buffer.from(images![0]!.data, "base64");
+    expect(decoded.byteLength).toBe(png.byteLength);
+    expect(decoded.equals(png)).toBe(true);
+    const saved = await fixture.run('text(load("imagePassed"));');
+    expect(saved.output).toContainEqual({ type: "text", text: "true" });
   } finally {
-    await harness.close(ctx);
+    await fixture.close();
+  }
+});
+
+it("returns read images as arrays through native nested calls", async () => {
+  const picture = { type: "image" as const, data: "iVBORw0KGgo=", mimeType: "image/png" };
+  let reads = 0;
+  const fixture = await openCodemodeHarness(
+    new CallableCatalog([
+      imageReadTool({
+        read: (request) => {
+          expect(request.path).toBe("picture.png");
+          reads++;
+          return okAsync({ output: [picture] });
+        },
+      }),
+    ]),
+  );
+  try {
+    const result = await fixture.run(
+      'const blocks=await tools.read({path:"picture.png"}); text(Array.isArray(blocks)); text(blocks.length); image(blocks[0]);',
+    );
+    expect(result.isError).toBe(false);
+    const lines = result.output?.flatMap((block) =>
+      block.type === "text" ? block.text.split("\n") : [],
+    );
+    expect(lines).toContain("true");
+    expect(lines).toContain("1");
+    expect(result.output?.filter((item) => item.type === "image")).toEqual([picture]);
+    expect(reads).toBe(1);
+  } finally {
+    await fixture.close();
   }
 });
 

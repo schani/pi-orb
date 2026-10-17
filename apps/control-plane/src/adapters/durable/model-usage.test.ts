@@ -37,12 +37,18 @@ function completed(id: string, items: unknown[], total?: number) {
 }
 const text = (id: string, value: string, total?: number) =>
   completed(id, [{ type: "message", id, content: [{ type: "output_text", text: value }] }], total);
-const call = (id: string, name: string, args: unknown) =>
+const call = (id: string, code: string) =>
   completed(id, [
-    { type: "function_call", id, call_id: id, name, arguments: JSON.stringify(args) },
+    {
+      type: "custom_tool_call",
+      id: `ctc_${id}`,
+      call_id: `call_${id}`,
+      name: "codemode",
+      input: code,
+    },
   ]);
 
-// Contract with pi-durable 1.1.0 internals the ledger classification relies on (docs/model-usage.md).
+// Contract with pi-durable 1.3.0 internals the ledger classification relies on (docs/model-usage.md).
 describe("durable model usage capture", () => {
   it("classifies root, subagent and compaction calls and records the provider's usage", async () => {
     const requests: string[] = [];
@@ -59,29 +65,47 @@ describe("durable model usage capture", () => {
         const raw = (
           request.headers["content-encoding"] === "zstd" ? zstdDecompressSync(bytes) : bytes
         ).toString();
-        const body = JSON.parse(raw) as { input?: unknown };
-        const owner = raw.includes("context summarization assistant")
+        const body = JSON.parse(raw) as {
+          instructions?: string;
+          input?: Array<{
+            type?: string;
+            role?: string;
+            content?: Array<{ type: string; text?: string }>;
+          }>;
+        };
+        const userText = body.input
+          ?.filter((item) => item.role === "user")
+          .flatMap((item) => item.content ?? [])
+          .filter((part) => part.type === "input_text")
+          .map((part) => part.text ?? "");
+        const owner = body.instructions?.includes("context summarization assistant")
           ? "compaction"
-          : raw.includes("ROOT_TURN")
-            ? "root"
-            : "child";
+          : userText?.includes("CHILD_TASK")
+            ? "child"
+            : "root";
         requests.push(owner);
-        const outputs = (JSON.stringify(body.input).match(/function_call_output/g) ?? []).length;
-        const agentId = /\\"agent_id\\":\\"([^\\]+)\\"/.exec(raw)?.[1];
+        const outputs =
+          body.input?.filter((item) => item.type === "custom_tool_call_output").length ?? 0;
         const events =
           owner === "compaction"
             ? text("summary", "Turn one spawned a child.")
             : owner === "child"
               ? text("child", "child done")
-              : raw.includes("ROOT_TURN_THREE")
+              : userText?.some((value) => value.startsWith("ROOT_TURN_THREE"))
                 ? text("third", "third done")
-                : raw.includes("ROOT_TURN_TWO")
+                : userText?.some((value) => value.startsWith("ROOT_TURN_TWO"))
                   ? // A full context window makes the next generation compact first.
                     text("second", "second done", 10_000_000)
                   : outputs === 0
-                    ? call("spawn", "subagent", { prompt: "CHILD_TASK" })
+                    ? call(
+                        "spawn",
+                        'const child = JSON.parse(await tools.subagent({prompt:"CHILD_TASK"})); store("child", child.agent_id); text(child);',
+                      )
                     : outputs === 1
-                      ? call("wait", "get_subagent_result", { agent_id: agentId, wait: true })
+                      ? call(
+                          "wait",
+                          'text(JSON.parse(await tools.get_subagent_result({agent_id:load("child"),wait:true})).receipt);',
+                        )
                       : text("first", "first done");
         response.writeHead(200, { "content-type": "text/event-stream" });
         for (const event of events) response.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -106,7 +130,9 @@ describe("durable model usage capture", () => {
       })
     )._unsafeUnwrap();
     const registry = createRegistry();
-    registry.install(createDurableTools().extension);
+    const tools = createDurableTools();
+    registry.install(tools.extension);
+    registry.install(tools.childExtension);
     const { storage } = (await new MemoryAgentPersistence().openOrb("orb", false))._unsafeUnwrap();
     const agent = (
       await DurableAgent.open({
@@ -114,6 +140,8 @@ describe("durable model usage capture", () => {
         storage,
         models,
         registry,
+        modelTools: tools.modelTools,
+        childExtension: tools.childExtension,
         env: new NodeExecutionEnv({ cwd: "/tmp" }),
         checkoutCommit: "commit",
         instructions: "instruction",
@@ -146,6 +174,7 @@ describe("durable model usage capture", () => {
       await seven;
     } finally {
       await agent.close();
+      await tools.close();
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

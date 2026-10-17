@@ -5,7 +5,8 @@ import {
   type SubmissionId,
 } from "@earendil-works/pi-durable";
 import type { MessageInputBlock, OrbMessageSystem } from "@pi-orb/protocol";
-import { err, ok, Result, ResultAsync } from "neverthrow";
+import { err, ok, okAsync, Result, ResultAsync } from "neverthrow";
+import type { StoreError } from "../../domain/errors.ts";
 import { jsonEqual } from "../../domain/json-equal.ts";
 import { squashMessageBatch } from "../../domain/message-batch.ts";
 import type { Query } from "../durable-pg/executor.ts";
@@ -19,6 +20,40 @@ const rejected = (): AuthorityError => ({
   code: "projection",
   message: "Input admission changed",
 });
+
+function sleepInputAdmission(sleepId: unknown, stopReason: unknown): Result<void, AuthorityError> {
+  return sleepId != null || stopReason === "sleep"
+    ? err({ type: "authority_error", code: "busy", message: "Input admission paused by sleep" })
+    : ok(undefined);
+}
+
+function queuedInputAdmission(held: boolean): Result<void, AuthorityError> {
+  return held
+    ? err({
+        type: "authority_error",
+        code: "busy",
+        message: "Input admission waits for queued messages",
+      })
+    : ok(undefined);
+}
+
+/** Read-only refusal seam; the native commit guard remains the atomic authority. */
+export function checkNativeInputAdmission(
+  query: Query,
+  orbId: string,
+  browser: boolean,
+): ResultAsync<void, AuthorityError | StoreError> {
+  return query("SELECT sleep_id,stop_reason FROM orbs WHERE id=$1", [orbId])
+    .andThen((orb) => sleepInputAdmission(orb.rows[0]?.sleep_id, orb.rows[0]?.stop_reason))
+    .andThen(() =>
+      browser
+        ? query(
+            "SELECT 1 FROM orb_messages WHERE orb_id=$1 AND status IN ('queued','delivering') AND operation_id IS NULL LIMIT 1",
+            [orbId],
+          ).andThen((held) => queuedInputAdmission(held.rows.length > 0))
+        : okAsync(undefined),
+    );
+}
 
 /** Native/public publication holds the same orb lock as pending cancellation. */
 export async function projectNativeInboxCommit(
@@ -90,28 +125,9 @@ export async function projectNativeInboxCommit(
           // Native admission can precede receipt finalization; placement is not new input.
           if (admittedSubmissions.has(submission.id) || captured?.submissionId === submission.id)
             continue;
-          const orb = await query("SELECT sleep_id,stop_reason FROM orbs WHERE id=$1", [orbId]);
-          if (orb.isErr()) return err(orb.error);
-          if (orb.value.rows[0]?.sleep_id != null || orb.value.rows[0]?.stop_reason === "sleep")
-            return err<never, AuthorityError>({
-              type: "authority_error",
-              code: "busy",
-              message: "Input admission paused by sleep",
-            });
-          if (ids.length === 0) {
-            const held = await query(
-              "SELECT 1 FROM orb_messages WHERE orb_id=$1 AND status IN ('queued','delivering') AND operation_id IS NULL LIMIT 1",
-              [orbId],
-            );
-            if (held.isErr()) return err(held.error);
-            if (held.value.rows.length > 0)
-              return err<never, AuthorityError>({
-                type: "authority_error",
-                code: "busy",
-                message: "Input admission waits for queued messages",
-              });
-            continue;
-          }
+          const admission = await checkNativeInputAdmission(query, orbId, ids.length === 0);
+          if (admission.isErr()) return err(admission.error);
+          if (ids.length === 0) continue;
           const rows = await query(
             "SELECT message_id,content,system,status,delivery_batch_id,operation_id FROM orb_messages WHERE orb_id=$1 AND message_id=ANY($2::uuid[]) ORDER BY ordinal FOR UPDATE",
             [orbId, arrayParam(ids)],

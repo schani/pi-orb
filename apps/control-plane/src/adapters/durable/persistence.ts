@@ -5,6 +5,7 @@ import type { AgentSnapshot } from "../../domain/agent-ports.ts";
 import type { RuntimeClientError } from "../../domain/errors.ts";
 import type { OrbRow } from "../../domain/orb.ts";
 import type { OperationContext } from "../../domain/ports.ts";
+import type { AuthorityError } from "../durable-pg/index.ts";
 
 export interface AgentArtifacts {
   write(bytes: Uint8Array): ResultAsync<string, RuntimeClientError>;
@@ -12,11 +13,17 @@ export interface AgentArtifacts {
   read(path: string): ResultAsync<Uint8Array | null, RuntimeClientError>;
 }
 
+export type InputAdmissionError =
+  | { readonly type: "input_admission_refused"; readonly error: RuntimeClientError }
+  | { readonly type: "input_admission_failed"; readonly cause: AuthorityError };
+
 export interface AgentStorageLease {
   readonly artifacts?: AgentArtifacts;
   readonly storage: Storage;
   /** Validates/renews the database owner and admission fence before inference/effects. */
   check(): ResultAsync<void, RuntimeClientError>;
+  /** Read-only policy check; infrastructure/ownership failures remain fatal. */
+  checkInputAdmission(browser: boolean): ResultAsync<void, InputAdmissionError>;
   /** Enables only owner-fenced native cleanup after new admissions/effects are revoked. */
   beginDrain(): ResultAsync<void, RuntimeClientError>;
   /** Revokes ownership and stops renewal after admitted work drains. */

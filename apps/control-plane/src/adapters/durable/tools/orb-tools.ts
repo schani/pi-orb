@@ -17,7 +17,7 @@ import type { ParentNotification } from "../notifications.ts";
 /** Calls the application service directly, never a guest CLI or runtime HTTP endpoint. */
 export function createOrbTools(service: OrbAgentOperations, notifyParent?: ParentNotification) {
   const resultOutput = (result: Awaited<ResultAsync<unknown, OrbAgentError>>) => ({
-    content: [
+    output: [
       {
         type: "text" as const,
         text: JSON.stringify(result.isOk() ? result.value : { error: result.error }),

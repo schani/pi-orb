@@ -62,8 +62,9 @@ it("publishes Native held-acquisition abort without an assistant terminal or sum
   const bundle = createDurableTools();
   const registry = createRegistry();
   registry.install({
+    ...bundle.extension,
     name: "held",
-    tools: bundle.modelTools.map((tool) => ({
+    tools: (bundle.extension.tools ?? []).map((tool) => ({
       ...tool,
       execute: (args, api, ctx) =>
         tool.execute(

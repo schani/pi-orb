@@ -211,3 +211,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 ## Claude model usage forwarding — 80
 
 80. **Resolved (2026-10-14; user decision):** Claude orbs' per-call usage (`docs/model-usage.md`) reaches `model_calls` as one hidden replicated `claude.model_call` history record per call, inserted by the control plane in the history commit transaction. Rejected: a runtime→control-plane endpoint — a new route, client and loss handling, where history replication already provides durable, authenticated, exactly-once delivery; the cost is roughly 20% more history records in busy Claude orbs. `query_source` maps `sdk` → `root`, `agent:*` → `subagent`, `compact` → `compaction`, others verbatim. `cost_usd` is stored for Pi and Claude calls.
+
+## Code-mode store cutover — 81
+
+81. **Open (2026-10-16):** when adopting Pi 1.3 native code-mode, should existing custom `store()`/`load()` values carry over into `CodemodeStoreDoc`, or should native store start empty? Future success-only, rewindable/as-of-fork semantics are approved (`docs/pi-durable-evaluation.md`); that does not decide existing values. Neither import nor empty-start is approved. Existing rows remain untouched; no importer, dual read/write or external-state operation is authorized.

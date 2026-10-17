@@ -1,13 +1,15 @@
-import type { Context, JsonValue } from "@earendil-works/chord";
+import { type Context, isJsonValue, type JsonValue } from "@earendil-works/chord";
 import { type TSchema, Type } from "@earendil-works/pi-ai";
 import {
   defineTool,
   type ToolExecutionApi,
+  type ToolExecutionResult,
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import type { McpTransport } from "@earendil-works/pi-mcp";
 import { McpClient, toLlmContent } from "@earendil-works/pi-mcp";
-import { errAsync, ok, okAsync, ResultAsync } from "neverthrow";
+import { err, errAsync, ok, okAsync, Result, ResultAsync } from "neverthrow";
+import { Check } from "typebox/value";
 import { type CallableCatalog, errorResult, type ToolError } from "./catalog.ts";
 
 /** connect must resolve scoped broker credentials afresh; no credentials are retained in the catalog. */
@@ -20,6 +22,13 @@ export interface McpEndpoint {
 export type McpServerStatus =
   | { name: string; status: "available" }
   | { name: string; status: "unavailable" | "needs-auth"; error: ToolError };
+function invalidResponse(): ToolExecutionResult {
+  return {
+    isError: true,
+    output: [{ type: "text", text: "Invalid MCP response" }],
+    diagnostics: [{ severity: "error", code: "invalid_response", message: "Invalid MCP response" }],
+  };
+}
 export class McpTools {
   private statuses: readonly McpServerStatus[] = [];
   status(): readonly McpServerStatus[] {
@@ -32,13 +41,14 @@ export class McpTools {
       parameters: Type.Object({}, { additionalProperties: false }),
       replay: "safe",
       execute: async () => ({
-        content: [{ type: "text" as const, text: JSON.stringify(this.statuses) }],
+        output: [{ type: "text" as const, text: JSON.stringify(this.statuses) }],
       }),
     });
   }
   private readonly running = new Set<McpClient>();
   private readonly resourceEndpoints = new Map<string, McpEndpoint>();
   private unavailable(endpoint: McpEndpoint, error: ToolError, api: ToolExecutionApi): void {
+    if (error.code === "cancelled") return;
     const status = endpoint.unavailableState?.() ?? "unavailable";
     const previous = this.statuses.find((entry) => entry.name === endpoint.name);
     this.statuses = this.statuses.map((entry) =>
@@ -79,6 +89,7 @@ export class McpTools {
               { additionalProperties: false },
             ),
         replay: "safe",
+        structuredOutputSchema: Type.Object({}, { additionalProperties: true }),
         execute: async (args, api, ctx) => {
           const input = args as { server?: string; uri?: string; cursor?: string };
           if (input.cursor && !input.server)
@@ -125,7 +136,8 @@ export class McpTools {
               this.unavailable(endpoint, response.error, api);
               return errorResult(response.error);
             }
-            rows.push(response.value as JsonValue);
+            if (!isJsonValue(response.value)) return invalidResponse();
+            rows.push(response.value);
           }
           const key = name === "list_mcp_resources" ? "resources" : "resourceTemplates";
           const scriptValue =
@@ -133,8 +145,8 @@ export class McpTools {
               ? (rows[0] ?? {})
               : { [key]: rows.flatMap((row) => (Array.isArray(row) ? row : [])) };
           return {
-            content: [{ type: "text", text: JSON.stringify(scriptValue) }],
-            details: { scriptValue },
+            output: [{ type: "text", text: JSON.stringify(scriptValue) }],
+            structuredOutput: scriptValue,
           };
         },
       });
@@ -147,13 +159,6 @@ export class McpTools {
             "Use server names from MCP namespaces; list resources/templates before reading unfamiliar URIs.",
         },
         deferred: true,
-        outputSchema: { type: "object" },
-        project: (result) =>
-          typeof result.details === "object" &&
-          result.details !== null &&
-          "scriptValue" in result.details
-            ? result.details.scriptValue
-            : undefined,
       });
     }
   }
@@ -170,6 +175,7 @@ export class McpTools {
     fn: (client: McpClient) => Promise<T>,
   ): ResultAsync<T, ToolError> {
     if (this.closed) return errAsync({ code: "unavailable", message: "MCP tools closed" });
+    if (ctx.abortSignal?.aborted) return errAsync({ code: "cancelled", message: "MCP cancelled" });
     const client = new McpClient({ name: "pi-orb", version: "1", requestTimeoutMs: 30_000 });
     this.running.add(client);
     return ResultAsync.fromSafePromise(
@@ -182,7 +188,11 @@ export class McpTools {
         };
         ctx.abortSignal?.addEventListener("abort", abort, { once: true });
         const result = await ResultAsync.fromPromise(
-          Promise.resolve().then(() => endpoint.connect(ctx)),
+          Promise.resolve().then(() =>
+            this.closed || ctx.abortSignal?.aborted
+              ? errAsync<McpTransport, ToolError>({ code: "cancelled", message: "MCP cancelled" })
+              : endpoint.connect(ctx),
+          ),
           () => ({ code: "unavailable" as const, message: "MCP broker connection failed" }),
         )
           .andThen((value) => value)
@@ -194,21 +204,22 @@ export class McpTools {
               })).andThen(() =>
                 errAsync<T, ToolError>({ code: "cancelled", message: "MCP cancelled" }),
               );
-            return ResultAsync.fromPromise(
-              client.connect(transport).then(() => {
+            const failed = (): ToolError => ({
+              code: ctx.abortSignal?.aborted ? "cancelled" : "unavailable",
+              message: `MCP ${endpoint.name} request failed`,
+            });
+            return ResultAsync.fromThrowable(() => client.connect(transport), failed)().andThen(
+              () => {
+                if (this.closed || ctx.abortSignal?.aborted)
+                  return errAsync<T, ToolError>({ code: "cancelled", message: "MCP cancelled" });
                 const description = endpoint.description ?? client.serverInfo?.name;
                 this.catalog.namespace({
                   name: `mcp__${endpoint.name}`,
                   ...(description ? { description } : {}),
                   ...(client.instructions ? { instructions: client.instructions } : {}),
                 });
-                return fn(client);
-              }),
-              () =>
-                ({
-                  code: ctx.abortSignal?.aborted ? "cancelled" : "unavailable",
-                  message: `MCP ${endpoint.name} request failed`,
-                }) as ToolError,
+                return ResultAsync.fromThrowable(() => fn(client), failed)();
+              },
             );
           });
         const cleanup = await ResultAsync.fromPromise(client.close(), () => ({
@@ -217,12 +228,19 @@ export class McpTools {
         }));
         ctx.abortSignal?.removeEventListener("abort", abort);
         this.running.delete(client);
+        if (ctx.abortSignal?.aborted)
+          return err<T, ToolError>({ code: "cancelled", message: "MCP cancelled" });
         if (result.isErr()) return result;
         return cleanup.map(() => result.value);
       })(),
     ).andThen((value) => value);
   }
   async discover(ctx: Context) {
+    if (ctx.abortSignal?.aborted)
+      return err<readonly McpServerStatus[], ToolError>({
+        code: "cancelled",
+        message: "MCP cancelled",
+      });
     const statuses: McpServerStatus[] = [];
     for (const endpoint of this.endpoints) {
       const previous = this.statuses.find((status) => status.name === endpoint.name);
@@ -239,6 +257,7 @@ export class McpTools {
         description: endpoint.description ?? client.serverInfo?.name,
       }));
       if (discovered.isErr()) {
+        if (discovered.error.code === "cancelled") return err(discovered.error);
         statuses.push({
           name: endpoint.name,
           status: endpoint.unavailableState?.() ?? "unavailable",
@@ -263,6 +282,14 @@ export class McpTools {
           description: tool.description ?? tool.name,
           parameters: tool.inputSchema as TSchema,
           replay: "unsafe",
+          structuredOutputSchema: Type.Object({
+            content: Type.Array(Type.Unknown()),
+            isError: Type.Optional(Type.Boolean()),
+            _meta: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+            structuredContent: Type.Optional(
+              (tool.outputSchema as TSchema | undefined) ?? Type.Unknown(),
+            ),
+          }),
           execute: async (args, api, context) => {
             let progress = okAsync<void, ToolError>(undefined);
             const called = await this.using(endpoint, context, (client) =>
@@ -300,32 +327,39 @@ export class McpTools {
               return errorResult(called.error);
             }
             const response = called.value;
-            return {
-              isError: response.isError ?? false,
-              content: toLlmContent(response),
-              details: { scriptValue: response as unknown as JsonValue },
-            };
+            const rendered = Result.fromThrowable(
+              (): ToolExecutionResult | undefined =>
+                isJsonValue(response)
+                  ? {
+                      isError: response.isError ?? false,
+                      output: toLlmContent(response),
+                      structuredOutput: response,
+                    }
+                  : undefined,
+              () => ({ code: "invalid_response" as const, message: "Invalid MCP tool response" }),
+            )();
+            if (rendered.isOk() && rendered.value) return rendered.value;
+            return invalidResponse();
           },
         });
-        this.catalog.add(registered as ToolRegistration);
+        const prepareArguments = registered.prepareArguments;
+        this.catalog.add({
+          ...registered,
+          prepareArguments: (args) => {
+            const valid = Result.fromThrowable(
+              () => Check(tool.inputSchema, args),
+              (): ToolError => ({ code: "invalid_arguments", message: "Invalid MCP arguments" }),
+            )();
+            if (valid.isErr() || !valid.value) {
+              // biome-ignore lint/plugin/no-throw: Harness prepareArguments must throw to reject before coercion and hooks.
+              throw new Error("Invalid MCP arguments");
+            }
+            return prepareArguments ? prepareArguments(args) : args;
+          },
+        } as ToolRegistration);
         this.catalog.metadata(registered.name, {
           namespace,
           deferred: true,
-          outputSchema: {
-            type: "object",
-            properties: {
-              content: { type: "array", items: { type: "object" } },
-              isError: { type: "boolean" },
-              _meta: { type: "object" },
-              ...(tool.outputSchema ? { structuredContent: tool.outputSchema } : {}),
-            },
-          },
-          project: (result) =>
-            typeof result.details === "object" &&
-            result.details !== null &&
-            "scriptValue" in result.details
-              ? result.details.scriptValue
-              : undefined,
         });
       }
     }

@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 
 const root = join(import.meta.dirname, "../../..");
@@ -18,7 +19,7 @@ const json = (
     devDependencies?: Record<string, string>;
   };
 
-const piVersion = "1.1.0";
+const piVersion = "1.3.0";
 const helperPath = "scripts/apply-dependency-patches.mjs";
 const patchPath = `patches/@earendil-works+pi-coding-agent+${piVersion}.patch`;
 
@@ -88,7 +89,99 @@ describe("Pi dependency patch installation", () => {
     expect(patch).toContain(
       "diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js",
     );
-    expect(patch).toContain("async _runCustomMessagePrompt(appMessage)");
+    expect(patch).toContain("async _prepareRun(trigger, signal)");
+    expect(patch).toContain(
+      "this._agentRunPreparationAbortController = preparationAbortController;",
+    );
+  });
+
+  it("keeps native Durable journals, namespace discovery and previews on the public contract", () => {
+    const base = "node_modules/@earendil-works/pi-durable/dist/codemode/";
+    for (const barrel of ["index.js", "index.d.ts"]) {
+      expect(read(`${base}${barrel}`)).toContain("CodemodeRunDoc, CodemodeJournalDoc,");
+    }
+    const native = read(`${base}codemode.js`);
+    expect(native).toContain("const namespaces = (this.options.namespaces ?? []).map(");
+    expect(native).toContain('namespace.name.split("__").at(-1) === query');
+    expect(native).toContain(
+      'toCodemodeIdentifier(namespace.name).split("__").at(-1) === toCodemodeIdentifier(query)',
+    );
+    expect(native).toContain("Object.keys(value).slice(0, 16)");
+    expect(native).toContain(": typeof value).slice(0, 256)");
+    expect(native).toContain(
+      'const args = call.args === undefined ? "" : argumentPreview(call.args);',
+    );
+    expect(native).toContain("return `tools.${made.name}(${argumentPreview(made.arguments)})`;");
+    expect(native).toContain("${call.name}(${argumentPreview(call.args)})`");
+    expect(native).not.toContain("JSON.stringify(call.args)");
+    expect(native).not.toContain("JSON.stringify(made.arguments)");
+    // Display sanitization must not change native execution, journal or replay equality.
+    expect(native).toContain("sameJson(made.arguments, call.args ?? {})");
+    expect(native).toContain("const args = (call.args === undefined ? {} : call.args);");
+    expect(native).not.toContain("const args = (call.args ?? {});");
+    expect(native).toContain("executeTool(call.name, args, this.context, { key: `c${call.id}` })");
+    expect(native).toContain("{ args: call.args }");
+    expect(native).toContain("tx.doc(CodemodeRunDoc, api.taskId)");
+    expect(native).toContain("tx.doc(CodemodeJournalDoc, api.taskId)");
+  });
+
+  it("decodes native image saves with a bounded portable byte loop", () => {
+    const source = read("node_modules/@earendil-works/pi-durable/dist/codemode/output.js");
+    const body = source.match(
+      /        const binary = atob\(data\);\n        const bytes = new Uint8Array\(binary.length\);\n        for \(let i = 0; i < binary.length; i\+\+\)\n            bytes\[i\] = binary.charCodeAt\(i\);/,
+    )?.[0];
+    expect(body).toBeDefined();
+    expect(source).not.toContain("Uint8Array.from(atob(data)");
+    const decode = runInNewContext("(data) => {" + body + "; return bytes;}", {
+      atob,
+      Uint8Array,
+    }) as (data: string) => Uint8Array;
+    for (const length of [0, 1, 2, 3, 255, 256, 257, 258]) {
+      const expected = Buffer.alloc(length);
+      for (let i = 0; i < length; i++) expected[i] = i % 256;
+      const data = expected.toString("base64");
+      const bytes = decode(data);
+      expect(bytes.byteLength).toBe(expected.byteLength);
+      expect(Buffer.from(bytes).equals(expected)).toBe(true);
+      expect(data).toBe(expected.toString("base64"));
+    }
+  });
+
+  it("bounds native display previews to keys without exposing argument values", () => {
+    const native = read("node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js");
+    const helper = native.match(/function argumentPreview\(value\) \{[\s\S]*?\n\}/)?.[0];
+    expect(helper).toBeDefined();
+    const preview = runInNewContext(`(${helper})`) as (value: unknown) => string;
+    expect(preview({ token: "PREVIEW_CANARY", nested: { password: "PREVIEW_CANARY" } })).toBe(
+      '["token","nested"]',
+    );
+    expect(preview("PREVIEW_CANARY")).toBe('"string"');
+    expect(preview(null)).toBe('"object"');
+    expect(preview(undefined)).toBe('"undefined"');
+    const many = Object.fromEntries(
+      Array.from({ length: 17 }, (_, index) => [`key${index}`, "PREVIEW_CANARY"]),
+    );
+    expect(JSON.parse(preview(many))).toHaveLength(16);
+    const long = { ["k".repeat(300)]: "PREVIEW_CANARY" };
+    expect(preview(long)).toHaveLength(256);
+    expect(preview(long)).not.toContain("PREVIEW_CANARY");
+  });
+
+  it("retains CPU checkpoints for both execute and deterministic start workers", () => {
+    const base = "node_modules/@earendil-works/pi-codemode/dist/";
+    expect(read(`${base}types.d.ts`)).toContain("workerData?: unknown;");
+    expect(read(`${base}runtime/host.js`)).toContain("extension: options.workerData");
+    const worker = read(`${base}runtime/worker.js`);
+    expect(worker).toContain(
+      "shouldInterrupt: () => data.checkpoint?.() || Atomics.load(interrupt, 0) !== 0",
+    );
+    const vm = read(`${base}runtime/vm.js`);
+    expect(vm).toContain("interruptHandler: options.shouldInterrupt");
+    expect(vm).toContain("options.shouldInterrupt()");
+    expect(vm).toContain("wasi: clock ? deterministicWasi(clock) : discardOutput");
+    const execution = read(`${base}runtime/execution.js`);
+    expect(execution).toContain("start(code, options)");
+    expect(execution).toContain("deterministic:");
   });
 
   it("applies exactly the installed patches during root and container installs", () => {
@@ -108,7 +201,7 @@ describe("Pi dependency patch installation", () => {
       expect(dockerfile.indexOf("COPY vendor vendor")).toBeLessThan(install);
       expect(dockerfile.indexOf(`COPY ${helperPath} ${helperPath}`)).toBeLessThan(install);
       expect(dockerfile.indexOf(`COPY ${helperPath} ${helperPath}`)).toBeGreaterThan(-1);
-      const scope = workspace === "@pi-orb/control-plane" ? " --pi-only" : "";
+      const scope = workspace === "@pi-orb/control-plane" ? " --pi-durable-only" : "";
       expect(dockerfile.indexOf(`node ${helperPath}${scope}`, install)).toBeGreaterThan(install);
       expect(dockerfile).not.toContain("patch-package");
       const gitInstall =
@@ -121,10 +214,11 @@ describe("Pi dependency patch installation", () => {
     }
 
     const patchFiles = [
-      "@earendil-works+pi-agent-core+1.1.0.patch",
-      "@earendil-works+pi-ai+1.1.0.patch",
-      "@earendil-works+pi-codemode+1.1.0.patch",
-      "@earendil-works+pi-coding-agent+1.1.0.patch",
+      "@earendil-works+pi-agent-core+1.3.0.patch",
+      "@earendil-works+pi-ai+1.3.0.patch",
+      "@earendil-works+pi-codemode+1.3.0.patch",
+      "@earendil-works+pi-durable+1.3.0.patch",
+      "@earendil-works+pi-coding-agent+1.3.0.patch",
       "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
     ];
     expect(

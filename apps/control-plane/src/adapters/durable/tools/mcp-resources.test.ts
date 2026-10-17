@@ -4,6 +4,7 @@ import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
 import { okAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { createDurableTools } from "./index.ts";
+import { openCodemodeHarness } from "./testkit/codemode.ts";
 
 it("discovers resources-only servers without tools/list and preserves namespace guidance", async () => {
   const methods: string[] = [];
@@ -43,9 +44,17 @@ it("discovers resources-only servers without tools/list and preserves namespace 
   try {
     expect((await bundle.ready()).isOk()).toBe(true);
     expect(methods).not.toContain("tools/list");
-    expect(bundle.catalog.describeNamespace("docs")?.instructions).toBe(
-      "Resolve project before reading",
-    );
+    const fixture = await openCodemodeHarness(bundle.catalog);
+    try {
+      const discovery = await fixture.run('return (await describeNamespace("docs")).instructions;');
+      expect(discovery.isError).toBe(false);
+      expect(discovery.output).toContainEqual({
+        type: "text",
+        text: "Resolve project before reading",
+      });
+    } finally {
+      await fixture.close();
+    }
     const listed = await bundle.catalog.invoke(
       "list_mcp_resources",
       {},
@@ -54,7 +63,7 @@ it("discovers resources-only servers without tools/list and preserves namespace 
     );
     expect(listed.isOk()).toBe(true);
     if (listed.isOk())
-      expect(bundle.catalog.metadata("list_mcp_resources").project?.(listed.value)).toEqual({
+      expect(listed.value.structuredOutput).toEqual({
         resources: [{ server: "docs", uri: "doc:a", name: "a" }],
       });
     const read = await bundle.catalog.invoke(
@@ -65,7 +74,7 @@ it("discovers resources-only servers without tools/list and preserves namespace 
     );
     expect(read.isOk()).toBe(true);
     if (read.isOk())
-      expect(bundle.catalog.metadata("read_mcp_resource").project?.(read.value)).toEqual({
+      expect(read.value.structuredOutput).toEqual({
         server: "docs",
         uri: "doc:a",
         contents: [{ uri: "doc:a", text: "body" }],

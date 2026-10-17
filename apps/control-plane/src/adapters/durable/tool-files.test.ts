@@ -54,7 +54,7 @@ describe("scoped agent files", () => {
     const f = fixture();
     expect(
       (await f.files.read({ path: "AGENTS.md", offset: 2, limit: 1 }, api, context))._unsafeUnwrap()
-        ?.content,
+        ?.output,
     ).toEqual([{ type: "text", text: "two" }]);
     expect(
       (await f.files.read({ path: "/etc/passwd" }, api, context))._unsafeUnwrap(),
@@ -66,19 +66,19 @@ describe("scoped agent files", () => {
     expect(
       (
         await f.files.read({ path: "/opt/pi-orb/skills/skill/SKILL.md" }, api, context)
-      )._unsafeUnwrap()?.content,
+      )._unsafeUnwrap()?.output,
     ).toEqual([{ type: "text", text: "platform" }]);
   });
   it("returns supported images and rejects invalid UTF8", async () => {
     const f = fixture();
     expect(
-      (await f.files.read({ path: "image.png" }, api, context))._unsafeUnwrap()?.content?.[0],
+      (await f.files.read({ path: "image.png" }, api, context))._unsafeUnwrap()?.output?.[0],
     ).toMatchObject({ type: "image", mimeType: "image/png" });
     expect((await f.files.read({ path: "invalid.bin" }, api, context)).isErr()).toBe(true);
   });
   it("bounds UTF8 output without splitting characters and reports continuation", async () => {
     const value = (await fixture().files.read({ path: "large.txt" }, api, context))._unsafeUnwrap();
-    const text = value?.content?.[0];
+    const text = value?.output?.[0];
     expect(text?.type).toBe("text");
     if (text?.type === "text") {
       expect(Buffer.byteLength(text.text)).toBeLessThanOrEqual(50 * 1024);
@@ -89,9 +89,9 @@ describe("scoped agent files", () => {
   it("spills scoped bytes and never delegates a missing private reference", async () => {
     const f = fixture();
     const path = (await f.files.spill("saved\noutput", api, context))._unsafeUnwrap();
-    expect(
-      (await f.files.read({ path, offset: 2 }, api, context))._unsafeUnwrap()?.content,
-    ).toEqual([{ type: "text", text: "output" }]);
+    expect((await f.files.read({ path, offset: 2 }, api, context))._unsafeUnwrap()?.output).toEqual(
+      [{ type: "text", text: "output" }],
+    );
     expect((await f.files.read({ path: "/orb-artifacts/other" }, api, context)).isErr()).toBe(true);
     expect((await f.files.spill("x".repeat(16 * 1024 * 1024 + 1), api, context)).isErr()).toBe(
       true,

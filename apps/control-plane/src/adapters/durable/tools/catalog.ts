@@ -1,18 +1,16 @@
 import type { Context } from "@earendil-works/chord";
 import type { TSchema } from "@earendil-works/pi-ai";
 import type { CodemodeJsonSchema } from "@earendil-works/pi-codemode";
-import { renderToolSample, toCodemodeIdentifier } from "@earendil-works/pi-codemode/declarations";
 import {
   defineTool,
   type ToolExecutionApi,
   type ToolExecutionResult,
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
+import type { CodemodeNamespace } from "@earendil-works/pi-durable/codemode";
 import { ExecutionError, FileError } from "@earendil-works/pi-durable/env";
 import { errAsync, okAsync, Result, ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
-import { Bm25Ranker, createToolSearchDocument } from "./vendor/search.ts";
-import type { ToolNamespace } from "./vendor/types.ts";
 
 export type ToolError = {
   code: "forbidden" | "invalid_arguments" | "unavailable" | "cancelled";
@@ -29,7 +27,7 @@ const allow: AuthorizeTool = () => okAsync(undefined);
 export function errorResult(error: ToolError): ToolExecutionResult {
   return {
     isError: true,
-    content: [
+    output: [
       { type: "text", text: error.output ? `${error.output}\n${error.message}` : error.message },
     ],
     diagnostics: [{ severity: "error", code: error.code, message: error.message }],
@@ -78,22 +76,43 @@ function bashFailure(error: unknown): string | undefined {
     : undefined;
 }
 
+type ToolNamespace = Omit<CodemodeNamespace, "prefix">;
+
+const nativeOutputSchema: CodemodeJsonSchema = {
+  anyOf: [
+    { type: "string" },
+    {
+      type: "array",
+      items: {
+        anyOf: [
+          {
+            type: "object",
+            required: ["type", "text"],
+            properties: {
+              type: { const: "text" },
+              text: { type: "string" },
+              textSignature: { type: "string" },
+            },
+          },
+          {
+            type: "object",
+            required: ["type", "data", "mimeType"],
+            properties: {
+              type: { const: "image" },
+              data: { type: "string" },
+              mimeType: { type: "string" },
+            },
+          },
+        ],
+      },
+    },
+  ],
+};
+
 export interface CallableMetadata {
   namespace?: ToolNamespace;
   outputSchema?: CodemodeJsonSchema;
   deferred?: boolean;
-  /** Full MCP or structured output; deliberately separate from public Durable content. */
-  project?: (result: ToolExecutionResult) => unknown;
-}
-function namespaceMatches(namespace: string, query: string): boolean {
-  const id = toCodemodeIdentifier(namespace);
-  const queryId = toCodemodeIdentifier(query);
-  return (
-    namespace === query ||
-    id === queryId ||
-    namespace.split("__").at(-1) === query ||
-    id.split("__").at(-1) === queryId
-  );
 }
 /** The same gate serves model calls and every nested sandbox callback. */
 export class CallableCatalog {
@@ -125,11 +144,13 @@ export class CallableCatalog {
         }
       : metadata;
   }
-  policyTools() {
-    return this.definitions().map((tool) => ({
-      ...tool,
-      outputSchema: this.metadata(tool.name).outputSchema ?? { type: "string" },
-    }));
+  nativeNamespaces(): readonly CodemodeNamespace[] {
+    return this.namespaceValues().flatMap((namespace) =>
+      (namespace.name === "mcp"
+        ? ["list_mcp_", "read_mcp_"]
+        : [namespace.name === "orb" ? "orb_" : `${namespace.name}__`]
+      ).map((prefix) => ({ ...namespace, prefix })),
+    );
   }
   constructor(
     tools: readonly ToolRegistration[],
@@ -159,55 +180,17 @@ export class CallableCatalog {
   definitions(): readonly ToolRegistration[] {
     return [...this.entries.values()].filter((tool) => !this.hidden.has(tool.name));
   }
-  describe(name: string) {
-    const tool = this.policyTools().find(
-      (t) => t.name === name || toCodemodeIdentifier(t.name) === name,
-    );
-    return tool
-      ? renderToolSample({
-          name: tool.name,
-          description: tool.description,
-          inputSchema: tool.parameters as CodemodeJsonSchema,
-          outputSchema: tool.outputSchema,
-        })
-      : undefined;
-  }
-  describeNamespace(name: string) {
-    const tools = this.definitions().filter((t) => {
-      const ns = this.metadata(t.name).namespace;
-      return ns && namespaceMatches(ns.name, name);
-    });
-    const namespace = tools[0]
-      ? this.metadata(tools[0].name).namespace
-      : [...this.namespaces.values()].find((ns) => namespaceMatches(ns.name, name));
-    return namespace
-      ? { ...namespace, tools: tools.map((t) => toCodemodeIdentifier(t.name)) }
-      : undefined;
-  }
-  search(query: string, options: { limit?: number; namespace?: string } = {}) {
-    const documents = this.definitions()
-      .filter(
-        (t) =>
-          !options.namespace ||
-          (this.metadata(t.name).namespace &&
-            namespaceMatches(this.metadata(t.name).namespace!.name, options.namespace)),
-      )
-      .map((t) => createToolSearchDocument(t, this.metadata(t.name).namespace));
-    return new Bm25Ranker().rank(query, documents, options.limit ?? 8).map((t) => ({
-      name: toCodemodeIdentifier(t.name),
-      description: this.describe(t.name) ?? "",
-    }));
-  }
   invoke(
     name: string,
     args: unknown,
     api: ToolExecutionApi,
     context: Context,
+    preparedArguments = false,
   ): ResultAsync<ToolExecutionResult, ToolError> {
     const tool = this.hidden.has(name) ? undefined : this.entries.get(name);
     if (!tool) return errAsync({ code: "unavailable", message: "Unknown tool" });
     const prepared = Result.fromThrowable(
-      () => (tool.prepareArguments ? tool.prepareArguments(args) : args),
+      () => (!preparedArguments && tool.prepareArguments ? tool.prepareArguments(args) : args),
       () => ({ code: "invalid_arguments" as const, message: `Invalid arguments for ${name}` }),
     )();
     if (prepared.isErr()) return errAsync(prepared.error);
@@ -227,13 +210,18 @@ export class CallableCatalog {
           message: "Tool cancelled",
         });
       let output = "";
+      let outputBytes = 0;
+      const started = performance.now();
       const executionApi =
         name === "bash"
           ? {
               ...api,
+              outputWindow: undefined,
+              retainedOutput: () => ({ text: output, truncated: outputBytes > 50 * 1024 }),
               output: (text: string | Uint8Array) => {
                 const decoded =
                   typeof text === "string" ? text : Buffer.from(text).toString("utf8");
+                outputBytes += Buffer.byteLength(decoded);
                 output = Buffer.from(output + decoded)
                   .subarray(-50 * 1024)
                   .toString("utf8");
@@ -251,18 +239,112 @@ export class CallableCatalog {
             `${name} failed`,
           ...(name === "bash" && output ? { output } : {}),
         }),
-      );
+      ).map((result) => {
+        if (
+          name !== "bash" ||
+          typeof result.structuredOutput !== "object" ||
+          result.structuredOutput === null ||
+          !("exitCode" in result.structuredOutput) ||
+          typeof result.structuredOutput.exitCode !== "number"
+        )
+          return result;
+        const value = result.structuredOutput as {
+          output: string;
+          truncated: boolean;
+          fullOutputPath?: string;
+          exitCode: number;
+        };
+        return {
+          ...result,
+          output: result.output ?? [{ type: "text" as const, text: output }],
+          ...(this.metadata(name).outputSchema
+            ? {
+                structuredOutput: {
+                  output: value.output,
+                  truncated: value.truncated,
+                  ...(value.fullOutputPath ? { full_output_path: value.fullOutputPath } : {}),
+                  exit_code: value.exitCode,
+                  wall_time_seconds: (performance.now() - started) / 1000,
+                },
+              }
+            : {}),
+        };
+      });
     });
   }
   registrations(): ToolRegistration[] {
-    return this.definitions().map((tool) =>
-      defineTool({
+    return this.definitions().map((tool) => {
+      const metadata = this.metadata(tool.name);
+      return defineTool({
         ...tool,
+        callers: ["tools"],
+        ...(tool.prepareArguments
+          ? {
+              prepareArguments: (args: unknown) => {
+                const prepared = Result.fromThrowable(
+                  () => tool.prepareArguments!(args),
+                  () => `Invalid arguments for ${tool.name}`,
+                )();
+                if (prepared.isErr()) {
+                  // biome-ignore lint/plugin/no-throw: Harness repair contract rejects by throwing
+                  throw new Error(prepared.error);
+                }
+                return prepared.value;
+              },
+            }
+          : {}),
+        ...(metadata.deferred ? { deferred: true as const } : {}),
+        structuredOutputSchema:
+          metadata.outputSchema ?? tool.structuredOutputSchema ?? nativeOutputSchema,
         execute: async (args, api, ctx) => {
-          const result = await this.invoke(tool.name, args, api, ctx);
-          return result.isOk() ? result.value : errorResult(result.error);
+          const called = await this.invoke(tool.name, args, api, ctx, true);
+          if (called.isErr()) return errorResult(called.error);
+          const result = called.value;
+          if (result.structuredOutput !== undefined) return result;
+          const output = result.output ?? [
+            { type: "text" as const, text: api.retainedOutput?.().text ?? "" },
+          ];
+          if (result.isError)
+            return {
+              ...result,
+              diagnostics: [
+                ...(result.diagnostics ?? []),
+                ...(result.diagnostics?.some((item) => item.severity === "error")
+                  ? []
+                  : [
+                      {
+                        severity: "error" as const,
+                        code: "tool_failed",
+                        message:
+                          output
+                            .filter((item) => item.type === "text")
+                            .map((item) => item.text)
+                            .join("\n") || `${tool.name} failed`,
+                      },
+                    ]),
+              ],
+            };
+          return {
+            ...result,
+            structuredOutput: output.some((item) => item.type === "image")
+              ? output.map((item) =>
+                  item.type === "image"
+                    ? { type: "image" as const, data: item.data, mimeType: item.mimeType }
+                    : {
+                        type: "text" as const,
+                        text: item.text,
+                        ...(item.textSignature !== undefined
+                          ? { textSignature: item.textSignature }
+                          : {}),
+                      },
+                )
+              : output
+                  .filter((item) => item.type === "text")
+                  .map((item) => item.text)
+                  .join("\n"),
+          };
         },
-      }),
-    );
+      });
+    });
   }
 }

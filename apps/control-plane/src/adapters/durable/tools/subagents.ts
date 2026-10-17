@@ -60,7 +60,12 @@ export const ChildAnchor = defineTask<
           ownership: { kind: "task", taskId: runtime.taskId },
         });
         const agent = await tx.doc(AgentDoc, child.id);
-        agent.tools = ["codemode"];
+        agent.tools = (runtime.registry.extension(CHILD_TOOLS_EXTENSION)?.tools ?? [])
+          .map((tool) => tool.name)
+          .filter(
+            (name) => name !== "orb_spawn" && !subagentTools.some((tool) => tool.name === name),
+          );
+        agent.modelTools = ["codemode"];
         agent.extensions = { remove: [TOOLS_EXTENSION] };
         if (task.input.model) agent.model = task.input.model;
         await tx.appendEntry(ROOT_CONVERSATION_ID, {
@@ -150,7 +155,7 @@ export const ChildAnchor = defineTask<
     runtime.commit(async () => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
 });
 const result = (data: unknown) => ({
-  content: [{ type: "text" as const, text: JSON.stringify(data) }],
+  output: [{ type: "text" as const, text: JSON.stringify(data) }],
 });
 const idSchema = Type.Object({ agent_id: Type.String() }, { additionalProperties: false });
 async function receipt(api: ToolExecutionApi, id: string, ctx: Context) {

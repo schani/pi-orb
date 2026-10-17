@@ -46,8 +46,8 @@ describe("control-plane Dockerfile workspace contract", () => {
     expect(rebuild).not.toMatch(/npm ci|apply-dependency-patches/);
   });
   it("applies only installed package patches and retains code-mode attribution", () => {
-    for (const name of ["pi-ai", "pi-coding-agent", "pi-codemode"]) {
-      const patch = `@earendil-works+${name}+1.1.0.patch`;
+    for (const name of ["pi-agent-core", "pi-ai", "pi-coding-agent", "pi-codemode", "pi-durable"]) {
+      const patch = `@earendil-works+${name}+1.3.0.patch`;
       expect(dockerfile).toContain(`COPY patches/${patch} patches/${patch}`);
     }
     expect(dockerfile).toContain(
@@ -55,7 +55,7 @@ describe("control-plane Dockerfile workspace contract", () => {
     );
     expect(dockerfile).toContain("COPY patches/pi-codemode.* patches/");
     expect(dockerfile).not.toContain("COPY patches patches");
-    expect(dockerfile).toContain("node scripts/apply-dependency-patches.mjs");
+    expect(dockerfile).toContain("node scripts/apply-dependency-patches.mjs --pi-durable-only");
     expect(dockerfile).not.toContain("patch-package");
   });
   it("ships central Git acquisition, bundled skills and the code-mode worker", () => {

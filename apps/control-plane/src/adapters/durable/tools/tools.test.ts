@@ -2,6 +2,7 @@ import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/conte
 import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
+  type FauxResponseFactory,
   fauxAssistantMessage,
   fauxProvider,
   fauxToolCall,
@@ -15,8 +16,9 @@ import {
 } from "@earendil-works/pi-durable";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
+import { MemoryAgentPersistence } from "../memory-persistence.testkit.ts";
 import { CallableCatalog } from "./catalog.ts";
-import { createDurableTools } from "./index.ts";
+import { ChildReceipts, createDurableTools } from "./index.ts";
 
 const context = BACKGROUND_CONTEXT;
 describe("Durable callable tools", () => {
@@ -29,7 +31,7 @@ describe("Durable callable tools", () => {
       parameters: Type.Object({ value: Type.String() }),
       execute: async ({ value }) => {
         calls++;
-        return { content: [{ type: "text", text: value }] };
+        return { output: [{ type: "text", text: value }] };
       },
     });
     const catalog = new CallableCatalog([echo], () => {
@@ -76,7 +78,7 @@ describe("Durable callable tools", () => {
           parameters: Type.Object({}),
           execute: async () => {
             calls++;
-            return { content: [] };
+            return { output: [] };
           },
         }),
       ],
@@ -97,11 +99,25 @@ describe("Durable callable tools", () => {
   });
 
   it("runs actual QuickJS callbacks through Durable and retains images and errors", async () => {
+    const png = {
+      type: "image" as const,
+      data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jg9sAAAAASUVORK5CYII=",
+      mimeType: "image/png",
+    };
+    const executed: string[] = [];
     const faux = fauxProvider();
     faux.setResponses([
       fauxAssistantMessage(
         fauxToolCall("codemode", {
-          code: 'const r = await tools.echo({value:"ok"}); text(r); image({type:"image",data:"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jg9sAAAAASUVORK5CYII=",mimeType:"image/png"});',
+          code: `const r = await tools.echo({value:"ok"});
+            if (typeof r === "string") text(r);
+            else for (const block of r) {
+              if (block.type === "image") image(block);
+              else text(block.text);
+            }
+            image(${JSON.stringify(png)});
+            try { await tools.echo({value:"denied"}); }
+            catch (error) { text(String(error)); }`,
         }),
         { stopReason: "toolUse" },
       ),
@@ -115,17 +131,30 @@ describe("Durable callable tools", () => {
           name: "echo",
           description: "echo",
           parameters: Type.Object({ value: Type.String() }),
-          execute: async ({ value }) => ({ content: [{ type: "text", text: value }] }),
+          execute: async ({ value }) => {
+            executed.push(value);
+            return {
+              output: [{ type: "text", text: value }, png, { type: "text", text: "after" }],
+            };
+          },
         }),
       ],
-      authorize: () => okAsync(undefined),
+      authorize: (_name, args) =>
+        (args as { value?: string }).value === "denied"
+          ? errAsync({ code: "forbidden", message: "Denied by policy" })
+          : okAsync(undefined),
     });
     const registry = createRegistry();
     registry.install(tools.extension);
+    registry.install(tools.childExtension);
     const harness = await Harness.open(new MemoryStorage(), { models, registry }, context);
     try {
       const root = await harness.root(context, {
-        agent: { model: { provider: "faux", modelId: "faux-1" } },
+        agent: {
+          model: { provider: "faux", modelId: "faux-1" },
+          modelTools: tools.modelTools,
+          extensions: { remove: [tools.childExtension] },
+        },
       });
       harness.resume();
       await (await root.submit({ type: "input", content: "go" }, context)).wait(context);
@@ -133,12 +162,16 @@ describe("Durable callable tools", () => {
       const result = entries.items
         .flatMap((e) => e.model ?? [])
         .find((m) => m.role === "toolResult");
-      expect(result?.content).toContainEqual({ type: "text", text: "ok" });
-      expect(result?.content).toContainEqual({
-        type: "image",
-        data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jg9sAAAAASUVORK5CYII=",
-        mimeType: "image/png",
-      });
+      expect(result?.isError).toBe(false);
+      const lines =
+        result?.content.flatMap((block) => (block.type === "text" ? block.text.split("\n") : [])) ??
+        [];
+      expect(lines.filter((line) => line === "ok" || line === "after")).toEqual(["ok", "after"]);
+      expect(lines.filter((line) => line.includes("Denied by policy"))).toHaveLength(1);
+      const images = result?.content.filter((block) => block.type === "image") ?? [];
+      expect(images).toEqual([png, png]);
+      expect(images.map((block) => block.data.length)).toEqual([png.data.length, png.data.length]);
+      expect(executed).toEqual(["ok"]);
     } finally {
       await harness.close(context);
       await tools.close();
@@ -155,21 +188,35 @@ describe("Durable callable tools", () => {
       entered = r;
     });
     const faux = fauxProvider();
-    const respond = async (request: { messages: readonly unknown[] }) => {
+    let parentCalls = 0;
+    const respond: FauxResponseFactory = async (request, options) => {
       if (
         JSON.stringify(request.messages).includes('"child"') &&
         !JSON.stringify(request.messages).includes('"toolResult"')
       ) {
         entered();
-        await blocked;
-        return fauxAssistantMessage("child result");
+        await Promise.race([
+          blocked,
+          new Promise<void>((resolve) => {
+            if (options?.signal?.aborted) resolve();
+            else options?.signal?.addEventListener("abort", () => resolve(), { once: true });
+          }),
+        ]);
+        return options?.signal?.aborted
+          ? fauxAssistantMessage("", { stopReason: "aborted" })
+          : fauxAssistantMessage("child result");
       }
+      parentCalls++;
       return fauxAssistantMessage("parent done");
     };
     faux.setResponses([
-      fauxAssistantMessage(fauxToolCall("subagent", { prompt: "child" }), {
-        stopReason: "toolUse",
-      }),
+      fauxAssistantMessage(
+        fauxToolCall("codemode", {
+          code: 'text(JSON.parse(await tools.subagent({prompt:"child"})));',
+        }),
+        { stopReason: "toolUse" },
+      ),
+      respond,
       respond,
       respond,
     ]);
@@ -178,14 +225,18 @@ describe("Durable callable tools", () => {
     const tools = createDurableTools();
     const registry = createRegistry();
     registry.install(tools.extension);
-    const storage = new MemoryStorage();
-    const harness = await Harness.open(storage, { models, registry }, context);
+    registry.install(tools.childExtension);
+    const persistence = new MemoryAgentPersistence();
+    const { storage } = (await persistence.openOrb("tools", false))._unsafeUnwrap();
+    let harness = await Harness.open(storage, { models, registry }, context);
     try {
-      const root = await harness.root(context, {
+      let root = await harness.root(context, {
         agent: {
           model: { provider: "faux", modelId: "faux-1" },
           instructions: "inherited",
           cwd: "/shared",
+          modelTools: tools.modelTools,
+          extensions: { remove: [tools.childExtension] },
         },
       });
       harness.resume();
@@ -197,13 +248,34 @@ describe("Durable callable tools", () => {
       graph.dispose();
       const page = await storage.scanConversations({}, 100, undefined, context);
       expect(page.items.filter((c) => c.owner)).toHaveLength(1);
-      release();
+      const receipts = await harness.snapshot(ChildReceipts, root.id, context);
+      expect(Object.keys(receipts?.children ?? {})).toHaveLength(1);
+      expect(
+        (await root.entries({}, 100, undefined, context)).items.filter(
+          (entry) => entry.kind === "orb.subagent-task",
+        ),
+      ).toHaveLength(1);
+      await harness.close(context);
+      harness = await Harness.open(
+        (await persistence.openOrb("tools", true))._unsafeUnwrap().storage,
+        { models, registry },
+        context,
+      );
+      root = await harness.root(context);
+      expect(await harness.snapshot(ChildReceipts, root.id, context)).toEqual(receipts);
+      harness.resume();
       await root.abort(context, { background: true });
       expect((await harness.inspect(context)).tasks).toHaveLength(0);
+      expect(await harness.snapshot(ChildReceipts, root.id, context)).toEqual(receipts);
+      expect(
+        (await storage.scanConversations({}, 100, undefined, context)).items.filter((c) => c.owner),
+      ).toHaveLength(1);
+      expect(parentCalls).toBe(1);
     } finally {
       release();
       await harness.close(context);
       await tools.close();
+      await persistence.close();
     }
   });
 });

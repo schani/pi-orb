@@ -13,8 +13,15 @@ type Body = {
   prompt_cache_key?: unknown;
   instructions?: unknown;
   tools?: unknown;
-  input?: unknown[];
+  input?: Array<{ type?: string; role?: string; content?: unknown; output?: string }>;
 };
+
+const spawnCode =
+  'const child = JSON.parse(await tools.subagent({prompt:"CHILD_TASK"})); store("child", child.agent_id); text(child);';
+const waitCode =
+  'text(JSON.parse(await tools.get_subagent_result({agent_id:load("child"),wait:true})).receipt);';
+const toolOutputs = (body: Body) =>
+  body.input?.filter((item) => item.type === "custom_tool_call_output") ?? [];
 
 function completed(id: string, items: unknown[]) {
   return [
@@ -31,10 +38,14 @@ function completed(id: string, items: unknown[]) {
 }
 const text = (id: string, value: string) =>
   completed(id, [{ type: "message", id, content: [{ type: "output_text", text: value }] }]);
-const call = (id: string, name: string, args: unknown) =>
-  completed(id, [
-    { type: "function_call", id, call_id: id, name, arguments: JSON.stringify(args) },
-  ]);
+const codeCall = (id: string, code: string) => ({
+  type: "custom_tool_call",
+  id: `ctc_${id}`,
+  call_id: `call_${id}`,
+  name: "codemode",
+  input: code,
+});
+const call = (id: string, code: string) => completed(id, [codeCall(id, code)]);
 const reasoned = (id: string, item: unknown) =>
   completed(id, [
     { type: "reasoning", id: `rs_${id}`, summary: [], encrypted_content: `enc_${id}` },
@@ -61,8 +72,7 @@ describe("durable Codex prompt cache key", () => {
         const body = JSON.parse(raw) as Body;
         const owner = raw.includes("ROOT_TURN_ONE") ? "root" : "child";
         requests.push({ owner, body });
-        const outputs = (JSON.stringify(body.input).match(/function_call_output/g) ?? []).length;
-        const agentId = /\\"agent_id\\":\\"([^\\]+)\\"/.exec(raw)?.[1];
+        const outputs = toolOutputs(body).length;
         const events =
           owner === "child"
             ? text("child", "child done")
@@ -71,9 +81,9 @@ describe("durable Codex prompt cache key", () => {
               : raw.includes("ROOT_TURN_TWO")
                 ? text("second", "second done")
                 : outputs === 0
-                  ? call("spawn", "subagent", { prompt: "CHILD_TASK" })
+                  ? call("spawn", spawnCode)
                   : outputs === 1
-                    ? call("wait", "get_subagent_result", { agent_id: agentId, wait: true })
+                    ? call("wait", waitCode)
                     : text("first", "first done");
         response.writeHead(200, { "content-type": "text/event-stream" });
         for (const event of events) response.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -95,7 +105,9 @@ describe("durable Codex prompt cache key", () => {
         })
       )._unsafeUnwrap();
       const registry = createRegistry();
-      registry.install(createDurableTools().extension);
+      const tools = createDurableTools();
+      registry.install(tools.extension);
+      registry.install(tools.childExtension);
       const { storage } = (await persistence.openOrb("orb", false))._unsafeUnwrap();
       return (
         await DurableAgent.open({
@@ -103,6 +115,8 @@ describe("durable Codex prompt cache key", () => {
           storage,
           models,
           registry,
+          modelTools: tools.modelTools,
+          childExtension: tools.childExtension,
           env: new NodeExecutionEnv({ cwd: "/tmp" }),
           checkoutCommit: "commit",
           instructions: "instruction",
@@ -148,6 +162,12 @@ describe("durable Codex prompt cache key", () => {
       expect(new Set(root)).toEqual(new Set([root[0]]));
       expect(child[0]).toEqual(expect.stringMatching(/\S/));
       expect(child[0]).not.toBe(root[0]);
+      for (const { body } of requests)
+        expect(body.tools).toEqual([expect.objectContaining({ type: "custom", name: "codemode" })]);
+      const lastRoot = requests.filter((request) => request.owner === "root").at(-1)!;
+      expect(toolOutputs(lastRoot.body)[1]?.output?.split("\n").at(-1)).toBe(
+        JSON.stringify({ status: "completed", result: { output: "child done" } }),
+      );
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -174,25 +194,11 @@ describe("durable Codex prompt cache key", () => {
         ).toString();
         const body = JSON.parse(raw) as Body;
         requests.push(body);
-        const outputs = (JSON.stringify(body.input).match(/function_call_output/g) ?? []).length;
-        const agentId = /\\"agent_id\\":\\"([^\\]+)\\"/.exec(raw)?.[1];
+        const outputs = toolOutputs(body).length;
         const next = `r${id++}`;
+        const fn = (code: string) => reasoned(next, codeCall(next, code));
         const bash = (command: string) =>
-          reasoned(next, {
-            type: "function_call",
-            id: `fc_${next}`,
-            call_id: `call_${next}`,
-            name: "bash",
-            arguments: JSON.stringify({ command }),
-          });
-        const fn = (name: string, args: unknown) =>
-          reasoned(next, {
-            type: "function_call",
-            id: `fc_${next}`,
-            call_id: `call_${next}`,
-            name,
-            arguments: JSON.stringify(args),
-          });
+          fn(`text(await tools.bash(${JSON.stringify({ command })}));`);
         const done = (value: string) =>
           reasoned(next, {
             type: "message",
@@ -208,9 +214,9 @@ describe("durable Codex prompt cache key", () => {
               ? bash(`echo root${outputs}`)
               : done("second done")
             : outputs === 0
-              ? fn("subagent", { prompt: "CHILD_TASK" })
+              ? fn(spawnCode)
               : outputs === 1
-                ? fn("get_subagent_result", { agent_id: agentId, wait: true })
+                ? fn(waitCode)
                 : done("first done");
         response.writeHead(200, { "content-type": "text/event-stream" });
         for (const event of events) response.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -231,13 +237,17 @@ describe("durable Codex prompt cache key", () => {
       })
     )._unsafeUnwrap();
     const registry = createRegistry();
-    registry.install(createDurableTools().extension);
+    const tools = createDurableTools();
+    registry.install(tools.extension);
+    registry.install(tools.childExtension);
     const agent = (
       await DurableAgent.open({
         orbId: "orb",
         storage,
         models,
         registry,
+        modelTools: tools.modelTools,
+        childExtension: tools.childExtension,
         env: new NodeExecutionEnv({ cwd: "/tmp" }),
         checkoutCommit: "commit",
         instructions: "pending",
@@ -282,15 +292,42 @@ describe("durable Codex prompt cache key", () => {
         const childNote = input.includes("ROOT_TURN")
           ? ""
           : "\n\nYou are a subagent. Do not spawn orbs.";
-        expect(body.instructions).toBe(
-          `<orb-instructions>\nPENDING_PROMPT${childNote}\n</orb-instructions>`,
+        expect(body.instructions).toBe(bodies[0]?.instructions);
+        const instructions = String(body.instructions);
+        const sections = [...instructions.matchAll(/<([a-z-]+)>\n([\s\S]*?)\n<\/\1>/g)];
+        expect(sections.map((match) => match[1]).sort()).toEqual(["codemode", "orb-instructions"]);
+        expect(sections.map((match) => match[0]).join("\n\n")).toBe(instructions);
+        expect(sections.find((match) => match[1] === "orb-instructions")?.[2]).toBe(
+          `PENDING_PROMPT${childNote}`,
         );
-        expect(input.split("ORB_PROMPT").length - 1).toBe(input.includes("ROOT_TURN_TWO") ? 1 : 0);
+        expect(sections.find((match) => match[1] === "codemode")?.[2]).toEqual(
+          expect.stringMatching(/\S/),
+        );
+        expect(body.tools).toEqual([expect.objectContaining({ type: "custom", name: "codemode" })]);
+        const updated = input.includes("ROOT_TURN_TWO");
+        expect(input.split("ORB_PROMPT").length - 1).toBe(updated ? 1 : 0);
+        expect(input).not.toContain("PENDING_PROMPT");
+        expect(body.input?.filter((item) => item.role === "developer")).toEqual(
+          updated
+            ? [
+                {
+                  role: "developer",
+                  content:
+                    'Updated system prompt section "orb-instructions":\n\n<orb-instructions>\nORB_PROMPT\n</orb-instructions>',
+                },
+              ]
+            : [],
+        );
+        if (input.includes("ROOT_TURN") && toolOutputs(body).length >= 2)
+          expect(toolOutputs(body)[1]?.output?.split("\n").at(-1)).toBe(
+            JSON.stringify({ status: "completed", result: { output: "child done" } }),
+          );
       }
       for (const [index, body] of bodies.entries()) {
         const previous = bodies[index - 1];
         if (!previous) continue;
         expect(body.tools).toEqual(previous.tools);
+        expect(body.input!.length).toBeGreaterThan(previous.input!.length);
         expect(body.input?.slice(0, previous.input?.length)).toEqual(previous.input);
       }
     }

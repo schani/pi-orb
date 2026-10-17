@@ -100,7 +100,7 @@ it.each(["abort", "adopt"] as const)(
             await api.details({ progress: 1 }, ctx);
             progress.resolve();
             await finishProgress.promise;
-            return { content: [{ type: "text", text: "pulse" }] };
+            return { output: [{ type: "text", text: "pulse" }] };
           },
         }),
       ],
@@ -108,8 +108,9 @@ it.each(["abort", "adopt"] as const)(
     const registry = createRegistry();
     // The production outer registration owns LazyExecutionEnv wait publication.
     registry.install({
+      ...bundle.extension,
       name: "composed",
-      tools: bundle.modelTools.map((tool) => ({
+      tools: (bundle.extension.tools ?? []).map((tool) => ({
         ...tool,
         execute: async (args, api, ctx) => {
           const progressApi = executionWaitProgress(api, ctx, () => {});
@@ -214,14 +215,15 @@ it.each(["abort", "adopt"] as const)(
       expect(effects).toBe(0);
       if (outcome === "abort") {
         const operationId = toolFrames.at(-1)!.operationId;
+        finishProgress.resolve();
         expect(
           (await agent.request("abort", { type: "abort", operationId }))._unsafeUnwrap(),
         ).toMatchObject({ type: "accepted", operationId });
-        finishProgress.resolve();
         allowReevaluation.resolve();
         allowFinal.resolve();
         expect((await agent.waitForIdle()).isOk()).toBe(true);
         expect(agent.health()).toMatchObject({ status: "ready", activity: "idle" });
+        expect(agent.liveView()).toBeNull();
         expect(effects).toBe(0);
         release.resolve();
         faux.setResponses([fauxAssistantMessage("FUTURE_CENTRAL_DONE")]);

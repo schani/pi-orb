@@ -50,13 +50,65 @@ function setup(
   registry.install(tools.childExtension);
   return { models, registry, tools };
 }
-const initial = {
-  agent: {
-    model: { provider: "faux", modelId: "faux-1" },
-    instructions: "shared instructions",
-    cwd: "/shared",
-  },
-};
+function nativeCall(name: string, args: Record<string, unknown>, id = name) {
+  return fauxToolCall(
+    "codemode",
+    { code: `text(await tools.${name}(${JSON.stringify(args)}));` },
+    { id },
+  );
+}
+function nativeData(result: { content: readonly { type: string; text?: string }[] } | undefined) {
+  expect(result?.content[0]).toMatchObject({
+    type: "text",
+    text: expect.stringMatching(/^Script completed\n/),
+  });
+  const body = result?.content[1];
+  expect(body?.type).toBe("text");
+  return JSON.parse(body?.text ?? "");
+}
+function initial(tools: ReturnType<typeof createDurableTools>) {
+  return {
+    agent: {
+      model: { provider: "faux", modelId: "faux-1" },
+      instructions: "shared instructions",
+      cwd: "/shared",
+      modelTools: tools.modelTools,
+      extensions: { remove: [tools.childExtension] },
+    },
+  };
+}
+
+it("rejects direct model subagent calls before creating a child", async () => {
+  const results: unknown[] = [];
+  const s = setup([
+    fauxAssistantMessage(fauxToolCall("subagent", { prompt: "forbidden direct child" }), {
+      stopReason: "toolUse",
+    }),
+    (request) => {
+      results.push(...request.messages.filter((message) => message.role === "toolResult"));
+      return fauxAssistantMessage("parent done");
+    },
+  ]);
+  const storage = new MemoryStorage();
+  const harness = await Harness.open(storage, s, ctx);
+  try {
+    const root = await harness.root(ctx, initial(s.tools));
+    harness.resume();
+    await (await root.submit({ type: "input", content: "parent" }, ctx)).wait(ctx);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ toolName: "subagent", isError: true });
+    expect(JSON.stringify(results)).toContain("Tool subagent is not available");
+    expect(
+      Object.keys((await harness.snapshot(ChildReceipts, root.id, ctx))?.children ?? {}),
+    ).toHaveLength(0);
+    expect(
+      (await storage.scanConversations({}, 100, undefined, ctx)).items.filter((c) => c.owner),
+    ).toHaveLength(0);
+  } finally {
+    await harness.close(ctx);
+    await s.tools.close();
+  }
+});
 
 it("cancels only the selected child; root abort drains its sibling", async () => {
   const startedA = barrier(),
@@ -74,10 +126,10 @@ it("cancels only the selected child; root abort drains its sibling", async () =>
     }
     const results = request.messages.filter((m) => m.role === "toolResult");
     if (results.length === 2) {
+      for (const result of results) expect(result.isError).toBe(false);
       await Promise.all([startedA.promise, startedB.promise]);
-      const raw = results[0]?.content[0];
-      const id = JSON.parse(raw?.type === "text" ? raw.text : "{}").agent_id;
-      return fauxAssistantMessage(fauxToolCall("cancel_subagent", { agent_id: id }), {
+      const id = nativeData(results[0]).agent_id;
+      return fauxAssistantMessage(nativeCall("cancel_subagent", { agent_id: id }), {
         stopReason: "toolUse",
       });
     }
@@ -86,12 +138,8 @@ it("cancels only the selected child; root abort drains its sibling", async () =>
   const s = setup([
     fauxAssistantMessage(
       [
-        fauxToolCall("subagent", { prompt: "child-a" }, { id: "a" }),
-        fauxToolCall(
-          "subagent",
-          { prompt: "child-b", description: "Existing child header" },
-          { id: "b" },
-        ),
+        nativeCall("subagent", { prompt: "child-a" }, "a"),
+        nativeCall("subagent", { prompt: "child-b", description: "Existing child header" }, "b"),
       ],
       { stopReason: "toolUse" },
     ),
@@ -99,7 +147,7 @@ it("cancels only the selected child; root abort drains its sibling", async () =>
   ]);
   const harness = await Harness.open(new MemoryStorage(), s, ctx);
   try {
-    const root = await harness.root(ctx, initial);
+    const root = await harness.root(ctx, initial(s.tools));
     harness.resume();
     await (await root.submit({ type: "input", content: "parent" }, ctx)).wait(ctx);
     const entries = await root.entries({}, 100, undefined, ctx);
@@ -140,7 +188,7 @@ it("reopens persisted anchors without recreating children or rerunning the spawn
     return fauxAssistantMessage("parent done");
   };
   const s = setup([
-    fauxAssistantMessage(fauxToolCall("subagent", { prompt: "child" }), { stopReason: "toolUse" }),
+    fauxAssistantMessage(nativeCall("subagent", { prompt: "child" }), { stopReason: "toolUse" }),
     respond,
     respond,
   ]);
@@ -155,7 +203,7 @@ it("reopens persisted anchors without recreating children or rerunning the spawn
   }) as Storage;
   let harness = await Harness.open(storage, s, ctx);
   try {
-    const root = await harness.root(ctx, initial);
+    const root = await harness.root(ctx, initial(s.tools));
     harness.resume();
     await (await root.submit({ type: "input", content: "parent" }, ctx)).wait(ctx);
     await childStarted.promise;
@@ -228,11 +276,10 @@ it("children inherit refreshed instructions but neither see nor start subagents"
       return fauxAssistantMessage("child done");
     }
     const last = request.messages.filter((m) => m.role === "toolResult").at(-1);
-    const text = last?.content[0];
-    if (last?.toolName === "subagent")
+    if (last?.toolCallId === "subagent")
       return fauxAssistantMessage(
-        fauxToolCall("get_subagent_result", {
-          agent_id: JSON.parse(text?.type === "text" ? text.text : "{}").agent_id,
+        nativeCall("get_subagent_result", {
+          agent_id: nativeData(last).agent_id,
           wait: true,
         }),
         { stopReason: "toolUse" },
@@ -243,7 +290,7 @@ it("children inherit refreshed instructions but neither see nor start subagents"
     [
       (request) => {
         capture(request);
-        return fauxAssistantMessage(fauxToolCall("subagent", { prompt: "child prompt" }), {
+        return fauxAssistantMessage(nativeCall("subagent", { prompt: "child prompt" }), {
           stopReason: "toolUse",
         });
       },
@@ -256,7 +303,7 @@ it("children inherit refreshed instructions but neither see nor start subagents"
             name: "orb_spawn",
             description: "Create a same-project orb with a prompt.",
             parameters: Type.Object({ prompt: Type.String() }),
-            execute: async () => ({ content: [{ type: "text", text: "spawned" }] }),
+            execute: async () => ({ output: [{ type: "text", text: "spawned" }] }),
           }),
         ],
       },
@@ -266,9 +313,7 @@ it("children inherit refreshed instructions but neither see nor start subagents"
   const storage = new MemoryStorage();
   const harness = await Harness.open(storage, s, ctx);
   try {
-    const root = await harness.root(ctx, {
-      agent: { ...initial.agent, extensions: { remove: [s.tools.childExtension] } },
-    });
+    const root = await harness.root(ctx, initial(s.tools));
     harness.resume();
     await (await root.submit({ type: "input", content: "parent" }, ctx)).wait(ctx);
     const tagged = (text: string) => `<orb-instructions>\n${text}\n</orb-instructions>`;
@@ -308,10 +353,9 @@ it("starts a child on the selected model and rejects an unavailable one before c
     const outcomes = request.messages.filter((m) => m.role === "toolResult");
     if (outcomes.length === 2) {
       results.push(...outcomes.map((m) => JSON.stringify(m.content)));
-      const first = outcomes[0]?.content[0];
       return fauxAssistantMessage(
-        fauxToolCall("get_subagent_result", {
-          agent_id: JSON.parse(first?.type === "text" ? first.text : "{}").agent_id,
+        nativeCall("get_subagent_result", {
+          agent_id: nativeData(outcomes[0]).agent_id,
           wait: true,
         }),
         { stopReason: "toolUse" },
@@ -324,8 +368,8 @@ it("starts a child on the selected model and rejects an unavailable one before c
     [
       fauxAssistantMessage(
         [
-          fauxToolCall("subagent", { prompt: "child prompt", model: "Terra" }, { id: "a" }),
-          fauxToolCall("subagent", { prompt: "other prompt", model: "Luna" }, { id: "b" }),
+          nativeCall("subagent", { prompt: "child prompt", model: "Terra" }, "a"),
+          nativeCall("subagent", { prompt: "other prompt", model: "Luna" }, "b"),
         ],
         { stopReason: "toolUse" },
       ),
@@ -345,7 +389,10 @@ it("starts a child on the selected model and rejects an unavailable one before c
   const harness = await Harness.open(storage, s, ctx);
   try {
     const root = await harness.root(ctx, {
-      agent: { ...initial.agent, model: { provider: "openai-codex", modelId: "gpt-6.1-sol" } },
+      agent: {
+        ...initial(s.tools).agent,
+        model: { provider: "openai-codex", modelId: "gpt-6.1-sol" },
+      },
     });
     harness.resume();
     await (await root.submit({ type: "input", content: "parent" }, ctx)).wait(ctx);
@@ -372,7 +419,7 @@ it("parent input interrupts a real child wait without aborting its anchor or con
   ]);
   const harness = await Harness.open(new MemoryStorage(), s, ctx);
   try {
-    const root = await harness.root(ctx, initial);
+    const root = await harness.root(ctx, initial(s.tools));
     const api = {
       conversationId: root.id,
       taskId: 42 as TaskId,

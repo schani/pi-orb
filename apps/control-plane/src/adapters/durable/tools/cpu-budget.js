@@ -44,7 +44,8 @@ export class CpuBudget {
       this.timer = this.schedule(() => this.refill(), CPU_QUANTUM_MS);
       this.timer.unref?.();
     }
-    const stats = new SharedArrayBuffer(24);
+    // [CPU us, parked us, checkpoints, currently parked].
+    const stats = new SharedArrayBuffer(32);
     let released = false;
     return {
       workerData: { cpuBudget: this.buffer, cpuStats: stats },

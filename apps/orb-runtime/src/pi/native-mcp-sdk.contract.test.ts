@@ -192,9 +192,10 @@ it("observes native server connection failure without exposing its raw error or 
   try {
     await session.bindExtensions({});
     await observation;
-    await session.extensionRunner.emitBeforeAgentStart("ordinary user turn", undefined, {
-      cwd: dir,
-    });
+    await session.extensionRunner.emitBeforeAgentStart(
+      { messageType: "user", prompt: "ordinary user turn" },
+      { cwd: dir },
+    );
     expect(states).toContainEqual({ name: "offline", state: "failed" });
     await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
   } finally {

@@ -756,8 +756,10 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
       );
       const operationId = String(publishedTool["operationId"]);
       const callId = String(publishedTool["callId"]);
+      // VM_EFFECT has one tools.bash callback inside the outer codemode call.
+      const executionCallId = `${callId}/c1`;
       await waitFor("backend execution wait publication", async () =>
-        lifecycleEdge(cp!.logs, orb, "execution.tool_waiting", { call_id: callId }) &&
+        lifecycleEdge(cp!.logs, orb, "execution.tool_waiting", { call_id: executionCallId }) &&
         operationEvent(frames.slice(frameStart), operationId, "tool_state", {
           callId,
           message: "Waiting for execution.",
@@ -765,7 +767,13 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
           ? true
           : null,
       );
-      barrierEvents.push({ phase: "execution-wait-acknowledged", orb, operationId, callId });
+      barrierEvents.push({
+        phase: "execution-wait-acknowledged",
+        orb,
+        operationId,
+        callId,
+        executionCallId,
+      });
       writeFileSync(join(evidence, "waiting-phases.json"), JSON.stringify(barrierEvents, null, 2));
       await expectPage(page.getByText(/waiting.*execution|waiting.*VM/i).first()).toBeVisible({
         timeout: 30_000,
@@ -822,7 +830,7 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
           const logs = [cp!.logs.join("").slice(logStart)];
           return (await api(cp!.baseUrl, "GET", `/api/v1/orbs/${orb}`)).body["state"] ===
             "running" &&
-            lifecycleEdge(logs, orb, "execution.tool_ready", { call_id: callId }) &&
+            lifecycleEdge(logs, orb, "execution.tool_ready", { call_id: executionCallId }) &&
             lifecycleEdge(logs, orb, "instructions.host_adopted")
             ? true
             : null;
@@ -859,7 +867,13 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
             ? true
             : null;
         });
-        barrierEvents.push({ phase: "ready-tool-assistant-committed", orb, operationId });
+        barrierEvents.push({
+          phase: "ready-tool-assistant-committed",
+          orb,
+          operationId,
+          callId,
+          executionCallId,
+        });
         writeFileSync(
           join(evidence, "waiting-phases.json"),
           JSON.stringify(barrierEvents, null, 2),
@@ -931,13 +945,19 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
           }) &&
           operationEvent(frames.slice(frameStart), undefined, "status", { activity: "idle" }) &&
           lifecycleEdge(cp!.logs, orb, "execution.tool_wait_finished", {
-            call_id: callId,
+            call_id: executionCallId,
             outcome: "cancelled",
           })
             ? true
             : null,
         );
-        barrierEvents.push({ phase: "operation-aborted", orb, operationId, callId });
+        barrierEvents.push({
+          phase: "operation-aborted",
+          orb,
+          operationId,
+          callId,
+          executionCallId,
+        });
         release();
         await waitFor(
           "execution ready after cancelled wait",

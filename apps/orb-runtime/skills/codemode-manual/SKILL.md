@@ -5,7 +5,7 @@ description: 'Full code-mode scripting manual: tool discovery, result types, sta
 
 # Code-mode agent manual
 
-Run JavaScript to compose authorized tools, filter their replies and emit only useful results. For all resource caps, read [Limits (central wrapper)](/opt/pi-orb/skills/codemode-quick-reference/SKILL.md). Both skills are bundled resources on central process, Docker and GCP; read them with `tools.read`.
+Run JavaScript to compose authorized tools, filter their replies and emit only useful results. For all resource caps, read [Limits (central native code-mode)](/opt/pi-orb/skills/codemode-quick-reference/SKILL.md). Both skills are bundled resources on central process, Docker and GCP; read them with `tools.read`.
 
 ## Source and options
 
@@ -53,12 +53,12 @@ Invalid identifier characters become `_`: `mcp__dev-radius__search` is `tools.mc
 
 Check the discovered declaration before using a result:
 
-- Text tools such as `read`, `write` and `edit` normally return strings. A read containing images returns content blocks; emit text blocks with `text(block.text)` and image blocks with `image(block)`.
+- Known text tools such as `write` and `edit` return strings. `read` returns a string or an array of image blocks; emit each image with `image(block)`. Generic mixed callbacks return a string or an array of text/image blocks; use `text(block.text)` for text blocks.
 - `bash` returns `{ output, truncated, full_output_path?, exit_code, wall_time_seconds }` when a command exit status is available, including nonzero exits. Check `exit_code`; do not mistake resolution for command success. Read `full_output_path` with a tool when more captured output is needed.
-- MCP calls return their `CallToolResult`, including `content`, `isError` and optional `structuredContent`. Inspect `isError` and prefer `structuredContent` for local processing. Emit selected text or image content blocks, not the whole payload.
+- MCP calls return the full raw `CallToolResult`, including `content`, `isError` and optional `structuredContent`. Inspect `isError` and the shape of `structuredContent` before processing: it can be any JSON value, including arrays or null. Emit selected text or image content blocks, not the whole payload.
 - Other structured tools return their declared projected value. An output schema is not a universal promise that all tool replies have the same envelope.
 
-Await required work. A failed or blocked tool call, invalid arguments, or an ordinary tool error rejects with an `Error` carrying its error text. MCP error results and command exit statuses must also be checked as above. Catch recoverable rejections inside the script, or use `Promise.allSettled()` for independent work. Batch at most eight calls, counting discovery calls as well; sequential batches still share cumulative execution budgets.
+Await required work. A failed or blocked tool call, invalid arguments, or an ordinary tool error rejects with an `Error` carrying its error text. A declared structured result can resolve even on tool failure; check its error fields. MCP error results and command exit statuses must also be checked as above. Catch recoverable rejections inside the script, or use `Promise.allSettled()` for independent work. Batch at most eight calls, counting discovery calls as well; sequential batches still share cumulative execution budgets.
 
 ```js
 const results = await Promise.allSettled([
@@ -74,19 +74,19 @@ text(results.map((r, i) => r.status === "fulfilled"
 
 `store(key, value)` writes a small JSON value under a string key; `store(key, undefined)` deletes it. `load(key)` returns a copy or `undefined`: mutating that copy does not change stored state. Store IDs, cursors and summaries, not raw tool payloads or image data.
 
-Successful executions commit store writes to the conversation, retained across subsequent calls and resume. Variables do not survive VM teardown. Failed executions commit no store writes. External tool effects are not rolled back, including effects before timeout, cancellation or a later script error. Nested calls are not independently replayed: inspect the affected resource before retrying a mutation.
+Successful executions commit native store writes to the conversation, retained across calls and resume. State rewinds with history and forks as of the selected entry. Variables do not survive VM teardown. Failed executions commit no store writes. Native deterministic journals reconstruct interrupted scripts and reattach owned nested calls; each nested tool retains its own replay policy. Parent replay refusal blocks new nested admissions, but already-admitted replay-safe pending children may retry independently until cleanup aborts them. Retries check current authorization/environment without rerunning admission-time preparation/hooks; completed callback receipts are reused. This is not exactly-once external execution. Effects before timeout, cancellation or later failure are not rolled back; inspect the affected resource before retrying a mutation.
 
 Script completion, `exit()`, timeout or cancellation ends execution and cancels outstanding calls. Unawaited work may already have acted; cancellation is not proof of rollback. A promise that cannot settle with no pending tool call fails immediately because the VM has no timers or I/O.
 
 ## Failures and large results
 
-The wrapper reports completion/failure, elapsed time, emitted output and any script error. Parse/runtime errors include `codemode.js` stack locations. Timeout or abort terminates the worker; VM/worker failures are sandbox failures. Out-of-memory errors require reducing retained data. Callback budget overflow reports `resource_limit`, cancels the script and callbacks, and commits no store writes.
+Native formatting reports completion/failure and elapsed time, then emitted output and any script error. Multiple text items have `==> text N/M <==` headers; adjacent text is joined and console lines follow in one `<console_output>` block. The result is not a JSON envelope. Parse/runtime errors include `codemode.js` stack locations. Timeout or abort terminates the worker; VM/worker failures are sandbox failures. Out-of-memory errors require reducing retained data. Callback budget overflow reports `resource_limit`, cancels the script and callbacks, and commits no store writes.
 
-Output-budget truncation can spill output to a private artifact and reports its path; use `tools.read({ path, offset, limit })` to inspect a bounded portion. Truncation is distinct from execution failure, and increasing `max_output_tokens` cannot raise hard resource caps. To avoid oversized results, filter and aggregate locally, emit summaries, and split work across executions. Read the linked skill's limits before choosing batch, read, store or artifact sizes.
+Output-budget truncation can spill text to a private PostgreSQL artifact and reports its path; use `tools.read({ path, offset, limit })` to inspect a bounded portion. Images remain inline; binary saves are unavailable, with no guest/local temporary-file fallback. Truncation is distinct from execution failure, and increasing `max_output_tokens` cannot raise hard resource caps. To avoid oversized results, filter and aggregate locally, emit summaries, and split work across executions. Read the linked skill's limits before choosing batch, read, store or artifact sizes.
 
 ## Provenance and license
 
-Adapted for pi-orb's central wrapper from `@earendil-works/pi-coding-agent` 1.0.0 `docs/codemode.md` and `@earendil-works/pi-codemode` 1.0.0 `README.md`, as installed by this repository's lockfile. Upstream source: https://github.com/earendil-works/pi (paths `packages/coding-agent/docs/codemode.md` and `packages/codemode/README.md`). API behavior checked against pi-orb `apps/control-plane/src/adapters/durable/tools/codemode.ts`, `catalog.ts` and `vendor/discovery.ts`.
+Adapted from Pi's code-mode documentation under MIT. Current behavior uses `@earendil-works/pi-durable/codemode` and `@earendil-works/pi-codemode` 1.3.0: [upstream source](https://github.com/earendil-works/pi/tree/v1.3.0/packages/durable/src/codemode), [sandbox documentation](https://github.com/earendil-works/pi/blob/v1.3.0/packages/codemode/README.md). Policy checked against pi-orb `apps/control-plane/src/adapters/durable/tools/{codemode,catalog,codemode-sandbox}.ts`; local patch provenance: `patches/pi-codemode.PROVENANCE.md`, `patches/pi-durable.PROVENANCE.md`.
 
 MIT License
 

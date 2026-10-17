@@ -62,11 +62,12 @@ function sealedFixture(completeSdk = false) {
       );
   }
   for (const patch of [
-    "@earendil-works+pi-agent-core+1.1.0.patch",
-    "@earendil-works+pi-ai+1.1.0.patch",
-    "@earendil-works+pi-coding-agent+1.1.0.patch",
+    "@earendil-works+pi-agent-core+1.3.0.patch",
+    "@earendil-works+pi-ai+1.3.0.patch",
+    "@earendil-works+pi-coding-agent+1.3.0.patch",
     "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
-    "@earendil-works+pi-codemode+1.1.0.patch",
+    "@earendil-works+pi-codemode+1.3.0.patch",
+    "@earendil-works+pi-durable+1.3.0.patch",
   ]) {
     const source = readFileSync(join(root, "patches", patch), "utf8");
     const paths = [...source.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map((match) => match[1]);
@@ -92,8 +93,8 @@ function piOnlyCli(root) {
     join(root, "scripts/apply-dependency-patches.mjs"),
   );
   symlinkSync(join(repository, "node_modules/neverthrow"), join(root, "node_modules/neverthrow"));
-  return () =>
-    spawnSync(process.execPath, [join(root, "scripts/apply-dependency-patches.mjs"), "--pi-only"], {
+  return (scope = "--pi-only") =>
+    spawnSync(process.execPath, [join(root, "scripts/apply-dependency-patches.mjs"), scope], {
       cwd: root,
       encoding: "utf8",
       env: { ...process.env, NODE_OPTIONS: "" },
@@ -104,12 +105,15 @@ test("Pi-only installs core, AI, coding-agent and codemode and exposes selective
   const root = sealedFixture(true);
   rmSync(join(root, "node_modules/@gotgenes"), { recursive: true });
   rmSync(join(root, "patches/@gotgenes+pi-subagents+21.7.0-orb.8.patch"));
+  rmSync(join(root, "node_modules/@earendil-works/pi-durable"), { recursive: true });
+  rmSync(join(root, "patches/@earendil-works+pi-durable+1.3.0.patch"));
   const run = piOnlyCli(root);
   for (const entry of readdirSync(join(repository, "node_modules"))) {
     if (entry === "@earendil-works") {
       for (const name of readdirSync(join(repository, "node_modules", entry))) {
         const target = join(root, "node_modules", entry, name);
-        if (!existsSync(target)) symlinkSync(join(repository, "node_modules", entry, name), target);
+        if (name !== "pi-durable" && !existsSync(target))
+          symlinkSync(join(repository, "node_modules", entry, name), target);
       }
     } else if (entry !== "@gotgenes" && !existsSync(join(root, "node_modules", entry))) {
       symlinkSync(join(repository, "node_modules", entry), join(root, "node_modules", entry));
@@ -128,10 +132,10 @@ test("Pi-only installs core, AI, coding-agent and codemode and exposes selective
   );
   assert.equal(api.status, 0, api.stderr);
   assert.deepEqual(result.stdout.trim().split("\n"), [
-    "dependency patches: @earendil-works+pi-agent-core+1.1.0.patch: applied",
-    "dependency patches: @earendil-works+pi-ai+1.1.0.patch: applied",
-    "dependency patches: @earendil-works+pi-coding-agent+1.1.0.patch: applied",
-    "dependency patches: @earendil-works+pi-codemode+1.1.0.patch: applied",
+    "dependency patches: @earendil-works+pi-agent-core+1.3.0.patch: applied",
+    "dependency patches: @earendil-works+pi-ai+1.3.0.patch: applied",
+    "dependency patches: @earendil-works+pi-coding-agent+1.3.0.patch: applied",
+    "dependency patches: @earendil-works+pi-codemode+1.3.0.patch: applied",
   ]);
   assert.match(
     readFileSync(
@@ -141,6 +145,29 @@ test("Pi-only installs core, AI, coding-agent and codemode and exposes selective
     /cancelQueuedCustomSteer/,
   );
   assert.equal(run().status, 0);
+});
+
+test("Durable-only installs require Durable and omit subagents", () => {
+  const root = sealedFixture();
+  rmSync(join(root, "node_modules/@gotgenes"), { recursive: true });
+  rmSync(join(root, "patches/@gotgenes+pi-subagents+21.7.0-orb.8.patch"));
+  const run = piOnlyCli(root);
+  const result = run("--pi-durable-only");
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /pi-durable\+1\.3\.0\.patch: applied/);
+  assert.equal(run("--pi-durable-only").status, 0);
+});
+
+test("Durable-only refuses a missing declared package before modifying any package", () => {
+  const root = sealedFixture();
+  const run = piOnlyCli(root);
+  const target = join(root, "node_modules/@earendil-works/pi-agent-core/dist/agent.js");
+  const before = readFileSync(target);
+  rmSync(join(root, "node_modules/@earendil-works/pi-durable/package.json"));
+  const result = run("--pi-durable-only");
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /input_unreadable/);
+  assert.deepEqual(readFileSync(target), before);
 });
 
 for (const name of ["pi-agent-core", "pi-ai", "pi-coding-agent", "pi-codemode"]) {
@@ -186,11 +213,11 @@ for (const symlinked of [false, true]) {
   });
 }
 
-for (const scope of [[], ["--pi-only"]]) {
+for (const scope of [[], ["--pi-only"], ["--pi-durable-only"]]) {
   test(`CLI seals code-mode's bounded image prelude (${scope.join(" ") || "all"})`, () => {
     const root = sealedFixture();
     const target = "node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js";
-    const patch = "@earendil-works+pi-codemode+1.1.0.patch";
+    const patch = "@earendil-works+pi-codemode+1.3.0.patch";
     for (const path of [
       target,
       "node_modules/@earendil-works/pi-codemode/package.json",
@@ -205,14 +232,14 @@ for (const scope of [[], ["--pi-only"]]) {
       createHash("sha256")
         .update(readFileSync(join(root, target)))
         .digest("hex");
-    if (hash() === "6d431bb8c1aba7eb1ce6ecd6539bf3c19a84824ad2ad491266f415dfa9715daa") {
+    if (hash() === "376a58055c2f7c74f43c88fb993d5875a3670c614854022eac111c891127e384") {
       const reversed = spawnSync("git", ["apply", "--reverse", join(root, "patches", patch)], {
         cwd: root,
         encoding: "utf8",
       });
       assert.equal(reversed.status, 0, reversed.stderr);
     }
-    assert.equal(hash(), "19379bd753e82b795a89168aedbb1e0b86d314e33dce4d11810c036520b0dfcf");
+    assert.equal(hash(), "2fc2886529c0a7e8a7c9ac16b7c96fb2bbf8d2dce562801c5a09d723a57ea6ca");
     mkdirSync(join(root, "scripts"));
     cpSync(
       join(repository, "scripts/apply-dependency-patches.mjs"),
@@ -230,8 +257,8 @@ for (const scope of [[], ["--pi-only"]]) {
       });
     const first = run();
     assert.equal(first.status, 0, first.stderr);
-    assert.match(first.stdout, /pi-codemode\+1\.1\.0\.patch: applied/);
-    assert.equal(hash(), "6d431bb8c1aba7eb1ce6ecd6539bf3c19a84824ad2ad491266f415dfa9715daa");
+    assert.match(first.stdout, /pi-codemode\+1\.3\.0\.patch: applied/);
+    assert.equal(hash(), "376a58055c2f7c74f43c88fb993d5875a3670c614854022eac111c891127e384");
     assert.equal(run().status, 0);
     writeFileSync(join(root, target), `${readFileSync(join(root, target), "utf8")}\n// drift\n`);
     assert.equal(run().status, 1);
@@ -265,7 +292,7 @@ test("CLI ignores inherited repository selection", () => {
     },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /@earendil-works\+pi-ai\+1\.1\.0\.patch/);
+  assert.match(result.stdout, /@earendil-works\+pi-ai\+1\.3\.0\.patch/);
   assert.equal(readFileSync(join(ancestor, "node_modules/example/index.js"), "utf8"), "before\n");
 });
 
@@ -308,8 +335,8 @@ test("CLI resolves its installation root even when launched from a workspace", (
     encoding: "utf8",
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /@earendil-works\+pi-ai\+1\.1\.0\.patch: applied/);
-  assert.match(result.stdout, /@earendil-works\+pi-ai\+1\.1\.0\.patch/);
+  assert.match(result.stdout, /@earendil-works\+pi-ai\+1\.3\.0\.patch: applied/);
+  assert.match(result.stdout, /@earendil-works\+pi-ai\+1\.3\.0\.patch/);
   const target = join(root, "node_modules/@earendil-works/pi-ai/dist/types.d.ts");
   writeFileSync(target, `${readFileSync(target, "utf8")}\n// drift\n`);
   const failure = spawnSync(
@@ -372,10 +399,11 @@ for (const nested of [false, true]) {
     rmSync(join(root, "patches"), { recursive: true });
     cpSync(join(repository, "patches"), join(root, "patches"), { recursive: true });
     for (const patch of [
-      "@earendil-works+pi-agent-core+1.1.0.patch",
-      "@earendil-works+pi-ai+1.1.0.patch",
-      "@earendil-works+pi-codemode+1.1.0.patch",
-      "@earendil-works+pi-coding-agent+1.1.0.patch",
+      "@earendil-works+pi-agent-core+1.3.0.patch",
+      "@earendil-works+pi-ai+1.3.0.patch",
+      "@earendil-works+pi-codemode+1.3.0.patch",
+      "@earendil-works+pi-durable+1.3.0.patch",
+      "@earendil-works+pi-coding-agent+1.3.0.patch",
       "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
     ]) {
       const source = readFileSync(join(root, "patches", patch), "utf8");
@@ -399,7 +427,7 @@ for (const nested of [false, true]) {
     }
     const result = applyDependencyPatches(root);
     assert.equal(result.isOk(), true, JSON.stringify(result.error));
-    assert.equal(result.value.length, 5);
+    assert.equal(result.value.length, 6);
     assert.ok(result.value.every(({ status }) => status === "applied"));
     assert.ok(
       applyDependencyPatches(root).value.every(({ status }) => status === "already_applied"),

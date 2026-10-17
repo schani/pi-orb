@@ -1,11 +1,16 @@
 import type { Seq, Storage, StorageWrite, SubmissionId } from "@earendil-works/pi-durable";
-import { StorageRejected } from "@earendil-works/pi-durable";
+import { StorageRequestError } from "@earendil-works/pi-durable";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 import type { StoreError } from "../../domain/errors.ts";
 import type { PostgreSQLClient } from "../pg/client.ts";
 import { executor, type Query, type SqlDatabase, type SqlExecutor } from "./executor.ts";
 import { PgStorage } from "./storage.ts";
-import { rejectStorage, storageAuthorityError } from "./storage-boundary.ts";
+import {
+  rejectStorage,
+  rejectStorageRequest,
+  StorageFailure,
+  storageAuthorityError,
+} from "./storage-boundary.ts";
 
 export type AuthorityError = {
   type: "authority_error";
@@ -20,6 +25,9 @@ export type AuthorityError = {
     | "history_integrity";
   message: string;
 };
+type StorageTransactionError =
+  | AuthorityError
+  | { type: "invalid_storage_request"; message: string };
 export type Ownership = { orbId: string; ownerId: string; fence: number; admissionVersion: number };
 export type CommitOptions = {
   admit?(query: Query): Promise<Result<void, AuthorityError | StoreError>>;
@@ -297,7 +305,7 @@ export class PgDurableAuthority {
       },
       transaction: async <T>(callback: (executor: SqlExecutor) => Promise<T>): Promise<T> => {
         if (closed || !ownership || !options) rejectStorage("Read-only or closed authority");
-        const result = await this.db.transaction<T, AuthorityError>(async (query) => {
+        const result = await this.db.transaction<T, StorageTransactionError>(async (query) => {
           const guarded = await this.guard(query, ownership, draining);
           if (guarded.isErr()) return err(guarded.error);
           const admitted = await options.admit?.(query);
@@ -308,22 +316,29 @@ export class PgDurableAuthority {
               await options.checkpoint?.("before_native");
               return callback(executor(query, orbId));
             })(),
-            (error) =>
-              storageAuthorityError(error) ??
-              failure(
-                "projection",
-                error instanceof StorageRejected ? error.message : "Durable transaction rejected",
-              ),
+            (error): StorageTransactionError =>
+              error instanceof StorageRequestError
+                ? { type: "invalid_storage_request", message: error.message }
+                : (storageAuthorityError(error) ??
+                  failure(
+                    "projection",
+                    error instanceof StorageFailure
+                      ? error.message
+                      : "Durable transaction rejected",
+                  )),
           );
-          return run as Result<T, AuthorityError>;
+          return run as Result<T, StorageTransactionError>;
         });
-        if (result.isErr())
+        if (result.isErr()) {
+          if (result.error.type === "invalid_storage_request")
+            rejectStorageRequest(result.error.message);
           rejectStorage(
             result.error.type === "authority_error"
               ? result.error.message
               : "Durable commit rejected",
             { cause: result.error },
           );
+        }
         if (typeof result.value === "number") {
           // Notification failure cannot turn an acknowledged database commit into a rollback.
           Result.fromThrowable(

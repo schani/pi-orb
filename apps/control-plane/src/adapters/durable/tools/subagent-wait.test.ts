@@ -17,7 +17,9 @@ it("followUp and writes do not interrupt child completion", async () => {
     await boundary.queue("write");
     expect(boundary.child.state.status).toBe("running");
     boundary.complete();
-    expect(data(await execution)).toMatchObject({ status: "completed" });
+    const result = await execution;
+    expect(result).not.toHaveProperty("content");
+    expect(data(result)).toMatchObject({ status: "completed" });
     expect(boundary.cancelCalls).toBe(0);
     expect(boundary.watches.size).toBe(0);
   } finally {

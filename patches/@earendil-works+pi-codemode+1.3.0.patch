@@ -1,44 +1,19 @@
 diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js b/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js
-index 3b3710a..d2d919b 100644
 --- a/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js
 +++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js
-@@ -141,6 +141,7 @@ class Execution {
-             memoryLimitBytes: options.memoryLimitBytes,
-             store: options.store,
-             interrupt: this.interrupt,
-+            extension: options.workerData,
-         };
+@@ -23,7 +23,7 @@
+             throw new Error(`Failed to load QuickJS: ${errorMessage(error)}`);
+         }
+         const interrupt = new SharedArrayBuffer(4);
+-        const workerData = { ...data, wasm: module, interrupt };
++        const workerData = { ...data, wasm: module, interrupt, extension: options.workerData };
+         const releaseWorker = options.acquireWorker?.();
          let worker;
          try {
-@@ -296,6 +297,7 @@ export class CodemodeSandbox {
-     memoryLimitBytes;
-     wasm;
-     workerUrl;
-+    workerData;
-     running = new Set();
-     closed = false;
-     constructor(options = {}) {
-@@ -303,6 +305,7 @@ export class CodemodeSandbox {
-         this.memoryLimitBytes = options.memoryLimitBytes;
-         this.wasm = options.wasm;
-         this.workerUrl = options.workerUrl ?? defaultWorkerUrl();
-+        this.workerData = options.workerData;
-         for (const tool of options.tools ?? [])
-             this.registerTool(tool);
-         const namespaces = new Set();
-@@ -355,6 +358,7 @@ export class CodemodeSandbox {
-             store: serializeStore(options.store),
-             wasm: this.wasm === undefined ? loadQuickJSWasm() : Promise.resolve(this.wasm),
-             workerUrl: this.workerUrl,
-+            workerData: this.workerData,
-         });
-         this.running.add(execution);
-         return execution.promise.finally(() => this.running.delete(execution));
 diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js b/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js
-index df78017..fa3f09c 100644
 --- a/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js
 +++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js
-@@ -37,7 +37,8 @@ export const MAX_STORE_TOTAL_CHARS = 1024 * 1024;
+@@ -39,7 +39,8 @@
   * limit a script that prints in a loop grows the host's memory until it crashes. The item limit
   * covers loops that print empty strings.
   */
@@ -46,9 +21,9 @@ index df78017..fa3f09c 100644
 +// pi-orb's bounded worker enforces 1 MiB text / 32 MiB aggregate first; this stays a backstop above it.
 +export const MAX_OUTPUT_CHARS = 64 * 1024 * 1024;
  export const MAX_OUTPUT_ITEMS = 100_000;
- const IMAGE_HELPER_EXPECTS = "image expects a non-empty image URL string, an object with image_url, or a raw MCP image block";
+ const IMAGE_HELPER_EXPECTS = 'image expects a non-empty image URL string, an object with image_url, or an image block { type: "image", data, mimeType }';
  export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJson) {
-@@ -395,6 +396,19 @@ export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJ
+@@ -397,6 +398,19 @@
  		["image/webp", /^UklG.{8}RUJQ/],
  	];
  
@@ -68,7 +43,7 @@ index df78017..fa3f09c 100644
  	function image(value) {
  		const url = imageUrl(value);
  		if (url === "") throw new TypeErrorCtor(${JSON.stringify(IMAGE_HELPER_EXPECTS)});
-@@ -412,7 +426,7 @@ export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJ
+@@ -414,7 +428,7 @@
  		// resent on every later turn. Line breaks from wrapped base64 are dropped. The declared type
  		// is ignored in favor of the detected one, as providers also reject mismatches.
  		const data = url.slice(comma + 1).replace(/\\s+/g, "");
@@ -78,28 +53,26 @@ index df78017..fa3f09c 100644
  		}
  		const head = data.slice(0, 16);
 diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js b/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
-index 3c7edcc..2357c5b 100644
 --- a/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
 +++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
-@@ -52,7 +52,7 @@ async function main(data) {
-         // Without a guard, deep recursion overflows the wasm stack and traps instead of throwing a
-         // catchable RangeError.
-         maxStackSize: MAX_STACK_SIZE,
--        interruptHandler: () => Atomics.load(interrupt, 0) !== 0,
-+        interruptHandler: () => data.checkpoint?.() || Atomics.load(interrupt, 0) !== 0,
-         wasi: discardOutput,
+@@ -23,7 +23,7 @@
+         data,
+         wasm: data.wasm,
+         post,
+-        shouldInterrupt: () => Atomics.load(interrupt, 0) !== 0,
++        shouldInterrupt: () => data.checkpoint?.() || Atomics.load(interrupt, 0) !== 0,
      });
-     // Called from the prelude with primitives only.
+     parentPort?.on("message", (message) => {
+         if (isHostToWorkerMessage(message))
 diff --git a/node_modules/@earendil-works/pi-codemode/dist/types.d.ts b/node_modules/@earendil-works/pi-codemode/dist/types.d.ts
-index c887956..40acf0f 100644
 --- a/node_modules/@earendil-works/pi-codemode/dist/types.d.ts
 +++ b/node_modules/@earendil-works/pi-codemode/dist/types.d.ts
-@@ -124,6 +124,8 @@ export interface CodemodeSandboxOptions {
+@@ -140,6 +140,8 @@
       * specifier of an embedded build entrypoint; other hosts usually use a URL.
       */
      workerUrl?: string | URL;
 +    /** Structured-cloneable data for a custom worker entry, exposed as workerData.extension. */
 +    workerData?: unknown;
- }
- export interface CodemodeExecuteOptions {
-     signal?: AbortSignal;
+     /**
+      * Synchronously reserves capacity immediately before creating each worker, after loading wasm.
+      * Throw to deny admission without starting a worker. Return a release callback, called once if

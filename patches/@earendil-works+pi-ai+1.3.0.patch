@@ -1,5 +1,4 @@
 diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js b/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
-index 6ee63ec..3c44584 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
 +++ b/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
 @@ -1,7 +1,7 @@
@@ -11,7 +10,7 @@ index 6ee63ec..3c44584 100644
  import { formatProviderError, normalizeProviderError } from "../utils/error-body.js";
  import { AssistantMessageEventStream } from "../utils/event-stream.js";
  import { headersToRecord } from "../utils/headers.js";
-@@ -30,6 +30,38 @@ const CODEX_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]
+@@ -30,6 +30,38 @@
  const WEBSOCKET_MESSAGE_TOO_BIG_CLOSE_CODE = 1009;
  const WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE = "websocket_connection_limit_reached";
  const PREVIOUS_RESPONSE_NOT_FOUND_CODE = "previous_response_not_found";
@@ -50,7 +49,7 @@ index 6ee63ec..3c44584 100644
  const CODEX_RESPONSE_STATUSES = new Set([
      "completed",
      "incomplete",
-@@ -161,6 +193,12 @@ export const stream = (model, context, options) => {
+@@ -162,6 +194,12 @@
              stopReason: "pending",
              timestamp: Date.now(),
          };
@@ -63,7 +62,7 @@ index 6ee63ec..3c44584 100644
          try {
              const apiKey = options?.apiKey;
              if (!apiKey) {
-@@ -182,7 +220,6 @@ export const stream = (model, context, options) => {
+@@ -183,7 +221,6 @@
              const httpTimeoutMs = normalizeTimeoutMs(options?.timeoutMs);
              const websocketConnectTimeoutMs = normalizeTimeoutMs(options?.websocketConnectTimeoutMs);
              const transport = options?.transport || "auto";
@@ -71,7 +70,7 @@ index 6ee63ec..3c44584 100644
              const websocketDisabledForSession = transport !== "sse" && isWebSocketSseFallbackActive(cacheSessionId);
              if (websocketDisabledForSession) {
                  recordWebSocketSseFallback(cacheSessionId);
-@@ -191,10 +228,17 @@ export const stream = (model, context, options) => {
+@@ -192,10 +229,17 @@
                  let websocketStarted = false;
                  let retriedWebSocketConnectionLimit = false;
                  let retriedMissingWebSocketContinuation = false;
@@ -90,7 +89,7 @@ index 6ee63ec..3c44584 100644
                              websocketStarted = true;
                              if (!startEmitted) {
                                  startEmitted = true;
-@@ -214,6 +258,7 @@ export const stream = (model, context, options) => {
+@@ -215,6 +259,7 @@
                          return;
                      }
                      catch (error) {
@@ -98,7 +97,7 @@ index 6ee63ec..3c44584 100644
                          const aborted = options?.signal?.aborted;
                          const connectionLimitBeforeStart = !websocketStarted && isWebSocketConnectionLimitReachedError(error);
                          const previousResponseNotFound = isPreviousResponseNotFoundError(error);
-@@ -228,18 +273,24 @@ export const stream = (model, context, options) => {
+@@ -229,18 +274,24 @@
                          if (aborted || (isCodexNonTransportError(error) && !connectionLimitBeforeStart)) {
                              throw error;
                          }
@@ -130,7 +129,7 @@ index 6ee63ec..3c44584 100644
                          break;
                      }
                  }
-@@ -257,6 +308,9 @@ export const stream = (model, context, options) => {
+@@ -258,6 +309,9 @@
              let lastError;
              const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
              for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -140,7 +139,7 @@ index 6ee63ec..3c44584 100644
                  if (options?.signal?.aborted) {
                      throw new Error("Request was aborted");
                  }
-@@ -264,7 +318,10 @@ export const stream = (model, context, options) => {
+@@ -265,7 +319,10 @@
                      const headerTimeoutSignal = httpTimeoutMs !== undefined && httpTimeoutMs > 0 ? AbortSignal.timeout(httpTimeoutMs) : undefined;
                      const combinedSignal = combineAbortSignals([options?.signal, headerTimeoutSignal]);
                      try {
@@ -152,7 +151,7 @@ index 6ee63ec..3c44584 100644
                              method: "POST",
                              headers: sseHeaders,
                              body: sseBody,
-@@ -281,6 +338,7 @@ export const stream = (model, context, options) => {
+@@ -282,6 +339,7 @@
                          combinedSignal.cleanup();
                      }
                      await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
@@ -160,7 +159,7 @@ index 6ee63ec..3c44584 100644
                      if (response.ok) {
                          break;
                      }
-@@ -299,6 +357,7 @@ export const stream = (model, context, options) => {
+@@ -300,6 +358,7 @@
                          statusText: response.statusText,
                      });
                      const info = await parseErrorResponse(fakeResponse);
@@ -168,7 +167,7 @@ index 6ee63ec..3c44584 100644
                      throw new Error(info.friendlyMessage || info.message);
                  }
                  catch (error) {
-@@ -325,6 +384,7 @@ export const stream = (model, context, options) => {
+@@ -326,6 +385,7 @@
              if (!response.body) {
                  throw new Error("No response body");
              }
@@ -176,7 +175,7 @@ index 6ee63ec..3c44584 100644
              if (!startEmitted) {
                  startEmitted = true;
                  stream.push({ type: "start", partial: output });
-@@ -344,7 +404,13 @@ export const stream = (model, context, options) => {
+@@ -345,7 +405,13 @@
                  delete block.customInput;
              }
              output.stopReason = options?.signal?.aborted ? "aborted" : "error";
@@ -191,7 +190,7 @@ index 6ee63ec..3c44584 100644
              stream.push({ type: "error", reason: output.stopReason, error: output });
              stream.end();
          }
-@@ -365,6 +431,7 @@ export const streamSimple = (model, context, options) => {
+@@ -366,6 +432,7 @@
      return stream(model, context, {
          ...base,
          reasoningEffort,
@@ -199,7 +198,7 @@ index 6ee63ec..3c44584 100644
      });
  };
  // ============================================================================
-@@ -1172,7 +1239,7 @@
+@@ -1173,7 +1240,7 @@
  async function processWebSocketStream(url, body, headers, output, stream, model, onStart, idleTimeoutMs, websocketConnectTimeoutMs, cacheSessionId, accountId, grammarToolInputProperties, options) {
      const { socket, entry, reused, release } = await acquireWebSocket(url, headers, cacheSessionId, accountId, options?.signal, websocketConnectTimeoutMs, options?.env);
      let keepConnection = true;
@@ -208,7 +207,7 @@ index 6ee63ec..3c44584 100644
      // ChatGPT Codex Responses rejects `store: true` ("Store must be set to false").
      // WebSocket continuation still works via connection-scoped previous_response_id state.
      const fullBody = body;
-@@ -1241,11 +1308,12 @@ async function parseErrorResponse(response) {
+@@ -1242,11 +1309,12 @@
      const raw = await response.text();
      let message = raw || response.statusText || "Request failed";
      let friendlyMessage;
@@ -222,7 +221,7 @@ index 6ee63ec..3c44584 100644
              if (/usage_limit_reached|usage_not_included|rate_limit_exceeded/i.test(code) || response.status === 429) {
                  const plan = err.plan_type ? ` (${err.plan_type.toLowerCase()} plan)` : "";
                  const mins = err.resets_at
-@@ -1258,7 +1326,7 @@ async function parseErrorResponse(response) {
+@@ -1259,7 +1327,7 @@
          }
      }
      catch { }
@@ -232,10 +231,9 @@ index 6ee63ec..3c44584 100644
  // ============================================================================
  // Auth & Headers
 diff --git a/node_modules/@earendil-works/pi-ai/dist/auth/resolve.js b/node_modules/@earendil-works/pi-ai/dist/auth/resolve.js
-index fca09b1..d65c86c 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/auth/resolve.js
 +++ b/node_modules/@earendil-works/pi-ai/dist/auth/resolve.js
-@@ -75,7 +75,8 @@ export async function refreshStoredOAuthCredential(credentials, providerId, oaut
+@@ -75,7 +75,8 @@
              if (!needsRefresh(current))
                  return undefined; // another process/request refreshed
              try {
@@ -246,10 +244,9 @@ index fca09b1..d65c86c 100644
              catch (error) {
                  throw new ModelsError("oauth", `OAuth refresh failed for ${providerId}`, { cause: error });
 diff --git a/node_modules/@earendil-works/pi-ai/dist/types.d.ts b/node_modules/@earendil-works/pi-ai/dist/types.d.ts
-index b01603b..33efd15 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/types.d.ts
 +++ b/node_modules/@earendil-works/pi-ai/dist/types.d.ts
-@@ -111,6 +111,8 @@ export interface ProviderRequestOptions<TModel = Model<Api>> {
+@@ -99,6 +99,8 @@
      maxRetryDelayMs?: number;
  }
  export interface StreamOptions extends ProviderRequestOptions<Model<Api>> {

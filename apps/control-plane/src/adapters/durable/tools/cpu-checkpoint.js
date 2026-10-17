@@ -32,10 +32,13 @@ export function createCpuCheckpoint(
       const generation = Atomics.load(epoch, 0);
       if (Atomics.load(credit, 0) > 0n) break;
       const started = platform.now();
+      Atomics.store(stats, 3, 1n);
+      Atomics.notify(stats, 3);
       platform.wait(epoch, 0, generation, CPU_QUANTUM_MS);
       Atomics.add(stats, 1, (platform.now() - started) / 1000n);
       charge();
     }
+    Atomics.store(stats, 3, 0n);
     return Atomics.load(interrupt, 0) !== 0;
   };
 }

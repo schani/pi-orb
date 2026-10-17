@@ -52,7 +52,7 @@ test("one-shot fault only changes exact MCP tool POST after grant and restores f
   }
 });
 
-test("actual Pi 1.1.0 session binds production native adapter, discovers, calls and shuts down", {
+test("actual Pi 1.3.0 session binds production native adapter, discovers, calls and shuts down", {
   timeout: 15000,
 }, async () => {
   const methods = [];
@@ -267,7 +267,7 @@ test("selected metadata inspection is bounded to requested tools", { timeout: 15
   await once(server, "listening");
   const events = [];
   try {
-    await runQualification({
+    const outcome = await runQualification({
       catalog: {
         revision: 3,
         servers: [
@@ -286,6 +286,7 @@ test("selected metadata inspection is bounded to requested tools", { timeout: 15
       toolName: "selected",
       output: (item) => events.push(item),
     });
+    assert.equal(outcome.isOk(), true);
     assert.deepEqual(
       events.filter((item) => item.phase === "inspect").map((item) => item.tool),
       ["selected"],

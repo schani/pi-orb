@@ -8,7 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 
 const hash = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
-const patch = "@earendil-works+pi-coding-agent+1.1.0.patch";
+const patch = "@earendil-works+pi-coding-agent+1.3.0.patch";
 
 function run(cwd, command, args) {
   const result = spawnSync(command, args, {
@@ -29,9 +29,9 @@ test("shipped Pi-only helper applies and reapplies in checkout staging and extra
   const extracted = join(pristine, "extracted");
   const names = [
     patch,
-    "@earendil-works+pi-ai+1.1.0.patch",
-    "@earendil-works+pi-agent-core+1.1.0.patch",
-    "@earendil-works+pi-codemode+1.1.0.patch",
+    "@earendil-works+pi-ai+1.3.0.patch",
+    "@earendil-works+pi-agent-core+1.3.0.patch",
+    "@earendil-works+pi-codemode+1.3.0.patch",
   ];
   const targets = [];
   const gitFiles = ["config", "index"].map((file) => {
