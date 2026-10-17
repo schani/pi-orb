@@ -8,8 +8,6 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Roll out additive Claude compaction scrollback when authorized** (2026-10-16; `docs/postmortems/2026-10-16-claude-compaction-scrollback.md`, `docs/history-replication.md`). Implemented and locally qualified, undeployed. On authorized rollout, verify full retained scrollback and delivered-inbox deduplication for `c9a30a6d-afb3-4a51-a979-335ae7ac389e` after browser reload; no replay or wake.
-
 - **Diagnose lifecycle-smoke old-revision HTTP 500** (2026-10-16; `docs/postmortems/2026-10-16-lifecycle-smoke-http500.md`). Establish why the restart GET was attributed to deleted revision `00060-kfk`; correlate response shape and trace evidence. Deploy 38961777202 remains applied-but-unvalidated; bounded smoke retries do not explain or clear it.
 
 - **Own direct runtime/build/type dependencies explicitly** (2026-10-16; `docs/dependency-audit.md`). Resolve runtime imports of undeclared Pi AI/agent-core/Chord and native-image/fork build use of hoisted esbuild. Review runtime `ws` and native-image `determined` as dev-only declarations; preserve plugin peers and DST coverage. Qualify isolated package installs/builds and types; do not rely on incidental hoisting.

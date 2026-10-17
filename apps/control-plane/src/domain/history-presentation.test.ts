@@ -1,6 +1,6 @@
 import type { HistoryRecord } from "@pi-orb/protocol";
 import { expect, it } from "vitest";
-import { orderHistoryForPresentation } from "./history-presentation.ts";
+import { orderHistoryForPresentation as orderHistory } from "./history-presentation.ts";
 
 const record = (id: string, parentId: string | null, day = 7): HistoryRecord => ({
   id,
@@ -20,10 +20,8 @@ it("keeps earlier components before compaction despite a backdated descendant", 
   const cursor = record("cursor", backdated.id, 2);
   const input = [cursor, compact, output, backdated, earlier];
   const expected = [earlier, output, compact, backdated, cursor];
-  expect(orderHistoryForPresentation(input, cursor.id)._unsafeUnwrap()).toEqual(expected);
-  expect(orderHistoryForPresentation([...input].reverse(), cursor.id)._unsafeUnwrap()).toEqual(
-    expected,
-  );
+  expect(orderHistory(input, cursor.id)._unsafeUnwrap()).toEqual(expected);
+  expect(orderHistory(input.toReversed(), cursor.id)._unsafeUnwrap()).toEqual(expected);
   expect(input[0]).toBe(cursor);
 });
 
@@ -33,9 +31,13 @@ it("prioritizes ready siblings by timestamp then ID, not depth-first ancestry", 
   const b = record("b", root.id);
   const deep = record("deep", a.id, 9);
   const cursor = record("cursor", b.id, 1);
-  expect(
-    orderHistoryForPresentation([deep, cursor, b, a, root], cursor.id)._unsafeUnwrap(),
-  ).toEqual([root, a, b, deep, cursor]);
+  expect(orderHistory([deep, cursor, b, a, root], cursor.id)._unsafeUnwrap()).toEqual([
+    root,
+    a,
+    b,
+    deep,
+    cursor,
+  ]);
 });
 
 it("orders arbitrary timestamp strings consistently across input permutations", () => {
@@ -51,12 +53,7 @@ it("orders arbitrary timestamp strings consistently across input permutations", 
     [a, z, m],
     [a, m, z],
   ]) {
-    expect(orderHistoryForPresentation([...roots, cursor], cursor.id)._unsafeUnwrap()).toEqual([
-      m,
-      z,
-      a,
-      cursor,
-    ]);
+    expect(orderHistory([...roots, cursor], cursor.id)._unsafeUnwrap()).toEqual([m, z, a, cursor]);
   }
 });
 
@@ -64,9 +61,7 @@ it("walks more than 6000 ancestors without recursion", () => {
   const records = Array.from({ length: 6501 }, (_, i) =>
     record(String(i), i === 0 ? null : String(i - 1)),
   );
-  expect(orderHistoryForPresentation([...records].reverse(), "6500")._unsafeUnwrap()).toEqual(
-    records,
-  );
+  expect(orderHistory([...records].reverse(), "6500")._unsafeUnwrap()).toEqual(records);
 });
 
 it.each([
@@ -78,7 +73,7 @@ it.each([
 ])(
   "returns a typed corruption error for an impossible snapshot: $cursor",
   ({ records, cursor }) => {
-    const result = orderHistoryForPresentation(records, cursor);
+    const result = orderHistory(records, cursor);
     expect(result.isErr() && result.error).toMatchObject({
       type: "store_error",
       code: "corruption",
