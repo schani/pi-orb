@@ -13,6 +13,10 @@ Lifecycle edges are `claude-recovery-claimed`, `claude-recovery-disposal-failed`
 
 Orb states, reconciliation rules, idle auto-stop, and the orphan-host sweep. The host operations these rules drive are specified in `docs/host-provider.md`.
 
+## Findings
+
+**2026-10-18:** release activation gates autonomous ownership, not HTTP availability. New-revision metadata and unloaded conversation/WS snapshots can report idle without observing the owning agent. Recommended invariant, **not yet approved or implemented**: unobserved activity is not confirmed idle. Historical screenshot payload remains inferred. Evidence: `docs/postmortems/2026-10-18-false-idle-during-release.md`; work: `TODO.md`.
+
 ## Decisions
 
 - **Incident rule (2026-10-04):** correlate guest shutdown admission, provider audit and durable lifecycle edges before attributing a restart to an extension error. Two scoped Spot preemptions preceded secondary loadout errors; they do not explain every prior restart. Preserve replay/admission fences when restoring services and distinguish interrupted checks from completed qualification. Evidence: `docs/postmortems/2026-10-04-spot-preemption-loadout.md`.
