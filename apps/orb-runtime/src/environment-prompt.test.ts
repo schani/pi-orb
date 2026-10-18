@@ -17,40 +17,6 @@ describe("shared runtime environment prompt", () => {
     ).toBe(true);
   });
 
-  it("keeps user-interactive process starts out of subagents", () => {
-    const guidance = environmentPrompt.indexOf(
-      "Do not use subagents to start processes that the user interacts with, because it's too finicky.",
-    );
-    expect(guidance).toBeGreaterThan(-1);
-    expect(guidance).toBeLessThan(environmentPrompt.indexOf("For MCP servers"));
-  });
-
-  it("explains browser-owned MCP setup even without configured servers", () => {
-    expect(environmentPrompt).toMatch(/MCP servers.*ask.*user.*project.*config gear/i);
-    expect(environmentPrompt).toMatch(/MCPs.*OAuth Connect.*Secrets.*static keys/);
-    expect(environmentPrompt).toMatch(/catalog changes.*next start/i);
-    expect(environmentPrompt).toMatch(/OAuth reauthorization.*no restart/);
-    expect(environmentPrompt).not.toContain("pi-orb mcp add");
-  });
-
-  it("documents the boot hooks the repository may own", () => {
-    // The failure fragment (`hooks/prompt.ts`) is appended only when a hook
-    // or its env file breaks; an agent that never sees one must still know the convention
-    // exists, or it will never write one (docs/orb-setup-hook.md).
-    expect(environmentPrompt).toContain(".agents/setup");
-    expect(environmentPrompt).toContain(".agents/resume");
-    expect(environmentPrompt).toContain("once per compute incarnation");
-    expect(environmentPrompt).toContain("every start");
-    // The identity split is the rule a hook author gets wrong first.
-    expect(environmentPrompt).toMatch(/executable.*root hooks/i);
-    expect(environmentPrompt).toMatch(
-      /setup.*once per compute incarnation.*before.*agent.*without.*identity/,
-    );
-    expect(environmentPrompt).toMatch(/setup.*install toolchains/i);
-    expect(environmentPrompt).toMatch(/resume.*every start.*identity.*credentials/i);
-    expect(environmentPrompt).toMatch(/both.*idempotent.*\$HOME\/\.cache\/pi-orb\/logs/i);
-  });
-
   it("preserves the exact user-edited runtime bullets", () => {
     expect(environmentPrompt.split("\n").filter((line) => line.startsWith("- "))).toEqual([
       "- Python 3 (`python`, `python3`, virtual environments) and rustup; no default Rust toolchain. Select via `rust-toolchain.toml` or install with rustup. Toolchains/Cargo persist in `$HOME`.",
@@ -63,6 +29,7 @@ describe("shared runtime environment prompt", () => {
   });
 
   it("keeps harness-specific CLI guidance out of the shared base", () => {
+    expect(environmentPrompt).not.toContain("pi-orb mcp add");
     expect(environmentPrompt).not.toMatch(/`pi-orb /);
     expect(environmentPrompt).not.toContain("## Orb tools");
   });

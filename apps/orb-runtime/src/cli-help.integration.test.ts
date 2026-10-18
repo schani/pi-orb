@@ -95,137 +95,109 @@ describe("public pi-orb help", () => {
     },
   );
 
-  it("explains account inspection and transcript fidelity, size and replication lag", async () => {
-    const orbs = await help(["orbs", "--help"]);
-    expect(orbs).toMatch(/list.*search.*account.*orbs/i);
-    expect(orbs).toContain("[query]");
-    const transcript = await help(["transcript", "--help"]);
-    expect(transcript).toMatch(/read.*conversation/i);
-    expect(transcript).toMatch(/very long/i);
-    expect(transcript).toMatch(/--json.*lossless structured/i);
-    expect(transcript).toMatch(/active.*replicated snapshot.*briefly lag.*live/i);
-  });
-
-  it("explains all self identity fields", async () => {
-    const output = await help(["self", "--help"]);
-    for (const field of [
-      "identity",
-      "dashboard",
-      "project",
-      "repository",
-      "creation time",
-      "spawning parent",
-      "direct children",
-      "preview hostname",
-      "--json",
-    ])
-      expect(output).toContain(field);
-  });
-
-  it("explains independent spawning and every option", async () => {
-    const output = await help(["spawn", "--help"]);
-    expect(output).toContain(SPAWN_USAGE);
-    expect(output).toMatch(/independent.*same project/i);
-    expect(output).toMatch(/fresh.*default.branch checkout/i);
-    expect(output).toMatch(/own conversation.*separate filesystem/i);
-    expect(output).toMatch(/no shared checkout.*local subagents/i);
-    expect(output).toMatch(/keeps running.*this orb stops/i);
-    for (const flag of ["--prompt", "--prompt-file", "--name", "--model", "--id", "--json"]) {
-      expect(output).toContain(flag);
-    }
-    expect(output).toMatch(/stdin/i);
-    expect(output).toMatch(/acceptance.*not.*completion/i);
-  });
-
-  it.each(["archive", "delete"])(
-    "requires explicit permission and export before %s",
-    async (command) => {
-      const output = await help([command, "--help"]);
-      expect(output).toMatch(/only.*explicit user request/i);
-      expect(output).toMatch(/push or export.*before/i);
-      expect(output).toMatch(/permanently deletes.*workspace/i);
-      if (command === "archive") {
-        expect(output).toMatch(/retains.*transcript.*conversation/i);
-      } else {
-        expect(output).toMatch(/permanently deletes.*workspace.*conversation.*hosted files/i);
-        expect(output).toMatch(/interrupt.*turn.*before.*acknowledg/i);
-      }
-    },
-  );
-
-  it("distinguishes user alerts from parent messaging", async () => {
-    const output = await help(["alert", "--help"]);
-    expect(output).toMatch(/transcript alert/i);
-    expect(output).toMatch(/flag.*until.*user opens.*issuing orb/i);
-    expect(output).toMatch(/not.*parent orb/i);
-    expect(output).toContain("--request-id");
-  });
-
-  it("explains durable deferred sleep rather than timers", async () => {
-    const output = await help(["sleep", "--help"]);
-    expect(output).toContain("pi-orb sleep 1h");
-    expect(output).toMatch(/absolute wake deadline/i);
-    expect(output).toMatch(/stops.*after.*admitted work finishes/i);
-    expect(output).toMatch(/successful.*return.*durable acceptance.*not.*already asleep/is);
-    expect(output).toMatch(/deferred sleep.*not.*code.mode.*timers.*shell sleep/i);
-  });
-
-  it("explains option meanings, defaults, retry identity and peer effects", async () => {
-    const spawn = await help(["spawn", "--help"]);
-    expect(spawn).toMatch(/--name.*name/i);
-    expect(spawn).toMatch(/--model.*provider\/id/i);
-    expect(spawn).toMatch(/omission.*harness.*not.*model/is);
-    expect(spawn).toMatch(/--id.*UUID.*retry key/i);
-    expect(spawn).toMatch(/reuse.*identical arguments/is);
-    expect(spawn).toMatch(/--json.*response.*instead.*URL/i);
-    const send = await help(["send", "--help"]);
-    expect(send).toMatch(/same owner and project/i);
-    expect(send).toMatch(/non-human.*not.*consent/i);
-    expect(send).toMatch(/no shared filesystem/i);
-    expect(send).toMatch(/wake.*stopped.*sleeping/i);
-    expect(send).toMatch(/--request-id.*128/i);
-    expect(send).toMatch(/retry.*same.*target.*message/is);
-    const host = await help(["host", "--help"]);
-    expect(host).toMatch(/path defaults.*basename/i);
-    expect(host).toMatch(/--request-id.*UUID.*generated/i);
-    expect(host).toMatch(/unknown.*same.*file.*path.*request/is);
-    expect(host).toMatch(/rm.*no.*stdout/i);
-    expect(host).toMatch(/32 MiB/);
-    expect(host).toMatch(/UUID.*versions 1.5/is);
-    expect(host).toMatch(/five.minute.*deadline/i);
-    const token = await help(["id-token", "--help"]);
-    expect(token).toMatch(/--audience.*recipient.*512/i);
-    expect(token).toMatch(/--ttl-seconds.*60.*3600.*600/i);
-    expect(token).toMatch(/--flag=value/i);
-    expect(token).toMatch(/retry.*10 seconds/is);
-    expect(token).toContain("PI_ORB_ID_TOKEN_DIAGNOSTICS=1");
-    expect(token).toMatch(/token.free.*stderr/i);
-    const sleep = await help(["sleep", "--help"]);
-    expect(sleep).toMatch(/not idempotent.*new deadline/is);
-    const deletion = await help(["delete", "--help"]);
-    expect(deletion).toMatch(/does not.*wait.*children.*uploads/is);
-    expect(deletion).toMatch(/not.*project.*siblings/i);
-    const alert = await help(["alert", "--help"]);
-    expect(alert).toMatch(/--request-id.*128/i);
-    expect(alert).toMatch(/retry.*same.*message/is);
-    expect(alert).toMatch(/4,096/);
-  });
-
-  it("describes send, hosting actions and token security", async () => {
-    const send = await help(["send", "--help"]);
-    expect(send).toMatch(/queue.*message.*orb/i);
-    expect(send).toMatch(/acceptance.*not.*reply/i);
-    expect(send).toContain("--request-id");
-    const host = await help(["host", "--help"]);
-    expect(host).toMatch(/publish.*file/i);
-    expect(host).toMatch(/ls.*list/i);
-    expect(host).toMatch(/rm.*remove/i);
-    expect(host).toContain("--request-id");
-    const token = await help(["id-token", "--help"]);
-    expect(token).toMatch(/short.lived.*OIDC/i);
-    expect(token).toMatch(/stdout.*bearer credential/i);
-    expect(token).toContain("--ttl-seconds");
-    expect(token).toMatch(/tracing.*logs/i);
+  it.each(
+    Object.entries({
+      self: [
+        "identity",
+        "dashboard",
+        "project",
+        "repository",
+        "creation time",
+        "spawning parent",
+        "direct children",
+        "preview hostname",
+        "--json",
+      ],
+      orbs: [/list.*search.*account.*orbs/i, "[query]"],
+      transcript: [
+        /read.*conversation/i,
+        /very long/i,
+        /--json.*lossless structured/i,
+        /active.*replicated snapshot.*briefly lag.*live/i,
+      ],
+      spawn: [
+        SPAWN_USAGE,
+        /independent.*same project/i,
+        /fresh.*default.branch checkout/i,
+        /own conversation.*separate filesystem/i,
+        /no shared checkout.*local subagents/i,
+        /keeps running.*this orb stops/i,
+        /stdin/i,
+        /acceptance.*not.*completion/i,
+        /--name.*name/i,
+        /--model.*provider\/id/i,
+        /omission.*harness.*not.*model/is,
+        /--id.*UUID.*retry key/i,
+        /reuse.*identical arguments/is,
+        /--json.*response.*instead.*URL/i,
+      ],
+      archive: [
+        /only.*explicit user request/i,
+        /push or export.*before/i,
+        /permanently deletes.*workspace/i,
+        /retains.*transcript.*conversation/i,
+      ],
+      delete: [
+        /only.*explicit user request/i,
+        /push or export.*before/i,
+        /permanently deletes.*workspace.*conversation.*hosted files/i,
+        /interrupt.*turn.*before.*acknowledg/i,
+        /does not.*wait.*children.*uploads/is,
+        /not.*project.*siblings/i,
+      ],
+      alert: [
+        /transcript alert/i,
+        /flag.*until.*user opens.*issuing orb/i,
+        /not.*parent orb/i,
+        /--request-id.*128/i,
+        /retry.*same.*message/is,
+        /4,096/,
+      ],
+      sleep: [
+        "pi-orb sleep 1h",
+        /absolute wake deadline/i,
+        /stops.*after.*admitted work finishes/i,
+        /successful.*return.*durable acceptance.*not.*already asleep/is,
+        /deferred sleep.*not.*code.mode.*timers.*shell sleep/i,
+        /not idempotent.*new deadline/is,
+      ],
+      send: [
+        /same owner and project/i,
+        /non-human.*not.*consent/i,
+        /no shared filesystem/i,
+        /wake.*stopped.*sleeping/i,
+        /--request-id.*128/i,
+        /retry.*same.*target.*message/is,
+        /queue.*message.*orb/i,
+        /acceptance.*not.*reply/i,
+      ],
+      host: [
+        /path defaults.*basename/i,
+        /--request-id.*UUID.*generated/i,
+        /unknown.*same.*file.*path.*request/is,
+        /rm.*no.*stdout/i,
+        /32 MiB/,
+        /UUID.*versions 1.5/is,
+        /five.minute.*deadline/i,
+        /publish.*file/i,
+        /ls.*list/i,
+        /rm.*remove/i,
+      ],
+      "id-token": [
+        /--audience.*recipient.*512/i,
+        /--ttl-seconds.*60.*3600.*600/i,
+        /--flag=value/i,
+        /retry.*10 seconds/is,
+        "PI_ORB_ID_TOKEN_DIAGNOSTICS=1",
+        /token.free.*stderr/i,
+        /short.lived.*OIDC/i,
+        /stdout.*bearer credential/i,
+        /tracing.*logs/i,
+      ],
+    }),
+  )("explains %s semantics, options and retry contract", async (command, matches) => {
+    const output = await help([command, "--help"]);
+    for (const match of matches) expect(output).toMatch(match);
   });
 
   it("never contacts the runtime/control plane for help, including destructive commands", async () => {
