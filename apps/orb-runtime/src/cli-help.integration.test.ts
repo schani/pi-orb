@@ -117,6 +117,8 @@ describe("public pi-orb help", () => {
       ],
       spawn: [
         SPAWN_USAGE,
+        "--prompt",
+        "--prompt-file",
         /independent.*same project/i,
         /fresh.*default.branch checkout/i,
         /own conversation.*separate filesystem/i,
