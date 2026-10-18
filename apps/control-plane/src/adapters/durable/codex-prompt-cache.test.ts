@@ -288,7 +288,9 @@ describe("durable Codex prompt cache key", () => {
         const input = JSON.stringify(body.input);
         const childNote = input.includes("ROOT_TURN")
           ? ""
-          : "\n\nYou are a subagent. Do not spawn orbs.";
+          : `\n\n- You are a subagent. Your parent started you in this same orb; you share its filesystem.
+- To communicate with your parent agent you have \`notify_parent\`. Do not use \`orb_send\` for that!!!
+- Do not start subagents or orbs!`;
         expect(body.instructions).toBe(bodies[0]?.instructions);
         const instructions = String(body.instructions);
         const sections = [...instructions.matchAll(/<([a-z-]+)>\n([\s\S]*?)\n<\/\1>/g)];

@@ -10,7 +10,7 @@ import { gotoFrontendFixture } from "./testkit/frontend-fixture.ts";
 const evidence = "/tmp/orb-pad-nesting";
 const projectId = "frontend-fixture-project";
 const childId = "frontend-fixture-orb";
-const orb = (id: string, name: string, spawnedBy?: string): OrbView => ({
+const orb = (id: string, name: string, spawnedByOrb?: string): OrbView => ({
   id,
   name,
   projectId,
@@ -20,7 +20,7 @@ const orb = (id: string, name: string, spawnedBy?: string): OrbView => ({
   createdAt: "2026-10-01T00:00:00Z",
   updatedAt: "2026-10-01T00:00:00Z",
   stateChangedAt: "2026-10-01T00:00:00Z",
-  ...(spawnedBy === undefined ? {} : { spawnedBy }),
+  ...(spawnedByOrb === undefined ? {} : { spawnedByOrb }),
 });
 let vite: ViteDevServer;
 let browser: Awaited<ReturnType<typeof chromium.launch>>;

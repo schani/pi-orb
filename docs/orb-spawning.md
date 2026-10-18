@@ -8,7 +8,7 @@ The new orb gets a fresh default-branch checkout, normal project secrets, boot h
 
 This is not a parent/child lifecycle, result callback, worktree handoff, wait/cancel protocol, or scheduler. Cross-project creation, recursive delegation, cost quotas, and TTLs are outside this slice. The broader orchestration question remains in `docs/open-questions.md`, question 29. Agent instructions describe requested delegation, warn about fresh checkouts and compute independence, and prohibit recursive fan-out without user direction.
 
-**Browser nesting (implemented locally 2026-10-14; not deployed):** project orb-list and individual-orb GETs expose the existing immutable caller ID as optional `OrbView.spawnedBy`, retaining provenance after caller archival/deletion and omitting it for non-spawned orbs. Mutation responses may omit it. Nesting is derived presentation only: same-project working parents, including stopped/failed orbs, retain working children; a missing or shelved parent releases direct working children to roots without reparenting writes. Archive membership remains independent. Rules and observability: `docs/web-ui.md`; API shape: `docs/control-plane-api.md`. No new persisted state or schema.
+**Browser nesting (implemented locally 2026-10-14; not deployed):** project orb-list and individual-orb GETs expose the existing immutable caller ID as optional `OrbView.spawnedByOrb`, retaining provenance after caller archival/deletion and omitting it for non-spawned orbs. Mutation responses may omit it. Nesting is derived presentation only: same-project working parents, including stopped/failed orbs, retain working children; a missing or shelved parent releases direct working children to roots without reparenting writes. Archive membership remains independent. Rules and observability: `docs/web-ui.md`; API shape: `docs/control-plane-api.md`. No new persisted state or schema.
 
 ## Model selection (2026-10-14; not deployed)
 
@@ -45,7 +45,9 @@ For simplicity the CLI makes **one** request with a 10-second deadline and no au
 
 `pi-orb orbs` and `pi-orb transcript <id>` already provide discovery and replicated progress inspection. The returned browser URL shows existing startup, inbox, failure, and transcript state. There is no completion notification back to the caller.
 
-**Spawn relations (2026-10-14):** native `orb_self` and `pi-orb self [--json]` expose historical `spawnedBy:{id,url}|null` and required `children:[{id,name:string|null,url}]`, existing direct accepted targets ordered by ID. Archived/deleting children remain until removed; deleted targets and grandchildren are omitted; empty means `[]`. Both paths use a shared application service/store port over existing `orb_spawns`, with no new persistence or lifecycle coupling (`docs/control-plane-api.md`). Alerts address the issuing orb's user, not its parent; inspect child progress with `orb_transcript` or `pi-orb transcript <id>`.
+**Spawn relations (2026-10-14):** native `orb_self` and `pi-orb self [--json]` expose historical `spawnedByOrb:{id,url}|null` and required `children:[{id,name:string|null,url}]`, existing direct accepted targets ordered by ID. Archived/deleting children remain until removed; deleted targets and grandchildren are omitted; empty means `[]`. Both paths use a shared application service/store port over existing `orb_spawns`, with no new persistence or lifecycle coupling (`docs/control-plane-api.md`). Alerts address the issuing orb's user, not its parent; inspect child progress with `orb_transcript` or `pi-orb transcript <id>`.
+
+**Provenance naming (decided 2026-10-18):** APIs and domain/UI fields use `spawnedByOrb` to distinguish orb provenance from a local subagent's parent agent. Browser views retain the optional caller ID; self-inspection retains `{id,url}|null`. Storage and provenance semantics are unchanged.
 
 ## Runtime API
 

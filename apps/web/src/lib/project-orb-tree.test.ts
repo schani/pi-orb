@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildProjectOrbTree } from "./project-orb-tree.ts";
 import { splitProjectOrbs } from "./project-orbs.ts";
 
-const orb = (id: string, spawnedBy?: string, state: OrbView["state"] = "running"): OrbView => ({
+const orb = (id: string, spawnedByOrb?: string, state: OrbView["state"] = "running"): OrbView => ({
   id,
   projectId: "project",
   harness: "pi",
@@ -13,7 +13,7 @@ const orb = (id: string, spawnedBy?: string, state: OrbView["state"] = "running"
   stateChangedAt: "2026-10-01T00:00:00Z",
   createdAt: "2026-10-01T00:00:00Z",
   updatedAt: "2026-10-01T00:00:00Z",
-  ...(spawnedBy === undefined ? {} : { spawnedBy }),
+  ...(spawnedByOrb === undefined ? {} : { spawnedByOrb }),
 });
 const rows = (items: OrbView[]) =>
   buildProjectOrbTree(items).map(({ orb, depth }) => [orb.id, depth]);

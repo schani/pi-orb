@@ -296,7 +296,7 @@ export const OrbViewSchema = Type.Object(
     state: OrbStateSchema,
     stateVersion: Type.Number(),
     /** Original spawn caller ID; browser reads derive it from acceptance provenance. */
-    spawnedBy: Type.Optional(Type.String()),
+    spawnedByOrb: Type.Optional(Type.String()),
     centralAgent: Type.Optional(Type.Boolean()),
     /** Latest observed agent activity, independent of compute for central agents. */
     activity: Type.Optional(Type.Union([Type.Literal("idle"), Type.Literal("busy")])),

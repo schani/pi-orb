@@ -23,7 +23,7 @@ export const OrbSelfSchema = Type.Object(
       { id: Type.String(), name: Type.String(), repositoryUrl: Type.String() },
       closed,
     ),
-    spawnedBy: Type.Union([
+    spawnedByOrb: Type.Union([
       Type.Object({ id: Type.String(), url: Type.String() }, closed),
       Type.Null(),
     ]),

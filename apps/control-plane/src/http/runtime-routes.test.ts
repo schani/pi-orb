@@ -745,7 +745,11 @@ describe("runtime broker routes", () => {
         url: ORB_SELF_PATH,
         headers: { authorization: "Bearer child-token", host: "untrusted.test" },
       });
-      expect(self.json().spawnedBy).toEqual({ id: ORB, url: `https://browser.test/orbs/${ORB}` });
+      expect(self.json().spawnedByOrb).toEqual({
+        id: ORB,
+        url: `https://browser.test/orbs/${ORB}`,
+      });
+      expect(self.json()).not.toHaveProperty("spawnedBy");
       expect(self.json().orb.id).toBe(id);
       expect((await spawn({ prompt: "Different" })).statusCode).toBe(409);
     });
@@ -790,7 +794,7 @@ describe("runtime broker routes", () => {
         headers: { authorization: "Bearer child-token" },
       });
       expect(child.statusCode).toBe(200);
-      expect(child.json().spawnedBy).toEqual({
+      expect(child.json().spawnedByOrb).toEqual({
         id: ORB,
         url: `https://browser.test/orbs/${ORB}`,
       });
@@ -1632,7 +1636,7 @@ describe("runtime broker routes", () => {
           name: `project-${PROJECT}`,
           repositoryUrl: "https://github.com/owner/repo",
         },
-        spawnedBy: null,
+        spawnedByOrb: null,
         children: [],
         previewHost: `pi-orb-${ORB}.tail.test.ts.net`,
       });

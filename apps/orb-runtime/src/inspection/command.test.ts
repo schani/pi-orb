@@ -85,7 +85,7 @@ describe("orb inspection presentation", () => {
         createdAt: "2026-10-01T00:00:00.000Z",
       },
       project: { id: "project-a", name: "App", repositoryUrl: "https://github.com/o/r" },
-      spawnedBy: null,
+      spawnedByOrb: null,
       children: [],
       previewHost: null,
     };
@@ -97,7 +97,7 @@ describe("orb inspection presentation", () => {
     expect(output).not.toContain("Child:");
     const family = formatSelf({
       ...self,
-      spawnedBy: { id: "parent", url: "https://browser.test/orbs/parent" },
+      spawnedByOrb: { id: "parent", url: "https://browser.test/orbs/parent" },
       children: [
         { id: "child", name: "Parser\nwork", url: "https://browser.test/orbs/child" },
         { id: "unnamed", name: null, url: "https://browser.test/orbs/unnamed" },
@@ -109,7 +109,7 @@ describe("orb inspection presentation", () => {
     expect(
       formatSelf({
         ...self,
-        spawnedBy: { id: "parent", url: "https://browser.test/orbs/parent" },
+        spawnedByOrb: { id: "parent", url: "https://browser.test/orbs/parent" },
         previewHost: "orb.tail.ts.net",
       }),
     ).toContain("orb.tail.ts.net");

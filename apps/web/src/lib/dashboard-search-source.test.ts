@@ -100,11 +100,11 @@ describe("dashboard search source", () => {
   });
 
   it("matches working tree traversal while keeping archives flat, including after promotion", () => {
-    const child = { ...orb("child", "Child", "running"), spawnedBy: "parent" };
+    const child = { ...orb("child", "Child", "running"), spawnedByOrb: "parent" };
     const other = orb("other", "Other", "running");
     const parent = orb("parent", "Parent", "stopped");
-    const grandchild = { ...orb("grandchild", "Grandchild", "running"), spawnedBy: "child" };
-    const archived = { ...orb("archived", "Archived", "archived"), spawnedBy: "parent" };
+    const grandchild = { ...orb("grandchild", "Grandchild", "running"), spawnedByOrb: "child" };
+    const archived = { ...orb("archived", "Archived", "archived"), spawnedByOrb: "parent" };
     const orbOrder = new Map();
     const titles = (items: OrbView[]) =>
       buildDashboardSearchSource({

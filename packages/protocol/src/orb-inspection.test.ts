@@ -39,7 +39,7 @@ describe("orb inspection schemas", () => {
       createdAt: "2026-10-01T00:00:00.000Z",
     },
     project: { id: "project-a", name: "Project", repositoryUrl: "https://github.com/o/r" },
-    spawnedBy: null,
+    spawnedByOrb: null,
     children: [],
     previewHost: null,
   };
@@ -50,7 +50,7 @@ describe("orb inspection schemas", () => {
       Check(OrbSelfSchema, {
         ...self,
         orb: { ...self.orb, name: "Work" },
-        spawnedBy: { id: "parent", url: "https://app.test/orbs/parent" },
+        spawnedByOrb: { id: "parent", url: "https://app.test/orbs/parent" },
         children: [
           { id: "child", name: "Work", url: "https://app.test/orbs/child" },
           { id: "unnamed", name: null, url: "https://app.test/orbs/unnamed" },
@@ -63,12 +63,14 @@ describe("orb inspection schemas", () => {
   it("rejects unknown self fields at every object level and malformed required fields", () => {
     for (const invalid of [
       { ...self, extra: true },
+      { ...self, spawnedBy: null },
+      { ...self, spawnedByOrb: undefined, spawnedBy: null },
       { ...self, orb: { ...self.orb, extra: true } },
       { ...self, project: { ...self.project, extra: true } },
-      { ...self, spawnedBy: { id: "parent", url: "https://app.test/orbs/parent", extra: true } },
+      { ...self, spawnedByOrb: { id: "parent", url: "https://app.test/orbs/parent", extra: true } },
       { ...self, orb: { ...self.orb, id: 42 } },
       { ...self, project: { ...self.project, name: null } },
-      { ...self, spawnedBy: { id: "parent", url: 42 } },
+      { ...self, spawnedByOrb: { id: "parent", url: 42 } },
       { ...self, children: undefined },
       { ...self, children: null },
       { ...self, children: [{ id: "child", url: "https://app.test/orbs/child" }] },

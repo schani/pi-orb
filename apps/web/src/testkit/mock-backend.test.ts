@@ -118,17 +118,17 @@ it.each([false, true])(
     const { items } = await get<{ items: OrbView[] }>(projectPath);
     expect(
       items
-        .filter((orb) => orb.spawnedBy !== undefined)
-        .map(({ id, spawnedBy }) => ({
+        .filter((orb) => orb.spawnedByOrb !== undefined)
+        .map(({ id, spawnedByOrb }) => ({
           id,
-          spawnedBy,
+          spawnedByOrb,
         })),
     ).toEqual(
       orbNesting
         ? [
-            { id: "frontend-long-history", spawnedBy: "frontend-fixture-orb" },
-            { id: "frontend-lazy-details", spawnedBy: "frontend-long-history" },
-            { id: "frontend-charts", spawnedBy: "frontend-fixture-orb" },
+            { id: "frontend-long-history", spawnedByOrb: "frontend-fixture-orb" },
+            { id: "frontend-lazy-details", spawnedByOrb: "frontend-long-history" },
+            { id: "frontend-charts", spawnedByOrb: "frontend-fixture-orb" },
           ]
         : [],
     );
@@ -139,7 +139,7 @@ it.each([false, true])(
       const history = await get<DisplayHistoryView>(`/api/v1/orbs/${id}/history`);
       expect(history.records.length).toBeGreaterThan(0);
     }
-    expect(items.find((orb) => orb.id === "frontend-sticky-bars")?.spawnedBy).toBeUndefined();
+    expect(items.find((orb) => orb.id === "frontend-sticky-bars")?.spawnedByOrb).toBeUndefined();
   },
 );
 

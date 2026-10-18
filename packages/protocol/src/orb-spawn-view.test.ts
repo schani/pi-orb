@@ -17,13 +17,20 @@ const orb = {
 describe("browser spawn provenance", () => {
   it("accepts an optional caller ID", () => {
     expect(Check(OrbViewSchema, orb)).toBe(true);
-    expect(Check(OrbViewSchema, { ...orb, spawnedBy: "parent" })).toBe(true);
+    expect(Check(OrbViewSchema, { ...orb, spawnedByOrb: "parent" })).toBe(true);
+  });
+
+  it("rejects the old provenance field", () => {
+    expect(Check(OrbViewSchema, { ...orb, spawnedBy: "parent" })).toBe(false);
+    expect(Check(OrbViewSchema, { ...orb, spawnedByOrb: "parent", spawnedBy: "parent" })).toBe(
+      false,
+    );
   });
 
   it.each([null, 42, { id: "parent", url: "https://app.test/orbs/parent" }])(
     "rejects non-string provenance: %j",
-    (spawnedBy) => {
-      expect(Check(OrbViewSchema, { ...orb, spawnedBy })).toBe(false);
+    (spawnedByOrb) => {
+      expect(Check(OrbViewSchema, { ...orb, spawnedByOrb })).toBe(false);
     },
   );
 });

@@ -182,7 +182,7 @@ This is intentionally not implemented by calling `/api/v1/*`: incarnation bearer
 
 ### Current orb identity (decided 2026-10-01)
 
-`pi-orb self [--json]` reads the authenticated caller and its spawn relations, without a fleet list. `GET /runtime/v1/orb/self` returns non-cacheable `{v:1,orb:{id,name,url,createdAt},project:{id,name,repositoryUrl},spawnedBy:{id,url}|null,children:[{id,name:string|null,url}],previewHost:string|null}`. The control plane constructs dashboard URLs from configured `PI_ORB_APP_ORIGIN`, never the runtime origin. Spawn provenance comes from `orb_spawns` and survives deletion of the parent: the historical ID/link remains, even when the parent URL shows a missing resource. Preview is a configured hostname, not verified reachability; it is null without tailnet configuration. The CLI prints a readable summary by default, structured JSON with `--json`, and typed errors on stderr. Reads create no lifecycle event. The earlier scalar `pi-orb url` proposal was rejected in favor of this identity command. The agent environment prompt mentions `pi-orb self [--json]` and its returned identity fields (decided 2026-10-01): a single line makes the command discoverable without duplicating CLI usage.
+`pi-orb self [--json]` reads the authenticated caller and its spawn relations, without a fleet list. `GET /runtime/v1/orb/self` returns non-cacheable `{v:1,orb:{id,name,url,createdAt},project:{id,name,repositoryUrl},spawnedByOrb:{id,url}|null,children:[{id,name:string|null,url}],previewHost:string|null}`. The control plane constructs dashboard URLs from configured `PI_ORB_APP_ORIGIN`, never the runtime origin. Spawn provenance comes from `orb_spawns` and survives deletion of the parent: the historical ID/link remains, even when the parent URL shows a missing resource. Preview is a configured hostname, not verified reachability; it is null without tailnet configuration. The CLI prints a readable summary by default, structured JSON with `--json`, and typed errors on stderr. Reads create no lifecycle event. The earlier scalar `pi-orb url` proposal was rejected in favor of this identity command. The agent environment prompt mentions `pi-orb self [--json]` and its returned identity fields (decided 2026-10-01): a single line makes the command discoverable without duplicating CLI usage.
 
 **Spawn relations (2026-10-14):** native `orb_self` and runtime/CLI self share required `children`, listing existing direct accepted `orb_spawns` targets in ID order with current nullable names and dashboard URLs. Archived/deleting targets remain until removal; deleted targets and grandchildren are omitted; no children yields `[]`. A shared application service uses the store port, without new persisted state. Failures return sanitized typed errors, not partial identity. CLI prints `Spawned by:` and `Child:` name/ID/URL lines; `--json` preserves the schema.
 
@@ -192,7 +192,7 @@ This is intentionally not implemented by calling `/api/v1/*`: incarnation bearer
 
 ### In-orb spawning (decided and implemented 2026-09-08)
 
-**Browser spawn provenance (implemented locally 2026-10-14; not deployed):** `OrbView.spawnedBy?: string` is the immutable caller orb ID from `orb_spawns`, omitted for non-spawned orbs. `GET /api/v1/projects/:projectId/orbs` and `GET /api/v1/orbs/:orbId` retain it after caller archival/deletion; mutation responses may omit it. It is provenance, not lifecycle ownership or an eligible display parent. Service/store reads expose the existing relation without new persisted state. Display rules: `docs/web-ui.md`. Runtime self-inspection retains its existing `{id,url}|null` shape; no runtime WebSocket or harness changes.
+**Browser spawn provenance (implemented locally 2026-10-14; not deployed):** `OrbView.spawnedByOrb?: string` is the immutable caller orb ID from `orb_spawns`, omitted for non-spawned orbs. `GET /api/v1/projects/:projectId/orbs` and `GET /api/v1/orbs/:orbId` retain it after caller archival/deletion; mutation responses may omit it. It is provenance, not lifecycle ownership or an eligible display parent. Service/store reads expose the existing relation without new persisted state. Display rules: `docs/web-ui.md`. Runtime self-inspection retains its existing `{id,url}|null` shape; no runtime WebSocket or harness changes.
 
 `PUT /runtime/v1/orbs/:orbId/spawn` accepts `{ prompt, name? }` from a running orb's per-incarnation bearer. It derives the project from the caller and atomically commits an independent orb, its initial inbox message, and immutable acceptance/provenance. It returns non-cacheable `202 { orbId, projectId, url, messageId }` without waiting for boot or completion; `url` uses configured `PI_ORB_APP_ORIGIN`, not the runtime service origin. The new orb ID also identifies the initial message and retries. Same caller/body retries do not duplicate work; altered requests, retired identity, and lifecycle fences fail explicitly. CLI usage, transaction/authority boundaries, error classes, and project-owned deletion-safe retry tombstones: `docs/orb-spawning.md`.
 
@@ -261,7 +261,7 @@ interface OrbView {
   stateVersion: number;
   activity?: "idle" | "busy";
   unreadAlertId?: string;
-  spawnedBy?: string;
+  spawnedByOrb?: string;
   checkoutCommit?: string;
   resourceWarnings?: Array<{
     path: string;

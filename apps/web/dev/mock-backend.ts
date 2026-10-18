@@ -678,9 +678,9 @@ function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
   const chartsOrb: OrbView = { ...orb, id: "frontend-charts", name: "Transcript charts" };
   const lazyOrb: OrbView = { ...orb, id: "frontend-lazy-details", name: "Lazy details" };
   if (orbNesting) {
-    longOrb.spawnedBy = orb.id;
-    lazyOrb.spawnedBy = longOrb.id;
-    chartsOrb.spawnedBy = orb.id;
+    longOrb.spawnedByOrb = orb.id;
+    lazyOrb.spawnedByOrb = longOrb.id;
+    chartsOrb.spawnedByOrb = orb.id;
   }
   const lazyRecords: HistoryRecord[] = [
     {

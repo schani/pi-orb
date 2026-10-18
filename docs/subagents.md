@@ -12,7 +12,15 @@ Durable owns child conversations. `subagent({prompt,description?,model?})` retur
 
 **No nested children or orbs (decided 2026-10-13):** only the root can start subagents or spawn orbs. Orb `217632b5-d323-43c8-910a-b261f2b83301` showed one direct child while seven were running: each child inherited the root's codemode, whose description inlined all five subagent tools, plus the system-prompt line "Subagents support start, steer, observe, wait and cancel." Children now select `orb.child-tools` instead of `orb.tools`; its codemode uses the root catalog without the subagent tools and `orb_spawn`, so they are neither described, discoverable nor callable. The root never selects `orb.child-tools`. Removed for everyone: that system-prompt line, the line enumerating the `orb_*` tools (codemode already describes them), and codemode's `searchTools('subagent')` discovery example (2026-10-03 guidance decision above). `subagent` tells the root children cannot start subagents or orbs. Inherited user/project instructions and the runtime environment prompt may still mention subagents. A local child that was given only `orb_spawn` misreported it as "creating subagents", which prompted hiding `orb_spawn` too.
 
-**Child instructions (decided 2026-10-15):** central children inherit the parent prompt plus `You are a subagent. Do not spawn orbs.` Children retain the pinned parent context and suffix; orb roots do not receive it.
+**Child instructions (decided 2026-10-18; implemented locally, not deployed):** central children inherit the pinned parent context plus exactly:
+
+```text
+- You are a subagent. Your parent started you in this same orb; you share its filesystem.
+- To communicate with your parent agent you have `notify_parent`. Do not use `orb_send` for that!!!
+- Do not start subagents or orbs!
+```
+
+The suffix distinguishes shared-filesystem children from independent orbs and parent notifications from inter-orb messages. Root prompts and tool descriptions remain unchanged. Children can discover and call `notify_parent`; roots instead have `orb_alert`.
 
 **Model selector (decided 2026-10-13):** `subagent({prompt,description?,model?})` takes `Astra`, `Sol`, `Terra` or `Luna`, the conversation picker's names (`SELECTABLE_CODEX_MODELS`); omitted inherits the parent's model. An unavailable model returns `Model unavailable: <name>` before any child is created. The receipt and `get_subagent_result`/`list_subagents` report the selected name. The schema enum rejects other values, so no provider/model ID path exists.
 
