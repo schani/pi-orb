@@ -37,7 +37,7 @@ describe("central orb operations", () => {
     };
     expect(self).toMatchObject({
       orb: { url: "http://app/orbs/caller" },
-      spawnedBy: null,
+      spawnedByOrb: null,
       children: [],
     });
     const spawned = (
@@ -45,7 +45,7 @@ describe("central orb operations", () => {
     )._unsafeUnwrap() as { orbId: string; url: string };
     expect(spawned.url).toBe(`http://app/orbs/${spawned.orbId}`);
     expect((await service.invoke({ kind: "self" }, "family"))._unsafeUnwrap()).toMatchObject({
-      spawnedBy: null,
+      spawnedByOrb: null,
       children: [{ id: spawned.orbId, name: null, url: spawned.url }],
     });
     vi.spyOn(h.store, "listSpawnChildren").mockReturnValue(

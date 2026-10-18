@@ -12,7 +12,7 @@ export function buildProjectOrbTree(working: readonly OrbView[]): ProjectOrbTree
   const children = new Map<string, OrbView[]>();
   const roots: OrbView[] = [];
   for (const orb of working) {
-    const parent = orb.spawnedBy === undefined ? undefined : byId.get(orb.spawnedBy);
+    const parent = orb.spawnedByOrb === undefined ? undefined : byId.get(orb.spawnedByOrb);
     if (
       parent === undefined ||
       parent.id === orb.id ||

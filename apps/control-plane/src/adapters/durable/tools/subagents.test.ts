@@ -314,7 +314,9 @@ it("children inherit pinned instructions but neither see nor start subagents", a
     harness.resume();
     await (await root.submit({ type: "input", content: "parent" }, ctx)).wait(ctx);
     const tagged = (text: string) => `<orb-instructions>\n${text}\n</orb-instructions>`;
-    const childNote = "\n\nYou are a subagent. Do not spawn orbs.";
+    const childNote = `\n\n- You are a subagent. Your parent started you in this same orb; you share its filesystem.
+- To communicate with your parent agent you have \`notify_parent\`. Do not use \`orb_send\` for that!!!
+- Do not start subagents or orbs!`;
     expect(prompts.child).toEqual([
       tagged(`PINNED_PROMPT${childNote}`),
       tagged(`PINNED_PROMPT${childNote}`),

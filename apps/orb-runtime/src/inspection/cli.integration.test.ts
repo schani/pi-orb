@@ -99,7 +99,7 @@ describe("pi-orb inspection CLI entry point", () => {
               createdAt: "2026-10-01T00:00:00.000Z",
             },
             project: orb.project,
-            spawnedBy: null,
+            spawnedByOrb: null,
             children: [{ id: "child", name: "Child work", url: "https://browser.test/orbs/child" }],
             previewHost: null,
           }),
@@ -157,7 +157,7 @@ describe("pi-orb inspection CLI entry point", () => {
     expect(json).toMatchObject({ code: 0, stderr: "" });
     expect(JSON.parse(json.stdout)).toMatchObject({
       orb: { id: "orb-current" },
-      spawnedBy: null,
+      spawnedByOrb: null,
       children: [{ id: "child", name: "Child work", url: "https://browser.test/orbs/child" }],
       previewHost: null,
     });

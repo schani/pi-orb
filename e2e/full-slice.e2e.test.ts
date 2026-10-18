@@ -205,7 +205,7 @@ const SCENARIO = {
             type: "toolCall",
             name: "codemode",
             arguments: {
-              code: `const self = JSON.parse(await tools.orb_self({})); text(await tools.orb_send({orbId: self.spawnedBy.id, message: ${JSON.stringify(PEER_BODY)}}));`,
+              code: `const self = JSON.parse(await tools.orb_self({})); text(await tools.orb_send({orbId: self.spawnedByOrb.id, message: ${JSON.stringify(PEER_BODY)}}));`,
             },
           },
           { type: "stop", status: "completed" },
@@ -2261,7 +2261,7 @@ describe("full slice E2E", () => {
         name: project.body["name"],
         repositoryUrl: REPOSITORY_URL,
       },
-      spawnedBy: null,
+      spawnedByOrb: null,
       children: [],
       previewHost: null,
     });
@@ -2375,7 +2375,7 @@ describe("full slice E2E", () => {
         name: project.body["name"],
         repositoryUrl: REPOSITORY_URL,
       },
-      spawnedBy: { id: secondOrbId, url: `${base}/orbs/${secondOrbId}` },
+      spawnedByOrb: { id: secondOrbId, url: `${base}/orbs/${secondOrbId}` },
       children: [],
       previewHost: null,
     });

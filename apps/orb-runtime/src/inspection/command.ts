@@ -54,8 +54,8 @@ export function formatSelf(self: OrbSelf): string {
     `Project: ${cell(self.project.name)} (${cell(self.project.id)})`,
     `Repository: ${self.project.repositoryUrl}`,
   ];
-  if (self.spawnedBy !== null)
-    lines.push(`Spawned by: ${self.spawnedBy.id} (${self.spawnedBy.url})`);
+  if (self.spawnedByOrb !== null)
+    lines.push(`Spawned by: ${self.spawnedByOrb.id} (${self.spawnedByOrb.url})`);
   for (const child of self.children)
     lines.push(`Child: ${cell(child.name ?? "untitled orb")} (${cell(child.id)}) ${child.url}`);
   if (self.previewHost !== null) lines.push(`Preview: ${self.previewHost}`);

@@ -46,7 +46,9 @@ export function promptExtension(instructions: string): Extension {
   const render = (conversationId: string) =>
     conversationId === String(ROOT_CONVERSATION_ID)
       ? instructions
-      : `${instructions}\n\nYou are a subagent. Do not spawn orbs.`;
+      : `${instructions}\n\n- You are a subagent. Your parent started you in this same orb; you share its filesystem.
+- To communicate with your parent agent you have \`notify_parent\`. Do not use \`orb_send\` for that!!!
+- Do not start subagents or orbs!`;
   // Tagged so a later "Updated system prompt section" names a delimited part of the instructions.
   const tagged = (text: string) => `<${SECTION}>\n${text}\n</${SECTION}>`;
   // The persisted section becomes the request's instructions and is re-sent only when it changes,

@@ -710,7 +710,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
           const spawn = this.spawns.get(orb.id);
           return {
             ...orb,
-            spawnedBy: spawn?.projectId === orb.projectId ? spawn.callerOrbId : null,
+            spawnedByOrb: spawn?.projectId === orb.projectId ? spawn.callerOrbId : null,
           };
         }),
     );

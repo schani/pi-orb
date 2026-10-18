@@ -28,6 +28,6 @@ export function readOrb(
     .andThen((orb) =>
       orb === null
         ? okAsync<OrbListRow | null, StoreError>(null)
-        : store.getSpawnCaller(task, orbId).map((spawnedBy) => ({ ...orb, spawnedBy })),
+        : store.getSpawnCaller(task, orbId).map((spawnedByOrb) => ({ ...orb, spawnedByOrb })),
     );
 }

@@ -110,11 +110,11 @@ export function getOrbSpawnRelations(
   store: Pick<ControlPlaneStore, "getSpawnCaller" | "listSpawnChildren">,
   orbId: string,
   appOrigin: string,
-): ResultAsync<Pick<OrbSelf, "spawnedBy" | "children">, StoreError> {
+): ResultAsync<Pick<OrbSelf, "spawnedByOrb" | "children">, StoreError> {
   const url = (id: string) => `${appOrigin}/orbs/${id}`;
   return store.getSpawnCaller(task, orbId).andThen((callerId) =>
     store.listSpawnChildren(task, orbId).map((children) => ({
-      spawnedBy: callerId === null ? null : { id: callerId, url: url(callerId) },
+      spawnedByOrb: callerId === null ? null : { id: callerId, url: url(callerId) },
       children: children.map((child) => ({ ...child, url: url(child.id) })),
     })),
   );

@@ -761,7 +761,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       .map((result) =>
         result.rows.map((row) => ({
           ...mapOrbRow(row),
-          spawnedBy: (row["spawned_by"] as string | null) ?? null,
+          spawnedByOrb: (row["spawned_by"] as string | null) ?? null,
         })),
       );
   }

@@ -647,7 +647,7 @@ export function registerRoutes(
       }
       return reply.send({
         items: orbs.value.map((orb) =>
-          orbView(orb, deps.control, config, viewerUserId(request), orb.spawnedBy),
+          orbView(orb, deps.control, config, viewerUserId(request), orb.spawnedByOrb),
         ),
       });
     },
@@ -701,7 +701,7 @@ export function registerRoutes(
       return reply.status(404).send(httpError("not_found", "orb not found", false));
     }
     return reply.send(
-      orbView(orb.value, deps.control, config, viewerUserId(request), orb.value.spawnedBy),
+      orbView(orb.value, deps.control, config, viewerUserId(request), orb.value.spawnedByOrb),
     );
   });
 

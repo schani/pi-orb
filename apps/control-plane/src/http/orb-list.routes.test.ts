@@ -39,10 +39,13 @@ it("exposes only caller IDs using one project-list read, without per-orb lookups
   expect(response.statusCode).toBe(200);
   const items = response.json().items;
   expect(items).toHaveLength(2);
-  expect(items.find((orb: { id: string }) => orb.id === "child").spawnedBy).toBe("parent");
-  expect(items.find((orb: { id: string }) => orb.id === "parent")).not.toHaveProperty("spawnedBy");
+  expect(items.find((orb: { id: string }) => orb.id === "child").spawnedByOrb).toBe("parent");
+  expect(items.find((orb: { id: string }) => orb.id === "parent")).not.toHaveProperty(
+    "spawnedByOrb",
+  );
   for (const orb of items) {
     expect(Check(OrbViewSchema, orb)).toBe(true);
+    expect(orb).not.toHaveProperty("spawnedBy");
     expect(orb).not.toHaveProperty("requestHash");
     expect(orb).not.toHaveProperty("callerIncarnation");
   }
@@ -52,7 +55,7 @@ it("exposes only caller IDs using one project-list read, without per-orb lookups
 
 it("exposes the same provenance on direct GET, including a deleted caller", async () => {
   const read = () => app.inject({ method: "GET", url: "/api/v1/orbs/child" });
-  expect((await read()).json().spawnedBy).toBe("parent");
+  expect((await read()).json().spawnedByOrb).toBe("parent");
   const parent = h.store.orbSnapshot("parent");
   expect(parent).not.toBeNull();
   if (parent === null) return;
@@ -72,8 +75,9 @@ it("exposes the same provenance on direct GET, including a deleted caller", asyn
   )._unsafeUnwrap();
   const response = await read();
   expect(response.statusCode).toBe(200);
-  expect(response.json().spawnedBy).toBe("parent");
+  expect(response.json().spawnedByOrb).toBe("parent");
   expect(Check(OrbViewSchema, response.json())).toBe(true);
+  expect(response.json()).not.toHaveProperty("spawnedBy");
 });
 
 it("does not read provenance for a missing orb", async () => {

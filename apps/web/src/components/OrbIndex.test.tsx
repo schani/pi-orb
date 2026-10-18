@@ -82,8 +82,8 @@ describe("stacked project index", () => {
   });
 
   it("renders an expanded working tree with native selected links and a flat archive", () => {
-    const child = { ...orb, id: "child", name: "Child", spawnedBy: orb.id };
-    const archived = { ...orb, id: "archived", state: "archived" as const, spawnedBy: orb.id };
+    const child = { ...orb, id: "child", name: "Child", spawnedByOrb: orb.id };
+    const archived = { ...orb, id: "archived", state: "archived" as const, spawnedByOrb: orb.id };
     const html = renderToStaticMarkup(
       <IndexProject
         {...props}

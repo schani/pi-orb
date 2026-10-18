@@ -1168,8 +1168,8 @@ export function storeSemanticsContractTests(
       const expectRelation = async () => {
         const rows = await read();
         expect(rows.map((row) => row.id).sort()).toEqual([caller.id, child.id].sort());
-        expect(rows.find((row) => row.id === caller.id)).toMatchObject({ spawnedBy: null });
-        expect(rows.find((row) => row.id === child.id)).toMatchObject({ spawnedBy: caller.id });
+        expect(rows.find((row) => row.id === caller.id)).toMatchObject({ spawnedByOrb: null });
+        expect(rows.find((row) => row.id === child.id)).toMatchObject({ spawnedByOrb: caller.id });
       };
       await expectRelation();
       (
@@ -1221,7 +1221,9 @@ export function storeSemanticsContractTests(
           expectedStateVersion: deletion.stateVersion,
         })
       )._unsafeUnwrap();
-      expect(await read()).toMatchObject([{ id: child.id, name: "Renamed", spawnedBy: caller.id }]);
+      expect(await read()).toMatchObject([
+        { id: child.id, name: "Renamed", spawnedByOrb: caller.id },
+      ]);
       expect((await store.getSpawnCaller(task, child.id))._unsafeUnwrap()).toBe(caller.id);
       const childDeletion = (
         await store.requestOrbDeletion(task, {
