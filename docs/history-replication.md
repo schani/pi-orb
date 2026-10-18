@@ -380,7 +380,7 @@ Before stopping the host, the control plane:
 
 If a pull or database commit fails retryably, the stop does not proceed; the control plane retries while leaving the host running.
 
-Drain failures are classified. Transport failures, `503 history_unavailable`, and transient database errors are retryable. `409 cursor_not_found`, a session-header mismatch, and mapping/validation failures are replication-integrity failures that no retry can repair. On an integrity failure the control plane abandons the drain and one transaction marks the orb `failed` with a typed error, revokes the runtime token, and records a discard fence through the current compute incarnation. Shared replacement-intent reconciliation then disposes compute while preserving the authoritative filesystem for manual inspection and, where supported, explicit offline recovery described below.
+Drain failures are classified. Transport failures, `503 history_unavailable`, and transient database errors are retryable. `409 cursor_not_found`, a session-header mismatch, and mapping/validation failures are replication-integrity failures that no retry can repair. On an integrity failure the control plane abandons the drain and one transaction marks the orb `failed` with a typed error, revokes the runtime token, and records a discard fence through the current compute incarnation. Shared replacement-intent reconciliation then disposes compute while preserving the authoritative filesystem for manual inspection.
 
 **Audit finding (2026-10-14; implemented locally, undeployed):** loopback-fetch tests reproduced false failure/discard of a healthy orb with committed history after body-read abort, socket interruption or non-JSON `503`; no reported incident. Reject transport/parse conflation: interruption does not prove corrupt history. The distinction in `docs/runtime-protocol.md` preserves retryability and genuine integrity failure/discard authority. Existing `lifecycle:` pull-failed/drain-blocked edges and typed `lastError` suffice; no new persisted state. [RED authority evidence](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/91be99a9-6192-4aa6-879b-d2c451a65af4/audit1/red-authority.log).
 
@@ -407,79 +407,6 @@ The replica is explicitly **not** an orb backup or reconstruction source. **Dele
 **Archival implemented 2026-08-08:** `docs/orb-archival.md` makes the replica the authoritative *read-only transcript* only after an archive has restored the runtime if necessary, waited for idle, completed pull-until-empty, and durably sealed its cursor/head before destroying the filesystem. It remains forbidden to reconstruct or start an orb from that replica: checkout files and runtime state are intentionally gone. A seal failure blocks resource destruction rather than silently retaining an incomplete transcript.
 
 **Durability rule:** replication exposes only complete durable records; it never commits a cursor naming memory-only initialization or streaming output. Empty replicas permit session rotation, but a committed cursor cannot silently rewind. Browser synchronization and request-head validation must observe one coherent projection; partial gating can reject every first message. Earlier evidence: `docs/postmortems/2026-08-03-cursor-not-found.md`.
-
-## Read-only desync diagnostic
-
-**Decision (2026-10-04, America/Cancun):** diagnosis is read-only; never automatically repair. `apps/orb-runtime/src/inspection/diagnose-history.ts` compares an explicit native Pi version-3 JSONL file against an explicit complete native replica export. **Decided and implemented (2026-10-05, America/Cancun):** explicit offline recovery of the verified linear fork uses `--recover`; ordinary diagnosis never mutates. The user's tool-specific **no-tests waiver includes diagnosis and recovery**; no automated tests or suites are added/run for this tool. This does not exempt any other code. Typecheck, lint, help, offline candidate review and manually invoked refusal cases still apply.
-
-From a repository checkout with Node 24 and `npm ci` installed:
-
-```sh
-# Run inside an authorized orb; replica-only read, no target runtime start.
-pi-orb transcript <orb-id> --json > /external/evidence/replica.json
-npm run diagnose:history -- --session /accessible/native-session.jsonl --replica /external/evidence/replica.json
-# Direct node avoids npm banners in machine-readable stdout.
-node apps/orb-runtime/src/inspection/diagnose-history.ts --session /accessible/native-session.jsonl --replica /external/evidence/replica.json --json > /external/evidence/diagnosis.json
-```
-
-The authoritative session file must already be accessible, or a separately acquired byte-preserving copy must be supplied. The tool neither locates/mounts workspace disks nor attaches cloud resources. It uses no credentials or network access. Never redirect exports/reports onto either input or into the target session/workspace; preserve them externally. Reports contain paths, IDs, timestamps and exact-original-byte input SHA-256 fingerprints, not conversation bodies. Exit 0 means a report was produced, **not** synchronization proved; exit 2 means bad arguments, unreadable input or unsupported replica/session format.
-
-Supported replica shapes are native `OrbTranscript` (`pi-orb transcript --json`) and native `OrbHistoryView`. Current browser **and ops** `/api/v1/orbs/:id/history` responses are display projections without native overflow and are rejected; `infra/api.sh` authentication does not make that response sufficient evidence. The CLI transcript export is one complete replica snapshot response, without pagination; the tool does not fetch remote pages or accept partial page wrappers.
-
-Parsing strictly decodes UTF-8 at the read boundary; invalid UTF-8 is rejected with exit 2, never silently replaced. SHA-256 fingerprints cover the original Buffer bytes, not decoded/re-encoded text. No SDK SessionManager, newline insertion or migration is used. It retains parseable unterminated records while reporting their line numbers; malformed/blank/non-object lines and invalid identities are reported rather than silently discarded. Legacy session versions are explicitly unsupported, never migrated. Shared entries are compared through the existing `mapPiEntry` production projection, including intentional identity-only system-message/compaction state and sanitized assistant Codex diagnostics. These redactions are not payload divergences.
-
-The report includes session/header identity and content comparisons, exact disk-only/export-only record identities (including custom boot/reboot records), duplicate IDs and positions, normalized content-divergence IDs, unavailable comparisons, graph roots/leaves/branches, missing and forward/self parents, replica cursor/head presence locally, and an append-versus-export shared ID prefix. **That prefix is descriptive, not an integrity requirement.** The replica export follows the selected cursor's parent ancestry, not the complete append log or every SQL branch. The tool separately reconstructs local ancestry at the replica cursor and compares it with the exported chain. Disk-only does not prove unreplicated; last parseable disk append does not prove the active head. Duplicate/cyclic/incomplete graphs make ancestry conclusions unavailable.
-
-Preserve the JSON report and both inputs before investigating reported lines/IDs. Malformed tails, selected-chain omissions, replica lag and concurrent writes limit conclusions: absence is only absence from parseable supplied records. A runtime-loaded head gap is not the exact missing-record count; compare supplied records and inspect malformed-line metadata before counting. No report authorizes rollback, cursor reset, restart or repair. Confirmed disk divergence and unverified write mechanism: `docs/postmortems/2026-10-04-workspace-full-history-desync.md`.
-
-## Explicit offline linear-fork recovery
-
-**Decided and implemented (2026-10-05, America/Cancun):** `--recover --offline` is a one-shot operator operation, not a reconciler or generic branching repair. It requires a stopped/failed orb with no host, an accessible offline session, and a consistent full SQL export. The operator must exclude every runtime/writer and concurrent SQL changes throughout collection and apply; `--offline` attests this. The tool cannot check cloud ownership or SQL freshness, mounts nothing, starts nothing, and uses no network/credentials.
-
-```sh
-# Review first; source remains unchanged. All outputs must be outside target workspace.
-node apps/orb-runtime/src/inspection/diagnose-history.ts --recover --offline \
-  --session /offline/native-session.jsonl --replica /external/replica.json \
-  --replica-state /external/replica-state.json --backup-dir /external/new-candidate-backup \
-  --output /external/new-candidate.jsonl > /external/candidate-report.json 2> /external/candidate-refusal.json
-# After reviewing candidate bytes, ancestry and report fingerprints, apply to the actual offline session.
-# Omit --output and use a different, nonexistent --backup-dir.
-node apps/orb-runtime/src/inspection/diagnose-history.ts --recover --offline \
-  --session /offline/native-session.jsonl --replica /external/replica.json \
-  --replica-state /external/replica-state.json --backup-dir /external/new-apply-backup \
-  > /external/apply-report.json 2> /external/apply-refusal.json
-```
-
-`--session` names the actual accessible offline session to replace, not merely an evidence copy. A byte-preserving copy can be used for candidate review or disposable apply validation; applying to that copy does not repair the orb. Keep the actual session and SQL frozen between review and apply.
-
-The SQL proof is manually queried and assembled; no export helper is supplied. Read orb metadata, the full count and **every** `history_records` row for the target orb in one consistent snapshot (for example, a read-only `REPEATABLE READ` transaction), not a selected-chain export:
-
-```ts
-{ version: 1, complete: true, orbId: string, state: "stopped" | "failed", hostRef: null,
-  session: HarnessSessionMetadata, cursor: string, headId: string,
-  rowCount: number, records: HistoryRecord[] }
-```
-
-Map `orbs.id` → `orbId`, `state` → `state`, `host_ref` → `hostRef`, decoded `harness_session_header` → `session`, `replication_cursor` → `cursor`, and `replicated_head_id` → `headId`. `records` contains the complete decoded `history_records.record` JSON values filtered only by `orb_id`, not SQL row wrappers or display projections; array order is immaterial. `rowCount` is the count under that same filter and snapshot. Add literal `version: 1` and operator attestation `complete: true`. Schema: `apps/control-plane/src/adapters/pg/migrations/001_initial.sql` plus `044_lossless_history_json.sql`; native metadata/record types: `packages/protocol/src/history.ts`. The selected-chain query in `apps/control-plane/src/adapters/pg/store.ts` is **not** a full-proof query.
-
-For driver-decoded export values, select whole payloads; serialize the assembled proof once:
-
-```sql
-SELECT harness_session_header FROM orbs WHERE id = $1;
-SELECT record FROM history_records WHERE orb_id = $1;
-```
-
-`rowCount` must be the full SQL count. Completeness is operator-attested, not independently or cryptographically proved. The report states this and fingerprints the original proof bytes. SQL header, orb identity, pointers, count, unique IDs and every immutable normalized record must match the native selected export; extra SQL branches are refused. Every local-tail ID must be absent from the full SQL proof. No SQL row or cursor is changed.
-
-Only this structure is accepted: a nonempty, normalized-equal shared prefix; exactly one malformed line immediately after it; a complete, linear replica tail; and a nonempty, otherwise intact linear local tail attached to the common parent. The malformed object must be truncated inside a string, with its complete identity and every available semantic JSON value matching the first restored native entry. Arbitrary garbage, extra headers, blanks, unterminated lines, legacy versions, duplicate IDs, missing/forward/cyclic parents, other forks, payload differences and incomplete proof are refused. Restored entries must be losslessly mapped native conversation messages or custom messages; system records, compactions and potentially redacted assistant diagnostics cannot be reconstructed. Restored tool results require preceding tool calls.
-
-Recovery preserves the exact header/common bytes, all IDs, and the subsequent local-tail bytes. It restores the replica tail, removes the verified truncated line and reparents **only the first local-tail record** onto the replica cursor. Strict JSONL re-read and production mapping verify the entire resulting linear ancestry, retained replica cursor, and final local append/head. Normal replication subsequently reads the local tail after the unchanged SQL cursor.
-
-The tool creates a new external mode-0700 backup directory containing exclusive, read-only original session/export/proof byte copies, `candidate.jsonl` and metadata-only `plan.json`. It fsyncs files and directories before replacing anything. Candidate mode writes a separate exclusive output; apply writes a same-directory temporary file, preserves original uid/gid/permission bits with fchown/fchmod, fsyncs, rechecks source bytes/inode/device/path/ownership/mode, atomically renames, and fsyncs the session directory. Symlinks, nonregular files and hard-linked sessions are refused. Offline ownership remains essential: the last hash check is not a lock against a concurrent writer.
-
-After final byte/ownership verification, external `outcome.json` is fsynced. Reports contain paths, SHA-256 fingerprints, IDs, parent before/after, proof shape and expected pointers, never bodies. Exit 2 emits a typed refusal/incomplete reason on stderr; preserve it externally. A failure after rename may mean replacement already happened: inspect the external plan, candidate fingerprint and actual session before retrying. Existing backups/outputs are never overwritten. No automatic rollback, SQL reset, restart or runtime/protocol change is performed. Incident rationale: `docs/postmortems/2026-10-04-workspace-full-history-desync.md`.
-
-**Completed recovery (2026-10-05, America/Cancun):** the tool atomically applied reviewed candidate `d2d7501e205bef19f9b277842221018a8d3f538fd1a4f03fe2122d72d08b63a4` to orb `00b5f77d-aaaf-4ae3-8f00-894581416589`, restoring four native records, removing malformed line 1,926 and reparenting only `46db26fa` from `2c5abde1` to `5aac75bd`; uid/gid `2000:2000` and mode `0600` were preserved. Normal boot and replication registered the three local-tail IDs with exact parents without direct SQL modification. Verification found all 1,928 original SQL rows unchanged, no lost IDs, and all four restored full native records on the selected chain: running with 1,936 records and cursor = head `5ae1cc29`, then 1,938 records at `89c9f064` in a later native export. Evidence, backup fallback and cleanup: `docs/postmortems/2026-10-04-workspace-full-history-desync.md`. This manual repair does not close the served-vs-durable persistence gap tracked in `TODO.md` or change the automatic-reconciliation decision in `docs/open-questions.md`.
 
 ## Minimal PostgreSQL schema
 
