@@ -252,7 +252,7 @@ it.for([
         if (results.length === 0)
           return fauxAssistantMessage(
             fauxToolCall("codemode", {
-              code: 'text(await tools.orb_alert({message:"PRIVATE race report"}));',
+              code: 'text(await tools.notify_parent({message:"PRIVATE race report"}));',
             }),
             { stopReason: "toolUse" },
           );

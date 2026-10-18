@@ -12,7 +12,7 @@ Peer messages are non-human agent input, independent of spawn ancestry; alerts a
 
 ## Interfaces and admission
 
-- **Builtin:** `orb_send({orbId,message})`; sender/request identity comes from the authenticated caller/durable tool task, never model arguments.
+- **Builtin:** `orb_send({orbId,message})` sends to another agent in an independent orb without a shared filesystem; local subagents coordinate through `notify_parent` instead (decision 2026-10-17). Sender/request identity comes from the authenticated caller/durable tool task, never model arguments.
 - **CLI:** `pi-orb send <orb-id> "message" [--request-id <id>]`; canonical lowercase target UUID, nonblank original text up to 64 KiB UTF-8, request ID a nonempty string up to 128 characters (generated UUID if omitted). Success and ambiguous acceptance report the request ID for explicit retry.
 - **Guest API:** authenticated `POST /runtime/v1/orb/send`, exact `{v:1,orbId,message,requestId}`, no extra fields/sender argument; no-store HTTP 202 `{v:1,orbId,messageId,requestId}`. Protocol: `packages/protocol/src/orb-messaging.ts`; service: `apps/control-plane/src/domain/orb-messaging.ts`.
 

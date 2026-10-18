@@ -32,7 +32,7 @@ export interface DurableToolsOptions {
   orb?: { id: string; task: SimulationTask };
 }
 export function createDurableTools(options: DurableToolsOptions = {}) {
-  const catalog = new CallableCatalog(
+  const all = new CallableCatalog(
     [
       ...(CodingTools.tools ?? []),
       imageReadTool(options.files),
@@ -52,13 +52,14 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
     "orb_spawn",
     "orb_send",
     "orb_alert",
+    "notify_parent",
     "orb_sleep",
     "orb_archive",
     "orb_delete",
   ]) {
-    catalog.metadata(name, { ...catalog.metadata(name), outputSchema: { type: "string" } });
+    all.metadata(name, { ...all.metadata(name), outputSchema: { type: "string" } });
   }
-  catalog.metadata("bash", {
+  all.metadata("bash", {
     outputSchema: {
       type: "object",
       required: ["output", "truncated", "exit_code", "wall_time_seconds"],
@@ -71,7 +72,7 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
       },
     },
   });
-  catalog.metadata("read", {
+  all.metadata("read", {
     outputSchema: {
       anyOf: [
         { type: "string" },
@@ -90,10 +91,11 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
       ],
     },
   });
+  const catalog = all.without(["notify_parent"]);
   const running = new Set<CodemodeSandbox>();
   const mcp = new McpTools(options.mcp ?? [], catalog);
   catalog.add(mcp.statusTool());
-  const child = catalog.without([...subagentTools.map((tool) => tool.name), "orb_spawn"]);
+  const child = all.without([...subagentTools.map((tool) => tool.name), "orb_spawn", "orb_alert"]);
   const extensions = () => {
     const native = codemodeExtension(catalog, running, options.files, options.orb);
     const childNative = codemodeExtension(child, running, options.files, options.orb);

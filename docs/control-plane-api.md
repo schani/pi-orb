@@ -152,6 +152,19 @@ wire protocol, storage, and lifecycle contract.
 
 `GET /api/v1/system` returns `{ hostProvider, databaseKind, version }` — the host provider this process constructs (`process` | `docker` | `gce`), the database it opened (`pglite` | `postgres`), and the control-plane package version. It exists so the dashboard footer can state which deployment the browser is looking at, which is the first question asked when a local window and a cloud window are open side by side. Every value is resolved once at boot and constant for the process's lifetime, so the route reads nothing — no store, no filesystem — per request. It carries deployment facts only: no connection strings, project or zone names, image references, secrets, or counts of anything the fleet is doing. It is registered with the rest of the browser API, and requires an application principal.
 
+### In-orb CLI help (decided 2026-10-17)
+
+`pi-orb --help`, `-h`, and `help` print the full command reference: arguments,
+options, examples, output, effects, safety, acceptance, retries and exit classes.
+`pi-orb help <command>` and `pi-orb <command> --help|-h` print the same command
+section. A command-leading help flag ignores remaining arguments and never runs
+the command; later message, prompt, file and option-value text is not scanned for help.
+Help is static, needs no runtime identity or network, writes stdout and exits 0.
+Unknown commands, invalid help syntax and missing root commands write brief usage
+and a full-help pointer to stderr and exit 2. Normal command dispatch is unchanged. Dispatcher integration
+tests check reference coverage against command usage constants, semantic guidance,
+literal argument preservation, and zero HTTP requests with a fixture runtime.
+
 ### In-orb inspection API (ownership scope updated 2026-09-16)
 
 The production URL injected into an orb points at the single app origin; the incarnation bearer authorizes runtime routes, not browser APIs. The `pi-orb` CLI therefore uses two dedicated runtime-facing reads:
@@ -175,7 +188,7 @@ This is intentionally not implemented by calling `/api/v1/*`: incarnation bearer
 
 ### Orb alerts (2026-09-30)
 
-`OrbView.unreadAlertId` is present while an alert is unread. Browser `POST /api/v1/orbs/:orbId/alerts/ack` accepts `{recordId}` and returns `{unreadAlertId: string | null}`. It clears only the observed alert, preserving a newer pointer. Missing orbs return 404; an unreplicated/non-alert identity returns 409; unavailable persistence/replication returns 503. The response is non-cacheable. Resource GETs never acknowledge alerts. Native `orb_alert` and `pi-orb alert` flag the issuing orb for the user; alerts are not sent to its parent orb. Creation uses an authenticated local runtime endpoint, not a control-plane transcript write. `docs/orb-alerts.md` specifies persistence, entry semantics, and observability.
+`OrbView.unreadAlertId` is present while an alert is unread. Browser `POST /api/v1/orbs/:orbId/alerts/ack` accepts `{recordId}` and returns `{unreadAlertId: string | null}`. It clears only the observed alert, preserving a newer pointer. Missing orbs return 404; an unreplicated/non-alert identity returns 409; unavailable persistence/replication returns 503. The response is non-cacheable. Resource GETs never acknowledge alerts. Root-only native `orb_alert` and `pi-orb alert` flag the issuing orb for the user; alerts are not sent to its parent orb. Local subagent-only `notify_parent({message})` steers the parent agent within the same orb, not the user (decision 2026-10-17). Creation uses an authenticated local runtime endpoint, not a control-plane transcript write. `docs/orb-alerts.md` specifies persistence, entry semantics, and observability.
 
 ### In-orb spawning (decided and implemented 2026-09-08)
 

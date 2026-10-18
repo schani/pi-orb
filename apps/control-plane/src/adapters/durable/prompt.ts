@@ -8,6 +8,9 @@ import {
   section,
 } from "@earendil-works/pi-durable";
 
+import { environmentPrompt } from "../../../../orb-runtime/src/environment-prompt.ts";
+import { piEnvironmentPrompt } from "./environment-prompt.ts";
+
 const SECTION = "orb-instructions";
 
 export interface PromptSnapshot {
@@ -31,6 +34,8 @@ export function renderPrompt(snapshot: PromptSnapshot): string {
     "You are a coding assistant. Use tools to inspect and change the project. Be concise.",
     instructions ? `<project_instructions>\n${instructions}\n</project_instructions>` : "",
     snapshot.appendSystem ?? "",
+    environmentPrompt,
+    piEnvironmentPrompt,
     formatSkillsForPrompt([...snapshot.skills]),
   ]
     .filter(Boolean)

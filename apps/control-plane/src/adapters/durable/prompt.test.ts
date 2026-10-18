@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { environmentPrompt } from "../../../../orb-runtime/src/environment-prompt.ts";
+import { piEnvironmentPrompt } from "./environment-prompt.ts";
 import { renderPrompt } from "./prompt.ts";
 
 describe("central data-only prompt", () => {
@@ -15,4 +17,17 @@ describe("central data-only prompt", () => {
     expect(prompt).toContain("APPEND");
     expect(prompt).not.toContain("<cwd>");
   });
+});
+
+it.each([
+  { repository: [], skills: [] },
+  { repository: [{ path: "/guest/AGENTS.md", content: "REPO" }], skills: [] },
+])("appends shared environment once with the empty Pi suffix", (snapshot) => {
+  const prompt = renderPrompt({ ...snapshot, appendSystem: "APPEND" });
+  expect(piEnvironmentPrompt).toBe("");
+  expect(prompt.split(environmentPrompt)).toHaveLength(2);
+  expect(prompt).toContain(`APPEND\n\n${environmentPrompt}`);
+  expect(prompt).not.toContain("## Orb CLI");
+  expect(prompt).not.toContain("<cwd>");
+  expect(prompt).not.toContain("Host workspace pending execution readiness");
 });

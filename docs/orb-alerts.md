@@ -4,7 +4,7 @@
 
 ## Required behavior
 
-- Root `orb_alert` or `pi-orb alert "message"` alerts the user on that orb; native subagents notify their parent conversation privately.
+- Root `orb_alert` or `pi-orb alert "message"` alerts the user on that orb. Local subagents use `notify_parent({message})` to notify their parent agent.
 - **Clarified (2026-10-14):** alerts are not sent to the parent orb. They do not enqueue parent messages or trigger a parent turn.
 - The message appears chronologically in the transcript with distinct alert styling.
 - A durable orb-level unread flag replaces the normal state icon with a red alert icon, regardless of lifecycle/activity state.
@@ -28,7 +28,9 @@
 
 ### Child-to-parent steering (decision 2026-10-14; implemented locally, not deployed)
 
-Native child `orb_alert({message})` steers its parent with trusted JSON `{agent_id,description,message}`, using `whenBusy: "steer"`. `{accepted:true}` means durable native submission, not inference or comprehension. Trusted child ownership and receipt lookup supply identity; `requestId: subagent-notify:<taskId>:<callId>` deduplicates calls. Root `orb_alert` and CLI alerts retain the red transcript band and unread flag below.
+**Tool separation (decided 2026-10-17; local, undeployed):** `notify_parent` is described, discoverable and callable only by local subagents; `orb_alert` only by roots. Distinct catalog views cover inline declarations, search, descriptions and native/nested execution. Execution guards reject the wrong conversation before effects. The separate names distinguish parent coordination from user escalation; both retain existing durable observability and persistence.
+
+Native child `notify_parent({message})` steers its parent with trusted JSON `{agent_id,description,message}`, using `whenBusy: "steer"`. `{accepted:true}` means durable native submission, not inference or comprehension. Trusted child ownership and receipt lookup supply identity; `requestId: subagent-notify:<taskId>:<callId>` deduplicates calls. Root `orb_alert` and CLI alerts retain the red transcript band and unread flag below.
 
 **Selected (2026-10-14): [option 2, Inline preview](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/ba74c9c5-9d6c-41e8-b95d-f380ec08a22f/design/expandable-alerts/index.html#proposal-2).** The user selected option 2. Alternatives 1 Rail row, 3 Wait attachment, 4 Margin flag and 5 Stack remain unselected in the linked study. Question 78 is resolved.
 

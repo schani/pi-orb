@@ -6,7 +6,7 @@ import {
   type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
 import { OrbSpawnRequestSchema } from "@pi-orb/protocol";
-import { errAsync, type ResultAsync } from "neverthrow";
+import { err, type ResultAsync } from "neverthrow";
 import type {
   OrbAgentError,
   OrbAgentOperations,
@@ -62,7 +62,7 @@ export function createOrbTools(service: OrbAgentOperations, notifyParent?: Paren
     defineTool({
       name: "orb_send",
       description:
-        "Queue non-human input to a same-owner, same-project orb and wake it. Acceptance is not a reply.",
+        "Send a message to another orb and wake it. Orbs do not share file systems! Acceptance is not a reply.",
       parameters: Type.Object(
         { orbId: Type.String(), message: Type.String() },
         { additionalProperties: false },
@@ -73,15 +73,37 @@ export function createOrbTools(service: OrbAgentOperations, notifyParent?: Paren
     defineTool({
       name: "orb_alert",
       description:
-        "Notify the parent conversation privately from a subagent; otherwise append a transcript alert and flag this orb. Alerts are not sent to the parent orb.",
+        "Notify the user: append a transcript alert and flag this orb. Alerts are not sent to other agents.",
+      parameters: Type.Object({ message: Type.String() }, { additionalProperties: false }),
+      replay: "unsafe",
+      execute: async (args, api) => {
+        if (api.conversationId !== ROOT_CONVERSATION_ID)
+          return resultOutput(
+            err({
+              code: "unauthorized",
+              message: "Only the root conversation can alert the user",
+            }),
+          );
+        return output({ kind: "alert", ...args }, api);
+      },
+    }),
+    defineTool({
+      name: "notify_parent",
+      description:
+        "Notify your parent agent in this orb. Acceptance means durable submission, not a reply.",
       parameters: Type.Object({ message: Type.String() }, { additionalProperties: false }),
       replay: "unsafe",
       execute: async (args, api, context: Context) => {
         if (api.conversationId === ROOT_CONVERSATION_ID)
-          return output({ kind: "alert", ...args }, api);
+          return resultOutput(
+            err({
+              code: "unauthorized",
+              message: "Only local subagents can notify a parent",
+            }),
+          );
         if (!notifyParent)
           return resultOutput(
-            await errAsync({
+            err({
               code: "unavailable",
               message: "Private notifications unavailable",
             } satisfies OrbAgentError),

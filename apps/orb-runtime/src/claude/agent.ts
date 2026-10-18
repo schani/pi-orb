@@ -53,6 +53,7 @@ import type { CompactError, DetailError, OrbAgent, SnapshotError } from "../doma
 import type { AgentGateView } from "../domain/requests.ts";
 import { configurePersistentRust } from "../domain/rust.ts";
 import type { HarnessSnapshot, LiveOperationView } from "../domain/types.ts";
+import { environmentPrompt } from "../environment-prompt.ts";
 import { applyGitIdentity } from "../git-identity/apply.ts";
 import type { HookEnvSource } from "../hooks/env-file.ts";
 import { BootHookRunner } from "../hooks/runner.ts";
@@ -71,11 +72,10 @@ import { fetchBootContext } from "./boot-context.ts";
 import { claudeBootEntries } from "./boot-notification.ts";
 import { BOOT_BASELINE_TYPE, planBootNotification, SLEEP_WAKE_TYPE } from "./boot-policy.ts";
 import { ClaudeDiagnostics, type ClaudeQueryError } from "./diagnostics.ts";
-import { environmentPrompt } from "./environment-prompt.ts";
+import { claudeEnvironmentPrompt } from "./environment-prompt.ts";
 import { readExecutionIdentity } from "./execution-identity.ts";
 import { ClaudeHistory, type HistoryFiles, nativeHistoryFiles } from "./history.ts";
 import { FileIdleStopFence } from "./idle-stop-fence.ts";
-import { readClaudeRepositoryInstructions } from "./instructions.ts";
 import { type ClaudeMcpRuntime, createClaudeMcp } from "./mcp.ts";
 import {
   type ModelUsageReceiver,
@@ -523,6 +523,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     await this.hooks.applyHookEnv(process.env);
     this.prompt = [
       environmentPrompt,
+      claudeEnvironmentPrompt,
       personal.value.content,
       project.value.content,
       ...(this.options.previewHost ? [portExposurePrompt(this.options.previewHost)] : []),
@@ -922,8 +923,6 @@ export class ClaudeOrbAgent implements OrbAgent {
     const state = this.state;
     if (state === null)
       return errAsync({ message: "Native Claude session pointer is unavailable." });
-    const repositoryInstructions = readClaudeRepositoryInstructions(state.cwd);
-    if (repositoryInstructions.isErr()) return errAsync(repositoryInstructions.error);
     const nativePath = this.nativePath();
     if (nativePath.isErr()) return errAsync(nativePath.error);
     const authSettings = validateClaudeAuthSettings(state.cwd, this.configDir);
@@ -997,7 +996,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       systemPrompt: {
         type: "preset",
         preset: "claude_code",
-        append: [this.prompt, repositoryInstructions.value].filter(Boolean).join("\n\n"),
+        append: this.prompt,
       },
       settingSources: ["user", "project", "local"],
       skills: "all",

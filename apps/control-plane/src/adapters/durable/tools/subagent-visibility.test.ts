@@ -21,7 +21,12 @@ import { createDurableTools } from "./index.ts";
 import { ChildAnchor, subagentTools } from "./subagents.ts";
 
 const context = BACKGROUND_CONTEXT;
-const forbidden = ["orb_spawn", ...subagentTools.map((tool) => tool.name), "orb_spawn_alias"];
+const forbidden = [
+  "orb_alert",
+  "orb_spawn",
+  ...subagentTools.map((tool) => tool.name),
+  "orb_spawn_alias",
+];
 
 it.each([false, true])(
   "enforces a child's native callable whitelist, including guessed aliases and reattachment (restart: %s)",
@@ -43,6 +48,15 @@ it.each([false, true])(
         return okAsync(undefined);
       },
       additionalTools: [
+        defineTool({
+          name: "orb_alert",
+          description: "forbidden alert",
+          parameters: Type.Object({}),
+          execute: async () => {
+            effects++;
+            return { output: [] };
+          },
+        }),
         defineTool({
           name: "orb_spawn",
           description: "forbidden effect",
