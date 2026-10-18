@@ -278,7 +278,7 @@ describe("orb Harness ownership", () => {
             registry: createRegistry(),
             env: new NodeExecutionEnv({ cwd: directory }),
             checkoutCommit: null,
-            instructions: "CP instructions; host resources pending",
+            instructions: "Pinned instructions",
           });
         },
       })

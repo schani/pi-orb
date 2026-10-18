@@ -127,25 +127,6 @@ for (const composition of CROSS_AXIS_CASES) {
                   stop,
                 ],
               },
-              ...(central
-                ? [
-                    {
-                      match: {
-                        toolResultContains: { regex: "Host instructions adopted; re-evaluate" },
-                      },
-                      steps: [
-                        {
-                          type: "toolCall",
-                          name: "codemode",
-                          arguments: {
-                            code: `text(await tools.bash({command:${JSON.stringify(shell)}}));`,
-                          },
-                        },
-                        stop,
-                      ],
-                    },
-                  ]
-                : []),
               {
                 match: { toolResultContains: { regex: "CROSS_AXIS_HOST_TOOL" } },
                 steps: [{ type: "text", content: "CROSS_AXIS_DONE" }, stop],
@@ -400,15 +381,22 @@ for (const composition of CROSS_AXIS_CASES) {
         const ready = await fetch(`${runtimeBase}/execution/ready`, { headers });
         expect(ready.status).toBe(central ? 200 : 404);
         if (central) {
-          const resources = (await ready.json()) as {
+          const readiness = (await ready.json()) as {
             cwd: string;
             incarnation: string;
             checkoutCommit: string;
           };
-          expect(resources.cwd).toBe(local ? guestRepo : "/workspace/repo");
-          expect(resources.incarnation).toBe(String(incarnation));
-          expect(resources.checkoutCommit).toMatch(/^[a-f0-9]{40}$/);
-          writeFileSync(join(evidence, "execution-ready.json"), JSON.stringify(resources));
+          expect(Object.keys(readiness).sort()).toEqual([
+            "checkoutCommit",
+            "cwd",
+            "hooks",
+            "incarnation",
+            "pid",
+          ]);
+          expect(readiness.cwd).toBe(local ? guestRepo : "/workspace/repo");
+          expect(readiness.incarnation).toBe(String(incarnation));
+          expect(readiness.checkoutCommit).toMatch(/^[a-f0-9]{40}$/);
+          writeFileSync(join(evidence, "execution-ready.json"), JSON.stringify(readiness));
         }
         if (central) {
           const pin = await fetch(`${cp.baseUrl}/api/runtime/initial-checkout`, { headers });
@@ -453,9 +441,7 @@ for (const composition of CROSS_AXIS_CASES) {
         await waitFor("first turn summary consumed before browser input", async () => {
           const recorded: unknown = await fakeControl(fake.sessionKey, "/requests");
           return Array.isArray(recorded) &&
-            recorded.some(
-              (request) => request.status === 200 && request.matchedRuleIndex === (central ? 3 : 2),
-            )
+            recorded.some((request) => request.status === 200 && request.matchedRuleIndex === 2)
             ? true
             : null;
         });

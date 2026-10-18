@@ -18,7 +18,6 @@ test("execution boot preserves incarnation-scoped launch failure injection and i
       workDir: root,
       repositoryUrl: "invalid-test-repository",
       incarnation: "3",
-      skillsDir: "",
       broker: null,
       environment: {
         PI_ORB_ID: "test",
@@ -67,7 +66,6 @@ test("fresh boot stays initializing before pin and surfaces terminal Git failure
     workDir: root,
     repositoryUrl: "https://github.com/test/test",
     incarnation: "3",
-    skillsDir: "",
     environment: { PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT: "1" },
     broker: { controlPlaneUrl: `http://127.0.0.1:${address.port}`, runtimeToken: "private" },
   });
@@ -110,17 +108,12 @@ test.each([0, 3])(
         "-m",
         "initial",
       ]);
-      await writeFile(join(repo, "AGENTS.md"), "root instructions");
-      await mkdir(join(repo, ".pi"), { recursive: true });
-      await writeFile(join(repo, "CLAUDE.md"), "repository instructions");
-      await symlink("../CLAUDE.md", join(repo, ".pi", "AGENTS.md"));
-      await mkdir(join(repo, "skill-assets", "review"), { recursive: true });
-      await writeFile(join(repo, "skill-assets", "review", "SKILL.md"), "review skill");
+      await symlink("missing-instructions", join(repo, "AGENTS.md"));
       await mkdir(join(repo, ".agents", "skills"), { recursive: true });
-      await symlink("../../skill-assets/review", join(repo, ".agents", "skills", "review"));
+      await symlink("missing-skill", join(repo, ".agents", "skills", "broken"));
       await writeFile(
         join(repo, ".agents", "setup"),
-        `#!/bin/sh\necho setup >> runs\nexit ${exitCode}\n`,
+        `#!/bin/sh\nmkdir -p .pi\nln -s missing-instructions .pi/AGENTS.md\necho setup >> runs\nexit ${exitCode}\n`,
       );
       await writeFile(
         join(repo, ".agents", "resume"),
@@ -138,7 +131,6 @@ test.each([0, 3])(
         workDir: root,
         repositoryUrl: "https://github.com/test/test",
         incarnation: "3",
-        skillsDir: join(root, "skills"),
         environment: {
           ...process.env,
           PI_ORB_INITIAL_CHECKOUT_COMMIT: exitCode === 0 ? "a".repeat(40) : "",
@@ -162,14 +154,12 @@ test.each([0, 3])(
       expect(
         Check(ExecutionReadySchema, { ...boot.snapshot, hooks: { setup: { outcome: "failed" } } }),
       ).toBe(false);
-      expect(boot.snapshot?.instructions).toEqual([
-        {
-          path: join(repo, ".pi", "AGENTS.md"),
-          content: "repository instructions",
-        },
-      ]);
-      expect(boot.snapshot?.skills).toEqual([
-        { path: join(repo, ".agents", "skills", "review", "SKILL.md"), content: "review skill" },
+      expect(Object.keys(boot.snapshot ?? {}).sort()).toEqual([
+        "checkoutCommit",
+        "cwd",
+        "hooks",
+        "incarnation",
+        "pid",
       ]);
       expect(await readFile(join(repo, "runs"), "utf8")).toBe("setup\nresume\n");
       boot.shutdown();
@@ -225,7 +215,6 @@ async function gitIdentityBoot(
         workDir: root,
         repositoryUrl: "https://github.com/test/test",
         incarnation: "3",
-        skillsDir: "",
         environment,
         broker: { controlPlaneUrl: `http://127.0.0.1:${address.port}`, runtimeToken: "private" },
       });

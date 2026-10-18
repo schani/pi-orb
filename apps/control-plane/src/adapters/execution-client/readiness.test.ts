@@ -72,9 +72,6 @@ test("execution readiness transports setup and resume failures without rejecting
     incarnation: "3",
     pid: 1,
     checkoutCommit: "commit",
-    instructions: [],
-    skills: [],
-    resources: [],
     hooks,
   };
   const app = buildExecutionServer({

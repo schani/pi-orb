@@ -37,7 +37,6 @@ export function errorResult(error: ToolError): ToolExecutionResult {
 function preExecutionFailure(error: unknown): string | undefined {
   if (!(error instanceof ExecutionError) && !(error instanceof FileError)) return undefined;
   return new Set([
-    "Host instructions adopted; re-evaluate the operation under the current instructions.",
     "Execution failed; use Start or new input to retry.",
     "Execution stopped by request.",
     "Execution unavailable during archival.",

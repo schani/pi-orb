@@ -1,6 +1,6 @@
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { err, ok, ResultAsync } from "neverthrow";
+import { err, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { durableError } from "../durable/manager.ts";
 import { LazyExecutionEnv } from "./lazy-env.ts";
@@ -68,33 +68,6 @@ describe("lazy execution", () => {
     cancel.abort();
     released.resolve();
     expect((await result).ok).toBe(false);
-    expect(effects).toBe(0);
-  });
-
-  it("rejects a stale model decision with a bounded private-content-free reason", async () => {
-    let effects = 0;
-    const remote = new NodeExecutionEnv({ cwd: "/tmp" });
-    remote.exists = async () => {
-      effects++;
-      return { ok: true, value: true };
-    };
-    let adopted = false;
-    const env = new LazyExecutionEnv({
-      cwd: "/workspace/repo",
-      acquire: () =>
-        ResultAsync.fromSafePromise(Promise.resolve()).map(() => {
-          adopted = true;
-          return remote;
-        }),
-      admit: () =>
-        adopted
-          ? err(durableError("Host instructions adopted; re-evaluate the operation."))
-          : ok(undefined),
-    });
-    const result = await env.exists("file", BACKGROUND_CONTEXT);
-    expect(result.ok).toBe(false);
-    if (!result.ok)
-      expect(result.error.message).toBe("Host instructions adopted; re-evaluate the operation.");
     expect(effects).toBe(0);
   });
 

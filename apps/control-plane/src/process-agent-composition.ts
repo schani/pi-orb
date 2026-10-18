@@ -1,17 +1,10 @@
-import { basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
-  parseFrontmatter,
-  type Skill,
-  type SkillFrontmatter,
-} from "@earendil-works/pi-coding-agent";
-import {
   type Agent,
   createRegistry,
-  type EnvTarget,
   type Extension,
   type Harness,
   ROOT_CONVERSATION_ID,
@@ -24,7 +17,6 @@ import { err, ok, okAsync, Result, ResultAsync } from "neverthrow";
 import { LunaTurnSummarizer } from "../../orb-runtime/src/pi/luna-summarizer.ts";
 import { NativeResourceContext } from "./adapters/durable/context-storage.ts";
 import { executionWaitProgress } from "./adapters/durable/execution-wait-progress.ts";
-import { InstructionReadiness } from "./adapters/durable/instruction-readiness.ts";
 import type { DurableAgentPlaneOptions } from "./adapters/durable/manager.ts";
 import { durableError } from "./adapters/durable/manager.ts";
 import { fenceModels } from "./adapters/durable/model-fence.ts";
@@ -92,39 +84,7 @@ export function scopedMcpHeaders(
   return ok(headers);
 }
 
-export function snapshotSkills(resources: readonly { path: string; content: string }[]): Skill[] {
-  return resources.flatMap(({ path, content }) => {
-    const parsed = Result.fromThrowable(
-      () => parseFrontmatter<SkillFrontmatter>(content),
-      () => undefined,
-    )();
-    if (parsed.isErr()) return [];
-    const frontmatter = parsed.value.frontmatter;
-    if (typeof frontmatter.description !== "string" || !frontmatter.description.trim()) return [];
-    const baseDir = dirname(path);
-    return [
-      {
-        name: typeof frontmatter.name === "string" ? frontmatter.name : basename(baseDir),
-        description: frontmatter.description,
-        filePath: path,
-        baseDir,
-        sourceInfo: {
-          path,
-          source: "project",
-          scope: "project" as const,
-          origin: "top-level" as const,
-          baseDir,
-        },
-        disableModelInvocation: frontmatter["disable-model-invocation"] === true,
-      },
-    ];
-  });
-}
-
-export function processAgentSystemContext(
-  userTimeZone: string | null,
-  resources: readonly { path: string; content: string }[],
-): string {
+export function processAgentSystemContext(userTimeZone: string | null): string {
   return [
     "Use codemode to compose tool calls.",
     ...(userTimeZone
@@ -132,9 +92,6 @@ export function processAgentSystemContext(
           `User’s time zone: ${userTimeZone}. Present dates and times in this time zone unless they request another.`,
         ]
       : []),
-    ...resources
-      .filter((resource) => basename(resource.path) === "APPEND_SYSTEM.md")
-      .map((resource) => resource.content),
   ].join("\n\n");
 }
 
@@ -333,18 +290,16 @@ export function createProcessAgentContext(
         return err(durableError("Required resource context unavailable"));
       const saved = await nativeContext.save(platformSnapshot, prepared.value.managed);
       if (saved.isErr()) return err(durableError("Resource context publication unavailable"));
-      const pendingInstructions = renderPrompt({
-        cwd: "Host workspace pending execution readiness",
+      const instructions = renderPrompt({
         personal: personal.value.content,
         project: projectInstructions.value.content,
         repository: prepared.value.instructions,
         skills: prepared.value.skills,
-        appendSystem: `${processAgentSystemContext(orb.userTimeZone, [])}\n\nRequired repository resources are loaded at the pinned commit. Workspace execution is pending. Decisions must be re-evaluated if host hooks or workspace edits change adopted instructions.`,
+        appendSystem: processAgentSystemContext(orb.userTimeZone),
       });
-      const instructions = new InstructionReadiness(pendingInstructions);
       const resourcesAbort = new AbortController();
       lease?.signal.addEventListener("abort", () => resourcesAbort.abort(), { once: true });
-      const loadSnapshot = (
+      const loadReady = (
         binding: ExecutionBinding & { release?: () => void },
         ctx: Context,
         requireRunning: boolean,
@@ -389,34 +344,6 @@ export function createProcessAgentContext(
                   return err(durableError("execution admission changed"));
                 remote.cwd = ready.value.cwd;
                 env.cwd = ready.value.cwd;
-                const offered = instructions.offer(
-                  renderPrompt({
-                    cwd: ready.value.cwd,
-                    personal: personal.value.content,
-                    project: projectInstructions.value.content,
-                    repository: ready.value.instructions,
-                    skills: [
-                      ...snapshotSkills(
-                        ready.value.skills.filter((skill) =>
-                          skill.path.startsWith(`${ready.value.cwd}/`),
-                        ),
-                      ),
-                      ...prepared.value.skills.filter((skill) =>
-                        skill.filePath.startsWith("/opt/pi-orb/skills/"),
-                      ),
-                    ],
-                    appendSystem: processAgentSystemContext(
-                      orb.userTimeZone,
-                      ready.value.resources,
-                    ),
-                  }),
-                );
-                if (offered.changed)
-                  logOrbEvent(task, orb.id, "instructions.host_discovered", {
-                    revision: offered.revision,
-                    incarnation: binding.incarnation,
-                    admission_version: orb.agentAdmissionVersion,
-                  });
                 return ok(remote);
               });
           })
@@ -432,11 +359,11 @@ export function createProcessAgentContext(
           },
           orb.agentAdmissionVersion,
           waiting,
-        ).andThen((binding) => loadSnapshot(binding, ctx, true));
-      const hydrateExecution = (ctx: Context) =>
+        ).andThen((binding) => loadReady(binding, ctx, true));
+      const checkExecutionReady = (ctx: Context) =>
         deps.store
           .getOrb(task, orb.id)
-          .mapErr(() => durableError("execution snapshot unavailable"))
+          .mapErr(() => durableError("execution readiness unavailable"))
           .andThen((current) => {
             if (
               !current ||
@@ -444,15 +371,15 @@ export function createProcessAgentContext(
               current.agentAdmissionVersion !== orb.agentAdmissionVersion ||
               !deps.hostProvider.executionBinding
             )
-              return err(durableError("execution snapshot admission changed"));
+              return err(durableError("execution readiness admission changed"));
             return deps.hostProvider
               .executionBinding(
                 task,
                 { provider: deps.hostProvider.kind, resourceId: current.hostRef },
                 { signal: ctx.abortSignal ?? resourcesAbort.signal },
               )
-              .mapErr(() => durableError("execution snapshot binding unavailable"))
-              .andThen((binding) => loadSnapshot(binding, ctx, false))
+              .mapErr(() => durableError("execution readiness binding unavailable"))
+              .andThen((binding) => loadReady(binding, ctx, false))
               .map(() => undefined);
           });
       const env = new LazyExecutionEnv({
@@ -767,11 +694,6 @@ export function createProcessAgentContext(
       const recordModelCall = (use: ModelCallUse, response: AssistantMessage) =>
         options.modelUsage.record(task, modelCall({ ownerUserId, orbId: orb.id, use }, response));
       const summaryModel = models.value.getModel(CODEX_PROVIDER, "gpt-6-luna");
-      const discovery =
-        orb.state === "running"
-          ? hydrateExecution(withAbortSignal(resourcesAbort.signal, BACKGROUND_CONTEXT))
-          : okAsync(undefined);
-      void discovery;
       return ok({
         env,
         models: models.value,
@@ -800,7 +722,7 @@ export function createProcessAgentContext(
         modelTools: tools.modelTools,
         childExtension: tools.childExtension,
         checkoutCommit: prepared.value.commitSha,
-        hydrateExecution,
+        checkExecutionReady,
         executionActive: () => env.active(),
         resume: !readOnly && orb.stopReason !== "manual" && orb.stopReason !== "sleep",
         openSignal: operation.signal,
@@ -820,23 +742,12 @@ export function createProcessAgentContext(
                 ? ok(undefined)
                 : err(durableError("agent admission superseded")),
             ),
-        envFor: (target: EnvTarget) =>
-          env.invocation(instructions.admission(String(target.conversationId))),
-        prompt: (conversationId: string) =>
-          instructions.prompt(conversationId, (revision) =>
-            logOrbEvent(task, orb.id, "instructions.host_adopted", {
-              revision,
-              conversation_id: conversationId,
-              admission_version: orb.agentAdmissionVersion,
-            }),
-          ),
+        envFor: () => env.invocation(),
         instructionSnapshots: { personal: personal.value, project: projectInstructions.value },
-        instructions: pendingInstructions,
+        instructions,
         closeResources: () => {
           resourcesAbort.abort();
-          return closeProcessAgentResources(tools, env).andThen(() =>
-            ResultAsync.fromSafePromise(Promise.resolve(discovery)).map(() => undefined),
-          );
+          return closeProcessAgentResources(tools, env);
         },
       });
     };

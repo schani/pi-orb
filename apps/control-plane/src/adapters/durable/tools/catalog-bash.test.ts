@@ -58,15 +58,12 @@ test("actual remote built-in bash failure retains stdout, stderr and safe exit d
   }
 });
 
-test("exposes only the bounded pre-execution re-evaluation reason", async () => {
+test("exposes only the bounded pre-execution admission reason", async () => {
   for (const [name, ErrorType] of [
     ["bash", ExecutionError],
     ["read", FileError],
   ] as const) {
-    for (const message of [
-      "Host instructions adopted; re-evaluate the operation under the current instructions.",
-      "PRIVATE AGENTS CONTENT",
-    ]) {
+    for (const message of ["execution admission revoked", "PRIVATE AGENTS CONTENT"]) {
       const catalog = new CallableCatalog([
         defineTool({
           name,
@@ -82,7 +79,7 @@ test("exposes only the bounded pre-execution re-evaluation reason", async () => 
         .execute({}, {} as ToolExecutionApi, executionContext());
       const output = JSON.stringify(result);
       expect(output).not.toContain("PRIVATE AGENTS CONTENT");
-      if (message.startsWith("Host instructions")) expect(output).toContain(message);
+      if (message === "execution admission revoked") expect(output).toContain(message);
     }
   }
 });

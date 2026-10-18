@@ -19,7 +19,6 @@ import {
   type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
 import { expect, it } from "vitest";
-import { InstructionReadiness } from "../instruction-readiness.ts";
 import { promptExtension } from "../prompt.ts";
 import { ChildReceipts, createDurableTools } from "./index.ts";
 import { ChildAnchor, subagentTools } from "./subagents.ts";
@@ -237,8 +236,7 @@ it("reopens persisted anchors without recreating children or rerunning the spawn
   }
 });
 
-it("children inherit refreshed instructions but neither see nor start subagents", async () => {
-  const instructions = new InstructionReadiness("PENDING_PROMPT");
+it("children inherit pinned instructions but neither see nor start subagents", async () => {
   const prompts = { root: [] as string[], child: [] as string[] };
   const capture = (request: Parameters<FauxResponseFactory>[0]) => {
     const child = JSON.stringify(request.messages.find((m) => m.role === "user")?.content).includes(
@@ -266,7 +264,6 @@ it("children inherit refreshed instructions but neither see nor start subagents"
       childTools.push([...offered].map(([name, description]) => ({ name, description })));
       const result = request.messages.find((m) => m.role === "toolResult");
       if (!result) {
-        instructions.offer("HOST_READY_PROMPT");
         return fauxAssistantMessage(
           fauxToolCall("codemode", { code: "text(await tools.subagent({prompt: 'grandchild'}));" }),
           { stopReason: "toolUse" },
@@ -309,7 +306,7 @@ it("children inherit refreshed instructions but neither see nor start subagents"
       },
     },
   );
-  s.registry.install(promptExtension((id) => instructions.prompt(id)));
+  s.registry.install(promptExtension("PINNED_PROMPT"));
   const storage = new MemoryStorage();
   const harness = await Harness.open(storage, s, ctx);
   try {
@@ -319,11 +316,11 @@ it("children inherit refreshed instructions but neither see nor start subagents"
     const tagged = (text: string) => `<orb-instructions>\n${text}\n</orb-instructions>`;
     const childNote = "\n\nYou are a subagent. Do not spawn orbs.";
     expect(prompts.child).toEqual([
-      tagged(`PENDING_PROMPT${childNote}`),
-      tagged(`HOST_READY_PROMPT${childNote}`),
+      tagged(`PINNED_PROMPT${childNote}`),
+      tagged(`PINNED_PROMPT${childNote}`),
     ]);
-    expect(prompts.root[0]).toBe(tagged("PENDING_PROMPT"));
-    expect(prompts.root.at(-1)).toBe(tagged("HOST_READY_PROMPT"));
+    expect(prompts.root[0]).toBe(tagged("PINNED_PROMPT"));
+    expect(prompts.root.at(-1)).toBe(tagged("PINNED_PROMPT"));
     for (const prompt of prompts.root) expect(prompt).not.toContain(childNote.trim());
     expect(childTools).toHaveLength(2);
     for (const tools of childTools) {

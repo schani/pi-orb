@@ -17,7 +17,6 @@ import { expect, it } from "vitest";
 import { LazyExecutionEnv } from "../execution-client/lazy-env.ts";
 import { DurableAgent } from "./agent.ts";
 import { executionWaitProgress } from "./execution-wait-progress.ts";
-import { InstructionReadiness } from "./instruction-readiness.ts";
 import { createDurableTools } from "./tools/index.ts";
 
 function latch() {
@@ -28,7 +27,7 @@ function latch() {
   return { promise, resolve };
 }
 
-it.each(["abort", "adopt"] as const)(
+it.each(["abort", "ready"] as const)(
   "composed codemode preserves held execution wait across nested progress: %s",
   async (outcome) => {
     const directory = await mkdtemp(join(tmpdir(), "composed-wait-"));
@@ -38,13 +37,7 @@ it.each(["abort", "adopt"] as const)(
       finishProgress = latch(),
       pulseEntered = latch();
     const allowModel = latch(),
-      acquired = latch(),
-      allowOffer = latch(),
-      offered = latch(),
-      admitted = latch();
-    const modelCall = latch(),
-      reevaluated = latch(),
-      allowReevaluation = latch(),
+      modelCall = latch(),
       shell = latch();
     const finalModel = latch(),
       allowFinal = latch(),
@@ -52,7 +45,6 @@ it.each(["abort", "adopt"] as const)(
       publicWait = latch(),
       publicProgress = latch();
     let progressArmed = false;
-    const readiness = new InstructionReadiness("PRIVATE_OLD: pending host instructions");
     const remote = new NodeExecutionEnv({ cwd: directory });
     const exec = remote.exec.bind(remote);
     let effects = 0;
@@ -77,12 +69,6 @@ it.each(["abort", "adopt"] as const)(
                 else ctx.abortSignal?.addEventListener("abort", () => done(), { once: true });
               }),
             ]);
-            if (!ctx.abortSignal?.aborted) {
-              acquired.resolve();
-              await allowOffer.promise;
-              readiness.offer("PRIVATE_HOOK: only write HOOK_ALLOWED_AFTER_READY");
-              offered.resolve();
-            }
             return remote;
           })(),
         ),
@@ -133,18 +119,7 @@ it.each(["abort", "adopt"] as const)(
         await allowModel.promise;
         return fauxAssistantMessage(
           fauxToolCall("codemode", {
-            code: 'await Promise.all([tools.bash({command:"touch MUST_NOT_EXIST"}), tools.pulse({})]);',
-          }),
-          { stopReason: "toolUse" },
-        );
-      },
-      async (request) => {
-        prompts.push(JSON.stringify(request));
-        reevaluated.resolve();
-        await allowReevaluation.promise;
-        return fauxAssistantMessage(
-          fauxToolCall("codemode", {
-            code: 'text(await tools.bash({command:"echo changed > HOOK_ALLOWED_AFTER_READY; printf VM_EXECUTED_ONCE"}));',
+            code: 'await Promise.all([tools.bash({command:"echo changed > FIRST_COMMAND; printf VM_EXECUTED_ONCE"}), tools.pulse({})]);',
           }),
           { stopReason: "toolUse" },
         );
@@ -163,15 +138,8 @@ it.each(["abort", "adopt"] as const)(
         models,
         registry,
         env,
-        envFor: (target) => {
-          const admit = readiness.admission(String(target.conversationId));
-          return env.invocation(() => {
-            admitted.resolve();
-            return admit();
-          });
-        },
-        instructions: "PRIVATE_OLD: pending host instructions",
-        prompt: (id) => readiness.prompt(id),
+        envFor: () => env.invocation(),
+        instructions: "PRIVATE_PINNED: repository instructions",
         checkoutCommit: null,
         initialSettings: { model: { provider: "faux", id: "faux-1" }, thinkingLevel: "off" },
       })
@@ -198,7 +166,7 @@ it.each(["abort", "adopt"] as const)(
       expect(
         frames.some((frame) => frame.type === "runtime.event" && frame.event.type === "tool_state"),
       ).toBe(false);
-      expect(prompts[0]).toContain("PRIVATE_OLD");
+      expect(prompts[0]).toContain("PRIVATE_PINNED");
       allowModel.resolve();
       await waiting.promise;
       await progress.promise;
@@ -219,7 +187,6 @@ it.each(["abort", "adopt"] as const)(
         expect(
           (await agent.request("abort", { type: "abort", operationId }))._unsafeUnwrap(),
         ).toMatchObject({ type: "accepted", operationId });
-        allowReevaluation.resolve();
         allowFinal.resolve();
         expect((await agent.waitForIdle()).isOk()).toBe(true);
         expect(agent.health()).toMatchObject({ status: "ready", activity: "idle" });
@@ -235,16 +202,6 @@ it.each(["abort", "adopt"] as const)(
       } else {
         release.resolve();
         finishProgress.resolve();
-        await acquired.promise;
-        expect(effects).toBe(0);
-        allowOffer.resolve();
-        await offered.promise;
-        await admitted.promise;
-        await reevaluated.promise;
-        expect(effects).toBe(0);
-        expect(prompts[1]).toContain("PRIVATE_HOOK");
-        expect(prompts[1]).toContain("re-evaluate");
-        allowReevaluation.resolve();
         await shell.promise;
         await finalModel.promise;
         expect(effects).toBe(1);
@@ -254,30 +211,24 @@ it.each(["abort", "adopt"] as const)(
         allowFinal.resolve();
         await committed.promise;
         await agent.waitForIdle();
-        expect(await readFile(join(directory, "HOOK_ALLOWED_AFTER_READY"), "utf8")).toBe(
-          "changed\n",
-        );
-        expect(await readdir(directory)).toEqual(["HOOK_ALLOWED_AFTER_READY"]);
+        expect(await readFile(join(directory, "FIRST_COMMAND"), "utf8")).toBe("changed\n");
+        expect(await readdir(directory)).toEqual(["FIRST_COMMAND"]);
         const history = JSON.stringify(agent.snapshot()._unsafeUnwrap().records);
+        expect(prompts).toHaveLength(1);
         expect(history).toContain("VM_EXECUTED_ONCE");
         expect(history).toContain("READY_VM_DONE");
       }
       const history = JSON.stringify(agent.snapshot()._unsafeUnwrap().records);
-      expect(history).not.toContain("PRIVATE_OLD");
-      expect(history).not.toContain("PRIVATE_HOOK");
-      expect(await readdir(directory)).toEqual(
-        outcome === "abort" ? [] : ["HOOK_ALLOWED_AFTER_READY"],
-      );
+      expect(history).not.toContain("PRIVATE_PINNED");
+      expect(await readdir(directory)).toEqual(outcome === "abort" ? [] : ["FIRST_COMMAND"]);
       expect(effects).toBe(outcome === "abort" ? 0 : 1);
     } finally {
       release.resolve();
       finishProgress.resolve();
-      allowReevaluation.resolve();
       allowFinal.resolve();
       publicWait.resolve();
       pulseEntered.resolve();
       allowModel.resolve();
-      allowOffer.resolve();
       await agent.close();
       await bundle.close();
       await env.cleanup(BACKGROUND_CONTEXT);

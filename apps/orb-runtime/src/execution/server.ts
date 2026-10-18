@@ -118,9 +118,6 @@ export function buildExecutionServer(options: ExecutionServerOptions) {
         incarnation: options.incarnation,
         pid: process.pid,
         checkoutCommit: "",
-        instructions: [],
-        skills: [],
-        resources: [],
       },
   );
   app.post(EXECUTION_RPC_PATH, async (request, reply) => {

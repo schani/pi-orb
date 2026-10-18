@@ -251,12 +251,12 @@ describe("independent central lifecycle", () => {
     const accepted = readiness === "success";
     const terminal = readiness === "creating" || readiness === "starting";
     const state = readiness === "creating" ? "creating" : "starting";
-    it(`hydrates guest resources before publishing running (${readiness})`, async () => {
+    it(`checks execution readiness before publishing running (${readiness})`, async () => {
       await runDst(
-        { name: `central-resource-ready-${readiness}`, iterations: 10, lateTimerProbability: 0 },
+        { name: `central-execution-ready-${readiness}`, iterations: 10, lateTimerProbability: 0 },
         async (sim) => {
           const h = makeHarness();
-          let adopted = 0;
+          let checks = 0;
           let suspends = 0;
           let conversationClosed = 0;
           let executionClosed = 0;
@@ -264,7 +264,7 @@ describe("independent central lifecycle", () => {
             ...plane(() => undefined, true),
             executionReady: () => {
               expect(h.store.orbSnapshot("orb")?.state).toBe(state);
-              adopted++;
+              checks++;
               return accepted
                 ? okAsync(undefined)
                 : terminal || readiness === "retryable"
@@ -279,7 +279,7 @@ describe("independent central lifecycle", () => {
                   : errAsync({
                       type: "runtime_client_error",
                       code: "unreachable",
-                      message: "resource snapshot unavailable",
+                      message: "execution readiness unavailable",
                       retryable: readiness === "generic-retryable",
                       answered: true,
                     });
@@ -322,7 +322,7 @@ describe("independent central lifecycle", () => {
                   "execution",
                 );
                 const outcome = await reconcileOrbOnce(task, deps, "orb");
-                expect(adopted).toBe(1);
+                expect(checks).toBe(1);
                 expect(h.store.orbSnapshot("orb")?.state).toBe(
                   terminal ? "failed" : accepted ? "running" : state,
                 );
@@ -342,7 +342,7 @@ describe("independent central lifecycle", () => {
                   expect(outcome).toEqual({ type: "waiting", reason: "readiness" });
                   expect(deps.control.getBootProbe("orb")?.lastError).toBe(
                     readiness === "generic" || readiness === "generic-retryable"
-                      ? "resource snapshot unavailable"
+                      ? "execution readiness unavailable"
                       : terminalReadiness.message,
                   );
                 }

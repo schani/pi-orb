@@ -99,7 +99,7 @@ export interface AgentPlane {
     orb: OrbRow,
     context: OperationContext,
   ): ResultAsync<RuntimeHealth, RuntimeClientError>;
-  /** Hydrate host-authoritative resources after guest ready, before publishing compute readiness. */
+  /** Validate execution readiness and admission before publishing ready compute. */
   executionReady?(
     task: SimulationTask,
     orb: OrbRow,

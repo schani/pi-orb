@@ -175,9 +175,8 @@ describe("durable Codex prompt cache key", () => {
   });
 
   // Regression: the orb prompt rode at the tail of every request, so no request extended the previous one.
-  it("sends the orb prompt as instructions, then one in-place update, extending each previous request", async () => {
+  it("sends pinned instructions across turns and child calls, extending each previous request", async () => {
     const requests: Body[] = [];
-    let prompt = "PENDING_PROMPT";
     let id = 0;
     const server = createServer((request, response) => {
       if (request.method !== "POST") {
@@ -250,8 +249,7 @@ describe("durable Codex prompt cache key", () => {
         childExtension: tools.childExtension,
         env: new NodeExecutionEnv({ cwd: "/tmp" }),
         checkoutCommit: "commit",
-        instructions: "pending",
-        prompt: () => prompt,
+        instructions: "PINNED_PROMPT",
         initialSettings: {
           model: { provider: "openai-codex", id: "gpt-6-astra" },
           thinkingLevel: "medium",
@@ -271,7 +269,6 @@ describe("durable Codex prompt cache key", () => {
     };
     try {
       await turn("ROOT_TURN_ONE");
-      prompt = "ORB_PROMPT";
       await turn("ROOT_TURN_TWO");
     } finally {
       await agent.close();
@@ -298,26 +295,14 @@ describe("durable Codex prompt cache key", () => {
         expect(sections.map((match) => match[1]).sort()).toEqual(["codemode", "orb-instructions"]);
         expect(sections.map((match) => match[0]).join("\n\n")).toBe(instructions);
         expect(sections.find((match) => match[1] === "orb-instructions")?.[2]).toBe(
-          `PENDING_PROMPT${childNote}`,
+          `PINNED_PROMPT${childNote}`,
         );
         expect(sections.find((match) => match[1] === "codemode")?.[2]).toEqual(
           expect.stringMatching(/\S/),
         );
         expect(body.tools).toEqual([expect.objectContaining({ type: "custom", name: "codemode" })]);
-        const updated = input.includes("ROOT_TURN_TWO");
-        expect(input.split("ORB_PROMPT").length - 1).toBe(updated ? 1 : 0);
-        expect(input).not.toContain("PENDING_PROMPT");
-        expect(body.input?.filter((item) => item.role === "developer")).toEqual(
-          updated
-            ? [
-                {
-                  role: "developer",
-                  content:
-                    'Updated system prompt section "orb-instructions":\n\n<orb-instructions>\nORB_PROMPT\n</orb-instructions>',
-                },
-              ]
-            : [],
-        );
+        expect(input).not.toContain("PINNED_PROMPT");
+        expect(body.input?.filter((item) => item.role === "developer")).toEqual([]);
         if (input.includes("ROOT_TURN") && toolOutputs(body).length >= 2)
           expect(toolOutputs(body)[1]?.output?.split("\n").at(-1)).toBe(
             JSON.stringify({ status: "completed", result: { output: "child done" } }),

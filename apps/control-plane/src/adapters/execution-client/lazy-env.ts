@@ -24,7 +24,6 @@ export interface LazyExecutionOptions {
     context: Context,
     waiting?: () => ResultAsync<void, RuntimeClientError>,
   ) => ResultAsync<ExecutionEnv, RuntimeClientError>;
-  readonly admit?: () => Result<void, RuntimeClientError>;
   readonly validate?: (
     env: ExecutionEnv,
     context: Context,
@@ -74,12 +73,11 @@ export class LazyExecutionEnv implements ExecutionEnv {
     this.id = options.id ?? randomUUID();
     this.cwd = options.cwd;
   }
-  invocation(admit?: LazyExecutionOptions["admit"]): LazyExecutionEnv {
+  invocation(): LazyExecutionEnv {
     const child = new LazyExecutionEnv({
       ...this.options,
       cwd: this.cwd,
       id: this.id,
-      ...(admit ? { admit } : {}),
     });
     child.retain = () => {
       if (this.abort.signal.aborted) child.abort.abort();
@@ -125,8 +123,6 @@ export class LazyExecutionEnv implements ExecutionEnv {
     if (acquired.isErr()) return this.reject(acquired.error);
     this.bound = acquired.value;
     this.cwd = acquired.value.cwd;
-    const admitted = this.options.admit?.();
-    if (admitted?.isErr()) return this.reject(admitted.error);
     const validated = await this.options.validate?.(
       acquired.value,
       withAbortSignal(signal, context),

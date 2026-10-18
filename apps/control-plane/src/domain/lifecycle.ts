@@ -1146,38 +1146,38 @@ async function reconcileCreateStart(
       deps.control.noteHookFailure(orb.id, firstHookFailure(status.hooks));
       const executionReady = deps.agentPlane?.executionReady?.bind(deps.agentPlane);
       if (executionReady !== undefined) {
-        const resources = await withDeadline(
+        const readiness = await withDeadline(
           task,
           deps.constants.runtimeRequestTimeoutMs,
-          "adopt execution resources",
+          "check execution readiness",
           (context) => executionReady(task, orb, context),
         );
-        if (resources.isErr()) {
+        if (readiness.isErr()) {
           if (
-            resources.error.answered &&
-            !resources.error.retryable &&
-            resources.error.code === "initialization_failed" &&
-            resources.error.initializationError !== undefined
+            readiness.error.answered &&
+            !readiness.error.retryable &&
+            readiness.error.code === "initialization_failed" &&
+            readiness.error.initializationError !== undefined
           )
             return failOrb(
               task,
               deps,
               orb,
               "runtime_failed",
-              `${resources.error.initializationError.code}: ${resources.error.initializationError.message}`,
+              `${readiness.error.initializationError.code}: ${readiness.error.initializationError.message}`,
             );
           deps.control.recordBootProbe(orb.id, {
             ...probeBase,
             answered: true,
-            lastError: resources.error.message,
+            lastError: readiness.error.message,
           });
-          if (deps.control.noteCondition(`execution-resources:${orb.id}`, true))
-            logOrbEvent(task, orb.id, "execution-resources-blocked", {
-              message: resources.error.message,
+          if (deps.control.noteCondition(`execution-readiness:${orb.id}`, true))
+            logOrbEvent(task, orb.id, "execution-readiness-blocked", {
+              message: readiness.error.message,
             });
           return waiting("readiness");
         }
-        deps.control.noteCondition(`execution-resources:${orb.id}`, false);
+        deps.control.noteCondition(`execution-readiness:${orb.id}`, false);
       }
       // Persist ready identity before the orb becomes running (docs/lifecycle.md).
       const readyAt = task.wallNow();

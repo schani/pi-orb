@@ -28,7 +28,6 @@ const boot = new ExecutionBoot({
   incarnation,
   orbId: env("PI_ORB_ID"),
   repositoryUrl: env("PI_ORB_REPOSITORY_URL"),
-  skillsDir: process.env.PI_ORB_SKILLS_DIR ?? "",
   environment: process.env,
   broker: readBrokerEnv(process.env),
 });
