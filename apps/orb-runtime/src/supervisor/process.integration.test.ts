@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { ChildProcess, spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { Socket } from "node:net";
@@ -13,6 +13,7 @@ type OwnedProcess = {
   child: ReturnType<typeof spawn>;
   exit: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
   runtimePid: Promise<number>;
+  disconnected: Promise<void>;
   knownRuntimePid?: number;
   trace: string[];
   stderr: string;
@@ -51,17 +52,19 @@ async function cleanupProcesses(ownedProcesses: OwnedProcess[]): Promise<void> {
   const errors: unknown[] = [];
   for (const owned of ownedProcesses) {
     try {
-      if (owned.knownRuntimePid !== undefined) process.kill(-owned.knownRuntimePid, "SIGKILL");
+      if (owned.child.exitCode === null && owned.child.signalCode === null)
+        owned.child.kill("SIGKILL");
+      await owned.exit;
+      // Exit can precede the final runtime PID message.
+      await owned.disconnected;
     } catch (cause) {
-      if (!(cause instanceof Error && "code" in cause && cause.code === "ESRCH"))
-        errors.push(cause);
+      errors.push(cause);
     } finally {
       try {
-        if (owned.child.exitCode === null && owned.child.signalCode === null)
-          owned.child.kill("SIGKILL");
-        await owned.exit;
+        if (owned.knownRuntimePid !== undefined) process.kill(-owned.knownRuntimePid, "SIGKILL");
       } catch (cause) {
-        errors.push(cause);
+        if (!(cause instanceof Error && "code" in cause && cause.code === "ESRCH"))
+          errors.push(cause);
       }
     }
   }
@@ -124,7 +127,15 @@ function launch(
       });
     },
   );
-  const owned: OwnedProcess = { child, exit, runtimePid, trace: ["launched"], stderr: "" };
+  const disconnected = new Promise<void>((resolve) => child.once("disconnect", resolve));
+  const owned: OwnedProcess = {
+    child,
+    exit,
+    runtimePid,
+    disconnected,
+    trace: ["launched"],
+    stderr: "",
+  };
   child.stderr?.on("data", (chunk: Buffer) => {
     owned.stderr = (owned.stderr + chunk.toString()).slice(-8_192);
   });
@@ -167,6 +178,55 @@ async function phase(owned: OwnedProcess, name: string, barrier: Promise<void>):
 }
 
 describe("runtime supervisor real processes", () => {
+  it("kills a runtime group reported after the fixture exits but before IPC disconnects", async () => {
+    const child = new ChildProcess();
+    const owned: OwnedProcess = {
+      child,
+      exit: new Promise((resolve) =>
+        child.once("exit", (code, signal) => resolve({ code, signal })),
+      ),
+      disconnected: new Promise((resolve) => child.once("disconnect", resolve)),
+      runtimePid: new Promise(() => {}),
+      trace: [],
+      stderr: "",
+    };
+    child.once("message", (message: { runtimePid: number }) => {
+      owned.knownRuntimePid = message.runtimePid;
+      owned.trace.push("runtime PID received");
+    });
+    const stop = vi.spyOn(child, "kill").mockImplementation(() => {
+      queueMicrotask(() => {
+        owned.trace.push("fixture exited");
+        child.emit("exit", null, "SIGKILL");
+        // The exit waiter resumes before this final IPC delivery.
+        queueMicrotask(() => {
+          child.emit("message", { runtimePid: 12345 });
+          owned.trace.push("IPC disconnected");
+          child.emit("disconnect");
+        });
+      });
+      return true;
+    });
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+      owned.trace.push("runtime group killed");
+      return true;
+    });
+    try {
+      await cleanupProcesses([owned]);
+      expect(stop).toHaveBeenCalledExactlyOnceWith("SIGKILL");
+      expect(kill).toHaveBeenCalledExactlyOnceWith(-12345, "SIGKILL");
+      expect(owned.trace).toEqual([
+        "fixture exited",
+        "runtime PID received",
+        "IPC disconnected",
+        "runtime group killed",
+      ]);
+    } finally {
+      stop.mockRestore();
+      kill.mockRestore();
+    }
+  });
+
   it("cleans up a fixture stalled before runtime spawn without awaiting its PID", async () => {
     const directory = await mkdtemp(join(tmpdir(), "pi-orb-supervisor-stall-"));
     directories.push(directory);
@@ -181,32 +241,20 @@ setInterval(() => {}, 1_000);
     );
     const ready = await handshake(true);
     const owned = launch(["unused"], `http://127.0.0.1:${ready.port}`, undefined, script);
-    // Observe any attempted PID wait causally; fixture rescue needs no deadline.
     await phase(owned, "fixture startup held before spawn", ready.accepted);
-    let reportWait = () => {};
-    const waited = new Promise<void>((resolve) => {
-      reportWait = resolve;
+    const runtimePid = owned.runtimePid;
+    Object.defineProperty(owned, "runtimePid", {
+      get() {
+        throw new Error("cleanup must not read an unresolved runtime PID");
+      },
     });
-    const then = owned.runtimePid.then.bind(owned.runtimePid);
-    const spy = vi.spyOn(owned.runtimePid, "then").mockImplementation((...args) => {
-      reportWait();
-      return then(...args);
-    });
-    const cleanup = cleanupProcesses([owned]).then(
-      () => "cleaned",
-      () => "failed",
-    );
     try {
-      expect(await Promise.race([cleanup, waited.then(() => "waited for unknown PID")])).toBe(
-        "cleaned",
-      );
+      await cleanupProcesses([owned]);
       expect(await owned.exit).toEqual({ code: null, signal: "SIGKILL" });
-      await expect(owned.runtimePid).rejects.toThrow("fixture exited before reporting runtime PID");
+      await expect(runtimePid).rejects.toThrow("fixture exited before reporting runtime PID");
     } finally {
-      spy.mockRestore();
       owned.child.kill("SIGKILL");
       await owned.exit;
-      await cleanup;
     }
   });
 
@@ -286,7 +334,6 @@ setInterval(() => {}, 1_000);
           expect.objectContaining({ code: "ESRCH" }),
         );
       }
-      console.info({ signal, trace: owned.trace, stderr: owned.stderr });
     },
   );
 

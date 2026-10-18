@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { renameSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { fileURLToPath } from "node:url";
 
@@ -47,8 +47,7 @@ if (mode === "descendant") {
       resolve();
     }),
   );
-  writeFileSync(`${mode}.tmp`, `${process.pid} ${descendant.pid}`);
-  renameSync(`${mode}.tmp`, mode as string);
+  writeFileSync(mode as string, `${process.pid} ${descendant.pid}`);
   for (const signal of signals)
     process.on(signal, async () => {
       await publish(handlingPort, `runtime received ${signal}; waiting for descendant`);
