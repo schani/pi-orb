@@ -116,6 +116,19 @@ export async function runArtifactRestart(f: RestartFixture): Promise<void> {
     "low",
   );
   await f.submit("READ_RETAINED_SPILL");
+  await waitFor("retained spill read committed after restart", async () => {
+    const history = await readReplicatedHistorySnapshot(cp, f.orb);
+    return history.records.some(
+      (record) =>
+        record.type === "message" &&
+        record.role === "assistant" &&
+        record.content.some(
+          (block) => block.type === "text" && block.text === "RETAINED_SPILL_READ_DONE",
+        ),
+    )
+      ? true
+      : null;
+  });
   await expectPage(page.getByText("RETAINED_SPILL_READ_DONE", { exact: true })).toBeVisible();
   const restored = JSON.stringify(await readReplicatedHistorySnapshot(cp, f.orb));
   expect(restored).toContain("RESTORED_SKILL:PINNED_RESOURCE_ASSET");

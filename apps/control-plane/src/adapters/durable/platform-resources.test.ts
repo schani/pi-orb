@@ -80,7 +80,7 @@ const codemodeSkills = [
 it("discovers both skill metadata without bodies and reads snapshots on demand", async () => {
   const bundle = await codemodeBundle();
   const resources = snapshotPromptResources(bundle)._unsafeUnwrap();
-  const prompt = renderPrompt({ cwd: "/guest/repo", repository: [], skills: resources.skills });
+  const prompt = renderPrompt({ repository: [], skills: resources.skills });
   const reader = new SnapshotResourceReader(bundle);
   for (const { name, description } of codemodeSkills) {
     const skill = resources.skills.find((skill) => skill.name === name);
@@ -174,7 +174,7 @@ it.each([
     expect(manual.length).toBeGreaterThan(2000);
     expect(manual).not.toMatch(/models\.|settings\.md|CodemodeSandbox/);
     const resources = snapshotPromptResources(bundle)._unsafeUnwrap();
-    const prompt = renderPrompt({ cwd, repository: [], skills: resources.skills });
+    const prompt = renderPrompt({ repository: [], skills: resources.skills });
     expect(resources.skills.filter(({ name }) => name.startsWith("codemode-"))).toHaveLength(2);
     const limitsPath =
       manual.match(/\[Limits \(central native code-mode\)\]\(([^)]+)\)/)?.[1] ?? "missing";

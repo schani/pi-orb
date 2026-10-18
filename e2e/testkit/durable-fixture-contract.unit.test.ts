@@ -12,8 +12,10 @@ it("checks the selected execution child before killing it", () => {
   expect(fixture).toContain('"PI_ORB_RUNTIME_MODE=execution"');
   expect(fixture).toContain("expect(children).toHaveLength(1)");
 });
-it("re-evaluates adopted instructions for ordinary ready and hook-policy turns", () => {
-  expect(fixture).toContain('"READY_POLICY_REEVALUATED"');
-  expect(fixture).toContain('regex: "Host instructions adopted; re-evaluate"');
-  expect(fixture).toContain('getByText("READY_VM_DONE", { exact: true })');
+it("owns the retained-spill commit barrier before checking its browser projection", () => {
+  const restart = readFileSync(new URL("./durable-artifact-restart.ts", import.meta.url), "utf8");
+  const commit = restart.indexOf('"retained spill read committed after restart"');
+  const visible = restart.indexOf('page.getByText("RETAINED_SPILL_READ_DONE", { exact: true })');
+  expect(commit).toBeGreaterThan(0);
+  expect(visible).toBeGreaterThan(commit);
 });

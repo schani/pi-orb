@@ -1,15 +1,9 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import {
-  type ExecutionReady,
-  type ExecutionResource,
-  type RuntimeHealth,
-  validateRepositoryUrl,
-} from "@pi-orb/protocol";
+import { type ExecutionReady, type RuntimeHealth, validateRepositoryUrl } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 import type { BrokerEnv } from "../broker/endpoint.ts";
@@ -21,9 +15,7 @@ import { NodeHookSpawner } from "../hooks/spawner.ts";
 import { initialCheckoutCommands } from "../initial-checkout.ts";
 import { awaitInitialCheckoutCommit } from "../pending-initial-checkout.ts";
 import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts";
-import { repositoryResources } from "../repository-resources.ts";
 import { checkTestLaunchFailure } from "../test-launch-failure.ts";
-import { executionContext } from "./server.ts";
 
 interface BootError {
   readonly type: "execution_boot_error";
@@ -35,7 +27,6 @@ interface BootOptions {
   readonly workDir: string;
   readonly repositoryUrl: string;
   readonly incarnation: string;
-  readonly skillsDir: string;
   readonly environment: NodeJS.ProcessEnv;
   readonly broker: BrokerEnv | null;
 }
@@ -206,64 +197,13 @@ export class ExecutionBoot {
     }
     await this.hooks.runResume();
     await this.hooks.applyHookEnv(o.environment);
-    const env = new NodeExecutionEnv({ cwd });
-    const instructions: ExecutionResource[] = [];
-    const repository = repositoryResources(cwd);
-    if (repository.isErr())
-      return err({
-        type: "execution_boot_error",
-        code: "resource_discovery_failed",
-        message: repository.error,
-      });
-    instructions.push(...repository.value.instructions);
-    const skills: ExecutionResource[] = [];
-    for (const path of repository.value.skills) {
-      const resource = await this.resource(env, path);
-      if (!resource)
-        return err({
-          type: "execution_boot_error",
-          code: "resource_discovery_failed",
-          message: "repository skill could not be read",
-        });
-      skills.push(resource);
-    }
-    for (const root of [o.skillsDir]) {
-      const paths = Result.fromThrowable(
-        () => this.skillPaths(root, 0),
-        () => [] as string[],
-      )();
-      if (paths.isOk())
-        for (const path of paths.value.slice(0, 128)) {
-          const resource = await this.resource(env, path);
-          if (resource) skills.push(resource);
-        }
-    }
     this.snapshot = {
       cwd,
       incarnation: o.incarnation,
       pid: process.pid,
       checkoutCommit: commit.value,
       hooks: this.hooks.report(),
-      instructions,
-      skills,
-      resources: [...instructions, ...skills],
     };
     return ok(undefined);
-  }
-  private skillPaths(root: string, depth: number): string[] {
-    if (depth > 4 || !existsSync(root)) return [];
-    return readdirSync(root, { withFileTypes: true }).flatMap((entry) =>
-      entry.isDirectory()
-        ? this.skillPaths(join(root, entry.name), depth + 1)
-        : entry.isFile() && entry.name === "SKILL.md"
-          ? [join(root, entry.name)]
-          : [],
-    );
-  }
-  private async resource(env: NodeExecutionEnv, path: string): Promise<ExecutionResource | null> {
-    const info = await env.fileInfo(path, executionContext());
-    if (!info.ok || info.value.size > 256 * 1024 || info.value.kind !== "file") return null;
-    const result = await env.readTextFile(path, executionContext());
-    return result.ok ? { path, content: result.value } : null;
   }
 }

@@ -57,20 +57,12 @@ export const ExecutionExecSchema = Type.Object({
     }),
   ),
 });
-export interface ExecutionResource {
-  readonly path: string;
-  readonly content: string;
-}
-/** Data only: repository JavaScript is never imported by the control plane. */
 export interface ExecutionReady {
   readonly cwd: string;
   readonly incarnation: string;
   readonly pid: number;
   readonly checkoutCommit: string;
   readonly hooks?: RuntimeHooks;
-  readonly instructions: readonly ExecutionResource[];
-  readonly skills: readonly ExecutionResource[];
-  readonly resources: readonly ExecutionResource[];
 }
 export const ExecutionReadySchema = Type.Object({
   cwd: Type.String(),
@@ -78,9 +70,6 @@ export const ExecutionReadySchema = Type.Object({
   pid: Type.Integer(),
   checkoutCommit: Type.String(),
   hooks: Type.Optional(RuntimeHooksSchema),
-  instructions: Type.Array(Type.Object({ path: Type.String(), content: Type.String() })),
-  skills: Type.Array(Type.Object({ path: Type.String(), content: Type.String() })),
-  resources: Type.Array(Type.Object({ path: Type.String(), content: Type.String() })),
 });
 export const ExecutionWireResultSchema = Type.Union([
   Type.Object({ ok: Type.Literal(true), value: Type.Optional(Type.Unknown()) }),

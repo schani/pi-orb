@@ -11,7 +11,6 @@ import {
 const SECTION = "orb-instructions";
 
 export interface PromptSnapshot {
-  readonly cwd: string;
   readonly personal?: string;
   readonly repository: readonly { path: string; content: string }[];
   readonly project?: string;
@@ -19,7 +18,7 @@ export interface PromptSnapshot {
   readonly skills: readonly Skill[];
 }
 
-/** Snapshot data comes from guest RPC; executable repository extensions are never loaded centrally. */
+/** Pinned resource data only; repository extensions are never loaded centrally. */
 export function renderPrompt(snapshot: PromptSnapshot): string {
   const instructions = [
     snapshot.personal,
@@ -33,21 +32,16 @@ export function renderPrompt(snapshot: PromptSnapshot): string {
     instructions ? `<project_instructions>\n${instructions}\n</project_instructions>` : "",
     snapshot.appendSystem ?? "",
     formatSkillsForPrompt([...snapshot.skills]),
-    `<cwd>\n${snapshot.cwd}\n</cwd>`,
   ]
     .filter(Boolean)
     .join("\n\n");
 }
 
-export function promptExtension(
-  instructions: string | ((conversationId: string) => string),
-): Extension {
-  const render = (conversationId: string) => {
-    const prompt = typeof instructions === "string" ? instructions : instructions(conversationId);
-    return conversationId === String(ROOT_CONVERSATION_ID)
-      ? prompt
-      : `${prompt}\n\nYou are a subagent. Do not spawn orbs.`;
-  };
+export function promptExtension(instructions: string): Extension {
+  const render = (conversationId: string) =>
+    conversationId === String(ROOT_CONVERSATION_ID)
+      ? instructions
+      : `${instructions}\n\nYou are a subagent. Do not spawn orbs.`;
   // Tagged so a later "Updated system prompt section" names a delimited part of the instructions.
   const tagged = (text: string) => `<${SECTION}>\n${text}\n</${SECTION}>`;
   // The persisted section becomes the request's instructions and is re-sent only when it changes,

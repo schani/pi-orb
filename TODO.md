@@ -73,7 +73,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 - **Qualify Central Durable production host-loss/database failover before adoption** (`docs/pi-durable-evaluation.md`, `docs/testing.md`; question 72 (Pi Durable) remains open). Frozen local process/Docker, full unit/DST/infrastructure, real-PostgreSQL and actual image/worker qualification passed2026-10-05. Qualify production ownership/security/recovery under host loss and database failover; source GCP/native-VM contracts are not live GCP qualification. No deployment or user-data migration is authorized; parent owns service operation.
 
-- [x] **Independent central process lifecycle** (implemented locally 2026-10-03; not deployed). Central models/MCP/inbox/browser operate off-VM; work/visible demand warms execution eagerly. Immutable lazy VM invocations hold lifecycle-acquired execution leases; revocable ownership, serialized alert authority and private instruction-generation adoption have regressions. Policy: `docs/lifecycle.md`; qualification evidence and limits: `docs/testing.md`.
+- [x] **Independent central process lifecycle** (implemented locally 2026-10-03; not deployed). Central models/MCP/inbox/browser operate off-VM; work/visible demand warms execution eagerly. Immutable lazy VM invocations hold lifecycle-acquired execution leases; revocable ownership, serialized alert authority and first-turn pinned instructions have regressions. Policy: `docs/lifecycle.md`; qualification evidence and limits: `docs/testing.md`.
 
 - **Retain codemode loadout failure diagnostics** (`docs/postmortems/2026-10-03-codemode-prepare-loadout.md`). Tests first: retain sanitized, bounded `prepare_loadout` extension failure cause/stack in durable user-visible diagnostics.
 

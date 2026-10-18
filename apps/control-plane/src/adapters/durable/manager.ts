@@ -399,7 +399,7 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
         });
       const agent = this.manager.get(orb.id);
       return agent
-        ? agent.hydrateExecution(withAbortSignal(context.signal, BACKGROUND_CONTEXT))
+        ? agent.checkExecutionReady(withAbortSignal(context.signal, BACKGROUND_CONTEXT))
         : errAsync(durableError("central agent unavailable", true));
     });
   }

@@ -43,8 +43,6 @@ const summary = {
 
 const privatePolicy =
   "PRIVATE_POLICY_SENTINEL: Never write MUST_NOT_EXIST. After readiness, append allowed to ALLOWED_AFTER_READY instead.";
-const hookPolicy =
-  "HOOK_POLICY_SENTINEL: Never write MUST_NOT_EXIST or ALLOWED_AFTER_READY. Append changed to HOOK_ALLOWED_AFTER_READY instead.";
 
 const it = test.runIf(process.env["PI_ORB_E2E_BACKEND"] === "process");
 
@@ -54,7 +52,6 @@ export type IndependentCase =
   | "host-failure"
   | "ready"
   | "git-stop"
-  | "hook-policy"
   | "git-abort"
   | "artifact-restart";
 
@@ -84,7 +81,7 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
       throw new Error("missing barrier listener");
     writeFileSync(
       join(workspace, ".agents", "setup"),
-      `#!/bin/sh\nnode -e 'fetch("http://127.0.0.1:${gateAddress.port}/hold").then(r=>r.text()).then(()=>{})'\n${cancellation === "hook-policy" ? `printf '%s' '${hookPolicy}' > AGENTS.md\n` : ""}`,
+      `#!/bin/sh\nnode -e 'fetch("http://127.0.0.1:${gateAddress.port}/hold").then(r=>r.text()).then(()=>{})'\n`,
       { mode: 0o755 },
     );
     writeFileSync(join(workspace, "AGENTS.md"), privatePolicy);
@@ -274,35 +271,8 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
                 summary,
               ]
             : []),
-          ...(cancellation === "ready" || cancellation === "hook-policy"
+          ...(cancellation === "ready"
             ? [
-                ...[
-                  {
-                    match: {
-                      toolResultContains: { regex: "Host instructions adopted; re-evaluate" },
-                    },
-                    steps: [
-                      {
-                        type: "text",
-                        content:
-                          cancellation === "hook-policy"
-                            ? "HOOK_POLICY_REEVALUATED"
-                            : "READY_POLICY_REEVALUATED",
-                      },
-                      {
-                        type: "toolCall",
-                        name: "bash",
-                        arguments: {
-                          command:
-                            cancellation === "hook-policy"
-                              ? "printf 'changed\\n' >> HOOK_ALLOWED_AFTER_READY; printf VM_EXECUTED_ONCE"
-                              : "printf 'allowed\\n' >> ALLOWED_AFTER_READY; printf VM_EXECUTED_ONCE",
-                        },
-                      },
-                      stop,
-                    ],
-                  },
-                ],
                 {
                   match: { toolResultContains: { regex: "VM_EXECUTED_ONCE" } },
                   steps: [{ type: "text", content: "READY_VM_DONE" }, stop],
@@ -821,17 +791,16 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
         });
         expect(existsSync(join(workspace, "MUST_NOT_EXIST"))).toBe(false);
         release();
-      } else if (cancellation === "ready" || cancellation === "hook-policy") {
+      } else if (cancellation === "ready") {
         await expect(
           runTerminal(cp.baseUrl, orb, "pi-orb self --json", "SELF_DONE"),
         ).rejects.toThrow(/ready=false.*code=1013/);
         release();
-        await waitFor("execution ready and instructions adopted", async () => {
+        await waitFor("execution ready", async () => {
           const logs = [cp!.logs.join("").slice(logStart)];
           return (await api(cp!.baseUrl, "GET", `/api/v1/orbs/${orb}`)).body["state"] ===
             "running" &&
-            lifecycleEdge(logs, orb, "execution.tool_ready", { call_id: executionCallId }) &&
-            lifecycleEdge(logs, orb, "instructions.host_adopted")
+            lifecycleEdge(logs, orb, "execution.tool_ready", { call_id: executionCallId })
             ? true
             : null;
         });
@@ -856,14 +825,7 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
               outcome: "completed",
             }) &&
             committedToolOutput(history.records, "VM_EXECUTED_ONCE") &&
-            message("assistant", "READY_VM_DONE", true) &&
-            message(
-              "assistant",
-              cancellation === "hook-policy"
-                ? "HOOK_POLICY_REEVALUATED"
-                : "READY_POLICY_REEVALUATED",
-              true,
-            )
+            message("assistant", "READY_VM_DONE", true)
             ? true
             : null;
         });
@@ -885,20 +847,7 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
         await forceReconcilePass(cp, orb);
         expect((await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}`)).body["state"]).toBe("running");
         expect(existsSync(join(workspace, "MUST_NOT_EXIST"))).toBe(false);
-        if (cancellation === "hook-policy") {
-          await expectPage(
-            page.getByText("HOOK_POLICY_REEVALUATED", { exact: true }),
-          ).toBeVisible();
-          expect(existsSync(join(workspace, "ALLOWED_AFTER_READY"))).toBe(false);
-          expect(readFileSync(join(workspace, "HOOK_ALLOWED_AFTER_READY"), "utf8")).toBe(
-            "changed\n",
-          );
-        } else {
-          await expectPage(
-            page.getByText("READY_POLICY_REEVALUATED", { exact: true }),
-          ).toBeVisible();
-          expect(readFileSync(join(workspace, "ALLOWED_AFTER_READY"), "utf8")).toBe("allowed\n");
-        }
+        expect(readFileSync(join(workspace, "ALLOWED_AFTER_READY"), "utf8")).toBe("allowed\n");
         const identity = await runTerminal(
           cp.baseUrl,
           orb,
@@ -920,15 +869,12 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
         const workspaceDecision = models.filter((request) => request["matchedRuleIndex"] === 3);
         expect(first).toHaveLength(1);
         expect(workspaceDecision).toHaveLength(1);
-        expect(effectiveOpenAIResponseInstructions(first[0]?.body)).toContain(privatePolicy);
-        expect(effectiveOpenAIResponseInstructions(workspaceDecision[0]?.body)).toContain(
-          privatePolicy,
-        );
-        if (cancellation === "hook-policy") {
-          const reevaluated = models.filter((request) => request["matchedRuleIndex"] === 4);
-          expect(reevaluated).toHaveLength(1);
-          expect(effectiveOpenAIResponseInstructions(reevaluated[0]?.body)).toContain(hookPolicy);
-          expect(JSON.stringify(history.body)).not.toContain("HOOK_POLICY_SENTINEL");
+        const pinnedInstructions = effectiveOpenAIResponseInstructions(first[0]?.body);
+        expect(pinnedInstructions).toContain(privatePolicy);
+        expect(pinnedInstructions).toContain("Pinned resource fixture");
+        for (const request of models) {
+          if (request["matchedRuleIndex"] === 2 || request["matchedRuleIndex"] === 5) continue;
+          expect(effectiveOpenAIResponseInstructions(request.body)).toBe(pinnedInstructions);
         }
         expect(
           execFileSync("git", ["-C", workspace, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),

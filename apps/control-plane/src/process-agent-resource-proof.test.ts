@@ -82,7 +82,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "resource-composition-proof-"));
   await mkdir(join(root, ".agents/skills/proof"), { recursive: true });
   await writeFile(join(root, skillPath), skill);
-  let hostInstructions = "hook-modified instructions";
+  await writeFile(join(root, "AGENTS.md"), "hook-modified instructions");
   const server = buildExecutionServer({
     token: "proof-token",
     incarnation: "0",
@@ -92,9 +92,6 @@ async function fixture() {
       incarnation: "0",
       pid: process.pid,
       checkoutCommit: snapshot.commitSha,
-      instructions: [{ path: join(root, "AGENTS.md"), content: hostInstructions }],
-      skills: [{ path: join(root, skillPath), content: skill }],
-      resources: [],
     }),
   });
   const baseUrl = await server.listen({ host: "127.0.0.1", port: 0 });
@@ -144,9 +141,6 @@ async function fixture() {
     bindings: () => bindings,
     modelSetups: () => readyReads,
     lease: () => lease,
-    setHostInstructions: (text: string) => {
-      hostInstructions = text;
-    },
     state: async (
       state: "running" | "stopped" | "starting",
       newAdmission = false,
@@ -175,7 +169,12 @@ async function fixture() {
 }
 
 type Bundle = Awaited<ReturnType<Awaited<ReturnType<typeof fixture>>["openContext"]>>;
-async function invoke(bundle: Bundle, name: string, args: Record<string, unknown>) {
+async function invoke(
+  bundle: Bundle,
+  name: string,
+  args: Record<string, unknown>,
+  waiting?: () => Promise<void>,
+) {
   const tool = required(
     bundle.registry
       .snapshot()
@@ -190,8 +189,12 @@ async function invoke(bundle: Bundle, name: string, args: Record<string, unknown
     taskId: 1,
     callId: "proof-call",
     diagnostic: (value: ToolDiagnostic) => diagnostics.push(value),
+    output: () => {},
     details: async (value: { executionWait?: boolean }) => {
-      if (value.executionWait) abort.abort();
+      if (value.executionWait) {
+        if (waiting) await waiting();
+        else abort.abort();
+      }
     },
   } as unknown as ToolExecutionApi;
   const result = await tool.execute(args, api, {
@@ -338,27 +341,35 @@ it.each(["manual", "sleep"] as const)(
   },
 );
 
-it("re-evaluates hook instruction offers and routes ready read/write/edit/read through real execution HTTP, not PG", async () => {
+it("executes the first boot-time command under pinned instructions and routes live read/write/edit/read through HTTP", async () => {
   const f = await fixture();
   let bundle: Bundle | undefined;
   try {
     f.releaseGit.resolve();
     bundle = await f.openContext();
-    bundle.prompt?.("root");
-    const oldEnv = required(required(bundle.envFor)({ conversationId: "root" } as never));
-    (await required(bundle.hydrateExecution)(BACKGROUND_CONTEXT))._unsafeUnwrap();
-    await f.state("running");
-    const stale = await oldEnv.writeFile(skillPath, "must not write", BACKGROUND_CONTEXT);
-    expect(await readFile(join(f.root, skillPath), "utf8")).toBe(skill);
-    expect(stale.ok).toBe(false);
-    if (!stale.ok) expect(stale.error.message).toContain("re-evaluate");
-    await oldEnv.cleanup(BACKGROUND_CONTEXT);
-    expect(bundle.prompt?.("root")).toContain("hook-modified instructions");
-    f.setHostInstructions("hook instructions revised again");
-    (await required(bundle.hydrateExecution)(BACKGROUND_CONTEXT))._unsafeUnwrap();
-    expect(bundle.prompt?.("root")).toContain("hook instructions revised again");
-    expect(bundle.prompt?.("root")).not.toContain("immutable Git instructions");
-    await f.state("running");
+    const instructions = bundle.instructions;
+    expect(instructions).toContain("immutable Git instructions");
+    expect(instructions).toContain("composition proof");
+    expect(instructions).not.toMatch(/pending|re-evaluat|hook-modified/i);
+    let waits = 0;
+    const first = await invoke(
+      bundle,
+      "bash",
+      { command: "printf FIRST_COMMAND; pwd" },
+      async () => {
+        waits++;
+        expect(f.bindings()).toBe(0);
+        await f.state("running");
+      },
+    );
+    expect(first.isError, JSON.stringify(first)).not.toBe(true);
+    expect(JSON.stringify(first.output)).toContain("FIRST_COMMAND");
+    expect(JSON.stringify(first.output)).toContain(f.root);
+    expect(waits).toBe(1);
+    expect(bundle.instructions).toBe(instructions);
+    await writeFile(join(f.root, "AGENTS.md"), "host instructions revised again");
+    (await required(bundle.checkExecutionReady)(BACKGROUND_CONTEXT))._unsafeUnwrap();
+    expect(bundle.instructions).toBe(instructions);
     const beforeBundledRead = f.bindings();
     const bundledAlias = await invoke(bundle, "read", {
       path: "/opt/pi-orb/./skills/cloud-identity/../boot-hooks/SKILL.md",
@@ -404,9 +415,7 @@ it("re-evaluates hook instruction offers and routes ready read/write/edit/read t
     await f.state("starting");
     await f.reopenLease();
     bundle = await f.openContext();
-    // A new off-host context uses the immutable baseline, not the last host offer.
-    expect(bundle.prompt?.("root")).toContain("immutable Git instructions");
-    expect(bundle.prompt?.("root")).not.toContain("hook instructions revised again");
+    expect(bundle.instructions).toBe(instructions);
     const priorBindings = f.bindings();
     expect((await invoke(bundle, "read", { path: skillPath })).output).toEqual([
       { type: "text", text: skill },

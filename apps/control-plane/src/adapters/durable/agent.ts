@@ -164,7 +164,6 @@ export interface DurableAgentOptions {
   readonly storage: Storage;
   readonly env: ExecutionEnv;
   readonly envFor?: (target: EnvTarget) => ExecutionEnv;
-  readonly prompt?: (conversationId: string) => string;
   readonly resume?: boolean;
   readonly checkAdmission?: () => ResultAsync<void, RuntimeClientError>;
   readonly checkInputAdmission?: (browser: boolean) => ResultAsync<void, InputAdmissionError>;
@@ -174,7 +173,7 @@ export interface DurableAgentOptions {
   readonly openSignal?: AbortSignal;
   readonly ownershipSignal?: AbortSignal;
   readonly executionActive?: () => boolean;
-  readonly hydrateExecution?: (
+  readonly checkExecutionReady?: (
     context: import("@earendil-works/chord").Context,
   ) => ResultAsync<void, RuntimeClientError>;
   readonly models: Models;
@@ -327,7 +326,7 @@ export class DurableAgent implements AgentSessionFacade {
       : options.models;
     return ResultAsync.fromPromise(
       (async () => {
-        options.registry.install(promptExtension(options.prompt ?? options.instructions));
+        options.registry.install(promptExtension(options.instructions));
         stage = "storage";
         harness = await Harness.open(
           options.storage,
@@ -665,10 +664,10 @@ export class DurableAgent implements AgentSessionFacade {
   executionActive(): boolean {
     return this.options.executionActive?.() ?? false;
   }
-  hydrateExecution(
+  checkExecutionReady(
     ctx: import("@earendil-works/chord").Context,
   ): ResultAsync<void, RuntimeClientError> {
-    return this.options.hydrateExecution?.(ctx) ?? okAsync(undefined);
+    return this.options.checkExecutionReady?.(ctx) ?? okAsync(undefined);
   }
   workActive(): boolean {
     return !this.paused && this.unfinishedWork();

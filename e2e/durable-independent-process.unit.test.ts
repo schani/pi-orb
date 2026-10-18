@@ -35,12 +35,12 @@ it("owns scoped summary, model, backend wait and final commit barriers before UI
   expect(fixture).toContain('"ready tool and assistant committed"');
 });
 
-it("preserves all six existing acceptance registrations separately from followups", () => {
+it("registers execution acceptance separately from resource followups", () => {
   const original = readFileSync(
     new URL("./durable-independent-process.e2e.test.ts", import.meta.url),
     "utf8",
   );
-  for (const name of ["abort", "stop", "host-failure", "ready", "git-stop", "hook-policy"]) {
+  for (const name of ["abort", "stop", "host-failure", "ready", "git-stop"]) {
     expect(original).toContain(`"${name}"`);
   }
   const followup = readFileSync(
@@ -49,4 +49,17 @@ it("preserves all six existing acceptance registrations separately from followup
   );
   expect(followup).toContain('registerIndependentCase("git-abort")');
   expect(followup).toContain('registerIndependentCase("artifact-restart")');
+});
+
+it("scripts one VM effect and completes it directly after readiness", () => {
+  expect(fixture.match(/printf VM_EXECUTED_ONCE/g)).toHaveLength(1);
+  expect(fixture).toContain(">> ALLOWED_AFTER_READY; printf VM_EXECUTED_ONCE");
+  expect(fixture).toContain(
+    'expect(readFileSync(join(workspace, "ALLOWED_AFTER_READY"), "utf8")).toBe("allowed\\n")',
+  );
+});
+
+it("synchronizes cross-axis browser input after the first summary", () => {
+  const crossAxis = readFileSync(new URL("./cross-axis.e2e.test.ts", import.meta.url), "utf8");
+  expect(crossAxis).toContain("request.status === 200 && request.matchedRuleIndex === 2");
 });

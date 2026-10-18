@@ -19,7 +19,6 @@ import {
   refreshProcessMcpTool,
   scopedMcpAuth,
   scopedMcpHeaders,
-  snapshotSkills,
 } from "./process-agent-composition.ts";
 import { makeHarness, makeOrbRow, makeProjectRow, TEST_USER_ID } from "./testkit/fixtures.ts";
 
@@ -151,7 +150,7 @@ describe("process agent composition", () => {
       expect(models).toHaveBeenCalledOnce();
       expect(ready).not.toHaveBeenCalled();
       if (result.isOk()) {
-        expect(result.value.instructions).toContain("Required repository resources are loaded");
+        expect(result.value.instructions).not.toMatch(/pending|<cwd>/i);
         await result.value.closeResources?.();
       }
     } finally {
@@ -243,7 +242,7 @@ describe("process agent composition", () => {
     }
   });
 
-  it("hydrates authoritative resources before publishing ready compute", async () => {
+  it("checks execution metadata before publishing ready compute without changing pinned instructions", async () => {
     const harness = makeHarness();
     const orb = makeOrbRow("central", "project", "running", { hostRef: "executor" });
     harness.store.seedProject(makeProjectRow("project"));
@@ -265,9 +264,6 @@ describe("process agent composition", () => {
         ...binding,
         pid: 1,
         checkoutCommit: "commit",
-        instructions: [{ path: "/repo/AGENTS.md", content: "PRIVATE HOST INSTRUCTIONS" }],
-        skills: [],
-        resources: [],
         hooks,
       }),
     );
@@ -287,8 +283,13 @@ describe("process agent composition", () => {
       });
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       if (result.isErr()) return;
-      expect((await result.value.hydrateExecution?.(BACKGROUND_CONTEXT))?.isOk()).toBe(true);
-      expect(result.value.prompt?.("root")).toContain("PRIVATE HOST INSTRUCTIONS");
+      const instructions = result.value.instructions;
+      expect(ready).not.toHaveBeenCalled();
+      expect((await result.value.checkExecutionReady?.(BACKGROUND_CONTEXT))?.isOk()).toBe(true);
+      expect(ready).toHaveBeenCalledTimes(1);
+      expect(result.value.instructions).toBe(instructions);
+      harness.store.seedOrb({ ...orb, agentAdmissionVersion: orb.agentAdmissionVersion + 1 });
+      expect((await result.value.checkExecutionReady?.(BACKGROUND_CONTEXT))?.isErr()).toBe(true);
       await result.value.closeResources?.();
     } finally {
       ready.mockRestore();
@@ -329,21 +330,6 @@ describe("process agent composition", () => {
       "X-Mode": "local",
     });
     expect(scopedMcpHeaders(server.headers, {}).isErr()).toBe(true);
-  });
-
-  it("projects skill metadata without placing bodies in the prompt", () => {
-    const skills = snapshotSkills([
-      {
-        path: "/repo/.agents/skills/demo/SKILL.md",
-        content: "---\nname: demo\ndescription: Inspect the demo\n---\nSecret body not in system",
-      },
-    ]);
-    expect(skills[0]).toMatchObject({
-      name: "demo",
-      description: "Inspect the demo",
-      filePath: "/repo/.agents/skills/demo/SKILL.md",
-    });
-    expect(JSON.stringify(skills)).not.toContain("Secret body");
   });
 
   it("attempts execution cleanup when tool cleanup fails", async () => {
@@ -521,16 +507,10 @@ describe("process agent composition", () => {
     expect(cleaned).toEqual(["tools", "env"]);
   });
 
-  it("preserves timezone and APPEND_SYSTEM context with generic tool guidance", () => {
-    const system = processAgentSystemContext("Asia/Tokyo", [
-      { path: "/repo/.pi/APPEND_SYSTEM.md", content: "Repository environment context" },
-      { path: "/repo/.pi/SYSTEM.md", content: "Do not inject this resource" },
-    ]);
+  it("preserves timezone with generic tool guidance", () => {
+    const system = processAgentSystemContext("Asia/Tokyo");
     expect(system).toContain("User’s time zone: Asia/Tokyo");
-    expect(system).toContain("Repository environment context");
     expect(system).toContain("Use codemode to compose tool calls.");
     expect(system).not.toMatch(/orb_spawn|subagent/i);
-    expect(system).not.toContain("Do not inject this resource");
-    expect(system).not.toContain("profiles");
   });
 });

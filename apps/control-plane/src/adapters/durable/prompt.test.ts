@@ -4,7 +4,6 @@ import { renderPrompt } from "./prompt.ts";
 describe("central data-only prompt", () => {
   it("orders personal, repository and project instructions and preserves skill inventory", () => {
     const prompt = renderPrompt({
-      cwd: "/guest/repo",
       personal: "PERSONAL",
       repository: [{ path: "/guest/AGENTS.md", content: "REPO" }],
       project: "PROJECT",
@@ -14,6 +13,6 @@ describe("central data-only prompt", () => {
     expect(prompt.indexOf("PERSONAL")).toBeLessThan(prompt.indexOf("REPO"));
     expect(prompt.indexOf("REPO")).toBeLessThan(prompt.indexOf("PROJECT"));
     expect(prompt).toContain("APPEND");
-    expect(prompt).toContain("/guest/repo");
+    expect(prompt).not.toContain("<cwd>");
   });
 });
