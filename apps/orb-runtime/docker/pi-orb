@@ -9,6 +9,17 @@ else
 fi
 
 case "${1:-}" in
+  help|--help|-h)
+    exec node "$app_root/apps/orb-runtime/src/cli-help-entry.ts" "$@"
+    ;;
+esac
+case "${2:-}" in
+  --help|-h)
+    exec node "$app_root/apps/orb-runtime/src/cli-help-entry.ts" "$@"
+    ;;
+esac
+
+case "${1:-}" in
   id-token)
     shift
     exec node "$app_root/apps/orb-runtime/src/id-token/cli.ts" "$@"
@@ -45,20 +56,6 @@ case "${1:-}" in
     exec node "$app_root/apps/orb-runtime/src/inspection/cli.ts" "$@"
     ;;
   *)
-    echo "usage:" >&2
-    echo "  pi-orb spawn (--prompt <text> | --prompt-file <path|->) [--name <name>] [--id <uuid>] [--json]" >&2
-    echo "  pi-orb archive" >&2
-    echo "  pi-orb delete" >&2
-    echo "  pi-orb sleep <positive integer><s|m|h|d>" >&2
-    echo '  pi-orb send <orb-id> "message" [--request-id <id>]' >&2
-    echo '  pi-orb alert "message" [--request-id <id>]' >&2
-    echo "  pi-orb host <file> [path] [--request-id <uuid>]" >&2
-    echo "  pi-orb host ls" >&2
-    echo "  pi-orb host rm <path>" >&2
-    echo "  pi-orb self [--json]" >&2
-    echo "  pi-orb orbs [query] [--json]" >&2
-    echo "  pi-orb transcript <orb-id> [--json]" >&2
-    echo "  pi-orb id-token --audience <audience> [--ttl-seconds <60..3600>]" >&2
-    exit 2
+    exec node "$app_root/apps/orb-runtime/src/cli-help-entry.ts" "$@"
     ;;
 esac

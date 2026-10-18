@@ -121,6 +121,7 @@ export async function probeNativeSdk({
   onRoot,
   beforeQuery,
   onMessage,
+  onRequest,
   env: extraEnv = {},
   allowPorts = [],
 } = {}) {
@@ -157,6 +158,7 @@ export async function probeNativeSdk({
       request.on("end", () => {
         const body = JSON.parse(text);
         text = "";
+        onRequest?.(body);
         requestSettings.push({
           model: body.model,
           effort: body.output_config?.effort ?? null,

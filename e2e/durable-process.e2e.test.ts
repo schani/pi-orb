@@ -375,7 +375,7 @@ text('NOTIFY_SPAWNED');`),
             steps: [
               codemode(`
 text(await tools.bash({command:'printf ready > notify-child-ready; read value < notify-alert-release'}));
-text(await tools.orb_alert({message:${JSON.stringify(message)}}));
+text(await tools.notify_parent({message:${JSON.stringify(message)}}));
 text(await tools.bash({command:'printf accepted > notify-alert-accepted; read value < notify-child-release'}));
 text('NOTIFY_CHILD_FINISHED');`),
               stop,

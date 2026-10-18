@@ -1,5 +1,5 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { ToolExecutionApi } from "@earendil-works/pi-durable";
+import { ROOT_CONVERSATION_ID, type ToolExecutionApi } from "@earendil-works/pi-durable";
 import { OrbSpawnRequestSchema } from "@pi-orb/protocol";
 import { errAsync, okAsync } from "neverthrow";
 import { assert, expect, it, vi } from "vitest";
@@ -46,6 +46,7 @@ it("uses durable child task identities and does not expose authority arguments",
     "orb_spawn",
     "orb_send",
     "orb_alert",
+    "notify_parent",
     "orb_sleep",
     "orb_archive",
     "orb_delete",
@@ -71,7 +72,7 @@ it.each(["denied", "unbound"] as const)(
     const invoke = vi.fn<OrbAgentOperations["invoke"]>(() => okAsync({ accepted: true }));
     const notify = vi.fn(() => errAsync({ code: "unauthorized" as const, message: "revoked" }));
     const alert = createOrbTools({ invoke }, binding === "denied" ? notify : undefined).find(
-      (tool) => tool.name === "orb_alert",
+      (tool) => tool.name === "notify_parent",
     );
     assert.isDefined(alert);
     const result = await alert.execute(
@@ -93,9 +94,7 @@ it.each(["denied", "unbound"] as const)(
 it("describes family inspection and alerts without parent delivery", () => {
   const tools = createOrbTools({ invoke: () => okAsync({}) });
   expect(tools.find((tool) => tool.name === "orb_self")?.description).toMatch(/parent.*child/i);
-  expect(tools.find((tool) => tool.name === "orb_alert")?.description).toContain(
-    "Alerts are not sent to the parent orb.",
-  );
+  expect(tools.find((tool) => tool.name === "orb_alert")?.description).toContain("Notify the user");
 });
 
 it("binds peer sends to durable tool call identity, never model sender input", async () => {
@@ -104,6 +103,9 @@ it("binds peer sends to durable tool call identity, never model sender input", a
   expect(tool).toBeDefined();
   if (!tool) return;
   expect(tool.replay).toBe("safe");
+  expect(tool.description).toBe(
+    "Send a message to another orb and wake it. Orbs do not share file systems! Acceptance is not a reply.",
+  );
   await tool.execute(
     { orbId: "target", message: "hi" },
     { taskId: "task", callId: "call" } as never,
@@ -124,4 +126,70 @@ it("returns model output without changing schema-less programmatic text", async 
     BACKGROUND_CONTEXT,
   );
   expect(result).toEqual({ output: [{ type: "text", text: '{"accepted":true}' }] });
+});
+
+it("notifies only the parent from a child, retaining admission and call identity", async () => {
+  const invoke = vi.fn<OrbAgentOperations["invoke"]>(() => okAsync({ accepted: true }));
+  const notify = vi.fn(() => okAsync({ accepted: true as const }));
+  const tool = createOrbTools({ invoke }, notify).find((tool) => tool.name === "notify_parent")!;
+  expect(tool.replay).toBe("unsafe");
+  const api = { taskId: 42, conversationId: 7, callId: "outer:nested:0" } as ToolExecutionApi;
+  expect(await tool.execute({ message: "report" }, api, BACKGROUND_CONTEXT)).toEqual({
+    output: [{ type: "text", text: '{"accepted":true}' }],
+  });
+  expect(invoke).toHaveBeenCalledExactlyOnceWith(
+    { kind: "notification_admission" },
+    '[42,"outer:nested:0"]',
+  );
+  expect(notify).toHaveBeenCalledExactlyOnceWith("report", api, BACKGROUND_CONTEXT);
+});
+
+it("does not notify when application admission is rejected", async () => {
+  const invoke = vi.fn<OrbAgentOperations["invoke"]>(() =>
+    errAsync({ code: "unauthorized", message: "stopped" }),
+  );
+  const notify = vi.fn(() => okAsync({ accepted: true as const }));
+  const tool = createOrbTools({ invoke }, notify).find((tool) => tool.name === "notify_parent")!;
+  const result = await tool.execute(
+    { message: "report" },
+    { taskId: 42, conversationId: 7, callId: "call" } as ToolExecutionApi,
+    BACKGROUND_CONTEXT,
+  );
+  expect(result.isError).toBe(true);
+  expect(JSON.stringify(result.output)).toContain("stopped");
+  expect(notify).not.toHaveBeenCalled();
+});
+
+it.each([
+  { name: "orb_alert", conversationId: 7 },
+  { name: "notify_parent", conversationId: ROOT_CONVERSATION_ID },
+])("rejects $name in the wrong conversation before effects", async ({ name, conversationId }) => {
+  const invoke = vi.fn<OrbAgentOperations["invoke"]>(() => okAsync({ accepted: true }));
+  const notify = vi.fn(() => okAsync({ accepted: true as const }));
+  const tool = createOrbTools({ invoke }, notify).find((tool) => tool.name === name)!;
+  const result = await tool.execute(
+    { message: "report" },
+    { taskId: 42, conversationId, callId: "call" } as ToolExecutionApi,
+    BACKGROUND_CONTEXT,
+  );
+  expect(result.isError).toBe(true);
+  expect(JSON.stringify(result.output)).toContain("unauthorized");
+  expect(invoke).not.toHaveBeenCalled();
+  expect(notify).not.toHaveBeenCalled();
+});
+
+it("alerts only the user from the root", async () => {
+  const invoke = vi.fn<OrbAgentOperations["invoke"]>(() => okAsync({ accepted: true }));
+  const notify = vi.fn(() => okAsync({ accepted: true as const }));
+  const tool = createOrbTools({ invoke }, notify).find((tool) => tool.name === "orb_alert")!;
+  await tool.execute(
+    { message: "report" },
+    { taskId: 42, conversationId: ROOT_CONVERSATION_ID, callId: "call" } as ToolExecutionApi,
+    BACKGROUND_CONTEXT,
+  );
+  expect(invoke).toHaveBeenCalledExactlyOnceWith(
+    { kind: "alert", message: "report" },
+    '[42,"call"]',
+  );
+  expect(notify).not.toHaveBeenCalled();
 });

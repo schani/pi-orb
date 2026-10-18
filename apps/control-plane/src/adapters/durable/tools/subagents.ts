@@ -21,7 +21,7 @@ import {
 import { errorResult } from "./catalog.ts";
 
 export const TOOLS_EXTENSION = "orb.tools";
-/** Selected only by children: their codemode lacks the subagent tools and orb_spawn. */
+/** Selected only by children: their codemode lacks subagent tools, orb_spawn and orb_alert. */
 export const CHILD_TOOLS_EXTENSION = "orb.child-tools";
 type Receipt = { anchor: number; prompt: string; description: string; model?: string };
 export const ChildReceipts = defineDoc<{ children: Record<string, Receipt> }>({

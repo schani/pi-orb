@@ -175,7 +175,11 @@ it.each(["root", "child"] as const)(
       const names = [
         ...orbTools
           .map((tool) => tool.name)
-          .filter((name) => scope === "root" || name !== "orb_spawn"),
+          .filter((name) =>
+            scope === "root"
+              ? name !== "notify_parent"
+              : !["orb_spawn", "orb_alert"].includes(name),
+          ),
         ...(scope === "root" ? subagentTools.map((tool) => tool.name) : []),
       ];
       const { metadata, result } = await nativeMetadata(
@@ -314,6 +318,94 @@ it.each(["root", "child"] as const)(
         },
         required: ["content"],
       });
+    } finally {
+      await bundle.close();
+    }
+  },
+);
+
+it.each(["root", "child"] as const)(
+  "separates notification discovery, descriptions and native calls in %s",
+  async (scope) => {
+    const effects: string[] = [];
+    const own = scope === "root" ? "orb_alert" : "notify_parent";
+    const hidden = scope === "root" ? "notify_parent" : "orb_alert";
+    const bundle = createDurableTools({
+      additionalTools: [
+        ...createOrbTools(
+          {
+            invoke: (request) => {
+              effects.push(request.kind);
+              return okAsync({ accepted: true });
+            },
+          },
+          () => {
+            effects.push("notify");
+            return okAsync({ accepted: true });
+          },
+        ),
+        defineTool({
+          name: "probe_hidden",
+          description: "Probe native notification scope",
+          parameters: Type.Object({}),
+          execute: async (_args, api, ctx) => {
+            const result = await api.executeTool(hidden, { message: "forbidden" }, ctx);
+            return { output: [{ type: "text", text: String(result.isError) }] };
+          },
+        }),
+      ],
+    });
+    try {
+      expect((await bundle.ready()).isOk()).toBe(true);
+      const extension = scope === "root" ? bundle.extension : bundle.childExtension;
+      expect(extension.tools?.map((tool) => tool.name)).toContain(own);
+      expect(extension.tools?.map((tool) => tool.name)).not.toContain(hidden);
+      if (scope === "root") {
+        expect(bundle.catalog.definitions().map((tool) => tool.name)).not.toContain(hidden);
+        expect(
+          (
+            await bundle.catalog.invoke(
+              hidden,
+              { message: "forbidden" },
+              {} as ToolExecutionApi,
+              BACKGROUND_CONTEXT,
+            )
+          ).isErr(),
+        ).toBe(true);
+      }
+      const { metadata, result } = await nativeMetadata(
+        bundle,
+        scope,
+        `
+        let described = false, called = false;
+        try { described = (await describeTool("${hidden}")) !== undefined; } catch {}
+        try { await tools["${hidden}"]({message:"forbidden"}); called = true; } catch {}
+        text({
+          listed: ALL_TOOLS.some((tool) => tool.name === "${hidden}"),
+          searched: await searchTools("${hidden}"),
+          described, called,
+          namespace: await describeNamespace("orb"),
+          own: await describeTool("${own}"),
+          accepted: await tools["${own}"]({message:"report"}),
+          nativeDenied: await tools.probe_hidden({}),
+        });
+      `,
+      );
+      expect(result.isError).toBe(false);
+      const payload = JSON.parse(
+        result.output!.filter((item) => item.type === "text").at(-1)!.text,
+      );
+      expect(payload.listed).toBe(false);
+      expect(payload.described).toBe(false);
+      expect(payload.called).toBe(false);
+      expect(JSON.stringify(payload.searched)).not.toContain(hidden);
+      expect(JSON.stringify(payload.namespace)).not.toContain(hidden);
+      expect(payload.own).toContain(own);
+      expect(payload.accepted).toBe('{"accepted":true}');
+      expect(payload.nativeDenied).toBe("true");
+      expect(metadata).not.toContain(hidden);
+      expect(metadata).toContain(own);
+      expect(effects).toEqual(scope === "root" ? ["alert"] : ["notification_admission", "notify"]);
     } finally {
       await bundle.close();
     }

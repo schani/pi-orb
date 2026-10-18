@@ -84,6 +84,8 @@ export interface NativeProbeOptions {
   withWorkflow?: boolean;
   beforeQuery?: (options: Options) => void | Promise<void>;
   onMessage?: (message: SDKMessage) => void | Promise<void>;
+  /** Synthetic loopback provider requests only; never headers or credentials. */
+  onRequest?: (body: Record<string, unknown>) => void;
   /** Merged over the probe's isolated native environment. */
   env?: Record<string, string>;
   /** Loopback ports the network guard admits besides the fake API. */
