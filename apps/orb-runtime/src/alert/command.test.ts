@@ -24,3 +24,20 @@ it("reports lost response as unknown outcome with replay identity", async () => 
   );
   expect(result._unsafeUnwrapErr()).toMatchObject({ code: "unknown_outcome", requestId: "fixed" });
 });
+
+it("reports a synchronous transport throw with replay identity", async () => {
+  const result = await sendAlert(
+    { message: "heads up", requestId: "stable-id" },
+    {
+      token: "secret",
+      port: 8080,
+      fetch: () => {
+        throw new Error("fetch failed before returning a promise");
+      },
+    },
+  );
+  expect(result._unsafeUnwrapErr()).toMatchObject({
+    code: "unknown_outcome",
+    requestId: "stable-id",
+  });
+});

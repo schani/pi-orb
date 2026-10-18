@@ -27,18 +27,19 @@ apps/
   control-plane/
     src/
       domain/           # polling/lifecycle state machines and interfaces
-      adapters/         # PostgreSQL/PGlite clients and Docker/process/GCE adapters
+      adapters/         # central Pi Durable, PostgreSQL/PGlite, host adapters
       http/             # Fastify routes and WebSocket proxy
   orb-runtime/
     src/
-      pi/               # Pi SDK integration and history mapping
+      claude/           # native Claude harness, boot and history
+      execution/        # workspace RPC and guest services
       http/             # history pull and live WebSocket endpoints
       inspection/       # in-orb sibling listing and replicated-transcript CLI
   web/                  # React browser UI
 
 packages/
   protocol/             # TypeBox schemas and inferred wire/history types
-  luna/                 # Shared Luna model/request/response adapter policy
+  luna/                 # Central auxiliary model/request/response adapter policy
 
 infra/
   opentofu/             # added when the cloud slice begins
@@ -48,7 +49,7 @@ package.json
 tsconfig.base.json
 ```
 
-`protocol` is shared because it has three real consumers. `luna` was extracted only after both the control plane's orb auto-naming and the runtime's turn notifications needed the same model selection, no-tool/minimal-reasoning options, response parsing, and typed provider-error mapping (decided 2026-08-07); prompts, credentials, scheduling, and product-specific output validation remain in their owning applications. Keep `OrbHostProvider`, repositories, broader Pi integration, fakes, and tests inside the application that owns them. Extract other domain, adapter, provider, or test-support packages only when another application genuinely needs them.
+`protocol` is shared because it has three real consumers. Central auxiliary inference uses `luna` for fixed model selection, no-tool/minimal-reasoning options, response parsing and typed provider errors. The concrete turn-summary adapter belongs in `apps/control-plane/src/adapters/luna-summarizer.ts`; the summary coordinator consumes its port without importing Pi. Prompts, credentials, scheduling and product-specific output validation remain with their owners. Keep `OrbHostProvider`, repositories, broader Pi integration, fakes, and tests inside the application that owns them. Extract other domain, adapter, provider, or test-support packages only when another application genuinely needs them.
 
 The web app depends on `protocol`, not control-plane implementation code. Domain directories contain no Fastify, React, PostgreSQL, Docker, or Pi imports. Avoid generic `common` or `utils` packages.
 
@@ -58,7 +59,9 @@ Runtime dependencies:
 
 - `neverthrow`: mandatory Result-based error handling;
 - `determined`: mandatory deterministic scheduling/failure simulation;
-- `@earendil-works/pi-coding-agent`: the first harness;
+- `@earendil-works/pi-durable`: central Pi conversation/task authority and execution environments;
+- `@earendil-works/pi-coding-agent`: central model/auth/skill helpers;
+- `@anthropic-ai/claude-agent-sdk`: host-native Claude;
 - `fastify`: robust HTTP routing, body limits, lifecycle, and schema integration for both servers;
 - `@fastify/websocket`: WebSocket upgrade/lifecycle integration (and its `ws` implementation);
 - `typebox`: one source for runtime JSON validation and inferred TypeScript protocol types;
@@ -76,9 +79,9 @@ Development/build dependencies:
 
 Everything else should begin as first-party code or use an existing CLI.
 
-**Dependency patch installation (decided 2026-10-04).** Root, control-plane Docker, runtime Docker, and native-image installs run `node scripts/apply-dependency-patches.mjs` after locked npm installation. Git is an installation prerequisite in every context; the runner canonicalizes the installation root, clears inherited Git environment/configuration, and stops repository discovery before the root's parent. This prevents a snapshot nested beneath another checkout from silently skipping patch paths. It applies shipped patches with `git apply`, accepts a successful reverse check as already applied, and otherwise fails with patch-specific diagnostics. Release inputs include versioned patches and pinned vendor archives. This removes the installer-only `patch-package → find-yarn-workspace-root → micromatch → braces` chain affected by [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm). Its inputs were installation-time workspace patterns, not application requests, but both server workspaces declared it as a production dependency; the four high audit findings were not dev-only. Rejected: upgrading `patch-package` (8.0.1 remains the latest official release and retains the chain), its canary (same chain), or downgrading to 6.0.7 (introduces vulnerable `tmp`). A scoped Git runner avoids a fork, new patch parser, and dependency overrides. **Reconciliation (2026-10-05; scopes updated 2026-10-16):** the CLI validates exact package versions, patch SHA-256 and pristine/patched file SHA-256 before touching any selected package; `--pi-only` selects agent-core, AI, coding-agent and codemode for standalone installs; `--pi-durable-only` adds Durable for control-plane installs. Default root/runtime/native installs require all six patches, including the subagent fork. Missing selected inputs fail atomically before application. Installer tests check every changed JS/declaration file, missing inputs and atomic rejection before application. Its exported `applyDependencyPatches(root)` retains the Result-based Git mechanism for adapter fixtures; release installs use the sealed CLI. Diagnostics identify scope, seal or Git failures without printing file contents.
+**Dependency patch installation (2026-10-18).** Root and packaged control-plane installs run `node scripts/apply-dependency-patches.mjs` after locked npm installation. The single patch set covers Pi AI, coding-agent ModelRuntime, codemode and Durable. The runner validates exact package versions, patch SHA-256 and pristine/patched file hashes before any mutation. It canonicalizes the install root, clears inherited Git configuration/environment and prevents enclosing-repository discovery. Missing inputs, drift or application failure reject with patch-specific diagnostics; already-applied patches pass reverse checks. Execution/Claude hosts install unmodified locked production dependencies, without the patch runner or patch files. Guest/native loaded-closure checks verify zero patched files; installed transitive package presence does not imply a loaded harness or patch requirement.
 
-**Pi 1.3.0 reseal (2026-10-16; local, not deployed).** Five Pi patches seal official 1.3.0 artifacts; the subagent fork is the sixth patch set. Upstream shared user/custom preparation replaces the duplicate local helpers; the patch retains preparation cancellation/drain, exact queued-steer ownership, broker diagnostics and MCP hooks. The codemode checkpoint runs through the shared execute/start/replay VM, including promise-job polling, without changing native worker-exit accounting or deterministic clocks. Linear image validation and the 64 Mi-character backstop remain (`patches/pi-codemode.PROVENANCE.md`). The Durable patch publicly exports existing run/journal documents, retains resource-only namespaces and aliases, sanitizes display previews, bounds image-decoder allocation and preserves explicit null arguments (only undefined defaults to `{}`) (`patches/pi-durable.PROVENANCE.md`). It preserves native execution/replay and uses no new task document. The unchanged orb.8 subagent archive admits Pi 1.3 through its peer constraints. Patch/version/file hashes and container input lists are sealed; final clean-install qualification is in `docs/testing.md`.
+Git remains an installation prerequisite. The scoped runner avoids a patch parser/fork and the vulnerable installer-only `patch-package → find-yarn-workspace-root → micromatch → braces` chain ([GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)). Rejected: official patch-package 8.0.1 and its canary retain that chain; 6.0.7 adds vulnerable `tmp`. Native sandbox, image-decoder and replay changes retain strict provenance (`patches/pi-codemode.PROVENANCE.md`, `patches/pi-durable.PROVENANCE.md`); exact-source qualification is recorded in `docs/testing.md`.
 
 ## HTTP, WebSocket, and schemas
 

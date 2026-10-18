@@ -1,7 +1,7 @@
 import { type HistoryRecord, HistoryRecordSchema } from "@pi-orb/protocol";
 import { Check } from "typebox/value";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { mapPiEntry } from "../../../../orb-runtime/src/pi/mapping.ts";
+import { mapPiEntry } from "../../../../orb-runtime/src/domain/mapping.ts";
 import { jsonParam } from "./client.ts";
 import { runMigrations } from "./migrate.ts";
 import { PGliteClient } from "./pglite-client.ts";

@@ -7,7 +7,6 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { NoSimulationTask } from "determined";
 import type { Result } from "neverthrow";
 import { expect, it } from "vitest";
-import type { RuntimeClientError } from "../../domain/errors.ts";
 import { makeOrbRow, makeProjectRow } from "../../testkit/fixtures.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
 import { PGliteClient } from "../pg/pglite-client.ts";
@@ -227,13 +226,7 @@ it("cancels one member of a frozen batch, rejects late admission and delivers it
     const closing = agent.close();
     expect(agent.close()).toBe(closing);
     const closed = await closing;
-    expect(closed._unsafeUnwrapErr()).toEqual({
-      type: "runtime_client_error",
-      code: "history_unavailable",
-      answered: true,
-      retryable: true,
-      message: "Agent drain ownership unavailable",
-    } satisfies RuntimeClientError);
+    requireOk("close rejected agent", closed);
     expect(storageCloseCompletions).toBeGreaterThan(0);
     expect(storageCloseCompletions).toBe(storageCloseCalls);
     expect(resourceCloseCalls).toBe(1);

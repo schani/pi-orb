@@ -18,16 +18,16 @@ import type { BrokerEnv } from "../broker/endpoint.ts";
 import { resolveMcpHeaders } from "../mcp/boot.ts";
 import { type McpError, mcpError } from "../mcp/error.ts";
 import {
-  createMcpStateReporter,
-  createNativeMcpFetch,
-  type OrbMcpDiagnostic,
-  type OrbMcpState,
-} from "../mcp/native.ts";
-import {
   HttpMcpTokenEndpoint,
   McpCredentialResolver,
   type McpTokenEndpoint,
 } from "../mcp/oauth.ts";
+import {
+  createBrokerMcpFetch,
+  createMcpStateReporter,
+  type OrbMcpDiagnostic,
+  type OrbMcpState,
+} from "../mcp/transport.ts";
 
 export interface ClaudeMcpRuntime {
   mcpServers: NonNullable<Options["mcpServers"]>;
@@ -69,7 +69,7 @@ export function createClaudeMcp(deps: ClaudeMcpDeps): Result<ClaudeMcpRuntime, M
         );
         const lifetime = new AbortController();
         let diagnostic: OrbMcpDiagnostic | undefined;
-        const brokerFetch = createNativeMcpFetch({
+        const brokerFetch = createBrokerMcpFetch({
           config,
           headers: headers.value,
           resolver,

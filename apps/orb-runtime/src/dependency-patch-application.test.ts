@@ -17,14 +17,11 @@ import { afterEach, describe, expect, it } from "vitest";
 const root = join(import.meta.dirname, "../../..");
 const helper = join(root, "scripts/apply-dependency-patches.mjs");
 const names = [
-  "@earendil-works+pi-agent-core+1.3.0.patch",
   "@earendil-works+pi-ai+1.3.0.patch",
   "@earendil-works+pi-coding-agent+1.3.0.patch",
-  "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
   "@earendil-works+pi-codemode+1.3.0.patch",
   "@earendil-works+pi-durable+1.3.0.patch",
 ];
-const piNames = names.filter((name) => name.startsWith("@earendil-works+"));
 const scratch: string[] = [];
 const sha = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
 const files = (name: string) =>
@@ -156,8 +153,8 @@ describe("sealed dependency patch application", () => {
     const dir = fixture();
     const target = join(dir, files(names[0] as string)[0] as string);
     const before = sha(target);
-    const manifest = join(dir, "node_modules/@gotgenes/pi-subagents/package.json");
-    writeFileSync(manifest, JSON.stringify({ version: "21.7.1" }));
+    const manifest = join(dir, "node_modules/@earendil-works/pi-durable/package.json");
+    writeFileSync(manifest, JSON.stringify({ version: "1.3.1" }));
     expect(run(dir).status).toBe(1);
     expect(sha(target)).toBe(before);
   });
@@ -189,16 +186,6 @@ describe("sealed dependency patch application", () => {
     cpSync(join(root, path), join(dir, path));
     expect(run(dir).status).toBe(1);
   });
-  it("pi-only standalone installs require four packages without Durable or subagents", () => {
-    const dir = fixture();
-    rmSync(join(dir, "node_modules/@gotgenes"), { recursive: true });
-    rmSync(join(dir, "patches", names[3] as string));
-    rmSync(join(dir, "node_modules/@earendil-works/pi-durable"), { recursive: true });
-    rmSync(join(dir, "patches/@earendil-works+pi-durable+1.3.0.patch"));
-    expect(run(dir, "--pi-only").status).toBe(0);
-    expect(run(dir, "--pi-durable-only").status).toBe(1);
-    expect(run(dir).status).toBe(1);
-  });
   it.each(["package", "patch", "file"])(
     "requires Durable %s before changing any package",
     (kind) => {
@@ -212,7 +199,7 @@ describe("sealed dependency patch application", () => {
       const target = join(dir, files(names[0] as string)[0] as string);
       const before = sha(target);
       rmSync(join(dir, path));
-      const result = run(dir, "--pi-durable-only");
+      const result = run(dir);
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("input_unreadable");
       expect(sha(target)).toBe(before);
@@ -228,27 +215,27 @@ describe("sealed dependency patch application", () => {
     const inputs = [...dockerfile.matchAll(/^COPY patches\/(\S+) patches\/\1$/gm)].map(
       (match) => match[1] as string,
     );
-    expect(inputs.sort()).toEqual(piNames.toSorted());
+    expect(inputs.sort()).toEqual(names.toSorted());
     for (const name of inputs) cpSync(join(root, "patches", name), join(dir, "patches", name));
-    const result = run(dir, "--pi-durable-only");
+    const result = run(dir);
     expect(result.status, result.stderr).toBe(0);
     for (const name of inputs)
       for (const path of files(name)) expect(sha(join(dir, path))).toBe(sha(join(root, path)));
   });
-  it.each(piNames)("pi-durable-only rejects changed patch bytes: %s", (name) => {
+  it.each(names)("rejects changed patch bytes: %s", (name) => {
     const dir = fixture();
     writeFileSync(join(dir, "patches", name), "changed patch\n");
     const before = names.flatMap(files).map((path) => sha(join(dir, path)));
-    const result = run(dir, "--pi-durable-only");
+    const result = run(dir);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("patch checksum mismatch");
     expect(names.flatMap(files).map((path) => sha(join(dir, path)))).toEqual(before);
   });
-  it.each(piNames.flatMap(files))("pi-durable-only rejects installed file drift: %s", (path) => {
+  it.each(names.flatMap(files))("rejects installed file drift: %s", (path) => {
     const dir = fixture();
     writeFileSync(join(dir, path), `${readFileSync(join(dir, path), "utf8")}\n// drift\n`);
     const before = names.flatMap(files).map((target) => sha(join(dir, target)));
-    const result = run(dir, "--pi-durable-only");
+    const result = run(dir);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("installed bytes mismatch");
     expect(names.flatMap(files).map((target) => sha(join(dir, target)))).toEqual(before);
@@ -273,14 +260,11 @@ describe("sealed dependency patch application", () => {
     expect(result.stderr).toContain("patch check failed");
     expect(sha(target)).toBe(before);
   });
-  it("preserves every vendor archive and shipped patch checksum", () => {
-    const evidence = `d9afae712be5304e09a490f28b0493180c8565fe6585efe173b1daaab3e5cf2a  vendor/gotgenes-pi-subagents-21.7.0-orb.8.tgz
- e709d41ab45ae8e5847ffe96171751d8e7618afc0f54f47a6ca2ddb4c52d5abf  patches/@earendil-works+pi-ai+1.3.0.patch
- f60540cee8a74742c43b0bbe49c82a19836e9e6496bfef71bb2ef5f5fe9fe462  patches/@earendil-works+pi-agent-core+1.3.0.patch
- 600c7ca7eab79eba58e45c5cdddd891ccbddac918432aa404581edecbbf5ae4b  patches/@earendil-works+pi-coding-agent+1.3.0.patch
+  it("preserves every shipped patch checksum", () => {
+    const evidence = `e709d41ab45ae8e5847ffe96171751d8e7618afc0f54f47a6ca2ddb4c52d5abf  patches/@earendil-works+pi-ai+1.3.0.patch
+ 5ccd27bea08593d9ac2307ed5d3d6ee977d88b6cc531bedf59db55aa46329348  patches/@earendil-works+pi-coding-agent+1.3.0.patch
  d4d7e968a23054b75e25603cc66906492ba8a2d2710a0cbbb5896bd56f0fa42a  patches/@earendil-works+pi-codemode+1.3.0.patch
- d6c02a98876d02f200dd4bea1ad6601e1befc61a0f67a2bba7942e2c5b665ff6  patches/@earendil-works+pi-durable+1.3.0.patch
- b3e48bde4e53ead071abf15eae78b26dc5ea01441d8946782ba2284f1da06f9a  patches/@gotgenes+pi-subagents+21.7.0-orb.8.patch`;
+ d6c02a98876d02f200dd4bea1ad6601e1befc61a0f67a2bba7942e2c5b665ff6  patches/@earendil-works+pi-durable+1.3.0.patch`;
     for (const line of evidence.trim().split("\n")) {
       const [hash, path] = line.trim().split(/\s+/);
       expect(sha(join(root, path as string))).toBe(hash);

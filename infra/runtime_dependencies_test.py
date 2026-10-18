@@ -1,4 +1,5 @@
 """Runtime dependency layer boundaries and executable build-log contracts."""
+import json
 import os
 from pathlib import Path
 import re
@@ -46,7 +47,9 @@ class RuntimeDependenciesTests(unittest.TestCase):
         self.assertNotEqual(self.install, self.rebuild)
         self.assertIn('--workspace @pi-orb/orb-runtime', self.install)
         self.assertIn('--include-workspace-root=false --ignore-scripts', self.install)
-        self.assertIn('node scripts/apply-dependency-patches.mjs', self.install)
+        self.assertNotIn('apply-dependency-patches', self.dockerfile)
+        self.assertNotIn('COPY vendor', self.dockerfile)
+        self.assertNotIn('COPY patches', self.dockerfile)
         self.assertIn('ln -s /app/node_modules/.bin/agent-browser', self.install)
         self.assertNotIn('npm ci', self.rebuild)
         self.assertNotIn('apply-dependency-patches', self.rebuild)
@@ -82,7 +85,7 @@ esac
             return result, calls.read_text() if calls.exists() else ''
 
     def test_progress_reports_separate_install_patch_and_rebuild_durations(self):
-        for step, phases in [(self.install, ['npm-install', 'patch']),
+        for step, phases in [(self.install, ['npm-install']),
                              (self.rebuild, ['pty-rebuild'])]:
             with self.subTest(phases=phases):
                 result, calls = self.run_step(step)
@@ -97,7 +100,6 @@ esac
     def test_failures_preserve_status_without_success_markers_or_later_commands(self):
         for step, failure, phase, later in [
             (self.install, 'npm ci', 'npm-install', 'node scripts/'),
-            (self.install, 'node scripts/', 'patch', 'ln -s'),
             (self.rebuild, 'npm rebuild', 'pty-rebuild', 'node -e'),
             (self.rebuild, 'node -e', 'pty-rebuild', ''),
         ]:
@@ -108,3 +110,36 @@ esac
                 self.assertNotIn(f'runtime-deps:{phase}:complete', result.stdout)
                 if later:
                     self.assertNotIn(later, calls)
+
+    def test_runtime_declares_only_execution_and_claude_dependencies(self):
+        dependencies = json.loads((ROOT / 'apps/orb-runtime/package.json').read_text())['dependencies']
+        for package in ['@gotgenes/pi-subagents', '@earendil-works/pi-coding-agent',
+                        '@earendil-works/pi-tui', '@pi-orb/luna', '@pi-orb/mock-openai']:
+            self.assertNotIn(package, dependencies)
+        self.assertEqual(dependencies['@earendil-works/pi-durable'], '1.3.0')
+        self.assertIn('@anthropic-ai/claude-agent-sdk', dependencies)
+
+    def test_host_subagent_artifact_is_absent_from_lockfile(self):
+        lock = json.loads((ROOT / 'package-lock.json').read_text())
+        self.assertNotIn('node_modules/@gotgenes/pi-subagents', lock['packages'])
+        self.assertFalse((ROOT / 'vendor').exists())
+
+    def test_native_execution_image_uses_unmodified_runtime_dependencies(self):
+        source = (ROOT / 'infra/native-vm/install.sh').read_text()
+        self.assertNotIn('apply-dependency-patches', source)
+
+    def test_docker_qualification_uses_central_backend(self):
+        source = (ROOT / '.github/workflows/e2e.yml').read_text()
+        self.assertNotIn('host-pi', source)
+        self.assertNotIn('PI_ORB_AGENT_BACKEND', source)
+
+    def test_runtime_image_omits_central_mock_provider(self):
+        self.assertNotIn('packages/mock-openai', self.dockerfile)
+        snapshot = (ROOT / 'packages/native-image/src/snapshot.ts').read_text()
+        self.assertNotIn('packages/mock-openai', snapshot)
+
+    def test_root_scripts_reference_existing_entrypoints(self):
+        scripts = json.loads((ROOT / 'package.json').read_text())['scripts']
+        for command in scripts.values():
+            for path in re.findall(r'node (apps/[^ ]+\.ts)', command):
+                self.assertTrue((ROOT / path).is_file(), path)

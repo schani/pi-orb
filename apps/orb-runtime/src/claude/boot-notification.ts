@@ -1,7 +1,7 @@
 import type { HistoryRecord } from "@pi-orb/protocol";
-import { BOOT_BASELINE_TYPE } from "../pi/boot-notification.ts";
+import { BOOT_BASELINE_TYPE } from "./boot-policy.ts";
 
-/** Adapt native root evidence to the shared pure boot policy, never to a Pi session. */
+/** Adapt native root evidence to the pure boot policy. */
 export function claudeBootEntries(records: readonly HistoryRecord[]): unknown[] {
   const humanReceipts = new Map(
     records.flatMap((record) =>

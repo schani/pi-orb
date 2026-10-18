@@ -33,6 +33,21 @@ describe("single control-plane composition", () => {
     );
   });
 
+  it("keeps central model configuration out of compute launch inputs", () => {
+    const launchInputs = source.slice(
+      source.indexOf("const runtimeExtraEnv:"),
+      source.indexOf("const extraEnvOption"),
+    );
+    for (const centralInput of [
+      "mockOpenAi",
+      "MOCK_OPENAI_OAUTH_URL_ENV",
+      "MOCK_OPENAI_INFERENCE_URL_ENV",
+      "PI_OFFLINE",
+    ]) {
+      expect(launchInputs).not.toContain(centralInput);
+    }
+  });
+
   it("keeps signing-key repair before activation and all autonomous loops after it", () => {
     const activation = source.indexOf("await waitForReleaseActivation(");
     expect(activation).toBeGreaterThan(source.indexOf("void ensureSigningKeyInBackground()"));

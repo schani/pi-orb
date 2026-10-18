@@ -7,8 +7,8 @@ import {
   probeNativeSdk,
   probeNetworkGuard,
 } from "../../../../scripts/claude-sdk-contract/probe.mjs";
-import { BOOT_BASELINE_TYPE, planBootNotification } from "../pi/boot-notification.ts";
 import { ComposedClaudeFixture } from "../testkit/claude-composed.ts";
+import { BOOT_BASELINE_TYPE, planBootNotification } from "./boot-policy.ts";
 import { ClaudeHistory } from "./history.ts";
 
 const fixture = JSON.parse(

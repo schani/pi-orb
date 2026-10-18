@@ -52,10 +52,7 @@ const unavailable = () => failure("unavailable", "Durable authority database una
 /** Production ownership deadlines use database time after locking. */
 export class PgDurableAuthority {
   private readonly db: PostgreSQLClient;
-  private readonly drains = new WeakMap<
-    Storage,
-    { ownership: Ownership; isClosed(): boolean; activate(): boolean }
-  >();
+  private readonly drains = new WeakMap<Storage, { ownership: Ownership; activate(): void }>();
   private readonly now: (() => number) | undefined;
   constructor(db: PostgreSQLClient, now?: () => number) {
     this.db = db;
@@ -176,8 +173,6 @@ export class PgDurableAuthority {
 
   beginDrain(ownership: Ownership, storage: Storage): ResultAsync<void, AuthorityError> {
     const capability = this.drains.get(storage);
-    if (capability?.isClosed())
-      return new ResultAsync(Promise.resolve(err(failure("closed", "Storage is closed"))));
     if (
       !capability ||
       capability.ownership.orbId !== ownership.orbId ||
@@ -188,6 +183,7 @@ export class PgDurableAuthority {
       return new ResultAsync(
         Promise.resolve(err(failure("stale_owner", "Storage ownership mismatch"))),
       );
+    // Closed storage admits no writes, but owner validation still applies.
     return this.db
       .transaction<void, AuthorityError>(async (query) => {
         const guarded = await this.guard(query, ownership, true);
@@ -204,9 +200,7 @@ export class PgDurableAuthority {
           .mapErr(unavailable);
       })
       .mapErr((error) => (error.type === "authority_error" ? error : unavailable()))
-      .andThen(() =>
-        capability.activate() ? ok(undefined) : err(failure("closed", "Storage is closed")),
-      );
+      .map(() => capability.activate());
   }
 
   release(ownership: Ownership): ResultAsync<void, AuthorityError> {
@@ -366,11 +360,8 @@ export class PgDurableAuthority {
       if (ownership)
         this.drains.set(storage, {
           ownership: { ...ownership },
-          isClosed: () => closed,
           activate: () => {
-            if (closed) return false;
-            draining = true;
-            return true;
+            if (!closed) draining = true;
           },
         });
       return storage;

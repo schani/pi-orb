@@ -3,7 +3,6 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   cpSync,
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -49,23 +48,13 @@ test("applies patches without a Git repository and accepts already-applied patch
   assert.deepEqual(second.value, [{ patch: "example+1.0.0.patch", status: "already_applied" }]);
 });
 
-function sealedFixture(completeSdk = false) {
+function sealedFixture() {
   const root = fixture();
   rmSync(join(root, "patches"), { recursive: true });
   cpSync(join(repository, "patches"), join(root, "patches"), { recursive: true });
-  if (completeSdk) {
-    for (const name of ["pi-agent-core", "pi-ai", "pi-coding-agent", "pi-codemode"])
-      cpSync(
-        join(repository, "node_modules/@earendil-works", name),
-        join(root, "node_modules/@earendil-works", name),
-        { recursive: true },
-      );
-  }
   for (const patch of [
-    "@earendil-works+pi-agent-core+1.3.0.patch",
     "@earendil-works+pi-ai+1.3.0.patch",
     "@earendil-works+pi-coding-agent+1.3.0.patch",
-    "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
     "@earendil-works+pi-codemode+1.3.0.patch",
     "@earendil-works+pi-durable+1.3.0.patch",
   ]) {
@@ -86,95 +75,26 @@ function sealedFixture(completeSdk = false) {
   return root;
 }
 
-function piOnlyCli(root) {
+function sealedCli(root) {
   mkdirSync(join(root, "scripts"));
   cpSync(
     join(repository, "scripts/apply-dependency-patches.mjs"),
     join(root, "scripts/apply-dependency-patches.mjs"),
   );
   symlinkSync(join(repository, "node_modules/neverthrow"), join(root, "node_modules/neverthrow"));
-  return (scope = "--pi-only") =>
-    spawnSync(process.execPath, [join(root, "scripts/apply-dependency-patches.mjs"), scope], {
+  return () =>
+    spawnSync(process.execPath, [join(root, "scripts/apply-dependency-patches.mjs")], {
       cwd: root,
       encoding: "utf8",
       env: { ...process.env, NODE_OPTIONS: "" },
     });
 }
 
-test("Pi-only installs core, AI, coding-agent and codemode and exposes selective cancellation", () => {
-  const root = sealedFixture(true);
-  rmSync(join(root, "node_modules/@gotgenes"), { recursive: true });
-  rmSync(join(root, "patches/@gotgenes+pi-subagents+21.7.0-orb.8.patch"));
-  rmSync(join(root, "node_modules/@earendil-works/pi-durable"), { recursive: true });
-  rmSync(join(root, "patches/@earendil-works+pi-durable+1.3.0.patch"));
-  const run = piOnlyCli(root);
-  for (const entry of readdirSync(join(repository, "node_modules"))) {
-    if (entry === "@earendil-works") {
-      for (const name of readdirSync(join(repository, "node_modules", entry))) {
-        const target = join(root, "node_modules", entry, name);
-        if (name !== "pi-durable" && !existsSync(target))
-          symlinkSync(join(repository, "node_modules", entry, name), target);
-      }
-    } else if (entry !== "@gotgenes" && !existsSync(join(root, "node_modules", entry))) {
-      symlinkSync(join(repository, "node_modules", entry), join(root, "node_modules", entry));
-    }
-  }
-  const result = run();
-  assert.equal(result.status, 0, result.stderr);
-  const api = spawnSync(
-    process.execPath,
-    [
-      "--input-type=module",
-      "-e",
-      'import { AgentSession } from "@earendil-works/pi-coding-agent"; if (typeof AgentSession.prototype.cancelQueuedCustomSteer !== "function") process.exit(1);',
-    ],
-    { cwd: root, encoding: "utf8", env: { ...process.env, NODE_OPTIONS: "" } },
-  );
-  assert.equal(api.status, 0, api.stderr);
-  assert.deepEqual(result.stdout.trim().split("\n"), [
-    "dependency patches: @earendil-works+pi-agent-core+1.3.0.patch: applied",
-    "dependency patches: @earendil-works+pi-ai+1.3.0.patch: applied",
-    "dependency patches: @earendil-works+pi-coding-agent+1.3.0.patch: applied",
-    "dependency patches: @earendil-works+pi-codemode+1.3.0.patch: applied",
-  ]);
-  assert.match(
-    readFileSync(
-      join(root, "node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.d.ts"),
-      "utf8",
-    ),
-    /cancelQueuedCustomSteer/,
-  );
-  assert.equal(run().status, 0);
-});
-
-test("Durable-only installs require Durable and omit subagents", () => {
-  const root = sealedFixture();
-  rmSync(join(root, "node_modules/@gotgenes"), { recursive: true });
-  rmSync(join(root, "patches/@gotgenes+pi-subagents+21.7.0-orb.8.patch"));
-  const run = piOnlyCli(root);
-  const result = run("--pi-durable-only");
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /pi-durable\+1\.3\.0\.patch: applied/);
-  assert.equal(run("--pi-durable-only").status, 0);
-});
-
-test("Durable-only refuses a missing declared package before modifying any package", () => {
-  const root = sealedFixture();
-  const run = piOnlyCli(root);
-  const target = join(root, "node_modules/@earendil-works/pi-agent-core/dist/agent.js");
-  const before = readFileSync(target);
-  rmSync(join(root, "node_modules/@earendil-works/pi-durable/package.json"));
-  const result = run("--pi-durable-only");
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /input_unreadable/);
-  assert.deepEqual(readFileSync(target), before);
-});
-
-for (const name of ["pi-agent-core", "pi-ai", "pi-coding-agent", "pi-codemode"]) {
-  test(`Pi-only refuses missing ${name} before modifying another package`, () => {
+for (const name of ["pi-ai", "pi-coding-agent", "pi-codemode", "pi-durable"]) {
+  test(`refuses missing ${name} before modifying another package`, () => {
     const root = sealedFixture();
-    const run = piOnlyCli(root);
-    const target = join(root, "node_modules/@earendil-works/pi-agent-core/dist/agent.js");
+    const run = sealedCli(root);
+    const target = join(root, "node_modules/@earendil-works/pi-ai/dist/types.d.ts");
     const before = readFileSync(target);
     rmSync(join(root, `node_modules/@earendil-works/${name}/package.json`));
     const result = run();
@@ -213,57 +133,55 @@ for (const symlinked of [false, true]) {
   });
 }
 
-for (const scope of [[], ["--pi-only"], ["--pi-durable-only"]]) {
-  test(`CLI seals code-mode's bounded image prelude (${scope.join(" ") || "all"})`, () => {
-    const root = sealedFixture();
-    const target = "node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js";
-    const patch = "@earendil-works+pi-codemode+1.3.0.patch";
-    for (const path of [
-      target,
-      "node_modules/@earendil-works/pi-codemode/package.json",
-      "node_modules/@earendil-works/pi-codemode/dist/runtime/host.js",
-      "node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js",
-      "node_modules/@earendil-works/pi-codemode/dist/types.d.ts",
-    ]) {
-      mkdirSync(dirname(join(root, path)), { recursive: true });
-      cpSync(join(repository, path), join(root, path));
-    }
-    const hash = () =>
-      createHash("sha256")
-        .update(readFileSync(join(root, target)))
-        .digest("hex");
-    if (hash() === "376a58055c2f7c74f43c88fb993d5875a3670c614854022eac111c891127e384") {
-      const reversed = spawnSync("git", ["apply", "--reverse", join(root, "patches", patch)], {
-        cwd: root,
-        encoding: "utf8",
-      });
-      assert.equal(reversed.status, 0, reversed.stderr);
-    }
-    assert.equal(hash(), "2fc2886529c0a7e8a7c9ac16b7c96fb2bbf8d2dce562801c5a09d723a57ea6ca");
-    mkdirSync(join(root, "scripts"));
-    cpSync(
-      join(repository, "scripts/apply-dependency-patches.mjs"),
-      join(root, "scripts/apply-dependency-patches.mjs"),
-    );
-    symlinkSync(
-      join(repository, "node_modules/neverthrow"),
-      join(root, "node_modules/neverthrow"),
-      "dir",
-    );
-    const run = () =>
-      spawnSync(process.execPath, [join(root, "scripts/apply-dependency-patches.mjs"), ...scope], {
-        cwd: root,
-        encoding: "utf8",
-      });
-    const first = run();
-    assert.equal(first.status, 0, first.stderr);
-    assert.match(first.stdout, /pi-codemode\+1\.3\.0\.patch: applied/);
-    assert.equal(hash(), "376a58055c2f7c74f43c88fb993d5875a3670c614854022eac111c891127e384");
-    assert.equal(run().status, 0);
-    writeFileSync(join(root, target), `${readFileSync(join(root, target), "utf8")}\n// drift\n`);
-    assert.equal(run().status, 1);
-  });
-}
+test("CLI seals code-mode's bounded image prelude", () => {
+  const root = sealedFixture();
+  const target = "node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js";
+  const patch = "@earendil-works+pi-codemode+1.3.0.patch";
+  for (const path of [
+    target,
+    "node_modules/@earendil-works/pi-codemode/package.json",
+    "node_modules/@earendil-works/pi-codemode/dist/runtime/host.js",
+    "node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js",
+    "node_modules/@earendil-works/pi-codemode/dist/types.d.ts",
+  ]) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    cpSync(join(repository, path), join(root, path));
+  }
+  const hash = () =>
+    createHash("sha256")
+      .update(readFileSync(join(root, target)))
+      .digest("hex");
+  if (hash() === "376a58055c2f7c74f43c88fb993d5875a3670c614854022eac111c891127e384") {
+    const reversed = spawnSync("git", ["apply", "--reverse", join(root, "patches", patch)], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    assert.equal(reversed.status, 0, reversed.stderr);
+  }
+  assert.equal(hash(), "2fc2886529c0a7e8a7c9ac16b7c96fb2bbf8d2dce562801c5a09d723a57ea6ca");
+  mkdirSync(join(root, "scripts"));
+  cpSync(
+    join(repository, "scripts/apply-dependency-patches.mjs"),
+    join(root, "scripts/apply-dependency-patches.mjs"),
+  );
+  symlinkSync(
+    join(repository, "node_modules/neverthrow"),
+    join(root, "node_modules/neverthrow"),
+    "dir",
+  );
+  const run = () =>
+    spawnSync(process.execPath, [join(root, "scripts/apply-dependency-patches.mjs")], {
+      cwd: root,
+      encoding: "utf8",
+    });
+  const first = run();
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stdout, /pi-codemode\+1\.3\.0\.patch: applied/);
+  assert.equal(hash(), "376a58055c2f7c74f43c88fb993d5875a3670c614854022eac111c891127e384");
+  assert.equal(run().status, 0);
+  writeFileSync(join(root, target), `${readFileSync(join(root, target), "utf8")}\n// drift\n`);
+  assert.equal(run().status, 1);
+});
 
 test("CLI ignores inherited repository selection", () => {
   const ancestor = fixture();
@@ -399,12 +317,10 @@ for (const nested of [false, true]) {
     rmSync(join(root, "patches"), { recursive: true });
     cpSync(join(repository, "patches"), join(root, "patches"), { recursive: true });
     for (const patch of [
-      "@earendil-works+pi-agent-core+1.3.0.patch",
       "@earendil-works+pi-ai+1.3.0.patch",
       "@earendil-works+pi-codemode+1.3.0.patch",
       "@earendil-works+pi-durable+1.3.0.patch",
       "@earendil-works+pi-coding-agent+1.3.0.patch",
-      "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
     ]) {
       const source = readFileSync(join(root, "patches", patch), "utf8");
       for (const line of source.split("\n")) {
@@ -427,10 +343,95 @@ for (const nested of [false, true]) {
     }
     const result = applyDependencyPatches(root);
     assert.equal(result.isOk(), true, JSON.stringify(result.error));
-    assert.equal(result.value.length, 6);
+    assert.equal(result.value.length, 4);
     assert.ok(result.value.every(({ status }) => status === "applied"));
     assert.ok(
       applyDependencyPatches(root).value.every(({ status }) => status === "already_applied"),
     );
   });
 }
+
+test("coding-agent patch covers only central provider diagnostics", () => {
+  const patch = readFileSync(
+    join(repository, "patches/@earendil-works+pi-coding-agent+1.3.0.patch"),
+    "utf8",
+  );
+  assert.deepEqual(
+    [...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map((match) => match[1]),
+    [
+      "node_modules/@earendil-works/pi-coding-agent/dist/core/model-runtime.js",
+      "node_modules/@earendil-works/pi-coding-agent/dist/core/provider-composer.d.ts",
+    ],
+  );
+});
+
+test("guest execution and Claude load no patched dependency files", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+      import assert from "node:assert/strict";
+      import { registerHooks } from "node:module";
+      import { mkdtemp, rm } from "node:fs/promises";
+      import { tmpdir } from "node:os";
+      import { join, relative } from "node:path";
+      import { fileURLToPath } from "node:url";
+      const loaded = new Set();
+      registerHooks({ load(url, context, next) {
+        if (url.startsWith("file:")) loaded.add(relative(process.cwd(), fileURLToPath(url)));
+        return next(url, context);
+      }});
+      const { NodeExecutionEnv } = await import("@earendil-works/pi-durable/env/node");
+      await import("./apps/orb-runtime/src/claude/agent.ts");
+      await import("./apps/orb-runtime/src/execution/server.ts");
+      const cwd = await mkdtemp(join(tmpdir(), "guest-env-contract-"));
+      const env = new NodeExecutionEnv({ cwd });
+      const context = { value: () => undefined, toString: () => "dependency-contract" };
+      const value = (result) => { assert.equal(result.ok, true, result.error?.message); return result.value; };
+      try {
+        value(await env.writeFile("input.txt", "one\\ntwo\\n", context));
+        value(await env.appendFile("input.txt", "three\\n", context));
+        assert.equal(value(await env.readTextFile("input.txt", context)), "one\\ntwo\\nthree\\n");
+        value(await env.renameFile("input.txt", "output.txt", context));
+        assert.equal(value(await env.fileInfo("output.txt", context)).size, 14);
+        const reader = value(await env.openBinaryReader("output.txt", undefined, context));
+        try { assert.equal(Buffer.from(value(await reader.read(4, 3, context))).toString(), "two"); }
+        finally { await reader.close(context); }
+        const missing = await env.readTextFile("missing.txt", context);
+        assert.equal(missing.ok, false);
+        assert.equal(missing.error.code, "not_found");
+        let output = "";
+        const executed = value(await env.exec("cat output.txt", { onOutput: (text) => { output += text; } }, context));
+        assert.equal(executed.exitCode, 0);
+        assert.equal(output, "one\\ntwo\\nthree\\n");
+      } finally {
+        await env.cleanup(context);
+        await rm(cwd, { recursive: true, force: true });
+      }
+      console.log(JSON.stringify([...loaded].sort()));
+      `,
+    ],
+    { cwd: repository, encoding: "utf8", env: { ...process.env, NODE_OPTIONS: "" } },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const loaded = JSON.parse(result.stdout);
+  assert.ok(loaded.includes("node_modules/@earendil-works/pi-durable/dist/env/node.js"));
+  const patchedFiles = new Set(
+    readdirSync(join(repository, "patches"))
+      .filter((name) => name.endsWith(".patch"))
+      .flatMap((name) =>
+        [
+          ...readFileSync(join(repository, "patches", name), "utf8").matchAll(
+            /^diff --git a\/(\S+) b\/\S+$/gm,
+          ),
+        ].map((match) => match[1]),
+      ),
+  );
+  assert.ok(patchedFiles.size > 0);
+  assert.deepEqual(
+    loaded.filter((path) => patchedFiles.has(path)),
+    [],
+  );
+});

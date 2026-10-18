@@ -21,11 +21,10 @@ const snapshot: ResourceSnapshot = {
 };
 
 describe("cross-axis acceptance contracts", () => {
-  it("registers independent explicit backend/provider compositions", () => {
+  it("registers both host providers", () => {
     expect(CROSS_AXIS_CASES).toEqual([
-      { provider: "process", agentBackend: "central-durable", movingMain: true },
-      { provider: "process", agentBackend: "host-pi", movingMain: false },
-      { provider: "docker", agentBackend: "central-durable", movingMain: false },
+      { provider: "process", movingMain: true },
+      { provider: "docker", movingMain: false },
     ]);
   });
   it("holds the resolved immutable snapshot before publication", async () => {

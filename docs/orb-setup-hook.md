@@ -154,7 +154,7 @@ environment"). Rejected: a `pi-orb` subcommand to re-run hooks — executing the
   toolchain) plus `PI_ORB=1`, `PI_ORB_HOOK=setup|resume`, and `PI_ORB_HOOK_ENV_FILE` (below).
 - Setup additionally has `PI_ORB_RUNTIME_TOKEN` and `PI_ORB_CONTROL_PLANE_URL` removed
   (decision 3). Resume has them. Neither hook receives Tailscale material.
-- Control-plane-managed project secrets (`docs/credentials.md`, implemented 2026-08-28) are fetched only after setup returns and before resume starts. Setup therefore cannot see them; resume, the Pi session, and terminals can. Their names join the env-file deny-list for that boot, so `$PI_ORB_HOOK_ENV_FILE` cannot accidentally shadow the dashboard-managed value.
+- Control-plane-managed project secrets (`docs/credentials.md`, implemented 2026-08-28) are fetched only after setup returns and before resume starts. Setup therefore cannot see them; resume, native Claude and workspace tools/terminals can. Their names join the env-file deny-list for that boot, so `$PI_ORB_HOOK_ENV_FILE` cannot accidentally shadow the dashboard-managed value.
 - Network is available to both, subject to whatever egress the host provider allows the orb.
 - Nothing a hook exports persists into the agent's environment by itself: the hook is its own
   process, and its exports die with it.
@@ -237,12 +237,13 @@ and outcomes that affect the user must be visible in the product.
   incarnation, reason, exit code — never output content) and nothing on success, per the
   edges-not-levels rule in `docs/lifecycle.md`. Resume failures follow the same shape with a
   `resume-failed` edge; a resume still running after 10 seconds is not an event.
-- The agent is told. When the latest setup or resume did not succeed, the runtime appends a
+- Native Claude is told. When the latest setup or resume did not succeed, its runtime appends a
   short system-prompt fragment (the mechanism `docs/pi-adapter.md` uses for the tool baseline and
   port exposure) naming the hook, the outcome, and the log path, so the first thing the agent can
-  do is fix its own environment. A healthy boot appends nothing.
+  do is fix its own environment. A healthy boot appends nothing. Central Pi receives hook reports
+  through execution health; pinned context and first inference do not wait for hooks.
 - The agent is also told that the convention *exists*, which is a different requirement (added
-  2026-08-25): the always-appended tool baseline (`apps/orb-runtime/src/pi/environment-prompt.ts`)
+  2026-08-25): the always-appended tool baseline
   carries three sentences naming both files, the once-per-incarnation / every-start split, the
   identity split, the idempotency and executable rules, and the log directory. Without it an agent
   that never hits a failure never learns it could write one. The baseline has room for the
@@ -285,10 +286,8 @@ files plus a committed, secret-free `.pi-orb/gcp-external-account.json` template
 "commit a script the next orb's agent runs by hand" guidance and the note that automatic execution
 was pending. `apps/orb-runtime/skills/boot-hooks/SKILL.md` is the authoring guide for hooks in
 general — the split, the budgets, the idempotency pattern, the log and status paths, and worked
-examples — since the tool baseline has room for the convention only. Both are pinned by
-`apps/orb-runtime/src/pi/skills.test.ts`, which reads the paths, budgets, and scrubbed variable
-names out of `apps/orb-runtime/src/hooks/runner.ts` rather than restating them, and which requires
-that no setup example authenticates anything.
+examples — since the tool baseline has room for the convention only. Skill contracts read paths, budgets and scrubbed variable names from
+`apps/orb-runtime/src/hooks/runner.ts`, and require that no setup example authenticates anything.
 
 ## Using the hooks
 

@@ -1,0 +1,614 @@
+import {
+  CHART_CONTENT_TYPE,
+  type ContentBlock,
+  type EventRecord,
+  type HistoryRecord,
+  type JsonObject,
+  type JsonValue,
+  type MessageRecord,
+  OrbMessageSystemSchema,
+  systemInputEvent,
+} from "@pi-orb/protocol";
+import { err, ok, type Result } from "neverthrow";
+import { Check } from "typebox/value";
+
+/**
+ * Lossless Pi-entry → normalized-record mapping (docs/pi-adapter.md). Every
+ * persisted entry maps one-to-one; a failure here fails the whole pull rather
+ * than silently omitting an entry. Native entries land in `overflow.native`,
+ * sanitized by `nativeForHistory`.
+ */
+
+export interface MappingError {
+  readonly type: "history_mapping_error";
+  readonly code: "mapping_failure";
+  readonly message: string;
+}
+
+const fail = (message: string): Result<never, MappingError> =>
+  err({ type: "history_mapping_error", code: "mapping_failure", message });
+
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asJson(value: unknown): JsonValue {
+  // Entries come from Pi's JSONL session file, so they are JSON-safe by
+  // construction; this normalizes undefined away for exactness.
+  return JSON.parse(JSON.stringify(value)) as JsonValue;
+}
+
+function systemMessageIdentity(message: Record<string, unknown>): JsonObject {
+  return {
+    role: "system",
+    ...(typeof message["timestamp"] === "number" ? { timestamp: message["timestamp"] } : {}),
+  };
+}
+
+/**
+ * Reduce Pi system messages to their identity and codex-failure diagnostics to
+ * their sanitized context; everything else passes through.
+ */
+function nativeForHistory(entry: Record<string, unknown>): JsonObject {
+  const native = asJson(entry) as JsonObject;
+  if (entry["type"] === "message") {
+    const message = entry["message"];
+    if (isRecordObject(message) && message["role"] === "system") {
+      native["message"] = systemMessageIdentity(message);
+    } else if (isRecordObject(message) && message["role"] === "assistant") {
+      const clean = native["message"] as JsonObject;
+      const diagnostics = message["diagnostics"];
+      if (Array.isArray(diagnostics)) {
+        clean["diagnostics"] = diagnostics.map((diagnostic) => {
+          if (!isRecordObject(diagnostic) || diagnostic["type"] !== "codex_failure")
+            return diagnostic;
+          const context = codexFailureContext([diagnostic]);
+          const timestamp = diagnostic["timestamp"];
+          return {
+            type: "codex_failure",
+            ...(typeof timestamp === "number" && Number.isSafeInteger(timestamp) && timestamp >= 0
+              ? { timestamp }
+              : {}),
+            ...context,
+          };
+        }) as JsonValue;
+      }
+    }
+  } else if (entry["type"] === "compaction") {
+    const systemMessage = entry["systemMessage"];
+    if (isRecordObject(systemMessage)) {
+      native["systemMessage"] = systemMessageIdentity(systemMessage);
+    }
+  }
+  return native;
+}
+
+interface EntryIdentity {
+  id: string;
+  parentId: string | null;
+  timestamp: string;
+  overflow: JsonObject;
+}
+
+function identityOf(entry: Record<string, unknown>): Result<EntryIdentity, MappingError> {
+  const { id, parentId, timestamp } = entry;
+  if (typeof id !== "string" || id === "") {
+    return fail(`entry has no usable id: ${JSON.stringify(entry).slice(0, 200)}`);
+  }
+  if (parentId !== null && typeof parentId !== "string") {
+    return fail(`entry ${id} has invalid parentId`);
+  }
+  if (typeof timestamp !== "string") {
+    return fail(`entry ${id} has no timestamp`);
+  }
+  return ok({
+    id,
+    parentId: parentId ?? null,
+    timestamp,
+    overflow: { native: nativeForHistory(entry) },
+  });
+}
+
+function textBlock(text: string): ContentBlock {
+  return { type: "text", text };
+}
+
+function stringOf(source: Record<string, unknown>, key: string): string | undefined {
+  const value = source[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+type SubagentKind = NonNullable<EventRecord["subagent"]>["kind"];
+
+function subagentKind(customType: string): SubagentKind | null {
+  switch (customType) {
+    case "subagent-notification":
+      return "notification";
+    case "subagent-update":
+      return "update";
+    case "subagent-workspace-notice":
+      return "workspace_notice";
+    default:
+      return null;
+  }
+}
+
+/** The subagent extension's receipt details, typed for clients. */
+function subagentNotice(
+  customType: string,
+  rawDetails: unknown,
+): NonNullable<EventRecord["subagent"]> | null {
+  const kind = subagentKind(customType);
+  if (kind === null) return null;
+  const details = isRecordObject(rawDetails) ? rawDetails : {};
+  const id = stringOf(details, "id");
+  const description = stringOf(details, "description");
+  const status = stringOf(details, "status");
+  const message = stringOf(details, "message");
+  const notice = stringOf(details, "notice");
+  const error = stringOf(details, "error");
+  const resultPreview = stringOf(details, "resultPreview");
+  const durationMs = details["durationMs"];
+  return {
+    kind,
+    ...(id !== undefined ? { id } : {}),
+    ...(description !== undefined ? { description } : {}),
+    ...(status !== undefined ? { status } : {}),
+    ...(message !== undefined ? { message } : {}),
+    ...(notice !== undefined ? { notice } : {}),
+    ...(error !== undefined ? { error } : {}),
+    ...(resultPreview !== undefined ? { resultPreview } : {}),
+    ...(typeof durationMs === "number" ? { durationMs } : {}),
+  };
+}
+
+/** Every durable client message ID the send-anytime envelope delivered, in order. */
+function inboxMessageIds(rawDetails: unknown): string[] {
+  if (!isRecordObject(rawDetails)) return [];
+  const ids = rawDetails["messageIds"];
+  if (Array.isArray(ids)) return ids.filter((id): id is string => typeof id === "string");
+  const single = rawDetails["messageId"];
+  return typeof single === "string" ? [single] : [];
+}
+
+export function mapUserContent(content: unknown): ContentBlock[] {
+  if (typeof content === "string") return [textBlock(content)];
+  if (!Array.isArray(content)) return [];
+  const blocks: ContentBlock[] = [];
+  for (const item of content) {
+    if (!isRecordObject(item)) continue;
+    if (item["type"] === "text" && typeof item["text"] === "string") {
+      blocks.push(textBlock(item["text"]));
+    } else if (item["type"] === "image") {
+      blocks.push({
+        type: "image",
+        ...(typeof item["mimeType"] === "string" ? { mediaType: item["mimeType"] } : {}),
+        ...(typeof item["data"] === "string" ? { data: item["data"] } : {}),
+      });
+    } else {
+      blocks.push({ type: "other", contentType: String(item["type"]), data: asJson(item) });
+    }
+  }
+  return blocks;
+}
+
+function mapAssistantContent(content: unknown): ContentBlock[] {
+  if (!Array.isArray(content)) return [];
+  const blocks: ContentBlock[] = [];
+  for (const item of content) {
+    if (!isRecordObject(item)) continue;
+    switch (item["type"]) {
+      case "text":
+        if (typeof item["text"] === "string") blocks.push(textBlock(item["text"]));
+        break;
+      case "thinking":
+        blocks.push({
+          type: "reasoning",
+          text: typeof item["thinking"] === "string" ? item["thinking"] : "",
+          ...(typeof item["redacted"] === "boolean" ? { redacted: item["redacted"] } : {}),
+        });
+        break;
+      case "toolCall":
+        blocks.push({
+          type: "tool_call",
+          callId: String(item["id"] ?? ""),
+          name: String(item["name"] ?? ""),
+          arguments: asJson(item["arguments"] ?? null),
+        });
+        break;
+      default:
+        blocks.push({ type: "other", contentType: String(item["type"]), data: asJson(item) });
+    }
+  }
+  return blocks;
+}
+
+const CODEX_ERROR_CODES = new Set([
+  "invalid_api_key",
+  "invalid_grant",
+  "unauthorized",
+  "authentication_error",
+  "invalid_token",
+  "rate_limit_exceeded",
+  "usage_limit_reached",
+  "insufficient_quota",
+  "websocket_connection_limit_reached",
+  "previous_response_not_found",
+]);
+
+function codexFailureContext(
+  diagnostics: unknown,
+): NonNullable<MessageRecord["failure"]>["context"] {
+  if (!Array.isArray(diagnostics)) return undefined;
+  const diagnostic = diagnostics
+    .filter(isRecordObject)
+    .findLast((entry) => entry["type"] === "codex_failure");
+  if (diagnostic === undefined) return undefined;
+  const context: NonNullable<NonNullable<MessageRecord["failure"]>["context"]> = {};
+  if (diagnostic["transport"] === "sse" || diagnostic["transport"] === "websocket")
+    context.transport = diagnostic["transport"];
+  if (
+    diagnostic["phase"] === "before_message_stream_start" ||
+    diagnostic["phase"] === "after_message_stream_start"
+  )
+    context.phase = diagnostic["phase"];
+  const boundedInteger = (value: unknown, min: number, max: number): value is number =>
+    typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
+  if (boundedInteger(diagnostic["brokerGeneration"], 0, Number.MAX_SAFE_INTEGER))
+    context.brokerGeneration = diagnostic["brokerGeneration"];
+  if (boundedInteger(diagnostic["tokenExpiresAt"], 0, 8_640_000_000_000_000))
+    context.tokenExpiresAt = diagnostic["tokenExpiresAt"];
+  if (boundedInteger(diagnostic["attempt"], 1, 20)) context.attempt = diagnostic["attempt"];
+  if (boundedInteger(diagnostic["status"], 100, 599)) context.status = diagnostic["status"];
+  if (boundedInteger(diagnostic["wsCloseCode"], 1000, 4999))
+    context.wsCloseCode = diagnostic["wsCloseCode"];
+  if (typeof diagnostic["code"] === "string" && CODEX_ERROR_CODES.has(diagnostic["code"]))
+    context.code = diagnostic["code"];
+  if (
+    typeof diagnostic["requestId"] === "string" &&
+    (/^req_[a-zA-Z0-9]{8,64}$/.test(diagnostic["requestId"]) ||
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+        diagnostic["requestId"],
+      ))
+  )
+    context.requestId = diagnostic["requestId"];
+  return Object.keys(context).length ? context : undefined;
+}
+
+function mapMessageEntry(
+  identity: EntryIdentity,
+  message: Record<string, unknown>,
+): Result<HistoryRecord, MappingError> {
+  const role = message["role"];
+  switch (role) {
+    case "user":
+      return ok({
+        ...identity,
+        type: "message",
+        role: "user",
+        content: mapUserContent(message["content"]),
+      });
+    case "assistant": {
+      const usage = isRecordObject(message["usage"]) ? message["usage"] : undefined;
+      const cost = usage !== undefined && isRecordObject(usage["cost"]) ? usage["cost"] : undefined;
+      const usageNumber = (value: unknown): number | undefined =>
+        typeof value === "number" ? value : undefined;
+      const inputTokens = usageNumber(usage?.["input"]);
+      const outputTokens = usageNumber(usage?.["output"]);
+      const cacheReadTokens = usageNumber(usage?.["cacheRead"]);
+      const cacheWriteTokens = usageNumber(usage?.["cacheWrite"]);
+      const totalTokens = usageNumber(usage?.["totalTokens"]);
+      const costUsd = usageNumber(cost?.["total"]);
+      const errorMessage = stringOf(message, "errorMessage");
+      const diagnostics = message["diagnostics"];
+      const context =
+        message["provider"] === "openai-codex" ? codexFailureContext(diagnostics) : undefined;
+      const failure =
+        message["stopReason"] === "error" &&
+        errorMessage !== undefined &&
+        errorMessage.trim() !== ""
+          ? {
+              message: errorMessage,
+              diagnostics: (Array.isArray(diagnostics) ? diagnostics : [])
+                .filter(isRecordObject)
+                .map((diagnostic) => diagnostic["type"])
+                .filter((type): type is string => typeof type === "string"),
+              ...(context ? { context } : {}),
+            }
+          : null;
+      const record: MessageRecord = {
+        ...identity,
+        type: "message",
+        role: "assistant",
+        content: mapAssistantContent(message["content"]),
+        ...(typeof message["model"] === "string"
+          ? {
+              model: {
+                ...(typeof message["provider"] === "string"
+                  ? { provider: message["provider"] }
+                  : {}),
+                id: message["model"],
+              },
+            }
+          : {}),
+        ...(usage !== undefined
+          ? {
+              usage: {
+                ...(inputTokens !== undefined ? { inputTokens } : {}),
+                ...(outputTokens !== undefined ? { outputTokens } : {}),
+                ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+                ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+                ...(totalTokens !== undefined ? { totalTokens } : {}),
+                ...(costUsd !== undefined ? { costUsd } : {}),
+              },
+            }
+          : {}),
+        ...(typeof message["stopReason"] === "string"
+          ? { finishReason: message["stopReason"] }
+          : {}),
+        ...(failure === null ? {} : { failure }),
+      };
+      return ok(record);
+    }
+    case "toolResult": {
+      const details = message["details"];
+      const patch = isRecordObject(details) ? stringOf(details, "patch") : undefined;
+      const nativeCalls = message["nestedCalls"];
+      const nativeSummary =
+        isRecordObject(nativeCalls) &&
+        typeof nativeCalls["complete"] === "boolean" &&
+        Array.isArray(nativeCalls["calls"])
+          ? { complete: nativeCalls["complete"], calls: nativeCalls["calls"] as unknown[] }
+          : undefined;
+      const calls: NonNullable<
+        Extract<ContentBlock, { type: "tool_result" }>["nestedCalls"]
+      >["calls"] = nativeSummary
+        ? nativeSummary.calls.filter(isRecordObject).flatMap((call) =>
+            typeof call["id"] === "string" &&
+            typeof call["name"] === "string" &&
+            (call["status"] === "ok" ||
+              call["status"] === "error" ||
+              call["status"] === "unfinished")
+              ? [
+                  {
+                    id: call["id"],
+                    name: call["name"],
+                    status: call["status"],
+                    ...(call["arguments"] !== undefined
+                      ? { arguments: asJson(call["arguments"]) }
+                      : {}),
+                    ...(typeof call["argumentsBytes"] === "number"
+                      ? { argumentsBytes: call["argumentsBytes"] }
+                      : {}),
+                    ...(typeof call["durationMs"] === "number"
+                      ? { durationMs: call["durationMs"] }
+                      : {}),
+                    ...(typeof call["error"] === "string" ? { error: call["error"] } : {}),
+                  },
+                ]
+              : [],
+          )
+        : [];
+      const nestedCalls = nativeSummary
+        ? {
+            calls,
+            complete: nativeSummary.complete && calls.length === nativeSummary.calls.length,
+          }
+        : undefined;
+      return ok({
+        ...identity,
+        type: "message",
+        role: "tool",
+        content: [
+          {
+            type: "tool_result",
+            callId: String(message["toolCallId"] ?? ""),
+            content: [
+              ...mapUserContent(message["content"]).filter(
+                (block) =>
+                  block.type === "text" || block.type === "image" || block.type === "other",
+              ),
+              // Code-mode charts ride in result details, outside the model's view (docs/pi-adapter.md).
+              ...(isRecordObject(details) && Array.isArray(details["charts"])
+                ? details["charts"].map((data) => ({
+                    type: "other" as const,
+                    contentType: CHART_CONTENT_TYPE,
+                    data: asJson(data),
+                  }))
+                : []),
+            ],
+            isError: message["isError"] === true,
+            ...(patch === undefined ? {} : { patch }),
+            ...(nestedCalls === undefined ? {} : { nestedCalls }),
+          },
+        ],
+      });
+    }
+    default:
+      // An unknown message role becomes a generic event rather than
+      // inventing a shared role (docs/pi-adapter.md).
+      return ok({
+        ...identity,
+        type: "event",
+        eventType: `pi.message.${String(role)}`,
+      });
+  }
+}
+
+/** Map one persisted Pi session entry to exactly one normalized record. */
+export function mapPiEntry(entry: unknown): Result<HistoryRecord, MappingError> {
+  if (!isRecordObject(entry)) {
+    return fail(`entry is not an object: ${JSON.stringify(entry)?.slice(0, 200)}`);
+  }
+  const identityResult = identityOf(entry);
+  if (identityResult.isErr()) return err(identityResult.error);
+  const identity = identityResult.value;
+
+  switch (entry["type"]) {
+    case "message": {
+      const message = entry["message"];
+      if (!isRecordObject(message)) return fail(`message entry ${identity.id} has no message`);
+      return mapMessageEntry(identity, message);
+    }
+    case "compaction":
+      return ok({
+        ...identity,
+        type: "compaction",
+        summary: [textBlock(typeof entry["summary"] === "string" ? entry["summary"] : "")],
+      });
+    case "thinking_level_change":
+      return ok({ ...identity, type: "event", eventType: "pi.thinking_level_change" });
+    case "model_change":
+      return ok({ ...identity, type: "event", eventType: "pi.model_change" });
+    case "branch_summary":
+      return ok({
+        ...identity,
+        type: "event",
+        eventType: "pi.branch_summary",
+        content: [textBlock(typeof entry["summary"] === "string" ? entry["summary"] : "")],
+      });
+    case "custom": {
+      const data = isRecordObject(entry["data"]) ? entry["data"] : null;
+      if (
+        entry["customType"] === "pi-orb:mcp-status" &&
+        typeof data?.["server"] === "string" &&
+        /^[a-z][a-z0-9_-]{0,63}$/.test(data["server"]) &&
+        (data["state"] === "failed" ||
+          data["state"] === "needs-auth" ||
+          data["state"] === "disconnected" ||
+          data["state"] === "connected")
+      ) {
+        const server = data["server"];
+        const state = data["state"];
+        const label = `MCP ${server}${data["source"] === "child" ? " (child)" : ""}`;
+        return ok({
+          ...identity,
+          type: "event",
+          eventType: "pi.custom",
+          custom: { customType: "pi-orb:mcp-status", display: true },
+          content: [
+            textBlock(
+              state === "connected"
+                ? `${label}: connected.`
+                : `${label}: ${state}. Check project MCP settings.`,
+            ),
+          ],
+        });
+      }
+      if (
+        entry["customType"] === "pi-orb.settings-fallback" &&
+        typeof data?.["message"] === "string"
+      )
+        return ok({
+          ...identity,
+          type: "event",
+          eventType: "agent.settings_fallback",
+          content: [textBlock(data["message"])],
+        });
+      if (
+        entry["customType"] === "pi-orb.compaction-outcome" &&
+        typeof data?.["operationId"] === "string" &&
+        typeof data["message"] === "string" &&
+        (data["outcome"] === "failed" || data["outcome"] === "aborted")
+      )
+        return ok({
+          ...identity,
+          type: "event",
+          eventType: "agent.compaction",
+          compaction: {
+            operationId: data["operationId"],
+            outcome: data["outcome"],
+            message: data["message"],
+          },
+          content: [textBlock(data["message"])],
+        });
+      if (
+        entry["customType"] === "pi-orb.stream-audit" &&
+        (data?.["edge"] === "no_event_gap" || data?.["edge"] === "large_tool_arguments")
+      ) {
+        const label =
+          typeof data["parentSessionId"] === "string" ? "Child model stream" : "Model stream";
+        return ok({
+          ...identity,
+          type: "event",
+          eventType: "agent.stream_issue",
+          custom: { customType: "pi-orb.stream-audit", display: true },
+          content: [
+            textBlock(
+              `${label}: ${data["edge"] === "no_event_gap" ? "no decoded event for 60 seconds." : "tool arguments reached 64 KiB."}`,
+            ),
+          ],
+        });
+      }
+      const alert =
+        entry["customType"] === "pi-orb.alert" &&
+        typeof data?.["message"] === "string" &&
+        typeof data["requestId"] === "string"
+          ? { message: data["message"], requestId: data["requestId"] }
+          : null;
+      return ok({
+        ...identity,
+        type: "event",
+        eventType: "pi.custom",
+        ...(alert === null ? {} : { alert }),
+      });
+    }
+    case "custom_message": {
+      const customType = stringOf(entry, "customType") ?? "";
+      if (customType === "pi-orb.user-message") {
+        const ids = inboxMessageIds(entry["details"]);
+        return ok({
+          ...identity,
+          type: "message",
+          role: "user",
+          content: mapUserContent(entry["content"]),
+          ...(ids.length === 0 ? {} : { inboxMessageIds: ids }),
+        });
+      }
+      const details = entry["details"];
+      const subagent = subagentNotice(customType, details);
+      const ids = inboxMessageIds(details);
+      const system = isRecordObject(details) ? details["system"] : undefined;
+      if (
+        customType === "pi-orb.system-message" &&
+        isRecordObject(system) &&
+        system["kind"] === "orb_message"
+      ) {
+        if (
+          !Check(OrbMessageSystemSchema, system) ||
+          system.kind !== "orb_message" ||
+          ids.length !== 1
+        )
+          return fail("Invalid peer inbox receipt");
+        return ok(
+          systemInputEvent({
+            ...identity,
+            sender: { orbId: system.senderOrbId },
+            content: mapUserContent(entry["content"]),
+            inboxMessageIds: ids,
+          }),
+        );
+      }
+      return ok({
+        ...identity,
+        type: "event",
+        eventType: "pi.custom_message",
+        content: mapUserContent(entry["content"]),
+        custom: { customType, display: entry["display"] === true },
+        ...(subagent === null ? {} : { subagent }),
+        ...(ids.length === 0 ? {} : { inboxMessageIds: ids }),
+      });
+    }
+    case "label":
+      return ok({ ...identity, type: "event", eventType: "pi.label" });
+    case "session_info":
+      return ok({ ...identity, type: "event", eventType: "pi.session_info" });
+    default:
+      // Unknown future entry types preserve cursor continuity as events.
+      return ok({
+        ...identity,
+        type: "event",
+        eventType: `pi.${String(entry["type"])}`,
+      });
+  }
+}

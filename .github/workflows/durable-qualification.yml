@@ -21,7 +21,6 @@ jobs:
         shard: [1, 2, 3, 4]
     env:
       PI_ORB_E2E_BACKEND: process
-      PI_ORB_AGENT_BACKEND: central-durable
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -64,7 +63,6 @@ jobs:
             .context/cross-orb/messaging/*/*-native-history.json
             test-failures/profile-login/failure.json
             test-failures/full-slice-upload/failure.json
-            test-failures/subagent-*/failure.json
             test-failures/lazy-return-*/failure.json
             test-failures/lazy-return-*/failure.png
             test-failures/lazy-return-*/trace.zip

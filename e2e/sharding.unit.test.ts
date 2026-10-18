@@ -22,24 +22,7 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
   expect(source).toContain("  pull_request:\n  push:\n    branches:\n      - main\n");
   const normalRun = source.split("- name: Run end-to-end test")[1]?.split("- name:")[0];
   expect(normalRun).toBeDefined();
-  expect(source).toContain("  workflow_dispatch:\n    inputs:\n");
-  expect(source).toContain("      subagent_continuation_diagnostic:");
-  expect(source).toContain("        type: boolean\n        default: false");
-  expect(source).not.toContain("webkit_reload_diagnostic");
-  expect(source).not.toContain("Diagnose frontend shard");
-  expect(normalRun).toContain(
-    "if: github.event_name != 'workflow_dispatch' || !inputs.subagent_continuation_diagnostic",
-  );
-  const diagnostic = source.split("- name: Diagnose subagent continuation")[1]?.split("- name:")[0];
-  expect(diagnostic).toContain(
-    "if: github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic",
-  );
-  expect(diagnostic?.match(/if: (.+)/u)?.[1]).toBe(
-    "github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic",
-  );
-  expect(diagnostic?.match(/run: (.+)/u)?.[1]).toBe("npm run test:e2e -- --shard=2/4");
-  expect(diagnostic?.match(/npm run test:e2e/gu)).toHaveLength(1);
-  expect(diagnostic).not.toMatch(/for |--(?:project|retry|passWithNoTests|testTimeout)/u);
+  expect(source).toContain("  workflow_dispatch:\n");
   expect(source).toContain("timeout-minutes: 40");
   expect(normalRun).toContain(
     `run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --shard=\${{ matrix.shard }}/4`,
@@ -64,7 +47,6 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
     "test-failures/*.json",
     "test-failures/profile-login/failure.json",
     "test-failures/full-slice-upload/failure.json",
-    "test-failures/subagent-*/failure.json",
   ]);
   expect(source).toContain("test-failures/lazy-return-*/trace.zip");
   const browserUpload = source
@@ -75,12 +57,6 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
     ".context/claude-production-hardening/browser-failure",
   );
   expect(browserUpload).toContain("include-hidden-files: true");
-});
-
-it("keeps manual diagnostics distinct from required E2E checks", () => {
-  expect(workflow("e2e").match(/^ {4}name: (.+)$/mu)?.[1]).toBe(
-    "E2E (${{ matrix.shard }}/4)${{ github.event_name == 'workflow_dispatch' && inputs.subagent_continuation_diagnostic && ' diagnostic' || '' }}",
-  );
 });
 
 it("the actual Vitest sequencer partitions every E2E file exactly once across four shards", async () => {

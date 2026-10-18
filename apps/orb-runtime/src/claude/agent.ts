@@ -61,24 +61,20 @@ import { fetchMcpCatalog } from "../mcp/boot.ts";
 import { triggerOrbName } from "../naming/client.ts";
 import { readRootReadme } from "../naming/context.ts";
 import { fetchPersonalInstructions } from "../personal-instructions/endpoint.ts";
-import { fetchBootContext } from "../pi/boot-context.ts";
-import {
-  BOOT_BASELINE_TYPE,
-  planBootNotification,
-  SLEEP_WAKE_TYPE,
-} from "../pi/boot-notification.ts";
-import { environmentPrompt } from "../pi/environment-prompt.ts";
-import { readExecutionIdentity } from "../pi/execution-identity.ts";
-import { FileIdleStopFence } from "../pi/idle-stop-fence.ts";
 import { fetchProjectInstructions } from "../project-instructions/endpoint.ts";
 import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts";
 import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { ClaudeActivity } from "./activity.ts";
 import { claudeChildEnvironment, fetchClaudeSubscription, verifyClaudeAccount } from "./auth.ts";
 import { validateClaudeAuthSettings } from "./auth-settings.ts";
+import { fetchBootContext } from "./boot-context.ts";
 import { claudeBootEntries } from "./boot-notification.ts";
+import { BOOT_BASELINE_TYPE, planBootNotification, SLEEP_WAKE_TYPE } from "./boot-policy.ts";
 import { ClaudeDiagnostics, type ClaudeQueryError } from "./diagnostics.ts";
+import { environmentPrompt } from "./environment-prompt.ts";
+import { readExecutionIdentity } from "./execution-identity.ts";
 import { ClaudeHistory, type HistoryFiles, nativeHistoryFiles } from "./history.ts";
+import { FileIdleStopFence } from "./idle-stop-fence.ts";
 import { readClaudeRepositoryInstructions } from "./instructions.ts";
 import { type ClaudeMcpRuntime, createClaudeMcp } from "./mcp.ts";
 import {

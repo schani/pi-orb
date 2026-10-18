@@ -3,7 +3,7 @@ import { NoSimulationTask } from "determined";
 import type { ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { mapPiEntry } from "../../../orb-runtime/src/pi/mapping.ts";
+import { mapPiEntry } from "../../../orb-runtime/src/domain/mapping.ts";
 import {
   ComposedClaudeFixture,
   rootResult,

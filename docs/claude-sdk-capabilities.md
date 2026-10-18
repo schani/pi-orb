@@ -148,8 +148,7 @@ An ambient task excluded from the indicator is not necessarily effect-free. Ther
 `Query.close(): void` is destructive, not an awaited drain.
 Sources: [public types](https://unpkg.com/@anthropic-ai/claude-agent-sdk@0.3.289/sdk.d.ts), [TypeScript reference](https://code.claude.com/docs/en/agent-sdk/typescript), [hooks](https://code.claude.com/docs/en/hooks).
 
-Current pi-orb ownership (`docs/subagents.md`, `docs/lifecycle.md`): `pi/agent.ts:1393` finishes only with ready health, root `session.isIdle`, no `turnStart`, and no `subagentWork.busy`; persisted history flushes before completion.
-`domain/subagent-work` owns admission through actual terminal publication, including queued/cancelling work and continuation handoff. Settings/input ownership separately blocks `prepareIdleStop` (`pi/agent.ts:1554`). Uploads are independent lifecycle activity; control-plane inbox and visible tabs separately prevent idle auto-stop.
+Current pi-orb ownership (`docs/subagents.md`, `docs/lifecycle.md`): central Pi derives aggregate native root/child/task work and completes only after durable publication. Native Claude retains query, subprocess, task/handoff and cleanup ownership until its supervised drain. Settings/input and prepared-stop admission remain fenced; uploads, inbox and visible tabs supply separate lifecycle demand.
 Detached dev servers intentionally do not prevent idle-stop. Counting all SDK background tasks would change policy; root completion alone would lose owned work. No full equivalence is proven.
 
 Approved POC qualification boundary (2026-10-04): SDK adapters retain owned holds through native owned tool/child cleanup, persistence and continuation handoff, and claim input synchronously before SDK submission. Co-location does not prove native background gating; remote cleanup is historical split-specific evidence.

@@ -2,7 +2,6 @@ import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import {
   CONTROL_PLANE_URL_ENV,
-  HARNESS_ENV,
   PREVIEW_HOST_ENV,
   previewHost,
   RUNTIME_TOKEN_ENV,
@@ -28,7 +27,6 @@ import { specFingerprintOf } from "../spec-fingerprint.ts";
 import type { TailscaleHostOptions } from "../tailscale/client.ts";
 
 export interface DockerOrbHostProviderOptions {
-  readonly runtimeMode?: "pi" | "execution";
   readonly image: string;
   /** Docker network shared by orb containers (and the control plane when containerized). */
   readonly network: string;
@@ -41,7 +39,7 @@ export interface DockerOrbHostProviderOptions {
    */
   readonly controlPlaneUrl?: string;
   readonly controlPlanePort: number;
-  /** Extra environment passed to every orb container (e.g. E2E mock-OpenAI URLs). */
+  /** Extra environment passed to every orb container. */
   readonly extraEnv?: Readonly<Record<string, string>>;
   /**
    * Tailscale port exposure (docs/ports.md). Absent means no tailscale env is
@@ -205,7 +203,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
       network: this.options.network,
       controlPlaneUrl: this.controlPlaneUrl(),
       extraEnv: this.options.extraEnv ?? {},
-      runtimeMode: input.harness === "claude" ? "pi" : (this.options.runtimeMode ?? "pi"),
+      runtimeMode: input.harness === "claude" ? "claude" : "execution",
       skillsDir: IMAGE_SKILLS_DIR,
       tailscale:
         this.options.tailscale === undefined
@@ -626,11 +624,9 @@ export class DockerOrbHostProvider implements OrbHostProvider {
           "--env",
           `PI_ORB_CLAUDE_RECOVERY_PROOF=${JSON.stringify(request.claudeRecoveryProof ?? null)}`,
           "--env",
-          `${HARNESS_ENV}=${request.bootstrap.harness ?? "pi"}`,
-          "--env",
           `${SKILLS_DIR_ENV}=${IMAGE_SKILLS_DIR}`,
           "--env",
-          `PI_ORB_RUNTIME_MODE=${request.bootstrap.harness === "claude" ? "pi" : (this.options.runtimeMode ?? "pi")}`,
+          `PI_ORB_RUNTIME_MODE=${request.bootstrap.harness === "claude" ? "claude" : "execution"}`,
           "--env",
           `PI_ORB_INITIAL_CHECKOUT_COMMIT=${request.bootstrap.initialCheckoutCommit ?? ""}`,
           "--env",

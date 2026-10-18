@@ -286,8 +286,7 @@ present, guarded on `command -v`), `.agents/resume` (restore the credential file
 variables where the agent's shells read them, `gcloud auth login --cred-file=…`, set the project),
 and a `.pi-orb/gcp-external-account.json` template — which holds no secret, so committing it is
 what makes the next orb's gcloud identity cost zero steps. The `--cred-file` login lives in resume
-because setup has no identity, and `apps/orb-runtime/src/pi/skills.test.ts` asserts that
-structurally. A second baked skill, `boot-hooks`, is the general authoring guide for those files.
+because setup has no identity; skill contracts assert that structurally. A second baked skill, `boot-hooks`, is the general authoring guide for those files.
 
 **Persistent deployment access reaffirmed 2026-09-09:** this repository's committed hooks already configure project-wide federation. Additional deployment permissions belong on the shared service account in the separately administered foundation, not in per-orb personal logins. After fixing the missing hosting-bucket grant, the actual resume hook ran twice in an empty HOME/gcloud configuration, passed an application plan with federation alone, and preserved the denial of state-bucket mutation and project-IAM administration. The temporary administrator login was revoked. Existing and future admitted project orbs receive the same durable IAM grant without sharing a refresh token. The exact permission scope and platform limitations are recorded in `docs/deployment.md` and `docs/postmortems/2026-09-09-release-hosting-bucket-iam.md`.
 

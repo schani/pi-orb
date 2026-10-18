@@ -24,7 +24,7 @@ Shared `orbToolRequestId(senderOrbId,requestId)` derives `message_id`; existing 
 
 - **SQL/inbox:** `045_orb_messaging.sql` replaces only `orb_messages_system_check`, retaining null/exact sleep variants and adding exact `{kind:"orb_message",senderOrbId}` with both required keys, string/RFC UUID validation, no extras, and `COALESCE(...,false)` fail-closed validation. No new tables, columns, indexes, foreign keys or backfill; existing IDs, content, ordinal, status, delivery/error/wake fields remain.
 - **History JSON:** `eventType:"orb.message"`, original `content`, singleton `inboxMessageIds`, and structured `sender:{orbId}` (optional on event schema, required for peers by mappers). Display preserves sender; existing object-valued history storage needs no migration. Native origins/text prefixes cannot grant attribution; malformed peer receipts fail mapping rather than become human input.
-- **Central Pi Durable:** existing `orb.identity.receipts[batchId].system` retains complete metadata covered by its fingerprint; atomic/public projection preserves it. **Host Pi:** existing native custom-message `details.system` retains/maps metadata. Neither adds receipt keys/IDs.
+- **Central Pi Durable:** existing `orb.identity.receipts[batchId].system` retains complete metadata covered by its fingerprint; atomic/public projection preserves it. No new receipt keys/IDs.
 - **Claude:** existing delivery-state `system` accepts the variant; UUID-keyed `provenance.json` adds optional `sender:{orbId}` alongside `system:boolean`, requiring valid sender and singleton inbox identity. No new file/receipt identity.
 - **Wake:** existing `auto_start`/`wake_state_version` and sleep/stop/admission fields change atomically; no new flag, deadline or state machine.
 

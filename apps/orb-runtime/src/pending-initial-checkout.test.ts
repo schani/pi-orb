@@ -135,7 +135,7 @@ test("outage wait is bounded and cancellation prevents late fetch", async () => 
   });
   expect(cancelled.isErr()).toBe(true);
 });
-test("known pin and host-pi do not request the endpoint", async () => {
+test("known pin and absent wait flag do not request the endpoint", async () => {
   const fetch = async () => {
     throw new Error("unexpected fetch");
   };

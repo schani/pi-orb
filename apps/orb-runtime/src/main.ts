@@ -1,6 +1,5 @@
 import { join } from "node:path";
-import { readMockOpenAiEnv } from "@pi-orb/mock-openai";
-import { HARNESS_ENV, SKILLS_DIR_ENV } from "@pi-orb/protocol";
+import { SKILLS_DIR_ENV } from "@pi-orb/protocol";
 import { readBrokerEnv } from "./broker/endpoint.ts";
 import { ClaudeOrbAgent } from "./claude/agent.ts";
 import { startModelUsageReceiver } from "./claude/model-usage.ts";
@@ -8,7 +7,6 @@ import { readClaudeRecoveryProof } from "./claude/recovery-proof.ts";
 import type { OrbAgent } from "./domain/orb-agent.ts";
 import { ORB_MARKER_ENV } from "./hooks/env-file.ts";
 import { buildRuntimeServer } from "./http/server.ts";
-import { PiOrbAgent } from "./pi/agent.ts";
 import { startTailscale } from "./tailscale/daemon.ts";
 import { readTailscaleEnv } from "./tailscale/env.ts";
 import { TerminalManager } from "./terminal/manager.ts";
@@ -42,18 +40,12 @@ async function main(): Promise<void> {
     );
   }
   const tailscale = readTailscaleEnv(process.env);
-  const harness = env(HARNESS_ENV, "pi");
-  if (harness !== "pi" && harness !== "claude") {
-    console.error(`${HARNESS_ENV} must be pi or claude`);
-    process.exit(1);
-  }
   const agentOptions = {
     orbId: env("PI_ORB_ID"),
     repositoryUrl: env("PI_ORB_REPOSITORY_URL"),
     workDir,
     skillsDir: env(SKILLS_DIR_ENV),
     broker: readBrokerEnv(process.env),
-    mockOpenAi: readMockOpenAiEnv(process.env),
     previewHost: tailscale?.previewHost ?? null,
     incarnation: env("PI_ORB_HOST_INCARNATION", "0"),
     claudeRecoveryProof: readClaudeRecoveryProof(process.env.PI_ORB_CLAUDE_RECOVERY_PROOF),
@@ -61,15 +53,14 @@ async function main(): Promise<void> {
   };
   // Exports arrive only after the agent spawns Claude Code, so the sink never sees `claude` unset.
   let claude: ClaudeOrbAgent | undefined;
-  if (harness === "claude")
-    claude = new ClaudeOrbAgent({
-      ...agentOptions,
-      modelUsage: await startModelUsageReceiver(
-        (call) => claude?.recordModelCall(call),
-        (error) => console.error(`claude.model_usage_rejected: ${error.message}`),
-      ),
-    });
-  const agent: OrbAgent = claude ?? new PiOrbAgent(agentOptions);
+  claude = new ClaudeOrbAgent({
+    ...agentOptions,
+    modelUsage: await startModelUsageReceiver(
+      (call) => claude?.recordModelCall(call),
+      (error) => console.error(`claude.model_usage_rejected: ${error.message}`),
+    ),
+  });
+  const agent: OrbAgent = claude;
 
   // The health server starts before slow initialization (docs/host-provider.md).
   // PTYs are admitted only after the checkout is ready, but their manager is

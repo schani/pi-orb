@@ -17,7 +17,6 @@ import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CONTROL_PLANE_URL_ENV,
-  HARNESS_ENV,
   PREVIEW_HOST_ENV,
   RUNTIME_TOKEN_ENV,
   SKILLS_DIR_ENV,
@@ -39,7 +38,6 @@ import type {
 import { specFingerprintOf } from "../spec-fingerprint.ts";
 
 export interface ProcessOrbHostProviderOptions {
-  readonly runtimeMode?: "pi" | "execution";
   readonly stateDirectory: string;
   readonly runtimeEntryPoint: string;
   readonly controlPlaneUrl: string;
@@ -162,7 +160,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     return specFingerprintOf({
       v: 1,
       runtimeEntryPoint: this.options.runtimeEntryPoint,
-      runtimeMode: input.harness === "claude" ? "pi" : (this.options.runtimeMode ?? "execution"),
+      runtimeMode: input.harness === "claude" ? "claude" : "execution",
       nodeExecutable: this.options.nodeExecutable ?? process.execPath,
       controlPlaneUrl: this.options.controlPlaneUrl,
       skillsDir: this.options.skillsDir,
@@ -336,10 +334,8 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     delete environment.XDG_CONFIG_HOME;
     Object.assign(environment, this.options.extraEnv ?? {}, {
       PI_ORB_ID: metadata.orbId,
-      [HARNESS_ENV]: metadata.harness,
       PI_ORB_REPOSITORY_URL: metadata.repositoryUrl,
-      PI_ORB_RUNTIME_MODE:
-        metadata.harness === "claude" ? "pi" : (this.options.runtimeMode ?? "execution"),
+      PI_ORB_RUNTIME_MODE: metadata.harness === "claude" ? "claude" : "execution",
       PI_ORB_INITIAL_CHECKOUT_COMMIT: metadata.initialCheckoutCommit ?? "",
       PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT: metadata.awaitInitialCheckoutCommit ? "1" : "",
       PI_ORB_HOST_INCARNATION: String(metadata.incarnation),

@@ -3,12 +3,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  MOCK_OPENAI_INFERENCE_URL_ENV,
-  MOCK_OPENAI_OAUTH_URL_ENV,
-  type MockOpenAiConfig,
-  readMockOpenAiEnv,
-} from "@pi-orb/mock-openai";
+import { type MockOpenAiConfig, readMockOpenAiEnv } from "@pi-orb/mock-openai";
 import {
   HOSTING_MAX_FILE_BYTES,
   HOSTING_TRANSFER_TIMEOUT_MS,
@@ -64,7 +59,6 @@ import {
 } from "./adapters/tailscale/client.ts";
 import { CryptoUserIdSource } from "./adapters/user-id.ts";
 import { uploadRequest } from "./adapters/workspace-upload-http.ts";
-import { agentBackend } from "./agent-backend.ts";
 import {
   type ApplicationAuth,
   createApplicationAuth,
@@ -211,13 +205,6 @@ export async function main(
   } = {},
 ): Promise<void> {
   const bootTask = new NoSimulationTask("boot", true);
-  const selectedAgent = agentBackend(process.env["PI_ORB_AGENT_BACKEND"]);
-  if (selectedAgent.isErr()) {
-    bootTask.error(selectedAgent.error.message);
-    process.exitCode = 1;
-    return;
-  }
-  const runtimeMode = selectedAgent.value === "central-durable" ? "execution" : "pi";
   const databaseUrl = env("DATABASE_URL", "postgres://pi-orb:pi-orb@127.0.0.1:5433/pi_orb");
   const databaseKind = env("PI_ORB_DATABASE_KIND", "postgresql");
   const pglitePath = env(
@@ -303,8 +290,8 @@ export async function main(
     if (migrated.value.length > 0) bootTask.log("applied migrations:", migrated.value.join(", "));
   }
 
-  // E2E mode: when the fake-OpenAI URLs are set, the auth gate and every orb
-  // container route Codex OAuth/inference to the mock (docs/PI-CODEX-E2E.md).
+  // E2E mode routes central Codex auth and model calls to the mock
+  // (docs/PI-CODEX-E2E.md).
   const mockOpenAi = readMockOpenAiEnv(process.env);
   if (mockOpenAi !== null) {
     bootTask.log("E2E mode: Codex OAuth/inference routed to", mockOpenAi.oauthBaseUrl);
@@ -370,13 +357,6 @@ export async function main(
   const e2eLaunchFailureMarker = env("PI_ORB_E2E_LAUNCH_FAILURE_MARKER", "");
   const e2eHostSpec = env("PI_ORB_E2E_HOST_SPEC", "");
   const runtimeExtraEnv: Record<string, string> = {
-    ...(mockOpenAi === null
-      ? {}
-      : {
-          [MOCK_OPENAI_OAUTH_URL_ENV]: mockOpenAi.oauthBaseUrl,
-          [MOCK_OPENAI_INFERENCE_URL_ENV]: mockOpenAi.inferenceBaseUrl,
-          PI_OFFLINE: "1",
-        }),
     ...(e2eLaunchFailureMarker === ""
       ? {}
       : { PI_ORB_E2E_LAUNCH_FAILURE_MARKER: e2eLaunchFailureMarker }),
@@ -454,7 +434,6 @@ export async function main(
           projectId: env("PI_ORB_GCP_PROJECT", ""),
           zone: env("PI_ORB_GCE_ZONE", "us-central1-a"),
           machineType: env("PI_ORB_GCE_MACHINE_TYPE", "n2d-highmem-2"),
-          runtimeMode,
           subnetwork: env(
             "PI_ORB_GCE_SUBNETWORK",
             "regions/us-central1/subnetworks/pi-orb-us-central1",
@@ -478,7 +457,6 @@ export async function main(
             runtimeEntryPoint: fileURLToPath(
               new URL("../../orb-runtime/src/runtime-entry.ts", import.meta.url),
             ),
-            runtimeMode,
             commandDirectory: fileURLToPath(new URL("../../orb-runtime/docker", import.meta.url)),
             skillsDir: fileURLToPath(new URL("../../orb-runtime/skills", import.meta.url)),
             controlPlaneUrl: env("PI_ORB_BROKER_URL", `http://127.0.0.1:${port}`),
@@ -487,7 +465,6 @@ export async function main(
           })
         : new DockerOrbHostProvider({
             image: runtimeImage,
-            runtimeMode,
             network: dockerNetwork,
             ...(process.env["PI_ORB_DOCKER_INVENTORY_SCOPE"] === undefined
               ? {}
@@ -667,124 +644,113 @@ export async function main(
       ),
   );
   let centralPlane: DurableAgentPlane | undefined;
-  if (selectedAgent.value === "central-durable") {
-    const opened = await DurableAgentPlane.create({
-      persistence: database.agentPersistence,
-      prepare: (task, orb, context) =>
-        resourceGate
-          .acquire(task, orb, context)
-          .map(() => undefined)
-          .mapErr((error) => ({
-            type: "runtime_client_error" as const,
-            code: "initialization_failed" as const,
-            answered: true,
-            retryable: error.code === "storage",
+  const opened = await DurableAgentPlane.create({
+    persistence: database.agentPersistence,
+    prepare: (task, orb, context) =>
+      resourceGate
+        .acquire(task, orb, context)
+        .map(() => undefined)
+        .mapErr((error) => ({
+          type: "runtime_client_error" as const,
+          code: "initialization_failed" as const,
+          answered: true,
+          retryable: error.code === "storage",
+          message: error.message,
+          initializationError: {
+            code: "resource_acquisition_failed",
             message: error.message,
-            initializationError: {
-              code: "resource_acquisition_failed",
-              message: error.message,
-              retryable: error.code === "storage",
-            },
-          })),
-      currentOrb: (task, orbId) =>
-        database.store.getOrb(task, orbId).mapErr(() => ({
+            retryable: error.code === "storage",
+          },
+        })),
+    currentOrb: (task, orbId) =>
+      database.store.getOrb(task, orbId).mapErr(() => ({
+        type: "runtime_client_error" as const,
+        code: "history_unavailable" as const,
+        answered: true,
+        retryable: true,
+        message: "Conversation admission unavailable",
+      })),
+    cancelPending: (task, orb, operationId) =>
+      database.store
+        .getProject(task, orb.projectId)
+        .mapErr(() => ({
           type: "runtime_client_error" as const,
           code: "history_unavailable" as const,
           answered: true,
           retryable: true,
-          message: "Conversation admission unavailable",
-        })),
-      cancelPending: (task, orb, operationId) =>
-        database.store
-          .getProject(task, orb.projectId)
-          .mapErr(() => ({
-            type: "runtime_client_error" as const,
-            code: "history_unavailable" as const,
-            answered: true,
-            retryable: true,
-            message: "Pending admission unavailable",
-          }))
-          .andThen((project) =>
-            project
-              ? cancelQueuedUserTurn(
-                  task,
-                  database.store,
-                  {
-                    kind: "central",
-                    orbId: orb.id,
-                    projectId: orb.projectId,
-                    ownerUserId: project.ownerUserId,
-                    agentAdmissionVersion: orb.agentAdmissionVersion,
-                  },
-                  operationId,
-                )
-              : errAsync({
-                  type: "runtime_client_error" as const,
-                  code: "history_unavailable" as const,
-                  answered: true,
-                  retryable: false,
-                  message: "Pending admission unavailable",
-                }),
-          ),
-      openContext: createProcessAgentContext(deps, {
-        brokerForUser,
-        resources: resourceGate,
-        mcp: database.mcp,
-        mcpOAuth,
-        modelUsage: database.modelUsage,
-        appOrigin: appOrigin || `http://127.0.0.1:${port}`,
-        ...(tailnetDnsName ? { tailnetDnsName } : {}),
-        inferenceBaseUrl: (userId) =>
-          (adapters.mockOpenAiForUser?.(userId) ?? mockOpenAi)?.inferenceBaseUrl,
-        notifyParent: (orbId, expectedAdmissionVersion, message, api, context) =>
-          centralPlane
-            ? centralPlane.notifyParent(orbId, message, api, context, expectedAdmissionVersion)
+          message: "Pending admission unavailable",
+        }))
+        .andThen((project) =>
+          project
+            ? cancelQueuedUserTurn(
+                task,
+                database.store,
+                {
+                  kind: "central",
+                  orbId: orb.id,
+                  projectId: orb.projectId,
+                  ownerUserId: project.ownerUserId,
+                  agentAdmissionVersion: orb.agentAdmissionVersion,
+                },
+                operationId,
+              )
             : errAsync({
-                code: "unavailable" as const,
-                message: "Notification admission unavailable",
+                type: "runtime_client_error" as const,
+                code: "history_unavailable" as const,
+                answered: true,
+                retryable: false,
+                message: "Pending admission unavailable",
               }),
-        appendAlert: (orbId, requestId, message, expectedAdmissionVersion) => {
-          if (!centralPlane)
-            return errAsync({ code: "unavailable" as const, message: "central agent unavailable" });
-          return centralPlane
-            .appendAlert(orbId, requestId, message, expectedAdmissionVersion)
-            .mapErr(() => ({
+        ),
+    openContext: createProcessAgentContext(deps, {
+      brokerForUser,
+      resources: resourceGate,
+      mcp: database.mcp,
+      mcpOAuth,
+      modelUsage: database.modelUsage,
+      appOrigin: appOrigin || `http://127.0.0.1:${port}`,
+      ...(tailnetDnsName ? { tailnetDnsName } : {}),
+      inferenceBaseUrl: (userId) =>
+        (adapters.mockOpenAiForUser?.(userId) ?? mockOpenAi)?.inferenceBaseUrl,
+      notifyParent: (orbId, expectedAdmissionVersion, message, api, context) =>
+        centralPlane
+          ? centralPlane.notifyParent(orbId, message, api, context, expectedAdmissionVersion)
+          : errAsync({
               code: "unavailable" as const,
-              message: "alert admission unavailable",
-            }));
-        },
-      }),
-    });
-    if (opened.isErr()) {
-      bootTask.error("central agent authority failed:", opened.error.message);
-      if (hostProvider instanceof ProcessOrbHostProvider) await hostProvider.close();
-      await database.close();
-      process.exitCode = 1;
-      return;
-    }
-    centralPlane = opened.value;
-    deps = {
-      ...deps,
-      agentPlane: new HarnessAgentPlane(
-        centralPlane,
-        new SdkAgentPlane({
-          hostProvider,
-          runtimeClient: deps.runtimeClient,
-          control: deps.control,
-        }),
-        deps.store,
-      ),
-    };
-  } else {
-    deps = {
-      ...deps,
-      agentPlane: new SdkAgentPlane({
+              message: "Notification admission unavailable",
+            }),
+      appendAlert: (orbId, requestId, message, expectedAdmissionVersion) => {
+        if (!centralPlane)
+          return errAsync({ code: "unavailable" as const, message: "central agent unavailable" });
+        return centralPlane
+          .appendAlert(orbId, requestId, message, expectedAdmissionVersion)
+          .mapErr(() => ({
+            code: "unavailable" as const,
+            message: "alert admission unavailable",
+          }));
+      },
+    }),
+  });
+  if (opened.isErr()) {
+    bootTask.error("central agent authority failed:", opened.error.message);
+    if (hostProvider instanceof ProcessOrbHostProvider) await hostProvider.close();
+    await database.close();
+    process.exitCode = 1;
+    return;
+  }
+  centralPlane = opened.value;
+  deps = {
+    ...deps,
+    agentPlane: new HarnessAgentPlane(
+      centralPlane,
+      new SdkAgentPlane({
         hostProvider,
         runtimeClient: deps.runtimeClient,
         control: deps.control,
       }),
-    };
-  }
+      deps.store,
+    ),
+  };
   app.addHook("onClose", async () => {
     const drained = await claudeAuth.close(httpTask);
     if (drained.isErr())
@@ -902,13 +868,9 @@ export async function main(
   registerRuntimeRoutes(app, httpTask, {
     appOrigin,
     ...viewConfig,
-    ...(centralPlane
-      ? {
-          alertWriter: centralPlane,
-          initialCheckoutCommit: (task: SimulationTask, orb: import("./domain/orb.ts").OrbRow) =>
-            resourceGate.initialPin(task, orb),
-        }
-      : {}),
+    alertWriter: centralPlane,
+    initialCheckoutCommit: (task: SimulationTask, orb: import("./domain/orb.ts").OrbRow) =>
+      resourceGate.initialPin(task, orb),
     send: (task, caller, request) => sendGuestOrbMessage(task, deps, caller, request),
     spawn: (task, caller, orbId, request) => spawnOrb(task, deps, caller, orbId, request),
     sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
@@ -999,10 +961,9 @@ export async function main(
   const closeResources = (): Promise<void> => {
     resourceClosePromise ??= (async () => {
       await closeApp();
-      if (centralPlane) {
-        const closed = await centralPlane.close();
-        if (closed.isErr()) bootTask.error("central agent close failed:", closed.error.message);
-      }
+      const authorityClosed = await centralPlane.close();
+      if (authorityClosed.isErr())
+        bootTask.error("central agent close failed:", authorityClosed.error.message);
       if (hostProvider instanceof ProcessOrbHostProvider) await hostProvider.close();
       const closed = await database.close();
       if (closed.isErr()) bootTask.error("database close failed:", closed.error.message);

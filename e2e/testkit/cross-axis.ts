@@ -8,9 +8,8 @@ import {
 } from "../../apps/control-plane/src/domain/resources.ts";
 
 export const CROSS_AXIS_CASES = [
-  { provider: "process", agentBackend: "central-durable", movingMain: true },
-  { provider: "process", agentBackend: "host-pi", movingMain: false },
-  { provider: "docker", agentBackend: "central-durable", movingMain: false },
+  { provider: "process", movingMain: true },
+  { provider: "docker", movingMain: false },
 ] as const;
 
 export function localGitEnvironment(repository: string, url: string): Record<string, string> {

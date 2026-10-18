@@ -1,0 +1,1053 @@
+import {
+  CHART_CONTENT_TYPE,
+  HistoryRecordSchema,
+  projectDisplayRecord,
+  projectRecordDetail,
+} from "@pi-orb/protocol";
+import { Check } from "typebox/value";
+import { describe, expect, it } from "vitest";
+import { mapPiEntry } from "./mapping.ts";
+
+const base = { id: "e2", parentId: "e1", timestamp: "2026-07-20T10:00:00.000Z" };
+
+function expectMapped(entry: unknown, exactNative = true) {
+  const result = mapPiEntry(entry);
+  expect(result.isOk(), `mapping failed: ${JSON.stringify(result)}`).toBe(true);
+  if (!result.isOk()) throw new Error("unreachable");
+  const record = result.value;
+  expect(Check(HistoryRecordSchema, record), "mapped record must validate").toBe(true);
+  expect(record.id).toBe(base.id);
+  expect(record.parentId).toBe(base.parentId);
+  expect(record.timestamp).toBe(base.timestamp);
+  if (exactNative) expect(record.overflow["native"]).toEqual(entry);
+  return record;
+}
+
+describe("Pi entry mapping", () => {
+  it.each(["", " \n\t "])(
+    "keeps normalized native thinking %j while omitting its public row",
+    (thinking) => {
+      const native = {
+        ...base,
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking, redacted: false },
+            { type: "toolCall", id: "call-1", name: "read", arguments: { path: "/file" } },
+          ],
+        },
+      };
+      const record = expectMapped(native);
+      if (record.type !== "message") throw new Error("expected message");
+      expect(record.content[0]).toEqual({ type: "reasoning", text: thinking, redacted: false });
+      expect(record.overflow.native).toEqual(native);
+      expect(projectDisplayRecord(record)).toMatchObject({
+        id: base.id,
+        parentId: base.parentId,
+        content: [{ type: "tool_call", detailKey: `${base.id}:1` }],
+      });
+      expect(projectRecordDetail(record, `${base.id}:0`)).toEqual({
+        type: "reasoning",
+        text: thinking,
+      });
+      expect(projectRecordDetail(record, `${base.id}:1`)).toEqual({
+        type: "tool_call",
+        arguments: { path: "/file" },
+      });
+    },
+  );
+  it("maps a user message with string content", () => {
+    const record = expectMapped({
+      ...base,
+      type: "message",
+      message: { role: "user", content: "hello there", timestamp: 1 },
+    });
+    expect(record.type).toBe("message");
+    if (record.type !== "message") return;
+    expect(record.role).toBe("user");
+    expect(record.content).toEqual([{ type: "text", text: "hello there" }]);
+  });
+
+  it("maps a user message with text and image blocks", () => {
+    const record = expectMapped({
+      ...base,
+      type: "message",
+      message: {
+        role: "user",
+        content: [
+          { type: "text", text: "look at this" },
+          { type: "image", data: "aWpn", mimeType: "image/jpeg" },
+        ],
+        timestamp: 1,
+      },
+    });
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.content).toEqual([
+      { type: "text", text: "look at this" },
+      { type: "image", mediaType: "image/jpeg", data: "aWpn" },
+    ]);
+  });
+
+  it("maps an assistant message with thinking, text, tool calls, usage, and model", () => {
+    const record = expectMapped({
+      ...base,
+      type: "message",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "pondering...", redacted: false },
+          { type: "text", text: "the answer" },
+          { type: "toolCall", id: "call-1", name: "bash", arguments: { cmd: "ls" } },
+        ],
+        api: "openai-responses",
+        provider: "openai-codex",
+        model: "gpt-5.2-codex",
+        usage: {
+          input: 100,
+          output: 50,
+          cacheRead: 10,
+          cacheWrite: 5,
+          totalTokens: 165,
+          cost: { input: 0.1, output: 0.2, cacheRead: 0.01, cacheWrite: 0.02, total: 0.33 },
+        },
+        stopReason: "toolUse",
+        timestamp: 2,
+      },
+    });
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.role).toBe("assistant");
+    expect(record.content).toEqual([
+      { type: "reasoning", text: "pondering...", redacted: false },
+      { type: "text", text: "the answer" },
+      { type: "tool_call", callId: "call-1", name: "bash", arguments: { cmd: "ls" } },
+    ]);
+    expect(record.model).toEqual({ provider: "openai-codex", id: "gpt-5.2-codex" });
+    expect(record.usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadTokens: 10,
+      cacheWriteTokens: 5,
+      totalTokens: 165,
+      costUsd: 0.33,
+    });
+    expect(record.finishReason).toBe("toolUse");
+  });
+
+  it("maps a tool result to a single typed tool_result block with role tool", () => {
+    const record = expectMapped({
+      ...base,
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolCallId: "call-1",
+        toolName: "bash",
+        content: [{ type: "text", text: "file1\nfile2" }],
+        isError: false,
+        timestamp: 3,
+      },
+    });
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.role).toBe("tool");
+    expect(record.content).toEqual([
+      {
+        type: "tool_result",
+        callId: "call-1",
+        content: [{ type: "text", text: "file1\nfile2" }],
+        isError: false,
+      },
+    ]);
+  });
+
+  it("projects Pi's bounded native nested-call summary on its codemode result", () => {
+    const nestedCalls = {
+      calls: [
+        {
+          id: "parent/1",
+          name: "mcp__fixture__echo",
+          status: "error",
+          arguments: { value: "marker" },
+          durationMs: 11,
+          error: "MCP request aborted",
+        },
+        {
+          id: "parent/2",
+          name: "read",
+          status: "unfinished",
+          argumentsBytes: 9000,
+        },
+      ],
+      complete: false,
+    };
+    const record = expectMapped({
+      ...base,
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolCallId: "parent",
+        toolName: "codemode",
+        content: [{ type: "text", text: "Script failed" }],
+        isError: true,
+        nestedCalls,
+      },
+    });
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.content[0]).toEqual({
+      type: "tool_result",
+      callId: "parent",
+      content: [{ type: "text", text: "Script failed" }],
+      isError: true,
+      nestedCalls,
+    });
+  });
+
+  it("marks a native summary incomplete when invalid children cannot be projected", () => {
+    const record = expectMapped({
+      ...base,
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolCallId: "parent",
+        toolName: "codemode",
+        content: [],
+        nestedCalls: {
+          complete: true,
+          calls: [
+            { id: "parent/1", name: "read", status: "ok" },
+            { id: "parent/2", name: "read", status: "unexpected" },
+          ],
+        },
+      },
+    });
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.content[0]).toMatchObject({
+      nestedCalls: { complete: false, calls: [{ id: "parent/1", name: "read", status: "ok" }] },
+    });
+  });
+
+  it("shows stream anomaly edges without trusting stored content, and keeps terminal audits quiet", () => {
+    const entry = {
+      ...base,
+      type: "custom",
+      customType: "pi-orb.stream-audit",
+      data: { edge: "large_tool_arguments", parentSessionId: "child", message: "SECRET" },
+    };
+    expect(expectMapped(entry)).toMatchObject({
+      custom: { display: true },
+      content: [{ type: "text", text: "Child model stream: tool arguments reached 64 KiB." }],
+    });
+    expect(expectMapped({ ...entry, data: { edge: "no_event_gap" } })).toMatchObject({
+      content: [{ text: "Model stream: no decoded event for 60 seconds." }],
+    });
+    expect(
+      expectMapped({ ...entry, data: { edge: "terminal", terminal: "aborted" } }),
+    ).not.toHaveProperty("content");
+  });
+
+  it.each(["failed", "needs-auth", "disconnected", "connected"] as const)(
+    "shows a safe MCP %s status from a native custom entry without making it model context",
+    (state) => {
+      const record = expectMapped({
+        ...base,
+        type: "custom",
+        customType: "pi-orb:mcp-status",
+        data: { server: "posthog", state, message: "untrusted secret bearer" },
+      });
+      expect(record).toMatchObject({
+        type: "event",
+        eventType: "pi.custom",
+        custom: { customType: "pi-orb:mcp-status", display: true },
+        content: [
+          {
+            type: "text",
+            text:
+              state === "connected"
+                ? "MCP posthog: connected."
+                : `MCP posthog: ${state}. Check project MCP settings.`,
+          },
+        ],
+      });
+      if (record.type !== "event") throw new Error("expected event");
+      expect(JSON.stringify(record.content)).not.toContain("untrusted secret");
+    },
+  );
+
+  it("labels child MCP status without trusting its stored message or exposing its session ID in the label", () => {
+    const record = expectMapped({
+      ...base,
+      type: "custom",
+      customType: "pi-orb:mcp-status",
+      data: {
+        server: "posthog",
+        state: "needs-auth",
+        source: "child",
+        sessionId: "child-session",
+        message: "RAW_SERVER_SECRET",
+      },
+    });
+    if (record.type !== "event") throw new Error("expected event");
+    expect(record.content).toEqual([
+      { type: "text", text: "MCP posthog (child): needs-auth. Check project MCP settings." },
+    ]);
+    expect(record.overflow.native).toMatchObject({ data: { sessionId: "child-session" } });
+    expect(JSON.stringify(record.content)).not.toContain("child-session");
+    expect(JSON.stringify(record.content)).not.toContain("RAW_SERVER_SECRET");
+  });
+
+  it("keeps malformed MCP status hidden while retaining native identity and overflow", () => {
+    const record = expectMapped({
+      ...base,
+      type: "custom",
+      customType: "pi-orb:mcp-status",
+      data: { server: "bad\nsecret", state: "failed", message: "secret" },
+    });
+    expect(record).toMatchObject({ type: "event", eventType: "pi.custom", id: base.id });
+    if (record.type !== "event") throw new Error("expected event");
+    expect(record.custom).toBeUndefined();
+    expect(record.content).toBeUndefined();
+  });
+
+  it("keeps unknown codemode-store entries one-to-one without inventing nested records", () => {
+    const record = expectMapped({
+      ...base,
+      type: "custom",
+      customType: "codemode-store",
+      data: { set: { evidence: { matches: 1 } } },
+    });
+    expect(record).toMatchObject({
+      type: "event",
+      eventType: "pi.custom",
+      id: base.id,
+    });
+  });
+
+  it("maps a failed assistant message to a typed failure with diagnostic types", () => {
+    const record = expectMapped({
+      ...base,
+      type: "message",
+      message: {
+        role: "assistant",
+        content: [],
+        model: "gpt-5.2-codex",
+        provider: "openai-codex",
+        stopReason: "error",
+        errorMessage: "WebSocket closed 1006",
+        diagnostics: [
+          { type: "provider_transport_failure", timestamp: 1 },
+          { type: "stream_aborted", timestamp: 2 },
+          "malformed",
+        ],
+      },
+    });
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.failure).toEqual({
+      message: "WebSocket closed 1006",
+      diagnostics: ["provider_transport_failure", "stream_aborted"],
+    });
+  });
+
+  it("preserves custom diagnostic names and payloads", () => {
+    const diagnostic = { type: "custom-type", timestamp: 1, details: { reason: "original" } };
+    const record = expectMapped({
+      ...base,
+      type: "message",
+      message: {
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: "failure",
+        diagnostics: [diagnostic],
+      },
+    });
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.failure?.diagnostics).toEqual(["custom-type"]);
+    expect(record.overflow.native).toMatchObject({ message: { diagnostics: [diagnostic] } });
+  });
+
+  it("keeps existing native diagnostics intact while sanitizing each new Codex failure", () => {
+    const old = {
+      type: "provider_transport_failure",
+      timestamp: 1,
+      error: {
+        name: "WebSocketCloseError",
+        message: "WebSocket closed 1011",
+        stack: "existing stack",
+      },
+      details: { phase: "after_message_stream_start", requestBytes: 42 },
+    };
+    const first = {
+      type: "codex_failure",
+      transport: "websocket",
+      phase: "before_message_stream_start",
+      attempt: 1,
+      wsCloseCode: 1011,
+      brokerGeneration: 7,
+      tokenExpiresAt: 1800000000000,
+      reason: "raw-secret",
+      headers: { authorization: "raw-secret" },
+    };
+    const last = {
+      type: "codex_failure",
+      transport: "sse",
+      phase: "before_message_stream_start",
+      attempt: 2,
+      status: 401,
+      code: "invalid_api_key",
+      requestId: "req_12345678",
+      payload: "raw-secret",
+    };
+    const record = expectMapped(
+      {
+        ...base,
+        type: "message",
+        message: {
+          role: "assistant",
+          provider: "openai-codex",
+          content: [],
+          stopReason: "error",
+          errorMessage: "failure",
+          diagnostics: [old, first, last],
+        },
+      },
+      false,
+    );
+    if (record.type !== "message") throw new Error("expected message");
+    const native = record.overflow["native"] as { message: { diagnostics: unknown[] } };
+    expect(native.message.diagnostics[0]).toEqual(old);
+    expect(native.message.diagnostics[1]).toEqual({
+      type: "codex_failure",
+      transport: "websocket",
+      phase: "before_message_stream_start",
+      attempt: 1,
+      wsCloseCode: 1011,
+      brokerGeneration: 7,
+      tokenExpiresAt: 1800000000000,
+    });
+    expect(native.message.diagnostics[2]).toEqual({
+      type: "codex_failure",
+      transport: "sse",
+      phase: "before_message_stream_start",
+      attempt: 2,
+      status: 401,
+      code: "invalid_api_key",
+      requestId: "req_12345678",
+    });
+    expect(record.failure?.context).toEqual({
+      transport: "sse",
+      phase: "before_message_stream_start",
+      attempt: 2,
+      status: 401,
+      code: "invalid_api_key",
+      requestId: "req_12345678",
+    });
+    expect(JSON.stringify(native.message.diagnostics.slice(1))).not.toContain("raw-secret");
+  });
+
+  it("persists only allowlisted bounded Codex failure facts", () => {
+    const record = expectMapped(
+      {
+        ...base,
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [],
+          provider: "openai-codex",
+          model: "gpt-6-astra",
+          stopReason: "error",
+          errorMessage: "failure",
+          diagnostics: [
+            {
+              type: "codex_failure",
+              transport: "sse",
+              phase: "before_message_stream_start",
+              attempt: 2,
+              status: 401,
+              code: "invalid_api_key",
+              requestId: "req_12345678",
+              brokerGeneration: 7,
+              tokenExpiresAt: 1800000000000,
+              accessToken: "secret",
+              headers: { authorization: "secret" },
+              payload: "secret",
+              reason: "secret",
+            },
+          ],
+        },
+      },
+      false,
+    );
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.failure?.context).toEqual({
+      transport: "sse",
+      phase: "before_message_stream_start",
+      attempt: 2,
+      status: 401,
+      code: "invalid_api_key",
+      requestId: "req_12345678",
+      brokerGeneration: 7,
+      tokenExpiresAt: 1800000000000,
+    });
+    expect(JSON.stringify(record)).not.toContain("secret");
+  });
+
+  it("rejects token-like identifiers and unknown provider codes", () => {
+    const record = expectMapped(
+      {
+        ...base,
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [],
+          provider: "openai-codex",
+          stopReason: "error",
+          errorMessage: "Codex request failed",
+          diagnostics: [
+            { type: "codex_failure", code: "sk_secret", requestId: "req_sk_token", status: 401 },
+          ],
+        },
+      },
+      false,
+    );
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.failure?.context).toEqual({ status: 401 });
+    expect(JSON.stringify(record)).not.toContain("sk_secret");
+  });
+
+  it("maps a failed assistant message without diagnostics to an empty diagnostic list", () => {
+    const record = expectMapped({
+      ...base,
+      type: "message",
+      message: {
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: "Codex error: the usage limit has been reached",
+      },
+    });
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.failure).toEqual({
+      message: "Codex error: the usage limit has been reached",
+      diagnostics: [],
+    });
+  });
+
+  it("omits the failure of an assistant message that did not fail or has no message", () => {
+    const succeeded = expectMapped({
+      ...base,
+      type: "message",
+      message: { role: "assistant", content: [], stopReason: "stop" },
+    });
+    if (succeeded.type !== "message") throw new Error("expected message");
+    expect(succeeded.failure).toBeUndefined();
+    const blank = expectMapped({
+      ...base,
+      type: "message",
+      message: { role: "assistant", content: [], stopReason: "error", errorMessage: " " },
+    });
+    if (blank.type !== "message") throw new Error("expected message");
+    expect(blank.failure).toBeUndefined();
+  });
+
+  it("maps an edit tool result patch onto the tool_result block", () => {
+    const record = expectMapped({
+      ...base,
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolCallId: "call-1",
+        toolName: "edit",
+        content: [{ type: "text", text: "updated" }],
+        details: { patch: "--- a/src/a.ts\n+++ b/src/a.ts\n+new" },
+        isError: false,
+      },
+    });
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.content[0]).toEqual({
+      type: "tool_result",
+      callId: "call-1",
+      content: [{ type: "text", text: "updated" }],
+      isError: false,
+      patch: "--- a/src/a.ts\n+++ b/src/a.ts\n+new",
+    });
+  });
+
+  it("carries code-mode charts from result details as chart leaves", () => {
+    const chart = {
+      kind: "bar",
+      title: "slowest endpoints",
+      bars: [{ label: "POST /checkout", value: 412 }],
+    };
+    const record = expectMapped({
+      ...base,
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolCallId: "call-1",
+        toolName: "codemode",
+        content: [{ type: "text", text: "Script completed" }],
+        details: { cpu: { cpuMs: 3 }, charts: [chart] },
+        isError: false,
+      },
+    });
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.content[0]).toEqual({
+      type: "tool_result",
+      callId: "call-1",
+      content: [
+        { type: "text", text: "Script completed" },
+        { type: "other", contentType: CHART_CONTENT_TYPE, data: chart },
+      ],
+      isError: false,
+    });
+  });
+
+  it("omits the patch of a tool result that carries none", () => {
+    const record = expectMapped({
+      ...base,
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolCallId: "call-1",
+        toolName: "bash",
+        content: [{ type: "text", text: "done" }],
+        details: { exitCode: 0 },
+        isError: false,
+      },
+    });
+    if (record.type !== "message") throw new Error("expected message");
+    const block = record.content[0];
+    if (block?.type !== "tool_result") throw new Error("expected tool_result");
+    expect(block.patch).toBeUndefined();
+  });
+
+  it("retains system-message identity without replicating prompt or tool state", () => {
+    const record = expectMapped(
+      {
+        ...base,
+        type: "message",
+        message: {
+          role: "system",
+          content: "SYSTEM_CONTENT_SENTINEL",
+          sections: { project_context: "SYSTEM_SECTION_SENTINEL" },
+          toolsAdded: [
+            {
+              name: "system_sentinel_tool",
+              description: "SYSTEM_TOOL_SENTINEL",
+              parameters: { type: "object", properties: { secretPath: { type: "string" } } },
+            },
+          ],
+          toolsRemoved: [{ name: "SYSTEM_REMOVED_TOOL_SENTINEL" }],
+          replace: true,
+          timestamp: 5,
+        },
+      },
+      false,
+    );
+    expect(record).toMatchObject({
+      type: "event",
+      eventType: "pi.message.system",
+      id: base.id,
+      parentId: base.parentId,
+      timestamp: base.timestamp,
+      overflow: {
+        native: {
+          ...base,
+          type: "message",
+          message: { role: "system", timestamp: 5 },
+        },
+      },
+    });
+    const serialized = JSON.stringify(record);
+    for (const sentinel of [
+      "SYSTEM_CONTENT_SENTINEL",
+      "SYSTEM_SECTION_SENTINEL",
+      "SYSTEM_TOOL_SENTINEL",
+      "SYSTEM_REMOVED_TOOL_SENTINEL",
+      "secretPath",
+    ])
+      expect(serialized).not.toContain(sentinel);
+  });
+
+  it("maps an unknown message role to a generic event", () => {
+    const record = expectMapped({
+      ...base,
+      type: "message",
+      message: { role: "somethingNew", data: 1, timestamp: 5 },
+    });
+    if (record.type !== "event") throw new Error("expected event");
+    expect(record.eventType).toBe("pi.message.somethingNew");
+  });
+
+  it("maps compaction to a CompactionRecord with a text summary block", () => {
+    const record = expectMapped({
+      ...base,
+      type: "compaction",
+      summary: "we discussed things",
+      firstKeptEntryId: "e1",
+      tokensBefore: 5000,
+    });
+    expect(record.type).toBe("compaction");
+    if (record.type !== "compaction") return;
+    expect(record.summary).toEqual([{ type: "text", text: "we discussed things" }]);
+  });
+
+  it("retains compaction data without replicating its system checkpoint", () => {
+    const record = expectMapped(
+      {
+        ...base,
+        type: "compaction",
+        summary: "ordinary conversation summary",
+        firstKeptEntryId: "e1",
+        tokensBefore: 5000,
+        details: { preserved: "ordinary native detail" },
+        systemMessage: {
+          role: "system",
+          content: "COMPACTION_CONTENT_SENTINEL",
+          sections: { project_context: "COMPACTION_SECTION_SENTINEL" },
+          toolsAdded: [
+            {
+              name: "compaction_sentinel_tool",
+              description: "COMPACTION_TOOL_SENTINEL",
+              parameters: { type: "object" },
+            },
+          ],
+          timestamp: 6,
+        },
+      },
+      false,
+    );
+    expect(record).toMatchObject({
+      type: "compaction",
+      summary: [{ type: "text", text: "ordinary conversation summary" }],
+      overflow: {
+        native: {
+          ...base,
+          type: "compaction",
+          firstKeptEntryId: "e1",
+          tokensBefore: 5000,
+          details: { preserved: "ordinary native detail" },
+          systemMessage: { role: "system", timestamp: 6 },
+        },
+      },
+    });
+    const serialized = JSON.stringify(record);
+    expect(serialized).toContain("ordinary native detail");
+    for (const sentinel of [
+      "COMPACTION_CONTENT_SENTINEL",
+      "COMPACTION_SECTION_SENTINEL",
+      "COMPACTION_TOOL_SENTINEL",
+    ])
+      expect(serialized).not.toContain(sentinel);
+  });
+
+  it("maps lifecycle entries to typed events", () => {
+    expect(
+      expectMapped({ ...base, type: "thinking_level_change", thinkingLevel: "high" }),
+    ).toMatchObject({ type: "event", eventType: "pi.thinking_level_change" });
+    expect(
+      expectMapped({ ...base, type: "model_change", provider: "openai-codex", modelId: "gpt-x" }),
+    ).toMatchObject({ type: "event", eventType: "pi.model_change" });
+    expect(
+      expectMapped({ ...base, type: "branch_summary", fromId: "e1", summary: "branch stuff" }),
+    ).toMatchObject({
+      type: "event",
+      eventType: "pi.branch_summary",
+      content: [{ type: "text", text: "branch stuff" }],
+    });
+    expect(
+      expectMapped({ ...base, type: "custom", customType: "my-ext", data: { a: 1 } }),
+    ).toMatchObject({ type: "event", eventType: "pi.custom" });
+    expect(
+      expectMapped({ ...base, type: "label", targetId: "e1", label: "bookmark" }),
+    ).toMatchObject({ type: "event", eventType: "pi.label" });
+    expect(expectMapped({ ...base, type: "session_info", name: "my session" })).toMatchObject({
+      type: "event",
+      eventType: "pi.session_info",
+    });
+  });
+
+  it("maps the durable inbox custom message as an ordinary user message", () => {
+    const record = expectMapped({
+      ...base,
+      type: "custom_message",
+      customType: "pi-orb.user-message",
+      content: [{ type: "text", text: "steer here" }],
+      display: true,
+      details: { messageId: "message-1" },
+    });
+    expect(record.type).toBe("message");
+    if (record.type !== "message") return;
+    expect(record.role).toBe("user");
+    expect(record.content).toEqual([{ type: "text", text: "steer here" }]);
+    expect(record.inboxMessageIds).toEqual(["message-1"]);
+    expect(record.overflow.native).toMatchObject({ details: { messageId: "message-1" } });
+  });
+
+  it("maps a combined sleep wake as a system event with inbox identity", () => {
+    const record = expectMapped({
+      ...base,
+      type: "custom_message",
+      customType: "pi-orb.sleep-wake",
+      content: "The host restarted after scheduled sleep.",
+      display: true,
+      details: {
+        messageIds: ["sleep-1"],
+        sleepUntil: "2026-09-18T04:05:06.000Z",
+        runtimeInstanceId: "runtime-2",
+        incarnation: "2",
+      },
+    });
+    expect(record).toMatchObject({
+      type: "event",
+      eventType: "pi.custom_message",
+      inboxMessageIds: ["sleep-1"],
+      custom: { customType: "pi-orb.sleep-wake", display: true },
+    });
+  });
+
+  it("maps an ordinary sleep expiry notice as a system event, never a human message", () => {
+    const record = expectMapped({
+      ...base,
+      type: "custom_message",
+      customType: "pi-orb.system-message",
+      content: [{ type: "text", text: "Sleep deadline expired while work was active." }],
+      display: true,
+      details: {
+        messageIds: ["sleep-2"],
+        system: { kind: "sleep_expired", sleepUntil: "2026-09-18T04:05:06.000Z" },
+      },
+    });
+    expect(record).toMatchObject({
+      type: "event",
+      inboxMessageIds: ["sleep-2"],
+      custom: { customType: "pi-orb.system-message", display: true },
+    });
+  });
+
+  it("maps a squashed inbox batch to every client message id in order", () => {
+    const record = expectMapped({
+      ...base,
+      type: "custom_message",
+      customType: "pi-orb.user-message",
+      content: [{ type: "text", text: "two messages" }],
+      display: true,
+      details: { messageIds: ["message-1", "message-2"], delivery: "turn", operationId: "op-1" },
+    });
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.inboxMessageIds).toEqual(["message-1", "message-2"]);
+  });
+
+  it("omits inbox ids from a user message that carries none", () => {
+    const record = expectMapped({
+      ...base,
+      type: "message",
+      message: { role: "user", content: "typed in the terminal" },
+    });
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.inboxMessageIds).toBeUndefined();
+  });
+
+  it("projects a non-model-context alert with typed message and stable request identity", () => {
+    const mapped = mapPiEntry({
+      type: "custom",
+      id: "alert-id",
+      parentId: null,
+      timestamp: "2026-01-01T00:00:00Z",
+      customType: "pi-orb.alert",
+      data: { message: "<script>\nsecond line", requestId: "req-id" },
+    });
+    expect(mapped._unsafeUnwrap()).toMatchObject({
+      type: "event",
+      eventType: "pi.custom",
+      alert: { message: "<script>\nsecond line", requestId: "req-id" },
+    });
+  });
+
+  it("maps displayed and hidden custom messages to typed custom fields", () => {
+    const shown = expectMapped({
+      ...base,
+      type: "custom_message",
+      customType: "my-ext",
+      content: "injected note",
+      display: true,
+    });
+    if (shown.type !== "event") throw new Error("expected event");
+    expect(shown.custom).toEqual({ customType: "my-ext", display: true });
+    const hidden = expectMapped({
+      ...base,
+      type: "custom_message",
+      customType: "my-ext",
+      content: "model-only note",
+      display: false,
+    });
+    if (hidden.type !== "event") throw new Error("expected event");
+    expect(hidden.custom).toEqual({ customType: "my-ext", display: false });
+    expect(hidden.subagent).toBeUndefined();
+  });
+
+  it("maps each subagent custom message to a typed subagent receipt", () => {
+    const notification = expectMapped({
+      ...base,
+      type: "custom_message",
+      customType: "subagent-notification",
+      content: "<task-notification>machine instructions</task-notification>",
+      display: true,
+      details: {
+        id: "child-1",
+        description: "Check deployment",
+        status: "error",
+        error: "Unsupported model",
+        resultPreview: "No output.",
+        durationMs: 4200,
+        outputFile: "/private/tasks/session.jsonl",
+        toolUses: 3,
+      },
+    });
+    if (notification.type !== "event") throw new Error("expected event");
+    expect(notification.subagent).toEqual({
+      kind: "notification",
+      id: "child-1",
+      description: "Check deployment",
+      status: "error",
+      error: "Unsupported model",
+      resultPreview: "No output.",
+      durationMs: 4200,
+    });
+
+    const update = expectMapped({
+      ...base,
+      type: "custom_message",
+      customType: "subagent-update",
+      content: "<subagent-update>progress</subagent-update>",
+      display: true,
+      details: { id: "child-2", description: "Check services", message: "halfway there" },
+    });
+    if (update.type !== "event") throw new Error("expected event");
+    expect(update.subagent).toEqual({
+      kind: "update",
+      id: "child-2",
+      description: "Check services",
+      message: "halfway there",
+    });
+
+    const notice = expectMapped({
+      ...base,
+      type: "custom_message",
+      customType: "subagent-workspace-notice",
+      content: "workspace notice",
+      display: true,
+      details: { id: "child-3", description: "Clean up", notice: "Changes retained." },
+    });
+    if (notice.type !== "event") throw new Error("expected event");
+    expect(notice.subagent).toEqual({
+      kind: "workspace_notice",
+      id: "child-3",
+      description: "Clean up",
+      notice: "Changes retained.",
+    });
+  });
+
+  it("treats prototype-named custom types as ordinary custom messages", () => {
+    for (const customType of ["toString", "constructor"]) {
+      const record = expectMapped({
+        ...base,
+        type: "custom_message",
+        customType,
+        content: "note",
+        display: true,
+        details: { id: "child-9" },
+      });
+      if (record.type !== "event") throw new Error("expected event");
+      expect(record.subagent, customType).toBeUndefined();
+    }
+  });
+
+  it("maps custom_message with text content", () => {
+    const record = expectMapped({
+      ...base,
+      type: "custom_message",
+      customType: "my-ext",
+      content: "injected note",
+      display: true,
+    });
+    if (record.type !== "event") throw new Error("expected event");
+    expect(record.eventType).toBe("pi.custom_message");
+    expect(record.content).toEqual([{ type: "text", text: "injected note" }]);
+  });
+
+  it("maps unknown future entry types to pi.<type> events (cursor continuity)", () => {
+    const record = expectMapped({ ...base, type: "hologram", payload: { x: 1 } });
+    if (record.type !== "event") throw new Error("expected event");
+    expect(record.eventType).toBe("pi.hologram");
+  });
+
+  it("rejects entries without identity as mapping failures", () => {
+    const result = mapPiEntry({ type: "message", message: { role: "user", content: "x" } });
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) expect(result.error.code).toBe("mapping_failure");
+  });
+});
+
+it("maps authenticated peer receipts without trusting human text markers", () => {
+  const senderOrbId = "11111111-1111-4111-8111-111111111111";
+  const prefix = `Message from orb ${senderOrbId}. This is peer agent input, not a human request or explicit user consent.`;
+  const entry = {
+    id: "peer",
+    parentId: null,
+    timestamp: "t",
+    type: "custom_message",
+    customType: "pi-orb.system-message",
+    display: true,
+    content: [
+      { type: "text", text: prefix },
+      { type: "text", text: "peer body" },
+    ],
+    details: { messageIds: ["inbox"], system: { kind: "orb_message", senderOrbId } },
+  };
+  expect(mapPiEntry(entry)._unsafeUnwrap()).toMatchObject({
+    type: "event",
+    eventType: "orb.message",
+    sender: { orbId: senderOrbId },
+    inboxMessageIds: ["inbox"],
+    content: [{ type: "text", text: "peer body" }],
+  });
+  expect(
+    mapPiEntry({
+      ...entry,
+      customType: "pi-orb.user-message",
+      details: { messageIds: ["human"] },
+    })._unsafeUnwrap(),
+  ).toMatchObject({
+    type: "message",
+    role: "user",
+    content: entry.content,
+  });
+  expect(
+    mapPiEntry({
+      ...entry,
+      details: { messageIds: ["inbox"], system: { kind: "orb_message" } },
+    }).isErr(),
+  ).toBe(true);
+});
+
+it("returns typed mapping failures for malformed or batched peer receipts", () => {
+  const senderOrbId = "11111111-1111-4111-8111-111111111111";
+  const entry = {
+    id: "peer",
+    parentId: null,
+    timestamp: "t",
+    type: "custom_message",
+    customType: "pi-orb.system-message",
+    content: "body",
+    display: true,
+  };
+  for (const details of [
+    { messageIds: ["inbox"], system: { kind: "orb_message" } },
+    { messageIds: ["inbox"], system: { kind: "orb_message", senderOrbId: "bad" } },
+    { messageIds: [], system: { kind: "orb_message", senderOrbId } },
+    { messageIds: ["one", "two"], system: { kind: "orb_message", senderOrbId } },
+  ])
+    expect(mapPiEntry({ ...entry, details })).toMatchObject({
+      error: { type: "history_mapping_error", code: "mapping_failure" },
+    });
+});

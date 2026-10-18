@@ -49,20 +49,20 @@ import { createDisplayRecordProjector, reasoningHeadline } from "@pi-orb/protoco
 import type { SimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, type Result, ResultAsync } from "neverthrow";
 import {
-  buildTurnSummaryInput,
-  type TurnSummarizer,
-  TurnSummaryCoordinator,
-} from "../../../../orb-runtime/src/domain/turn-summary.ts";
-import {
   instructionsAdoption,
   PERSONAL_INSTRUCTIONS_ADOPTION,
   PROJECT_INSTRUCTIONS_ADOPTION,
-} from "../../../../orb-runtime/src/pi/instructions-adoption.ts";
+} from "../../../../orb-runtime/src/domain/instructions-adoption.ts";
 import {
   codexModelDisplayName,
   eligibleCodexModels,
   PINNED_CODEX_MODEL_ID,
-} from "../../../../orb-runtime/src/pi/model-select.ts";
+} from "../../../../orb-runtime/src/domain/model-select.ts";
+import {
+  buildTurnSummaryInput,
+  type TurnSummarizer,
+  TurnSummaryCoordinator,
+} from "../../../../orb-runtime/src/domain/turn-summary.ts";
 import type { AgentLiveView, AgentSessionFacade, AgentSnapshot } from "../../domain/agent-ports.ts";
 import type { RuntimeClientError } from "../../domain/errors.ts";
 import type { ModelCallUse } from "../../domain/model-usage.ts";

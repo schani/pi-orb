@@ -4,8 +4,8 @@ import { centralModelScenario } from "./testkit/durable-model-fixture.ts";
 
 const fixture = readFileSync(new URL("./full-main-auth.e2e.test.ts", import.meta.url), "utf8");
 
-it("waits for the selected backend's model-visible tool without weakening the roundtrip", () => {
-  expect(fixture).toContain('fixtureAgentBackend() === "central-durable" ? "codemode" : "bash"');
+it("waits for the model-visible tool without weakening the roundtrip", () => {
+  expect(fixture).toContain('const completedToolName = "codemode";');
   expect(fixture).toContain("frame.event.name === completedToolName");
   expect(fixture).toContain('frame.event.state === "completed"');
   expect(fixture).toContain('command: "printf GOOGLE_MAIN_TOOL_OK"');
@@ -15,7 +15,7 @@ it("waits for the selected backend's model-visible tool without weakening the ro
   );
 });
 
-it.each([false, true])("preserves the real shell effect under central=%s", (central) => {
+it("preserves the real shell effect", () => {
   const scenario = {
     model: {
       rules: [
@@ -31,12 +31,10 @@ it.each([false, true])("preserves the real shell effect under central=%s", (cent
       ],
     },
   };
-  const transformed = centralModelScenario(scenario, central) as typeof scenario;
+  const transformed = centralModelScenario(scenario) as typeof scenario;
   const call = transformed.model.rules[0]?.steps[0];
-  expect(call?.name).toBe(central ? "codemode" : "bash");
-  expect(call?.arguments).toEqual(
-    central
-      ? { code: 'text(await tools.bash({"command":"printf GOOGLE_MAIN_TOOL_OK"}));' }
-      : { command: "printf GOOGLE_MAIN_TOOL_OK" },
-  );
+  expect(call?.name).toBe("codemode");
+  expect(call?.arguments).toEqual({
+    code: 'text(await tools.bash({"command":"printf GOOGLE_MAIN_TOOL_OK"}));',
+  });
 });

@@ -661,7 +661,7 @@ The ribbon communicates the shared authentication cause; it does not replace ope
 
 Two Docker-free development compositions exist and must not be confused:
 
-- **Full service with process-hosted orbs:** run `npm run dev:local` for the control plane/SQLite/process supervisor and `npm run dev --workspace @pi-orb/web` for the normal web server. This exercises real Pi runtimes, lifecycle, protocol, replication, credentials, and model inference, but runs repository code unsandboxed (`docs/host-provider.md`). Local mode trusts only loopback Vite origins; opening Vite through another hostname (for example a tailnet name) returns 403 unless `PI_ORB_APP_ORIGIN` is set to that exact origin.
+- **Full service with process-hosted orbs:** run `npm run dev:local` for the control plane/PGlite/process supervisor and `npm run dev --workspace @pi-orb/web` for the normal web server. This exercises central Pi, execution runtimes, lifecycle, protocol, history, credentials and model inference, but runs repository code unsandboxed (`docs/host-provider.md`). Local mode trusts only loopback Vite origins; opening Vite through another hostname (for example a tailnet name) returns 403 unless `PI_ORB_APP_ORIGIN` is set to that exact origin.
 - **Frontend-only fixture:** run only `npm run dev:frontend`. Vite replaces the HTTP/WebSocket backend in process; no control plane, database, orb process, Pi session, or model call exists.
 
 The web workspace's in-process fixture is activated by Vite's `frontend` mode. Run it with:

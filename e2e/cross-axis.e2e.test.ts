@@ -44,12 +44,12 @@ async function unusedPort(): Promise<number> {
 for (const composition of CROSS_AXIS_CASES) {
   const provider = process.env["PI_ORB_E2E_BACKEND"] === "process" ? "process" : "docker";
   test.runIf(composition.provider === provider)(
-    `${composition.agentBackend}+${composition.provider}: fresh checkout, real host tool, browser, CLI${composition.movingMain ? ", moving main and dirty resume" : ""}`,
+    `${composition.provider}: fresh checkout, real host tool, browser, CLI${composition.movingMain ? ", moving main and dirty resume" : ""}`,
     async () => {
       const root = mkdtempSync(join(tmpdir(), "pi-orb-cross-axis-"));
       const evidence = join(
         process.env["PI_ORB_E2E_EVIDENCE_DIR"] ?? join(import.meta.dirname, "../test-failures"),
-        `cross-axis-${composition.agentBackend}-${composition.provider}-${randomUUID()}`,
+        `cross-axis-${composition.provider}-${randomUUID()}`,
       );
       mkdirSync(evidence, { recursive: true });
       const project = randomUUID();
@@ -57,7 +57,6 @@ for (const composition of CROSS_AXIS_CASES) {
       const repo = join(root, "source");
       const hosts = join(root, "hosts");
       const guestRepo = join(hosts, orb, "workspace", "repo");
-      const central = composition.agentBackend === "central-durable";
       const local = composition.provider === "process";
       const pgName = `cross-axis-pg-${randomUUID()}`;
       const network = `cross-axis-${randomUUID()}`;
@@ -108,61 +107,53 @@ for (const composition of CROSS_AXIS_CASES) {
       }
       const shell =
         "set -eu; printf CROSS_AXIS_HOST_TOOL; pwd; git rev-parse HEAD; printf CROSS_AXIS_FILE > cross-axis-smoke.txt; pi-orb self --json > cross-axis-self.json; cat cross-axis-self.json; printf CROSS_AXIS_CLI_OK";
-      const fake = await createFakeSession(
-        `cross-axis-${randomUUID()}`,
-        {
-          auth: { accountId: "cross-axis", device: { manualApprove: true } },
-          model: {
-            rules: [
-              {
-                match: { userMessage: { regex: "^CROSS_AXIS_TURN$" } },
-                steps: [
-                  {
-                    type: "toolCall",
-                    name: central ? "codemode" : "bash",
-                    arguments: central
-                      ? { code: `text(await tools.bash({command:${JSON.stringify(shell)}}));` }
-                      : { command: shell },
+      const fake = await createFakeSession(`cross-axis-${randomUUID()}`, {
+        auth: { accountId: "cross-axis", device: { manualApprove: true } },
+        model: {
+          rules: [
+            {
+              match: { userMessage: { regex: "^CROSS_AXIS_TURN$" } },
+              steps: [
+                {
+                  type: "toolCall",
+                  name: "codemode",
+                  arguments: {
+                    code: `text(await tools.bash({command:${JSON.stringify(shell)}}));`,
                   },
-                  stop,
-                ],
-              },
-              {
-                match: { toolResultContains: { regex: "CROSS_AXIS_HOST_TOOL" } },
-                steps: [{ type: "text", content: "CROSS_AXIS_DONE" }, stop],
-              },
-              {
-                match: {
-                  userMessage: { regex: "^Write a single short desktop-notification sentence" },
                 },
-                steps: [{ type: "text", content: "Verified host execution." }, stop],
+                stop,
+              ],
+            },
+            {
+              match: { toolResultContains: { regex: "CROSS_AXIS_HOST_TOOL" } },
+              steps: [{ type: "text", content: "CROSS_AXIS_DONE" }, stop],
+            },
+            {
+              match: {
+                userMessage: { regex: "^Write a single short desktop-notification sentence" },
               },
-              {
-                match: { userMessage: { regex: "^CROSS_AXIS_BROWSER$" } },
-                steps: [{ type: "text", content: "CROSS_AXIS_BROWSER_DONE" }, stop],
+              steps: [{ type: "text", content: "Verified host execution." }, stop],
+            },
+            {
+              match: { userMessage: { regex: "^CROSS_AXIS_BROWSER$" } },
+              steps: [{ type: "text", content: "CROSS_AXIS_BROWSER_DONE" }, stop],
+            },
+            {
+              match: {
+                userMessage: { regex: "^Write a single short desktop-notification sentence" },
               },
-              {
-                match: {
-                  userMessage: { regex: "^Write a single short desktop-notification sentence" },
-                },
-                steps: [{ type: "text", content: "Verified browser input." }, stop],
-              },
-            ],
-          },
+              steps: [{ type: "text", content: "Verified browser input." }, stop],
+            },
+          ],
         },
-        composition.agentBackend,
-      );
-      const nameFake = await createFakeSession(
-        `cross-axis-names-${randomUUID()}`,
-        {
-          model: {
-            rules: [
-              { match: { default: true }, steps: [{ type: "text", content: "Fixture" }, stop] },
-            ],
-          },
+      });
+      const nameFake = await createFakeSession(`cross-axis-names-${randomUUID()}`, {
+        model: {
+          rules: [
+            { match: { default: true }, steps: [{ type: "text", content: "Fixture" }, stop] },
+          ],
         },
-        composition.agentBackend,
-      );
+      });
       let pgStarted = false;
       let networkCreated = false;
       let failed = true;
@@ -203,7 +194,6 @@ for (const composition of CROSS_AXIS_CASES) {
           port: await unusedPort(),
           fake,
           nameFake,
-          agentBackend: composition.agentBackend,
           ...(local
             ? { pglitePath: join(root, "db"), processStateDirectory: hosts }
             : {
@@ -214,10 +204,10 @@ for (const composition of CROSS_AXIS_CASES) {
           authDir: join(root, "auth"),
           hostingRoot: join(root, "hosting"),
           webDist: join(root, "web"),
-          ...(central ? { entry: "e2e/cross-axis-control-plane-entry.ts" } : {}),
+          entry: "e2e/cross-axis-control-plane-entry.ts",
           extraEnv: {
-            ...(local && central ? localGitEnvironment(repo, URL) : {}),
-            ...(local && central
+            ...(local ? localGitEnvironment(repo, URL) : {}),
+            ...(local
               ? {
                   PI_ORB_E2E_RESOURCE_REPOSITORY: repo,
                   PI_ORB_E2E_RESOLVED_GATE: `http://127.0.0.1:${gateAddress.port}/resolved`,
@@ -326,7 +316,7 @@ for (const composition of CROSS_AXIS_CASES) {
           { timeoutMs: 300_000 },
         );
         const view = await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}`);
-        expect(view.body["centralAgent"] === true).toBe(central);
+        expect(view.body["centralAgent"]).toBe(true);
         let token: string;
         let incarnation: number;
         let runtimeBase: string;
@@ -339,7 +329,7 @@ for (const composition of CROSS_AXIS_CASES) {
           expect(command).toContain("/runtime-entry.ts");
           expect(
             readFileSync(`/proc/${metadata.processGroupId}/environ`, "utf8").split("\0"),
-          ).toContain(`PI_ORB_RUNTIME_MODE=${central ? "execution" : "pi"}`);
+          ).toContain("PI_ORB_RUNTIME_MODE=execution");
           if (beforePin) {
             expect(metadata).toMatchObject({
               specFingerprint: beforePin.specFingerprint,
@@ -379,54 +369,50 @@ for (const composition of CROSS_AXIS_CASES) {
           "x-orb-incarnation": String(incarnation),
         };
         const ready = await fetch(`${runtimeBase}/execution/ready`, { headers });
-        expect(ready.status).toBe(central ? 200 : 404);
-        if (central) {
-          const readiness = (await ready.json()) as {
-            cwd: string;
-            incarnation: string;
-            checkoutCommit: string;
-          };
-          expect(Object.keys(readiness).sort()).toEqual([
-            "checkoutCommit",
-            "cwd",
-            "hooks",
-            "incarnation",
-            "pid",
-          ]);
-          expect(readiness.cwd).toBe(local ? guestRepo : "/workspace/repo");
-          expect(readiness.incarnation).toBe(String(incarnation));
-          expect(readiness.checkoutCommit).toMatch(/^[a-f0-9]{40}$/);
-          writeFileSync(join(evidence, "execution-ready.json"), JSON.stringify(readiness));
-        }
-        if (central) {
-          const pin = await fetch(`${cp.baseUrl}/api/runtime/initial-checkout`, { headers });
-          expect(pin.status).toBe(200);
-          const persisted = (await pin.json()) as { commitSha: string };
-          const head = local
-            ? git(guestRepo, "rev-parse", "HEAD")
-            : (
-                await docker([
-                  "exec",
-                  `pi-orb-${orb}-i${incarnation}`,
-                  "git",
-                  "-C",
-                  "/workspace/repo",
-                  "rev-parse",
-                  "HEAD",
-                ])
-              ).trim();
-          expect(persisted.commitSha).toBe(head);
-          if (pinA) expect(persisted.commitSha).toBe(pinA);
-          writeFileSync(
-            join(evidence, "pin.json"),
-            JSON.stringify({
-              persistedSha: persisted.commitSha,
-              guestHead: head,
-              fixtureMain: local ? git(repo, "rev-parse", "main") : null,
-              freshCheckoutInitiallyAbsent: local,
-            }),
-          );
-        }
+        expect(ready.status).toBe(200);
+        const readiness = (await ready.json()) as {
+          cwd: string;
+          incarnation: string;
+          checkoutCommit: string;
+        };
+        expect(Object.keys(readiness).sort()).toEqual([
+          "checkoutCommit",
+          "cwd",
+          "hooks",
+          "incarnation",
+          "pid",
+        ]);
+        expect(readiness.cwd).toBe(local ? guestRepo : "/workspace/repo");
+        expect(readiness.incarnation).toBe(String(incarnation));
+        expect(readiness.checkoutCommit).toMatch(/^[a-f0-9]{40}$/);
+        writeFileSync(join(evidence, "execution-ready.json"), JSON.stringify(readiness));
+        const pin = await fetch(`${cp.baseUrl}/api/runtime/initial-checkout`, { headers });
+        expect(pin.status).toBe(200);
+        const persisted = (await pin.json()) as { commitSha: string };
+        const head = local
+          ? git(guestRepo, "rev-parse", "HEAD")
+          : (
+              await docker([
+                "exec",
+                `pi-orb-${orb}-i${incarnation}`,
+                "git",
+                "-C",
+                "/workspace/repo",
+                "rev-parse",
+                "HEAD",
+              ])
+            ).trim();
+        expect(persisted.commitSha).toBe(head);
+        if (pinA) expect(persisted.commitSha).toBe(pinA);
+        writeFileSync(
+          join(evidence, "pin.json"),
+          JSON.stringify({
+            persistedSha: persisted.commitSha,
+            guestHead: head,
+            fixtureMain: local ? git(repo, "rev-parse", "main") : null,
+            freshCheckoutInitiallyAbsent: local,
+          }),
+        );
         await waitFor("real model tool round trip committed", async () => {
           const history = await api(baseUrl, "GET", `/api/v1/orbs/${orb}/history`);
           writeFileSync(join(evidence, "history.json"), JSON.stringify(history.body));
