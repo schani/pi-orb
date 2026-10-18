@@ -3,12 +3,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  MOCK_OPENAI_INFERENCE_URL_ENV,
-  MOCK_OPENAI_OAUTH_URL_ENV,
-  type MockOpenAiConfig,
-  readMockOpenAiEnv,
-} from "@pi-orb/mock-openai";
+import { type MockOpenAiConfig, readMockOpenAiEnv } from "@pi-orb/mock-openai";
 import {
   HOSTING_MAX_FILE_BYTES,
   HOSTING_TRANSFER_TIMEOUT_MS,
@@ -295,8 +290,8 @@ export async function main(
     if (migrated.value.length > 0) bootTask.log("applied migrations:", migrated.value.join(", "));
   }
 
-  // E2E mode: when the fake-OpenAI URLs are set, the auth gate and every orb
-  // container route Codex OAuth/inference to the mock (docs/PI-CODEX-E2E.md).
+  // E2E mode routes central Codex auth and model calls to the mock
+  // (docs/PI-CODEX-E2E.md).
   const mockOpenAi = readMockOpenAiEnv(process.env);
   if (mockOpenAi !== null) {
     bootTask.log("E2E mode: Codex OAuth/inference routed to", mockOpenAi.oauthBaseUrl);
@@ -362,13 +357,6 @@ export async function main(
   const e2eLaunchFailureMarker = env("PI_ORB_E2E_LAUNCH_FAILURE_MARKER", "");
   const e2eHostSpec = env("PI_ORB_E2E_HOST_SPEC", "");
   const runtimeExtraEnv: Record<string, string> = {
-    ...(mockOpenAi === null
-      ? {}
-      : {
-          [MOCK_OPENAI_OAUTH_URL_ENV]: mockOpenAi.oauthBaseUrl,
-          [MOCK_OPENAI_INFERENCE_URL_ENV]: mockOpenAi.inferenceBaseUrl,
-          PI_OFFLINE: "1",
-        }),
     ...(e2eLaunchFailureMarker === ""
       ? {}
       : { PI_ORB_E2E_LAUNCH_FAILURE_MARKER: e2eLaunchFailureMarker }),

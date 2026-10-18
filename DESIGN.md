@@ -305,3 +305,5 @@ Reference material:
 - [docs/references/pi-sdk-qualification.md](docs/references/pi-sdk-qualification.md) — historical SDK release and qualification receipts
 
 - [docs/references/native-mcp-qualification.md](docs/references/native-mcp-qualification.md) — historical native transport/auth/session characterization and original first failures
+
+- [docs/postmortems/2026-10-18-central-drain-close-race.md](docs/postmortems/2026-10-18-central-drain-close-race.md) — native failure/storage-close race blocked central deletion

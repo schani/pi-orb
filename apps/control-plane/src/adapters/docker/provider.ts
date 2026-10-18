@@ -39,7 +39,7 @@ export interface DockerOrbHostProviderOptions {
    */
   readonly controlPlaneUrl?: string;
   readonly controlPlanePort: number;
-  /** Extra environment passed to every orb container (e.g. E2E mock-OpenAI URLs). */
+  /** Extra environment passed to every orb container. */
   readonly extraEnv?: Readonly<Record<string, string>>;
   /**
    * Tailscale port exposure (docs/ports.md). Absent means no tailscale env is
