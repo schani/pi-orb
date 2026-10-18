@@ -154,9 +154,11 @@ describe("execution role bindings", () => {
           }),
         ),
     ]);
-    const result = await makeProvider(transport, undefined, undefined, {
-      runtimeMode: "execution",
-    }).executionBinding(task, { provider: "gce", resourceId: "pi-orb-orb-1" }, context);
+    const result = await makeProvider(transport).executionBinding(
+      task,
+      { provider: "gce", resourceId: "pi-orb-orb-1" },
+      context,
+    );
     expect(result.isOk()).toBe(true);
     if (result.isOk())
       expect(result.value).toEqual({
@@ -184,16 +186,11 @@ describe("execution role bindings", () => {
       ).isErr(),
     ).toBe(true);
   });
-  it("separates central and guest launch specifications", () => {
+  it("separates execution and Claude launch specifications", () => {
     const input = { orbId: "orb-1", repositoryUrl: "https://github.com/o/r" };
-    expect(
-      makeProvider(new FakeTransport([]), undefined, undefined, {
-        runtimeMode: "pi",
-      }).desiredSpecFingerprint(input),
-    ).not.toBe(
-      makeProvider(new FakeTransport([]), undefined, undefined, {
-        runtimeMode: "execution",
-      }).desiredSpecFingerprint(input),
+    const provider = makeProvider(new FakeTransport([]));
+    expect(provider.desiredSpecFingerprint({ ...input, harness: "pi" })).not.toBe(
+      provider.desiredSpecFingerprint({ ...input, harness: "claude" }),
     );
   });
 });
@@ -384,10 +381,8 @@ describe("GceOrbHostProvider", () => {
   });
 
   it.each([
-    { harness: "pi", runtimeMode: "pi" },
-    { harness: "claude", runtimeMode: "pi" },
     { harness: "pi", runtimeMode: "execution" },
-    { harness: "claude", runtimeMode: "execution" },
+    { harness: "claude", runtimeMode: "claude" },
   ] as const)(
     "creates a Spot native instance with %s configuration",
     async ({ harness, runtimeMode }) => {
@@ -401,8 +396,7 @@ describe("GceOrbHostProvider", () => {
         () => done, // op wait
       ]);
       const provider = makeProvider(transport, undefined, undefined, {
-        runtimeMode,
-        extraEnv: { PI_ORB_HARNESS: "wrong" },
+        extraEnv: { PI_ORB_RUNTIME_MODE: "wrong" },
       });
       const result = await provider.provision(
         task,
@@ -448,10 +442,9 @@ describe("GceOrbHostProvider", () => {
       ) as Record<string, string>;
       expect(config).toMatchObject({
         PI_ORB_ID: "orb-1",
-        PI_ORB_HARNESS: harness,
         PI_ORB_HOST_INCARNATION: "0",
         PI_ORB_REPOSITORY_URL: "https://github.com/o/r",
-        PI_ORB_RUNTIME_MODE: harness === "claude" ? "pi" : runtimeMode,
+        PI_ORB_RUNTIME_MODE: runtimeMode,
         PI_ORB_INITIAL_CHECKOUT_COMMIT: "b".repeat(40),
         PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT: "1",
         PI_ORB_CONTROL_PLANE_URL: "https://runtime.example",

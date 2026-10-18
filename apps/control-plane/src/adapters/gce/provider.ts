@@ -1,7 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   CONTROL_PLANE_URL_ENV,
-  HARNESS_ENV,
   PREVIEW_HOST_ENV,
   previewHost,
   RUNTIME_TOKEN_ENV,
@@ -28,7 +27,6 @@ import type { TailscaleHostOptions } from "../tailscale/client.ts";
 import type { GceApiTransport, GceResponse } from "./api.ts";
 
 export interface GceOrbHostProviderOptions {
-  readonly runtimeMode?: "pi" | "execution";
   readonly projectId: string;
   readonly zone: string;
   /** e.g. "n2d-highmem-2". */
@@ -419,11 +417,10 @@ export class GceOrbHostProvider implements OrbHostProvider {
       ...(this.options.extraEnv ?? {}),
       [SKILLS_DIR_ENV]: "/opt/pi-orb/skills",
       PI_ORB_ID: orbId,
-      [HARNESS_ENV]: harness,
       PI_ORB_HOST_INCARNATION: String(incarnation),
       PI_ORB_CLAUDE_RECOVERY_PROOF: "",
       PI_ORB_REPOSITORY_URL: repositoryUrl,
-      PI_ORB_RUNTIME_MODE: harness === "claude" ? "pi" : (this.options.runtimeMode ?? "pi"),
+      PI_ORB_RUNTIME_MODE: harness === "claude" ? "claude" : "execution",
       [CONTROL_PLANE_URL_ENV]: this.options.controlPlaneUrl,
       ...(tailscale === undefined
         ? {}

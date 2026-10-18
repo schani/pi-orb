@@ -1,13 +1,11 @@
-import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ServerFrame } from "@pi-orb/protocol";
-import { okAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { OutboundWriter } from "../../../orb-runtime/src/domain/outbound.ts";
 import {
-  PiOrbAgent,
-  type PiSession,
-  type PiSessionManager,
-} from "../../../orb-runtime/src/pi/agent.ts";
+  ComposedClaudeFixture,
+  rootRequest,
+} from "../../../orb-runtime/src/testkit/claude-composed.ts";
 import { initialState, reducer } from "./OrbPage.tsx";
 
 it.each(["bash", "codemode"])("retains %s code through live tool states", (name) => {
@@ -59,151 +57,141 @@ it("reduces live headline replacements independently of hidden reasoning text", 
   }
 });
 
-// Exhaust the finite schedules: next response before/after retirement,
-// immediate/backpressured delivery, snapshot/microtask flush, and a mapping
-// failpoint before the committed response. Inspect every delivered frame.
+// Exhaust immediate/backpressured delivery, next-response timing, snapshot/SDK
+// publication, and a failed journal commit before the response becomes durable.
 it.each(
   [false, true].flatMap((queued) =>
     [false, true].flatMap((nextBeforeRetirement) =>
-      [false, true].flatMap((snapshotBeforeFlush) =>
+      [false, true].flatMap((publishViaSnapshot) =>
         [false, true].map((blockedFirst) => ({
           queued,
           nextBeforeRetirement,
-          snapshotBeforeFlush,
+          publishViaSnapshot,
           blockedFirst,
         })),
       ),
     ),
   ),
 )(
-  "retires previous response output: %j",
-  async ({ queued, nextBeforeRetirement, snapshotBeforeFlush, blockedFirst }) => {
-    let emit: (event: AgentSessionEvent) => void = () => undefined;
-    const summarizer = { summarize: () => okAsync("") };
-    const agent = new PiOrbAgent({
-      skillsDir: null,
-      orbId: "test",
-      repositoryUrl: "https://example.com/repo",
-      workDir: "/nonexistent",
-      broker: null,
-      turnSummarizer: summarizer,
-    });
-    const session = {
-      subscribe: (listener: typeof emit) => {
-        emit = listener;
-        return () => undefined;
-      },
-    } as unknown as PiSession;
-    const entries: unknown[] = [];
-    const manager = {
-      getEntries: () => entries,
-      getLeafId: () => null,
-      getHeader: () => ({ id: "session" }),
-      getSessionId: () => "session",
-      getSessionFile: () => undefined,
-      buildContextEntries: () => entries,
-      appendCustomEntry: () => "baseline",
-    } as unknown as PiSessionManager;
-    agent.attachSession(session, manager, summarizer);
-    let browser = initialState("test");
-    let firstIds: string[] = [];
-    const committedSnapshots: { browser: string[]; reconnect: string[] }[] = [];
-    const frames: ServerFrame[] = [];
-    let bufferedAmount = queued ? 100 : 0;
-    const writer = new OutboundWriter(
-      {
-        get bufferedAmount() {
-          return bufferedAmount;
+  "retires previous Claude response output: %j",
+  async ({ queued, nextBeforeRetirement, publishViaSnapshot, blockedFirst }) => {
+    const f = new ComposedClaudeFixture();
+    try {
+      expect((await f.attach()).isOk()).toBe(true);
+      let browser = initialState("orb-a");
+      let firstIds: string[] = [];
+      const committedSnapshots: { browser: string[]; reconnect: string[] }[] = [];
+      const frames: ServerFrame[] = [];
+      let bufferedAmount = queued ? 100 : 0;
+      const writer = new OutboundWriter(
+        {
+          get bufferedAmount() {
+            return bufferedAmount;
+          },
+          send(json) {
+            const frame = JSON.parse(json) as ServerFrame;
+            frames.push(frame);
+            browser = reducer(browser, { type: "frame", frame });
+            // Each delivered frame is a possible render and reconnect boundary.
+            if (browser.records.has("saved")) {
+              committedSnapshots.push({
+                browser: [...browser.liveBlocks.keys()].filter((id) => firstIds.includes(id)),
+                reconnect: (f.agent.liveView()?.blocks ?? [])
+                  .map((block) => block.blockId)
+                  .filter((id) => firstIds.includes(id)),
+              });
+            }
+          },
+          close() {
+            expect.fail("unexpected backpressure close");
+          },
         },
-        send(json) {
-          const frame = JSON.parse(json) as ServerFrame;
-          frames.push(frame);
-          browser = reducer(browser, { type: "frame", frame });
-          // Each frame is a possible React render and reconnect boundary.
-          if (browser.records.has("saved")) {
-            committedSnapshots.push({
-              browser: [...browser.liveBlocks.keys()].filter((id) => firstIds.includes(id)),
-              reconnect: (agent.liveView()?.blocks ?? [])
-                .map((block) => block.blockId)
-                .filter((id) => firstIds.includes(id)),
-            });
-          }
-        },
-        close() {
-          expect.fail("unexpected backpressure close");
-        },
-      },
-      { highWaterMark: 1, maxCriticalBufferedBytes: 100_000 },
-    );
-    agent.subscribe((frame) => writer.enqueue(frame));
-    const send = (event: unknown) => emit(event as AgentSessionEvent);
-    const response = (texts: string[]) => ({
-      role: "assistant",
-      content: texts.map((thinking) => ({ type: "thinking", thinking })),
-      stopReason: "toolUse",
-    });
-    const next = () => {
-      send({ type: "message_start", message: response([]) });
-      send({ type: "message_update", message: response(["second"]) });
-    };
-    send({ type: "agent_start" });
-    send({ type: "message_start", message: response([]) });
-    send({
-      type: "message_update",
-      message: response(["first", "stale tail", "another stale tail"]),
-    });
-    firstIds = agent.liveView()?.blocks.map((block) => block.blockId) ?? [];
-    expect(firstIds).toHaveLength(3);
-    const finalMessage = response(["final normalized reasoning"]);
-    send({ type: "message_end", message: finalMessage });
-    // The SDK persists after invoking its subscribers. Deliberately use final
-    // text different from the stream, so no text-equality retirement can pass
-    // (docs/postmortems/2026-09-09-stale-thinking.md).
-    if (blockedFirst) entries.push({ id: "bad", type: "unmappable" });
-    entries.push({
-      id: "saved",
-      parentId: null,
-      type: "message",
-      timestamp: "2026-09-09T00:00:00Z",
-      message: finalMessage,
-    });
-    if (nextBeforeRetirement) next();
-    if (blockedFirst) {
-      expect(agent.snapshot().isErr()).toBe(true);
-      expect(
-        agent.liveView()?.blocks.filter((block) => firstIds.includes(block.blockId)),
-      ).toHaveLength(3);
-      expect(frames.some((frame) => frame.type === "history.record")).toBe(false);
-      entries.shift(); // Release only the explicit mapping failpoint.
-    }
-    // Force a reconnect snapshot in the notify/append/microtask gap too.
-    if (snapshotBeforeFlush) {
-      const reconnect = agent.snapshot();
-      expect(reconnect.isErr() ? reconnect.error : null).toBeNull();
-      expect(agent.liveView()?.blocks.filter((block) => firstIds.includes(block.blockId))).toEqual(
-        [],
+        { highWaterMark: 1, maxCriticalBufferedBytes: 100_000 },
       );
+      f.agent.subscribe((frame) => writer.enqueue(frame));
+      expect((await f.agent.submitMessage([{ type: "text", text: "hello" }], "op")).isOk()).toBe(
+        true,
+      );
+      const input = await f.query.input.next();
+      if (input.done) throw new Error("missing native input");
+      f.receipt(input.value);
+      const send = (message: object) => f.query.emitUnscheduled(message as SDKMessage);
+      const stream = (uuid: string, index: number, thinking: string) =>
+        send({
+          type: "stream_event",
+          uuid,
+          session_id: f.state.id,
+          parent_tool_use_id: null,
+          event: {
+            type: "content_block_start",
+            index,
+            content_block: { type: "thinking", thinking },
+          },
+        });
+      for (const [index, thinking] of ["first", "stale tail", "another stale tail"].entries())
+        await stream("first-stream", index, thinking);
+      firstIds = f.agent.liveView()?.blocks.map((block) => block.blockId) ?? [];
+      expect(firstIds).toHaveLength(3);
+      const finalMessage = {
+        type: "assistant",
+        uuid: "saved",
+        timestamp: f.state.timestamp,
+        session_id: f.state.id,
+        parent_tool_use_id: null,
+        message: {
+          role: "assistant",
+          content: [{ type: "thinking", thinking: "final normalized reasoning" }],
+        },
+      };
+      // UUID ownership, not text equality, must retire all streamed blocks.
+      await send(finalMessage);
+      const next = () => stream("next-stream", 0, "second");
+      if (nextBeforeRetirement) await next();
+      f.append(finalMessage);
+      if (blockedFirst) {
+        f.failCommit = true;
+        expect(f.agent.snapshot().isErr()).toBe(true);
+        expect(
+          f.agent.liveView()?.blocks.filter((block) => firstIds.includes(block.blockId)),
+        ).toHaveLength(3);
+        expect(
+          frames.some((frame) => frame.type === "history.record" && frame.record.id === "saved"),
+        ).toBe(false);
+        f.failCommit = false;
+      }
+      if (publishViaSnapshot) expect(f.agent.snapshot().isOk()).toBe(true);
+      else await send(rootRequest);
+      expect(
+        f.agent.liveView()?.blocks.filter((block) => firstIds.includes(block.blockId)),
+      ).toEqual([]);
+      if (!nextBeforeRetirement) {
+        expect(f.agent.liveView()?.blocks).toEqual([]);
+        await next();
+      }
+      bufferedAmount = 0;
+      writer.onDrain();
+      expect(f.agent.liveView()?.blocks.map((block) => block.text)).toEqual(["second"]);
+      expect([...browser.liveBlocks.values()].map((block) => block.text)).toEqual([""]);
+      expect(firstIds).not.toContain([...browser.liveBlocks.keys()][0]);
+      const saved = frames.find(
+        (frame) => frame.type === "history.record" && frame.record.id === "saved",
+      );
+      expect(saved).toMatchObject({ retiredBlockIds: firstIds });
+      expect(committedSnapshots.length).toBeGreaterThan(0);
+      for (const snapshot of committedSnapshots)
+        expect(snapshot).toEqual({ browser: [], reconnect: [] });
+      expect(
+        frames.some(
+          (frame) =>
+            frame.type === "runtime.event" && String(frame.event.type) === "output_retired",
+        ),
+      ).toBe(false);
+    } finally {
+      f.failCommit = false;
+      f.query.exit();
+      f.query.endOutput();
+      await f.agent.closeExtensions();
+      f.dispose();
     }
-    await Promise.resolve();
-    if (!nextBeforeRetirement) {
-      expect(agent.liveView()?.blocks).toEqual([]);
-      next();
-    }
-    bufferedAmount = 0;
-    writer.onDrain();
-    expect(agent.liveView()?.blocks.map((block) => block.text)).toEqual(["second"]);
-    expect([...browser.liveBlocks.values()].map((block) => block.text)).toEqual([""]);
-    expect(firstIds).not.toContain([...browser.liveBlocks.keys()][0]);
-    const saved = frames.findIndex((frame) => frame.type === "history.record");
-    expect(saved).toBeGreaterThanOrEqual(0);
-    expect(committedSnapshots.length).toBeGreaterThan(0);
-    for (const snapshot of committedSnapshots)
-      expect(snapshot).toEqual({ browser: [], reconnect: [] });
-    expect(frames[saved]).toMatchObject({ retiredBlockIds: firstIds });
-    expect(
-      frames.some(
-        (frame) => frame.type === "runtime.event" && String(frame.event.type) === "output_retired",
-      ),
-    ).toBe(false);
   },
 );

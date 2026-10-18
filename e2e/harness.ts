@@ -85,35 +85,13 @@ export async function fakeRequest(
   }
 }
 
-export type FixtureAgentBackend = "central-durable" | "host-pi";
-
-/** Defaults to host-pi, or central-durable for the process backend; an override or PI_ORB_AGENT_BACKEND wins. */
-export function fixtureAgentBackend(override?: FixtureAgentBackend): FixtureAgentBackend {
-  const selected = process.env["PI_ORB_AGENT_BACKEND"];
-  return (
-    override ??
-    (selected === "central-durable" || selected === "host-pi"
-      ? selected
-      : process.env["PI_ORB_E2E_BACKEND"] === "process"
-        ? "central-durable"
-        : "host-pi")
-  );
-}
-
-export async function createFakeSession(
-  name: string,
-  scenario: unknown,
-  agentBackend?: FixtureAgentBackend,
-): Promise<FakeSession> {
+export async function createFakeSession(name: string, scenario: unknown): Promise<FakeSession> {
   // Retried: a lost response can leak one unreferenced mock session, which
   // costs nothing a per-test session does not already cost.
   const response = await fakeRequest("POST", "/api/__mock__/sessions", {
     body: {
       name,
-      scenario: centralModelScenario(
-        scenario,
-        fixtureAgentBackend(agentBackend) === "central-durable",
-      ),
+      scenario: centralModelScenario(scenario),
     },
     retryTransport: true,
   });
@@ -773,7 +751,6 @@ export async function startControlPlane(options: {
   hostingRoot?: string;
   webDist?: string;
   entry?: string;
-  agentBackend?: FixtureAgentBackend;
   resourceRepository?: string;
   resourceGateUrl?: string;
   readinessHeaders?: Record<string, string>;
@@ -786,13 +763,9 @@ export async function startControlPlane(options: {
   const ownedHostingRoot = options.hostingRoot === undefined;
   const hostingRoot = options.hostingRoot ?? mkdtempSync(join(tmpdir(), "pi-orb-e2e-hosting-"));
   const logs: string[] = [];
-  const agentBackend = fixtureAgentBackend(options.agentBackend);
-  const relay =
-    agentBackend === "central-durable"
-      ? await durableFakeRelay(
-          options.extraEnv?.["PI_ORB_FAKE_OPENAI_INFERENCE_URL"] ?? options.fake.inferenceBaseUrl,
-        )
-      : undefined;
+  const relay = await durableFakeRelay(
+    options.extraEnv?.["PI_ORB_FAKE_OPENAI_INFERENCE_URL"] ?? options.fake.inferenceBaseUrl,
+  );
   const entry =
     options.entry ??
     (options.resourceRepository === undefined
@@ -830,20 +803,18 @@ export async function startControlPlane(options: {
       PI_ORB_HOST_SPEC_GENERATION: String(options.hostSpecGeneration ?? 0),
       PI_ORB_E2E_HOST_SPEC: options.e2eHostSpec,
       PI_ORB_FAKE_OPENAI_OAUTH_URL: options.fake.oauthBaseUrl,
-      PI_ORB_FAKE_OPENAI_INFERENCE_URL: options.fake.inferenceBaseUrl,
       ...(options.nameFake === undefined
         ? {}
         : { PI_ORB_NAME_INFERENCE_URL: options.nameFake.inferenceBaseUrl }),
       ...options.extraEnv,
       PI_ORB_DOCKER_INVENTORY_SCOPE: options.dockerInventoryScope ?? randomUUID(),
-      PI_ORB_AGENT_BACKEND: agentBackend,
       ...(options.resourceRepository === undefined
         ? {}
         : {
             PI_ORB_E2E_RESOURCE_REPOSITORY: options.resourceRepository,
             PI_ORB_E2E_RESOURCE_GATE_URL: options.resourceGateUrl,
           }),
-      ...(relay === undefined ? {} : { PI_ORB_FAKE_OPENAI_INFERENCE_URL: relay.baseUrl }),
+      PI_ORB_FAKE_OPENAI_INFERENCE_URL: relay.baseUrl,
     },
     stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
@@ -867,7 +838,7 @@ export async function startControlPlane(options: {
         child.once("exit", finish);
         child.kill("SIGTERM");
       }
-    }).then(() => relay?.close());
+    }).then(() => relay.close());
     return stopped;
   };
   let baseUrl = `http://127.0.0.1:${options.port}`;
@@ -899,7 +870,7 @@ export async function startControlPlane(options: {
     authDir,
     logs,
     hostingRoot,
-    ...(relay === undefined ? {} : { modelRequests: relay.requests }),
+    modelRequests: relay.requests,
     stop,
   };
 }

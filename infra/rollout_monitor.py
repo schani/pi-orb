@@ -26,9 +26,9 @@ def placement(service, image):
         return fail('invalid', 'service configuration unavailable')
     if not valid_id(revision):
         return fail('invalid', 'invalid serving revision')
-    if container['image'] != image or env.get('PI_ORB_AGENT_BACKEND') != 'central-durable':
-        return fail('conflict', 'serving image or Pi placement changed')
-    return Result({'revision': revision, 'backend': 'central-durable',
+    if container['image'] != image:
+        return fail('conflict', 'serving image changed')
+    return Result({'revision': revision,
                    'generation': env.get('PI_ORB_HOST_SPEC_GENERATION')})
 
 
@@ -36,8 +36,7 @@ def log_counts(rows):
     return {'errors': sum(row.get('severity') in ('ERROR', 'CRITICAL', 'ALERT', 'EMERGENCY') for row in rows),
             'http429': sum(row.get('httpRequest', {}).get('status') == 429 for row in rows),
             'http5xx': sum(type(row.get('httpRequest', {}).get('status')) is int and
-                          row['httpRequest']['status'] >= 500 for row in rows),
-            'legacyBackend': sum(row.get('jsonPayload', {}).get('code') == 'legacy_backend' for row in rows)}
+                          row['httpRequest']['status'] >= 500 for row in rows)}
 
 
 def lifecycle_counts(rows):
@@ -53,7 +52,7 @@ def lifecycle_counts(rows):
         match = re.search(r'lifecycle: (?:orb=[\w-]+ )?([\w.-]+)(?: |$)', text)
         if not match or match[1] not in events:
             continue
-        code = re.search(r'\bcode=(legacy_backend|history_integrity)(?: |$)', text)
+        code = re.search(r'\bcode=(history_integrity)(?: |$)', text)
         key = code[1] if code else match[1]
         counts[key] = counts.get(key, 0) + 1
     return counts
@@ -125,7 +124,7 @@ def api(cloud, path):
 
 
 
-def fleet_inventory(cloud, central=True):
+def fleet_inventory(cloud):
     projects = api(cloud, '/api/v1/projects')
     if projects.error:
         return projects
@@ -147,7 +146,7 @@ def fleet_inventory(cloud, central=True):
                     'creating', 'starting', 'running', 'stopping', 'stopped', 'failed',
                     'archiving', 'archived', 'deleting'):
                 return fail('invalid', 'invalid orb state')
-            if central and (orb.get('centralAgent') is True) != (harness == 'pi'):
+            if (orb.get('centralAgent') is True) != (harness == 'pi'):
                 return fail('conflict', 'per-orb placement mismatch')
             key = harness + ':' + state
             fleet[key] = fleet.get(key, 0) + 1
@@ -212,7 +211,7 @@ def sample(cloud, record, start):
     if baseline and baseline.get('ownerUserId') != fleet.value['ownerUserId']:
         return fail('conflict', 'monitor owner differs from preflight')
     logs = cloud.json(['logging', 'read',
-        f'resource.type="cloud_run_revision" AND resource.labels.service_name="pi-orb-issuer" AND resource.labels.location="{record["region"]}" AND resource.labels.revision_name="{selected.value["revision"]}" AND timestamp>="{start}" AND (severity>=ERROR OR httpRequest.status>=500 OR httpRequest.status=429 OR textPayload:"lifecycle:" OR jsonPayload.code="legacy_backend")',
+        f'resource.type="cloud_run_revision" AND resource.labels.service_name="pi-orb-issuer" AND resource.labels.location="{record["region"]}" AND resource.labels.revision_name="{selected.value["revision"]}" AND timestamp>="{start}" AND (severity>=ERROR OR httpRequest.status>=500 OR httpRequest.status=429 OR textPayload:"lifecycle:")',
         '--project', record['project'], '--limit=1000'])
     if logs.error:
         return logs
@@ -298,7 +297,7 @@ def main():
         if not isinstance(origin, str) or not origin.startswith('https://'):
             return 1
         os.environ['PI_ORB_APP_ORIGIN'] = origin
-        fleet = fleet_inventory(cloud, central=False)
+        fleet = fleet_inventory(cloud)
         if fleet.error:
             print('rollout monitor preflight: owner fleet unavailable', file=sys.stderr)
             return 1

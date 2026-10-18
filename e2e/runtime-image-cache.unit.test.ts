@@ -112,12 +112,10 @@ describe("trusted persistent runtime layer cache", () => {
     expect(source).toContain("permissions:\n  contents: read\n");
   });
 
-  it("binds both test entrypoints to the exact loaded image with no build-record artifacts", () => {
-    for (const name of ["Run end-to-end test", "Diagnose subagent continuation"]) {
-      expect(step(name)).toContain(
-        `PI_ORB_E2E_RUNTIME_IMAGE_ID: \${{ steps.runtime-image.outputs.imageid }}`,
-      );
-    }
+  it("binds E2E to the exact loaded image with no build-record artifacts", () => {
+    expect(step("Run end-to-end test")).toContain(
+      `PI_ORB_E2E_RUNTIME_IMAGE_ID: \${{ steps.runtime-image.outputs.imageid }}`,
+    );
     const build = step("Build E2E runtime image");
     expect(build).toContain("DOCKER_BUILD_RECORD_UPLOAD: false");
     expect(step("Report runtime image build")).toContain("steps.runtime-image.outputs.imageid");

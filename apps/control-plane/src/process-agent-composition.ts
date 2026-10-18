@@ -14,7 +14,6 @@ import {
 import { type AuthProvider, StreamableHttpTransport } from "@earendil-works/pi-mcp";
 import type { McpConfig } from "@pi-orb/protocol";
 import { err, ok, okAsync, Result, ResultAsync } from "neverthrow";
-import { LunaTurnSummarizer } from "../../orb-runtime/src/pi/luna-summarizer.ts";
 import { NativeResourceContext } from "./adapters/durable/context-storage.ts";
 import { executionWaitProgress } from "./adapters/durable/execution-wait-progress.ts";
 import type { DurableAgentPlaneOptions } from "./adapters/durable/manager.ts";
@@ -34,6 +33,7 @@ import type { McpServerStatus } from "./adapters/durable/tools/mcp.ts";
 import { createOrbTools } from "./adapters/durable/tools/orb-tools.ts";
 import { RemoteExecutionEnv } from "./adapters/execution-client/env.ts";
 import { LazyExecutionEnv } from "./adapters/execution-client/lazy-env.ts";
+import { LunaTurnSummarizer } from "./adapters/luna-summarizer.ts";
 import { modelCall } from "./adapters/model-usage.ts";
 import type { PgResourceGate } from "./adapters/pg/resource-gate.ts";
 import { CODEX_PROVIDER, getToken, type TokenGrant, type TokenRequest } from "./domain/broker.ts";

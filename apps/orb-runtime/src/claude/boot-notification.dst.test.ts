@@ -1,11 +1,11 @@
 import { join } from "node:path";
 import { ok } from "neverthrow";
 import { expect, it } from "vitest";
-import { planBootNotification } from "../pi/boot-notification.ts";
 import { ComposedClaudeFixture, ScheduledClaudeQuery } from "../testkit/claude-composed.ts";
 import { runDst } from "../testkit/sim.ts";
 import { ClaudeOrbAgent } from "./agent.ts";
 import { claudeBootEntries } from "./boot-notification.ts";
+import { planBootNotification } from "./boot-policy.ts";
 import { ClaudeHistory } from "./history.ts";
 
 it("a crash or abort after the durable boot claim cancels admission before the native prompt", async () => {

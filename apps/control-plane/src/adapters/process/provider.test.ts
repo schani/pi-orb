@@ -42,7 +42,6 @@ if (process.env.GROUP_MEMBER_PID_FILE) {
 }
 writeFileSync(process.env.OBSERVED_ENV_FILE, JSON.stringify({
   orbId: process.env.PI_ORB_ID,
-  harness: process.env.PI_ORB_HARNESS,
   repositoryUrl: process.env.PI_ORB_REPOSITORY_URL,
   runtimeMode: process.env.PI_ORB_RUNTIME_MODE,
   initialCheckoutCommit: process.env.PI_ORB_INITIAL_CHECKOUT_COMMIT,
@@ -215,14 +214,13 @@ afterEach(async () => {
 
 describe("ProcessOrbHostProvider", () => {
   launchIt.each([
-    { harness: "pi", runtimeMode: "pi" },
     { harness: "pi", runtimeMode: "execution" },
-    { harness: "claude", runtimeMode: "execution" },
+    { harness: "claude", runtimeMode: "claude" },
   ] as const)(
-    "launches independent %s role and persists initial commit",
+    "launches harness-derived %s role and persists initial commit",
     async ({ harness, runtimeMode }) => {
       const observedEnv = join(tmpdir(), `pi-orb-role-${crypto.randomUUID()}.json`);
-      const { provider } = makeProvider({ OBSERVED_ENV_FILE: observedEnv }, { runtimeMode });
+      const { provider } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
       const commit = "b".repeat(40);
       const provisioned = await provider.provision(
         task,
@@ -243,7 +241,7 @@ describe("ProcessOrbHostProvider", () => {
           ? (JSON.parse(readFileSync(observedEnv, "utf8")) as Record<string, string>)
           : null,
       );
-      expect(observed.runtimeMode).toBe(harness === "claude" ? "pi" : runtimeMode);
+      expect(observed.runtimeMode).toBe(runtimeMode);
       expect(observed.initialCheckoutCommit).toBe(commit);
       expect(observed.awaitInitialCheckoutCommit).toBe("1");
       rmSync(observedEnv, { force: true });
@@ -277,7 +275,7 @@ describe("ProcessOrbHostProvider", () => {
     const { provider, root } = makeProvider({
       OBSERVED_ENV_FILE: observedEnv,
       PI_ORB_CONTAINER: "1",
-      PI_ORB_HARNESS: "wrong",
+      PI_ORB_RUNTIME_MODE: "wrong",
     });
     const provisioned = await provider.provision(
       task,
@@ -295,7 +293,7 @@ describe("ProcessOrbHostProvider", () => {
       }
     });
     expect(values.orbId).toBe(request.orbId);
-    expect(values.harness).toBe(harness);
+    expect(values.runtimeMode).toBe(harness === "claude" ? "claude" : "execution");
     expect(values.repositoryUrl).toBe(request.bootstrap.repositoryUrl);
     expect(values.incarnation).toBe(String(request.incarnation));
     expect(values.container).toBe("0");

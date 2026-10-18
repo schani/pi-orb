@@ -33,7 +33,6 @@ chmod 755 /usr/local/bin/rustup
 for proxy in cargo rustc rustdoc rustfmt cargo-clippy cargo-fmt clippy-driver; do ln -s rustup "/usr/local/bin/$proxy"; done
 cd /app
 npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts
-node scripts/apply-dependency-patches.mjs
 node infra/native-vm/claude-check.mjs | tee /opt/pi-orb/claude-sdk-version
 rm -rf node_modules/node-pty/prebuilds
 npm rebuild node-pty

@@ -14,7 +14,7 @@ import {
   type MappingError,
   mapPiEntry,
   mapUserContent,
-} from "../../../../orb-runtime/src/pi/mapping.ts";
+} from "../../../../orb-runtime/src/domain/mapping.ts";
 
 export function activeSubagents(
   graph: TaskGraph,

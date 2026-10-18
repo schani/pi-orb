@@ -17,7 +17,7 @@ import { err, ok, Result, ResultAsync } from "neverthrow";
 import {
   eligibleCodexModels,
   SELECTABLE_CODEX_MODELS,
-} from "../../../../../orb-runtime/src/pi/model-select.ts";
+} from "../../../../../orb-runtime/src/domain/model-select.ts";
 import { errorResult } from "./catalog.ts";
 
 export const TOOLS_EXTENSION = "orb.tools";

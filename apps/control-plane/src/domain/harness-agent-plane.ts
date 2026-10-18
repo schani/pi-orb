@@ -14,7 +14,7 @@ export function agentPlacement(plane: AgentPlane | undefined, orb: OrbRow) {
   return orb.harness === "claude" ? "host" : (plane?.placementFor?.(orb) ?? plane?.placement);
 }
 
-/** Pi placement is configurable; native Claude authority always stays on its host. */
+/** Pi authority is central; native Claude authority stays on its host. */
 export class HarnessAgentPlane implements AgentPlane {
   readonly placement: "central" | "host";
   private readonly pi: AgentPlane;

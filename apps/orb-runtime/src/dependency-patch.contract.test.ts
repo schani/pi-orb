@@ -24,12 +24,6 @@ const helperPath = "scripts/apply-dependency-patches.mjs";
 const patchPath = `patches/@earendil-works+pi-coding-agent+${piVersion}.patch`;
 
 describe("Pi dependency patch installation", () => {
-  it("ships only active vendor archives", () => {
-    expect(readdirSync(join(root, "vendor")).sort()).toEqual([
-      "gotgenes-pi-subagents-21.7.0-orb.8.tgz",
-    ]);
-  });
-
   it("uses Iron's bundled declarations", () => {
     expect(
       json("apps/control-plane/package.json").devDependencies?.["@types/hapi__iron"],
@@ -38,14 +32,13 @@ describe("Pi dependency patch installation", () => {
     expect(lock.packages["node_modules/@types/hapi__iron"]).toBeUndefined();
   });
 
-  it("pins the patched SDK without vulnerable patch tooling in every installing workspace", () => {
-    expect(json("package.json").devDependencies?.["patch-package"]).toBeUndefined();
-    for (const manifest of ["apps/orb-runtime/package.json", "apps/control-plane/package.json"]) {
-      expect(json(manifest).dependencies).toMatchObject({
-        "@earendil-works/pi-coding-agent": piVersion,
-      });
-      expect(json(manifest).dependencies?.["patch-package"]).toBeUndefined();
-    }
+  it("pins the central model runtime SDK", () => {
+    expect(
+      json("apps/control-plane/package.json").dependencies?.["@earendil-works/pi-coding-agent"],
+    ).toBe(piVersion);
+    expect(
+      json("apps/orb-runtime/package.json").dependencies?.["@earendil-works/pi-coding-agent"],
+    ).toBeUndefined();
   });
 
   it("removes the vulnerable patch tooling from the root lock graph", () => {
@@ -86,13 +79,9 @@ describe("Pi dependency patch installation", () => {
   it("carries the exact versioned patch", () => {
     expect(existsSync(join(root, patchPath))).toBe(true);
     const patch = read(patchPath);
-    expect(patch).toContain(
-      "diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js",
-    );
-    expect(patch).toContain("async _prepareRun(trigger, signal)");
-    expect(patch).toContain(
-      "this._agentRunPreparationAbortController = preparationAbortController;",
-    );
+    expect(patch).toContain("dist/core/model-runtime.js");
+    expect(patch).toContain("dist/core/provider-composer.d.ts");
+    expect(patch).toContain("codexBrokerDiagnostics: requestDiagnostics");
   });
 
   it("keeps native Durable journals, namespace discovery and previews on the public contract", () => {
@@ -128,7 +117,7 @@ describe("Pi dependency patch installation", () => {
   it("decodes native image saves with a bounded portable byte loop", () => {
     const source = read("node_modules/@earendil-works/pi-durable/dist/codemode/output.js");
     const body = source.match(
-      /        const binary = atob\(data\);\n        const bytes = new Uint8Array\(binary.length\);\n        for \(let i = 0; i < binary.length; i\+\+\)\n            bytes\[i\] = binary.charCodeAt\(i\);/,
+      / {8}const binary = atob\(data\);\n {8}const bytes = new Uint8Array\(binary.length\);\n {8}for \(let i = 0; i < binary.length; i\+\+\)\n {12}bytes\[i\] = binary.charCodeAt\(i\);/,
     )?.[0];
     expect(body).toBeDefined();
     expect(source).not.toContain("Uint8Array.from(atob(data)");
@@ -189,74 +178,37 @@ describe("Pi dependency patch installation", () => {
       `node ${helperPath} && node scripts/fix-node-pty-prebuild-permissions.mjs`,
     );
 
-    for (const [path, workspace] of [
-      ["apps/orb-runtime/Dockerfile", "@pi-orb/orb-runtime"],
-      ["apps/control-plane/Dockerfile", "@pi-orb/control-plane"],
-    ] as const) {
-      const dockerfile = read(path);
-      const install = dockerfile.indexOf(`npm ci --workspace ${workspace}`);
-      expect(install).toBeGreaterThan(-1);
-
-      expect(dockerfile.indexOf("COPY vendor vendor")).toBeGreaterThan(-1);
-      expect(dockerfile.indexOf("COPY vendor vendor")).toBeLessThan(install);
-      expect(dockerfile.indexOf(`COPY ${helperPath} ${helperPath}`)).toBeLessThan(install);
-      expect(dockerfile.indexOf(`COPY ${helperPath} ${helperPath}`)).toBeGreaterThan(-1);
-      const scope = workspace === "@pi-orb/control-plane" ? " --pi-durable-only" : "";
-      expect(dockerfile.indexOf(`node ${helperPath}${scope}`, install)).toBeGreaterThan(install);
-      expect(dockerfile).not.toContain("patch-package");
-      const gitInstall =
-        workspace === "@pi-orb/orb-runtime"
-          ? /&& runtime-apt[^\n]*\bgit\b/
-          : /apt-get install -y --no-install-recommends[^\n]*\bgit\b/;
-      const acquisition = dockerfile.search(gitInstall);
-      expect(acquisition).toBeGreaterThan(-1);
-      expect(acquisition).toBeLessThan(install);
-    }
-
     const patchFiles = [
-      "@earendil-works+pi-agent-core+1.3.0.patch",
       "@earendil-works+pi-ai+1.3.0.patch",
       "@earendil-works+pi-codemode+1.3.0.patch",
       "@earendil-works+pi-durable+1.3.0.patch",
       "@earendil-works+pi-coding-agent+1.3.0.patch",
-      "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
     ];
     expect(
       readdirSync(join(root, "patches"))
         .filter((name) => name.endsWith(".patch"))
         .sort(),
-    ).toEqual([...patchFiles].sort());
-    expect(read("apps/control-plane/Dockerfile")).toContain("COPY patches/pi-codemode.* patches/");
-    const controlPlaneDependencies = json("apps/control-plane/package.json").dependencies;
-    expect(controlPlaneDependencies?.["@earendil-works/pi-ai"]).toBe(piVersion);
-    expect(controlPlaneDependencies?.["@gotgenes/pi-subagents"]).toBeUndefined();
+    ).toEqual(patchFiles.toSorted());
     const controlPlane = read("apps/control-plane/Dockerfile");
-    const install = controlPlane.indexOf("RUN npm ci --workspace @pi-orb/control-plane");
-    expect(controlPlane).not.toContain("COPY patches patches");
-    for (const patch of patchFiles) {
-      const copy = `COPY patches/${patch} patches/${patch}`;
-      if (patch.startsWith("@gotgenes+")) {
-        expect(controlPlane).not.toContain(copy);
-      } else {
-        expect(controlPlane.indexOf(copy)).toBeGreaterThan(-1);
-        expect(controlPlane.indexOf(copy)).toBeLessThan(install);
-      }
+    const install = controlPlane.indexOf("npm ci --workspace @pi-orb/control-plane");
+    expect(install).toBeGreaterThan(-1);
+    for (const source of [helperPath, ...patchFiles.map((patch) => `patches/${patch}`)]) {
+      const copy = controlPlane.indexOf(`COPY ${source} ${source}`);
+      expect(copy).toBeGreaterThan(-1);
+      expect(copy).toBeLessThan(install);
     }
+    expect(controlPlane.indexOf(`node ${helperPath}`, install)).toBeGreaterThan(install);
+    expect(controlPlane).toContain("COPY patches/pi-codemode.* patches/");
     const runtime = read("apps/orb-runtime/Dockerfile");
-    expect(runtime.indexOf("COPY patches patches")).toBeGreaterThan(-1);
-    expect(runtime.indexOf("COPY patches patches")).toBeLessThan(
-      runtime.indexOf("npm ci --workspace @pi-orb/orb-runtime"),
-    );
+    expect(runtime).not.toContain(helperPath);
+    expect(runtime).not.toContain("COPY patches");
   });
 
-  it("applies the packaged patch during native-image installation", () => {
-    expect(read("packages/native-image/src/snapshot.ts")).toMatch(
-      /UPLOADED_SOURCE_PATHS = \[[\s\S]*"patches"/,
-    );
-    const nativeInstall = read("infra/native-vm/install.sh");
-    expect(read("packages/native-image/src/snapshot.ts")).toContain(`"${helperPath}"`);
-    expect(nativeInstall.indexOf(`node ${helperPath}`)).toBeGreaterThan(
-      nativeInstall.indexOf("npm ci"),
-    );
+  it("uses unmodified dependencies in the native execution image", () => {
+    const snapshot = read("packages/native-image/src/snapshot.ts");
+    expect(snapshot).not.toContain('"patches"');
+    expect(snapshot).not.toContain('"vendor"');
+    expect(snapshot).not.toContain(`"${helperPath}"`);
+    expect(read("infra/native-vm/install.sh")).not.toContain(helperPath);
   });
 });

@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HistoryRecord, OrbBootContext } from "@pi-orb/protocol";
 import { describe, expect, it } from "vitest";
-import { planBootNotification } from "../pi/boot-notification.ts";
 import { claudeBootEntries } from "./boot-notification.ts";
+import { planBootNotification } from "./boot-policy.ts";
 import { ClaudeHistory } from "./history.ts";
 
 const identity = { runtimeInstanceId: "new", executionId: "host-2", incarnation: "1" };

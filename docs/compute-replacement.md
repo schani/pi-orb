@@ -47,7 +47,7 @@ An update does not bounce a healthy running orb. The currently running incarnati
 
 ## Why disposal is not `destroy`
 
-The existing provider `destroy(orbId)` contract is deletion-grade: it removes compute **and authoritative storage**, and the Tailscale cleanup path removes the orb’s tailnet identity. Reusing it here would destroy the checkout and Pi session.
+The existing provider `destroy(orbId)` contract is deletion-grade: it removes compute **and authoritative storage**, and the Tailscale cleanup path removes the orb’s tailnet identity. Reusing it here would destroy the checkout and native Claude history.
 
 Add a separate provider operation with intentionally narrower authority:
 
@@ -68,7 +68,7 @@ Provider mappings:
 
 - **GCE:** list/verify exact orb ownership; delete matching instances at or below the incarnation fence, including the legacy un-suffixed instance name, which reads as incarnation 0; wait for each operation and verify absence. Instance deletion auto-deletes its boot disk and ephemeral NIC/IP. Never delete `pi-orb-data-<orbId>`. Cloud Logging remains subject to its independent retention policy.
 - **Docker:** force-remove matching incarnation containers at or below the fence. Never remove the fixed workspace volume or shared images/networks. A replacement container is fresh even though the developer machine’s global Docker image store is outside per-orb ownership; the production cache-corruption incident class is specifically isolated by GCE’s replaced boot disk.
-- **Process:** the durable host metadata records the launched child’s process-group ID, so absence stays verifiable after a control-plane restart that lost the in-memory child table. Discard terminates the recorded process group if it still exists, closes its incarnation log handles, and removes only ephemeral host metadata needed to launch that incarnation. Keep the per-orb workspace, Pi state, and Tailscale state. Provision recreates the ephemeral metadata.
+- **Process:** the durable host metadata records the launched child’s process-group ID, so absence stays verifiable after a control-plane restart that lost the in-memory child table. Discard terminates the recorded process group if it still exists, closes its incarnation log handles, and removes only ephemeral host metadata needed to launch that incarnation. Keep the workspace, native Claude state and Tailscale state. Central Pi authority remains in PostgreSQL. Provision recreates the ephemeral metadata.
 
 The ordinary orphan sweep remains stop-only. It must not infer destructive authority from a `failed` row alone; the durable incarnation-bounded discard intent described below is the authority to delete compute.
 

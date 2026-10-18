@@ -1,6 +1,6 @@
 # pi-orb
 
-pi-orb runs Pi coding agents in isolated, Docker-backed **orbs**, with a web UI for persistent conversations that can be stopped and resumed. A deliberately unsandboxed process backend is available for trusted Docker-free testing. It is currently an unauthenticated local-development prototype and must not be exposed publicly.
+pi-orb provides persistent Pi and Claude coding conversations with isolated execution workspaces. Pi runs centrally with PostgreSQL authority; Claude runs natively on its host. Process, Docker and GCP hosts supply execution services. The unsandboxed process provider is for trusted local testing.
 
 Design documentation starts at [DESIGN.md](DESIGN.md), which indexes the topical design docs under `docs/`. The actionable backlog is [TODO.md](TODO.md).
 
@@ -59,4 +59,4 @@ This is an alternative to the full service above, not its web-server command. Fo
 npm run dev:frontend
 ```
 
-Open http://localhost:5173. The seeded orb streams a simulated echo for each message, simulates the floating binary terminal and turn notifications, and keeps fixture history only in memory until Vite restarts. It does not exercise the process host provider, Pi, SQLite replication, credentials, or model inference. After fixture-backend or shared-protocol changes, restart the entire frontend process and verify the changed operation on the actual shared preview; Vite reload failure can leave an old API serving HTTP 200. See [docs/web-ui.md](docs/web-ui.md).
+Open http://localhost:5173. The seeded orb streams a simulated echo for each message, simulates the floating binary terminal and turn notifications, and keeps fixture history only in memory until Vite restarts. It does not exercise the process host provider, Pi, PostgreSQL replication, credentials, or model inference. After fixture-backend or shared-protocol changes, restart the entire frontend process and verify the changed operation on the actual shared preview; Vite reload failure can leave an old API serving HTTP 200. See [docs/web-ui.md](docs/web-ui.md).

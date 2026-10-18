@@ -1,6 +1,6 @@
 import { ok } from "neverthrow";
 import { describe, expect, it } from "vitest";
-import { readExecutionIdentity } from "../pi/execution-identity.ts";
+import { readExecutionIdentity } from "./execution-identity.ts";
 import {
   claudeRecoveryEpisode,
   parseClaudePhysicalLifetime,

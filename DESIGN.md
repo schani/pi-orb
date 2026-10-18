@@ -6,7 +6,7 @@
 
 pi-orb runs an AI coding agent in an isolated, remotely managed environment called an **orb**. A user should eventually be able to invoke `pi-orb` from a project, get a web-based agent experience backed by an orb, disconnect, and later reconnect from another machine without tying the orb's lifetime to a local process.
 
-Pi is the default agent harness, embedded through the Pi SDK. A co-located Claude Agent SDK POC is implemented and running locally (approved 2026-10-04; qualification scope in `docs/testing.md`, not deployed). Host lifecycle, runtime protocol and replica storage use the shared `OrbAgent` boundary; each orb's harness is immutable. Claude's exact uncertain-worker guard has one episode-fenced automatic whole-compute recovery (2026-10-06; local, undeployed), without inference replay; `docs/lifecycle.md` defines disposal proof, attempt and command fences.
+Pi is the default harness, running centrally through Durable with PostgreSQL authority. Claude Agent SDK runs natively on its execution host; qualification scope is in `docs/testing.md`. Host lifecycle, runtime protocol and replica storage use the shared `OrbAgent` boundary; each orb's harness is immutable. Claude's exact uncertain-worker guard has one episode-fenced automatic whole-compute recovery (2026-10-06; local, undeployed), without inference replay; `docs/lifecycle.md` defines disposal proof, attempt and command fences.
 
 ## Current vertical-slice scope
 
@@ -17,15 +17,15 @@ The first target is deliberately narrow:
 - Let users register a project with a name and public Git repository URL.
 - Clone the repository into a fresh orb without caching or synchronization optimizations.
 - Use a fixed orb runtime image and prescribed base environment; projects may add write-only environment secrets fetched by each orb runtime at boot (`docs/credentials.md`).
-- Embed Pi or the Claude Agent SDK, selected at orb creation; spawned orbs inherit the caller's harness.
+- Select central Pi or host-native Claude at orb creation; spawned orbs inherit the caller's harness.
 - Provide a web UI; no terminal TUI and no tmux-based interaction.
 - Run exactly one native root conversation per orb.
 - Support a linear conversation and compaction. Do not expose branching, session switching, cloning, or forking initially. Durable send-anytime input is implemented: a message steers when delivered to a busy agent and otherwise starts a turn, while submission to a stopped or failed orb durably queues the message and requests startup (`docs/runtime-protocol.md`). Scheduled self-sleep is approved and under DST-first implementation: graceful stop/start with a durable deadline and combined first-wake notification (`docs/orb-sleep.md`).
-- Persist the orb itself only through its filesystem.
-- Replicate the complete conversation history to the control plane database.
+- Keep workspace files on retained host storage, private Pi authority in PostgreSQL and native Claude authority on its retained filesystem.
+- Retain complete normalized public conversation history in PostgreSQL.
 - Show browser history through a compact display projection with on-demand HTTP details; retain complete records for replication and the in-orb CLI (`docs/history-replication.md`, `docs/web-ui.md`).
 - Make stopped-orb history viewable immediately from the database without starting the orb.
-- Put Docker behind an infrastructure abstraction that can later gain a GCE implementation.
+- Use the host-provider abstraction for process, Docker and GCP execution.
 - Build deterministic simulation testing into concurrency-critical code from the start using [`determined`](https://www.npmjs.com/package/determined).
 - Support trusted-company ownership without collaboration features: own-user defaults, company-wide direct resource access, and no presence, transfer, coworker-switcher or permissions framework.
 
@@ -37,9 +37,9 @@ The first version is not intended to be a generic VM configurator or a generic r
 - The browser communicates only with the control plane, never directly with an orb runtime.
 - The original first slice has no application authentication or authorization: anybody who can reach it can perform every operation. It is local/trusted-development software and must not be exposed publicly.
 - Stages 1–2 application identity, owned projects, and per-user personal instructions are deployed from `ec81e80` for existing single-user use. Stage 2's schema/data cutover is verified; typed-history migration compatibility enforcement remains a follow-up (`docs/postmortems/2026-09-17-typed-history-runtime-fence.md`). Stage 3 per-user credentials is on `main`, qualified, and undeployed; coworker onboarding remains unauthorized. The single-application Google login/stateless sealed-session implementation was deployed and release-validated 2026-10-06 (`docs/deployment.md`). Local development explicitly selects `PI_ORB_AUTH_MODE=local`. `docs/multi-user.md`.
-- After routing and runtime connection, the control plane proxies one live WebSocket between browser and runtime without interpreting agent content.
+- Central Pi attaches conversation WebSockets directly to the agent plane; native Claude uses a content-agnostic proxy to its runtime.
 - That WebSocket carries browser commands, visible transient streaming events, compact committed display-record notifications, runtime status, acknowledgements, and errors. Open private-detail disclosures poll control-plane HTTP; the backend is implemented locally, frontend work and validation remain underway (`docs/runtime-protocol.md`).
-- The control plane never uses WebSocket traffic for persistence. Replica persistence happens only through separate control-plane HTTP pulls from the runtime.
+- WebSocket traffic is not persistence authority. Central Pi commits native/public history transactionally; Claude history reaches PostgreSQL through separate runtime HTTP pulls.
 - We will not use tmux as the user interaction or session-persistence mechanism.
 - The orb's lifetime is independent of the browser or local CLI session.
 - There is one agent/conversation per orb in the first version.
@@ -53,33 +53,18 @@ The first version is not intended to be a generic VM configurator or a generic r
 **Production validated 2026-10-06:** one `pi-orb-issuer` application serves app/API/broker, public discovery/JWKS and an isolated files hostname. Its exact workload issuer and trust remain unchanged; app/files/broker URLs changed. Google login uses stateless sealed cookies; logout cannot revoke copied cookies. Exact-Origin checks protect cookie mutations/WebSockets. Google machine ID tokens authorize the ordinary API; runtime incarnation bearers retain separate authority. Migration 031 preserved all six user UUIDs while changing their identity mappings. Public runtime ingress and shared issuer/application privileges deliberately reduce infrastructure isolation. Configuration and live evidence: `docs/deployment.md`; authentication: `docs/credentials.md`; cutover/gates: `docs/control-plane-consolidation.md`.
 
 ```text
-Browser
-   |
-   | HTTPS / WebSocket
-   v
-Control plane
-   |-- Web/API service
-   |-- Orb lifecycle orchestration
-   |-- History ingestion and live fan-out
-   |-- Cloud SQL/PostgreSQL replica
-   |
-   | harness-agnostic orb runtime protocol
-   v
-Orb host
-   |-- Docker container initially
-   |-- unsandboxed local process for container-restricted testing
-   |-- GCE VM later
-   |
-   `-- Orb runtime (Node.js)
-          |-- Pi or Claude SDK and persistent native history
-          |-- shared OrbAgent/runtime boundary
-          |-- health and activity reporting
-          `-- harness-specific normalized history adapter
+Browser -- HTTPS / WebSocket --> Control plane
+                                 |-- Web/API, lifecycle, brokers
+                                 |-- central Pi Durable + PostgreSQL authority
+                                 |-- normalized public history and live fan-out
+                                 `-- OrbHostProvider (process / Docker / GCP)
+                                       |-- execution services and workspace
+                                       `-- native Claude + filesystem history
 ```
 
-The browser talks only to the control plane. In the original first slice, the control plane resolves/starts the orb, loads replicated history, and performs the cursor-aware handoff. It proxies the live WebSocket content-agnostically between browser and runtime. Browser detail/image HTTP reads go through the control plane to one replica record or an already-running runtime, without waking compute. History persistence is a separate control-plane-to-runtime HTTP pull of full records, so the proxy does not need to understand agent messages. Cloud Run WebSocket behavior was validated operationally in 2026-07 (`docs/open-questions.md`, question 2).
+**Placement decision (2026-10-18):** Pi runs centrally; Claude runs host-native. Host choice never changes agent placement. Central inference, MCP, inbox and conversation attachment do not require execution readiness. Host-backed tools acquire an incarnation-fenced guest binding only when invoked. Passive history/detail reads use product storage without loading a Harness or waking compute. Native Claude history uses the pull-only replica and content-agnostic live proxy.
 
-**Central Durable candidate (historical process/Docker qualification 2026-10-05; latest-main integration validation underway 2026-10-06; undeployed):** agent backend is independent of process/Docker/GCP. Central authority and separate public history share causal PostgreSQL transactions; immutable Git resources precede the first model turn while execution warms concurrently. Stable metadata handles preserve subscriptions; passive history reads never load a Harness, and stopped-and-quiescent unloading never interrupts work. `PI_ORB_AGENT_BACKEND` defaults to `central-durable`; production Terraform selects `central-durable` under the 2026-10-09 adoption approval (question 72 (Pi Durable)). Existing host-Pi conversations reject further use while retaining readable history and workspaces; Claude remains host-native. Fresh exact-source release gates remain required. Local PostgreSQL/process/Docker qualification does not establish live GCP or host-loss/database failover. Contracts/evidence: `docs/pi-durable-evaluation.md`, `docs/lifecycle.md`, `docs/testing.md`.
+Central private agent state and separate public history commit causally in PostgreSQL. Required pinned Git resources precede the first model turn while execution warms concurrently. Stable metadata handles preserve subscriptions; stopped-and-quiescent unloading never interrupts work. Archive seals public history before deleting private state; retained workspaces follow ordinary compute replacement. Source-specific qualification and recovery limits: `docs/pi-durable-evaluation.md`, `docs/lifecycle.md`, `docs/testing.md`.
 
 ## In-orb spawning and deferred suborbs
 
@@ -87,17 +72,7 @@ An orb can launch another orb with a prompt through `pi-orb spawn` and receive i
 
 Orb-to-orb messaging is approved (2026-10-14, America/Los_Angeles), independent of ancestry: same-owner/same-project trusted non-human input through the existing inbox, shown in a Correspondence band, waking stopped/sleeping targets. The approved minimal contract is implemented locally; scoped actual-process checks pass, full qualification remains pending. A PR and a process-host preview are authorized, not production deployment (`docs/orb-messaging.md`, `TODO.md`).
 
-First-class child orbs/subagents are a product goal but not part of the first slice. Local subagent integration is being validated in `docs/subagents.md` (2026-09-14): a minimal pinned gotgenes fork plus runtime-owned aggregate activity, preserving one user-facing root conversation with additional internal SDK sessions. It is not deployed.
-
-Likely future properties:
-
-- parent agent tools to spawn, inspect, message, wait for, and cancel child work;
-- control-plane enforcement of concurrency, cost, TTL, and nesting limits;
-- branch/worktree isolation so agents never concurrently mutate the same working tree;
-- structured results including summary, patch/commit, tests, artifacts, and cost;
-- selectable isolation such as process, container, or full orb.
-
-No child-orb protocol has been finalized.
+Local Pi children use native Durable task ownership and inherited authorized tools, with named model selection and no profiles or nested delegation. Root receipts and activity are public; private child transcripts are not (`docs/subagents.md`). Independent spawned orbs have separate lifetime and fresh checkout (`docs/orb-spawning.md`).
 
 ## Design doc index
 
@@ -116,13 +91,13 @@ Subsystem designs:
 - [docs/orb-messaging.md](docs/orb-messaging.md) — locally implemented same-owner/same-project peer input, Correspondence band, wake policy and minimal persistence; qualification pending
 - [docs/runtime-protocol.md](docs/runtime-protocol.md) — the browser↔runtime wire protocol: handshake, display frames, detail HTTP, ordering, backpressure
 - [docs/history-replication.md](docs/history-replication.md) — the harness-agnostic history model, pull-only replication, PostgreSQL schema, and implemented explicit offline recovery (2026-10-05, America/Cancun)
-- [docs/pi-adapter.md](docs/pi-adapter.md) — Pi embedding and the Pi→normalized history mapping
+- [docs/pi-adapter.md](docs/pi-adapter.md) — central Pi execution, admission, resource policy and product history
 - [docs/claude-code-ui-research.md](docs/claude-code-ui-research.md) — research on Claude Code custom UIs, SDK integration, and authentication caveats; no adoption decision
 - [docs/claude-agent-sdk.md](docs/claude-agent-sdk.md) — approved co-located POC, owner-central subscription auth, accepted long-lived guest bearer, native history/idle contracts and qualification
 - [docs/claude-sdk-capabilities.md](docs/claude-sdk-capabilities.md) — remote-tool, hook, skill and restart-history API audit; research only
 - [docs/model-usage.md](docs/model-usage.md) — per-call model usage ledger: coverage, use classification, schema, write path
 - [docs/pi-durable-evaluation.md](docs/pi-durable-evaluation.md) — Pi Durable research, historical POC and locally qualified PostgreSQL candidate
-- [docs/subagents.md](docs/subagents.md) — local leaf subagents, minimal gotgenes fork, aggregate activity and DST-first integration/acceptance plan
+- [docs/subagents.md](docs/subagents.md) — native Durable children, aggregate activity, cancellation and completion waits
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
 - [docs/multi-user.md](docs/multi-user.md) — trusted-company identity, owned projects/settings, per-user credentials, and tailnet options
 - [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
@@ -326,3 +301,7 @@ Reference material:
 - [docs/AWS-MICROVMS.md](docs/AWS-MICROVMS.md) — the full AWS Lambda MicroVMs host-provider evaluation
 - [docs/PI-CODEX-E2E.md](docs/PI-CODEX-E2E.md) — Pi + mock-OpenAI-Codex E2E integration mechanism
 - [docs/DETERMINED-BUG.md](docs/DETERMINED-BUG.md) — `determined` 0.4.0 cross-task-await deadlock (fixed in 0.4.1)
+
+- [docs/references/pi-sdk-qualification.md](docs/references/pi-sdk-qualification.md) — historical SDK release and qualification receipts
+
+- [docs/references/native-mcp-qualification.md](docs/references/native-mcp-qualification.md) — historical native transport/auth/session characterization and original first failures

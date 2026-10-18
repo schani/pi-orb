@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createFakeSession, fixtureAgentBackend } from "../harness.ts";
+import { createFakeSession } from "../harness.ts";
 import {
   centralModelScenario,
   matcherRequest,
@@ -8,7 +8,7 @@ import {
 } from "./durable-model-fixture.ts";
 
 describe("central model fixtures", () => {
-  it("selects backend independently and sends adapted central but unchanged SDK policies", async () => {
+  it("adapts every session policy for central inference", async () => {
     const bodies: { scenario: unknown }[] = [];
     vi.stubGlobal("fetch", async (_url: string, request: RequestInit) => {
       bodies.push(JSON.parse(String(request.body)));
@@ -24,12 +24,8 @@ describe("central model fixtures", () => {
       },
     };
     try {
-      expect(fixtureAgentBackend("host-pi")).toBe("host-pi");
-      expect(fixtureAgentBackend("central-durable")).toBe("central-durable");
-      await createFakeSession("sdk", policy, "host-pi");
-      await createFakeSession("central", policy, "central-durable");
-      expect(bodies[0]?.scenario).toEqual(policy);
-      expect(bodies[1]?.scenario).toEqual(centralModelScenario(policy, true));
+      await createFakeSession("central", policy);
+      expect(bodies[0]?.scenario).toEqual(centralModelScenario(policy));
     } finally {
       vi.unstubAllGlobals();
     }
@@ -54,9 +50,8 @@ describe("central model fixtures", () => {
       ],
     },
   };
-  it("converts central calls without changing ordered rules or SDK fixtures", () => {
-    expect(centralModelScenario(scenario, false)).toBe(scenario);
-    const converted = centralModelScenario(scenario, true) as typeof scenario;
+  it("converts calls without changing ordered rules or source fixtures", () => {
+    const converted = centralModelScenario(scenario) as typeof scenario;
     expect(converted.auth).toEqual(scenario.auth);
     expect(converted.model.rules[0]?.match).toEqual(scenario.model.rules[0]?.match);
     expect(converted.model.rules[0]?.steps[1]).toEqual({
@@ -80,7 +75,7 @@ describe("central model fixtures", () => {
         ],
       },
     };
-    expect(centralModelScenario(input, true)).toEqual(input);
+    expect(centralModelScenario(input)).toEqual(input);
   });
   it("rejects direct catalogs, accepts raw and JSON declarations", () => {
     expect(

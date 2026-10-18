@@ -11,22 +11,6 @@ import { err, ok, Result } from "neverthrow";
 // Fixed release inputs: [pristine SHA-256, patched SHA-256] for each changed file.
 const packages = [
   {
-    package: "node_modules/@earendil-works/pi-agent-core",
-    version: "1.3.0",
-    patch: "@earendil-works+pi-agent-core+1.3.0.patch",
-    sha: "f60540cee8a74742c43b0bbe49c82a19836e9e6496bfef71bb2ef5f5fe9fe462",
-    files: {
-      "node_modules/@earendil-works/pi-agent-core/dist/agent.d.ts": [
-        "1ae9fb28e132a7d0c545c96b69bca5a69db1374695853d12921bc623709a7589",
-        "04ece9f4511c543a845773e05d2a4126cd0fe7871074120cc4a8c25731f3f959",
-      ],
-      "node_modules/@earendil-works/pi-agent-core/dist/agent.js": [
-        "163ad28551f1c38b8eb899a5c9dd89cd9d9005fb7dd9c4abeb008ee380e98c51",
-        "d812a39c0e3f446e787a1d395349e95dec32d4622daa9c4223e509b9116b2948",
-      ],
-    },
-  },
-  {
     package: "node_modules/@earendil-works/pi-ai",
     version: "1.3.0",
     patch: "@earendil-works+pi-ai+1.3.0.patch",
@@ -50,20 +34,8 @@ const packages = [
     package: "node_modules/@earendil-works/pi-coding-agent",
     version: "1.3.0",
     patch: "@earendil-works+pi-coding-agent+1.3.0.patch",
-    sha: "600c7ca7eab79eba58e45c5cdddd891ccbddac918432aa404581edecbbf5ae4b",
+    sha: "5ccd27bea08593d9ac2307ed5d3d6ee977d88b6cc531bedf59db55aa46329348",
     files: {
-      "node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.d.ts": [
-        "2767a341270b405f9a8403baf0b1ba1f91b86bfb9267de2ae55d6438fed08a2f",
-        "a93a53bbc934421276650c7af595c5a94c250b597d49ba981deeca53ccd6e130",
-      ],
-      "node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js": [
-        "d0b4545a5da7fe97aa699269e64e27b37ee2fb5b7985efb1c0a66fc3d1883b52",
-        "6c26fb1e8204454a33350131c564fb5254af269c0430b05b5e888c74468def05",
-      ],
-      "node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/runner.js": [
-        "0e659fb4338069d91c4d0a3b032b51bf8d179a99e6417bc3e39e59b672aaec76",
-        "698e474917bb6fd8abbc7d7d3e6e02c29100af640fb2ed02f1cd4f1882fbe028",
-      ],
       "node_modules/@earendil-works/pi-coding-agent/dist/core/model-runtime.js": [
         "578b742bea061fed029b8e139c6c0bcfe31e60665e9c0c6a08769761ef169dfd",
         "619ebeafc6bc2ddc7b681dac17b0b54d214fc5d1ad953bf4c4559346e162a598",
@@ -71,58 +43,6 @@ const packages = [
       "node_modules/@earendil-works/pi-coding-agent/dist/core/provider-composer.d.ts": [
         "b8fe1ab3313ec7f87d8e451f97f742f52f6f8cc1f4c05d2d9e4bad49063ffb08",
         "58823e0268b493bae5a504aafaecde3cc9a4f02d1d95e6537d7a747578e9bca2",
-      ],
-      "node_modules/@earendil-works/pi-coding-agent/dist/extensions/mcp/index.d.ts": [
-        "2326ac2f37daa7bbf258629846b4ff6d4d8d2c570331777b2da0852525de843e",
-        "ab7976c5aa2fd778d2de86681e683bd0f5496bb5d25f9a06b96371856d7d7e76",
-      ],
-      "node_modules/@earendil-works/pi-coding-agent/dist/extensions/mcp/index.js": [
-        "c0570b9d256120a1df9b65a015964076dff6a3710646e041fcb2770ae7132fde",
-        "bd6f2c0c2f0376e68a589af7a4b0df311d0ecf95f73d8a0a1ab62e5cb660ff1d",
-      ],
-      "node_modules/@earendil-works/pi-coding-agent/dist/extensions/mcp/runtime.d.ts": [
-        "d5c9561f03ff23a629e9744971ba218a9092fa1a9635c4079dbda816b99e8178",
-        "50840ceb0769c966496d0a604cc0e4c8caec95431a76c784b0e5c1cd13c1be19",
-      ],
-      "node_modules/@earendil-works/pi-coding-agent/dist/extensions/mcp/runtime.js": [
-        "be9e8eea88363f2fefaea2c25c854845393f112394ee5989d22facd2f1acea6e",
-        "3b176fdb79d69b1180baf4f32f7e548f61f7efa3e9a997486b1aca32f49b8682",
-      ],
-      "node_modules/@earendil-works/pi-coding-agent/dist/index.d.ts": [
-        "2f2c87d877a6502a11bcdbaf3be62c12a154ab87d795e954d44c50833d0efbcd",
-        "c47c0a71ef64d4ccc83575203d32d5fc629c7dbd288e022ae2fa240c3e467e3f",
-      ],
-      "node_modules/@earendil-works/pi-coding-agent/dist/index.js": [
-        "4569157e6038be9840fa514db4b00a27fd0be9e3622cc7b49a281de6c027d7ff",
-        "c9dbf08a4e1d0b34516f198999bf3beeed73fab2a3b39cd98cddf7969639b6dd",
-      ],
-    },
-  },
-  {
-    package: "node_modules/@gotgenes/pi-subagents",
-    version: "21.7.0-orb.8",
-    patch: "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
-    sha: "b3e48bde4e53ead071abf15eae78b26dc5ea01441d8946782ba2284f1da06f9a",
-    files: {
-      "node_modules/@gotgenes/pi-subagents/dist/extension.js": [
-        "ebf9e0c343ec6458eecc3c2aa002f302373a8056a92ee46ad7ac1b117ad9087e",
-        "9589e69fdbd0dac396f0192f0f76065f1bca9da54aa576ab52a7933c3abaf976",
-      ],
-      "node_modules/@gotgenes/pi-subagents/src/config/agent-types.ts": [
-        "d4496903cfd7cf8d77a672dd3a01267b79cf85d66cf334b1ba0e155eb5cc50f9",
-        "5e5e6527f686b07196b6142cd3a3f06ca85d5ea919e3c9027ddf75624e1fa96f",
-      ],
-      "node_modules/@gotgenes/pi-subagents/src/index.ts": [
-        "292afe9a3e81c8927fd4319df6c8a2250e06bdbaee49f598e73cf8ab8aa17fb3",
-        "5a1ab00e5701ef884cad07ebe5d9a4741c559edee6f176942fd33a9f02eaf484",
-      ],
-      "node_modules/@gotgenes/pi-subagents/src/lifecycle/create-subagent-session.ts": [
-        "55e6c308310826f272e0e977beba41ec772d5e8abf5b8bacc0fbb5751083e237",
-        "9e965ddecafd730efb9aa4b1a023f9e899dc78d4d7b0a3f0c5d724095ccf4bd2",
-      ],
-      "node_modules/@gotgenes/pi-subagents/src/session/session-config.ts": [
-        "25d0e591f268cd55f27c21c9a035d7a3e16f1a2733c5bea8c7aaf650907b85d8",
-        "239ff373b92dc69fec259dde5baa3e6d29cbe0452811af05acd291c3c38155aa",
       ],
     },
   },
@@ -282,29 +202,13 @@ const inspectSealed = Result.fromThrowable(
  * @returns {import("neverthrow").Result<PatchOutcome[], PatchError | SealError>}
  */
 function installSealed(root, args) {
-  if (
-    args.length > 1 ||
-    (args.length === 1 && !["--pi-only", "--pi-durable-only"].includes(args[0]))
-  )
-    return err({
-      type: "invalid_scope",
-      message: "expected no arguments, --pi-only or --pi-durable-only",
-    });
+  if (args.length !== 0) return err({ type: "invalid_scope", message: "expected no arguments" });
   const canonical = canonicalRoot(root);
   if (canonical.isErr()) return err(canonical.error);
   root = canonical.value;
-  const piPackages = new Set([
-    "node_modules/@earendil-works/pi-agent-core",
-    "node_modules/@earendil-works/pi-ai",
-    "node_modules/@earendil-works/pi-coding-agent",
-    "node_modules/@earendil-works/pi-codemode",
-  ]);
-  if (args[0] === "--pi-durable-only") piPackages.add("node_modules/@earendil-works/pi-durable");
-  const selected =
-    args.length === 1 ? packages.filter((entry) => piPackages.has(entry.package)) : packages;
   const pending = [];
   const outcomes = [];
-  for (const entry of selected) {
+  for (const entry of packages) {
     const inspected = inspectSealed(root, entry);
     if (inspected.isErr()) return err(inspected.error);
     const { version, patch, hashes } = inspected.value;

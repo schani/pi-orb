@@ -37,7 +37,6 @@ import {
   FatalProbeError,
   fakeControl,
   fetchIssuerKeys,
-  fixtureAgentBackend,
   forceReconcilePass,
   orbContainerNames,
   readReplicatedHistorySnapshot,
@@ -50,11 +49,10 @@ import {
 import { holdModelStream } from "./held-model-stream.ts";
 import { runTerminal } from "./terminal-client.ts";
 import { FailureEvidence } from "./testkit/failure-evidence.ts";
-import { restartNoticePattern } from "./testkit/restart-notice-rule.ts";
 import { UploadContinuationPhases } from "./testkit/upload-continuation-phases.ts";
 
 /**
- * The full docs/testing.md slice against the real Pi SDK and fake OpenAI
+ * The full docs/testing.md slice against central Pi and fake OpenAI
  * service: device login, scripted streaming with a real tool round trip,
  * history replication, and the controlled-stop drain. The default backend is
  * real PostgreSQL + Docker. PI_ORB_E2E_BACKEND=process selects the Docker-free
@@ -70,7 +68,6 @@ const RUNTIME_IMAGE = "pi-orb-runtime:dev";
 const REPOSITORY_URL = "https://github.com/schani/pi-orb";
 const PROCESS_BACKEND = process.env["PI_ORB_E2E_BACKEND"] === "process";
 
-const CENTRAL_NATIVE = fixtureAgentBackend() === "central-durable";
 const PEER_BODY =
   '<script>globalThis.__peerInjected=true</script>\n<img src=x onerror="globalThis.__peerInjected=true">\n**literal** & "quotes"\n' +
   "unbroken-".repeat(100);
@@ -122,18 +119,11 @@ const SCENARIO = {
           { type: "stop", status: "completed" },
         ],
       },
-      {
-        match: { userMessage: { regex: "^# Conversation" } },
-        steps: [
-          { type: "text", content: "E2E_COMPACT_SUMMARY: tool check succeeded; retain decisions." },
-          { type: "stop", status: "completed" },
-        ],
-      },
       ...["E2E_RESTART_NOTICE_OK", "E2E_REPLACEMENT_NOTICE_OK"].flatMap((reply) => [
         {
           match: {
             userMessage: {
-              regex: PROCESS_BACKEND ? "^Check the E2E restarted session$" : restartNoticePattern,
+              regex: "^Check the E2E restarted session$",
             },
           },
           steps: [
@@ -141,19 +131,15 @@ const SCENARIO = {
             { type: "stop", status: "completed" },
           ],
         },
-        ...(PROCESS_BACKEND
-          ? [
-              {
-                match: {
-                  userMessage: { regex: "^Write a single short desktop-notification sentence" },
-                },
-                steps: [
-                  { type: "text", content: "Checked the restarted session." },
-                  { type: "stop", status: "completed" },
-                ],
-              },
-            ]
-          : []),
+        {
+          match: {
+            userMessage: { regex: "^Write a single short desktop-notification sentence" },
+          },
+          steps: [
+            { type: "text", content: "Checked the restarted session." },
+            { type: "stop", status: "completed" },
+          ],
+        },
       ]),
       {
         match: { userMessage: { regex: "^Do the spawned E2E task$" } },
@@ -212,31 +198,27 @@ const SCENARIO = {
           { type: "stop", status: "completed" },
         ],
       },
-      ...(CENTRAL_NATIVE
-        ? [
-            {
-              match: { userMessage: { regex: "E2E_PEER_ROUNDTRIP" } },
-              steps: [
-                {
-                  type: "toolCall",
-                  name: "codemode",
-                  arguments: {
-                    code: `const self = JSON.parse(await tools.orb_self({})); text(await tools.orb_send({orbId: self.spawnedBy.id, message: ${JSON.stringify(PEER_BODY)}}));`,
-                  },
-                },
-                { type: "stop", status: "completed" },
-              ],
+      {
+        match: { userMessage: { regex: "E2E_PEER_ROUNDTRIP" } },
+        steps: [
+          {
+            type: "toolCall",
+            name: "codemode",
+            arguments: {
+              code: `const self = JSON.parse(await tools.orb_self({})); text(await tools.orb_send({orbId: self.spawnedBy.id, message: ${JSON.stringify(PEER_BODY)}}));`,
             },
-            // Sender continuation, receiver inference and their summaries may interleave.
-            ...Array.from({ length: 4 }, () => ({
-              match: { default: true },
-              steps: [
-                { type: "text", content: "PEER_ROUNDTRIP_COMPLETE" },
-                { type: "stop", status: "completed" },
-              ],
-            })),
-          ]
-        : []),
+          },
+          { type: "stop", status: "completed" },
+        ],
+      },
+      // Sender continuation, receiver inference and their summaries may interleave.
+      ...Array.from({ length: 4 }, () => ({
+        match: { default: true },
+        steps: [
+          { type: "text", content: "PEER_ROUNDTRIP_COMPLETE" },
+          { type: "stop", status: "completed" },
+        ],
+      })),
       {
         match: { userMessage: { regex: "^please delete this orb$" } },
         steps: [
@@ -1132,29 +1114,7 @@ describe("full slice E2E", () => {
         expect(historyAfter.status).toBe(200);
         const beforeRecords = historyBefore.body["records"] as DisplayRecord[];
         const afterRecords = historyAfter.body["records"] as DisplayRecord[];
-        const nativeById = new Map(
-          (await readReplicatedHistorySnapshot(controlPlane, replacementOrbId)).records.map(
-            (record) => [record.id, record],
-          ),
-        );
-        expect(afterRecords.slice(0, beforeRecords.length)).toEqual(beforeRecords);
-        // The SDK re-appends binding settings for message-free sessions (real-SDK contract).
-        // Browser records keep the complete prefix but omit native settings payloads
-        // and the hidden boot baseline's custom type.
-        for (const record of afterRecords.slice(beforeRecords.length)) {
-          expect(record.type).toBe("event");
-          if (record.type !== "event") continue;
-          if (record.eventType === "pi.custom") {
-            expect(record.custom).toBeUndefined();
-            expect(nativeById.get(record.id)).toMatchObject({
-              type: "event",
-              eventType: "pi.custom",
-              overflow: { native: { customType: "pi-orb.boot" } },
-            });
-          } else
-            expect(["pi.model_change", "pi.thinking_level_change"]).toContain(record.eventType);
-          expect(JSON.stringify(record)).not.toContain('"native"');
-        }
+        expect(afterRecords).toEqual(beforeRecords);
         expect(historyAfter.body["session"]).not.toBeNull();
 
         // -- boot hooks (docs/orb-setup-hook.md) ------------------------------
@@ -1496,11 +1456,7 @@ describe("full slice E2E", () => {
         );
         expect(Date.now() - createdAt).toBeLessThan(120_000);
         expect(failed["lastError"]).toEqual(
-          expect.stringContaining(
-            failed["centralAgent"] === true
-              ? "runtime_failed: resource_acquisition_failed:"
-              : "runtime_failed: clone_failed:",
-          ),
+          expect.stringContaining("runtime_failed: resource_acquisition_failed:"),
         );
         expect(failed["lastError"]).not.toEqual(expect.stringContaining("deadline_exceeded"));
 
@@ -1891,7 +1847,7 @@ describe("full slice E2E", () => {
           (frame) =>
             frame.type === "runtime.event" &&
             frame.event.type === "tool_state" &&
-            frame.event.name === (PROCESS_BACKEND ? "codemode" : "bash") &&
+            frame.event.name === "codemode" &&
             frame.event.state === "completed",
         ),
       180_000,
@@ -2048,10 +2004,10 @@ describe("full slice E2E", () => {
       { timeoutMs: 30_000, intervalMs: 200 },
     );
 
-    // Manual compaction is a live operation, never an inbox message or Luna turn.
+    // Central Pi rejects compaction without changing history.
     const compactOrb = await api(base, "GET", `/api/v1/orbs/${orbId}`);
-    const centralCompaction = compactOrb.body["centralAgent"] === true;
-    let compactedRecords = (await api(base, "GET", `/api/v1/orbs/${orbId}/history`)).body[
+    expect(compactOrb.body["centralAgent"]).toBe(true);
+    const compactedRecords = (await api(base, "GET", `/api/v1/orbs/${orbId}/history`)).body[
       "records"
     ] as { id: string; type: string }[];
     const compactStart = frames.length;
@@ -2075,101 +2031,21 @@ describe("full slice E2E", () => {
         .slice(compactStart)
         .find((frame) => frame.type === "request.result" && frame.requestId === compactRequestId),
     );
-    if (centralCompaction) {
-      expect(compactAccepted).toMatchObject({
-        result: { type: "rejected", error: { code: "unsupported", retryable: false } },
-      });
-      expect(
-        frames
-          .slice(compactStart)
-          .some(
-            (frame) =>
-              frame.type === "runtime.event" &&
-              (frame.event.type === "operation_started" ||
-                frame.event.type === "operation_finished"),
-          ),
-      ).toBe(false);
-      expect((await api(base, "GET", `/api/v1/orbs/${orbId}/history`)).body["records"]).toEqual(
-        compactedRecords,
-      );
-    } else {
-      expect(compactAccepted).toMatchObject({ result: { type: "accepted", duplicate: false } });
-      const compactOperationId =
-        compactAccepted.type === "request.result" && compactAccepted.result.type === "accepted"
-          ? compactAccepted.result.operationId
-          : "";
-      expect(
-        await untilFrame("compact busy", () =>
-          frames
-            .slice(compactStart)
-            .find(
-              (frame) =>
-                frame.type === "runtime.event" &&
-                frame.event.type === "status" &&
-                frame.event.work === "compaction" &&
-                frame.event.operationId === compactOperationId,
-            ),
-        ),
-      ).toMatchObject({
-        event: { activity: "busy", work: "compaction", compactionAfterId: compactAfterId },
-      });
-      await untilFrame("native compaction history", () =>
-        frames
-          .slice(compactStart)
-          .find((frame) => frame.type === "history.record" && frame.record.type === "compaction"),
-      );
-      const compactFinished = await untilFrame("compact finished", () =>
-        frames
-          .slice(compactStart)
-          .find(
-            (frame) =>
-              frame.type === "runtime.event" &&
-              frame.event.type === "operation_finished" &&
-              frame.event.operationId === compactOperationId,
-          ),
-      );
-      expect(compactFinished).toMatchObject({ event: { outcome: "completed" } });
-      expect(
-        frames
-          .slice(compactStart)
-          .some((frame) => frame.type === "runtime.event" && frame.event.type === "output_patch"),
-      ).toBe(false);
-      const compactDuplicateStart = frames.length;
-      socket.send(
-        JSON.stringify({
-          v: 1,
-          type: "client.request",
-          requestId: compactRequestId,
-          action: compactAction,
-        }),
-      );
-      expect(
-        await untilFrame("compact duplicate", () =>
-          frames
-            .slice(compactDuplicateStart)
-            .find(
-              (frame) => frame.type === "request.result" && frame.requestId === compactRequestId,
-            ),
-        ),
-      ).toMatchObject({
-        result: { type: "accepted", operationId: compactOperationId, duplicate: true },
-      });
-      compactedRecords = await waitFor(
-        "compaction replicated",
-        async () => {
-          const snapshot = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
-          const records = snapshot.body["records"] as { id: string; type: string }[];
-          return records.some((record) => record.type === "compaction") ? records : null;
-        },
-        { timeoutMs: 60_000, intervalMs: 200 },
-      );
-    }
-    const compactCalls = await fakeControl(fake.sessionKey, "/requests");
+    expect(compactAccepted).toMatchObject({
+      result: { type: "rejected", error: { code: "unsupported", retryable: false } },
+    });
     expect(
-      Array.isArray(compactCalls)
-        ? compactCalls.filter((call: { matchedRuleIndex?: number }) => call.matchedRuleIndex === 3)
-        : [],
-    ).toHaveLength(centralCompaction ? 0 : 1);
+      frames
+        .slice(compactStart)
+        .some(
+          (frame) =>
+            frame.type === "runtime.event" &&
+            (frame.event.type === "operation_started" || frame.event.type === "operation_finished"),
+        ),
+    ).toBe(false);
+    expect((await api(base, "GET", `/api/v1/orbs/${orbId}/history`)).body["records"]).toEqual(
+      compactedRecords,
+    );
     socket.close();
 
     // Controlled stop: drain, then host stop (docs/testing.md).
@@ -2202,8 +2078,7 @@ describe("full slice E2E", () => {
     expect(JSON.stringify(stoppedRecords)).toContain("The check succeeded: E2E_TOOL_OK.");
     expect(await (await fetch(hostedUrl)).text()).toContain("replacement");
 
-    // SDK restarts infer from a custom user-role notice. Central process
-    // restarts preserve the conversation; a real user turn checks fresh instructions.
+    // Compute restarts preserve the conversation; a user turn checks fresh instructions.
     for (const [index, reply] of ["E2E_RESTART_NOTICE_OK", "E2E_REPLACEMENT_NOTICE_OK"].entries()) {
       if (index === 1) {
         expect(
@@ -2234,35 +2109,31 @@ describe("full slice E2E", () => {
       const restartCallCount = Array.isArray(restartCallsBefore) ? restartCallsBefore.length : -1;
       expect(restartCallCount).toBeGreaterThanOrEqual(0);
       expect((await api(base, "POST", `/api/v1/orbs/${orbId}/start`)).status).toBe(202);
-      if (PROCESS_BACKEND) {
-        await waitFor(
-          "restarted conversation ready",
-          async () => {
-            const view = await api(base, "GET", `/api/v1/orbs/${orbId}`);
-            if (view.body["state"] === "failed")
-              throw new FatalProbeError(String(view.body["lastError"]));
-            return view.body["state"] === "running" && view.body["activity"] === "idle"
-              ? true
-              : null;
-          },
-          { timeoutMs: 300_000, intervalMs: 1_000 },
-        );
-        const restartedHistory = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
-        const beforeRecords = restartHistoryBefore.body["records"] as DisplayRecord[];
-        expect(
-          (restartedHistory.body["records"] as DisplayRecord[]).slice(0, beforeRecords.length),
-        ).toEqual(beforeRecords);
-        expect(restartedHistory.body["session"]).toEqual(restartHistoryBefore.body["session"]);
-        expect(JSON.stringify(restartedHistory.body["records"])).not.toContain(reply);
-        expect(await fakeControl(fake.sessionKey, "/requests")).toHaveLength(restartCallCount);
-        expect(
-          (
-            await api(base, "PUT", `/api/v1/orbs/${orbId}/messages/${randomUUID()}`, {
-              content: [{ type: "text", text: "Check the E2E restarted session" }],
-            })
-          ).status,
-        ).toBe(202);
-      }
+      await waitFor(
+        "restarted conversation ready",
+        async () => {
+          const view = await api(base, "GET", `/api/v1/orbs/${orbId}`);
+          if (view.body["state"] === "failed")
+            throw new FatalProbeError(String(view.body["lastError"]));
+          return view.body["state"] === "running" && view.body["activity"] === "idle" ? true : null;
+        },
+        { timeoutMs: 300_000, intervalMs: 1_000 },
+      );
+      const restartedHistory = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
+      const beforeRecords = restartHistoryBefore.body["records"] as DisplayRecord[];
+      expect(
+        (restartedHistory.body["records"] as DisplayRecord[]).slice(0, beforeRecords.length),
+      ).toEqual(beforeRecords);
+      expect(restartedHistory.body["session"]).toEqual(restartHistoryBefore.body["session"]);
+      expect(JSON.stringify(restartedHistory.body["records"])).not.toContain(reply);
+      expect(await fakeControl(fake.sessionKey, "/requests")).toHaveLength(restartCallCount);
+      expect(
+        (
+          await api(base, "PUT", `/api/v1/orbs/${orbId}/messages/${randomUUID()}`, {
+            content: [{ type: "text", text: "Check the E2E restarted session" }],
+          })
+        ).status,
+      ).toBe(202);
       await waitFor(
         reply,
         async () => {
@@ -2279,7 +2150,7 @@ describe("full slice E2E", () => {
       const warning = "All processes running before the restart were killed";
       const history = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
       const serialized = JSON.stringify(history.body["records"]);
-      if (!PROCESS_BACKEND) expect(serialized).toContain(warning);
+      expect(serialized).not.toContain(warning);
       const replica = JSON.stringify(
         (await readReplicatedHistorySnapshot(controlPlane, orbId)).records,
       );
@@ -2288,13 +2159,12 @@ describe("full slice E2E", () => {
       expect(serialized).not.toContain("PERSONAL_E2E_");
       expect(serialized).not.toContain("PROJECT_E2E_");
       const records = history.body["records"] as DisplayRecord[];
-      if (!PROCESS_BACKEND)
-        expect(
-          records.filter(
-            (record) =>
-              record.type === "event" && record.custom?.customType === "pi-orb.host-restarted",
-          ),
-        ).toHaveLength(index + 1);
+      expect(
+        records.filter(
+          (record) =>
+            record.type === "event" && record.custom?.customType === "pi-orb.host-restarted",
+        ),
+      ).toHaveLength(0);
       const calls: unknown = await fakeControl(fake.sessionKey, "/requests");
       expect(
         Array.isArray(calls) &&
@@ -2302,43 +2172,34 @@ describe("full slice E2E", () => {
             const effectiveInstructions = effectiveOpenAIResponseInstructions(call.body);
             return (
               call.status === 200 &&
-              call.matchedRuleIndex === 4 + index * (PROCESS_BACKEND ? 2 : 1) &&
+              call.matchedRuleIndex === 3 + index * 2 &&
               !effectiveInstructions.includes("PROJECT_E2E_FIRST_BOOT") &&
               effectiveInstructions.includes("PROJECT_E2E_NEXT_BOOT") === (index === 0) &&
               !effectiveInstructions.includes("PERSONAL_E2E_FIRST_BOOT") &&
               effectiveInstructions.includes("PERSONAL_E2E_NEXT_BOOT") === (index === 0) &&
               call.body?.model === "gpt-6.1-sol" &&
               call.body?.reasoning?.effort === "low" &&
-              (PROCESS_BACKEND
-                ? call.body?.input?.some(
-                    (message: { role?: string; content?: unknown }) =>
-                      message.role === "user" &&
-                      JSON.stringify(message.content).includes("Check the E2E restarted session"),
-                  ) &&
-                  !JSON.stringify(call.body?.input).includes("pi-orb.host-restarted") &&
-                  !JSON.stringify(call.body?.input).includes(warning)
-                : call.body?.input?.some(
-                    (message: { role?: string; content?: unknown }) =>
-                      message.role === "user" && JSON.stringify(message.content).includes(warning),
-                  ))
+              call.body?.input?.some(
+                (message: { role?: string; content?: unknown }) =>
+                  message.role === "user" &&
+                  JSON.stringify(message.content).includes("Check the E2E restarted session"),
+              ) &&
+              !JSON.stringify(call.body?.input).includes("pi-orb.host-restarted") &&
+              !JSON.stringify(call.body?.input).includes(warning)
             );
           }),
       ).toBe(true);
-      if (PROCESS_BACKEND) {
-        await waitFor(
-          "restart verification notification inference recorded",
-          async () => {
-            const recorded: unknown = await fakeControl(fake.sessionKey, "/requests");
-            return Array.isArray(recorded) &&
-              recorded.some(
-                (call) => call.status === 200 && call.matchedRuleIndex === 5 + index * 2,
-              )
-              ? true
-              : null;
-          },
-          { timeoutMs: 30_000, intervalMs: 200 },
-        );
-      }
+      await waitFor(
+        "restart verification notification inference recorded",
+        async () => {
+          const recorded: unknown = await fakeControl(fake.sessionKey, "/requests");
+          return Array.isArray(recorded) &&
+            recorded.some((call) => call.status === 200 && call.matchedRuleIndex === 4 + index * 2)
+            ? true
+            : null;
+        },
+        { timeoutMs: 30_000, intervalMs: 200 },
+      );
       expect((await api(base, "POST", `/api/v1/orbs/${orbId}/stop`)).status).toBe(202);
       await waitFor(
         "notified orb stopped",
@@ -2348,9 +2209,7 @@ describe("full slice E2E", () => {
             : null,
         { timeoutMs: 120_000, intervalMs: 1_000 },
       );
-      if (PROCESS_BACKEND) {
-        expect(await fakeControl(fake.sessionKey, "/requests")).toHaveLength(restartCallCount + 2);
-      }
+      expect(await fakeControl(fake.sessionKey, "/requests")).toHaveLength(restartCallCount + 2);
     }
 
     // Whole-project deletion fans out through the same deletion-grade cleanup.
@@ -2449,9 +2308,7 @@ describe("full slice E2E", () => {
       async () => {
         const calls: unknown = await fakeControl(fake.sessionKey, "/requests");
         if (!Array.isArray(calls)) return null;
-        const first = calls.find(
-          (call) => call.matchedRuleIndex === (PROCESS_BACKEND ? 8 : 6) && call.status === 200,
-        );
+        const first = calls.find((call) => call.matchedRuleIndex === 7 && call.status === 200);
         if (!first) return null;
         expect(first.body.model).toBe("gpt-6-astra");
         expect(effectiveOpenAIResponseInstructions(first.body)).toContain(timezoneLine);
@@ -2476,9 +2333,7 @@ describe("full slice E2E", () => {
       async () => {
         const recorded: unknown = await fakeControl(fake.sessionKey, "/requests");
         return Array.isArray(recorded) &&
-          recorded.some(
-            (call) => call.status === 200 && call.matchedRuleIndex === (PROCESS_BACKEND ? 9 : 7),
-          )
+          recorded.some((call) => call.status === 200 && call.matchedRuleIndex === 8)
           ? true
           : null;
       },
@@ -2684,92 +2539,87 @@ describe("full slice E2E", () => {
         async () => {
           const recorded: unknown = await fakeControl(fake.sessionKey, "/requests");
           return Array.isArray(recorded) &&
-            recorded.some(
-              (call) =>
-                call.status === 200 && call.matchedRuleIndex === (PROCESS_BACKEND ? 12 : 10),
-            )
+            recorded.some((call) => call.status === 200 && call.matchedRuleIndex === 11)
             ? true
             : null;
         },
         { timeoutMs: 30_000, intervalMs: 200 },
       );
 
-      if (CENTRAL_NATIVE) {
-        const sent = await terminalRun(
-          secondOrbId,
-          `pi-orb send ${spawnedOrbId} E2E_PEER_ROUNDTRIP; printf '\\120\\105\\105\\122\\137\\123\\105\\116\\124\\012'`,
-          "PEER_SENT",
+      const sent = await terminalRun(
+        secondOrbId,
+        `pi-orb send ${spawnedOrbId} E2E_PEER_ROUNDTRIP; printf '\\120\\105\\105\\122\\137\\123\\105\\116\\124\\012'`,
+        "PEER_SENT",
+      );
+      expect(sent).toContain("Message queued (");
+      const receipt = await waitFor("unattended native peer roundtrip replicated", async () => {
+        const snapshot = await readReplicatedHistorySnapshot(controlPlane, secondOrbId);
+        const peers = snapshot.records.filter(
+          (record) => record.type === "event" && record.eventType === "orb.message",
         );
-        expect(sent).toContain("Message queued (");
-        const receipt = await waitFor("unattended native peer roundtrip replicated", async () => {
-          const snapshot = await readReplicatedHistorySnapshot(controlPlane, secondOrbId);
-          const peers = snapshot.records.filter(
-            (record) => record.type === "event" && record.eventType === "orb.message",
-          );
-          if (peers.length > 1) throw new FatalProbeError("duplicate native peer receipt");
-          return peers[0] ?? null;
-        });
-        expect(receipt).toMatchObject({
-          sender: { orbId: spawnedOrbId },
-          content: [{ type: "text", text: PEER_BODY }],
-          inboxMessageIds: [expect.any(String)],
-        });
-        await waitFor("both peer turns and summaries settled", async () => {
-          const requests = await fakeControl(fake.sessionKey, "/requests");
-          const start = PROCESS_BACKEND ? 13 : 11;
-          return Array.isArray(requests) &&
-            requests.filter(
-              (request) =>
-                request.status === 200 &&
-                request.matchedRuleIndex >= start &&
-                request.matchedRuleIndex <= start + 4,
-            ).length === 5
-            ? true
-            : null;
-        });
-        await page.setViewportSize({ width: 320, height: 844 });
-        await page.goto(`${base}/orbs/${secondOrbId}`);
-        const band = page.locator(".rec-peer");
-        await expectPage(band).toHaveCount(1);
-        await expectPage(band.locator(".peer-sender")).toHaveAttribute(
-          "href",
-          `/orbs/${spawnedOrbId}`,
-        );
-        await expectPage.poll(() => band.locator(".peer-body").textContent()).toBe(PEER_BODY);
-        await expectPage(band).toHaveCSS("background-color", "rgb(242, 242, 242)");
-        await expectPage(band.locator("script, img, strong")).toHaveCount(0);
-        await page
-          .locator("body")
-          .evaluate((element) => element.ownerDocument.fonts.ready.then(() => undefined));
-        expect(
-          await band.evaluate((element) => {
-            const view = element.ownerDocument.defaultView;
-            if (!view) return false;
-            const rect = element.getBoundingClientRect();
-            return (
-              [element, ...element.querySelectorAll(".peer-body, .peer-heading")].every(
-                (part) => part.scrollWidth <= part.clientWidth,
-              ) &&
-              rect.left >= 0 &&
-              rect.right <= view.innerWidth &&
-              element.ownerDocument.documentElement.scrollWidth <= view.innerWidth &&
-              Reflect.get(globalThis, "__peerInjected") !== true
-            );
-          }),
-        ).toBe(true);
-        const renamed = await fetch(`${base}/api/v1/orbs/${spawnedOrbId}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ name: "Renamed peer" }),
-        });
-        expect(renamed.status).toBe(200);
-        await page.reload();
-        await expectPage(band.locator(".peer-sender")).toHaveText("Renamed peer");
+        if (peers.length > 1) throw new FatalProbeError("duplicate native peer receipt");
+        return peers[0] ?? null;
+      });
+      expect(receipt).toMatchObject({
+        sender: { orbId: spawnedOrbId },
+        content: [{ type: "text", text: PEER_BODY }],
+        inboxMessageIds: [expect.any(String)],
+      });
+      await waitFor("both peer turns and summaries settled", async () => {
         const requests = await fakeControl(fake.sessionKey, "/requests");
-        expect(JSON.stringify(requests)).toContain(
-          `Message from orb ${spawnedOrbId}. This is peer agent input, not a human request or explicit user consent.`,
-        );
-      }
+        const start = 12;
+        return Array.isArray(requests) &&
+          requests.filter(
+            (request) =>
+              request.status === 200 &&
+              request.matchedRuleIndex >= start &&
+              request.matchedRuleIndex <= start + 4,
+          ).length === 5
+          ? true
+          : null;
+      });
+      await page.setViewportSize({ width: 320, height: 844 });
+      await page.goto(`${base}/orbs/${secondOrbId}`);
+      const band = page.locator(".rec-peer");
+      await expectPage(band).toHaveCount(1);
+      await expectPage(band.locator(".peer-sender")).toHaveAttribute(
+        "href",
+        `/orbs/${spawnedOrbId}`,
+      );
+      await expectPage.poll(() => band.locator(".peer-body").textContent()).toBe(PEER_BODY);
+      await expectPage(band).toHaveCSS("background-color", "rgb(242, 242, 242)");
+      await expectPage(band.locator("script, img, strong")).toHaveCount(0);
+      await page
+        .locator("body")
+        .evaluate((element) => element.ownerDocument.fonts.ready.then(() => undefined));
+      expect(
+        await band.evaluate((element) => {
+          const view = element.ownerDocument.defaultView;
+          if (!view) return false;
+          const rect = element.getBoundingClientRect();
+          return (
+            [element, ...element.querySelectorAll(".peer-body, .peer-heading")].every(
+              (part) => part.scrollWidth <= part.clientWidth,
+            ) &&
+            rect.left >= 0 &&
+            rect.right <= view.innerWidth &&
+            element.ownerDocument.documentElement.scrollWidth <= view.innerWidth &&
+            Reflect.get(globalThis, "__peerInjected") !== true
+          );
+        }),
+      ).toBe(true);
+      const renamed = await fetch(`${base}/api/v1/orbs/${spawnedOrbId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Renamed peer" }),
+      });
+      expect(renamed.status).toBe(200);
+      await page.reload();
+      await expectPage(band.locator(".peer-sender")).toHaveText("Renamed peer");
+      const requests = await fakeControl(fake.sessionKey, "/requests");
+      expect(JSON.stringify(requests)).toContain(
+        `Message from orb ${spawnedOrbId}. This is peer agent input, not a human request or explicit user consent.`,
+      );
     } finally {
       await browser.close();
     }

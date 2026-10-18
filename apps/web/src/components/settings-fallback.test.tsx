@@ -1,7 +1,7 @@
 import { projectDisplayRecord } from "@pi-orb/protocol";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
-import { mapPiEntry } from "../../../orb-runtime/src/pi/mapping.ts";
+import { mapPiEntry } from "../../../orb-runtime/src/domain/mapping.ts";
 import { detailContext } from "../testkit/display-fixtures.ts";
 import { HistoryView } from "./HistoryView.tsx";
 

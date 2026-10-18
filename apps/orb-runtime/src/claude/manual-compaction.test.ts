@@ -2,7 +2,6 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { projectDisplayRecord } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { expect, it } from "vitest";
-import { planBootNotification } from "../pi/boot-notification.ts";
 import {
   ComposedClaudeFixture,
   nativeHook,
@@ -10,6 +9,7 @@ import {
   rootResult,
 } from "../testkit/claude-composed.ts";
 import { claudeBootEntries } from "./boot-notification.ts";
+import { planBootNotification } from "./boot-policy.ts";
 
 const task = new NoSimulationTask("claude-compact-test", false);
 function gate() {

@@ -186,12 +186,9 @@ interface FakeRuntimeInstance {
    */
   turnResume: RuntimeTurnResume | null;
   /**
-   * Inbox batches this incarnation has handed to Pi but whose record is not on
-   * disk yet, keyed by durable batch ID — the runtime's in-memory
-   * pending-batch set (`PiOrbAgent.pendingInboxMessages`,
-   * docs/runtime-protocol.md). It is consulted before enqueueing, so a retry
-   * against the same incarnation never delivers twice, and it dies with the
-   * process, so a crash before the flush loses the batch entirely.
+   * Accepted batches awaiting persistence, keyed by durable batch ID.
+   * Retries within one incarnation reuse the pending batch; process loss
+   * clears it, allowing redelivery when no persisted record exists.
    */
   pendingBatches: Map<string, PendingInboxBatch>;
   /** `.agents/resume` runs once per runtime process, after setup. */
@@ -300,21 +297,13 @@ const DEFAULT_PREEMPTION_SOFT_WINDOW_MS = 30_000;
 /** The effective host specification a world deploys until a test changes it. */
 const DEFAULT_DESIRED_SPEC = "spec-a";
 
-/**
- * The `customType` of the resume marker the runtime appends when it
- * picks an interrupted turn back up (docs/lifecycle.md; one
- * `sendCustomMessage(marker, { triggerTurn: true })` of a `display: true`
- * custom message, which the Pi adapter normalizes to an `event` record —
- * docs/pi-adapter.md).
- */
-// Mirrors TURN_RESUME_CUSTOM_TYPE in apps/orb-runtime/src/pi/turn-resume.ts.
+/** Visible resume marker in the simulated runtime history. */
 const RESUME_MARKER_CUSTOM_TYPE = "pi-orb.turn-resume";
 
 /**
  * The record the loop guard appends after three claimed attempts: a
  * declined resume must be as visible as a performed one (docs/lifecycle.md).
  */
-// Mirrors TURN_RESUME_DECLINED_CUSTOM_TYPE in the same runtime module.
 const DECLINE_MARKER_CUSTOM_TYPE = "pi-orb.turn-resume-declined";
 
 const RESUME_MARKER_TEXT = "turn interrupted by a host restart — resuming";
@@ -529,9 +518,8 @@ export class FakeWorld {
   }
 
   /**
-   * The runtime's side of one idempotent batch delivery
-   * (`PiOrbAgent.deliverInboxMessage`, docs/runtime-protocol.md): consult the
-   * persisted session, then this incarnation's pending set, and only then
+   * Idempotent runtime batch delivery (docs/runtime-protocol.md): consult
+   * persisted history, then this incarnation's pending set, and only then
    * enqueue. `flush` says whether the session write lands within this call or
    * whether the batch stays in memory, where a crash can still lose it.
    */

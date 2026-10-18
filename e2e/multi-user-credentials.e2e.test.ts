@@ -335,10 +335,7 @@ beforeAll(async () => {
   githubBaseUrl = await listen(githubServer);
 
   const localRepository =
-    process.env["PI_ORB_E2E_BACKEND"] === "process" &&
-    (process.env["PI_ORB_AGENT_BACKEND"] ?? "central-durable") === "central-durable"
-      ? join(root, "repository")
-      : undefined;
+    process.env["PI_ORB_E2E_BACKEND"] === "process" ? join(root, "repository") : undefined;
   if (localRepository !== undefined) {
     mkdirSync(localRepository);
     execFileSync("git", ["init", "-b", "main", localRepository]);
@@ -682,10 +679,7 @@ describe.skipIf(process.platform !== "linux")("authorized two-user credentials",
         (call) => call.owner === "bob" && call.body.includes("ALICE_CHILD_OWNER"),
       ),
     ).toBe(false);
-    if (
-      process.env["PI_ORB_E2E_BACKEND"] === "process" &&
-      (process.env["PI_ORB_AGENT_BACKEND"] ?? "central-durable") === "central-durable"
-    ) {
+    if (process.env["PI_ORB_E2E_BACKEND"] === "process") {
       expect(control.logs.join("")).toContain(`multi-user-resource-owner orb=${child} owner=alice`);
       expect(control.logs.join("")).not.toContain(
         `multi-user-resource-owner orb=${child} owner=bob`,

@@ -1,4 +1,4 @@
-# Pi Durable evaluation
+# Central Pi Durable
 
 **Research, 2026-10-02.** Upstream source inspected at [`9b3c19da5cffc4c5e8b6bd74c45abc1ab6bfcd16`](https://github.com/earendil-works/pi/tree/9b3c19da5cffc4c5e8b6bd74c45abc1ab6bfcd16/packages/durable), package `1.0.0` (expressly experimental); pi-orb at `fb7e40a`. The research itself ran no tests or benchmarks. **POC authorized 2026-10-03:** central control-plane Harnesses on the process backend, with per-orb SQLite authority, authenticated remote execution, MCP/codemode and generic child mechanics. Historically qualified locally; the pre-rebase PostgreSQL candidate was locally process/Docker qualified and remains undeployed. The source rebased onto `7971fe1` passed separate unit/DST/infrastructure/PostgreSQL and scoped process acceptance (`docs/testing.md`), not a full post-rebase E2E gate. Production adoption was approved 2026-10-09: [question 72 (Pi Durable)](open-questions.md).
 
@@ -30,7 +30,6 @@ Source boundaries: `apps/control-plane/src/adapters/durable/tools/{codemode,cata
 
 This decided storage before production adoption. Question 72 (Pi Durable) in `docs/open-questions.md` records the subsequent adoption approval; live recovery qualification remains separate. No dual-store compatibility phase is required.
 
-**Cutover assessment (2026-10-06):** the global backend selector reroutes every Pi orb, not only newly created orbs; Claude remains host-native. Existing host-SDK private context is not imported into PostgreSQL Native authority. Public transcript and workspace retention do not establish model-context continuity: Native projection rejects a persisted public cursor absent from its own entries. The runtime-mode change also changes the desired compute fingerprint, adopted through ordinary stopped-compute replacement. There is no existing fresh-orbs-only selector or reverse import after central work. The 2026-10-09 adoption decision accepts this conversation break without authorizing workspace deletion.
 
 ## Production adoption decision (2026-10-09)
 
@@ -40,23 +39,15 @@ The user authorized central Pi activation, normal qualified main merge, deployme
 
 **Operational rule (2026-10-09):** shared control-plane OOM is a fleet-wide agent interruption, not proof of guest failure. Recovery-task counts and repeated instruction-adoption logs do not establish subagent counts or memory attribution. Preserve platform memory/instance evidence and durable owner/task identities; user-visible recovery diagnosis must distinguish confirmed OOM from an unknown memory driver. Bounded recovery/subagent memory and diagnosis work is tracked in `TODO.md`. Evidence: `docs/postmortems/2026-10-09-central-durable-oom-recovery.md`.
 
-## Integrated candidate (rebased 2026-10-05; scoped validation passed; undeployed)
+## Integrated architecture
 
 The same private-authority/public-projection adapter runs against PostgreSQL and PGlite. Owner leases use the database clock; an instance-bound bounded drain capability permits already-admitted cleanup after admission revocation, never new submission/model/effect dispatch. Archive atomically checks/seals the current public head and purges private native state, repository snapshots and artifacts; delete removes both lifetimes. Stable handles retain metadata only; passive transcript reads query PostgreSQL without loading a Harness. Stopped-and-quiescent unloading is deferred while work remains, rechecks persisted state, and never aborts work or boots compute merely to unload.
 
-**Integration decision (2026-10-06):** immutable per-orb harness selection remains `pi|claude`. `PI_ORB_AGENT_BACKEND=central-durable|host-pi` selects only Pi placement independently of process/Docker/GCP. Claude remains host-co-located with native filesystem resume authority; central Claude is rejected (`docs/claude-agent-sdk.md`). The domain AgentPlane dispatcher selects from the persisted orb, including health, inbox, stop and replication. Per-orb lifecycle, live/detail and display branches use the same placement; only central Pi launches execution-only guests or acquires initial central Git resources. Host Claude keeps owner/harness authentication, native runtime launch, pull replication and guarded runtime detail fallback. No new persisted placement or native-history migration is needed. This integration is undergoing fresh validation, not qualified by earlier gates. The code default and production Terraform select `central-durable` under the 2026-10-09 adoption decision. Provider/packaging contracts are implemented, not live GCP qualification. Pre-rebase frozen full unit/DST/infrastructure, mandatory real-PostgreSQL, types/lint, full central-process and Docker SDK E2E plus explicit central-Docker cross acceptance passed; these do not qualify the rebased source. Actual runtime/CP image builds and the network-disabled packaged worker's exact20MiB/callback/Git/skills proof passed. Local mock qualification does not cover live GCP or host-loss/database failover. Counts, failures and source hashes: `docs/testing.md`.
+**Placement decision (2026-10-18):** immutable per-orb harness selection is `pi|claude`, independent of process/Docker/GCP host selection. Pi runs centrally with PostgreSQL authority and execution-only guests; Claude stays host-native with filesystem resume authority. Central Claude is rejected (`docs/claude-agent-sdk.md`). AgentPlane dispatches health, inbox, stop and replication using the persisted harness. Native Claude keeps owner/harness authentication, pull replication and guarded runtime detail fallback. No new persisted placement state. Qualification is exact-source and provider-specific (`docs/testing.md`).
 
 `Harness.close()` suspends unfinished tasks; Stop alone does not manufacture terminal cancellation records. An admitted explicit root abort can terminally cancel native root/child tasks, without fabricating an assistant-abort public entry. The focused composed PostgreSQL/PGlite proof and its limits are in `docs/testing.md`.
 
-## Earlier process POC scope (2026-10-03)
-
-This section records the qualified SQLite POC, not candidate storage or provider selection.
-
-One control-plane Node process owns an authority directory under a Linux `flock`; each orb has its own SQLite store (`synchronous=FULL`) and independently suspended Harness. The process guest owns checkout/hooks and remote execution only. Docker/GCE remain SDK-backed. This is not a PostgreSQL adapter, cloud cutover or qualification of power-loss/failover semantics.
-
-**Pre-candidate composition audit (2026-10-04):** `apps/control-plane/src/main.ts:577` couples the process provider to central Durable; Docker/GCE use the host Pi SDK. `AgentPlane` has only a central implementation; the SDK path is not an adapter to that port.
-
-**Implemented candidate contract (2026-10-04):** independent axes `AgentBackend {central pi-durable, host Pi SDK}` × `HostProvider {process, Docker, GCP}`; all six combinations must be possible. Code contracts cover all six selections; this neither qualifies all compositions nor approves deployment.
+## Ownership and execution
 
 **Placement decision (2026-10-04):** central agents default to asynchronous JavaScript objects in the existing control-plane Node process, not one OS process per orb. No per-orb WorkerThread without demonstrated need. Earlier “worker” terminology referred to a JavaScript object, not a separate process. Stop/Sleep must not terminate the shared process. Each orb has a lightweight stable agent handle for the lifetime of its control-plane process, separate from optional expensive Harness/resources; browser subscriptions survive unload/reopen. **Integrated candidate (locally qualified 2026-10-05):** unload those resources once the host is stopped and the agent is quiescent. If the host stops during active central work, defer unloading until idle and recheck that the host is still stopped. Never interrupt work, children, waits, leases, pending persistence/publication or summaries; inference/MCP remain independent while the host is not running. Do not reopen resources or boot a VM solely to unload them. This supersedes the earlier host-stop-independent eviction policy. **Rejected:** LRU/resource-pressure eviction is unnecessary for the first version; no thresholds or additional FSM are needed.
 
@@ -66,7 +57,7 @@ One control-plane Node process owns an authority directory under a Linux `flock`
 
 Recovered live tasks produce a passive `pi-orb.harness-restarted` notice with safe task identities. It is visible in product history but excluded from model input; it does not trigger inference or assert that all guest processes died. Unsafe interrupted effects remain ambiguous.
 
-**Decision, 2026-10-03:** ordinary process-host Stop/Start, including host-spec replacement, preserves the central conversation and authority (SQLite in this historical POC). It requires no additional transcript notice and creates no synthetic model input or inference. Only unfinished-work Harness recovery produces the passive `pi-orb.harness-restarted` notice described above. Explicit Stop/Start adopts fresh managed instructions and retains model/thinking settings for the next real user turn; execution-only idle/replacement is not a managed-instruction refresh guarantee. Docker/GCE retain SDK restart inference. Scheduled sleep is different: its wake delivers one combined restart/sleep-finished model context and one `pi-orb.sleep-wake` history event.
+**Decision, 2026-10-03:** ordinary process-host Stop/Start, including host-spec replacement, preserves the central conversation and authority (SQLite in this historical POC). It requires no additional transcript notice and creates no synthetic model input or inference. Only unfinished-work Harness recovery produces the passive `pi-orb.harness-restarted` notice described above. Explicit Stop/Start adopts fresh managed instructions and retains model/thinking settings for the next real user turn; execution-only idle/replacement is not a managed-instruction refresh guarantee. Scheduled sleep is different: its wake delivers one combined restart/sleep-finished model context and one `pi-orb.sleep-wake` history event.
 
 The requested child surface is generic start/steer/observe/wait/list/cancel, with inherited ordinary configuration and no profile system. MCP/codemode reuse standalone Pi libraries; native orb tools route through application services. The CLI remains for hooks and shell workloads. Acceptance outcomes live in `docs/testing.md`.
 
@@ -135,37 +126,28 @@ Measured local integration scope, **not an upper bound on central simplification
 
 ### Current capability contract (2026-10-17)
 
-Central Durable uses pinned Git resources; host Pi retains SDK resource loading. Backend selection is independent of host provider. These capabilities do not imply deployment qualification.
+Central Durable uses pinned Git resources across process, Docker and GCP execution hosts. These capabilities do not imply deployment qualification.
 
-| Capability | Central Durable | Host Pi |
-| --- | --- | --- |
-| Skill metadata and on-demand `SKILL.md` reads | Pinned metadata before the first request; bodies read on demand | Full via SDK loader/tools |
-| Bundled and repository skills | Separate bundled resources plus pinned `.pi/skills` (absence-only `.agents/skills` fallback) | Full SDK discovery plus provider path |
-| User/ancestor skills, additional settings paths/filters, package skills | Outside required resource scope | SDK discovery retained |
-| Skill validation/diagnostics | Strict metadata parsing; repository warnings persist, platform collisions/failures block | SDK validation/diagnostics retained |
-| Skill helper scripts/references/assets | Pinned files available off-host; explicit repository reads use live workspace when ready | Guest read/shell access |
-| `/skill:name`, prompt-template invocation | Not exposed | Inbox also bypasses SDK expansion |
-| Resource reload | Pinned instruction context; explicit workspace reads see current contents | SDK reload APIs inherited, no product reload command |
-| Managed personal/project prompts configured through pi-orb (required) | Implemented; captured at context creation before guest readiness, not refreshed per generation/save | Implemented via runtime-start snapshot adoption |
-| Native instruction-file variants and `SYSTEM.md`/`APPEND_SYSTEM.md` | First-present pinned repository `AGENTS.md`; SYSTEM variants outside required scope | SDK discovery retained |
-| Executable user/project Pi extensions | Deliberately excluded centrally; first-party Durable definitions are separate | SDK loading retained |
-| Subagents | Native Durable APIs: start/steer/observe/wait/list/cancel, inherited instructions/authorized tools, optional named model; no profiles, nested children or orb spawning | Patched third-party SDK extension |
-| Compaction | Automatic compaction enabled; manual/budget controls not exposed | SDK compaction machinery retained |
-| Codemode/MCP | Native scoped tool calls and namespace discovery, including MCP resources/server instructions; no full SDK/TUI/model-helper surface | SDK integration retained |
-| Session tree/branch controls and follow-up queue | Not exposed | SDK APIs do not imply product exposure |
+| Capability | Contract |
+| --- | --- |
+| Skill metadata and on-demand `SKILL.md` reads | Pinned metadata before the first request; bodies read on demand |
+| Bundled and repository skills | Separate bundled resources plus pinned `.pi/skills` (absence-only `.agents/skills` fallback) |
+| User/ancestor skills, additional settings paths/filters, package skills | Outside required resource scope |
+| Skill validation/diagnostics | Strict metadata parsing; repository warnings persist, platform collisions/failures block |
+| Skill helper scripts/references/assets | Pinned files available off-host; explicit repository reads use live workspace when ready |
+| `/skill:name`, prompt-template invocation | Not exposed |
+| Resource reload | Pinned instruction context; explicit workspace reads see current contents |
+| Managed personal/project prompts configured through pi-orb (required) | Implemented; captured at context creation before guest readiness, not refreshed per generation/save |
+| Native instruction-file variants and `SYSTEM.md`/`APPEND_SYSTEM.md` | First-present pinned repository `AGENTS.md`; SYSTEM variants outside required scope |
+| Executable user/project Pi extensions | Deliberately excluded centrally; first-party Durable definitions are separate |
+| Subagents | Native Durable APIs: start/steer/observe/wait/list/cancel, inherited instructions/authorized tools, optional named model; no profiles, nested children or orb spawning |
+| Compaction | Automatic compaction enabled; manual/budget controls not exposed |
+| Codemode/MCP | Native scoped tool calls and namespace discovery, including MCP resources/server instructions; no full SDK/TUI/model-helper surface |
+| Session tree/branch controls and follow-up queue | Not exposed |
 
 **Pinned resource decision (2026-10-17):** Git acquisition persists the instruction file, complete repository skill files and manifest before model setup. Composition combines pinned instructions with managed personal/project text and bundled platform skills; Pi's `formatSkillsForPrompt` exposes skill metadata, with bodies loaded on demand. Execution readiness contains only cwd, incarnation, PID, checkout commit and hook reports. Explicit repository reads use pinned files off-host and current guest files once ready; bundled resources remain off-host. Resource acquisition outcomes and sanitized warnings are durable and user-visible.
 
-Pi's `AgentSession.prompt()` expands skill/template commands outside interactive mode too. Retained inbox delivery instead calls `sendCustomMessage` (`apps/orb-runtime/src/pi/agent.ts`); central delivery submits content directly (`apps/control-plane/src/adapters/durable/agent.ts`). Neither exposes that expansion. Other central boundaries are in `apps/control-plane/src/adapters/durable/tools/{subagents,codemode,mcp,catalog}.ts` and `prompt.ts`; automatic compaction is inherited from Durable's generation machinery, not a product settings surface. Source contracts establish neither deployed parity nor reliable model skill selection/helper dependency availability; qualification is recorded in `docs/testing.md`.
-
-### Reuse assessment
-
-**Earlier reuse assessment (2026-10-02):** the broad inventory below is subject to the supported-product scope decision above; it does not authorize every listed SDK feature. The process POC's generic child surface supersedes profile-porting as its requirement.
-
-- Port agent session/tool/history mapping, root/child lifecycle, cancellation, settings, prompts and context. The Pi coding-agent extension API is not natively compatible with Durable definitions: port or adapt native MCP/codemode broker and discovery, subagent profiles/spawn/steer/results receipts, image read, and the current browser input contract. `@gotgenes/pi-subagents` is a third-party extension named for its author/namespace; pi-orb currently uses a patched fork for cancellation and parent-wake behavior, not a core Durable feature. Preserve resource loading and broker diagnostic auth seams.
-- Reuse coding-agent's exported `ModelRuntime`, settings and resource-loading helpers where appropriate, plus context/skills helpers and the existing normalized history schema. This is not a rewrite of every Pi-related library.
-- Built-in Durable `read` does not support images, and the inspected demo excludes them; that does **not** establish that Durable cannot accept image inputs anywhere. Test image-bearing tools and model messages separately.
-- Reassess SDK-specific patches case by case rather than assuming they all survive or all disappear. The AI diagnostic patch likely remains relevant. In particular, do not assume the custom-turn preparation patch is eliminated: boot notices and freshly loaded instructions must be ordered before any resumed inference.
+Central inbox delivery submits content directly; skill/template command expansion is not a product input path. Tool boundaries live in `apps/control-plane/src/adapters/durable/tools/{subagents,codemode,mcp,catalog}.ts` and `prompt.ts`. Automatic compaction belongs to Durable generation machinery, not a product settings surface. Source contracts establish neither deployed parity nor reliable model skill selection/helper dependency availability (`docs/testing.md`).
 
 ### Historical companion packages and codemode placement
 
@@ -194,12 +176,6 @@ One possible placement runs `CodemodeSandbox` centrally with **only scoped injec
 **Manual resource decision (2026-10-09).** The adapted coding-agent manual is more useful to the agent than a standalone sandbox README: it documents the actual central API without unsupported model helpers. Only the manual body carries upstream provenance and the MIT notice. The two skills link directly to `/opt/pi-orb/skills/codemode-quick-reference/SKILL.md` and `/opt/pi-orb/skills/codemode-manual/SKILL.md`. Central process, Docker and GCP share these private `SnapshotResourceReader` keys, independently of guest working directories or installed package roots. Static resources use the existing platform bundler without runtime documentation discovery or generation. Focused contracts cover both metadata entries, absent default bodies, explicit snapshot reads, reciprocal links and unique bundled resources. This is source support, not live provider qualification or deployment evidence; the observed session retains its existing skill inventory. The generated tool description does not inject the manual. No runtime or transcript pagination implementation changed.
 
 The central instruction prompt is separately rendered from personal/repository/project instructions, appended system text, skill summaries and cwd (`apps/control-plane/src/adapters/durable/prompt.ts:20-36,39-65`; installed by `agent.ts:301`). That is not wholesale injection of README/design docs. The **actual current session** exposes the short `orb_transcript` description “Read an orb's committed transcript by ID.” and only `{orbId}`; it advertises no paging yet, matching `tools/orb-tools.ts:35-40`. The session's codemode description advertises callback limits but no store-size limits or README link. These observed descriptions are distinct from host/SDK enforcement and upstream library documentation; inspecting upstream does not establish what was injected into a model session.
-
-### Historical MCP/codemode adapter assessment
-
-**Pre-candidate adapter audit (2026-10-04):** `pi-mcp` client and `pi-codemode` sandbox are independent libraries used unchanged; pi-orb's wrappers are narrow adapters, not forks. The standalone MCP client implements resources and server instructions. The central Durable adapter exposes only tools and does not load the coding-agent SDK MCP extension. The matrix records an adapter exposure gap, not a standalone-library limitation or an approval to add features.
-
-At the 2026-10-04 assessment, pi-orb composed native SDK `createMcpExtension` and `createCodemodeExtension` in [`apps/orb-runtime/src/pi/extensions/index.ts`](../apps/orb-runtime/src/pi/extensions/index.ts); both operate in the same session/tool catalog (see [`native-mcp-sdk.contract.test.ts`](../apps/orb-runtime/src/pi/native-mcp-sdk.contract.test.ts)). This proves the existing SDK route, **not** a ready Durable adapter. Standalone MCP async calls compose with sandbox-injected async functions. The proposed bridge would register `defineTool` definitions, discover MCP tools, map schema/names and validate authorized callable arguments; route environment calls through fenced orb RPC and MCP through scoped broker callbacks; translate text/images, typed errors and progress; bridge Chord `Context` cancellation to sandbox/tool `AbortSignal`; and close connections/workers. Sandbox schemas render model declarations but **do not validate nested arguments**: callable adapters must validate them. Durable validates outer tool parameters; its outer replay classification/checkpoint does not automatically checkpoint nested calls inside one codemode script. [Durable tool API](https://github.com/earendil-works/pi/blob/9b3c19da5cffc4c5e8b6bd74c45abc1ab6bfcd16/packages/durable/src/harness/define.ts), [codemode README](https://github.com/earendil-works/pi/blob/9b3c19da5cffc4c5e8b6bd74c45abc1ab6bfcd16/packages/codemode/README.md), [MCP README](https://github.com/earendil-works/pi/blob/9b3c19da5cffc4c5e8b6bd74c45abc1ab6bfcd16/packages/mcp/README.md).
 
 ### Historical wrapper vendoring rationale (2026-10-04)
 
@@ -234,4 +210,4 @@ Upstream paths below refer to the pinned commit above:
 - [Article](https://earendil.com/posts/pi-durable/), [package README](https://github.com/earendil-works/pi/blob/9b3c19da5cffc4c5e8b6bd74c45abc1ab6bfcd16/packages/durable/README.md), [experimental coding-agent README](https://github.com/earendil-works/pi/blob/9b3c19da5cffc4c5e8b6bd74c45abc1ab6bfcd16/packages/coding-agent/src/experimental/durable/README.md) — scope, samples and limits.
 - [SQLite adapter](https://github.com/earendil-works/pi/blob/9b3c19da5cffc4c5e8b6bd74c45abc1ab6bfcd16/packages/durable/src/storage/sqlite/node.ts), [JSONL storage](https://github.com/earendil-works/pi/blob/9b3c19da5cffc4c5e8b6bd74c45abc1ab6bfcd16/packages/durable/src/storage/jsonl/storage.ts) — inspected durability settings/write paths.
 - `packages/durable/src/tools/{read,image}.ts` — built-in tool support.
-- pi-orb: `apps/orb-runtime/src/pi/agent.ts` and related runtime integration; [Pi adapter](pi-adapter.md), [lifecycle](lifecycle.md), [history/replication](history-replication.md), [subagents](subagents.md), [runtime protocol](runtime-protocol.md), [testing](testing.md). Source references are inspection evidence, not validation results.
+- pi-orb: `apps/control-plane/src/adapters/durable/agent.ts` and related central integration; [Pi adapter](pi-adapter.md), [lifecycle](lifecycle.md), [history/replication](history-replication.md), [subagents](subagents.md), [runtime protocol](runtime-protocol.md), [testing](testing.md). Source references are inspection evidence, not validation results.

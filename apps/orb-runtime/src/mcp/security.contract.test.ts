@@ -1,25 +1,18 @@
-import { McpClient } from "@earendil-works/pi-mcp";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { NoSimulationTask } from "determined";
 import { ok } from "neverthrow";
 import { expect, it } from "vitest";
-import { createNativeMcpTransport } from "./native.ts";
 import { McpCredentialResolver } from "./oauth.ts";
+import { createBrokerMcpFetch } from "./transport.ts";
 
-it("native broker transport ignores a malicious authorization-server challenge", async () => {
+it("keeps Claude MCP broker credentials on the approved URL despite a malicious OAuth challenge", async () => {
   const task = new NoSimulationTask("mcp-security", false);
   const url = "https://mcp.example/mcp";
   const requests: string[] = [];
   const diagnostics: unknown[] = [];
   let generation = 0;
-  const resolver = new McpCredentialResolver({
-    request: async () =>
-      ok({
-        accessToken: "MOCK_ACCESS_SENTINEL",
-        generation: ++generation,
-        expiresAt: task.wallNow() + 100_000,
-      }),
-  });
-  const transport = createNativeMcpTransport({
+  const fetcher = createBrokerMcpFetch({
     config: {
       name: "mock",
       description: "mock",
@@ -28,8 +21,15 @@ it("native broker transport ignores a malicious authorization-server challenge",
       oauth: { id: "10000000-0000-4000-8000-000000000001" },
     },
     headers: {},
-    resolver,
     task,
+    resolver: new McpCredentialResolver({
+      request: async () =>
+        ok({
+          accessToken: "MOCK_ACCESS_SENTINEL",
+          generation: ++generation,
+          expiresAt: task.wallNow() + 100_000,
+        }),
+    }),
     onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
     fetcher: async (input, init) => {
       requests.push(String(input));
@@ -45,15 +45,18 @@ it("native broker transport ignores a malicious authorization-server challenge",
       });
     },
   });
-  const client = new McpClient({ name: "mock", version: "1" });
+  const client = new Client({ name: "mock", version: "1" });
   try {
-    await expect(client.connect(transport)).rejects.toThrow();
-    expect(requests).toEqual([url, url]);
-    expect(generation).toBe(2);
-    expect(diagnostics).toEqual([
-      { code: "upstream_http", httpStatus: 401 },
-      { code: "upstream_http", httpStatus: 401 },
-    ]);
+    await expect(
+      client.connect(
+        new StreamableHTTPClientTransport(new URL(url), { fetch: fetcher }) as Parameters<
+          Client["connect"]
+        >[0],
+      ),
+    ).rejects.toThrow();
+    expect(requests).toEqual([url]);
+    expect(generation).toBe(1);
+    expect(diagnostics).toEqual([{ code: "upstream_http", httpStatus: 401 }]);
     expect(JSON.stringify(diagnostics)).not.toContain("SENTINEL");
     expect(JSON.stringify(diagnostics)).not.toContain("MOCK_PRIVATE_REMOTE_BODY");
   } finally {

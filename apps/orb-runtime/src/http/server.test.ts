@@ -1,14 +1,12 @@
 import { on, once } from "node:events";
 import type { AddressInfo } from "node:net";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { RUNTIME_SUBPROTOCOL, type ServerFrame, ServerFrameSchema } from "@pi-orb/protocol";
 import { okAsync } from "neverthrow";
 import { Check } from "typebox/value";
 import { expect, it, onTestFinished, vi } from "vitest";
 import { WebSocket } from "ws";
-import { PiOrbAgent, type PiSession } from "../pi/agent.ts";
 import type { TerminalManager } from "../terminal/manager.ts";
-import { MemoryIdleStopFence } from "../testkit/idle-stop-fence.ts";
+import { ComposedClaudeFixture } from "../testkit/claude-composed.ts";
 import { buildRuntimeServer } from "./server.ts";
 
 const hello = JSON.stringify({
@@ -39,20 +37,10 @@ async function receive(socket: WebSocket, text: string, until = "request.result"
 it.each(["before hello", "after hello"])(
   "rejects invalid runtime frames %s without losing availability",
   async (phase) => {
-    const agent = new PiOrbAgent({
-      orbId: "test",
-      repositoryUrl: "https://example.com/repo",
-      workDir: "/unused",
-      skillsDir: null,
-      broker: null,
-      executionId: "test-host",
-      idleStopFence: new MemoryIdleStopFence(),
-    });
-    agent.attachSession(
-      { isIdle: true, subscribe: () => () => undefined } as unknown as PiSession,
-      SessionManager.inMemory("/unused"),
-      { summarize: () => okAsync("") },
-    );
+    const fixture = new ComposedClaudeFixture();
+    onTestFinished(() => fixture.dispose());
+    expect((await fixture.attach()).isOk()).toBe(true);
+    const agent = fixture.agent;
     const changeSettings = vi
       .spyOn(agent, "changeSettings")
       .mockReturnValue(okAsync<void, never>(undefined));

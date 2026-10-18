@@ -49,21 +49,12 @@ RUN case "$TARGETARCH" in \
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-COPY patches patches
-COPY scripts/apply-dependency-patches.mjs scripts/apply-dependency-patches.mjs
-COPY vendor vendor
 COPY packages/protocol/package.json packages/protocol/
-COPY packages/mock-openai/package.json packages/mock-openai/
-COPY packages/luna/package.json packages/luna/
 COPY apps/orb-runtime/package.json apps/orb-runtime/
 RUN start="$(date +%s)" \
   && echo "runtime-deps:npm-install:start" \
   && npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts \
   && echo "runtime-deps:npm-install:complete elapsed_s=$(($(date +%s) - start))" \
-  && start="$(date +%s)" \
-  && echo "runtime-deps:patch:start" \
-  && node scripts/apply-dependency-patches.mjs \
-  && echo "runtime-deps:patch:complete elapsed_s=$(($(date +%s) - start))" \
   && ln -s /app/node_modules/.bin/agent-browser /usr/local/bin/agent-browser
 RUN --network=none start="$(date +%s)" \
   && echo "runtime-deps:pty-rebuild:start" \
@@ -73,8 +64,6 @@ RUN --network=none start="$(date +%s)" \
   && echo "runtime-deps:pty-rebuild:complete elapsed_s=$(($(date +%s) - start))"
 
 COPY packages/protocol/src packages/protocol/src
-COPY packages/mock-openai/src packages/mock-openai/src
-COPY packages/luna/src packages/luna/src
 COPY apps/orb-runtime/src apps/orb-runtime/src
 
 # Broker-backed GitHub auth (docs/credentials.md): a gh shim ahead of /usr/bin/gh

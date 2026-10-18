@@ -157,7 +157,6 @@ class WorkflowContractTest(unittest.TestCase):
                 ('Upload rollout monitor', upload),
                 ('Upload missing-orb navigation failure evidence', upload),
                 ('Upload lazy-return browser failure evidence', upload),
-                ('Upload MCP failure summaries', upload),
                 ('Upload only the validated release record', upload),
             ],
         )
@@ -174,9 +173,6 @@ class WorkflowContractTest(unittest.TestCase):
                 'failure()', 'release-lazy-return', 14,
                 ['path: |', '  test-failures/lazy-return-*/failure.json',
                  '  test-failures/lazy-return-*/failure.png', '  test-failures/lazy-return-*/trace.zip'],
-            ),
-            'Upload MCP failure summaries': (
-                'failure()', 'release-mcp', 14, ['path: test-failures/mcp-*.json'],
             ),
             'Upload only the validated release record': (
                 'always()', 'release', 30, ['path: ${{ runner.temp }}/release-artifact/release.json'],

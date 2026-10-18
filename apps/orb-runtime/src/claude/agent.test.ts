@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { ClaudeOrbAgent } from "./agent.ts";
 
-it("never advertises ready or falls back to Pi when subscription authentication is absent", async () => {
+it("rejects readiness and submission when subscription authentication is absent", async () => {
   const workDir = mkdtempSync(join(tmpdir(), "claude-agent-"));
   try {
     const agent = new ClaudeOrbAgent({

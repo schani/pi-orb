@@ -17,10 +17,10 @@ class MonitorTest(unittest.TestCase):
 
     def test_projection_never_retains_payloads_or_freeform_errors(self):
         rows = [{'severity': 'ERROR', 'textPayload': 'secret prompt',
-                 'jsonPayload': {'code': 'legacy_backend', 'prompt': 'secret'},
+                 'jsonPayload': {'prompt': 'secret'},
                  'httpRequest': {'status': 503, 'requestUrl': 'secret'}}]
         self.assertEqual(monitor.log_counts(rows),
-                         {'errors': 1, 'http429': 0, 'http5xx': 1, 'legacyBackend': 1})
+                         {'errors': 1, 'http429': 0, 'http5xx': 1})
         self.assertNotIn('secret', json.dumps(monitor.log_counts(rows)))
 
     def test_window_cannot_finish_early_and_first_fault_is_not_erased(self):
@@ -40,12 +40,11 @@ class MonitorTest(unittest.TestCase):
             self.assertEqual(evidence['samples'][1]['message'], 'health unavailable')
             self.assertIn('at', evidence['samples'][1])
 
-    def test_lifecycle_classification_separates_expected_refusal(self):
-        rows = [{'textPayload': 'lifecycle: orb=secret central-agent-start-rejected code=legacy_backend message=secret'},
-                {'textPayload': 'lifecycle: orb=secret central-agent-start-rejected code=history_integrity message=secret'},
+    def test_lifecycle_classification_retains_integrity_failures(self):
+        rows = [{'textPayload': 'lifecycle: orb=secret central-agent-start-rejected code=history_integrity message=secret'},
                 {'textPayload': 'lifecycle: orb=secret drain-integrity reason=secret'}]
         counts = monitor.lifecycle_counts(rows)
-        self.assertEqual(counts, {'legacy_backend': 1, 'history_integrity': 1, 'drain-integrity': 1})
+        self.assertEqual(counts, {'history_integrity': 1, 'drain-integrity': 1})
         self.assertNotIn('secret', json.dumps(counts))
 
     def test_readonly_queries_paginate_and_missing_metrics_are_incomplete(self):
@@ -77,15 +76,6 @@ class MonitorTest(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     monitor.observe({}, output)
 
-    def test_info_legacy_refusals_cannot_hide_an_unrelated_error(self):
-        with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / 'monitor.json'
-            clock = iter([0, 1080])
-            with patch.object(monitor, 'sample', return_value=Result({
-                    'logs': {'errors': 1}, 'lifecycle': {'legacy_backend': 2}})):
-                self.assertIsNotNone(monitor.observe({}, output, clock=lambda: next(clock)).error)
-            self.assertEqual(json.loads(output.read_text())['outcome'], 'regression')
-
     def test_generic_error_is_a_regression_not_a_healthy_sample(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'monitor.json'
@@ -106,7 +96,21 @@ class MonitorTest(unittest.TestCase):
 
     def test_owner_inventory_cannot_succeed_with_an_unexpected_empty_fleet(self):
         with patch.object(monitor, 'api', return_value=Result({'items': []})):
-            self.assertIsNotNone(monitor.fleet_inventory(object(), False).error)
+            self.assertIsNotNone(monitor.fleet_inventory(object()).error)
+
+    def test_owner_inventory_requires_central_pi_and_native_claude(self):
+        for harness in ('pi', 'claude'):
+            for central in (False, True):
+                with self.subTest(harness=harness, central=central), patch.object(
+                        monitor, 'api', side_effect=[
+                            Result({'items': [{'id': '00000000-0000-4000-8000-000000000001'}]}),
+                            Result({'items': [{'harness': harness, 'state': 'running',
+                                               'centralAgent': central}]})]):
+                    result = monitor.fleet_inventory(object())
+                if central == (harness == 'pi'):
+                    self.assertEqual(result.value['counts'], {harness + ':running': 1})
+                else:
+                    self.assertEqual(result.error.kind, 'conflict')
 
     def test_composed_readonly_sample_has_exact_identity_and_numeric_metrics(self):
         record = {'project': 'project', 'region': 'region', 'releaseId': 'release',
@@ -114,7 +118,6 @@ class MonitorTest(unittest.TestCase):
         service = {'status': {'latestReadyRevisionName': 'revision', 'traffic': [
             {'revisionName': 'revision', 'percent': 100}]}, 'spec': {'template': {'spec': {
             'containers': [{'image': 'image', 'env': [
-                {'name': 'PI_ORB_AGENT_BACKEND', 'value': 'central-durable'},
                 {'name': 'PI_ORB_HOST_SPEC_GENERATION', 'value': '1'},
                 {'name': 'PI_ORB_APP_ORIGIN', 'value': 'https://application.example'}]}]}}}}
         class FakeCloud:
@@ -146,14 +149,13 @@ class MonitorTest(unittest.TestCase):
         self.assertIn('httpRequest.status=429', queries)
         self.assertNotIn('delete', queries)
 
-    def test_effective_setting_rejects_wrong_backend_and_image(self):
+    def test_effective_setting_rejects_wrong_image(self):
         service = {'status': {'latestReadyRevisionName': 'revision'},
                    'spec': {'template': {'spec': {'containers': [{'image': 'image', 'env': [
-                       {'name': 'PI_ORB_AGENT_BACKEND', 'value': 'central-durable'}]}]}}}}
-        self.assertIsNone(monitor.placement(service, 'image').error)
+                       {'name': 'PI_ORB_HOST_SPEC_GENERATION', 'value': '1'}]}]}}}}
+        self.assertEqual(monitor.placement(service, 'image').value,
+                         {'revision': 'revision', 'generation': '1'})
         self.assertIsNotNone(monitor.placement(service, 'wrong').error)
-        service['spec']['template']['spec']['containers'][0]['env'][0]['value'] = 'host-pi'
-        self.assertIsNotNone(monitor.placement(service, 'image').error)
 
 
 if __name__ == '__main__':

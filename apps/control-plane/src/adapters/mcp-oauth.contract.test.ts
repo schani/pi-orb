@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { NoSimulationTask } from "determined";
 import { describe, expect, it } from "vitest";
-import { observeTokenResponses } from "../../../../scripts/native-mcp-exploration/live-qualification/oauth-scope-measurement.mjs";
 import type { StoredMcpOAuth } from "../domain/mcp-oauth.ts";
 import { createMcpOAuthFetch, SdkMcpOAuth } from "./mcp-oauth.ts";
 
@@ -52,6 +51,7 @@ for (const provider of ["cloudflare", "datadog"] as const) {
         if (url.pathname === "/register") {
           const metadata = JSON.parse(String(init?.body));
           expect(metadata.redirect_uris).toEqual(["https://orb.example/callback"]);
+          expect(metadata.scope).toBe("mcp_all");
           return json({
             ...metadata,
             client_id: "test-client",
@@ -94,15 +94,7 @@ for (const provider of ["cloudflare", "datadog"] as const) {
               expires_in: 86400 * 730,
             });
       };
-      const observed: unknown[] = [];
-      const observedFetch = observeTokenResponses(fetcher, {
-        tokenEndpoint: "https://consent.example/token",
-        knownScopes: ["mcp_all"],
-        record: (metric) => {
-          observed.push(metric);
-        },
-      })._unsafeUnwrap();
-      const sdk = new SdkMcpOAuth("https://orb.example/callback", observedFetch);
+      const sdk = new SdkMcpOAuth("https://orb.example/callback", fetcher);
       const prepared = (
         await sdk.prepare(task, { projectId: "p", id: "c", url: serverUrl }, "opaque-state")
       )._unsafeUnwrap();
@@ -110,6 +102,7 @@ for (const provider of ["cloudflare", "datadog"] as const) {
       challenge = url.searchParams.get("code_challenge") ?? "";
       expect(challenge).not.toBe("");
       expect(url.searchParams.get("state")).toBe("opaque-state");
+      expect(url.searchParams.get("scope")).toBe("mcp_all");
       expect(url.searchParams.get("code_challenge_method")).toBe("S256");
       const discoveryCount = discoveryRequests;
       changedDiscovery = true;
@@ -176,17 +169,6 @@ for (const provider of ["cloudflare", "datadog"] as const) {
       ]);
       expect(discoveryRequests).toBe(discoveryCount);
       expect(prepared.secret.oauth.issuer).toBe(issuer);
-      expect(observed).toEqual([
-        {
-          kind: "authorization_code",
-          outcome: "present",
-          knownScopes: ["mcp_all"],
-          unknownCount: 0,
-        },
-        { kind: "refresh_token", outcome: "omitted" },
-        { kind: "refresh_token", outcome: "omitted" },
-        { kind: "authorization_code", outcome: "omitted" },
-      ]);
     });
   });
 }

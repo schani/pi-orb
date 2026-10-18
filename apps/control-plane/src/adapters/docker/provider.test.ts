@@ -83,7 +83,6 @@ it("launches only the controller's verified recovery proof, overriding extra env
 });
 
 interface ProviderOverrides {
-  readonly runtimeMode?: "pi" | "execution";
   readonly image?: string;
   readonly network?: string;
   readonly inventoryScope?: string;
@@ -118,7 +117,7 @@ describe("execution bindings", () => {
         },
       ]),
     }));
-    const result = await makeProvider({ runtimeMode: "execution" }).executionBinding(
+    const result = await makeProvider().executionBinding(
       task,
       { provider: "docker", resourceId: "pi-orb-orb-1" },
       context,
@@ -133,12 +132,11 @@ describe("execution bindings", () => {
       });
   });
   it.each([
-    { harness: "pi", runtimeMode: "pi" },
     { harness: "pi", runtimeMode: "execution" },
-    { harness: "claude", runtimeMode: "execution" },
+    { harness: "claude", runtimeMode: "claude" },
   ] as const)("launches selected %s role with pinned commit", async ({ harness, runtimeMode }) => {
     installFreshHost();
-    const result = await makeProvider({ runtimeMode }).provision(
+    const result = await makeProvider().provision(
       task,
       {
         ...request,
@@ -153,7 +151,7 @@ describe("execution bindings", () => {
     );
     expect(result.isOk()).toBe(true);
     const launch = dockerFake.calls.find((args) => args[0] === "run") ?? [];
-    expect(envValue(launch, "PI_ORB_RUNTIME_MODE")).toBe(harness === "claude" ? "pi" : runtimeMode);
+    expect(envValue(launch, "PI_ORB_RUNTIME_MODE")).toBe(runtimeMode);
     expect(envValue(launch, "PI_ORB_INITIAL_CHECKOUT_COMMIT")).toBe("a".repeat(40));
     expect(envValue(launch, "PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT")).toBe("1");
   });
@@ -247,23 +245,20 @@ const minterFailing = (error: TailscaleError): TailscaleAuthKeyMinter => ({
 const tailnet = { tailnetDnsName: "tailnet.ts.net" };
 
 describe("DockerOrbHostProvider", () => {
-  it.each(["pi", "claude"] as const)(
-    "launches selected %s harness after extra env",
-    async (harness) => {
-      installFreshHost();
-      const provider = makeProvider({ extraEnv: { PI_ORB_HARNESS: "wrong" } });
-      const result = await provider.provision(
-        task,
-        { ...request, bootstrap: { ...request.bootstrap, harness } },
-        context,
-      );
-      expect(result.isOk()).toBe(true);
-      const argv = dockerFake.calls.find((args) => args[0] === "run") ?? [];
-      expect(argv.filter((value) => value.startsWith("PI_ORB_HARNESS=")).at(-1)).toBe(
-        `PI_ORB_HARNESS=${harness}`,
-      );
-    },
-  );
+  it.each(["pi", "claude"] as const)("derives %s runtime mode after extra env", async (harness) => {
+    installFreshHost();
+    const provider = makeProvider({ extraEnv: { PI_ORB_RUNTIME_MODE: "wrong" } });
+    const result = await provider.provision(
+      task,
+      { ...request, bootstrap: { ...request.bootstrap, harness } },
+      context,
+    );
+    expect(result.isOk()).toBe(true);
+    const argv = dockerFake.calls.find((args) => args[0] === "run") ?? [];
+    expect(argv.filter((value) => value.startsWith("PI_ORB_RUNTIME_MODE=")).at(-1)).toBe(
+      `PI_ORB_RUNTIME_MODE=${harness === "claude" ? "claude" : "execution"}`,
+    );
+  });
   beforeEach(() => {
     dockerFake.reset();
   });
@@ -831,7 +826,7 @@ describe("DockerOrbHostProvider host specification", () => {
         network: "pi-orb",
         controlPlaneUrl: "http://host.docker.internal:3000",
         extraEnv: {},
-        runtimeMode: "pi",
+        runtimeMode: "execution",
         skillsDir: "/opt/pi-orb/skills",
         harness: "pi",
         tailscale: null,

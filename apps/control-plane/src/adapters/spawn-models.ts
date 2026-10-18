@@ -6,7 +6,7 @@ import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 import { claudeChildEnvironment } from "../../../orb-runtime/src/claude/auth.ts";
 import { latestClaudeModels } from "../../../orb-runtime/src/claude/models.ts";
-import { eligibleCodexModels } from "../../../orb-runtime/src/pi/model-select.ts";
+import { eligibleCodexModels } from "../../../orb-runtime/src/domain/model-select.ts";
 import { getToken } from "../domain/broker.ts";
 import type { ClaudeSubscriptionAuth } from "../domain/claude-auth.ts";
 import type { CheckSpawnModel, SpawnModelError } from "../domain/orb-spawning.ts";

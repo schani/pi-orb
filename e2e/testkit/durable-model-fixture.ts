@@ -5,10 +5,10 @@ const object = (value: unknown): JsonObject | undefined =>
     : undefined;
 
 /** Preserve ordered fake-model policies; only change central callable exposure. */
-export function centralModelScenario(scenario: unknown, central: boolean): unknown {
+export function centralModelScenario(scenario: unknown): unknown {
   const value = object(scenario);
   const model = object(value?.["model"]);
-  if (!central || !value || !model || !Array.isArray(model["rules"])) return scenario;
+  if (!value || !model || !Array.isArray(model["rules"])) return scenario;
   return {
     ...value,
     model: {

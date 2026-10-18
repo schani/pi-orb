@@ -19,22 +19,6 @@ export interface PullHistoryError {
 }
 
 /**
- * The replication view of a snapshot (docs/history-replication.md): while the SDK has not
- * durably flushed the session, the control plane must see zero records and a
- * null head — a committed cursor must always survive a restart. Browser-
- * facing views are intentionally NOT gated: they are upsert-based and
- * full-resync on unknown cursors, and gating only some of them desynchronizes
- * the head the client sees from the one requests are validated against.
- */
-export function gateUnflushedSnapshot(
-  snapshot: HarnessSnapshot,
-  flushed: boolean,
-): HarnessSnapshot {
-  if (flushed) return snapshot;
-  return { ...snapshot, records: [], headId: null };
-}
-
-/**
  * Pure docs/history-replication.md pull semantics over one immutable snapshot. The HTTP handler
  * folds this Result into status codes.
  */
