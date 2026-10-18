@@ -661,10 +661,7 @@ beforeAll(async () => {
   hostingRootDirectory = mkdtempSync(join(tmpdir(), "pi-orb-e2e-hosting-"));
   fake = await createFakeSession(`pi-orb-e2e-${Date.now()}`, SCENARIO);
   nameFake = await createFakeSession(`pi-orb-name-e2e-${Date.now()}`, NAME_SCENARIO);
-  reasoningStream = await holdModelStream(fake.inferenceBaseUrl, "please run the e2e tool check", {
-    host: PROCESS_BACKEND ? "127.0.0.1" : "0.0.0.0",
-    advertisedHost: PROCESS_BACKEND ? "127.0.0.1" : "host.docker.internal",
-  });
+  reasoningStream = await holdModelStream(fake.inferenceBaseUrl, "please run the e2e tool check");
 
   if (PROCESS_BACKEND) {
     localStateDirectory = mkdtempSync(join(tmpdir(), "pi-orb-e2e-local-"));
@@ -737,13 +734,16 @@ afterAll(async () => {
       await docker(["volume", "rm", "-f", `pi-orb-data-${id}`]).catch(() => undefined);
     }
   }
-  await controlPlane?.stop();
-  if (!PROCESS_BACKEND) await docker(["rm", "-f", PG_CONTAINER]).catch(() => undefined);
-  if (fake !== undefined) await deleteFakeSession(fake.sessionKey);
-  if (nameFake !== undefined) await deleteFakeSession(nameFake.sessionKey);
-  if (localStateDirectory !== "") rmSync(localStateDirectory, { recursive: true, force: true });
-  if (webDistDirectory !== "") rmSync(webDistDirectory, { recursive: true, force: true });
-  if (hostingRootDirectory !== "") rmSync(hostingRootDirectory, { recursive: true, force: true });
+  try {
+    await controlPlane?.stop();
+  } finally {
+    if (!PROCESS_BACKEND) await docker(["rm", "-f", PG_CONTAINER]).catch(() => undefined);
+    if (fake !== undefined) await deleteFakeSession(fake.sessionKey);
+    if (nameFake !== undefined) await deleteFakeSession(nameFake.sessionKey);
+    if (localStateDirectory !== "") rmSync(localStateDirectory, { recursive: true, force: true });
+    if (webDistDirectory !== "") rmSync(webDistDirectory, { recursive: true, force: true });
+    if (hostingRootDirectory !== "") rmSync(hostingRootDirectory, { recursive: true, force: true });
+  }
 }, 120_000);
 
 async function restartControlPlaneWithSpec(spec: string, generation: number): Promise<void> {

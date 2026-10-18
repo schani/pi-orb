@@ -101,7 +101,10 @@ it.each([false, true])("Native trailing partial commit: completion held=%s", asy
 it("full slice fences only its reasoning turn until the accepted operation publishes a patch", () => {
   const source = readFileSync(new URL("./full-slice.e2e.test.ts", import.meta.url), "utf8");
   expect(source).toContain(
-    'holdModelStream(fake.inferenceBaseUrl, "please run the e2e tool check"',
+    'holdModelStream(fake.inferenceBaseUrl, "please run the e2e tool check");',
+  );
+  expect(source).toMatch(
+    /try\s*{\s*await controlPlane\?\.stop\(\);\s*}\s*finally\s*{\s*if \(!PROCESS_BACKEND\) await docker\(\["rm", "-f", PG_CONTAINER\]\)/,
   );
   expect(source).toContain('"reasoning patch before model completion"');
   expect(source).toContain("frame.event.operationId === reasoningOperationId");

@@ -334,25 +334,22 @@ beforeAll(async () => {
   });
   githubBaseUrl = await listen(githubServer);
 
-  const localRepository =
-    process.env["PI_ORB_E2E_BACKEND"] === "process" ? join(root, "repository") : undefined;
-  if (localRepository !== undefined) {
-    mkdirSync(localRepository);
-    execFileSync("git", ["init", "-b", "main", localRepository]);
-    writeFileSync(join(localRepository, "AGENTS.md"), "Use the project owner's credentials.\n");
-    execFileSync("git", ["-C", localRepository, "add", "AGENTS.md"]);
-    execFileSync("git", [
-      "-C",
-      localRepository,
-      "-c",
-      "user.name=Fixture",
-      "-c",
-      "user.email=fixture@example.test",
-      "commit",
-      "-m",
-      "fixture",
-    ]);
-  }
+  const localRepository = join(root, "repository");
+  mkdirSync(localRepository);
+  execFileSync("git", ["init", "-b", "main", localRepository]);
+  writeFileSync(join(localRepository, "AGENTS.md"), "Use the project owner's credentials.\n");
+  execFileSync("git", ["-C", localRepository, "add", "AGENTS.md"]);
+  execFileSync("git", [
+    "-C",
+    localRepository,
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.test",
+    "commit",
+    "-m",
+    "fixture",
+  ]);
   control = await startControlPlane({
     pglitePath: join(root, "control-plane.pglite"),
     processStateDirectory: join(root, "process-hosts"),
@@ -364,12 +361,8 @@ beforeAll(async () => {
     entry: "e2e/two-user-control-plane-entry.ts",
     readinessHeaders: { "x-pi-orb-e2e-principal": "alice" },
     extraEnv: {
-      ...(localRepository === undefined
-        ? {}
-        : {
-            ...localGitEnvironment(localRepository, REPOSITORY_URL),
-            PI_ORB_E2E_RESOURCE_REPOSITORY: localRepository,
-          }),
+      ...localGitEnvironment(localRepository, REPOSITORY_URL),
+      PI_ORB_E2E_RESOURCE_REPOSITORY: localRepository,
       PI_ORB_E2E_ALICE_OAUTH_URL: fake.oauthBaseUrl,
       PI_ORB_E2E_ALICE_INFERENCE_URL: inferenceBaseUrl,
       PI_ORB_E2E_BOB_OAUTH_URL: bobFake.oauthBaseUrl,
@@ -679,15 +672,11 @@ describe.skipIf(process.platform !== "linux")("authorized two-user credentials",
         (call) => call.owner === "bob" && call.body.includes("ALICE_CHILD_OWNER"),
       ),
     ).toBe(false);
-    if (process.env["PI_ORB_E2E_BACKEND"] === "process") {
-      expect(control.logs.join("")).toContain(`multi-user-resource-owner orb=${child} owner=alice`);
-      expect(control.logs.join("")).not.toContain(
-        `multi-user-resource-owner orb=${child} owner=bob`,
-      );
-      expect(control.logs.join("")).not.toContain(
-        `multi-user-resource-owner orb=${child} owner=unknown`,
-      );
-    }
+    expect(control.logs.join("")).toContain(`multi-user-resource-owner orb=${child} owner=alice`);
+    expect(control.logs.join("")).not.toContain(`multi-user-resource-owner orb=${child} owner=bob`);
+    expect(control.logs.join("")).not.toContain(
+      `multi-user-resource-owner orb=${child} owner=unknown`,
+    );
     completed = true;
   }, 360_000);
 });

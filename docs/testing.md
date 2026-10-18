@@ -1,5 +1,17 @@
 # Testing
 
+## PR 145 first qualification (2026-10-18; undeployed)
+
+[Checks39159748045](https://github.com/schani/pi-orb/actions/runs/39159748045) first failed an obsolete package contract requiring the removed vendored subagent; that assertion is removed. [Docker39159748118](https://github.com/schani/pi-orb/actions/runs/39159748118), source `1905e42`, first failed full-slice shard3 and multi-user credentials. Logs/artifacts remain under `/workspace/pr145-evidence/ci-first/`; uploaded DST JSONs are historical traces, not new DST failures.
+
+Full-slice reproduced unchanged on `46bbe77` with verified image `sha256:4aff5d0f064c8bed1113d9d65db849cdb4ca94e5170ab639489243c4ee13fdaf`: no request reached the reasoning fence, then cleanup rethrew `ENOTFOUND host.docker.internal`. The control-plane model relay runs on the runner, even with Docker compute; advertising a guest-only hostname breaks its upstream fetch. Both backends now use the fence's default loopback listener. The strengthened source contract fails first; six reasoning/fence contracts, E2E types and scoped lint pass. Local reproduction and receipts: `/workspace/pr145-evidence/full-slice-local/`. Existing operation identity, live reasoning, strict tool, security and lifecycle assertions/deadlines remain unchanged. Actual focused/full-file corrected Docker qualification is pending.
+
+The first corrected attempt failed before tests:5436 was still owned by the unchanged RED's PostgreSQL container `ff32d9d5ab96` (`pi-orb-e2e-pg-e3fc9525-1e91-4eb2-a4db-6f6c414a6537`). Its stored orb ID exactly matches the RED artifact target. Retained relay-close failure escaped `controlPlane.stop()` before PostgreSQL cleanup; a tests-first `finally` contract now preserves that failure while guaranteeing the remaining fixture cleanup. Ownership/inventory evidence and the failed attempt are retained beside the RED. Only that verified owned container was removed; root PostgreSQL5432 was untouched.
+
+The multi-user fixture uses PGlite/process hosts even under Docker-shard environment selection. Its conditional local Git transport was absent there: resource acquisition failed Git authentication before child inference. The synthetic Alice grant independently fails where anonymous Git succeeds. Local Git environment/resource-repository injection is now unconditional after owner resolution; Alice/not-Bob model and Git credential assertions remain mandatory on both environments. The corrected Docker-environment file passes1/1. Evidence: `/workspace/pr145-evidence/multi-user/{red-summary.json,git-auth-reproduction.json,green.log}`.
+
+The first exact-`46bbe77` native build passed and its owned resources were cleaned. This predates the fixture corrections; final-head qualification remains required. No deployment or full-suite pass is claimed.
+
 **Owner-connection fixture navigation (2026-10-17):** returning Home uses the SPA link and asserts no new document request; explicit reload still verifies persistence. Tests-first evidence and investigation limits: `docs/postmortems/2026-10-16-claude-compaction-scrollback.md`.
 
 ## Usage mock connection ownership (decision 2026-10-16)
