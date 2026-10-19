@@ -65,10 +65,10 @@ The user explicitly waived explaining only Deploy `39269276700`'s recorded
 historical debug-token mint failure: “You can waive that mint’s cause.” Missing
 stderr leaves its cause unknown; no root-cause fix is claimed. Preserve the
 first-failure evidence and failed gate. Both fixtures are verified absent;
-deployed `5b9653bd` remains **applied-but-unvalidated**. No gate or future error is
-waived: ordinary exact-head qualification, release validation and new-failure
-handling remain mandatory. The telemetry/retry feature is implemented locally; hosted qualification and
-release validation remain tracked in `TODO.md`.
+deployed `5b9653bd` was **applied-but-unvalidated** at the waiver. No gate or future
+error is waived: ordinary exact-head qualification, release validation and
+new-failure handling remain mandatory. Subsequent runner qualification and
+release recovery are recorded below.
 
 ## Initial diagnostic correction — local, undeployed
 
@@ -83,7 +83,8 @@ all 11 focused tests passed with fake clocks and secret-bearing subprocess
 results/exceptions. After `npm ci`, full infrastructure qualification passed:
 92 Node, 186 Python and 32 native-VM tests, zero failures. Original first-failure
 evidence is unchanged. These tests qualify diagnostics, not the historical auth cause
-or production recovery. Hosted qualification and release validation remain tracked in `TODO.md`.
+or production recovery. Subsequent hosted qualification and release validation
+are recorded below.
 
 ## Classified retry correction — local, undeployed (2026-10-19, PDT)
 
@@ -126,6 +127,27 @@ passed. `infra-bookkeeping-qualified.log`, `typecheck-bookkeeping-qualified.log`
 did not run full E2E. Hosted exact-head CI must run the full unit suite. These
 corrections establish runner behavior, not the historical auth cause or production
 recovery; no deployment, validation-only run or release-record mutation occurred.
+
+## Recovery — 2026-10-19, PDT
+
+Runner `27bad6ec` passed hosted CI `39283295725`, E2E `39283295721` and
+Durable `39283295730`, all on attempt 1. Genuine validation-only
+[Deploy 39283648895](https://github.com/schani/pi-orb/actions/runs/39283648895)
+then completed at 9:25:19 AM: all seven gates passed and four fixtures are
+recorded deleted. New record `r-1792426427-3aa0fdaf-a846-4ebc-b42d-819d0f3507e7`
+is **validated** and explicitly names the original release in `validatesRelease`.
+Product `5b9653bd`, deployed artifacts, generation `1792422251` and serving
+revision `00065-p5z` are unchanged; runner qualification is not a product rollout.
+The original failed record remains unchanged. The historical mint cause remains
+unknown under the narrow waiver above; no historical root-cause fix is claimed.
+
+Receipt: `/workspace/validation-recovery-evidence/release-39283648895-1/release.json`.
+The first later manual observation remains a regression from this operator orb's
+mint-floor denials. A separate isolated window subsequently recorded **observed**
+with 16 available samples and zero ERROR, HTTP 429/5xx or lifecycle regression
+counters; central inference remains unobserved. This is not the original rollout
+window or a historical mint-cause fix. Separate receipt and causal limits:
+`docs/postmortems/2026-10-19-observer-mint-floor.md`.
 
 ## Evidence
 

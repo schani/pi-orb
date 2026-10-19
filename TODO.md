@@ -8,13 +8,9 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Qualify image-validation correction** (`4e44ed35`; `docs/testing.md`, `docs/postmortems/2026-10-19-image-test-cpu-contention.md`). Complete ordinary exact-head release qualification; focused controlled receipts do not replace it.
-
 - **Align boot-hooks skill context-delivery claims** (`apps/orb-runtime/skills/boot-hooks/SKILL.md:105–106,124–125`): reconcile promised env issues and failed-hook outcome/log path in model context with actual delivery; `bootHookPrompt` has no production caller. Remove its unused renderer if appropriate.
 
 - **Review correction for false idle during release handoff** (2026-10-18; `docs/postmortems/2026-10-18-false-idle-during-release.md`). Recommendation, not approved implementation: distinguish unobserved activity from confirmed idle in central metadata and unloaded conversation/WS snapshots. Before any authorized fix, add deterministic ownership-handoff coverage and content-free revision/owner/observation diagnostics sufficient to explain the user-visible status without raw payloads. Discuss any persisted-state change before implementing it; no product fix is authorized by this investigation.
-
-- **Qualify smoke auth telemetry/retry and validate the applied release** (2026-10-19; `docs/postmortems/2026-10-19-lifecycle-smoke-auth.md`). The runner feature is implemented locally with tests-first classified retry/privacy/deadline/cleanup coverage; complete hosted exact-head qualification and explicit original-record validation-only recovery. The user waived only explaining Deploy 39269276700's recorded historical debug-token mint cause on 2026-10-19, PDT (America/Los_Angeles); preserve first-failure evidence, with missing stderr and cause unknown. Both fixtures are verified absent; deployed `5b9653bd` remains applied-but-unvalidated. No gates or future errors are waived; local diagnostic tests are not production recovery and new failures require normal handling.
 
 - **Diagnose lifecycle-smoke old-revision HTTP 500** (2026-10-16; `docs/postmortems/2026-10-16-lifecycle-smoke-http500.md`). Establish why the restart GET was attributed to deleted revision `00060-kfk`; correlate response shape and trace evidence. Deploy 38961777202 remains applied-but-unvalidated; bounded smoke retries do not explain or clear it.
 

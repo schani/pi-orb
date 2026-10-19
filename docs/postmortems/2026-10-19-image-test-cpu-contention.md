@@ -142,3 +142,13 @@ Installed prelude SHA-256:
 No persisted-state change, full-suite/E2E/image release qualification, commit,
 push or deployment occurred. The complete original hashed log was not recovered
 in this workspace; archived transcript excerpts cannot replace its bytes.
+
+## Subsequent release qualification — 2026-10-19, PDT
+
+The correction shipped in product `5b9653bd` after attempt-1 CI/E2E/Durable
+qualification. Deploy `39269276700` applied it but failed lifecycle auth.
+Validation-only `39283648895`, using qualified runner `27bad6ec`, subsequently
+validated that unchanged product/artifact generation with all seven recovery
+gates passed and four fixtures recorded deleted. The original failed record
+and historical-attribution limits remain unchanged. Receipts and independent
+observation limits: `docs/testing.md`, `docs/deployment.md`.
