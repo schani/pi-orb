@@ -1,5 +1,5 @@
 import { NoSimulationTask } from "determined";
-import { okAsync, ResultAsync } from "neverthrow";
+import { ok, okAsync, ResultAsync } from "neverthrow";
 import { expect, it, vi } from "vitest";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
 import type { AgentPlane } from "./agent-ports.ts";
@@ -40,15 +40,17 @@ it("allocates execution while central resource preparation is held", async () =>
         phase: "loading_session",
       }));
     },
-    deliverMessage: () =>
-      okAsync({
-        v: 1,
-        messageId: "unused",
-        status: "queued",
-        delivery: "turn",
-        operationId: "unused",
-        duplicate: false,
-      }),
+    deliverMessages: () =>
+      okAsync([
+        ok({
+          v: 1,
+          messageId: "unused",
+          status: "queued",
+          delivery: "turn",
+          operationId: "unused",
+          duplicate: false,
+        }),
+      ]),
     prepareIdleStop: () => okAsync({ v: 1, prepared: true }),
     pullHistory: () =>
       okAsync({

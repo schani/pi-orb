@@ -14,7 +14,7 @@ it("routes central Pi and native Claude by immutable harness selection", async (
   const makePlane = (kind: "central" | "host") => ({
     placement: kind,
     health: vi.fn(() => okAsync({})),
-    deliverMessage: vi.fn(() => okAsync({})),
+    deliverMessages: vi.fn(() => okAsync([])),
     prepareIdleStop: vi.fn(() => okAsync({})),
     pullHistory: vi.fn(() => okAsync({})),
     suspend: vi.fn(() => okAsync(undefined)),
@@ -34,7 +34,7 @@ it("routes central Pi and native Claude by immutable harness selection", async (
   for (const orb of [pi, claude]) {
     expect(plane.placementFor(orb)).toBe(orb.harness === "claude" ? "host" : "central");
     await plane.health(task, orb, context);
-    await plane.deliverMessage(task, orb, {} as never, context);
+    await plane.deliverMessages(task, orb, [{} as never], context);
     await plane.prepareIdleStop(task, orb, context);
     await plane.pullHistory(task, orb, {} as never, context);
     await plane.suspend(task, orb.id, context, 3);
@@ -42,7 +42,7 @@ it("routes central Pi and native Claude by immutable harness selection", async (
   }
   for (const method of [
     "health",
-    "deliverMessage",
+    "deliverMessages",
     "prepareIdleStop",
     "pullHistory",
     "suspend",

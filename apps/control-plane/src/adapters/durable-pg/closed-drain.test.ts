@@ -236,13 +236,14 @@ it.each([false, true])(
       (
         await database.store.claimNextOrbMessageBatch(task, { orbId: id, now: task.wallNow() })
       )._unsafeUnwrap();
-      const delivery = await plane.deliverMessage(
+      const delivery = await plane.deliverMessages(
         task,
         orb,
-        { baseUrl: "central", messageId, messageIds: [messageId], content },
+        [{ baseUrl: "central", messageId, messageIds: [messageId], content }],
         context,
       );
       expect(delivery.isOk(), JSON.stringify(delivery)).toBe(true);
+      expect(delivery._unsafeUnwrap()[0]!.isOk()).toBe(true);
       await entered.promise;
       (await requestOrbDeletion(task, deps, id))._unsafeUnwrap();
       releaseTool.resolve();

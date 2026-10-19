@@ -44,13 +44,13 @@ export class HarnessAgentPlane implements AgentPlane {
   executionActive(orbId: string) {
     return this.pi.executionActive?.(orbId) ?? false;
   }
-  deliverMessage(
+  deliverMessages(
     task: SimulationTask,
     orb: OrbRow,
-    request: DeliverMessageClientRequest,
+    requests: readonly DeliverMessageClientRequest[],
     context: OperationContext,
   ) {
-    return this.select(orb).deliverMessage(task, orb, request, context);
+    return this.select(orb).deliverMessages(task, orb, requests, context);
   }
   prepareIdleStop(task: SimulationTask, orb: OrbRow, context: OperationContext) {
     return this.select(orb).prepareIdleStop(task, orb, context);

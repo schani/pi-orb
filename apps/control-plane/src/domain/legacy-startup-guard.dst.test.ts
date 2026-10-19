@@ -26,13 +26,13 @@ function rejectingPlane() {
   const checkStartup = vi.fn((..._args: Parameters<AgentPlane["health"]>) =>
     errAsync<void, RuntimeClientError>(refusal),
   );
-  const deliverMessage = vi.fn<AgentPlane["deliverMessage"]>(() => errAsync(refusal));
+  const deliverMessages = vi.fn<AgentPlane["deliverMessages"]>(() => errAsync(refusal));
   const health = vi.fn<AgentPlane["health"]>(() => errAsync(refusal));
   const plane: AgentPlane & { checkStartup: typeof checkStartup } = {
     placement: "central",
     checkStartup,
     health,
-    deliverMessage,
+    deliverMessages,
     pullHistory: () => errAsync(refusal),
     prepareIdleStop: () => errAsync(refusal),
     suspend: () => okAsync(undefined),
@@ -40,7 +40,7 @@ function rejectingPlane() {
     session: () => null,
     close: () => okAsync(undefined),
   };
-  return { plane, checkStartup, deliverMessage, health };
+  return { plane, checkStartup, deliverMessages, health };
 }
 
 it("manual refusal precedes sleep cancellation and CAS, and shares one rejection edge with dispatch", async () => {
@@ -81,7 +81,7 @@ it("manual refusal precedes sleep cancellation and CAS, and shares one rejection
             expect(h.store.orbSnapshot("orb")).toEqual(before);
             expect(cas).not.toHaveBeenCalled();
             expect(sleep).not.toHaveBeenCalled();
-            expect(f.deliverMessage).not.toHaveBeenCalled();
+            expect(f.deliverMessages).not.toHaveBeenCalled();
             expect(log.matching(" central-agent-start-rejected ")).toHaveLength(1);
             expect(log.matching("legacy_backend")).toHaveLength(1);
             expect(log.matching(" central-agent-unavailable ")).toHaveLength(0);
@@ -178,7 +178,7 @@ it.each(["queued", "delivering", "cancelled-member"] as const)(
                 lastError:
                   scenario === "cancelled-member" ? "Cancelled before agent admission" : message,
               });
-              const request = f.deliverMessage.mock.calls[0]![2];
+              const request = f.deliverMessages.mock.calls[0]![2][0]!;
               expect(request.messageIds).toEqual(
                 scenario === "cancelled-member" ? [first] : [first, second],
               );
@@ -186,7 +186,7 @@ it.each(["queued", "delivering", "cancelled-member"] as const)(
               if (scenario === "cancelled-member") expect(request.messageId).not.toBe(frozenBatch);
               for (let i = 0; i < 3; i++) await reconcileCentralAgent(task, deps, "orb");
               expect(h.store.messageSnapshots("orb")).toEqual(failed);
-              expect(f.deliverMessage).toHaveBeenCalledTimes(1);
+              expect(f.deliverMessages).toHaveBeenCalledTimes(1);
               // A terminal batch must not wedge later FIFO input or become a retry obligation.
               (
                 await h.store.enqueueOrbMessage(task, {
@@ -200,7 +200,7 @@ it.each(["queued", "delivering", "cancelled-member"] as const)(
               expect(
                 h.store.messageSnapshots("orb").find((row) => row.messageId === later),
               ).toMatchObject({ status: "failed", lastError: message });
-              expect(f.deliverMessage).toHaveBeenCalledTimes(2);
+              expect(f.deliverMessages).toHaveBeenCalledTimes(2);
               expect(h.store.replicaRecords("orb")).toEqual([record]);
               expect(h.store.orbSnapshot("orb")).toMatchObject({
                 state: before.state,

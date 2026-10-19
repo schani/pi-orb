@@ -335,6 +335,7 @@ export class DurableAgent implements AgentSessionFacade {
               ? fenceModels(models, options.checkAdmission, options.ownershipSignal)
               : models,
             registry: options.registry,
+            settings: { steeringMode: "all", followUpMode: "all" },
             env: (target) => options.envFor?.(target) ?? options.env,
             ...(options.now === undefined ? {} : { now: options.now }),
             onReport: (error) => {
@@ -424,6 +425,7 @@ export class DurableAgent implements AgentSessionFacade {
         };
         agent.receipts = identity.receipts;
         agent.settingsReceipts = identity.settings;
+        let unfinishedSubmissions = false;
         let submissionCursor: Cursor | undefined;
         do {
           const page = await options.storage.scanSubmissions(
@@ -433,6 +435,8 @@ export class DurableAgent implements AgentSessionFacade {
             context,
           );
           for (const submission of page.items) {
+            if (submission.status === "queued" || submission.status === "placed")
+              unfinishedSubmissions = true;
             if (submission.entry !== undefined && submission.requestId?.startsWith("inbox:"))
               agent.inboxEntries.set(submission.entry, submission.requestId.slice(6));
             if (
@@ -499,7 +503,8 @@ export class DurableAgent implements AgentSessionFacade {
           if (end.reason === "failed") agent.storageFailed(end.error);
         });
         const recoveredTasks = Object.keys(agent.tasks.tasks);
-        if (recoveredTasks.length > 0 && options.resume !== false) {
+        const recovering = recoveredTasks.length > 0 || unfinishedSubmissions;
+        if (recovering && options.resume !== false) {
           stage = "recovery budget";
           const admitted = await options.admitRecovery?.();
           if (admitted?.isErr()) {
@@ -525,7 +530,7 @@ export class DurableAgent implements AgentSessionFacade {
         const edge = await options.edge?.("harness.opened", {
           orbId: options.orbId,
           sessionId: identity.sessionId,
-          recovered: recoveredTasks.length > 0,
+          recovered: recovering,
           readonly: agent.paused,
           processId: process.pid,
         });
@@ -540,7 +545,10 @@ export class DurableAgent implements AgentSessionFacade {
         }
         agent.updateStatus();
         stage = "resume";
-        if (options.resume !== false) harness.resume();
+        if (options.resume !== false) {
+          await root.submitMany([], context);
+          harness.resume();
+        }
         return ok(agent);
       })(),
       (error) => {
@@ -1077,110 +1085,144 @@ export class DurableAgent implements AgentSessionFacade {
   deliver(
     request: DeliverMessageClientRequest,
   ): ResultAsync<DeliverOrbMessageResponse, RuntimeClientError> {
-    return this.serial(() => this.deliverNow(request));
+    return this.deliverMany([request]).andThen((results) => results[0]!);
   }
 
-  private async deliverNow(
-    request: DeliverMessageClientRequest,
-  ): Promise<Result<DeliverOrbMessageResponse, RuntimeClientError>> {
+  deliverMany(
+    requests: readonly DeliverMessageClientRequest[],
+  ): ResultAsync<
+    readonly Result<DeliverOrbMessageResponse, RuntimeClientError>[],
+    RuntimeClientError
+  > {
+    return this.serial(() => this.deliverManyNow(requests));
+  }
+
+  private async deliverManyNow(
+    requests: readonly DeliverMessageClientRequest[],
+  ): Promise<
+    Result<readonly Result<DeliverOrbMessageResponse, RuntimeClientError>[], RuntimeClientError>
+  > {
     if (this.failure) return err(this.failure);
-    const fingerprint = JSON.stringify({
-      content: request.content,
-      messageIds: request.messageIds,
-      system: request.system ?? null,
-    });
-    const existing = this.receipts[request.messageId];
-    if (existing && existing.fingerprint !== fingerprint)
-      return err(durableError("message ID conflicts with persisted content"));
-    const nativeRequestId = `inbox:${request.messageId}`;
-    const lookup = ResultAsync.fromThrowable(
-      () => this.options.storage.submissionByRequest(this.root.id, nativeRequestId, context),
-      (error) => this.immediateStorageFailure(error, "Native input lookup failed"),
-    );
-    const native = await lookup();
-    if (native.isErr()) return err(native.error);
-    if (native.value === undefined) {
-      const admission = await this.options.checkInputAdmission?.(request.messageIds.length === 0);
-      if (admission?.isErr()) {
-        if (admission.error.type === "input_admission_failed") {
-          this.failStorage(admission.error.cause);
-          return err(startupRuntimeError(admission.error.cause));
-        }
-        // A concurrent native admission wins over an advisory policy refusal.
-        const latest = await lookup();
-        if (latest.isErr()) return err(latest.error);
-        if (latest.value === undefined) return err(admission.error.error);
-      }
-    }
-    const delivery =
-      existing?.submissionId !== undefined
-        ? existing.delivery
-        : this.operationId
-          ? "steer"
-          : "turn";
     const wasBusy = this.operationId;
-    const content = nativeInputContent(request.content, request.system);
-    if (!existing) {
-      const admitted: Receipt = {
-        fingerprint,
-        operationId: wasBusy ?? `${this.session.id}:input:${request.messageId}`,
-        delivery,
-        messageIds: [...request.messageIds],
-        ...(request.system === undefined ? {} : { system: request.system }),
-      };
-      await this.root.commit(async (tx) => {
-        (await tx.doc(Identity, this.root.id)).receipts[request.messageId] = admitted;
-      }, context);
-      this.receipts[request.messageId] = admitted;
+    const results: Result<DeliverOrbMessageResponse, RuntimeClientError>[] = [];
+    const prepared: {
+      index: number;
+      request: DeliverMessageClientRequest;
+      receipt: Receipt;
+      duplicate: boolean;
+      settled: boolean;
+    }[] = [];
+    for (const [index, request] of requests.entries()) {
+      const fingerprint = JSON.stringify({
+        content: request.content,
+        messageIds: request.messageIds,
+        system: request.system ?? null,
+      });
+      const existing = this.receipts[request.messageId];
+      if (existing && existing.fingerprint !== fingerprint) {
+        results[index] = err(durableError("message ID conflicts with persisted content"));
+        continue;
+      }
+      const nativeRequestId = `inbox:${request.messageId}`;
+      const lookup = ResultAsync.fromThrowable(
+        () => this.options.storage.submissionByRequest(this.root.id, nativeRequestId, context),
+        (error) => this.immediateStorageFailure(error, "Native input lookup failed"),
+      );
+      let native = await lookup();
+      if (native.isErr()) return err(native.error);
+      if (native.value === undefined) {
+        const admission = await this.options.checkInputAdmission?.(request.messageIds.length === 0);
+        if (admission?.isErr()) {
+          if (admission.error.type === "input_admission_failed") {
+            this.failStorage(admission.error.cause);
+            return err(startupRuntimeError(admission.error.cause));
+          }
+          // Only this request's prior native admission can override an advisory refusal.
+          const latest = await lookup();
+          if (latest.isErr()) return err(latest.error);
+          if (latest.value === undefined) return err(admission.error.error);
+          native = latest;
+        }
+      }
+      prepared.push({
+        index,
+        request,
+        duplicate: existing?.submissionId !== undefined,
+        settled: native.value?.status === "done" || native.value?.status === "unanswered",
+        receipt: existing ?? {
+          fingerprint,
+          operationId: wasBusy ?? `${this.session.id}:input:${request.messageId}`,
+          delivery: wasBusy ? "steer" : "turn",
+          messageIds: [...request.messageIds],
+          ...(request.system === undefined ? {} : { system: request.system }),
+        },
+      });
     }
+    await this.root.commit(async (tx) => {
+      const identity = await tx.doc(Identity, this.root.id);
+      for (const { request, receipt } of prepared) identity.receipts[request.messageId] = receipt;
+    }, context);
+    for (const { request, receipt } of prepared) this.receipts[request.messageId] = receipt;
     const stillAdmitted = await this.options.checkAdmission?.();
     if (this.closing || this.paused || stillAdmitted?.isErr())
       return err(
         stillAdmitted?.isErr() ? stillAdmitted.error : durableError("Harness admissions closed"),
       );
     const admitted = await ResultAsync.fromPromise(
-      this.root.submit(
-        {
-          type: "input",
-          content,
-          requestId: nativeRequestId,
-          whenBusy: "steer",
-        },
+      this.root.submitMany(
+        prepared.map(({ request }) => ({
+          type: "input" as const,
+          content: nativeInputContent(request.content, request.system),
+          requestId: `inbox:${request.messageId}`,
+          whenBusy: "steer" as const,
+        })),
         context,
       ),
       (error) => {
         const authority = storageAuthorityError(error);
         return authority
           ? startupRuntimeError(authority)
-          : durableError("Native input admission failed");
+          : durableError("Native input admission failed", true);
       },
     );
     if (admitted.isErr()) return err(admitted.error);
-    const submitted = admitted.value;
-    const operationId =
-      existing?.submissionId !== undefined
-        ? existing.operationId
-        : (wasBusy ?? `${this.session.id}:submission:${submitted.id}`);
-    const receipt = {
-      fingerprint,
-      operationId,
-      delivery,
-      submissionId: submitted.id,
-      messageIds: [...request.messageIds],
-      ...(request.system === undefined ? {} : { system: request.system }),
-    };
+    const recoveredInputId =
+      admitted.value.submissions[
+        prepared.findIndex(({ duplicate, settled }) => !duplicate && settled)
+      ]?.id;
+    for (const [index, input] of prepared.entries()) {
+      const { request, receipt, duplicate, settled } = input;
+      const submissionId = admitted.value.submissions[index]!.id;
+      const inputId = (settled ? recoveredInputId : admitted.value.inputId) ?? submissionId;
+      const nativeOperationId = `${this.session.id}:submission:${inputId}`;
+      const operationId = settled ? nativeOperationId : (this.operationId ?? nativeOperationId);
+      const delivery = settled
+        ? receipt.delivery
+        : admitted.value.busy || operationId !== nativeOperationId
+          ? "steer"
+          : "turn";
+      const finalized: Receipt = {
+        ...receipt,
+        submissionId,
+        delivery: duplicate ? receipt.delivery : delivery,
+        operationId: duplicate ? receipt.operationId : operationId,
+      };
+      input.receipt = finalized;
+      results[input.index] = ok({
+        v: 1,
+        messageId: request.messageId,
+        status: "persisted",
+        operationId: finalized.operationId,
+        delivery: finalized.delivery,
+        duplicate,
+      });
+    }
     await this.root.commit(async (tx) => {
-      (await tx.doc(Identity, this.root.id)).receipts[request.messageId] = receipt;
+      const identity = await tx.doc(Identity, this.root.id);
+      for (const { request, receipt } of prepared) identity.receipts[request.messageId] = receipt;
     }, context);
-    this.receipts[request.messageId] = receipt;
-    return ok({
-      v: 1,
-      messageId: request.messageId,
-      status: "persisted",
-      operationId,
-      delivery,
-      duplicate: existing?.submissionId !== undefined,
-    });
+    for (const { request, receipt } of prepared) this.receipts[request.messageId] = receipt;
+    return ok(results);
   }
 
   request(
@@ -1199,17 +1241,21 @@ export class DurableAgent implements AgentSessionFacade {
             type: "rejected",
             error: { code: "stale_head", message: "history changed", retryable: false },
           });
-        const delivered = await this.deliverNow({
-          baseUrl: "central",
-          messageId: `browser:${requestId}`,
-          messageIds: [],
-          content: action.content,
-        });
-        return delivered.map((receipt) => ({
-          type: "accepted" as const,
-          operationId: receipt.operationId,
-          duplicate: receipt.duplicate,
-        }));
+        const delivered = await this.deliverManyNow([
+          {
+            baseUrl: "central",
+            messageId: `browser:${requestId}`,
+            messageIds: [],
+            content: action.content,
+          },
+        ]);
+        return delivered
+          .andThen((results) => results[0]!)
+          .map((receipt) => ({
+            type: "accepted" as const,
+            operationId: receipt.operationId,
+            duplicate: receipt.duplicate,
+          }));
       });
     return this.serial<RequestResultFrame["result"]>(async () => {
       if (this.failure && action.type !== "abort") return err(this.failure);

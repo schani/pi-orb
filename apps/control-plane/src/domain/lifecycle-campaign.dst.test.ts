@@ -1,6 +1,6 @@
 import type { HistoryRecord } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { err, errAsync, okAsync } from "neverthrow";
+import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { FAILPOINTS } from "../testkit/failpoints.ts";
 import { makeHarness, makeProjectRow, seedRunningOrb, TEST_USER_ID } from "../testkit/fixtures.ts";
@@ -284,14 +284,23 @@ describe("stateful lifecycle campaign", () => {
                 central.world.setActivity(ORB, centralBusy ? "busy" : "idle");
                 return central.deps.runtimeClient.health(task, url(), context);
               },
-              deliverMessage: (task, orb, request, context) => {
-                inspectRequest(request);
-                return central.deps.runtimeClient.deliverMessage(
-                  task,
-                  { ...request, baseUrl: url() },
-                  context,
-                );
-              },
+              deliverMessages: (task, _orb, requests, context) =>
+                new ResultAsync(
+                  (async () => {
+                    const responses = [];
+                    for (const request of requests) {
+                      inspectRequest(request);
+                      const response = await central.deps.runtimeClient.deliverMessage(
+                        task,
+                        { ...request, baseUrl: url() },
+                        context,
+                      );
+                      if (response.isErr()) return err(response.error);
+                      responses.push(response);
+                    }
+                    return ok(responses);
+                  })(),
+                ),
               prepareIdleStop: (_task, _orb, _context) => {
                 central.world.setActivity(ORB, centralBusy ? "busy" : "idle");
                 if (centralBusy) return okAsync({ v: 1 as const, prepared: false });

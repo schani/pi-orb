@@ -24,8 +24,8 @@ describe("independent central dispatcher", () => {
       let claimed = false;
       let released = false;
       let delivered = 0;
-      const original = h.store.claimNextOrbMessageBatch.bind(h.store);
-      h.store.claimNextOrbMessageBatch = (task, request) =>
+      const original = h.store.claimOrbMessageBacklog.bind(h.store);
+      h.store.claimOrbMessageBacklog = (task, request) =>
         new ResultAsync(
           (async () => {
             const result = await original(task, request);
@@ -53,16 +53,18 @@ describe("independent central dispatcher", () => {
             status: "initializing" as const,
             phase: "booting" as const,
           }),
-        deliverMessage: () => {
+        deliverMessages: () => {
           delivered++;
-          return okAsync({
-            v: 1 as const,
-            messageId: "old",
-            status: "persisted" as const,
-            delivery: "turn" as const,
-            operationId: "turn",
-            duplicate: false,
-          });
+          return okAsync([
+            ok({
+              v: 1 as const,
+              messageId: "old",
+              status: "persisted" as const,
+              delivery: "turn" as const,
+              operationId: "turn",
+              duplicate: false,
+            }),
+          ]);
         },
         pullHistory: unavailable,
         prepareIdleStop: unavailable,
@@ -184,9 +186,10 @@ describe("independent central dispatcher", () => {
               sessionId: "central",
               activity: "busy" as const,
             }),
-          deliverMessage: (task, _orb, request) =>
+          deliverMessages: (task, _orb, requests) =>
             new ResultAsync(
               (async () => {
+                const request = requests[0]!;
                 if (!deliveries.includes(request.messageId)) {
                   const last = records.at(-1);
                   records.push({
@@ -210,14 +213,16 @@ describe("independent central dispatcher", () => {
                   if (committed.isErr()) return err(committed.error);
                   deliveries.push(request.messageId);
                 }
-                return ok({
-                  v: 1 as const,
-                  messageId: request.messageId,
-                  status: "persisted" as const,
-                  delivery: "steer" as const,
-                  operationId: "turn",
-                  duplicate: false,
-                });
+                return ok([
+                  ok({
+                    v: 1 as const,
+                    messageId: request.messageId,
+                    status: "persisted" as const,
+                    delivery: "steer" as const,
+                    operationId: "turn",
+                    duplicate: false,
+                  }),
+                ]);
               })(),
             ),
           pullHistory: (_task, _orb, request) => {

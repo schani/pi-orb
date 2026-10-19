@@ -663,7 +663,7 @@ describe("central Durable agent", () => {
     expect(closes).toBe(2);
   });
 
-  it("keeps unplaced admitted steering input busy after the preceding run fails", async () => {
+  it("consumes admitted steering input after the preceding run fails", async () => {
     const entered = barrier();
     const release = barrier();
     const faux = fauxProvider();
@@ -676,6 +676,7 @@ describe("central Durable agent", () => {
           errorMessage: "scripted terminal failure",
         });
       },
+      fauxAssistantMessage("queued answer"),
     ]);
     const models = createModels();
     models.setProvider(faux.provider);
@@ -697,8 +698,9 @@ describe("central Durable agent", () => {
       await agent.deliver({ ...input, messageId: "steer", messageIds: ["steer"] });
       release.resolve();
       await agent.waitForIdle();
-      expect(agent.snapshot()._unsafeUnwrap().activity).toBe("busy");
-      expect((await agent.prepareIdleStop())._unsafeUnwrap().prepared).toBe(false);
+      expect(faux.state.callCount).toBe(2);
+      expect(agent.snapshot()._unsafeUnwrap().activity).toBe("idle");
+      expect((await agent.prepareIdleStop())._unsafeUnwrap().prepared).toBe(true);
     } finally {
       release.resolve();
       await agent.close();

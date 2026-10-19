@@ -100,18 +100,22 @@ it("keeps a PG-backed subscribed handle across stopped quiescent unload and repl
     (await plane.health(task, orb, context))._unsafeUnwrap();
     expect(handle.snapshot()._unsafeUnwrap().session.id).toBe(empty.session.id);
     (
-      await plane.deliverMessage(
+      await plane.deliverMessages(
         task,
         orb,
-        {
-          baseUrl: "unused",
-          messageId: randomUUID(),
-          messageIds: [],
-          content: [{ type: "text", text: "first" }],
-        },
+        [
+          {
+            baseUrl: "unused",
+            messageId: randomUUID(),
+            messageIds: [],
+            content: [{ type: "text", text: "first" }],
+          },
+        ],
         context,
       )
-    )._unsafeUnwrap();
+    )
+      ._unsafeUnwrap()[0]!
+      ._unsafeUnwrap();
     await finished[0]!.promise;
     const before = (await handle.readSnapshot!())._unsafeUnwrap();
     expect(dispatches).toBe(1);
@@ -141,18 +145,22 @@ it("keeps a PG-backed subscribed handle across stopped quiescent unload and repl
     orb = (await database.store.getOrb(task, orb.id))._unsafeUnwrap()!;
     (await plane.health(task, orb, context))._unsafeUnwrap();
     (
-      await plane.deliverMessage(
+      await plane.deliverMessages(
         task,
         orb,
-        {
-          baseUrl: "unused",
-          messageId: randomUUID(),
-          messageIds: [],
-          content: [{ type: "text", text: "second" }],
-        },
+        [
+          {
+            baseUrl: "unused",
+            messageId: randomUUID(),
+            messageIds: [],
+            content: [{ type: "text", text: "second" }],
+          },
+        ],
         context,
       )
-    )._unsafeUnwrap();
+    )
+      ._unsafeUnwrap()[0]!
+      ._unsafeUnwrap();
     await finished[1]!.promise;
     expect(opens).toBe(2);
     expect(dispatches).toBe(2);

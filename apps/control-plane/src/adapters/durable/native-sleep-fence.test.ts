@@ -193,11 +193,11 @@ it.each([
         }
         // Delay only the wrapper's receipt finalization, outside the Native mutation line.
         const root = Reflect.get(agent, "root") as Conversation;
-        const submit = root.submit.bind(root);
+        const submitMany = root.submitMany.bind(root);
         const submitted = barrier();
-        vi.spyOn(root, "submit").mockImplementation(async (...args) => {
-          const result = await submit(...args);
-          if (args[0].requestId === `inbox:${messageId}`) {
+        vi.spyOn(root, "submitMany").mockImplementation(async (...args) => {
+          const result = await submitMany(...args);
+          if (args[0].some((input) => input.requestId === `inbox:${messageId}`)) {
             submitted.resolve();
             await receiptRelease.promise;
           }
@@ -304,10 +304,10 @@ it.each([
         ...(system ? { system } : {}),
       };
       if (kind !== "peer-held") {
-        const submit = vi.spyOn(Reflect.get(agent, "root") as Conversation, "submit");
+        const submitMany = vi.spyOn(Reflect.get(agent, "root") as Conversation, "submitMany");
         const admission = await agent.deliver(request);
-        expect(submit).toHaveBeenCalledWith(
-          expect.objectContaining({ whenBusy: "steer", requestId: `inbox:${messageId}` }),
+        expect(submitMany).toHaveBeenCalledWith(
+          [expect.objectContaining({ whenBusy: "steer", requestId: `inbox:${messageId}` })],
           expect.anything(),
         );
         expect(admission._unsafeUnwrap()).toMatchObject({

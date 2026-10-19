@@ -63,15 +63,17 @@ it("never retargets an authorized old alert or delivery to the post-Stop owner",
     ).toBe(true);
     expect(
       (
-        await plane.deliverMessage(
+        await plane.deliverMessages(
           task,
           old,
-          {
-            baseUrl: "central",
-            messageId: "old-message",
-            messageIds: [],
-            content: [{ type: "text", text: "STALE MESSAGE" }],
-          },
+          [
+            {
+              baseUrl: "central",
+              messageId: "old-message",
+              messageIds: [],
+              content: [{ type: "text", text: "STALE MESSAGE" }],
+            },
+          ],
           context,
         )
       ).isErr(),

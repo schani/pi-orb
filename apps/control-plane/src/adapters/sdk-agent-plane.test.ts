@@ -59,15 +59,17 @@ describe("host SDK agent plane", () => {
       const pending =
         method === "pullHistory"
           ? plane.pullHistory(task, orb, { baseUrl: "http://old", after: null, limit: 1 }, context)
-          : plane.deliverMessage(
+          : plane.deliverMessages(
               task,
               orb,
-              {
-                baseUrl: "http://old",
-                messageId: "message",
-                messageIds: ["message"],
-                content: [{ type: "text", text: "hello" }],
-              },
+              [
+                {
+                  baseUrl: "http://old",
+                  messageId: "message",
+                  messageIds: ["message"],
+                  content: [{ type: "text", text: "hello" }],
+                },
+              ],
               context,
             );
       expect(started).not.toHaveBeenCalled();

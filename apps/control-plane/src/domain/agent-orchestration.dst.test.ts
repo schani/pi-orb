@@ -26,7 +26,7 @@ describe("central agent orchestration", () => {
       const plane: AgentPlane = {
         placement: "central",
         health: () => errAsync(failure),
-        deliverMessage: () => errAsync(failure),
+        deliverMessages: () => errAsync(failure),
         prepareIdleStop: () => errAsync(failure),
         pullHistory: () => errAsync(failure),
         suspend: () => okAsync(undefined),
@@ -69,7 +69,7 @@ describe("central agent orchestration", () => {
       const seen: string[] = [];
       const plane: AgentPlane = {
         placement: "central",
-        deliverMessage: () => errAsync(failure),
+        deliverMessages: () => errAsync(failure),
         prepareIdleStop: () => errAsync(failure),
         dispose: () => okAsync(undefined),
         session: () => null,

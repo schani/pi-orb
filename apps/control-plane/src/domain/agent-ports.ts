@@ -107,12 +107,15 @@ export interface AgentPlane {
   ): ResultAsync<void, RuntimeClientError>;
   /** Outstanding immutable VM invocation leases, excluding model/CP work. */
   executionActive?(orbId: string): boolean;
-  deliverMessage(
+  deliverMessages(
     task: SimulationTask,
     orb: OrbRow,
-    request: DeliverMessageClientRequest,
+    requests: readonly DeliverMessageClientRequest[],
     context: OperationContext,
-  ): ResultAsync<DeliverOrbMessageResponse, RuntimeClientError>;
+  ): ResultAsync<
+    readonly Result<DeliverOrbMessageResponse, RuntimeClientError>[],
+    RuntimeClientError
+  >;
   prepareIdleStop(
     task: SimulationTask,
     orb: OrbRow,

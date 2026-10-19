@@ -1,5 +1,15 @@
 # Testing
 
+## FIFO snapshot admission and queued-input recovery (2026-10-18; local, undeployed)
+
+Central Pi now admits the eligible FIFO snapshot atomically and drains queued input after terminal model failure, duplicate retry or authorized active reopen. Native/adapter contracts cover retry context, declined overflow compaction, mixed provenance, independent receipts and operation-handoff races; initial RED evidence: `docs/postmortems/2026-10-18-peer-inbox-stall.md`. Claude's singleton admission is unchanged. Current-source scoped qualification is pending; no full-suite, deployment or live-recovery result is claimed.
+
+The first broad scoped run failed central lifecycle campaign seed25: its adapted sequential fake plane continued after a failed first partition and committed the tail out of FIFO order. Explicit `DST_REPLAY` reproduced the receipt-order assertion before correction. The wrapper now stops forwarding on the first error; FIFO/conservation assertions remain unchanged, and actual Native atomic admission has separate contracts. The corrected schedule diverges under strict replay; that is not a passing replay. Evidence: `test-failures/lifecycle-campaign-central-seed-25-1792372119168-0.json`, `/tmp/queued-input-scoped-tests-first-failure.log`, `/tmp/queued-input-campaign-replay-before-fix.log` and `/tmp/queued-input-campaign-replay-after-fix.log`.
+
+The next scoped run exposed an obsolete Sleep-fence spy/wrapper on `submit`: delivery now uses `submitMany`. Only the fixture seam and array arguments changed; before/after-Sleep guards and consumption/safety assertions remain intact. First failure: `/tmp/queued-input-scoped-tests-second-failure.log`. This is a deterministic fixture mismatch, not a production failure or flake.
+
+The third scoped run found a production regression: the new outer-error path retried definitive orb-wide `legacy_backend`/`history_integrity` denial, leaving input queued. Explicit replay reproduced it before correction. The existing `noteCentralStartup` classification now sends terminal orb-wide denial through the per-partition failure loop for every partition; generic outer errors retry, and individual partition failures remain isolated. Legacy assertions and the global-rejection matrix remain. Evidence: `test-failures/legacy-batch-queued-1792372889276-0.json`, `/tmp/queued-input-scoped-tests-third-failure.log` and `/tmp/queued-input-legacy-replay-before-fix.log`.
+
 ## PR 145 first qualification (2026-10-18; undeployed)
 
 [Checks39159748045](https://github.com/schani/pi-orb/actions/runs/39159748045) first failed an obsolete package contract requiring the removed vendored subagent; that assertion is removed. [Docker39159748118](https://github.com/schani/pi-orb/actions/runs/39159748118), source `1905e42`, first failed full-slice shard3 and multi-user credentials. Logs/artifacts remain under `/workspace/pr145-evidence/ci-first/`; uploaded DST JSONs are historical traces, not new DST failures.

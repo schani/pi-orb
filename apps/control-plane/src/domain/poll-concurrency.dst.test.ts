@@ -151,8 +151,8 @@ describe("real multi-orb polling (DST)", () => {
               ...(inbox ? { inboxMessageIds: [id] } : {}),
             };
           }
-          const claim = h.store.claimNextOrbMessageBatch.bind(h.store);
-          h.store.claimNextOrbMessageBatch = (task, request) =>
+          const claim = h.store.claimOrbMessageBacklog.bind(h.store);
+          h.store.claimOrbMessageBacklog = (task, request) =>
             new ResultAsync(
               (async () => {
                 if (request.orbId === "a" && phase === "claim" && !released) await hold(task);
@@ -184,23 +184,26 @@ describe("real multi-orb polling (DST)", () => {
                   });
                 })(),
               ),
-            deliverMessage: (task, orb, request) =>
+            deliverMessages: (task, orb, requests) =>
               new ResultAsync(
                 (async () => {
+                  const request = requests[0]!;
                   if (orb.id === "a" && phase === "delivery" && !released) await hold(task);
                   if (!deliveries.includes(request.messageId)) {
                     records.get(orb.id)?.push(record(task, orb.id, request.messageId, true));
                     deliveries.push(request.messageId);
                   }
                   gate.notifyAll(task, "delivered");
-                  return ok({
-                    v: 1 as const,
-                    messageId: request.messageId,
-                    status: "persisted" as const,
-                    delivery: "steer" as const,
-                    operationId: "turn",
-                    duplicate: false,
-                  });
+                  return ok([
+                    ok({
+                      v: 1 as const,
+                      messageId: request.messageId,
+                      status: "persisted" as const,
+                      delivery: "steer" as const,
+                      operationId: "turn",
+                      duplicate: false,
+                    }),
+                  ]);
                 })(),
               ),
             pullHistory: (task, orb, request) =>
@@ -399,7 +402,7 @@ for (const ending of ["shutdown", "fatal"] as const) {
               sessionId: orb.id,
               activity: "idle",
             }),
-          deliverMessage: () => {
+          deliverMessages: () => {
             throw new Error("no messages expected");
           },
           pullHistory: (task, orb, request) =>
@@ -683,12 +686,13 @@ it.each(boundaryCases)(
           const pi: AgentPlane = {
             placement: "central",
             health: sdk.health.bind(sdk),
-            deliverMessage: (task, orb, request, context) => {
+            deliverMessages: (task, orb, requests, context) => {
               if (orb.id === "a") {
-                entered.push(...request.messageIds);
-                trace.push({ edge: "port-entered", ids: [...request.messageIds] });
+                const ids = requests.flatMap((request) => [...request.messageIds]);
+                entered.push(...ids);
+                trace.push({ edge: "port-entered", ids });
               }
-              return sdk.deliverMessage(task, orb, request, context).andThen((response) => {
+              return sdk.deliverMessages(task, orb, requests, context).andThen((response) => {
                 h.world.flushPendingInboxBatches(orb.id);
                 const session = h.world.sessionHeaderOf(orb.id);
                 if (session === null) throw new Error("seeded session missing");

@@ -1221,6 +1221,53 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     );
   }
 
+  claimOrbMessageBacklog(
+    task: SimulationTask,
+    params: { orbId: string; now: number },
+  ): ResultAsync<OrbMessageRow[], StoreError> {
+    return this.access(task, FAILPOINTS.storeWrite, "claim orb message backlog", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (orb?.sleepId != null || orb?.stopReason === "sleep") return [];
+      const rows = this.messages.get(params.orbId) ?? [];
+      const outstanding = rows.filter(
+        (row) => row.status === "queued" || row.status === "delivering",
+      );
+      const snapshot: OrbMessageRow[] = [];
+      for (let index = 0; index < outstanding.length; ) {
+        const first = outstanding[index++];
+        if (first === undefined) break;
+        if (first.deliveryBatchId !== null) {
+          snapshot.push(first);
+          continue;
+        }
+        const batch = [first];
+        if (first.system === null) {
+          while (index < outstanding.length) {
+            const next = outstanding[index];
+            if (next === undefined || next.system !== null || next.deliveryBatchId !== null) break;
+            batch.push(next);
+            index++;
+          }
+        }
+        const batchId = messageBatchId(batch.map((row) => row.messageId));
+        snapshot.push(
+          ...batch.map((row) => ({
+            ...row,
+            status: "delivering" as const,
+            deliveryBatchId: batchId,
+            updatedAt: params.now,
+          })),
+        );
+      }
+      const claimed = new Map(snapshot.map((row) => [row.messageId, row]));
+      this.messages.set(
+        params.orbId,
+        rows.map((row) => claimed.get(row.messageId) ?? row),
+      );
+      return snapshot;
+    });
+  }
+
   claimNextOrbMessageBatch(
     task: SimulationTask,
     params: { orbId: string; now: number },

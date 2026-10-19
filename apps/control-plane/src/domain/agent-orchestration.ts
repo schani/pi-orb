@@ -1,5 +1,5 @@
 import type { SimulationTask } from "determined";
-import { okAsync } from "neverthrow";
+import { okAsync, ResultAsync } from "neverthrow";
 import type { OrbRow } from "./orb.ts";
 import type {
   ControlPlaneDeps,
@@ -32,16 +32,20 @@ export function agentHistory(
     : deps.runtimeClient.pullHistory(task, request, context);
 }
 
-export function deliverAgentMessage(
+export function deliverAgentMessages(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   orb: OrbRow,
-  request: DeliverMessageClientRequest,
+  requests: readonly DeliverMessageClientRequest[],
   context: OperationContext,
 ) {
   return deps.agentPlane
-    ? deps.agentPlane.deliverMessage(task, orb, request, context)
-    : deps.runtimeClient.deliverMessage(task, request, context);
+    ? deps.agentPlane.deliverMessages(task, orb, requests, context)
+    : ResultAsync.fromSafePromise(
+        Promise.all(
+          requests.map((request) => deps.runtimeClient.deliverMessage(task, request, context)),
+        ),
+      );
 }
 
 export function prepareAgentStop(

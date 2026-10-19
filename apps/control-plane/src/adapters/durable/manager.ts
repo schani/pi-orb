@@ -463,10 +463,10 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
     return this.handles.get(orbId) ?? null;
   }
 
-  deliverMessage(
+  deliverMessages(
     _task: SimulationTask,
     orb: OrbRow,
-    request: DeliverMessageClientRequest,
+    requests: readonly DeliverMessageClientRequest[],
     context: OperationContext,
   ) {
     if (context.signal.aborted)
@@ -478,7 +478,7 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
     const handle = this.handles.get(orb.id);
     return agent && handle
       ? handle.admit(() =>
-          this.ensure(_task, orb, context).andThen((current) => current.deliver(request)),
+          this.ensure(_task, orb, context).andThen((current) => current.deliverMany(requests)),
         )
       : this.checkStartup(_task, orb, context).andThen(() =>
           errAsync(durableError("central agent is not open", true)),
