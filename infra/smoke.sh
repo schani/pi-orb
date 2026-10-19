@@ -22,17 +22,19 @@ cleanup() {
   trap - EXIT
   if [ "$status" -eq 0 ]; then
     if [ -n "$PROJECT_ID" ]; then
-      fixture_delete project "$PROJECT_ID" || status=1
-      if [ "$status" -eq 0 ] && [ -n "$ORB_ID" ]; then
+      if fixture_delete project "$PROJECT_ID"; then PROJECT_ID=""; else [ "$?" -ne 2 ] || PROJECT_ID=""; status=1; fi
+      if [ -z "$PROJECT_ID" ] && [ -n "$ORB_ID" ]; then
         # A project finalizer removes its orbs. Confirm the row is gone too.
-        fixture_delete orb "$ORB_ID" || status=1
+        if fixture_delete orb "$ORB_ID"; then ORB_ID=""; else [ "$?" -ne 2 ] || ORB_ID=""; status=1; fi
       fi
     fi
-  else
+  fi
+  if [ "$status" -ne 0 ] && [ -n "$PROJECT_ID$ORB_ID" ]; then
     [ -z "$PROJECT_ID" ] || fixture_record project "$PROJECT_ID" retained || true
     [ -z "$ORB_ID" ] || fixture_record orb "$ORB_ID" retained || true
     echo "Failed fixtures retained: project=$PROJECT_ID orb=$ORB_ID; they may incur compute/storage charges." >&2
   fi
+  if [ "$status" -eq 0 ]; then echo "LIFECYCLE SMOKE PASSED (cleanup verified)"; fi
   exit "$status"
 }
 trap cleanup EXIT
@@ -51,7 +53,7 @@ wait_for_state() {
     state=$(jq -er '.state' <<<"$view") || fail "$step: no orb state"
     if [ "$state" != "$last" ]; then say "$step: $state"; last=$state; fi
     if [ "$state" = "$target" ]; then return 0; fi
-    if [ "$state" = failed ]; then fail "$step: $(jq -r '.lastError' <<<"$view")"; fi
+    if [ "$state" = failed ]; then fail "$step: orb failed"; fi
     if [ "$(date +%s)" -ge "$limit" ]; then fail "$step: $state after ${timeout}s (wanted $target)"; fi
     smoke_sleep "$limit"
   done
@@ -64,7 +66,9 @@ command_orb() {
 }
 
 for command in jq python3 uuidgen; do command -v "$command" >/dev/null || fail "missing $command"; done
-export PI_ORB_APP_ORIGIN=${PI_ORB_APP_ORIGIN:-$(cd "$DIR" && tofu output -raw app_url)}
+PI_ORB_APP_ORIGIN=${PI_ORB_APP_ORIGIN:-$(python3 "$DIR/smoke_http.py" external tofu-app)} || fail "app URL unavailable"
+[ -n "$PI_ORB_APP_ORIGIN" ] || fail "app URL empty"
+export PI_ORB_APP_ORIGIN
 PROJECT_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 ORB_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 fixture_record project "$PROJECT_ID" requested

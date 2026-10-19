@@ -381,9 +381,15 @@ describe("workload-identity cloud release configuration", () => {
     expect(network).toMatch(
       /resource "google_compute_firewall" "iap_to_orb_ssh"[\s\S]*source_ranges\s+=\s+\["35\.235\.240\.0\/20"\][\s\S]*target_service_accounts\s+=\s+\[local\.orb_vm_email, local\.image_builder_email\][\s\S]*ports\s+=\s+\["22"\]/,
     );
-    expect(smoke).toContain("--tunnel-through-iap --quiet");
+    const adapter = readFileSync(resolve("infra/smoke_http.py"), "utf8");
+    expect(smoke).toContain('python3 "$DIR/smoke_http.py" external "ssh-$step" "$@"');
+    expect(adapter).toContain('"--tunnel-through-iap", "--quiet"');
+    expect(adapter).toContain('"--project=" + os.environ["PI_ORB_GCP_PROJECT"]');
+    expect(adapter).toContain('"--zone=" + os.environ["PI_ORB_GCE_ZONE"]');
     expect(smoke).toContain('wait_for_ssh "$MINT_INSTANCE"');
-    expect(smoke).toContain("sed 's/^/  /' \"$WORK_DIR/mint.err\"");
+    expect(smoke).toContain("PI_ORB_ID_TOKEN_DIAGNOSTICS=1");
+    expect(adapter).toContain("relay_diagnostics(result.stderr)");
+    expect(smoke).not.toContain("sed 's/^/  /' \"$WORK_DIR/mint.err\"");
   });
 
   it("extracts instance metadata locally from describe JSON", () => {
@@ -391,8 +397,11 @@ describe("workload-identity cloud release configuration", () => {
     const helper = smoke.match(/instance_metadata\(\)[\s\S]*?\n}\n\norb_ssh\(\)/)?.[0];
 
     expect(helper).toBeDefined();
-    expect(helper).toContain("gcloud compute instances describe");
-    expect(helper).toContain("--format=json");
+    const adapter = readFileSync(resolve("infra/smoke_http.py"), "utf8");
+    expect(helper).toContain('external instance-describe "$1"');
+    expect(adapter).toContain(
+      '"describe", name, "--zone=" + os.environ["PI_ORB_GCE_ZONE"], "--format=json"',
+    );
     expect(helper).toContain("JSON.parse(input)");
     expect(helper).not.toContain("--filter");
   });

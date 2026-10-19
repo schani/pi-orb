@@ -55,11 +55,22 @@ rejection nor the helper's subprocess-timeout branch.
   clear the failed lifecycle gate.
 
 **Underlying auth cause remains unknown.** Credential refresh/expiry, a terminal
-transport failure and IAM denial are not established. Historical waivers do not
-cover this failure. No release/validation rerun, production mutation, cleanup,
-IAM change or release-record change was performed by this investigation.
+transport failure and IAM denial are not established. No release/validation rerun,
+production mutation, cleanup, IAM change or release-record change was performed
+by this investigation.
 
-## Diagnostic correction — local, undeployed
+## Historical-cause waiver — 2026-10-19, PDT (America/Los_Angeles)
+
+The user explicitly waived explaining only Deploy `39269276700`'s recorded
+historical debug-token mint failure: “You can waive that mint’s cause.” Missing
+stderr leaves its cause unknown; no root-cause fix is claimed. Preserve the
+first-failure evidence and failed gate. Both fixtures are verified absent;
+deployed `5b9653bd` remains **applied-but-unvalidated**. No gate or future error is
+waived: ordinary exact-head qualification, release validation and new-failure
+handling remain mandatory. The telemetry/retry feature is implemented locally; hosted qualification and
+release validation remain tracked in `TODO.md`.
+
+## Initial diagnostic correction — local, undeployed
 
 Auth failures retain the subprocess exit code, monotonic elapsed seconds and
 only fixed allowlisted RPC/OAuth/transport categories. Unrecognized or conflicting
@@ -72,7 +83,49 @@ all 11 focused tests passed with fake clocks and secret-bearing subprocess
 results/exceptions. After `npm ci`, full infrastructure qualification passed:
 92 Node, 186 Python and 32 native-VM tests, zero failures. Original first-failure
 evidence is unchanged. These tests qualify diagnostics, not the historical auth cause
-or production recovery. Remaining investigation is tracked in `TODO.md`.
+or production recovery. Hosted qualification and release validation remain tracked in `TODO.md`.
+
+## Classified retry correction — local, undeployed (2026-10-19, PDT)
+
+The user approved bounded classified retries for all external operations in the
+normal lifecycle/identity smokes, not arbitrary command/stage retries. The smoke
+adapter now covers authentication, GCE/SSH, preview, issuer verification,
+federation and fixture-publication IO. Unknown failures fail closed; terminal
+credentials, certificates, host keys, headers and typed bodies take precedence.
+Assertions, malformed JSON, remote CLI failures and CAS conflicts do not retry.
+Auth, response bodies and backoff share fixed deadlines. Publication retries the
+same generation-fenced request only; it never refreshes the generation or retries
+the whole transaction. No release schema or fixture-state changes were made.
+
+Retained CI diagnostics contain only fixed operations/categories and numeric
+attempt/status/budget fields. Remote mint diagnostics use the existing allowlist;
+claim/body/error values are not printed. Cleanup distinguishes deletion, absence
+confirmation and recording; PASS follows verified cleanup. Proven API absence
+remains recorded as deleted even if publication fails: internal cleanup exit 2
+clears that ID while keeping the gate failed. Shared projects alone never cause
+an owned-fixture cost warning. Failed owned fixtures
+retain IDs and a cost warning; credential scratch is removed on either verdict.
+
+Tests were written before each correction; red/green receipts are retained under
+`/workspace/smoke-retry-evidence/`. The first full infrastructure run exposed five
+existing publication-diagnostic assertions: an overbroad wrapper suppressed
+already-sanitized Result messages. Preserving those messages corrected the
+wrapper; assertions remain unchanged. The initial full unit run was cut off by
+an agent-imposed 200-second command boundary. Its retained output also exposed
+two stale source contracts expecting raw SSH/describe commands in shell. Updated
+contracts assert the same IAP/project/zone/metadata invariants at the new adapter
+boundary, plus sanitized remote diagnostics. Their focused 28-test suite passes.
+A prematurely launched second full unit process was explicitly stopped; all owned
+descendants were verified absent. Neither incomplete run is claimed passed.
+Final frozen-source local checks passed: 104 Node infrastructure tests, 217 Python
+tests, 32 native-VM checks, workspace/E2E typechecks and repository lint (411
+warnings, 83 informational findings, zero errors). Shell syntax and diff checks
+passed. `infra-bookkeeping-qualified.log`, `typecheck-bookkeeping-qualified.log`,
+`lint-bookkeeping-qualified.log` and
+`infra-release-contract.log` retain those receipts. This infra-only runner change
+did not run full E2E. Hosted exact-head CI must run the full unit suite. These
+corrections establish runner behavior, not the historical auth cause or production
+recovery; no deployment, validation-only run or release-record mutation occurred.
 
 ## Evidence
 

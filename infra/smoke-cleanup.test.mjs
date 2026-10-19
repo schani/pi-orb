@@ -48,6 +48,12 @@ exit ${status}
           );
           assert.equal(result.status, status === 0 && apiFailure ? 1 : status, result.stderr);
           assert.equal(existsSync(work), false, "credential scratch must always be removed");
+          if (status === 0 && !apiFailure) {
+            assert.match(result.stdout, /WORKLOAD-IDENTITY SMOKE PASSED/);
+          } else {
+            assert.doesNotMatch(result.stdout, /SMOKE PASSED/);
+            assert.match(result.stderr, /compute\/storage charges/);
+          }
           if (status === 0) {
             const calls = readFileSync(join(dir, "calls"), "utf8").trim().split("\n");
             const subjects = [
@@ -73,4 +79,84 @@ exit ${status}
       });
     }
   }
+}
+
+test("lifecycle partial cleanup never relabels a verified-deleted project retained", () => {
+  const lifecycle = readFileSync(new URL("./smoke.sh", import.meta.url), "utf8");
+  const cleanup = lifecycle.match(/^cleanup\(\) \{[\s\S]*?^\}/m)[0];
+  const result = spawnSync(
+    "bash",
+    [
+      "-c",
+      `
+set -euo pipefail
+PROJECT_ID=owned-project
+ORB_ID=owned-orb
+fixture_delete() { echo "delete:$*"; [ "$1" = project ]; }
+fixture_record() { echo "record:$*"; }
+${cleanup}
+trap cleanup EXIT
+exit 0
+`,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /delete:project owned-project/);
+  assert.match(result.stdout, /delete:orb owned-orb/);
+  assert.match(result.stdout, /record:orb owned-orb retained/);
+  assert.doesNotMatch(result.stdout, /record:project|SMOKE PASSED/);
+  assert.match(result.stderr, /owned-orb.*compute\/storage charges/);
+});
+
+for (const kind of ["lifecycle", "identity-shared", "identity-disposable"]) {
+  test(`${kind}: verified absence survives record failure without PASS`, () => {
+    const identity = kind !== "lifecycle";
+    const source = readFileSync(
+      new URL(identity ? "./smoke-workload-identity.sh" : "./smoke.sh", import.meta.url),
+      "utf8",
+    );
+    const cleanup = source.match(/^cleanup\(\) \{[\s\S]*?^\}/m)[0];
+    const dir = mkdtempSync(join(tmpdir(), "pi-orb-record-cleanup-"));
+    const work = join(dir, "credentials");
+    writeFileSync(work, "credential-sentinel");
+    try {
+      const result = spawnSync(
+        "bash",
+        [
+          "-c",
+          `
+set -euo pipefail
+${helpers}
+fixture_record() { echo "record:$*"; [ "$3" != deleted ]; }
+api() { printf '%s' '{"error":{"code":"not_found"}}'; }
+API=api
+PROJECT_ID=owned-project
+ORB_ID=owned-orb
+MINT_ORB=owned-mint
+STOPPED_ORB=owned-stopped
+PROJECT_IS_DISPOSABLE=${kind === "identity-disposable"}
+${cleanup}
+trap cleanup EXIT
+exit 0
+`,
+        ],
+        { encoding: "utf8", env: { ...process.env, WORK_DIR: work } },
+      );
+      assert.equal(result.status, 1);
+      assert.doesNotMatch(result.stdout, /SMOKE PASSED/);
+      assert.match(result.stderr, /phase=record outcome=failed/);
+      assert.doesNotMatch(result.stdout, /record:orb .* retained/);
+      if (kind === "identity-disposable") {
+        assert.match(result.stdout, /record:project owned-project retained/);
+        assert.match(result.stderr, /compute\/storage charges/);
+      } else {
+        assert.doesNotMatch(result.stdout, /record:project .* retained/);
+        assert.doesNotMatch(result.stderr, /compute\/storage charges/);
+      }
+      if (identity) assert.equal(existsSync(work), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 }

@@ -513,7 +513,11 @@ def main(argv):
         print("usage: release_state.py <init|stage|vars|snapshot|check|publish|activate|finish> RECORD ...", file=sys.stderr)
         return 2
     action, path, *args = argv[1:]
-    cloud = Cloud()
+    if action == "fixture":
+        from infra.smoke_fixture import FixtureCloud
+        cloud = FixtureCloud()
+    else:
+        cloud = Cloud()
     if action == "init" and len(args) == 6:
         release_id, commit, project, region, zone, workflow_url = args
         record = {"schemaVersion": 1, "releaseId": release_id, "commit": commit, "runnerCommit": commit, "project": project, "region": region, "zone": zone,

@@ -90,19 +90,22 @@ cleanup() {
   trap - EXIT
   # Failure evidence stays in the cloud; credential scratch is always removed.
   if [ "$status" -eq 0 ]; then
-    if [ -n "$MINT_ORB" ]; then fixture_delete orb "$MINT_ORB" || status=1; fi
-    if [ -n "$STOPPED_ORB" ]; then fixture_delete orb "$STOPPED_ORB" || status=1; fi
+    if [ -n "$MINT_ORB" ]; then if fixture_delete orb "$MINT_ORB"; then MINT_ORB=""; else [ "$?" -ne 2 ] || MINT_ORB=""; status=1; fi; fi
+    if [ -n "$STOPPED_ORB" ]; then if fixture_delete orb "$STOPPED_ORB"; then STOPPED_ORB=""; else [ "$?" -ne 2 ] || STOPPED_ORB=""; status=1; fi; fi
     if [ "$status" -eq 0 ] && [ "$PROJECT_IS_DISPOSABLE" = true ] && [ -n "$PROJECT_ID" ]; then
-      fixture_delete project "$PROJECT_ID" || status=1
+      if fixture_delete project "$PROJECT_ID"; then PROJECT_ID=""; else [ "$?" -ne 2 ] || PROJECT_ID=""; status=1; fi
     fi
-  elif [ -n "$MINT_ORB$STOPPED_ORB$PROJECT_ID" ]; then
+  fi
+  if [ "$status" -ne 0 ] && { [ -n "$MINT_ORB$STOPPED_ORB" ] || { [ "$PROJECT_IS_DISPOSABLE" = true ] && [ -n "$PROJECT_ID" ]; }; }; then
     [ -z "$MINT_ORB" ] || fixture_record orb "$MINT_ORB" retained || true
     [ -z "$STOPPED_ORB" ] || fixture_record orb "$STOPPED_ORB" retained || true
     if [ "$PROJECT_IS_DISPOSABLE" = true ] && [ -n "$PROJECT_ID" ]; then fixture_record project "$PROJECT_ID" retained || true; fi
-    echo "Failed fixtures retained for diagnosis: project=$PROJECT_ID orbs=$MINT_ORB,$STOPPED_ORB" >&2
+    echo "Failed fixtures retained for diagnosis: orbs=$MINT_ORB,$STOPPED_ORB" >&2
+    if [ "$PROJECT_IS_DISPOSABLE" = true ] && [ -n "$PROJECT_ID" ]; then echo "Owned project retained: $PROJECT_ID" >&2; fi
     echo "Delete only these test fixtures after preserving evidence; they may still incur compute/storage charges." >&2
   fi
   [ -n "$WORK_DIR" ] && rm -rf "$WORK_DIR"
+  if [ "$status" -eq 0 ]; then echo "WORKLOAD-IDENTITY SMOKE PASSED (cleanup verified)"; fi
   exit "$status"
 }
 trap cleanup EXIT
@@ -125,7 +128,7 @@ done
 # assignment whose failure the operator must understand is guarded with `||` or
 # the `if !` form.
 if [ -z "${PI_ORB_APP_ORIGIN:-}" ]; then
-  if ! PI_ORB_APP_ORIGIN=$(cd "$DIR" && tofu output -raw app_url); then
+  if ! PI_ORB_APP_ORIGIN=$(python3 "$DIR/smoke_http.py" external tofu-app); then
     fail "preflight" "no app URL (set PI_ORB_APP_ORIGIN, or make 'tofu output -raw app_url' readable)"
   fi
 fi
@@ -134,7 +137,7 @@ export PI_ORB_APP_ORIGIN
 
 ISSUER_URL=${PI_ORB_ISSUER_URL:-}
 if [ -z "$ISSUER_URL" ]; then
-  if ! ISSUER_URL=$(cd "$DIR" && tofu output -raw issuer_url); then
+  if ! ISSUER_URL=$(python3 "$DIR/smoke_http.py" external tofu-issuer); then
     fail "preflight" "no issuer URL (set PI_ORB_ISSUER_URL, or make 'tofu output -raw issuer_url' readable)"
   fi
 fi
@@ -199,8 +202,10 @@ api() { # api <path> [json-body] [method]
 # Local verifier: exactly the checks docs/workload-identity.md requires of a
 # relying party, run against the *deployed* issuer rather than a fixture. The
 # JWT arrives on stdin and never appears in argv, output, or a file.
+cp "$DIR/smoke_identity_http.cjs" "$WORK_DIR/smoke_identity_http.cjs"
 cat > "$WORK_DIR/verify.js" <<'VERIFY_JS'
 const { createPublicKey, createVerify } = require("node:crypto");
+const { smokeJson } = require("./smoke_identity_http.cjs");
 
 // Run as a file (`node verify.js …`), so the arguments start after argv[1].
 const [issuer, audience, projectId, orbId, incarnation] = process.argv.slice(2);
@@ -219,10 +224,10 @@ const read = () =>
     process.stdin.on("end", () => resolve(data.trim()));
   });
 
-const getJson = async (url) => {
-  const response = await fetch(url);
-  if (!response.ok) fail(`GET ${url} answered ${response.status}`);
-  return await response.json();
+const getJson = async (operation, url) => {
+  const response = await smokeJson(operation, url);
+  if (!response.ok) fail("issuer request failed");
+  return response.body;
 };
 
 (async () => {
@@ -235,20 +240,20 @@ const getJson = async (url) => {
   // Discovery is fetched from the configured issuer origin and must claim to be
   // that issuer. A document naming someone else is a misconfiguration a verifier
   // must never follow.
-  const discovery = await getJson(`${issuer}/.well-known/openid-configuration`);
-  if (discovery.issuer !== issuer) fail(`discovery issuer ${discovery.issuer} != ${issuer}`);
-  if (!String(discovery.jwks_uri).startsWith(issuer)) {
-    fail(`jwks_uri ${discovery.jwks_uri} is not under the issuer origin`);
+  const discovery = await getJson("discovery", `${issuer}/.well-known/openid-configuration`);
+  if (discovery.issuer !== issuer) fail("discovery_issuer_mismatch");
+  if (new URL(discovery.jwks_uri).origin !== new URL(issuer).origin) {
+    fail("jwks_origin_mismatch");
   }
   if (!(discovery.id_token_signing_alg_values_supported || []).includes("RS256")) {
     fail("discovery does not advertise RS256");
   }
 
-  if (header.alg !== "RS256") fail(`unexpected alg ${header.alg}`);
+  if (header.alg !== "RS256") fail("algorithm_mismatch");
   if (!header.kid) fail("no kid in the JWT header");
-  const jwks = await getJson(discovery.jwks_uri);
+  const jwks = await getJson("jwks", discovery.jwks_uri);
   const jwk = (jwks.keys || []).find((key) => key.kid === header.kid);
-  if (!jwk) fail(`kid ${header.kid} is not published in the JWKS`);
+  if (!jwk) fail("key_unpublished");
   const verifier = createVerify("RSA-SHA256");
   verifier.update(`${parts[0]}.${parts[1]}`);
   const signature = Buffer.from(parts[2].replace(/-/g, "+").replace(/_/g, "/"), "base64");
@@ -261,32 +266,23 @@ const getJson = async (url) => {
   // authorization mistake the recipes warn about.
   const now = Math.floor(Date.now() / 1000);
   const skew = 60;
-  if (claims.iss !== issuer) fail(`iss ${claims.iss} != ${issuer}`);
-  if (claims.aud !== audience) fail(`aud ${claims.aud} != ${audience}`);
-  if (claims.token_use !== "exchanged") fail(`token_use ${claims.token_use} != exchanged`);
+  if (claims.iss !== issuer) fail("issuer_mismatch");
+  if (claims.aud !== audience) fail("audience_mismatch");
+  if (claims.token_use !== "exchanged") fail("token_use_mismatch");
   if (!(claims.iat <= now + skew)) fail("iat is in the future");
   if (!(claims.exp > now - skew)) fail("token is already expired");
   if (claims.exp - claims.iat > 3600) fail("lifetime exceeds the documented maximum");
-  if (claims.sub !== orbId) fail(`sub ${claims.sub} != ${orbId}`);
-  if (claims.orb_id !== orbId) fail(`orb_id ${claims.orb_id} != ${orbId}`);
+  if (claims.sub !== orbId) fail("subject_mismatch");
+  if (claims.orb_id !== orbId) fail("orb_mismatch");
   if (String(claims.host_incarnation) !== incarnation) {
-    fail(`host_incarnation ${claims.host_incarnation} != live incarnation ${incarnation}`);
+    fail("incarnation_mismatch");
   }
-  if (claims.project_id !== projectId) fail(`project_id ${claims.project_id} != ${projectId}`);
+  if (claims.project_id !== projectId) fail("project_mismatch");
   if (!claims.jti) fail("no jti claim");
   if (claims.user_id || claims.email) fail("the token carries a user identity it must not have");
 
-  // Claims only — never the token.
-  process.stdout.write(
-    JSON.stringify({
-      kid: header.kid,
-      project_id: claims.project_id,
-      orb_id: claims.orb_id,
-      host_incarnation: claims.host_incarnation,
-      ttl_seconds: claims.exp - claims.iat,
-    }) + "\n",
-  );
-})().catch((error) => fail(String(error)));
+  process.stdout.write("verified\n");
+})().catch(() => fail("local verification failed"));
 VERIFY_JS
 
 # Remote probe, run *inside another live orb* against the control-plane URL
@@ -296,18 +292,19 @@ VERIFY_JS
 # The mint route's error is a bare string (`{"error":"not_mintable"}`, see
 # packages/protocol/src/workload-identity.ts), not the `{"error":{"code":...}}`
 # shape of the browser API, so the code is read from `error` directly.
-cat > "$WORK_DIR/probe.js" <<'PROBE_JS'
+cat "$DIR/smoke_identity_http.cjs" > "$WORK_DIR/probe.js"
+cat >> "$WORK_DIR/probe.js" <<'PROBE_JS'
 let bearer = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => (bearer += chunk));
 process.stdin.on("end", async () => {
-  const response = await fetch(process.argv[1], {
+  const response = await smokeJson("probe", process.argv[1], {
     method: "POST",
     headers: { authorization: `Bearer ${bearer.trim()}`, "content-type": "application/json" },
     body: JSON.stringify({ audience: "urn:pi-orb-smoke:revocation-probe" }),
   });
-  const body = await response.json().catch(() => ({}));
-  const code = typeof body.error === "string" ? body.error : "";
+  if (!response.ok) { process.exitCode = 6; return; }
+  const code = response.body.error === "not_mintable" ? "not_mintable" : "";
   process.stdout.write(`${response.status} ${code}\n`);
 });
 PROBE_JS
@@ -332,8 +329,8 @@ create_project() {
       "$pid" "$name" "https://github.com/octocat/Hello-World")") ||
     fail "create-project" "api.sh failed"
   got=$(printf '%s' "$response" | jget id) ||
-    fail "create-project" "unparseable response: $response"
-  [ "$got" = "$pid" ] || fail "create-project" "unexpected response: $response"
+    fail "create-project" "unparseable response"
+  [ "$got" = "$pid" ] || fail "create-project" "unexpected response"
   fixture_record project "$pid" created
 }
 
@@ -343,8 +340,8 @@ create_orb() {
   response=$(api "/api/v1/projects/$pid/orbs" "$(printf '{"id":"%s"}' "$oid")") ||
     fail "create-orb" "api.sh failed"
   got=$(printf '%s' "$response" | jget id) ||
-    fail "create-orb" "unparseable response: $response"
-  [ "$got" = "$oid" ] || fail "create-orb" "unexpected response: $response"
+    fail "create-orb" "unparseable response"
+  [ "$got" = "$oid" ] || fail "create-orb" "unexpected response"
   fixture_record orb "$oid" created
   say "orb created: $oid"
 }
@@ -358,8 +355,8 @@ wait_for_state() {
     check_deadline "$step"
     view=$(PI_ORB_SMOKE_DEADLINE="$limit" api "/api/v1/orbs/$oid") || fail "$step" "api.sh failed while polling"
     state=$(printf '%s' "$view" | jget state) ||
-      fail "$step" "unparseable orb view: $view"
-    [ -n "$state" ] || fail "$step" "orb view carried no state: $view"
+      fail "$step" "unparseable orb view"
+    [ -n "$state" ] || fail "$step" "orb view carried no state"
     if [ "$state" != "$last" ]; then
       say "  $oid: $state"
       last=$state
@@ -367,7 +364,7 @@ wait_for_state() {
     case "$state" in
       "$target") return 0 ;;
       failed)
-        fail "$step" "orb $oid failed; lastError: $(printf '%s' "$view" | jget lastError)"
+        fail "$step" "orb $oid failed"
         ;;
     esac
     if [ "$(date +%s)" -ge "$limit" ]; then
@@ -382,22 +379,18 @@ command_orb() { # command_orb <orb> <start|stop>
   response=$(api "/api/v1/orbs/$oid/$verb" '{}') ||
     fail "$verb-orb" "api.sh failed"
   err=$(printf '%s' "$response" | jget error.code) ||
-    fail "$verb-orb" "unparseable response: $response"
-  [ -z "$err" ] || fail "$verb-orb" "control plane refused $verb: $response"
+    fail "$verb-orb" "unparseable response"
+  [ -z "$err" ] || fail "$verb-orb" "control plane refused command"
 }
 
 # --- GCE steps --------------------------------------------------------------
 
 orb_instance() { # the one live instance of an orb, by label
-  gcloud compute instances list --project "$PI_ORB_GCP_PROJECT" \
-    --filter="zone:($PI_ORB_GCE_ZONE) AND labels.pi-orb-orb-id=$1" \
-    --format='value(name)'
+  python3 "$DIR/smoke_http.py" external instances-list "$1"
 }
 
 instance_metadata() { # instance_metadata <instance> <key>
-  gcloud compute instances describe "$1" --project "$PI_ORB_GCP_PROJECT" \
-    --zone "$PI_ORB_GCE_ZONE" \
-    --format=json |
+  python3 "$DIR/smoke_http.py" external instance-describe "$1" |
     node -e '
 const key = process.argv[1];
 let input = "";
@@ -415,7 +408,7 @@ process.stdin.on("end", () => {
   const items = Array.isArray(instance.metadata?.items) ? instance.metadata.items : [];
   const matches = items.filter((item) => item.key === key);
   if (matches.length > 1) {
-    process.stderr.write(`instance metadata: duplicate key ${key}\n`);
+    process.stderr.write("instance metadata: duplicate key\n");
     process.exitCode = 3;
     return;
   }
@@ -426,40 +419,18 @@ process.stdin.on("end", () => {
 ' "$2"
 }
 
-orb_ssh() { # orb_ssh <instance> <remote command>; stdin is forwarded
-  # shellcheck disable=SC2086  # PI_ORB_SMOKE_SSH_FLAGS is a deliberate word list
-  gcloud compute ssh "$1" --project "$PI_ORB_GCP_PROJECT" \
-    --zone "$PI_ORB_GCE_ZONE" --tunnel-through-iap --quiet \
-    ${PI_ORB_SMOKE_SSH_FLAGS:-} -- "$2"
+orb_ssh() { # orb_ssh <allowlisted step> <instance> <remote command>
+  local step=$1
+  shift
+  python3 "$DIR/smoke_http.py" external "ssh-$step" "$@"
 }
 
 wait_for_ssh() {
-  local instance=$1
-  local limit=$(( $(date +%s) + SSH_READY_TIMEOUT ))
-  local attempt=0
-  local attempt_error="$WORK_DIR/ssh-ready-attempt.err"
-  local first_error="$WORK_DIR/ssh-ready-first.err"
-  local last_error="$WORK_DIR/ssh-ready-last.err"
-
-  say "waiting for SSH through IAP on $instance (<= ${SSH_READY_TIMEOUT}s)"
-  while :; do
-    check_deadline "ssh-ready"
-    attempt=$((attempt + 1))
-    if orb_ssh "$instance" true </dev/null >/dev/null 2> "$attempt_error"; then
-      say "  SSH ready after $attempt attempt(s)"
-      return 0
-    fi
-    if [ "$attempt" -eq 1 ]; then cp "$attempt_error" "$first_error"; fi
-    cp "$attempt_error" "$last_error"
-    if [ "$(date +%s)" -ge "$limit" ]; then
-      echo "first SSH attempt diagnostic:" >&2
-      sed 's/^/  /' "$first_error" >&2
-      echo "last SSH attempt diagnostic:" >&2
-      sed 's/^/  /' "$last_error" >&2
-      fail "ssh-ready" "SSH through IAP did not become ready after ${SSH_READY_TIMEOUT}s"
-    fi
-    sleep "$POLL_INTERVAL"
-  done
+  local instance=$1 limit=$(( $(date +%s) + SSH_READY_TIMEOUT ))
+  [ "$limit" -le "$DEADLINE" ] || limit=$DEADLINE
+  say "waiting for SSH through IAP (<= ${SSH_READY_TIMEOUT}s)"
+  PI_ORB_SMOKE_DEADLINE="$limit" orb_ssh ready "$instance" true </dev/null >/dev/null ||
+    fail "ssh-ready" "SSH through IAP unavailable"
 }
 
 # --- run --------------------------------------------------------------------
@@ -475,8 +446,8 @@ fi
 MINT_ORB=$(uuidgen | tr '[:upper:]' '[:lower:]')
 STOPPED_ORB=$(uuidgen | tr '[:upper:]' '[:lower:]')
 
-say "workload-identity smoke against $PI_ORB_APP_ORIGIN"
-say "issuer $ISSUER_URL, audience $AUDIENCE"
+say "workload-identity smoke"
+
 say "project $PROJECT_ID (disposable=$PROJECT_IS_DISPOSABLE)"
 if [ "$FEDERATE" != true ]; then
   note "federation legs disabled: set PI_ORB_SMOKE_WIF_AUDIENCE, \
@@ -504,34 +475,30 @@ MINT_INSTANCE=$(orb_instance "$MINT_ORB") ||
 STOPPED_INSTANCE=$(orb_instance "$STOPPED_ORB") ||
   fail "locate-instance" "gcloud could not list instances for $STOPPED_ORB"
 [ "$(printf '%s\n' "$MINT_INSTANCE" | wc -w)" -eq 1 ] ||
-  fail "locate-instance" "expected exactly one instance for $MINT_ORB, got '$MINT_INSTANCE'"
+  fail "locate-instance" "expected exactly one mint instance"
 [ "$(printf '%s\n' "$STOPPED_INSTANCE" | wc -w)" -eq 1 ] ||
-  fail "locate-instance" "expected exactly one instance for $STOPPED_ORB, got '$STOPPED_INSTANCE'"
+  fail "locate-instance" "expected exactly one stopped instance"
 # The instance name is pi-orb-<orbId>-i<incarnation>; the suffix is the live
 # incarnation, and the verifier asserts the token's claim equals it.
 MINT_INCARNATION=${MINT_INSTANCE##*-i}
 case "$MINT_INCARNATION" in
-  "" | *[!0-9]*) fail "locate-instance" "cannot read an incarnation from '$MINT_INSTANCE'" ;;
+  "" | *[!0-9]*) fail "locate-instance" "invalid instance incarnation" ;;
 esac
-say "  minting from $MINT_INSTANCE (incarnation $MINT_INCARNATION)"
+say "  mint instance located"
 wait_for_ssh "$MINT_INSTANCE"
 
 # Use the already-owned peer, not an optional tailnet client on the CI runner.
 preview=$(api "/api/v1/orbs/$STOPPED_ORB" | jget previewHost) || fail "peer-preview" "cannot read preview host"
 [[ "$preview" =~ ^[a-zA-Z0-9.-]+$ ]] && [ "${#preview}" -le 253 ] || fail "peer-preview" "invalid or absent preview host"
 preview_deadline=$(( $(date +%s) + 60 ))
-while :; do
-  check_deadline "peer-preview"
-  preview_response=$(orb_ssh "$MINT_INSTANCE" "sudo python3 - /usr/bin/tailscale '$preview'" < "$DIR/smoke_preview.py" 2> "$WORK_DIR/preview.err") || preview_response=""
-  preview_code=$(printf '%s\n' "$preview_response" | tail -n1)
-  preview_body=$(printf '%s\n' "$preview_response" | sed '$d')
-  if [ "$preview_code" = 200 ] && jq -e '.status == "ready"' <<<"$preview_body" >/dev/null 2>&1; then
-    say "peer preview health: HTTP 200 ready"
-    break
-  fi
-  [ "$(date +%s)" -lt "$preview_deadline" ] || fail "peer-preview" "peer never returned HTTP 200 ready"
-  sleep "$POLL_INTERVAL"
-done
+[ "$preview_deadline" -le "$DEADLINE" ] || preview_deadline=$DEADLINE
+preview_response=$(PI_ORB_SMOKE_DEADLINE="$preview_deadline" orb_ssh preview "$MINT_INSTANCE" "sudo python3 - /usr/bin/tailscale '$preview' $(( $(date +%s) + 25 < preview_deadline ? $(date +%s) + 25 : preview_deadline ))" < "$DIR/smoke_preview.py") ||
+  fail "peer-preview" "preview probe failed"
+preview_code=$(printf '%s\n' "$preview_response" | tail -n1)
+preview_body=$(printf '%s\n' "$preview_response" | sed '$d')
+[ "$preview_code" = 200 ] && jq -e '.status == "ready"' <<<"$preview_body" >/dev/null 2>&1 ||
+  fail "peer-preview" "peer did not return HTTP 200 ready"
+say "peer preview health: HTTP 200 ready"
 
 mint() {
   local audience=$1 out=$2
@@ -539,9 +506,9 @@ mint() {
   # goes to stderr. Isolating the one JWT-shaped line keeps an ssh banner from
   # silently corrupting the token, and the token is never printed, echoed, or
   # placed in an argument list — only redirected into a mode-0600 file and piped.
-  if ! orb_ssh "$MINT_INSTANCE" \
-    "sudo systemd-run --quiet --pipe --wait --collect --uid=orb --property=EnvironmentFile=/run/pi-orb/environment /usr/local/bin/pi-orb id-token --audience '$audience'" \
-    > "$WORK_DIR/mint.raw" 2> "$WORK_DIR/mint.err"; then
+  if ! orb_ssh mint "$MINT_INSTANCE" \
+    "sudo systemd-run --quiet --pipe --wait --collect --uid=orb --property=EnvironmentFile=/run/pi-orb/environment --setenv=PI_ORB_ID_TOKEN_DIAGNOSTICS=1 /usr/local/bin/pi-orb id-token --audience '$audience'" \
+    > "$WORK_DIR/mint.raw"; then
     return 1
   fi
   tr -d '\r' < "$WORK_DIR/mint.raw" |
@@ -552,14 +519,12 @@ mint() {
 
 say "step 4/7: mint through the in-orb CLI and verify against the live issuer"
 if ! mint "$AUDIENCE" "$WORK_DIR/token"; then
-  echo "in-orb mint diagnostic:" >&2
-  sed 's/^/  /' "$WORK_DIR/mint.err" >&2
   fail "mint" "the in-orb CLI produced no JWT"
 fi
 CLAIMS=$(node "$WORK_DIR/verify.js" "$ISSUER_URL" "$AUDIENCE" \
   "$PROJECT_ID" "$MINT_ORB" "$MINT_INCARNATION" \
-  < "$WORK_DIR/token") || fail "verify" "the minted token did not verify against $ISSUER_URL"
-say "  verified: $CLAIMS"
+  < "$WORK_DIR/token") || fail "verify" "the minted token did not verify"
+say "  signature and identity verified"
 
 say "step 5/7: exchange through GCP STS and call a read-only API"
 if [ "$FEDERATE" != true ]; then
@@ -568,25 +533,21 @@ else
   # curl reads its request from a mode-0600 config file so the subject token
   # never enters an argument list.
   sts_exchange() { # sts_exchange <token-file> <out-file> ; prints the HTTP status
-    local token status
+    local token status operation=${3:-sts}
     token=$(tr -d '\n' < "$1")
     cat > "$WORK_DIR/sts.conf" <<EOF
 url = "https://sts.googleapis.com/v1/token"
 header = "content-type: application/json"
 data = "{\"audience\":\"$WIF_STS_AUDIENCE\",\"grantType\":\"urn:ietf:params:oauth:grant-type:token-exchange\",\"requestedTokenType\":\"urn:ietf:params:oauth:token-type:access_token\",\"scope\":\"https://www.googleapis.com/auth/cloud-platform\",\"subjectTokenType\":\"urn:ietf:params:oauth:token-type:jwt\",\"subjectToken\":\"$token\"}"
 EOF
-    # `|| true`: a transport failure must reach the caller as the status `000`
-    # curl already prints, not abort the script at this assignment under `set
-    # -e` before any diagnostic runs. Only the wrong-audience check tells 000
-    # apart from a real rejection.
-    status=$(curl -s -K "$WORK_DIR/sts.conf" -o "$2" -w '%{http_code}' || true)
+    status=$(python3 "$DIR/smoke_http.py" external "$operation" "$WORK_DIR/sts.conf" "$2")
     rm -f "$WORK_DIR/sts.conf"
     printf '%s' "$status"
   }
 
   status=$(sts_exchange "$WORK_DIR/token" "$WORK_DIR/sts.json")
   [ "$status" = "200" ] ||
-    fail "sts-exchange" "STS refused the pi-orb token: HTTP $status $(cat "$WORK_DIR/sts.json")"
+    fail "sts-exchange" "STS exchange failed"
   federated=$(jget access_token < "$WORK_DIR/sts.json") ||
     fail "sts-exchange" "unparseable STS response"
   [ -n "$federated" ] || fail "sts-exchange" "STS returned no access token"
@@ -600,14 +561,14 @@ header = "authorization: Bearer $federated"
 header = "content-type: application/json"
 data = "{\"scope\":[\"https://www.googleapis.com/auth/cloud-platform\"],\"lifetime\":\"300s\"}"
 EOF
-  status=$(curl -s -K "$WORK_DIR/impersonate.conf" -o "$WORK_DIR/sa.json" -w '%{http_code}' || true)
+  status=$(python3 "$DIR/smoke_http.py" external impersonate "$WORK_DIR/impersonate.conf" "$WORK_DIR/sa.json")
   rm -f "$WORK_DIR/impersonate.conf"
   [ "$status" = "200" ] ||
-    fail "impersonate" "generateAccessToken answered HTTP $status $(cat "$WORK_DIR/sa.json")"
+    fail "impersonate" "impersonation failed"
   sa_token=$(jget accessToken < "$WORK_DIR/sa.json") ||
     fail "impersonate" "unparseable generateAccessToken response"
   [ -n "$sa_token" ] || fail "impersonate" "no access token for $WIF_TEST_SA"
-  say "  impersonated $WIF_TEST_SA"
+  say "  impersonation succeeded"
 
   # The acceptance criterion: an authorized read-only API call succeeds, with a
   # credential chain that began inside the orb and contains no stored secret.
@@ -615,38 +576,23 @@ EOF
 url = "https://cloudresourcemanager.googleapis.com/v1/projects/$PI_ORB_GCP_PROJECT"
 header = "authorization: Bearer $sa_token"
 EOF
-  status=$(curl -s -K "$WORK_DIR/read.conf" -o "$WORK_DIR/read.json" -w '%{http_code}' || true)
+  status=$(python3 "$DIR/smoke_http.py" external read "$WORK_DIR/read.conf" "$WORK_DIR/read.json")
   rm -f "$WORK_DIR/read.conf"
   [ "$status" = "200" ] ||
-    fail "read-only-api" "the read-only API call answered HTTP $status $(cat "$WORK_DIR/read.json")"
+    fail "read-only-api" "read-only API call failed"
   got=$(jget projectId < "$WORK_DIR/read.json") ||
     fail "read-only-api" "unparseable API response"
   [ "$got" = "$PI_ORB_GCP_PROJECT" ] ||
-    fail "read-only-api" "read back project '$got', expected '$PI_ORB_GCP_PROJECT'"
+    fail "read-only-api" "read-only project assertion failed"
   say "  read-only API call succeeded as the federated identity"
 
   # Negative: a token for another audience must die at STS. The provider's
   # allowed-audience list is the check; nothing downstream ever sees it.
   mint "$WRONG_AUDIENCE" "$WORK_DIR/wrong-token" ||
     fail "wrong-audience" "the CLI refused to mint for a syntactically valid audience"
-  status=$(sts_exchange "$WORK_DIR/wrong-token" "$WORK_DIR/wrong-sts.json")
-  # This is the only negative federation assertion, so it must be an explicit
-  # rejection *by STS*. "anything that is not 200" also accepts curl's `000`
-  # transport failure, which would report a DNS blip or a proxy hiccup as proof
-  # that the audience check works — the one thing this step exists to prove.
-  case "$status" in
-    4??) ;;
-    200) fail "wrong-audience" "STS accepted a token minted for '$WRONG_AUDIENCE'" ;;
-    000)
-      fail "wrong-audience" \
-        "could not reach STS at all (curl transport failure); the audience rejection is unproven"
-      ;;
-    *)
-      fail "wrong-audience" \
-        "expected a 4xx rejection of '$WRONG_AUDIENCE' from STS, got HTTP $status $(cat "$WORK_DIR/wrong-sts.json")"
-      ;;
-  esac
-  say "  STS rejected the wrong-audience token (HTTP $status)"
+  status=$(sts_exchange "$WORK_DIR/wrong-token" "$WORK_DIR/wrong-sts.json" sts-negative)
+  [ "$status" = "400" ] || fail "wrong-audience" "typed STS audience rejection is unproven"
+  say "  STS rejected the wrong-audience token"
   rm -f "$WORK_DIR/wrong-token" "$WORK_DIR/wrong-sts.json"
 fi
 rm -f "$WORK_DIR/token"
@@ -655,15 +601,15 @@ say "step 6/7: prove a stopped orb cannot mint"
 # The bearer of the orb about to be stopped, read from its instance metadata —
 # the same place the provider injected it. It is transported to the prober orb
 # on stdin, so it never appears in an argument list on either machine.
-STOPPED_BEARER=$(instance_metadata "$STOPPED_INSTANCE" pi-orb-config | node -e 'let s=""; process.stdin.on("data", c => s += c); process.stdin.on("end", () => process.stdout.write(JSON.parse(s).PI_ORB_RUNTIME_TOKEN ?? ""))') ||
+STOPPED_BEARER=$(instance_metadata "$STOPPED_INSTANCE" pi-orb-config | node -e 'let s=""; process.stdin.on("data", c => s += c); process.stdin.on("end", () => { try { process.stdout.write(JSON.parse(s).PI_ORB_RUNTIME_TOKEN ?? ""); } catch { process.stderr.write("invalid instance config\n"); process.exitCode = 3; } })') ||
   fail "read-bearer" "gcloud could not describe $STOPPED_INSTANCE"
 [ -n "$STOPPED_BEARER" ] || fail "read-bearer" "no runtime token on $STOPPED_INSTANCE"
 # The control plane's URL as orbs see it, straight from the runtime environment the
 # provider configured — no assumption about the deployment's topology. The
 # `if !` form matters: `pipefail` makes a failed ssh fail the whole pipeline,
 # and a plain assignment would abort the script before `fail` could say why.
-if ! MINT_ROUTE=$(orb_ssh "$MINT_INSTANCE" \
-  "sudo systemd-run --quiet --pipe --wait --collect --uid=orb --property=EnvironmentFile=/run/pi-orb/environment /usr/bin/printenv PI_ORB_CONTROL_PLANE_URL" 2>/dev/null |
+if ! MINT_ROUTE=$(orb_ssh environment "$MINT_INSTANCE" \
+  "sudo systemd-run --quiet --pipe --wait --collect --uid=orb --property=EnvironmentFile=/run/pi-orb/environment /usr/bin/printenv PI_ORB_CONTROL_PLANE_URL" |
   tr -d '\r' | tail -n 1); then
   fail "probe-setup" "could not read the control-plane URL from $MINT_INSTANCE over ssh"
 fi
@@ -671,8 +617,8 @@ fi
 MINT_ROUTE="${MINT_ROUTE%/}/runtime/v1/id-token"
 
 probe() { # probe <bearer> ; prints "<status> <code>"
-  printf '%s' "$1" | orb_ssh "$MINT_INSTANCE" \
-    "sudo -u orb /usr/local/bin/node -e \"\$(printf %s $PROBE_B64 | base64 -d)\" '$MINT_ROUTE'" |
+  printf '%s' "$1" | orb_ssh probe "$MINT_INSTANCE" \
+    "sudo -u orb env PI_ORB_SMOKE_DEADLINE=$(( $(date +%s) + 25 < DEADLINE ? $(date +%s) + 25 : DEADLINE )) /usr/local/bin/node -e \"\$(printf %s $PROBE_B64 | base64 -d)\" '$MINT_ROUTE'" |
     tr -d '\r' | tail -n 1
 }
 
@@ -681,7 +627,7 @@ if ! result=$(probe "$STOPPED_BEARER"); then
 fi
 case "$result" in
   200*) : ;;
-  *) fail "probe-baseline" "a running orb's own bearer did not mint: $result" ;;
+  *) fail "probe-baseline" "running bearer assertion failed" ;;
 esac
 say "  baseline: the live bearer mints (HTTP 200)"
 
@@ -691,30 +637,20 @@ if ! result=$(probe "$STOPPED_BEARER"); then
   fail "stopped-orb-mint" "the in-VPC probe could not be run on $MINT_INSTANCE"
 fi
 [ "$result" = "403 not_mintable" ] ||
-  fail "stopped-orb-mint" "expected '403 not_mintable' after the stop, got '$result'"
-say "  a stopped orb is refused: $result"
+  fail "stopped-orb-mint" "stopped bearer assertion failed"
+say "  a stopped orb is refused: 403 not_mintable"
 
 if ! result=$(probe "$(uuidgen | tr -d '-')$(uuidgen | tr -d '-')"); then
   fail "unknown-bearer" "the in-VPC probe could not be run on $MINT_INSTANCE"
 fi
 case "$result" in
   401*) : ;;
-  *) fail "unknown-bearer" "expected 401 for an unknown bearer, got '$result'" ;;
+  *) fail "unknown-bearer" "unknown bearer assertion failed" ;;
 esac
-say "  an unknown bearer is refused: $result"
+say "  an unknown bearer is refused: 401"
 
 say "step 7/7: stop the minting orb and dispose of both"
 command_orb "$MINT_ORB" stop
 wait_for_state "$MINT_ORB" stopped "$STOPPED_TIMEOUT" "stop-mint-orb"
 
-echo
-echo "WORKLOAD-IDENTITY SMOKE PASSED in $(($(date +%s) - START_TS))s"
-echo "  issuer:      $ISSUER_URL"
-echo "  audience:    $AUDIENCE"
-echo "  claims:      $CLAIMS"
-if [ "$FEDERATE" = true ]; then
-  echo "  federation:  STS + $WIF_TEST_SA + a read-only API call all succeeded"
-else
-  echo "  federation:  SKIPPED (no WIF tier configured)"
-fi
-echo "  cleanup:     both orbs are deleted on exit$([ "$PROJECT_IS_DISPOSABLE" = true ] && echo ", along with the project")"
+say "Identity assertions passed; verifying fixture deletion."
