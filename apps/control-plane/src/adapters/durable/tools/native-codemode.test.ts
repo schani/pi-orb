@@ -12,7 +12,8 @@ describe("native Durable codemode integration", () => {
     try {
       expect(bundle.modelTools[0].replay).toBe("safe");
       expect(bundle.modelTools[0].callers).toEqual(["model"]);
-      expect(bundle.extension.sections?.map((section) => section.key)).toContain("codemode");
+      expect(bundle.extension.sections?.map((section) => section.key)).toContain("tool-catalogue");
+      expect(bundle.extension.sections?.map((section) => section.key)).not.toContain("codemode");
       expect(
         bundle.extension.tools
           ?.filter((tool) => tool.name !== "codemode")

@@ -10,6 +10,35 @@ Central Pi admits a FIFO snapshot atomically, retaining provenance/receipts, and
 
 **First failures retained:** central lifecycle campaign seed25's sequential mock forwarded after the first error, committing the tail out of FIFO order; pre-fix `DST_REPLAY` reproduced it, and the mock now stops at the error. Strict post-fix replay diverges, not passes. Evidence: `test-failures/lifecycle-campaign-central-seed-25-1792372119168-0.json`, `/tmp/queued-input-{scoped-tests-first-failure,campaign-replay-before-fix,campaign-replay-after-fix}.log`. An obsolete Sleep spy used `submit` instead of `submitMany` (`/tmp/queued-input-scoped-tests-second-failure.log`). The third run reproduced definitive orb-wide `legacy_backend`/`history_integrity` denial wrongly retrying; existing startup classification now fails every partition for terminal global denial, preserving retryable outer errors and isolated partition failures. Evidence: `test-failures/legacy-batch-queued-1792372889276-0.json`, `/tmp/queued-input-{scoped-tests-third-failure,legacy-replay-before-fix}.log`. Assertions remain intact.
 
+## Prompt-review image timeouts (2026-10-18; unresolved)
+
+At baseline `6cd6d79b5f67a0717ccefd0d2c0694e450eb4b29` plus prompt-review WIP,
+`codemode-sandbox.test.ts`’s “bounds deterministic output images” timed out at
+30,007 ms; `image-validation.test.ts`’s full 20 MiB callback at 30,033 ms.
+Both live under `apps/control-plane/src/adapters/durable/tools/`. The retained
+`tools-focused.log` SHA-256 is
+`2147a9679e6ddb57cf6f464d1f628eda0fd62ca03d354e93ab6c70c620040193`.
+It also records two metadata assertion failures and has no final summary; its exact
+CLI, exit status and termination reason are unavailable. No passing rerun or fix
+is claimed. This new non-UI blocker is outside PR 137’s historical exception.
+
+First-source SHA-256 seals (unchanged from that baseline):
+
+- `codemode-sandbox.test.ts`: `984ddf8ce2e58ea63c8d02fc6fbf9ca01fb12836441515e3b65b0e1008f5866f`
+- `image-validation.test.ts`: `44b495c03cff5dde645eb763baed73f7692f1a5327a77120ac67a900f243c5f1`
+- `vitest.config.ts`: `921999c103dbe57d279d5594d02907e4b300d4600009d66a06dc59c26d40ac67`
+
+The tools log spans 19:41:40–19:45:30 America/Los_Angeles. Independently logged
+`npm run test:e2e -- e2e/durable-process.e2e.test.ts` began at 19:41:42 and took
+208.01 s; Chromium logs overlap 19:41:25–19:43:13 and 19:44:07–19:45:14.
+These are log windows, not failed-test intervals. The observed two logical CPUs
+resolve Vitest’s 50% limit to one worker absent an unknown CLI override. Overlap
+and broad slowdown support contention, not a proven cause. Post-run snapshots
+show no OOM, quota throttling or disk exhaustion; failure-window CPU/await-phase
+telemetry is missing. Preserve the 30 s deadline, full fixtures and byte/store
+assertions; qualification uses one command owner with descendant exit before
+E2E/browser work. Isolation alone does not clear the blocker.
+
 ## PR 145 first qualification (2026-10-18; undeployed)
 
 [Checks39159748045](https://github.com/schani/pi-orb/actions/runs/39159748045) first failed an obsolete package contract requiring the removed vendored subagent; that assertion is removed. [Docker39159748118](https://github.com/schani/pi-orb/actions/runs/39159748118), source `1905e42`, first failed full-slice shard3 and multi-user credentials. Logs/artifacts remain under `/workspace/pr145-evidence/ci-first/`; uploaded DST JSONs are historical traces, not new DST failures.

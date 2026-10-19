@@ -19,7 +19,7 @@ import { createDurableTools } from "./index.ts";
 import { createOrbTools } from "./orb-tools.ts";
 import { openCodemodeHarness } from "./testkit/codemode.ts";
 
-it("advertises discovered resources-only instructions in ready and actual provider metadata", async () => {
+it("keeps resources-only instructions in namespace discovery, not initial provider metadata", async () => {
   let connections = 0;
   const bundle = createDurableTools({
     mcp: [
@@ -72,11 +72,31 @@ it("advertises discovered resources-only instructions in ready and actual provid
     models.setProvider(faux.provider);
     harness = await Harness.open(new MemoryStorage(), { models, registry }, ctx);
     const root = await harness.root(ctx, {
-      agent: { model: { provider: "faux", modelId: "faux-1" }, tools: bundle.modelTools },
+      agent: {
+        model: { provider: "faux", modelId: "faux-1" },
+        tools: null,
+        modelTools: bundle.modelTools,
+      },
     });
     harness.resume();
     await (await root.submit({ type: "input", content: "go" }, ctx)).wait(ctx);
-    expect(metadata).toContain("Resolve project before reading");
+    expect(metadata).toContain("<tool-catalogue>");
+    expect(metadata).not.toContain("Resolve project before reading");
+    expect(metadata).not.toContain("Use server names from MCP namespaces");
+    expect(metadata).not.toContain("Namespace mcp");
+    const initialFixture = await openCodemodeHarness(bundle.catalog);
+    try {
+      const initial = await initialFixture.run(
+        'text(await describeNamespace("mcp__docs")); text(await describeNamespace("mcp"));',
+      );
+      expect(initial.isError).toBe(false);
+      expect(JSON.stringify(initial.output)).toContain("Resolve project before reading");
+      expect(JSON.stringify(initial.output)).toContain(
+        "Use server names from MCP namespaces; list resources/templates before reading unfamiliar URIs.",
+      );
+    } finally {
+      await initialFixture.close();
+    }
     expect(bundle.catalog.definitions().some((t) => t.name === "subagent")).toBe(true);
     const resources = await bundle.catalog.invoke(
       "list_mcp_resources",
@@ -87,17 +107,19 @@ it("advertises discovered resources-only instructions in ready and actual provid
     expect(resources.isOk()).toBe(true);
     const fixture = await openCodemodeHarness(bundle.catalog);
     try {
-      const discovery = await fixture.run('return (await describeNamespace("docs")).instructions;');
+      const discovery = await fixture.run(
+        'return (await describeNamespace("mcp__docs")).instructions;',
+      );
       expect(discovery.isError).toBe(false);
       expect(discovery.output).toContainEqual({
         type: "text",
         text: "Use refreshed project guidance",
       });
       const refreshed = await fixture.run(
-        'await tools.list_mcp_resources({}); text(await describeNamespace("docs"));',
+        'await tools.list_mcp_resources({}); text(await describeNamespace("mcp__docs"));',
       );
       expect(JSON.stringify(refreshed.output)).toContain("Use refreshed project guidance");
-      const next = await fixture.run('text(await describeNamespace("docs"));');
+      const next = await fixture.run('text(await describeNamespace("mcp__docs"));');
       expect(JSON.stringify(next.output)).toContain("Latest project guidance");
     } finally {
       await fixture.close();

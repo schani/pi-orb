@@ -1,5 +1,5 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
+import { type Tool, Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   fauxAssistantMessage,
@@ -15,10 +15,13 @@ import {
   type ToolExecutionApi,
   type ToolExecutionResult,
 } from "@earendil-works/pi-durable";
+import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
 import { okAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
+import { CODEMODE_BOOTSTRAP } from "./codemode.ts";
+import { PiCodemodeSandbox } from "./codemode-sandbox.ts";
 import { createDurableTools } from "./index.ts";
 import { createOrbTools } from "./orb-tools.ts";
 import { ChildAnchor, subagentTools } from "./subagents.ts";
@@ -31,11 +34,29 @@ async function nativeMetadata(
 ) {
   let result: ToolExecutionResult | undefined;
   let metadata = "";
+  let offered: Tool[] = [];
   const registry = createRegistry();
+  const nativeSection = createCodemodeExtension({
+    sandbox: new PiCodemodeSandbox(),
+    models: false,
+    namespaces: bundle.catalog.nativeNamespaces(),
+  }).sections?.[0];
+  if (!nativeSection) return expect.fail("Native catalogue section missing");
   for (const extension of [bundle.extension, bundle.childExtension])
     registry.install(
       defineExtension({
         ...extension,
+        sections: (extension.sections ?? []).map((section) => ({
+          ...section,
+          render: async (input, ctx) => {
+            const rendered = await section.render(input, ctx);
+            const native = await nativeSection.render(input, ctx);
+            const intro = "Tools scripts can call (`await tools.<name>(args)`):\n\n";
+            expect(native?.startsWith(intro)).toBe(true);
+            expect(rendered).toBe(native?.slice(intro.length));
+            return rendered;
+          },
+        })),
         tools: extension.tools!.map((tool) =>
           tool.name !== "codemode"
             ? tool
@@ -52,6 +73,9 @@ async function nativeMetadata(
   const faux = fauxProvider();
   faux.setResponses([
     async (request) => {
+      offered = request.messages.flatMap((message) =>
+        message.role === "system" ? (message.toolsAdded ?? []) : [],
+      );
       metadata = JSON.stringify(request.messages.filter((message) => message.role === "system"));
       return fauxAssistantMessage(fauxToolCall("codemode", { code: source }), {
         stopReason: "toolUse",
@@ -91,6 +115,28 @@ async function nativeMetadata(
         BACKGROUND_CONTEXT,
       );
     }
+    expect(offered.map((tool) => tool.name)).toEqual(["codemode"]);
+    expect(offered[0]?.description).toBe(CODEMODE_BOOTSTRAP);
+    expect(JSON.stringify(offered[0])).not.toMatch(/Run JavaScript|Globals:|8-outstanding/);
+    expect(metadata).toContain("<tool-catalogue>");
+    expect(metadata).not.toContain("<codemode>");
+    expect(metadata).not.toContain("Tools scripts can call");
+    for (const guidance of [
+      "Namespace orb: discover with describeNamespace(",
+      "Namespace mcp: discover with describeNamespace(",
+      "Use archive/delete only on explicit user request",
+      "Stop/sleep revokes execution admission",
+      "a connected browser does not override Stop",
+      "Use server names from MCP namespaces",
+      "list resources/templates before reading unfamiliar URIs",
+      "Fixture server instructions before first use",
+    ])
+      expect(metadata).not.toContain(guidance);
+    for (const extension of [bundle.extension, bundle.childExtension]) {
+      expect(extension.sections?.map((section) => section.key)).toContain("tool-catalogue");
+      expect(extension.sections?.map((section) => section.key)).not.toContain("codemode");
+    }
+    expect(CODEMODE_BOOTSTRAP).not.toContain("Tools scripts can call");
     expect(result).toBeDefined();
     return { metadata, result: result! };
   } finally {
@@ -209,6 +255,9 @@ it.each(["root", "child"] as const)(
       expect(payload.callback).toContain('type: "text"');
       expect(payload.childCanSpawn).toBe(scope === "root");
       expect(payload.childCanSubagent).toBe(scope === "root");
+      expect(metadata).toContain("## orb");
+      expect(metadata).toContain("Orb lifecycle and conversation operations");
+      expect(metadata).toContain("Get this orb's identity, project, parent provenance");
       expect(metadata).toMatch(/orb_self\(args: \{\}\): Promise<string>/);
       expect(metadata).toContain(
         "image_callback(args: { [key: string]: unknown; }): Promise<string | Array<",
@@ -251,8 +300,9 @@ it.each(["root", "child"] as const)(
                   message.method === "initialize"
                     ? {
                         protocolVersion: "2025-11-25",
-                        capabilities: { tools: {} },
+                        capabilities: { tools: {}, resources: {} },
                         serverInfo: { name: "fixture", version: "1" },
+                        instructions: "Fixture server instructions before first use",
                       }
                     : message.method === "tools/list"
                       ? {
@@ -284,13 +334,17 @@ it.each(["root", "child"] as const)(
       const { metadata, result } = await nativeMetadata(
         bundle,
         scope,
-        'text({declaration:await describeTool("mcp__fixture__raw"),raw:await tools.mcp__fixture__raw({})});',
+        'text({namespace:await describeNamespace("mcp__fixture"),resources:await describeNamespace("mcp"),declaration:await describeTool("mcp__fixture__raw"),raw:await tools.mcp__fixture__raw({})});',
       );
       expect(result.isError).toBe(false);
       const text = result.output?.[1];
       if (text?.type !== "text") return expect.fail("Native script payload missing");
       const payload = JSON.parse(text.text);
       expect(payload.raw).toEqual(raw);
+      expect(payload.namespace.instructions).toBe("Fixture server instructions before first use");
+      expect(payload.resources.instructions).toBe(
+        "Use server names from MCP namespaces; list resources/templates before reading unfamiliar URIs.",
+      );
       for (const field of [
         "content:",
         "structuredContent?: Array<number | null | string>",
@@ -400,6 +454,9 @@ it.each(["root", "child"] as const)(
       expect(payload.called).toBe(false);
       expect(JSON.stringify(payload.searched)).not.toContain(hidden);
       expect(JSON.stringify(payload.namespace)).not.toContain(hidden);
+      expect(payload.namespace.instructions).toBe(
+        "Use archive/delete only on explicit user request. Stop/sleep revokes execution admission; a connected browser does not override Stop.",
+      );
       expect(payload.own).toContain(own);
       expect(payload.accepted).toBe('{"accepted":true}');
       expect(payload.nativeDenied).toBe("true");

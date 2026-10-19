@@ -8,6 +8,10 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Root-cause new non-UI 20 MiB/image 30s timeouts** (2026-10-18 LA; first-failure facts and evidence hashes: `docs/testing.md`). Deployment blocked pending causal correction and exact-head validation; PR 137’s historical exception excludes these.
+
+- **Align boot-hooks skill context-delivery claims** (`apps/orb-runtime/skills/boot-hooks/SKILL.md:105–106,124–125`): reconcile promised env issues and failed-hook outcome/log path in model context with actual delivery; `bootHookPrompt` has no production caller. Remove its unused renderer if appropriate.
+
 - **Review correction for false idle during release handoff** (2026-10-18; `docs/postmortems/2026-10-18-false-idle-during-release.md`). Recommendation, not approved implementation: distinguish unobserved activity from confirmed idle in central metadata and unloaded conversation/WS snapshots. Before any authorized fix, add deterministic ownership-handoff coverage and content-free revision/owner/observation diagnostics sufficient to explain the user-visible status without raw payloads. Discuss any persisted-state change before implementing it; no product fix is authorized by this investigation.
 
 - **Diagnose lifecycle-smoke old-revision HTTP 500** (2026-10-16; `docs/postmortems/2026-10-16-lifecycle-smoke-http500.md`). Establish why the restart GET was attributed to deleted revision `00060-kfk`; correlate response shape and trace evidence. Deploy 38961777202 remains applied-but-unvalidated; bounded smoke retries do not explain or clear it.

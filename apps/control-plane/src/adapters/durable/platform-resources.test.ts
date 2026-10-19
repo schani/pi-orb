@@ -1,15 +1,22 @@
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import {
   CHART_MAX_BARS,
   CHART_MAX_PER_SCRIPT,
   CHART_MAX_POINTS,
   CHART_MAX_SERIES,
 } from "@pi-orb/protocol";
-import { expect, it } from "vitest";
+import { okAsync } from "neverthrow";
+import { expect, it, vi } from "vitest";
 import { SnapshotResourceReader } from "../../domain/resources.ts";
 import { snapshotPromptResources } from "../git-resources/prompt.ts";
 import { loadPlatformResources } from "./platform-resources.ts";
 import { renderPrompt } from "./prompt.ts";
+import { createAgentToolFiles } from "./tool-files.ts";
+import { CODEMODE_BOOTSTRAP } from "./tools/codemode.ts";
+import { createDurableTools } from "./tools/index.ts";
+import { openCodemodeHarness } from "./tools/testkit/codemode.ts";
 
 it("loads only application-owned bundled skills into private virtual paths", async () => {
   const loaded = (
@@ -26,8 +33,7 @@ it("loads only application-owned bundled skills into private virtual paths", asy
     "/opt/pi-orb/skills/boot-hooks/SKILL.md",
     "/opt/pi-orb/skills/charts/SKILL.md",
     "/opt/pi-orb/skills/cloud-identity/SKILL.md",
-    "/opt/pi-orb/skills/codemode-manual/SKILL.md",
-    "/opt/pi-orb/skills/codemode-quick-reference/SKILL.md",
+    "/opt/pi-orb/skills/codemode/SKILL.md",
     "/opt/pi-orb/skills/hosting/SKILL.md",
   ]);
   expect(loaded.every((file) => file.sha256.length === 64)).toBe(true);
@@ -66,18 +72,12 @@ async function codemodeBundle() {
 
 const codemodeSkills = [
   {
-    name: "codemode-quick-reference",
-    description:
-      "Brief code-mode overview, example and all pi-orb code-mode limits. Read for syntax reminders or sandbox/resource-limit failures.",
-  },
-  {
-    name: "codemode-manual",
-    description:
-      "Full code-mode scripting manual: tool discovery, result types, state, concurrency, output and failure handling. Read for detailed API usage.",
+    name: "codemode",
+    description: "Code-mode scripting instructions. Read before using codemode.",
   },
 ];
 
-it("discovers both skill metadata without bodies and reads snapshots on demand", async () => {
+it("discovers single skill metadata without bodies and reads snapshots on demand", async () => {
   const bundle = await codemodeBundle();
   const resources = snapshotPromptResources(bundle)._unsafeUnwrap();
   const prompt = renderPrompt({ repository: [], skills: resources.skills });
@@ -98,14 +98,47 @@ it("discovers both skill metadata without bodies and reads snapshots on demand",
     expect(JSON.stringify(resources.skills)).not.toContain(body);
     expect(bundle.files.filter((file) => file.path === path)).toHaveLength(1);
   }
-  expect(bundle.files.filter(({ path }) => path.includes("/codemode"))).toHaveLength(2);
+  expect(bundle.files.filter(({ path }) => path.endsWith("/codemode/SKILL.md"))).toHaveLength(1);
+  expect(prompt).toContain("Load a skill's file when the task matches its description.");
+  expect(prompt).not.toContain("Use the read tool");
   expect(prompt).not.toContain("262144");
   expect(prompt).not.toContain("structuredContent");
 });
 
-it("provides a bounded example, relevant caps and stable bundled-manual guidance", async () => {
+it("packages upstream attribution beside the skill without adding it to prompts", async () => {
   const bundle = await codemodeBundle();
-  const file = bundle.files.find(({ path }) => path.endsWith("/codemode-quick-reference/SKILL.md"));
+  const reader = new SnapshotResourceReader(bundle);
+  const license = Buffer.from(
+    (await reader.read("/opt/pi-orb/skills/codemode/LICENSE"))._unsafeUnwrap(),
+  ).toString();
+  expect(license).toBe(
+    await readFile(
+      new URL("../../../../orb-runtime/skills/codemode/LICENSE", import.meta.url),
+      "utf8",
+    ),
+  );
+  expect(license).toMatch(/MIT License[\s\S]*Copyright \(c\) 2025 Mario Zechner/);
+  expect(license).toContain("SOFTWARE.");
+  expect(license).toContain(
+    "https://github.com/earendil-works/pi/tree/v1.3.0/packages/durable/src/codemode",
+  );
+  const skill = Buffer.from(
+    (await reader.read("/opt/pi-orb/skills/codemode/SKILL.md"))._unsafeUnwrap(),
+  ).toString();
+  expect(skill).not.toContain("MIT License");
+  expect(skill).not.toContain("## Provenance and license");
+  const prompt = renderPrompt({
+    repository: [],
+    skills: snapshotPromptResources(bundle)._unsafeUnwrap().skills,
+  });
+  expect(prompt).not.toContain(license);
+  expect(prompt).not.toContain("MIT License");
+  expect(prompt).not.toContain("/opt/pi-orb/skills/codemode/LICENSE");
+});
+
+it("provides all scripting guidance and caps in one bounded skill", async () => {
+  const bundle = await codemodeBundle();
+  const file = bundle.files.find(({ path }) => path.endsWith("/codemode/SKILL.md"));
   expect(file).toBeDefined();
   const content = Buffer.from(file?.bytes ?? []).toString();
   for (const requirement of [
@@ -135,8 +168,23 @@ it("provides a bounded example, relevant caps and stable bundled-manual guidance
     /unawaited[\s\S]*cancel/i,
     /no nested codemode/i,
     /max_output_tokens[\s\S]*not[\s\S]*caps/i,
-    /\[Manual\]\(\/opt\/pi-orb\/skills\/codemode-manual\/SKILL\.md\)/,
-    /\/opt\/pi-orb\/skills\/codemode-manual\/SKILL\.md/,
+    /ALL_TOOLS[\s\S]*describeNamespace/,
+    /structuredContent[\s\S]*exit_code|exit_code[\s\S]*structuredContent/,
+    /await chart\(spec\)[\s\S]*source[\s\S]*8 charts/,
+    /Images are returned inline/,
+    /Promise\.allSettled/,
+    /<console_output>/,
+    /each nested tool retains its own replay policy/,
+    /Only codemode is offered to the model/,
+    /The \x60tool-catalogue\x60 section of the system prompt lists/,
+    /describeNamespace\("orb"\)/,
+    /describeNamespace\("mcp"\)/,
+    /exact namespace identifier[\s\S]*describeNamespace\("mcp__github"\)/i,
+    /resource[\s\S]*\x60server\x60 argument[\s\S]*bare server name/i,
+    /Before first using tools in a namespace[\s\S]*describeNamespace[\s\S]*instructions[\s\S]*follow[\s\S]*server instructions/i,
+    /Use archive\/delete only on explicit user request\./,
+    /Stop\/sleep revokes execution admission; a connected browser does not override Stop\./,
+    /Use server names from MCP namespaces; list resources\/templates before reading unfamiliar URIs\./,
   ])
     expect(content).toMatch(requirement);
 });
@@ -146,46 +194,47 @@ it.each([
   ["docker", "/guest/repo"],
   ["gcp", "/workspace"],
 ])(
-  "reads reciprocal skill links from the %s cwd-independent resource snapshot",
+  "executes the literal bootstrap against the complete %s cwd-independent snapshot",
   async (_provider, cwd) => {
     const bundle = await codemodeBundle();
     const reader = new SnapshotResourceReader(bundle);
-    const skillPath = "/opt/pi-orb/skills/codemode-quick-reference/SKILL.md";
-    const skill = Buffer.from((await reader.read(skillPath))._unsafeUnwrap()).toString();
-    expect(skill).toContain("[Manual](/opt/pi-orb/skills/codemode-manual/SKILL.md)");
-    expect(skill).toContain("/opt/pi-orb/skills/codemode-manual/SKILL.md");
-    expect(skill).not.toMatch(/\/app\/|package root|paths may differ|models/i);
-    const manualPath = skill.match(/\[Manual\]\(([^)]+)\)/)?.[1] ?? "missing";
-    const manual = Buffer.from((await reader.read(manualPath))._unsafeUnwrap()).toString();
-    for (const api of [
-      "@options:",
-      "ALL_TOOLS",
-      "searchTools",
-      "describeTool",
-      "describeNamespace",
-      "structuredContent",
-      "exit_code",
-      "full_output_path",
-      "store(",
-      "load(",
-      "resource_limit",
-    ])
-      expect(manual).toContain(api);
-    expect(manual.length).toBeGreaterThan(2000);
-    expect(manual).not.toMatch(/models\.|settings\.md|CodemodeSandbox/);
-    const resources = snapshotPromptResources(bundle)._unsafeUnwrap();
-    const prompt = renderPrompt({ repository: [], skills: resources.skills });
-    expect(resources.skills.filter(({ name }) => name.startsWith("codemode-"))).toHaveLength(2);
-    const limitsPath =
-      manual.match(/\[Limits \(central native code-mode\)\]\(([^)]+)\)/)?.[1] ?? "missing";
-    expect(limitsPath).toBe(skillPath);
-    expect(Buffer.from((await reader.read(limitsPath))._unsafeUnwrap()).toString()).toBe(skill);
-    expect(manual).toContain("# Code-mode agent manual");
-    expect(manual).toContain("MIT License");
-    expect(manual).toContain("Copyright (c) 2025 Mario Zechner");
-    expect(manual).not.toMatch(/SKILL\.md#|\/app\//);
-    expect(prompt).not.toContain(manual);
-    expect(prompt).not.toContain("structuredContent");
+    const read = vi.spyOn(reader, "read");
+    const files = createAgentToolFiles({
+      reader,
+      allowSnapshotRead: () => false,
+      check: () => okAsync(undefined),
+      artifacts: { write: () => okAsync("unused"), read: () => okAsync(null) },
+    });
+    const tools = createDurableTools({ files });
+    const env = new NodeExecutionEnv({ cwd });
+    const guestRead = vi.spyOn(env, "openBinaryReader");
+    const fixture = await openCodemodeHarness(tools.catalog, { files, env });
+    try {
+      const skillPath = "/opt/pi-orb/skills/codemode/SKILL.md";
+      const file = bundle.files.find(({ path }) => path === skillPath);
+      if (!file) return expect.fail("Canonical code-mode skill missing");
+      const skill = await readFile(
+        new URL("../../../../orb-runtime/skills/codemode/SKILL.md", import.meta.url),
+        "utf8",
+      );
+      expect(Buffer.from(file.bytes).toString()).toBe(skill);
+      expect(Buffer.byteLength(skill)).toBeLessThanOrEqual(50 * 1024);
+      expect(skill.split("\n").length).toBeLessThanOrEqual(2000);
+      const result = await fixture.run(CODEMODE_BOOTSTRAP.split("\n").slice(1).join("\n"));
+      expect(result.isError).toBe(false);
+      const output = result.output?.filter((item) => item.type === "text").map((item) => item.text);
+      expect(output).toHaveLength(2);
+      expect(output?.[0]).toMatch(/^Script completed\nWall time [\d.]+ seconds\nOutput:\n$/);
+      expect(output?.[1]).toBe(skill);
+      expect(result.diagnostics ?? []).toEqual([]);
+      expect(read).toHaveBeenCalledExactlyOnceWith(skillPath);
+      expect(guestRead).not.toHaveBeenCalled();
+      expect(skill).not.toMatch(/codemode-manual|codemode-quick-reference|SKILL\.md#|models\./);
+      expect(skill).not.toContain("MIT License");
+    } finally {
+      await fixture.close();
+      await tools.close();
+    }
   },
 );
 
