@@ -1,4 +1,4 @@
-# Image-test CPU contention (2026-10-19; historical attribution unresolved)
+# Image-test CPU contention (2026-10-19; historical attribution waived)
 
 ## First failure
 
@@ -79,7 +79,16 @@ not the original scan. The first two named cases retain their fixtures/assertion
 
 CPU contention is sufficient to reproduce both failures; the original schedule
 and CLI remain unknown. Isolation or a green optimized run cannot establish
-original attribution or clear the deployment blocker in `TODO.md`.
+original attribution.
+
+**User-approved exception (2026-10-19, America/Los_Angeles):** “Yes, waive the
+historical attribution!” Explaining only the original prompt-review non-UI
+image/20 MiB 30 s timeouts is no longer a deployment requirement. Preserve all
+first-failure evidence and uncertainty; no exact historical cause is claimed
+fixed or proven. The controlled correction below remains a controlled claim.
+The waiver excludes metadata assertion failures, new failures and ordinary
+exact-head release qualification; it authorizes no deployment.
+
 Preserve full fixtures, 30 s deadlines, byte/store assertions and single-owner
 execution with descendant exit before browser/E2E work.
 

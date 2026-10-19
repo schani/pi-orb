@@ -8,7 +8,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Attribute original non-UI 20 MiB/image 30s timeouts** (2026-10-18 LA; `docs/testing.md`, `docs/postmortems/2026-10-19-image-test-cpu-contention.md`). Deployment blocked: original CPU schedule/CLI remain unknown. Controlled contention reproduces both failures; isolated green or optimized qualification does not resolve original attribution. The measured scan hotspot is corrected under controlled contention; original attribution and exact-head release validation remain required. PR 137’s historical exception excludes these.
+- **Qualify image-validation correction** (`4e44ed35`; `docs/testing.md`, `docs/postmortems/2026-10-19-image-test-cpu-contention.md`). Complete ordinary exact-head release qualification; focused controlled receipts do not replace it.
 
 - **Align boot-hooks skill context-delivery claims** (`apps/orb-runtime/skills/boot-hooks/SKILL.md:105–106,124–125`): reconcile promised env issues and failed-hook outcome/log path in model context with actual delivery; `bootHookPrompt` has no production caller. Remove its unused renderer if appropriate.
 

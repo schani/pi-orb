@@ -10,7 +10,7 @@ Central Pi admits a FIFO snapshot atomically, retaining provenance/receipts, and
 
 **First failures retained:** central lifecycle campaign seed25's sequential mock forwarded after the first error, committing the tail out of FIFO order; pre-fix `DST_REPLAY` reproduced it, and the mock now stops at the error. Strict post-fix replay diverges, not passes. Evidence: `test-failures/lifecycle-campaign-central-seed-25-1792372119168-0.json`, `/tmp/queued-input-{scoped-tests-first-failure,campaign-replay-before-fix,campaign-replay-after-fix}.log`. An obsolete Sleep spy used `submit` instead of `submitMany` (`/tmp/queued-input-scoped-tests-second-failure.log`). The third run reproduced definitive orb-wide `legacy_backend`/`history_integrity` denial wrongly retrying; existing startup classification now fails every partition for terminal global denial, preserving retryable outer errors and isolated partition failures. Evidence: `test-failures/legacy-batch-queued-1792372889276-0.json`, `/tmp/queued-input-{scoped-tests-third-failure,legacy-replay-before-fix}.log`. Assertions remain intact.
 
-## Prompt-review image timeouts (2026-10-18; unresolved)
+## Prompt-review image timeouts (2026-10-18; historical attribution waived 2026-10-19)
 
 At baseline `6cd6d79b5f67a0717ccefd0d2c0694e450eb4b29` plus prompt-review WIP,
 `codemode-sandbox.test.ts`’s “bounds deterministic output images” timed out at
@@ -20,7 +20,7 @@ Both live under `apps/control-plane/src/adapters/durable/tools/`. The retained
 `2147a9679e6ddb57cf6f464d1f628eda0fd62ca03d354e93ab6c70c620040193`.
 It also records two metadata assertion failures and has no final summary; its exact
 CLI, exit status and termination reason are unavailable. Historical attribution
-is not established. This new non-UI blocker is outside PR 137’s historical exception.
+is not established. PR 137’s historical exception does not cover these failures.
 
 First-source SHA-256 seals (unchanged from that baseline):
 
@@ -37,7 +37,7 @@ and broad slowdown support contention, not a proven cause. Post-run snapshots
 show no OOM, quota throttling or disk exhaustion; failure-window CPU/await-phase
 telemetry is missing. Preserve the 30 s deadline, full fixtures and byte/store
 assertions; qualification uses one command owner with descendant exit before
-E2E/browser work. Isolation alone does not clear the blocker.
+E2E/browser work. Isolation alone does not establish historical attribution.
 
 **Controlled finding (2026-10-19):** both unchanged files pass isolated (21 tests).
 Pinning the selected image tests and three CPU hogs to one core reproduces both
@@ -49,9 +49,15 @@ passes 60 tests in ten files, including CPU/cancellation/DST guards; fresh `npm 
 18 installer contracts, idempotence, root typecheck and lint pass. The final
 work-count regression fails on the original scan before passing the correction.
 This establishes a sufficient mechanism and controlled correction, not the original
-schedule or CLI; historical attribution and exact-head release qualification remain
-unresolved. Commands, source seals, first failures and cleanup are preserved in
+schedule or CLI. Commands, source seals, first failures and cleanup are preserved in
 `docs/postmortems/2026-10-19-image-test-cpu-contention.md`.
+
+**User-approved exception (2026-10-19, America/Los_Angeles):** “Yes, waive the
+historical attribution!” Explaining only these original non-UI image/20 MiB
+30 s timeouts is no longer a deployment requirement. Preserve the evidence and
+unknown historical cause; no historical cause is claimed fixed or proven.
+The waiver excludes the metadata assertion failures, new failures and ordinary
+exact-head release qualification, which remain required. It authorizes no deployment.
 
 ## PR 145 first qualification (2026-10-18; undeployed)
 
