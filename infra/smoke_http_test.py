@@ -13,7 +13,7 @@ ID = "00000000-0000-4000-8000-000000000001"
 
 class SmokeHttpTest(unittest.TestCase):
     def invoke(self, replies, path="/api/v1/orbs/" + ID, body="", method="GET",
-               budget=60, auth_duration=0, duration=0, auth_code=0):
+               budget=60, auth_duration=0, duration=0, auth_code=0, auth_stderr=b"secret-auth"):
         now, calls, sleeps = [100.0], [], []
         output, log = io.TextIOWrapper(io.BytesIO()), io.StringIO()
 
@@ -25,7 +25,7 @@ class SmokeHttpTest(unittest.TestCase):
             calls.append((args, kwargs))
             if args[0] == "gcloud":
                 now[0] += auth_duration
-                return subprocess.CompletedProcess(args, auth_code, b"secret-token", b"secret-auth")
+                return subprocess.CompletedProcess(args, auth_code, b"secret-token", auth_stderr)
             now[0] += duration
             index = sum(call[0][0] == "curl" for call in calls) - 1
             reply = replies[min(index, len(replies) - 1)]
@@ -132,6 +132,50 @@ class SmokeHttpTest(unittest.TestCase):
         args, kwargs = result[2][-1]
         self.assertEqual(float(args[args.index("--max-time") + 1]), 2)
         self.assertEqual(kwargs["timeout"], 2)
+
+    def test_auth_failure_diagnostics_are_allowlisted_and_terminal(self):
+        for diagnostic, expected in [
+            (b"PERMISSION_DENIED: secret iam.serviceAccounts.getOpenIdToken", "permission_denied"),
+            (b"invalid_grant: secret subject token expired", "invalid_grant"),
+            (b"invalid_target: secret audience", "invalid_target"),
+            (b"UNAUTHENTICATED: secret", "unauthenticated"),
+            (b"RESOURCE_EXHAUSTED: secret", "resource_exhausted"),
+            (b"UNAVAILABLE: secret", "unavailable"),
+            (b"DEADLINE_EXCEEDED: secret", "deadline_exceeded"),
+            (b"unauthorized_client: secret", "unauthorized_client"),
+            (b"SSLError: secret CERTIFICATE_VERIFY_FAILED", "tls"),
+            (b"NameResolutionError: secret", "dns"),
+            (b"ReadTimeout: secret", "timeout"),
+            (b"secret 403 503 1234567890", "unknown"),
+            (b"secret\xff\nhttps://private.invalid?token=secret", "unknown"),
+            (b"invalid_grant PERMISSION_DENIED secret", "unknown"),
+            (b"", "unknown"),
+        ]:
+            with self.subTest(expected=expected, diagnostic=diagnostic):
+                result = self.invoke([], auth_code=1, auth_duration=10.625,
+                                     auth_stderr=diagnostic + b"\nBearer secret-token")
+                self.assertEqual((result[0], result[1], len(result[2]), result[3]), (2, b"", 1, []))
+                self.assertEqual(result[4], "smoke-http: phase=auth exit=1 outcome=failed "
+                                 f"error={expected} elapsed_s=10.625\n")
+                self.assertNotIn("secret", result[4])
+                self.assertNotIn("private.invalid", result[4])
+
+    def test_auth_execution_failures_are_distinct_and_private(self):
+        for failure, expected in [
+            (OSError("secret"), "exec"),
+            (subprocess.TimeoutExpired("secret", 1, output=b"secret-token", stderr=b"secret"), "timeout"),
+        ]:
+            with self.subTest(expected=expected):
+                with patch.object(smoke_http.subprocess, "run", side_effect=failure) as run, \
+                     patch.dict(os.environ, {"PI_ORB_SMOKE_DEADLINE": "160"}), \
+                     patch.object(smoke_http.time, "time", return_value=100), \
+                     patch.object(smoke_http.time, "monotonic", return_value=100), \
+                     patch("sys.argv", ["smoke_http.py", "project", "https://private.invalid", "/api/v1/projects", "", "GET"]), \
+                     patch("sys.stderr", io.StringIO()) as log:
+                    self.assertEqual(smoke_http.main(), 2)
+                    self.assertEqual(run.call_count, 1)
+                    self.assertEqual(log.getvalue(), "smoke-http: phase=auth outcome=unavailable "
+                                     f"error={expected} elapsed_s=0.000\n")
 
     def test_auth_failure_and_timeout_are_private(self):
         result = self.invoke([], auth_code=1)

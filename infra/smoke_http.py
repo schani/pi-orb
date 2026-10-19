@@ -51,9 +51,26 @@ def retry_after(headers):
         return 0
 
 
+def auth_error(stderr):
+    diagnostic = stderr.decode(errors="replace")
+    categories = {code.lower() for code in re.findall(
+        r"\b(?:PERMISSION_DENIED|UNAUTHENTICATED|RESOURCE_EXHAUSTED|UNAVAILABLE|"
+        r"DEADLINE_EXCEEDED|invalid_grant|invalid_target|unauthorized_client)\b",
+        diagnostic, re.IGNORECASE)}
+    for category, pattern in (
+        ("tls", r"\b(?:SSLError|CERTIFICATE_VERIFY_FAILED)\b"),
+        ("dns", r"\b(?:NameResolutionError|Temporary failure in name resolution)\b"),
+        ("timeout", r"\b(?:ReadTimeout|ConnectTimeout|TimeoutError)\b"),
+    ):
+        if re.search(pattern, diagnostic, re.IGNORECASE):
+            categories.add(category)
+    return categories.pop() if len(categories) == 1 else "unknown"
+
+
 def main():
     project, origin, path, body, method = sys.argv[1:]
-    deadline = time.monotonic() + min(
+    started = time.monotonic()
+    deadline = started + min(
         60, float(os.environ["PI_ORB_SMOKE_DEADLINE"]) - time.time())
     if deadline <= time.monotonic():
         print("smoke-http: phase=auth outcome=deadline", file=sys.stderr)
@@ -64,11 +81,15 @@ def main():
             f"--impersonate-service-account=pi-orb-debug@{project}.iam.gserviceaccount.com",
             f"--audiences={origin}",
         ], capture_output=True, timeout=deadline - time.monotonic())
-    except (OSError, subprocess.TimeoutExpired):
-        print("smoke-http: phase=auth outcome=unavailable", file=sys.stderr)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        category = "timeout" if isinstance(error, subprocess.TimeoutExpired) else "exec"
+        print(f"smoke-http: phase=auth outcome=unavailable error={category} "
+              f"elapsed_s={time.monotonic() - started:.3f}", file=sys.stderr)
         return 2
     if auth.returncode:
-        print(f"smoke-http: phase=auth exit={auth.returncode} outcome=failed", file=sys.stderr)
+        print(f"smoke-http: phase=auth exit={auth.returncode} outcome=failed "
+              f"error={auth_error(auth.stderr)} elapsed_s={time.monotonic() - started:.3f}",
+              file=sys.stderr)
         return 2
     safe = method in {"GET", "HEAD", "DELETE"} or (method == "POST" and fixed_id_create(path, body))
     args = ["curl", "-s", "-K", "-", "-X", method, origin + path]
