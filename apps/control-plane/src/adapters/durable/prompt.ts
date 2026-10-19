@@ -32,11 +32,11 @@ export function renderPrompt(snapshot: PromptSnapshot): string {
     .join("\n\n");
   return [
     "You are a coding assistant. Use tools to inspect and change the project. Be concise.",
+    environmentPrompt,
     instructions ? `<project_instructions>\n${instructions}\n</project_instructions>` : "",
     snapshot.appendSystem ?? "",
-    environmentPrompt,
     piEnvironmentPrompt,
-    formatSkillsForPrompt([...snapshot.skills]),
+    formatSkillsForPrompt([...snapshot.skills], "indirect"),
   ]
     .filter(Boolean)
     .join("\n\n");

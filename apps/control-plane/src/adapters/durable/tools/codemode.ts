@@ -1,5 +1,5 @@
 import { type Context, copyJson } from "@earendil-works/chord";
-import { CodemodeSandbox, parseCodemodeSource } from "@earendil-works/pi-codemode";
+import { type CodemodeSandbox, parseCodemodeSource } from "@earendil-works/pi-codemode";
 import {
   defineTool,
   type Extension,
@@ -23,8 +23,13 @@ import { type CallableCatalog, errorResult } from "./catalog.ts";
 import { PiCodemodeSandbox } from "./codemode-sandbox.ts";
 import type { AgentToolFiles } from "./files.ts";
 
-const POLICY =
-  "\nOnly codemode is offered to the model. Do not redeclare tools or other injected globals. Tool calls and discovery share an 8-outstanding limit; each script allows 256 callbacks, 8 MiB serialized arguments and 64 MiB serialized replies. Exceeding a resource limit cancels the script without saving store writes. The default deadline is five minutes; timeout_ms overrides it. Batch independent calls with Promise.allSettled in batches of at most 8. Native nested calls retain their own replay policy; failed scripts do not undo effects. Images must use image(), not text(). await chart(spec) shows the user a separate chart row; its data is not returned to the model. spec is {kind:'line',title,unit?,source?,series:[{name,points:[[time,value|null]]}],markers?:[{at:time,label}],thresholds?:[{value,label}]} (ISO or epoch-ms time, at most 6 series/5000 points) or {kind:'bar',title,unit?,source?,bars:[{label,value}]}. source is an http(s) origin link. At most 8 charts per script.";
+export const CODEMODE_BOOTSTRAP =
+  'Read the codemode skill first:\ntext(await tools.read({path:"/opt/pi-orb/skills/codemode/SKILL.md"}));';
+
+export function formatToolCatalogue(text: string | undefined): string | undefined {
+  const intro = "Tools scripts can call (`await tools.<name>(args)`):\n\n";
+  return text?.startsWith(intro) ? text.slice(intro.length) : text;
+}
 
 function object(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -67,11 +72,7 @@ export function codemodeTool(
   const native = createCodemodeTool(options);
   return defineTool({
     ...native,
-    description:
-      native.description.replace(
-        "`image()` also saves the image to a temp file and the result names its path.",
-        "Images are returned inline.",
-      ) + POLICY,
+    description: CODEMODE_BOOTSTRAP,
     execute: async (args, api, context) => {
       const parsed = Result.fromThrowable(
         () => parseCodemodeSource(args.code),
@@ -329,16 +330,8 @@ export function codemodeExtension(
     tools: [codemodeTool(catalog, running, files, orb)],
     sections: (extension.sections ?? []).map((section) => ({
       ...section,
-      render: async (input, context) => {
-        const declarations = await section.render(input, context);
-        const namespaces = catalog
-          .namespaceValues()
-          .map(
-            (namespace) =>
-              `Namespace ${namespace.name}: discover with describeNamespace(${JSON.stringify(namespace.name)}).${namespace.instructions ? `\n${namespace.instructions}` : ""}`,
-          );
-        return [declarations, ...namespaces].filter(Boolean).join("\n\n") || undefined;
-      },
+      key: "tool-catalogue",
+      render: async (input, context) => formatToolCatalogue(await section.render(input, context)),
     })),
   };
 }

@@ -1,11 +1,11 @@
 ---
-name: codemode-manual
-description: 'Full code-mode scripting manual: tool discovery, result types, state, concurrency, output and failure handling. Read for detailed API usage.'
+name: codemode
+description: 'Code-mode scripting instructions. Read before using codemode.'
 ---
 
 # Code-mode agent manual
 
-Run JavaScript to compose authorized tools, filter their replies and emit only useful results. For all resource caps, read [Limits (central native code-mode)](/opt/pi-orb/skills/codemode-quick-reference/SKILL.md). Both skills are bundled resources on central process, Docker and GCP; read them with `tools.read`.
+Run JavaScript to compose authorized tools, filter their replies and emit only useful results. This skill is a bundled resource on central process, Docker and GCP; read it with `tools.read`.
 
 ## Source and options
 
@@ -41,13 +41,22 @@ Only emitted text/images and the final return value reach the model; nested repl
 
 ## Discover and call
 
-The tool description lists inline declarations, but deferred tools are callable too. Discovery exposes their exact argument and result shapes, namespace instructions and identifiers:
+Tools scripts can call (`await tools.<name>(args)`):
+
+Only codemode is offered to the model. The `tool-catalogue` section of the system prompt lists the tools scripts can call, by namespace, as far as space allows. Deferred tools are callable too. Discovery exposes their exact argument and result shapes, namespace instructions and identifiers:
 
 ```js
 text(await searchTools("subagent"));
 text(await describeNamespace("orb"));
+text(await describeNamespace("mcp"));
 text(await describeTool("read"));
 ```
+
+Before first using tools in a namespace, emit and read `await describeNamespace(name)`, including its `instructions`, and follow the returned server instructions. MCP server instructions are dynamic; this skill does not replace them. Use the exact namespace identifier from discovery, for example `text(await describeNamespace("mcp__github"));` for server `github`. The MCP resource `server` argument uses the bare server name (`github`), not the namespace identifier (`mcp__github`).
+
+Namespace `orb`: discover with `text(await describeNamespace("orb"));`. Use archive/delete only on explicit user request. Stop/sleep revokes execution admission; a connected browser does not override Stop.
+
+Namespace `mcp`: discover with `text(await describeNamespace("mcp"));`. Use server names from MCP namespaces; list resources/templates before reading unfamiliar URIs.
 
 Invalid identifier characters become `_`: `mcp__dev-radius__search` is `tools.mcp__dev_radius__search`. Namespace membership does not change the callable name: an Orb call uses `tools.orb_self({})`, not `orb.self()`. Every tool takes one argument object. Arguments and replies cross a JSON boundary; do not pass functions or cyclic objects. Nested `codemode` is not callable.
 
@@ -82,30 +91,48 @@ Script completion, `exit()`, timeout or cancellation ends execution and cancels 
 
 Native formatting reports completion/failure and elapsed time, then emitted output and any script error. Multiple text items have `==> text N/M <==` headers; adjacent text is joined and console lines follow in one `<console_output>` block. The result is not a JSON envelope. Parse/runtime errors include `codemode.js` stack locations. Timeout or abort terminates the worker; VM/worker failures are sandbox failures. Out-of-memory errors require reducing retained data. Callback budget overflow reports `resource_limit`, cancels the script and callbacks, and commits no store writes.
 
-Output-budget truncation can spill text to a private PostgreSQL artifact and reports its path; use `tools.read({ path, offset, limit })` to inspect a bounded portion. Images remain inline; binary saves are unavailable, with no guest/local temporary-file fallback. Truncation is distinct from execution failure, and increasing `max_output_tokens` cannot raise hard resource caps. To avoid oversized results, filter and aggregate locally, emit summaries, and split work across executions. Read the linked skill's limits before choosing batch, read, store or artifact sizes.
+Output-budget truncation can spill text to a private PostgreSQL artifact and reports its path; use `tools.read({ path, offset, limit })` to inspect a bounded portion. Images are returned inline; binary saves are unavailable, with no guest/local temporary-file fallback. Truncation is distinct from execution failure, and increasing `max_output_tokens` cannot raise hard resource caps. To avoid oversized results, filter and aggregate locally, emit summaries, and split work across executions. Read the limits below before choosing batch, read, store or artifact sizes.
 
-## Provenance and license
+## Charts
 
-Adapted from Pi's code-mode documentation under MIT. Current behavior uses `@earendil-works/pi-durable/codemode` and `@earendil-works/pi-codemode` 1.3.0: [upstream source](https://github.com/earendil-works/pi/tree/v1.3.0/packages/durable/src/codemode), [sandbox documentation](https://github.com/earendil-works/pi/blob/v1.3.0/packages/codemode/README.md). Policy checked against pi-orb `apps/control-plane/src/adapters/durable/tools/{codemode,catalog,codemode-sandbox}.ts`; local patch provenance: `patches/pi-codemode.PROVENANCE.md`, `patches/pi-durable.PROVENANCE.md`.
+`await chart(spec)` shows the user a separate chart row; its data is not returned to the model. Use it for quantitative information that fits line or bar charts.
 
-MIT License
+```js
+await chart({
+  kind: "line",
+  title: "Latency",
+  unit: "ms",
+  series: [{ name: "p95", points: [["2026-10-17T12:00:00Z", 42]] }],
+});
+```
 
-Copyright (c) 2025 Mario Zechner
+`spec` is `{kind:'line',title,unit?,source?,series:[{name,points:[[time,value|null]]}],markers?:[{at:time,label}],thresholds?:[{value,label}]}` (ISO or epoch-ms time, at most 6 series/5000 points) or `{kind:'bar',title,unit?,source?,bars:[{label,value}]}`. `source` is an http(s) origin link. At most 8 charts per script. For chart rendering details, read [charts](/opt/pi-orb/skills/charts/SKILL.md).
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+## Bounded summary example
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Compose authorized tools in JavaScript; process large replies locally and emit/store summaries, not raw payloads. Discover tools with searchTools/describeTool/describeNamespace. Only explicit output/return reaches the model. Do not redeclare injected globals. Await calls; show images with image(), not text(). No nested codemode.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+```js
+const raw = await tools.read({ path: "package.json" });
+const pkg = JSON.parse(raw);
+const summary = {
+  name: pkg.name,
+  scripts: Object.keys(pkg.scripts ?? {}),
+  dependencies: Object.keys(pkg.dependencies ?? {}).length,
+};
+store("package-summary", summary);
+text(summary);
+```
+
+## Limits (central native code-mode)
+
+- Sandbox: no Node, direct filesystem, network or timers. Each execution gets a fresh VM; variables do not survive. 256 MiB QuickJS heap, not a process quota.
+- CPU: 1 core shared across central code-mode workers per control-plane process; at most 20 ms accumulated idle credit. Cooperative checkpoints can pause scripts; wall deadlines still apply. Not an OS quota for host callbacks or other threads.
+- Store: 262144 JSON characters/value; 1048576 total including keys. load() returns a copy; only successful executions commit store writes. Native state rewinds with history and forks as of the selected entry. Summarize oversized values or split work across executions.
+- Options: default timeout 5 min (300000 ms); first-line `// @options: {"timeout_ms": 60000, "max_output_tokens": 10000}` overrides it. timeout_ms: positive integer ≤2147483647; max_output_tokens: nonnegative safe integer ≤9007199254740991, default 10000 estimated tokens (4 characters/token). max_output_tokens does not raise resource caps.
+- Callbacks: 8 outstanding, 256 cumulative calls, 8 MiB arguments, 64 MiB replies per execution; discovery globals share these budgets. Sizes count serialized JSON UTF-8 bytes including escapes; cumulative, not per-call. Batch at most eight; same-execution chunking cannot evade totals.
+- Emitted output: 1 MiB text, 32 MiB aggregate encoded image+text, 4096 items (text/console/image). This worker-pipe cap is not an unconditional top-level-return cap; keep returns small too.
+- Nested bash capture: 1 MiB UTF-8; full_output_path points to a spill when truncated.
+- Text read: 2000 lines or 50 KiB; continue with offset/limit. Images: PNG/JPEG/GIF/WebP retain original bytes up to 20 MiB raw, inclusive, independent of dimensions, through the native reader’s public image-processor hook.
+- Images remain inline; binary artifact saves are unavailable. Private text artifact: 16 MiB each. Remote execution HTTP requests and whole-file reads: 16 MiB (request body/raw file, not encoded response). Serialization/transport may lower the allowance; strongest applicable limit wins.
+- Native journals resume interrupted scripts; nested calls follow their own replay policy, not an exactly-once guarantee. Failed scripts do not roll back earlier tool effects; no store commit. Unawaited calls are cancelled when execution ends; await required work.

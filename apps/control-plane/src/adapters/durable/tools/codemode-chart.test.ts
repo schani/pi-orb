@@ -4,7 +4,6 @@ import { defineTool } from "@earendil-works/pi-durable";
 import { CHART_MAX_PER_SCRIPT } from "@pi-orb/protocol";
 import { describe, expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
-import { codemodeTool } from "./codemode.ts";
 import { openCodemodeHarness } from "./testkit/codemode.ts";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -130,9 +129,5 @@ describe("code-mode chart()", () => {
     } finally {
       await fixture.close();
     }
-  });
-
-  it("documents chart() for the model", () => {
-    expect(codemodeTool(new CallableCatalog([]), new Set()).description).toMatch(/chart\(/);
   });
 });

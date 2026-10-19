@@ -294,12 +294,15 @@ describe("durable Codex prompt cache key", () => {
         expect(body.instructions).toBe(bodies[0]?.instructions);
         const instructions = String(body.instructions);
         const sections = [...instructions.matchAll(/<([a-z-]+)>\n([\s\S]*?)\n<\/\1>/g)];
-        expect(sections.map((match) => match[1]).sort()).toEqual(["codemode", "orb-instructions"]);
+        expect(sections.map((match) => match[1]).sort()).toEqual([
+          "orb-instructions",
+          "tool-catalogue",
+        ]);
         expect(sections.map((match) => match[0]).join("\n\n")).toBe(instructions);
         expect(sections.find((match) => match[1] === "orb-instructions")?.[2]).toBe(
           `PINNED_PROMPT${childNote}`,
         );
-        expect(sections.find((match) => match[1] === "codemode")?.[2]).toEqual(
+        expect(sections.find((match) => match[1] === "tool-catalogue")?.[2]).toEqual(
           expect.stringMatching(/\S/),
         );
         expect(body.tools).toEqual([expect.objectContaining({ type: "custom", name: "codemode" })]);

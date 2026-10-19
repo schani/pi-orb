@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { errAsync, okAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { ResourceAcquisition, type ResourceSnapshot } from "../../domain/resources.ts";
+import { loadPlatformResources } from "./platform-resources.ts";
 import { type PersistedPlatformContext, prepareResourceContext } from "./resource-context.ts";
 
 const file = (path: string, text: string) => ({
@@ -117,11 +119,29 @@ describe("prepared resource context", () => {
     expect(second.commitSha).toBe(first.commitSha);
     expect(f.counts()).toEqual({ sourceCalls: 1, platformCalls: 1 });
   });
-  it("adopts changed application platform versions without repinning repository", async () => {
+  it("adopts the canonical skill on a platform version change without repinning repository", async () => {
     const f = fixture();
-    await prepareResourceContext(f.options);
-    await prepareResourceContext({ ...f.options, platformVersion: "v2" });
-    expect(f.counts()).toEqual({ sourceCalls: 1, platformCalls: 2 });
+    const first = (await prepareResourceContext(f.options))._unsafeUnwrap();
+    const path = "/opt/pi-orb/skills/codemode/SKILL.md";
+    expect(first.reader.contains(path)).toBe(false);
+    const loadPlatform = () =>
+      loadPlatformResources(
+        fileURLToPath(new URL("../../../../orb-runtime/skills/", import.meta.url)),
+      );
+    const second = (
+      await prepareResourceContext({
+        ...f.options,
+        platformVersion: "v2",
+        loadPlatform,
+      })
+    )._unsafeUnwrap();
+    const canonical = (await loadPlatform())._unsafeUnwrap().find((file) => file.path === path);
+    expect(second.skills.filter((skill) => skill.name === "codemode")).toHaveLength(1);
+    expect(Buffer.from((await second.reader.read(path))._unsafeUnwrap())).toEqual(
+      Buffer.from(canonical?.bytes ?? []),
+    );
+    expect(second.commitSha).toBe(first.commitSha);
+    expect(f.counts()).toEqual({ sourceCalls: 1, platformCalls: 1 });
   });
   it("rejects revoked admission at the publication checkpoint", async () => {
     const f = fixture();

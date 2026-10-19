@@ -1,9 +1,11 @@
+import { createCodemodeTool } from "@earendil-works/pi-durable/codemode";
 import { FileError } from "@earendil-works/pi-durable/env";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { okAsync } from "neverthrow";
 import { expect, it, vi } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
-import { codemodeTool } from "./codemode.ts";
+import { CODEMODE_BOOTSTRAP, codemodeTool } from "./codemode.ts";
+import { PiCodemodeSandbox } from "./codemode-sandbox.ts";
 import { subagentTools } from "./subagents.ts";
 import { openCodemodeHarness } from "./testkit/codemode.ts";
 
@@ -28,18 +30,27 @@ it("declares inherited subagent configuration with a named model selector", asyn
   }
 });
 
-it("documents the reserved tools binding without a subagent example", () => {
+it("offers only the literal skill bootstrap and preserves the native tool contract", () => {
   const tool = codemodeTool(new CallableCatalog(subagentTools), new Set());
-  expect(tool.description).toContain("Do not redeclare tools or other injected globals.");
-  expect(tool.description).not.toContain("searchTools('subagent')");
-});
-
-it("describes inline images without promising temp files", () => {
-  const tool = codemodeTool(new CallableCatalog([]), new Set());
-  expect(tool.description).toContain("Images are returned inline.");
-  expect(tool.description).not.toContain(
-    "`image()` also saves the image to a temp file and the result names its path.",
+  const native = createCodemodeTool({ sandbox: new PiCodemodeSandbox(), models: false });
+  expect(tool.description).toBe(CODEMODE_BOOTSTRAP);
+  expect(tool.description).toBe(
+    'Read the codemode skill first:\ntext(await tools.read({path:"/opt/pi-orb/skills/codemode/SKILL.md"}));',
   );
+  for (const key of [
+    "name",
+    "parameters",
+    "constrainedSampling",
+    "outputLimits",
+    "replay",
+    "callers",
+  ] as const)
+    expect(tool[key]).toEqual(native[key]);
+  expect(tool.constrainedSampling).toMatchObject({
+    type: "grammar",
+    variants: { openai_lark: expect.stringContaining("start: options_source | plain_source") },
+  });
+  expect(tool.description).not.toMatch(/Run JavaScript|Globals:|chart\(|8-outstanding|temp file/);
 });
 
 it("returns native images inline without writing to the environment or text artifact store", async () => {
