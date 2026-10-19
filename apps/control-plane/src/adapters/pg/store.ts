@@ -1374,9 +1374,18 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     });
   }
 
-  claimOrbMessageBacklog(
+  claimOrbMessageBacklog(task: SimulationTask, params: { orbId: string; now: number }) {
+    return this.claimOrbMessages(task, params, true);
+  }
+
+  claimNextOrbMessageBatch(task: SimulationTask, params: { orbId: string; now: number }) {
+    return this.claimOrbMessages(task, params, false);
+  }
+
+  private claimOrbMessages(
     _task: SimulationTask,
     params: { orbId: string; now: number },
+    wholeBacklog: boolean,
   ): ResultAsync<OrbMessageRow[], StoreError> {
     return this.db.transaction<OrbMessageRow[], StoreError>(async (query) => {
       const current = await query("SELECT sleep_id,stop_reason FROM orbs WHERE id=$1 FOR UPDATE", [
@@ -1400,19 +1409,27 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         const first = rows[index++];
         if (first === undefined) break;
         if (first.deliveryBatchId !== null) {
+          if (!wholeBacklog)
+            return ok(rows.filter((row) => row.deliveryBatchId === first.deliveryBatchId));
           snapshot.push(first);
           continue;
         }
         const batch = [first];
-        if (first.system === null) {
-          while (index < rows.length) {
-            const next = rows[index];
-            if (next === undefined || next.system !== null || next.deliveryBatchId !== null) break;
-            batch.push(next);
-            index++;
-          }
+        while (first.system === null && index < rows.length) {
+          const next = rows[index];
+          if (
+            next === undefined ||
+            next.system !== null ||
+            (wholeBacklog && next.deliveryBatchId !== null)
+          )
+            break;
+          batch.push(next);
+          index++;
         }
-        const ids = batch.map((row) => row.messageId);
+        const eligible = batch.filter(
+          (row) => row.deliveryBatchId === null && (wholeBacklog || row.status === "queued"),
+        );
+        const ids = eligible.map((row) => row.messageId);
         const claimed = await query(
           `UPDATE orb_messages SET delivery_batch_id = $2, status = 'delivering', updated_at = $3
            WHERE orb_id = $1 AND message_id = ANY($4::uuid[]) AND delivery_batch_id IS NULL
@@ -1423,67 +1440,9 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         snapshot.push(
           ...claimed.value.rows.map(mapMessageRow).sort((a, b) => a.ordinal - b.ordinal),
         );
+        if (!wholeBacklog) break;
       }
       return ok(snapshot);
-    });
-  }
-
-  claimNextOrbMessageBatch(
-    _task: SimulationTask,
-    params: { orbId: string; now: number },
-  ): ResultAsync<OrbMessageRow[], StoreError> {
-    return this.db.transaction<OrbMessageRow[], StoreError>(async (query) => {
-      const current = await query("SELECT sleep_id,stop_reason FROM orbs WHERE id=$1 FOR UPDATE", [
-        params.orbId,
-      ]);
-      if (current.isErr()) return err(current.error);
-      if (
-        current.value.rows[0]?.["sleep_id"] != null ||
-        current.value.rows[0]?.["stop_reason"] === "sleep"
-      )
-        return ok([]);
-      const outstanding = await query(
-        `SELECT * FROM orb_messages WHERE orb_id = $1
-           AND status IN ('queued', 'delivering') ORDER BY ordinal FOR UPDATE`,
-        [params.orbId],
-      );
-      if (outstanding.isErr()) return err(outstanding.error);
-      const first = outstanding.value.rows[0];
-      if (first === undefined) return ok([]);
-      const existingBatch = first["delivery_batch_id"];
-      if (existingBatch !== null) {
-        return ok(
-          outstanding.value.rows
-            .filter((row) => row["delivery_batch_id"] === existingBatch)
-            .map(mapMessageRow),
-        );
-      }
-      const firstSystem = first["system"] !== null;
-      const eligible = firstSystem
-        ? [first]
-        : outstanding.value.rows.slice(
-            0,
-            outstanding.value.rows.findIndex((row) => row["system"] !== null) < 0
-              ? undefined
-              : outstanding.value.rows.findIndex((row) => row["system"] !== null),
-          );
-      const batchId = messageBatchId(
-        eligible
-          .filter((row) => row["status"] === "queued" && row["delivery_batch_id"] === null)
-          .map((row) => String(row["message_id"])),
-      );
-      const claimed = await query(
-        `UPDATE orb_messages m SET delivery_batch_id = $2, status = 'delivering', updated_at = $3
-         WHERE m.orb_id = $1 AND m.status = 'queued' AND m.delivery_batch_id IS NULL
-           AND ($4::boolean AND m.message_id = $5::uuid OR NOT $4::boolean AND m.system IS NULL
-             AND NOT EXISTS (SELECT 1 FROM orb_messages earlier
-               WHERE earlier.orb_id = m.orb_id AND earlier.ordinal < m.ordinal
-                 AND earlier.system IS NOT NULL AND earlier.status IN ('queued', 'delivering')))
-         RETURNING m.*`,
-        [params.orbId, batchId, new Date(params.now), firstSystem, first["message_id"]],
-      );
-      if (claimed.isErr()) return err(claimed.error);
-      return ok(claimed.value.rows.map(mapMessageRow).sort((a, b) => a.ordinal - b.ordinal));
     });
   }
 

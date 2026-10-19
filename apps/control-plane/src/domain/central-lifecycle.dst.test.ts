@@ -38,18 +38,16 @@ function plane(deliver: () => void, work = false): AgentPlane {
         status: "initializing" as const,
         phase: "booting" as const,
       }),
-    deliverMessages: () => {
+    deliverMessage: () => {
       deliver();
-      return okAsync([
-        ok({
-          v: 1 as const,
-          messageId: "human",
-          status: "persisted" as const,
-          delivery: "turn" as const,
-          operationId: "turn",
-          duplicate: false,
-        }),
-      ]);
+      return okAsync({
+        v: 1 as const,
+        messageId: "human",
+        status: "persisted" as const,
+        delivery: "turn" as const,
+        operationId: "turn",
+        duplicate: false,
+      });
     },
     prepareIdleStop: unavailable,
     pullHistory: unavailable,

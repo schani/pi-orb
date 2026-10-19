@@ -1,5 +1,5 @@
 import type { SimulationTask } from "determined";
-import { errAsync, okAsync, ResultAsync } from "neverthrow";
+import { errAsync, okAsync, type ResultAsync } from "neverthrow";
 import type { AgentPlane } from "../domain/agent-ports.ts";
 import type { ControlState } from "../domain/control-state.ts";
 import type { RuntimeClientError } from "../domain/errors.ts";
@@ -58,21 +58,15 @@ export class SdkAgentPlane implements AgentPlane {
       this.deps.runtimeClient.health(task, url, context),
     );
   }
-  deliverMessages(
+  deliverMessage(
     task: SimulationTask,
     orb: OrbRow,
-    requests: readonly DeliverMessageClientRequest[],
+    request: DeliverMessageClientRequest,
     context: OperationContext,
   ) {
     return this.endpoint(task, orb, context).andThen((baseUrl) => {
       this.deps.control.noteRuntimeRequestStarted(orb.id, task.monotonicNow());
-      return ResultAsync.fromSafePromise(
-        Promise.all(
-          requests.map((request) =>
-            this.deps.runtimeClient.deliverMessage(task, { ...request, baseUrl }, context),
-          ),
-        ),
-      );
+      return this.deps.runtimeClient.deliverMessage(task, { ...request, baseUrl }, context);
     });
   }
   prepareIdleStop(task: SimulationTask, orb: OrbRow, context: OperationContext) {

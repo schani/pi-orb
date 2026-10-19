@@ -463,6 +463,17 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
     return this.handles.get(orbId) ?? null;
   }
 
+  deliverMessage(
+    task: SimulationTask,
+    orb: OrbRow,
+    request: DeliverMessageClientRequest,
+    context: OperationContext,
+  ) {
+    return this.deliverMessages(task, orb, [request], context).andThen(
+      (responses) => responses[0] ?? err(durableError("message delivery response missing", true)),
+    );
+  }
+
   deliverMessages(
     _task: SimulationTask,
     orb: OrbRow,

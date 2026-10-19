@@ -181,23 +181,7 @@ diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
      /** Handle for an existing submission, or `undefined`. */
      async get(id, context) {
          const record = await this.#session.readOnLine(() => this.#storage.submission(id, context));
-@@ -132,6 +177,15 @@
-             if (existing.type !== draft.type) {
-                 throw new Error(`Request ${draft.requestId} already identifies a submission of type ${existing.type}`);
-             }
-+            if (existing.status === "queued") {
-+                const live = await tx.doc(LiveDoc, conversationId);
-+                if (live.run === undefined) {
-+                    const boundary = await prepareBoundary(tx, conversationId, queueModes);
-+                    const { users } = await applyBoundary(tx, boundary, "final", now);
-+                    if (users.length > 0)
-+                        await startRun(tx, conversationId, live, users);
-+                }
-+            }
-             return existing.id;
-         }
-     }
-@@ -150,25 +204,8 @@
+@@ -150,25 +195,8 @@
      // A boundary reads the table, so it is prepared before the first table write; a busy one needs none.
      const boundary = busy ? undefined : await prepareBoundary(tx, conversationId, queueModes);
      if (boundary === undefined || boundary.inbox.items.length > 0) {
@@ -225,7 +209,7 @@ diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
          if (boundary === undefined)
              return id;
          const { users } = await applyBoundary(tx, boundary, "final", now);
-@@ -191,4 +228,29 @@
+@@ -191,4 +219,29 @@
      await startRun(tx, conversationId, live, [id]);
      return id;
  }
@@ -259,28 +243,7 @@ diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
 diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/generation.js b/node_modules/@earendil-works/pi-durable/dist/harness/generation.js
 --- a/node_modules/@earendil-works/pi-durable/dist/harness/generation.js
 +++ b/node_modules/@earendil-works/pi-durable/dist/harness/generation.js
-@@ -133,7 +133,19 @@
-             const { attempt, compacted, until } = task.state.checkpoint;
-             await runtime.sleep(until, context);
-             await runtime.commit(async (tx) => {
--                (await tx.doc(LiveDoc, runtime.conversationId)).generation = { attempt: attempt + 1 };
-+                const conversationId = runtime.conversationId;
-+                const boundary = await prepareBoundary(tx, conversationId, runtime.settings);
-+                const live = await tx.doc(LiveDoc, conversationId);
-+                const { users, reset } = await applyBoundary(tx, boundary, "postTools", runtime.now());
-+                if (reset) {
-+                    endRun(tx, live, runtime.taskId, { status: "unanswered", reason: "reset" });
-+                    if (users.length > 0)
-+                        await startRun(tx, conversationId, live, users);
-+                    return { status: "terminal", outcome: { status: "completed", result: {} } };
-+                }
-+                if (live.run?.taskId === runtime.taskId)
-+                    live.run.inputs.push(...users);
-+                live.generation = { attempt: attempt + 1 };
-                 const checkpoint = {
-                     phase: "prepare",
-                     attempt: attempt + 1,
-@@ -244,9 +256,14 @@
+@@ -244,9 +244,14 @@
  }
  /** Settle the run's inputs `unanswered` with `model_error` and fail with `text`. */
  async function failModelError(runtime, text, context) {
@@ -296,7 +259,7 @@ diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/generation.js 
          return {
              status: "terminal",
              outcome: { status: "failed", error: { message: text, detail: { reason: "model_error" } } },
-@@ -390,6 +407,7 @@
+@@ -390,6 +395,7 @@
          attempt <= policy.maxRetries;
      const until = retry ? runtime.now() + retryDelayMs(policy, attempt) : 0;
      await runtime.commit(async (tx) => {
@@ -304,7 +267,7 @@ diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/generation.js 
          const live = await tx.doc(LiveDoc, conversationId);
          await appendAssistant(tx, conversationId, message);
          if (retry) {
-@@ -404,6 +422,9 @@
+@@ -404,6 +410,9 @@
          }
          const text = message.errorMessage ?? `Model response ended with stop reason ${message.stopReason}`;
          endRun(tx, live, runtime.taskId, { status: "unanswered", reason: "model_error", detail: text });

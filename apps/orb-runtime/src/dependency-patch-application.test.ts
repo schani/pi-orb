@@ -264,7 +264,7 @@ describe("sealed dependency patch application", () => {
     const evidence = `e709d41ab45ae8e5847ffe96171751d8e7618afc0f54f47a6ca2ddb4c52d5abf  patches/@earendil-works+pi-ai+1.3.0.patch
  5ccd27bea08593d9ac2307ed5d3d6ee977d88b6cc531bedf59db55aa46329348  patches/@earendil-works+pi-coding-agent+1.3.0.patch
  d4d7e968a23054b75e25603cc66906492ba8a2d2710a0cbbb5896bd56f0fa42a  patches/@earendil-works+pi-codemode+1.3.0.patch
- e92307969c349f5202284955fbcd926abb01dda988b93b5098ff8b701334b95f  patches/@earendil-works+pi-durable+1.3.0.patch`;
+ 1c275400b15174c92868d55944417eb129f15b6eca7c80e5dc0495587e8c81a9  patches/@earendil-works+pi-durable+1.3.0.patch`;
     for (const line of evidence.trim().split("\n")) {
       const [hash, path] = line.trim().split(/\s+/);
       expect(sha(join(root, path as string))).toBe(hash);

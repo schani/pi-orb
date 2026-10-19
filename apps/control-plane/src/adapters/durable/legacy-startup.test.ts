@@ -653,17 +653,15 @@ it("does not prepare resources for rejected startup or passive history and termi
       code: "legacy_backend",
       retryable: false,
     });
-    const delivery = await plane.deliverMessages(
+    const delivery = await plane.deliverMessage(
       f.task,
       f.orb,
-      [
-        {
-          baseUrl: "unused",
-          messageId: "input",
-          messageIds: ["input"],
-          content: [{ type: "text", text: "continue" }],
-        },
-      ],
+      {
+        baseUrl: "unused",
+        messageId: "input",
+        messageIds: ["input"],
+        content: [{ type: "text", text: "continue" }],
+      },
       operation,
     );
     expect(delivery.isErr() ? delivery.error : null).toMatchObject({

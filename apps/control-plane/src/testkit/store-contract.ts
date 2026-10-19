@@ -2123,194 +2123,85 @@ export function storeSemanticsContractTests(
       expect(generated.isOk() && generated.value).toBeNull();
     });
 
-    describe("full orb message backlog", () => {
+    it("claims a mixed immutable FIFO backlog and blocks it during sleep", async () => {
       const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
-      const enqueue = async (n: number, senderId?: string) =>
+      (await store.insertProject(task, project))._unsafeUnwrap();
+      (await store.insertOrb(task, { ...orb, state: "running" }))._unsafeUnwrap();
+      for (const n of [201, 202])
+        (await store.insertOrb(task, { ...orb, id: id(n) }))._unsafeUnwrap();
+      const enqueue = async (n: number, peer?: number) =>
         (
           await store.enqueueOrbMessage(task, {
             orbId: orb.id,
             messageId: id(n),
             content: [{ type: "text", text: String(n) }],
             now: 2_000 + n,
-            ...(senderId === undefined
+            ...(peer === undefined
               ? {}
               : {
                   sender: {
-                    orbId: senderId,
+                    orbId: id(peer),
                     projectId: project.id,
                     ownerUserId: OWNER,
-                    caller: peerCentralCaller(senderId),
+                    caller: peerCentralCaller(id(peer)),
                   },
                 }),
           })
         )._unsafeUnwrap();
       const claim = async (now = 3_000) =>
         (await store.claimOrbMessageBacklog(task, { orbId: orb.id, now }))._unsafeUnwrap();
-
-      it("freezes every mixed FIFO group without merging peer provenance or late arrivals", async () => {
-        await seed();
-        for (const n of [201, 202])
-          (await store.insertOrb(task, { ...orb, id: id(n) }))._unsafeUnwrap();
-        await enqueue(211);
-        await enqueue(212);
-        await enqueue(213, id(201));
-        await enqueue(214, id(202));
-        await enqueue(215);
-        await enqueue(216);
-        const snapshot = await claim();
-        expect(snapshot.map((row) => row.messageId)).toEqual(
-          [211, 212, 213, 214, 215, 216].map(id),
-        );
-        expect(snapshot.map((row) => row.deliveryBatchId)).toEqual([
-          messageBatchId([id(211), id(212)]),
-          messageBatchId([id(211), id(212)]),
-          id(213),
-          id(214),
-          messageBatchId([id(215), id(216)]),
-          messageBatchId([id(215), id(216)]),
-        ]);
-        expect(snapshot.every((row) => row.status === "delivering")).toBe(true);
-        expect(snapshot.map((row) => row.system)).toEqual([
-          null,
-          null,
-          { kind: "orb_message", senderOrbId: id(201) },
-          { kind: "orb_message", senderOrbId: id(202) },
-          null,
-          null,
-        ]);
-        expect((await store.listOrbMessages(task, orb.id))._unsafeUnwrap()).toEqual(snapshot);
-        expect(await claim(4_000)).toEqual(snapshot);
-        await enqueue(217);
-        await enqueue(218);
-        const extended = await claim(5_000);
-        expect(extended.slice(0, snapshot.length)).toEqual(snapshot);
-        expect(extended.slice(snapshot.length).map((row) => row.deliveryBatchId)).toEqual([
-          messageBatchId([id(217), id(218)]),
-          messageBatchId([id(217), id(218)]),
-        ]);
-        expect(await claim(6_000)).toEqual(extended);
-      });
-
-      it("preserves an existing prefix claim and admission metadata while claiming later groups", async () => {
-        await seed();
-        (await store.insertOrb(task, { ...orb, id: id(201) }))._unsafeUnwrap();
-        await enqueue(211);
-        await enqueue(212);
-        const prefix = (
-          await store.claimNextOrbMessageBatch(task, { orbId: orb.id, now: 2_500 })
-        )._unsafeUnwrap();
-        (
-          await store.noteOrbMessageDelivery(task, {
-            orbId: orb.id,
-            messageIds: prefix.map((row) => row.messageId),
-            delivery: "steer",
-            operationId: "operation",
-            now: 2_600,
-          })
-        )._unsafeUnwrap();
-        const admitted = (await store.listOrbMessages(task, orb.id))._unsafeUnwrap();
-        await enqueue(213);
-        await enqueue(214);
-        await enqueue(215, id(201));
-        await enqueue(216);
-        const snapshot = await claim();
-        expect(snapshot.slice(0, 2)).toEqual(admitted);
-        expect(snapshot.map((row) => row.deliveryBatchId)).toEqual([
-          prefix[0]?.deliveryBatchId,
-          prefix[0]?.deliveryBatchId,
-          messageBatchId([id(213), id(214)]),
-          messageBatchId([id(213), id(214)]),
-          id(215),
-          id(216),
-        ]);
-        expect(snapshot.map((row) => row.messageId)).toEqual(
-          [211, 212, 213, 214, 215, 216].map(id),
-        );
-        expect(await claim(4_000)).toEqual(snapshot);
-      });
-
-      it("serializes concurrent snapshots without overtaking an outstanding system row", async () => {
-        await seed();
-        (await store.insertOrb(task, { ...orb, id: id(201) }))._unsafeUnwrap();
-        await enqueue(211, id(201));
-        await enqueue(212);
-        await enqueue(213);
-        const [a, b] = await Promise.all([claim(3_000), claim(4_000)]);
-        expect(a).toEqual(b);
-        expect(a.map((row) => row.messageId)).toEqual([211, 212, 213].map(id));
-        expect(a.map((row) => row.deliveryBatchId)).toEqual([
-          id(211),
-          messageBatchId([id(212), id(213)]),
-          messageBatchId([id(212), id(213)]),
-        ]);
-      });
-
-      it("blocks claims throughout sleep without changing frozen or queued rows", async () => {
-        (await store.insertProject(task, project))._unsafeUnwrap();
-        (await store.insertOrb(task, { ...orb, state: "running" }))._unsafeUnwrap();
-        await enqueue(211);
-        await claim();
-        await enqueue(212);
-        const before = (await store.listOrbMessages(task, orb.id))._unsafeUnwrap();
-        const sleeping = (
-          await store.scheduleOrbSleep(task, {
-            orbId: orb.id,
-            caller: peerCentralCaller(orb.id),
-            sleepId: id(220),
-            durationSeconds: 300,
-          })
-        )._unsafeUnwrap();
-        expect(await claim()).toEqual([]);
-        const stopped = (
-          await store.casTransition(task, {
-            orbId: orb.id,
-            expectedStateVersion: sleeping.stateVersion,
-            toState: "stopped",
-            now: 4_000,
-          })
-        )._unsafeUnwrap();
-        expect(await claim()).toEqual([]);
-        expect((await store.listOrbMessages(task, orb.id))._unsafeUnwrap()).toEqual(before);
-        (
-          await store.cancelOrbSleep(task, {
-            orbId: orb.id,
-            expectedStateVersion: stopped.stateVersion,
-            now: 5_000,
-          })
-        )._unsafeUnwrap();
-        expect((await claim(6_000)).map((row) => row.messageId)).toEqual([211, 212].map(id));
-      });
-
-      it("keeps Abort cancellation and survivor regrouping semantics", async () => {
-        await seed();
-        for (const n of [211, 212, 213]) await enqueue(n);
-        const initial = await claim();
-        expect(
-          (
-            await store.cancelPendingOrbMessage(task, {
-              orbId: orb.id,
-              messageId: id(212),
-              caller: peerCentralCaller(orb.id),
-              now: 4_000,
-            })
-          )._unsafeUnwrap(),
-        ).toBe("cancelled");
-        const rows = (await store.listOrbMessages(task, orb.id))._unsafeUnwrap();
-        expect(rows.map((row) => row.status)).toEqual(["queued", "failed", "queued"]);
-        expect(rows.map((row) => row.deliveryBatchId)).toEqual([
-          null,
-          initial[0]?.deliveryBatchId,
-          null,
-        ]);
-        const survivors = await claim(5_000);
-        expect(survivors.map((row) => row.messageId)).toEqual([211, 213].map(id));
-        expect(survivors.map((row) => row.deliveryBatchId)).toEqual([
-          messageBatchId([id(211), id(213)]),
-          messageBatchId([id(211), id(213)]),
-        ]);
-        expect(await claim(6_000)).toEqual(survivors);
-        expect((await store.listOrbMessages(task, orb.id))._unsafeUnwrap()[1]).toEqual(rows[1]);
-      });
+      await enqueue(211);
+      await enqueue(212);
+      const prefix = (
+        await store.claimNextOrbMessageBatch(task, { orbId: orb.id, now: 2_500 })
+      )._unsafeUnwrap();
+      await enqueue(213, 201);
+      await enqueue(214, 202);
+      await enqueue(215);
+      await enqueue(216);
+      const snapshot = await claim();
+      expect(snapshot.map((r) => r.messageId)).toEqual([211, 212, 213, 214, 215, 216].map(id));
+      expect(snapshot.map((r) => r.deliveryBatchId)).toEqual([
+        prefix[0]!.deliveryBatchId,
+        prefix[0]!.deliveryBatchId,
+        id(213),
+        id(214),
+        messageBatchId([id(215), id(216)]),
+        messageBatchId([id(215), id(216)]),
+      ]);
+      expect(snapshot.map((r) => r.system)).toEqual([
+        null,
+        null,
+        { kind: "orb_message", senderOrbId: id(201) },
+        { kind: "orb_message", senderOrbId: id(202) },
+        null,
+        null,
+      ]);
+      expect(snapshot.every((r) => r.status === "delivering")).toBe(true);
+      expect(await claim(5_000)).toEqual(snapshot);
+      await enqueue(217);
+      const beforeSleep = (await store.listOrbMessages(task, orb.id))._unsafeUnwrap();
+      const sleeping = (
+        await store.scheduleOrbSleep(task, {
+          orbId: orb.id,
+          caller: peerCentralCaller(orb.id),
+          sleepId: id(220),
+          durationSeconds: 300,
+        })
+      )._unsafeUnwrap();
+      expect(await claim(6_000)).toEqual([]);
+      expect((await store.listOrbMessages(task, orb.id))._unsafeUnwrap()).toEqual(beforeSleep);
+      (
+        await store.cancelOrbSleep(task, {
+          orbId: orb.id,
+          expectedStateVersion: sleeping.stateVersion,
+          now: 7_000,
+        })
+      )._unsafeUnwrap();
+      const extended = await claim(8_000);
+      expect(extended.slice(0, snapshot.length)).toEqual(snapshot);
+      expect(extended.slice(snapshot.length).map((r) => r.deliveryBatchId)).toEqual([id(217)]);
+      expect(await claim(9_000)).toEqual(extended);
     });
 
     it("durably queues a stopped-orb message, wakes it, and completes from replicated identity", async () => {

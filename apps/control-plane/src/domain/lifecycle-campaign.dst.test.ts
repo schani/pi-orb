@@ -284,19 +284,35 @@ describe("stateful lifecycle campaign", () => {
                 central.world.setActivity(ORB, centralBusy ? "busy" : "idle");
                 return central.deps.runtimeClient.health(task, url(), context);
               },
-              deliverMessages: (task, _orb, requests, context) =>
+              deliverMessage: (task, orb, request, context) => {
+                inspectRequest(request);
+                return central.deps.runtimeClient.deliverMessage(
+                  task,
+                  { ...request, baseUrl: url() },
+                  context,
+                );
+              },
+              deliverMessages: (task, orb, requests, context) =>
                 new ResultAsync(
                   (async () => {
                     const responses = [];
                     for (const request of requests) {
-                      inspectRequest(request);
-                      const response = await central.deps.runtimeClient.deliverMessage(
-                        task,
-                        { ...request, baseUrl: url() },
-                        context,
-                      );
-                      if (response.isErr()) return err(response.error);
+                      const response = await plane.deliverMessage(task, orb, request, context);
                       responses.push(response);
+                      if (response.isErr() && response.error.retryable) {
+                        responses.push(
+                          ...requests.slice(responses.length).map(() =>
+                            err({
+                              type: "runtime_client_error" as const,
+                              code: "unreachable" as const,
+                              answered: false,
+                              retryable: true,
+                              message: "Earlier partition not admitted",
+                            }),
+                          ),
+                        );
+                        break;
+                      }
                     }
                     return ok(responses);
                   })(),

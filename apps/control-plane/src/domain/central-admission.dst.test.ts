@@ -1,4 +1,4 @@
-import { ok, okAsync } from "neverthrow";
+import { okAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
 import { runDst } from "../testkit/sim.ts";
@@ -97,17 +97,15 @@ describe("central admission transaction fence", () => {
             status: "initializing" as const,
             phase: "booting" as const,
           }),
-        deliverMessages: () =>
-          okAsync([
-            ok({
-              v: 1 as const,
-              messageId: "m",
-              status: "persisted" as const,
-              delivery: "turn" as const,
-              operationId: "turn",
-              duplicate: false,
-            }),
-          ]),
+        deliverMessage: () =>
+          okAsync({
+            v: 1 as const,
+            messageId: "m",
+            status: "persisted" as const,
+            delivery: "turn" as const,
+            operationId: "turn",
+            duplicate: false,
+          }),
         prepareIdleStop: () => {
           operations.push("prepare");
           return okAsync({ v: 1 as const, prepared: true });

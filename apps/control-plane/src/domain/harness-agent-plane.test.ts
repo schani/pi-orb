@@ -14,7 +14,7 @@ it("routes central Pi and native Claude by immutable harness selection", async (
   const makePlane = (kind: "central" | "host") => ({
     placement: kind,
     health: vi.fn(() => okAsync({})),
-    deliverMessages: vi.fn(() => okAsync([])),
+    deliverMessage: vi.fn(() => okAsync({})),
     prepareIdleStop: vi.fn(() => okAsync({})),
     pullHistory: vi.fn(() => okAsync({})),
     suspend: vi.fn(() => okAsync(undefined)),
@@ -23,7 +23,8 @@ it("routes central Pi and native Claude by immutable harness selection", async (
     close: vi.fn(() => okAsync(undefined)),
   });
   const host = makePlane("host");
-  const selected = makePlane("central");
+  const bulk = vi.fn(() => okAsync([]));
+  const selected = { ...makePlane("central"), deliverMessages: bulk };
   const plane = new HarnessAgentPlane(
     selected as unknown as AgentPlane,
     host as unknown as AgentPlane,
@@ -34,7 +35,7 @@ it("routes central Pi and native Claude by immutable harness selection", async (
   for (const orb of [pi, claude]) {
     expect(plane.placementFor(orb)).toBe(orb.harness === "claude" ? "host" : "central");
     await plane.health(task, orb, context);
-    await plane.deliverMessages(task, orb, [{} as never], context);
+    await plane.deliverMessage(task, orb, {} as never, context);
     await plane.prepareIdleStop(task, orb, context);
     await plane.pullHistory(task, orb, {} as never, context);
     await plane.suspend(task, orb.id, context, 3);
@@ -42,7 +43,7 @@ it("routes central Pi and native Claude by immutable harness selection", async (
   }
   for (const method of [
     "health",
-    "deliverMessages",
+    "deliverMessage",
     "prepareIdleStop",
     "pullHistory",
     "suspend",
@@ -51,6 +52,11 @@ it("routes central Pi and native Claude by immutable harness selection", async (
     expect(host[method]).toHaveBeenCalledTimes(1);
     expect(selected[method]).toHaveBeenCalledTimes(1);
   }
+  expect((await plane.deliverMessages(task, pi, [], context)).isOk()).toBe(true);
+  expect(bulk).toHaveBeenCalledWith(task, pi, [], context);
+  const rejected = await plane.deliverMessages(task, claude, [], context);
+  expect(rejected._unsafeUnwrapErr()).toMatchObject({ retryable: true });
+  expect(host.deliverMessage).toHaveBeenCalledTimes(1);
   await plane.close();
   expect(host.close).toHaveBeenCalledTimes(1);
   expect(selected.close).toHaveBeenCalledTimes(1);

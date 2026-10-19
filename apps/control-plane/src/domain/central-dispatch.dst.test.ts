@@ -16,9 +16,24 @@ import {
 import { pollLoop } from "./loops.ts";
 
 describe("independent central dispatcher", () => {
-  it.each(["stop", "sleep"] as const)("fences claimed input after %s", async (fence) => {
+  it.each(["deliver", "stop", "sleep"] as const)("fences claimed input after %s", async (fence) => {
     await runDst({ name: `central-dispatch-${fence}-claim`, iterations: 15 }, async (sim) => {
       const h = makeHarness();
+      const project = makeProjectRow("project");
+      const peer = "00000000-0000-4000-8000-00000000000a";
+      const inputs = ["old", "peer", "last"];
+      const sender = {
+        orbId: peer,
+        projectId: project.id,
+        ownerUserId: project.ownerUserId,
+        caller: {
+          kind: "central" as const,
+          orbId: peer,
+          projectId: project.id,
+          ownerUserId: project.ownerUserId,
+          agentAdmissionVersion: 0,
+        },
+      };
       const gate = new ConditionVariable(`claim ${fence} authority`);
       let queued = false;
       let claimed = false;
@@ -29,6 +44,7 @@ describe("independent central dispatcher", () => {
         new ResultAsync(
           (async () => {
             const result = await original(task, request);
+            expect(result._unsafeUnwrap().map((r) => r.messageId)).toEqual(inputs);
             claimed = true;
             gate.notifyAll(task, "claimed");
             while (!released) await gate.wait(task, `${fence} accepted`);
@@ -53,18 +69,32 @@ describe("independent central dispatcher", () => {
             status: "initializing" as const,
             phase: "booting" as const,
           }),
-        deliverMessages: () => {
+        deliverMessage: unavailable,
+        deliverMessages: (_task, _orb, requests) => {
           delivered++;
-          return okAsync([
-            ok({
-              v: 1 as const,
-              messageId: "old",
-              status: "persisted" as const,
-              delivery: "turn" as const,
-              operationId: "turn",
-              duplicate: false,
-            }),
-          ]);
+          expect(requests).toEqual(
+            inputs.map((messageId) => ({
+              baseUrl: "",
+              messageId,
+              messageIds: [messageId],
+              content: [{ type: "text", text: messageId }],
+              ...(messageId === "peer"
+                ? { system: { kind: "orb_message", senderOrbId: peer } }
+                : {}),
+            })),
+          );
+          return okAsync(
+            requests.map((r) =>
+              ok({
+                v: 1 as const,
+                messageId: r.messageId,
+                status: "persisted" as const,
+                delivery: "turn" as const,
+                operationId: "turn",
+                duplicate: false,
+              }),
+            ),
+          );
         },
         pullHistory: unavailable,
         prepareIdleStop: unavailable,
@@ -74,8 +104,8 @@ describe("independent central dispatcher", () => {
         close: () => okAsync(undefined),
       };
       const deps = { ...h.deps, agentPlane: plane };
-      const project = makeProjectRow("project");
-      if (fence === "sleep") h.store.seedProject(project);
+      h.store.seedProject(project);
+      h.store.seedOrb(makeOrbRow(peer, "project", "running"));
       h.store.seedOrb(makeOrbRow("orb", "project", fence === "sleep" ? "running" : "creating"));
       const result = await sim.runTasks([
         {
@@ -88,37 +118,50 @@ describe("independent central dispatcher", () => {
         {
           name: "stop",
           f: async (task) => {
-            expect(
-              (
-                await h.store.enqueueOrbMessage(task, {
-                  orbId: "orb",
-                  messageId: "old",
-                  content: [{ type: "text", text: "old" }],
-                  now: task.wallNow(),
-                })
-              ).isOk(),
-            ).toBe(true);
+            for (const messageId of inputs)
+              expect(
+                (
+                  await h.store.enqueueOrbMessage(task, {
+                    orbId: "orb",
+                    messageId,
+                    content: [{ type: "text", text: messageId }],
+                    now: task.wallNow(),
+                    ...(messageId === "peer" ? { sender } : {}),
+                  })
+                ).isOk(),
+              ).toBe(true);
             queued = true;
             gate.notifyAll(task, "queued");
             while (!claimed) await gate.wait(task, "claimed batch");
-            const accepted =
-              fence === "stop"
-                ? await requestOrbStop(task, deps, "orb")
-                : await requestOrbSleep(
-                    task,
-                    deps,
-                    "orb",
-                    {
-                      kind: "central",
-                      orbId: "orb",
-                      projectId: "project",
-                      ownerUserId: project.ownerUserId,
-                      agentAdmissionVersion: 0,
-                    },
-                    300,
-                    "sleep",
-                  );
-            expect(accepted.isOk()).toBe(true);
+            if (fence === "deliver") {
+              (
+                await h.store.enqueueOrbMessage(task, {
+                  orbId: "orb",
+                  messageId: "later",
+                  content: [{ type: "text", text: "later" }],
+                  now: task.wallNow(),
+                })
+              )._unsafeUnwrap();
+            } else {
+              const accepted =
+                fence === "stop"
+                  ? await requestOrbStop(task, deps, "orb")
+                  : await requestOrbSleep(
+                      task,
+                      deps,
+                      "orb",
+                      {
+                        kind: "central",
+                        orbId: "orb",
+                        projectId: "project",
+                        ownerUserId: project.ownerUserId,
+                        agentAdmissionVersion: 0,
+                      },
+                      300,
+                      "sleep",
+                    );
+              expect(accepted.isOk()).toBe(true);
+            }
             released = true;
             gate.notifyAll(task, `${fence} accepted`);
           },
@@ -127,11 +170,24 @@ describe("independent central dispatcher", () => {
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       if (fence === "sleep")
         expect(h.store.orbSnapshot("orb")).toMatchObject({ sleepId: "sleep", stopReason: null });
-      expect(delivered).toBe(0);
-      expect(h.store.messageSnapshots("orb")[0]).toMatchObject({
-        status: "delivering",
-        autoStart: false,
-      });
+      const rows = h.store.messageSnapshots("orb");
+      expect(rows.slice(0, inputs.length).map((r) => r.deliveryBatchId)).toEqual(inputs);
+      expect(rows.slice(0, inputs.length).map((r) => r.status)).toEqual(
+        inputs.map(() => "delivering"),
+      );
+      if (fence === "deliver") {
+        expect(delivered).toBe(1);
+        expect(rows.slice(0, inputs.length).every((r) => r.operationId === "turn")).toBe(true);
+        expect(rows.at(-1)).toMatchObject({
+          messageId: "later",
+          status: "queued",
+          deliveryBatchId: null,
+        });
+      } else {
+        expect(delivered).toBe(0);
+        for (const row of rows)
+          expect(row).toMatchObject({ status: "delivering", autoStart: false });
+      }
     });
   });
   it("delivers later input and completes Stop while VM provisioning remains held", async () => {
@@ -186,10 +242,9 @@ describe("independent central dispatcher", () => {
               sessionId: "central",
               activity: "busy" as const,
             }),
-          deliverMessages: (task, _orb, requests) =>
+          deliverMessage: (task, _orb, request) =>
             new ResultAsync(
               (async () => {
-                const request = requests[0]!;
                 if (!deliveries.includes(request.messageId)) {
                   const last = records.at(-1);
                   records.push({
@@ -213,16 +268,14 @@ describe("independent central dispatcher", () => {
                   if (committed.isErr()) return err(committed.error);
                   deliveries.push(request.messageId);
                 }
-                return ok([
-                  ok({
-                    v: 1 as const,
-                    messageId: request.messageId,
-                    status: "persisted" as const,
-                    delivery: "steer" as const,
-                    operationId: "turn",
-                    duplicate: false,
-                  }),
-                ]);
+                return ok({
+                  v: 1 as const,
+                  messageId: request.messageId,
+                  status: "persisted" as const,
+                  delivery: "steer" as const,
+                  operationId: "turn",
+                  duplicate: false,
+                });
               })(),
             ),
           pullHistory: (_task, _orb, request) => {

@@ -156,22 +156,18 @@ it("preserves the browser subscription across Stop and passive history, then str
     expect(plane.session(orb.id)).toBe(handle);
     expect((await plane.health(task, original, context)).isErr()).toBe(true);
     (
-      await plane.deliverMessages(
+      await plane.deliverMessage(
         task,
         orb,
-        [
-          {
-            baseUrl: "central",
-            messageId: "fresh-message",
-            messageIds: [],
-            content: [{ type: "text", text: "fresh question" }],
-          },
-        ],
+        {
+          baseUrl: "central",
+          messageId: "fresh-message",
+          messageIds: [],
+          content: [{ type: "text", text: "fresh question" }],
+        },
         context,
       )
-    )
-      ._unsafeUnwrap()[0]!
-      ._unsafeUnwrap();
+    )._unsafeUnwrap();
     await streaming;
     expect(live.closed).toBe(false);
     expect(JSON.stringify(browserFrames)).toContain("fresh answer");

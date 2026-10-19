@@ -107,7 +107,14 @@ export interface AgentPlane {
   ): ResultAsync<void, RuntimeClientError>;
   /** Outstanding immutable VM invocation leases, excluding model/CP work. */
   executionActive?(orbId: string): boolean;
-  deliverMessages(
+  deliverMessage(
+    task: SimulationTask,
+    orb: OrbRow,
+    request: DeliverMessageClientRequest,
+    context: OperationContext,
+  ): ResultAsync<DeliverOrbMessageResponse, RuntimeClientError>;
+  /** Atomic central admission of the ordered FIFO snapshot. */
+  deliverMessages?(
     task: SimulationTask,
     orb: OrbRow,
     requests: readonly DeliverMessageClientRequest[],

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import type { Simulation, SimulationTask } from "determined";
-import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
+import { err, errAsync, okAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
 import { runDst, waitUntil } from "../testkit/sim.ts";
@@ -43,19 +43,16 @@ function retryHarness(resourceFailed = true, work = false) {
         status: "initializing",
         phase: "booting",
       }),
-    deliverMessages: (_task, orb, requests) => {
-      const request = requests[0]!;
+    deliverMessage: (_task, orb, request) => {
       calls.deliveries.push(orb.agentAdmissionVersion);
-      return okAsync([
-        ok({
-          v: 1,
-          messageId: request.messageId,
-          status: "persisted",
-          delivery: "turn",
-          operationId: "turn",
-          duplicate: false,
-        }),
-      ]);
+      return okAsync({
+        v: 1,
+        messageId: request.messageId,
+        status: "persisted",
+        delivery: "turn",
+        operationId: "turn",
+        duplicate: false,
+      });
     },
     prepareIdleStop: unavailable,
     pullHistory: unavailable,
@@ -139,7 +136,7 @@ describe("resource-failure retry admission", () => {
   it("queued retry is one-shot, including duplicate admission of its existing inbox row", async () => {
     await dst("resource-retry-queued-one-shot", () => {
       const h = retryHarness();
-      h.deps.agentPlane.deliverMessages = (_task, orb) => {
+      h.deps.agentPlane.deliverMessage = (_task, orb) => {
         h.calls.deliveries.push(orb.agentAdmissionVersion);
         return unavailable();
       };
@@ -217,10 +214,10 @@ describe("resource-failure retry admission", () => {
                   return result;
                 })(),
               );
-            h.deps.agentPlane.deliverMessages = (...args) =>
+            h.deps.agentPlane.deliverMessage = (...args) =>
               new ResultAsync(
                 (async () => {
-                  const result = await base.deliverMessages(...args);
+                  const result = await base.deliverMessage(...args);
                   if (callback === "delivery") await block(args[0], args[1].agentAdmissionVersion);
                   if (callback === "delivery") completions.push(args[1].agentAdmissionVersion);
                   return result;
