@@ -1,5 +1,11 @@
 # Testing
 
+## Patch inventory correction (2026-10-19; local, undeployed)
+
+[CI 39266608274](https://github.com/schani/pi-orb/actions/runs/39266608274) blocked [Deploy 39266682780](https://github.com/schani/pi-orb/actions/runs/39266682780) before apply: the shipped-checksum assertion retained the pre-optimization code-mode seal. After `npm ci`, the unchanged suite reproduced exactly that failure (41 passed, one failed). Commit `4e44ed35` changed the patch, installer seal and provenance together but missed this inline inventory. Update only its expected hash to verified `c365898bfca4c5d111a4739131fcd068c3727863690acc7f97d781310b13a66a`; preserve the assertion and historical seals.
+
+Serialized correction receipts: 42 application tests, 18 installer tests, `sha256sum -c` against the extracted inline inventory (four patches), installer idempotence and scoped Biome check pass. Evidence: `/workspace/deploy-39266682780-evidence/`, including unchanged `ci-failed.log` (SHA-256 `8938637e31e6c22bbc5f1c5444d5f7f8284b56f5fadc175fc5ce9aa7337f65b0`) and `local-red.log`. No production change, new DST failure or deployment; exact-head release gates remain required. The historical image-timeout attribution waiver below is unchanged and excludes this corrected assertion failure.
+
 ## FIFO snapshot admission and queued-input recovery (2026-10-18; [PR 148](https://github.com/schani/pi-orb/pull/148), local, undeployed)
 
 Central Pi admits a FIFO snapshot atomically, retaining provenance/receipts, and drains accepted input after terminal model/compaction failure, duplicate-only batch retry or guarded active reopen. Coverage lives in `agent-backlog.test.ts`, `queued-model-error.test.ts` and existing agent, operation-identity and central-dispatch fixtures. Claude admission and provider retry semantics are unchanged. First REDs: `docs/postmortems/2026-10-18-peer-inbox-stall.md`.
