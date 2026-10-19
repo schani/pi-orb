@@ -101,6 +101,7 @@ Subsystem designs:
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
 - [docs/multi-user.md](docs/multi-user.md) — trusted-company identity, owned projects/settings, per-user credentials, and tailnet options
 - [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
+- [docs/prompt-review.md](docs/prompt-review.md) — standalone prompt review, scoped text editing and protected runtime placeholders
 - [docs/activity-headlines.md](docs/activity-headlines.md) — locally implemented request-owned Luna activity headlines, durable metadata and bounded local qualification
 - [docs/transcript-cache.md](docs/transcript-cache.md) — bounded browser transcript caching, ownership/freshness rules, compact transport measurements and qualification
 - [docs/agent-settings.md](docs/agent-settings.md) — implemented lifecycle-cluster header, model/thinking authority, persistence, mutation and DST qualification

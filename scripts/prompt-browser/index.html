@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <title>Prompts</title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/app.css">
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <main class="prompt-browser">
+      <header class="browser-header">
+        <h1>Prompts</h1>
+        <nav class="view-controls" aria-label="View">
+          <button id="atomic-view" type="button" aria-pressed="true">Atomic</button>
+          <button id="template-view" type="button" aria-pressed="false">Initial context</button>
+          <button id="rendered-view" type="button" aria-pressed="false">Rendered prompt</button>
+          <button id="skills-jump" type="button">Skills</button>
+        </nav>
+        <p>Changes stay in this checkout. Nothing is deployed.</p>
+      </header>
+      <section id="catalog-status" class="catalog-status" aria-live="polite">
+        Loading prompts…
+      </section>
+      <div id="workspace" class="workspace" hidden>
+        <aside class="inventory">
+          <div class="inventory-controls">
+            <label for="search">Search</label>
+            <button id="redundant-filter" type="button" aria-pressed="false">Redundant</button>
+          </div>
+          <input id="search" type="search" placeholder="Filter prompts" autocomplete="off">
+          <nav id="inventory" aria-label="Prompt inventory"></nav>
+          <p id="empty-filter" hidden>No matching prompts.</p>
+        </aside>
+        <section id="detail" class="detail" aria-label="Selected prompt">
+          <div id="selection-message" class="selection-message"></div>
+          <div id="prompt-panel" class="prompt-panel" hidden>
+            <header class="prompt-header">
+              <h2 id="prompt-title">Prompt</h2>
+              <p id="prompt-note" hidden></p>
+              <p id="prompt-delivery"></p>
+              <div id="covered-by" class="overlaps" hidden>
+                <span>Covered by</span>
+                <nav id="keeper-links" aria-label="Covering prompts"></nav>
+              </div>
+              <div id="overlaps" class="overlaps" hidden>
+                <span>Overlaps</span>
+                <nav id="overlap-links" aria-label="Overlapping prompts"></nav>
+              </div>
+              <div class="actions">
+                <span id="edit-status" role="status"></span>
+                <button id="diff" type="button" aria-expanded="false" aria-controls="before-panel">Diff</button>
+                <button id="reload" type="button">Reload latest</button>
+                <button id="revert" type="button">Revert</button>
+                <button id="save" type="button">Save</button>
+              </div>
+              <p id="prompt-error" role="alert" hidden></p>
+            </header>
+            <div id="editors" class="editors">
+              <section id="before-panel" class="editor-pane" hidden>
+                <label for="before">Before</label>
+                <textarea id="before" readonly spellcheck="false" wrap="soft"></textarea>
+              </section>
+              <section class="editor-pane">
+                <label id="prompt-label" for="prompt" class="visually-hidden">Prompt</label>
+                <textarea id="prompt" spellcheck="false" wrap="soft"></textarea>
+              </section>
+            </div>
+          </div>
+        </section>
+      </div>
+      <section id="initial-context" class="initial-context" hidden aria-label="Initial context template">
+        <header class="template-controls">
+          <strong>Checkout template</strong>
+          <select id="template-role" aria-label="Conversation">
+            <option value="root">Root</option>
+            <option value="subagent">Subagent</option>
+          </select>
+          <select id="template-harness" aria-label="Harness">
+            <option value="pi">Pi · central</option>
+            <option value="claude">Claude</option>
+          </select>
+        </header>
+        <p id="template-timing"></p>
+        <div class="template-columns">
+          <strong>Request content · source recipe</strong>
+          <strong>Review notes · not sent</strong>
+        </div>
+        <div id="template-sections"></div>
+      </section>
+      <section id="rendered-prompt" class="initial-context rendered-prompt" hidden aria-label="Rendered prompt">
+        <header class="template-controls">
+          <select id="rendered-role" aria-label="Conversation">
+            <option value="root">Root</option>
+            <option value="subagent">Subagent</option>
+          </select>
+          <select id="rendered-harness" aria-label="Harness">
+            <option value="pi">Pi · central</option>
+            <option value="claude">Claude</option>
+          </select>
+          <select id="rendered-timezone" aria-label="Time zone">
+            <option value="America/Los_Angeles">America/Los_Angeles</option>
+            <option value="">No time zone</option>
+          </select>
+          <button id="render-refresh" type="button">Refresh</button>
+        </header>
+        <p class="rendered-scope">Checkout · AGENTS.md + bundled skills · no account/project instructions or external MCP</p>
+        <p id="rendered-status" role="status"></p>
+        <pre id="rendered-text" hidden></pre>
+      </section>
+      <!-- biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard focus lets this scrollable preview handle native scrolling keys. -->
+      <section id="overlap-preview" aria-labelledby="overlap-preview-title" tabindex="0" hidden>
+        <h2 id="overlap-preview-title">Prompt</h2>
+        <pre id="overlap-preview-text"></pre>
+      </section>
+    </main>
+  </body>
+</html>

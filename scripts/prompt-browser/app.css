@@ -1,0 +1,520 @@
+.prompt-browser {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.prompt-browser [hidden] {
+  display: none;
+}
+
+.browser-header {
+  flex: none;
+  border-bottom: 1px solid var(--k);
+  padding: 12px 16px;
+}
+
+.browser-header h1 {
+  font: inherit;
+  font-weight: 700;
+  margin: 0;
+}
+
+.browser-header p {
+  margin: 4px 0 0;
+  color: var(--g3);
+}
+
+.catalog-status,
+.selection-message {
+  padding: 16px;
+}
+
+.catalog-status p,
+.selection-message p {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.inventory {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--k);
+  padding: 12px;
+}
+
+.inventory-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+#redundant-filter {
+  padding: 1px 6px;
+}
+
+#redundant-filter[aria-pressed="true"] {
+  background: var(--k);
+  color: var(--w);
+}
+
+.inventory input {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--k);
+  padding: 4px 6px;
+  margin-bottom: 16px;
+  border-radius: 0;
+}
+
+.inventory h2 {
+  font: inherit;
+  font-weight: 700;
+  margin: 16px 0 4px;
+  border-bottom: 1px solid var(--k);
+  overflow-wrap: anywhere;
+}
+
+.inventory ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inventory a {
+  display: block;
+  border: 0;
+  padding: 5px 6px;
+  overflow-wrap: anywhere;
+}
+
+.inventory a[aria-current="page"] {
+  background: var(--k);
+  color: var(--w);
+}
+
+.inventory .scope {
+  display: block;
+  color: var(--g3);
+}
+
+.inventory a[aria-current="page"] .scope,
+.inventory a:hover .scope {
+  color: inherit;
+}
+
+.detail,
+.prompt-panel,
+.editor-pane {
+  min-width: 0;
+  min-height: 0;
+}
+
+.prompt-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.prompt-header {
+  flex: none;
+  max-height: 50dvh;
+  overflow-y: auto;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--k);
+}
+
+#prompt-title {
+  font: inherit;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  margin: 0 0 8px;
+}
+
+#prompt-note {
+  margin: 0 0 8px;
+  color: var(--g3);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#edit-status {
+  margin-right: auto;
+}
+
+#prompt-error {
+  color: var(--bad);
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.editors {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+
+.editors.reviewing {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.editor-pane {
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-pane + .editor-pane {
+  border-left: 1px solid var(--k);
+}
+
+.editor-pane label:not(.visually-hidden) {
+  border-bottom: 1px solid var(--k);
+  padding: 4px 16px;
+}
+
+.editor-pane textarea {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+  padding: 12px 16px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  resize: none;
+  border-radius: 0;
+}
+
+.editor-pane textarea[readonly] {
+  background: var(--g1);
+}
+
+.prompt-browser :focus-visible {
+  outline: 2px solid var(--k);
+  outline-offset: -2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 650px) {
+  .prompt-browser {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: visible;
+  }
+
+  .prompt-header {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .editors,
+  .editor-pane textarea {
+    min-height: 65dvh;
+  }
+
+  .inventory {
+    overflow: visible;
+    border-right: 0;
+    border-bottom: 1px solid var(--k);
+  }
+
+  #inventory {
+    max-height: 220px;
+    overflow-y: auto;
+  }
+
+  .editors.reviewing {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .editor-pane + .editor-pane {
+    border-left: 0;
+  }
+
+  .editors.reviewing .editor-pane + .editor-pane {
+    border-top: 1px solid var(--k);
+  }
+
+  .editors.reviewing textarea {
+    min-height: 40dvh;
+  }
+
+  .browser-header,
+  .prompt-header {
+    padding: 12px;
+  }
+}
+
+.overlaps {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+#overlap-links,
+#keeper-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+  min-width: 0;
+}
+
+#overlap-links a,
+#keeper-links a {
+  overflow-wrap: anywhere;
+}
+
+#overlap-preview {
+  position: fixed;
+  z-index: 10;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+  border: 1px solid var(--k);
+  background: var(--w);
+  color: var(--k);
+}
+
+#overlap-preview h2 {
+  font: inherit;
+  font-weight: 700;
+  margin: 0 0 8px;
+}
+
+#overlap-preview pre {
+  margin: 0;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.prompt-browser .redundant {
+  color: #a34200;
+}
+
+.inventory a.redundant .scope {
+  color: inherit;
+}
+
+.inventory a.redundant[aria-current="page"],
+.inventory a.redundant:hover,
+#overlap-links a.redundant:hover {
+  color: #ffb366;
+  background: var(--k);
+}
+
+.view-controls {
+  float: right;
+  display: flex;
+  gap: 8px;
+}
+
+.view-controls [aria-pressed="true"] {
+  background: var(--k);
+  color: var(--w);
+}
+
+.initial-context {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+
+.template-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.template-controls select {
+  border: 1px solid var(--k);
+  border-radius: 0;
+  background: var(--w);
+  color: var(--k);
+  padding: 4px;
+}
+
+#template-sections h2 {
+  font: inherit;
+  font-weight: 700;
+  border-bottom: 1px solid var(--k);
+  margin: 24px 0 12px;
+}
+
+#prompt-delivery {
+  margin: 0 0 8px;
+}
+
+.template-delivery {
+  margin: -4px 0 12px;
+  font-weight: 700;
+}
+
+#template-timing {
+  margin: 12px 0;
+}
+
+.template-columns,
+.template-part {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.template-columns {
+  position: sticky;
+  top: -12px;
+  z-index: 1;
+  background: var(--w);
+  border-bottom: 1px solid var(--k);
+  padding: 8px 0;
+}
+
+.template-columns strong {
+  padding: 8px;
+  overflow-wrap: anywhere;
+}
+
+.template-columns strong:first-child {
+  color: var(--w);
+  background: var(--k);
+}
+
+.template-columns strong:last-child,
+.template-annotation {
+  border-left: 3px solid var(--k);
+  background: var(--g1);
+}
+
+.template-part {
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+  align-items: start;
+}
+
+#template-sections pre {
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+
+.template-payload {
+  grid-column: 1;
+  min-width: 0;
+  border: 1px solid var(--k);
+  padding: 8px;
+}
+
+.conditional > .template-payload {
+  border-style: dashed;
+}
+
+.template-annotation {
+  grid-column: 2;
+  min-width: 0;
+  padding: 8px;
+}
+
+.template-annotation:empty {
+  display: none;
+}
+
+.template-annotation p {
+  margin: 0;
+}
+
+.template-annotation > * + * {
+  margin-top: 8px;
+}
+
+.template-condition {
+  font-weight: 700;
+}
+
+.runtime-value {
+  background: var(--g1);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+[data-channel="availability"] .template-annotation {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 650px) {
+  .initial-context {
+    overflow: visible;
+    padding: 12px;
+  }
+
+  .template-columns,
+  .template-part {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 8px;
+  }
+}
+
+.rendered-scope {
+  margin: 12px 0;
+  color: var(--g3);
+}
+
+#rendered-status:empty {
+  display: none;
+}
+
+#rendered-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  user-select: text;
+}
+
+@media (max-width: 650px) {
+  .view-controls {
+    float: none;
+    flex-wrap: wrap;
+    margin: 8px 0;
+  }
+}
