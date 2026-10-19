@@ -50,7 +50,7 @@ const packages = [
     package: "node_modules/@earendil-works/pi-codemode",
     version: "1.3.0",
     patch: "@earendil-works+pi-codemode+1.3.0.patch",
-    sha: "d4d7e968a23054b75e25603cc66906492ba8a2d2710a0cbbb5896bd56f0fa42a",
+    sha: "c365898bfca4c5d111a4739131fcd068c3727863690acc7f97d781310b13a66a",
     files: {
       "node_modules/@earendil-works/pi-codemode/dist/runtime/host.js": [
         "74715f56e02642913caf8247abd9cf0c559f9ed1a5e7be210e43c104e8e70da4",
@@ -58,7 +58,7 @@ const packages = [
       ],
       "node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js": [
         "2fc2886529c0a7e8a7c9ac16b7c96fb2bbf8d2dce562801c5a09d723a57ea6ca",
-        "376a58055c2f7c74f43c88fb993d5875a3670c614854022eac111c891127e384",
+        "5a52984e773985827e45490c9fb60a6fe6ec2302a8e2cbc1ffda5d5cc9737d06",
       ],
       "node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js": [
         "22f72950eaaa7e7e3a816db5ce1203f2a685de0328ea097278fd74b11263d813",

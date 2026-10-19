@@ -7,9 +7,9 @@ Published artifact integrity: `sha512-2G9tmbsPhgzwfz7cmzJpbLSLqOx3eu22Gbzm+Wc3Hq
 
 Patched file: `dist/runtime/prelude-source.js`, generated from `packages/codemode/src/runtime/prelude-source.ts`.
 Original file SHA-256: `2fc2886529c0a7e8a7c9ac16b7c96fb2bbf8d2dce562801c5a09d723a57ea6ca`.
-Patch SHA-256: `d4d7e968a23054b75e25603cc66906492ba8a2d2710a0cbbb5896bd56f0fa42a`.
+Patch SHA-256: `c365898bfca4c5d111a4739131fcd068c3727863690acc7f97d781310b13a66a`.
 
-Replace image base64 regexp validation with a linear, constant-auxiliary-space ASCII scan. QuickJS's regexp execution exhausts the 256 MiB VM heap on a 20 MiB image before the existing output guard. Public sandbox globals cannot override built-in `image`; there is no public prelude option. Keep the public sandbox and worker, not a fork or private import.
+Validate image base64 with a quantifier-free invalid-character search and terminal-padding check. The upstream quantified regexp exhausts the 256 MiB VM heap on a 20 MiB image; a per-character JavaScript scan avoids that allocation but spends seconds in QuickJS bytecode. The search avoids both costs without slicing the payload. Public sandbox globals cannot override built-in `image`; there is no public prelude option. Keep the public sandbox and worker, not a fork or private import.
 
 Preserve the exact upstream language: nonempty length divisible by four, base64 alphabet, at most two terminal padding characters. Unused padding bits remain accepted, as upstream does not require canonical encoding. Whitespace stripping, signature detection, supported media, byte output, heap and callback/output limits are unchanged. No pixel decoding or provider-size acceptance is claimed.
 

@@ -19,8 +19,8 @@ Both live under `apps/control-plane/src/adapters/durable/tools/`. The retained
 `tools-focused.log` SHA-256 is
 `2147a9679e6ddb57cf6f464d1f628eda0fd62ca03d354e93ab6c70c620040193`.
 It also records two metadata assertion failures and has no final summary; its exact
-CLI, exit status and termination reason are unavailable. No passing rerun or fix
-is claimed. This new non-UI blocker is outside PR 137’s historical exception.
+CLI, exit status and termination reason are unavailable. Historical attribution
+is not established. This new non-UI blocker is outside PR 137’s historical exception.
 
 First-source SHA-256 seals (unchanged from that baseline):
 
@@ -38,6 +38,20 @@ show no OOM, quota throttling or disk exhaustion; failure-window CPU/await-phase
 telemetry is missing. Preserve the 30 s deadline, full fixtures and byte/store
 assertions; qualification uses one command owner with descendant exit before
 E2E/browser work. Isolation alone does not clear the blocker.
+
+**Controlled finding (2026-10-19):** both unchanged files pass isolated (21 tests).
+Pinning the selected image tests and three CPU hogs to one core reproduces both
+30 s failures, with about 250 ms worker CPU per wall second and little guard
+parking. Replacing the measured `validBase64` bytecode loop with a quantifier-free
+invalid-character search passes those same controlled cases at 12,341/14,341 ms,
+without changing fixtures or deadlines. The final corrected-source focused gate
+passes 60 tests in ten files, including CPU/cancellation/DST guards; fresh `npm ci`,
+18 installer contracts, idempotence, root typecheck and lint pass. The final
+work-count regression fails on the original scan before passing the correction.
+This establishes a sufficient mechanism and controlled correction, not the original
+schedule or CLI; historical attribution and exact-head release qualification remain
+unresolved. Commands, source seals, first failures and cleanup are preserved in
+`docs/postmortems/2026-10-19-image-test-cpu-contention.md`.
 
 ## PR 145 first qualification (2026-10-18; undeployed)
 

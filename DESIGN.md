@@ -125,6 +125,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-19-image-test-cpu-contention.md](docs/postmortems/2026-10-19-image-test-cpu-contention.md) — controlled CPU contention reproduces image deadlines; original attribution unresolved
 - [docs/postmortems/2026-10-16-codemode-worker-exit-liveness.md](docs/postmortems/2026-10-16-codemode-worker-exit-liveness.md) — terminating Worker unref strands required physical-exit drain; source correction, qualification pending
 - [docs/postmortems/2026-10-16-usage-mock-idle-connection.md](docs/postmortems/2026-10-16-usage-mock-idle-connection.md) — usage mock HTTP ownership; controlled stale-lease class, historical close owner unknown
 - [docs/postmortems/2026-10-16-lifecycle-smoke-http500.md](docs/postmortems/2026-10-16-lifecycle-smoke-http500.md) — lifecycle restart poll HTTP 500 attributed to deleted revision; applied release remains unvalidated

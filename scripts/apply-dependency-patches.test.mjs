@@ -151,7 +151,7 @@ test("CLI seals code-mode's bounded image prelude", () => {
     createHash("sha256")
       .update(readFileSync(join(root, target)))
       .digest("hex");
-  if (hash() === "376a58055c2f7c74f43c88fb993d5875a3670c614854022eac111c891127e384") {
+  if (hash() === "5a52984e773985827e45490c9fb60a6fe6ec2302a8e2cbc1ffda5d5cc9737d06") {
     const reversed = spawnSync("git", ["apply", "--reverse", join(root, "patches", patch)], {
       cwd: root,
       encoding: "utf8",
@@ -177,7 +177,7 @@ test("CLI seals code-mode's bounded image prelude", () => {
   const first = run();
   assert.equal(first.status, 0, first.stderr);
   assert.match(first.stdout, /pi-codemode\+1\.3\.0\.patch: applied/);
-  assert.equal(hash(), "376a58055c2f7c74f43c88fb993d5875a3670c614854022eac111c891127e384");
+  assert.equal(hash(), "5a52984e773985827e45490c9fb60a6fe6ec2302a8e2cbc1ffda5d5cc9737d06");
   assert.equal(run().status, 0);
   writeFileSync(join(root, target), `${readFileSync(join(root, target), "utf8")}\n// drift\n`);
   assert.equal(run().status, 1);

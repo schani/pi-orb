@@ -4,6 +4,7 @@ import { defineTool } from "@earendil-works/pi-durable";
 import { okAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
+import { createNativeCodemodeSandbox } from "./codemode-sandbox.ts";
 import { imageReadTool } from "./read.ts";
 import { openCodemodeHarness } from "./testkit/codemode.ts";
 
@@ -141,12 +142,82 @@ it("preserves upstream base64, padding, media signature and input-shape validati
   }
 });
 
-it("rejects corruption at the full-size suffix without regexp OOM or store writes", async () => {
+it("matches base64 alphabet and terminal-padding semantics across every ASCII character", async () => {
+  const prefix = "iVBORw0KGgoA";
+  const suffixes = [
+    "",
+    "=",
+    "==",
+    "===",
+    "====",
+    "AAAA=",
+    "AAAA==",
+    "AAAA====",
+    "AA==",
+    "AAA=",
+    "A===",
+    "!A==",
+    "A!==",
+    "AA!=",
+  ];
+  for (const character of [
+    ...Array.from({ length: 128 }, (_, code) => String.fromCharCode(code)),
+    "é",
+    "\u00a0",
+    "\u2028",
+    "\ud800",
+    "\udc00",
+    "😀",
+  ]) {
+    for (let position = 0; position < 4; position++)
+      suffixes.push("A".repeat(position) + character + "A".repeat(3 - position));
+  }
+  const inputs = suffixes.map((suffix) => prefix + suffix);
+  const normalized = inputs.map((data) => data.replace(/\s+/g, ""));
+  const expected = normalized.map(
+    (data) => data.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(data),
+  );
   const sandbox = new CodemodeSandbox({ workerUrl, memoryLimitBytes });
   try {
     const result = await sandbox.execute(`
+      const accepted=[];
+      for (const data of ${JSON.stringify(inputs)}) {
+        try { image({type:"image",data,mimeType:"image/png"}); accepted.push(true); }
+        catch { accepted.push(false); }
+      }
+      text(accepted);
+    `);
+    expect(result.ok).toBe(true);
+    expect(result.output.filter((item) => item.type === "text")).toEqual([
+      { type: "text", text: JSON.stringify(expected) },
+    ]);
+    expect(result.output.filter((item) => item.type === "image")).toEqual(
+      normalized
+        .filter((_, index) => expected[index])
+        .map((data) => ({
+          type: "image",
+          data,
+          mimeType: "image/png",
+        })),
+    );
+  } finally {
+    await sandbox.close();
+  }
+});
+
+it("rejects corruption at the full-size suffix without regexp OOM or store writes", async () => {
+  const sandbox = createNativeCodemodeSandbox();
+  const fixture = 'const data="iVBORw0KGgoA" + "A".repeat(27962028-13) + "!";';
+  try {
+    const control = await sandbox.execute(
+      `${fixture} data.replace(/\\s+/g,"").search(/[^A-Za-z0-9+/]/);`,
+    );
+    expect(control.ok).toBe(true);
+    await sandbox.drained();
+    const controlPolls = sandbox.snapshot().cpu.checkpoints;
+    const result = await sandbox.execute(`
       store("mustNotPersist",true);
-      const data="iVBORw0KGgoA" + "A".repeat(27962028-13) + "!";
+      ${fixture}
       image({type:"image",data,mimeType:"image/png"});
     `);
     expect(result.ok).toBe(false);
@@ -155,9 +226,13 @@ it("rejects corruption at the full-size suffix without regexp OOM or store write
       expect(result.error.kind).toBe("script");
       expect(result.error.message).toContain("not valid base64");
     }
+    await sandbox.drained();
+    // Validation adds only fixed VM work over whitespace and alphabet regexp passes.
+    expect(sandbox.snapshot().cpu.checkpoints - controlPolls).toBeLessThan(controlPolls + 100);
     expect(result).not.toHaveProperty("storeWrites");
   } finally {
     await sandbox.close();
+    await sandbox.drained();
   }
 });
 
