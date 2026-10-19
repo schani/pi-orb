@@ -51,6 +51,10 @@ jobs:
       - name: Install pinned browser engines and system dependencies
         run: npm run test:e2e:install
 
+      - name: Test prompt browser
+        if: matrix.shard == 1
+        run: node --test scripts/prompt-browser/smoke.test.mjs
+
       - name: Check Docker disk budget
         run: |
           df -h

@@ -22,7 +22,10 @@ export interface PromptSnapshot {
 }
 
 /** Pinned resource data only; repository extensions are never loaded centrally. */
-export function renderPrompt(snapshot: PromptSnapshot): string {
+export function renderPrompt(
+  snapshot: PromptSnapshot,
+  text: { preamble?: string; environment?: string; piEnvironment?: string } = {},
+): string {
   const instructions = [
     snapshot.personal,
     ...snapshot.repository.map(({ path, content }) => `# ${path}\n${content}`),
@@ -31,11 +34,12 @@ export function renderPrompt(snapshot: PromptSnapshot): string {
     .filter(Boolean)
     .join("\n\n");
   return [
-    "You are a coding assistant. Use tools to inspect and change the project. Be concise.",
+    text.preamble ??
+      "You are a coding assistant. Use tools to inspect and change the project. Be concise.",
     instructions ? `<project_instructions>\n${instructions}\n</project_instructions>` : "",
     snapshot.appendSystem ?? "",
-    environmentPrompt,
-    piEnvironmentPrompt,
+    text.environment ?? environmentPrompt,
+    text.piEnvironment ?? piEnvironmentPrompt,
     formatSkillsForPrompt([...snapshot.skills]),
   ]
     .filter(Boolean)
