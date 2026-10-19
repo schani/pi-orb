@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ControlPlaneDatabase } from "../adapters/database.ts";
 import { jsonParam, type PostgreSQLClient } from "../adapters/pg/client.ts";
 import type { StoreError } from "../domain/errors.ts";
+import { messageBatchId } from "../domain/message-batch.ts";
 import type { OrbRow, ProjectRow } from "../domain/orb.ts";
 import type {
   CentralAgentCaller,
@@ -2120,6 +2121,87 @@ export function storeSemanticsContractTests(
         onlyIfNull: true,
       });
       expect(generated.isOk() && generated.value).toBeNull();
+    });
+
+    it("claims a mixed immutable FIFO backlog and blocks it during sleep", async () => {
+      const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+      (await store.insertProject(task, project))._unsafeUnwrap();
+      (await store.insertOrb(task, { ...orb, state: "running" }))._unsafeUnwrap();
+      for (const n of [201, 202])
+        (await store.insertOrb(task, { ...orb, id: id(n) }))._unsafeUnwrap();
+      const enqueue = async (n: number, peer?: number) =>
+        (
+          await store.enqueueOrbMessage(task, {
+            orbId: orb.id,
+            messageId: id(n),
+            content: [{ type: "text", text: String(n) }],
+            now: 2_000 + n,
+            ...(peer === undefined
+              ? {}
+              : {
+                  sender: {
+                    orbId: id(peer),
+                    projectId: project.id,
+                    ownerUserId: OWNER,
+                    caller: peerCentralCaller(id(peer)),
+                  },
+                }),
+          })
+        )._unsafeUnwrap();
+      const claim = async (now = 3_000) =>
+        (await store.claimOrbMessageBacklog(task, { orbId: orb.id, now }))._unsafeUnwrap();
+      await enqueue(211);
+      await enqueue(212);
+      const prefix = (
+        await store.claimNextOrbMessageBatch(task, { orbId: orb.id, now: 2_500 })
+      )._unsafeUnwrap();
+      await enqueue(213, 201);
+      await enqueue(214, 202);
+      await enqueue(215);
+      await enqueue(216);
+      const snapshot = await claim();
+      expect(snapshot.map((r) => r.messageId)).toEqual([211, 212, 213, 214, 215, 216].map(id));
+      expect(snapshot.map((r) => r.deliveryBatchId)).toEqual([
+        prefix[0]!.deliveryBatchId,
+        prefix[0]!.deliveryBatchId,
+        id(213),
+        id(214),
+        messageBatchId([id(215), id(216)]),
+        messageBatchId([id(215), id(216)]),
+      ]);
+      expect(snapshot.map((r) => r.system)).toEqual([
+        null,
+        null,
+        { kind: "orb_message", senderOrbId: id(201) },
+        { kind: "orb_message", senderOrbId: id(202) },
+        null,
+        null,
+      ]);
+      expect(snapshot.every((r) => r.status === "delivering")).toBe(true);
+      expect(await claim(5_000)).toEqual(snapshot);
+      await enqueue(217);
+      const beforeSleep = (await store.listOrbMessages(task, orb.id))._unsafeUnwrap();
+      const sleeping = (
+        await store.scheduleOrbSleep(task, {
+          orbId: orb.id,
+          caller: peerCentralCaller(orb.id),
+          sleepId: id(220),
+          durationSeconds: 300,
+        })
+      )._unsafeUnwrap();
+      expect(await claim(6_000)).toEqual([]);
+      expect((await store.listOrbMessages(task, orb.id))._unsafeUnwrap()).toEqual(beforeSleep);
+      (
+        await store.cancelOrbSleep(task, {
+          orbId: orb.id,
+          expectedStateVersion: sleeping.stateVersion,
+          now: 7_000,
+        })
+      )._unsafeUnwrap();
+      const extended = await claim(8_000);
+      expect(extended.slice(0, snapshot.length)).toEqual(snapshot);
+      expect(extended.slice(snapshot.length).map((r) => r.deliveryBatchId)).toEqual([id(217)]);
+      expect(await claim(9_000)).toEqual(extended);
     });
 
     it("durably queues a stopped-orb message, wakes it, and completes from replicated identity", async () => {

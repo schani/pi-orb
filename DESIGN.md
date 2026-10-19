@@ -255,6 +255,7 @@ Tracking:
 - [docs/postmortems/2026-10-07-runner-apt-timeout.md](docs/postmortems/2026-10-07-runner-apt-timeout.md) — hosted dependency installation exhausted the E2E budget; signed HTTPS Ubuntu archive before APT
 - [docs/postmortems/2026-10-09-central-durable-oom-recovery.md](docs/postmortems/2026-10-09-central-durable-oom-recovery.md) — shared control-plane OOM and repeated task recovery; memory driver unproven
 - [docs/postmortems/2026-10-13-history-migration-deadlock.md](docs/postmortems/2026-10-13-history-migration-deadlock.md) — migration/reader lock inversion; three-session rejection proof, bounded NOWAIT acquisition and catalog limits
+- [docs/postmortems/2026-10-18-peer-inbox-stall.md](docs/postmortems/2026-10-18-peer-inbox-stall.md) — pending Native input after model failure; local FIFO snapshot admission, queued-input recovery and attribution limits
 - [docs/postmortems/2026-10-18-false-idle-during-release.md](docs/postmortems/2026-10-18-false-idle-during-release.md) — cross-revision activity observation gap; metadata and unloaded WS snapshots can report false idle
 - [docs/postmortems/](docs/postmortems/) — incident forensics; design docs keep the resulting rules and link here
 - [docs/postmortems/2026-09-09-stale-thinking.md](docs/postmortems/2026-09-09-stale-thinking.md) — message-index reuse left stale green thinking below newer commands; explicit streaming retirement

@@ -52,6 +52,23 @@ export class HarnessAgentPlane implements AgentPlane {
   ) {
     return this.select(orb).deliverMessage(task, orb, request, context);
   }
+  deliverMessages(
+    task: SimulationTask,
+    orb: OrbRow,
+    requests: readonly DeliverMessageClientRequest[],
+    context: OperationContext,
+  ) {
+    const plane = this.select(orb);
+    return plane.placement === "central" && plane.deliverMessages
+      ? plane.deliverMessages(task, orb, requests, context)
+      : errAsync({
+          type: "runtime_client_error" as const,
+          code: "invalid_response" as const,
+          answered: false,
+          retryable: true,
+          message: "Central backlog admission unavailable",
+        });
+  }
   prepareIdleStop(task: SimulationTask, orb: OrbRow, context: OperationContext) {
     return this.select(orb).prepareIdleStop(task, orb, context);
   }

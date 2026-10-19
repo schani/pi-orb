@@ -4,9 +4,11 @@ import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import {
+  CompactionTask,
   createRegistry,
   defineTask,
   Harness,
+  hook,
   MemoryStorage,
   type StorageWrite,
 } from "@earendil-works/pi-durable";
@@ -255,10 +257,11 @@ it("keeps queued Native steering generations in the accepted busy operation", as
     }),
   );
   models.setProvider(faux.provider);
+  const storage = new MemoryStorage();
   const agent = (
     await DurableAgent.open({
       orbId: "steering",
-      storage: new MemoryStorage(),
+      storage,
       models,
       registry: createRegistry(),
       env: new NodeExecutionEnv({ cwd: "/tmp" }),
@@ -280,12 +283,40 @@ it("keeps queued Native steering generations in the accepted busy operation", as
   try {
     const first = (await agent.deliver(input("first")))._unsafeUnwrap();
     await checkpoint(entered[0]!.promise, "first generation");
-    const queued = (await agent.deliver(input("queued")))._unsafeUnwrap();
+    const backlog = ["peer A", "queued", "peer B"].map((id, index) => ({
+      ...input(id),
+      ...(index === 1
+        ? {}
+        : {
+            system: {
+              kind: "orb_message" as const,
+              senderOrbId: `00000000-0000-4000-8000-00000000000${index + 1}`,
+            },
+          }),
+    }));
+    const admitted = (await agent.deliverMany(backlog))
+      ._unsafeUnwrap()
+      .map((r) => r._unsafeUnwrap());
+    const queued = admitted[1]!;
+    for (const receipt of admitted)
+      expect(receipt).toMatchObject({ operationId: first.operationId, delivery: "steer" });
     expect(queued).toMatchObject({ operationId: first.operationId, delivery: "steer" });
     expect(calls).toBe(1);
     releases[0]!.resolve();
     await checkpoint(entered[1]!.promise, "steered generation");
     expect(contexts[1]).toContain("queued");
+    expect(contexts[1]).toMatch(/peer A[\s\S]*queued[\s\S]*peer B/);
+    const identities = async () =>
+      (await storage.scanSubmissions({}, 100, undefined, BACKGROUND_CONTEXT)).items.map((r) => [
+        r.requestId,
+        r.id,
+      ]);
+    const before = await identities();
+    expect(
+      (await agent.deliverMany(backlog))._unsafeUnwrap().map((r) => r._unsafeUnwrap()),
+    ).toEqual(admitted.map((r) => ({ ...r, duplicate: true })));
+    expect(await identities()).toEqual(before);
+    expect(calls).toBe(2);
     expect(agent.health()).toMatchObject({ operationId: first.operationId, activity: "busy" });
     expect((await agent.deliver(input("queued")))._unsafeUnwrap()).toMatchObject({
       duplicate: true,
@@ -311,5 +342,69 @@ it("keeps queued Native steering generations in the accepted busy operation", as
   } finally {
     for (const release of releases) release.resolve();
     await agent.close();
+  }
+});
+
+it("starts queued input after declined overflow compaction without replaying failed input", async () => {
+  const ctx = BACKGROUND_CONTEXT;
+  const entered = latch(),
+    release = latch();
+  const models = createModels();
+  const faux = fauxProvider();
+  let next = "";
+  faux.setResponses([
+    fauxAssistantMessage("history"),
+    fauxAssistantMessage("", { stopReason: "error", errorMessage: "prompt is too long" }),
+    (request) => {
+      next = JSON.stringify(request.messages);
+      return fauxAssistantMessage("queued answer");
+    },
+  ]);
+  models.setProvider(faux.provider);
+  const registry = createRegistry();
+  registry.install({
+    name: "decline",
+    hooks: [
+      hook(CompactionTask, {
+        beforeCompact: async () => {
+          entered.resolve();
+          await release.promise;
+          return { decline: true as const };
+        },
+      }),
+    ],
+  });
+  const harness = await Harness.open(
+    new MemoryStorage(),
+    {
+      models,
+      registry,
+      settings: { steeringMode: "all", followUpMode: "all", compaction: { keepRecentTokens: 1 } },
+    },
+    ctx,
+  );
+  try {
+    const root = await harness.root(ctx, {
+      agent: { model: { provider: "faux", modelId: "faux-1" } },
+    });
+    await root.submit({ type: "input", content: "history" }, ctx);
+    await root.waitForIdle(ctx);
+    const failed = await root.submit({ type: "input", content: "overflow" }, ctx);
+    await entered.promise;
+    const queued = (
+      await root.submitMany(
+        [{ type: "input", content: "after compaction", whenBusy: "steer" }],
+        ctx,
+      )
+    ).submissions[0]!;
+    release.resolve();
+    await root.waitForIdle(ctx);
+    expect(await failed.status(ctx)).toMatchObject({ status: "unanswered", reason: "model_error" });
+    expect(await queued.status(ctx)).toMatchObject({ status: "done" });
+    expect(next).toContain("after compaction");
+    expect(faux.state.callCount).toBe(3);
+  } finally {
+    release.resolve();
+    await harness.close(ctx);
   }
 });

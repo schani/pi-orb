@@ -151,8 +151,8 @@ describe("real multi-orb polling (DST)", () => {
               ...(inbox ? { inboxMessageIds: [id] } : {}),
             };
           }
-          const claim = h.store.claimNextOrbMessageBatch.bind(h.store);
-          h.store.claimNextOrbMessageBatch = (task, request) =>
+          const claim = h.store.claimOrbMessageBacklog.bind(h.store);
+          h.store.claimOrbMessageBacklog = (task, request) =>
             new ResultAsync(
               (async () => {
                 if (request.orbId === "a" && phase === "claim" && !released) await hold(task);

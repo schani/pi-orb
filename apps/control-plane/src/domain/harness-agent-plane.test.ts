@@ -23,7 +23,8 @@ it("routes central Pi and native Claude by immutable harness selection", async (
     close: vi.fn(() => okAsync(undefined)),
   });
   const host = makePlane("host");
-  const selected = makePlane("central");
+  const bulk = vi.fn(() => okAsync([]));
+  const selected = { ...makePlane("central"), deliverMessages: bulk };
   const plane = new HarnessAgentPlane(
     selected as unknown as AgentPlane,
     host as unknown as AgentPlane,
@@ -51,6 +52,11 @@ it("routes central Pi and native Claude by immutable harness selection", async (
     expect(host[method]).toHaveBeenCalledTimes(1);
     expect(selected[method]).toHaveBeenCalledTimes(1);
   }
+  expect((await plane.deliverMessages(task, pi, [], context)).isOk()).toBe(true);
+  expect(bulk).toHaveBeenCalledWith(task, pi, [], context);
+  const rejected = await plane.deliverMessages(task, claude, [], context);
+  expect(rejected._unsafeUnwrapErr()).toMatchObject({ retryable: true });
+  expect(host.deliverMessage).toHaveBeenCalledTimes(1);
   await plane.close();
   expect(host.close).toHaveBeenCalledTimes(1);
   expect(selected.close).toHaveBeenCalledTimes(1);

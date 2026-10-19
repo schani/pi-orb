@@ -97,3 +97,183 @@ diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/output.js b/n
          const kind = `${mimeType}, ${bytes.length} bytes`;
          // A failed write must not discard the result of a script whose calls already ran: it becomes part of the label.
          const saved = await write(`image-${index}${IMAGE_EXTENSIONS[mimeType] ?? ".bin"}`, bytes);
+diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/harness.js b/node_modules/@earendil-works/pi-durable/dist/harness/harness.js
+--- a/node_modules/@earendil-works/pi-durable/dist/harness/harness.js
++++ b/node_modules/@earendil-works/pi-durable/dist/harness/harness.js
+@@ -33,6 +33,9 @@
+     }
+     submit(submission, context) {
+         return this.#host.submissions.submit(this.id, submission, context);
++    }
++    submitMany(inputs, context) {
++        return this.#host.submissions.submitMany(this.id, inputs, context);
+     }
+     compact(instructions, context) {
+         this.#host.tasks.resume();
+diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts b/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts
+--- a/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts
++++ b/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts
+@@ -598,6 +598,12 @@
+      * even mid-run, as it changes nothing the model sees.
+      */
+     submit(submission: SubmissionDraft, context: Context): Promise<Submission>;
++    /** Admit a finite input snapshot atomically before scheduling; an empty snapshot advances an idle inbox. */
++    submitMany(inputs: readonly InputSubmissionDraft[], context: Context): Promise<{
++        readonly submissions: readonly Submission[];
++        readonly busy: boolean;
++        readonly inputId?: SubmissionId;
++    }>;
+     /**
+      * Admit a write of a `pi.reset` entry that starts a new context, carrying `handoff` as a user message when given.
+      * Resolves after admission; while busy, it is placed at the next boundary.
+diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js b/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
+--- a/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
++++ b/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
+@@ -33,6 +33,51 @@
+         const id = await this.#session.commitWith((tx) => admitSubmission(tx, conversationId, draft, this.#now(), this.#queueModes()), context);
+         return new SubmissionHandle(id, this);
+     }
++    /** Admit the snapshot on one Session line, preserving each submission's identity. */
++    async submitMany(conversationId, inputs, context) {
++        this.#resume();
++        const admitted = await this.#session.commitWith(async (tx) => {
++            const existing = [];
++            for (const input of inputs) {
++                if (input.type !== "input")
++                    throw new TypeError("submitMany accepts only inputs");
++                if (input.entry !== undefined)
++                    checkInputEntry(input.entry);
++                const record = input.requestId === undefined ? undefined : await tx.submissionByRequest(conversationId, input.requestId);
++                if (record !== undefined && record.type !== "input")
++                    throw new Error(`Request ${input.requestId} already identifies a submission of type ${record.type}`);
++                existing.push(record);
++            }
++            const live = await tx.doc(LiveDoc, conversationId);
++            const busy = live.run !== undefined;
++            if (busy && inputs.some((input, index) => existing[index] === undefined && input.whenBusy === "reject"))
++                throw new ConversationBusy(conversationId);
++            const boundary = await prepareBoundary(tx, conversationId, this.#queueModes());
++            const ids = [];
++            const requests = new Map();
++            for (let index = 0; index < inputs.length; index++) {
++                const input = inputs[index];
++                let id = existing[index]?.id ?? requests.get(input.requestId);
++                if (id === undefined) {
++                    id = await queueSubmission(tx, conversationId, input, boundary.inbox);
++                    if (input.requestId !== undefined)
++                        requests.set(input.requestId, id);
++                }
++                ids.push(id);
++            }
++            if (live.run === undefined) {
++                const { users } = await applyBoundary(tx, boundary, "final", this.#now());
++                if (users.length > 0)
++                    await startRun(tx, conversationId, live, users);
++            }
++            return { ids, busy, inputId: live.run?.inputs[0] };
++        }, context);
++        return {
++            submissions: admitted.ids.map((id) => new SubmissionHandle(id, this)),
++            busy: admitted.busy,
++            inputId: admitted.inputId,
++        };
++    }
+     /** Handle for an existing submission, or `undefined`. */
+     async get(id, context) {
+         const record = await this.#session.readOnLine(() => this.#storage.submission(id, context));
+@@ -150,25 +195,8 @@
+     // A boundary reads the table, so it is prepared before the first table write; a busy one needs none.
+     const boundary = busy ? undefined : await prepareBoundary(tx, conversationId, queueModes);
+     if (boundary === undefined || boundary.inbox.items.length > 0) {
+-        const { id } = await tx.createSubmission({
+-            conversationId,
+-            ...requestId,
+-            type: draft.type,
+-            status: "queued",
+-        });
+-        // Hosts may leave optional fields `undefined`; drafts take strict JSON.
+-        const value = copyJson(draft.type === "write" ? draft.entry : draft.content, {
+-            omitUndefinedProperties: true,
+-        });
+-        const items = (boundary?.inbox ?? (await tx.doc(InboxDoc, conversationId))).items;
+-        if (draft.type === "write")
+-            items.push({ id, mode: "write", entry: value });
+-        else {
+-            const mode = draft.whenBusy === "steer" ? "steer" : "followUp";
+-            const content = value;
+-            const entry = draft.entry === undefined ? {} : { entry: pickInputEntry(draft.entry) };
+-            items.push({ id, mode, content, ...entry });
+-        }
++        const inbox = boundary?.inbox ?? (await tx.doc(InboxDoc, conversationId));
++        const id = await queueSubmission(tx, conversationId, draft, inbox);
+         if (boundary === undefined)
+             return id;
+         const { users } = await applyBoundary(tx, boundary, "final", now);
+@@ -191,4 +219,29 @@
+     await startRun(tx, conversationId, live, [id]);
+     return id;
+ }
++
++/** Shared queued admission; callers finish table reads before creating submissions. */
++async function queueSubmission(tx, conversationId, draft, inbox) {
++    const requestId = draft.requestId === undefined ? {} : { requestId: draft.requestId };
++    const { id } = await tx.createSubmission({
++        conversationId,
++        ...requestId,
++        type: draft.type,
++        status: "queued",
++    });
++    // Hosts may leave optional fields `undefined`; drafts take strict JSON.
++    const value = copyJson(draft.type === "write" ? draft.entry : draft.content, {
++        omitUndefinedProperties: true,
++    });
++    const items = inbox.items;
++    if (draft.type === "write")
++        items.push({ id, mode: "write", entry: value });
++    else {
++        const mode = draft.whenBusy === "steer" ? "steer" : "followUp";
++        const content = value;
++        const entry = draft.entry === undefined ? {} : { entry: pickInputEntry(draft.entry) };
++        items.push({ id, mode, content, ...entry });
++    }
++    return id;
++}
+ //# sourceMappingURL=submissions.js.map
+\ No newline at end of file
+diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/generation.js b/node_modules/@earendil-works/pi-durable/dist/harness/generation.js
+--- a/node_modules/@earendil-works/pi-durable/dist/harness/generation.js
++++ b/node_modules/@earendil-works/pi-durable/dist/harness/generation.js
+@@ -244,9 +244,14 @@
+ }
+ /** Settle the run's inputs `unanswered` with `model_error` and fail with `text`. */
+ async function failModelError(runtime, text, context) {
++    const conversationId = runtime.conversationId;
+     await runtime.commit(async (tx) => {
+-        const live = await tx.doc(LiveDoc, runtime.conversationId);
++        const boundary = await prepareBoundary(tx, conversationId, runtime.settings);
++        const live = await tx.doc(LiveDoc, conversationId);
+         endRun(tx, live, runtime.taskId, { status: "unanswered", reason: "model_error", detail: text });
++        const { users } = await applyBoundary(tx, boundary, "final", runtime.now());
++        if (users.length > 0)
++            await startRun(tx, conversationId, live, users);
+         return {
+             status: "terminal",
+             outcome: { status: "failed", error: { message: text, detail: { reason: "model_error" } } },
+@@ -390,6 +395,7 @@
+         attempt <= policy.maxRetries;
+     const until = retry ? runtime.now() + retryDelayMs(policy, attempt) : 0;
+     await runtime.commit(async (tx) => {
++        const boundary = retry ? undefined : await prepareBoundary(tx, conversationId, runtime.settings);
+         const live = await tx.doc(LiveDoc, conversationId);
+         await appendAssistant(tx, conversationId, message);
+         if (retry) {
+@@ -404,6 +410,9 @@
+         }
+         const text = message.errorMessage ?? `Model response ended with stop reason ${message.stopReason}`;
+         endRun(tx, live, runtime.taskId, { status: "unanswered", reason: "model_error", detail: text });
++        const { users } = await applyBoundary(tx, boundary, "final", runtime.now());
++        if (users.length > 0)
++            await startRun(tx, conversationId, live, users);
+         return {
+             status: "terminal",
+             outcome: { status: "failed", error: { message: text, detail: { reason: "model_error" } } },

@@ -322,6 +322,11 @@ export interface ControlPlaneStore extends ActivityHeadlineStore {
     task: SimulationTask,
     params: { orbId: string; caller: ArchiveCaller },
   ): ResultAsync<OrbBootContext | null, StoreError | StateConflict>;
+  /** Atomically freezes every outstanding FIFO group, preserving existing claims; sleep blocks the snapshot. */
+  claimOrbMessageBacklog(
+    task: SimulationTask,
+    params: { orbId: string; now: number },
+  ): ResultAsync<OrbMessageRow[], StoreError>;
   /** Atomically freezes the next FIFO delivery batch: queued user messages up to the next system message, or that system message alone. */
   claimNextOrbMessageBatch(
     task: SimulationTask,

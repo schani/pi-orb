@@ -1221,45 +1221,68 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     );
   }
 
-  claimNextOrbMessageBatch(
+  claimOrbMessageBacklog(task: SimulationTask, params: { orbId: string; now: number }) {
+    return this.claimOrbMessages(task, params, true);
+  }
+
+  claimNextOrbMessageBatch(task: SimulationTask, params: { orbId: string; now: number }) {
+    return this.claimOrbMessages(task, params, false);
+  }
+
+  private claimOrbMessages(
     task: SimulationTask,
     params: { orbId: string; now: number },
+    wholeBacklog: boolean,
   ): ResultAsync<OrbMessageRow[], StoreError> {
-    return this.access(task, FAILPOINTS.storeWrite, "claim orb message batch", () => {
+    const operation = wholeBacklog ? "claim orb message backlog" : "claim orb message batch";
+    return this.access(task, FAILPOINTS.storeWrite, operation, () => {
       const orb = this.orbs.get(params.orbId);
       if (orb?.sleepId != null || orb?.stopReason === "sleep") return [];
       const rows = this.messages.get(params.orbId) ?? [];
       const outstanding = rows.filter(
         (row) => row.status === "queued" || row.status === "delivering",
       );
-      const first = outstanding[0];
-      if (first === undefined) return [];
-      if (first.deliveryBatchId !== null) {
-        return outstanding.filter((row) => row.deliveryBatchId === first.deliveryBatchId);
+      const snapshot: OrbMessageRow[] = [];
+      for (let index = 0; index < outstanding.length; ) {
+        const first = outstanding[index++];
+        if (first === undefined) break;
+        if (first.deliveryBatchId !== null) {
+          if (!wholeBacklog)
+            return outstanding.filter((row) => row.deliveryBatchId === first.deliveryBatchId);
+          snapshot.push(first);
+          continue;
+        }
+        const batch = [first];
+        while (first.system === null && index < outstanding.length) {
+          const next = outstanding[index];
+          if (
+            next === undefined ||
+            next.system !== null ||
+            (wholeBacklog && next.deliveryBatchId !== null)
+          )
+            break;
+          batch.push(next);
+          index++;
+        }
+        const eligible = batch.filter(
+          (row) => row.deliveryBatchId === null && (wholeBacklog || row.status === "queued"),
+        );
+        const batchId = messageBatchId(eligible.map((row) => row.messageId));
+        for (const row of eligible)
+          snapshot.push({
+            ...row,
+            status: "delivering",
+            deliveryBatchId: batchId,
+            updatedAt: params.now,
+          });
+        if (!wholeBacklog) break;
       }
-      const systemIndex = outstanding.findIndex((row) => row.system !== null);
-      const batch =
-        first.system !== null
-          ? [first]
-          : outstanding.slice(0, systemIndex < 0 ? undefined : systemIndex);
-      const claimedIds = new Set(
-        batch
-          .filter((row) => row.status === "queued" && row.deliveryBatchId === null)
-          .map((row) => row.messageId),
+      const claimed = new Map(snapshot.map((row) => [row.messageId, row]));
+      this.messages.set(
+        params.orbId,
+        rows.map((row) => claimed.get(row.messageId) ?? row),
       );
-      const batchId = messageBatchId([...claimedIds]);
-      const updated = rows.map((row) =>
-        claimedIds.has(row.messageId)
-          ? {
-              ...row,
-              status: "delivering" as const,
-              deliveryBatchId: batchId,
-              updatedAt: params.now,
-            }
-          : row,
-      );
-      this.messages.set(params.orbId, updated);
-      return updated.filter((row) => row.deliveryBatchId === batchId);
+      return snapshot;
     });
   }
 

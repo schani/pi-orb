@@ -579,7 +579,13 @@ describe("central Durable agent", () => {
 
   it("durably deduplicates input and projects completed assistant history", async () => {
     const faux = fauxProvider();
-    faux.setResponses([fauxAssistantMessage("answer")]);
+    const contexts: string[] = [];
+    faux.setResponses(
+      Array(2).fill((request: { messages: unknown }) => {
+        contexts.push(JSON.stringify(request.messages));
+        return fauxAssistantMessage("answer");
+      }),
+    );
     const models = createModels();
     models.setProvider(faux.provider);
     const agent = (
@@ -600,13 +606,37 @@ describe("central Durable agent", () => {
       messageIds: ["one"],
       content: [{ type: "text" as const, text: "question" }],
     };
-    expect((await agent.deliver(request))._unsafeUnwrap().duplicate).toBe(false);
+    const peers = [1, 2].map((n) => ({
+      ...request,
+      messageId: `peer-${n}`,
+      messageIds: [`peer-${n}`],
+      content: [{ type: "text" as const, text: `peer body ${n}` }],
+      system: {
+        kind: "orb_message" as const,
+        senderOrbId: `00000000-0000-4000-8000-00000000000${n}`,
+      },
+    }));
+    const receipts = (await agent.deliverMany([peers[0]!, request, peers[1]!]))
+      ._unsafeUnwrap()
+      .map((r) => r._unsafeUnwrap());
+    expect(receipts[1]?.duplicate).toBe(false);
+    expect(new Set(receipts.map((r) => r.operationId)).size).toBe(1);
     expect((await agent.deliver(request))._unsafeUnwrap().duplicate).toBe(true);
     expect(
       (await agent.deliver({ ...request, content: [{ type: "text", text: "different" }] })).isErr(),
     ).toBe(true);
     await agent.waitForIdle();
+    expect(contexts).toHaveLength(1);
+    expect(contexts[0]).toMatch(/peer body 1[\s\S]*question[\s\S]*peer body 2/);
     const snapshot = agent.snapshot()._unsafeUnwrap();
+    expect(
+      snapshot.records.filter((r) => r.type === "event" && r.eventType === "orb.message"),
+    ).toMatchObject(
+      peers.map((p) => ({
+        sender: { orbId: p.system.senderOrbId },
+        inboxMessageIds: p.messageIds,
+      })),
+    );
     expect(
       snapshot.records.filter((record) => record.type === "message" && record.role === "user"),
     ).toHaveLength(1);
@@ -615,11 +645,21 @@ describe("central Durable agent", () => {
     ).toBe(true);
     expect(snapshot.activity).toBe("idle");
     expect((await agent.prepareIdleStop())._unsafeUnwrap().prepared).toBe(true);
+    const mixed = await agent.deliverMany([
+      peers[0]!,
+      { ...request, messageId: "after-stop", messageIds: ["after-stop"] },
+    ]);
+    expect(mixed.isOk()).toBe(true);
+    expect(mixed._unsafeUnwrap().map((r) => r._unsafeUnwrap().duplicate)).toEqual([true, false]);
+    expect(mixed._unsafeUnwrap()[0]!._unsafeUnwrap()).toEqual({ ...receipts[0]!, duplicate: true });
+    await agent.waitForIdle();
+    expect(contexts).toHaveLength(2);
     expect(
-      (
-        await agent.deliver({ ...request, messageId: "after-stop", messageIds: ["after-stop"] })
-      ).isOk(),
-    ).toBe(true);
+      agent
+        .snapshot()
+        ._unsafeUnwrap()
+        .records.filter((r) => r.type === "event" && r.eventType === "orb.message"),
+    ).toHaveLength(2);
     expect((await agent.close()).isOk()).toBe(true);
     expect((await agent.deliver(request)).isErr()).toBe(true);
   });
@@ -663,7 +703,7 @@ describe("central Durable agent", () => {
     expect(closes).toBe(2);
   });
 
-  it("keeps unplaced admitted steering input busy after the preceding run fails", async () => {
+  it("consumes admitted steering input after the preceding run fails", async () => {
     const entered = barrier();
     const release = barrier();
     const faux = fauxProvider();
@@ -676,6 +716,7 @@ describe("central Durable agent", () => {
           errorMessage: "scripted terminal failure",
         });
       },
+      fauxAssistantMessage("queued answer"),
     ]);
     const models = createModels();
     models.setProvider(faux.provider);
@@ -697,8 +738,9 @@ describe("central Durable agent", () => {
       await agent.deliver({ ...input, messageId: "steer", messageIds: ["steer"] });
       release.resolve();
       await agent.waitForIdle();
-      expect(agent.snapshot()._unsafeUnwrap().activity).toBe("busy");
-      expect((await agent.prepareIdleStop())._unsafeUnwrap().prepared).toBe(false);
+      expect(faux.state.callCount).toBe(2);
+      expect(agent.snapshot()._unsafeUnwrap().activity).toBe("idle");
+      expect((await agent.prepareIdleStop())._unsafeUnwrap().prepared).toBe(true);
     } finally {
       release.resolve();
       await agent.close();

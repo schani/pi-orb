@@ -1374,9 +1374,18 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     });
   }
 
-  claimNextOrbMessageBatch(
+  claimOrbMessageBacklog(task: SimulationTask, params: { orbId: string; now: number }) {
+    return this.claimOrbMessages(task, params, true);
+  }
+
+  claimNextOrbMessageBatch(task: SimulationTask, params: { orbId: string; now: number }) {
+    return this.claimOrbMessages(task, params, false);
+  }
+
+  private claimOrbMessages(
     _task: SimulationTask,
     params: { orbId: string; now: number },
+    wholeBacklog: boolean,
   ): ResultAsync<OrbMessageRow[], StoreError> {
     return this.db.transaction<OrbMessageRow[], StoreError>(async (query) => {
       const current = await query("SELECT sleep_id,stop_reason FROM orbs WHERE id=$1 FOR UPDATE", [
@@ -1394,42 +1403,46 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         [params.orbId],
       );
       if (outstanding.isErr()) return err(outstanding.error);
-      const first = outstanding.value.rows[0];
-      if (first === undefined) return ok([]);
-      const existingBatch = first["delivery_batch_id"];
-      if (existingBatch !== null) {
-        return ok(
-          outstanding.value.rows
-            .filter((row) => row["delivery_batch_id"] === existingBatch)
-            .map(mapMessageRow),
+      const rows = outstanding.value.rows.map(mapMessageRow);
+      const snapshot: OrbMessageRow[] = [];
+      for (let index = 0; index < rows.length; ) {
+        const first = rows[index++];
+        if (first === undefined) break;
+        if (first.deliveryBatchId !== null) {
+          if (!wholeBacklog)
+            return ok(rows.filter((row) => row.deliveryBatchId === first.deliveryBatchId));
+          snapshot.push(first);
+          continue;
+        }
+        const batch = [first];
+        while (first.system === null && index < rows.length) {
+          const next = rows[index];
+          if (
+            next === undefined ||
+            next.system !== null ||
+            (wholeBacklog && next.deliveryBatchId !== null)
+          )
+            break;
+          batch.push(next);
+          index++;
+        }
+        const eligible = batch.filter(
+          (row) => row.deliveryBatchId === null && (wholeBacklog || row.status === "queued"),
         );
+        const ids = eligible.map((row) => row.messageId);
+        const claimed = await query(
+          `UPDATE orb_messages SET delivery_batch_id = $2, status = 'delivering', updated_at = $3
+           WHERE orb_id = $1 AND message_id = ANY($4::uuid[]) AND delivery_batch_id IS NULL
+           RETURNING *`,
+          [params.orbId, messageBatchId(ids), new Date(params.now), arrayParam(ids)],
+        );
+        if (claimed.isErr()) return err(claimed.error);
+        snapshot.push(
+          ...claimed.value.rows.map(mapMessageRow).sort((a, b) => a.ordinal - b.ordinal),
+        );
+        if (!wholeBacklog) break;
       }
-      const firstSystem = first["system"] !== null;
-      const eligible = firstSystem
-        ? [first]
-        : outstanding.value.rows.slice(
-            0,
-            outstanding.value.rows.findIndex((row) => row["system"] !== null) < 0
-              ? undefined
-              : outstanding.value.rows.findIndex((row) => row["system"] !== null),
-          );
-      const batchId = messageBatchId(
-        eligible
-          .filter((row) => row["status"] === "queued" && row["delivery_batch_id"] === null)
-          .map((row) => String(row["message_id"])),
-      );
-      const claimed = await query(
-        `UPDATE orb_messages m SET delivery_batch_id = $2, status = 'delivering', updated_at = $3
-         WHERE m.orb_id = $1 AND m.status = 'queued' AND m.delivery_batch_id IS NULL
-           AND ($4::boolean AND m.message_id = $5::uuid OR NOT $4::boolean AND m.system IS NULL
-             AND NOT EXISTS (SELECT 1 FROM orb_messages earlier
-               WHERE earlier.orb_id = m.orb_id AND earlier.ordinal < m.ordinal
-                 AND earlier.system IS NOT NULL AND earlier.status IN ('queued', 'delivering')))
-         RETURNING m.*`,
-        [params.orbId, batchId, new Date(params.now), firstSystem, first["message_id"]],
-      );
-      if (claimed.isErr()) return err(claimed.error);
-      return ok(claimed.value.rows.map(mapMessageRow).sort((a, b) => a.ordinal - b.ordinal));
+      return ok(snapshot);
     });
   }
 

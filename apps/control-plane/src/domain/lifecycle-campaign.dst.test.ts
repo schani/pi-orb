@@ -1,6 +1,6 @@
 import type { HistoryRecord } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { err, errAsync, okAsync } from "neverthrow";
+import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { FAILPOINTS } from "../testkit/failpoints.ts";
 import { makeHarness, makeProjectRow, seedRunningOrb, TEST_USER_ID } from "../testkit/fixtures.ts";
@@ -292,6 +292,31 @@ describe("stateful lifecycle campaign", () => {
                   context,
                 );
               },
+              deliverMessages: (task, orb, requests, context) =>
+                new ResultAsync(
+                  (async () => {
+                    const responses = [];
+                    for (const request of requests) {
+                      const response = await plane.deliverMessage(task, orb, request, context);
+                      responses.push(response);
+                      if (response.isErr() && response.error.retryable) {
+                        responses.push(
+                          ...requests.slice(responses.length).map(() =>
+                            err({
+                              type: "runtime_client_error" as const,
+                              code: "unreachable" as const,
+                              answered: false,
+                              retryable: true,
+                              message: "Earlier partition not admitted",
+                            }),
+                          ),
+                        );
+                        break;
+                      }
+                    }
+                    return ok(responses);
+                  })(),
+                ),
               prepareIdleStop: (_task, _orb, _context) => {
                 central.world.setActivity(ORB, centralBusy ? "busy" : "idle");
                 if (centralBusy) return okAsync({ v: 1 as const, prepared: false });

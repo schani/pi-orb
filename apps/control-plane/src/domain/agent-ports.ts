@@ -113,6 +113,16 @@ export interface AgentPlane {
     request: DeliverMessageClientRequest,
     context: OperationContext,
   ): ResultAsync<DeliverOrbMessageResponse, RuntimeClientError>;
+  /** Atomic central admission of the ordered FIFO snapshot. */
+  deliverMessages?(
+    task: SimulationTask,
+    orb: OrbRow,
+    requests: readonly DeliverMessageClientRequest[],
+    context: OperationContext,
+  ): ResultAsync<
+    readonly Result<DeliverOrbMessageResponse, RuntimeClientError>[],
+    RuntimeClientError
+  >;
   prepareIdleStop(
     task: SimulationTask,
     orb: OrbRow,

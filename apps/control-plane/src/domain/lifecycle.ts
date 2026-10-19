@@ -10,7 +10,7 @@ import { err, ok, okAsync, type Result, ResultAsync } from "neverthrow";
 import { acceptsCentralAgentCaller } from "./agent-authorization.ts";
 import {
   agentHealth,
-  deliverAgentMessage,
+  deliverAgentMessages,
   prepareAgentStop,
   suspendAgent,
 } from "./agent-orchestration.ts";
@@ -1624,71 +1624,72 @@ async function dispatchQueuedMessages(
   orb: OrbRow,
   baseUrl: string,
 ): Promise<ReconcileOutcome | null> {
-  const pendingBatch = await deps.store.claimNextOrbMessageBatch(task, {
-    orbId: orb.id,
-    now: task.wallNow(),
-  });
-  if (pendingBatch.isErr()) return retryable(pendingBatch.error);
-  if (pendingBatch.value.length > 0) {
-    if (agentPlacement(deps.agentPlane, orb) === "central") {
-      await task.checkpoint("central.dispatch-before-authority");
-      const current = await deps.store.getOrb(task, orb.id);
-      if (current.isErr()) return retryable(current.error);
-      if (
-        current.value === null ||
-        current.value.agentAdmissionVersion !== orb.agentAdmissionVersion ||
-        current.value.sleepId !== null ||
-        current.value.stopReason === "manual" ||
-        current.value.stopReason === "sleep" ||
-        ["archiving", "archived", "deleting"].includes(current.value.state)
-      )
-        return { type: "conflict" };
-      orb = current.value;
-    }
-    if (agentPlacement(deps.agentPlane, orb) !== "central" && baseUrl === "")
-      return retryable("runtime address unavailable");
-    const messageIds = pendingBatch.value.map((message) => message.messageId);
-    const batchId = pendingBatch.value[0]?.deliveryBatchId ?? messageIds[0] ?? "";
-    const system = pendingBatch.value[0]?.system ?? null;
-    const delivered = await withDeadline(
-      task,
-      deps.constants.runtimeRequestTimeoutMs,
-      "deliver queued message batch",
-      (context) => {
-        if (!deps.agentPlane) deps.control.noteRuntimeRequestStarted(orb.id, task.monotonicNow());
-        return deliverAgentMessage(
-          task,
-          deps,
-          orb,
-          {
-            baseUrl: baseUrl,
-            messageId: batchId,
-            messageIds,
-            content: squashMessageBatch(pendingBatch.value),
-            ...(system !== null ? { system } : {}),
-          },
-          context,
-        );
-      },
-    );
+  const central = agentPlacement(deps.agentPlane, orb) === "central";
+  const pending = await (central
+    ? deps.store.claimOrbMessageBacklog(task, { orbId: orb.id, now: task.wallNow() })
+    : deps.store.claimNextOrbMessageBatch(task, { orbId: orb.id, now: task.wallNow() }));
+  if (pending.isErr()) return retryable(pending.error);
+  if (pending.value.length === 0) return null;
+  if (central) {
+    await task.checkpoint("central.dispatch-before-authority");
+    const current = await deps.store.getOrb(task, orb.id);
+    if (current.isErr()) return retryable(current.error);
+    if (
+      current.value === null ||
+      current.value.agentAdmissionVersion !== orb.agentAdmissionVersion ||
+      current.value.sleepId !== null ||
+      current.value.stopReason === "manual" ||
+      current.value.stopReason === "sleep" ||
+      ["archiving", "archived", "deleting"].includes(current.value.state)
+    )
+      return { type: "conflict" };
+    orb = current.value;
+  }
+  if (!central && baseUrl === "") return retryable("runtime address unavailable");
+  const batches = new Map<string, OrbMessageRow[]>();
+  for (const message of pending.value) {
+    const id = message.deliveryBatchId ?? message.messageId;
+    const batch = batches.get(id) ?? [];
+    batch.push(message);
+    batches.set(id, batch);
+  }
+  const requests = [...batches].map(([messageId, messages]) => ({
+    baseUrl,
+    messageId,
+    messageIds: messages.map((message) => message.messageId),
+    content: squashMessageBatch(messages),
+    ...(messages[0]?.system ? { system: messages[0].system } : {}),
+  }));
+  const submitted = await withDeadline(
+    task,
+    deps.constants.runtimeRequestTimeoutMs,
+    "deliver queued message backlog",
+    (context) => {
+      if (!deps.agentPlane) deps.control.noteRuntimeRequestStarted(orb.id, task.monotonicNow());
+      return deliverAgentMessages(task, deps, orb, requests, context);
+    },
+  );
+  // Only definitive orb-wide startup refusals apply to every partition.
+  if (submitted.isErr() && !(central && noteCentralStartup(task, deps, orb, submitted.error)))
+    return retryable(submitted.error);
+  const responses = submitted.isErr() ? requests.map(() => err(submitted.error)) : submitted.value;
+  let outcome: ReconcileOutcome = { type: "noop" };
+  for (const [index, request] of requests.entries()) {
+    const delivered = responses[index];
+    if (delivered === undefined) return retryable("message backlog response incomplete");
+    const { messageId: batchId, messageIds } = request;
     if (delivered.isErr()) {
-      if (agentPlacement(deps.agentPlane, orb) === "central")
-        noteCentralStartup(task, deps, orb, delivered.error);
-      if (delivered.error.answered && agentPlacement(deps.agentPlane, orb) !== "central") {
+      if (central) noteCentralStartup(task, deps, orb, delivered.error);
+      if (delivered.error.answered && !central) {
         const inspected = await inspectFailedRuntime(task, deps, orb, baseUrl);
         if (inspected.isErr()) return retryable(inspected.error);
         if (inspected.value) return { type: "progressed" };
+        deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
       }
-      if (delivered.error.answered) {
-        if (agentPlacement(deps.agentPlane, orb) !== "central")
-          deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
+      if (delivered.error.retryable) {
+        outcome = retryable(delivered.error);
+        continue;
       }
-      if (delivered.error.retryable) return retryable(delivered.error);
-      // A rejection the runtime will repeat for the same payload (an oversized
-      // or malformed message) is terminal for this batch: redelivering it
-      // forever would wedge every later message behind it. The rows leave the
-      // outstanding set carrying the runtime's reason, which the message
-      // resource and the UI show as a failed message (docs/runtime-protocol.md).
       const failed = await deps.store.failOrbMessageBatch(task, {
         orbId: orb.id,
         messageIds,
@@ -1703,19 +1704,10 @@ async function dispatchQueuedMessages(
         code: delivered.error.code,
         error: delivered.error.message,
       });
-      return { type: "progressed" };
+      if (outcome.type === "noop") outcome = { type: "progressed" };
+      continue;
     }
-    // The runtime just answered an authenticated request, which is exactly
-    // what liveness measures; without this, an orb whose pulls are lagging can
-    // be restarted in the same second its runtime served a delivery.
-    if (agentPlacement(deps.agentPlane, orb) !== "central")
-      deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
-    // The idle anchor is when the user's work reached the runtime, not when it
-    // was admitted: a batch can sit in the queue for longer than the whole
-    // idle window (a stopped orb, an unreachable runtime), and then the first
-    // pass after it leaves the outstanding set would idle-stop an orb whose
-    // turn had just begun. Advisory and monotone, like every other
-    // `last_busy_at` write (docs/lifecycle.md).
+    if (!central) deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
     await deps.store.touchLastBusy(task, { orbId: orb.id, now: task.wallNow() });
     const noted = await deps.store.noteOrbMessageDelivery(task, {
       orbId: orb.id,
@@ -1725,19 +1717,14 @@ async function dispatchQueuedMessages(
       now: task.wallNow(),
     });
     if (noted.isErr()) return retryable(noted.error);
-    if (!delivered.value.duplicate) {
+    if (!delivered.value.duplicate)
       logOrbEvent(task, orb.id, "message-batch-dispatched", {
         batch_id: batchId,
         message_count: messageIds.length,
         delivery: delivered.value.delivery,
       });
-    }
-    // A dispatched batch is user work in flight, so the idle countdown
-    // below is not reached while it is outstanding.
-    return { type: "noop" };
   }
-
-  return null;
+  return outcome;
 }
 
 async function reconcileStopping(
