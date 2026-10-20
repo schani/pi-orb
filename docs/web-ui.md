@@ -1,5 +1,15 @@
 # Web UI
 
+## Home-screen installation (decided and implemented locally 2026-10-20; not deployed)
+
+iPhone and iPad support an online-only standalone home-screen app. The static manifest uses `/` for identity, scope and launch URL, so installation from an orb never pins that resource or an automatic creation route. The installed name is `pi-orb`; theme and launch background are white. Opaque 180/192/512px PNGs rasterize the existing `public/favicons/neutral.svg` on white. The Apple touch icon and manifest icons stay fixed while the ordinary SVG tab favicon continues to reflect orb state.
+
+The entry HTML links the manifest with `crossorigin="use-credentials"` and declares Apple standalone/title metadata. Manifest and icons are public static assets, outside authenticated browser routes; API and WebSocket authority is unchanged. Retain the user agent's default viewport fit and status bar rather than introducing edge-to-edge safe-area CSS. No service worker, offline cache, push, install prompt, or new persisted state is introduced.
+
+Installation uses Safari's Add to Home Screen flow (`README.md`). The installed app may need its own sign-in; do not assume Safari session sharing. Existing same-tab login, return-path and session-ribbon behavior applies. Physical iPhone/iPad installation, fresh/expired Google-login round trips, background/resume, keyboard, rotation and safe-area behavior remain unverified. Automated built-shell checks establish metadata delivery and browser image decoding, not those device behaviors (`docs/testing.md`).
+
+Static request status/MIME and existing sanitized authentication outcomes diagnose delivery/login failures; visible session and operation errors retain their current scope. Static metadata adds no autonomous decisions or lifecycle telemetry.
+
 ## Spawned-orb nesting (implemented locally 2026-10-14; not deployed)
 
 **Decision (2026-10-14):** the selected inline tree is implemented on the dashboard and orb-view index, tests first. Working children are always visible, indented below their parent with a thin connector. Preserve production typography, state tiles, selection inversion, 316px dashboard columns and the 236px orb index. No nesting collapse/expand controls, family counts, accordion behavior or depth configuration. The existing archive disclosure is unchanged; phones still hide the orb-view index. Approved study: [inline tree](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/de50d729-0037-48df-a886-b8971cd84e7d/design/orb-nesting/index.html).

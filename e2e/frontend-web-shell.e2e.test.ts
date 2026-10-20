@@ -232,7 +232,7 @@ it.each(["schani/pi-orb", "github.com/schani/pi-orb"])(
   },
 );
 
-it("boots the production shell and loads its built JS, CSS and favicon on direct deep links and reload", async () => {
+it("boots the production shell and loads built assets and install metadata on direct deep links and reload", async () => {
   const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
   const page = await browser.newPage();
   const responses: { path: string; status: number }[] = [];
@@ -266,6 +266,59 @@ it("boots the production shell and loads its built JS, CSS and favicon on direct
     const favicon = await page.locator('link[rel="icon"]').getAttribute("href");
     expect(favicon).toBeTruthy();
     expect((await page.request.get(`${origin}${favicon}`)).status()).toBe(200);
+    const manifestLink = page.locator('link[rel="manifest"]');
+    await expectPage(manifestLink).toHaveAttribute("href", "/manifest.webmanifest");
+    await expectPage(manifestLink).toHaveAttribute("crossorigin", "use-credentials");
+    const manifestResponse = await page.request.get(`${origin}/manifest.webmanifest`);
+    expect(manifestResponse.status()).toBe(200);
+    expect(manifestResponse.headers()["content-type"]).toContain("application/manifest+json");
+    const manifest = await manifestResponse.json();
+    expect(manifest).toMatchObject({
+      id: "/",
+      scope: "/",
+      start_url: "/",
+      display: "standalone",
+      theme_color: "#ffffff",
+      background_color: "#ffffff",
+    });
+    const appleIcon = page.locator('link[rel="apple-touch-icon"]');
+    await expectPage(appleIcon).toHaveAttribute("href", "/favicons/apple-touch-icon.png");
+    const iconSizes = [
+      ["/favicons/apple-touch-icon.png", 180],
+      ...manifest.icons.map((icon: { src: string; sizes: string }) => [
+        icon.src,
+        Number(icon.sizes.split("x")[0]),
+      ]),
+    ] as [string, number][];
+    expect(iconSizes).toEqual([
+      ["/favicons/apple-touch-icon.png", 180],
+      ["/favicons/app-192.png", 192],
+      ["/favicons/app-512.png", 512],
+    ]);
+    for (const [path, size] of iconSizes) {
+      const response = await page.request.get(`${origin}${path}`);
+      expect(response.status()).toBe(200);
+      expect(response.headers()["content-type"]).toContain("image/png");
+      const dimensions = await page.locator("body").evaluate(async (body, src) => {
+        const image = body.ownerDocument.createElement("img");
+        image.src = src;
+        await image.decode();
+        return [image.naturalWidth, image.naturalHeight];
+      }, path);
+      expect(dimensions).toEqual([size, size]);
+    }
+    for (const path of ["/manifest.webmanifest", ...iconSizes.map(([path]) => path)]) {
+      const head = await page.request.head(`${origin}${path}`);
+      expect(head.status()).toBe(200);
+      expect(await head.body()).toHaveLength(0);
+    }
+    for (const path of ["/missing.webmanifest", "/favicons/missing.png"]) {
+      for (const method of ["GET", "HEAD"] as const) {
+        const response = await page.request.fetch(`${origin}${path}`, { method });
+        expect(response.status()).toBe(404);
+        expect(await response.text()).not.toContain('<div id="root">');
+      }
+    }
     expect(responses.some(({ path, status }) => path.endsWith(".js") && status === 200)).toBe(true);
     expect(responses.some(({ path, status }) => path.endsWith(".css") && status === 200)).toBe(
       true,
