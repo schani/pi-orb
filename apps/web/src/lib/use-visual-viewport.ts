@@ -1,32 +1,62 @@
 import { type RefObject, useLayoutEffect } from "react";
+import { devConsoleDebug } from "./dev-console-debug.ts";
 
 type Listen = {
-  addEventListener(type: "resize" | "scroll", listener: () => void): void;
-  removeEventListener(type: "resize" | "scroll", listener: () => void): void;
+  addEventListener(type: string, listener: () => void): void;
+  removeEventListener(type: string, listener: () => void): void;
 };
 type Viewport = Listen & { height: number; offsetTop: number; scale: number };
-type Host = Listen & { innerHeight: number; visualViewport: Viewport | null };
+type Host = Listen & {
+  innerHeight: number;
+  visualViewport: Viewport | null;
+  document: Listen & { visibilityState: string };
+};
 type Style = { setProperty(name: string, value: string): void; removeProperty(name: string): void };
 
 /** Pins the app box's variables to the visual viewport; returns the cleanup. */
 export function followVisualViewport(style: Style, host: Host): () => void {
   const viewport = host.visualViewport;
+  let applied: { height: number; top: number } | undefined;
   const update = () => {
     // Let native pinch zoom pan the existing layout instead of reflowing it.
     if (viewport && viewport.scale !== 1) return;
     const height = viewport?.height ?? host.innerHeight;
     if (height <= 0) return;
+    const top = viewport?.offsetTop ?? 0;
+    if (applied?.height === height && applied.top === top) return;
     style.setProperty("--visual-viewport-height", `${height}px`);
-    style.setProperty("--visual-viewport-top", `${viewport?.offsetTop ?? 0}px`);
+    style.setProperty("--visual-viewport-top", `${top}px`);
+    applied = { height, top };
+    return applied;
   };
+  const resume = (outcome: "visible" | "pageshow" | "focus") => {
+    if (host.document.visibilityState !== "visible") return;
+    const changed = update();
+    if (changed)
+      devConsoleDebug.record({
+        event: "viewport",
+        outcome,
+        viewportHeight: changed.height,
+        viewportOffsetTop: changed.top,
+      });
+  };
+  const visible = () => resume("visible");
+  const pageshow = () => resume("pageshow");
+  const focus = () => resume("focus");
   update();
   viewport?.addEventListener("resize", update);
   viewport?.addEventListener("scroll", update);
   host.addEventListener("resize", update);
+  host.document.addEventListener("visibilitychange", visible);
+  host.addEventListener("pageshow", pageshow);
+  host.addEventListener("focus", focus);
   return () => {
     viewport?.removeEventListener("resize", update);
     viewport?.removeEventListener("scroll", update);
     host.removeEventListener("resize", update);
+    host.document.removeEventListener("visibilitychange", visible);
+    host.removeEventListener("pageshow", pageshow);
+    host.removeEventListener("focus", focus);
     style.removeProperty("--visual-viewport-height");
     style.removeProperty("--visual-viewport-top");
   };

@@ -22,10 +22,12 @@ async function fakeVisualViewport(page: Page, width: number, height: number): Pr
     const viewport = new EventTarget();
     Object.assign(viewport, { height: ${height}, width: ${width}, offsetTop: 0, offsetLeft: 0, scale: 1 });
     Object.defineProperty(window, 'visualViewport', { value: viewport, configurable: true });
-    window.setVisualViewport = (height, offsetTop, scale = 1) => {
+    window.setVisualViewport = (height, offsetTop, scale = 1, notify = true) => {
       Object.assign(viewport, { height, offsetTop, scale });
-      viewport.dispatchEvent(new Event('resize'));
-      viewport.dispatchEvent(new Event('scroll'));
+      if (notify) {
+        viewport.dispatchEvent(new Event('resize'));
+        viewport.dispatchEvent(new Event('scroll'));
+      }
     };
   `);
 }
@@ -1571,6 +1573,110 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       await page.close();
     }
   });
+
+  it.each(["visibilitychange", "pageshow", "focus"])(
+    "resamples iPad viewport geometry on %s without resize or scroll events",
+    async (event) => {
+      const page = await browser.newPage({
+        viewport: { width: 1180, height: 820 },
+        isMobile: true,
+        hasTouch: true,
+      });
+      await fakeVisualViewport(page, 1180, 820);
+      try {
+        const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
+        await gotoFrontendHistory(
+          page,
+          `${origin}/orbs/frontend-long-history`,
+          "frontend-long-history",
+          composer,
+        );
+        await composer.fill("keep this draft across resume");
+        const scroller = page.locator(".orb-transcript-scroll");
+        const resume = async (height: number, top: number) => {
+          await page.evaluate(`
+            Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+            document.dispatchEvent(new Event('visibilitychange'));
+            window.setVisualViewport(${height}, ${top}, 1, false);
+            Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+            ${event === "visibilitychange" ? "document" : "window"}.dispatchEvent(new Event('${event}'));
+          `);
+          await expectPage(page.locator(".app")).toHaveCSS("height", `${height}px`);
+          const bounds = await page.locator(".app").evaluate((element) => {
+            const rect = (selector: string) => {
+              const { top, bottom } = element.querySelector(selector).getBoundingClientRect();
+              return { top, bottom };
+            };
+            return {
+              header: rect(".orb-header"),
+              reading: rect(".orb-transcript-scroll"),
+              composer: rect(".composer"),
+              index: rect(".orb-index"),
+            };
+          });
+          expectPage(bounds.header.top).toBe(top);
+          expectPage(bounds.reading.top).toBe(bounds.header.bottom);
+          expectPage(bounds.reading.bottom).toBe(bounds.composer.top);
+          expectPage(bounds.composer.bottom).toBe(height + top);
+          expectPage(bounds.index).toEqual({ top, bottom: height + top });
+          expectPage(await page.evaluate("window.scrollY")).toBe(0);
+        };
+        await expectPage
+          .poll(() =>
+            scroller.evaluate(
+              (element) => element.scrollHeight - element.clientHeight - element.scrollTop,
+            ),
+          )
+          .toBeLessThanOrEqual(1);
+        await resume(504, 120);
+        await expectPage
+          .poll(() =>
+            scroller.evaluate(
+              (element) => element.scrollHeight - element.clientHeight - element.scrollTop,
+            ),
+          )
+          .toBeLessThanOrEqual(1);
+        await scroller.evaluate((element) => {
+          element.scrollTop = 200;
+          element.dispatchEvent(new Event("scroll"));
+        });
+        await resume(640, 0);
+        expectPage(await scroller.evaluate((element) => element.scrollTop)).toBe(200);
+        await expectPage(composer).toHaveValue("keep this draft across resume");
+        expectPage(
+          await page.evaluate(() =>
+            Reflect.get(globalThis, "piOrbDebug")
+              .dump()
+              .trace.filter((entry: { event: string }) => entry.event === "viewport")
+              .map(
+                (entry: {
+                  outcome: string;
+                  viewportHeight: number;
+                  viewportOffsetTop: number;
+                }) => ({
+                  outcome: entry.outcome,
+                  viewportHeight: entry.viewportHeight,
+                  viewportOffsetTop: entry.viewportOffsetTop,
+                }),
+              ),
+          ),
+        ).toEqual([
+          {
+            outcome: event === "visibilitychange" ? "visible" : event,
+            viewportHeight: 504,
+            viewportOffsetTop: 120,
+          },
+          {
+            outcome: event === "visibilitychange" ? "visible" : event,
+            viewportHeight: 640,
+            viewportOffsetTop: 0,
+          },
+        ]);
+      } finally {
+        await page.close();
+      }
+    },
+  );
 
   it("aborts only from the collapsed phone pad and retains the draft", async () => {
     const page = await browser.newPage({

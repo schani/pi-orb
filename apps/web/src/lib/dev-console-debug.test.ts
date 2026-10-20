@@ -82,6 +82,29 @@ describe("DevConsoleDebug", () => {
     });
   });
 
+  it("sanitizes content-free viewport resume geometry", () => {
+    const debug = new DevConsoleDebug();
+    for (const value of [120.75, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      debug.record({
+        event: "viewport",
+        outcome: "visible",
+        viewportHeight: value,
+        viewportOffsetTop: value,
+      });
+    }
+    expect(
+      debug.dump().trace.map(({ viewportHeight, viewportOffsetTop }) => ({
+        viewportHeight,
+        viewportOffsetTop,
+      })),
+    ).toEqual([
+      { viewportHeight: 120, viewportOffsetTop: 120 },
+      { viewportHeight: 0, viewportOffsetTop: 0 },
+      { viewportHeight: 0, viewportOffsetTop: 0 },
+      { viewportHeight: 0, viewportOffsetTop: 0 },
+    ]);
+  });
+
   it("returns detached dumps and scans current order and inbox evidence on demand", () => {
     const debug = new DevConsoleDebug();
     const records = history("orb", ["first", "second"]).records;

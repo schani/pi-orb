@@ -13,7 +13,8 @@ export type DebugTraceEvent =
   | "frame_rejected"
   | "frame_received"
   | "sync_state"
-  | "scroll_pin";
+  | "scroll_pin"
+  | "viewport";
 
 export interface DebugTraceInput {
   event: DebugTraceEvent;
@@ -34,6 +35,7 @@ export interface DebugTraceInput {
   recordCount?: number | undefined;
   scrollY?: number | undefined;
   viewportHeight?: number | undefined;
+  viewportOffsetTop?: number | undefined;
   contentHeight?: number | undefined;
 }
 
@@ -115,6 +117,9 @@ function safeTrace(input: DebugTraceInput, seq: number): DebugTraceEntry {
     ...(input.scrollY !== undefined ? { scrollY: finiteCount(input.scrollY) } : {}),
     ...(input.viewportHeight !== undefined
       ? { viewportHeight: finiteCount(input.viewportHeight) }
+      : {}),
+    ...(input.viewportOffsetTop !== undefined
+      ? { viewportOffsetTop: finiteCount(input.viewportOffsetTop) }
       : {}),
     ...(input.contentHeight !== undefined
       ? { contentHeight: finiteCount(input.contentHeight) }
