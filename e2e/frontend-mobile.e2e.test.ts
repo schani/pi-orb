@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type HistoryRecord, projectDisplayRecord } from "@pi-orb/protocol";
-import { type Browser, chromium, expect as expectPage, webkit } from "@playwright/test";
+import { type Browser, chromium, expect as expectPage, type Page, webkit } from "@playwright/test";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
@@ -15,6 +15,20 @@ const ORB_PATH = "/orbs/frontend-fixture-orb";
 const DEJAVU_MONO = readFileSync(
   join(import.meta.dirname, "fixtures/fonts/DejaVuSansMono.ttf"),
 ).toString("base64");
+
+/** Controlled geometry adapter for Safari's visual-only resizing, not keyboard emulation. */
+async function fakeVisualViewport(page: Page, width: number, height: number): Promise<void> {
+  await page.addInitScript(`
+    const viewport = new EventTarget();
+    Object.assign(viewport, { height: ${height}, width: ${width}, offsetTop: 0, offsetLeft: 0, scale: 1 });
+    Object.defineProperty(window, 'visualViewport', { value: viewport, configurable: true });
+    window.setVisualViewport = (height, offsetTop, scale = 1) => {
+      Object.assign(viewport, { height, offsetTop, scale });
+      viewport.dispatchEvent(new Event('resize'));
+      viewport.dispatchEvent(new Event('scroll'));
+    };
+  `);
+}
 
 // Each engine owns its fixture, so accepted messages cannot leak between engines.
 describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) => {
@@ -1431,17 +1445,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       hasTouch: true,
     });
     // Model Safari's visual-only resizing: the layout viewport stays 844px tall.
-    // This is a controlled geometry adapter, not a claim to emulate its keyboard.
-    await page.addInitScript(`
-      const viewport = new EventTarget();
-      Object.assign(viewport, { height: 844, width: 390, offsetTop: 0, offsetLeft: 0, scale: 1 });
-      Object.defineProperty(window, 'visualViewport', { value: viewport, configurable: true });
-      window.setPhoneViewport = (height, offsetTop, scale = 1) => {
-        Object.assign(viewport, { height, offsetTop, scale });
-        viewport.dispatchEvent(new Event('resize'));
-        viewport.dispatchEvent(new Event('scroll'));
-      };
-    `);
+    await fakeVisualViewport(page, 390, 844);
     try {
       const composer = page.locator(".composer");
       await gotoFrontendHistory(
@@ -1463,7 +1467,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         .toBeLessThanOrEqual(1);
       await composer.getByRole("button", { name: "Write message" }).tap();
       await composer.getByRole("textbox").fill("keep this draft while the keyboard moves");
-      await page.evaluate("window.setPhoneViewport(390, 61)");
+      await page.evaluate("window.setVisualViewport(390, 61)");
       await expectPage(app).toHaveCSS("top", "61px");
       await expectPage(app).toHaveCSS("height", "390px");
       await expectPage
@@ -1483,7 +1487,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
           element.scrollTop = position;
           element.dispatchEvent(new Event("scroll"));
         }, scrollTop);
-        await page.evaluate(`window.setPhoneViewport(${height}, ${top})`);
+        await page.evaluate(`window.setVisualViewport(${height}, ${top})`);
         await expectPage(app).toHaveCSS("height", `${height}px`);
         await expectPage(app).toHaveCSS("top", `${top}px`);
         expectPage(await scroller.evaluate((element) => element.scrollTop)).toBe(scrollTop);
@@ -1505,24 +1509,64 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         expectPage(await page.evaluate("window.scrollY")).toBe(0);
       }
       // Native pinch zoom pans the existing layout instead of shrinking it again.
-      await page.evaluate("window.setPhoneViewport(260, 20, 2)");
+      await page.evaluate("window.setVisualViewport(260, 20, 2)");
       await expectPage(app).toHaveCSS("height", "520px");
       await composer.getByRole("button", { name: "Fold editor" }).tap();
-      await page.evaluate("window.setPhoneViewport(844, 0)");
+      await page.evaluate("window.setVisualViewport(844, 0)");
       await expectPage(app).toHaveCSS("height", "844px");
       await composer.getByRole("button", { name: "Write message" }).tap();
       await expectPage(composer.getByRole("textbox")).toHaveValue(
         "keep this draft while the keyboard moves",
       );
       await page.setViewportSize({ width: 1280, height: 900 });
-      await expectPage(app).toHaveCSS("position", "static");
+      await page.evaluate("window.setVisualViewport(900, 0)");
+      await expectPage(page.locator(".orb-index")).toBeVisible();
       await expectPage(scroller).toHaveCSS("display", "block");
-      // React removes the override in an effect cleanup, after the media query already applied.
-      await expectPage
-        .poll(() =>
-          app.evaluate((element) => element.style.getPropertyValue("--phone-viewport-height")),
-        )
-        .toBe("");
+      await expectPage(app).toHaveCSS("top", "0px");
+      await expectPage(app).toHaveCSS("height", "900px");
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("keeps the iPad desktop layout inside a shrunken, panned visual viewport", async () => {
+    const page = await browser.newPage({
+      viewport: { width: 1180, height: 820 },
+      isMobile: true,
+      hasTouch: true,
+    });
+    // iPadOS's floating input-assistant bar shrinks the visual viewport and pans it down.
+    await fakeVisualViewport(page, 1180, 820);
+    try {
+      const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
+      await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb", composer);
+      const app = page.locator(".app");
+      await composer.focus();
+      for (const [height, top] of [
+        [504, 316],
+        [640, 120],
+        [820, 0],
+      ] as const) {
+        await page.evaluate(`window.setVisualViewport(${height}, ${top})`);
+        await expectPage(app).toHaveCSS("top", `${top}px`);
+        await expectPage(app).toHaveCSS("height", `${height}px`);
+        const bounds = await page.locator(".app").evaluate((element) => {
+          const rect = (selector: string) => {
+            const { top, bottom } = element.querySelector(selector).getBoundingClientRect();
+            return { top, bottom };
+          };
+          return {
+            header: rect(".orb-header"),
+            composer: rect(".composer"),
+            index: rect(".orb-index"),
+          };
+        });
+        expectPage(bounds.header.top).toBe(top);
+        expectPage(bounds.composer.bottom).toBe(height + top);
+        expectPage(bounds.index).toEqual({ top, bottom: height + top });
+        expectPage(await page.evaluate("window.scrollY")).toBe(0);
+        await expectPage(composer).toBeFocused();
+      }
     } finally {
       await page.close();
     }

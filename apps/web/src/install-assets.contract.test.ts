@@ -29,6 +29,33 @@ describe("home-screen install assets", () => {
     );
   });
 
+  it("gives WebKit an invisible, click-through white status-bar band from the first frame", () => {
+    const html = readFileSync(join(webRoot, "index.html"), "utf8");
+    // Before the React root, so it exists before any script runs.
+    expect(html).toMatch(
+      /<body>\s*<div class="status-bar-band" aria-hidden="true"><\/div>\s*<div id="root"><\/div>/,
+    );
+    const rule = html.match(/\.status-bar-band\s*\{([^}]*)\}/)?.[1] ?? "";
+    const declarations = Object.fromEntries(
+      rule
+        .split(";")
+        .map((declaration) => declaration.split(":").map((part) => part.trim()))
+        .filter(([property]) => property),
+    );
+    // WebKit fixedContainerEdges: fixed, ≥90% wide, >10px tall, within ~4px of the top.
+    expect(declarations).toEqual({
+      position: "fixed",
+      "z-index": "2147483647",
+      top: "0",
+      left: "0",
+      width: "100%",
+      height: "12px",
+      "background-color": "#ffffff",
+      "background-clip": "text",
+      "pointer-events": "none",
+    });
+  });
+
   it("launches the dashboard under a stable app identity", () => {
     const manifest = JSON.parse(readFileSync(join(webRoot, "public/manifest.webmanifest"), "utf8"));
     expect(manifest).toEqual({

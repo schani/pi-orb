@@ -1574,9 +1574,18 @@ body:has(.orb-page) {
   overflow: hidden;
 }
 
+#root:has(.orb-page) {
+  min-height: 0;
+}
+
+/* The orb page owns one box at the visual viewport (useVisualViewport), so iOS
+   keyboards and the iPad input-assistant bar cannot pan its top out of view. */
 .app:has(.orb-page) {
-  flex: none;
-  height: 100dvh;
+  position: fixed;
+  top: var(--visual-viewport-top, 0px);
+  left: 0;
+  width: 100%;
+  height: var(--visual-viewport-height, 100dvh);
   min-height: 0;
   overflow: hidden;
 }
@@ -1591,11 +1600,10 @@ body:has(.orb-page) {
 
 .orb-index {
   position: fixed;
-  top: 0;
+  top: var(--visual-viewport-top, 0px);
   left: 0;
   width: 236px;
-  height: 100dvh;
-  max-height: 100dvh;
+  height: var(--visual-viewport-height, 100dvh);
   overflow-y: auto;
   border-right: 1px solid var(--k);
 }
@@ -1719,9 +1727,8 @@ body:has(.orb-page) {
 }
 
 .app:has(> .session-ribbon) .orb-index {
-  top: var(--ribbon);
-  height: calc(100dvh - var(--ribbon));
-  max-height: calc(100dvh - var(--ribbon));
+  top: calc(var(--visual-viewport-top, 0px) + var(--ribbon));
+  height: calc(var(--visual-viewport-height, 100dvh) - var(--ribbon));
 }
 
 .orb-name {
@@ -3055,22 +3062,7 @@ button.orb-phone-menu {
 @media (max-width: 600px) {
   html:has(.orb-page),
   body:has(.orb-page) {
-    overflow: hidden;
     overscroll-behavior: none;
-  }
-
-  #root:has(.orb-page) {
-    min-height: 0;
-  }
-
-  .app:has(.orb-page) {
-    position: fixed;
-    top: var(--phone-viewport-top, 0px);
-    left: 0;
-    width: 100%;
-    height: var(--phone-viewport-height, 100dvh);
-    min-height: 0;
-    overflow: hidden;
   }
 
   .orb-page {

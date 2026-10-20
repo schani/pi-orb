@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type OrbView, OrbViewSchema, type ProjectView, type SessionProbe } from "@pi-orb/protocol";
-import { chromium, expect as expectPage } from "@playwright/test";
+import { chromium, expect as expectPage, webkit } from "@playwright/test";
 import Fastify from "fastify";
 import { Errors } from "typebox/value";
 import { build } from "vite";
@@ -342,3 +342,61 @@ it("boots the production shell and loads built assets and install metadata on di
     await page.close();
   }
 });
+
+it.each(["chromium", "webkit"] as const)(
+  "%s: the status-bar band qualifies for WebKit's solid status bar without painting or hit testing",
+  async (engine) => {
+    const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
+    const engineBrowser = engine === "webkit" ? await webkit.launch() : browser;
+    const page = await engineBrowser.newPage({ viewport: { width: 1180, height: 820 } });
+    try {
+      await page.goto(`${origin}/unrecognized`);
+      await expectPage(page.getByText("Page doesn't exist")).toBeVisible();
+      const band = page.locator(".status-bar-band");
+      const geometry = await band.evaluate((element) => {
+        const view = element.ownerDocument.defaultView;
+        const style = view.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return {
+          position: style.position,
+          zIndex: style.zIndex,
+          backgroundColor: style.backgroundColor,
+          pointerEvents: style.pointerEvents,
+          top: rect.top,
+          widthShare: rect.width / view.innerWidth,
+          height: rect.height,
+          hit: element.ownerDocument.elementFromPoint(view.innerWidth / 2, 4) === element,
+        };
+      });
+      expect(geometry).toEqual({
+        position: "fixed",
+        zIndex: "2147483647",
+        backgroundColor: "rgb(255, 255, 255)",
+        pointerEvents: "none",
+        top: 0,
+        widthShare: 1,
+        height: 12,
+        hit: false,
+      });
+      const withBand = await page.screenshot({ animations: "disabled" });
+      // A black backdrop makes any band paint visible.
+      const backdrop = await page.evaluateHandle(() => {
+        const document = Reflect.get(globalThis, "document");
+        const element = document.createElement("div");
+        element.style.cssText = "position:fixed;top:0;left:0;right:0;height:24px;background:#000";
+        return document.body.appendChild(element);
+      });
+      const clip = { x: 0, y: 0, width: 1180, height: 24 };
+      const backdropWithBand = await page.screenshot({ clip, animations: "disabled" });
+      await band.evaluate((element) => {
+        element.style.display = "none";
+      });
+      expect(await page.screenshot({ clip, animations: "disabled" })).toEqual(backdropWithBand);
+      await backdrop.evaluate((element) => element.remove());
+      expect(await page.screenshot({ animations: "disabled" })).toEqual(withBand);
+    } finally {
+      await page.close();
+      if (engineBrowser !== browser) await engineBrowser.close();
+    }
+  },
+);

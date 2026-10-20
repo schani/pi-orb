@@ -133,6 +133,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Follow-ups
 
+- **Verify the iPad status-bar band and input-bar viewport on the installed app** (2026-10-20; `docs/web-ui.md`). Browser checks prove the band is invisible, click-through and qualifies geometrically, and that the orb page follows a simulated shrunken/panned visual viewport at iPad width. Confirm on the user's iPadOS 26 home-screen install that the status-bar blur is gone (including with menus/dialogs open) and that focusing the composer with a hardware keyboard keeps the header in view.
+
 - **Complete orb-messaging qualification** (local 2026-10-14; `docs/orb-messaging.md`, `docs/testing.md`; PR https://github.com/schani/pi-orb/pull/112). Complete new-head full unit/infra, Python/native-VM, whole E2E and exact-head CI gates. Resolve historical PGlite attribution and infrastructure fixture failures; neither is cleared. Preserve first evidence under `.context/cross-orb/`. Scoped/composed receipts grant no merge or deployment clearance.
 
 - **Complete Claude steering release qualification** (2026-10-12; `docs/testing.md`). Immediate input is implemented locally; native/HTTP/DST checks pass. Complete the final full unit run, full process/Docker E2E and PostgreSQL gates before release. No deployment.
