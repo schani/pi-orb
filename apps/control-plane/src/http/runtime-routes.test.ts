@@ -312,10 +312,12 @@ describe("runtime broker routes", () => {
     expect((await post()).statusCode).toBe(401);
   });
 
-  it("queues authenticated peer sends with trusted provenance and stable retries", async () => {
+  it("queues authenticated cross-project peer sends with trusted provenance and stable retries", async () => {
     store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
     const target = "00000000-0000-4000-8000-000000000088";
-    store.seedOrb(makeOrbRow(target, PROJECT, "stopped", { stopReason: "manual" }));
+    const targetProject = "target-project";
+    store.seedProject(makeProjectRow(targetProject));
+    store.seedOrb(makeOrbRow(target, targetProject, "stopped", { stopReason: "manual" }));
     const payload = { v: 1, orbId: target, message: "literal peer text", requestId: "fixed" };
     const send = (body: unknown = payload) =>
       app.inject({
@@ -326,6 +328,16 @@ describe("runtime broker routes", () => {
       });
     const accepted = await send();
     expect(accepted.statusCode).toBe(202);
+    expect(accepted.headers["cache-control"]).toBe("no-store");
+    expect((await send()).json()).toEqual(accepted.json());
+    expect(store.messageSnapshots(target)).toMatchObject([
+      { autoStart: true, system: { kind: "orb_message", senderOrbId: ORB } },
+    ]);
+    store.seedProject({ ...makeProjectRow(targetProject), ownerUserId: "other-owner" });
+    expect((await send()).statusCode).toBe(409);
+    store.seedProject({ ...makeProjectRow(targetProject), state: "deleting" });
+    expect((await send()).statusCode).toBe(409);
+    expect(store.messageSnapshots(target)).toHaveLength(1);
     for (const invalid of [
       { ...payload, senderOrbId: target },
       { ...payload, system: { kind: "orb_message" } },

@@ -70,7 +70,7 @@ it("emits one content-free acceptance edge across lost acknowledgements and retr
   });
 });
 
-it("maps unavailable and cross-project targets to domain errors", async () => {
+it("accepts same-owner cross-project targets and rejects missing or foreign-owner targets", async () => {
   const h = seed();
   const task = new NoSimulationTask("peer scopes", false);
   h.store.seedProject({
@@ -97,8 +97,87 @@ it("maps unavailable and cross-project targets to domain errors", async () => {
     (await sendOrbMessage(task, h.deps, sender, { ...request, orbId: "bad" }))._unsafeUnwrapErr()
       .code,
   ).toBe("invalid_request");
-  for (const id of ["00000000-0000-4000-8000-000000000004", "00000000-0000-4000-8000-000000000003"])
-    expect((await sendOrbMessage(task, h.deps, sender, { ...request, orbId: id })).isErr()).toBe(
-      true,
-    );
+  const crossProject = { ...request, orbId: "00000000-0000-4000-8000-000000000003" };
+  expect((await sendOrbMessage(task, h.deps, sender, crossProject)).isOk()).toBe(true);
+  expect((await sendOrbMessage(task, h.deps, sender, crossProject)).isOk()).toBe(true);
+  expect(h.store.messageSnapshots(crossProject.orbId)).toMatchObject([
+    { system: { kind: "orb_message", senderOrbId: sender.orbId } },
+  ]);
+  h.store.seedProject({
+    ...makeProjectRow("00000000-0000-4000-8000-000000000012"),
+    ownerUserId: "00000000-0000-4000-8000-000000000099",
+  });
+  expect((await sendOrbMessage(task, h.deps, sender, crossProject))._unsafeUnwrapErr().code).toBe(
+    "conflict",
+  );
+  expect(h.store.messageSnapshots(crossProject.orbId)).toHaveLength(1);
 });
+
+it.each(["sender", "target"] as const)(
+  "orders reciprocal cross-project sends against %s project deletion",
+  async (side) => {
+    await runDst(
+      { name: `cross-project-peer-delete-${side}`, iterations: 60, seed: 71 },
+      async (sim) => {
+        const h = seed();
+        const targetProject = "00000000-0000-4000-8000-000000000012";
+        h.store.seedProject({ ...makeProjectRow(targetProject), ownerUserId: sender.ownerUserId });
+        h.store.seedOrb(peerOrb(request.orbId, "running", { ...sender.caller }, targetProject));
+        const reverseSender = { ...sender, orbId: request.orbId, projectId: targetProject };
+        const reverse = { ...request, orbId: sender.orbId };
+        const reciprocal = await sim.runTasks([
+          {
+            name: "forward",
+            f: async (task) =>
+              expect((await sendOrbMessage(task, h.deps, sender, request)).isOk()).toBe(true),
+          },
+          {
+            name: "reverse",
+            f: async (task) =>
+              expect((await sendOrbMessage(task, h.deps, reverseSender, reverse)).isOk()).toBe(
+                true,
+              ),
+          },
+        ]);
+        expect(reciprocal.isOk()).toBe(true);
+        const freshId = "00000000-0000-4000-8000-000000000014";
+        const race = await sim.runTasks([
+          {
+            name: "admit",
+            f: async (task) => {
+              const result = await sendOrbMessage(task, h.deps, sender, {
+                ...request,
+                messageId: freshId,
+              });
+              expect(
+                h.store.messageSnapshots(request.orbId).some((m) => m.messageId === freshId),
+              ).toBe(result.isOk());
+            },
+          },
+          {
+            name: "delete",
+            f: async (task) => {
+              expect(
+                (
+                  await h.store.requestProjectDeletion(task, {
+                    projectId: side === "sender" ? sender.projectId : targetProject,
+                    now: task.wallNow(),
+                    cleanupAfter: task.wallNow(),
+                  })
+                ).isOk(),
+              ).toBe(true);
+              for (const [source, message] of [
+                [sender, request],
+                [reverseSender, reverse],
+              ] as const)
+                expect(
+                  (await sendOrbMessage(task, h.deps, source, message))._unsafeUnwrapErr().code,
+                ).toBe("conflict");
+            },
+          },
+        ]);
+        expect(race.isOk()).toBe(true);
+      },
+    );
+  },
+);

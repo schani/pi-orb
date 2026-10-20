@@ -935,8 +935,11 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       }
       const orb = this.orbs.get(targetId);
       if (orb === undefined) return { conflict: true as const, missing: true as const };
-      if (sender !== undefined && orb.projectId !== sender.projectId)
-        return { conflict: true as const };
+      if (sender !== undefined) {
+        const targetProject = this.projects.get(orb.projectId);
+        if (targetProject?.state !== "active" || targetProject.ownerUserId !== sender.ownerUserId)
+          return { conflict: true as const };
+      }
       if (["deleting", "archiving", "archived"].includes(orb.state)) {
         return { conflict: true as const };
       }
