@@ -72,12 +72,16 @@ it.each(["chromium", "webkit"] as const)(
       if (!address || typeof address === "string") return;
       const origin = `http://127.0.0.1:${address.port}`;
       const page = await context.newPage();
-      await page.route("**/api/v1/projects", async (route) => {
-        const response = await route.fetch();
-        const body = await response.json();
-        body.items[0].name = "Signal and Boards with a project name long enough to truncate";
-        await route.fulfill({ response, json: body });
-      });
+      const projectsResponse = await page.request.get(`${origin}/api/v1/projects`);
+      check(projectsResponse.status()).toBe(200);
+      const projects = structuredClone(await projectsResponse.json());
+      projects.items[0].name = "Signal and Boards with a project name long enough to truncate";
+      const scratchpad = projects.items.find(
+        (project: { id: string }) => project.id === "frontend-scratchpad-project",
+      );
+      await page.route("**/api/v1/projects", (route) =>
+        route.fulfill({ json: structuredClone(projects) }),
+      );
       const scopedPosts: { path: string; body: Record<string, unknown> }[] = [];
       const projectEndpoint = "**/api/v1/projects/*/orbs";
       await page.route(projectEndpoint, async (route) => {
@@ -324,14 +328,7 @@ it.each(["chromium", "webkit"] as const)(
           await page.locator(".ix-brand").click();
           await check(page.locator(".dashboard")).toBeVisible();
         } else {
-          await page.route("**/api/v1/projects", async (route) => {
-            const response = await route.fetch();
-            const body = await response.json();
-            body.items.find(
-              (project: { id: string }) => project.id === "frontend-scratchpad-project",
-            ).state = "deleting";
-            await route.fulfill({ response, json: body });
-          });
+          scratchpad.state = "deleting";
           await check(page.getByRole("region", { name: "scratchpad", exact: true })).toContainText(
             "deleting project…",
           );
@@ -346,7 +343,7 @@ it.each(["chromium", "webkit"] as const)(
           `${origin}${fence === "unmount" ? "/" : "/orbs/frontend-fixture-orb"}`,
         );
         await page.unroute(projectEndpoint);
-        if (fence === "deletion") await page.unroute("**/api/v1/projects");
+        if (fence === "deletion") scratchpad.state = "active";
       }
       await page.setViewportSize({ width: 390, height: 844 });
       await gotoFrontendFixture(page, origin, page.locator(".dashboard .project-head").first());

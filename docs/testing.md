@@ -1,5 +1,11 @@
 # Testing
 
+## Harness-icon catalog ownership (2026-10-20; PR 151)
+
+[First CI failure](https://github.com/schani/pi-orb/actions/runs/39452155383/job/118729501183), source `2e5d24f8`: Chromium's index readiness timed out with the second StrictMode projects GET pending inside the test's decoration proxy. No crash or new DST failure; uploaded traces match historical fixtures. Logs, artifacts and controlled experiments remain in `.context/pr151-ci/`.
+
+The test now reads the catalog once and fulfills cloned JSON, owning name/deletion overlays while leaving dynamic orb requests unchanged; deletion resets active before mobile checks. A controlled second-upstream hold reproduces the old proxy's missing headers; releasing it restores them. The snapshot renders with that gate armed in three deterministic runs. This models the observed pending request, not its socket-level cause. Both original Chromium/WebKit cases, E2E types and scoped lint pass with unchanged assertions/deadlines. New-head CI qualification remains required.
+
 ## Smoke runner qualification and validation-only recovery (2026-10-19, PDT)
 
 Runner source `27bad6ec2282e56198be6a356220677da07cf6dc` passed [CI 39283295725](https://github.com/schani/pi-orb/actions/runs/39283295725), [E2E 39283295721](https://github.com/schani/pi-orb/actions/runs/39283295721) and [Durable 39283295730](https://github.com/schani/pi-orb/actions/runs/39283295730), all on attempt 1. These hosted receipts qualify the smoke telemetry/classified retry correction beyond its retained local tests.
