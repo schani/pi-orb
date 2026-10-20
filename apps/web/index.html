@@ -11,8 +11,25 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/favicons/apple-touch-icon.png" />
     <link id="pi-orb-favicon" rel="icon" type="image/svg+xml" href="/favicons/neutral.svg" />
     <title>pi-orb</title>
+    <style>
+      /* WebKit (iOS 26+) colors the status bar from a fixed box sampled 4px below the top
+         edge's midpoint when it spans >=90% of the viewport and is over 10px tall; without
+         one, iPadOS blurs the page under it. The clip paints nothing; the color still counts. */
+      .status-bar-band {
+        position: fixed;
+        z-index: 2147483647;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 12px;
+        background-color: #ffffff;
+        background-clip: text;
+        pointer-events: none;
+      }
+    </style>
   </head>
   <body>
+    <div class="status-bar-band" aria-hidden="true"></div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

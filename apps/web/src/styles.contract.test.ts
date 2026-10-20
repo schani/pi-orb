@@ -280,7 +280,9 @@ describe("orb workspace layout contract", () => {
     expect(rule(".app")).toContain("display: flex");
     expect(rule(".app")).toContain("min-height: 100dvh");
     expect(rule(".app")).toContain("flex-direction: column");
-    expect(rule(".app:has(.orb-page)")).toContain("height: 100dvh");
+    expect(rule(".app:has(.orb-page)")).toContain("position: fixed");
+    expect(rule(".app:has(.orb-page)")).toContain("top: var(--visual-viewport-top, 0px)");
+    expect(rule(".app:has(.orb-page)")).toContain("height: var(--visual-viewport-height, 100dvh)");
     expect(rule(".orb-page")).toContain("flex: 1");
     expect(rule(".orb-page")).toContain("min-height: 0");
     expect(rule(".orb-main")).toContain("overflow: hidden");
@@ -297,12 +299,16 @@ describe("orb workspace layout contract", () => {
 
   it("keeps the project index beside the transcript with plain hover rows", () => {
     expect(rule(".orb-index")).toContain("position: fixed");
+    expect(rule(".orb-index")).toContain("top: var(--visual-viewport-top, 0px)");
+    expect(rule(".orb-index")).toContain("height: var(--visual-viewport-height, 100dvh)");
     expect(rule(".orb-index")).toContain("width: 236px");
     expect(rule(".orb-index")).toContain("overflow-y: auto");
     expect(rule(".orb-main")).toContain("grid-column: 2");
-    expect(rule(".app:has(> .session-ribbon) .orb-index")).toContain("top: var(--ribbon)");
     expect(rule(".app:has(> .session-ribbon) .orb-index")).toContain(
-      "height: calc(100dvh - var(--ribbon))",
+      "top: calc(var(--visual-viewport-top, 0px) + var(--ribbon))",
+    );
+    expect(rule(".app:has(> .session-ribbon) .orb-index")).toContain(
+      "height: calc(var(--visual-viewport-height, 100dvh) - var(--ribbon))",
     );
     const phone = css.slice(css.indexOf("@media (max-width: 600px)"));
     expect(phone).toMatch(/\.orb-main \{\s*grid-column: 1;/);

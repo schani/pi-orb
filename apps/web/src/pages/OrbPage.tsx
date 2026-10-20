@@ -106,7 +106,7 @@ import {
 } from "../lib/turn-notifications.ts";
 import { HeadlineSlots } from "../lib/use-activity-headline.tsx";
 import { usePhoneLayout } from "../lib/use-phone-layout.ts";
-import { usePhoneViewport } from "../lib/use-phone-viewport.ts";
+import { useVisualViewport } from "../lib/use-visual-viewport.ts";
 import { generateUuid } from "../lib/uuid.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
@@ -882,7 +882,7 @@ export function OrbHeaderSettings({
 export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCache }) {
   const pageRef = useRef<HTMLDivElement>(null);
   const selectCurrentOrb = useRef<() => void>(() => {});
-  usePhoneViewport(pageRef);
+  useVisualViewport(pageRef);
   const [project, setProject] = useState<{ id: string; name: string } | null>(null);
   const [senderNames, setSenderNames] = useState<ReadonlyMap<string, string | null>>(
     () => new Map(),
