@@ -70,7 +70,7 @@ Central private agent state and separate public history commit causally in Postg
 
 An orb can launch another orb with a prompt through `pi-orb spawn` and receive its browser URL (implemented 2026-09-08). This creates independent same-project work with atomic durable prompt acceptance; see `docs/orb-spawning.md`.
 
-Orb-to-orb messaging is approved (2026-10-14, America/Los_Angeles), independent of ancestry: same-owner/same-project trusted non-human input through the existing inbox, shown in a Correspondence band, waking stopped/sleeping targets. The approved minimal contract is implemented locally; scoped actual-process checks pass, full qualification remains pending. A PR and a process-host preview are authorized, not production deployment (`docs/orb-messaging.md`, `TODO.md`).
+Orb-to-orb messaging is approved (2026-10-14, America/Los_Angeles), independent of ancestry: same-owner trusted non-human input across projects (expanded 2026-10-20) through the existing inbox, shown in a Correspondence band, waking stopped/sleeping targets. The approved minimal contract is implemented locally; scoped actual-process checks pass, full qualification remains pending. A PR and a process-host preview are authorized, not production deployment (`docs/orb-messaging.md`, `TODO.md`).
 
 Local Pi children use native Durable task ownership and inherited authorized tools, with named model selection and no profiles or nested delegation. Root receipts and activity are public; private child transcripts are not (`docs/subagents.md`). Independent spawned orbs have separate lifetime and fresh checkout (`docs/orb-spawning.md`).
 
@@ -88,7 +88,7 @@ Subsystem designs:
 - [docs/project-deletion.md](docs/project-deletion.md) — permanent project deletion by atomic fan-out through deletion-grade cleanup for every child orb
 - [docs/orb-archival.md](docs/orb-archival.md) — read-only transcript retention after shared deletion-grade resource cleanup
 - [docs/orb-spawning.md](docs/orb-spawning.md) — in-orb CLI creation with an atomically queued prompt and browser URL
-- [docs/orb-messaging.md](docs/orb-messaging.md) — locally implemented same-owner/same-project peer input, Correspondence band, wake policy and minimal persistence; qualification pending
+- [docs/orb-messaging.md](docs/orb-messaging.md) — locally implemented same-owner cross-project peer input, Correspondence band, wake policy and minimal persistence; qualification pending
 - [docs/runtime-protocol.md](docs/runtime-protocol.md) — the browser↔runtime wire protocol: handshake, display frames, detail HTTP, ordering, backpressure
 - [docs/history-replication.md](docs/history-replication.md) — the harness-agnostic history model, pull-only replication, PostgreSQL schema, and implemented explicit offline recovery (2026-10-05, America/Cancun)
 - [docs/pi-adapter.md](docs/pi-adapter.md) — central Pi execution, admission, resource policy and product history

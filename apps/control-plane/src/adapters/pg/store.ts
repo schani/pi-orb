@@ -1084,8 +1084,18 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       }
       let orbRow = locked.value.rows.find((row) => row["id"] === targetId);
       if (orbRow === undefined) return err({ type: "orb_message_target_not_found" });
-      if (sender !== undefined && orbRow["project_id"] !== sender.projectId)
-        return err(stateConflict());
+      if (sender !== undefined) {
+        const targetProject = await query(
+          "SELECT owner_user_id, state FROM projects WHERE id = $1",
+          [orbRow["project_id"]],
+        );
+        if (targetProject.isErr()) return err(targetProject.error);
+        if (
+          targetProject.value.rows[0]?.["owner_user_id"] !== sender.ownerUserId ||
+          targetProject.value.rows[0]?.["state"] !== "active"
+        )
+          return err(stateConflict());
+      }
       const state = String(orbRow["state"]) as OrbState;
       if (state === "deleting" || state === "archiving" || state === "archived") {
         return err(stateConflict(state));

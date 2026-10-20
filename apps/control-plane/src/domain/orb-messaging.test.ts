@@ -18,7 +18,9 @@ function seed() {
   const h = makeHarness();
   h.store.seedProject({ ...makeProjectRow(sender.projectId), ownerUserId: sender.ownerUserId });
   h.store.seedOrb(peerOrb(sender.orbId, "running", { ...sender.caller, hostRef: "host" }));
-  h.store.seedOrb(peerOrb(request.orbId, "stopped", { stopReason: "manual" }));
+  const targetProject = "00000000-0000-4000-8000-000000000012";
+  h.store.seedProject({ ...makeProjectRow(targetProject), ownerUserId: sender.ownerUserId });
+  h.store.seedOrb(peerOrb(request.orbId, "stopped", { stopReason: "manual" }, targetProject));
   return h;
 }
 const sender = {
@@ -70,19 +72,19 @@ it("emits one content-free acceptance edge across lost acknowledgements and retr
   });
 });
 
-it("maps unavailable and cross-project targets to domain errors", async () => {
+it("accepts same-owner cross-project targets and rejects missing or foreign-owner targets", async () => {
   const h = seed();
   const task = new NoSimulationTask("peer scopes", false);
   h.store.seedProject({
-    ...makeProjectRow("00000000-0000-4000-8000-000000000012"),
-    ownerUserId: sender.ownerUserId,
+    ...makeProjectRow("00000000-0000-4000-8000-000000000014"),
+    ownerUserId: "00000000-0000-4000-8000-000000000099",
   });
   h.store.seedOrb(
     peerOrb(
       "00000000-0000-4000-8000-000000000003",
       "running",
       {},
-      "00000000-0000-4000-8000-000000000012",
+      "00000000-0000-4000-8000-000000000014",
     ),
   );
   expect(
@@ -97,6 +99,7 @@ it("maps unavailable and cross-project targets to domain errors", async () => {
     (await sendOrbMessage(task, h.deps, sender, { ...request, orbId: "bad" }))._unsafeUnwrapErr()
       .code,
   ).toBe("invalid_request");
+  expect((await sendOrbMessage(task, h.deps, sender, request)).isOk()).toBe(true);
   for (const id of ["00000000-0000-4000-8000-000000000004", "00000000-0000-4000-8000-000000000003"])
     expect((await sendOrbMessage(task, h.deps, sender, { ...request, orbId: id })).isErr()).toBe(
       true,

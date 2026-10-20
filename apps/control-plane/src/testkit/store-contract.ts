@@ -584,26 +584,32 @@ export function storeSemanticsContractTests(
       expect((await store.listOrbMessages(task, human.id))._unsafeUnwrap()).toHaveLength(1);
     });
 
-    it("serializes reciprocal peer sends and deletion without duplicate receipts", async () => {
+    it.each(["sender", "target"])("serializes reciprocal sends vs %s deletion", async (side) => {
       await seed();
-      const peer = { ...orb, id: "00000000-0000-4000-8000-000000000003" };
+      const peerProject = { ...project, id: "00000000-0000-4000-8000-000000000010", name: "peer" };
+      (await store.insertProject(task, peerProject))._unsafeUnwrap();
+      const peer = {
+        ...orb,
+        id: "00000000-0000-4000-8000-000000000003",
+        projectId: peerProject.id,
+      };
       (await store.insertOrb(task, peer))._unsafeUnwrap();
-      const sender = (id: string) => ({
-        orbId: id,
-        projectId: project.id,
+      const sender = (source: OrbRow) => ({
+        orbId: source.id,
+        projectId: source.projectId,
         ownerUserId: OWNER,
-        caller: peerCentralCaller(id),
+        caller: { ...peerCentralCaller(source.id), projectId: source.projectId },
       });
       const params = {
         orbId: orb.id,
         messageId: "00000000-0000-4000-8000-000000000004",
         content: [{ type: "text" as const, text: "peer" }],
         now: 2000,
-        sender: sender(peer.id),
+        sender: sender(peer),
       };
       const results = await Promise.all([
         store.enqueueOrbMessage(task, params),
-        store.enqueueOrbMessage(task, { ...params, orbId: peer.id, sender: sender(orb.id) }),
+        store.enqueueOrbMessage(task, { ...params, orbId: peer.id, sender: sender(orb) }),
       ]);
       expect(results.every((result) => result.isOk())).toBe(true);
       const race = await Promise.all([
@@ -612,7 +618,7 @@ export function storeSemanticsContractTests(
           messageId: "00000000-0000-4000-8000-000000000005",
         }),
         store.requestProjectDeletion(task, {
-          projectId: project.id,
+          projectId: side === "sender" ? peerProject.id : project.id,
           now: 3000,
           cleanupAfter: 3000,
         }),
@@ -636,8 +642,15 @@ export function storeSemanticsContractTests(
           now: 1500,
         })
       )._unsafeUnwrap();
+      const sourceProject = {
+        ...project,
+        id: "00000000-0000-4000-8000-000000000010",
+        name: "peer",
+      };
+      (await store.insertProject(task, sourceProject))._unsafeUnwrap();
       const source = {
         ...orb,
+        projectId: sourceProject.id,
         id: "00000000-0000-4000-8000-000000000003",
         state: "running" as const,
         runtimeTokenHash: "peer-token",
@@ -651,7 +664,7 @@ export function storeSemanticsContractTests(
         now: 2000,
         sender: {
           orbId: source.id,
-          projectId: project.id,
+          projectId: source.projectId,
           ownerUserId: OWNER,
           caller: { runtimeTokenHash: "peer-token", hostIncarnation: 1 },
         },
@@ -686,7 +699,11 @@ export function storeSemanticsContractTests(
         { ...params.sender, caller: { runtimeTokenHash: "peer-token", hostIncarnation: 2 } },
         {
           ...params.sender,
-          caller: { ...peerCentralCaller(source.id), agentAdmissionVersion: 9 },
+          caller: {
+            ...peerCentralCaller(source.id),
+            projectId: source.projectId,
+            agentAdmissionVersion: 9,
+          },
         },
       ])
         expect((await store.enqueueOrbMessage(task, { ...params, sender })).isErr()).toBe(true);
@@ -3452,6 +3469,47 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
       expect((await store.insertProject(task, project)).isOk()).toBe(true);
       expect((await store.insertOrb(task, orb)).isOk()).toBe(true);
     }
+
+    it("rejects foreign-owner cross-project sends and retries", async () => {
+      await seed();
+      const ownerUserId = "00000000-0000-4000-8000-000000000098";
+      (
+        await database.users.resolveUser(
+          task,
+          { issuer: "driver-contract", subject: `${name}-peer-owner`, email: null },
+          { id: ownerUserId, now: 0 },
+        )
+      )._unsafeUnwrap();
+      const targetProject = { ...project, id: "00000000-0000-4000-8000-000000000010", ownerUserId };
+      (await store.insertProject(task, targetProject))._unsafeUnwrap();
+      const target = {
+        ...orb,
+        id: "00000000-0000-4000-8000-000000000003",
+        projectId: targetProject.id,
+      };
+      (await store.insertOrb(task, target))._unsafeUnwrap();
+      const params = {
+        orbId: target.id,
+        messageId: "00000000-0000-4000-8000-000000000004",
+        content: [{ type: "text" as const, text: "peer" }],
+        now: 2000,
+        sender: {
+          orbId: orb.id,
+          projectId: project.id,
+          ownerUserId: OWNER,
+          caller: {
+            kind: "central" as const,
+            ownerUserId: OWNER,
+            projectId: project.id,
+            orbId: orb.id,
+            agentAdmissionVersion: 0,
+          },
+        },
+      };
+      expect((await store.enqueueOrbMessage(task, params)).isErr()).toBe(true);
+      expect((await store.enqueueOrbMessage(task, params)).isErr()).toBe(true);
+      expect((await store.listOrbMessages(task, target.id))._unsafeUnwrap()).toHaveLength(0);
+    });
 
     it("enforces exact sleep/peer metadata shapes including SQL NULL fields", async () => {
       await seed();
