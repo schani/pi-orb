@@ -1678,6 +1678,60 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     },
   );
 
+  it.each([true, false])(
+    "opens external transcript links in Safari only from an iOS home-screen app (standalone %s)",
+    async (standalone) => {
+      const page = await browser.newPage({
+        viewport: { width: 1180, height: 820 },
+        isMobile: true,
+        hasTouch: true,
+      });
+      await page
+        .context()
+        .route("https://example.com/**", (route) =>
+          route.fulfill({ contentType: "text/html", body: "<title>external</title>" }),
+        );
+      // Playwright's WebKit reruns init scripts in the same document after the
+      // unhandled-scheme navigation, so the script must be idempotent.
+      await page.addInitScript(`
+        if (window.linkClicks === undefined) {
+          window.linkClicks = [];
+          window.addEventListener("click", (event) => window.linkClicks.push(event.defaultPrevented));
+          if (${standalone}) {
+            Object.defineProperty(navigator, "standalone", { value: true });
+            Object.defineProperty(navigator, "maxTouchPoints", { value: 5 });
+          }
+        }
+      `);
+      try {
+        await gotoFrontendHistory(
+          page,
+          `${origin}${ORB_PATH}`,
+          "frontend-fixture-orb",
+          page.locator(".history"),
+        );
+        const link = page.locator('.history a[href="https://example.com/history"]');
+        await expectPage(link).toHaveAttribute("target", "_blank");
+        if (standalone) {
+          // Navigation to the unhandled scheme surfaces as a request in both engines.
+          const safari = page.waitForRequest((request) => request.url().startsWith("x-safari-"));
+          await link.click();
+          expectPage((await safari).url()).toBe("x-safari-https://example.com/history");
+        } else {
+          const popup = page.waitForEvent("popup");
+          await link.click();
+          const opened = await popup;
+          await opened.waitForLoadState();
+          expectPage(opened.url()).toBe("https://example.com/history");
+        }
+        await expectPage.poll(() => page.evaluate("window.linkClicks")).toEqual([standalone]);
+        expectPage(page.url()).toBe(`${origin}${ORB_PATH}`);
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
   it("aborts only from the collapsed phone pad and retains the draft", async () => {
     const page = await browser.newPage({
       viewport: { width: 390, height: 844 },
