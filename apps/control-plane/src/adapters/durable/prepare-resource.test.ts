@@ -13,6 +13,7 @@ it("cancels pending resource preparation promptly on Stop, without acquiring a l
   const plane = (
     await DurableAgentPlane.create({
       persistence: {
+        recoveryDemand: () => okAsync(false),
         open: () => {
           leased = true;
           return errAsync(durableError("unexpected"));
@@ -52,6 +53,7 @@ it("does not acquire ownership or compose models before the required resource sn
   const plane = (
     await DurableAgentPlane.create({
       persistence: {
+        recoveryDemand: () => okAsync(false),
         open: () => {
           events.push("lease");
           return errAsync(durableError("test gate complete"));

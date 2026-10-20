@@ -34,6 +34,11 @@ export interface AgentStorageLease {
 
 /** Private authority and passive public history have independent lifetimes. */
 export interface AgentPersistence {
+  recoveryDemand(
+    task: SimulationTask,
+    orb: OrbRow,
+    context: OperationContext,
+  ): ResultAsync<boolean, RuntimeClientError>;
   checkStartup?(
     task: SimulationTask,
     orb: OrbRow,

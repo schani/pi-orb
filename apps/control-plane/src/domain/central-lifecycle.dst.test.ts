@@ -1,8 +1,8 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import type { SimulationTask } from "determined";
+import { NoSimulationTask, type SimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { LazyExecutionEnv } from "../adapters/execution-client/lazy-env.ts";
 import { makeHarness, makeOrbRow, makeProjectRow, seedRunningOrb } from "../testkit/fixtures.ts";
 import { runDst, waitUntil } from "../testkit/sim.ts";
@@ -788,3 +788,227 @@ describe("independent central lifecycle", () => {
     });
   });
 });
+
+describe("persisted central recovery demand", () => {
+  it.each([true, false])("checks durable demand=%s before stopped quiescence", async (demand) => {
+    await runDst({ name: `central-persisted-demand-${demand}`, iterations: 1 }, async (sim) => {
+      const h = makeHarness();
+      let probes = 0,
+        opens = 0,
+        unloads = 0;
+      const base = plane(() => undefined);
+      const deps = {
+        ...h.deps,
+        agentPlane: {
+          ...base,
+          session: () => null,
+          recoveryDemand: () => {
+            probes++;
+            return okAsync(demand);
+          },
+          health: (...args: Parameters<AgentPlane["health"]>) => {
+            opens++;
+            return base.health(...args);
+          },
+          unload: () => {
+            unloads++;
+            return okAsync(true);
+          },
+        },
+      };
+      const result = await sim.runTasks([
+        {
+          name: "driver",
+          f: async (task) => {
+            h.store.seedOrb(makeOrbRow("orb", "p", "stopped", { stopReason: "idle" }));
+            expect((await reconcileCentralAgent(task, deps, "orb")).isOk()).toBe(true);
+            expect(probes).toBe(1);
+            expect(opens).toBe(demand ? 1 : 0);
+            expect(unloads).toBe(demand ? 0 : 1);
+            expect(h.store.orbSnapshot("orb")?.state).toBe("stopped");
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    });
+  });
+
+  it.each(["manual", "sleep"] as const)(
+    "does not probe or resume durable demand during %s inhibition",
+    async (stopReason) => {
+      await runDst(
+        { name: `central-inhibited-demand-${stopReason}`, iterations: 1 },
+        async (sim) => {
+          const h = makeHarness();
+          let probes = 0,
+            opens = 0,
+            suspends = 0;
+          const base = plane(() => undefined);
+          const deps = {
+            ...h.deps,
+            agentPlane: {
+              ...base,
+              session: () => null,
+              recoveryDemand: () => {
+                probes++;
+                return okAsync(true);
+              },
+              health: (...args: Parameters<AgentPlane["health"]>) => {
+                opens++;
+                return base.health(...args);
+              },
+              suspend: () => {
+                suspends++;
+                return okAsync(undefined);
+              },
+            },
+          };
+          const result = await sim.runTasks([
+            {
+              name: "driver",
+              f: async (task) => {
+                h.store.seedOrb(makeOrbRow("orb", "p", "stopped", { stopReason }));
+                expect((await reconcileCentralAgent(task, deps, "orb")).isOk()).toBe(true);
+                expect(probes).toBe(0);
+                expect(opens).toBe(0);
+                expect(suspends).toBe(1);
+                expect(h.store.orbSnapshot("orb")?.stopReason).toBe(stopReason);
+              },
+            },
+          ]);
+          expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        },
+      );
+    },
+  );
+
+  it("does not treat a failed durable demand read as quiescence", async () => {
+    await runDst({ name: "central-persisted-demand-error", iterations: 1 }, async (sim) => {
+      const h = makeHarness();
+      let opens = 0,
+        unloads = 0;
+      const failure: RuntimeClientError = {
+        type: "runtime_client_error",
+        code: "history_unavailable",
+        message: "Persisted agent demand unavailable",
+        answered: true,
+        retryable: true,
+      };
+      const base = plane(() => undefined);
+      const deps = {
+        ...h.deps,
+        agentPlane: {
+          ...base,
+          session: () => null,
+          recoveryDemand: () => errAsync(failure),
+          health: (...args: Parameters<AgentPlane["health"]>) => {
+            opens++;
+            return base.health(...args);
+          },
+          unload: () => {
+            unloads++;
+            return okAsync(true);
+          },
+        },
+      };
+      const result = await sim.runTasks([
+        {
+          name: "driver",
+          f: async (task) => {
+            h.store.seedOrb(makeOrbRow("orb", "p", "stopped", { stopReason: "idle" }));
+            expect((await reconcileCentralAgent(task, deps, "orb"))._unsafeUnwrapErr()).toEqual({
+              type: "retryable",
+              message: failure.message,
+            });
+            expect(opens).toBe(0);
+            expect(unloads).toBe(0);
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    });
+  });
+});
+
+it.each(["probe", "open", "failed-health"] as const)(
+  "surfaces and clears central recovery %s failures without row writes",
+  async (stage) => {
+    const h = makeHarness();
+    const task = new NoSimulationTask("recovery-errors", false);
+    const logs = vi.spyOn(task, "log");
+    const failure: RuntimeClientError = {
+      type: "runtime_client_error",
+      code: "history_unavailable",
+      answered: true,
+      retryable: true,
+      message: "Recovery unavailable",
+    };
+    let failing = true,
+      demand = true,
+      initializing = false;
+    const base = plane(() => undefined);
+    const deps = {
+      ...h.deps,
+      agentPlane: {
+        ...base,
+        session: () => null,
+        recoveryDemand: () => (failing && stage === "probe" ? errAsync(failure) : okAsync(demand)),
+        health: () =>
+          initializing
+            ? base.health(task, row, { signal: new AbortController().signal })
+            : failing
+              ? stage === "failed-health"
+                ? okAsync({
+                    v: 1 as const,
+                    orbId: "orb",
+                    runtimeInstanceId: "central",
+                    status: "failed" as const,
+                    error: { code: "recovery_failed", message: failure.message, retryable: true },
+                  })
+                : errAsync(failure)
+              : okAsync({
+                  v: 1 as const,
+                  orbId: "orb",
+                  runtimeInstanceId: "central",
+                  status: "ready" as const,
+                  sessionId: "central",
+                  checkoutCommit: null,
+                  activity: "idle" as const,
+                }),
+        unload: () => okAsync(true),
+      },
+    };
+    const row = makeOrbRow("orb", "p", "stopped", { stopReason: "idle" });
+    for (const clear of ["recovered", "quiescent", "manual", "sleep", "clearOrb"] as const) {
+      h.store.seedOrb(row);
+      demand = true;
+      failing = true;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        expect((await reconcileCentralAgent(task, deps, "orb")).isErr()).toBe(true);
+        expect(deps.control.getAgentRecoveryError("orb")).toBe(failure.message);
+        expect(h.store.orbSnapshot("orb")).toEqual(row);
+      }
+      if (clear === "recovered") {
+        failing = false;
+        initializing = true;
+        expect((await reconcileCentralAgent(task, deps, "orb")).isOk()).toBe(true);
+        expect(deps.control.getAgentRecoveryError("orb")).toBe(failure.message);
+        initializing = false;
+      }
+      if (clear === "clearOrb") deps.control.clearOrb("orb");
+      else {
+        failing = false;
+        if (clear === "quiescent") demand = false;
+        if (clear === "manual" || clear === "sleep") h.store.seedOrb({ ...row, stopReason: clear });
+        expect((await reconcileCentralAgent(task, deps, "orb")).isOk()).toBe(true);
+      }
+      expect(deps.control.getAgentRecoveryError("orb")).toBeNull();
+    }
+    const failures = logs.mock.calls.filter((parts) =>
+      String(parts[0]).includes("central-agent-recovery-failed"),
+    );
+    expect(failures).toHaveLength(5);
+    expect(String(failures[0]?.[0])).toContain(`stage=${stage === "probe" ? "probe" : "open"}`);
+    expect(String(failures[0]?.[0])).toContain("source=persisted_work");
+  },
+);

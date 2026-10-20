@@ -417,3 +417,15 @@ describe("orbView previewHost", () => {
     expect(Check(OrbViewSchema, view)).toBe(true);
   });
 });
+
+it("shows reconstructible central recovery errors through the existing lastError field", () => {
+  const control = new ControlState();
+  const row = { ...orb, state: "stopped" as const, stopReason: "idle" as const };
+  control.noteAgentRecoveryError(orb.id, "Recovery unavailable");
+  const view = orbView(row, control, { centralAgent: true });
+  expect(view.lastError).toBe("Recovery unavailable");
+  expect(Check(OrbViewSchema, view)).toBe(true);
+  expect(row.lastError).toBeNull();
+  control.noteAgentRecoveryError(orb.id, null);
+  expect(orbView(row, control, { centralAgent: true }).lastError).toBeUndefined();
+});

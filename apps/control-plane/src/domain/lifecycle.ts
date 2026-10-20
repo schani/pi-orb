@@ -2531,6 +2531,25 @@ async function reconcileTerminalBackstop(
   return { type: "progressed" };
 }
 
+function centralRecoveryFailed(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orb: OrbRow,
+  stage: "probe" | "open",
+  error: RuntimeClientError,
+): ReconcileOutcome {
+  if (deps.control.noteAgentRecoveryError(orb.id, error.message))
+    logOrbEvent(task, orb.id, "central-agent-recovery-failed", {
+      source: "persisted_work",
+      stage,
+      code: error.code,
+      message: error.message,
+      state_version: orb.stateVersion,
+      admission_version: orb.agentAdmissionVersion,
+    });
+  return retryable(error);
+}
+
 /** Central admission and dispatch never await compute operations. */
 export async function reconcileCentralAgent(
   task: SimulationTask,
@@ -2541,6 +2560,8 @@ export async function reconcileCentralAgent(
   if (orbResult.isErr()) return err(retryable(orbResult.error));
   let orb = orbResult.value;
   if (orb === null) return err({ type: "noop" });
+  if (orb.state !== "stopped" || orb.stopReason === "manual" || orb.stopReason === "sleep")
+    deps.control.noteAgentRecoveryError(orbId, null);
   if (
     agentPlacement(deps.agentPlane, orb) === "central" &&
     orb.state !== "archived" &&
@@ -2580,6 +2601,7 @@ export async function reconcileCentralAgent(
         }
       }
       const centralOrb = orb;
+      let persistedRecovery = false;
       if (
         orb.state === "stopped" &&
         !deps.agentPlane?.session(orbId)?.workActive?.() &&
@@ -2593,15 +2615,34 @@ export async function reconcileCentralAgent(
             (message) => message.status === "queued" || message.status === "delivering",
           )
         ) {
-          const unloaded = await withDeadline(
+          const demand = await withDeadline(
             task,
             deps.constants.runtimeRequestTimeoutMs,
-            "unload stopped host agent state",
-            (context) => deps.agentPlane?.unload?.(task, centralOrb, context) ?? okAsync(false),
+            "persisted central agent recovery demand",
+            (context) =>
+              deps.agentPlane?.recoveryDemand?.(task, centralOrb, context) ?? okAsync(false),
           );
-          if (unloaded.isErr()) return err(retryable(unloaded.error));
-          deps.control.noteAgentWork(orbId, false);
-          return ok(orb);
+          if (demand.isErr())
+            return err(centralRecoveryFailed(task, deps, orb, "probe", demand.error));
+          if (deps.control.noteCondition(`central-recovery:${orbId}`, demand.value) && demand.value)
+            logOrbEvent(task, orbId, "central-agent-recovery-requested", {
+              source: "persisted_work",
+              state_version: orb.stateVersion,
+              admission_version: orb.agentAdmissionVersion,
+            });
+          if (!demand.value) {
+            deps.control.noteAgentRecoveryError(orbId, null);
+            const unloaded = await withDeadline(
+              task,
+              deps.constants.runtimeRequestTimeoutMs,
+              "unload stopped host agent state",
+              (context) => deps.agentPlane?.unload?.(task, centralOrb, context) ?? okAsync(false),
+            );
+            if (unloaded.isErr()) return err(retryable(unloaded.error));
+            deps.control.noteAgentWork(orbId, false);
+            return ok(orb);
+          }
+          persistedRecovery = true;
         }
       }
       const health = await withDeadline(
@@ -2617,10 +2658,28 @@ export async function reconcileCentralAgent(
         health.isErr() ? health.error : undefined,
       );
       if (
-        deps.control.noteCondition(`central-health:${orbId}`, health.isErr() && !rejected) &&
+        deps.control.noteCondition(
+          `central-health:${orbId}`,
+          health.isErr() && !rejected && !persistedRecovery,
+        ) &&
         health.isErr()
       )
         logOrbEvent(task, orbId, "central-agent-unavailable", { message: health.error.message });
+      if (persistedRecovery && health.isErr())
+        return err(centralRecoveryFailed(task, deps, orb, "open", health.error));
+      if (persistedRecovery && health.isOk() && health.value.status === "failed")
+        return err(
+          centralRecoveryFailed(task, deps, orb, "open", {
+            type: "runtime_client_error",
+            code: "initialization_failed",
+            answered: true,
+            message: health.value.error.message,
+            retryable: health.value.error.retryable,
+            initializationError: health.value.error,
+          }),
+        );
+      if (health.isOk() && health.value.status === "ready")
+        deps.control.noteAgentRecoveryError(orbId, null);
       const busy = deps.agentPlane?.session(orbId)?.workActive?.() === true;
       deps.control.noteAgentWork(orbId, busy);
       if (busy) await deps.store.touchLastBusy(task, { orbId, now: task.wallNow() });

@@ -508,6 +508,7 @@ it("preserves SDK terminal startup failure even when lease cleanup fails", async
   const plane = (
     await DurableAgentPlane.create({
       persistence: {
+        recoveryDemand: (...args) => f.database.agentPersistence.recoveryDemand(...args),
         checkStartup: (...args) => f.database.agentPersistence.checkStartup!(...args),
         open: (...args) =>
           f.database.agentPersistence.open(...args).andThen((lease) =>
