@@ -1055,28 +1055,16 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       StoreError | StateConflict | OrbMessageTargetNotFound
     >(async (query) => {
       const sender = params.sender;
-      let targetProjectId: string | undefined;
       if (sender !== undefined) {
-        const target = await query("SELECT project_id FROM orbs WHERE id = $1", [targetId]);
-        if (target.isErr()) return err(target.error);
-        targetProjectId = target.value.rows[0]?.["project_id"] as string | undefined;
-        // Sorted project locks precede sorted orb locks, including reciprocal cross-project sends.
-        const projectIds = [
-          ...new Set([
-            sender.projectId,
-            ...(targetProjectId === undefined ? [] : [targetProjectId]),
-          ]),
-        ];
-        const projects = await query(
-          "SELECT id, state, owner_user_id FROM projects WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE",
-          [arrayParam(projectIds)],
+        // Project before sorted orb locks matches project deletion and reciprocal sends.
+        const project = await query(
+          "SELECT state, owner_user_id FROM projects WHERE id = $1 FOR UPDATE",
+          [sender.projectId],
         );
-        if (projects.isErr()) return err(projects.error);
+        if (project.isErr()) return err(project.error);
         if (
-          projects.value.rows.length !== projectIds.length ||
-          projects.value.rows.some(
-            (row) => row["state"] !== "active" || row["owner_user_id"] !== sender.ownerUserId,
-          )
+          project.value.rows[0]?.["state"] !== "active" ||
+          project.value.rows[0]?.["owner_user_id"] !== sender.ownerUserId
         )
           return err(stateConflict());
       }
@@ -1096,8 +1084,18 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       }
       let orbRow = locked.value.rows.find((row) => row["id"] === targetId);
       if (orbRow === undefined) return err({ type: "orb_message_target_not_found" });
-      if (sender !== undefined && orbRow["project_id"] !== targetProjectId)
-        return err(stateConflict());
+      if (sender !== undefined) {
+        const targetProject = await query(
+          "SELECT owner_user_id, state FROM projects WHERE id = $1",
+          [orbRow["project_id"]],
+        );
+        if (targetProject.isErr()) return err(targetProject.error);
+        if (
+          targetProject.value.rows[0]?.["owner_user_id"] !== sender.ownerUserId ||
+          targetProject.value.rows[0]?.["state"] !== "active"
+        )
+          return err(stateConflict());
+      }
       const state = String(orbRow["state"]) as OrbState;
       if (state === "deleting" || state === "archiving" || state === "archived") {
         return err(stateConflict(state));

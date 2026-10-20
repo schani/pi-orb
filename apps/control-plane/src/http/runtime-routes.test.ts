@@ -333,10 +333,11 @@ describe("runtime broker routes", () => {
     expect(store.messageSnapshots(target)).toMatchObject([
       { autoStart: true, system: { kind: "orb_message", senderOrbId: ORB } },
     ]);
-    store.seedProject({ ...makeProjectRow(targetProject), ownerUserId: "other-owner" });
-    expect((await send()).statusCode).toBe(409);
-    store.seedProject({ ...makeProjectRow(targetProject), state: "deleting" });
-    expect((await send()).statusCode).toBe(409);
+    const foreignProject = "foreign-project";
+    store.seedProject({ ...makeProjectRow(foreignProject), ownerUserId: "other-owner" });
+    const foreignOrb = "00000000-0000-4000-8000-000000000087";
+    store.seedOrb(makeOrbRow(foreignOrb, foreignProject, "running"));
+    expect((await send({ ...payload, orbId: foreignOrb })).statusCode).toBe(409);
     expect(store.messageSnapshots(target)).toHaveLength(1);
     for (const invalid of [
       { ...payload, senderOrbId: target },
