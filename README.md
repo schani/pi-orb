@@ -4,6 +4,10 @@ pi-orb provides persistent Pi and Claude coding conversations with isolated exec
 
 Design documentation starts at [DESIGN.md](DESIGN.md), which indexes the topical design docs under `docs/`. The actionable backlog is [TODO.md](TODO.md).
 
+## Install on iPhone or iPad
+
+Open the HTTPS app in Safari, then choose **Share → Add to Home Screen → Add**. Leave **Open as Web App** enabled if offered. Launch the icon and sign in if prompted; its session may differ from Safari's. A network connection is required.
+
 ## Run locally
 
 There are three development compositions: the Docker-backed full service, the Docker-free full service using the process host provider, and a frontend-only fixture. The two Docker-free commands are intentionally different: use `dev:local` when backend/runtime behavior matters, and `dev:frontend` only for isolated UI work.

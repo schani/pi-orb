@@ -49,6 +49,8 @@ describe("web assets", () => {
     "/assets/missing.js",
     "/favicons",
     "/favicons/missing",
+    "/favicons/missing.png",
+    "/missing.webmanifest",
     "/api/v1/missing",
     "/runtime/v1/missing",
     "/mcp/oauth/failed",
