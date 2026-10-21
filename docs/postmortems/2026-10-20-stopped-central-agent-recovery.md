@@ -57,7 +57,12 @@ submit → poll → poll → restart → restart → reconcile → progress → 
 
 With initially running compute it passes. With compute stopped by ordinary idle lifecycle, input is accepted as Native submission 10/public operation `conversation:…:submission:10`, projected once, and marked delivered with `autoStart=false`. Generation task 12 remains running at a persisted request checkpoint. Both release restarts replace the plane/persistence/control state; ordinary reconciliation and polling never reopen it. Model progress is released, but the 15-second virtual fair suffix ends without a terminal task or answer. Total opens remain 2: the initial idle incarnation and the message-admission incarnation; none after replacement. Passive observations preserve that same operation/submission identity across both restarts.
 
-Retained trace: `test-failures/central-work-true-3-1792537434171-0.json`. First passive state: `test-failures/central-work-true-3-state-1792537434162.json`. `runDst`'s automatic replay and an explicit replay reproduce the completion invariant:
+Original evidence (authenticated downloads; save to these original paths for historical replay):
+
+- [test-failures/central-work-true-3-1792537434171-0.json](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/9c88a7b6-1d86-4c2d-adf2-fd46df8ed3dd/evidence/central-work/central-work-true-3-1792537434171-0.json), SHA-256 `670c05e56a535860aa14b2ff869f5a7c82248c305a9ee218ff798366c51d39ee`.
+- [test-failures/central-work-true-3-state-1792537434162.json](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/9c88a7b6-1d86-4c2d-adf2-fd46df8ed3dd/evidence/central-work/central-work-true-3-state-1792537434162.json), SHA-256 `5154807bfaaa51925a8c75b4c96e31c50ef1bd1a2957aceae852a2fb724ba565` (first passive state).
+
+`runDst`'s automatic replay and an explicit replay reproduce the completion invariant on the original pre-fix source:
 
 ```sh
 DST_REPLAY=test-failures/central-work-true-3-1792537434171-0.json \
