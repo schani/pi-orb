@@ -197,3 +197,74 @@ describe("Durable native code-mode store", () => {
     }
   });
 });
+
+it("reports only bounded schema-owned missing names and respects catalog visibility", () => {
+  const fields = [
+    "context",
+    'quote"\nfield',
+    "x".repeat(65),
+    ...Array.from({ length: 20 }, (_, i) => `field${i}`),
+  ];
+  const catalog = new CallableCatalog([
+    defineTool({
+      name: "required",
+      description: "fixture",
+      parameters: Type.Object(Object.fromEntries(fields.map((field) => [field, Type.String()]))),
+      execute: async () => ({ output: [] }),
+    }),
+  ]);
+  const message = catalog.invalidArgumentsMessage("required", {
+    context: "secret-value",
+    extra: "secret-value",
+  });
+  expect(message).not.toContain("secret-value");
+  expect(message).not.toContain('"context"');
+  expect(message).toContain(JSON.stringify('quote"\nfield'));
+  expect(message).not.toContain("x".repeat(65));
+  expect(message).not.toContain('"field15"');
+  expect(message.length).toBeLessThan(1100);
+  const generic = "Invalid arguments for required";
+  for (const args of [
+    null,
+    [],
+    "secret-value",
+    Object.fromEntries(fields.map((field) => [field, 42])),
+  ])
+    expect(catalog.invalidArgumentsMessage("required", args)).toBe(generic);
+  expect(catalog.without(["required"]).invalidArgumentsMessage("required", {})).toBe(generic);
+  expect(
+    catalog.invalidArgumentsMessage("required", Object.create({ context: "inherited" })),
+  ).toContain('"context"');
+});
+
+it("sanitizes native invalid_arguments diagnostics without exposing their message or argument values", async () => {
+  const fixture = await openCodemodeHarness(
+    new CallableCatalog([
+      defineTool({
+        name: "reject",
+        description: "fixture",
+        parameters: Type.Object({ value: Type.String() }),
+        execute: async (_args, api) => {
+          api.diagnostic({
+            severity: "error",
+            code: "invalid_arguments",
+            message: "secret-thirdparty-message",
+          });
+          return { isError: true, output: [] };
+        },
+      }),
+    ]),
+  );
+  try {
+    const result = await fixture.run(
+      'try {await tools.reject({value:"secret-argument"});} catch(e) {text(e.message);}',
+    );
+    expect(result.output).toContainEqual({
+      type: "text",
+      text: "Invalid arguments for reject\nreject failed",
+    });
+    expect(output(result)).not.toContain("secret-");
+  } finally {
+    await fixture.close();
+  }
+});

@@ -141,6 +141,7 @@ test("CLI seals code-mode's bounded image prelude", () => {
     target,
     "node_modules/@earendil-works/pi-codemode/package.json",
     "node_modules/@earendil-works/pi-codemode/dist/runtime/host.js",
+    "node_modules/@earendil-works/pi-codemode/dist/declarations.js",
     "node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js",
     "node_modules/@earendil-works/pi-codemode/dist/types.d.ts",
   ]) {
