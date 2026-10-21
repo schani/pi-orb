@@ -222,12 +222,12 @@ export async function centralWorkHarness() {
       native,
       tasks,
       records: snapshot.records,
+      accepted: [...accepted],
     };
   }
 
-  async function complete(task: SimulationTask) {
-    const state = await inspect(task);
-    const outcomes = [...accepted].map(([id, operation]) => {
+  function complete(state: Awaited<ReturnType<typeof inspect>>) {
+    const outcomes = state.accepted.map(([id, operation]) => {
       const submission = state.native.filter(
         (row) => JSON.parse(String(row.record)).requestId === `inbox:${id}`,
       );

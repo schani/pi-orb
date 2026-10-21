@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NoSimulationTask } from "determined";
 import { expect, it } from "vitest";
-import { makeOrbRow, makeProjectRow } from "../../testkit/fixtures.ts";
+import { makeOrbRow, makeProjectRow, seedTestUser } from "../../testkit/fixtures.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
 import { PGliteClient } from "../pg/pglite-client.ts";
 import { PgAgentPersistence } from "./pg-persistence.ts";
@@ -58,13 +58,7 @@ it("derives recovery demand from indexed Native status without acquiring ownersh
   const context = { signal: new AbortController().signal };
   try {
     (await database.migrate())._unsafeUnwrap();
-    (
-      await database.users.resolveUser(
-        task,
-        { issuer: "test", subject: "owner", email: null },
-        { id: project.ownerUserId, now: 0 },
-      )
-    )._unsafeUnwrap();
+    (await seedTestUser(task, database.users))._unsafeUnwrap();
     (await database.store.insertProject(task, project))._unsafeUnwrap();
     for (const row of [orb, other]) (await database.store.insertOrb(task, row))._unsafeUnwrap();
     const persistence = database.agentPersistence;

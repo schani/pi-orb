@@ -790,143 +790,77 @@ describe("independent central lifecycle", () => {
 });
 
 describe("persisted central recovery demand", () => {
+  function fixture(
+    demand: boolean | RuntimeClientError,
+    stopReason: OrbRow["stopReason"] = "idle",
+  ) {
+    const h = makeHarness();
+    const task = new NoSimulationTask("persisted-recovery-demand", false);
+    const calls = { probes: 0, opens: 0, unloads: 0, suspends: 0 };
+    const base = plane(() => undefined);
+    const deps = {
+      ...h.deps,
+      agentPlane: {
+        ...base,
+        session: () => null,
+        recoveryDemand: () => {
+          calls.probes++;
+          return typeof demand === "boolean" ? okAsync(demand) : errAsync(demand);
+        },
+        health: (...args: Parameters<AgentPlane["health"]>) => {
+          calls.opens++;
+          return base.health(...args);
+        },
+        unload: () => {
+          calls.unloads++;
+          return okAsync(true);
+        },
+        suspend: () => {
+          calls.suspends++;
+          return okAsync(undefined);
+        },
+      },
+    };
+    h.store.seedOrb(makeOrbRow("orb", "p", "stopped", { stopReason }));
+    return { h, task, calls, deps };
+  }
+
   it.each([true, false])("checks durable demand=%s before stopped quiescence", async (demand) => {
-    await runDst({ name: `central-persisted-demand-${demand}`, iterations: 1 }, async (sim) => {
-      const h = makeHarness();
-      let probes = 0,
-        opens = 0,
-        unloads = 0;
-      const base = plane(() => undefined);
-      const deps = {
-        ...h.deps,
-        agentPlane: {
-          ...base,
-          session: () => null,
-          recoveryDemand: () => {
-            probes++;
-            return okAsync(demand);
-          },
-          health: (...args: Parameters<AgentPlane["health"]>) => {
-            opens++;
-            return base.health(...args);
-          },
-          unload: () => {
-            unloads++;
-            return okAsync(true);
-          },
-        },
-      };
-      const result = await sim.runTasks([
-        {
-          name: "driver",
-          f: async (task) => {
-            h.store.seedOrb(makeOrbRow("orb", "p", "stopped", { stopReason: "idle" }));
-            expect((await reconcileCentralAgent(task, deps, "orb")).isOk()).toBe(true);
-            expect(probes).toBe(1);
-            expect(opens).toBe(demand ? 1 : 0);
-            expect(unloads).toBe(demand ? 0 : 1);
-            expect(h.store.orbSnapshot("orb")?.state).toBe("stopped");
-          },
-        },
-      ]);
-      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-    });
+    const { h, task, calls, deps } = fixture(demand);
+    expect((await reconcileCentralAgent(task, deps, "orb")).isOk()).toBe(true);
+    expect(calls.probes).toBe(1);
+    expect(calls.opens).toBe(demand ? 1 : 0);
+    expect(calls.unloads).toBe(demand ? 0 : 1);
+    expect(h.store.orbSnapshot("orb")?.state).toBe("stopped");
   });
 
   it.each(["manual", "sleep"] as const)(
     "does not probe or resume durable demand during %s inhibition",
     async (stopReason) => {
-      await runDst(
-        { name: `central-inhibited-demand-${stopReason}`, iterations: 1 },
-        async (sim) => {
-          const h = makeHarness();
-          let probes = 0,
-            opens = 0,
-            suspends = 0;
-          const base = plane(() => undefined);
-          const deps = {
-            ...h.deps,
-            agentPlane: {
-              ...base,
-              session: () => null,
-              recoveryDemand: () => {
-                probes++;
-                return okAsync(true);
-              },
-              health: (...args: Parameters<AgentPlane["health"]>) => {
-                opens++;
-                return base.health(...args);
-              },
-              suspend: () => {
-                suspends++;
-                return okAsync(undefined);
-              },
-            },
-          };
-          const result = await sim.runTasks([
-            {
-              name: "driver",
-              f: async (task) => {
-                h.store.seedOrb(makeOrbRow("orb", "p", "stopped", { stopReason }));
-                expect((await reconcileCentralAgent(task, deps, "orb")).isOk()).toBe(true);
-                expect(probes).toBe(0);
-                expect(opens).toBe(0);
-                expect(suspends).toBe(1);
-                expect(h.store.orbSnapshot("orb")?.stopReason).toBe(stopReason);
-              },
-            },
-          ]);
-          expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        },
-      );
+      const { h, task, calls, deps } = fixture(true, stopReason);
+      expect((await reconcileCentralAgent(task, deps, "orb")).isOk()).toBe(true);
+      expect(calls.probes).toBe(0);
+      expect(calls.opens).toBe(0);
+      expect(calls.suspends).toBe(1);
+      expect(h.store.orbSnapshot("orb")?.stopReason).toBe(stopReason);
     },
   );
 
   it("does not treat a failed durable demand read as quiescence", async () => {
-    await runDst({ name: "central-persisted-demand-error", iterations: 1 }, async (sim) => {
-      const h = makeHarness();
-      let opens = 0,
-        unloads = 0;
-      const failure: RuntimeClientError = {
-        type: "runtime_client_error",
-        code: "history_unavailable",
-        message: "Persisted agent demand unavailable",
-        answered: true,
-        retryable: true,
-      };
-      const base = plane(() => undefined);
-      const deps = {
-        ...h.deps,
-        agentPlane: {
-          ...base,
-          session: () => null,
-          recoveryDemand: () => errAsync(failure),
-          health: (...args: Parameters<AgentPlane["health"]>) => {
-            opens++;
-            return base.health(...args);
-          },
-          unload: () => {
-            unloads++;
-            return okAsync(true);
-          },
-        },
-      };
-      const result = await sim.runTasks([
-        {
-          name: "driver",
-          f: async (task) => {
-            h.store.seedOrb(makeOrbRow("orb", "p", "stopped", { stopReason: "idle" }));
-            expect((await reconcileCentralAgent(task, deps, "orb"))._unsafeUnwrapErr()).toEqual({
-              type: "retryable",
-              message: failure.message,
-            });
-            expect(opens).toBe(0);
-            expect(unloads).toBe(0);
-          },
-        },
-      ]);
-      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    const failure: RuntimeClientError = {
+      type: "runtime_client_error",
+      code: "history_unavailable",
+      message: "Persisted agent demand unavailable",
+      answered: true,
+      retryable: true,
+    };
+    const { task, calls, deps } = fixture(failure);
+    expect((await reconcileCentralAgent(task, deps, "orb"))._unsafeUnwrapErr()).toEqual({
+      type: "retryable",
+      message: failure.message,
     });
+    expect(calls.opens).toBe(0);
+    expect(calls.unloads).toBe(0);
   });
 });
 

@@ -41,7 +41,7 @@ async function execute(task: SimulationTask, owner: SimulationTask, h: Harness, 
   }
   // Observe identities and safety before any subsequent restart, never to
   // choose a command. Reads do not open a Harness or trigger recovery.
-  await h.complete(task);
+  return h.inspect(task);
 }
 
 function program(task: SimulationTask, restarts: boolean): Command[] {
@@ -98,57 +98,38 @@ for (const idle of [false, true]) {
               f: async (simulationTask) => {
                 const task = nativeDeadlineTask(simulationTask);
                 await ready.promise;
-                const observe = async () => {
-                  const state = await h.inspect(task);
-                  observations.push({
-                    history: state.history,
-                    generation: state.generation,
-                    opens: state.opens,
-                    entered: state.entered,
-                    state: state.orb?.state,
-                    stopReason: state.orb?.stopReason,
-                    messages: state.messages.map(
-                      ({ messageId, status, operationId, autoStart }) => ({
-                        messageId,
-                        status,
-                        operationId,
-                        autoStart,
-                      }),
-                    ),
-                    native: state.native,
-                    tasks: state.tasks,
-                  });
+                const observe = (state: Awaited<ReturnType<Harness["inspect"]>>) => {
+                  observations.push(state);
+                  return h.complete(state);
                 };
                 try {
                   await h.initialize(task, owner);
                   if (idle) {
-                    await execute(task, owner, h, "idle");
-                    expect((await h.inspect(task)).orb?.state, "idle reaches stopped compute").toBe(
-                      "stopped",
-                    );
+                    const state = await execute(task, owner, h, "idle");
+                    observe(state);
+                    expect(state.orb?.state, "idle reaches stopped compute").toBe("stopped");
                   }
                   // Seed 0 also supplies a no-restart control. Every command is
                   // generated before execution, independent of inspected state.
                   const commands = program(task, seed !== 0);
                   h.command(JSON.stringify(commands));
                   for (const command of commands) {
-                    await execute(task, owner, h, command);
-                    await observe();
+                    observe(await execute(task, owner, h, command));
                   }
                   // Fair suffix: no new inputs, restarts, faults, Start, or direct open.
                   h.release();
                   const deadline = task.monotonicNow() + 15_000;
-                  while (task.monotonicNow() < deadline && !(await h.complete(task))) {
+                  let completed = observe(await h.inspect(task));
+                  while (task.monotonicNow() < deadline && !completed) {
                     await h.tick(task);
                     await task.sleep(500, "fair suffix");
+                    completed = observe(await h.inspect(task));
                   }
-                  const completed = await h.complete(task);
-                  await observe();
                   if (!completed) {
                     mkdirSync("test-failures", { recursive: true });
                     writeFileSync(
                       `test-failures/central-work-${idle}-${seed}-state-${Date.now()}.json`,
-                      JSON.stringify({ observations, final: await h.inspect(task) }, null, 2),
+                      JSON.stringify({ observations, final: observations.at(-1) }, null, 2),
                     );
                   }
                   expect(completed, "accepted work completes under its original identity").toBe(
