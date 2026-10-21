@@ -270,6 +270,10 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
     return handle;
   }
 
+  recoveryDemand(task: SimulationTask, orb: OrbRow, context: OperationContext) {
+    return this.options.persistence.recoveryDemand(task, orb, context);
+  }
+
   checkStartup(task: SimulationTask, orb: OrbRow, context: OperationContext) {
     return this.options.persistence.checkStartup?.(task, orb, context) ?? okAsync(undefined);
   }

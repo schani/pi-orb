@@ -159,6 +159,8 @@ export function orbView(
     (orb.state === "creating" || orb.state === "starting") && !showChallenge
       ? control.getBootProbe(orb.id)
       : null;
+  const lastError =
+    (config.centralAgent ? control.getAgentRecoveryError(orb.id) : null) ?? orb.lastError;
   const stateDetail = stateDetailOf(orb, control, drain, bootProbe, config.centralAgent === true);
   return {
     id: orb.id,
@@ -171,7 +173,7 @@ export function orbView(
     ...(config.centralAgent ? { centralAgent: true } : {}),
     ...(activity !== undefined ? { activity } : {}),
     ...(orb.checkoutCommit !== null ? { checkoutCommit: orb.checkoutCommit } : {}),
-    ...(orb.lastError !== null ? { lastError: orb.lastError } : {}),
+    ...(lastError !== null ? { lastError } : {}),
     ...(orb.resourceWarnings?.length ? { resourceWarnings: orb.resourceWarnings } : {}),
     ...(orb.unreadAlertId !== null ? { unreadAlertId: orb.unreadAlertId } : {}),
     ...(stateDetail !== undefined ? { stateDetail } : {}),

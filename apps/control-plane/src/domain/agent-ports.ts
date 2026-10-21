@@ -94,6 +94,12 @@ export interface AgentPlane {
     orb: OrbRow,
     context: OperationContext,
   ): ResultAsync<void, RuntimeClientError>;
+  /** Read-only persisted work check; never opens agent resources or acquires ownership. */
+  recoveryDemand?(
+    task: SimulationTask,
+    orb: OrbRow,
+    context: OperationContext,
+  ): ResultAsync<boolean, RuntimeClientError>;
   health(
     task: SimulationTask,
     orb: OrbRow,

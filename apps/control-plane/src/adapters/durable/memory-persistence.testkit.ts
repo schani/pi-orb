@@ -29,6 +29,26 @@ export class MemoryAgentPersistence implements AgentPersistence {
     this.ttl = ttl;
   }
 
+  recoveryDemand(_task: SimulationTask, orb: OrbRow, context: OperationContext) {
+    if (context.signal.aborted) return errAsync(durableError("recovery demand cancelled", true));
+    const storage = this.backends.get(orb.id);
+    if (!storage) return okAsync(false);
+    return ResultAsync.fromPromise(
+      (async () => {
+        for (const status of ["pending", "running", "waiting", "completing"] as const) {
+          const page = await storage.scanTasks({ status }, 1, undefined, BACKGROUND_CONTEXT);
+          if (page.items.length) return true;
+        }
+        for (const status of ["queued", "placed"] as const) {
+          const page = await storage.scanSubmissions({ status }, 1, undefined, BACKGROUND_CONTEXT);
+          if (page.items.length) return true;
+        }
+        return false;
+      })(),
+      () => durableError("Persisted agent demand unavailable", true),
+    );
+  }
+
   openOrb(orbId: string, existing: boolean) {
     let storage = this.backends.get(orbId);
     if (!storage) {

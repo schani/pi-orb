@@ -240,6 +240,19 @@ export class ControlState {
     return (this.executionLeases.get(orbId) ?? 0) > 0;
   }
 
+  private readonly agentRecoveryErrors = new Map<string, string>();
+
+  noteAgentRecoveryError(orbId: string, message: string | null): boolean {
+    const previous = this.getAgentRecoveryError(orbId);
+    if (message === null) this.agentRecoveryErrors.delete(orbId);
+    else this.agentRecoveryErrors.set(orbId, message);
+    return previous !== message;
+  }
+
+  getAgentRecoveryError(orbId: string): string | null {
+    return this.agentRecoveryErrors.get(orbId) ?? null;
+  }
+
   private readonly agentWork = new Map<string, boolean>();
 
   noteAgentWork(orbId: string, busy: boolean): void {
@@ -595,6 +608,7 @@ export class ControlState {
     this.bootProbes.delete(orbId);
     this.bootEvidenceSince.delete(orbId);
     this.hookFailures.delete(orbId);
+    this.agentRecoveryErrors.delete(orbId);
     this.episodes.delete(orbId);
     this.liveness.delete(orbId);
     ControlState.forgetOrb(this.nextAttemptAt, orbId);

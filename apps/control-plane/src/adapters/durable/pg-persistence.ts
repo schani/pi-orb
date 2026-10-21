@@ -35,6 +35,22 @@ export class PgAgentPersistence implements AgentPersistence {
     this.store = store;
   }
 
+  recoveryDemand(_task: SimulationTask, orb: OrbRow, context: OperationContext) {
+    if (context.signal.aborted) return errAsync(failure("Agent recovery demand check cancelled"));
+    return this.db
+      .query(
+        `SELECT EXISTS (
+        SELECT 1 FROM durable_pg_tasks WHERE orb_id=$1
+          AND status IN ('pending','running','waiting','completing')
+      ) OR EXISTS (
+        SELECT 1 FROM durable_pg_submissions WHERE orb_id=$1 AND status IN ('queued','placed')
+      ) AS demand`,
+        [orb.id],
+      )
+      .mapErr(() => failure("Persisted agent demand unavailable"))
+      .map((result) => result.rows[0]?.demand === true);
+  }
+
   checkStartup(_task: SimulationTask, orb: OrbRow, context: OperationContext) {
     if (context.signal.aborted) return errAsync(failure("Agent startup check cancelled"));
     return this.db
