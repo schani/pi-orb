@@ -50,8 +50,12 @@ const packages = [
     package: "node_modules/@earendil-works/pi-codemode",
     version: "1.3.0",
     patch: "@earendil-works+pi-codemode+1.3.0.patch",
-    sha: "c365898bfca4c5d111a4739131fcd068c3727863690acc7f97d781310b13a66a",
+    sha: "ce5992310bf98e79f2c3242a76a80a008383a822a5a0447b354cda097480cfa1",
     files: {
+      "node_modules/@earendil-works/pi-codemode/dist/declarations.js": [
+        "00ab54f850a7412d029f8d9699fcb51b1346f3cb2c58e47b63f9189292ec260c",
+        "93ea4e2a077874b6b273b5091965d208e5e2aa7668cb6215e538cc811c6d266a",
+      ],
       "node_modules/@earendil-works/pi-codemode/dist/runtime/host.js": [
         "74715f56e02642913caf8247abd9cf0c559f9ed1a5e7be210e43c104e8e70da4",
         "e9e50ef986e1889e57b16529f2c3b849c61ddc6e8d0c67e3f672fa335e920076",

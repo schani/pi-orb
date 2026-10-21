@@ -222,7 +222,7 @@ export function codemodeTool(
             ...result,
             diagnostics: result.diagnostics.map((diagnostic) =>
               diagnostic.code === "invalid_arguments"
-                ? { ...diagnostic, message: `Invalid arguments for ${name}` }
+                ? { ...diagnostic, message: catalog.invalidArgumentsMessage(name, value) }
                 : diagnostic,
             ),
           }));

@@ -179,6 +179,23 @@ export class CallableCatalog {
   definitions(): readonly ToolRegistration[] {
     return [...this.entries.values()].filter((tool) => !this.hidden.has(tool.name));
   }
+  invalidArgumentsMessage(name: string, args: unknown): string {
+    const generic = `Invalid arguments for ${name}`;
+    const tool = this.hidden.has(name) ? undefined : this.entries.get(name);
+    if (!tool || typeof args !== "object" || args === null || Array.isArray(args)) return generic;
+    const required = "required" in tool.parameters ? tool.parameters.required : undefined;
+    if (!Array.isArray(required)) return generic;
+    const missing: string[] = [];
+    let length = 0;
+    for (const field of required) {
+      if (typeof field !== "string" || field.length > 64 || Object.hasOwn(args, field)) continue;
+      const quoted = JSON.stringify(field);
+      if (missing.length === 16 || length + quoted.length + 2 > 1024) break;
+      missing.push(quoted);
+      length += quoted.length + 2;
+    }
+    return missing.length ? `${generic}. Missing required fields: ${missing.join(", ")}` : generic;
+  }
   invoke(
     name: string,
     args: unknown,

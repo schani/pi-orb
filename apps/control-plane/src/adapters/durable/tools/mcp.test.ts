@@ -535,3 +535,87 @@ it("rejects raw MCP arguments before native coercion, hooks, authorization and c
     await mcp.close();
   }
 });
+
+it("discovers oversized MCP arguments and safely explains missing required fields", async () => {
+  let effects = 0;
+  const tools = createDurableTools({
+    mcp: [
+      {
+        name: "posthog",
+        connect: () => {
+          const { client, server } = createInMemoryTransportPair();
+          server.onMessage((message) => {
+            if (!("method" in message) || !("id" in message)) return;
+            const respond = (result: unknown) =>
+              server.send({ jsonrpc: "2.0", id: message.id, result });
+            if (message.method === "initialize")
+              void respond({
+                protocolVersion: "2025-11-25",
+                capabilities: { tools: {} },
+                serverInfo: { name: "fixture", version: "1" },
+              });
+            if (message.method === "tools/list")
+              void respond({
+                tools: [
+                  {
+                    name: "exec",
+                    inputSchema: {
+                      type: "object",
+                      properties: {
+                        command: { type: "string", description: "x".repeat(40_000) },
+                        context: { type: "string" },
+                        llm_model: { type: "string" },
+                        conversation_id: { type: "string" },
+                      },
+                      required: ["command", "context", "llm_model"],
+                    },
+                  },
+                ],
+              });
+            if (message.method === "tools/call") {
+              effects++;
+              void respond({ content: [{ type: "text", text: "ok" }] });
+            }
+          });
+          void server.start();
+          return okAsync(client);
+        },
+      },
+    ],
+  });
+  try {
+    expect((await tools.ready()).isOk()).toBe(true);
+    const fixture = await openCodemodeHarness(tools.catalog);
+    try {
+      const invalid = await fixture.run(
+        'try { await tools.mcp__posthog__exec({command:"secret-command-value"}); } catch(e) { text(e.message); }',
+      );
+      expect(invalid.isError).toBe(false);
+      expect(invalid.output).toContainEqual({
+        type: "text",
+        text: 'Invalid arguments for mcp__posthog__exec. Missing required fields: "context", "llm_model"',
+      });
+      expect(JSON.stringify(invalid.output)).not.toContain("secret-command-value");
+      expect(effects).toBe(0);
+      const declaration = await fixture.run('return await describeTool("mcp__posthog__exec");');
+      const rendered = JSON.stringify(declaration.output);
+      for (const field of [
+        "command: string",
+        "context: string",
+        "llm_model: string",
+        "conversation_id?: string",
+      ])
+        expect(rendered).toContain(field);
+      const valid = await fixture.run(
+        'const r = await tools.mcp__posthog__exec({command:"help",context:"diagnosing invocation",llm_model:"unknown"}); text(r.content[0].text);',
+      );
+      expect(valid.isError).toBe(false);
+      expect(valid.output).toContainEqual({ type: "text", text: "ok" });
+      expect(effects).toBe(1);
+    } finally {
+      await fixture.close();
+    }
+  } finally {
+    await tools.close();
+  }
+});

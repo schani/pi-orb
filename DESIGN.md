@@ -125,6 +125,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-21-posthog-exec-required-context.md](docs/postmortems/2026-10-21-posthog-exec-required-context.md) — live exec requires context/model fields; corrected help succeeds, historical cached schema unverified
 - [docs/postmortems/2026-10-19-observer-mint-floor.md](docs/postmortems/2026-10-19-observer-mint-floor.md) — operator credential refresh hits the mint floor; separate isolated observation passed
 - [docs/postmortems/2026-10-19-image-test-cpu-contention.md](docs/postmortems/2026-10-19-image-test-cpu-contention.md) — controlled CPU contention reproduces image deadlines; original attribution unresolved
 - [docs/postmortems/2026-10-16-codemode-worker-exit-liveness.md](docs/postmortems/2026-10-16-codemode-worker-exit-liveness.md) — terminating Worker unref strands required physical-exit drain; source correction, qualification pending

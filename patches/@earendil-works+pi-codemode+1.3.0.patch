@@ -77,3 +77,37 @@ diff --git a/node_modules/@earendil-works/pi-codemode/dist/types.d.ts b/node_mod
      /**
       * Synchronously reserves capacity immediately before creating each worker, after loading wasm.
       * Throw to deny admission without starting a worker. Return a release callback, called once if
+diff --git a/node_modules/@earendil-works/pi-codemode/dist/declarations.js b/node_modules/@earendil-works/pi-codemode/dist/declarations.js
+--- a/node_modules/@earendil-works/pi-codemode/dist/declarations.js
++++ b/node_modules/@earendil-works/pi-codemode/dist/declarations.js
+@@ -111,15 +111,18 @@
+  * type cannot express (`// @integer @minimum 1 @default 20`); `Array<T>` for arrays. Local references
+  * (`#/$defs/...`, `#/definitions/...`) resolve against `schema`; recursive and remote references
+  * render as `unknown`. A result longer than `maxChars` is rendered again without the constraint tags,
+- * and renders as `unknown` if it is still too long.
++ * then without descriptions, and renders as `unknown` if it is still too long.
+  */
+ export function schemaToType(schema, options = {}) {
+-    const render = (tags) => toType(schema, { root: schema, resolving: new Set(), expansions: 0, tags });
++    const render = (tags, descriptions = true) => toType(schema, { root: schema, resolving: new Set(), expansions: 0, tags, descriptions });
+     const type = render(true);
+     if (options.maxChars === undefined || type.length <= options.maxChars)
+         return type;
+     const untagged = render(false);
+-    return untagged.length <= options.maxChars ? untagged : "unknown";
++    if (untagged.length <= options.maxChars)
++        return untagged;
++    const uncommented = render(false, false);
++    return uncommented.length <= options.maxChars ? uncommented : "unknown";
+ }
+ function resolveRef(ref, root) {
+     if (ref !== "#" && !ref.startsWith("#/"))
+@@ -297,7 +300,7 @@
+     if (members.length === 0)
+         return "{}";
+     const comments = names.map((name) => {
+-        const lines = descriptionOf(properties[name])
++        const lines = (context.descriptions ? descriptionOf(properties[name]) : "")
+             .split(LINE_TERMINATORS)
+             .map((line) => line.trim())
+             .filter(Boolean);
