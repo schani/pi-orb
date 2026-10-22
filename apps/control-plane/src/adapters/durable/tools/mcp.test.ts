@@ -18,7 +18,6 @@ import {
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
 import { errAsync, okAsync } from "neverthrow";
 import { expect, it } from "vitest";
-import { refreshProcessMcpTool } from "../../../process-agent-composition.ts";
 import { projectHistory } from "../projection.ts";
 import { CallableCatalog } from "./catalog.ts";
 import { createDurableTools } from "./index.ts";
@@ -26,34 +25,29 @@ import { McpTools } from "./mcp.ts";
 import { openCodemodeHarness } from "./testkit/codemode.ts";
 
 it("projects authorization-required diagnostics into durable user-visible history", async () => {
-  const tools = createDurableTools();
-  await tools.ready();
+  const tools = createDurableTools({
+    mcp: [
+      {
+        name: "fixture",
+        unavailableState: () => "needs-auth",
+        connect: () => errAsync({ code: "forbidden", message: "secret" }),
+      },
+    ],
+  });
   const faux = fauxProvider();
   faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("codemode", { code: 'text("not authorized")' }), {
-      stopReason: "toolUse",
-    }),
+    fauxAssistantMessage(
+      fauxToolCall("codemode", { code: 'text(await tools.mcp_discover({server:"fixture"}));' }),
+      {
+        stopReason: "toolUse",
+      },
+    ),
     fauxAssistantMessage("done"),
   ]);
   const models = createModels();
   models.setProvider(faux.provider);
   const registry = createRegistry();
-  registry.install({
-    ...tools.extension,
-    tools: (tools.extension.tools ?? []).map((tool) =>
-      tool.name === "codemode"
-        ? refreshProcessMcpTool(tool, () =>
-            okAsync([
-              {
-                name: "fixture",
-                status: "needs-auth",
-                error: { code: "forbidden", message: "secret" },
-              },
-            ]),
-          )
-        : tool,
-    ),
-  });
+  registry.install(tools.extension);
   const harness = await Harness.open(new MemoryStorage(), { models, registry }, BACKGROUND_CONTEXT);
   try {
     const root = await harness.root(BACKGROUND_CONTEXT, {

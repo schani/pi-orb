@@ -313,10 +313,26 @@ text('DURABLE_SCRIPT_DONE');`;
           },
           {
             match: { userMessage: { regex: "^DURABLE_ACCEPTANCE$" } },
-            steps: [{ type: "toolCall", name: "codemode", arguments: { code: script } }, stop],
+            steps: [
+              codemode(`const statuses = JSON.parse(await tools.mcp_status({}));
+if (!statuses.some(server => server.name === 'fixture' && server.status === 'unprobed')) throw new Error('expected unprobed MCP server');
+text(await tools.mcp_discover({server:'fixture'})); text('DURABLE_DISCOVERED');`),
+              stop,
+            ],
+          },
+          {
+            match: { toolResultContains: { regex: "DURABLE_DISCOVERED" } },
+            steps: [codemode(script), stop],
           },
           {
             match: { userMessage: { regex: "^DURABLE_CHILD$" } },
+            steps: [
+              codemode("text(await tools.mcp_discover({})); text('DURABLE_CHILD_DISCOVERED');"),
+              stop,
+            ],
+          },
+          {
+            match: { toolResultContains: { regex: "DURABLE_CHILD_DISCOVERED" } },
             steps: [
               {
                 type: "toolCall",
@@ -572,6 +588,7 @@ text('NOTIFY_PARENT_HANDLED');`),
       await expectPage(
         page.getByRole("button", { name: "Change model", exact: true }),
       ).toContainText("Sol");
+      expect(calls).toEqual([]);
       await thinking.click();
       await page.getByRole("option", { name: "low", exact: true }).click();
       await expectPage(thinking).toHaveText("low");

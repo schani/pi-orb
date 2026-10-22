@@ -1,7 +1,13 @@
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
-import { MemoryStorage } from "@earendil-works/pi-durable";
+import {
+  fauxAssistantMessage,
+  fauxProvider,
+  fauxToolCall,
+} from "@earendil-works/pi-ai/providers/faux";
+import { Harness, MemoryStorage } from "@earendil-works/pi-durable";
+import { McpClient, StreamableHttpTransport } from "@earendil-works/pi-mcp";
 import { NoSimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it, vi } from "vitest";
@@ -11,12 +17,14 @@ import * as durableModels from "./adapters/durable/models.ts";
 import { RemoteExecutionEnv } from "./adapters/execution-client/env.ts";
 import * as brokerDomain from "./domain/broker.ts";
 import {
+  admitProcessAgentResources,
   closeProcessAgentResources,
-  discoverProcessTools,
+  mcpFetchSignal,
   processAgentContext,
   processAgentSystemContext,
+  processMcpDiscoveryDiagnostics,
   createProcessAgentContext as productionCreateProcessAgentContext,
-  refreshProcessMcpTool,
+  refreshProcessTools,
   scopedMcpAuth,
   scopedMcpHeaders,
 } from "./process-agent-composition.ts";
@@ -57,7 +65,55 @@ function createProcessAgentContext(
 }
 
 describe("process agent composition", () => {
-  it("uses fresh SDK auth admission after the opening operation is cancelled", async () => {
+  it("retains discovery phase evidence only for failed startup attempts", () => {
+    const task = new NoSimulationTask("discovery-diagnostics", false);
+    const clock = vi.spyOn(task, "monotonicNow").mockReturnValue(150);
+    const log = vi.spyOn(task, "log").mockImplementation(() => {});
+    const diagnostics = processMcpDiscoveryDiagnostics(task, "orb", 7, 100);
+    const started = {
+      attempt: 1,
+      server: "fixture",
+      serverOrdinal: 1,
+      serverTotal: 2,
+      phase: "initialize" as const,
+      outcome: "started" as const,
+      elapsedMs: 0,
+      discoveryElapsedMs: 0,
+      aborted: false,
+    };
+    try {
+      diagnostics.record(started);
+      expect(log).not.toHaveBeenCalled();
+      clock.mockReturnValue(170);
+      diagnostics.record({
+        ...started,
+        outcome: "aborted",
+        elapsedMs: 20,
+        discoveryElapsedMs: 20,
+        aborted: true,
+      });
+      expect(log).toHaveBeenCalledTimes(2);
+      expect(log.mock.calls[0]?.[0]).toContain("composition_elapsed_ms=50");
+      expect(log.mock.calls[1]?.[0]).toContain("outcome=aborted");
+      expect(log.mock.calls[1]?.[0]).toContain("composition_elapsed_ms=70");
+      expect(log.mock.calls[1]?.[0]).toContain("phase_elapsed_ms=20");
+      expect(log.mock.calls[1]?.[0]).toContain("discovery_elapsed_ms=20");
+      diagnostics.finish?.(1);
+      diagnostics.record(started);
+      expect(log).toHaveBeenCalledTimes(2);
+      diagnostics.record({ ...started, outcome: "failed", errorCategory: "unavailable" });
+      expect(log).toHaveBeenCalledTimes(4);
+      const healthy = processMcpDiscoveryDiagnostics(task, "orb", 7, 100);
+      healthy.record(started);
+      healthy.record({ ...started, outcome: "completed" });
+      healthy.finish?.(1);
+      expect(log).toHaveBeenCalledTimes(4);
+    } finally {
+      log.mockRestore();
+      clock.mockRestore();
+    }
+  });
+  it("opens without MCP network and uses fresh SDK auth admission after opening cancellation", async () => {
     const harness = makeHarness();
     const orb = makeOrbRow("central", "project", "starting", {
       hostRef: "executor",
@@ -81,13 +137,20 @@ describe("process agent composition", () => {
     const models = vi
       .spyOn(durableModels, "createDurableModels")
       .mockReturnValue(okAsync({ getModel: () => undefined } as never));
+    const fetcher = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new Error("MCP must not connect during startup"));
     try {
       const open = createProcessAgentContext(harness.deps, {
-        mcp: { read: () => okAsync({ servers: [] }) },
+        mcp: {
+          read: () =>
+            okAsync({ servers: [{ name: "hung", url: "https://mcp.invalid", headers: {} }] }),
+        },
         brokerForUser,
       } as never);
       const result = await open(task, orb, { signal: opening.signal });
       expect(result.isOk()).toBe(true);
+      expect(fetcher).not.toHaveBeenCalled();
       expect(result._unsafeUnwrap().initialSettings).toEqual({
         model: { provider: "openai-codex", id: "gpt-6-astra" },
         thinkingLevel: "high",
@@ -108,6 +171,7 @@ describe("process agent composition", () => {
       clock.mockRestore();
       token.mockRestore();
       models.mockRestore();
+      fetcher.mockRestore();
     }
   });
   it("opens CP models and tools while execution readiness is held", async () => {
@@ -318,6 +382,313 @@ describe("process agent composition", () => {
     expect(result.value.commitHistory).toBeUndefined();
   });
 
+  it("honors both caller cancellation and the SDK cleanup timeout", async () => {
+    const caller = new AbortController();
+    const request = new AbortController();
+    const joined = mcpFetchSignal(caller.signal, request.signal);
+    request.abort();
+    expect(joined?.aborted).toBe(true);
+    const otherRequest = new AbortController();
+    const other = mcpFetchSignal(caller.signal, otherRequest.signal);
+    caller.abort();
+    expect(other?.aborted).toBe(true);
+    const opening = new AbortController();
+    const client = new McpClient({ name: "test", version: "1" });
+    let deleteSignal: AbortSignal | null | undefined;
+    let entered!: () => void;
+    const deleting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const transport = new StreamableHttpTransport({
+      url: "https://mcp.invalid",
+      fetch: async (_input, init) => {
+        if (init?.method === "DELETE") {
+          deleteSignal = mcpFetchSignal(opening.signal, init.signal);
+          entered();
+          await new Promise<void>((resolve) =>
+            deleteSignal?.addEventListener("abort", () => resolve(), { once: true }),
+          );
+          return new Response(null, { status: 204 });
+        }
+        const message = JSON.parse(String(init?.body));
+        return message.method === "initialize"
+          ? new Response(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: message.id,
+                result: {
+                  protocolVersion: "2025-11-25",
+                  capabilities: {},
+                  serverInfo: { name: "fixture", version: "1" },
+                },
+              }),
+              { headers: { "Content-Type": "application/json", "Mcp-Session-Id": "session" } },
+            )
+          : new Response(null, { status: 202 });
+      },
+    });
+    await client.connect(transport);
+    const closed = client.close();
+    await deleting;
+    expect(deleteSignal?.aborted).toBe(false);
+    // Node's AbortSignal.timeout uses platform timers, not Vitest's fake clock.
+    await closed;
+    expect(deleteSignal?.aborted).toBe(true);
+    expect(opening.signal.aborted).toBe(false);
+  });
+
+  it.each(["http", "network", "credential"] as const)(
+    "records sanitized %s failure at the MCP adapter boundary",
+    async (failure) => {
+      const h = makeHarness();
+      const orb = makeOrbRow("central", "project", "starting");
+      h.store.seedProject(makeProjectRow("project"));
+      h.store.seedOrb(orb);
+      const task = new NoSimulationTask("mcp-failure", false);
+      const log = vi.spyOn(task, "log").mockImplementation(() => {});
+      const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        if (failure === "network") throw new Error("SECRET URL TOKEN");
+        return new Response(null, { status: 503 });
+      });
+      const models = vi
+        .spyOn(durableModels, "createDurableModels")
+        .mockReturnValue(okAsync({ getModel: () => undefined } as never));
+      try {
+        const open = createProcessAgentContext(h.deps, {
+          mcp: {
+            read: () =>
+              okAsync({
+                servers: [
+                  {
+                    name: "fixture",
+                    url: "https://mcp.invalid",
+                    headers: {},
+                    ...(failure === "credential" ? { oauth: { id: "auth" } } : {}),
+                  },
+                ],
+              }),
+          },
+          mcpOAuth: { token: async () => err({ type: "mcp_oauth_error", code: "auth_required" }) },
+        } as never);
+        const result = await open(task, orb, { signal: new AbortController().signal });
+        expect(result.isOk()).toBe(true);
+        expect(fetcher).not.toHaveBeenCalled();
+        if (result.isErr()) return;
+        const discover = result.value.registry
+          .snapshot()
+          .tools()
+          .find(({ tool }) => tool.name === "mcp_discover")?.tool;
+        expect(discover).toBeDefined();
+        const output = await discover?.execute(
+          { server: "fixture" },
+          { diagnostic: () => {} } as never,
+          BACKGROUND_CONTEXT,
+        );
+        expect(JSON.stringify(output)).toContain(
+          failure === "credential" ? "needs-auth" : "unavailable",
+        );
+        const lines = log.mock.calls.map(([line]) => line).join("\n");
+        expect(lines).toContain(
+          `errorCategory=${failure === "credential" ? "auth_required" : failure}`,
+        );
+        if (failure === "http") expect(lines).toContain("http_status=503");
+        expect(lines).not.toContain("SECRET");
+        expect(lines).not.toContain("https://");
+        await result.value.closeResources?.();
+      } finally {
+        log.mockRestore();
+        fetcher.mockRestore();
+        models.mockRestore();
+      }
+    },
+  );
+
+  it("keeps recovered authorization challenges and unsupported cleanup silent", async () => {
+    const h = makeHarness();
+    const orb = makeOrbRow("central", "project", "starting");
+    h.store.seedProject(makeProjectRow("project"));
+    h.store.seedOrb(orb);
+    const task = new NoSimulationTask("mcp-healthy", false);
+    const log = vi.spyOn(task, "log").mockImplementation(() => {});
+    let initializes = 0;
+    let deletes = 0;
+    const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      if (init?.method === "DELETE") {
+        deletes++;
+        return new Response(null, { status: 405 });
+      }
+      if (init?.method === "GET") return new Response(null, { status: 405 });
+      const message = JSON.parse(String(init?.body));
+      if (message.method !== "initialize") return new Response(null, { status: 202 });
+      if (++initializes === 1) return new Response(null, { status: 401 });
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            protocolVersion: "2025-11-25",
+            capabilities: {},
+            serverInfo: { name: "fixture", version: "1" },
+          },
+        }),
+        { headers: { "Content-Type": "application/json", "Mcp-Session-Id": "session" } },
+      );
+    });
+    const models = vi
+      .spyOn(durableModels, "createDurableModels")
+      .mockReturnValue(okAsync({ getModel: () => undefined } as never));
+    try {
+      const open = createProcessAgentContext(h.deps, {
+        mcp: {
+          read: () =>
+            okAsync({
+              servers: [
+                { name: "fixture", url: "https://mcp.invalid", headers: {}, oauth: { id: "auth" } },
+              ],
+            }),
+        },
+        mcpOAuth: {
+          token: async () => ok({ accessToken: "token", generation: 1, expiresAt: 9999999999999 }),
+        },
+      } as never);
+      const result = await open(task, orb, { signal: new AbortController().signal });
+      expect(result.isOk()).toBe(true);
+      if (result.isErr()) return;
+      const discover = result.value.registry
+        .snapshot()
+        .tools()
+        .find(({ tool }) => tool.name === "mcp_discover")?.tool;
+      const output = await discover?.execute(
+        { server: "fixture" },
+        { diagnostic: () => {} } as never,
+        BACKGROUND_CONTEXT,
+      );
+      expect(JSON.stringify(output)).toContain("available");
+      expect(initializes).toBe(2);
+      expect(deletes).toBe(1);
+      expect(log.mock.calls.map(([line]) => line).join("\n")).not.toContain("durable.mcp_");
+      await result.value.closeResources?.();
+    } finally {
+      models.mockRestore();
+      fetcher.mockRestore();
+      log.mockRestore();
+    }
+  });
+
+  it("installs explicitly discovered tools for subsequent root and child scripts", async () => {
+    const h = makeHarness();
+    const orb = makeOrbRow("central", "project", "starting");
+    h.store.seedProject(makeProjectRow("project"));
+    h.store.seedOrb(orb);
+    const faux = fauxProvider();
+    const models = createModels();
+    models.setProvider(faux.provider);
+    const modelFactory = vi
+      .spyOn(durableModels, "createDurableModels")
+      .mockReturnValue(okAsync(models as never));
+    const methods: string[] = [];
+    const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      const message = JSON.parse(String(init?.body));
+      methods.push(message.method);
+      if (message.method === "notifications/initialized")
+        return new Response(null, { status: 202 });
+      const result =
+        message.method === "initialize"
+          ? {
+              protocolVersion: "2025-11-25",
+              capabilities: { tools: {} },
+              serverInfo: { name: "fixture", version: "1" },
+            }
+          : message.method === "tools/list"
+            ? { tools: [{ name: "ping", inputSchema: { type: "object" } }] }
+            : { content: [{ type: "text", text: "pong" }] };
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    let harness: Harness | undefined;
+    let options: Awaited<ReturnType<ReturnType<typeof createProcessAgentContext>>> | undefined;
+    try {
+      const open = createProcessAgentContext(h.deps, {
+        mcp: {
+          read: () =>
+            okAsync({
+              servers: ["root", "child"].map((name) => ({
+                name,
+                url: "https://mcp.invalid",
+                headers: {},
+              })),
+            }),
+        },
+      } as never);
+      options = await open(new NoSimulationTask("mcp-registration", false), orb, {
+        signal: new AbortController().signal,
+      });
+      expect(options.isOk()).toBe(true);
+      if (options.isErr()) return;
+      const config = options.value;
+      const childExtension = config.childExtension;
+      expect(childExtension).toBeDefined();
+      if (!childExtension) return;
+      harness = await Harness.open(
+        new MemoryStorage(),
+        { models, registry: config.registry },
+        BACKGROUND_CONTEXT,
+      );
+      config.bindNativeConversation?.(harness.conversation.bind(harness));
+      const root = await harness.root(BACKGROUND_CONTEXT, {
+        agent: {
+          model: { provider: "faux", modelId: "faux-1" },
+          modelTools: config.modelTools ?? [],
+          extensions: { remove: [childExtension] },
+        },
+      });
+      const child = await harness.createConversation(
+        {
+          ownership: { kind: "ownerless" },
+          agent: {
+            model: { provider: "faux", modelId: "faux-1" },
+            tools: childExtension.tools ?? [],
+            modelTools: config.modelTools ?? [],
+            extensions: {
+              remove: config.registry
+                .snapshot()
+                .installed()
+                .filter((extension) => extension.name !== childExtension.name),
+            },
+          },
+        },
+        BACKGROUND_CONTEXT,
+      );
+      harness.resume();
+      for (const [conversation, server] of [
+        [root, "root"],
+        [child, "child"],
+      ] as const) {
+        for (const code of [
+          `text(await tools.mcp_discover({server:${JSON.stringify(server)}}));`,
+          `text(await describeTool("mcp__${server}__ping")); text(await tools.mcp__${server}__ping({}));`,
+        ]) {
+          faux.setResponses([
+            fauxAssistantMessage(fauxToolCall("codemode", { code }), { stopReason: "toolUse" }),
+            fauxAssistantMessage("done"),
+          ]);
+          await (
+            await conversation.submit({ type: "input", content: "run" }, BACKGROUND_CONTEXT)
+          ).wait(BACKGROUND_CONTEXT);
+        }
+        const entries = await conversation.entries({}, 100, undefined, BACKGROUND_CONTEXT);
+        expect(JSON.stringify(entries.items)).toContain("pong");
+      }
+      expect(methods.filter((method) => method === "tools/call")).toHaveLength(2);
+    } finally {
+      await harness?.close(BACKGROUND_CONTEXT);
+      if (options?.isOk()) await options.value.closeResources?.();
+      modelFactory.mockRestore();
+      fetcher.mockRestore();
+    }
+  });
+
   it("resolves literal and scoped static MCP headers without missing-secret fallback", () => {
     const server = {
       headers: {
@@ -346,57 +717,29 @@ describe("process agent composition", () => {
     expect(result.isErr()).toBe(true);
   });
 
-  it("persists sanitized MCP status edges in code-mode tool diagnostics before execution", async () => {
-    const diagnostics: unknown[] = [];
-    const order: string[] = [];
-    const original = {
+  it("refreshes the local native view without MCP discovery before code execution", async () => {
+    const execute = vi.fn(async () => ({ output: [{ type: "text" as const, text: "local" }] }));
+    const tool = refreshProcessTools({
       name: "codemode",
       description: "code",
-      parameters: {},
-      execute: async () => {
-        order.push("execute");
-        return {};
-      },
-    };
-    const tool = refreshProcessMcpTool(original as never, () => {
-      order.push("discover");
-      return okAsync([
-        { name: "fixture", status: "needs-auth", error: { code: "forbidden", message: "secret" } },
-      ] as const);
+      parameters: Type.Object({}),
+      execute,
     });
-    const api = { diagnostic: (value: unknown) => diagnostics.push(value) };
-    await tool.execute({}, api as never, BACKGROUND_CONTEXT);
-    await tool.execute({}, api as never, BACKGROUND_CONTEXT);
-    expect(order).toEqual(["discover", "execute", "discover", "execute"]);
-    expect(diagnostics).toEqual([
-      { severity: "info", code: "mcp_status", message: "MCP fixture: needs-auth." },
-    ]);
-  });
-
-  it("returns visible native output without executing code when MCP discovery fails", async () => {
-    const execute = vi.fn(async () => ({}));
-    const tool = refreshProcessMcpTool(
-      { name: "codemode", description: "code", parameters: Type.Object({}), execute },
-      () => errAsync({ code: "unavailable", message: "PRIVATE-DISCOVERY-FAILURE" }),
-    );
-    const result = await tool.execute({}, {} as never, BACKGROUND_CONTEXT);
-    expect(result).toEqual({
-      isError: true,
-      output: [{ type: "text", text: "MCP discovery cancelled or unavailable" }],
+    expect(await tool.execute({}, {} as never, BACKGROUND_CONTEXT)).toEqual({
+      output: [{ type: "text", text: "local" }],
     });
-    expect(execute).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledOnce();
   });
 
   it("does not execute code when the native MCP view cannot refresh", async () => {
     const execute = vi.fn(async () => ({}));
-    const tool = refreshProcessMcpTool(
+    const tool = refreshProcessTools(
       { name: "codemode", description: "code", parameters: Type.Object({}), execute },
-      () => okAsync([]),
       () => errAsync({ code: "unavailable", message: "PRIVATE-NATIVE-REFRESH-FAILURE" }),
     );
     expect(await tool.execute({}, {} as never, BACKGROUND_CONTEXT)).toEqual({
       isError: true,
-      output: [{ type: "text", text: "MCP discovery cancelled or unavailable" }],
+      output: [{ type: "text", text: "Tool catalog unavailable" }],
     });
     expect(execute).not.toHaveBeenCalled();
   });
@@ -434,16 +777,15 @@ describe("process agent composition", () => {
     expect(reasons).toEqual([{ reason: "startup" }, { reason: "rejected", staleGeneration: 1 }]);
   });
 
-  it("rejects discovery aborted before registry installation and cleans both resources", async () => {
+  it("rejects admission aborted before registry installation and cleans both resources", async () => {
     const controller = new AbortController();
     let release: (() => void) | undefined;
     const admission = new Promise<void>((resolve) => {
       release = resolve;
     });
     const cleaned: string[] = [];
-    const discovery = discoverProcessTools(
+    const discovery = admitProcessAgentResources(
       {
-        ready: () => ResultAsync.fromSafePromise(admission).map(() => []),
         close: () => {
           cleaned.push("tools");
           return okAsync(undefined);
@@ -455,6 +797,7 @@ describe("process agent composition", () => {
         },
       },
       withAbortSignal(controller.signal, BACKGROUND_CONTEXT),
+      () => ResultAsync.fromSafePromise(admission),
     );
     controller.abort();
     release?.();
@@ -464,11 +807,10 @@ describe("process agent composition", () => {
     expect(cleaned).toEqual(["tools", "env"]);
   });
 
-  it("rejects revoked admission after successful discovery and cleans both resources", async () => {
+  it("rejects revoked admission before registry installation and cleans both resources", async () => {
     const cleaned: string[] = [];
-    const result = await discoverProcessTools(
+    const result = await admitProcessAgentResources(
       {
-        ready: () => okAsync([]),
         close: () => {
           cleaned.push("tools");
           return okAsync(undefined);
@@ -481,27 +823,6 @@ describe("process agent composition", () => {
       },
       BACKGROUND_CONTEXT,
       () => errAsync(durableError("owner changed")),
-    );
-    expect(result.isErr()).toBe(true);
-    expect(cleaned).toEqual(["tools", "env"]);
-  });
-
-  it("rejects tool discovery errors rather than installing an empty registry", async () => {
-    const cleaned: string[] = [];
-    const result = await discoverProcessTools(
-      {
-        ready: () => errAsync({ code: "unavailable" as const, message: "discovery failed" }),
-        close: () => {
-          cleaned.push("tools");
-          return okAsync(undefined);
-        },
-      },
-      {
-        cleanup: async () => {
-          cleaned.push("env");
-        },
-      },
-      BACKGROUND_CONTEXT,
     );
     expect(result.isErr()).toBe(true);
     expect(cleaned).toEqual(["tools", "env"]);

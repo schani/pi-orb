@@ -7,6 +7,7 @@ import type {
   CredentialPointerRow,
   CredentialPointerWrite,
   CredentialSecretStore,
+  OperationContext,
   StoredCredential,
   StoredSecret,
   UpstreamRefresher,
@@ -337,6 +338,7 @@ export class McpOAuth {
     task: SimulationTask,
     binding: McpOAuthBinding,
     request: TokenRequest,
+    context?: OperationContext & { readonly deadlineAt?: number },
   ): Promise<Result<TokenGrant, McpOAuthError>> {
     const storeError = (): StoreError => ({
       type: "store_error" as const,
@@ -434,6 +436,15 @@ export class McpOAuth {
       },
       binding.id,
       request,
+      context
+        ? {
+            ...context,
+            deadlineAt: Math.min(
+              context.deadlineAt ?? Number.POSITIVE_INFINITY,
+              task.monotonicNow() + DEFAULT_BROKER_CONSTANTS.requestDeadlineMs,
+            ),
+          }
+        : undefined,
     );
     return result.mapErr((e) =>
       oauthError(e.type === "auth_required" ? "auth_required" : "unavailable"),

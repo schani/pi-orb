@@ -56,6 +56,8 @@ Before first using tools in a namespace, emit and read `await describeNamespace(
 
 Namespace `orb`: discover with `text(await describeNamespace("orb"));`. Use archive/delete only on explicit user request. Stop/sleep revokes execution admission; a connected browser does not override Stop.
 
+MCP servers start `unprobed`. `text(await tools.mcp_status({}));` lists cached status without connecting. Before using a server, run `text(await tools.mcp_discover({server:"github"}));`, then use its discovered tools in a **new script**. Omit `server` to discover all sequentially; select one to avoid waiting for another server. Retry unavailable/needs-auth servers explicitly after fixing connectivity or consent. Reopened contexts require rediscovery; a historical completed discovery receipt does not restore the live catalog.
+
 Namespace `mcp`: discover with `text(await describeNamespace("mcp"));`. Use server names from MCP namespaces; list resources/templates before reading unfamiliar URIs.
 
 Invalid identifier characters become `_`: `mcp__dev-radius__search` is `tools.mcp__dev_radius__search`. Namespace membership does not change the callable name: an Orb call uses `tools.orb_self({})`, not `orb.self()`. Every tool takes one argument object. Arguments and replies cross a JSON boundary; do not pass functions or cyclic objects. Nested `codemode` is not callable.

@@ -90,6 +90,7 @@ export function codemodeTool(
         execution: { conversationId: String(api.conversationId), callId: api.callId },
       });
       const previews = new Map<number, { args: string; argumentKeys: string[] }>();
+      const reportedMcpStatuses = new Set<string>();
       const paths = new Map<string, string>();
       const directory = `/orb-artifacts/codemode-${api.taskId}`;
       let charts: ChartSpec[] = [];
@@ -210,7 +211,7 @@ export function codemodeTool(
       const decorated: ToolExecutionApi = {
         ...api,
         env,
-        executeTool: (name, value, ctx, callOptions) => {
+        executeTool: async (name, value, ctx, callOptions) => {
           const id = Number(callOptions?.key?.slice(1));
           if (Number.isSafeInteger(id))
             previews.set(id, {
@@ -218,14 +219,49 @@ export function codemodeTool(
               argumentKeys:
                 object(value) || Array.isArray(value) ? Object.keys(value).slice(0, 16) : [],
             });
-          return api.executeTool(name, value, ctx, callOptions).then((result) => ({
-            ...result,
-            diagnostics: result.diagnostics.map((diagnostic) =>
-              diagnostic.code === "invalid_arguments"
-                ? { ...diagnostic, message: catalog.invalidArgumentsMessage(name, value) }
-                : diagnostic,
-            ),
-          }));
+          const forward = (
+            diagnostics: readonly {
+              code?: string;
+              severity: "info" | "warn" | "error";
+              message: string;
+            }[],
+          ) => {
+            for (const diagnostic of diagnostics)
+              if (
+                diagnostic.code === "mcp_status" &&
+                !reportedMcpStatuses.has(diagnostic.message)
+              ) {
+                reportedMcpStatuses.add(diagnostic.message);
+                api.diagnostic(diagnostic);
+              }
+          };
+          const watch =
+            name === "mcp_discover"
+              ? await api.watchDoc(LiveDoc, api.conversationId, ctx)
+              : undefined;
+          watch?.start(async (live) => {
+            for (const slot of live?.nestedTools ?? [])
+              if (slot.parentTaskId === api.taskId) forward(slot.diagnostics ?? []);
+          });
+          try {
+            const result = await api.executeTool(name, value, ctx, callOptions);
+            forward(result.diagnostics);
+            return {
+              ...result,
+              diagnostics: result.diagnostics.map((diagnostic) =>
+                diagnostic.code === "invalid_arguments"
+                  ? { ...diagnostic, message: catalog.invalidArgumentsMessage(name, value) }
+                  : diagnostic.code === "tool_unavailable" && name.startsWith("mcp__")
+                    ? {
+                        ...diagnostic,
+                        message: "MCP tools unavailable; call mcp_discover again in a new script.",
+                      }
+                    : diagnostic,
+              ),
+            };
+          } finally {
+            await watch?.stop();
+          }
         },
         commit: (change, ctx) =>
           api.commit(async (tx) => {

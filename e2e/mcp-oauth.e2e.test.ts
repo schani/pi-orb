@@ -18,6 +18,7 @@ import {
   startControlPlane,
   waitFor,
 } from "./harness.ts";
+import { committedToolOutput } from "./testkit/durable-wait-barriers.ts";
 import { hasCommittedMcpStatus } from "./testkit/mcp-status-detail.ts";
 
 const it = baseIt.skipIf(process.platform !== "linux");
@@ -51,6 +52,7 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
   let grant = 0;
   let refreshes = 0;
   let acceptedCalls = 0;
+  let mcpRequests = 0;
   let rejectAccess = false;
   let rejectRefresh = false;
   const codes = new Map<string, { challenge: string; redirect: string }>();
@@ -138,6 +140,7 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
         res.writeHead(405).end();
         return;
       }
+      mcpRequests++;
       if (rejectAccess || req.headers.authorization !== `Bearer fixture-access-${grant}`) {
         res.writeHead(401).end();
         return;
@@ -175,7 +178,23 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
             {
               type: "toolCall" as const,
               name: "codemode",
-              arguments: { code: "text(await tools.mcp__fixture__read({}))" },
+              arguments: {
+                code: `${index === 7 || index === 1 ? "const statuses = JSON.parse(await tools.mcp_status({})); if (!statuses.some(server => server.name === 'fixture' && server.status === 'unprobed')) throw new Error('expected unprobed MCP server');" : ""}
+text(await tools.mcp_discover({server:'fixture'})); text('OAUTH_DISCOVERED_${index}');`,
+              },
+            },
+            { type: "stop" as const, status: "completed" as const },
+          ],
+        },
+        {
+          match: { toolResultContains: { regex: `OAUTH_DISCOVERED_${index}` } },
+          steps: [
+            {
+              type: "toolCall" as const,
+              name: "codemode",
+              arguments: {
+                code: "const statuses = JSON.parse(await tools.mcp_status({})); if (statuses.some(server => server.name === 'fixture' && server.status === 'available')) text(await tools.mcp__fixture__read({})); else text('OAUTH_UNAVAILABLE');",
+              },
             },
             { type: "stop" as const, status: "completed" as const },
           ],
@@ -293,7 +312,7 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
           status: number;
         }[];
         return history.includes(`OAUTH_DONE_${index}`) &&
-          requests.some((r) => r.matchedRuleIndex === (index + 1) * 3 + 2 && r.status === 200)
+          requests.some((r) => r.matchedRuleIndex === (index + 1) * 4 + 3 && r.status === 200)
           ? true
           : null;
       },
@@ -376,6 +395,7 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
         expect(initial.status).toBe("ready");
         expect(initial.sessionId).toBeTruthy();
         expect(initial.runtimeInstanceId).toBeTruthy();
+        expect(mcpRequests).toBe(0);
         expect(
           (
             await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${randomUUID()}`, {
@@ -428,14 +448,11 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
         await waitFor(
           "connected recovery history",
           async () => {
-            const history = (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`))
-              .body as unknown as DisplayHistoryView;
-            const detail = await hasCommittedMcpStatus(history, "connected", (path) =>
-              api(cp.baseUrl, "GET", path),
-            );
-            if (detail.isErr() && detail.error.type !== "detail_missing")
-              throw new FatalProbeError(`MCP detail ${detail.error.type} (${detail.error.status})`);
-            return detail.isOk() && detail.value ? true : null;
+            const history = await readReplicatedHistorySnapshot(cp, orb);
+            return committedToolOutput(history.records, '"status":"available"') &&
+              committedToolOutput(history.records, "OAUTH_READ_OK")
+              ? true
+              : null;
           },
           { timeoutMs: 60_000 },
         );

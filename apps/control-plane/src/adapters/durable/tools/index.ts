@@ -8,7 +8,12 @@ import { ResultAsync } from "neverthrow";
 import { type AuthorizeTool, CallableCatalog, type ToolError } from "./catalog.ts";
 import { codemodeExtension } from "./codemode.ts";
 import type { AgentToolFiles } from "./files.ts";
-import { type McpEndpoint, McpTools } from "./mcp.ts";
+import {
+  type McpDiscoveryDiagnostics,
+  type McpEndpoint,
+  type McpServerStatus,
+  McpTools,
+} from "./mcp.ts";
 
 export type { AgentToolFiles } from "./files.ts";
 
@@ -27,6 +32,7 @@ export { ChildAnchor, ChildReceipts, subagentTools } from "./subagents.ts";
 export interface DurableToolsOptions {
   authorize?: AuthorizeTool;
   mcp?: readonly McpEndpoint[];
+  mcpDiscovery?: McpDiscoveryDiagnostics;
   additionalTools?: readonly ToolRegistration[];
   files?: AgentToolFiles;
   orb?: { id: string; task: SimulationTask };
@@ -45,6 +51,7 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
     "write",
     "edit",
     "mcp_status",
+    "mcp_discover",
     ...subagentTools.map((tool) => tool.name),
     "orb_self",
     "orb_list",
@@ -93,7 +100,7 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
   });
   const catalog = all.without(["notify_parent"]);
   const running = new Set<CodemodeSandbox>();
-  const mcp = new McpTools(options.mcp ?? [], catalog);
+  const mcp = new McpTools(options.mcp ?? [], catalog, options.mcpDiscovery);
   catalog.add(mcp.statusTool());
   const child = all.without([...subagentTools.map((tool) => tool.name), "orb_spawn", "orb_alert"]);
   const extensions = () => {
@@ -115,17 +122,21 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
       modelTools: [code] as const,
     };
   };
+  const ready = (
+    context: Context = BACKGROUND_CONTEXT,
+    server?: string,
+    observed?: (status: McpServerStatus) => void,
+  ): ResultAsync<readonly McpServerStatus[], ToolError> =>
+    ResultAsync.fromSafePromise(mcp.discover(context, server, observed)).andThen((result) => {
+      Object.assign(bundle, extensions());
+      return result;
+    });
+  catalog.add(mcp.discoveryTool(ready));
   const bundle = {
     ...extensions(),
     catalog,
     mcpStatus: () => mcp.status(),
-    ready: (context: Context = BACKGROUND_CONTEXT) =>
-      ResultAsync.fromSafePromise(mcp.discover(context))
-        .andThen((result) => result)
-        .map((statuses) => {
-          Object.assign(bundle, extensions());
-          return statuses;
-        }),
+    ready,
     close: (): ResultAsync<void, ToolError> =>
       ResultAsync.fromPromise(
         Promise.all([...running].map((s) => s.close())).then(() => undefined),
