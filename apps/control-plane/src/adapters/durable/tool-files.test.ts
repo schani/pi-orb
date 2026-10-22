@@ -12,10 +12,6 @@ function fixture() {
   let offline = true;
   let admitted = true;
   const reader = new SnapshotResourceReader({
-    orbId: "orb",
-    commitSha: "a".repeat(40),
-    instructionPath: null,
-    skillRoot: null,
     files: [
       { path: "AGENTS.md", bytes: Buffer.from("one\ntwo\nthree"), sha256: "" },
       { path: "/opt/pi-orb/skills/skill/SKILL.md", bytes: Buffer.from("platform"), sha256: "" },
@@ -103,10 +99,6 @@ describe("scoped agent files", () => {
     let admitted = true;
     const files = createAgentToolFiles({
       reader: new SnapshotResourceReader({
-        orbId: "o",
-        commitSha: "a".repeat(40),
-        instructionPath: null,
-        skillRoot: null,
         files: [],
       }),
       allowSnapshotRead: () => true,

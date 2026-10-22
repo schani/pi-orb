@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { DisplayHistoryView, OrbView, UsageView } from "@pi-orb/protocol";
+import { Readable } from "node:stream";
+import type { DisplayHistoryView, OrbView, ProjectView, UsageView } from "@pi-orb/protocol";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Connect, ViteDevServer } from "vite";
@@ -26,19 +27,34 @@ function fixture({ timestampChurn = false, orbNesting = false } = {}) {
       },
     } as unknown as ViteDevServer,
   );
-  return async <T>(path: string): Promise<T> =>
+  return async <T>(
+    path: string,
+    {
+      method = "GET",
+      payload,
+      status = 200,
+    }: {
+      method?: string;
+      payload?: unknown;
+      status?: number;
+    } = {},
+  ): Promise<T> =>
     new Promise((resolve) => {
       const response = {
         statusCode: 0,
         setHeader() {},
         end(body: string) {
-          expect(response.statusCode).toBe(200);
+          expect(response.statusCode).toBe(status);
           resolve(JSON.parse(body) as T);
         },
       };
       if (middleware === undefined) return expect.fail("missing fixture middleware");
       middleware(
-        { method: "GET", url: path, headers: {} } as IncomingMessage,
+        Object.assign(Readable.from(payload === undefined ? [] : [JSON.stringify(payload)]), {
+          method,
+          url: path,
+          headers: {},
+        }) as IncomingMessage,
         response as unknown as ServerResponse,
         () => expect.fail("fixture request was not handled"),
       );
@@ -199,4 +215,24 @@ it("binds named usage rankings to seeded orb metadata and retains one deleted or
   const missing = usage.orbs.filter((row) => row.name === null);
   expect(missing).toHaveLength(1);
   expect(items.some((orb) => orb.id === missing[0]?.id)).toBe(false);
+});
+
+it("creates and edits a name-only project in the mock", async () => {
+  const request = fixture();
+  const created = await request<ProjectView>("/api/v1/projects", {
+    method: "POST",
+    payload: { id: "name-only", name: "Notebook" },
+    status: 201,
+  });
+  expect(created.repositoryUrl).toBeNull();
+  const attached = await request<ProjectView>("/api/v1/projects/name-only", {
+    method: "PATCH",
+    payload: { name: "Notebook", repositoryUrl: "o/r" },
+  });
+  expect(attached.repositoryUrl).toBe("https://github.com/o/r");
+  const cleared = await request<ProjectView>("/api/v1/projects/name-only", {
+    method: "PATCH",
+    payload: { name: "Edited", repositoryUrl: "  " },
+  });
+  expect(cleared).toMatchObject({ name: "Edited", repositoryUrl: null });
 });

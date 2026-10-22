@@ -155,7 +155,7 @@ const NativeStateSchema = Type.Object({
 
 export interface ClaudeOrbAgentOptions {
   readonly orbId: string;
-  readonly repositoryUrl: string;
+  readonly repositoryUrl: string | null;
   readonly workDir: string;
   readonly skillsDir: string | null;
   readonly broker: BrokerEnv | null;

@@ -3,10 +3,6 @@ import { expect, it } from "vitest";
 import { SnapshotResourceReader } from "./resources.ts";
 
 const reader = new SnapshotResourceReader({
-  orbId: "proof",
-  commitSha: "a".repeat(40),
-  instructionPath: null,
-  skillRoot: ".agents/skills",
   files: (
     [
       [".agents/skills/proof/reference.md", "adopted reference"],

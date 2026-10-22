@@ -512,7 +512,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
 
   updateProject(
     task: SimulationTask,
-    params: { projectId: string; name: string; repositoryUrl: string; now: number },
+    params: { projectId: string; name: string; repositoryUrl: string | null; now: number },
   ) {
     return this.access(task, FAILPOINTS.storeWrite, "update project", () => {
       const project = this.projects.get(params.projectId);

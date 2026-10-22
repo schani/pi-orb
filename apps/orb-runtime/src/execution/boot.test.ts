@@ -290,3 +290,28 @@ test("boot fails with git_identity_unavailable when the identity cannot be read"
     },
   );
 });
+
+test("repository-free execution readies without fetching or validating a Git pin", async () => {
+  const root = await mkdtemp(join(tmpdir(), "execution-no-repo-"));
+  const boot = new ExecutionBoot({
+    orbId: "test",
+    workDir: root,
+    repositoryUrl: null,
+    incarnation: "3",
+    broker: null,
+    environment: {
+      ...process.env,
+      PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT: "1",
+      PI_ORB_INITIAL_CHECKOUT_COMMIT: "not-a-sha",
+    },
+  });
+  try {
+    expect((await boot.boot()).isOk()).toBe(true);
+    expect(boot.snapshot).toMatchObject({ cwd: join(root, "repo"), checkoutCommit: null });
+    expect(Check(ExecutionReadySchema, boot.snapshot)).toBe(true);
+    expect(boot.health()).toMatchObject({ status: "ready", checkoutCommit: null });
+  } finally {
+    boot.shutdown();
+    await rm(root, { recursive: true, force: true });
+  }
+});

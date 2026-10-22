@@ -257,8 +257,6 @@ export function createProcessAgentContext(
       );
       let platformSnapshot: PersistedPlatformContext | null = null;
       const prepared = await prepareResourceContext({
-        orbId: orb.id,
-        url: project.value.repositoryUrl,
         signal: operation.signal,
         platformVersion: "pi-orb-platform-1",
         acquisition: { acquire: () => options.resources.acquire(task, orb, operation) },

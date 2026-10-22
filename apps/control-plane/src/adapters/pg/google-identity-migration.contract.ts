@@ -25,6 +25,7 @@ const followingMigrations = [
   "045_orb_messaging.sql",
   "046_orb_initial_model.sql",
   "047_model_calls_cost.sql",
+  "048_optional_project_repository.sql",
 ];
 const first = {
   userId: "00000000-0000-4000-8000-000000000001",

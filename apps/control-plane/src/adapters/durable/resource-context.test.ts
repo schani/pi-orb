@@ -44,11 +44,16 @@ function fixture() {
     },
   );
   const options = {
-    orbId: "orb",
-    url: "https://github.com/o/r",
     signal: new AbortController().signal,
     platformVersion: "v1",
-    acquisition,
+    acquisition: {
+      acquire: () =>
+        acquisition.acquire({
+          orbId: "orb",
+          url: "https://github.com/o/r",
+          signal: new AbortController().signal,
+        }),
+    },
     managed: () =>
       okAsync({
         personal: { content: `personal ${revision}`, revision },
@@ -90,6 +95,28 @@ function fixture() {
   };
 }
 describe("prepared resource context", () => {
+  it("fences no-repository platform publication after revoked admission", async () => {
+    const f = fixture();
+    let writes = 0;
+    const result = await prepareResourceContext({
+      ...f.options,
+      acquisition: { acquire: () => okAsync(null) },
+      platformStore: {
+        get: () => okAsync(null),
+        put: () => {
+          writes++;
+          return okAsync(undefined);
+        },
+      },
+      checkpoint: () => {
+        f.revoke();
+        return okAsync(undefined);
+      },
+    });
+    expect(result.isErr()).toBe(true);
+    expect(writes).toBe(0);
+  });
+
   it("rejects malformed platform skill metadata before publication", async () => {
     const f = fixture();
     let writes = 0;

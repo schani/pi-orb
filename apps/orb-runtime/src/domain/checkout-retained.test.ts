@@ -57,3 +57,29 @@ describe("retained checkout", () => {
     expect(result._unsafeUnwrapErr().code).toBe("clone_failed");
   });
 });
+
+it("preserves a Git checkout when the project repository is removed", async () => {
+  const { workDir, repoDir } = retainedRepo();
+  git(repoDir, "init", "-q");
+  writeFileSync(join(repoDir, "a"), "a");
+  git(repoDir, "add", "a");
+  git(repoDir, "commit", "-qm", "a");
+  const head = git(repoDir, "rev-parse", "HEAD");
+  expect((await prepareCheckout(workDir, "https://example.invalid/r.git"))._unsafeUnwrap()).toBe(
+    head.trim(),
+  );
+  writeFileSync(join(repoDir, "a"), "dirty");
+
+  expect((await prepareCheckout(workDir, null))._unsafeUnwrap()).toBeNull();
+  expect(git(repoDir, "rev-parse", "HEAD")).toBe(head);
+  expect(git(repoDir, "diff")).toContain("+dirty");
+});
+
+it("rejects a retained workspace with corrupt Git metadata", async () => {
+  const { workDir, repoDir } = retainedRepo();
+  mkdirSync(join(repoDir, ".git"));
+
+  const result = await prepareCheckout(workDir, "https://example.invalid/r.git");
+
+  expect(result._unsafeUnwrapErr().code).toBe("clone_failed");
+});

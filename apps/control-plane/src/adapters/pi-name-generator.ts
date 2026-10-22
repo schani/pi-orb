@@ -19,7 +19,7 @@ const failure = (message: string): OrbNameGeneratorError => ({
 
 function prompt(input: {
   projectName: string;
-  repositoryUrl: string;
+  repositoryUrl: string | null;
   message: string;
   readme: string | null;
 }): string {
@@ -27,7 +27,7 @@ function prompt(input: {
     Array.from(value).slice(0, characters).join("");
   const quotedContext = JSON.stringify({
     projectName: truncate(input.projectName, 512),
-    repositoryUrl: truncate(input.repositoryUrl, 2_048),
+    repositoryUrl: input.repositoryUrl === null ? null : truncate(input.repositoryUrl, 2_048),
     firstMessage: input.message,
     readme: input.readme,
   });
@@ -61,7 +61,7 @@ export class PiOrbNameGenerator implements OrbNameGenerator {
       ownerUserId: string;
       orbId: string;
       projectName: string;
-      repositoryUrl: string;
+      repositoryUrl: string | null;
       message: string;
       readme: string | null;
     },

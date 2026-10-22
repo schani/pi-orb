@@ -33,7 +33,7 @@ const skillReasons: Record<ResourceWarning["code"], string> = {
 };
 
 export function snapshotPromptResources(
-  snapshot: ResourceSnapshot,
+  snapshot: Pick<ResourceSnapshot, "instructionPath" | "skillRoot" | "files">,
   options: { invalidSkills?: "strict" | "warn" } = {},
 ): Result<
   {

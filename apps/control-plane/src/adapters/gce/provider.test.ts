@@ -381,11 +381,13 @@ describe("GceOrbHostProvider", () => {
   });
 
   it.each([
-    { harness: "pi", runtimeMode: "execution" },
-    { harness: "claude", runtimeMode: "claude" },
+    { harness: "pi", runtimeMode: "execution", repositoryUrl: "https://github.com/o/r" },
+    { harness: "claude", runtimeMode: "claude", repositoryUrl: "https://github.com/o/r" },
+    { harness: "pi", runtimeMode: "execution", repositoryUrl: null },
+    { harness: "claude", runtimeMode: "claude", repositoryUrl: null },
   ] as const)(
-    "creates a Spot native instance with %s configuration",
-    async ({ harness, runtimeMode }) => {
+    "creates a Spot native instance with $harness and repository $repositoryUrl",
+    async ({ harness, runtimeMode, repositoryUrl }) => {
       const transport = new FakeTransport([
         () => notFound, // instance get
         () => notFound, // disk get
@@ -405,6 +407,7 @@ describe("GceOrbHostProvider", () => {
           bootstrap: {
             ...provisionRequest.bootstrap,
             harness,
+            repositoryUrl,
             initialCheckoutCommit: "b".repeat(40),
             awaitInitialCheckoutCommit: true,
           },
@@ -443,7 +446,7 @@ describe("GceOrbHostProvider", () => {
       expect(config).toMatchObject({
         PI_ORB_ID: "orb-1",
         PI_ORB_HOST_INCARNATION: "0",
-        PI_ORB_REPOSITORY_URL: "https://github.com/o/r",
+        PI_ORB_REPOSITORY_URL: repositoryUrl ?? "",
         PI_ORB_RUNTIME_MODE: runtimeMode,
         PI_ORB_INITIAL_CHECKOUT_COMMIT: "b".repeat(40),
         PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT: "1",

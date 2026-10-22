@@ -38,10 +38,6 @@ it("loads only application-owned bundled skills into private virtual paths", asy
   ]);
   expect(loaded.every((file) => file.sha256.length === 64)).toBe(true);
   const reader = new SnapshotResourceReader({
-    orbId: "orb",
-    commitSha: "a".repeat(40),
-    instructionPath: null,
-    skillRoot: "/opt/pi-orb/skills",
     files: loaded,
   });
   const cloud = Buffer.from(

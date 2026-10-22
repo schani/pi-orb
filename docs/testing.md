@@ -10,6 +10,14 @@ Tests first failed on absent installation/checks and the native snapshot whiteli
 
 The complete amd64 runtime Docker image builds. A disposable UID2000, network-disabled, capability-free container passes Bun evaluation, Bun/bunx 1.4.4 checks and a git-crypt 0.7.0 symmetric-key encrypt/lock/unlock roundtrip. The arm64 archive's official SHA-256 and layout are verified, but arm64 execution and native cloud image construction/acceptance are not qualified. No E2E or deployment; runtime/harness code is unchanged. Evidence, including RED logs: `.context/bun-git-crypt/`.
 
+## Name-only projects (2026-10-22; local, undeployed)
+
+Historical process-backend E2E qualification on frozen source: **64 files / 460 tests passed**, one PostgreSQL file / two tests skipped. That 65-file selection included the standalone name-only test, now folded into the multi-user credentials E2E. The Spot-interrupted original run remains incomplete, not green; no product fix or deployment is claimed. Evidence and source hashes: [postmortem](postmortems/2026-10-22-no-repository-e2e-preemption.md), `.context/no-repo/`.
+
+Current trimmed checks: **105 tests / 13 files**, existing multi-user E2E **1/1**, typecheck and lint pass. Runtime/protocol source remains frozen; only dev-mock retry machinery was removed. Trim fixture failures, diagnoses and checks: `.context/pr159-trim/`. Original port-0 fixture failure and preview verification: `.context/no-repo/`.
+
+[CI 39833808392](https://github.com/schani/pi-orb/actions/runs/39833808392) failed two now-removed duplicate boot tests whose Git-config path assumption ignored inherited `XDG_CONFIG_HOME`; no product fix is indicated (evidence: `.context/pr159-ci/REPORT.md`).
+
 ## Harness-icon catalog ownership (2026-10-20; PR 151)
 
 [First CI failure](https://github.com/schani/pi-orb/actions/runs/39452155383/job/118729501183), source `2e5d24f8`: Chromium's index readiness timed out with the second StrictMode projects GET pending inside the test's decoration proxy. No crash or new DST failure; uploaded traces match historical fixtures. Logs, artifacts and controlled experiments remain in `.context/pr151-ci/`.

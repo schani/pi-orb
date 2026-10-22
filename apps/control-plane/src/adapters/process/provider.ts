@@ -67,7 +67,7 @@ interface HostMetadata {
   readonly v: 1;
   readonly orbId: string;
   readonly incarnation: number;
-  readonly repositoryUrl: string;
+  readonly repositoryUrl: string | null;
   readonly harness: import("@pi-orb/protocol").HarnessKind;
   readonly initialCheckoutCommit?: string;
   readonly awaitInitialCheckoutCommit?: boolean;
@@ -154,7 +154,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
 
   desiredSpecFingerprint(input: {
     readonly orbId: string;
-    readonly repositoryUrl: string;
+    readonly repositoryUrl: string | null;
     readonly harness?: import("@pi-orb/protocol").HarnessKind;
   }): string {
     return specFingerprintOf({
@@ -197,7 +197,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
         parsed.orbId !== orbId ||
         !Number.isSafeInteger(incarnation) ||
         incarnation < 0 ||
-        typeof parsed.repositoryUrl !== "string" ||
+        (parsed.repositoryUrl !== null && typeof parsed.repositoryUrl !== "string") ||
         (parsed.harness !== "pi" && parsed.harness !== "claude") ||
         typeof parsed.runtimeToken !== "string" ||
         typeof parsed.port !== "number" ||
@@ -334,7 +334,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     delete environment.XDG_CONFIG_HOME;
     Object.assign(environment, this.options.extraEnv ?? {}, {
       PI_ORB_ID: metadata.orbId,
-      PI_ORB_REPOSITORY_URL: metadata.repositoryUrl,
+      PI_ORB_REPOSITORY_URL: metadata.repositoryUrl ?? "",
       PI_ORB_RUNTIME_MODE: metadata.harness === "claude" ? "claude" : "execution",
       PI_ORB_INITIAL_CHECKOUT_COMMIT: metadata.initialCheckoutCommit ?? "",
       PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT: metadata.awaitInitialCheckoutCommit ? "1" : "",

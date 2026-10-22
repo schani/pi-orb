@@ -6,6 +6,7 @@ import { err, ok, Result, ResultAsync } from "neverthrow";
 
 export interface CheckoutError {
   readonly code:
+    | "workspace_init_failed"
     | "invalid_repository_url"
     | "clone_failed"
     | "checkout_admission_revoked"
@@ -41,10 +42,23 @@ const execGit = (args: string[], cwd: string): ResultAsync<string, { message: st
  */
 export async function prepareCheckout(
   workDir: string,
-  repositoryUrl: string,
+  repositoryUrl: string | null,
   initialCommands?: () => Promise<Result<readonly string[][], CheckoutError>>,
 ): Promise<Result<string | null, CheckoutError>> {
   const repoDir = join(workDir, "repo");
+  if (repositoryUrl === null) {
+    return Result.fromThrowable(
+      () => {
+        mkdirSync(repoDir, { recursive: true });
+        return null;
+      },
+      (cause): CheckoutError => ({
+        code: "workspace_init_failed",
+        message: String(cause),
+        retryable: true,
+      }),
+    )();
+  }
   if (!existsSync(repoDir)) {
     const url = validateRepositoryUrl(repositoryUrl);
     if (url.isErr())
@@ -74,6 +88,7 @@ export async function prepareCheckout(
     )();
     if (renamed.isErr()) return err(renamed.error);
   }
+  if (!existsSync(join(repoDir, ".git"))) return ok(null);
   const commit = await execGit(["rev-parse", "HEAD"], repoDir);
   if (commit.isOk()) return ok(commit.value);
   const refs = await execGit(["for-each-ref", "--count=1"], repoDir);

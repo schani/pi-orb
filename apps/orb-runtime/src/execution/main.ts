@@ -27,7 +27,7 @@ const boot = new ExecutionBoot({
   workDir,
   incarnation,
   orbId: env("PI_ORB_ID"),
-  repositoryUrl: env("PI_ORB_REPOSITORY_URL"),
+  repositoryUrl: process.env.PI_ORB_REPOSITORY_URL || null,
   environment: process.env,
   broker: readBrokerEnv(process.env),
 });

@@ -160,7 +160,7 @@ const inspectionError = (
 
 const inspectionItem = (
   orb: OrbRow,
-  project: { id: string; name: string; repositoryUrl: string },
+  project: { id: string; name: string; repositoryUrl: string | null },
 ): OrbInspectionItem => ({
   id: orb.id,
   name: orb.name,

@@ -4,7 +4,7 @@ import { matchAppSearchItems } from "./app-search.ts";
 import { buildDashboardSearchSource } from "./dashboard-search-source.ts";
 import { splitProjectOrbs } from "./project-orbs.ts";
 
-const project = (id: string, name: string, repositoryUrl: string): ProjectView => ({
+const project = (id: string, name: string, repositoryUrl: string | null): ProjectView => ({
   id,
   name,
   repositoryUrl,
@@ -72,6 +72,19 @@ describe("dashboard search source", () => {
     expect(matchAppSearchItems(source.items, "github.com/acme/atlas")[0]?.key).toBe(
       "dashboard:project:project/1",
     );
+  });
+
+  it("searches name-only projects without repository metadata", () => {
+    const source = buildDashboardSearchSource({
+      projects: [project("name-only", "Notebook", null)],
+      projectsLoading: false,
+      projectsFailed: false,
+      now,
+      orbLists: { "name-only": { type: "loaded", items: [] } },
+    });
+    expect(source.items[0]).toMatchObject({ title: "Notebook", keywords: ["Notebook"] });
+    expect(source.items[0]?.context).toBeUndefined();
+    expect(matchAppSearchItems(source.items, "Notebook")[0]?.href).toBe("/projects/name-only");
   });
 
   it("shares rendered first-appearance order while refreshing Find metadata", () => {

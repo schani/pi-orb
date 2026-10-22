@@ -93,6 +93,35 @@ export function ownedProjectsContractTests(
       ).toBe(true);
     });
 
+    it("round-trips a null repository, retries and repository edits", async () => {
+      const first = { ...row("10000000-0000-4000-8000-000000000005", A), repositoryUrl: null };
+      const replies = await Promise.all([
+        subject.store.insertProject(task, first),
+        subject.store.insertProject(task, first),
+      ]);
+      expect(replies.every((reply) => reply.isOk())).toBe(true);
+      expect(
+        (await subject.store.getProject(task, first.id))._unsafeUnwrap()?.repositoryUrl,
+      ).toBeNull();
+      expect(
+        (await subject.store.listProjectsByOwner(task, A))._unsafeUnwrap()[0]?.repositoryUrl,
+      ).toBeNull();
+      for (const repositoryUrl of ["https://github.com/o/r", null]) {
+        const updated = (
+          await subject.store.updateProject(task, {
+            projectId: first.id,
+            name: "edited",
+            repositoryUrl,
+            now: 1,
+          })
+        )._unsafeUnwrap();
+        expect(updated?.repositoryUrl).toBe(repositoryUrl);
+        expect(
+          (await subject.store.getProject(task, first.id))._unsafeUnwrap()?.repositoryUrl,
+        ).toBe(repositoryUrl);
+      }
+    });
+
     it("types a cross-owner same-id race while a lower UUID user is inserted", async () => {
       const id = "10000000-0000-4000-8000-000000000004";
       const [left, right] = await Promise.all([

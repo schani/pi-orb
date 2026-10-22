@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
@@ -9,7 +9,13 @@ import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { ClaudeOrbAgent } from "./agent.ts";
 import { claudeEnvironmentPrompt } from "./environment-prompt.ts";
 
-vi.mock("../domain/checkout.ts", () => ({ prepareCheckout: () => okAsync("commit") }));
+vi.mock("../domain/checkout.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../domain/checkout.ts")>();
+  return {
+    prepareCheckout: (dir: string, url: string | null) =>
+      url === null ? actual.prepareCheckout(dir, url) : okAsync("commit"),
+  };
+});
 vi.mock("../domain/home.ts", () => ({ configurePersistentHome: (dir: string) => ok(dir) }));
 vi.mock("../domain/rust.ts", () => ({ configurePersistentRust: () => {} }));
 vi.mock("./execution-identity.ts", () => ({ readExecutionIdentity: () => ok(null) }));
@@ -69,6 +75,34 @@ it("appends the shared environment then Claude suffix exactly once before existi
     expect(append.split(environmentPrompt)).toHaveLength(2);
     expect(append.split(claudeEnvironmentPrompt)).toHaveLength(2);
     expect(append).not.toContain("Use the available orb tools");
+  } finally {
+    agent.shutdownHooks();
+    rmSync(workDir, { recursive: true, force: true });
+  }
+});
+
+it("boots Claude in a repository-free workspace with managed instructions", async () => {
+  const workDir = mkdtempSync(join(tmpdir(), "claude-no-repo-"));
+  const options: Options[] = [];
+  const agent = new ClaudeOrbAgent({
+    orbId: "orb",
+    repositoryUrl: null,
+    workDir,
+    skillsDir: null,
+    broker: { controlPlaneUrl: "http://unused.invalid", runtimeToken: "unused" },
+    sdkFactory: (_input, value) => {
+      options.push(value);
+      return err({ message: "No process started." });
+    },
+  });
+  try {
+    await agent.boot();
+    expect(options).toHaveLength(1);
+    expect(options[0]?.cwd).toBe(join(workDir, "repo"));
+    expect(JSON.stringify(options[0]?.systemPrompt)).toContain("PERSONAL");
+    expect(JSON.stringify(options[0]?.systemPrompt)).toContain("PROJECT");
+    expect(existsSync(join(workDir, "repo"))).toBe(true);
+    expect(existsSync(join(workDir, "repo", ".git"))).toBe(false);
   } finally {
     agent.shutdownHooks();
     rmSync(workDir, { recursive: true, force: true });

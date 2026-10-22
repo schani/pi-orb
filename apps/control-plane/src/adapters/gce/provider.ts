@@ -246,7 +246,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
 
   desiredSpecFingerprint(input: {
     readonly orbId: string;
-    readonly repositoryUrl: string;
+    readonly repositoryUrl: string | null;
     readonly harness?: import("@pi-orb/protocol").HarnessKind;
   }): string {
     // Rendered at incarnation 0 on purpose: the fingerprint describes the
@@ -277,7 +277,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
   private launchSpec(input: {
     readonly orbId: string;
     readonly incarnation: number;
-    readonly repositoryUrl: string;
+    readonly repositoryUrl: string | null;
     readonly harness?: import("@pi-orb/protocol").HarnessKind;
   }): GceLaunchSpec {
     return {
@@ -409,7 +409,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
   private expectedConfig(
     orbId: string,
     incarnation: number,
-    repositoryUrl: string,
+    repositoryUrl: string | null,
     harness: import("@pi-orb/protocol").HarnessKind = "pi",
   ): Readonly<Record<string, string>> {
     const tailscale = this.options.tailscale;
@@ -419,7 +419,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
       PI_ORB_ID: orbId,
       PI_ORB_HOST_INCARNATION: String(incarnation),
       PI_ORB_CLAUDE_RECOVERY_PROOF: "",
-      PI_ORB_REPOSITORY_URL: repositoryUrl,
+      PI_ORB_REPOSITORY_URL: repositoryUrl ?? "",
       PI_ORB_RUNTIME_MODE: harness === "claude" ? "claude" : "execution",
       [CONTROL_PLANE_URL_ENV]: this.options.controlPlaneUrl,
       ...(tailscale === undefined

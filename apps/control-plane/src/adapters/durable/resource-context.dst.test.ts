@@ -37,11 +37,16 @@ it("DST fences old-context platform publication across Stop ABA and archive", as
           );
           const bytes = Buffer.from("---\nname: hosting\ndescription: bundled\n---\nbody");
           await prepareResourceContext({
-            orbId: "orb",
-            url: "https://github.com/o/r",
             signal: new AbortController().signal,
             platformVersion: "v1",
-            acquisition,
+            acquisition: {
+              acquire: () =>
+                acquisition.acquire({
+                  orbId: "orb",
+                  url: "https://github.com/o/r",
+                  signal: new AbortController().signal,
+                }),
+            },
             managed: () =>
               okAsync({
                 personal: { content: "", revision: 0 },

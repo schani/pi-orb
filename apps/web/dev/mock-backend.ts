@@ -7,6 +7,7 @@ import {
   type ClaudeAuthView,
   type ClientAction,
   ClientFrameSchema,
+  CreateProjectRequestSchema,
   EnqueueOrbMessageRequestSchema,
   GIT_IDENTITY_PATH,
   type GitIdentity,
@@ -31,6 +32,7 @@ import {
   type ServerFrame,
   TERMINAL_SUBPROTOCOL,
   TerminalClientControlSchema,
+  UpdateProjectRequestSchema,
   UploadBatchSchema,
   USAGE_PATH,
   validateGitIdentity,
@@ -39,6 +41,7 @@ import {
   validateRepositoryUrl,
   type WorkspaceUpload,
 } from "@pi-orb/protocol";
+import { ok } from "neverthrow";
 import { Check } from "typebox/value";
 import type { Plugin } from "vite";
 import { WebSocket, WebSocketServer } from "ws";
@@ -1651,24 +1654,23 @@ async function handleApi(
         return true;
       }
       const body = await readJson(request);
-      const name =
-        body !== null && typeof body === "object" && "name" in body && typeof body.name === "string"
-          ? body.name.normalize("NFKC").trim().replace(/\s+/gu, " ")
-          : "";
+      if (!Check(UpdateProjectRequestSchema, body)) {
+        sendJson(response, 400, {
+          error: { code: "invalid_request", message: "invalid project", retryable: false },
+        });
+        return true;
+      }
+      const name = body.name.normalize("NFKC").trim().replace(/\s+/gu, " ");
       if (name === "" || Array.from(name).length > 80) {
         sendJson(response, 400, {
           error: { code: "invalid_request", message: "invalid project name", retryable: false },
         });
         return true;
       }
-      const repository = validateRepositoryUrl(
-        body !== null &&
-          typeof body === "object" &&
-          "repositoryUrl" in body &&
-          typeof body.repositoryUrl === "string"
-          ? body.repositoryUrl
-          : "",
-      );
+      const repository =
+        body.repositoryUrl == null || body.repositoryUrl.trim() === ""
+          ? ok({ url: null })
+          : validateRepositoryUrl(body.repositoryUrl);
       if (repository.isErr()) {
         sendJson(response, 400, {
           error: { code: "invalid_request", message: repository.error.message, retryable: false },
@@ -1709,16 +1711,7 @@ async function handleApi(
   }
   if (method === "POST" && path === "/api/v1/projects") {
     const body = await readJson(request);
-    if (
-      body === null ||
-      typeof body !== "object" ||
-      !("id" in body) ||
-      !("name" in body) ||
-      !("repositoryUrl" in body) ||
-      typeof body.id !== "string" ||
-      typeof body.name !== "string" ||
-      typeof body.repositoryUrl !== "string"
-    ) {
+    if (!Check(CreateProjectRequestSchema, body)) {
       sendJson(response, 400, {
         error: { code: "invalid_request", message: "invalid project", retryable: false },
       });
@@ -1731,7 +1724,10 @@ async function handleApi(
       });
       return true;
     }
-    const repository = validateRepositoryUrl(body.repositoryUrl);
+    const repository =
+      body.repositoryUrl == null || body.repositoryUrl.trim() === ""
+        ? ok({ url: null })
+        : validateRepositoryUrl(body.repositoryUrl);
     if (repository.isErr()) {
       sendJson(response, 400, {
         error: { code: "invalid_request", message: repository.error.message, retryable: false },

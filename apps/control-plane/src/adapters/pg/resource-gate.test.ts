@@ -108,6 +108,75 @@ async function resourceTest() {
   return { db, database, task, orb, snapshot, context };
 }
 
+it("readies without a fabricated snapshot, then pins the first attached repository", async () => {
+  const { db, database, task, orb, snapshot, context } = await resourceTest();
+  const acquire = vi.fn(() => okAsync(snapshot));
+  const gate = new PgResourceGate(db, { acquire });
+  const log = vi.spyOn(task, "log");
+  try {
+    (
+      await db.query("UPDATE projects SET repository_url=NULL WHERE id=$1", [orb.projectId])
+    )._unsafeUnwrap();
+    expect((await gate.acquire(task, orb, context))._unsafeUnwrap()).toBeNull();
+    expect((await gate.acquire(task, orb, context))._unsafeUnwrap()).toBeNull();
+    expect((await gate.initialPin(task, orb))._unsafeUnwrap()).toBeNull();
+    expect((await new PgResourceSnapshots(db).get(orb.id))._unsafeUnwrap()).toBeNull();
+    expect(
+      (
+        await db.query(
+          "SELECT phase,commit_sha,file_count,byte_count FROM orb_resource_events WHERE orb_id=$1",
+          [orb.id],
+        )
+      )._unsafeUnwrap().rows,
+    ).toEqual([{ phase: "ready", commit_sha: null, file_count: 0, byte_count: 0 }]);
+    expect(
+      log.mock.calls
+        .map(([line]) => String(line))
+        .filter((line) => line.includes("resources.ready")),
+    ).toHaveLength(1);
+    expect(acquire).not.toHaveBeenCalled();
+    (
+      await db.query(
+        "UPDATE orbs SET agent_admission_version=agent_admission_version+1 WHERE id=$1",
+        [orb.id],
+      )
+    )._unsafeUnwrap();
+    expect((await gate.acquire(task, orb, context)).isErr()).toBe(true);
+    expect(acquire).not.toHaveBeenCalled();
+
+    let current = orb;
+    for (const repositoryUrl of ["https://github.com/o/attached", null]) {
+      (
+        await db.query("UPDATE projects SET repository_url=$2 WHERE id=$1", [
+          orb.projectId,
+          repositoryUrl,
+        ])
+      )._unsafeUnwrap();
+      current = { ...current, agentAdmissionVersion: current.agentAdmissionVersion + 1 };
+      (
+        await db.query("UPDATE orbs SET agent_admission_version=$2 WHERE id=$1", [
+          orb.id,
+          current.agentAdmissionVersion,
+        ])
+      )._unsafeUnwrap();
+      const reopened = new PgResourceGate(db, { acquire });
+      expect((await reopened.acquire(task, current, context))._unsafeUnwrap()).toEqual({
+        ...snapshot,
+        warnings: [],
+      });
+      expect((await reopened.initialPin(task, current))._unsafeUnwrap()).toBe(snapshot.commitSha);
+      expect(acquire).toHaveBeenCalledTimes(1);
+    }
+    expect(acquire).toHaveBeenCalledWith({
+      orbId: orb.id,
+      url: "https://github.com/o/attached",
+      signal: context.signal,
+    });
+  } finally {
+    await database.close();
+  }
+});
+
 it("publishes content-free warnings and heals duplicate ready metadata without Git or repeated logs", async () => {
   const { db, database, task, orb, snapshot, context } = await resourceTest();
   const warnings = [
