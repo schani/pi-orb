@@ -9,7 +9,7 @@ FROM node:24.22.0-bookworm-slim
 
 COPY infra/runtime_apt.sh /usr/local/bin/runtime-apt
 RUN chmod 755 /usr/local/bin/runtime-apt \
-  && runtime-apt git ca-certificates ripgrep curl zip unzip sudo python3 python3-venv python-is-python3 build-essential pkg-config \
+  && runtime-apt git git-crypt ca-certificates ripgrep curl zip unzip sudo python3 python3-venv python-is-python3 build-essential pkg-config \
   && mkdir -p -m 755 /etc/apt/keyrings \
   && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
        -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
@@ -45,6 +45,13 @@ RUN case "$TARGETARCH" in \
   && install -m 755 /tmp/rustup-init /usr/local/bin/rustup \
   && for proxy in cargo rustc rustdoc rustfmt cargo-clippy cargo-fmt clippy-driver; do ln -s rustup "/usr/local/bin/$proxy"; done \
   && rm /tmp/rustup-init
+
+COPY infra/install_bun.sh /tmp/install_bun.sh
+RUN sh /tmp/install_bun.sh "$TARGETARCH" \
+  && test "$(bun --version)" = 1.4.4 \
+  && test "$(bunx --version)" = 1.4.4 \
+  && git-crypt --version \
+  && rm /tmp/install_bun.sh
 
 WORKDIR /app
 

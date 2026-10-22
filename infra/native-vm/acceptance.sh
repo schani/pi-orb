@@ -13,6 +13,12 @@ case "$(getent shadow pi-orb-build | cut -d: -f2)" in
   *) echo 'build administrator password is not locked' >&2; exit 1 ;;
 esac
 sudo -u orb sudo -n true
+sudo -u orb sh -ec '
+  bun --version
+  test "$(bun --version)" = 1.4.4
+  test "$(bunx --version)" = 1.4.4
+  git-crypt --version
+'
 
 findmnt --noheadings --output SOURCE --target /workspace | grep -q '/dev/'
 workspace_device=$(readlink -f /dev/disk/by-id/google-pi-orb-data)

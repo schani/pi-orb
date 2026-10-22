@@ -6,8 +6,9 @@ installed size; transitive libraries remain only as dependencies of this baselin
 
 - Google guest agent, systemd, SSH, CA certificates: VM boot and operation.
 - Node 24.22.0, runtime npm dependencies, native node-pty: agent and terminal.
+- Bun 1.4.4 (`bun`, `bunx`): project JavaScript runtime/package tooling; checksum-pinned x64 baseline archive, shared with Docker via `infra/install_bun.sh`.
 - Docker Engine 29.1.3, containerd, Buildx, Compose: project containers/builds.
-- git, gh and broker helpers: repository and GitHub workflows.
+- git, git-crypt, gh and broker helpers: repository and GitHub workflows.
 - gcloud: prescribed GCP tooling.
 - Chromium and agent-browser: prescribed browser automation.
 - Python, venv, zip/unzip, curl, ripgrep: prescribed agent tools.
@@ -49,3 +50,9 @@ and pinned in `infra/native-vm/install.sh`; builds retain the installed version
 in `/opt/pi-orb/node-version`. Docker stages use `node:24.22.0-bookworm-slim`;
 the non-Linux filesystem test uses the full `node:24.22.0-bookworm` image for
 Python and ext4 tools.
+
+**Bun/git-crypt addition (2026-10-22; not deployed):** build checks and production
+`acceptance.sh` verify Bun/bunx 1.4.4 and execute `git-crypt --version`; acceptance
+runs these as `orb`. `git-crypt` follows the Debian package baseline; Bun's official
+archive checksums are pinned in the shared installer. Version output remains in
+the existing build/acceptance logs; no keys are installed.

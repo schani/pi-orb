@@ -59,6 +59,19 @@ describe("native image source snapshot", () => {
     );
   });
 
+  it("includes the shared Bun installer in the native build archive", async () => {
+    const root = await repository();
+    await mkdir(`${root}/infra`);
+    await writeFile(`${root}/infra/install_bun.sh`, "installer\n");
+    const snapshot = await prepareSourceSnapshot(`${root}/output`, { repositoryRoot: root });
+    if (snapshot.isErr()) throw new Error(snapshot.error.message);
+    expect(snapshot.value.inputInventory["infra/install_bun.sh"]).toBe(
+      createHash("sha256").update("installer\n").digest("hex"),
+    );
+    const listing = await execFileAsync("tar", ["-tzf", `${root}/output/source.tar.gz`]);
+    expect(listing.stdout).toContain("infra/install_bun.sh");
+  });
+
   it("captures dirty replacements and untracked patches without deleted tracked files", async () => {
     const root = await repository();
     await rm(`${root}/patches/dependency+1.0.0.patch`);

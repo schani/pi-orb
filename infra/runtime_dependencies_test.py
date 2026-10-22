@@ -43,6 +43,60 @@ class RuntimeDependenciesTests(unittest.TestCase):
         self.assertLess(source.index(checksum), source.index(extraction))
         self.assertIn('node --version >/opt/pi-orb/node-version', source)
 
+    def test_bun_installer_pins_supported_archives_and_verifies_before_install(self):
+        source = (ROOT / 'infra/install_bun.sh').read_text()
+        self.assertIn('bun-v1.4.4/${artifact}.zip', source)
+        for architecture, artifact, checksum in [
+            ('amd64', 'bun-linux-x64-baseline', 'e0446eb55995772eb9894bebae9a6be368d985a8b9271ee124486f9946eedd76'),
+            ('arm64', 'bun-linux-aarch64', 'baa6bb36f51d6e58561e02bbea825038a9df454f673d6d776e8bbf86f8c7850e'),
+        ]:
+            with self.subTest(architecture=architecture):
+                self.assertIn(f'{architecture}) artifact={artifact}; bun_sha={checksum}', source)
+        self.assertLess(source.index('sha256sum --check'), source.index('unzip '))
+        self.assertIn('install -m 755 "$temporary/$artifact/bun" /usr/local/bin/bun', source)
+        self.assertIn('ln -s bun /usr/local/bin/bunx', source)
+        result = subprocess.run(['/bin/sh', str(ROOT / 'infra/install_bun.sh'), 'unsupported'],
+                                capture_output=True, text=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('unsupported Bun architecture: unsupported', result.stderr)
+
+    def test_bun_checksum_failure_prevents_extraction_and_install(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            curl = root / 'curl'
+            curl.write_text('#!/bin/sh\nfor output; do :; done\nprintf corrupt > "$output"\n')
+            curl.chmod(0o755)
+            for command in ['unzip', 'install', 'ln', 'bun']:
+                stub = root / command
+                stub.write_text('#!/bin/sh\necho reached >> "$CALLS"\nexit 99\n')
+                stub.chmod(0o755)
+            for architecture in ['amd64', 'arm64']:
+                with self.subTest(architecture=architecture):
+                    result = subprocess.run(
+                        ['/bin/sh', str(ROOT / 'infra/install_bun.sh'), architecture],
+                        env=dict(os.environ, PATH=str(root) + ':' + os.environ['PATH'],
+                                 TMPDIR=directory, CALLS=str(root / 'calls')),
+                        capture_output=True, text=True, timeout=5)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('FAILED', result.stdout)
+                    self.assertFalse((root / 'calls').exists())
+                    self.assertFalse(list(root.glob('tmp.*')))
+
+    def test_both_images_install_and_qualify_bun_and_git_crypt(self):
+        native = (ROOT / 'infra/native-vm/install.sh').read_text()
+        self.assertIn('COPY infra/install_bun.sh /tmp/install_bun.sh', self.dockerfile)
+        self.assertIn('sh /tmp/install_bun.sh "$TARGETARCH"', self.dockerfile)
+        self.assertIn('sh infra/install_bun.sh amd64', native)
+        self.assertRegex(self.dockerfile, r'&& runtime-apt[^\n]*\bgit-crypt\b')
+        self.assertRegex(native, r'apt-get install[^\n]*\bgit-crypt\b')
+        acceptance = (ROOT / 'infra/native-vm/acceptance.sh').read_text()
+        self.assertIn("sudo -u orb sh -ec '", acceptance)
+        for source in [self.dockerfile, native, acceptance]:
+            with self.subTest(source=source[:30]):
+                self.assertIn('test "$(bun --version)" = 1.4.4', source)
+                self.assertIn('test "$(bunx --version)" = 1.4.4', source)
+                self.assertIn('git-crypt --version', source)
+
     def test_install_patch_and_rebuild_are_distinct_cacheable_layers(self):
         self.assertNotEqual(self.install, self.rebuild)
         self.assertIn('--workspace @pi-orb/orb-runtime', self.install)

@@ -221,6 +221,6 @@ exec /usr/bin/apt-get "$@"
     def test_dockerfile_uses_helper_for_both_package_sets(self):
         text = (ROOT / 'apps/orb-runtime/Dockerfile').read_text()
         self.assertIn('COPY infra/runtime_apt.sh /usr/local/bin/runtime-apt', text)
-        self.assertEqual(text.count('runtime-apt git ca-certificates'), 1)
+        self.assertEqual(text.count('runtime-apt git git-crypt ca-certificates'), 1)
         self.assertEqual(text.count('runtime-apt gh tailscale chromium google-cloud-cli'), 1)
         self.assertNotIn('apt-get install', text)
