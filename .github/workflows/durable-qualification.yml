@@ -29,6 +29,8 @@ jobs:
         with:
           node-version: '24.22.0'
           cache: npm
+      - name: Use the signed Ubuntu archive
+        run: sudo python3 infra/runner_apt.py /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt.conf.d/99pi-orb-force-ipv4
       - name: Install native addon prerequisites
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 build-essential
       - name: Install dependencies

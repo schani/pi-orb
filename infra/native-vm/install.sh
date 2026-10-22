@@ -11,7 +11,7 @@ exit 101
 EOF
 chmod 755 /usr/sbin/policy-rc.d
 apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl xz-utils git ripgrep zip unzip sudo python3 python3-venv python-is-python3 build-essential pkg-config iproute2 util-linux openssl
+apt-get install -y --no-install-recommends ca-certificates curl xz-utils git git-crypt ripgrep zip unzip sudo python3 python3-venv python-is-python3 build-essential pkg-config iproute2 util-linux openssl
 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/github.gpg
 curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg -o /etc/apt/keyrings/tailscale.gpg
 curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg -o /etc/apt/keyrings/google.asc
@@ -32,6 +32,10 @@ echo '4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10  /usr/loc
 chmod 755 /usr/local/bin/rustup
 for proxy in cargo rustc rustdoc rustfmt cargo-clippy cargo-fmt clippy-driver; do ln -s rustup "/usr/local/bin/$proxy"; done
 cd /app
+sh infra/install_bun.sh amd64
+test "$(bun --version)" = 1.4.4
+test "$(bunx --version)" = 1.4.4
+git-crypt --version
 npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts
 node infra/native-vm/claude-check.mjs | tee /opt/pi-orb/claude-sdk-version
 rm -rf node_modules/node-pty/prebuilds

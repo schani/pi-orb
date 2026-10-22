@@ -1,5 +1,15 @@
 # Testing
 
+## Durable browser APT setup (2026-10-22)
+
+**Rule:** Ubuntu runner helper coverage includes Durable process shards before native prerequisites and Playwright's privileged APT child, not only the Docker E2E workflow. The workflow-order inventory must cover each such job. Setup-only stalls are not test failures or successful qualification: preserve terminal logs and distinguish the proven acquisition phase from an unproven mirror/runner cause. The helper's public URI, keyring and IPv4 diagnostics remain in Actions logs; retries, deadlines and assertions are unchanged. Incident and local validation: `docs/postmortems/2026-10-22-durable-browser-apt-stall.md`. Fresh attempt-1 exact-head CI, all E2E shards and Durable qualification remain required; no historical cause is claimed fixed.
+
+## Bun/git-crypt image qualification (2026-10-22; local, undeployed)
+
+Tests first failed on absent installation/checks and the native snapshot whitelist. Contracts cover pinned amd64-baseline/arm64 archives, checksum rejection before extraction/install, unsupported architectures, both build paths and fail-closed production acceptance as `orb`. The existing APT package-sequence assertion required updating for `git-crypt`; its first failure is retained. `npm ci`, 22 focused Vitest cases, all 356 infrastructure/guest tests plus the filesystem check, native-image typecheck, scoped Biome and shell syntax checks pass.
+
+The complete amd64 runtime Docker image builds. A disposable UID2000, network-disabled, capability-free container passes Bun evaluation, Bun/bunx 1.4.4 checks and a git-crypt 0.7.0 symmetric-key encrypt/lock/unlock roundtrip. The arm64 archive's official SHA-256 and layout are verified, but arm64 execution and native cloud image construction/acceptance are not qualified. No E2E or deployment; runtime/harness code is unchanged. Evidence, including RED logs: `.context/bun-git-crypt/`.
+
 ## Harness-icon catalog ownership (2026-10-20; PR 151)
 
 [First CI failure](https://github.com/schani/pi-orb/actions/runs/39452155383/job/118729501183), source `2e5d24f8`: Chromium's index readiness timed out with the second StrictMode projects GET pending inside the test's decoration proxy. No crash or new DST failure; uploaded traces match historical fixtures. Logs, artifacts and controlled experiments remain in `.context/pr151-ci/`.
