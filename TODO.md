@@ -8,6 +8,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Diagnose central agent-open cancellation** (2026-10-21; `docs/postmortems/2026-10-21-rollout-agent-open-cancelled.md`): proposal, not implemented—add content-free typed abort-origin and phase-elapsed diagnostics to durable failed-open edges; deterministic tests must distinguish deadline from admission cancellation. Preserve guards and timeout policy; discuss any persisted-state change before implementation.
+
 - **Fix Chromium usage-page viewport overflow qualification** ([CI failure](https://github.com/schani/pi-orb/actions/runs/39530906083/job/118996304627), `e2e/usage-frontend.e2e.test.ts:442`): root-width assertion failed; cause unproven. Preserve `.context/central-work-campaign/cleanup-ci-failure/report.md`; a passing rerun does not clear this blocker.
 
 - **Align boot-hooks skill context-delivery claims** (`apps/orb-runtime/skills/boot-hooks/SKILL.md:105–106,124–125`): reconcile promised env issues and failed-hook outcome/log path in model context with actual delivery; `bootHookPrompt` has no production caller. Remove its unused renderer if appropriate.

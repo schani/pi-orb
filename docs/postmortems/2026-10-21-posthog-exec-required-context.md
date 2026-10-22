@@ -82,7 +82,7 @@ an argument-validation failure to an authentication or transport problem.
 Rendered declarations and public examples can omit or differ from required
 live fields; distinguish live discovery from historical process-cache evidence.
 
-## Correction — 2026-10-21 (local, not deployed)
+## Correction — 2026-10-21 (initial local, undeployed snapshot)
 
 The sealed codemode patch retries declaration rendering without descriptions
 after the existing tag-free pass. Types, local references, requiredness and
@@ -102,3 +102,11 @@ requiredness and the structural cap. The in-memory MCP/native codemode fixture
 then proves discovery of all four fields, safe missing-name output without
 argument secrets, no invalid-call effects, and successful corrected execution.
 These tests do not qualify a deployment or change the historical evidence limits.
+
+## Deployment — 2026-10-21
+
+PR 156 passed exact-main qualification and deployed; see
+`docs/postmortems/2026-10-21-rollout-agent-open-cancelled.md` for release evidence
+and the original orb's recovered startup cancellation (abort origin unproved).
+The observer had no live PostHog binding: no deployed live-call or inference
+qualification is claimed.
