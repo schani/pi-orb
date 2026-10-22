@@ -62,6 +62,8 @@ No test may be flaky. A failure that does not reproduce on every run is evidence
 
 **Historical identity-cleanup exception (user-approved 2026-10-15):** Explaining Deploy `38596107385`’s cleanup cause is not a merge/deployment requirement; diagnostics remain deferred (`TODO.md`). Preserve first-failure evidence and the failed identity gate. New failures, exact-head gates, assertions and verified fixture cleanup remain mandatory. Evidence: `docs/postmortems/2026-10-14-identity-smoke-cleanup.md`.
 
+**Historical npm preparation exception (user-approved 2026-10-22):** attribution of Durable `39844782648`'s original npm exit 152 is waived. Preserve evidence; no cause or fix is claimed. New failures, exact-head qualification, assertions and DST replay remain mandatory. Evidence: `docs/postmortems/2026-10-22-local-fake-npm-preparation.md`.
+
 For a DST failure, replay the recorded trace from `test-failures/` (`DST_REPLAY=<trace> npx vitest run …`) before any fix, understand the interleaving, and only then decide whether the defect is in the product or in the scenario's assumptions. Never delete the trace to make the suite pass.
 
 ## Observability

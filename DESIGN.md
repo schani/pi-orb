@@ -125,7 +125,7 @@ Subsystem designs:
 
 Tracking:
 
-- [docs/postmortems/2026-10-22-local-fake-npm-preparation.md](docs/postmortems/2026-10-22-local-fake-npm-preparation.md) — provider install exited 152 before tests; safe diagnostics and classified replay, original cause unknown and release-blocking
+- [docs/postmortems/2026-10-22-local-fake-npm-preparation.md](docs/postmortems/2026-10-22-local-fake-npm-preparation.md) — provider install exited 152 before tests; safe diagnostics, historical attribution waived
 - [docs/postmortems/2026-10-22-durable-browser-apt-stall.md](docs/postmortems/2026-10-22-durable-browser-apt-stall.md) — browser dependency acquisition stalled before tests; runner helper coverage corrected, historical cause unproven
 - [docs/postmortems/2026-10-22-no-repository-e2e-preemption.md](docs/postmortems/2026-10-22-no-repository-e2e-preemption.md) — confirmed Spot preemption interrupted E2E; full qualification pending
 - [docs/postmortems/2026-10-21-posthog-exec-required-context.md](docs/postmortems/2026-10-21-posthog-exec-required-context.md) — live exec requires context/model fields; corrected help succeeds, historical cached schema unverified

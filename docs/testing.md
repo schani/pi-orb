@@ -1,14 +1,10 @@
 # Testing
 
-## Local fake-provider npm preparation (2026-10-22; local, undeployed)
+## Local fake-provider npm preparation (2026-10-22)
 
-**Rule:** installation replay requires npm-owned final structured fetch-error evidence, never exit status alone. The fixture permits at most three attempts, disables npm fetch retries and shares one 300s install budget across attempts and interruptible 1s/2s backoffs. Each child gets the remaining budget; mandatory cleanup may add up to 6s plus I/O beyond it. Lifecycle/command, auth, certificate, integrity, lock, unknown, signal, timeout, spawn and cleanup failures are terminal; tests are never retried.
+Failed npm installation retains only finite allowlisted code/errno fields in existing phase artifacts, from at most 64 KiB of private combined output. Missing/conflicting/oversized fields remain unknown; unreadable output is marked unavailable. Raw logs stay private. npm defaults, one install invocation and the 300s tool timeout are unchanged.
 
-Existing manifest/phases uploads retain only finite npm classification/code/errno, clipping, safe signal, attempt, elapsed/backoff time and decision. Whole-document JSON parsing, agreement with npm-prefixed stderr code/fetch summary and 64 KiB-per-stream limits fail closed. No raw npm output, URLs, credentials, commands or payloads are uploaded; workflows and upload scope are unchanged. Tests cover real stub preparation through persisted evidence, spoofed dependency output, unknown exit 152, signal loss, clipping, deadlines, cancellation and cleanup failure.
-
-**Historical blocker unchanged:** [Durable 39844782648](https://github.com/schani/pi-orb/actions/runs/39844782648) process shard 1 exited 152 during provider installation before tests. The original npm cause was lost; ECONNRESET is not established. No exception has been granted. New passing CI or generic stabilization cannot clear this non-UI attribution blocker. Evidence, rejected retry-only alternative and local RED/GREEN receipts: `docs/postmortems/2026-10-22-local-fake-npm-preparation.md`.
-
-Final local checks: **56 focused tests**; `npm run test:infra` **122 Node + 220 Python + 33 guest tests**, after the stderr-summary correction. Scoped Biome, Node syntax and diff whitespace checks pass. Logs: `.context/local-fake-install/`. No hosted qualification, E2E or deployment.
+The user waived attribution of only [Durable 39844782648](https://github.com/schani/pi-orb/actions/runs/39844782648)'s original npm exit 152; its cause remains unknown. New failures and exact-head qualification remain mandatory. Evidence: `docs/postmortems/2026-10-22-local-fake-npm-preparation.md`.
 
 ## Durable browser APT setup (2026-10-22)
 

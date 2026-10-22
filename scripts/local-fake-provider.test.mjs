@@ -7,11 +7,10 @@ import { fileURLToPath } from "node:url";
 import { err, ok } from "neverthrow";
 import {
   canonicalOrigin,
-  classifyNpmFailure,
   FLING_INTEGRITY,
   inspectService,
-  installNpm,
   launch,
+  npmDiagnostic,
   ownershipPorts,
   PIN,
   runTool,
@@ -538,407 +537,85 @@ for (const signal of ["SIGINT", "SIGTERM"])
       assert.equal((await ownershipPorts.alive(child.pid)).value, false);
   });
 
-const fetchSummary =
-  "request to https://token:secret@example.invalid/pkg?key=private failed, reason: socket hang up";
-function npmFailure(code = "ECONNRESET", stderr, extra = {}) {
-  const failure = { code, summary: fetchSummary, detail: "", ...extra };
-  return classifyNpmFailure(
-    JSON.stringify({ error: failure }),
-    stderr ??
-      `npm error code ${code}\nnpm error errno -104\nnpm error network ${typeof failure.summary === "string" ? failure.summary : ""}\n`,
-  );
-}
-test("npm failure retains only finite classification/code/errno; exit 152 proves nothing", () => {
-  assert.deepEqual(npmFailure(), {
-    classification: "transient_network",
-    npmCode: "ECONNRESET",
-    errno: -104,
-    clipped: false,
-  });
-  assert.equal(classifyNpmFailure("", "").classification, "unknown");
-  for (const code of [
-    "E401",
-    "E403",
-    "CERT_HAS_EXPIRED",
-    "EINTEGRITY",
-    "EUSAGE",
-    "ELIFECYCLE",
-    "PRIVATE_TOKEN",
-  ]) {
-    const result = npmFailure(code);
-    assert.notEqual(result.classification, "transient_network");
-    assert.equal(JSON.stringify(result).includes("PRIVATE_TOKEN"), false);
-    assert.equal(JSON.stringify(result).includes("secret"), false);
-  }
-  assert.equal(npmFailure("ECONNRESET", "npm error errno private-token").errno, null);
-});
-test("npm final JSON is authoritative; network-looking lifecycle stderr never retries", () => {
-  for (const stderr of [
-    "npm error code ECONNRESET\nnpm error command failed\nnpm error command sh -c private-token",
-    "npm ERR! code ECONNRESET\nnpm ERR! command sh -c private-token",
+test("npm diagnostics retain only allowlisted anchored code/errno fields", () => {
+  for (const prefix of ["npm error", "npm ERR!"])
+    assert.deepEqual(
+      npmDiagnostic(
+        `${prefix} code ECONNRESET\n${prefix} errno -104\n${prefix} network https://token:secret@private.invalid\n${prefix} command sh -c secret`,
+      ),
+      { npmCode: "ECONNRESET", errno: -104, clipped: false },
+    );
+  assert.equal(npmDiagnostic("npm error code E401\nnpm error errno ECONNREFUSED").npmCode, "E401");
+  assert.equal(npmDiagnostic("npm error errno ECONNREFUSED").errno, "ECONNREFUSED");
+  for (const output of [
+    "",
+    "code ECONNRESET",
+    "npm error code secret\nnpm error errno secret",
+    "npm error code ECONNRESET extra",
   ])
-    assert.equal(npmFailure("ECONNRESET", stderr).classification, "lifecycle");
-  assert.equal(npmFailure(1, "npm error code ECONNRESET").classification, "unknown");
-  assert.equal(
-    npmFailure("ECONNRESET", "", {
-      summary: "command failed",
-      detail: "request to private URL ECONNRESET",
-    }).classification,
-    "lifecycle",
-  );
-  assert.equal(
-    npmFailure("ECONNRESET", "", { summary: "some arbitrary network-looking payload" })
-      .classification,
-    "unknown",
-  );
-  assert.equal(
-    classifyNpmFailure('prefix\n{"error":{"code":"ECONNRESET"}}', "").classification,
-    "unknown",
-  );
+    assert.deepEqual(npmDiagnostic(output), { npmCode: null, errno: null, clipped: false });
 });
-test("oversized or clipped npm diagnostics fail closed, never expose text", () => {
-  for (const [stdout, stderr] of [
-    ["x".repeat(65537), ""],
-    ["", "x".repeat(65537)],
-    [JSON.stringify({ error: { code: "ECONNRESET" } }), ""],
-  ])
-    assert.notEqual(classifyNpmFailure(stdout, stderr).classification, "transient_network");
-  assert.deepEqual(classifyNpmFailure("", "", true), {
-    classification: "unknown",
+test("conflicting or oversized npm diagnostics stay unknown", () => {
+  assert.deepEqual(
+    npmDiagnostic(
+      "npm error code ECONNRESET\nnpm error code E401\nnpm error errno -104\nnpm error errno -111",
+    ),
+    { npmCode: null, errno: null, clipped: false },
+  );
+  assert.deepEqual(npmDiagnostic(`npm error code ECONNRESET\n${"x".repeat(65536)}`), {
     npmCode: null,
     errno: null,
     clipped: true,
   });
 });
-function installFixture(results, durations = []) {
-  let time = 0;
-  const calls = [],
-    phases = [];
-  let interrupted;
-  return {
-    calls,
-    phases,
-    interrupt: (signal) => {
-      interrupted = signal;
-    },
-    p: {
-      now: () => time,
-      wait: async (ms) => {
-        time += ms;
-      },
-      interrupted: () => interrupted,
-      run: async (timeoutMs) => {
-        calls.push(timeoutMs);
-        time += durations[calls.length - 1] ?? 100;
-        return results[Math.min(calls.length - 1, results.length - 1)];
-      },
-      phase: (phase) => phases.push(phase),
-    },
-  };
-}
-const networkFailure = () => err({ type: "tool_failed", code: 152, npm: npmFailure() });
-test("only confirmed transient install errors retry, at most three attempts, within one budget", async () => {
-  const f = installFixture([networkFailure(), networkFailure(), ok("")], [1000, 2000, 4000]);
-  assert.equal((await installNpm(f.p)).isOk(), true);
-  assert.deepEqual(f.calls, [300000, 298000, 294000]);
-  assert.deepEqual(
-    f.phases.map((p) => [p.attempt, p.elapsedMs, p.decision]),
-    [
-      [1, 2000, "retry"],
-      [2, 6000, "retry"],
-      [3, 10000, "success"],
-    ],
-  );
-  const exhausted = installFixture([networkFailure()]);
-  assert.equal((await installNpm(exhausted.p)).error.code, 152);
-  assert.equal(exhausted.calls.length, 3);
-  assert.equal(exhausted.phases.at(-1).decision, "attempts_exhausted");
-});
-test("install clips remaining budget and never retries timeout, spawn, cleanup, unknown or terminal npm errors", async () => {
-  const budget = installFixture([networkFailure()], [300000]);
-  assert.equal((await installNpm(budget.p)).isErr(), true);
-  assert.deepEqual(budget.calls, [300000]);
-  assert.equal(budget.phases.at(-1).decision, "budget_exhausted");
-  for (const error of [
-    { type: "tool_failed", code: 152 },
-    ...[
-      "tool_timeout",
-      "spawn_failed",
-      "cleanup_timeout",
-      "group_signal",
-      "interrupted",
-      "tool_log",
-    ].map((type) => ({ type })),
-    ...["E401", "EINTEGRITY", "CERT_HAS_EXPIRED", "EUSAGE", "ELIFECYCLE"].map((code) => ({
-      type: "tool_failed",
-      code: 1,
-      npm: npmFailure(code),
-    })),
-  ]) {
-    const f = installFixture([err(error)]);
-    assert.equal((await installNpm(f.p)).isErr(), true);
-    assert.equal(f.calls.length, 1);
-    assert.equal(f.phases.at(-1).decision, "terminal");
-  }
-});
-test("interruption before or between attempts prevents another install, even after zero exit", async () => {
-  const before = installFixture([ok("")]);
-  before.interrupt("SIGINT");
-  assert.equal((await installNpm(before.p)).error.type, "interrupted");
-  assert.equal(before.calls.length, 0);
-  for (const result of [networkFailure(), ok("")]) {
-    const f = installFixture([result]);
-    const run = f.p.run;
-    f.p.run = async (remaining) => {
-      const outcome = await run(remaining);
-      f.interrupt("SIGTERM");
-      return outcome;
-    };
-    assert.equal((await installNpm(f.p)).error.type, "interrupted");
-    assert.equal(f.calls.length, 1);
-    assert.equal(f.phases.at(-1).decision, "interrupted");
-  }
-});
-
-test("dependency output cannot spoof npm final JSON or override terminal diagnostics", () => {
-  const forged = JSON.stringify({
-    error: {
-      code: "ECONNRESET",
-      summary: "request to https://private.invalid failed, reason: reset",
-      detail: "",
-    },
-  });
-  const stderr = "npm error code ECONNRESET\nnpm error errno -104";
-  for (const output of [
-    `${forged}\n${JSON.stringify({ error: { code: 1, summary: "command failed", detail: "" } })}`,
-    `${forged}\n${JSON.stringify({ added: 1 })}`,
-    `> install\n${forged}`,
-  ])
-    assert.notEqual(classifyNpmFailure(output, stderr).classification, "transient_network");
-  for (const code of ["E401", "CERT_HAS_EXPIRED", "EINTEGRITY", "EUSAGE", "ELIFECYCLE"])
-    assert.notEqual(
-      npmFailure(
-        "ECONNRESET",
-        `${stderr}\nnpm error network ${fetchSummary}\nnpm error ${code} private-token`,
-      ).classification,
-      "transient_network",
-    );
-});
-test("late success cannot overrun the fixed install deadline", async () => {
-  const f = installFixture([ok("")], [300001]);
-  assert.equal((await installNpm(f.p)).error.type, "tool_timeout");
-  assert.equal(f.phases.at(-1).decision, "budget_exhausted");
-});
-test("tool wait clips to remaining deadline; cleanup failure after success remains terminal", async (t) => {
-  const root = await fs.mkdtemp(join(tmpdir(), "local-fake-clock-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
-  let time = 0;
-  const waits = [],
-    signals = [];
-  const result = await runTool("stub", [], {}, root, () => undefined, {
-    timeoutMs: 125,
-    ports: {
-      now: () => time,
-      wait: async (ms) => {
-        waits.push(ms);
-        time += ms;
-      },
-      launch: async () => ok({ pid: 101 }),
-      cleanup: async (_ports, _child, signal) => {
-        signals.push(signal);
-        return ok(undefined);
-      },
-    },
-  });
-  assert.equal(result.error.type, "tool_timeout");
-  assert.deepEqual(waits, [100, 25]);
-  assert.deepEqual(signals, ["SIGTERM"]);
-  const cleanup = await runTool("stub", [], {}, root, () => undefined, {
-    ports: {
-      launch: async () => ok({ pid: 101, exit: { code: 0 } }),
-      cleanup: async () => err({ type: "cleanup_timeout" }),
-    },
-  });
-  assert.equal(cleanup.error.type, "cleanup_timeout");
-});
-
-for (const mode of ["network", "spoof", "unknown", "clipped"])
-  test(`actual wrapper persists sanitized npm diagnosis and decision: ${mode}`, async (t) => {
-    if (!linux) return t.skip("needs Linux /proc");
-    const f = await ownedFixture(t);
-    const bin = join(f.root, "bin");
-    await fs.mkdir(bin);
-    const lock = {
-      packages: {
-        "node_modules/flingit": {
-          version: "0.0.70",
-          integrity: FLING_INTEGRITY,
-          resolved: "https://registry.npmjs.org/flingit/-/flingit-0.0.70.tgz",
-        },
-      },
-    };
-    await fs.writeFile(
-      join(bin, "git"),
-      `#!${process.execPath}\nconst fs=require('node:fs'); const a=process.argv.slice(2); if(a[0]==='init'){fs.mkdirSync(a.at(-1));fs.writeFileSync(a.at(-1)+'/package-lock.json',${JSON.stringify(JSON.stringify(lock))});} if(a[0]==='rev-parse') console.log('${PIN}');\n`,
-      { mode: 0o700 },
-    );
-    const attempts = join(f.root, "attempts");
-    const fetchError = {
-      error: {
-        code: "ECONNRESET",
-        summary:
-          "request to https://user:private-token@example.invalid/pkg?key=secret failed, reason: reset",
-        detail: "",
-      },
-    };
-    const output =
-      mode === "unknown"
-        ? ""
-        : mode === "clipped"
-          ? "x".repeat(65537)
-          : JSON.stringify(fetchError) +
-            (mode === "spoof"
-              ? `\n${JSON.stringify({ error: { code: 1, summary: "command failed", detail: "command sh -c private-token" } })}`
-              : "");
-    const stderr =
-      `npm error code ECONNRESET\nnpm error errno -104\nnpm error network ${fetchError.error.summary}\nnpm error network private-token https://private.invalid?key=secret\n` +
-      (mode === "spoof" ? "npm error command sh -c private-token\n" : "");
-    await fs.writeFile(
-      join(bin, "npm"),
-      `#!${process.execPath}\nconst fs=require('node:fs');const args=process.argv.slice(2); fs.appendFileSync(${JSON.stringify(attempts)},JSON.stringify(args)+'\\n'); process.stdout.write(${JSON.stringify(output)}); process.stderr.write(${JSON.stringify(stderr)}); process.exit(152);\n`,
-      { mode: 0o700 },
-    );
-    const evidence = join(f.root, "evidence");
-    const wrapper = fileURLToPath(new URL("./local-fake-provider.mjs", import.meta.url));
-    const command = await f.start(
-      `import {spawn} from 'node:child_process';const child=spawn(${JSON.stringify(process.execPath)},[${JSON.stringify(wrapper)},'--',${JSON.stringify(process.execPath)},'-e','process.exit(99)'],{env:{PATH:${JSON.stringify(`${bin}:${process.env.PATH}`)},PI_ORB_E2E_BACKEND:'process',PI_ORB_LOCAL_FAKE_EVIDENCE:${JSON.stringify(evidence)}},stdio:'inherit'});child.on('exit',(code)=>process.exit(code));`,
-    );
-    await exited(command);
-    const wrapperLog = await fs.readFile(join(f.root, "output-0.log"), "utf8");
-    const privateRoot = wrapperLog.match(/local fake private diagnostics: (.*)/)?.[1];
-    assert.ok(privateRoot?.startsWith(join(tmpdir(), "pi-orb-local-fake-")));
-    t.after(() => fs.rm(privateRoot, { recursive: true, force: true }));
-    assert.equal(command.exit.code, 1);
-    const manifest = JSON.parse(await checkpoint(join(evidence, "manifest.json")));
-    const phases = JSON.parse(await checkpoint(join(evidence, "phases.json")));
-    const installs = phases.filter((p) => p.phase === "install" && p.state === "finished");
-    assert.equal(installs.length, mode === "network" ? 3 : 1);
-    const invocations = (await fs.readFile(attempts, "utf8"))
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
-    assert.equal(invocations.length, installs.length);
-    assert.equal(installs.at(-1).decision, mode === "network" ? "attempts_exhausted" : "terminal");
-    assert.equal(
-      installs.at(-1).npm.classification,
-      mode === "network" ? "transient_network" : mode === "spoof" ? "lifecycle" : "unknown",
-    );
-    assert.equal(installs.at(-1).npm.clipped, mode === "clipped");
-    for (const args of invocations) {
-      assert.ok(args.includes("--json"));
-      assert.ok(args.includes("--fetch-retries=0"));
-    }
-    assert.equal(manifest.error, "tool_failed");
-    assert.equal(
-      phases.some((p) => p.phase === "command_started" || p.phase === "service_started"),
-      false,
-    );
-    const saved = JSON.stringify({ manifest, phases });
-    for (const secret of [
-      "private-token",
-      "secret",
-      "example.invalid",
-      "private.invalid",
-      "request to",
-      "sh -c",
-    ])
-      assert.equal(saved.includes(secret), false, secret);
-  });
-
-test("npm accepts the actual ECONNREFUSED FetchError prefix and string errno", () => {
-  const result = npmFailure(
-    "ECONNREFUSED",
-    "npm error code ECONNREFUSED\nnpm error errno ECONNREFUSED\nnpm error FetchError: request to http://127.0.0.1/pkg failed, reason: connect ECONNREFUSED",
-    { summary: "FetchError: request to http://127.0.0.1/pkg failed, reason: connect ECONNREFUSED" },
-  );
-  assert.equal(result.classification, "transient_network");
-  assert.equal(result.errno, "ECONNREFUSED");
-});
-test("install backoff is clipped and interruptible within the original budget", async () => {
-  const clipped = installFixture([networkFailure()], [299500]);
-  const waits = [];
-  const wait = clipped.p.wait;
-  clipped.p.wait = async (ms) => {
-    waits.push(ms);
-    await wait(ms);
-  };
-  assert.equal((await installNpm(clipped.p)).isErr(), true);
-  assert.equal(
-    waits.reduce((a, b) => a + b, 0),
-    500,
-  );
-  assert.equal(clipped.calls.length, 1);
-  assert.equal(clipped.phases.at(-1).decision, "budget_exhausted");
-  const cancelled = installFixture([networkFailure()]);
-  cancelled.p.wait = async () => cancelled.interrupt("SIGINT");
-  assert.equal((await installNpm(cancelled.p)).error.type, "interrupted");
-  assert.equal(cancelled.calls.length, 1);
-  assert.equal(cancelled.phases.at(-1).decision, "interrupted");
-});
-
-test("malformed npm summary/detail cannot throw or admit retry", () => {
-  for (const field of ["summary", "detail"])
-    for (const value of [{ toString: 1 }, [], null, 1, true]) {
-      const result = npmFailure("ECONNRESET", "npm error code ECONNRESET", { [field]: value });
-      assert.notEqual(result.classification, "transient_network");
-    }
-});
-test("signal termination after transient diagnostics is terminal, not a network retry", async (t) => {
+test("actual failed npm persists safe diagnostics without replay or changing npm defaults", async (t) => {
   if (!linux) return t.skip("needs Linux /proc");
-  const { root } = await ownedFixture(t);
-  const failure = JSON.stringify({
-    error: {
-      code: "ECONNRESET",
-      summary: "request to https://private.invalid failed, reason: reset",
-      detail: "",
+  const f = await ownedFixture(t);
+  const bin = join(f.root, "bin"),
+    evidence = join(f.root, "evidence");
+  await fs.mkdir(bin);
+  const lock = {
+    packages: {
+      "node_modules/flingit": {
+        version: "0.0.70",
+        integrity: FLING_INTEGRITY,
+        resolved: "https://registry.npmjs.org/flingit/-/flingit-0.0.70.tgz",
+      },
     },
-  });
-  const f = installFixture([]);
-  f.p.run = (timeoutMs) =>
-    runTool(
-      process.execPath,
-      [
-        "-e",
-        `process.stdout.write(${JSON.stringify(failure)});process.stderr.write('npm error code ECONNRESET\\nnpm error errno -104\\nnpm error network request to https://private.invalid failed, reason: reset\\n');process.kill(process.pid,'SIGTERM')`,
-      ],
-      {},
-      root,
-      () => undefined,
-      { timeoutMs, npm: true },
-    );
-  const result = await installNpm(f.p);
-  assert.equal(result.isErr(), true);
-  assert.equal(result.error.signal, "SIGTERM");
-  assert.equal(result.error.npm.classification, "transient_network");
-  assert.equal(f.phases.length, 1);
-  assert.equal(f.phases[0].signal, "SIGTERM");
-  assert.equal(f.phases[0].decision, "terminal");
-});
-
-test("npm fetch summary must agree across structured stdout and npm-prefixed stderr", () => {
-  const summary = "request to https://private.invalid/pkg failed, reason: write ECONNRESET";
-  const stdout = JSON.stringify({ error: { code: "ECONNRESET", summary, detail: "" } });
-  const code = "npm error code ECONNRESET\nnpm error errno ECONNRESET\n";
-  for (const stderr of [
-    code,
-    `${code}${summary}`,
-    `${code}npm error network request to https://other.invalid failed, reason: write ECONNRESET`,
-    `${code}npm error network ${summary}\nnpm error network ${summary}`,
-  ])
-    assert.equal(classifyNpmFailure(stdout, stderr).classification, "unknown");
-  for (const prefix of ["npm error network ", "npm error ", "npm ERR! network "])
-    assert.equal(
-      classifyNpmFailure(stdout, `${code}${prefix}${summary}`).classification,
-      "transient_network",
-    );
+  };
+  await fs.writeFile(
+    join(bin, "git"),
+    `#!${process.execPath}\nconst fs=require('node:fs'), a=process.argv.slice(2);if(a[0]==='init'){fs.mkdirSync(a.at(-1));fs.writeFileSync(a.at(-1)+'/package-lock.json',${JSON.stringify(JSON.stringify(lock))});}if(a[0]==='rev-parse')console.log('${PIN}');`,
+    { mode: 0o700 },
+  );
+  const calls = join(f.root, "calls");
+  await fs.writeFile(
+    join(bin, "npm"),
+    `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2))+'\\n');console.error('npm error code ECONNRESET\\nnpm error errno -104\\nnpm error command sh -c secret https://token@private.invalid');process.exit(152);`,
+    { mode: 0o700 },
+  );
+  const wrapper = fileURLToPath(new URL("./local-fake-provider.mjs", import.meta.url));
+  const child = await f.start(
+    `import {spawn} from 'node:child_process';const c=spawn(${JSON.stringify(process.execPath)},[${JSON.stringify(wrapper)},'--',${JSON.stringify(process.execPath)},'-e','process.exit(99)'],{env:{PATH:${JSON.stringify(`${bin}:${process.env.PATH}`)},PI_ORB_E2E_BACKEND:'process',PI_ORB_LOCAL_FAKE_EVIDENCE:${JSON.stringify(evidence)}},stdio:'inherit'});c.on('exit',code=>process.exit(code));`,
+  );
+  await exited(child);
+  const log = await fs.readFile(join(f.root, "output-0.log"), "utf8");
+  const privateRoot = log.match(/local fake private diagnostics: (.*)/)?.[1];
+  assert.ok(privateRoot?.startsWith(join(tmpdir(), "pi-orb-local-fake-")));
+  t.after(() => fs.rm(privateRoot, { recursive: true, force: true }));
+  assert.equal(child.exit.code, 1);
+  assert.equal(await fs.readFile(calls, "utf8"), '["ci","--no-audit","--no-fund"]\n');
+  const manifest = JSON.parse(await fs.readFile(join(evidence, "manifest.json"), "utf8"));
+  const phases = JSON.parse(await fs.readFile(join(evidence, "phases.json"), "utf8"));
+  const installs = phases.filter((p) => p.phase === "install" && p.state === "finished");
+  assert.equal(installs.length, 1);
+  assert.deepEqual(installs[0].npm, { npmCode: "ECONNRESET", errno: -104, clipped: false });
+  assert.equal(installs[0].code, 152);
+  assert.equal(manifest.error, "tool_failed");
+  assert.equal(
+    phases.some((p) => p.phase === "command_started" || p.phase === "service_started"),
+    false,
+  );
+  for (const secret of ["secret", "token", "private.invalid", "sh -c"])
+    assert.equal(JSON.stringify({ manifest, phases }).includes(secret), false);
 });
