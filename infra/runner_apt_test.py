@@ -110,7 +110,8 @@ class RunnerAptTests(unittest.TestCase):
     def test_workflows_prepare_mirror_before_first_apt_operation(self):
         command = ('sudo python3 infra/runner_apt.py /etc/apt/sources.list.d/ubuntu.sources '
                    '/etc/apt/apt.conf.d/' + CONFIG_NAME)
-        for workflow, job in [('ci', 'checks'), ('e2e', 'e2e'), ('deploy', 'release')]:
+        for workflow, job in [('ci', 'checks'), ('e2e', 'e2e'), ('deploy', 'release'),
+                              ('durable-qualification', 'process')]:
             with self.subTest(workflow=workflow):
                 text = (ROOT / f'.github/workflows/{workflow}.yml').read_text()
                 jobs = dict(re.findall(r'^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)',
