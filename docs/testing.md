@@ -1,5 +1,15 @@
 # Testing
 
+## Local fake-provider npm preparation (2026-10-22; local, undeployed)
+
+**Rule:** installation replay requires npm-owned final structured fetch-error evidence, never exit status alone. The fixture permits at most three attempts, disables npm fetch retries and shares one 300s install budget across attempts and interruptible 1s/2s backoffs. Each child gets the remaining budget; mandatory cleanup may add up to 6s plus I/O beyond it. Lifecycle/command, auth, certificate, integrity, lock, unknown, signal, timeout, spawn and cleanup failures are terminal; tests are never retried.
+
+Existing manifest/phases uploads retain only finite npm classification/code/errno, clipping, safe signal, attempt, elapsed/backoff time and decision. Whole-document JSON parsing, agreement with npm-prefixed stderr code/fetch summary and 64 KiB-per-stream limits fail closed. No raw npm output, URLs, credentials, commands or payloads are uploaded; workflows and upload scope are unchanged. Tests cover real stub preparation through persisted evidence, spoofed dependency output, unknown exit 152, signal loss, clipping, deadlines, cancellation and cleanup failure.
+
+**Historical blocker unchanged:** [Durable 39844782648](https://github.com/schani/pi-orb/actions/runs/39844782648) process shard 1 exited 152 during provider installation before tests. The original npm cause was lost; ECONNRESET is not established. No exception has been granted. New passing CI or generic stabilization cannot clear this non-UI attribution blocker. Evidence, rejected retry-only alternative and local RED/GREEN receipts: `docs/postmortems/2026-10-22-local-fake-npm-preparation.md`.
+
+Final local checks: **56 focused tests**; `npm run test:infra` **122 Node + 220 Python + 33 guest tests**, after the stderr-summary correction. Scoped Biome, Node syntax and diff whitespace checks pass. Logs: `.context/local-fake-install/`. No hosted qualification, E2E or deployment.
+
 ## Durable browser APT setup (2026-10-22)
 
 **Rule:** Ubuntu runner helper coverage includes Durable process shards before native prerequisites and Playwright's privileged APT child, not only the Docker E2E workflow. The workflow-order inventory must cover each such job. Setup-only stalls are not test failures or successful qualification: preserve terminal logs and distinguish the proven acquisition phase from an unproven mirror/runner cause. The helper's public URI, keyring and IPv4 diagnostics remain in Actions logs; retries, deadlines and assertions are unchanged. Incident and local validation: `docs/postmortems/2026-10-22-durable-browser-apt-stall.md`. Fresh attempt-1 exact-head CI, all E2E shards and Durable qualification remain required; no historical cause is claimed fixed.

@@ -243,7 +243,9 @@ export function launch(file, args, options, output) {
         spawn(file, args, {
           ...options,
           detached: true,
-          stdio: output ? ["ignore", output.fd, output.fd] : ["ignore", "inherit", "inherit"],
+          stdio: output
+            ? ["ignore", output.fd, output.stderrFd ?? output.fd]
+            : ["ignore", "inherit", "inherit"],
         }),
       () => ({ type: "spawn_failed" }),
     )();
@@ -263,7 +265,7 @@ export function launch(file, args, options, output) {
     });
   });
 }
-const wait = () => new Promise((r) => setTimeout(r, 100));
+const wait = (ms = 100) => new Promise((r) => setTimeout(r, ms));
 async function signalGroup(pid, signal) {
   const members = await groupMembers(pid);
   if (members.isErr()) return members;
@@ -280,27 +282,208 @@ export const ownershipPorts = {
   signal: signalGroup,
   alive: async (pid) => (await groupMembers(pid)).map((members) => members.length > 0),
 };
-export async function runTool(file, args, options, root, interrupted) {
+const NPM_DIAGNOSTIC_LIMIT = 65_536;
+const npmClasses = {
+  transient_network: [
+    "ECONNRESET",
+    "ECONNREFUSED",
+    "ETIMEDOUT",
+    "EAI_AGAIN",
+    "ECONNECTIONTIMEOUT",
+    "EIDLETIMEOUT",
+    "ERESPONSETIMEOUT",
+    "ETRANSFERTIMEOUT",
+  ],
+  auth: ["E401", "E403", "ENEEDAUTH", "EOTP"],
+  certificate: [
+    "CERT_HAS_EXPIRED",
+    "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+    "DEPTH_ZERO_SELF_SIGNED_CERT",
+    "SELF_SIGNED_CERT_IN_CHAIN",
+    "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+    "ERR_TLS_CERT_ALTNAME_INVALID",
+  ],
+  integrity: ["EINTEGRITY"],
+  lock: ["EUSAGE", "ENOLOCK", "ELOCKVERIFY", "ERESOLVE", "EJSONPARSE"],
+  lifecycle: ["ELIFECYCLE"],
+};
+const npmErrnos = new Set([-104, -111, -110, -3001, ...npmClasses.transient_network]);
+
+export function classifyNpmFailure(stdout, stderr, clipped = false) {
+  const result = { classification: "unknown", npmCode: null, errno: null, clipped };
+  if (
+    clipped ||
+    Buffer.byteLength(stdout) > NPM_DIAGNOSTIC_LIMIT ||
+    Buffer.byteLength(stderr) > NPM_DIAGNOSTIC_LIMIT
+  )
+    return { ...result, clipped: true };
+  const parsed = Result.fromThrowable(
+    () => JSON.parse(stdout),
+    () => ({ type: "npm_json" }),
+  )();
+  const failure = parsed.isOk() ? parsed.value?.error : undefined;
+  const text = `${stderr}\n${typeof failure?.summary === "string" ? failure.summary : ""}\n${typeof failure?.detail === "string" ? failure.detail : ""}`;
+  const lifecycle =
+    /(?:^|\n)(?:npm (?:error|ERR!) )?command(?:\s|$)|\b(?:ELIFECYCLE|lifecycle)\b/i.test(text);
+  for (const [classification, codes] of Object.entries(npmClasses)) {
+    if (codes.includes(failure?.code)) {
+      result.classification = classification;
+      result.npmCode = failure.code;
+    }
+  }
+  const errno = stderr.match(/^npm (?:error|ERR!) errno (-?\d+|[A-Z_]+)$/m)?.[1];
+  const value = /^-?\d+$/.test(errno ?? "") ? Number(errno) : errno;
+  if (npmErrnos.has(value)) result.errno = value;
+  const terminal = Object.entries(npmClasses).find(
+    ([classification, codes]) =>
+      classification !== "transient_network" &&
+      codes.some((code) => new RegExp(`\\b${code}\\b`).test(text)),
+  );
+  if (lifecycle) result.classification = "lifecycle";
+  else if (terminal) result.classification = terminal[0];
+  else if (result.classification === "transient_network") {
+    const codes = [...stderr.matchAll(/^npm (?:error|ERR!) code (\S+)$/gm)].map(
+      (match) => match[1],
+    );
+    const summaries = [
+      ...stderr.matchAll(
+        /^npm (?:error|ERR!) (?:network )?((?:FetchError: )?request to https?:\/\/\S+ failed, reason: .+)$/gm,
+      ),
+    ].map((match) => match[1]);
+    // Only npm's whole structured result and matching top-level fetch diagnostic admit replay.
+    if (
+      typeof failure.summary !== "string" ||
+      typeof failure.detail !== "string" ||
+      codes.length !== 1 ||
+      codes[0] !== result.npmCode ||
+      summaries.length !== 1 ||
+      summaries[0] !== failure.summary ||
+      !/^(?:FetchError: )?request to https?:\/\/\S+ failed, reason: /i.test(failure.summary)
+    )
+      result.classification = "unknown";
+  }
+  return result;
+}
+
+export async function installNpm(p) {
+  const started = p.now();
+  const deadline = started + 300_000;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (p.interrupted()) return err({ type: "interrupted" });
+    const remaining = deadline - p.now();
+    if (remaining <= 0) return err({ type: "tool_timeout" });
+    let result = await p.run(remaining);
+    if (result.isOk() && p.now() >= deadline) result = err({ type: "tool_timeout" });
+    const transient =
+      result.isErr() &&
+      result.error.type === "tool_failed" &&
+      Number.isInteger(result.error.code) &&
+      result.error.code > 0 &&
+      result.error.code <= 255 &&
+      !result.error.signal &&
+      result.error.npm?.classification === "transient_network";
+    let decision = result.isOk() ? "success" : "terminal";
+    if (transient) decision = attempt === 3 ? "attempts_exhausted" : "retry";
+    if (p.now() >= deadline) decision = "budget_exhausted";
+    if (p.interrupted()) decision = "interrupted";
+    let retryDelayMs = 0;
+    if (decision === "retry") {
+      const delayStarted = p.now();
+      const delayUntil = Math.min(deadline, delayStarted + attempt * 1000);
+      while (p.now() < delayUntil && !p.interrupted())
+        await p.wait(Math.min(100, delayUntil - p.now()));
+      retryDelayMs = p.now() - delayStarted;
+      if (p.interrupted()) decision = "interrupted";
+      else if (p.now() >= deadline) decision = "budget_exhausted";
+    }
+    p.phase({
+      phase: "install",
+      at: new Date(p.now()).toISOString(),
+      state: "finished",
+      attempt,
+      elapsedMs: p.now() - started,
+      retryDelayMs,
+      decision,
+      code: result.isOk() ? 0 : (result.error.code ?? 1),
+      error: result.isErr() ? result.error.type : null,
+      ...(result.isErr() && result.error.signal ? { signal: result.error.signal } : {}),
+      ...(result.isErr() && result.error.npm ? { npm: result.error.npm } : {}),
+    });
+    if (p.interrupted()) return err({ type: "interrupted" });
+    if (decision !== "retry") return result;
+  }
+}
+
+async function npmDiagnostic(stdoutPath, stderrPath) {
+  return boundary("npm_diagnostic", async () => {
+    const sizes = await Promise.all([stdoutPath, stderrPath].map((path) => fs.stat(path)));
+    if (sizes.some((stat) => stat.size > NPM_DIAGNOSTIC_LIMIT))
+      return classifyNpmFailure("", "", true);
+    return classifyNpmFailure(
+      await fs.readFile(stdoutPath, "utf8"),
+      await fs.readFile(stderrPath, "utf8"),
+    );
+  });
+}
+export async function runTool(file, args, options, root, interrupted, settings = {}) {
+  if (interrupted()) return err({ type: "interrupted" });
+  const p = { ...ownershipPorts, launch, cleanup: stopChild, ...settings.ports };
+  const deadline = p.now() + (settings.timeoutMs ?? 300_000);
   const path = join(root, `tool-${Date.now()}.log`);
   const opened = await boundary("tool_log_open", () => fs.open(path, "w", 0o600));
   if (opened.isErr()) return opened;
   const output = opened.value;
-  const launched = await launch(file, args, options, output);
+  const jsonPath = `${path}.json`;
+  const json = settings.npm
+    ? await boundary("tool_log_open", () => fs.open(jsonPath, "w", 0o600))
+    : ok(undefined);
+  if (json.isErr()) {
+    await boundary("tool_log_close", () => output.close());
+    return json;
+  }
+  const launched = await p.launch(
+    file,
+    args,
+    options,
+    json.value ? { fd: json.value.fd, stderrFd: output.fd } : output,
+  );
   if (launched.isErr()) {
     await boundary("tool_log_close", () => output.close());
+    if (json.value) await boundary("tool_log_close", () => json.value.close());
     return launched;
   }
   const child = launched.value;
-  const deadline = Date.now() + 300_000;
-  while (!child.exit && Date.now() < deadline && !interrupted()) await wait();
+  while (!child.exit && p.now() < deadline && !interrupted())
+    await p.wait(Math.min(100, deadline - p.now()));
   let failure;
-  if (!child.exit) failure = { type: interrupted() ? "interrupted" : "tool_timeout" };
-  const cleaned = await stopChild(ownershipPorts, child, interrupted() ?? "SIGTERM", 3000);
+  if (interrupted()) failure = { type: "interrupted" };
+  else if (!child.exit || p.now() >= deadline) failure = { type: "tool_timeout" };
+  const cleaned = await p.cleanup(p, child, interrupted() ?? "SIGTERM", 3000);
   if (cleaned.isErr()) failure = cleaned.error;
   const closed = await boundary("tool_log_close", () => output.close());
+  const jsonClosed = json.value
+    ? await boundary("tool_log_close", () => json.value.close())
+    : ok(undefined);
   if (closed.isErr()) return closed;
+  if (jsonClosed.isErr()) return jsonClosed;
   if (failure) return err(failure);
-  if (child.exit.code !== 0) return err({ type: "tool_failed", code: child.exit.code });
+  if (child.exit.code !== 0) {
+    const diagnostic = settings.npm ? await npmDiagnostic(jsonPath, path) : ok(undefined);
+    return err({
+      type: "tool_failed",
+      code: child.exit.code,
+      ...(child.exit.signal
+        ? {
+            signal: ["SIGINT", "SIGTERM", "SIGKILL"].includes(child.exit.signal)
+              ? child.exit.signal
+              : "other",
+          }
+        : {}),
+      ...(settings.npm
+        ? { npm: diagnostic.isOk() ? diagnostic.value : classifyNpmFailure("", "") }
+        : {}),
+    });
+  }
   return boundary("tool_log", () => fs.readFile(path, "utf8"));
 }
 async function freePort(port) {
@@ -370,6 +553,22 @@ export async function runLocalFake(command, env = process.env) {
     preparationPhases.push({ phase, at: new Date().toISOString(), state: "started" });
     const toolEnv =
       file === "docker" && env.DOCKER_HOST ? { ...safeEnv, DOCKER_HOST: env.DOCKER_HOST } : safeEnv;
+    if (file === "npm")
+      return installNpm({
+        now: Date.now,
+        wait,
+        interrupted: () => interrupt,
+        run: (timeoutMs) =>
+          runTool(
+            file,
+            [...args, "--json", "--fetch-retries=0", "--loglevel=error", "--no-update-notifier"],
+            { cwd, env: toolEnv },
+            root,
+            () => interrupt,
+            { timeoutMs, npm: true },
+          ),
+        phase: (record) => preparationPhases.push(record),
+      });
     const result = await runTool(file, args, { cwd, env: toolEnv }, root, () => interrupt);
     preparationPhases.push({
       phase,
