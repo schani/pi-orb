@@ -2091,6 +2091,34 @@ function OrbConversation({
           </div>
         </header>
         <div className="orb-header-scroll">
+          {orb?.actionRequired !== undefined && (
+            <OrbNotice>
+              {orb.actionRequired.type === "owner_login_required" ? (
+                <>Project owner login required for {orb.actionRequired.provider}.</>
+              ) : orb.actionRequired.type === "claude_subscription_login" ? (
+                <ClaudeAuthButton />
+              ) : orb.actionRequired.verificationUri === "" ||
+                orb.actionRequired.userCode === "" ? (
+                <>
+                  Preparing{" "}
+                  {orb.actionRequired.type === "github_device_login" ? "GitHub" : "OpenAI"} login…
+                </>
+              ) : (
+                <>
+                  {orb.actionRequired.type === "github_device_login"
+                    ? "GitHub device login required."
+                    : "OpenAI device login required."}{" "}
+                  Visit{" "}
+                  <a href={orb.actionRequired.verificationUri} target="_blank" rel="noreferrer">
+                    {orb.actionRequired.verificationUri}
+                  </a>{" "}
+                  and enter <span className="user-code">{orb.actionRequired.userCode}</span>
+                  <CopyCodeButton code={orb.actionRequired.userCode} />
+                  {expiresIn !== null && <span className="muted"> expires in {expiresIn}</span>}
+                </>
+              )}
+            </OrbNotice>
+          )}
           {canConnectLive(orb) && connected && state.subagents.length > 0 && (
             <SubagentRail agents={state.subagents} context={detailContext} />
           )}
@@ -2197,34 +2225,6 @@ function OrbConversation({
                   ? "is not executable"
                   : "failed"}
               . The orb started anyway; its log is at <code>{orb.stateDetail.logPath}</code>.
-            </OrbNotice>
-          )}
-          {orb?.actionRequired !== undefined && (
-            <OrbNotice>
-              {orb.actionRequired.type === "owner_login_required" ? (
-                <>Project owner login required for {orb.actionRequired.provider}.</>
-              ) : orb.actionRequired.type === "claude_subscription_login" ? (
-                <ClaudeAuthButton />
-              ) : orb.actionRequired.verificationUri === "" ||
-                orb.actionRequired.userCode === "" ? (
-                <>
-                  Preparing{" "}
-                  {orb.actionRequired.type === "github_device_login" ? "GitHub" : "OpenAI"} login…
-                </>
-              ) : (
-                <>
-                  {orb.actionRequired.type === "github_device_login"
-                    ? "GitHub device login required."
-                    : "OpenAI device login required."}{" "}
-                  Visit{" "}
-                  <a href={orb.actionRequired.verificationUri} target="_blank" rel="noreferrer">
-                    {orb.actionRequired.verificationUri}
-                  </a>{" "}
-                  and enter <span className="user-code">{orb.actionRequired.userCode}</span>
-                  <CopyCodeButton code={orb.actionRequired.userCode} />
-                  {expiresIn !== null && <span className="muted"> expires in {expiresIn}</span>}
-                </>
-              )}
             </OrbNotice>
           )}
           {orbError !== null && (
