@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type HistoryRecord, projectDisplayRecord } from "@pi-orb/protocol";
+import { type HistoryRecord, type OrbView, projectDisplayRecord } from "@pi-orb/protocol";
 import { type Browser, chromium, expect as expectPage, type Page, webkit } from "@playwright/test";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
+import { closeRoutedPage } from "./testkit/close-routed-page.ts";
 import { gotoFrontendFixture, gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
 import { waitForFixtureMedia } from "./testkit/media-ready.ts";
 import { armNativeWheel } from "./testkit/native-wheel.ts";
@@ -67,6 +68,59 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     await browser?.close();
     await vite?.close();
   });
+
+  it.each([1280, 320])(
+    "keeps required GitHub login visible at the transcript tail at %ipx",
+    async (width) => {
+      const page = await browser.newPage({ viewport: { width, height: 740 } });
+      const orbId = "frontend-long-history";
+      await page.route(`**/api/v1/orbs/${orbId}`, async (route) => {
+        const response = await route.fetch();
+        const original: OrbView = await response.json();
+        await route.fulfill({
+          json: {
+            ...original,
+            centralAgent: true,
+            state: "creating",
+            activity: "busy",
+            actionRequired: {
+              type: "github_device_login",
+              verificationUri: "https://github.com/login/device",
+              userCode: "AUTH-2468",
+              expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+            },
+          } satisfies OrbView,
+        });
+      });
+      try {
+        await gotoFrontendHistory(page, `${origin}/orbs/${orbId}`, orbId);
+        const scroller = page.locator(".orb-transcript-scroll");
+        await expectPage
+          .poll(() =>
+            scroller.evaluate((element) => ({
+              long: element.scrollTop > element.clientHeight,
+              atTail:
+                Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop) <= 1,
+            })),
+          )
+          .toEqual({ long: true, atTail: true });
+        const code = page.locator(".user-code");
+        await expectPage(code).toBeInViewport({ ratio: 1 });
+        const before = await code.boundingBox();
+        await scroller.evaluate(
+          (element) =>
+            new Promise<void>((resolve) => {
+              element.addEventListener("scroll", () => queueMicrotask(resolve), { once: true });
+              element.scrollTop -= 100;
+            }),
+        );
+        expectPage(await code.boundingBox()).toEqual(before);
+        await expectPage(code).toBeInViewport({ ratio: 1 });
+      } finally {
+        await closeRoutedPage(page);
+      }
+    },
+  );
 
   it.each([320, 390, 402, 600, 631, 632, 1280])(
     "fills single-column dashboard width and retains fixed multi-column tracks at %ipx",
