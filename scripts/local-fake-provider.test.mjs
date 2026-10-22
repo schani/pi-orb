@@ -10,6 +10,7 @@ import {
   FLING_INTEGRITY,
   inspectService,
   launch,
+  npmDiagnostic,
   ownershipPorts,
   PIN,
   runTool,
@@ -535,3 +536,86 @@ for (const signal of ["SIGINT", "SIGTERM"])
     for (const child of [service, command])
       assert.equal((await ownershipPorts.alive(child.pid)).value, false);
   });
+
+test("npm diagnostics retain only allowlisted anchored code/errno fields", () => {
+  for (const prefix of ["npm error", "npm ERR!"])
+    assert.deepEqual(
+      npmDiagnostic(
+        `${prefix} code ECONNRESET\n${prefix} errno -104\n${prefix} network https://token:secret@private.invalid\n${prefix} command sh -c secret`,
+      ),
+      { npmCode: "ECONNRESET", errno: -104, clipped: false },
+    );
+  assert.equal(npmDiagnostic("npm error code E401\nnpm error errno ECONNREFUSED").npmCode, "E401");
+  assert.equal(npmDiagnostic("npm error errno ECONNREFUSED").errno, "ECONNREFUSED");
+  for (const output of [
+    "",
+    "code ECONNRESET",
+    "npm error code secret\nnpm error errno secret",
+    "npm error code ECONNRESET extra",
+  ])
+    assert.deepEqual(npmDiagnostic(output), { npmCode: null, errno: null, clipped: false });
+});
+test("conflicting or oversized npm diagnostics stay unknown", () => {
+  assert.deepEqual(
+    npmDiagnostic(
+      "npm error code ECONNRESET\nnpm error code E401\nnpm error errno -104\nnpm error errno -111",
+    ),
+    { npmCode: null, errno: null, clipped: false },
+  );
+  assert.deepEqual(npmDiagnostic(`npm error code ECONNRESET\n${"x".repeat(65536)}`), {
+    npmCode: null,
+    errno: null,
+    clipped: true,
+  });
+});
+test("actual failed npm persists safe diagnostics without replay or changing npm defaults", async (t) => {
+  if (!linux) return t.skip("needs Linux /proc");
+  const f = await ownedFixture(t);
+  const bin = join(f.root, "bin"),
+    evidence = join(f.root, "evidence");
+  await fs.mkdir(bin);
+  const lock = {
+    packages: {
+      "node_modules/flingit": {
+        version: "0.0.70",
+        integrity: FLING_INTEGRITY,
+        resolved: "https://registry.npmjs.org/flingit/-/flingit-0.0.70.tgz",
+      },
+    },
+  };
+  await fs.writeFile(
+    join(bin, "git"),
+    `#!${process.execPath}\nconst fs=require('node:fs'), a=process.argv.slice(2);if(a[0]==='init'){fs.mkdirSync(a.at(-1));fs.writeFileSync(a.at(-1)+'/package-lock.json',${JSON.stringify(JSON.stringify(lock))});}if(a[0]==='rev-parse')console.log('${PIN}');`,
+    { mode: 0o700 },
+  );
+  const calls = join(f.root, "calls");
+  await fs.writeFile(
+    join(bin, "npm"),
+    `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2))+'\\n');console.error('npm error code ECONNRESET\\nnpm error errno -104\\nnpm error command sh -c secret https://token@private.invalid');process.exit(152);`,
+    { mode: 0o700 },
+  );
+  const wrapper = fileURLToPath(new URL("./local-fake-provider.mjs", import.meta.url));
+  const child = await f.start(
+    `import {spawn} from 'node:child_process';const c=spawn(${JSON.stringify(process.execPath)},[${JSON.stringify(wrapper)},'--',${JSON.stringify(process.execPath)},'-e','process.exit(99)'],{env:{PATH:${JSON.stringify(`${bin}:${process.env.PATH}`)},PI_ORB_E2E_BACKEND:'process',PI_ORB_LOCAL_FAKE_EVIDENCE:${JSON.stringify(evidence)}},stdio:'inherit'});c.on('exit',code=>process.exit(code));`,
+  );
+  await exited(child);
+  const log = await fs.readFile(join(f.root, "output-0.log"), "utf8");
+  const privateRoot = log.match(/local fake private diagnostics: (.*)/)?.[1];
+  assert.ok(privateRoot?.startsWith(join(tmpdir(), "pi-orb-local-fake-")));
+  t.after(() => fs.rm(privateRoot, { recursive: true, force: true }));
+  assert.equal(child.exit.code, 1);
+  assert.equal(await fs.readFile(calls, "utf8"), '["ci","--no-audit","--no-fund"]\n');
+  const manifest = JSON.parse(await fs.readFile(join(evidence, "manifest.json"), "utf8"));
+  const phases = JSON.parse(await fs.readFile(join(evidence, "phases.json"), "utf8"));
+  const installs = phases.filter((p) => p.phase === "install" && p.state === "finished");
+  assert.equal(installs.length, 1);
+  assert.deepEqual(installs[0].npm, { npmCode: "ECONNRESET", errno: -104, clipped: false });
+  assert.equal(installs[0].code, 152);
+  assert.equal(manifest.error, "tool_failed");
+  assert.equal(
+    phases.some((p) => p.phase === "command_started" || p.phase === "service_started"),
+    false,
+  );
+  for (const secret of ["secret", "token", "private.invalid", "sh -c"])
+    assert.equal(JSON.stringify({ manifest, phases }).includes(secret), false);
+});

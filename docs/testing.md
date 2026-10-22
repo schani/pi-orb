@@ -1,5 +1,11 @@
 # Testing
 
+## Local fake-provider npm preparation (2026-10-22)
+
+Failed npm installation retains only finite allowlisted code/errno fields in existing phase artifacts, from at most 64 KiB of private combined output. Missing/conflicting/oversized fields remain unknown; unreadable output is marked unavailable. Raw logs stay private. npm defaults, one install invocation and the 300s tool timeout are unchanged.
+
+The user waived attribution of only [Durable 39844782648](https://github.com/schani/pi-orb/actions/runs/39844782648)'s original npm exit 152; its cause remains unknown. New failures and exact-head qualification remain mandatory. Evidence: `docs/postmortems/2026-10-22-local-fake-npm-preparation.md`.
+
 ## Durable browser APT setup (2026-10-22)
 
 **Rule:** Ubuntu runner helper coverage includes Durable process shards before native prerequisites and Playwright's privileged APT child, not only the Docker E2E workflow. The workflow-order inventory must cover each such job. Setup-only stalls are not test failures or successful qualification: preserve terminal logs and distinguish the proven acquisition phase from an unproven mirror/runner cause. The helper's public URI, keyring and IPv4 diagnostics remain in Actions logs; retries, deadlines and assertions are unchanged. Incident and local validation: `docs/postmortems/2026-10-22-durable-browser-apt-stall.md`. Fresh attempt-1 exact-head CI, all E2E shards and Durable qualification remain required; no historical cause is claimed fixed.

@@ -280,6 +280,38 @@ export const ownershipPorts = {
   signal: signalGroup,
   alive: async (pid) => (await groupMembers(pid)).map((members) => members.length > 0),
 };
+const npmCodes = new Set(
+  (
+    "ECONNRESET ECONNREFUSED ETIMEDOUT EAI_AGAIN ECONNECTIONTIMEOUT EIDLETIMEOUT " +
+    "ERESPONSETIMEOUT ETRANSFERTIMEOUT E401 E403 ENEEDAUTH EOTP CERT_HAS_EXPIRED " +
+    "UNABLE_TO_VERIFY_LEAF_SIGNATURE DEPTH_ZERO_SELF_SIGNED_CERT SELF_SIGNED_CERT_IN_CHAIN " +
+    "UNABLE_TO_GET_ISSUER_CERT_LOCALLY ERR_TLS_CERT_ALTNAME_INVALID EINTEGRITY EUSAGE " +
+    "ENOLOCK ELOCKVERIFY ERESOLVE EJSONPARSE ELIFECYCLE"
+  ).split(" "),
+);
+export function npmDiagnostic(output) {
+  const clipped = Buffer.byteLength(output) > 65_536;
+  const values = (field) => [
+    ...new Set(
+      [...output.matchAll(new RegExp(`^npm (?:error|ERR!) ${field} (\\S+)$`, "gm"))].map(
+        (m) => m[1],
+      ),
+    ),
+  ];
+  const code = values("code"),
+    errno = values("errno");
+  const value = /^-?\d+$/.test(errno[0] ?? "") ? Number(errno[0]) : errno[0];
+  return {
+    npmCode: !clipped && code.length === 1 && npmCodes.has(code[0]) ? code[0] : null,
+    errno:
+      !clipped &&
+      errno.length === 1 &&
+      (npmCodes.has(value) || [-104, -111, -110, -3001].includes(value))
+        ? value
+        : null,
+    clipped,
+  };
+}
 export async function runTool(file, args, options, root, interrupted) {
   const path = join(root, `tool-${Date.now()}.log`);
   const opened = await boundary("tool_log_open", () => fs.open(path, "w", 0o600));
@@ -300,7 +332,23 @@ export async function runTool(file, args, options, root, interrupted) {
   const closed = await boundary("tool_log_close", () => output.close());
   if (closed.isErr()) return closed;
   if (failure) return err(failure);
-  if (child.exit.code !== 0) return err({ type: "tool_failed", code: child.exit.code });
+  if (child.exit.code !== 0) {
+    let npm;
+    if (file === "npm") {
+      const diagnostic = await boundary("npm_diagnostic", async () => {
+        const input = await fs.open(path, "r");
+        try {
+          const buffer = Buffer.alloc(65_537);
+          const { bytesRead } = await input.read(buffer, 0, buffer.length, 0);
+          return npmDiagnostic(buffer.subarray(0, bytesRead).toString("utf8"));
+        } finally {
+          await input.close();
+        }
+      });
+      npm = diagnostic.isOk() ? diagnostic.value : { unavailable: true };
+    }
+    return err({ type: "tool_failed", code: child.exit.code, ...(npm ? { npm } : {}) });
+  }
   return boundary("tool_log", () => fs.readFile(path, "utf8"));
 }
 async function freePort(port) {
@@ -377,6 +425,7 @@ export async function runLocalFake(command, env = process.env) {
       state: "finished",
       code: result.isOk() ? 0 : (result.error.code ?? 1),
       error: result.isErr() ? result.error.type : null,
+      ...(result.isErr() && result.error.npm ? { npm: result.error.npm } : {}),
     });
     return result;
   };
