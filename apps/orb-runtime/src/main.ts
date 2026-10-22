@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   const tailscale = readTailscaleEnv(process.env);
   const agentOptions = {
     orbId: env("PI_ORB_ID"),
-    repositoryUrl: env("PI_ORB_REPOSITORY_URL"),
+    repositoryUrl: process.env.PI_ORB_REPOSITORY_URL || null,
     workDir,
     skillsDir: env(SKILLS_DIR_ENV),
     broker: readBrokerEnv(process.env),

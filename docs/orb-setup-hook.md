@@ -23,6 +23,8 @@ earlier than the first prompt — which is precisely what makes an unattended or
 precisely what lets a malicious commit take effect without anyone reading it. Both consequences
 are accepted and stated, not hidden.
 
+**Repository-free projects (decided 2026-10-22).** Hooks use the same retained `<work-dir>/repo` directory without initializing Git. Fresh workspaces have no hooks; executable `.agents/setup` and `.agents/resume` added there follow the usual incarnation/start rules. Setup still receives no identity; resume still receives secrets and broker authority. `PI_ORB_REPOSITORY_URL` is empty when no repository is configured.
+
 ## Reference: how Amp does it
 
 Source: [Customizing Orbs](https://ampcode.com/docs/orbs/customizing) and the surrounding Amp

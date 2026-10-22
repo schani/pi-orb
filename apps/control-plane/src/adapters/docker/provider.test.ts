@@ -155,6 +155,35 @@ describe("execution bindings", () => {
     expect(envValue(launch, "PI_ORB_INITIAL_CHECKOUT_COMMIT")).toBe("a".repeat(40));
     expect(envValue(launch, "PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT")).toBe("1");
   });
+  it.each(["pi", "claude"] as const)(
+    "launches %s without a repository and retains broker authority",
+    async (harness) => {
+      installFreshHost();
+      const provider = makeProvider({ extraEnv: { PI_ORB_REPOSITORY_URL: "https://wrong/repo" } });
+      const result = await provider.provision(
+        task,
+        { ...request, bootstrap: { repositoryUrl: null, harness } },
+        context,
+      );
+      expect(result.isOk()).toBe(true);
+      const launch = dockerFake.calls.find((args) => args[0] === "run") ?? [];
+      expect(envValue(launch, "PI_ORB_REPOSITORY_URL")).toBe("");
+      expect(envValue(launch, "PI_ORB_RUNTIME_MODE")).toBe(
+        harness === "pi" ? "execution" : "claude",
+      );
+      expect(envValue(launch, RUNTIME_TOKEN_ENV)).not.toBe("");
+      expect(envValue(launch, CONTROL_PLANE_URL_ENV)).not.toBe("");
+      expect(
+        provider.desiredSpecFingerprint({ orbId: request.orbId, repositoryUrl: null, harness }),
+      ).not.toBe(
+        provider.desiredSpecFingerprint({
+          orbId: request.orbId,
+          repositoryUrl: request.bootstrap.repositoryUrl,
+          harness,
+        }),
+      );
+    },
+  );
   it("passes the disabled initial-checkout barrier as an environment option", async () => {
     const launch = await provisionArgv(makeProvider());
     expect(envValue(launch, "PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT")).toBe("");

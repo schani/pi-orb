@@ -194,7 +194,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
 
   desiredSpecFingerprint(input: {
     readonly orbId: string;
-    readonly repositoryUrl: string;
+    readonly repositoryUrl: string | null;
     readonly harness?: import("@pi-orb/protocol").HarnessKind;
   }): string {
     return specFingerprintOf({
@@ -609,7 +609,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
           "--env",
           `PI_ORB_ID=${request.orbId}`,
           "--env",
-          `PI_ORB_REPOSITORY_URL=${request.bootstrap.repositoryUrl}`,
+          `PI_ORB_REPOSITORY_URL=${request.bootstrap.repositoryUrl ?? ""}`,
           "--env",
           `PI_ORB_HOST_INCARNATION=${request.incarnation}`,
           "--env",

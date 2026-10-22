@@ -18,7 +18,7 @@ import {
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { Result } from "neverthrow";
+import { ok, Result } from "neverthrow";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { enrichActivityHeadlines } from "../domain/activity-headlines.ts";
@@ -432,7 +432,10 @@ export function registerRoutes(
           ),
         );
     }
-    const url = validateRepositoryUrl(body.repositoryUrl);
+    const url =
+      body.repositoryUrl == null || body.repositoryUrl.trim() === ""
+        ? ok({ url: null })
+        : validateRepositoryUrl(body.repositoryUrl);
     if (url.isErr()) {
       return reply
         .status(400)
@@ -576,7 +579,10 @@ export function registerRoutes(
             ),
           );
       }
-      const repository = validateRepositoryUrl(body.repositoryUrl);
+      const repository =
+        body.repositoryUrl == null || body.repositoryUrl.trim() === ""
+          ? ok({ url: null })
+          : validateRepositoryUrl(body.repositoryUrl);
       if (repository.isErr()) {
         return reply
           .status(400)

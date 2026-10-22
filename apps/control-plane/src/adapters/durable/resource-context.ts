@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import type { Skill } from "@earendil-works/pi-coding-agent";
-import { errAsync, okAsync, type ResultAsync } from "neverthrow";
+import { errAsync, ok, okAsync, type ResultAsync } from "neverthrow";
 import { z } from "zod";
 import {
-  type ResourceAcquisition,
   type ResourceError,
   type ResourceFile,
   type ResourceReader,
+  type ResourceSnapshot,
   resourceError,
   SnapshotResourceReader,
 } from "../../domain/resources.ts";
@@ -26,7 +26,7 @@ export interface PlatformContextStore {
   put(snapshot: PersistedPlatformContext): ResultAsync<void, ResourceError>;
 }
 export interface PreparedResourceContext {
-  commitSha: string;
+  commitSha: string | null;
   managed: ManagedResourceInstructions;
   instructions: Array<{ path: string; content: string }>;
   skills: Skill[];
@@ -76,11 +76,9 @@ function decodePlatform(
 
 /** Repository pin is immutable. Managed prompts refresh on every context, not every Git fetch. */
 export function prepareResourceContext(options: {
-  orbId: string;
-  url: string;
   signal: AbortSignal;
   platformVersion: string;
-  acquisition: Pick<ResourceAcquisition, "acquire">;
+  acquisition: { acquire(): ResultAsync<ResourceSnapshot | null, ResourceError> };
   managed: () => ResultAsync<ManagedResourceInstructions, ResourceError>;
   platformStore: PlatformContextStore;
   loadPlatform: () => ResultAsync<ResourceFile[], ResourceError>;
@@ -93,13 +91,7 @@ export function prepareResourceContext(options: {
       ? errAsync<void, ResourceError>(resourceError("cancelled", "Resource context cancelled"))
       : options.check();
   return check()
-    .andThen(() =>
-      options.acquisition.acquire({
-        orbId: options.orbId,
-        url: options.url,
-        signal: options.signal,
-      }),
-    )
+    .andThen(() => options.acquisition.acquire())
     .andThen((repository) =>
       options.managed().andThen((managed) =>
         check()
@@ -117,8 +109,6 @@ export function prepareResourceContext(options: {
               };
               return decodePlatform(snapshot).andThen((validated) => {
                 const prompt = snapshotPromptResources({
-                  orbId: options.orbId,
-                  commitSha: repository.commitSha,
                   instructionPath: null,
                   skillRoot: "/opt/pi-orb/skills",
                   files: validated,
@@ -133,17 +123,17 @@ export function prepareResourceContext(options: {
           })
           .andThen((platformFiles) =>
             check().andThen(() => {
-              const project = snapshotPromptResources(repository, { invalidSkills: "warn" });
+              const project = repository
+                ? snapshotPromptResources(repository, { invalidSkills: "warn" })
+                : ok({ instructions: [], skills: [] });
               if (project.isErr()) return errAsync(project.error);
               const platform = snapshotPromptResources({
-                orbId: options.orbId,
-                commitSha: repository.commitSha,
                 instructionPath: null,
                 skillRoot: "/opt/pi-orb/skills",
                 files: platformFiles,
               });
               if (platform.isErr()) return errAsync(platform.error);
-              const combined = [...repository.files, ...platformFiles];
+              const combined = [...(repository?.files ?? []), ...platformFiles];
               const names = [...project.value.skills, ...platform.value.skills].map(
                 (skill) => skill.name,
               );
@@ -152,11 +142,11 @@ export function prepareResourceContext(options: {
                   resourceError("invalid", "Duplicate repository and platform skill names"),
                 );
               return okAsync({
-                commitSha: repository.commitSha,
+                commitSha: repository?.commitSha ?? null,
                 managed,
                 instructions: project.value.instructions,
                 skills: [...project.value.skills, ...platform.value.skills],
-                reader: new SnapshotResourceReader({ ...repository, files: combined }),
+                reader: new SnapshotResourceReader({ files: combined }),
                 resourceHash: digest(
                   Buffer.from(JSON.stringify(combined.map((file) => [file.path, file.sha256]))),
                 ),

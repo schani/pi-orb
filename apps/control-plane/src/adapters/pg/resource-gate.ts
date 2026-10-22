@@ -7,6 +7,7 @@ import type { OperationContext } from "../../domain/ports.ts";
 import {
   ResourceAcquisition,
   type ResourceError,
+  type ResourceSnapshot,
   type ResourceSource,
   type ResourceStatus,
   resourceError,
@@ -133,7 +134,7 @@ export class PgResourceGate {
       if (snapshot) return okAsync(snapshot.commitSha);
       return this.db
         .query(
-          "SELECT phase,error_code,error_message FROM orb_resource_events WHERE orb_id=$1 AND admission_version=$2 ORDER BY id DESC LIMIT 1",
+          "SELECT e.phase,e.error_code,e.error_message FROM orb_resource_events e JOIN orbs o ON o.id=e.orb_id JOIN projects p ON p.id=o.project_id WHERE e.orb_id=$1 AND e.admission_version=$2 AND p.repository_url IS NOT NULL ORDER BY e.id DESC LIMIT 1",
           [orb.id, orb.agentAdmissionVersion],
         )
         .mapErr(() => resourceError("storage", "Resource status unavailable"))
@@ -149,7 +150,11 @@ export class PgResourceGate {
         );
     });
   }
-  acquire(task: SimulationTask, orb: OrbRow, context: OperationContext) {
+  acquire(
+    task: SimulationTask,
+    orb: OrbRow,
+    context: OperationContext,
+  ): ResultAsync<ResourceSnapshot | null, ResourceError> {
     const store = new PgResourceSnapshots(this.db, (query) =>
       this.guard(query, orb, context.signal),
     );
@@ -164,22 +169,28 @@ export class PgResourceGate {
           byteCount: existing.files.reduce((sum, file) => sum + file.bytes.byteLength, 0),
           warnings: existing.warnings ?? [],
         }).map(() => existing);
-      return this.initialPin(task, orb)
-        .andThen(() =>
-          this.db
-            .query(
-              "SELECT p.repository_url FROM projects p JOIN orbs o ON o.project_id=p.id WHERE o.id=$1",
-              [orb.id],
-            )
-            .mapErr(() => resourceError("storage", "Resource project unavailable")),
+      return this.db
+        .query(
+          "SELECT p.repository_url FROM projects p JOIN orbs o ON o.project_id=p.id WHERE o.id=$1",
+          [orb.id],
         )
-        .andThen((result) => {
+        .mapErr(() => resourceError("storage", "Resource project unavailable"))
+        .andThen((result): ResultAsync<ResourceSnapshot | null, ResourceError> => {
           const url = result.rows[0]?.repository_url;
+          if (url === null)
+            return this.status(task, orb, context, {
+              phase: "ready",
+              commitSha: null,
+              fileCount: 0,
+              byteCount: 0,
+            }).map(() => null);
           if (typeof url !== "string")
             return errAsync(resourceError("not_found", "Resource project unavailable"));
-          return new ResourceAcquisition(store, this.source, {
-            record: (_id, status) => this.status(task, orb, context, status),
-          }).acquire({ orbId: orb.id, url, signal: context.signal });
+          return this.initialPin(task, orb).andThen(() =>
+            new ResourceAcquisition(store, this.source, {
+              record: (_id, status) => this.status(task, orb, context, status),
+            }).acquire({ orbId: orb.id, url, signal: context.signal }),
+          );
         });
     });
   }

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
@@ -9,7 +9,13 @@ import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { ClaudeOrbAgent } from "./agent.ts";
 import { claudeEnvironmentPrompt } from "./environment-prompt.ts";
 
-vi.mock("../domain/checkout.ts", () => ({ prepareCheckout: () => okAsync("commit") }));
+vi.mock("../domain/checkout.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../domain/checkout.ts")>();
+  return {
+    prepareCheckout: (dir: string, url: string | null) =>
+      url === null ? actual.prepareCheckout(dir, url) : okAsync("commit"),
+  };
+});
 vi.mock("../domain/home.ts", () => ({ configurePersistentHome: (dir: string) => ok(dir) }));
 vi.mock("../domain/rust.ts", () => ({ configurePersistentRust: () => {} }));
 vi.mock("./execution-identity.ts", () => ({ readExecutionIdentity: () => ok(null) }));
@@ -32,45 +38,53 @@ vi.mock("./auth.ts", async (importOriginal) => ({
   fetchClaudeSubscription: () => okAsync({ token: "test-token", generation: 1 }),
 }));
 
-it("appends the shared environment then Claude suffix exactly once before existing context", async () => {
-  const workDir = mkdtempSync(join(tmpdir(), "claude-environment-"));
-  mkdirSync(join(workDir, "repo"));
-  const options: Options[] = [];
-  const previewHost = "pi-orb-test.tail1234.ts.net";
-  const agent = new ClaudeOrbAgent({
-    orbId: "orb",
-    repositoryUrl: "https://example.com/repo",
-    workDir,
-    skillsDir: null,
-    previewHost,
-    broker: { controlPlaneUrl: "http://unused.invalid", runtimeToken: "unused" },
-    sdkFactory: (_input, value) => {
-      options.push(value);
-      return err({ message: "Captured model configuration; no process started." });
-    },
-  });
-  try {
-    await agent.boot();
-    expect(options).toHaveLength(1);
-    const system = options[0]?.systemPrompt;
-    expect(system).toEqual({
-      type: "preset",
-      preset: "claude_code",
-      append: [
-        environmentPrompt,
-        claudeEnvironmentPrompt,
-        "PERSONAL",
-        "PROJECT",
-        portExposurePrompt(previewHost),
-        "User's time zone: America/Los_Angeles.",
-      ].join("\n\n"),
+it.each(["https://example.com/repo", null])(
+  "composes environment and instructions with repository %s",
+  async (repositoryUrl) => {
+    const workDir = mkdtempSync(join(tmpdir(), "claude-environment-"));
+    if (repositoryUrl !== null) mkdirSync(join(workDir, "repo"));
+    const options: Options[] = [];
+    const previewHost = "pi-orb-test.tail1234.ts.net";
+    const agent = new ClaudeOrbAgent({
+      orbId: "orb",
+      repositoryUrl,
+      workDir,
+      skillsDir: null,
+      previewHost,
+      broker: { controlPlaneUrl: "http://unused.invalid", runtimeToken: "unused" },
+      sdkFactory: (_input, value) => {
+        options.push(value);
+        return err({ message: "Captured model configuration; no process started." });
+      },
     });
-    const append = typeof system === "object" && "append" in system ? (system.append ?? "") : "";
-    expect(append.split(environmentPrompt)).toHaveLength(2);
-    expect(append.split(claudeEnvironmentPrompt)).toHaveLength(2);
-    expect(append).not.toContain("Use the available orb tools");
-  } finally {
-    agent.shutdownHooks();
-    rmSync(workDir, { recursive: true, force: true });
-  }
-});
+    try {
+      await agent.boot();
+      expect(options).toHaveLength(1);
+      expect(options[0]?.cwd).toBe(join(workDir, "repo"));
+      if (repositoryUrl === null) {
+        expect(existsSync(join(workDir, "repo"))).toBe(true);
+        expect(existsSync(join(workDir, "repo", ".git"))).toBe(false);
+      }
+      const system = options[0]?.systemPrompt;
+      expect(system).toEqual({
+        type: "preset",
+        preset: "claude_code",
+        append: [
+          environmentPrompt,
+          claudeEnvironmentPrompt,
+          "PERSONAL",
+          "PROJECT",
+          portExposurePrompt(previewHost),
+          "User's time zone: America/Los_Angeles.",
+        ].join("\n\n"),
+      });
+      const append = typeof system === "object" && "append" in system ? (system.append ?? "") : "";
+      expect(append.split(environmentPrompt)).toHaveLength(2);
+      expect(append.split(claudeEnvironmentPrompt)).toHaveLength(2);
+      expect(append).not.toContain("Use the available orb tools");
+    } finally {
+      agent.shutdownHooks();
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  },
+);

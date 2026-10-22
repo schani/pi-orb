@@ -42,6 +42,8 @@ The harness-agnostic history model, the pull-only replication pipeline, and the 
 
 ## Persistence decisions
 
+**Name-only projects (decision 2026-10-22).** Migration `048_optional_project_repository.sql` allows `projects.repository_url` to be null. A project without a URL creates no repository snapshot or synthetic commit. Existing fenced resource events record readiness with a null commit and zero repository files/bytes. Retained repository snapshots still win after URL removal; managed instructions and private platform context retain their existing storage and ownership rules (`docs/pi-adapter.md`). No new resource mode or history representation is persisted.
+
 - The orb filesystem is assumed not to disappear. Containers, processes, and VMs may stop, crash, or be preempted, but the same persistent filesystem is available when the orb restarts.
 - The filesystem owns workspace files and native Claude history. Private Pi authority and public transcript projection live in PostgreSQL.
 - Public history supports immediate browsing, not workspace or private-context reconstruction. Native Claude pulls and central Pi atomic projection feed the same product contract.
@@ -418,7 +420,7 @@ Application code generates UUIDs with Node's `crypto.randomUUID()`; PostgreSQL d
 CREATE TABLE projects (
   id uuid PRIMARY KEY,
   name text NOT NULL UNIQUE CHECK (btrim(name) <> ''),
-  repository_url text NOT NULL CHECK (btrim(repository_url) <> ''),
+  repository_url text CHECK (btrim(repository_url) <> ''),
   created_at timestamptz NOT NULL DEFAULT now()
 );
 

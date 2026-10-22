@@ -61,14 +61,14 @@ export interface ExecutionReady {
   readonly cwd: string;
   readonly incarnation: string;
   readonly pid: number;
-  readonly checkoutCommit: string;
+  readonly checkoutCommit: string | null;
   readonly hooks?: RuntimeHooks;
 }
 export const ExecutionReadySchema = Type.Object({
   cwd: Type.String(),
   incarnation: Type.String(),
   pid: Type.Integer(),
-  checkoutCommit: Type.String(),
+  checkoutCommit: Type.Union([Type.String(), Type.Null()]),
   hooks: Type.Optional(RuntimeHooksSchema),
 });
 export const ExecutionWireResultSchema = Type.Union([

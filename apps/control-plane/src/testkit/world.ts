@@ -1396,7 +1396,7 @@ export class FakeOrbHostProvider implements OrbHostProvider {
    */
   desiredSpecFingerprint(input: {
     readonly orbId: string;
-    readonly repositoryUrl: string;
+    readonly repositoryUrl: string | null;
     readonly harness?: import("@pi-orb/protocol").HarnessKind;
   }): string {
     const spec = this.desiredSpecOverride ?? this.world.desiredSpec();

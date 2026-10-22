@@ -60,6 +60,26 @@ class BootstrapTest(unittest.TestCase):
             self.assertIn('HOME="' + str(root / 'workspace/home') + '"', environment.read_text())
             self.assertEqual((root / 'workspace/home').stat().st_mode & 0o777, 0o700)
 
+    def test_repository_is_optional_without_weakening_runtime_authentication(self):
+        for repository_url in ('', None):
+            config = self.config()
+            if repository_url is None:
+                del config['PI_ORB_REPOSITORY_URL']
+            else:
+                config['PI_ORB_REPOSITORY_URL'] = repository_url
+            with self.subTest(repository_url=repository_url), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / 'workspace').mkdir()
+                opened = lambda request, timeout: Response(json.dumps(config).encode())
+                self.assertEqual(bootstrap.main(opened, root / 'workspace', root / 'run', lambda _: True, lambda *_: None), 0)
+                environment = (root / 'run/environment').read_text()
+                self.assertIn('PI_ORB_RUNTIME_TOKEN="secret"', environment)
+                self.assertIn('PI_ORB_CONTROL_PLANE_URL="https://control"', environment)
+                for key in ('PI_ORB_RUNTIME_TOKEN', 'PI_ORB_CONTROL_PLANE_URL'):
+                    with self.subTest(required=key), self.assertRaisesRegex(ValueError, key):
+                        bad = {**config, key: ''}
+                        bootstrap.load_config(lambda request, timeout: Response(json.dumps(bad).encode()))
+
     def fake_clock(self):
         now = [0.0]
         sleeps = []

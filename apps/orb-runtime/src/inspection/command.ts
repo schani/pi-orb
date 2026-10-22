@@ -52,7 +52,7 @@ export function formatSelf(self: OrbSelf): string {
     `Dashboard: ${self.orb.url}`,
     `Created: ${self.orb.createdAt}`,
     `Project: ${cell(self.project.name)} (${cell(self.project.id)})`,
-    `Repository: ${self.project.repositoryUrl}`,
+    `Repository: ${self.project.repositoryUrl ?? "—"}`,
   ];
   if (self.spawnedByOrb !== null)
     lines.push(`Spawned by: ${self.spawnedByOrb.id} (${self.spawnedByOrb.url})`);
@@ -78,7 +78,7 @@ export function filterOrbs(
       item.name ?? "untitled orb",
       item.project.id,
       item.project.name,
-      item.project.repositoryUrl,
+      item.project.repositoryUrl ?? "",
     ].some((field) => normalize(field).includes(needle)),
   );
 }
@@ -97,7 +97,7 @@ export function formatOrbList(items: readonly OrbInspectionItem[], currentOrbId:
         item.name ?? "untitled orb",
         item.state,
         item.project.name,
-        item.project.repositoryUrl,
+        item.project.repositoryUrl ?? "—",
       ]
         .map(cell)
         .join("\t"),
@@ -185,7 +185,7 @@ export function formatTranscript(transcript: OrbTranscript): string {
     `# ${title} (${transcript.orb.id})`,
     "",
     `Project: ${transcript.orb.project.name} (${transcript.orb.project.id})`,
-    `Repository: ${transcript.orb.project.repositoryUrl}`,
+    `Repository: ${transcript.orb.project.repositoryUrl ?? "—"}`,
     `State: ${transcript.orb.state}`,
   ];
   if (transcript.records.length === 0) {

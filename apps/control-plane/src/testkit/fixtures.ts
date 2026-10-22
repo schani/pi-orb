@@ -260,7 +260,7 @@ export function seedTestUser(task: SimulationTask, users: UserStore) {
   );
 }
 
-export function makeProjectRow(id: string): ProjectRow {
+export function makeProjectRow(id: string): ProjectRow & { repositoryUrl: string } {
   return {
     id,
     ownerUserId: TEST_USER_ID,
@@ -337,7 +337,7 @@ export function makeOrbRow(
 export function desiredSpecFingerprintOf(
   harness: TestHarness,
   orbId: string,
-  repositoryUrl: string = makeProjectRow("seed").repositoryUrl,
+  repositoryUrl: string | null = makeProjectRow("seed").repositoryUrl,
 ): string {
   return harness.deps.hostProvider.desiredSpecFingerprint({ orbId, repositoryUrl });
 }
@@ -351,9 +351,12 @@ export function seedProvisionedHost(
   task: SimulationTask,
   harness: TestHarness,
   orbId: string,
-  options?: { repositoryUrl?: string; incarnation?: number; legacy?: boolean },
+  options?: { repositoryUrl?: string | null; incarnation?: number; legacy?: boolean },
 ): FakeProvisionedHost {
-  const repositoryUrl = options?.repositoryUrl ?? makeProjectRow("seed").repositoryUrl;
+  const repositoryUrl =
+    options?.repositoryUrl === undefined
+      ? makeProjectRow("seed").repositoryUrl
+      : options.repositoryUrl;
   return harness.world.provisionHost(
     task,
     orbId,

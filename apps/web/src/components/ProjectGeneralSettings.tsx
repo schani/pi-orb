@@ -1,4 +1,5 @@
 import { PROJECT_NAME_MAX_CHARS, type ProjectView, validateRepositoryUrl } from "@pi-orb/protocol";
+import { ok } from "neverthrow";
 import { useEffect, useRef, useState } from "react";
 import { describeApiError, updateProject } from "../lib/api.ts";
 import { TextFieldFrame } from "./TextFieldFrame.tsx";
@@ -22,9 +23,10 @@ export function ProjectGeneralSettings({
     };
   }, []);
   const [name, setName] = useState(project.name);
-  const [repositoryUrl, setRepositoryUrl] = useState(project.repositoryUrl);
+  const [repositoryUrl, setRepositoryUrl] = useState(project.repositoryUrl ?? "");
   const [error, setError] = useState<string | null>(null);
-  const repository = validateRepositoryUrl(repositoryUrl.trim());
+  const repository =
+    repositoryUrl.trim() === "" ? ok({ url: null }) : validateRepositoryUrl(repositoryUrl.trim());
   const valid = name.trim().length > 0 && repository.isOk();
   const save = async () => {
     if (saving || !valid || repository.isErr()) return;
@@ -41,7 +43,7 @@ export function ProjectGeneralSettings({
       return;
     }
     setName(result.value.name);
-    setRepositoryUrl(result.value.repositoryUrl);
+    setRepositoryUrl(result.value.repositoryUrl ?? "");
     await onChanged(result.value);
   };
   return (
@@ -74,7 +76,6 @@ export function ProjectGeneralSettings({
             <input
               value={repositoryUrl}
               disabled={saving}
-              required
               aria-invalid={repository.isErr()}
               aria-describedby={repository.isErr() ? "project-repository-error" : undefined}
               onChange={(event) => setRepositoryUrl(event.target.value)}

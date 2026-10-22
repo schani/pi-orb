@@ -4,6 +4,7 @@ import {
   type SystemView,
   validateRepositoryUrl,
 } from "@pi-orb/protocol";
+import { ok } from "neverthrow";
 import {
   type FormEvent,
   useCallback,
@@ -321,7 +322,7 @@ export function ProjectsPage({
     event.preventDefault();
     const trimmedName = name.trim();
     const trimmedUrl = repositoryUrl.trim();
-    const validated = validateRepositoryUrl(trimmedUrl);
+    const validated = trimmedUrl === "" ? ok({ url: null }) : validateRepositoryUrl(trimmedUrl);
     if (validated.isErr()) {
       setUrlError(validated.error.message);
       return;

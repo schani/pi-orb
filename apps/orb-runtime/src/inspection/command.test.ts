@@ -75,6 +75,33 @@ describe("orb inspection CLI arguments", () => {
 });
 
 describe("orb inspection presentation", () => {
+  it("searches and renders projects without a repository", () => {
+    const source = items[0];
+    if (source === undefined) throw new Error("missing fixture");
+    const orb = { ...source, project: { ...source.project, repositoryUrl: null } };
+    expect(filterOrbs([orb], "github")).toEqual([]);
+    expect(filterOrbs([orb], "pi-orb")).toEqual([orb]);
+    expect(formatOrbList([orb], orb.id)).toContain("pi-orb\t—\n");
+    expect(
+      formatSelf({
+        v: 1,
+        orb: {
+          id: orb.id,
+          name: orb.name,
+          url: "https://example.com/orbs/test",
+          createdAt: orb.updatedAt,
+        },
+        project: orb.project,
+        spawnedByOrb: null,
+        children: [],
+        previewHost: null,
+      }),
+    ).toContain("Repository: —");
+    expect(
+      formatTranscript({ v: 1, orb, session: null, cursor: null, headId: null, records: [] }),
+    ).toContain("Repository: —");
+  });
+
   it("prints self identity and only available optional fields", () => {
     const self = {
       v: 1 as const,

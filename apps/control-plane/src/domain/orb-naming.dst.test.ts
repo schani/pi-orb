@@ -11,7 +11,12 @@ class PausingGenerator implements OrbNameGenerator {
 
   generate(
     task: SimulationTask,
-    _input: { projectName: string; repositoryUrl: string; message: string; readme: string | null },
+    _input: {
+      projectName: string;
+      repositoryUrl: string | null;
+      message: string;
+      readme: string | null;
+    },
     _context: OperationContext,
   ): ResultAsync<string, OrbNameGeneratorError> {
     this.calls += 1;

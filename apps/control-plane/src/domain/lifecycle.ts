@@ -288,7 +288,7 @@ async function provisionHost(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   orb: OrbRow,
-  repositoryUrl: string,
+  repositoryUrl: string | null,
   reason: string,
 ): Promise<Result<ProvisionedOrbHost, OrbHostProviderError>> {
   const result = await withDeadline(

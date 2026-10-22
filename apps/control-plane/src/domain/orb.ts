@@ -144,7 +144,7 @@ export interface ProjectRow {
   readonly id: string;
   readonly ownerUserId: string;
   readonly name: string;
-  readonly repositoryUrl: string;
+  readonly repositoryUrl: string | null;
   readonly state: ProjectState;
   readonly stateVersion: number;
   readonly deletionRequestedAt: number | null;

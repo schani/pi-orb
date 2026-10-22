@@ -33,10 +33,6 @@ it("reads PG spills after owner reopen but not from another orb", async () => {
     const authority = new PgDurableAuthority(db, () => 0);
     const owner = (await authority.acquire(orb.id, "first", 0, 0, 1000))._unsafeUnwrap();
     const reader = new SnapshotResourceReader({
-      orbId: orb.id,
-      commitSha: "a".repeat(40),
-      instructionPath: null,
-      skillRoot: null,
       files: [],
     });
     const first = createAgentToolFiles({

@@ -61,7 +61,7 @@ export type ResourceStatus =
   | { phase: "acquiring" }
   | {
       phase: "ready";
-      commitSha: string;
+      commitSha: string | null;
       fileCount: number;
       byteCount: number;
       warnings?: ResourceWarning[];
@@ -143,7 +143,7 @@ export interface ResourceReader {
 }
 export class SnapshotResourceReader implements ResourceReader {
   private readonly files: Map<string, Uint8Array>;
-  constructor(snapshot: ResourceSnapshot) {
+  constructor(snapshot: Pick<ResourceSnapshot, "files">) {
     this.files = new Map(snapshot.files.map((file) => [file.path, Uint8Array.from(file.bytes)]));
   }
   contains(path: string): boolean {

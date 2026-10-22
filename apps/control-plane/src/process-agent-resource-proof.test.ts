@@ -31,11 +31,11 @@ function barrier() {
   });
   return { promise, resolve };
 }
-async function fixture() {
+async function fixture(repositoryUrl: string | null = makeProjectRow("project").repositoryUrl) {
   const db = new PGliteClient();
   const database = composeControlPlaneDatabase(db);
   const task = new NoSimulationTask("resource composition proof", false);
-  const project = makeProjectRow(randomUUID());
+  const project = { ...makeProjectRow(randomUUID()), repositoryUrl };
   let orb = makeOrbRow(randomUUID(), project.id, "starting", { hostRef: "proof-host" });
   (await database.migrate())._unsafeUnwrap();
   (
@@ -203,6 +203,28 @@ async function invoke(
   });
   return { ...result, diagnostics: [...diagnostics, ...(result.diagnostics ?? [])] };
 }
+
+it("prepares the first model context for a name-only project without Git or compute readiness", async () => {
+  const f = await fixture(null);
+  let bundle: Bundle | undefined;
+  try {
+    bundle = await f.openContext();
+    expect(bundle.instructions).toContain("personal-v1");
+    expect(bundle.instructions).toContain("project-v1");
+    expect(bundle.instructions).toContain("codemode");
+    expect(bundle.instructions).not.toContain("immutable Git instructions");
+    expect(bundle.checkoutCommit).toBeNull();
+    expect(f.modelSetups()).toBe(1);
+    expect(f.bindings()).toBe(0);
+    expect(f.fetches()).toBe(0);
+    expect((await new PgResourceSnapshots(f.db).get(f.snapshot.orbId))._unsafeUnwrap()).toBeNull();
+    const native = new NativeResourceContext(f.lease().storage, () => okAsync(undefined));
+    expect((await native.platform())._unsafeUnwrap()?.files.length).toBeGreaterThan(0);
+  } finally {
+    await bundle?.closeResources?.();
+    await f.close();
+  }
+});
 
 it.each(["manual", "sleep"] as const)(
   "requires the PG Git pin before model setup, refreshes managed prompts after %s inhibition without refetch or boot",

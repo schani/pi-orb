@@ -87,93 +87,99 @@ describe("PiOrbNameGenerator", () => {
       expect(completeLuna).not.toHaveBeenCalled();
     },
   );
-  it("binds the owner broker and omits the owner UUID from the model prompt", async () => {
-    const ownerUserId = "00000000-0000-4000-8000-00000000000a";
-    const boundUsers: string[] = [];
-    const brokerForUser = (userId: string): BrokerDeps => {
-      boundUsers.push(userId);
-      return {
-        pointers: {
-          readPointer: () =>
-            okAsync({
-              provider: "openai-codex",
-              rowVersion: 1,
-              generation: 4,
-              secretVersion: "owner-version",
-              refreshLeaseUntil: 0,
-              lastRefreshAt: 0,
-            }),
-          casWritePointer: () => {
-            throw new Error("unexpected pointer write");
+  it.each(["https://github.com/example/compiler", null])(
+    "binds the owner broker with repository %s and omits the owner UUID from the model prompt",
+    async (repositoryUrl) => {
+      completeLuna.mockClear();
+      recorded.length = 0;
+      const ownerUserId = "00000000-0000-4000-8000-00000000000a";
+      const boundUsers: string[] = [];
+      const brokerForUser = (userId: string): BrokerDeps => {
+        boundUsers.push(userId);
+        return {
+          pointers: {
+            readPointer: () =>
+              okAsync({
+                provider: "openai-codex",
+                rowVersion: 1,
+                generation: 4,
+                secretVersion: "owner-version",
+                refreshLeaseUntil: 0,
+                lastRefreshAt: 0,
+              }),
+            casWritePointer: () => {
+              throw new Error("unexpected pointer write");
+            },
           },
-        },
-        secrets: {
-          readSecret: () =>
-            okAsync({
-              access: "owner-access",
-              refresh: "owner-refresh",
-              accountId: "owner-account",
-              expiresAt: Date.now() + 3_600_000,
-            }),
-          writeSecret: () => {
-            throw new Error("unexpected secret write");
+          secrets: {
+            readSecret: () =>
+              okAsync({
+                access: "owner-access",
+                refresh: "owner-refresh",
+                accountId: "owner-account",
+                expiresAt: Date.now() + 3_600_000,
+              }),
+            writeSecret: () => {
+              throw new Error("unexpected secret write");
+            },
+            listSecretVersions: () => okAsync([]),
+            destroySecret: () => okAsync(undefined),
           },
-          listSecretVersions: () => okAsync([]),
-          destroySecret: () => okAsync(undefined),
+          upstreams: {},
+          constants: DEFAULT_BROKER_CONSTANTS,
+        } as BrokerDeps;
+      };
+      const generator = new PiOrbNameGenerator(
+        brokerForUser,
+        ledger,
+        "https://inference.example.test",
+      );
+
+      const result = await generator.generate(
+        new NoSimulationTask("name binding", false),
+        {
+          harness: "pi",
+          ownerUserId,
+          orbId: ORB_ID,
+          projectName: "Compiler",
+          repositoryUrl,
+          message: "Fix parser recovery",
+          readme: "Project instructions",
         },
-        upstreams: {},
-        constants: DEFAULT_BROKER_CONSTANTS,
-      } as BrokerDeps;
-    };
-    const generator = new PiOrbNameGenerator(
-      brokerForUser,
-      ledger,
-      "https://inference.example.test",
-    );
+        { signal: new AbortController().signal },
+      );
 
-    const result = await generator.generate(
-      new NoSimulationTask("name binding", false),
-      {
-        harness: "pi",
-        ownerUserId,
-        orbId: ORB_ID,
-        projectName: "Compiler",
-        repositoryUrl: "https://github.com/example/compiler",
-        message: "Fix parser recovery",
-        readme: "Project instructions",
-      },
-      { signal: new AbortController().signal },
-    );
-
-    expect(result._unsafeUnwrap()).toBe("Bound owner name");
-    expect(boundUsers).toEqual([ownerUserId]);
-    expect(completeLuna).toHaveBeenCalledOnce();
-    const call = completeLuna.mock.calls[0]?.[0] as {
-      prompt: string;
-      auth: { apiKey: string; baseUrl: string };
-      onResponse: (response: AssistantMessage) => void;
-    };
-    expect(call.auth).toEqual({
-      apiKey: "owner-access",
-      baseUrl: "https://inference.example.test",
-    });
-    expect(call.prompt).toContain("Fix parser recovery");
-    expect(call.prompt).not.toContain(ownerUserId);
-    call.onResponse(response);
-    expect(recorded).toEqual([
-      {
-        ownerUserId: ownerUserId,
-        orbId: ORB_ID,
-        use: "orb_name",
-        provider: "openai-codex",
-        model: "gpt-6-luna",
-        outcome: "stop",
-        input: 40,
-        output: 5,
-        cacheRead: 8,
-        cacheWrite: 0,
-        costUsd: 0,
-      },
-    ]);
-  });
+      expect(result._unsafeUnwrap()).toBe("Bound owner name");
+      expect(boundUsers).toEqual([ownerUserId]);
+      expect(completeLuna).toHaveBeenCalledOnce();
+      const call = completeLuna.mock.calls[0]?.[0] as {
+        prompt: string;
+        auth: { apiKey: string; baseUrl: string };
+        onResponse: (response: AssistantMessage) => void;
+      };
+      expect(call.auth).toEqual({
+        apiKey: "owner-access",
+        baseUrl: "https://inference.example.test",
+      });
+      expect(JSON.parse(call.prompt.split("\n").at(-1) ?? "{}").repositoryUrl).toBe(repositoryUrl);
+      expect(call.prompt).toContain("Fix parser recovery");
+      expect(call.prompt).not.toContain(ownerUserId);
+      call.onResponse(response);
+      expect(recorded).toEqual([
+        {
+          ownerUserId: ownerUserId,
+          orbId: ORB_ID,
+          use: "orb_name",
+          provider: "openai-codex",
+          model: "gpt-6-luna",
+          outcome: "stop",
+          input: 40,
+          output: 5,
+          cacheRead: 8,
+          cacheWrite: 0,
+          costUsd: 0,
+        },
+      ]);
+    },
+  );
 });

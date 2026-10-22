@@ -66,7 +66,10 @@ export function createOrbAgentOperations(
     hostIncarnation: (identity as OrbAgentIdentity).incarnation,
   };
   const unavailable = () => failure("unavailable", "orb operation unavailable");
-  const item = (orb: OrbRow, project: { id: string; name: string; repositoryUrl: string }) => ({
+  const item = (
+    orb: OrbRow,
+    project: { id: string; name: string; repositoryUrl: string | null },
+  ) => ({
     id: orb.id,
     name: orb.name,
     state: orb.state,

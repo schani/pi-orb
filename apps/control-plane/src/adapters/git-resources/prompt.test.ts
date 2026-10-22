@@ -39,8 +39,6 @@ it("parses adopted resources offline and keeps only progressively advertised ski
 });
 it("rejects malformed required skill metadata without silent omission", () => {
   const result = snapshotPromptResources({
-    orbId: "orb",
-    commitSha: "a".repeat(40),
     instructionPath: null,
     skillRoot: ".pi/skills",
     files: [
@@ -98,8 +96,6 @@ it("warn mode still rejects missing or invalid instructions with a safe path", (
   for (const files of [[], [{ path: "AGENTS.md", bytes: Buffer.from([255]), sha256: "hash" }]]) {
     const result = snapshotPromptResources(
       {
-        orbId: "orb",
-        commitSha: "a".repeat(40),
         instructionPath: "AGENTS.md",
         skillRoot: ".pi/skills",
         files,
@@ -148,8 +144,6 @@ it("always returns an empty warnings array for valid snapshots", () => {
   for (const options of [undefined, { invalidSkills: "warn" as const }]) {
     const result = snapshotPromptResources(
       {
-        orbId: "orb",
-        commitSha: "a".repeat(40),
         instructionPath: null,
         skillRoot: null,
         files: [],

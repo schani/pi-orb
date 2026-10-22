@@ -44,11 +44,16 @@ function fixture() {
     },
   );
   const options = {
-    orbId: "orb",
-    url: "https://github.com/o/r",
     signal: new AbortController().signal,
     platformVersion: "v1",
-    acquisition,
+    acquisition: {
+      acquire: () =>
+        acquisition.acquire({
+          orbId: "orb",
+          url: "https://github.com/o/r",
+          signal: new AbortController().signal,
+        }),
+    },
     managed: () =>
       okAsync({
         personal: { content: `personal ${revision}`, revision },
@@ -90,6 +95,48 @@ function fixture() {
   };
 }
 describe("prepared resource context", () => {
+  it("prepares managed prompts and platform skills without a repository pin", async () => {
+    const f = fixture();
+    const options = { ...f.options, acquisition: { acquire: () => okAsync(null) } };
+    const first = (await prepareResourceContext(options))._unsafeUnwrap();
+    expect(first.commitSha).toBeNull();
+    expect(first.managed).toEqual({
+      personal: { content: "personal 1", revision: 1 },
+      project: { content: "project", revision: 1 },
+    });
+    expect(first.instructions).toEqual([]);
+    expect(first.skills.map((skill) => skill.name)).toEqual(["hosting"]);
+    expect(first.reader.contains("/opt/pi-orb/skills/hosting/script.sh")).toBe(true);
+    expect(first.reader.contains("AGENTS.md")).toBe(false);
+    f.refresh();
+    const restored = (await prepareResourceContext(options))._unsafeUnwrap();
+    expect(restored.managed.personal.content).toBe("personal 2");
+    expect(restored.resourceHash).toBe(first.resourceHash);
+    expect(f.counts()).toEqual({ sourceCalls: 0, platformCalls: 1 });
+  });
+
+  it("fences no-repository platform publication after revoked admission", async () => {
+    const f = fixture();
+    let writes = 0;
+    const result = await prepareResourceContext({
+      ...f.options,
+      acquisition: { acquire: () => okAsync(null) },
+      platformStore: {
+        get: () => okAsync(null),
+        put: () => {
+          writes++;
+          return okAsync(undefined);
+        },
+      },
+      checkpoint: () => {
+        f.revoke();
+        return okAsync(undefined);
+      },
+    });
+    expect(result.isErr()).toBe(true);
+    expect(writes).toBe(0);
+  });
+
   it("rejects malformed platform skill metadata before publication", async () => {
     const f = fixture();
     let writes = 0;

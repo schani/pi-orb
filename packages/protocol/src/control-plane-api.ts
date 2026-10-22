@@ -77,7 +77,7 @@ export const CreateProjectRequestSchema = Type.Object(
   {
     id: Type.String(),
     name: Type.String({ minLength: 1, maxLength: PROJECT_NAME_MAX_CHARS }),
-    repositoryUrl: Type.String(),
+    repositoryUrl: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   },
   closed,
 );
@@ -86,7 +86,7 @@ export type CreateProjectRequest = Static<typeof CreateProjectRequestSchema>;
 export const UpdateProjectRequestSchema = Type.Object(
   {
     name: Type.String({ minLength: 1, maxLength: PROJECT_NAME_MAX_CHARS }),
-    repositoryUrl: Type.String(),
+    repositoryUrl: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   },
   closed,
 );
@@ -130,7 +130,7 @@ export const ProjectViewSchema = Type.Object(
   {
     id: Type.String(),
     name: Type.String(),
-    repositoryUrl: Type.String(),
+    repositoryUrl: Type.Union([Type.String(), Type.Null()]),
     state: ProjectStateSchema,
     deletionProgress: Type.Optional(ProjectDeletionProgressSchema),
     createdAt: Type.String(),

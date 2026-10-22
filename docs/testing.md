@@ -9,6 +9,15 @@
 Tests first failed on absent installation/checks and the native snapshot whitelist. Contracts cover pinned amd64-baseline/arm64 archives, checksum rejection before extraction/install, unsupported architectures, both build paths and fail-closed production acceptance as `orb`. The existing APT package-sequence assertion required updating for `git-crypt`; its first failure is retained. `npm ci`, 22 focused Vitest cases, all 356 infrastructure/guest tests plus the filesystem check, native-image typecheck, scoped Biome and shell syntax checks pass.
 
 The complete amd64 runtime Docker image builds. A disposable UID2000, network-disabled, capability-free container passes Bun evaluation, Bun/bunx 1.4.4 checks and a git-crypt 0.7.0 symmetric-key encrypt/lock/unlock roundtrip. The arm64 archive's official SHA-256 and layout are verified, but arm64 execution and native cloud image construction/acceptance are not qualified. No E2E or deployment; runtime/harness code is unchanged. Evidence, including RED logs: `.context/bun-git-crypt/`.
+## Name-only projects (2026-10-22; local, undeployed)
+
+Focused checks pass: API/store/UI **56**, runtime/providers **187**, native bootstrap **33**, resource gate **20**, plus central context, naming, composition and focused DST. The new process E2E passes **1/1**, covering mock Codex/GitHub gates, real shell/`gh` helper execution and stop/start retention. Typecheck, lint (411 baseline warnings, 83 infos) and build pass.
+
+**The scoped process-backend E2E selection is qualified across frozen-source runs:** original **29 files / 360 tests**, independent focused **1 / 2**, remaining **34 / 98** (exit 0): **64 files, 460 tests passed; one PostgreSQL file and two tests skipped** (PostgreSQL/Docker). All 65 selected files are accounted for; `source-qualified.log` verifies `source-freeze.sha256`. The original Spot-interrupted run remains incomplete, not green; its interrupted case is not counted. External shutdown evidence, not a passing rerun, establishes the interruption; no product fix, full unit-suite pass or production deployment is claimed. Evidence: [docs/postmortems/2026-10-22-no-repository-e2e-preemption.md](postmortems/2026-10-22-no-repository-e2e-preemption.md) and `.context/no-repo/` logs.
+
+The initial new E2E failed because configured host port `0` is forbidden; its fixture now uses `7193`. First-failure evidence is retained; no product root cause or fix is claimed.
+
+**Served process/PGlite preview verified (2026-10-22):** browser-created name-only project has SQL/API `repoURL: null` and a blank General repository field; entry JS/CSS return 200 with correct MIME, and Tailscale userspace `nc` confirms system API 200 with process/PGlite. Fixture deletion completed after the normal 65-second quarantine and the project list is empty; evidence: `.context/no-repo/preview-verified.md`, `preview.log`, `tailscale-preview.http`, `preview-projects.json` in the same directory; no real-model or GitHub login completion is claimed.
 
 ## Harness-icon catalog ownership (2026-10-20; PR 151)
 

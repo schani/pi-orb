@@ -20,7 +20,11 @@ export const OrbSelfSchema = Type.Object(
       closed,
     ),
     project: Type.Object(
-      { id: Type.String(), name: Type.String(), repositoryUrl: Type.String() },
+      {
+        id: Type.String(),
+        name: Type.String(),
+        repositoryUrl: Type.Union([Type.String(), Type.Null()]),
+      },
       closed,
     ),
     spawnedByOrb: Type.Union([
@@ -47,7 +51,7 @@ const OrbInspectionProjectSchema = Type.Object(
   {
     id: Type.String(),
     name: Type.String(),
-    repositoryUrl: Type.String(),
+    repositoryUrl: Type.Union([Type.String(), Type.Null()]),
   },
   closed,
 );

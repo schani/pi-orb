@@ -72,7 +72,7 @@ An orb can launch another orb with a prompt through `pi-orb spawn` and receive i
 
 Orb-to-orb messaging is approved (2026-10-14, America/Los_Angeles), independent of ancestry: same-owner trusted non-human input across projects (expanded 2026-10-20) through the existing inbox, shown in a Correspondence band, waking stopped/sleeping targets. The approved minimal contract is implemented locally; scoped actual-process checks pass, full qualification remains pending. A PR and a process-host preview are authorized, not production deployment (`docs/orb-messaging.md`, `TODO.md`).
 
-Local Pi children use native Durable task ownership and inherited authorized tools, with named model selection and no profiles or nested delegation. Root receipts and activity are public; private child transcripts are not (`docs/subagents.md`). Independent spawned orbs have separate lifetime and fresh checkout (`docs/orb-spawning.md`).
+Local Pi children use native Durable task ownership and inherited authorized tools, with named model selection and no profiles or nested delegation. Root receipts and activity are public; private child transcripts are not (`docs/subagents.md`). Independent spawned orbs have separate lifetimes and workspaces: fresh checkouts when a repository is configured, empty directories otherwise (`docs/orb-spawning.md`).
 
 ## Design doc index
 
@@ -126,6 +126,7 @@ Subsystem designs:
 Tracking:
 
 - [docs/postmortems/2026-10-22-durable-browser-apt-stall.md](docs/postmortems/2026-10-22-durable-browser-apt-stall.md) — browser dependency acquisition stalled before tests; runner helper coverage corrected, historical cause unproven
+- [docs/postmortems/2026-10-22-no-repository-e2e-preemption.md](docs/postmortems/2026-10-22-no-repository-e2e-preemption.md) — confirmed Spot preemption interrupted E2E; full qualification pending
 - [docs/postmortems/2026-10-21-posthog-exec-required-context.md](docs/postmortems/2026-10-21-posthog-exec-required-context.md) — live exec requires context/model fields; corrected help succeeds, historical cached schema unverified
 - [docs/postmortems/2026-10-19-observer-mint-floor.md](docs/postmortems/2026-10-19-observer-mint-floor.md) — operator credential refresh hits the mint floor; separate isolated observation passed
 - [docs/postmortems/2026-10-19-image-test-cpu-contention.md](docs/postmortems/2026-10-19-image-test-cpu-contention.md) — controlled CPU contention reproduces image deadlines; original attribution unresolved

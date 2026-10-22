@@ -201,7 +201,7 @@ function mapProjectRow(row: PgRow): ProjectRow {
     id: String(row["id"]),
     ownerUserId: String(row["owner_user_id"]),
     name: String(row["name"]),
-    repositoryUrl: String(row["repository_url"]),
+    repositoryUrl: row["repository_url"] == null ? null : String(row["repository_url"]),
     state: String(row["state"]) as ProjectRow["state"],
     stateVersion: Number(row["state_version"]),
     deletionRequestedAt:
@@ -501,7 +501,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       if (existingRow !== undefined)
         return String(existingRow["owner_user_id"]) === project.ownerUserId &&
           String(existingRow["name"]) === project.name &&
-          String(existingRow["repository_url"]) === project.repositoryUrl &&
+          (existingRow["repository_url"] == null ? null : String(existingRow["repository_url"])) ===
+            project.repositoryUrl &&
           String(existingRow["state"]) === project.state
           ? ok(mapProjectRow(existingRow))
           : err({ type: "project_conflict", reason: "concurrent_change" });
@@ -539,7 +540,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       return racedRow !== undefined &&
         String(racedRow["owner_user_id"]) === project.ownerUserId &&
         String(racedRow["name"]) === project.name &&
-        String(racedRow["repository_url"]) === project.repositoryUrl &&
+        (racedRow["repository_url"] == null ? null : String(racedRow["repository_url"])) ===
+          project.repositoryUrl &&
         String(racedRow["state"]) === project.state
         ? ok(mapProjectRow(racedRow))
         : err({ type: "project_conflict", reason: "concurrent_change" });
@@ -548,7 +550,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
 
   updateProject(
     _task: SimulationTask,
-    params: { projectId: string; name: string; repositoryUrl: string; now: number },
+    params: { projectId: string; name: string; repositoryUrl: string | null; now: number },
   ) {
     return this.db.transaction<ProjectRow | null, StoreError | ProjectConflict>(async (query) => {
       const project = await query("SELECT * FROM projects WHERE id = $1 AND state = 'active'", [

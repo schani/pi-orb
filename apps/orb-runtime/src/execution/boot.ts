@@ -25,7 +25,7 @@ interface BootError {
 interface BootOptions {
   readonly orbId: string;
   readonly workDir: string;
-  readonly repositoryUrl: string;
+  readonly repositoryUrl: string | null;
   readonly incarnation: string;
   readonly environment: NodeJS.ProcessEnv;
   readonly broker: BrokerEnv | null;
@@ -108,7 +108,17 @@ export class ExecutionBoot {
     configurePersistentRust(home.value, o.environment);
     const cwd = join(o.workDir, "repo");
     this.phase = "cloning";
-    if (!existsSync(cwd)) {
+    if (o.repositoryUrl === null) {
+      const workspace = Result.fromThrowable(
+        () => mkdirSync(cwd, { recursive: true }),
+        (): BootError => ({
+          type: "execution_boot_error",
+          code: "workspace_init_failed",
+          message: "workspace preparation failed",
+        }),
+      )();
+      if (workspace.isErr()) return err(workspace.error);
+    } else if (!existsSync(cwd)) {
       const url = validateRepositoryUrl(o.repositoryUrl);
       if (url.isErr())
         return err({
@@ -161,7 +171,10 @@ export class ExecutionBoot {
       )();
       if (moved.isErr()) return moved;
     }
-    const commit = await git(["rev-parse", "HEAD"], cwd);
+    const commit =
+      o.repositoryUrl === null || !existsSync(join(cwd, ".git"))
+        ? ok(null)
+        : await git(["rev-parse", "HEAD"], cwd);
     if (commit.isErr()) return err(commit.error);
     this.hooks = new BootHookRunner({
       repoDir: cwd,

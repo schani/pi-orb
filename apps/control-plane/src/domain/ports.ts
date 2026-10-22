@@ -226,7 +226,7 @@ export interface ControlPlaneStore extends ActivityHeadlineStore {
   /** Atomically updates active project metadata, fenced against deletion. */
   updateProject(
     task: SimulationTask,
-    params: { projectId: string; name: string; repositoryUrl: string; now: number },
+    params: { projectId: string; name: string; repositoryUrl: string | null; now: number },
   ): ResultAsync<ProjectRow | null, StoreError | ProjectConflict>;
   /** Atomically fences child creation and moves every child to permanent deletion. */
   requestProjectDeletion(
@@ -583,7 +583,7 @@ export interface ProvisionOrbHostRequest {
   readonly orbId: string;
   readonly incarnation: number;
   readonly bootstrap: {
-    repositoryUrl: string;
+    repositoryUrl: string | null;
     harness?: import("@pi-orb/protocol").HarnessKind;
     initialCheckoutCommit?: string;
     awaitInitialCheckoutCommit?: boolean;
@@ -627,7 +627,7 @@ export interface OrbHostProvider {
   /** Pure fingerprint of every non-secret input that fixes an incarnation's launch contract. */
   desiredSpecFingerprint(input: {
     readonly orbId: string;
-    readonly repositoryUrl: string;
+    readonly repositoryUrl: string | null;
     readonly harness?: import("@pi-orb/protocol").HarnessKind;
   }): string;
   /** Idempotent by orbId. */
@@ -1201,7 +1201,7 @@ export interface OrbNameGenerator {
       ownerUserId: string;
       orbId: string;
       projectName: string;
-      repositoryUrl: string;
+      repositoryUrl: string | null;
       message: string;
       readme: string | null;
     },

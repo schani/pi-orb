@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { err, ok } from "neverthrow";
@@ -18,7 +18,7 @@ it("pins fresh checkout before publishing it and bypasses admission on resume", 
   ) => {
     expect(command).toBe("git");
     commands.push(args);
-    if (args[0] === "clone") mkdirSync(join(root, ".clone-tmp"));
+    if (args[0] === "clone") mkdirSync(join(root, ".clone-tmp", ".git"), { recursive: true });
     callback(null, "a".repeat(40), "");
   }) as never);
   const pin = vi.fn(async () => ok([["checkout", "--detach", "b".repeat(40)]]));
@@ -44,3 +44,25 @@ it("fails closed before cloning if initial admission fails", async () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+it.each([null, "https://github.com/o/r"])(
+  "preserves a no-repository workspace after the project URL becomes %s without Git or pin admission",
+  async (repositoryUrl) => {
+    const root = mkdtempSync(join(tmpdir(), "checkout-no-repo-"));
+    vi.mocked(execFile).mockClear();
+    const pin = vi.fn(async () => ok([]));
+    try {
+      expect((await prepareCheckout(root, null, pin))._unsafeUnwrap()).toBeNull();
+      expect(existsSync(join(root, "repo"))).toBe(true);
+      expect(existsSync(join(root, "repo", ".git"))).toBe(false);
+      writeFileSync(join(root, "repo", "retained"), "work");
+      expect((await prepareCheckout(root, repositoryUrl, pin))._unsafeUnwrap()).toBeNull();
+      expect(existsSync(join(root, "repo", ".git"))).toBe(false);
+      expect(readFileSync(join(root, "repo", "retained"), "utf8")).toBe("work");
+      expect(execFile).not.toHaveBeenCalled();
+      expect(pin).not.toHaveBeenCalled();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);

@@ -22,7 +22,8 @@ export interface DashboardSearchSnapshot {
   orbOrder?: OrbOrderCache;
 }
 
-function githubRepositoryAlias(repositoryUrl: string): string | null {
+function githubRepositoryAlias(repositoryUrl: string | null): string | null {
+  if (repositoryUrl === null) return null;
   const withoutProtocol = repositoryUrl.replace(/^https?:\/\//i, "");
   if (!withoutProtocol.toLowerCase().startsWith("github.com/")) return null;
   return withoutProtocol
@@ -38,11 +39,12 @@ function projectItem(project: ProjectView): AppSearchItem {
     kindLabel: "project",
     group: "projects",
     title: project.name,
-    context: project.repositoryUrl,
-    keywords:
-      alias === null
-        ? [project.name, project.repositoryUrl]
-        : [project.name, project.repositoryUrl, alias],
+    ...(project.repositoryUrl === null ? {} : { context: project.repositoryUrl }),
+    keywords: [
+      project.name,
+      ...(project.repositoryUrl === null ? [] : [project.repositoryUrl]),
+      ...(alias === null ? [] : [alias]),
+    ],
     href: `/projects/${encodeURIComponent(project.id)}`,
   };
 }

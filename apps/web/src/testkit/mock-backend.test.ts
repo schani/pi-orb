@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { DisplayHistoryView, OrbView, UsageView } from "@pi-orb/protocol";
+import { Readable } from "node:stream";
+import type { DisplayHistoryView, OrbView, ProjectView, UsageView } from "@pi-orb/protocol";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Connect, ViteDevServer } from "vite";
@@ -26,22 +27,39 @@ function fixture({ timestampChurn = false, orbNesting = false } = {}) {
       },
     } as unknown as ViteDevServer,
   );
-  return async <T>(path: string): Promise<T> =>
-    new Promise((resolve) => {
+  return async <T>(
+    path: string,
+    {
+      method = "GET",
+      payload,
+      status = 200,
+    }: {
+      method?: string;
+      payload?: unknown;
+      status?: number;
+    } = {},
+  ): Promise<T> =>
+    new Promise<{ status: number; body: T }>((resolve) => {
       const response = {
         statusCode: 0,
         setHeader() {},
         end(body: string) {
-          expect(response.statusCode).toBe(200);
-          resolve(JSON.parse(body) as T);
+          resolve({ status: response.statusCode, body: JSON.parse(body) as T });
         },
       };
       if (middleware === undefined) return expect.fail("missing fixture middleware");
       middleware(
-        { method: "GET", url: path, headers: {} } as IncomingMessage,
+        Object.assign(Readable.from(payload === undefined ? [] : [JSON.stringify(payload)]), {
+          method,
+          url: path,
+          headers: {},
+        }) as IncomingMessage,
         response as unknown as ServerResponse,
         () => expect.fail("fixture request was not handled"),
       );
+    }).then((reply) => {
+      expect(reply.status).toBe(status);
+      return reply.body;
     });
 }
 
@@ -200,3 +218,41 @@ it("binds named usage rankings to seeded orb metadata and retains one deleted or
   expect(missing).toHaveLength(1);
   expect(items.some((orb) => orb.id === missing[0]?.id)).toBe(false);
 });
+
+it.each([undefined, null, "", "  "])(
+  "accepts name-only projects in the mock (%s)",
+  async (repositoryUrl) => {
+    const request = fixture();
+    const payload = { id: "name-only", name: "Notebook", repositoryUrl };
+    const created = await request<ProjectView>("/api/v1/projects", {
+      method: "POST",
+      payload,
+      status: 201,
+    });
+    expect(created.repositoryUrl).toBeNull();
+    const retry = await request<ProjectView>("/api/v1/projects", {
+      method: "POST",
+      payload: { ...payload, repositoryUrl: null },
+      status: 201,
+    });
+    expect(retry).toEqual(created);
+    const attached = await request<ProjectView>("/api/v1/projects/name-only", {
+      method: "PATCH",
+      payload: { name: "Notebook", repositoryUrl: "o/r" },
+    });
+    expect(attached.repositoryUrl).toBe("https://github.com/o/r");
+    const cleared = await request<ProjectView>("/api/v1/projects/name-only", {
+      method: "PATCH",
+      payload: { name: "Edited", repositoryUrl },
+    });
+    expect(cleared).toMatchObject({ name: "Edited", repositoryUrl: null });
+    for (const repositoryUrl of [42, false, {}, [], "https://evil.test/o/r"]) {
+      await request("/api/v1/projects/name-only", {
+        method: "PATCH",
+        payload: { name: "Invalid", repositoryUrl },
+        status: 400,
+      });
+    }
+    expect(await request<ProjectView>("/api/v1/projects/name-only")).toEqual(cleared);
+  },
+);
