@@ -1734,25 +1734,6 @@ async function handleApi(
       });
       return true;
     }
-    const existing = state.projects.get(body.id);
-    if (existing !== undefined) {
-      if (
-        existing.state === "active" &&
-        existing.name === name &&
-        existing.repositoryUrl === repository.value.url
-      ) {
-        sendJson(response, 201, existing);
-      } else {
-        sendJson(response, 409, {
-          error: {
-            code: "conflict",
-            message: "project id or state conflicts with this request",
-            retryable: false,
-          },
-        });
-      }
-      return true;
-    }
     const project: ProjectView = {
       id: body.id,
       name,

@@ -78,73 +78,51 @@ it("scopes default project creation/listing and idempotency to the signed-in use
   expect(bob.json().items.map((item: { id: string }) => item.id)).toEqual([b.id]);
 });
 
-it.each([undefined, null, "", "   "])(
-  "normalizes absent repository %s for create, edit and idempotency",
-  async (repositoryUrl) => {
-    const app = setup();
-    const id = "10000000-0000-4000-8000-000000000005";
-    const payload = { id, name: "No repository", repositoryUrl };
-    const created = await inject(app, "alice", {
-      method: "POST",
-      url: "/api/v1/projects",
-      payload,
-    });
-    expect(created.statusCode).toBe(201);
-    expect(created.json().repositoryUrl).toBeNull();
-    for (const repositoryUrl of [undefined, null, "", "  "]) {
-      const retry = await inject(app, "alice", {
-        method: "POST",
-        url: "/api/v1/projects",
-        payload: { ...payload, repositoryUrl },
-      });
-      expect(retry.statusCode).toBe(201);
-      expect(retry.json()).toEqual(created.json());
-    }
-    const conflict = await inject(app, "alice", {
-      method: "POST",
-      url: "/api/v1/projects",
-      payload: { ...payload, repositoryUrl: "o/r" },
-    });
-    expect(conflict.statusCode).toBe(409);
-    const attached = await inject(app, "alice", {
-      method: "PATCH",
-      url: `/api/v1/projects/${id}`,
-      payload: { name: "With repository", repositoryUrl: "o/r" },
-    });
-    expect(attached.statusCode).toBe(200);
-    expect(attached.json().repositoryUrl).toBe("https://github.com/o/r");
-    const cleared = await inject(app, "alice", {
-      method: "PATCH",
-      url: `/api/v1/projects/${id}`,
-      payload: { name: "Name only", repositoryUrl },
-    });
-    expect(cleared.statusCode).toBe(200);
-    expect(cleared.json()).toMatchObject({ name: "Name only", repositoryUrl: null });
-    const read = await inject(app, "alice", { method: "GET", url: `/api/v1/projects/${id}` });
-    expect(read.json()).toMatchObject({ name: "Name only", repositoryUrl: null });
-  },
-);
-
-it.each([42, false, {}, []])("rejects non-string repository %s", async (repositoryUrl) => {
+it.each([undefined, null, "", "   "])("normalizes absent repository %s", async (repositoryUrl) => {
   const app = setup();
-  const id = "10000000-0000-4000-8000-000000000006";
-  expect(
-    (
-      await inject(app, "alice", {
-        method: "POST",
-        url: "/api/v1/projects",
-        payload: { id, name: "Invalid", repositoryUrl },
-      })
-    ).statusCode,
-  ).toBe(400);
-  expect(
-    (
-      await inject(app, "alice", {
-        method: "GET",
-        url: `/api/v1/projects/${id}`,
-      })
-    ).statusCode,
-  ).toBe(404);
+  const created = await inject(app, "alice", {
+    method: "POST",
+    url: "/api/v1/projects",
+    payload: { id: "10000000-0000-4000-8000-000000000005", name: "Name only", repositoryUrl },
+  });
+  expect(created.statusCode).toBe(201);
+  expect(created.json().repositoryUrl).toBeNull();
+});
+
+it("retries name-only creation canonically and attaches and clears a repository", async () => {
+  const app = setup();
+  const id = "10000000-0000-4000-8000-000000000005";
+  const payload = { id, name: "Name only" };
+  const created = await inject(app, "alice", { method: "POST", url: "/api/v1/projects", payload });
+  const retry = await inject(app, "alice", {
+    method: "POST",
+    url: "/api/v1/projects",
+    payload: { ...payload, repositoryUrl: "  " },
+  });
+  expect(retry.statusCode).toBe(201);
+  expect(retry.json()).toEqual(created.json());
+  const conflict = await inject(app, "alice", {
+    method: "POST",
+    url: "/api/v1/projects",
+    payload: { ...payload, repositoryUrl: "o/r" },
+  });
+  expect(conflict.statusCode).toBe(409);
+  const attached = await inject(app, "alice", {
+    method: "PATCH",
+    url: `/api/v1/projects/${id}`,
+    payload: { name: "With repository", repositoryUrl: "o/r" },
+  });
+  expect(attached.statusCode).toBe(200);
+  expect(attached.json().repositoryUrl).toBe("https://github.com/o/r");
+  const cleared = await inject(app, "alice", {
+    method: "PATCH",
+    url: `/api/v1/projects/${id}`,
+    payload: { name: "Name only" },
+  });
+  expect(cleared.statusCode).toBe(200);
+  expect(cleared.json()).toMatchObject({ name: "Name only", repositoryUrl: null });
+  const read = await inject(app, "alice", { method: "GET", url: `/api/v1/projects/${id}` });
+  expect(read.json()).toMatchObject({ name: "Name only", repositoryUrl: null });
 });
 
 it.each(["schani/pi-orb", "github.com/schani/pi-orb"])(

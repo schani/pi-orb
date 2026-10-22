@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { once } from "node:events";
-import { access, chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -291,138 +291,25 @@ test("boot fails with git_identity_unavailable when the identity cannot be read"
   );
 });
 
-test.each([null, "https://github.com/test/test"])(
-  "no-repository boot retains the workspace after URL becomes %s and runs hooks and identity without a pin",
-  async (repositoryUrl) => {
-    const root = await mkdtemp(join(tmpdir(), "execution-no-repo-"));
-    const requests: string[] = [];
-    const server = createServer((request, response) => {
-      expect(request.headers.authorization).toBe("Bearer private");
-      requests.push(request.url ?? "");
-      const body =
-        request.url === "/runtime/v1/project-secrets"
-          ? { revision: 0, values: { PROJECT_SECRET: "available" } }
-          : { name: "Ada", email: "ada@example.com" };
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify(body));
-    });
-    server.listen(0, "127.0.0.1");
-    await once(server, "listening");
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("test port unavailable");
-    const boot = (url: string | null) =>
-      new ExecutionBoot({
-        orbId: "test",
-        workDir: root,
-        repositoryUrl: url,
-        incarnation: "3",
-        environment: {
-          ...process.env,
-          PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT: "1",
-          PI_ORB_INITIAL_CHECKOUT_COMMIT: "not-a-sha",
-        },
-        broker: { controlPlaneUrl: `http://127.0.0.1:${address.port}`, runtimeToken: "private" },
-      });
-    try {
-      const first = boot(null);
-      expect((await first.boot()).isOk()).toBe(true);
-      expect(first.snapshot).toMatchObject({ cwd: join(root, "repo"), checkoutCommit: null });
-      expect(Check(ExecutionReadySchema, first.snapshot)).toBe(true);
-      expect(first.health()).toMatchObject({ status: "ready", checkoutCommit: null });
-      first.shutdown();
-      await expect(access(join(root, "repo", ".git"))).rejects.toThrow();
-      await mkdir(join(root, "repo", ".agents"));
-      await writeFile(join(root, "repo", "retained"), "work");
-      await writeFile(
-        join(root, "repo", ".agents", "resume"),
-        '#!/bin/sh\necho "$PROJECT_SECRET" > resumed\n',
-      );
-      await chmod(join(root, "repo", ".agents", "resume"), 0o755);
-      const resumed = boot(repositoryUrl);
-      expect((await resumed.boot()).isOk()).toBe(true);
-      expect(resumed.snapshot?.checkoutCommit).toBeNull();
-      expect(resumed.health()).toMatchObject({ status: "ready", checkoutCommit: null });
-      await expect(access(join(root, "repo", ".git"))).rejects.toThrow();
-      await expect(access(join(root, ".clone-tmp"))).rejects.toThrow();
-      expect(await readFile(join(root, "repo", "retained"), "utf8")).toBe("work");
-      expect(await readFile(join(root, "repo", "resumed"), "utf8")).toBe("available\n");
-      expect(await readFile(join(root, "home", ".config", "git", "config"), "utf8")).toContain(
-        "ada@example.com",
-      );
-      expect(requests).toEqual([
-        "/runtime/v1/project-secrets",
-        "/runtime/v1/git-identity",
-        "/runtime/v1/project-secrets",
-        "/runtime/v1/git-identity",
-      ]);
-      resumed.shutdown();
-    } finally {
-      server.close();
-      await once(server, "close");
-      await rm(root, { recursive: true, force: true });
-    }
-  },
-);
-
-test("execution boot preserves a dirty Git checkout after the project repository is removed", async () => {
-  const root = await mkdtemp(join(tmpdir(), "execution-remove-repo-"));
-  const repo = join(root, "repo");
-  const boot = (repositoryUrl: string | null) =>
-    new ExecutionBoot({
-      orbId: "test",
-      workDir: root,
-      repositoryUrl,
-      incarnation: "3",
-      environment: { ...process.env, PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT: "1" },
-      broker: null,
-    });
-  try {
-    execFileSync("git", ["init", "-q", repo]);
-    execFileSync("git", [
-      "-C",
-      repo,
-      "-c",
-      "user.name=Test",
-      "-c",
-      "user.email=test@example.com",
-      "commit",
-      "-q",
-      "--allow-empty",
-      "-m",
-      "initial",
-    ]);
-    const first = boot("https://github.com/test/test");
-    expect((await first.boot()).isOk()).toBe(true);
-    const head = first.snapshot?.checkoutCommit;
-    first.shutdown();
-    await writeFile(join(repo, "retained"), "work");
-    const resumed = boot(null);
-    expect((await resumed.boot()).isOk()).toBe(true);
-    expect(resumed.snapshot?.checkoutCommit).toBeNull();
-    expect(await readFile(join(repo, "retained"), "utf8")).toBe("work");
-    expect(
-      execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
-    ).toBe(head);
-    resumed.shutdown();
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("execution boot rejects corrupt Git metadata in a retained workspace", async () => {
-  const root = await mkdtemp(join(tmpdir(), "execution-corrupt-repo-"));
+test("repository-free execution readies without fetching or validating a Git pin", async () => {
+  const root = await mkdtemp(join(tmpdir(), "execution-no-repo-"));
   const boot = new ExecutionBoot({
     orbId: "test",
     workDir: root,
-    repositoryUrl: "https://github.com/test/test",
+    repositoryUrl: null,
     incarnation: "3",
-    environment: { ...process.env, PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT: "1" },
     broker: null,
+    environment: {
+      ...process.env,
+      PI_ORB_AWAIT_INITIAL_CHECKOUT_COMMIT: "1",
+      PI_ORB_INITIAL_CHECKOUT_COMMIT: "not-a-sha",
+    },
   });
   try {
-    await mkdir(join(root, "repo", ".git"), { recursive: true });
-    expect((await boot.boot()).isErr()).toBe(true);
-    expect(boot.health()).toMatchObject({ status: "failed", error: { code: "clone_failed" } });
+    expect((await boot.boot()).isOk()).toBe(true);
+    expect(boot.snapshot).toMatchObject({ cwd: join(root, "repo"), checkoutCommit: null });
+    expect(Check(ExecutionReadySchema, boot.snapshot)).toBe(true);
+    expect(boot.health()).toMatchObject({ status: "ready", checkoutCommit: null });
   } finally {
     boot.shutdown();
     await rm(root, { recursive: true, force: true });

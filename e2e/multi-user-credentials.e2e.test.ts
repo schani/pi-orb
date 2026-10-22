@@ -431,9 +431,10 @@ describe.skipIf(process.platform !== "linux")("authorized two-user credentials",
       const created = await request(principal, "POST", "/api/v1/projects", {
         id,
         name: "same project name",
-        repositoryUrl: REPOSITORY_URL,
+        ...(principal === "alice" ? { repositoryUrl: REPOSITORY_URL } : {}),
       });
       expect(created.status).toBe(201);
+      expect(created.body.repositoryUrl).toBe(principal === "alice" ? REPOSITORY_URL : null);
     }
     expect((await request("alice", "GET", "/api/v1/projects")).body.items).toHaveLength(1);
     expect((await request("bob", "GET", "/api/v1/projects")).body.items).toHaveLength(1);
@@ -544,7 +545,7 @@ describe.skipIf(process.platform !== "linux")("authorized two-user credentials",
       const marker = `GITHUB_GRANT_${owner.toUpperCase()}_DONE`;
       const output = await terminalRun(
         id,
-        `gh auth token; printf '${shellEncoded(marker)}\\n'`,
+        `${owner === "bob" ? "test ! -e .git && test ! -e AGENTS.md && printf retained > retained.txt && " : ""}gh auth token; printf '${shellEncoded(marker)}\\n'`,
         marker,
       );
       expect(output).toContain(`github-access-${owner}`);
@@ -645,6 +646,29 @@ describe.skipIf(process.platform !== "linux")("authorized two-user credentials",
         expect(await response.json()).toMatchObject(expected);
       }
     }
+
+    const checkWorkspace = async () => {
+      const marker = "RETAINED_WORKSPACE_OK";
+      const output = await terminalRun(
+        bobOrb,
+        `test ! -e .git && test "$(cat retained.txt)" = retained && test "$(gh auth token)" = github-access-bob && printf 'protocol=https\\nhost=github.com\\n\\n' | git credential fill | grep -q '^password=github-access-bob$' && printf '${shellEncoded(marker)}\\n'`,
+        marker,
+      );
+      expect(output).toContain(marker);
+    };
+    await checkWorkspace();
+    expect((await request("bob", "POST", `/api/v1/orbs/${bobOrb}/stop`)).status).toBe(202);
+    await waitFor("Bob stopped", async () =>
+      (await orb("bob", bobOrb)).body.state === "stopped" ? true : null,
+    );
+    expect((await request("bob", "POST", `/api/v1/orbs/${bobOrb}/start`)).status).toBe(202);
+    await waitFor("Bob restarted", async () =>
+      (await orb("bob", bobOrb)).body.state === "running" ? true : null,
+    );
+    await checkWorkspace();
+    expect(
+      JSON.stringify((await request("bob", "GET", `/api/v1/orbs/${bobOrb}/history`)).body),
+    ).toContain("BOB_MODEL_COMPLETE");
 
     const child = randomUUID();
     const spawned = await terminalRun(

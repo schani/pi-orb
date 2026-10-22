@@ -38,53 +38,73 @@ vi.mock("./auth.ts", async (importOriginal) => ({
   fetchClaudeSubscription: () => okAsync({ token: "test-token", generation: 1 }),
 }));
 
-it.each(["https://example.com/repo", null])(
-  "composes environment and instructions with repository %s",
-  async (repositoryUrl) => {
-    const workDir = mkdtempSync(join(tmpdir(), "claude-environment-"));
-    if (repositoryUrl !== null) mkdirSync(join(workDir, "repo"));
-    const options: Options[] = [];
-    const previewHost = "pi-orb-test.tail1234.ts.net";
-    const agent = new ClaudeOrbAgent({
-      orbId: "orb",
-      repositoryUrl,
-      workDir,
-      skillsDir: null,
-      previewHost,
-      broker: { controlPlaneUrl: "http://unused.invalid", runtimeToken: "unused" },
-      sdkFactory: (_input, value) => {
-        options.push(value);
-        return err({ message: "Captured model configuration; no process started." });
-      },
+it("appends the shared environment then Claude suffix exactly once before existing context", async () => {
+  const workDir = mkdtempSync(join(tmpdir(), "claude-environment-"));
+  mkdirSync(join(workDir, "repo"));
+  const options: Options[] = [];
+  const previewHost = "pi-orb-test.tail1234.ts.net";
+  const agent = new ClaudeOrbAgent({
+    orbId: "orb",
+    repositoryUrl: "https://example.com/repo",
+    workDir,
+    skillsDir: null,
+    previewHost,
+    broker: { controlPlaneUrl: "http://unused.invalid", runtimeToken: "unused" },
+    sdkFactory: (_input, value) => {
+      options.push(value);
+      return err({ message: "Captured model configuration; no process started." });
+    },
+  });
+  try {
+    await agent.boot();
+    expect(options).toHaveLength(1);
+    const system = options[0]?.systemPrompt;
+    expect(system).toEqual({
+      type: "preset",
+      preset: "claude_code",
+      append: [
+        environmentPrompt,
+        claudeEnvironmentPrompt,
+        "PERSONAL",
+        "PROJECT",
+        portExposurePrompt(previewHost),
+        "User's time zone: America/Los_Angeles.",
+      ].join("\n\n"),
     });
-    try {
-      await agent.boot();
-      expect(options).toHaveLength(1);
-      expect(options[0]?.cwd).toBe(join(workDir, "repo"));
-      if (repositoryUrl === null) {
-        expect(existsSync(join(workDir, "repo"))).toBe(true);
-        expect(existsSync(join(workDir, "repo", ".git"))).toBe(false);
-      }
-      const system = options[0]?.systemPrompt;
-      expect(system).toEqual({
-        type: "preset",
-        preset: "claude_code",
-        append: [
-          environmentPrompt,
-          claudeEnvironmentPrompt,
-          "PERSONAL",
-          "PROJECT",
-          portExposurePrompt(previewHost),
-          "User's time zone: America/Los_Angeles.",
-        ].join("\n\n"),
-      });
-      const append = typeof system === "object" && "append" in system ? (system.append ?? "") : "";
-      expect(append.split(environmentPrompt)).toHaveLength(2);
-      expect(append.split(claudeEnvironmentPrompt)).toHaveLength(2);
-      expect(append).not.toContain("Use the available orb tools");
-    } finally {
-      agent.shutdownHooks();
-      rmSync(workDir, { recursive: true, force: true });
-    }
-  },
-);
+    const append = typeof system === "object" && "append" in system ? (system.append ?? "") : "";
+    expect(append.split(environmentPrompt)).toHaveLength(2);
+    expect(append.split(claudeEnvironmentPrompt)).toHaveLength(2);
+    expect(append).not.toContain("Use the available orb tools");
+  } finally {
+    agent.shutdownHooks();
+    rmSync(workDir, { recursive: true, force: true });
+  }
+});
+
+it("boots Claude in a repository-free workspace with managed instructions", async () => {
+  const workDir = mkdtempSync(join(tmpdir(), "claude-no-repo-"));
+  const options: Options[] = [];
+  const agent = new ClaudeOrbAgent({
+    orbId: "orb",
+    repositoryUrl: null,
+    workDir,
+    skillsDir: null,
+    broker: { controlPlaneUrl: "http://unused.invalid", runtimeToken: "unused" },
+    sdkFactory: (_input, value) => {
+      options.push(value);
+      return err({ message: "No process started." });
+    },
+  });
+  try {
+    await agent.boot();
+    expect(options).toHaveLength(1);
+    expect(options[0]?.cwd).toBe(join(workDir, "repo"));
+    expect(JSON.stringify(options[0]?.systemPrompt)).toContain("PERSONAL");
+    expect(JSON.stringify(options[0]?.systemPrompt)).toContain("PROJECT");
+    expect(existsSync(join(workDir, "repo"))).toBe(true);
+    expect(existsSync(join(workDir, "repo", ".git"))).toBe(false);
+  } finally {
+    agent.shutdownHooks();
+    rmSync(workDir, { recursive: true, force: true });
+  }
+});

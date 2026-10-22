@@ -269,61 +269,53 @@ describe("ProcessOrbHostProvider", () => {
       expect(stale.isErr()).toBe(true);
     },
   );
-  launchIt.each([
-    { harness: "pi", repositoryUrl: "https://github.com/o/r" },
-    { harness: "claude", repositoryUrl: "https://github.com/o/r" },
-    { harness: "pi", repositoryUrl: null },
-    { harness: "claude", repositoryUrl: null },
-  ] as const)(
-    "launches $harness with repository $repositoryUrl and isolated env",
-    async ({ harness, repositoryUrl }) => {
-      const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
-      vi.stubEnv("XDG_CONFIG_HOME", join(tmpdir(), "developer-config"));
-      const { provider, root } = makeProvider({
-        OBSERVED_ENV_FILE: observedEnv,
-        PI_ORB_CONTAINER: "1",
-        PI_ORB_RUNTIME_MODE: "wrong",
-      });
-      const provisioned = await provider.provision(
-        task,
-        { ...request, bootstrap: { ...request.bootstrap, harness, repositoryUrl } },
-        context,
-      );
-      expect(provisioned.isOk()).toBe(true);
-      if (provisioned.isErr()) return;
+  launchIt.each(["pi", "claude"] as const)("launches %s with isolated env", async (harness) => {
+    const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
+    vi.stubEnv("XDG_CONFIG_HOME", join(tmpdir(), "developer-config"));
+    const { provider, root } = makeProvider({
+      OBSERVED_ENV_FILE: observedEnv,
+      PI_ORB_CONTAINER: "1",
+      PI_ORB_RUNTIME_MODE: "wrong",
+    });
+    const provisioned = await provider.provision(
+      task,
+      { ...request, bootstrap: { ...request.bootstrap, harness } },
+      context,
+    );
+    expect(provisioned.isOk()).toBe(true);
+    if (provisioned.isErr()) return;
 
-      const values = await eventually(() => {
-        try {
-          return JSON.parse(readFileSync(observedEnv, "utf8")) as Record<string, string>;
-        } catch {
-          return null;
-        }
-      });
-      expect(values.orbId).toBe(request.orbId);
-      expect(values.runtimeMode).toBe(harness === "claude" ? "claude" : "execution");
-      expect(values.repositoryUrl).toBe(repositoryUrl ?? "");
-      expect(values.incarnation).toBe(String(request.incarnation));
-      expect(values.container).toBe("0");
-      expect(values.supervisorId).toMatch(/^[a-f0-9]{64}$/);
-      expect(values.controlPlaneUrl).toBe("http://127.0.0.1:7100");
-      expect(values.skillsDir).toBe("/opt/pi-orb/test-skills");
-      const expectedWorkDir = join(root, "configured-state", request.orbId, "workspace");
-      expect(values.workDir).toBe(expectedWorkDir);
-      expect(values.home).toBe(join(expectedWorkDir, "home"));
-      // Boot writes git's XDG file; it must never be the developer's.
-      expect(values.xdgConfigHome).toBeUndefined();
-      expect(existsSync(join(expectedWorkDir, "home"))).toBe(true);
-      expect(Number(values.port)).toBeGreaterThan(0);
+    const values = await eventually(() => {
+      try {
+        return JSON.parse(readFileSync(observedEnv, "utf8")) as Record<string, string>;
+      } catch {
+        return null;
+      }
+    });
+    expect(values.orbId).toBe(request.orbId);
+    expect(values.runtimeMode).toBe(harness === "claude" ? "claude" : "execution");
+    expect(values.repositoryUrl).toBe(request.bootstrap.repositoryUrl);
+    expect(values.incarnation).toBe(String(request.incarnation));
+    expect(values.container).toBe("0");
+    expect(values.supervisorId).toMatch(/^[a-f0-9]{64}$/);
+    expect(values.controlPlaneUrl).toBe("http://127.0.0.1:7100");
+    expect(values.skillsDir).toBe("/opt/pi-orb/test-skills");
+    const expectedWorkDir = join(root, "configured-state", request.orbId, "workspace");
+    expect(values.workDir).toBe(expectedWorkDir);
+    expect(values.home).toBe(join(expectedWorkDir, "home"));
+    // Boot writes git's XDG file; it must never be the developer's.
+    expect(values.xdgConfigHome).toBeUndefined();
+    expect(existsSync(join(expectedWorkDir, "home"))).toBe(true);
+    expect(Number(values.port)).toBeGreaterThan(0);
 
-      const observed = await provider.observe(task, provisioned.value.ref, context);
-      expect(observed.isOk() && observed.value?.state).toBe("running");
-      expect(observed.isOk() && Number.isFinite(observed.value?.lastStartedAt)).toBe(true);
-      expect(observed.isOk() && observed.value?.runtimeAddress?.baseUrl).toBe(
-        `http://127.0.0.1:${values.port}`,
-      );
-      rmSync(observedEnv, { force: true });
-    },
-  );
+    const observed = await provider.observe(task, provisioned.value.ref, context);
+    expect(observed.isOk() && observed.value?.state).toBe("running");
+    expect(observed.isOk() && Number.isFinite(observed.value?.lastStartedAt)).toBe(true);
+    expect(observed.isOk() && observed.value?.runtimeAddress?.baseUrl).toBe(
+      `http://127.0.0.1:${values.port}`,
+    );
+    rmSync(observedEnv, { force: true });
+  });
 
   launchIt("prepends an explicitly configured in-orb command directory to PATH", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);

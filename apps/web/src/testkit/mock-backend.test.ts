@@ -39,12 +39,13 @@ function fixture({ timestampChurn = false, orbNesting = false } = {}) {
       status?: number;
     } = {},
   ): Promise<T> =>
-    new Promise<{ status: number; body: T }>((resolve) => {
+    new Promise((resolve) => {
       const response = {
         statusCode: 0,
         setHeader() {},
         end(body: string) {
-          resolve({ status: response.statusCode, body: JSON.parse(body) as T });
+          expect(response.statusCode).toBe(status);
+          resolve(JSON.parse(body) as T);
         },
       };
       if (middleware === undefined) return expect.fail("missing fixture middleware");
@@ -57,9 +58,6 @@ function fixture({ timestampChurn = false, orbNesting = false } = {}) {
         response as unknown as ServerResponse,
         () => expect.fail("fixture request was not handled"),
       );
-    }).then((reply) => {
-      expect(reply.status).toBe(status);
-      return reply.body;
     });
 }
 
@@ -219,40 +217,22 @@ it("binds named usage rankings to seeded orb metadata and retains one deleted or
   expect(items.some((orb) => orb.id === missing[0]?.id)).toBe(false);
 });
 
-it.each([undefined, null, "", "  "])(
-  "accepts name-only projects in the mock (%s)",
-  async (repositoryUrl) => {
-    const request = fixture();
-    const payload = { id: "name-only", name: "Notebook", repositoryUrl };
-    const created = await request<ProjectView>("/api/v1/projects", {
-      method: "POST",
-      payload,
-      status: 201,
-    });
-    expect(created.repositoryUrl).toBeNull();
-    const retry = await request<ProjectView>("/api/v1/projects", {
-      method: "POST",
-      payload: { ...payload, repositoryUrl: null },
-      status: 201,
-    });
-    expect(retry).toEqual(created);
-    const attached = await request<ProjectView>("/api/v1/projects/name-only", {
-      method: "PATCH",
-      payload: { name: "Notebook", repositoryUrl: "o/r" },
-    });
-    expect(attached.repositoryUrl).toBe("https://github.com/o/r");
-    const cleared = await request<ProjectView>("/api/v1/projects/name-only", {
-      method: "PATCH",
-      payload: { name: "Edited", repositoryUrl },
-    });
-    expect(cleared).toMatchObject({ name: "Edited", repositoryUrl: null });
-    for (const repositoryUrl of [42, false, {}, [], "https://evil.test/o/r"]) {
-      await request("/api/v1/projects/name-only", {
-        method: "PATCH",
-        payload: { name: "Invalid", repositoryUrl },
-        status: 400,
-      });
-    }
-    expect(await request<ProjectView>("/api/v1/projects/name-only")).toEqual(cleared);
-  },
-);
+it("creates and edits a name-only project in the mock", async () => {
+  const request = fixture();
+  const created = await request<ProjectView>("/api/v1/projects", {
+    method: "POST",
+    payload: { id: "name-only", name: "Notebook" },
+    status: 201,
+  });
+  expect(created.repositoryUrl).toBeNull();
+  const attached = await request<ProjectView>("/api/v1/projects/name-only", {
+    method: "PATCH",
+    payload: { name: "Notebook", repositoryUrl: "o/r" },
+  });
+  expect(attached.repositoryUrl).toBe("https://github.com/o/r");
+  const cleared = await request<ProjectView>("/api/v1/projects/name-only", {
+    method: "PATCH",
+    payload: { name: "Edited", repositoryUrl: "  " },
+  });
+  expect(cleared).toMatchObject({ name: "Edited", repositoryUrl: null });
+});

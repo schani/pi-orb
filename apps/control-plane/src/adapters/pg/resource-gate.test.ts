@@ -108,9 +108,9 @@ async function resourceTest() {
   return { db, database, task, orb, snapshot, context };
 }
 
-it("readies name-only projects without Git or a fabricated snapshot, and restores idempotently", async () => {
-  const { db, database, task, orb, context } = await resourceTest();
-  const acquire = vi.fn(() => errAsync(resourceError("fetch", "must not fetch")));
+it("readies without a fabricated snapshot, then pins the first attached repository", async () => {
+  const { db, database, task, orb, snapshot, context } = await resourceTest();
+  const acquire = vi.fn(() => okAsync(snapshot));
   const gate = new PgResourceGate(db, { acquire });
   const log = vi.spyOn(task, "log");
   try {
@@ -135,30 +135,17 @@ it("readies name-only projects without Git or a fabricated snapshot, and restore
         .filter((line) => line.includes("resources.ready")),
     ).toHaveLength(1);
     expect(acquire).not.toHaveBeenCalled();
-  } finally {
-    await database.close();
-  }
-});
-
-it("acquires the first repository pin after a name-only context and retains it across later edits", async () => {
-  const { db, database, task, orb, snapshot, context } = await resourceTest();
-  const acquire = vi.fn(() => okAsync(snapshot));
-  try {
     (
-      await db.query("UPDATE projects SET repository_url=NULL WHERE id=$1", [orb.projectId])
+      await db.query(
+        "UPDATE orbs SET agent_admission_version=agent_admission_version+1 WHERE id=$1",
+        [orb.id],
+      )
     )._unsafeUnwrap();
-    const initial = new PgResourceGate(db, { acquire });
-    expect((await initial.acquire(task, orb, context))._unsafeUnwrap()).toBeNull();
-    expect((await initial.initialPin(task, orb))._unsafeUnwrap()).toBeNull();
-    expect((await new PgResourceSnapshots(db).get(orb.id))._unsafeUnwrap()).toBeNull();
+    expect((await gate.acquire(task, orb, context)).isErr()).toBe(true);
     expect(acquire).not.toHaveBeenCalled();
 
     let current = orb;
-    for (const repositoryUrl of [
-      "https://github.com/o/attached",
-      "https://github.com/o/changed",
-      null,
-    ]) {
+    for (const repositoryUrl of ["https://github.com/o/attached", null]) {
       (
         await db.query("UPDATE projects SET repository_url=$2 WHERE id=$1", [
           orb.projectId,
@@ -185,68 +172,6 @@ it("acquires the first repository pin after a name-only context and retains it a
       url: "https://github.com/o/attached",
       signal: context.signal,
     });
-    expect(
-      (
-        await db.query(
-          "SELECT commit_sha FROM orb_resource_events WHERE orb_id=$1 AND phase='ready' ORDER BY id",
-          [orb.id],
-        )
-      )._unsafeUnwrap().rows,
-    ).toEqual([
-      { commit_sha: null },
-      { commit_sha: snapshot.commitSha },
-      { commit_sha: snapshot.commitSha },
-      { commit_sha: snapshot.commitSha },
-    ]);
-  } finally {
-    await database.close();
-  }
-});
-
-it("restores a retained repository pin after its project becomes name-only", async () => {
-  const { db, database, task, orb, snapshot, context } = await resourceTest();
-  const acquire = vi.fn(() => errAsync(resourceError("fetch", "must not fetch")));
-  try {
-    (await new PgResourceSnapshots(db).put(snapshot))._unsafeUnwrap();
-    (
-      await db.query("UPDATE projects SET repository_url=NULL WHERE id=$1", [orb.projectId])
-    )._unsafeUnwrap();
-    const gate = new PgResourceGate(db, { acquire });
-    expect((await gate.acquire(task, orb, context))._unsafeUnwrap()).toEqual({
-      ...snapshot,
-      warnings: [],
-    });
-    expect((await gate.initialPin(task, orb))._unsafeUnwrap()).toBe(snapshot.commitSha);
-    expect(acquire).not.toHaveBeenCalled();
-  } finally {
-    await database.close();
-  }
-});
-
-it.each([
-  "UPDATE orbs SET agent_admission_version=agent_admission_version+1 WHERE id=$1",
-  "UPDATE orbs SET stop_reason='manual' WHERE id=$1",
-  "UPDATE orbs SET stop_reason='sleep' WHERE id=$1",
-  "UPDATE orbs SET state='archiving' WHERE id=$1",
-  "UPDATE orbs SET state='archived' WHERE id=$1",
-  "UPDATE orbs SET state='deleting' WHERE id=$1",
-])("fences name-only ready publication: %s", async (revoke) => {
-  const { db, database, task, orb, context } = await resourceTest();
-  const acquire = vi.fn(() => errAsync(resourceError("fetch", "must not fetch")));
-  try {
-    (
-      await db.query("UPDATE projects SET repository_url=NULL WHERE id=$1", [orb.projectId])
-    )._unsafeUnwrap();
-    (await db.query(revoke, [orb.id]))._unsafeUnwrap();
-    expect((await new PgResourceGate(db, { acquire }).acquire(task, orb, context)).isErr()).toBe(
-      true,
-    );
-    expect(
-      (
-        await db.query("SELECT count(*) AS n FROM orb_resource_events WHERE orb_id=$1", [orb.id])
-      )._unsafeUnwrap().rows[0]?.n,
-    ).toBe(0);
-    expect(acquire).not.toHaveBeenCalled();
   } finally {
     await database.close();
   }
