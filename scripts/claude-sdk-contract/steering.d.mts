@@ -20,7 +20,7 @@ export interface SteeringProbeResult {
 
 export function probeSteering(
   mode: "tool" | "response" | "thinking" | "tool-thinking",
-  onMessage?: (message: SDKMessage, root: { source: string; sessionId: string }) => Promise<void>,
+  onMessage?: (message: SDKMessage) => Promise<void>,
   nextInput?: (
     kind: "first" | "steer",
     context: { sessionId: string; marker: string },

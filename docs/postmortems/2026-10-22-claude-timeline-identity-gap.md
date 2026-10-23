@@ -1,37 +1,31 @@
 # Claude timeline identity gap
 
-2026-10-22, America/Los_Angeles (PDT). Historical diagnosis; approved correction implemented locally on 2026-10-23 PDT, with scoped qualification below. No target restart, replay or deployment.
-
-Orb `a1eea905-5bae-477f-b8e8-bc4730690210`, incarnation 0; GCE instance `6166242124207975524`, `us-central1-a`.
+2026-10-22, America/Los_Angeles (PDT). Orb `a1eea905-5bae-477f-b8e8-bc4730690210`, incarnation 0; GCE instance `6166242124207975524`, `us-central1-a`. No target restart, replay or deployment.
 
 ## Evidence
 
 | Time (PDT) | Observation |
 | --- | --- |
-| 21:01:31.054 | `running` → `stopping`, reason `idle_for_900s`; drain reported `idle_stop_prepared=true`. |
-| 21:01:49.726 | Host stop completed; orb `stopped`. |
-| 21:37:52.163 | Queued message requested wake; `starting` followed. This was an idle-stop wake, not evidence of preemption. |
-| 21:38:56.463 | `running`, reason `runtime_ready`; `turn-resume outcome=notified_restart`. |
+| 21:01:31.054 | `running` → `stopping`, `idle_for_900s`; `idle_stop_prepared=true`. |
+| 21:01:49.726 | Host stopped. |
+| 21:37:52.163 | Queued message requested wake; `starting`. Idle-stop wake, not evidence of preemption. |
+| 21:38:56.463 | `running`, `runtime_ready`; `turn-resume outcome=notified_restart`. |
 | 21:38:58.863 | Queued message dispatched as steering. |
-| 21:39:06.760–10.124 | Five hosting POSTs returned HTTP 201: four fonts and `transcript-timeline/index.html`. HTML catalog commit: 21:39:10.711, 75,018 bytes. |
+| 21:39:06.760–10.124 | Five hosting POSTs returned 201: four fonts and `transcript-timeline/index.html`. HTML catalog commit: 21:39:10.711, 75,018 bytes. |
 | 21:39:10.019 | Reconciler retry: `Claude session is not accepting work.` |
-| 21:39:16.141 | Ops GET `stateChangedAt`; `state=failed`, `lastError=runtime_failed: claude_stream_identity_gap`. |
-| 21:39:16.144 | Durable `runtime-failed` lifecycle edge retained the correlation diagnostic below. |
-| 21:39:16.836 | Guest `runtime_health_failed`; `healthFailure=failed`, not a health timeout. |
+| 21:39:16.141–.144 | Ops GET: `failed`, `lastError=runtime_failed: claude_stream_identity_gap`; durable `runtime-failed` edge retained the diagnostic below. |
+| 21:39:16.836 | Guest `runtime_health_failed`, `healthFailure=failed`; not a timeout. |
 | 21:39:17.167 | Control-plane service account requested instance deletion. |
-| 21:39:19.178 | Guest `runtime_child_exited`, exit 0, `requestedStop=true`: shutdown after failure detection. |
+| 21:39:19.178 | Guest `runtime_child_exited`, exit 0, `requestedStop=true`; shutdown followed failure detection. |
 | 21:39:33.536 | `compute-discard outcome=ok`; last boot evidence was `runtime ready`. |
-
-Failure diagnostic:
 
 ```json
 {"liveBlocks":1,"published":342,"nativeLength":342,"blocks":[{"id":"1f23ddac-9fb0-42dd-a3dc-2deaefc3a83a:0","ownerCount":0,"owners":[]}],"omittedBlocks":0,"firstUnpublished":null}
 ```
 
-One streamed block had no native assistant-message owner. No indexed native records remained unpublished at this check. Current `apps/orb-runtime/src/claude/agent.ts` fails `drainOperationOwned` when blocks remain or published/native counts differ after extension close and history flush. Assistant UUIDs assign streamed blocks to `messageBlocks`; native assistant IDs retire them during publication. This identifies the failed invariant, not the initiating SDK/event interleaving or the deleted VM's exact implementation. Data loss, failed uploads and a VM crash are not established.
+One streamed block lacked a native assistant owner; no indexed native records remained unpublished. Terminal drain requires both stream correlation and complete history publication. Only exact durable assistant UUIDs own/retire streamed blocks; this invariant is unchanged. The initiating SDK/event sequence and deleted VM's exact implementation remain unknown; data loss, failed uploads and a VM crash are not established. The VM is absent; no retained-disk/guest recovery was attempted.
 
-Authenticated hosted-file GET confirms all five catalog entries and `cleanupIssues: []`. The HTML is published despite the missing tool result/link in the conversation:
-
+Authenticated hosted-file GET confirms all five entries and `cleanupIssues: []`. The HTML was published despite the missing conversational tool result/link:
 https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/a1eea905-5bae-477f-b8e8-bc4730690210/transcript-timeline/index.html
 
 ## Read-only evidence queries
@@ -44,44 +38,20 @@ gcloud logging read 'resource.labels.instance_id="6166242124207975524" AND logNa
 gcloud logging read 'httpRequest.requestUrl:"/runtime/v1/hosting/files" AND timestamp>="2026-10-23T04:39:06Z" AND timestamp<="2026-10-23T04:39:12Z"' --project=playground-dev-6ae7 --order=asc --limit=100 --format='value(timestamp,httpRequest.requestMethod,httpRequest.requestUrl,httpRequest.status)'
 ```
 
-The hosting request query is time/path correlation, not orb authentication attribution; the per-orb catalog supplies that confirmation. The VM is absent; no retained-disk attachment or guest forensic recovery was attempted.
+Hosting logs correlate time/path, not orb authentication; the per-orb catalog supplies that confirmation.
 
-## Experiments (2026-10-23 PDT)
+## Experiments and decision (2026-10-23 PDT; local, undeployed)
 
-Pinned SDK 0.3.300 / CLI 2.1.300, isolated deterministic native probe: `priority:now` interrupts unfinished thinking with `content_block_stop` → `message_stop`, no assistant, then `result` with `terminal_reason=aborted_streaming`, `subtype=error_during_execution`, `is_error=true`. The queued steer subsequently succeeds. Before correction, production-adapter replay of genuine native output deterministically fails `claude_stream_identity_gap`; this alone is not live native/production composition qualification. Text interruption instead emits an aborted assistant with ordinary UUID correlation, needing no special clearing. A later native tool→thinking probe also returns explicit `terminal_reason=aborted_streaming` with `success` / `is_error=false`; the error triple is therefore not a necessary condition.
+Pinned SDK 0.3.300 / CLI 2.1.300 steering stops unfinished thinking with `content_block_stop` → `message_stop`, no assistant, then `terminal_reason=aborted_streaming`; both error and success results occur. Production-adapter replay reproduced the gap before correction. Text interruption emits an aborted assistant with ordinary UUID retirement. This establishes a sufficient mechanism, not the incident's sequence. Original native/RED evidence: `.context/claude-stream-identity/`. Boot probes showed identity-based involuntary wording and unsolicited settled inference; `shouldQuery:false` + `isSynthetic` produced zero calls through append/reopen, then one human call containing context. Evidence: `.context/boot-notice-investigation/`.
 
-Evidence under `.context/claude-stream-identity/`: `thinking.json`, `response.json`, `probe-events.log`, `boot-thinking-events.log`, `regression.patch`, `red-publication.log`, `red-native-precise.log`, `pinned-source.json`, `public-contract.txt`, `baseline-focused.log` (11 restored-baseline tests pass). This establishes a sufficient mechanism, not the deleted VM's sequence; the original attribution limit stands.
+The simplified decision captures current unowned, nonredacted reasoning IDs in one volatile set on exact `aborted_streaming`. After supervised native exit/stdout/iteration/hook drain, remove only still-unowned reasoning candidates before final history flush; `operation_finished` clears browser state. Older orphans, text, redacted/owned output and unpublished history remain fail closed. Native journal lag is covered by final drain, not per-response/input/predecessor proof or event ownership/republication; that larger design was rejected as unnecessary for ephemeral UI state. Approved neutral restart wording and passive settled context use existing marker/receipt FIFO. Zero-turn success is skipped only for nonempty IDs entirely in the volatile set of contexts actually enqueued in this query; ACK classification does not wait for lagging receipts. Interrupted work and sleep behavior are unchanged. Details: `docs/claude-agent-sdk.md`.
 
-Boot-policy probes separately show execution identity alone selects involuntary wording, and settled restart triggers unsolicited inference. Pinned `shouldQuery:false` + `isSynthetic` appends context with zero provider calls; metadata reopen remains at zero, then a later human input makes one call with context and the same boot UUID retained. Its zero-turn success is not inference. A standalone same-query FIFO probe qualifies the zero-turn acknowledgement before the human result; subsequent adapter integration and DST pass within the local scope below.
+## Local qualification of the simplification
 
-Evidence under `.context/boot-notice-investigation/`: `boot-policy-red.patch`, `boot-policy-red.log`, `boot-context-probe.log`, `should-query-probe.mjs`, `baseline.log` (25 pass after restoring tests).
+`npx vitest run apps/orb-runtime/src/claude packages/native-image/src/claude-workload.test.ts --maxWorkers=1`: 478 tests / 54 files pass; full-project typecheck and changed-file lint pass. Evidence: `.context/pr177-simplify/final-tests.log`, `final-typecheck.log`, `lint-changed.log`. The existing sealed native acceptance verifies passive restart, next-input context, receipt retention and automatic interrupted-work recovery; no separate passive probe is needed.
 
-## Decision (2026-10-23 PDT; implemented locally, undeployed)
+[Prior-head CI 39963865119](https://github.com/schani/pi-orb/actions/runs/39963865119) failed deterministically because acceptance still expected settled-restart inference. Its two failures were reproduced before updating that expectation, retaining cleanup and recovery assertions (`.context/pr177-original/ci-checks-failed.log`, `.context/pr177-simplify/native-acceptance-first-red.log`). Full CI/release qualification remains pending; no deployment or target restart.
 
-Reuse an existing result-error or steering-result event plus volatile proof for interrupted-thinking `history.record.retiredBlockIds` publication after commit. Require explicit `aborted_streaming`: `error_during_execution` / `is_error=true`, or `success` / `is_error=false` with an accepted pending steer. Proof binds query, accepted input, response, block/message stops and native predecessor; response input echoes are immutable. Authoritative scans validate the accepted input's durable receipt, prior assistant owners and absence of a current native owner. Unknown, text, redacted or owned output and missing/conflicting proof remain fail closed.
+## Historical qualification only
 
-Native journal writes can lag SDK stdout, even result-event publication. Stage proof in memory; after scan validation, the existing late-binding loop can re-emit the existing `claude.result_error` or `claude.steering_result` with retirement IDs. Blocks remain live until publication. Durable result errors retain visible interruption. Proof is not persisted. Extra persisted `terminalReason` / `retiredBlockIds` overflow metadata was rejected as unnecessary; schemas and record types are unchanged.
-
-Approved neutral wording and passive settled-restart behavior use existing markers/boot receipt provenance, with all unreceived contexts FIFO as `shouldQuery:false`, `isSynthetic` before the next legitimate input. Existing input correlation links native receipt to marker; no new persisted fields. Passive context is metadata, not resume authority; its zero-turn acknowledgement must not retire an active human operation. Missing passive receipts and mixed acknowledgements fail closed. Settled restart starts no unsolicited inference; interrupted human/tool resumes and scheduled `sleep_wake` remain triggering.
-
-Decision details: `docs/claude-agent-sdk.md`; remaining qualification: `TODO.md`.
-
-## Local qualification (2026-10-23 PDT)
-
-Final local source:
-
-- `npx vitest run apps/orb-runtime/src/claude --maxWorkers=1`: 521 tests / 56 files pass, including native contracts, admitted replay/live composition and DST (`.context/timeline-fixes/claude-suite-final.log`). Live composition feeds genuine native output/journal increments through the injected SDK queue, not the production subprocess spawner.
-- `npm run typecheck`: all pass (`.context/timeline-fixes/typecheck-all-final.log`).
-- `npm run lint`: exit 0, existing repository warnings (447) and infos (84); changed-file scoped lint clean (`.context/timeline-fixes/lint-all.log`).
-
-The original process full-slice run passed 4/4 in 527.40s; it was not rerun:
-
-```sh
-PI_ORB_E2E_BACKEND=process PI_ORB_LOCAL_FAKE_EVIDENCE=.context/timeline-fixes/e2e-local node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project=lifecycle e2e/full-slice.e2e.test.ts
-```
-
-Log: `.context/timeline-fixes/e2e-full-slice.log`. The code-mode caller hit its 300s deadline and cancelled the supervisor; detached original Vitest and fake-provider processes remained. That same Vitest completed all assertions and cleaned control-plane fixtures in `afterAll`. The residual exact-owned fake-provider process group `10800` was explicitly stopped; ports `3210`, `5173` and `7144` were verified clear. Supervisor final manifest/exit receipt is unavailable. This is neither an assertion failure nor a passing rerun, and does not establish completed local-fake supervision qualification. Evidence: `.context/timeline-fixes/e2e-local/supervision.txt` and `provider.log` in that directory.
-
-First failures, journal-lag diagnosis, negative regressions and mutation evidence remain in `.context/timeline-fixes/stream-summary.md` and its linked logs/traces. The eager-only mutation trace `test-failures/claude-interrupted-thinking-error-late-true-1792761553860-0.json` was replayed before restoring the implementation; restored replay passes. Scenario-assumption traces were replayed before correction. No passing rerun substitutes for those corrections.
-
-The entire E2E suite, CI, Docker and live subscription qualification were not run. No commit, deployment or target restart/replay. These local results establish neither the deleted VM's exact source nor its initiating sequence; both remain unknown.
+Commit `d8c2f198` records the superseded proof implementation and its 521-test local pass, not qualification of this simplification. First failures, journal-lag evidence, mutation and replayed DST traces remain in `.context/timeline-fixes/stream-summary.md` and its linked logs; trace files are retained. The original process full-slice assertions passed 4/4, but the caller cancelled its supervisor at 300s; detached Vitest completed fixture cleanup, the residual owned provider group was stopped and ports verified clear. No final supervisor receipt exists (`.context/timeline-fixes/e2e-local/supervision.txt`, `provider.log`); this does not qualify local-fake supervision. Remaining release qualification lives in `TODO.md`.

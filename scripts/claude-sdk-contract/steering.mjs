@@ -135,36 +135,30 @@ export async function probeSteering(mode, onMessage, nextInput) {
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const port = server.address().port;
-  let inputFailure;
   const input = {
     async *[Symbol.asyncIterator]() {
-      try {
-        const first = nextInput ? await nextInput("first", { sessionId, marker }) : undefined;
-        if (first) firstUuid = first.uuid;
-        yield first ?? {
-          type: "user",
-          uuid: firstUuid,
-          parent_tool_use_id: null,
-          priority: "now",
-          ...(mode === "thinking" || mode === "tool-thinking" ? {} : { origin: { kind: "human" } }),
-          message: { role: "user", content: "Run the fixed tool, then finish." },
-        };
-        await ready.promise;
-        const steer = nextInput ? await nextInput("steer", { sessionId, marker }) : undefined;
-        if (steer) steerUuid = steer.uuid;
-        yield steer ?? {
-          type: "user",
-          uuid: steerUuid,
-          parent_tool_use_id: null,
-          priority: "now",
-          origin: { kind: "human" },
-          message: { role: "user", content: marker },
-        };
-        await endInput.promise;
-      } catch (error) {
-        inputFailure = error;
-        throw error;
-      }
+      const first = nextInput ? await nextInput("first", { sessionId, marker }) : undefined;
+      if (first) firstUuid = first.uuid;
+      yield first ?? {
+        type: "user",
+        uuid: firstUuid,
+        parent_tool_use_id: null,
+        priority: "now",
+        origin: { kind: "human" },
+        message: { role: "user", content: "Run the fixed tool, then finish." },
+      };
+      await ready.promise;
+      const steer = nextInput ? await nextInput("steer", { sessionId, marker }) : undefined;
+      if (steer) steerUuid = steer.uuid;
+      yield steer ?? {
+        type: "user",
+        uuid: steerUuid,
+        parent_tool_use_id: null,
+        priority: "now",
+        origin: { kind: "human" },
+        message: { role: "user", content: marker },
+      };
+      await endInput.promise;
     },
   };
   let child;
@@ -256,13 +250,7 @@ export async function probeSteering(mode, onMessage, nextInput) {
     });
     for await (const message of sdk) {
       events.push(message);
-      if (onMessage) {
-        const source = await readFile(rootPath, "utf8").catch((error) => {
-          if (error.code === "ENOENT") return "";
-          throw error;
-        });
-        await onMessage(message, { source, sessionId });
-      }
+      if (onMessage) await onMessage(message);
       if (
         mode !== "tool" &&
         message.type === "stream_event" &&
@@ -297,8 +285,6 @@ export async function probeSteering(mode, onMessage, nextInput) {
     if (unexpectedRequest) throw new Error(`Unexpected local request: ${unexpectedRequest}`);
     const root = { source: await readFile(rootPath, "utf8"), sessionId, steerUuid };
     return { requests, results, steeredWhileToolBlocked, toolCompleted, root, events };
-  } catch (error) {
-    throw inputFailure ?? error;
   } finally {
     clearTimeout(timer);
     ready.resolve();

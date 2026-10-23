@@ -8,7 +8,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Complete predeployment qualification for Claude interrupted-thinking retirement and passive restart context** (2026-10-23 PDT; `docs/postmortems/2026-10-22-claude-timeline-identity-gap.md`). Complete exact-source full-suite, full E2E/Docker and CI gates, including supervised local-fake qualification. Scoped local passes do not authorize deployment or target replay/restart; preserve first-failure evidence and unknown historical attribution.
+- **Complete predeployment qualification for Claude interrupted-thinking retirement and passive restart context** (2026-10-23 PDT; `docs/postmortems/2026-10-22-claude-timeline-identity-gap.md`). Run exact-source full-suite, full E2E/Docker and CI gates, including supervised local-fake qualification. Preserve first-failure evidence; historical passes do not qualify the simplified implementation or authorize deployment/replay.
 
 - **Optional PR 162 diagnostic follow-up** (`docs/testing.md`): capture token-safe hosted-provider HTTP/transport outcomes and correct the manual helper's uncaught MCP rejection before reusing its completion oracle. Historical-stall attribution is waived for merge (user-approved 2026-10-22); no cause or fix is claimed.
 

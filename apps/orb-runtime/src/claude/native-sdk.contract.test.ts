@@ -476,7 +476,7 @@ nativeIt(
           .find(
             (record) =>
               record.type === "user" &&
-              JSON.stringify(record.message?.content).includes("/compact"),
+              JSON.stringify(record.message?.content ?? "").includes("/compact"),
           );
         expect(commandEcho?.promptId).not.toBe(compactUuid);
         expect(commandEcho?.uuid).toBe(compactUuid);
