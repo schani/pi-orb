@@ -175,7 +175,7 @@ echo mutation
                 result = self.shell(f'''replacement_evidence_dir "$ROOT"
 orb_pending=0
 fixture_record() {{ echo "record:$3" >&2; return {record}; }}
-api() {{ grep -q '"outcome":"requested"' "$log_dir/fixtures.jsonl"; echo POST >&2; printf '%s' '{response}'; return {code}; }}
+api() {{ grep -q '"outcome":"requested"' "$log_dir/fixtures.jsonl" || return 9; echo POST >&2; printf '%s' '{response}'; return {code}; }}
 trap 'echo "pending:$orb_pending"; cat "$log_dir/fixtures.jsonl"' EXIT
 replacement_create orb orb /api/v1/projects/project/orbs '{{"id":"orb"}}'
 ''')
