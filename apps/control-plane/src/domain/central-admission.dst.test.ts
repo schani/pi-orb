@@ -35,7 +35,7 @@ describe("central admission transaction fence", () => {
               appOrigin: "http://app",
               appendAlert: () => {
                 alerts++;
-                return okAsync({ recordId: "alert" });
+                return okAsync({ recordId: "alert", duplicate: false });
               },
             });
             for (const request of [

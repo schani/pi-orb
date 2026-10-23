@@ -213,19 +213,28 @@ it("limits empty output items and cancels outstanding callbacks through the real
   }
 });
 
-it("declares and returns native JSON text as strings, not object schemas", async () => {
+it("declares and returns orb objects without changing subagent text contracts", async () => {
   const bundle = createDurableTools({
-    additionalTools: createOrbTools({ invoke: () => okAsync({ id: "orb-id" }) }),
+    additionalTools: createOrbTools({
+      invoke: () =>
+        okAsync({
+          orb: { id: "orb-id", name: null, url: "url", createdAt: "now" },
+          project: { id: "project", name: "Project", repositoryUrl: null },
+          spawnedByOrb: null,
+          children: [],
+          previewHost: null,
+        }),
+    }),
   });
   const fixture = await openCodemodeHarness(bundle.catalog);
   try {
     const result = await fixture.run(
-      'const identity=await tools.orb_self({}); text({type:typeof identity,id:JSON.parse(identity).id,orb:(await describeTool("orb_self")).includes("Promise<string>"),subagent:(await describeTool("subagent")).includes("Promise<string>")});',
+      'const identity=await tools.orb_self({}); text({type:typeof identity,id:identity.orb.id,orb:(await describeTool("orb_self")).includes("Promise<string>"),subagent:(await describeTool("subagent")).includes("Promise<string>")});',
     );
     expect(result.isError).toBe(false);
     expect(result.output).toContainEqual({
       type: "text",
-      text: '{"type":"string","id":"orb-id","orb":true,"subagent":true}',
+      text: '{"type":"object","id":"orb-id","orb":false,"subagent":true}',
     });
   } finally {
     await fixture.close();

@@ -17,7 +17,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
-import { okAsync } from "neverthrow";
+import { errAsync, okAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
 import { CODEMODE_BOOTSTRAP } from "./codemode.ts";
@@ -200,10 +200,19 @@ describe("native callable registrations", () => {
 });
 
 it.each(["root", "child"] as const)(
-  "declares real native string and image-array contracts in %s discovery and inline metadata",
+  "declares real native object, string and image-array contracts in %s discovery and inline metadata",
   async (scope) => {
     const image = { type: "image" as const, data: "YQ==", mimeType: "image/png" };
-    const orbTools = createOrbTools({ invoke: () => okAsync({ id: "orb-id" }) });
+    const orbTools = createOrbTools({
+      invoke: () =>
+        okAsync({
+          orb: { id: "orb-id", name: null, url: "url", createdAt: "now" },
+          project: { id: "project", name: "Project", repositoryUrl: null },
+          spawnedByOrb: null,
+          children: [],
+          previewHost: null,
+        }),
+    });
     const bundle = createDurableTools({
       additionalTools: [
         ...orbTools,
@@ -235,7 +244,7 @@ it.each(["root", "child"] as const)(
       const strings = {};
       for (const name of ${JSON.stringify(names)}) strings[name] = (await describeTool(name)).includes("Promise<string>");
       text({strings, read:await describeTool("read"), callback:await describeTool("image_callback"),
-        identity:await tools.orb_self({}), image:await tools.read({path:"image.png"}),
+        orbDeclaration:await describeTool("orb_self"), identity:await tools.orb_self({}), image:await tools.read({path:"image.png"}),
         mixed:await tools.image_callback({}), childCanSpawn:ALL_TOOLS.some((tool) => tool.name === "orb_spawn"),
         childCanSubagent:ALL_TOOLS.some((tool) => tool.name === "subagent")});
     `,
@@ -244,8 +253,12 @@ it.each(["root", "child"] as const)(
       const text = result.output?.[1];
       if (text?.type !== "text") return expect.fail("Native script payload missing");
       const payload = JSON.parse(text.text);
-      expect(payload.strings).toEqual(Object.fromEntries(names.map((name) => [name, true])));
-      expect(payload.identity).toBe('{"id":"orb-id"}');
+      expect(payload.strings).toEqual(
+        Object.fromEntries(
+          names.map((name) => [name, !name.startsWith("orb_") && name !== "notify_parent"]),
+        ),
+      );
+      expect(payload.identity.orb.id).toBe("orb-id");
       expect(payload.image).toEqual([image]);
       expect(payload.mixed).toEqual([{ type: "text", text: "caption" }, image]);
       expect(payload.read).toContain("Promise<string | Array<");
@@ -258,7 +271,10 @@ it.each(["root", "child"] as const)(
       expect(metadata).toContain("## orb");
       expect(metadata).toContain("Orb lifecycle and conversation operations");
       expect(metadata).toContain("Get this orb's identity, project, parent provenance");
-      expect(metadata).toMatch(/orb_self\(args: \{\}\): Promise<string>/);
+      expect(metadata).toContain("orb_self(args: {}): Promise<{");
+      expect(payload.orbDeclaration).toContain("orb: {");
+      expect(payload.orbDeclaration).toContain("error: {");
+      expect(payload.orbDeclaration).toContain('"unauthorized"');
       expect(metadata).toContain(
         "image_callback(args: { [key: string]: unknown; }): Promise<string | Array<",
       );
@@ -266,9 +282,10 @@ it.each(["root", "child"] as const)(
       else expect(metadata).not.toContain("subagent(args:");
       expect(extension.tools?.find((tool) => tool.name === "codemode")?.callers).toEqual(["model"]);
       for (const name of names) {
-        expect(extension.tools?.find((tool) => tool.name === name)?.structuredOutputSchema).toEqual(
-          { type: "string" },
-        );
+        const schema = extension.tools?.find((tool) => tool.name === name)?.structuredOutputSchema;
+        if (name.startsWith("orb_") || name === "notify_parent")
+          expect(schema).toHaveProperty("anyOf");
+        else expect(schema).toEqual({ type: "string" });
       }
     } finally {
       await bundle.close();
@@ -390,7 +407,11 @@ it.each(["root", "child"] as const)(
           {
             invoke: (request) => {
               effects.push(request.kind);
-              return okAsync({ accepted: true });
+              return okAsync(
+                request.kind === "alert"
+                  ? { recordId: "record", duplicate: false }
+                  : { accepted: true },
+              );
             },
           },
           () => {
@@ -458,11 +479,55 @@ it.each(["root", "child"] as const)(
         "Use archive/delete only on explicit user request. Stop/sleep revokes execution admission; a connected browser does not override Stop.",
       );
       expect(payload.own).toContain(own);
-      expect(payload.accepted).toBe('{"accepted":true}');
+      expect(payload.accepted).toEqual(
+        scope === "root" ? { recordId: "record", duplicate: false } : { accepted: true },
+      );
       expect(payload.nativeDenied).toBe("true");
       expect(metadata).not.toContain(hidden);
       expect(metadata).toContain(own);
       expect(effects).toEqual(scope === "root" ? ["alert"] : ["notification_admission", "notify"]);
+    } finally {
+      await bundle.close();
+    }
+  },
+);
+
+it("returns expected orb errors as objects through native codemode with visible diagnostics", async () => {
+  const error = { code: "unauthorized" as const, message: "agent identity rejected" };
+  const bundle = createDurableTools({
+    additionalTools: createOrbTools({ invoke: () => errAsync(error) }),
+  });
+  try {
+    const { result } = await nativeMetadata(
+      bundle,
+      "root",
+      "const result = await tools.orb_self({}); text({code:result.error.code,message:result.error.message});",
+    );
+    expect(result.isError).toBe(false);
+    expect(result.output).toContainEqual({ type: "text", text: JSON.stringify(error) });
+  } finally {
+    await bundle.close();
+  }
+});
+
+it.each([false, true])(
+  "preserves native alert duplicate=%s receipts through codemode",
+  async (duplicate) => {
+    const receipt = { recordId: "record", duplicate };
+    const bundle = createDurableTools({
+      additionalTools: createOrbTools({ invoke: () => okAsync(receipt) }),
+    });
+    try {
+      const { result } = await nativeMetadata(
+        bundle,
+        "root",
+        "const receipt = await tools.orb_alert({message:'notice'}); text({receipt,done:true});",
+      );
+      expect(result.isError).toBe(false);
+      expect(result.output).toContainEqual({
+        type: "text",
+        text: JSON.stringify({ receipt, done: true }),
+      });
     } finally {
       await bundle.close();
     }

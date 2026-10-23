@@ -2,6 +2,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { ROOT_CONVERSATION_ID, type ToolExecutionApi } from "@earendil-works/pi-durable";
 import { OrbSpawnRequestSchema } from "@pi-orb/protocol";
 import { errAsync, okAsync } from "neverthrow";
+import { Check } from "typebox/value";
 import { assert, expect, it, vi } from "vitest";
 import type { OrbAgentOperations } from "../../../domain/orb-agent-operations.ts";
 import { createOrbTools } from "./orb-tools.ts";
@@ -117,7 +118,7 @@ it("binds peer sends to durable tool call identity, never model sender input", a
   );
 });
 
-it("returns model output without changing schema-less programmatic text", async () => {
+it("returns structured values alongside readable model output", async () => {
   const tool = createOrbTools({ invoke: () => okAsync({ accepted: true }) })[0];
   assert.isDefined(tool);
   const result = await tool.execute(
@@ -125,7 +126,10 @@ it("returns model output without changing schema-less programmatic text", async 
     { taskId: 42, callId: "call" } as ToolExecutionApi,
     BACKGROUND_CONTEXT,
   );
-  expect(result).toEqual({ output: [{ type: "text", text: '{"accepted":true}' }] });
+  expect(result).toEqual({
+    structuredOutput: { accepted: true },
+    output: [{ type: "text", text: '{"accepted":true}' }],
+  });
 });
 
 it("notifies only the parent from a child, retaining admission and call identity", async () => {
@@ -135,6 +139,7 @@ it("notifies only the parent from a child, retaining admission and call identity
   expect(tool.replay).toBe("unsafe");
   const api = { taskId: 42, conversationId: 7, callId: "outer:nested:0" } as ToolExecutionApi;
   expect(await tool.execute({ message: "report" }, api, BACKGROUND_CONTEXT)).toEqual({
+    structuredOutput: { accepted: true },
     output: [{ type: "text", text: '{"accepted":true}' }],
   });
   expect(invoke).toHaveBeenCalledExactlyOnceWith(
@@ -193,3 +198,68 @@ it("alerts only the user from the root", async () => {
   );
   expect(notify).not.toHaveBeenCalled();
 });
+
+const project = { id: "project", name: "Project", repositoryUrl: null };
+const item = { id: "orb", name: null, state: "running", updatedAt: "now", project };
+const responses = [
+  [
+    "orb_self",
+    {},
+    {
+      orb: { id: "orb", name: null, url: "url", createdAt: "now" },
+      project,
+      spawnedByOrb: null,
+      children: [],
+      previewHost: null,
+    },
+  ],
+  ["orb_list", {}, { currentOrbId: "orb", items: [item] }],
+  [
+    "orb_transcript",
+    { orbId: "orb" },
+    { orb: item, session: null, cursor: null, headId: null, records: [] },
+  ],
+  [
+    "orb_spawn",
+    { prompt: "work" },
+    { orbId: "orb", projectId: "project", messageId: "message", url: "url" },
+  ],
+  ["orb_send", { orbId: "orb", message: "hi" }, { orbId: "orb", messageId: "message" }],
+  ["orb_alert", { message: "hi" }, { recordId: "record", duplicate: false }],
+  ["notify_parent", { message: "hi" }, { accepted: true }],
+  ["orb_sleep", { durationSeconds: 60 }, { sleepId: "sleep", sleepUntil: 123456 }],
+  ["orb_archive", {}, { orbId: "orb", state: "archived" }],
+  ["orb_delete", {}, { orbId: "orb", state: "deleting" }],
+] as const;
+
+it.each(responses)(
+  "%s returns schema-checked success and typed errors",
+  async (name, args, value) => {
+    const api = {
+      taskId: 42,
+      callId: "call",
+      conversationId: name === "notify_parent" ? 7 : ROOT_CONVERSATION_ID,
+    } as ToolExecutionApi;
+    const error = { code: "unavailable" as const, message: "operation unavailable" };
+    for (const failed of [false, true]) {
+      const invoke: OrbAgentOperations["invoke"] = () =>
+        failed ? errAsync(error) : okAsync(value);
+      const tool = createOrbTools({ invoke }, () => okAsync({ accepted: true as const })).find(
+        (tool) => tool.name === name,
+      );
+      assert.isDefined(tool);
+      const result = await tool.execute(args as never, api, BACKGROUND_CONTEXT);
+      const expected = failed ? { error } : value;
+      expect(result.structuredOutput).toEqual(expected);
+      expect(result.output).toEqual([{ type: "text", text: JSON.stringify(expected) }]);
+      expect(result.isError === true).toBe(failed);
+      assert.isDefined(tool.structuredOutputSchema);
+      expect(Check(tool.structuredOutputSchema, expected)).toBe(true);
+      expect(Check(tool.structuredOutputSchema, JSON.stringify(expected))).toBe(false);
+      expect(Check(tool.structuredOutputSchema, { error: { code: "bogus", message: "bad" } })).toBe(
+        false,
+      );
+      if (failed) expect(result.diagnostics).toContainEqual({ severity: "error", ...error });
+    }
+  },
+);
