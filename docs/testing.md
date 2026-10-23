@@ -1561,3 +1561,29 @@ Logs and source manifests remain in `/workspace/history-search-index-evidence/` 
 executed run passed. This is isolated fixture evidence, not production qualification.
 
 Design and cost: `docs/history-search.md`.
+
+## Already-open alert readiness (2026-10-23; local, undeployed)
+
+[E2E 40024098913](https://github.com/schani/pi-orb/actions/runs/40024098913)
+failed the initial A badge assertion on `a716ac27`, before the delayed acknowledgement
+or B publication. [Deploy 40024279141](https://github.com/schani/pi-orb/actions/runs/40024279141)
+refused qualification; release was skipped. Original logs/artifacts and controlled
+RED evidence remain in `.context/deploy-override-evidence/main-qualification-failure/`.
+Holding all initial metadata GETs lets the old navigation helper return before mount;
+A then becomes a legitimate entry acknowledgement. This establishes a sufficient
+mechanism, not the unique historical interleaving; the UI stabilization exception applies.
+
+Decision: the keyboard Find and delayed-A/B tests pass `.orb-name` as the existing
+helper's ready locator before publishing A. Assertions and deadlines are unchanged.
+Actual Chromium/WebKit runs held both StrictMode metadata GETs behind an explicit
+gate: navigation stayed pending until release, then all four original alert scenarios
+passed. The complete file passes 7/7; workspace/E2E typecheck and scoped lint pass
+(one existing `innerText` warning). Sources and receipts remain in
+`.context/orb-alert-stabilization/`.
+
+Failures now emit up to 24 content-free metadata/ack events, acknowledged IDs/statuses,
+server unread pointer and header flag count to `test-failures/orb-alert-*.json`, covered
+by the existing E2E artifact upload. Failure-only pointer/UI snapshots each have a
+one-second deadline; an injected failure verified the fields. No product fix or
+historical attribution is claimed. Fresh exact-head qualification is still required;
+no workflow rerun or deployment was performed.
