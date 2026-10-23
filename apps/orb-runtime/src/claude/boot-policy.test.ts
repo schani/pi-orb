@@ -202,12 +202,16 @@ describe("boot notification decision", () => {
     ).toBe(true);
   });
   it("a durable inbox user message resets the loop guard", () => {
-    const marker = persisted(notice(settled));
+    let records: unknown[] = settled;
+    for (const runtimeInstanceId of ["runtime-2", "runtime-3", "runtime-4"]) {
+      const plan = notice([...records, dangling], { ...boot, runtimeInstanceId });
+      expect(plan.triggerTurn).toBe(true);
+      records = [...records, persisted(plan)];
+    }
+    const next = { ...boot, runtimeInstanceId: "runtime-5" };
+    expect(notice([...records, dangling], next).triggerTurn).toBe(false);
     const inbox = { type: "custom_message", customType: "pi-orb.user-message", id: "inbox" };
-    expect(
-      notice([...settled, marker, inbox, dangling], { ...boot, runtimeInstanceId: "runtime-3" })
-        .triggerTurn,
-    ).toBe(true);
+    expect(notice([...records, inbox, dangling], next).triggerTurn).toBe(true);
   });
   it("uses the exact normal restart notice after a settled aborted tail", () => {
     const plan = notice([
