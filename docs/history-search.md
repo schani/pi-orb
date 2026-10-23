@@ -1,6 +1,6 @@
 # History search
 
-**Approved decision — 2026-10-22 (America/Los_Angeles); implementation partially qualified, not deployed.** Exact BM25 over committed public history. The user approved the core, one derived table, backfill, structured Pi return shape and exact tool/CLI help copy. Pi registration and help passed local focused checks and real Pi acceptance; exact-head CI remains pending. Existing prompts, including the Claude suffix, stay unchanged. Qualification: `docs/testing.md`; remaining work: `TODO.md`.
+**Approved decision — 2026-10-22 (America/Los_Angeles).** Exact BM25 over committed public history. The user approved the core, one derived table, backfill, structured Pi return shape and exact tool/CLI help copy. Existing prompts, including the Claude suffix, stay unchanged. Qualification: `docs/testing.md`; remaining work: `TODO.md`.
 
 ## Interface and authorization
 
