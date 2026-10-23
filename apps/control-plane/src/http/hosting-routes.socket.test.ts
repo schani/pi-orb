@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { IncomingMessage } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { createConnection, type Socket } from "node:net";
 import { HOSTING_FILES_PATH } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
@@ -245,6 +245,50 @@ describe("hosting routes over a real HTTP socket", () => {
   });
 
   it("cancels the upload when the client disconnects", async () => {
+    const bytes = harness.hosting.deps.bytes;
+    const original = bytes.write.bind(bytes);
+    let readEntered!: () => void;
+    const reading = new Promise<void>((resolve) => {
+      readEntered = resolve;
+    });
+    let sourceClosed!: () => void;
+    const closed = new Promise<void>((resolve) => {
+      sourceClosed = resolve;
+    });
+    let signal!: AbortSignal;
+    let aborts = 0;
+    let closes = 0;
+    Object.assign(bytes, {
+      write: (...args: Parameters<typeof original>) => {
+        signal = args[4].signal;
+        signal.addEventListener(
+          "abort",
+          () => {
+            aborts += 1;
+          },
+          { once: true },
+        );
+        const source = args[2];
+        let reads = 0;
+        return original(
+          args[0],
+          args[1],
+          {
+            next: (task, context) => {
+              reads += 1;
+              if (reads === 2) readEntered();
+              return source.next(task, context);
+            },
+            close: (task) => {
+              closes += 1;
+              return source.close(task).map(() => sourceClosed());
+            },
+          },
+          args[3],
+          args[4],
+        );
+      },
+    });
     const socket: Socket = createConnection({ host: "127.0.0.1", port });
     await new Promise<void>((resolve) => socket.once("connect", resolve));
     socket.write(
@@ -259,15 +303,28 @@ describe("hosting routes over a real HTTP socket", () => {
         "a",
       ),
     );
-    socket.destroy();
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    expect(harness.hosting.current("index.html")).toBeUndefined();
+    try {
+      await reading;
+      socket.destroy();
+      await rawRequestAborted;
+      expect(signal.aborted).toBe(true);
+      expect(aborts).toBe(1);
+      await closed;
+      expect(closes).toBe(1);
+      expect(harness.hosting.current("index.html")).toBeUndefined();
+    } finally {
+      socket.destroy();
+    }
   });
 
   it("streams upload chunks into storage before request EOF without eager buffering", async () => {
     const bytes = harness.hosting.deps.bytes;
     const original = bytes.write.bind(bytes);
     let pulls = 0;
+    let firstPull!: () => void;
+    const pulled = new Promise<void>((resolve) => {
+      firstPull = resolve;
+    });
     Object.assign(bytes, {
       write: (...args: Parameters<typeof bytes.write>) => {
         const source = args[2];
@@ -280,7 +337,10 @@ describe("hosting routes over a real HTTP socket", () => {
               context: Parameters<typeof source.next>[1],
             ) => {
               pulls += 1;
-              return source.next(task, context);
+              return source.next(task, context).map((chunk) => {
+                if (chunk !== null) firstPull();
+                return chunk;
+              });
             },
             close: (task: Parameters<typeof source.close>[0]) => source.close(task),
           },
@@ -303,9 +363,7 @@ describe("hosting routes over a real HTTP socket", () => {
         "a",
       ),
     );
-    for (let attempts = 0; attempts < 20 && pulls === 0; attempts += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 2));
-    }
+    await pulled;
     expect(pulls).toBeGreaterThan(0);
     expect(harness.hosting.current("index.html")).toBeUndefined();
     socket.write("lpha");
@@ -548,6 +606,19 @@ describe("hosting routes over a real HTTP socket", () => {
 
     let pulls = 0;
     let closed = 0;
+    let markClosed!: () => void;
+    const sourceClosed = new Promise<void>((resolve) => {
+      markClosed = resolve;
+    });
+    let markBackpressure!: () => void;
+    const backpressured = new Promise<void>((resolve) => {
+      markBackpressure = resolve;
+    });
+    app.server.once("request", (_request: IncomingMessage, response: ServerResponse) => {
+      response.on("drain", () => {
+        if (pulls > 1) markBackpressure();
+      });
+    });
     Object.assign(harness.hosting.deps.bytes, {
       openExact: () =>
         okAsync({
@@ -563,6 +634,7 @@ describe("hosting routes over a real HTTP socket", () => {
             },
             close: () => {
               closed += 1;
+              markClosed();
               return okAsync(undefined);
             },
           },
@@ -574,7 +646,7 @@ describe("hosting routes over a real HTTP socket", () => {
       [`GET /s/${ORB}/large.bin HTTP/1.1`, "Host: files.example.test", "", ""].join("\r\n"),
     );
     socket.pause();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await backpressured;
     expect(pulls).toBeGreaterThan(1);
     expect(pulls).toBeLessThan(chunks);
     const pullsBeforeFirstRead = pulls;
@@ -583,9 +655,7 @@ describe("hosting routes over a real HTTP socket", () => {
     await received;
     expect(pullsBeforeFirstRead).toBeLessThan(chunks);
     socket.destroy();
-    for (let attempts = 0; attempts < 20 && closed === 0; attempts += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 2));
-    }
+    await sourceClosed;
     expect(closed).toBe(1);
   });
 
