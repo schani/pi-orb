@@ -93,7 +93,9 @@ export function hostedByteStoreContract(
 
     const wrong = { ...written.value.ref, generation: randomUUID() };
     expect((await reopened.deleteExact(task, wrong, context())).isOk()).toBe(true);
-    expect((await reopened.statExact(task, written.value.ref, context())).isOk()).toBe(true);
+    expect(await reopened.statExact(task, written.value.ref, context())).toEqual({
+      value: written.value,
+    });
     expect((await reopened.deleteExact(task, written.value.ref, context())).isOk()).toBe(true);
     expect((await reopened.deleteExact(task, written.value.ref, context())).isOk()).toBe(true);
     const absent = await reopened.statExact(task, written.value.ref, context());

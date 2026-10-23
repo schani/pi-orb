@@ -1,5 +1,9 @@
 # Testing
 
+## Adapter boundary assertions (2026-10-22)
+
+Exact-generation delete contracts require the original object after a wrong-generation delete and absence after the correct delete. Offline filesystem and modeled GCS qualify this invariant; live GCS remains opt-in.
+
 ## PostgreSQL subject isolation (2026-10-22)
 
 `openThrowawayPostgres` owns a unique schema per subject, sets pool-wide `search_path`, and drops only that schema on close. Concurrent subjects migrate independently; migration contracts retain their schema-relative catalog checks. Use a test-only database with schema privileges. Pending-abort uses the common `PI_ORB_TEST_DATABASE_URL` driver selection and verifies its isolated schema. Local audit receipts use PostgreSQL 15.19 over an owned Unix socket, not CI’s PostgreSQL 16.
