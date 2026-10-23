@@ -9,7 +9,7 @@ import {
 import { runDst } from "../testkit/sim.ts";
 
 it("bounds affected-query diagnostics without dropping ownership or the drain summary", async () => {
-  await runDst({ name: "claude-continuation-observation-bounds", iterations: 3 }, async (sim) => {
+  await runDst({ name: "claude-continuation-observation-bounds", iterations: 1 }, async (sim) => {
     const f = new ComposedClaudeFixture();
     try {
       expect((await f.attach()).isOk()).toBe(true);

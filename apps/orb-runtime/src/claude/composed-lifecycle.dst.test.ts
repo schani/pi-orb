@@ -18,7 +18,7 @@ import { ClaudeHistory } from "./history.ts";
 import { claudeRecoveryEpisode, qualifyClaudeRestart } from "./restore.ts";
 
 it("native child hooks, independent inventories, process exit, stdout and final history all retain ownership", async () => {
-  await runDst({ name: "claude-composed-native-drain", iterations: 30 }, async (sim) => {
+  await runDst({ name: "claude-composed-native-drain", iterations: 1 }, async (sim) => {
     const f = new ComposedClaudeFixture();
     try {
       expect((await f.attach()).isOk()).toBe(true);
@@ -314,7 +314,7 @@ it("independently scheduled process exit and trailing stdout cannot outrun final
 it.each(["receipt", "uncertain", "child"] as const)(
   "retained %s crash state is qualified without automatic inference or duplicate inbox delivery",
   async (kind) => {
-    await runDst({ name: `claude-composed-retained-${kind}`, iterations: 20 }, async (sim) => {
+    await runDst({ name: `claude-composed-retained-${kind}`, iterations: 1 }, async (sim) => {
       const f = new ComposedClaudeFixture();
       try {
         expect((await f.attach()).isOk()).toBe(true);

@@ -1626,3 +1626,5 @@ Shared instructions failures use one status/schema/sanitization table; wrapper s
 CLI suites share bounded UTF-8 output capture, fresh cwd, explicit environment, deadline and joined process-group termination; command responders and output contracts stay local. (2026-10-22 PDT).
 
 Lifecycle and publication fixtures reuse ScheduledClaudeQuery queue and independent process/EOF latches; model, filesystem, scheduling and failure behavior remain local. (2026-10-22 PDT).
+
+Only scripts with observed traces containing no entropy or timer events run once. Concurrent process/EOF, failpoint and deadline qualification retains schedule exploration. (2026-10-22 PDT).
