@@ -2,7 +2,7 @@
 
 ## PostgreSQL subject isolation (2026-10-22)
 
-`openThrowawayPostgres` owns a unique schema per subject, sets pool-wide `search_path`, and drops only that schema on close. Concurrent subjects migrate independently; migration contracts retain their schema-relative catalog checks. Use a test-only database with schema privileges. Local audit receipts use PostgreSQL 15.19 over an owned Unix socket, not CI’s PostgreSQL 16.
+`openThrowawayPostgres` owns a unique schema per subject, sets pool-wide `search_path`, and drops only that schema on close. Concurrent subjects migrate independently; migration contracts retain their schema-relative catalog checks. Use a test-only database with schema privileges. Pending-abort uses the common `PI_ORB_TEST_DATABASE_URL` driver selection and verifies its isolated schema. Local audit receipts use PostgreSQL 15.19 over an owned Unix socket, not CI’s PostgreSQL 16.
 
 ## Manual replacement smoke evidence
 
