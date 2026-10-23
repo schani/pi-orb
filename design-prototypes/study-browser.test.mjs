@@ -7,6 +7,8 @@ import test from "node:test";
 test("study lifecycle closes after callback failure and allocates distinct owned outputs", async () => {
   const source = (await readFile(new URL("./study-browser.mjs", import.meta.url), "utf8"))
     .replace('import { chromium } from "playwright";', "const { chromium } = globalThis.studyFixture;");
+  assert.match(source, /^const \{ chromium \} = globalThis.studyFixture;$/m);
+  assert.doesNotMatch(source, /(?:from\s*|import\s*\()\s*["']playwright["']/);
   const root = await mkdtemp(join(tmpdir(), "study-browser-test-"));
   const previous = process.env.STUDY_OUTPUT_DIR;
   process.env.STUDY_OUTPUT_DIR = root;
@@ -16,6 +18,7 @@ test("study lifecycle closes after callback failure and allocates distinct owned
     return { close: async () => { closed++; } };
   } } };
   try {
+    assert.equal(typeof globalThis.studyFixture.chromium.launch, "function");
     const { runStudy } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
     const outputs = [];
     for (let i = 0; i < 2; i++) {
@@ -53,6 +56,9 @@ test("all fourteen validators use owned lifecycle/output without changing study 
       .replace(/^import \{ runStudy \} from .*;$/m, "const runStudy = globalThis.studyValidator;")
       .replace(/^import \{ expect \} from .*;$/m, "const expect = undefined;")
       .replaceAll("import.meta.url", JSON.stringify(new URL(file, import.meta.url).href));
+    assert.match(executable, /^const runStudy = globalThis.studyValidator;$/m);
+    assert.doesNotMatch(executable, /(?:from\s*|import\s*\()\s*["'][^"']*(?:study-browser|playwright)/);
+    assert.equal(typeof globalThis.studyValidator, "function");
     try {
       await assert.rejects(import("data:text/javascript;base64," + Buffer.from(executable).toString("base64")), /controlled page creation/);
       assert(entered, file);

@@ -10,6 +10,7 @@ test("preemption proves recovery without sampling starting", async () => {
     /^import .*;$/gm,
     "",
   );
+  assert.doesNotMatch(source, /\bimport\b/);
   const fixture = { orbId: "owned", gcpProject: "fixture", zone: "fixture" };
   let reads = 0;
   const rows = [
@@ -62,6 +63,7 @@ test("unknown control stage is rejected before fixture reads or operations", asy
     /^import .*;$/gm,
     "",
   );
+  assert.doesNotMatch(source, /\bimport\b/);
   let touched = false;
   await assert.rejects(
     new AsyncFunction("assert", "readFileSync", "process", source)(
@@ -87,9 +89,11 @@ test("application probe expectations come from the owned fixture", async () => {
     expected,
     JSON.stringify({ githubLogin: "fixture-login", checkoutCommit: commit }),
   );
-  const source = (await readFile(new URL("./application-check.sh", import.meta.url), "utf8")).split(
-    'test "$NATIVE_VM_SECRET"',
-  )[0];
+  const script = await readFile(new URL("./application-check.sh", import.meta.url), "utf8");
+  const boundary = 'test "$NATIVE_VM_SECRET"';
+  assert.equal(script.split(boundary).length, 2);
+  const source = script.split(boundary)[0];
+  assert.doesNotMatch(source, /npm|testcontainers|docker/);
   try {
     for (const [login, sha, accepted] of [
       ["fixture-login", commit, true],
@@ -123,6 +127,7 @@ test("ready control publishes login and accepted checkout from its owned fixture
     /^import .*;$/gm,
     "",
   );
+  assert.doesNotMatch(source, /\bimport\b/);
   const fixture = { orbId: "owned", expectedGitHubLogin: "fixture-login" };
   const row = { state: "running", checkoutCommit: "c".repeat(40) };
   const writes = [];

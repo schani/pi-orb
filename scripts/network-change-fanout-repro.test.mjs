@@ -12,6 +12,13 @@ const source = (
   )
   .replace('import http from "node:http";', "const { http } = globalThis.fixture;")
   .replace('import { chromium } from "playwright";', "const { chromium } = globalThis.fixture;");
+assert.match(source, /^const \{ execFileSync \} = globalThis.fixture;$/m);
+assert.match(source, /^const \{ http \} = globalThis.fixture;$/m);
+assert.match(source, /^const \{ chromium \} = globalThis.fixture;$/m);
+assert.doesNotMatch(
+  source,
+  /(?:from\s*|import\s*\()\s*["'](?:node:child_process|node:http|playwright)["']/,
+);
 for (const stage of ["invalid", "launch", "newPage", "close"]) {
   test(`manual reproducer owns cleanup at ${stage}`, () => {
     const script = `
@@ -35,6 +42,7 @@ for (const stage of ["invalid", "launch", "newPage", "close"]) {
           };
         } },
       };
+      if (typeof globalThis.fixture.execFileSync !== "function" || typeof globalThis.fixture.chromium.launch !== "function" || typeof globalThis.fixture.http.createServer !== "function") throw Error("missing probe fakes");
       try { await import(${JSON.stringify("data:text/javascript;base64," + Buffer.from(source).toString("base64"))}); }
       catch {}
       console.log(JSON.stringify(calls));

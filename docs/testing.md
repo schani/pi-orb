@@ -1761,3 +1761,5 @@ Closed-schema tests own top-level event/message and nested custom-field rejectio
 One successful builder-create fixture pins both machine type and instance-only SSH metadata. (2026-10-22 PDT).
 
 Alert helper tests name snapshot and acknowledgement behavior; mounted late-arrival chronology remains in orb-alerts frontend coverage. (2026-10-22 PDT).
+
+Source-evaluating diagnostic tests require mock bindings and exclude their live imports before evaluation; argument-injected probes reject leftover imports and shell snippets require their extraction boundary. (2026-10-22 PDT).
