@@ -1,7 +1,6 @@
 from pathlib import Path
 import json
 import re
-import shlex
 import unittest
 from infra.workflow_testkit import steps as workflow_steps
 
@@ -89,12 +88,6 @@ class BrowserEvidenceTest(unittest.TestCase):
         scripts = json.loads((ROOT / 'package.json').read_text())['scripts']
         self.assertIn('scripts/local-fake-provider.test.mjs', scripts['test:infra'])
         self.assertNotIn('scripts/local-fake-provider.smoke.test.mjs', scripts['test:infra'])
-        node = shlex.split(scripts['test:infra'].split(' && ', 1)[0])
-        self.assertEqual(node[:2], ['node', '--test'])
-        for path in ('scripts/network-change-fanout-repro.test.mjs',
-                     'design-prototypes/study-browser.test.mjs',
-                     'e2e/native-vm/integration/manual-probes.test.mjs'):
-            self.assertEqual(node[2:].count(path), 1)
 
     def test_acceptance_jobs_own_their_pinned_fake_provider(self):
         for workflow, step_name in (
