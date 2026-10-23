@@ -618,8 +618,9 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
       console.error("OAuth bootstrap evidence", bootstrapEvidence);
       console.error(cp.logs.join(""));
       console.error(await page.locator("body").innerText());
-    } finally {
-      throw error;
+    } catch {
+      console.error("OAuth diagnostic capture failed");
     }
+    throw error;
   }
 });
