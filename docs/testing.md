@@ -1803,3 +1803,5 @@ Diagnostic cutoff counts parsed frame bytes, excluding a following incomplete UT
 **Decision (2026-10-22):** Executable acceptance scenarios own their scheduling and effect assertions; unit tests exercise stream phases, model conversion and resource outcomes directly. Constructed fake-model matcher data is compiled before submission. Framework collection/sequencing and deployment/security contracts remain separate executable/configuration boundaries.
 
 **Decision (2026-10-22):** CI runs foundation OpenTofu/mock-plan checks through `infra/foundation/test-tofu.sh`; `test:infra` owns the three Node suites once. `infra/foundation/test.sh` remains the full local foundation command, including release SSH and operator-budget checks.
+
+**Decision (2026-10-22):** Release-report contracts own the complete deployment upload action/policy inventory. Browser-evidence contracts own diagnostic producers and E2E uploads; both extract named workflow steps through one small parser.

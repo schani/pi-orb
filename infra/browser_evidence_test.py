@@ -3,16 +3,14 @@ import json
 import re
 import shlex
 import unittest
+from infra.workflow_testkit import steps as workflow_steps
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def steps(workflow):
-    body = (ROOT / '.github/workflows' / workflow).read_text()
-    return {name: text for name, text in re.findall(
-        r'      - name: ([^\n]+)\n(.*?)(?=      - name: |\Z)', body, re.S
-    )}
+    return dict(workflow_steps(workflow))
 
 
 class BrowserEvidenceTest(unittest.TestCase):
@@ -154,7 +152,7 @@ class BrowserEvidenceTest(unittest.TestCase):
         self.assertIn('await page.reload()', source)
         self.assertIn('reloadBoot.wait(', source)
         self.assertIn('await rm(evidence, { recursive: true', source)
-        for workflow in ('e2e.yml', 'deploy.yml'):
+        for workflow in ('e2e.yml',):
             with self.subTest(workflow=workflow):
                 step = steps(workflow)['Upload missing-orb navigation failure evidence']
                 self.assertIn('if: failure()', step)
@@ -179,7 +177,7 @@ class BrowserEvidenceTest(unittest.TestCase):
 
     def test_workflows_upload_only_owned_browser_evidence(self):
         expected = {f'test-failures/lazy-return-*/{name}' for name in ('failure.json', 'failure.png', 'trace.zip')}
-        for workflow in ('e2e.yml', 'deploy.yml'):
+        for workflow in ('e2e.yml',):
             with self.subTest(workflow=workflow):
                 step = steps(workflow)['Upload lazy-return browser failure evidence']
                 self.assertIn('if: failure()', step)
@@ -187,10 +185,6 @@ class BrowserEvidenceTest(unittest.TestCase):
                 self.assertIsNotNone(path)
                 self.assertEqual(set(path.group(1).split()), expected)
                 self.assertIn('if-no-files-found: ignore', step)
-        self.assertEqual(
-            re.search(r'^          path: (.+)$', steps('deploy.yml')['Upload only the validated release record'], re.M).group(1),
-            '${{ runner.temp }}/release-artifact/release.json',
-        )
         step = steps('e2e.yml')['Upload deterministic failure traces']
         self.assertIn('if: failure()', step)
         path = re.search(r'^          path: \\|\n((?:            [^\n]+\n)+)', step, re.M)
