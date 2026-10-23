@@ -1507,3 +1507,5 @@ Guest acceptance requires an actual /workspace mount whose canonical device equa
 google-pi-orb-data, then checks that device's filesystem and capacity.
 Task-handoff failure cleanup joins native process close (including stdio) before
 removing its gates and home or settling the helper.
+Receipt-order fixtures publish journal state by rename, then append one complete
+native line; the real watcher remains armed across both publications.
