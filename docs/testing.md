@@ -1543,6 +1543,18 @@ The historical host-SDK probe used a static model, the real Codex SSE parser and
 
 This isolates protocol/tool ordering, not the cause of E2E run `37389785804`. Server emission logs do not establish client consumption, tool execution, or transport EOF. The scripted upload command recursively searches `../uploads` without a timeout or explicit file-readiness gate: absent files can yield successful but unmatched output, while non-regular files or stalled filesystem operations can block. No evidence links either mechanism to that run.
 
+## History search (2026-10-22, America/Los_Angeles; local, undeployed)
+
+Pre-rebase head `ea004d68` passed 266 focused tests in eight files (extractor/privacy/Unicode, service/oracle, operations, protocol, CLI and runtime/issuer routes), plus 59 database checks in four files: eight search contracts on each database, five explicitly synchronized PostgreSQL publication/snapshot/backfill/archive/delete cases, and 19 Google identity migration contracts on each database. Both search adapters exercise the actual GIN plan. Global typecheck and lint pass (baseline lint warnings remain). Evidence: `/workspace/history-search-reduction-evidence/local/`.
+
+[CI run 39882232722](https://github.com/schani/pi-orb/actions/runs/39882232722), source `c978c478`, failed eight assertions: migration 049 was absent from the shared expected migration suffix (four cases on each database). All eight reproduced locally before adding the expected entry; the complete contracts then passed. First CI logs and local reproduction remain in `/workspace/history-search-reduction-evidence/{ci-first,local}/`; no DST trace was implicated or removed.
+
+The selected process-backed full-slice case passed before rebasing `ea004d68`, including real CLI search through the terminal against a committed marker with source IDs and a stopped source orb (one selected case; three unrelated cases unselected). Its E2E source and production code matched that pre-rebase tree; later pre-rebase edits affected only documentation and CLI test fixtures. This historical evidence does not qualify the rebased head. The CLI test does not exercise native Pi search. No result here qualifies first-deployment old-writer quiescence (`docs/history-search.md`).
+
+The approved native Pi registration/help changes on base `06733228` passed 131 focused tests (six files), global workspace/E2E typecheck and lint (437 warnings, 84 infos). The real central-Durable process E2E passed first run: one selected case, two unselected; native discovery and typed hits match a committed alert's record ID, orb and public snippet. Source/lock hashes matched before and after. No deployment or production-data access. Exact-head CI and E2E results: [PR #170 checks](https://github.com/schani/pi-orb/pull/170/checks).
+
+Six expected RED assertions preceded implementation. A fractional-limit assertion exposed existing SDK `Value.Convert` truncation (`1.5 → 1`): shared-schema/direct-domain tests check raw fractional rejection; native coverage checks max-limit rejection after SDK preparation. First failures, deterministic conversion proof and passing logs: `/workspace/history-search-final-evidence/`.
+
 ## End-to-end acceptance
 
 1. Create a project and select central Pi or native Claude.

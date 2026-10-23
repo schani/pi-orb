@@ -24,6 +24,43 @@ function seed() {
   return h;
 }
 describe("central orb operations", () => {
+  it("searches through the shared owner-bound service without runtime access", async () => {
+    const h = seed();
+    const search = vi.spyOn(h.store, "searchHistory").mockReturnValue(
+      okAsync({
+        hits: [],
+        documentCount: 0,
+        candidateCount: 0,
+      }),
+    );
+    const runtime = vi.spyOn(h.deps.runtimeClient, "pullHistory");
+    const service = createOrbAgentOperations(
+      new NoSimulationTask("search", false),
+      h.deps,
+      identity,
+      {
+        appOrigin: "https://app",
+        appendAlert: () => okAsync({ recordId: "a", duplicate: false }),
+      },
+    );
+    expect(
+      (
+        await service.invoke({ kind: "search", query: "Needle", scope: "project" }, "search")
+      )._unsafeUnwrap(),
+    ).toEqual({ hits: [] });
+    expect(search).toHaveBeenCalledWith(expect.anything(), {
+      ownerUserId: "owner",
+      projectId: "project",
+      terms: ["needle"],
+      limit: 10,
+    });
+    expect(runtime).not.toHaveBeenCalled();
+    expect(
+      (await service.invoke({ kind: "search", query: "x", limit: 0 }, "bad"))._unsafeUnwrapErr()
+        .code,
+    ).toBe("invalid_request");
+  });
+
   it("returns path-routed self and spawned orb links", async () => {
     const h = seed();
     const service = createOrbAgentOperations(
