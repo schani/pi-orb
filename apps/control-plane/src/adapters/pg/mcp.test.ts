@@ -123,7 +123,7 @@ describe.each(["PGlite", ...(url ? ["PostgreSQL"] : [])])("%s mcp", (backend) =>
     expect((await store.read(task, "missing-project"))._unsafeUnwrapErr().code).toBe("not_found");
   });
 
-  it("refuses publication after the project deletion fence and cascades cleanup", async () => {
+  it("refuses publication and reads after the project deletion fence", async () => {
     (await db.query("UPDATE projects SET state = 'deleting' WHERE id = $1", [P]))._unsafeUnwrap();
     expect(
       (await store.replace(task, P, { revision: 0, servers: [] }))._unsafeUnwrapErr().code,
