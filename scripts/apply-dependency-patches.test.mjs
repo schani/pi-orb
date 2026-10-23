@@ -67,7 +67,12 @@ function sealedFixture(root = fixture()) {
     const reversed = spawnSync("git", ["apply", "--reverse", join(root, "patches", patch)], {
       cwd: root,
       encoding: "utf8",
-      env: { PATH: process.env.PATH, GIT_CEILING_DIRECTORIES: dirname(root) },
+      env: {
+        PATH: process.env.PATH,
+        GIT_CEILING_DIRECTORIES: dirname(root),
+        GIT_CONFIG_NOSYSTEM: "1",
+        GIT_CONFIG_GLOBAL: "/dev/null",
+      },
     });
     assert.equal(reversed.status, 0, reversed.stderr);
   }
