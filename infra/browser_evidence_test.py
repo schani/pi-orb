@@ -92,7 +92,7 @@ class BrowserEvidenceTest(unittest.TestCase):
         self.assertIn('    timeout-minutes: 40', body)
         self.assertIn('        shard: [1, 2, 3, 4]', body)
         workflow_steps = steps('e2e.yml')
-        self.assertIn("node-version: '24.22.0'", workflow_steps['Set up Node.js'])
+        self.assertIn("node-version: '24.22.1'", workflow_steps['Set up Node.js'])
         self.assertIn('run: npm ci', workflow_steps['Install dependencies'])
         self.assertIn('run: npm run test:e2e:install', workflow_steps['Install pinned browser engines and system dependencies'])
         full = workflow_steps['Run end-to-end test']
