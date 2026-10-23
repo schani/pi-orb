@@ -819,6 +819,7 @@ export async function startControlPlane(options: {
       PI_ORB_HOSTING_ROOT: hostingRoot,
       PI_ORB_WEB_DIST: options.webDist,
       PI_ORB_APP_ORIGIN: publicOrigin,
+      PI_ORB_OIDC_ISSUER_URL: publicOrigin,
       PI_ORB_BROKER_URL: brokerOrigin,
       PI_ORB_HOSTING_ORIGIN: `http://files.localhost:${ingress.port}`,
       PI_ORB_DOCKER_NETWORK: options.dockerNetwork,
@@ -876,12 +877,15 @@ export async function startControlPlane(options: {
       if (ready.isErr())
         throw new Error(`controlled clock initialization failed: ${ready.error.type}`);
     }
+    const readinessHeaders = { ...options.readinessHeaders };
+    if (!Object.keys(readinessHeaders).some((name) => name.toLowerCase() === "host"))
+      readinessHeaders["host"] = new URL(publicOrigin).host;
     const listener = await waitForOwnedControlPlane(
       child,
       logs,
       "http://127.0.0.1:0",
       30_000,
-      options.readinessHeaders ?? { host: new URL(publicOrigin).host },
+      readinessHeaders,
       options.readinessPath,
     );
     ingress.setTarget(Number(new URL(listener).port));
