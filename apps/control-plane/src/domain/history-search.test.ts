@@ -121,6 +121,7 @@ describe("history search service", () => {
     { query: "x", scope: "project", orbId: "self" },
     { query: "x", scope: "user", orbId: "self" },
     { query: "x", orbId: "  " },
+    { query: "x", limit: 1.5 },
   ])("rejects malformed runtime input %j", async (request) => {
     const s = setup();
     expect(

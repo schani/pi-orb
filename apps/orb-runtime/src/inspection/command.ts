@@ -17,6 +17,7 @@ export const INSPECTION_USAGE = `usage:
   pi-orb self [--json]
   pi-orb orbs [query] [--json]
   pi-orb transcript <orb-id> [--json]
+  pi-orb search QUERY [--orb ID | --project | --all] [--limit N] [--json]
   pi-orb send <orb-id> "message" [--request-id <id>]
   pi-orb alert "message" [--request-id <id>]
   pi-orb id-token --audience <audience> [--ttl-seconds <60..3600>]

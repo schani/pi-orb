@@ -1,10 +1,10 @@
 # History search
 
-**Approved decision — 2026-10-22 (America/Los_Angeles); implementation partially qualified, not deployed.** Exact BM25 over committed public history. The user approved the core, one derived table, backfill and structured Pi return shape. Pi registration and all new tool/help prose await wording approval; existing prompts, including the Claude suffix, stay unchanged. Qualification: `docs/testing.md`; remaining work: `TODO.md`.
+**Approved decision — 2026-10-22 (America/Los_Angeles); implementation partially qualified, not deployed.** Exact BM25 over committed public history. The user approved the core, one derived table, backfill, structured Pi return shape and exact tool/CLI help copy. Pi registration and help passed local focused checks and real Pi acceptance; exact-head CI remains pending. Existing prompts, including the Claude suffix, stay unchanged. Qualification: `docs/testing.md`; remaining work: `TODO.md`.
 
 ## Interface and authorization
 
-Proposed Pi tool, not registered:
+Native Pi tool:
 
 ```ts
 orb_search_history({query, scope?: "orb" | "project" | "user", orbId?, limit?}): Promise<{hits: HistorySearchHit[]} | {error: OrbAgentError}>
@@ -12,8 +12,8 @@ orb_search_history({query, scope?: "orb" | "project" | "user", orbId?, limit?}):
 
 `OrbAgentError` is `{code: "unauthorized" | "not_found" | "conflict" | "unavailable" | "internal" | "invalid_request", message: string}`. Use native `structuredOutput` and a matching output schema, including errors with `isError`, so code-mode callers receive objects without `JSON.parse`. Framework validation, policy, cancellation and infrastructure failures can still reject. Only the CLI shell boundary serializes JSON.
 
-- Pending tool description: `Search your committed public history with BM25. Defaults to this orb; project searches this project and user searches all your orbs. Returns ranked snippets; use orb_transcript for full context.`
-- Pending CLI help: the usage line below plus summary `Search your committed public history with BM25.` No other new help prose, examples or retry text is proposed.
+- Approved tool description: `Search your committed public history with BM25. Defaults to this orb; project searches this project and user searches all your orbs. Returns ranked snippets; use orb_transcript for full context.`
+- Approved CLI help: the usage line below plus summary `Search your committed public history with BM25.`
 
 ```sh
 pi-orb search QUERY [--orb ID | --project | --all] [--limit N] [--json]
