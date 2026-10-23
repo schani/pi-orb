@@ -41,10 +41,8 @@ and no original fix is claimed. Controlled 40%-CPU failures, new failures,
 exact-head gates, assertions, production rules, fixture cleanup and DST
 replay/root-cause requirements are not waived.
 
-The isolated Linux subreaper joins shell groups and detached descendants; other
-POSIX platforms promise group cleanup only. Timeout summaries precede directory
-cleanup: fresh 0700 directory, 0600 file, bounded allowlisted lifecycle/cost and
-owner/join scalars. No argv, raw output, credentials or fixture copies; reject
-symlinks, oversized and nonregular inputs. Cleanup/reporting errors must preserve
-the timeout. Controlled witnesses require owned PIDs gone and a foreign sentinel
-alive, plus private bounded snapshots and independent directory cleanup.
+The offline fixture used a Linux subreaper and bounded private timeout summaries.
+Controlled witnesses checked owned descendants gone, a foreign sentinel alive,
+primary-timeout preservation and capture before independent directory cleanup.
+These historical receipts remain private; they are not current operational-probe
+or fixture-owner qualification.

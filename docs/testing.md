@@ -39,9 +39,9 @@ E2E ingress binds before CP startup; the child binds port zero and announces its
 
 ### Replacement smoke
 
-Offline adapters qualify selected-user auth, private allowlisted evidence, stdin-only bearers/raw descriptions, bounded calls, exact namespace ownership and verified API/provider cleanup, including Stage 2. Permission/transport errors cannot prove disposal or negative observations; failed owned fixtures remain inspectable. These tests do not qualify live GCE.
+**Decision (2026-10-23 PDT):** The replacement workflow is an operator-run probe, not routine CI product acceptance. Direct sourceable-shell and HTTP/external-adapter tests cover selected-user authentication, private allowlisted summaries, typed namespace refusal, record-before-create, API deletion confirmation, retention and cleanup verdicts. They do not qualify whole-script lifecycle/provider-poll wiring, synthetic Stage-2 choreography or live GCE. The operational probe retains both 65-second observation windows, Stage 2, stdin-only bearers/raw descriptions and bounded authenticated calls.
 
-Keep the 90s fixture deadline, 65,536-character payload, both 65-observation windows and 17 sensitive-input guards. Capture bounded allowlisted timeout evidence before directory cleanup and join owned groups/detached Linux descendants without touching foreign processes. Controlled CPU experiments establish startup cost, not the original timeout's cause. Evidence: `docs/postmortems/2026-10-22-replacement-smoke-fixture-budget.md`.
+Historical offline-fixture failure evidence and controlled CPU findings: `docs/postmortems/2026-10-22-replacement-smoke-fixture-budget.md`. No current test-only descendant-owner/reporter coverage is claimed.
 
 **Historical replacement-smoke exception (user-approved 2026-10-23, PDT):** attribution of only the original local 90s `TimeoutExpired` in `final-batch-infra-correct-env.log` is waived as a merge/deployment prerequisite. Preserve first-failure evidence; its cause remains unknown and no fix is claimed. Controlled 40%-CPU failures, new failures, exact-head gates, assertions, production rules, fixture cleanup and DST replay/root-cause requirements are not waived.
 

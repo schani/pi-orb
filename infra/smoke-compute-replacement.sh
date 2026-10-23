@@ -48,8 +48,7 @@ export PI_ORB_SMOKE_HTTP=1
 instance_prefix="pi-orb-${orb_id}-i"
 data_disk="pi-orb-data-${orb_id}"
 log_root=${PI_ORB_SMOKE_LOG_DIR:-test-failures}
-mkdir -p "$log_root"
-log_dir=$(mktemp -d "$log_root/compute-replacement-live.XXXXXXXX")
+replacement_evidence_dir "$log_root"
 echo "compute replacement evidence: $log_dir" >&2
 
 api() {
@@ -78,24 +77,12 @@ data_disk_exists() {
   printf '%s\n' "$description" | jq -e --arg name "$data_disk" '.name == $name' >/dev/null
 }
 token_refused() { printf '%s' "$1" | external runtime-refused "$base"; }
-instance_summary() {
-  jq '{name,id,disks:[.disks[] | {boot,source}],
-    spec:([.metadata.items[] | select(.key == "pi-orb-host-spec-fingerprint") | .value][0])}'
-}
-orb_summary() { jq '{id,state}'; }
 dump_failure() {
   orb_row 2>/dev/null | orb_summary >"$log_dir/orb.json" 2>/dev/null || true
   instances >"$log_dir/instances.txt" 2>/dev/null || true
   external disk-describe "$data_disk" 2>/dev/null |
     jq '{name,id,status,sizeGb}' >"$log_dir/data-disk.json" 2>/dev/null || true
   echo "first-failure evidence: $log_dir" >&2
-}
-fixture_evidence() {
-  jq -nc --arg kind "$1" --arg id "$2" --arg outcome "$3" \
-    '{kind:$kind,id:$id,outcome:$outcome}' >>"$log_dir/fixtures.jsonl"
-}
-record_owned() {
-  fixture_evidence "$@" && fixture_record "$@"
 }
 project_pending=0
 orb_pending=0
@@ -117,51 +104,6 @@ verify_provider_cleanup() {
     fi
     smoke_sleep "$PI_ORB_SMOKE_DEADLINE"
   done
-}
-on_exit() {
-  local status=$? code
-  trap - EXIT
-  if (( status == 0 )); then
-    if fixture_delete project "$project_id"; then
-      project_pending=0
-      fixture_evidence project "$project_id" deleted || status=1
-    else
-      code=$?; status=1
-      if (( code == 2 )); then
-        project_pending=0
-        fixture_evidence project "$project_id" deleted || true
-      fi
-    fi
-    if (( status == 0 )); then
-      if fixture_delete orb "$orb_id"; then
-        orb_pending=0
-        fixture_evidence orb "$orb_id" deleted || status=1
-      else
-        code=$?; status=1
-        if (( code == 2 )); then
-          orb_pending=0
-          fixture_evidence orb "$orb_id" deleted || true
-        fi
-      fi
-    fi
-    if (( status == 0 )) && ! verify_provider_cleanup; then
-      echo "Owned provider cleanup unconfirmed: project=$project_id orb=$orb_id; compute/storage charges may remain." >&2
-      status=1
-    fi
-  fi
-  if (( status != 0 )); then
-    (( project_pending == 0 )) || record_owned project "$project_id" retained || true
-    (( orb_pending == 0 )) || record_owned orb "$orb_id" retained || true
-    if (( project_pending || orb_pending )); then
-      echo "Failed fixtures retained: project=$project_id orb=$orb_id; they may incur compute/storage charges." >&2
-    fi
-    echo '{"outcome":"failed"}' >"$log_dir/cleanup.json"
-    dump_failure
-  else
-    echo '{"outcome":"verified"}' >"$log_dir/cleanup.json"
-    echo "compute replacement smoke passed (cleanup verified): project=$project_id orb=$orb_id"
-  fi
-  exit "$status"
 }
 trap on_exit EXIT
 trap 'exit 130' INT
@@ -199,22 +141,10 @@ wait_disposed() {
   return 1
 }
 
-# Refuse preexisting IDs before claiming ownership or mutating either resource.
-for path in "/api/v1/projects/$project_id" "/api/v1/orbs/$orb_id"; do
-  response=$(PI_ORB_SMOKE_DEADLINE=$(( $(date +%s) + boot_deadline_seconds )) "$API" "$path")
-  jq -e '.error.code == "not_found"' <<<"$response" >/dev/null
-done
-project_pending=1
-record_owned project "$project_id" requested
-response=$(api POST /api/v1/projects "$(jq -nc --arg id "$project_id" --arg repo "$repo" \
-  '{id:$id,name:("compute-replacement-smoke-" + ($id|.[0:8])),repositoryUrl:$repo}')")
-jq -e --arg id "$project_id" '.id == $id' <<<"$response" >/dev/null
-record_owned project "$project_id" created
-orb_pending=1
-record_owned orb "$orb_id" requested
-response=$(api POST "/api/v1/projects/$project_id/orbs" "$(jq -nc --arg id "$orb_id" '{id:$id}')")
-jq -e --arg id "$orb_id" '.id == $id' <<<"$response" >/dev/null
-record_owned orb "$orb_id" created
+replacement_preflight
+replacement_create project "$project_id" /api/v1/projects "$(jq -nc --arg id "$project_id" --arg repo "$repo" \
+  '{id:$id,name:("compute-replacement-smoke-" + ($id|.[0:8])),repositoryUrl:$repo}')"
+replacement_create orb "$orb_id" "/api/v1/projects/$project_id/orbs" "$(jq -nc --arg id "$orb_id" '{id:$id}')"
 wait_orb_state running "$boot_deadline_seconds" >"$log_dir/initial-running.json"
 old_instance=$(instances)
 [[ $(wc -w <<<"$old_instance") -eq 1 ]]
