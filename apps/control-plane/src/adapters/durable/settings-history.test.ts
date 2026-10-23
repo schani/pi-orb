@@ -136,6 +136,11 @@ describe("Durable public settings history", () => {
         type: "settings_applied",
         duplicate: true,
       });
+      expect((await agent.request("thinking", model))._unsafeUnwrap()).toMatchObject({
+        type: "rejected",
+        error: { code: "request_id_conflict" },
+      });
+      expect(await history()).toEqual(changed);
       await agent.close();
       agent = await open();
       expect(await history()).toEqual(changed);
