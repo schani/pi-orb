@@ -1546,3 +1546,5 @@ Mid-setup silence requires an observed running setup probe before injection.
 Sleep telemetry is asserted after successful tasks in every recorded iteration.
 
 Ordinary store outages must retry finitely within the backoff cap and return to the healthy cadence.
+
+Concurrent snapshot tests require successful nonempty reads during held writes; hosted replacement races retain typed transient open failures.

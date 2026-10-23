@@ -1,9 +1,9 @@
 import { NoSimulationTask } from "determined";
-import { errAsync, okAsync } from "neverthrow";
+import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { FAILPOINTS } from "../testkit/failpoints.ts";
 import { makeHostingHarness, openHostedFile, source } from "../testkit/hosting.ts";
-import { runDst } from "../testkit/sim.ts";
+import { runDst, waitUntil } from "../testkit/sim.ts";
 import {
   cleanupHostedFiles,
   cleanupRetiredHostedFiles,
@@ -386,37 +386,59 @@ describe("hosted files domain", () => {
   it("keeps reader snapshots exact while two uploads replace one path", async () => {
     await runDst({ name: "hosting-two-replacements-reader", iterations: 30 }, async (sim) => {
       const h = makeHostingHarness();
+      expect(
+        (await publishHostedFile(task, h.deps, h.request("seed"), source("alpha"), context)).isOk(),
+      ).toBe(true);
       let writersDone = 0;
+      let heldWriters = 0;
+      let overlapRead = false;
+      let successfulReads = 0;
+      const publish = h.deps.store.publishUpload.bind(h.deps.store);
+      h.deps.store.publishUpload = (...args) =>
+        new ResultAsync(
+          (async () => {
+            heldWriters++;
+            await waitUntil(args[0], "reader observes held replacement", () => overlapRead);
+            return publish(...args);
+          })(),
+        );
       const result = await sim.runTasks([
         {
           name: "alpha-writer",
           f: async (innerTask) => {
-            await publishHostedFile(
+            const uploaded = await publishHostedFile(
               innerTask,
               h.deps,
               h.request("request-a"),
               source("alpha"),
               context,
             );
+            expect(uploaded.isOk(), uploaded.isErr() ? uploaded.error.message : "").toBe(true);
             writersDone++;
           },
         },
         {
           name: "bravo-writer",
           f: async (innerTask) => {
-            await publishHostedFile(
+            const uploaded = await publishHostedFile(
               innerTask,
               h.deps,
               h.request("request-b"),
               source("bravo"),
               context,
             );
+            expect(uploaded.isOk(), uploaded.isErr() ? uploaded.error.message : "").toBe(true);
             writersDone++;
           },
         },
         {
           name: "reader",
           f: async (innerTask) => {
+            await waitUntil(
+              innerTask,
+              "both uploads held before publication",
+              () => heldWriters === 2,
+            );
             while (writersDone < 2) {
               const opened = await openHostedFile(
                 innerTask,
@@ -425,24 +447,36 @@ describe("hosted files domain", () => {
                 "index.html",
                 context,
               );
+              if (!overlapRead) expect(opened.isOk()).toBe(true);
+              if (opened.isErr()) {
+                // Replacement may retire a resolved generation before open.
+                expect(opened.error.type).toBe("hosting_retryable");
+              }
               if (opened.isOk()) {
                 const chunk = await opened.value.source.next(innerTask, context);
                 expect(chunk.isOk()).toBe(true);
+                expect(chunk.isOk() && chunk.value !== null).toBe(true);
                 if (chunk.isOk() && chunk.value !== null) {
+                  expect(chunk.value.byteLength).toBeGreaterThan(0);
+                  successfulReads++;
                   const text = new TextDecoder().decode(chunk.value);
                   expect(["alpha", "bravo"]).toContain(text);
                   expect(opened.value.file.sha256).toBe(
                     h.request(text === "alpha" ? "request-a" : "request-b").sha256,
                   );
                 }
-                await opened.value.source.close(innerTask);
+                expect((await opened.value.source.close(innerTask)).isOk()).toBe(true);
+                overlapRead = true;
               }
-              await innerTask.checkpoint("reader between replacement snapshots");
+              await innerTask.sleep(1, "reader between replacement snapshots");
             }
           },
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(overlapRead).toBe(true);
+      expect(successfulReads).toBeGreaterThan(0);
+      expect(writersDone).toBe(2);
       h.assertOwnership();
     });
   });
