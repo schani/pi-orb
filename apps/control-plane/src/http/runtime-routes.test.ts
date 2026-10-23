@@ -368,10 +368,15 @@ describe("runtime broker routes", () => {
     routeStore: ControlPlaneStore = store,
     tailnetDnsName: string | null = "tail.test.ts.net",
     hostingGuard = false,
-    checkSpawnModel = makeHarness().deps.checkSpawnModel,
+    checkSpawnModel?: ReturnType<typeof makeHarness>["deps"]["checkSpawnModel"],
   ): Promise<void> {
     app = Fastify();
-    const spawnDeps = { ...makeHarness().deps, store: routeStore, checkSpawnModel };
+    const base = makeHarness().deps;
+    const spawnDeps = {
+      ...base,
+      store: routeStore,
+      checkSpawnModel: checkSpawnModel ?? base.checkSpawnModel,
+    };
     vi.spyOn(spawnDeps.control, "nudgeNextAttemptAt").mockImplementation(spawnNudge);
     if (hostingGuard)
       registerHostingAccessGuard(
@@ -386,24 +391,13 @@ describe("runtime broker routes", () => {
     registerRuntimeRoutes(app, task, {
       appOrigin: "https://browser.test",
       ...(tailnetDnsName === null ? {} : { tailnetDnsName }),
-      send: (task, caller, request) =>
-        sendGuestOrbMessage(task, { ...makeHarness().deps, store: routeStore }, caller, request),
+      send: (task, caller, request) => sendGuestOrbMessage(task, spawnDeps, caller, request),
       spawn: (task, caller, orbId, request) => spawnOrb(task, spawnDeps, caller, orbId, request),
       sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
-        requestOrbSleep(
-          task,
-          { ...makeHarness().deps, store: routeStore },
-          orbId,
-          caller,
-          durationSeconds,
-          sleepId,
-        ),
-      readBootContext: (task, orbId, caller) =>
-        readOrbBootContext(task, { ...makeHarness().deps, store: routeStore }, orbId, caller),
-      archiveSelf: (task, orbId, caller) =>
-        requestOrbArchive(task, { ...makeHarness().deps, store: routeStore }, orbId, caller),
-      deleteSelf: (task, orbId, caller) =>
-        requestOrbDeletion(task, { ...makeHarness().deps, store: routeStore }, orbId, caller),
+        requestOrbSleep(task, spawnDeps, orbId, caller, durationSeconds, sleepId),
+      readBootContext: (task, orbId, caller) => readOrbBootContext(task, spawnDeps, orbId, caller),
+      archiveSelf: (task, orbId, caller) => requestOrbArchive(task, spawnDeps, orbId, caller),
+      deleteSelf: (task, orbId, caller) => requestOrbDeletion(task, spawnDeps, orbId, caller),
       store: routeStore,
       claudeCredential: (_task, orb) => {
         expect(orb.id).toBe(ORB);
@@ -1138,19 +1132,11 @@ describe("runtime broker routes", () => {
       "sanitizes %s failures without changing state",
       async (code) => {
         store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
-        const failing = new Proxy(store, {
-          get(target, property) {
-            if (property === "getOrb")
-              return () =>
-                errAsync({
-                  type: "store_error" as const,
-                  code,
-                  message: "private database detail",
-                  retryable: code === "unavailable",
-                });
-            const value: unknown = Reflect.get(target, property);
-            return typeof value === "function" ? value.bind(target) : value;
-          },
+        const failing = storeFailing("getOrb", {
+          type: "store_error",
+          code,
+          message: "private database detail",
+          retryable: code === "unavailable",
         });
         await app.close();
         await startApp(TEST_ISSUER_CONSTANTS, failing);
@@ -1228,19 +1214,11 @@ describe("runtime broker routes", () => {
       "sanitizes %s failures without changing state",
       async (code) => {
         store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
-        const failing = new Proxy(store, {
-          get(target, property) {
-            if (property === "getOrb")
-              return () =>
-                errAsync({
-                  type: "store_error" as const,
-                  code,
-                  message: "private database detail",
-                  retryable: code === "unavailable",
-                });
-            const value: unknown = Reflect.get(target, property);
-            return typeof value === "function" ? value.bind(target) : value;
-          },
+        const failing = storeFailing("getOrb", {
+          type: "store_error",
+          code,
+          message: "private database detail",
+          retryable: code === "unavailable",
         });
         await app.close();
         await startApp(TEST_ISSUER_CONSTANTS, failing);
@@ -1266,6 +1244,7 @@ describe("runtime broker routes", () => {
 
   function storeFailing(
     operation:
+      | "getOrb"
       | "listProjects"
       | "listProjectsByOwner"
       | "readHistorySnapshot"
