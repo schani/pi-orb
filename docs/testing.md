@@ -1731,3 +1731,5 @@ Foundation adoption qualification rejects every non-read gcloud operation during
 Dependency patch CLI cases share installation/cwd/environment setup while retaining byte seals, atomic refusal, drift and idempotence assertions. (2026-10-22 PDT).
 
 Native-image cleanup fixtures share only typed input defaults; temporary directories, cloud phases, ownership and simulation timing remain local. (2026-10-22 PDT).
+
+Manual inference tracing qualification asserts exact forwarded frames and status, private-text exclusion and record inventory. Client cancellation waits for upstream close; split-frame cutoff forwards each byte once. (2026-10-22 PDT).
