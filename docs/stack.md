@@ -18,6 +18,8 @@ TypeScript lets the Pi SDK, `determined`, `neverthrow`, protocol schemas, server
 
 **Toolchain decision (2026-10-16).** Use Node 24.22.0 LTS, Vite 8.3.4 with React plugin 6.1.2, and Vitest 5.0.5: update the supported LTS and build/test tools together, not Node 26 Current or the Pi family. Root owns Vite explicitly for Vitest's peer, pins `@types/node` 24.19.2 to the runtime major, and owns esbuild 0.28.2 for native build consumers independently of Chord's hoisting. Preserve existing browser targets explicitly rather than adopting Vite 8's narrower default. Vite's Rolldown/Oxc and native artifacts require clean-install/build qualification; Node changes also require PTY and runtime E2E gates. Evidence and limits: `docs/dependency-audit.md`, `docs/testing.md`.
 
+**Node security decision (2026-10-22).** Pin Node 24.22.1 across CI, Docker and native builds for the [TLS, DNS and Brotli security fixes](https://nodejs.org/en/blog/release/v24.22.1), staying on Node 24 LTS. Bundled npm remains 11.19.1; npm dependencies and the Pi family are unchanged. Native archives use the official signed SHA-256 manifest; installed Node inventory and build-phase logs retain the existing diagnostics. Qualification and limits: `docs/testing.md`.
+
 **Pi decision (2026-10-16).** Upgrade the aligned Pi family to 1.3.0 and use Durable's native code-mode adapter. Upstream owns nested tasks/journals and replay; pi-orb supplies scoped tools, resource/cancellation policy and private user-facing output. Native documents/tasks use existing PostgreSQL JSON storage, preserving completed history without a compatibility phase for unfinished custom executions. Rationale and persistence boundaries: `docs/pi-durable-evaluation.md`; qualification: `docs/testing.md`.
 
 ## Directory layout

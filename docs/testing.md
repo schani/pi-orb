@@ -1460,3 +1460,31 @@ Focused coverage checks indexed-root backfill/immutability, proof exclusions/con
 Head `b21404b8` passed eleven first-attempt CI checks; that combined tree does not qualify this scoped tree. Exact-head CI and the separate [UI correction, PR 139](https://github.com/schani/pi-orb/pull/139), remain merge/deployment prerequisites; the UI contract is not waived.
 
 **User exception — 2026-10-16:** explanation of only the original local PostgreSQL MCP `beforeEach` 10s and aggregate-image 30s timeouts is waived; no cause or fix is claimed. First failures, measurements and full historical records remain private under `/workspace/evidence/c9a30a6d/scope-cleanup/` and its referenced directories for a docs-only followup, including the separate release-500 waiver (not revoked). No new failure, assertion, exact-head gate or DST replay/root-cause requirement is waived.
+
+
+## Node 24.22.1 security qualification (2026-10-22; undeployed)
+
+Node-only patch: 24.22.1 LTS, bundled npm 11.19.1; no npm graph or Pi changes.
+Official `SHASUMS256.txt.sig` verifies with the Node release keyring: signer
+`5BE8A3F6C8A5C01D106C0AD820B1A390B168D356` (Antoine du Hamel).
+Downloaded linux-x64 and linux-arm64 tar.xz archives both match the signed manifest:
+
+- x64: `6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6`
+- arm64: `dbabf7a1cbf947e6059ffad2c27b80041db97dea1e553b62afdee7f13fca336e`
+
+The isolated local x64 toolchain reports Node 24.22.1, addon ABI 137 and npm
+11.19.1. Clean `npm ci` applied all four existing dependency patches, added 602
+packages and audited 610; it reports three advisories (one low, two moderate).
+Dependency remediation belongs to a separate PR. Updated pin/checksum contracts
+first failed against the old production pins (two tests, eight failing subtests).
+Evidence is retained locally in `/tmp/node-security-qualification/` (`signature.log`,
+`archives.log`, `red.log`, `npm-ci.log`). Offline, network-namespace-isolated
+node-pty source rebuild using the installed headers passes; an actual shell verifies
+TTY descriptors, output, exit status and ABI 137. Full workspace/E2E typecheck and
+lint pass (411 warnings, 83 infos); pin/sharding unit contracts pass 9/9 and
+PTY/auth/runtime-image unit contracts pass 32/32 (including real spawn/resize/exit).
+Full infra
+passes: 107 Node, 220 Python and 33 native-guest tests, plus filesystem/service
+checks. Local heavy phases were serialized across the dependency worktrees.
+CI owns the full unit/DST suite, runtime E2E and container builds; native cloud-image,
+acceptance and retained-workspace qualification have not run. No deployment.

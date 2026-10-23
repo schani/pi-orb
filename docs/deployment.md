@@ -288,7 +288,7 @@ In priority order:
    same-repository `push`/`main` runs at the exact dispatched SHA; record run IDs
    and attempts. Accept only one matching push run per workflow, on its first
    attempt; reruns cannot mask an earlier failure. CI, E2E and Deploy are aligned
-   on `ubuntu-24.04` and Node `24.22.0`.
+   on `ubuntu-24.04` and Node `24.22.1`.
    This removes duplicate checks, not coverage. Failed or cancelled runs block;
    pending or missing runs must succeed within 60 minutes (65-minute job limit).
    Require the CI checks job and all four E2E jobs. Before the release lock,
@@ -856,7 +856,7 @@ not duplicate the deployment algorithm. The first-release policy is recorded in
 immutable dispatched SHA, verifies checkout equality, and creates local branch
 `main` at that exact SHA before authentication. The shared command requires a
 clean checkout and re-verifies trusted same-repository `push`/`main` qualification
-for the selected SHA before acquiring the release lock. Node 24.22.0, SDK 583.0.0 with its explicit beta component and checksum-verified
+for the selected SHA before acquiring the release lock. Node 24.22.1, SDK 583.0.0 with its explicit beta component and checksum-verified
 OpenTofu 1.12.6 are pinned; actions use immutable SHAs, the runner is Ubuntu 24.04,
 and provider lock files are read-only. The 240-minute job budget accommodates
 checks, fresh native acceptance, migration/apply and up to 75 minutes of retirement.
