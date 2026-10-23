@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { ok, type Result, ResultAsync } from "neverthrow";
+import { ok, ResultAsync } from "neverthrow";
 import { expect } from "vitest";
 import { composeControlPlaneDatabase } from "../adapters/database.ts";
 import { PgClient, type PostgreSQLClient } from "../adapters/pg/client.ts";
@@ -39,11 +39,11 @@ export async function openThrowawayPostgres(
   return { database: composeControlPlaneDatabase(client), client };
 }
 
-export async function assertProjectDeletionFence(
+export async function assertProjectDeletionFence<T, E extends { code: string }>(
   db: PostgreSQLClient,
   connectionString: string,
   projectId: string,
-  write: (peer: PgClient) => PromiseLike<Result<unknown, { code: string }>>,
+  write: (peer: PgClient) => ResultAsync<T, E>,
 ): Promise<void> {
   const schema = String(
     (await db.query("SELECT current_schema() AS schema"))._unsafeUnwrap().rows[0]?.schema,
