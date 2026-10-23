@@ -20,6 +20,8 @@ TypeScript lets the Pi SDK, `determined`, `neverthrow`, protocol schemas, server
 
 **Node security decision (2026-10-22).** Pin Node 24.22.1 across CI, Docker and native builds for the [TLS, DNS and Brotli security fixes](https://nodejs.org/en/blog/release/v24.22.1), staying on Node 24 LTS. Bundled npm remains 11.19.1; npm dependencies and the Pi family are unchanged. Native archives use the official signed SHA-256 manifest; installed Node inventory and build-phase logs retain the existing diagnostics. Qualification and limits: `docs/testing.md`.
 
+**Maintenance decision (2026-10-22).** Refresh the existing Fastify plugins, IP parser, PostgreSQL clients/types, Markdown parser, WebSocket implementation/types and Zod within their current release lines. Pin Biome 2.6.2, Vite 8.3.5 and Playwright 1.64.1; preserve workspace range policy. Static's content-disposition 3 and pg's protocol/connection-string patches follow their owning dependencies. Pi stays aligned at 1.3.0 with its sealed patches. Qualification and lint-scope rationale: `docs/testing.md`.
+
 **Pi decision (2026-10-16).** Upgrade the aligned Pi family to 1.3.0 and use Durable's native code-mode adapter. Upstream owns nested tasks/journals and replay; pi-orb supplies scoped tools, resource/cancellation policy and private user-facing output. Native documents/tasks use existing PostgreSQL JSON storage, preserving completed history without a compatibility phase for unfinished custom executions. Rationale and persistence boundaries: `docs/pi-durable-evaluation.md`; qualification: `docs/testing.md`.
 
 ## Directory layout
