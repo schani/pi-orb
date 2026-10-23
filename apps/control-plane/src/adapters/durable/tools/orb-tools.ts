@@ -120,7 +120,10 @@ export function createOrbTools(service: OrbAgentOperations, notifyParent?: Paren
         "Notify the user: append a transcript alert and flag this orb. Alerts are not sent to other agents.",
       parameters: Type.Object({ message: Type.String() }, { additionalProperties: false }),
       structuredOutputSchema: resultSchema(
-        Type.Object({ recordId: Type.String() }, { additionalProperties: false }),
+        Type.Object(
+          { recordId: Type.String(), duplicate: Type.Boolean() },
+          { additionalProperties: false },
+        ),
       ),
       replay: "unsafe",
       execute: async (args, api) => {

@@ -225,7 +225,7 @@ const responses = [
     { orbId: "orb", projectId: "project", messageId: "message", url: "url" },
   ],
   ["orb_send", { orbId: "orb", message: "hi" }, { orbId: "orb", messageId: "message" }],
-  ["orb_alert", { message: "hi" }, { recordId: "record" }],
+  ["orb_alert", { message: "hi" }, { recordId: "record", duplicate: false }],
   ["notify_parent", { message: "hi" }, { accepted: true }],
   ["orb_sleep", { durationSeconds: 60 }, { sleepId: "sleep", sleepUntil: 123456 }],
   ["orb_archive", {}, { orbId: "orb", state: "archived" }],

@@ -408,7 +408,9 @@ it.each(["root", "child"] as const)(
             invoke: (request) => {
               effects.push(request.kind);
               return okAsync(
-                request.kind === "alert" ? { recordId: "record" } : { accepted: true },
+                request.kind === "alert"
+                  ? { recordId: "record", duplicate: false }
+                  : { accepted: true },
               );
             },
           },
@@ -478,7 +480,7 @@ it.each(["root", "child"] as const)(
       );
       expect(payload.own).toContain(own);
       expect(payload.accepted).toEqual(
-        scope === "root" ? { recordId: "record" } : { accepted: true },
+        scope === "root" ? { recordId: "record", duplicate: false } : { accepted: true },
       );
       expect(payload.nativeDenied).toBe("true");
       expect(metadata).not.toContain(hidden);
@@ -507,3 +509,27 @@ it("returns expected orb errors as objects through native codemode with visible 
     await bundle.close();
   }
 });
+
+it.each([false, true])(
+  "preserves native alert duplicate=%s receipts through codemode",
+  async (duplicate) => {
+    const receipt = { recordId: "record", duplicate };
+    const bundle = createDurableTools({
+      additionalTools: createOrbTools({ invoke: () => okAsync(receipt) }),
+    });
+    try {
+      const { result } = await nativeMetadata(
+        bundle,
+        "root",
+        "const receipt = await tools.orb_alert({message:'notice'}); text({receipt,done:true});",
+      );
+      expect(result.isError).toBe(false);
+      expect(result.output).toContainEqual({
+        type: "text",
+        text: JSON.stringify({ receipt, done: true }),
+      });
+    } finally {
+      await bundle.close();
+    }
+  },
+);
