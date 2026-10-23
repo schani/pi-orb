@@ -8,6 +8,8 @@ Merged main `42cf1061` into the test audit, retaining structured orb results, sc
 
 Ownership schedules require successful archive, final archived state, sealed public rows and no native entries. Drain/commit losers must retain the typed stale-owner cause; admission rejection alone does not prove archive.
 
+Forced catalog authorization cancellation uses the unit barrier and typed cancellation assertion. Composed SQL drain waits for real drain entry, checks closed admission, then releases its held commit directly; PGlite and PostgreSQL retain root/child recovery and lifecycle telemetry.
+
 Manager health tables union structured initialization failures and unproven error combinations, retaining execution-readiness identity, retryability and explicit replacement checks. Settings ACK/projection ordering remains an independent agent boundary.
 
 Durable SQL, HTTP, storage, tools and agent fixtures register independent reverse-order test-finished cleanup immediately after acquisition, before initialization. Each cleanup runs even if setup or another cleanup fails; the original failure remains reported.

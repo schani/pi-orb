@@ -19,7 +19,6 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { NoSimulationTask } from "determined";
 import { expect, it, onTestFailed } from "vitest";
 import { makeOrbRow, makeProjectRow } from "../../testkit/fixtures.ts";
-import { runDst } from "../../testkit/sim.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
 import { DurableAgent } from "../durable/agent.ts";
 import { durableError } from "../durable/manager.ts";
@@ -290,29 +289,8 @@ it.for([
       const closing = oldAgent.close();
       await drainEntered.promise;
       phase = "owned commit release";
-      await runDst(
-        { name: `pg-composed-drain-${kind}-${abortBeforeStop}`, iterations: 1 },
-        async (sim) => {
-          const scheduled = await sim.runTasks([
-            {
-              name: "explicit-stop",
-              f: async (scheduledTask) => {
-                await scheduledTask.checkpoint("before-close");
-                await scheduledTask.checkpoint("owned-drain-active");
-                expect(oldAgent.accepting()).toBe(false);
-              },
-            },
-            {
-              name: "admitted-native-commit",
-              f: async (scheduledTask) => {
-                await scheduledTask.checkpoint("before-resuming-owned-commit");
-                commitRelease.resolve();
-              },
-            },
-          ]);
-          expect(scheduled.isErr() ? scheduled.error : null).toBeNull();
-        },
-      );
+      expect(oldAgent.accepting()).toBe(false);
+      commitRelease.resolve();
       expect(
         (
           await oldAgent.deliver({
