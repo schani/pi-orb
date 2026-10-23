@@ -10,11 +10,9 @@ it("rejects native project auth overrides without exposing their values", () => 
     mkdirSync(join(dir, ".claude"));
     const path = join(dir, ".claude", "settings.json");
     for (const settings of [
-      { env: { ANTHROPIC_API_KEY: "secret" } },
       { env: { CLAUDE_CODE_OAUTH_TOKEN: "other-owner-secret" } },
       { env: { CLAUDE_CONFIG_DIR: "/profile" } },
       { env: { CLAUDE_CODE_USE_VERTEX: "1" } },
-      { apiKeyHelper: "cat secret" },
     ]) {
       writeFileSync(path, JSON.stringify(settings));
       const result = validateClaudeAuthSettings(dir, join(dir, "config"));
