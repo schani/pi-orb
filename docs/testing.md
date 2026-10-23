@@ -1583,7 +1583,14 @@ passed. The complete file passes 7/7; workspace/E2E typecheck and scoped lint pa
 
 Failures now emit up to 24 content-free metadata/ack events, acknowledged IDs/statuses,
 server unread pointer and header flag count to `test-failures/orb-alert-*.json`, covered
-by the existing E2E artifact upload. Failure-only pointer/UI snapshots each have a
-one-second deadline; an injected failure verified the fields. No product fix or
-historical attribution is claimed. Fresh exact-head qualification is still required;
-no workflow rerun or deployment was performed.
+by the existing E2E artifact upload. Failure-only pointer/UI snapshots run concurrently,
+each racing a one-second Node timer cleared on completion. The race covers pointer body
+parsing and UI evaluation; Playwright's locator timeout only bounds locator resolution.
+Tests-first controlled unresolved evaluation, pointer GET and pointer-body/UI gates
+verified artifacts and the identical original cause within 1,002 ms, before gate release.
+These are diagnostic promise gates, not renderer crashes. RED/GREEN sources and receipts
+remain in `.context/orb-alert-stabilization/wall-clock/`; the original four held-metadata
+schedules and evidence are unchanged. The complete uninstrumented seven-test file,
+workspace/E2E types and scoped lint pass. No product fix or historical attribution is
+claimed. Fresh exact-head qualification is still required; no workflow rerun or
+deployment was performed.

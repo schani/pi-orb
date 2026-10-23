@@ -99,20 +99,37 @@ function observeAlerts(page: Page, name: string): () => Promise<void> {
     );
   });
   return async () => {
-    const pointer = await page.request
-      .get(`${origin}${metadataPath}`, { timeout: 1_000 })
-      .then(async (response) => ({
-        status: response.status(),
-        unreadAlertId:
-          ((await response.json()) as { unreadAlertId?: string }).unreadAlertId ?? null,
-      }))
-      .catch(() => "unavailable");
-    const flagCount = await page
-      .locator("body")
-      .evaluate((body, selector) => body.querySelectorAll(selector).length, `.orb-life ${flag}`, {
-        timeout: 1_000,
-      })
-      .catch(() => "unavailable");
+    const snapshot = async <T>(pending: Promise<T>): Promise<T | "unavailable"> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          pending.catch(() => "unavailable" as const),
+          new Promise<"unavailable">((resolve) => {
+            timer = setTimeout(() => resolve("unavailable"), 1_000);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    const [pointer, flagCount] = await Promise.all([
+      snapshot(
+        page.request.get(`${origin}${metadataPath}`, { timeout: 1_000 }).then(async (response) => ({
+          status: response.status(),
+          unreadAlertId:
+            ((await response.json()) as { unreadAlertId?: string }).unreadAlertId ?? null,
+        })),
+      ),
+      snapshot(
+        page
+          .locator("body")
+          .evaluate(
+            (body, selector) => body.querySelectorAll(selector).length,
+            `.orb-life ${flag}`,
+            { timeout: 1_000 },
+          ),
+      ),
+    ]);
     const evidence = JSON.stringify({ timeline, pointer, flagCount }, null, 2);
     mkdirSync("test-failures", { recursive: true });
     writeFileSync(`test-failures/orb-alert-${name}.json`, evidence);
