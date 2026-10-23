@@ -4,7 +4,7 @@ import { makeHarness, makeOrbRow } from "../testkit/fixtures.ts";
 import { commitAgentHistory } from "./agent-history.ts";
 
 describe("central derived history", () => {
-  it("persists central snapshots without contacting a guest and is idempotent", async () => {
+  it("initializes the central session from repeated empty snapshots", async () => {
     const harness = makeHarness();
     harness.store.seedOrb(makeOrbRow("central", "project", "running"));
     const snapshot = {
