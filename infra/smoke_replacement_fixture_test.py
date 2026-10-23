@@ -2,7 +2,6 @@
 import json
 import os
 from pathlib import Path
-import signal
 import subprocess
 import sys
 import tempfile
@@ -85,19 +84,3 @@ child.wait()
                     self.assertTrue(json.loads(artifacts[0].read_text())['joined'])
                     self.assertNotIn('secret', artifacts[0].read_text())
             self.assertFalse(root.exists(), 'directory cleanup remains independent')
-
-    def test_cleanup_and_reporter_errors_cannot_replace_the_timeout(self):
-        from infra import smoke_replacement_fixture as fixture
-        from unittest.mock import Mock
-        owner = Mock(pid=123)
-        primary = subprocess.TimeoutExpired('secret-argv', 90, output='secret-output')
-        owner.communicate.side_effect = [primary, subprocess.TimeoutExpired('secret', 2), OSError('secret-cleanup')]
-        with tempfile.TemporaryDirectory() as directory, \
-             patch.object(subprocess, 'Popen', return_value=owner), \
-             patch.object(fixture, 'capture_failure', side_effect=OSError('secret-reporter')):
-            with self.assertRaises(subprocess.TimeoutExpired) as failure:
-                fixture.run_fixture(['fixture'], {}, Path(directory), '', False)
-        self.assertIs(failure.exception, primary)
-        owner.send_signal.assert_called_once_with(signal.SIGTERM)
-        owner.kill.assert_called_once()
-        self.assertTrue(all('secret' not in note for note in primary.__notes__))

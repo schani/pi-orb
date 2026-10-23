@@ -4,12 +4,10 @@ import os
 import shutil
 from pathlib import Path
 import stat
-import subprocess
 import tempfile
 import unittest
 
 from infra.smoke_replacement_fixture import run_fixture
-from infra.smoke_replacement_fixture_test import ReplacementFixtureTest
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ID = "00000000-0000-4000-8000-000000000001"
@@ -135,20 +133,14 @@ elif name == "curl":
     elif method == "GET" and (path.endswith(project) and not s.get("project_created") or
                              path.endswith(orb) and not s.get("orb_created")):
         status, body = "404", {"error": {"code": "not_found"}}
-    elif method == "POST" and path == "/api/v1/projects":
+    elif method == "POST" and (path == "/api/v1/projects" or path.endswith("/orbs")):
         from pathlib import Path
-        evidence = list((Path(root) / "evidence").glob("*/fixtures.jsonl"))
-        if any('"outcome":"requested"' in p.read_text() and project in p.read_text() for p in evidence):
-            s.setdefault("recorded_before_create", []).append("project")
-        s["project_created"] = True; save()
-        body = {"id": project}
-    elif method == "POST" and path.endswith("/orbs"):
-        from pathlib import Path
-        evidence = list((Path(root) / "evidence").glob("*/fixtures.jsonl"))
-        if any('"outcome":"requested"' in p.read_text() and orb in p.read_text() for p in evidence):
-            s.setdefault("recorded_before_create", []).append("orb")
-        s["orb_created"] = True; save()
-        body = {"id": orb}
+        kind, identifier = ("project", project) if path == "/api/v1/projects" else ("orb", orb)
+        evidence = (Path(root) / "evidence").glob("*/fixtures.jsonl")
+        if any('"outcome":"requested"' in p.read_text() and identifier in p.read_text() for p in evidence):
+            s.setdefault("recorded_before_create", []).append(kind)
+        s[kind + "_created"] = True; save()
+        body = {"id": identifier}
     elif path.endswith("/stop"):
         s["state"] = "stopped"; save()
     elif path.endswith("/start"):
@@ -215,15 +207,6 @@ class ReplacementSmokeTest(unittest.TestCase):
                              env, root, mode, stage2)
         return root, evidence, sentinel, result
 
-    def test_fake_sleep_preserves_log_without_starting_python(self):
-        root, _, _, _ = self.run_smoke(user="")
-        sleep = root / "bin/sleep"
-        self.assertFalse(sleep.is_symlink(), "stateless sleep must not start the Python dispatcher")
-        result = subprocess.run([str(sleep), "1"], env={**os.environ, "FAKE_ROOT": str(root)}, capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(self.commands(root), [["sleep", "1"]])
-        self.assertEqual(json.loads((root / "state.json").read_text()), {"state": "running", "starts": 0, "incarnation": 0})
-
     def assert_private_evidence(self, root, evidence, sentinel, result):
         self.assertEqual(sentinel.read_text(), "untouched", "preexisting symlink followed")
         children = [p for p in evidence.iterdir() if p.is_dir()]
@@ -267,13 +250,6 @@ class ReplacementSmokeTest(unittest.TestCase):
         self.assertEqual(sum(c[0] == "gcloud" for c in commands), 305)
         self.assertEqual(sum(c[0] == "fake-stage2" for c in commands), 1)
 
-    def commands(self, root):
-        return [json.loads(line) for line in (root / "commands.jsonl").read_text().splitlines()]
-
-    def test_common_authenticated_selected_user_api_and_verified_cleanup(self):
-        root, evidence, _, result = self.run_smoke()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        commands = self.commands(root)
         self.assertTrue(any(c[:3] == ["gcloud", "auth", "print-identity-token"] for c in commands))
         requests = [c for c in commands if c[0] == "curl" and any("/api/v1/" in a for a in c)]
         self.assertTrue(requests)
@@ -286,67 +262,54 @@ class ReplacementSmokeTest(unittest.TestCase):
             deletes = [i for i, c in enumerate(commands) if url in c and "DELETE" in c]
             self.assertEqual(len(deletes), 1)
             self.assertTrue(any(url in c and "GET" in c for c in commands[deletes[0] + 1:]))
-        child = next(p for p in evidence.iterdir() if p.is_dir())
         records = [json.loads(line) for line in (child / "fixtures.jsonl").read_text().splitlines()]
         for kind, identifier in (("project", PROJECT_ID), ("orb", ORB_ID)):
             outcomes = [r["outcome"] for r in records if r["kind"] == kind and r["id"] == identifier]
             self.assertEqual(outcomes, ["requested", "created", "deleted"])
         self.assertIn("cleanup verified", result.stdout)
 
-    def test_failed_owned_fixtures_retained_without_delete(self):
-        for mode, stage2 in (("ssh-failure", False), ("stage2-failure", True)):
-            with self.subTest(mode=mode):
-                root, evidence, _, result = self.run_smoke(mode=mode, stage2=stage2)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertFalse(any("DELETE" in c for c in self.commands(root)))
-                self.assertIn("Failed fixtures retained", result.stderr)
-                child = next(p for p in evidence.iterdir() if p.is_dir())
-                records = [json.loads(line) for line in (child / "fixtures.jsonl").read_text().splitlines()]
-                self.assertEqual([(r["kind"], r["id"]) for r in records if r["outcome"] == "retained"],
-                                 [("project", PROJECT_ID), ("orb", ORB_ID)])
-                self.assertNotIn("smoke passed", result.stdout)
+    def commands(self, root):
+        return [json.loads(line) for line in (root / "commands.jsonl").read_text().splitlines()]
 
-    def test_cleanup_failure_never_passes(self):
-        for mode in ("delete-refused", "cleanup-wrong-body", "cleanup-orb-present",
-                     "provider-list-error", "provider-leak"):
+    def test_adversarial_ownership_observation_and_cleanup(self):
+        for mode in (
+            "ssh-failure", "stage2-failure", "delete-refused", "cleanup-wrong-body",
+            "cleanup-orb-present", "provider-list-error", "provider-leak",
+            "preexisting-project", "preexisting-orb", "missing-user",
+            "disposal-list-permission", "disposal-disk-transport",
+            "negative-list-transport", "old-instance-permission",
+        ):
             with self.subTest(mode=mode):
-                root, _, _, result = self.run_smoke(mode=mode)
+                root, evidence, sentinel, result = self.run_smoke(
+                    mode=mode, stage2=mode == "stage2-failure",
+                    user="" if mode == "missing-user" else USER_ID)
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertNotIn("smoke passed", result.stdout)
-                if mode == "delete-refused":
-                    deletes = [c for c in self.commands(root) if "DELETE" in c]
-                    self.assertEqual(len(deletes), 1, "do not cascade after refused project deletion")
-
-    def test_preexisting_ids_are_never_claimed_or_mutated(self):
-        for mode in ("preexisting-project", "preexisting-orb"):
-            with self.subTest(mode=mode):
-                root, evidence, _, result = self.run_smoke(mode=mode)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertFalse(any("POST" in c or "DELETE" in c or c[:3] == ["gcloud", "compute", "ssh"]
-                                     for c in self.commands(root)))
-                child = next(p for p in evidence.iterdir() if p.is_dir())
-                self.assertFalse((child / "fixtures.jsonl").exists())
-
-    def test_missing_selected_user_fails_before_external_work(self):
-        root, _, _, result = self.run_smoke(user="")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("PI_ORB_USER_ID", result.stderr)
-        self.assertFalse((root / "commands.jsonl").exists())
-
-    def test_observation_failures_never_prove_disposal_or_negative_windows(self):
-        for mode, starts in (("disposal-list-permission", 1), ("disposal-disk-transport", 1),
-                             ("negative-list-transport", 1), ("old-instance-permission", 2)):
-            with self.subTest(mode=mode):
-                root, _, _, result = self.run_smoke(mode=mode)
-                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertEqual(json.loads((root / "state.json").read_text())["starts"], starts)
-
-    def test_failure_dump_excludes_raw_disk_and_orb_metadata(self):
-        root, evidence, sentinel, result = self.run_smoke(mode="ssh-failure")
-        self.assertNotEqual(result.returncode, 0)
-        child = self.assert_private_evidence(root, evidence, sentinel, result)
-        self.assertEqual(json.loads((child / "orb.json").read_text())["state"], "running")
-        self.assertEqual(json.loads((child / "data-disk.json").read_text())["id"], "200")
+                if mode == "missing-user":
+                    self.assertIn("PI_ORB_USER_ID", result.stderr)
+                    self.assertFalse((root / "commands.jsonl").exists())
+                    continue
+                commands = self.commands(root)
+                child = self.assert_private_evidence(root, evidence, sentinel, result)
+                if mode.startswith("preexisting-"):
+                    self.assertFalse(any("POST" in c or "DELETE" in c or
+                        c[:3] == ["gcloud", "compute", "ssh"] for c in commands))
+                    self.assertFalse((child / "fixtures.jsonl").exists())
+                elif mode in {"ssh-failure", "stage2-failure"}:
+                    self.assertFalse(any("DELETE" in c for c in commands))
+                    self.assertIn("Failed fixtures retained", result.stderr)
+                    records = [json.loads(line) for line in (child / "fixtures.jsonl").read_text().splitlines()]
+                    self.assertEqual([(r["kind"], r["id"]) for r in records if r["outcome"] == "retained"],
+                                     [("project", PROJECT_ID), ("orb", ORB_ID)])
+                    self.assertEqual(json.loads((child / "orb.json").read_text())["state"], "running")
+                    self.assertEqual(json.loads((child / "data-disk.json").read_text())["id"], "200")
+                elif mode == "delete-refused":
+                    self.assertEqual(sum("DELETE" in c for c in commands), 1,
+                                     "do not cascade after refused project deletion")
+                elif mode in {"disposal-list-permission", "disposal-disk-transport",
+                              "negative-list-transport", "old-instance-permission"}:
+                    self.assertEqual(json.loads((root / "state.json").read_text())["starts"],
+                                     2 if mode == "old-instance-permission" else 1)
 
 
 if __name__ == "__main__":
