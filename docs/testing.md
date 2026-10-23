@@ -1594,3 +1594,5 @@ Transport mapping tests inject owned fetch rejections rather than assuming fixed
 Runtime role children bind port zero and report the actual bound port through the test-only preload IPC probe. (2026-10-22 PDT).
 
 Socket servers, PTYs, fake timers and temporary roots register unconditional cleanup immediately; independent teardown hooks preserve assertion failures. (2026-10-22 PDT).
+
+Boot-secret retries use advancing time and a permanent outage must terminate at the explicit budget without later requests. (2026-10-22 PDT).
