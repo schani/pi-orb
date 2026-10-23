@@ -27,7 +27,7 @@ function fixture(root: string): string {
   writeFileSync(
     path,
     `import { createServer } from "node:http";
-import { writeFileSync, existsSync } from "node:fs";
+import { writeFileSync, renameSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 const crash = process.env.CRASH_ONCE_FILE;
 if (crash && !existsSync(crash)) { writeFileSync(crash, "crashed"); process.exit(23); }
@@ -40,7 +40,8 @@ if (process.env.GROUP_MEMBER_PID_FILE) {
     "process.on('SIGTERM', () => {}); require('node:fs').writeFileSync(process.env.GROUP_MEMBER_PID_FILE, String(process.pid)); setInterval(() => {}, 1000);",
   ], { stdio: "ignore", env: process.env });
 }
-writeFileSync(process.env.OBSERVED_ENV_FILE, JSON.stringify({
+const observedTemp = process.env.OBSERVED_ENV_FILE + "." + process.pid + ".tmp";
+writeFileSync(observedTemp, JSON.stringify({
   orbId: process.env.PI_ORB_ID,
   repositoryUrl: process.env.PI_ORB_REPOSITORY_URL,
   runtimeMode: process.env.PI_ORB_RUNTIME_MODE,
@@ -63,6 +64,7 @@ writeFileSync(process.env.OBSERVED_ENV_FILE, JSON.stringify({
   gitConfigValue1: process.env.GIT_CONFIG_VALUE_1,
   pid: process.pid,
 }));
+renameSync(observedTemp, process.env.OBSERVED_ENV_FILE);
 const server = createServer((_req, res) => { res.end("ok"); });
 server.listen(Number(process.env.PI_ORB_RUNTIME_PORT), "127.0.0.1");
 const stop = () => server.close(() => process.exit(0));
@@ -71,6 +73,52 @@ process.on("disconnect", stop);
 `,
   );
   return path;
+}
+
+it("publishes fixture JSON only after the complete write", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-orb-atomic-fixture-"));
+  roots.push(root);
+  const observed = join(root, "observed.json");
+  const preload = join(root, "interrupt-write.mjs");
+  writeFileSync(
+    preload,
+    `
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+const write = fs.writeFileSync;
+fs.writeFileSync = (path, data, ...args) => {
+  write(path, "{");
+  const partialVisible = fs.existsSync(process.env.OBSERVED_ENV_FILE);
+  const result = write(path, data, ...args);
+  setImmediate(() => process.send({ partialVisible, published: JSON.parse(fs.readFileSync(process.env.OBSERVED_ENV_FILE, "utf8")) }));
+  return result;
+};
+syncBuiltinESMExports();
+`,
+  );
+  const child = spawn(process.execPath, ["--import", preload, fixture(root)], {
+    env: { OBSERVED_ENV_FILE: observed, PI_ORB_RUNTIME_PORT: "0" },
+    stdio: ["ignore", "ignore", "ignore", "ipc"],
+  });
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  try {
+    const observation = await new Promise<unknown>((resolve, reject) => {
+      child.once("message", resolve);
+      child.once("error", reject);
+      child.once("exit", (code) => reject(new Error(`fixture exited before publication: ${code}`)));
+    });
+    expect(observation).toEqual({
+      partialVisible: false,
+      published: expect.objectContaining({ pid: child.pid }),
+    });
+  } finally {
+    child.kill("SIGKILL");
+    await exited;
+  }
+});
+
+function readObserved<T = Record<string, string>>(path: string): T | null {
+  return existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as T) : null;
 }
 
 function makeProvider(
@@ -236,11 +284,7 @@ describe("ProcessOrbHostProvider", () => {
         context,
       );
       expect(provisioned.isOk()).toBe(true);
-      const observed = await eventually(() =>
-        existsSync(observedEnv)
-          ? (JSON.parse(readFileSync(observedEnv, "utf8")) as Record<string, string>)
-          : null,
-      );
+      const observed = await eventually(() => readObserved(observedEnv));
       expect(observed.runtimeMode).toBe(runtimeMode);
       expect(observed.initialCheckoutCommit).toBe(commit);
       expect(observed.awaitInitialCheckoutCommit).toBe("1");
@@ -285,13 +329,7 @@ describe("ProcessOrbHostProvider", () => {
     expect(provisioned.isOk()).toBe(true);
     if (provisioned.isErr()) return;
 
-    const values = await eventually(() => {
-      try {
-        return JSON.parse(readFileSync(observedEnv, "utf8")) as Record<string, string>;
-      } catch {
-        return null;
-      }
-    });
+    const values = await eventually(() => readObserved(observedEnv));
     expect(values.orbId).toBe(request.orbId);
     expect(values.runtimeMode).toBe(harness === "claude" ? "claude" : "execution");
     expect(values.repositoryUrl).toBe(request.bootstrap.repositoryUrl);
@@ -323,13 +361,7 @@ describe("ProcessOrbHostProvider", () => {
     const { provider } = makeProvider({ OBSERVED_ENV_FILE: observedEnv }, { commandDirectory });
     const provisioned = await provider.provision(task, request, context);
     expect(provisioned.isOk()).toBe(true);
-    const values = await eventually(() => {
-      try {
-        return JSON.parse(readFileSync(observedEnv, "utf8")) as Record<string, string>;
-      } catch {
-        return null;
-      }
-    });
+    const values = await eventually(() => readObserved(observedEnv));
     expect(values.path?.split(":")[0]).toBe(commandDirectory);
     // The image's system gitconfig has no process-host equivalent, so the
     // GitHub credential helper travels in the environment with the shim.
@@ -353,13 +385,7 @@ describe("ProcessOrbHostProvider", () => {
     );
     const provisioned = await provider.provision(task, request, context);
     expect(provisioned.isOk()).toBe(true);
-    const values = await eventually(() => {
-      try {
-        return JSON.parse(readFileSync(observedEnv, "utf8")) as Record<string, string>;
-      } catch {
-        return null;
-      }
-    });
+    const values = await eventually(() => readObserved(observedEnv));
     expect(values.gitConfigCount).toBe("2");
     expect(values.gitConfigKey0).toBe("user.name");
     expect(values.gitConfigValue0).toBe("inherited");
@@ -501,15 +527,9 @@ describe("ProcessOrbHostProvider", () => {
     const first = await provider.provision(task, request, context);
     expect(first.isOk()).toBe(true);
     if (first.isErr()) return;
-    await eventually(() => {
-      try {
-        return readFileSync(observedEnv).length > 0 ? true : null;
-      } catch {
-        return null;
-      }
-    });
+    await eventually(() => readObserved(observedEnv));
 
-    const firstLifetime = JSON.parse(readFileSync(observedEnv, "utf8")).supervisorId;
+    const firstLifetime = readObserved(observedEnv)?.supervisorId;
     expect((await provider.stop(task, first.value.ref, context)).isOk()).toBe(true);
     const stopped = await provider.observe(task, first.value.ref, context);
     expect(stopped.isOk() && stopped.value?.state).toBe("stopped");
@@ -541,13 +561,7 @@ describe("ProcessOrbHostProvider", () => {
     const provisioned = await provider.provision(task, request, context);
     expect(provisioned.isOk()).toBe(true);
     if (provisioned.isErr()) return;
-    const values = await eventually(() => {
-      try {
-        return JSON.parse(readFileSync(observedEnv, "utf8")) as { pid: number };
-      } catch {
-        return null;
-      }
-    });
+    const values = await eventually(() => readObserved<{ pid: number }>(observedEnv));
     expect(processExists(values.pid)).toBe(true);
 
     const replacement = new ProcessOrbHostProvider({
@@ -576,13 +590,7 @@ describe("ProcessOrbHostProvider", () => {
     const first = await provider.provision(task, request, context);
     expect(first.isOk()).toBe(true);
     if (first.isErr()) return;
-    await eventually(() => {
-      try {
-        return readFileSync(observedEnv).length > 0 ? true : null;
-      } catch {
-        return null;
-      }
-    });
+    await eventually(() => readObserved(observedEnv));
     await provider.close();
 
     const replacement = new ProcessOrbHostProvider({
@@ -622,18 +630,12 @@ describe("ProcessOrbHostProvider", () => {
       readFileSync(join(root, "configured-state", request.orbId, "host.json"), "utf8"),
     ).supervisorId;
     releaseRelaunch();
-    await eventually(() => {
-      try {
-        return readFileSync(observedEnv).length > 0 ? true : null;
-      } catch {
-        return null;
-      }
-    });
+    await eventually(() => readObserved(observedEnv));
     const metadata = JSON.parse(
       readFileSync(join(root, "configured-state", request.orbId, "host.json"), "utf8"),
     );
     expect(metadata.supervisorId).toBe(initialLifetime);
-    expect(JSON.parse(readFileSync(observedEnv, "utf8")).supervisorId).toBe(initialLifetime);
+    expect(readObserved(observedEnv)?.supervisorId).toBe(initialLifetime);
     const listed = await provider.listManagedHosts(task, context);
     expect(listed.isOk() && listed.value[0]?.state).toBe("running");
     rmSync(observedEnv, { force: true });
@@ -733,13 +735,7 @@ describe("ProcessOrbHostProvider", () => {
       const { provider, root } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
       const provisioned = await provider.provision(task, request, context);
       expect(provisioned.isOk()).toBe(true);
-      const values = await eventually(() => {
-        try {
-          return JSON.parse(readFileSync(observedEnv, "utf8")) as { pid: number };
-        } catch {
-          return null;
-        }
-      });
+      const values = await eventually(() => readObserved<{ pid: number }>(observedEnv));
       expect(processExists(values.pid)).toBe(true);
 
       // Simulate metadata that lost its process group (e.g. written around a
