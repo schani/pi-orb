@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 # Disposable live-GCE acceptance smoke for docs/compute-replacement.md.
 # Required environment:
@@ -25,7 +26,7 @@ stop_deadline_seconds=$((boot_deadline_seconds / 3))
 dispose_deadline_seconds=$((boot_deadline_seconds / 3))
 negative_window_seconds=65            # more than two 30s terminal-backstop intervals
 
-for command in curl jq gcloud base64 python3; do
+for command in curl jq gcloud base64 python3 mktemp; do
   command -v "$command" >/dev/null || { echo "missing required command: $command" >&2; exit 2; }
 done
 : "${PI_ORB_BASE_URL:?required}"
@@ -38,8 +39,10 @@ orb_id=${PI_ORB_SMOKE_ORB_ID:-$(python3 -c 'import uuid; print(uuid.uuid4())')}
 base=${PI_ORB_BASE_URL%/}
 instance_prefix="pi-orb-${orb_id}-i"
 data_disk="pi-orb-data-${orb_id}"
-log_dir=${PI_ORB_SMOKE_LOG_DIR:-test-failures/compute-replacement-live-$(date +%s)}
-mkdir -p "$log_dir"
+log_root=${PI_ORB_SMOKE_LOG_DIR:-test-failures}
+mkdir -p "$log_root"
+log_dir=$(mktemp -d "$log_root/compute-replacement-live.XXXXXXXX")
+echo "compute replacement evidence: $log_dir" >&2
 
 api() {
   local method=$1 path=$2 body=${3-}
@@ -74,19 +77,30 @@ data_disk_exists() {
 # HTTP status of a broker-authenticated runtime route (runtime-routes.ts) for
 # one bearer token. Never -f: the 401 is the assertion, not a curl failure.
 token_probe_status() {
-  curl -sS -o /dev/null -w '%{http_code}' -X POST \
-    -H "authorization: Bearer $1" -H 'content-type: application/json' \
-    --data '{"reason":"startup"}' "$base/runtime/v1/tokens/model"
+  printf 'header = "authorization: Bearer %s"\n' "$1" |
+    curl -sS -K - -o /dev/null -w '%{http_code}' -X POST \
+      -H 'content-type: application/json' --data '{"reason":"startup"}' \
+      "$base/runtime/v1/tokens/model"
 }
+instance_summary() {
+  jq '{name,id,disks:[.disks[] | {boot,source}],
+    spec:([.metadata.items[] | select(.key == "pi-orb-host-spec-fingerprint") | .value][0])}'
+}
+orb_summary() { jq '{id,state}'; }
 dump_failure() {
-  orb_row >"$log_dir/orb.json" 2>&1 || true
-  instances >"$log_dir/instances.txt" 2>&1 || true
+  orb_row 2>/dev/null | orb_summary >"$log_dir/orb.json" 2>/dev/null || true
+  instances >"$log_dir/instances.txt" 2>/dev/null || true
   gcloud compute disks describe "$data_disk" --project "$PI_ORB_GCP_PROJECT" \
-    --zone "$PI_ORB_GCE_ZONE" --format=json >"$log_dir/data-disk.json" 2>&1 || true
+    --zone "$PI_ORB_GCE_ZONE" --format=json 2>/dev/null |
+    jq '{name,id,status,sizeGb}' >"$log_dir/data-disk.json" 2>/dev/null || true
   echo "first-failure evidence: $log_dir" >&2
 }
 cleanup() {
-  api DELETE "/api/v1/projects/$project_id" >"$log_dir/cleanup.json" 2>&1 || true
+  if api DELETE "/api/v1/projects/$project_id" >/dev/null 2>&1; then
+    echo '{"outcome":"delete-requested"}' >"$log_dir/cleanup.json"
+  else
+    echo '{"outcome":"delete-failed"}' >"$log_dir/cleanup.json"
+  fi
 }
 on_exit() {
   local status=$?
@@ -101,9 +115,9 @@ wait_orb_state() {
   while (( SECONDS < deadline )); do
     row=$(orb_row) || { sleep 2; continue; }
     state=$(jq -r .state <<<"$row")
-    [[ "$state" == "$wanted" ]] && { printf '%s\n' "$row"; return; }
+    [[ "$state" == "$wanted" ]] && { orb_summary <<<"$row"; return; }
     [[ "$state" == failed && "$wanted" != failed ]] && {
-      echo "orb failed while waiting for $wanted: $(jq -r .lastError <<<"$row")" >&2; return 1;
+      echo "orb failed while waiting for $wanted" >&2; return 1;
     }
     sleep 2
   done
@@ -135,7 +149,8 @@ data_disk_exists
 
 # Record the compute identity that must be gone after disposal: the numeric
 # instance ID, the auto-created boot disk, and the incarnation-0 runtime token.
-old_description=$(describe_instance "$old_instance" | tee "$log_dir/old-instance.json")
+old_description=$(describe_instance "$old_instance")
+instance_summary <<<"$old_description" >"$log_dir/old-instance.json"
 old_instance_id=$(jq -r .id <<<"$old_description")
 old_boot_disk=$(jq -r '.disks[] | select(.boot == true) | .source | split("/") | last' \
   <<<"$old_description")
@@ -181,7 +196,8 @@ wait_orb_state running "$boot_deadline_seconds" >"$log_dir/replacement-running.j
 new_instance=$(instances)
 [[ $(wc -w <<<"$new_instance") -eq 1 ]]
 [[ "$new_instance" == "${instance_prefix}1" ]]
-new_description=$(describe_instance "$new_instance" | tee "$log_dir/new-instance.json")
+new_description=$(describe_instance "$new_instance")
+instance_summary <<<"$new_description" >"$log_dir/new-instance.json"
 new_instance_id=$(jq -r .id <<<"$new_description")
 new_boot_disk=$(jq -r '.disks[] | select(.boot == true) | .source | split("/") | last' \
   <<<"$new_description")
@@ -230,7 +246,8 @@ if [[ -n "${PI_ORB_SMOKE_STAGE2_DEPLOY_COMMAND:-}" ]]; then
   wait_orb_state running "$boot_deadline_seconds" >"$log_dir/spec-replacement-running.json"
   stage2_instance=$(instances)
   [[ "$stage2_instance" == "${instance_prefix}2" ]]
-  stage2_description=$(describe_instance "$stage2_instance" | tee "$log_dir/stage2-instance.json")
+  stage2_description=$(describe_instance "$stage2_instance")
+  instance_summary <<<"$stage2_description" >"$log_dir/stage2-instance.json"
   stage2_id=$(jq -r .id <<<"$stage2_description")
   stage2_spec=$(jq -r '.metadata.items[] | select(.key == "pi-orb-host-spec-fingerprint") | .value' \
     <<<"$stage2_description")
