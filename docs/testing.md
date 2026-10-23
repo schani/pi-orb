@@ -1580,3 +1580,5 @@ Shared chunked waits and revision seeds preserve explicit reasons, project ident
 FakeWorld models one host slot per orb; creation history, refs and incarnation fences qualify modeled replacement, while physical uniqueness belongs to real-provider contracts.
 
 Invalid identity CLI input must exit with usage, empty stdout and zero endpoint requests. (2026-10-22 PDT).
+
+Sleep request qualification asserts the exact 3000ms deadline independently of abort mapping. (2026-10-22 PDT).
