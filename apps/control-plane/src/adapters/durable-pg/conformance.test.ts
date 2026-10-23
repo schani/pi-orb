@@ -105,7 +105,7 @@ for (const backend of ["pglite", ...(postgres ? ["postgres"] : [])]) {
         ])
       )._unsafeUnwrap();
       expect((await db.query("UPDATE durable_pg_tasks SET status='sleeping'")).isErr()).toBe(true);
-      await apply("049_durable_sleeping.sql");
+      await apply("050_durable_sleeping.sql");
       expect((await db.query("SELECT record FROM durable_pg_tasks"))._unsafeUnwrap().rows).toEqual([
         { record },
       ]);

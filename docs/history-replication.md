@@ -2,7 +2,7 @@
 
 ## Pi 1.4 persistence (decision 2026-10-22; local, undeployed)
 
-Migration `049_durable_sleeping.sql` widens only the existing task-status constraint. Existing task JSON holds `state.until`, checkpoint and restart count; no new columns/tables or history/auth rewrite. Native code-mode store checkpoints after 64 deltas change representation, not values, rewind or as-of-fork semantics. Trace carriers remain absent.
+Migration `050_durable_sleeping.sql` widens only the existing task-status constraint. Existing task JSON holds `state.until`, checkpoint and restart count; no new columns/tables or history/auth rewrite. Native code-mode store checkpoints after 64 deltas change representation, not values, rewind or as-of-fork semantics. Trace carriers remain absent.
 
 Graceful Harness close restores running tasks to pending through the same owner-fenced native/public transaction and `beginDrain` capability; it does not count as a crash. Revoked owners cannot publish close writes. Public snapshots derive interruption-pause notices from current blocked tasks without persisting duplicate alerts. Abort/child cancellation settles native work and removes the notice. `docs/pi-durable-evaluation.md` defines recovery policy.
 
@@ -81,6 +81,12 @@ Current explicit transcript inspection is company-wide; discovery is owner-scope
 Intended tool description: “Read an orb’s committed transcript in pages using `{orbId,cursor?,maxBytes?}`. `maxBytes` defaults to 65,536 bytes (64 KiB) for the complete JSON reply; override it on any page, including cursor requests. Pagination is always on. Records are complete and atomic: a record too large for the budget is returned alone with required metadata and may exceed `maxBytes`; existing transport/resource caps still apply. Pages follow stable parent ancestry latest-to-oldest. Pass `nextCursor` as `cursor` to continue until `nextCursor` is null.” This prompt contract is not implemented. Follow-up work is tracked in `TODO.md`; qualification includes memory/PGlite/PostgreSQL parity, DST races, Unicode/escaped JSON byte accounting, oversized records and termination. Telemetry records counts, bytes, latency and typed failures, never bodies/cursors.
 
 **Rejected approach (2026-10-09):** the earlier 256 KiB hard cap used JSON text fragments and chunk/phase/offset cursor state to bound even oversized records. Rejected because atomic records and a single-record exception are simpler and avoid agent-side fragment reconstruction and extra state.
+
+## History search (approved 2026-10-22, America/Los_Angeles; core ready locally, not deployed)
+
+`docs/history-search.md` defines owner-only BM25 over committed public records without waking compute. Migration 049 adds one derived token-frequency/length table with zero-token backfill markers; projection shares the source commit transaction. A once-only bounded application backfill completes before its migration marker. Search follows current transcript eligibility, retains archived history and cascades source deletion; private/native payloads are not crawled. Pi registration and CLI help await wording approval; E2E and full validation remain pending.
+
+Old control-plane history writers, including native receipt writers, must be verified quiescent before 049 and remain so through backfill until new writer activation. Old code does not index late commits. The ordinary `infra/release.sh` schema-before-retirement rollout is unsafe for this first migration; the deployment gate is tracked in `TODO.md`. No deployment safety is claimed.
 
 ## Browser display projection (decided 2026-10-01; implemented locally, validation pending)
 

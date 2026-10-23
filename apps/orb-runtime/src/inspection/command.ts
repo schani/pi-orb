@@ -2,17 +2,22 @@ import {
   CHART_CONTENT_TYPE,
   type ContentBlock,
   type HistoryRecord,
+  type HistorySearchRequest,
+  HistorySearchRequestSchema,
+  type HistorySearchResult,
   type JsonValue,
   type OrbInspectionItem,
   type OrbSelf,
   type OrbTranscript,
 } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
+import { Check } from "typebox/value";
 
 export const INSPECTION_USAGE = `usage:
   pi-orb self [--json]
   pi-orb orbs [query] [--json]
   pi-orb transcript <orb-id> [--json]
+  pi-orb search QUERY [--orb ID | --project | --all] [--limit N] [--json]
   pi-orb send <orb-id> "message" [--request-id <id>]
   pi-orb alert "message" [--request-id <id>]
   pi-orb id-token --audience <audience> [--ttl-seconds <60..3600>]
@@ -20,6 +25,7 @@ export const INSPECTION_USAGE = `usage:
   pi-orb delete`;
 
 export type InspectionCommand =
+  | { readonly type: "search"; readonly request: HistorySearchRequest; readonly json: boolean }
   | { readonly type: "self"; readonly json: boolean }
   | { readonly type: "orbs"; readonly query: string | null; readonly json: boolean }
   | { readonly type: "transcript"; readonly orbId: string; readonly json: boolean };
@@ -29,6 +35,7 @@ export function parseInspectionArgs(argv: readonly string[]): Result<InspectionC
   if (jsonCount > 1) return err(`--json given twice\n${INSPECTION_USAGE}`);
   const args = argv.filter((argument) => argument !== "--json");
   const [subcommand, ...operands] = args;
+  if (subcommand === "search") return parseSearchArgs(operands, jsonCount === 1);
   if (subcommand === "self" && operands.length === 0)
     return ok({ type: "self", json: jsonCount === 1 });
   if (subcommand === "orbs" && operands.length <= 1) {
@@ -44,6 +51,56 @@ export function parseInspectionArgs(argv: readonly string[]): Result<InspectionC
     return ok({ type: "transcript", orbId: transcriptOrbId, json: jsonCount === 1 });
   }
   return err(`invalid pi-orb command\n${INSPECTION_USAGE}`);
+}
+
+function parseSearchArgs(
+  args: readonly string[],
+  json: boolean,
+): Result<InspectionCommand, string> {
+  const request: { query?: string; scope?: "project" | "user"; orbId?: string; limit?: number } =
+    {};
+  let selector = false;
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index];
+    if (argument === undefined) continue;
+    if (argument === "--project" || argument === "--all" || argument === "--orb") {
+      if (selector) return err("conflicting search scopes");
+      selector = true;
+      if (argument === "--orb") {
+        const id = args[++index];
+        if (id === undefined || !id.trim() || id.startsWith("-"))
+          return err("invalid search orb ID");
+        request.orbId = id;
+      } else {
+        request.scope = argument === "--project" ? "project" : "user";
+      }
+    } else if (argument === "--limit") {
+      const limit = args[++index];
+      if (request.limit !== undefined || limit === undefined || !/^[0-9]+$/.test(limit))
+        return err("invalid search limit");
+      request.limit = Number(limit);
+    } else if (argument.startsWith("-") || request.query !== undefined) {
+      return err("invalid history search arguments");
+    } else {
+      request.query = argument;
+    }
+  }
+  return Check(HistorySearchRequestSchema, request)
+    ? ok({ type: "search", request, json })
+    : err("invalid history search arguments");
+}
+
+export function formatHistorySearch(result: HistorySearchResult): string {
+  if (result.hits.length === 0) return "No matches.\n";
+  const hits = result.hits.map((hit) =>
+    [
+      `${cell(hit.name ?? "untitled orb")} (${cell(hit.orbId)}) — ${cell(hit.projectName)}`,
+      `Session: ${cell(hit.sessionId)} Record: ${cell(hit.recordId)} Score: ${hit.score}`,
+      hit.orbUrl,
+      hit.snippet,
+    ].join("\n"),
+  );
+  return `${hits.join("\n\n")}\n`;
 }
 
 export function formatSelf(self: OrbSelf): string {
