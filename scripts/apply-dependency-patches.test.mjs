@@ -48,8 +48,7 @@ test("applies patches without a Git repository and accepts already-applied patch
   assert.deepEqual(second.value, [{ patch: "example+1.0.0.patch", status: "already_applied" }]);
 });
 
-function sealedFixture() {
-  const root = fixture();
+function sealedFixture(root = fixture()) {
   rmSync(join(root, "patches"), { recursive: true });
   cpSync(join(repository, "patches"), join(root, "patches"), { recursive: true });
   for (const patch of [
@@ -82,11 +81,11 @@ function sealedCli(root) {
     join(root, "scripts/apply-dependency-patches.mjs"),
   );
   symlinkSync(join(repository, "node_modules/neverthrow"), join(root, "node_modules/neverthrow"));
-  return () =>
+  return ({ cwd = root, env = {} } = {}) =>
     spawnSync(process.execPath, [join(root, "scripts/apply-dependency-patches.mjs")], {
-      cwd: root,
+      cwd,
       encoding: "utf8",
-      env: { ...process.env, NODE_OPTIONS: "" },
+      env: { ...process.env, NODE_OPTIONS: "", ...env },
     });
 }
 
@@ -160,21 +159,7 @@ test("CLI seals code-mode's bounded image prelude", () => {
     assert.equal(reversed.status, 0, reversed.stderr);
   }
   assert.equal(hash(), "2fc2886529c0a7e8a7c9ac16b7c96fb2bbf8d2dce562801c5a09d723a57ea6ca");
-  mkdirSync(join(root, "scripts"));
-  cpSync(
-    join(repository, "scripts/apply-dependency-patches.mjs"),
-    join(root, "scripts/apply-dependency-patches.mjs"),
-  );
-  symlinkSync(
-    join(repository, "node_modules/neverthrow"),
-    join(root, "node_modules/neverthrow"),
-    "dir",
-  );
-  const run = () =>
-    spawnSync(process.execPath, [join(root, "scripts/apply-dependency-patches.mjs")], {
-      cwd: root,
-      encoding: "utf8",
-    });
+  const run = sealedCli(root);
   const first = run();
   assert.equal(first.status, 0, first.stderr);
   assert.match(first.stdout, /pi-codemode\+1\.3\.0\.patch: applied/);
@@ -188,21 +173,11 @@ test("CLI ignores inherited repository selection", () => {
   const ancestor = fixture();
   assert.equal(spawnSync("git", ["init", "--quiet"], { cwd: ancestor }).status, 0);
   const root = sealedFixture();
-  mkdirSync(join(root, "scripts"));
-  cpSync(
-    join(repository, "scripts/apply-dependency-patches.mjs"),
-    join(root, "scripts/apply-dependency-patches.mjs"),
-  );
-  symlinkSync(
-    join(repository, "node_modules/neverthrow"),
-    join(root, "node_modules/neverthrow"),
-    "dir",
-  );
-  const result = spawnSync(process.execPath, [join(root, "scripts/apply-dependency-patches.mjs")], {
+  const run = sealedCli(root);
+  const result = run({
     cwd: root,
     encoding: "utf8",
     env: {
-      ...process.env,
       GIT_DIR: join(ancestor, ".git"),
       GIT_WORK_TREE: ancestor,
       GIT_COMMON_DIR: join(ancestor, ".git"),
@@ -237,19 +212,9 @@ test("rejects missing or empty patch directories", () => {
 
 test("CLI resolves its installation root even when launched from a workspace", () => {
   const root = sealedFixture();
-  mkdirSync(join(root, "scripts"));
   mkdirSync(join(root, "apps/workspace"), { recursive: true });
-  cpSync(
-    join(repository, "scripts/apply-dependency-patches.mjs"),
-    join(root, "scripts/apply-dependency-patches.mjs"),
-  );
-  symlinkSync(
-    join(repository, "node_modules/neverthrow"),
-    join(root, "node_modules/neverthrow"),
-    "dir",
-  );
-  assert.equal(spawnSync("git", ["init", "--quiet"], { cwd: root }).status, 0);
-  const result = spawnSync(process.execPath, [join(root, "scripts/apply-dependency-patches.mjs")], {
+  const run = sealedCli(root);
+  const result = run({
     cwd: join(root, "apps/workspace"),
     encoding: "utf8",
   });
@@ -258,31 +223,15 @@ test("CLI resolves its installation root even when launched from a workspace", (
   assert.match(result.stdout, /@earendil-works\+pi-ai\+1\.3\.0\.patch/);
   const target = join(root, "node_modules/@earendil-works/pi-ai/dist/types.d.ts");
   writeFileSync(target, `${readFileSync(target, "utf8")}\n// drift\n`);
-  const failure = spawnSync(
-    process.execPath,
-    [join(root, "scripts/apply-dependency-patches.mjs")],
-    {
-      cwd: root,
-      encoding: "utf8",
-    },
-  );
+  const failure = run();
   assert.equal(failure.status, 1);
   assert.match(failure.stderr, /installed bytes mismatch/);
 });
 
 test("CLI reports a missing Git executable as a typed installation failure", () => {
   const root = sealedFixture();
-  mkdirSync(join(root, "scripts"));
-  cpSync(
-    join(repository, "scripts/apply-dependency-patches.mjs"),
-    join(root, "scripts/apply-dependency-patches.mjs"),
-  );
-  symlinkSync(
-    join(repository, "node_modules/neverthrow"),
-    join(root, "node_modules/neverthrow"),
-    "dir",
-  );
-  const result = spawnSync(process.execPath, [join(root, "scripts/apply-dependency-patches.mjs")], {
+  const run = sealedCli(root);
+  const result = run({
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, PATH: join(root, "missing-bin") },
@@ -294,17 +243,8 @@ test("CLI reports a missing Git executable as a typed installation failure", () 
 
 test("CLI refuses unsealed fixtures without modifying their dependencies", () => {
   const root = fixture();
-  mkdirSync(join(root, "scripts"));
-  cpSync(
-    join(repository, "scripts/apply-dependency-patches.mjs"),
-    join(root, "scripts/apply-dependency-patches.mjs"),
-  );
-  symlinkSync(
-    join(repository, "node_modules/neverthrow"),
-    join(root, "node_modules/neverthrow"),
-    "dir",
-  );
-  const result = spawnSync(process.execPath, [join(root, "scripts/apply-dependency-patches.mjs")], {
+  const run = sealedCli(root);
+  const result = run({
     cwd: root,
     encoding: "utf8",
   });
@@ -314,34 +254,7 @@ test("CLI refuses unsealed fixtures without modifying their dependencies", () =>
 
 for (const nested of [false, true]) {
   test(`preserves all shipped patches in a ${nested ? "nested" : "standalone"} install`, () => {
-    const root = nested ? nestedFixture().root : fixture();
-    rmSync(join(root, "patches"), { recursive: true });
-    cpSync(join(repository, "patches"), join(root, "patches"), { recursive: true });
-    for (const patch of [
-      "@earendil-works+pi-ai+1.3.0.patch",
-      "@earendil-works+pi-codemode+1.3.0.patch",
-      "@earendil-works+pi-durable+1.3.0.patch",
-      "@earendil-works+pi-coding-agent+1.3.0.patch",
-    ]) {
-      const source = readFileSync(join(root, "patches", patch), "utf8");
-      for (const line of source.split("\n")) {
-        if (!line.startsWith("diff --git ")) continue;
-        const path = line.split(" ")[2].slice(2);
-        mkdirSync(join(root, path, ".."), { recursive: true });
-        cpSync(join(repository, path), join(root, path));
-      }
-      const reversed = spawnSync("git", ["apply", "--reverse", join(root, "patches", patch)], {
-        cwd: root,
-        encoding: "utf8",
-        env: {
-          PATH: process.env.PATH,
-          GIT_CEILING_DIRECTORIES: dirname(root),
-          GIT_CONFIG_NOSYSTEM: "1",
-          GIT_CONFIG_GLOBAL: "/dev/null",
-        },
-      });
-      assert.equal(reversed.status, 0, reversed.stderr);
-    }
+    const root = sealedFixture(nested ? nestedFixture().root : fixture());
     const result = applyDependencyPatches(root);
     assert.equal(result.isOk(), true, JSON.stringify(result.error));
     assert.equal(result.value.length, 4);
