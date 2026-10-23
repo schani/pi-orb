@@ -106,7 +106,7 @@ it.skipIf(process.platform !== "linux" || process.arch !== "x64")(
       };
       expect(progress.phase).toBe("known-receipt-observation");
       expect(progress.elapsedMs).toBeLessThan(110_000);
-      expect(progress.modelRequests).toBe(5);
+      expect(progress.modelRequests).toBe(4);
       expect(progress.phases.map((item) => item.phase)).toContain("known-receipt-durable");
       expect((await readdir(directory)).sort()).toEqual(["candidate", "validator"]);
       const wrapper = await readFile("infra/native-vm/claude-acceptance.sh", "utf8");
@@ -153,19 +153,19 @@ it.skipIf(process.platform !== "linux" || process.arch !== "x64")(
     const durable = timing.phases.find((item) => item.phase === "known-receipt-durable");
     const killed = timing.phases.find((item) => item.phase === "known-receipt-killed");
     expect(killed?.elapsedMs).toBeGreaterThanOrEqual(durable?.elapsedMs ?? Infinity);
-    expect(killed?.modelRequests).toBe(5);
+    expect(killed?.modelRequests).toBe(4);
     for (const phase of ["settled-restart-drained", "automatic-recovery-drained"])
       expect(phases).toContain(phase);
     expect(
       timing.phases.find((item) => item.phase === "automatic-recovery-drained")?.modelRequests,
-    ).toBe(6);
+    ).toBe(5);
     for (let index = 1; index < timing.phases.length; index++)
       expect(timing.phases[index]?.elapsedMs).toBeGreaterThanOrEqual(
         timing.phases[index - 1]?.elapsedMs ?? Infinity,
       );
-    expect(timing.nativeEdges.filter((edge) => edge.event === "native-spawn")).toHaveLength(7);
+    expect(timing.nativeEdges.filter((edge) => edge.event === "native-spawn")).toHaveLength(6);
     for (const event of ["native-shutdown-request", "native-stdout-eof", "sdk-iterator-eof"])
-      expect(timing.nativeEdges.filter((edge) => edge.event === event)).toHaveLength(6);
+      expect(timing.nativeEdges.filter((edge) => edge.event === event)).toHaveLength(5);
     expect(report).toEqual({
       schemaVersion: 1,
       syntheticOnly: true,

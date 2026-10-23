@@ -1,5 +1,30 @@
 import type { HistoryRecord } from "@pi-orb/protocol";
-import { BOOT_BASELINE_TYPE } from "./boot-policy.ts";
+import { BOOT_BASELINE_TYPE, HOST_RESTARTED_TYPE } from "./boot-policy.ts";
+
+type BootMarker = Extract<HistoryRecord, { type: "event" }>;
+
+function passiveBootMarker(record: HistoryRecord): boolean {
+  return (
+    record.type === "event" &&
+    record.eventType === HOST_RESTARTED_TYPE &&
+    record.overflow.operationId === undefined
+  );
+}
+
+/** The native receipt, not submission or public success, proves context was appended. */
+export function pendingBootContext(records: readonly HistoryRecord[]): BootMarker[] {
+  const received = new Set(
+    records.flatMap((record) =>
+      record.type === "event" && record.eventType === "claude.boot_receipt"
+        ? [record.overflow.operationId]
+        : [],
+    ),
+  );
+  return records.filter(
+    (record): record is BootMarker =>
+      record.type === "event" && passiveBootMarker(record) && !received.has(record.id),
+  );
+}
 
 /** Adapt native root evidence to the pure boot policy. */
 export function claudeBootEntries(records: readonly HistoryRecord[]): unknown[] {
@@ -43,7 +68,7 @@ export function claudeBootEntries(records: readonly HistoryRecord[]): unknown[] 
       ];
     }
     if (record.type !== "event") return [];
-    if (record.eventType === BOOT_BASELINE_TYPE)
+    if (record.eventType === BOOT_BASELINE_TYPE || passiveBootMarker(record))
       return [{ type: "custom", customType: record.eventType, data: record.overflow }];
     if (
       [
