@@ -1518,3 +1518,7 @@ normalized rows without retaining content, credentials or raw provider errors.
 The manual network-change reproducer validates modes before resource creation,
 bounds Docker calls and tears down browser/server on failure. Its output remains
 observations, not assertions that network changes caused a browser failure.
+The owned manual preemption experiment records before/recovered public versions
+and stateChangedAt. Running with at least two version advances and a later state
+transition timestamp witnesses recovery even when starting falls between polls.
+No concurrent lifecycle command belongs in that experiment.
