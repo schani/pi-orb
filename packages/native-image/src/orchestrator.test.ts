@@ -31,6 +31,7 @@ const input = (operationId = "owner-a"): ImageBuildInput => ({
 
 class FakeEffects implements ImageBuildEffects {
   readonly actions: string[] = [];
+  readonly cleanupSignals: { signal: AbortSignal; aborted: boolean }[] = [];
   manifest?: ImageBuildManifest;
   failure?: ImageBuildError;
   failAt?: string;
@@ -44,7 +45,13 @@ class FakeEffects implements ImageBuildEffects {
   now(): string {
     return "2026-09-05T00:00:00.000Z";
   }
-  run(stage: ImageBuildStage, action: string): ResultAsync<void, ImageBuildError> {
+  run(
+    stage: ImageBuildStage,
+    action: string,
+    _input: ImageBuildInput,
+    signal: AbortSignal,
+  ): ResultAsync<void, ImageBuildError> {
+    if (stage === "cleanup") this.cleanupSignals.push({ signal, aborted: signal.aborted });
     const key = `${stage}:${action}`;
     this.actions.push(key);
     if (this.abortAt === key) this.controller.abort();
@@ -173,12 +180,17 @@ describe("native image build orchestration", () => {
     };
     class AssertionEffects extends FakeEffects {
       probes = 0;
-      override run(stage: ImageBuildStage, action: string): ResultAsync<void, ImageBuildError> {
+      override run(
+        stage: ImageBuildStage,
+        action: string,
+        input: ImageBuildInput,
+        signal: AbortSignal,
+      ): ResultAsync<void, ImageBuildError> {
         if (stage === "validate" && action === "probe" && ++this.probes === 1) {
           this.actions.push("validate:probe");
           return errAsync(failure);
         }
-        return super.run(stage, action);
+        return super.run(stage, action, input, signal);
       }
     }
     const effects = new AssertionEffects();
@@ -233,6 +245,12 @@ describe("native image build orchestration", () => {
     effects.abortAt = "install:run";
     const result = await buildNativeImage(input(), effects, effects.controller.signal);
     expect(result.isErr()).toBe(true);
+    expect(effects.controller.signal.aborted).toBe(true);
+    expect(effects.cleanupSignals).toHaveLength(6);
+    for (const entry of effects.cleanupSignals) {
+      expect(entry.signal).not.toBe(effects.controller.signal);
+      expect(entry.aborted).toBe(false);
+    }
     expect(effects.actions.slice(-5)).toEqual([
       "cleanup:delete-validator",
       "cleanup:delete-builder",
