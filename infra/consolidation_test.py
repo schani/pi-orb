@@ -8,6 +8,34 @@ from infra.release_state import SERVICES
 
 
 class ConsolidationTest(unittest.TestCase):
+    def test_foundation_commands_have_one_ci_node_owner(self):
+        import os
+        import tempfile
+        suites = ['state_split.test.mjs', 'adopt.test.mjs', 'iam_contract.test.mjs']
+        scripts = json.loads(Path('package.json').read_text())['scripts']
+        ci = Path('.github/workflows/ci.yml').read_text()
+        self.assertIn('run: infra/foundation/test-tofu.sh', ci)
+        self.assertNotIn('run: infra/foundation/test.sh', ci)
+        for suite in suites:
+            self.assertEqual(scripts['test:infra'].count('infra/foundation/' + suite), 1)
+        with tempfile.TemporaryDirectory() as work:
+            directory = Path(work)
+            log = directory / 'calls'
+            for name in ('tofu', 'node'):
+                executable = directory / name
+                executable.write_text('#!/bin/sh\nprintf "%s %s\\n" "' + name + '" "$*" >> "$CALLS"\n')
+                executable.chmod(0o755)
+            env = {**os.environ, 'PATH': work + ':' + os.environ['PATH'], 'CALLS': str(log)}
+            for command, count in [('infra/foundation/test-tofu.sh', 0), ('infra/foundation/test.sh', 1)]:
+                log.write_text('')
+                result = subprocess.run([command], env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                calls = log.read_text()
+                self.assertIn(' test', calls)
+                self.assertEqual(calls.count('node --test'), count)
+                for suite in suites:
+                    self.assertEqual(calls.count(suite), count)
+
     def test_one_service_preserves_issuer_resource(self):
         source = Path('infra/run.tf').read_text()
         resources = '\n'.join(path.read_text() for path in Path('infra').glob('*.tf'))

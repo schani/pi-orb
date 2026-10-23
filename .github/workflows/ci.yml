@@ -91,7 +91,7 @@ jobs:
           echo "$RUNNER_TEMP/tofu-bin" >> "$GITHUB_PATH"
 
       - name: Test foundation contracts
-        run: infra/foundation/test.sh
+        run: infra/foundation/test-tofu.sh
 
       - name: Typecheck
         run: npm run typecheck
