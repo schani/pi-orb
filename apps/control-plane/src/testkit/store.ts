@@ -19,10 +19,6 @@ import type {
   StoreError,
 } from "../domain/errors.ts";
 import { orderHistoryForPresentation } from "../domain/history-presentation.ts";
-import {
-  extractHistorySearchText,
-  historySearchTermFrequencies,
-} from "../domain/history-search-text.ts";
 import { jsonEqual } from "../domain/json-equal.ts";
 import { logOrbEvent } from "../domain/log.ts";
 import { messageBatchId } from "../domain/message-batch.ts";
@@ -42,9 +38,6 @@ import type {
   EnqueueOrbMessageParams,
   FailOrbAndRequestComputeDiscardParams,
   FinalizeHostDiscardParams,
-  HistorySearchHit,
-  HistorySearchParams,
-  HistorySearchResult,
   MintSlotClaim,
   OrbMessageTargetNotFound,
   RecordHostDiscardStatusParams,
@@ -2411,86 +2404,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         ? okAsync<void, ReplicationIntegrityError>(undefined)
         : errAsync<void, ReplicationIntegrityError>(integrity),
     );
-  }
-
-  searchHistory(
-    task: SimulationTask,
-    params: HistorySearchParams,
-  ): ResultAsync<HistorySearchResult, StoreError> {
-    return this.access(task, FAILPOINTS.storeRead, "search history", () => {
-      if (params.terms.length === 0) return { hits: [], documentCount: 0, candidateCount: 0 };
-      const documents: Array<{
-        hit: Omit<HistorySearchHit, "score">;
-        tokenCount: number;
-        termFrequencies: Record<string, number>;
-      }> = [];
-      for (const orb of this.orbs.values()) {
-        const project = this.projects.get(orb.projectId);
-        if (
-          !project ||
-          project.ownerUserId !== params.ownerUserId ||
-          project.state === "deleting" ||
-          (params.projectId !== undefined && project.id !== params.projectId) ||
-          (params.orbId !== undefined && orb.id !== params.orbId) ||
-          orb.state === "deleting" ||
-          orb.harnessSessionId === null ||
-          orb.replicationCursor === null
-        )
-          continue;
-        const replica = this.replicas.get(orb.id);
-        const records: HistoryRecord[] = [];
-        if (orb.harness === "claude") {
-          records.push(...(replica?.records.values() ?? []));
-        } else {
-          let id: string | null = orb.replicationCursor;
-          while (id !== null) {
-            const record: HistoryRecord | undefined = replica?.records.get(id);
-            if (record === undefined) break;
-            records.push(record);
-            id = record.parentId;
-          }
-        }
-        for (const record of records) {
-          const metadata = historySearchTermFrequencies(extractHistorySearchText(record));
-          if (metadata.tokenCount === 0) continue;
-          documents.push({
-            hit: {
-              orbId: orb.id,
-              sessionId: orb.harnessSessionId,
-              recordId: record.id,
-              name: orb.name,
-              projectName: project.name,
-              record,
-            },
-            ...metadata,
-          });
-        }
-      }
-      const terms = [...new Set(params.terms)];
-      const documentCount = documents.length;
-      const averageLength = documents.reduce((sum, doc) => sum + doc.tokenCount, 0) / documentCount;
-      const frequencies = terms.map(
-        (term) => documents.filter((doc) => (doc.termFrequencies[term] ?? 0) > 0).length,
-      );
-      const hits: HistorySearchHit[] = [];
-      for (const doc of documents) {
-        let score = 0;
-        for (const [index, term] of terms.entries()) {
-          const tf = doc.termFrequencies[term] ?? 0;
-          if (tf === 0) continue;
-          const df = frequencies[index] ?? 0;
-          score +=
-            (Math.log(1 + (documentCount - df + 0.5) / (df + 0.5)) * tf * 2.2) /
-            (tf + 1.2 * (0.25 + (0.75 * doc.tokenCount) / averageLength));
-        }
-        if (score > 0) hits.push({ ...doc.hit, score });
-      }
-      const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
-      hits.sort(
-        (a, b) => b.score - a.score || compare(a.orbId, b.orbId) || compare(a.recordId, b.recordId),
-      );
-      return { documentCount, candidateCount: hits.length, hits: hits.slice(0, params.limit) };
-    });
   }
 
   readHistoryRecord(

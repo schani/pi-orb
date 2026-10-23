@@ -314,7 +314,6 @@ describe("minted tokens verify against the served JWKS", () => {
     });
     registerRuntimeRoutes(app, task, {
       appOrigin: "https://browser.test",
-      searchHistory: () => okAsync({ hits: [] }),
       send: (task, caller, request) =>
         sendGuestOrbMessage(task, { ...makeHarness().deps, store }, caller, request),
       spawn: () => okAsync(undefined),

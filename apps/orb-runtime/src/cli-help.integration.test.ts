@@ -17,7 +17,6 @@ const commands = [
   "self",
   "orbs",
   "transcript",
-  "search",
   "spawn",
   "archive",
   "delete",
@@ -84,19 +83,10 @@ describe("public pi-orb help", () => {
     async (command) => {
       const output = await help([command, "--help"]);
       expect(output).toContain(`pi-orb ${command}`);
-      if (command === "search") {
-        expect(INSPECTION_USAGE).toContain(
-          "pi-orb search QUERY [--orb ID | --project | --all] [--limit N] [--json]",
-        );
-        expect(output).toBe(
-          "usage: pi-orb search QUERY [--orb ID | --project | --all] [--limit N] [--json]\n\nSearch your committed public history with BM25.\n",
-        );
-      } else {
-        expect(output).toContain("Examples:");
-        expect(output).toContain("Output:");
-        expect(output).toContain("Retry:");
-        expect(output).toContain("Exit:");
-      }
+      expect(output).toContain("Examples:");
+      expect(output).toContain("Output:");
+      expect(output).toContain("Retry:");
+      expect(output).toContain("Exit:");
       expect(await help(["--help"])).toContain(output.trimEnd());
       expect(await help([command, "-h"])).toBe(output);
       expect(await help([command, "--help", "--request-id", "help-test"])).toBe(output);

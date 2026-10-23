@@ -59,12 +59,6 @@ const commands = {
       "pi-orb transcript 123e4567-e89b-42d3-a456-426614174000 --json > conversation.json",
     ],
   },
-  search: {
-    usage: "pi-orb search QUERY [--orb ID | --project | --all] [--limit N] [--json]",
-    summary: "Search your committed public history with BM25.",
-    details: [],
-    examples: [],
-  },
   spawn: {
     usage:
       "pi-orb spawn (--prompt <text> | --prompt-file <path|->) [--name <name>] [--model <provider/id>] [--id <uuid>] [--json]",
@@ -253,7 +247,9 @@ function commandHelp(command: Command): string {
     "",
     summary,
     ...details,
-    ...(examples.length > 0 ? ["", "Examples:", ...examples.map((example) => `  ${example}`)] : []),
+    "",
+    "Examples:",
+    ...examples.map((example) => `  ${example}`),
     "",
   ].join("\n");
 }
