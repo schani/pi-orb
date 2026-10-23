@@ -100,7 +100,6 @@ export function createGoogleLoginProvider(
             nonce,
             code_challenge: await oidc.calculatePKCECodeChallenge(codeVerifier),
             code_challenge_method: "S256",
-            hd: "heyglide.com",
           }).href;
           return { authorizationUrl, state, nonce, codeVerifier };
         }, unavailable)(),

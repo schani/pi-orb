@@ -8,6 +8,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Qualify signed-out Google login workaround** (2026-10-23; `docs/postmortems/2026-10-23-google-signed-out-login-500.md`). Removing outbound OAuth `hd` restores the initial Google sign-in screen in the affected Chrome context; implemented and focused-tested locally, not deployed. Qualify full real-Google login and return through our callback in affected Chrome and Safari, preserving signed Workspace admission. If SSO still fails after username entry, investigate Workspace profile/routing with its administrator; no underlying configuration defect is established.
+
 - **Qualify and diagnose database contention** (2026-10-23; `docs/postmortems/2026-10-23-agent-lease-loss-drain.md`). The cached lost-owner recovery blocker, publication-error propagation and failed-release tracking are corrected locally; renewal/drain cause and final close-outcome diagnostics are included. Add real PostgreSQL pool/lock-contention coverage and bounded pool-acquisition/SQL/transaction timings with backend/operation correlation. Identify the original migration/transaction lock chain before claiming its cause fixed. Discuss any persisted-state addition before implementation.
 
 - **Complete predeployment qualification for Claude interrupted-thinking retirement and passive restart context** (2026-10-23 PDT; `docs/postmortems/2026-10-22-claude-timeline-identity-gap.md`). Run exact-source full-suite, full E2E/Docker and CI gates, including supervised local-fake qualification. Preserve first-failure evidence; historical passes do not qualify the simplified implementation or authorize deployment/replay.
