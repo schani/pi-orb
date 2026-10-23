@@ -58,6 +58,37 @@ class BrowserEvidenceTest(unittest.TestCase):
         proof = steps('durable-qualification.yml')['Prove packaged worker, Git and skills without network']
         self.assertIn('2>&1 | tee', proof)
 
+    def test_nested_failure_producers_have_bounded_uploads(self):
+        producers = {
+            'e2e/transcript-cache-stopped.e2e.test.ts': ('test-failures/stopped-cache-*', ['evidence.json', 'failure.png', 'trace.zip']),
+            'e2e/full-slice.e2e.test.ts': ('test-failures/full-slice-orb-*', ['failure.txt', 'control-plane.log', 'failing-orb.json', 'failing-history.json', 'capture-outcomes.json']),
+            'e2e/empty-live-reasoning-frontend.e2e.test.ts': ('.context/empty-live-reasoning/simplification/*-first-failure', ['error.txt', 'frames.json', 'detail-requests.json', 'page-errors.json', 'page.html', 'page.png']),
+            'e2e/orb-alerts.e2e.test.ts': ('.context/orb-alerts/evidence/*', ['failure.txt', 'control-plane.log', 'orb.json', 'history.json']),
+            'e2e/orb-sleep.e2e.test.ts': ('.context/orb-sleep/evidence/*', ['failure.txt', 'manifest.json', 'control-plane.log', 'orb-view.json', 'history.json', 'messages.json']),
+        }
+        expected = set()
+        for producer, (directory, leaves) in producers.items():
+            source = (ROOT / producer).read_text()
+            for leaf in leaves:
+                self.assertIn('"' + leaf + '"', source, producer)
+                expected.add(directory + '/' + leaf)
+        for workflow in ('e2e.yml', 'durable-qualification.yml'):
+            step = steps(workflow)['Upload nested scenario failure evidence']
+            path = re.search(r'^          path: \|\n((?:            [^\n]+\n)+)', step, re.M)
+            self.assertEqual(set(path.group(1).split()), expected)
+            for policy in ('if: failure()', 'include-hidden-files: true', 'if-no-files-found: ignore', 'retention-days: 14'):
+                self.assertIn(policy, step)
+        process = steps('durable-qualification.yml')['Upload missing-orb navigation failure evidence']
+        path = re.search(r'^          path: \|\n((?:            [^\n]+\n)+)', process, re.M)
+        self.assertEqual(set(path.group(1).split()), {
+            'test-failures/missing-orb-*/' + leaf for leaf in ('failure.json', 'desktop.png', 'geometry.json')
+        })
+        import fnmatch
+        for forbidden in ('test-failures/full-slice-orb-test/fixture/auth/token',
+                          '.context/orb-alerts/evidence/test/host/auth.json',
+                          '.context/orb-sleep/evidence/test/host/workspace/private.txt'):
+            self.assertFalse(any(fnmatch.fnmatchcase(forbidden, pattern) for pattern in expected))
+
     def test_ci_exercises_provider_supervisor_contracts(self):
         scripts = json.loads((ROOT / 'package.json').read_text())['scripts']
         self.assertIn('scripts/local-fake-provider.test.mjs', scripts['test:infra'])
