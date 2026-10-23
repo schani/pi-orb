@@ -345,6 +345,8 @@ it("isolates colliding native IDs through reads, replacement, retirement and arc
         (await authority.acquire(id, "writer", 0, 0, 100))._unsafeUnwrap(),
       ),
     );
+    const [ownerA, ownerB] = owners;
+    if (ownerA === undefined || ownerB === undefined) expect.fail("fixture owners missing");
     const conversationId = 1 as ConversationId;
     const id = 2 as DocumentId;
     for (const [index, owner] of owners.entries()) {
@@ -402,7 +404,7 @@ it("isolates colliding native IDs through reads, replacement, retirement and arc
         )
       ).items,
     ).toEqual([original?.record]);
-    (await authority.archive(owners[0]!, async () => ok(undefined)))._unsafeUnwrap();
+    (await authority.archive(ownerA, async () => ok(undefined)))._unsafeUnwrap();
     expect(await a.conversation(conversationId, ctx)).toBeUndefined();
     expect(
       (await db.query("SELECT id FROM durable_pg_documents WHERE orb_id=$1", [orb]))._unsafeUnwrap()
@@ -410,6 +412,6 @@ it("isolates colliding native IDs through reads, replacement, retirement and arc
     ).toEqual([]);
     expect(await b.conversation(conversationId, ctx)).toEqual({ id: conversationId });
     expect(await b.document(id, "current", ctx)).toEqual(original);
-    expect((await authority.validate(owners[1]!)).isOk()).toBe(true);
+    expect((await authority.validate(ownerB)).isOk()).toBe(true);
   }
 });

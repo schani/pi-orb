@@ -1763,3 +1763,5 @@ One successful builder-create fixture pins both machine type and instance-only S
 Alert helper tests name snapshot and acknowledgement behavior; mounted late-arrival chronology remains in orb-alerts frontend coverage. (2026-10-22 PDT).
 
 Source-evaluating diagnostic tests require mock bindings and exclude their live imports before evaluation; argument-injected probes reject leftover imports and shell snippets require their extraction boundary. (2026-10-22 PDT).
+
+The colliding-tenant storage fixture positively requires both owners before archive/validation. (2026-10-22 PDT).
