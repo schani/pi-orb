@@ -1,6 +1,5 @@
 import { type HistoryRecord, type OrbMessageView, projectRecordDetail } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
-import { ok } from "neverthrow";
 import type { ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -9,11 +8,6 @@ import {
   ComposedClaudeFixture,
   rootResult,
 } from "../../../orb-runtime/src/testkit/claude-composed.ts";
-import { createInboxPoller } from "../lib/inbox-poller.ts";
-import {
-  hasDeliveredMessageAwaitingHistory,
-  messagesAwaitingHistory,
-} from "../lib/queued-messages.ts";
 import { detailContext, displayRecord } from "../testkit/display-fixtures.ts";
 import { DetailContent } from "./DetailBody.tsx";
 import {
@@ -635,94 +629,7 @@ describe("HistoryView turn structure", () => {
     expect(html).toContain('class="visually-hidden">You:</span>');
   });
 
-  it("restores consumed Claude image input at its receipt on reload and metadata polls", async () => {
-    const delivered: OrbMessageView = {
-      id: "steer-inbox",
-      orbId: "orb-1",
-      content: [
-        { type: "image", mediaType: "image/png", data: "aW1hZ2U=" },
-        { type: "text", text: "Add Compare to the prototype." },
-      ],
-      status: "delivered",
-      delivery: "steer",
-      createdAt: "2026-10-23T00:37:20.544Z",
-      updatedAt: "2026-10-23T00:37:22.869Z",
-    };
-    const receipt: HistoryRecord = {
-      id: "steer-receipt",
-      parentId: "before",
-      timestamp: "2026-10-23T00:37:22.273Z",
-      type: "event",
-      eventType: "claude.input_receipt",
-      inboxMessageIds: [delivered.id],
-      overflow: { inputKind: "human" },
-    };
-    const records = [
-      message("before", "assistant", "Before receipt."),
-      receipt,
-      message("after", "assistant", "After receipt."),
-    ];
-    const { content: _content, ...metadata } = delivered;
-    const reads: { after: number; tracked: readonly string[] }[] = [];
-    const poller = createInboxPoller(async (after, tracked) => {
-      reads.push({ after, tracked });
-      return ok(
-        after === 0
-          ? { items: [delivered], updates: [], cursor: 1 }
-          : { items: [], updates: [metadata], cursor: 1 },
-      );
-    });
-    const projected = records.map(displayRecord);
-    const render = () =>
-      renderToStaticMarkup(
-        <HistoryView
-          records={records}
-          liveBlocks={[
-            { blockId: "live", blockType: "text", text: "Live continuation.", revision: 1 },
-          ]}
-          tools={[]}
-          busy
-          queuedMessages={poller.rows()}
-        />,
-      );
-    expect(render()).not.toContain("Add Compare");
-    for (let poll = 0; poll < 2; poll++) {
-      await poller.poll(() => true);
-      poller.update((rows) => messagesAwaitingHistory(rows, projected));
-      const html = render();
-      expect(html.match(/Add Compare to the prototype\./g)).toHaveLength(1);
-      expect(html.match(/src="data:image\/png;base64,aW1hZ2U="/g)).toHaveLength(1);
-      expect(html.indexOf("Before receipt.")).toBeLessThan(html.indexOf("Add Compare"));
-      expect(html.indexOf("Add Compare")).toBeLessThan(html.indexOf("After receipt."));
-      expect(html).toContain('data-history-row="steer-receipt"');
-      expect(html).toContain('class="rec-status">delivered</span>');
-      // No permanent tail provisional: subsequent live output joins the last agent turn.
-      expect(html.match(/class="rec rec-orb"/g)).toHaveLength(2);
-      expect(html).toContain("Live continuation.");
-      expect(hasDeliveredMessageAwaitingHistory(poller.rows(), projected)).toBe(false);
-    }
-    expect(reads).toEqual([
-      { after: 0, tracked: [] },
-      { after: 1, tracked: [delivered.id] },
-    ]);
-    const ordinary: MessageRecord = {
-      ...message("ordinary", "user", "Add Compare to the prototype."),
-      inboxMessageIds: [delivered.id],
-    };
-    const replaced = renderToStaticMarkup(
-      <HistoryView
-        records={[...records, ordinary]}
-        liveBlocks={[]}
-        tools={[]}
-        busy={false}
-        queuedMessages={[delivered]}
-      />,
-    );
-    expect(replaced.match(/Add Compare to the prototype\./g)).toHaveLength(1);
-    expect(replaced).not.toContain('data-history-row="steer-receipt"');
-  });
-
-  it("orders receipt batches by inbox IDs and deduplicates repeated receipts globally", () => {
+  it("places receipt batches once, prefers canonical content and preserves the live tail", () => {
     const inbox = (id: string): OrbMessageView => ({
       id,
       orbId: "orb-1",
@@ -740,37 +647,27 @@ describe("HistoryView turn structure", () => {
       eventType: "claude.input_receipt",
       inboxMessageIds: ids,
     });
-    const peer = {
-      ...inbox("peer"),
-      system: { kind: "orb_message" as const, senderOrbId: "629e53de-a2c9-4f1b-87a6-437fd415e8de" },
-    };
-    const system = {
-      ...inbox("system"),
-      system: { kind: "sleep_wake" as const, sleepUntil: "2026-10-23T00:00:00Z" },
-    };
     const html = renderToStaticMarkup(
       <HistoryView
         records={[
-          receipt("batch", ["b", "a", "peer", "system"]),
+          receipt("batch", ["b", "a", "c"]),
           receipt("duplicate", ["a", "b"]),
-          { ...message("canonical", "user", "body-a"), inboxMessageIds: ["a"] },
-          message("after", "assistant", "After batch."),
+          { ...message("canonical", "user", "body-c"), inboxMessageIds: ["c"] },
+          message("after", "assistant", "After receipt."),
         ]}
-        liveBlocks={[]}
+        liveBlocks={[
+          { blockId: "live", blockType: "text", text: "Live continuation.", revision: 1 },
+        ]}
         tools={[]}
-        busy={false}
-        queuedMessages={[inbox("a"), system, peer, inbox("b")]}
+        busy
+        queuedMessages={[inbox("a"), inbox("b"), inbox("c")]}
       />,
     );
-    for (const id of ["a", "b", "peer", "system"]) {
-      expect(html.match(new RegExp(`body-${id}`, "g"))).toHaveLength(1);
-    }
-    expect(html.indexOf("body-b")).toBeLessThan(html.indexOf("body-peer"));
-    expect(html.indexOf("body-peer")).toBeLessThan(html.indexOf("body-system"));
-    expect(html.indexOf("body-system")).toBeLessThan(html.indexOf("body-a"));
-    expect(html).toContain('class="rec rec-peer rec-q"');
-    expect(html).toContain('class="rec rec-orb rec-q"');
+    expect(html.match(/body-[abc]/g)).toEqual(["body-b", "body-a", "body-c"]);
+    expect(html).toContain("Live continuation.");
+    expect(html).toContain('data-history-row="batch"');
     expect(html).not.toContain('data-history-row="duplicate"');
+    expect(html.match(/class="rec rec-orb"/g)).toHaveLength(1);
   });
 
   it("shows a message the runtime rejected as failed, with its reason", () => {

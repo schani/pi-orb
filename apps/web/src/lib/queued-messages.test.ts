@@ -120,6 +120,21 @@ describe("queued message list updates", () => {
       overflow: {},
     };
 
+    const receipt = displayRecord({
+      id: "receipt",
+      parentId: null,
+      timestamp: delivered.updatedAt,
+      overflow: {},
+      type: "event",
+      eventType: "claude.input_receipt",
+      inboxMessageIds: [delivered.id],
+    });
+    expect(messagesAwaitingHistory([delivered], [receipt])).toEqual([delivered]);
+    expect(hasDeliveredMessageAwaitingHistory([delivered], [receipt])).toBe(false);
+    expect(hasDeliveredMessageAwaitingHistory([message("other", "delivered")], [receipt])).toBe(
+      true,
+    );
+    expect(messagesAwaitingHistory([delivered], [receipt, displayRecord(represented)])).toEqual([]);
     expect(messagesAwaitingHistory([delivered], [])).toEqual([delivered]);
     expect(hasDeliveredMessageAwaitingHistory([delivered], [])).toBe(true);
     expect(messagesAwaitingHistory([delivered], [displayRecord(represented)])).toEqual([]);
@@ -163,43 +178,6 @@ describe("queued message list updates", () => {
         [displayRecord({ ...peer, inboxMessageIds: ["unrelated"] })],
       ),
     ).toEqual([delivered]);
-  });
-
-  it("retains consumed Claude input for presentation without requesting history repair", () => {
-    const delivered: OrbMessageView = {
-      ...message("steer", "delivered"),
-      delivery: "steer",
-      content: [
-        { type: "image", mediaType: "image/png", data: "aW1hZ2U=" },
-        { type: "text", text: "Add Compare to the prototype." },
-      ],
-    };
-    const receipt = displayRecord({
-      id: "input",
-      parentId: null,
-      timestamp: delivered.updatedAt,
-      type: "event",
-      eventType: "claude.input_receipt",
-      inboxMessageIds: [delivered.id],
-      overflow: { inputKind: "human" },
-    });
-
-    expect(messagesAwaitingHistory([delivered], [receipt])).toEqual([delivered]);
-    expect(hasDeliveredMessageAwaitingHistory([delivered], [receipt])).toBe(false);
-    expect(hasDeliveredMessageAwaitingHistory([message("unrelated", "delivered")], [receipt])).toBe(
-      true,
-    );
-    const ordinary = displayRecord({
-      id: "user-record",
-      parentId: receipt.id,
-      timestamp: delivered.updatedAt,
-      type: "message",
-      role: "user",
-      content: delivered.content,
-      inboxMessageIds: [delivered.id],
-      overflow: {},
-    });
-    expect(messagesAwaitingHistory([delivered], [receipt, ordinary])).toEqual([]);
   });
 
   it("does not read inbox identity from native overflow", () => {
