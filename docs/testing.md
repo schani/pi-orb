@@ -1552,3 +1552,5 @@ Concurrent snapshot tests require successful nonempty reads during held writes; 
 Project deletion proves retained archived history exists before asserting its removal.
 
 Healthy restart qualification checks both sides of the persisted idle deadline before a restart-anchored countdown could expire.
+
+Forced provision races witness a nonretryable conflict before winner commit and require forward-only recovery.

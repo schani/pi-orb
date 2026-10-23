@@ -669,6 +669,112 @@ describe("mixed-generation reconcilers (DST)", () => {
     expect(declinedTotal).toBeGreaterThan(0);
   });
 
+  it("recovers a provision conflict before the winning revision commits", async () => {
+    const capture = new LogCapture();
+    await runDst(
+      {
+        name: "mixed-generation-forced-create-conflict",
+        iterations: 10,
+        logCapture: capture,
+        lateTimerProbability: 0,
+      },
+      async (sim) => {
+        const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+        const oldRevision = revision(harness, OLD_GENERATION, OLD_SPEC);
+        const newRevision = revision(harness, NEW_GENERATION, NEW_SPEC);
+        const fingerprint = newRevision.hostProvider.desiredSpecFingerprint({
+          orbId: ORB,
+          repositoryUrl: REPOSITORY_URL,
+        });
+        let winnerProvisioned = false;
+        let releaseWinner = false;
+        let observedConflict = false;
+        const provisionWinner = newRevision.hostProvider.provision.bind(newRevision.hostProvider);
+        newRevision.hostProvider.provision = (...args) =>
+          provisionWinner(...args).andThen((host) =>
+            ResultAsync.fromSafePromise(
+              (async () => {
+                winnerProvisioned = true;
+                await waitUntil(
+                  args[0],
+                  "loser reconciles before winner commit",
+                  () => releaseWinner,
+                );
+                return host;
+              })(),
+            ),
+          );
+        const provisionLoser = oldRevision.hostProvider.provision.bind(oldRevision.hostProvider);
+        oldRevision.hostProvider.provision = (...args) =>
+          provisionLoser(...args).mapErr((error) => {
+            expect(error).toMatchObject({ code: "conflict", retryable: false });
+            expect(harness.store.orbSnapshot(ORB)?.hostRef).toBeNull();
+            observedConflict = true;
+            return error;
+          });
+        const stop = new AbortController();
+        const result = await sim.runTasks([
+          {
+            name: "winner",
+            f: async (task) => {
+              harness.world.configureOrb(ORB, { initDurationMs: 1_000 });
+              harness.store.seedProject(makeProjectRow(PROJECT));
+              harness.store.seedOrb(
+                makeOrbRow(ORB, PROJECT, "creating", { stateChangedAt: task.wallNow() }),
+              );
+              await reconcileOrbOnce(task, newRevision, ORB);
+              await reconcileLoop(task, newRevision, stop.signal);
+            },
+          },
+          { name: "poller", f: (task) => pollLoop(task, newRevision, stop.signal) },
+          {
+            name: "loser",
+            f: async (task) => {
+              await waitUntil(
+                task,
+                "winner compute exists without a row commit",
+                () => winnerProvisioned,
+              );
+              expect((await reconcileOrbOnce(task, oldRevision, ORB)).type).toBe("conflict");
+              expect(observedConflict).toBe(true);
+              expect(harness.store.orbSnapshot(ORB)).toMatchObject({
+                state: "creating",
+                hostRef: null,
+                hostDiscardThroughIncarnation: null,
+              });
+              const winnerRef = harness.world.hostRefOf(ORB);
+              expect(winnerRef).not.toBeNull();
+              expect(harness.world.createdHostsOf(ORB)).toEqual([
+                { incarnation: 0, specFingerprint: fingerprint },
+              ]);
+              releaseWinner = true;
+              await waitUntil(
+                task,
+                "winner recovers to running",
+                () => harness.store.orbSnapshot(ORB)?.state === "running",
+                { timeoutMs: 300_000 },
+              );
+              await reconcileOrbOnce(task, oldRevision, ORB);
+              expect(harness.store.orbSnapshot(ORB)).toMatchObject({
+                state: "running",
+                hostRef: winnerRef?.resourceId,
+                hostSpecFingerprint: fingerprint,
+                hostIncarnation: 0,
+              });
+              expect(harness.world.createdHostsOf(ORB)).toEqual([
+                { incarnation: 0, specFingerprint: fingerprint },
+              ]);
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(capture.matching("to=failed")).toEqual([]);
+        expect(capture.matching("compute-discard-requested")).toEqual([]);
+      },
+    );
+  });
+
   it("converges a raced first provision without failing the orb", async () => {
     const capture = new LogCapture();
     await runDst(
