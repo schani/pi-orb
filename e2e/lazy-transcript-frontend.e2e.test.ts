@@ -1,12 +1,9 @@
-import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Browser, chromium, expect, webkit } from "@playwright/test";
-import { createServer } from "vite";
+import { expect } from "@playwright/test";
 import { it } from "vitest";
-import { listenFrontend } from "./frontend-listen.ts";
 import { gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
+import { createFrontendFixture } from "./testkit/frontend-owned.ts";
 
 const ORB = "frontend-lazy-details";
 const hidden = [
@@ -19,37 +16,15 @@ const hidden = [
 it.each(["chromium", "webkit"] as const)(
   "%s: projected summaries group without reads; individual detail retries and caches",
   async (engine) => {
-    const root = join(import.meta.dirname, "../apps/web");
-    const cacheDir = await mkdtemp(join(tmpdir(), `pi-orb-lazy-${engine}-`));
     const evidence = await mkdtemp(
       join(import.meta.dirname, `../test-failures/lazy-return-${engine}-`),
     );
-    const vite = await createServer({
-      root,
-      configFile: join(root, "vite.config.ts"),
-      cacheDir,
-      mode: "frontend",
-      server: { host: "127.0.0.1", port: 0 },
-    });
-    let browser: Browser | undefined;
-    try {
-      await listenFrontend(vite);
-      const address = vite.httpServer?.address();
-      if (!address || typeof address === "string") throw new Error("No fixture port");
-      const executable =
-        process.env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"] ??
-        (existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined);
-      browser =
-        engine === "webkit"
-          ? await webkit.launch()
-          : await chromium.launch({
-              ...(executable === undefined ? {} : { executablePath: executable }),
-              args: ["--no-sandbox"],
-            });
-      const page = await browser.newPage({
+    const { page, origin } = await createFrontendFixture(engine, {
+      page: {
         viewport: { width: 1280, height: 900 },
-      });
-      const origin = `http://127.0.0.1:${address.port}`;
+      },
+    });
+    {
       await page.context().tracing.start({ screenshots: true, snapshots: true });
       await page.addInitScript(() => {
         const scope = globalThis as unknown as {
@@ -440,10 +415,6 @@ it.each(["chromium", "webkit"] as const)(
         releaseHeld();
         await page.close();
       }
-    } finally {
-      await browser?.close();
-      await vite.close();
-      await rm(cacheDir, { recursive: true, force: true });
     }
   },
 );

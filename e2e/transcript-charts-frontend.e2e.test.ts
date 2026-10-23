@@ -1,12 +1,7 @@
-import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { type Browser, chromium, expect, type Locator, type Page, webkit } from "@playwright/test";
-import { createServer } from "vite";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { it } from "vitest";
-import { listenFrontend } from "./frontend-listen.ts";
 import { gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
+import { createFrontendFixture } from "./testkit/frontend-owned.ts";
 
 const ORB = "frontend-charts";
 
@@ -34,31 +29,10 @@ async function dimmedLines(chart: Locator): Promise<number> {
 it.each(["chromium", "webkit"] as const)(
   "%s: renders code-mode charts as open rail rows with sorted tooltips and series isolation",
   async (engine) => {
-    const root = join(import.meta.dirname, "../apps/web");
-    const cacheDir = await mkdtemp(join(tmpdir(), `pi-orb-charts-${engine}-`));
-    const vite = await createServer({
-      root,
-      configFile: join(root, "vite.config.ts"),
-      cacheDir,
-      mode: "frontend",
-      server: { host: "127.0.0.1", port: 0 },
+    const { page, origin } = await createFrontendFixture(engine, {
+      page: { viewport: { width: 1280, height: 900 } },
     });
-    let browser: Browser | undefined;
-    try {
-      await listenFrontend(vite);
-      const address = vite.httpServer?.address();
-      if (!address || typeof address === "string") throw new Error("No fixture port");
-      const executable =
-        process.env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"] ??
-        (existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined);
-      browser =
-        engine === "webkit"
-          ? await webkit.launch()
-          : await chromium.launch({
-              ...(executable === undefined ? {} : { executablePath: executable }),
-              args: ["--no-sandbox"],
-            });
-      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    {
       const renders: unknown[] = [];
       const errors: string[] = [];
       // Chart failures surface as uncaught exceptions or Vega logger output (`WARN …`); failed
@@ -89,7 +63,7 @@ it.each(["chromium", "webkit"] as const)(
         };
       });
 
-      await gotoFrontendHistory(page, `http://127.0.0.1:${address.port}/orbs/${ORB}`, ORB);
+      await gotoFrontendHistory(page, `${origin}/orbs/${ORB}`, ORB);
       const rows = page.locator("details.chart-strip");
       await expect(rows).toHaveCount(10);
       for (const each of await rows.all()) {
@@ -154,10 +128,6 @@ it.each(["chromium", "webkit"] as const)(
       await key.locator("[data-series]", { hasText: "us-east-1b" }).hover();
       await expect.poll(() => dimmedLines(narrowZones.locator(".chart-canvas svg"))).toBe(5);
       expect(errors).toEqual([]);
-    } finally {
-      await browser?.close();
-      await vite.close();
-      await rm(cacheDir, { recursive: true, force: true });
     }
   },
 );

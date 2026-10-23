@@ -1,44 +1,15 @@
-import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { type Browser, chromium, expect, webkit } from "@playwright/test";
-import { createServer } from "vite";
+import { expect } from "@playwright/test";
 import { it } from "vitest";
-import { listenFrontend } from "./frontend-listen.ts";
 import { gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
+import { createFrontendFixture } from "./testkit/frontend-owned.ts";
 
 const ORB = "frontend-fixture-orb";
 
 it.each(["chromium", "webkit"] as const)(
   "%s: initially open stopped-orb image loads with no metadata or inbox rerender",
   async (engine) => {
-    const root = join(import.meta.dirname, "../apps/web");
-    const cacheDir = await mkdtemp(join(tmpdir(), `pi-orb-owner-${engine}-`));
-    const vite = await createServer({
-      root,
-      configFile: join(root, "vite.config.ts"),
-      cacheDir,
-      mode: "frontend",
-      server: { host: "127.0.0.1", port: 0 },
-    });
-    let browser: Browser | undefined;
-    try {
-      await listenFrontend(vite);
-      const address = vite.httpServer?.address();
-      if (!address || typeof address === "string") throw new Error("No fixture port");
-      const executable =
-        process.env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"] ??
-        (existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined);
-      browser =
-        engine === "webkit"
-          ? await webkit.launch()
-          : await chromium.launch({
-              ...(executable === undefined ? {} : { executablePath: executable }),
-              args: ["--no-sandbox"],
-            });
-      const page = await browser.newPage();
-      const origin = `http://127.0.0.1:${address.port}`;
+    const { page, origin } = await createFrontendFixture(engine, {});
+    {
       let orbReads = 0;
       let detailReads = 0;
       let release!: () => void;
@@ -89,10 +60,6 @@ it.each(["chromium", "webkit"] as const)(
         release();
         await page.close();
       }
-    } finally {
-      await browser?.close();
-      await vite.close();
-      await rm(cacheDir, { recursive: true, force: true });
     }
   },
 );

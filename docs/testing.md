@@ -1791,3 +1791,5 @@ Diagnostic cutoff counts parsed frame bytes, excluding a following incomplete UT
 **Decision (2026-10-22):** Summary barriers select the current phase’s queued operation for the exact orb, then require its successful outcome; scoped summary failures fail immediately. Global completion counts cannot acknowledge a turn.
 
 **Decision (2026-10-22):** Child and Docker listeners bind port zero and publish their owned endpoints. Public Host adapters remain separate. Artifact restart reuses the first actual endpoint to preserve its stable-origin contract, not a released reservation.
+
+**Decision (2026-10-22):** Ordinary frontend tests use a test-scoped Vite/browser/cache owner, registered before startup. Partial initialization cleans acquired resources; cleanup attempts every resource and retains startup failure as the cause. Route gates and evidence remain local; special HTTP/auth fixtures retain their separate owners.

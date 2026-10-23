@@ -1,12 +1,7 @@
-import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { type Browser, chromium, expect, type Page, webkit } from "@playwright/test";
-import { createServer } from "vite";
+import { expect, type Page } from "@playwright/test";
 import { it } from "vitest";
-import { listenFrontend } from "./frontend-listen.ts";
 import { gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
+import { createFrontendFixture } from "./testkit/frontend-owned.ts";
 
 const ORB = "frontend-fixture-orb";
 
@@ -36,34 +31,12 @@ const renderCheckpoint = (page: Page) =>
 it.each(["chromium", "webkit"] as const)(
   "%s: image bytes survive drawer and orb navigation",
   async (engine) => {
-    const root = join(import.meta.dirname, "../apps/web");
-    const cacheDir = await mkdtemp(join(tmpdir(), `pi-orb-image-cache-${engine}-`));
-    const vite = await createServer({
-      root,
-      configFile: join(root, "vite.config.ts"),
-      cacheDir,
-      mode: "frontend",
-      server: { host: "127.0.0.1", port: 0 },
-    });
-    let browser: Browser | undefined;
-    try {
-      await listenFrontend(vite);
-      const address = vite.httpServer?.address();
-      if (!address || typeof address === "string") throw new Error("No fixture port");
-      const executable =
-        process.env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"] ??
-        (existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined);
-      browser =
-        engine === "webkit"
-          ? await webkit.launch()
-          : await chromium.launch({
-              ...(executable === undefined ? {} : { executablePath: executable }),
-              args: ["--no-sandbox"],
-            });
-      const page = await browser.newPage({
+    const { browser, page, origin } = await createFrontendFixture(engine, {
+      page: {
         viewport: { width: 1280, height: 900 },
-      });
-      const origin = `http://127.0.0.1:${address.port}`;
+      },
+    });
+    {
       const requests: string[] = [];
       const detailRequests: string[] = [];
       page.on("request", (request) => {
@@ -342,10 +315,6 @@ it.each(["chromium", "webkit"] as const)(
         await page.unrouteAll({ behavior: "wait" });
         await page.close();
       }
-    } finally {
-      await browser?.close();
-      await vite.close();
-      await rm(cacheDir, { recursive: true, force: true });
     }
   },
 );
@@ -353,14 +322,8 @@ it.each(["chromium", "webkit"] as const)(
 it.each(["chromium", "webkit"] as const)(
   "%s: a valid local image renders even without a resident cache snapshot",
   async (engine) => {
-    const root = join(import.meta.dirname, "../apps/web");
-    const cacheDir = await mkdtemp(join(tmpdir(), `pi-orb-image-uncacheable-${engine}-`));
-    const vite = await createServer({
-      root,
-      configFile: join(root, "vite.config.ts"),
-      cacheDir,
-      mode: "frontend",
-      server: { host: "127.0.0.1", port: 0 },
+    const { page, origin } = await createFrontendFixture(engine, {
+      page: { viewport: { width: 1280, height: 900 } },
       plugins: [
         {
           name: "test-zero-transcript-cache-budget",
@@ -374,23 +337,7 @@ it.each(["chromium", "webkit"] as const)(
         },
       ],
     });
-    let browser: Browser | undefined;
-    try {
-      await listenFrontend(vite);
-      const address = vite.httpServer?.address();
-      if (!address || typeof address === "string") throw new Error("No fixture port");
-      const executable =
-        process.env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"] ??
-        (existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined);
-      browser =
-        engine === "webkit"
-          ? await webkit.launch()
-          : await chromium.launch({
-              ...(executable === undefined ? {} : { executablePath: executable }),
-              args: ["--no-sandbox"],
-            });
-      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-      const origin = `http://127.0.0.1:${address.port}`;
+    {
       const requests: string[] = [];
       let readImagePath = "";
       await page.route(`**/api/v1/orbs/${ORB}/details/**`, async (route) => {
@@ -442,10 +389,6 @@ it.each(["chromium", "webkit"] as const)(
       } finally {
         await page.close();
       }
-    } finally {
-      await browser?.close();
-      await vite.close();
-      await rm(cacheDir, { recursive: true, force: true });
     }
   },
 );

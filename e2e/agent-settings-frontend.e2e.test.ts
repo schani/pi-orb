@@ -1,29 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
-import { expect as check, chromium, webkit } from "@playwright/test";
-import { createServer } from "vite";
+import { expect as check } from "@playwright/test";
 import { it } from "vitest";
-import { listenFrontend } from "./frontend-listen.ts";
 import { gotoFrontendFixture } from "./testkit/frontend-fixture.ts";
+import { createFrontendFixture } from "./testkit/frontend-owned.ts";
 
 it.each(["chromium", "webkit"] as const)(
   "%s: Claude uses native effort levels and /effort without Pi shell prefixes",
   async (engine) => {
-    const root = join(import.meta.dirname, "../apps/web");
-    const vite = await createServer({
-      root,
-      configFile: join(root, "vite.config.ts"),
-      mode: "frontend",
-      server: { host: "127.0.0.1", port: 0 },
-    });
-    await listenFrontend(vite);
-    const address = vite.httpServer?.address();
-    if (!address || typeof address === "string") throw new Error("No owned fixture port");
-    const browser = await (engine === "chromium" ? chromium : webkit).launch({ headless: true });
-    const page = await browser.newPage();
-    const origin = `http://127.0.0.1:${address.port}`;
+    const fixture = await createFrontendFixture(engine);
+    const { page, origin } = fixture;
     const id = randomUUID();
-    try {
+    fixture.cleanup(() => page.request.delete(`${origin}/api/v1/orbs/${id}`));
+    {
       const created = await page.request.post(
         `${origin}/api/v1/projects/frontend-scratchpad-project/orbs`,
         { data: { id, harness: "claude", userTimeZone: "America/Los_Angeles" } },
@@ -56,10 +44,6 @@ it.each(["chromium", "webkit"] as const)(
       await input.pressSequentially("!printf fixture");
       await check(input).toHaveValue("!printf fixture");
       await check(page.locator(".composer-line .composer-prefix")).toHaveText(">");
-    } finally {
-      await page.request.delete(`${origin}/api/v1/orbs/${id}`);
-      await browser.close();
-      await vite.close();
     }
   },
 );
@@ -67,20 +51,12 @@ it.each(["chromium", "webkit"] as const)(
 it.each(["chromium", "webkit"] as const)(
   "%s: lifecycle cluster and slash settings preserve drafts and synchronize tabs",
   async (engine) => {
-    const root = join(import.meta.dirname, "../apps/web");
-    const vite = await createServer({
-      root,
-      configFile: join(root, "vite.config.ts"),
-      mode: "frontend",
-      server: { host: "127.0.0.1", port: 0 },
+    const fixture = await createFrontendFixture(engine, {
+      page: { viewport: { width: 1280, height: 900 } },
     });
-    await listenFrontend(vite);
-    const address = vite.httpServer?.address();
-    if (!address || typeof address === "string") throw new Error("No owned fixture port");
-    const browser = await (engine === "chromium" ? chromium : webkit).launch({ headless: true });
-    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-    const url = `http://127.0.0.1:${address.port}/orbs/frontend-fixture-orb`;
-    try {
+    const { browser, page, origin } = fixture;
+    const url = `${origin}/orbs/frontend-fixture-orb`;
+    {
       await gotoFrontendFixture(page, url);
       const thinking = page.getByRole("button", { name: "Change thinking", exact: true });
       await check(thinking).toBeEnabled();
@@ -170,9 +146,6 @@ it.each(["chromium", "webkit"] as const)(
       await page.getByRole("option", { name: "high", exact: true }).click();
       await check(input).toHaveValue("");
       await second.close();
-    } finally {
-      await browser.close();
-      await vite.close();
     }
   },
 );
