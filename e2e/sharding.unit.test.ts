@@ -10,7 +10,7 @@ const workflow = (name: string) =>
 it("uses the same declared Node and OS versions for CI, E2E and Deploy", () => {
   for (const name of ["ci", "e2e", "deploy"]) {
     expect(workflow(name)).toContain("runs-on: ubuntu-24.04");
-    expect(workflow(name)).toContain("node-version: '24.22.0'");
+    expect(workflow(name)).toContain("node-version: '24.22.1'");
   }
 });
 

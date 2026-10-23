@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.4/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.6.2/schema.json",
   "vcs": {
     "enabled": true,
     "clientKind": "git",
@@ -34,6 +34,20 @@
       "trailingCommas": "all"
     }
   },
+  "markdown": {
+    "formatter": { "enabled": false }
+  },
+  "yaml": {
+    "formatter": { "enabled": false }
+  },
+  "overrides": [
+    {
+      "includes": ["apps/web/src/lib/create-orb-request.test.ts"],
+      "linter": {
+        "rules": { "correctness": { "noComponentHookFactories": "off" } }
+      }
+    }
+  ],
   "assist": {
     "enabled": true,
     "actions": {

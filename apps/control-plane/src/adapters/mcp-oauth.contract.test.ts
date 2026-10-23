@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { NoSimulationTask } from "determined";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { StoredMcpOAuth } from "../domain/mcp-oauth.ts";
 import { createMcpOAuthFetch, SdkMcpOAuth } from "./mcp-oauth.ts";
 
@@ -264,6 +264,31 @@ it("SDK rejection of malformed HTTP 200 stays transient and is redacted", async 
     expect(result.error.type).toBe("upstream_transient");
     expect(result.error.diagnostic).toBe("unusable_refresh_response");
     expect(JSON.stringify(result.error)).not.toContain(secret);
+  }
+});
+it("forces redirect rejection on credential-bearing OAuth requests (GHSA-6prh-2h8m-c8cw)", async () => {
+  const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
+  const network = createMcpOAuthFetch();
+  try {
+    await network.fetcher("https://mcp.example/token", {
+      method: "POST",
+      headers: { "x-client-secret": "MOCK_SECRET" },
+      body: "refresh_token=MOCK_REFRESH",
+      redirect: "follow",
+    });
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith(
+      "https://mcp.example/token",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "x-client-secret": "MOCK_SECRET" },
+        body: "refresh_token=MOCK_REFRESH",
+        redirect: "error",
+        dispatcher: expect.anything(),
+      }),
+    );
+  } finally {
+    fetcher.mockRestore();
+    await network.close();
   }
 });
 it("rejects private metadata/token destinations before connecting", async () => {

@@ -385,6 +385,7 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
 
 type Turn =
   | { kind: "user"; record: MessageRecord }
+  | { kind: "inbox-receipt"; record: EventRecord; messages: OrbMessageView[] }
   | { kind: "peer"; record: EventRecord; senderId: string }
   | { kind: "agent"; key: string; records: Array<MessageRecord | EventRecord> }
   | { kind: "alert"; record: EventRecord; message: string }
@@ -582,7 +583,13 @@ function turnKey(turn: Turn): string {
   return turn.kind === "agent" ? turn.key : turn.record.id;
 }
 
-function groupTurns(records: readonly DisplayRecord[]): Turn[] {
+function groupTurns(records: readonly DisplayRecord[], queuedMessages: readonly OrbMessageView[]) {
+  const represented = representedInboxMessageIds(records);
+  const pending = new Map(
+    queuedMessages
+      .filter((message) => !represented.has(message.id))
+      .map((message) => [message.id, message]),
+  );
   const turns: Turn[] = [];
   const appendAgentPart = (record: MessageRecord | EventRecord) => {
     const last = turns[turns.length - 1];
@@ -602,7 +609,15 @@ function groupTurns(records: readonly DisplayRecord[]): Turn[] {
         turns.push({ kind: "compaction", record });
         break;
       case "event":
-        if (record.eventType === "orb.message" && record.sender !== undefined) {
+        if (record.eventType === "claude.input_receipt") {
+          const messages = (record.inboxMessageIds ?? []).flatMap((id) => {
+            const message = pending.get(id);
+            if (message === undefined) return [];
+            pending.delete(id);
+            return [message];
+          });
+          if (messages.length > 0) turns.push({ kind: "inbox-receipt", record, messages });
+        } else if (record.eventType === "orb.message" && record.sender !== undefined) {
           turns.push({ kind: "peer", record, senderId: record.sender.orbId });
         } else if (record.alert !== undefined) {
           turns.push({ kind: "alert", record, message: record.alert.message });
@@ -614,7 +629,7 @@ function groupTurns(records: readonly DisplayRecord[]): Turn[] {
         break;
     }
   }
-  return turns;
+  return { turns, pendingMessages: [...pending.values()] };
 }
 
 function OwnedSubagent({ record }: { record: EventRecord }) {
@@ -687,6 +702,54 @@ function CorrespondenceBand({
   );
 }
 
+function renderInboxMessage(
+  message: OrbMessageView,
+  orbState: OrbView["state"] | undefined,
+  senderNames: ReadonlyMap<string, string | null>,
+): ReactNode {
+  const system = message.system !== undefined;
+  const status = inboxStatusLabel(message, orbState);
+  // A message the runtime refused for good is terminal: say so where the
+  // message is, with the reason, rather than leaving it looking pending
+  // forever (docs/runtime-protocol.md).
+  const failed = message.status === "failed";
+  if (message.system?.kind === "orb_message") {
+    return (
+      <CorrespondenceBand
+        key={message.id}
+        id={message.id}
+        senderId={message.system.senderOrbId}
+        name={senderNames.get(message.system.senderOrbId)}
+        text={blockText(message.content.filter((block) => block.type === "text"))}
+        pending
+        status={status}
+        {...(failed && message.error !== undefined ? { error: message.error } : {})}
+      />
+    );
+  }
+  return (
+    <article className={`rec ${system ? "rec-orb" : "rec-you"} rec-q`} key={message.id}>
+      <span className="visually-hidden">{system ? "System:" : "You:"}</span>
+      <div className="rec-bd">
+        <span className="rec-status">{status}</span>
+        {message.content.map((block, index) =>
+          block.type === "text" ? (
+            <ChatMarkdown key={index}>{block.text}</ChatMarkdown>
+          ) : block.type === "image" && block.data !== undefined ? (
+            <img
+              key={index}
+              className="msg-image"
+              src={`data:${block.mediaType ?? "image/png"};base64,${block.data}`}
+              alt="attachment"
+            />
+          ) : null,
+        )}
+        {failed && message.error !== undefined && <div className="error-text">{message.error}</div>}
+      </div>
+    </article>
+  );
+}
+
 function renderTurn(
   turn: Turn,
   pairing: ToolPairing,
@@ -695,8 +758,15 @@ function renderTurn(
   live?: LiveAgentContent,
   busy = false,
   compactionIdentity?: string,
+  orbState?: OrbView["state"],
 ): ReactNode {
   switch (turn.kind) {
+    case "inbox-receipt":
+      return (
+        <div key={turn.record.id} data-history-row={turn.record.id}>
+          {turn.messages.map((message) => renderInboxMessage(message, orbState, senderNames))}
+        </div>
+      );
     case "peer":
       return (
         <CorrespondenceBand
@@ -796,19 +866,15 @@ export const HistoryView = memo(function HistoryView({
   const sharedHeadlineSlots = useContext(HeadlineSlots);
   const [headlineSlots] = useState(() => new HeadlineLimiter());
   const [openedDetails] = useState(() => new Set<string>());
-  const representedMessageIds = useMemo(() => representedInboxMessageIds(records), [records]);
-  const pendingMessages = queuedMessages.filter(
-    (message) => !representedMessageIds.has(message.id),
-  );
-  const { turns, pairing, committedToolCallIds, derivationMs } = useMemo(() => {
+  const { turns, pendingMessages, pairing, committedToolCallIds, derivationMs } = useMemo(() => {
     const start = performance.now();
     return {
-      turns: groupTurns(records),
+      ...groupTurns(records, queuedMessages),
       pairing: pairToolResults(records),
       committedToolCallIds: persistedToolCallIds(records),
       derivationMs: performance.now() - start,
     };
-  }, [records]);
+  }, [records, queuedMessages]);
   const keys = useMemo(() => turns.map(turnKey), [turns]);
   const historyRef = useRef<HTMLDivElement>(null);
   const firstMounted = useHistoryTail(keys, historyRef, viewportRef, onCompensatedRef);
@@ -876,53 +942,10 @@ export const HistoryView = memo(function HistoryView({
                     turn.kind === "compaction" && turn.record.id === compactionResult?.id
                       ? compaction?.operationId
                       : undefined,
+                    orbState,
                   ),
             )}
-          {pendingMessages.map((message) => {
-            const system = message.system !== undefined;
-            const status = inboxStatusLabel(message, orbState);
-            // A message the runtime refused for good is terminal: say so where the
-            // message is, with the reason, rather than leaving it looking pending
-            // forever (docs/runtime-protocol.md).
-            const failed = message.status === "failed";
-            if (message.system?.kind === "orb_message") {
-              return (
-                <CorrespondenceBand
-                  key={message.id}
-                  id={message.id}
-                  senderId={message.system.senderOrbId}
-                  name={senderNames.get(message.system.senderOrbId)}
-                  text={blockText(message.content.filter((block) => block.type === "text"))}
-                  pending
-                  status={status}
-                  {...(failed && message.error !== undefined ? { error: message.error } : {})}
-                />
-              );
-            }
-            return (
-              <article className={`rec ${system ? "rec-orb" : "rec-you"} rec-q`} key={message.id}>
-                <span className="visually-hidden">{system ? "System:" : "You:"}</span>
-                <div className="rec-bd">
-                  <span className="rec-status">{status}</span>
-                  {message.content.map((block, index) =>
-                    block.type === "text" ? (
-                      <ChatMarkdown key={index}>{block.text}</ChatMarkdown>
-                    ) : block.type === "image" && block.data !== undefined ? (
-                      <img
-                        key={index}
-                        className="msg-image"
-                        src={`data:${block.mediaType ?? "image/png"};base64,${block.data}`}
-                        alt="attachment"
-                      />
-                    ) : null,
-                  )}
-                  {failed && message.error !== undefined && (
-                    <div className="error-text">{message.error}</div>
-                  )}
-                </div>
-              </article>
-            );
-          })}
+          {pendingMessages.map((message) => renderInboxMessage(message, orbState, senderNames))}
           {hasAgentLive && !mergeLiveIntoFinalTurn && (
             <article className="rec rec-orb">
               <span className="visually-hidden">Orb:</span>

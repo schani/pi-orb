@@ -8,6 +8,6 @@ Linux)
 *)
   docker run --rm \
     -v "$PWD:/repo:ro" -w /repo \
-    node:24.22.0-bookworm python3 infra/native-vm/workspace_filesystem_test.py
+    node:24.22.1-bookworm python3 infra/native-vm/workspace_filesystem_test.py
   ;;
 esac

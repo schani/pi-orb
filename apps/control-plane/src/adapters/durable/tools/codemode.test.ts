@@ -26,7 +26,12 @@ describe("Durable native code-mode store", () => {
         createOrbTools({
           invoke: (_action, requestId) => {
             requests.push(requestId);
-            return okAsync({ accepted: true });
+            return okAsync({
+              orbId: "orb",
+              projectId: "project",
+              messageId: "message",
+              url: "url",
+            });
           },
         }),
       ),

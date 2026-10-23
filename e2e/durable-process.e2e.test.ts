@@ -270,7 +270,9 @@ text(await tools.get_subagent_result({agent_id:child.agent_id,wait:false}));
 text(await tools.get_subagent_result({agent_id:child.agent_id,wait:true}));
 const cancelled = JSON.parse(await tools.subagent({prompt:'DURABLE_CANCEL_CHILD'}));
 text(await tools.cancel_subagent({agent_id:cancelled.agent_id}));
-text(await tools.orb_self({}));
+const self = await tools.orb_self({});
+if (typeof self !== 'object' || !self.orb?.id) throw new Error('orb_self must return an object');
+text(self);
 text(await tools.orb_alert({message:'DURABLE_NATIVE_ALERT'}));
 text('DURABLE_SCRIPT_DONE');`;
     const fake = await createFakeSession(`durable-process-${randomUUID()}`, {

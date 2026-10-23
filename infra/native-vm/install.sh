@@ -23,8 +23,8 @@ echo 'deb [signed-by=/etc/apt/keyrings/google.asc] https://packages.cloud.google
 echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable' >/etc/apt/sources.list.d/docker.list
 apt-get update
 apt-get install -y --no-install-recommends gh tailscale chromium google-cloud-cli docker-ce=5:29.1.3-1~debian.12~bookworm docker-ce-cli=5:29.1.3-1~debian.12~bookworm containerd.io=2.3.4-2~debian.12~bookworm docker-buildx-plugin docker-compose-plugin
-curl -fsSL https://nodejs.org/dist/v24.22.0/node-v24.22.0-linux-x64.tar.xz -o /tmp/node.tar.xz
-echo 'cc2f601cee82d9a5a233302fe307abc600727035fd7d2c3a3571755989e95008  /tmp/node.tar.xz' | sha256sum -c -
+curl -fsSL https://nodejs.org/dist/v24.22.1/node-v24.22.1-linux-x64.tar.xz -o /tmp/node.tar.xz
+echo '6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6  /tmp/node.tar.xz' | sha256sum -c -
 tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
 rm /tmp/node.tar.xz
 curl -fsSL https://static.rust-lang.org/rustup/archive/1.29.0/x86_64-unknown-linux-gnu/rustup-init -o /usr/local/bin/rustup

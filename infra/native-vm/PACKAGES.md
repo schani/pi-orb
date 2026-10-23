@@ -5,7 +5,7 @@ APT recommendations. `packages.tsv` records every resolved package and its
 installed size; transitive libraries remain only as dependencies of this baseline.
 
 - Google guest agent, systemd, SSH, CA certificates: VM boot and operation.
-- Node 24.22.0, runtime npm dependencies, native node-pty: agent and terminal.
+- Node 24.22.1, runtime npm dependencies, native node-pty: agent and terminal.
 - Bun 1.4.4 (`bun`, `bunx`): project JavaScript runtime/package tooling; checksum-pinned x64 baseline archive, shared with Docker via `infra/install_bun.sh`.
 - Docker Engine 29.1.3, containerd, Buildx, Compose: project containers/builds.
 - git, git-crypt, gh and broker helpers: repository and GitHub workflows.
@@ -42,13 +42,13 @@ not on every retained-workspace restart. Boot edges are written to the serial jo
 Cloud publication uses the already prescribed Google Cloud CLI and adds no image
 package.
 
-**Node pin (2026-10-16):** CI, Docker and native images use Node 24.22.0
-(Krypton LTS), the latest Node 24 release in the [official index](https://nodejs.org/dist/index.json).
+**Node pin (2026-10-22):** CI, Docker and native images use Node 24.22.1
+(Krypton LTS), including the [24.22.1 security fixes](https://nodejs.org/en/blog/release/v24.22.1).
 Stay on Node 24 rather than Node 26 Current. The native linux-x64 archive SHA-256
-is checked against [official SHASUMS256.txt](https://nodejs.org/dist/v24.22.0/SHASUMS256.txt)
+is checked against [official SHASUMS256.txt](https://nodejs.org/dist/v24.22.1/SHASUMS256.txt)
 and pinned in `infra/native-vm/install.sh`; builds retain the installed version
-in `/opt/pi-orb/node-version`. Docker stages use `node:24.22.0-bookworm-slim`;
-the non-Linux filesystem test uses the full `node:24.22.0-bookworm` image for
+in `/opt/pi-orb/node-version`. Docker stages use `node:24.22.1-bookworm-slim`;
+the non-Linux filesystem test uses the full `node:24.22.1-bookworm` image for
 Python and ext4 tools.
 
 **Bun/git-crypt addition (2026-10-22; not deployed):** build checks and production

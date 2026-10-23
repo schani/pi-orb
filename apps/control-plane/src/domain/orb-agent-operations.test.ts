@@ -30,7 +30,7 @@ describe("central orb operations", () => {
       new NoSimulationTask("orb links", false),
       h.deps,
       identity,
-      { appOrigin: "http://app", appendAlert: () => okAsync({ recordId: "a" }) },
+      { appOrigin: "http://app", appendAlert: () => okAsync({ recordId: "a", duplicate: false }) },
     );
     const self = (await service.invoke({ kind: "self" }, "self"))._unsafeUnwrap() as {
       orb: { url: string };
@@ -66,7 +66,7 @@ describe("central orb operations", () => {
     async (state) => {
       await runDst({ name: `central-native-${state}`, iterations: 5 }, async (sim) => {
         const h = seed();
-        const appendAlert = vi.fn(() => okAsync({ recordId: "a" }));
+        const appendAlert = vi.fn(() => okAsync({ recordId: "a", duplicate: false }));
         h.store.seedOrb(
           makeOrbRow("caller", "project", state, { hostRef: null, runtimeTokenHash: null }),
         );
@@ -123,7 +123,10 @@ describe("central orb operations", () => {
                   orbId: "caller",
                   agentAdmissionVersion: 0,
                 },
-                { appOrigin: "http://app", appendAlert: () => okAsync({ recordId: "a" }) },
+                {
+                  appOrigin: "http://app",
+                  appendAlert: () => okAsync({ recordId: "a", duplicate: false }),
+                },
               );
               expect(
                 (
@@ -157,7 +160,7 @@ describe("central orb operations", () => {
             },
           ),
         );
-        const appendAlert = vi.fn(() => okAsync({ recordId: "a" }));
+        const appendAlert = vi.fn(() => okAsync({ recordId: "a", duplicate: false }));
         const result = await sim.runTasks([
           {
             name: "central",
@@ -218,7 +221,10 @@ describe("central orb operations", () => {
                 orbId: "caller",
                 agentAdmissionVersion: 0,
               },
-              { appOrigin: "http://app", appendAlert: () => okAsync({ recordId: "a" }) },
+              {
+                appOrigin: "http://app",
+                appendAlert: () => okAsync({ recordId: "a", duplicate: false }),
+              },
             );
             const row = h.store.orbSnapshot("caller");
             expect(row).toBeDefined();
@@ -246,7 +252,7 @@ describe("central orb operations", () => {
   it("denies stale incarnation and mismatched owner before effects", async () => {
     await runDst({ name: "native-orb-denials", iterations: 10 }, async (sim) => {
       const h = seed();
-      const appendAlert = vi.fn(() => okAsync({ recordId: "alert" }));
+      const appendAlert = vi.fn(() => okAsync({ recordId: "alert", duplicate: false }));
       const result = await sim.runTasks([
         {
           name: "invoke",
@@ -280,7 +286,7 @@ describe("central orb operations", () => {
           f: async (task) => {
             const service = createOrbAgentOperations(task, h.deps, identity, {
               appOrigin: "http://app",
-              appendAlert: () => okAsync({ recordId: "a" }),
+              appendAlert: () => okAsync({ recordId: "a", duplicate: false }),
             });
             const first = await service.invoke({ kind: "spawn", prompt: "work" }, "task:1");
             const second = await service.invoke({ kind: "spawn", prompt: "work" }, "task:1");
@@ -308,7 +314,7 @@ describe("central orb operations", () => {
           f: async (task) => {
             const service = createOrbAgentOperations(task, h.deps, identity, {
               appOrigin: "http://app",
-              appendAlert: () => okAsync({ recordId: "a" }),
+              appendAlert: () => okAsync({ recordId: "a", duplicate: false }),
             });
             const list = await service.invoke({ kind: "list" }, "1");
             expect(list.isOk()).toBe(true);
@@ -334,7 +340,7 @@ describe("central orb operations", () => {
             f: async (task) => {
               const service = createOrbAgentOperations(task, h.deps, identity, {
                 appOrigin: "http://app",
-                appendAlert: () => okAsync({ recordId: "a" }),
+                appendAlert: () => okAsync({ recordId: "a", duplicate: false }),
               });
               expect((await service.invoke({ kind }, "task:destructive")).isOk()).toBe(true);
               expect(h.store.orbSnapshot("caller")?.state).toBe(
@@ -354,7 +360,7 @@ describe("central orb operations", () => {
   it("passes alert request IDs to the authoritative append port", async () => {
     await runDst({ name: "native-orb-alert", iterations: 5 }, async (sim) => {
       const h = seed();
-      const appendAlert = vi.fn(() => okAsync({ recordId: "a" }));
+      const appendAlert = vi.fn(() => okAsync({ recordId: "a", duplicate: false }));
       await sim.runTasks([
         {
           name: "alert",
@@ -379,7 +385,10 @@ it.each(["guest", "central"] as const)(
   async (kind) => {
     const h = seed();
     const task = new NoSimulationTask("peer send", false);
-    const options = { appOrigin: "http://app", appendAlert: () => okAsync({ recordId: "a" }) };
+    const options = {
+      appOrigin: "http://app",
+      appendAlert: () => okAsync({ recordId: "a", duplicate: false }),
+    };
     const service =
       kind === "guest"
         ? createOrbAgentOperations(task, h.deps, identity, options)
@@ -447,7 +456,10 @@ it.each(["runtime", "central"] as const)(
       }),
     );
     const task = new NoSimulationTask("model ingress", false);
-    const options = { appOrigin: "http://app", appendAlert: () => okAsync({ recordId: "a" }) };
+    const options = {
+      appOrigin: "http://app",
+      appendAlert: () => okAsync({ recordId: "a", duplicate: false }),
+    };
     const service =
       kind === "central"
         ? createCentralOrbAgentOperations(

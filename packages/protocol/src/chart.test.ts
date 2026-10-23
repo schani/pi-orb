@@ -69,6 +69,160 @@ describe("parseChartSpec", () => {
     expect(parseChartSpec(bars)._unsafeUnwrap()).toEqual(bars);
   });
 
+  it("accepts a band around a line and normalizes its timestamps", () => {
+    const band = {
+      kind: "line",
+      title: "latency",
+      series: [
+        {
+          name: "p50",
+          points: [[1, 180]],
+          band: {
+            name: "p5–p95",
+            points: [
+              ["2026-10-13T18:00:00.000Z", 90, 240],
+              [2, null, 1],
+            ],
+          },
+        },
+      ],
+    };
+    expect(parseChartSpec(band)._unsafeUnwrap()).toMatchObject({
+      series: [
+        {
+          band: { name: "p5–p95", points: [[Date.parse("2026-10-13T18:00:00.000Z"), 90, 240]] },
+        },
+      ],
+    });
+    expect(
+      message({
+        ...band,
+        series: [{ ...band.series[0], band: { name: "b", points: [[1, 3, 2]] } }],
+      }),
+    ).toMatch(/band "b" has a low above its high/);
+    expect(
+      message({
+        ...band,
+        series: [{ ...band.series[0], band: { name: "p50", points: [[1, 1, 2]] } }],
+      }),
+    ).toMatch(/"p50" appears twice/);
+  });
+
+  it("accepts a histogram of raw values and bounds it", () => {
+    const histogram = {
+      kind: "histogram",
+      title: "latency distribution",
+      unit: "ms",
+      series: [
+        { name: "before", values: [120, 180] },
+        { name: "after", values: [130, 420] },
+      ],
+    };
+    expect(parseChartSpec(histogram)._unsafeUnwrap()).toEqual(histogram);
+    expect(
+      message({ ...histogram, series: [...histogram.series, { name: "c", values: [1] }] }),
+    ).toMatch(/series/);
+    expect(
+      message({ ...histogram, series: [{ name: "a", values: [Number.POSITIVE_INFINITY] }] }),
+    ).toMatch(/values/);
+    expect(
+      message({
+        ...histogram,
+        series: [{ name: "a", values: Array.from({ length: CHART_MAX_POINTS + 1 }, (_, i) => i) }],
+      }),
+    ).toMatch(new RegExp(`${CHART_MAX_POINTS} points`));
+  });
+
+  it("accepts a timeline and normalizes span times", () => {
+    const timeline = {
+      kind: "timeline",
+      title: "Deploy run",
+      spans: [
+        { lane: "setup", label: "queued", start: 0, end: 38_000, state: "queued" },
+        {
+          lane: "image",
+          label: "build",
+          start: "2026-10-13T18:00:00.000Z",
+          end: "2026-10-13T18:07:51.000Z",
+          critical: true,
+        },
+      ],
+    };
+    expect(parseChartSpec(timeline)._unsafeUnwrap()).toEqual({
+      ...timeline,
+      spans: [
+        timeline.spans[0],
+        {
+          ...timeline.spans[1],
+          start: Date.parse("2026-10-13T18:00:00.000Z"),
+          end: Date.parse("2026-10-13T18:07:51.000Z"),
+        },
+      ],
+    });
+    expect(message({ ...timeline, spans: [{ lane: "a", label: "b", start: 2, end: 1 }] })).toMatch(
+      /span "b" ends before it starts/,
+    );
+    expect(
+      message({ ...timeline, spans: [{ lane: "a", label: "b", start: 1, end: 2, state: "ok" }] }),
+    ).toMatch(/state/);
+  });
+
+  it("accepts a heatmap whose values match its labels", () => {
+    const heatmap = {
+      kind: "heatmap",
+      title: "CI failures",
+      x: ["00", "01"],
+      y: ["Mon", "Tue", "Wed"],
+      values: [
+        [0, 1],
+        [2, 3],
+        [4, 5],
+      ],
+    };
+    expect(parseChartSpec(heatmap)._unsafeUnwrap()).toEqual(heatmap);
+    expect(message({ ...heatmap, values: [[0, 1]] })).toMatch(/3 rows of 2 values/);
+    expect(message({ ...heatmap, values: [[0, 1], [2, 3], [4]] })).toMatch(/3 rows of 2 values/);
+    expect(
+      message({
+        ...heatmap,
+        values: [
+          [0, -1],
+          [2, 3],
+          [4, 5],
+        ],
+      }),
+    ).toMatch(/non-negative/);
+  });
+
+  it("accepts a compare chart and rejects rows it cannot place on a ratio scale", () => {
+    const compare = {
+      kind: "compare",
+      title: "p95 per-job service time",
+      unit: "s",
+      from: "TS 5.9",
+      to: "tsrs 0.18",
+      better: "lower",
+      rows: [
+        { label: "1 concurrent", from: 3.97, to: 0.42 },
+        { label: "2 concurrent", from: 6.97, to: 0.73 },
+      ],
+    };
+    expect(parseChartSpec(compare)._unsafeUnwrap()).toEqual(compare);
+    expect(parseChartSpec({ ...compare, tolerance: 10 }).isOk()).toBe(true);
+    expect(message({ ...compare, rows: [{ label: "a", from: 0, to: 1 }] })).toMatch(/positive/);
+    expect(
+      message({
+        ...compare,
+        rows: [
+          { label: "a", from: 1, to: 2 },
+          { label: "a", from: 1, to: 2 },
+        ],
+      }),
+    ).toMatch(/row "a" appears twice/);
+    expect(message({ ...compare, to: "TS 5.9" })).toMatch(/from and to/);
+    expect(message({ ...compare, better: "faster" })).toMatch(/better/);
+  });
+
   it("tells the script to fold or split more than six series", () => {
     const series = Array.from({ length: CHART_MAX_SERIES + 1 }, (_, i) => ({
       name: `s${i}`,

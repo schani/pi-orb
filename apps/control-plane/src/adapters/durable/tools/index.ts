@@ -50,22 +50,7 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
     ],
     options.authorize,
   );
-  for (const name of [
-    "write",
-    "edit",
-    "mcp_status",
-    ...subagentTools.map((tool) => tool.name),
-    "orb_self",
-    "orb_list",
-    "orb_transcript",
-    "orb_spawn",
-    "orb_send",
-    "orb_alert",
-    "notify_parent",
-    "orb_sleep",
-    "orb_archive",
-    "orb_delete",
-  ]) {
+  for (const name of ["write", "edit", "mcp_status", ...subagentTools.map((tool) => tool.name)]) {
     all.metadata(name, { ...all.metadata(name), outputSchema: { type: "string" } });
   }
   all.metadata("bash", {

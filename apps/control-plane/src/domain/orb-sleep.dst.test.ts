@@ -511,6 +511,8 @@ describe("scheduled sleep lifecycle (DST)", () => {
       {
         name: "sleep-prepared-provider-stop-bound",
         iterations: 10,
+        // Observe, prepare and pull remain available; only provider stop fails.
+        lateTimerProbability: 0,
         failpointProbabilities: { "provider.stop": 1 },
       },
       async (sim) => {
