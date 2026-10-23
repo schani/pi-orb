@@ -37,8 +37,10 @@ async function help(args: string[]) {
 }
 
 describe("public pi-orb help", () => {
+  let rootHelp: Promise<string> | undefined;
   it("prints root help to stdout without an orb environment", async () => {
-    const root = await help(["--help"]);
+    rootHelp ??= help(["--help"]);
+    const root = await rootHelp;
     expect(await help(["-h"])).toBe(root);
     expect(await help(["help"])).toBe(root);
     expect(root).toContain("pi-orb help [command]");
@@ -71,7 +73,8 @@ describe("public pi-orb help", () => {
       expect(output).toContain("Output:");
       expect(output).toContain("Retry:");
       expect(output).toContain("Exit:");
-      expect(await help(["--help"])).toContain(output.trimEnd());
+      rootHelp ??= help(["--help"]);
+      expect(await rootHelp).toContain(output.trimEnd());
       expect(await help([command, "-h"])).toBe(output);
       expect(await help([command, "--help", "--request-id", "help-test"])).toBe(output);
       expect(await help([command, "-h", "--json"])).toBe(output);
