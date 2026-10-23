@@ -1729,3 +1729,5 @@ Cancellation cleanup qualification observes signal identity and its non-aborted 
 Foundation adoption qualification rejects every non-read gcloud operation during dry run and pins the complete guarded execute mutation inventory, including changed-generation refusal. (2026-10-22 PDT).
 
 Dependency patch CLI cases share installation/cwd/environment setup while retaining byte seals, atomic refusal, drift and idempotence assertions. (2026-10-22 PDT).
+
+Native-image cleanup fixtures share only typed input defaults; temporary directories, cloud phases, ownership and simulation timing remain local. (2026-10-22 PDT).

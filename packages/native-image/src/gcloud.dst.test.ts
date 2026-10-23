@@ -3,25 +3,14 @@ import { errAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { runDst } from "../../../apps/control-plane/src/testkit/sim.ts";
 import { type CommandLogWriter, type CommandRunner, GcloudImageBuildEffects } from "./gcloud.ts";
-import type { ImageBuildInput } from "./orchestrator.ts";
+import { imageBuildInput } from "./testkit/image-build-input.ts";
 
-const input: ImageBuildInput = {
-  project: "target-project",
-  zone: "us-central1-a",
+const input = imageBuildInput({
   baseImage: "projects/base/global/images/base",
-  version: "v1",
   subnetwork: "subnet",
   builderServiceAccount: "builder@example.com",
   validationServiceAccount: "validator@example.com",
-  sourceCommit: "a".repeat(40),
-  sourceDirty: false,
-  sourceArchiveSha256: "b".repeat(64),
-  operationId: "0123456789abcdef",
-  validationRepositoryUrl: "https://github.com/example/repo",
-  inputInventory: {},
-  toolingInputInventory: {},
-  outputDir: "/sim/native-image",
-};
+});
 
 const timing = (task: SimulationTask) => ({
   now: () => task.monotonicNow(),

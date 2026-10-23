@@ -7,6 +7,8 @@ import { type CleanupEvidence, fileCleanupEvidenceWriter } from "./cleanup-evide
 import { type CleanupTiming, GcloudImageBuildEffects } from "./gcloud.ts";
 import { buildNativeImage, type ImageBuildInput } from "./orchestrator.ts";
 
+import { imageBuildInput } from "./testkit/image-build-input.ts";
+
 const directories: string[] = [];
 afterEach(async () => {
   for (const directory of directories.splice(0))
@@ -16,23 +18,7 @@ afterEach(async () => {
 async function input(): Promise<ImageBuildInput> {
   const outputDir = await mkdtemp(join(tmpdir(), "cleanup-operation-"));
   directories.push(outputDir);
-  return {
-    project: "target-project",
-    zone: "us-central1-a",
-    baseImage: "projects/base-project/global/images/debian-pinned",
-    version: "v1",
-    subnetwork: "projects/target-project/regions/us-central1/subnetworks/orbs",
-    builderServiceAccount: "builder@target-project",
-    validationServiceAccount: "orb@target-project",
-    sourceCommit: "a".repeat(40),
-    sourceDirty: false,
-    sourceArchiveSha256: "b".repeat(64),
-    operationId: "0123456789abcdef",
-    outputDir,
-    validationRepositoryUrl: "https://github.com/example/repo",
-    inputInventory: {},
-    toolingInputInventory: {},
-  };
+  return imageBuildInput({ outputDir });
 }
 
 const image = "pi-orb-image-v1-0123456789abcdef";
