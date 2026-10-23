@@ -313,28 +313,21 @@ text('DURABLE_SCRIPT_DONE');`;
           },
           {
             match: { userMessage: { regex: "^DURABLE_ACCEPTANCE$" } },
-            steps: [
-              codemode(`const statuses = JSON.parse(await tools.mcp_status({}));
-if (!statuses.some(server => server.name === 'fixture' && server.status === 'unprobed')) throw new Error('expected unprobed MCP server');
-text(await tools.mcp_discover({server:'fixture'})); text('DURABLE_DISCOVERED');`),
-              stop,
-            ],
+            steps: [codemode("text(await tools.mcp_status({})); text('DURABLE_MCP_READY');"), stop],
           },
           {
-            match: { toolResultContains: { regex: "DURABLE_DISCOVERED" } },
-            steps: [codemode(script), stop],
+            match: { toolResultContains: { regex: "DURABLE_MCP_READY" } },
+            steps: [{ type: "toolCall", name: "codemode", arguments: { code: script } }, stop],
           },
           {
             match: { userMessage: { regex: "^DURABLE_CHILD$" } },
             steps: [
-              codemode(
-                "text(await tools.mcp_discover({server:'fixture'})); text('DURABLE_CHILD_DISCOVERED');",
-              ),
+              codemode("text(await tools.mcp_status({})); text('DURABLE_CHILD_MCP_READY');"),
               stop,
             ],
           },
           {
-            match: { toolResultContains: { regex: "DURABLE_CHILD_DISCOVERED" } },
+            match: { toolResultContains: { regex: "DURABLE_CHILD_MCP_READY" } },
             steps: [
               {
                 type: "toolCall",

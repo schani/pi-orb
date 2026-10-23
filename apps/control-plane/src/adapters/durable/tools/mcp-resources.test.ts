@@ -42,7 +42,7 @@ it("discovers resources-only servers without tools/list and preserves namespace 
     ],
   });
   try {
-    expect((await bundle.discover(BACKGROUND_CONTEXT, "docs")).isOk()).toBe(true);
+    expect((await bundle.ready()).isOk()).toBe(true);
     expect(methods).not.toContain("tools/list");
     const fixture = await openCodemodeHarness(bundle.catalog);
     try {

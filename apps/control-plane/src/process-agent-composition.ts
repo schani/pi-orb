@@ -13,7 +13,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { type AuthProvider, StreamableHttpTransport } from "@earendil-works/pi-mcp";
 import type { McpConfig } from "@pi-orb/protocol";
-import { err, ok, okAsync, type Result, ResultAsync } from "neverthrow";
+import { err, ok, okAsync, Result, ResultAsync } from "neverthrow";
 import { NativeResourceContext } from "./adapters/durable/context-storage.ts";
 import { executionWaitProgress } from "./adapters/durable/execution-wait-progress.ts";
 import type { DurableAgentPlaneOptions } from "./adapters/durable/manager.ts";
@@ -29,7 +29,6 @@ import {
 } from "./adapters/durable/resource-context.ts";
 import { createAgentToolFiles } from "./adapters/durable/tool-files.ts";
 import { createDurableTools, type ToolError } from "./adapters/durable/tools/index.ts";
-import { McpAdapterFailure } from "./adapters/durable/tools/mcp.ts";
 import { createOrbTools } from "./adapters/durable/tools/orb-tools.ts";
 import { RemoteExecutionEnv } from "./adapters/execution-client/env.ts";
 import { LazyExecutionEnv } from "./adapters/execution-client/lazy-env.ts";
@@ -65,13 +64,6 @@ export function processAgentContext(
         return options.edge?.(code, facts) ?? okAsync(undefined);
       },
     }));
-}
-
-export function mcpFetchSignal(
-  caller?: AbortSignal,
-  transport?: AbortSignal | null,
-): AbortSignal | null {
-  return caller && transport ? AbortSignal.any([caller, transport]) : (caller ?? transport ?? null);
 }
 
 export function scopedMcpHeaders(
@@ -111,7 +103,10 @@ export function refreshProcessTools(
     execute: async (args, api, context) => {
       const agent = await currentAgent(api, context);
       if (agent.isErr())
-        return { isError: true, output: [{ type: "text", text: "Tool catalog unavailable" }] };
+        return {
+          isError: true,
+          output: [{ type: "text", text: "Tool catalog unavailable" }],
+        };
       return tool.execute(args, { ...api, agent: async () => agent.value }, context);
     },
   };
@@ -127,12 +122,7 @@ export function scopedMcpAuth(
     // MCP's AuthProvider requires rejection; McpTools catches it at its adapter boundary.
     if (grant.isErr()) {
       onState?.(grant.error.code === "forbidden" ? "needs-auth" : "unavailable");
-      return Promise.reject(
-        new McpAdapterFailure(
-          grant.error.code === "forbidden" ? "auth_required" : "unavailable",
-          "credential",
-        ),
-      );
+      return Promise.reject(new Error("MCP credential unavailable"));
     }
     onState?.("available");
     last = grant.value;
@@ -157,6 +147,32 @@ export function closeProcessAgentResources(
       durableError("execution cleanup failed"),
     ),
   ]).map(() => undefined);
+}
+
+export function admitProcessTools(
+  tools: {
+    close: () => ResultAsync<void, ToolError>;
+  },
+  env: { cleanup: (context: Context) => Promise<void> },
+  context: Context,
+  admit: () => ResultAsync<void, RuntimeClientError> = () => okAsync(undefined),
+): ResultAsync<void, RuntimeClientError> {
+  return ResultAsync.fromSafePromise(
+    (async () => {
+      const admitted = await admit();
+      if (admitted.isErr() || context.abortSignal?.aborted) {
+        await closeProcessAgentResources(tools, env);
+        return err<void, RuntimeClientError>(
+          context.abortSignal?.aborted
+            ? { ...durableError("agent composition cancelled"), code: "cancelled" }
+            : admitted.isErr()
+              ? admitted.error
+              : durableError("agent admission unavailable"),
+        );
+      }
+      return ok<void, RuntimeClientError>(undefined);
+    })(),
+  ).andThen((result) => result);
 }
 
 export function createProcessAgentContext(
@@ -415,17 +431,11 @@ export function createProcessAgentContext(
         mcpDiscovery: {
           now: () => task.monotonicNow(),
           record: (failure) =>
-            logOrbEvent(task, orb.id, "durable.mcp_discovery", {
+            logOrbEvent(task, orb.id, "durable.mcp_unavailable", {
+              ...failure,
+              stage: "discovery",
               processId: process.pid,
               admission_version: orb.agentAdmissionVersion,
-              server: failure.server,
-              phase: failure.phase,
-              outcome: failure.outcome,
-              phase_elapsed_ms: failure.elapsedMs,
-              discovery_elapsed_ms: failure.discoveryElapsedMs,
-              errorCategory: failure.errorCategory,
-              failure_stage: failure.failureStage,
-              http_status: failure.httpStatus,
             }),
         },
         orb: { id: orb.id, task },
@@ -464,8 +474,8 @@ export function createProcessAgentContext(
             name: server.name,
             unavailableState: () => (state === "needs-auth" ? "needs-auth" : "unavailable"),
             connect: (ctx) =>
-              ResultAsync.fromThrowable(
-                async () => {
+              ResultAsync.fromSafePromise(
+                (async () => {
                   const fetcher: typeof fetch = async (input, init) => {
                     const current = await deps.store.getProject(task, orb.projectId);
                     if (current.isErr() || current.value?.ownerUserId !== ownerUserId)
@@ -493,15 +503,16 @@ export function createProcessAgentContext(
                       headers.set(name, value);
                     if (lease && (await lease.check()).isErr())
                       return new Response(null, { status: 403 });
-                    const signal = mcpFetchSignal(ctx.abortSignal, init?.signal);
-                    const response = await ResultAsync.fromThrowable(
-                      () => fetch(input, { ...init, headers, signal }),
-                      () => new McpAdapterFailure(signal?.aborted ? "abort" : "network", "http"),
-                    )();
-                    // The Fetch contract rejects; McpTools catches the typed failure.
-                    if (response.isErr()) return Promise.reject(response.error);
-                    if (response.value.status === 401) state = "needs-auth";
-                    return response.value;
+                    const response = await fetch(input, {
+                      ...init,
+                      headers,
+                      signal:
+                        ctx.abortSignal && init?.signal
+                          ? AbortSignal.any([ctx.abortSignal, init.signal])
+                          : (ctx.abortSignal ?? init?.signal ?? null),
+                    });
+                    if (response.status === 401) state = "needs-auth";
+                    return response;
                   };
                   const oauth = server.oauth;
                   const authProvider = oauth
@@ -512,7 +523,6 @@ export function createProcessAgentContext(
                               task,
                               { projectId: orb.projectId, id: oauth.id, url: server.url },
                               request,
-                              ctx.abortSignal ? { signal: ctx.abortSignal } : undefined,
                             ),
                           )
                             .andThen((result) => result)
@@ -527,22 +537,36 @@ export function createProcessAgentContext(
                         },
                       )
                     : undefined;
-                  return new StreamableHttpTransport({
-                    url: server.url,
-                    fetch: fetcher,
-                    ...(authProvider ? { authProvider } : {}),
-                  });
-                },
-                (): ToolError => ({ code: "unavailable", message: "MCP transport unavailable" }),
-              )(),
+                  return Result.fromThrowable(
+                    () =>
+                      new StreamableHttpTransport({
+                        url: server.url,
+                        fetch: fetcher,
+                        ...(authProvider ? { authProvider } : {}),
+                      }),
+                    (): ToolError => ({
+                      code: "unavailable",
+                      message: "MCP transport unavailable",
+                    }),
+                  )();
+                })(),
+              ).andThen((result) => result),
           };
         }),
       });
-      const currentProject = await deps.store.getProject(task, orb.projectId);
+      const composed = await admitProcessTools(tools, env, context, () =>
+        deps.store
+          .getProject(task, orb.projectId)
+          .mapErr(() => durableError("orb project unavailable", true))
+          .andThen((current) =>
+            current?.ownerUserId === ownerUserId
+              ? ok(undefined)
+              : err(durableError("orb owner changed")),
+          ),
+      );
+      if (composed.isErr()) return err(composed.error);
       const admitted = await deps.store.getOrb(task, orb.id);
       if (
-        currentProject.isErr() ||
-        currentProject.value?.ownerUserId !== ownerUserId ||
         admitted.isErr() ||
         !admitted.value ||
         admitted.value.agentAdmissionVersion !== orb.agentAdmissionVersion ||
@@ -553,11 +577,7 @@ export function createProcessAgentContext(
       ) {
         resourcesAbort.abort();
         await closeProcessAgentResources(tools, env);
-        return err(
-          operation.signal.aborted
-            ? { ...durableError("agent composition cancelled"), code: "cancelled" as const }
-            : durableError("agent admission superseded"),
-        );
+        return err(durableError("agent admission superseded"));
       }
       const registry = createRegistry();
       let conversation: Harness["conversation"] | undefined;

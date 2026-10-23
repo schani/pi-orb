@@ -25,6 +25,6 @@ Two cancellation limitations were identified: the scoped fetch wrapper replaced 
 
 ## Resulting decision
 
-Remote MCP discovery cannot gate startup or unrelated tools. Explicit selected-server discovery and cheap cached status isolate optional providers; failures enter agent output, the parent's replicated diagnostics, and sanitized failure-only lifecycle traces. Caller cancellation stays cancellation. Preserve local configuration fail-closed behavior and mandatory owner/admission checks.
+Remote MCP discovery cannot gate startup or unrelated tools. On-demand discovery through `mcp_status` isolates optional providers from startup and unrelated scripts; failures enter agent output, the parent's replicated diagnostics, and sanitized failure-only lifecycle traces. Discovery retains serial per-server failure tolerance and the SDK per-request timeout. Caller cancellation stays cancellation. Preserve local configuration fail-closed behavior and mandatory owner/admission checks.
 
 Current contract and observability fields: `docs/mcp.md`. No schema, timeout policy, deployment or target restart is part of this change.

@@ -1,4 +1,5 @@
 import type { Context } from "@earendil-works/chord";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import { defineExtension, type ToolRegistration } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
@@ -45,7 +46,6 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
     "write",
     "edit",
     "mcp_status",
-    "mcp_discover",
     ...subagentTools.map((tool) => tool.name),
     "orb_self",
     "orb_list",
@@ -95,7 +95,7 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
   const catalog = all.without(["notify_parent"]);
   const running = new Set<CodemodeSandbox>();
   const mcp = new McpTools(options.mcp ?? [], catalog, options.mcpDiscovery);
-  catalog.add(mcp.statusTool());
+  catalog.add(mcp.statusTool((ctx) => bundle.ready(ctx)));
   const child = all.without([...subagentTools.map((tool) => tool.name), "orb_spawn", "orb_alert"]);
   const extensions = () => {
     const native = codemodeExtension(catalog, running, options.files, options.orb);
@@ -116,17 +116,17 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
       modelTools: [code] as const,
     };
   };
-  const discover = (context: Context, server: string) =>
-    ResultAsync.fromSafePromise(mcp.discover(context, server)).andThen((result) => {
-      Object.assign(bundle, extensions());
-      return result;
-    });
-  catalog.add(mcp.discoveryTool(discover));
   const bundle = {
     ...extensions(),
     catalog,
     mcpStatus: () => mcp.status(),
-    discover,
+    ready: (context: Context = BACKGROUND_CONTEXT) =>
+      ResultAsync.fromSafePromise(mcp.discover(context))
+        .andThen((result) => result)
+        .map((statuses) => {
+          Object.assign(bundle, extensions());
+          return statuses;
+        }),
     close: (): ResultAsync<void, ToolError> =>
       ResultAsync.fromPromise(
         Promise.all([...running].map((s) => s.close())).then(() => undefined),

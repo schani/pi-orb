@@ -69,7 +69,7 @@ it("cancels in-flight MCP requests and closes their scoped transports", async ()
       },
     ],
   });
-  await tools.discover(BACKGROUND_CONTEXT, "mock");
+  await tools.ready();
   const fixture = await openCodemodeHarness(tools.catalog);
   try {
     const discovery = await fixture.run(

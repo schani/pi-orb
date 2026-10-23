@@ -329,7 +329,7 @@ it.each(["root", "child"] as const)(
       ],
     });
     try {
-      expect((await bundle.discover(BACKGROUND_CONTEXT, "fixture")).isOk()).toBe(true);
+      expect((await bundle.ready()).isOk()).toBe(true);
       const extension = scope === "root" ? bundle.extension : bundle.childExtension;
       const { metadata, result } = await nativeMetadata(
         bundle,
@@ -410,6 +410,7 @@ it.each(["root", "child"] as const)(
       ],
     });
     try {
+      expect((await bundle.ready()).isOk()).toBe(true);
       const extension = scope === "root" ? bundle.extension : bundle.childExtension;
       expect(extension.tools?.map((tool) => tool.name)).toContain(own);
       expect(extension.tools?.map((tool) => tool.name)).not.toContain(hidden);

@@ -1,4 +1,4 @@
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
   fauxAssistantMessage,
@@ -15,13 +15,121 @@ import {
   type ToolExecutionResult,
   ToolTask,
 } from "@earendil-works/pi-durable";
+import { McpHttpError, McpTimeoutError } from "@earendil-works/pi-mcp";
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
 import { errAsync, okAsync } from "neverthrow";
 import { expect, it } from "vitest";
+import { projectHistory } from "../projection.ts";
 import { CallableCatalog } from "./catalog.ts";
 import { createDurableTools } from "./index.ts";
 import { McpTools } from "./mcp.ts";
 import { openCodemodeHarness } from "./testkit/codemode.ts";
+
+it("projects authorization-required diagnostics into durable user-visible history", async () => {
+  const tools = createDurableTools({
+    mcp: [
+      {
+        name: "fixture",
+        unavailableState: () => "needs-auth",
+        connect: () => errAsync({ code: "forbidden", message: "secret" }),
+      },
+    ],
+  });
+  const faux = fauxProvider();
+  faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("codemode", { code: "text(await tools.mcp_status({}))" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("done"),
+  ]);
+  const models = createModels();
+  models.setProvider(faux.provider);
+  const registry = createRegistry();
+  registry.install(tools.extension);
+  const harness = await Harness.open(new MemoryStorage(), { models, registry }, BACKGROUND_CONTEXT);
+  try {
+    const root = await harness.root(BACKGROUND_CONTEXT, {
+      agent: { model: { provider: "faux", modelId: "faux-1" } },
+    });
+    harness.resume();
+    await (await root.submit({ type: "input", content: "go" }, BACKGROUND_CONTEXT)).wait(
+      BACKGROUND_CONTEXT,
+    );
+    const records = await root.entries({}, 100, undefined, BACKGROUND_CONTEXT);
+    const history = projectHistory(records.items, "session");
+    expect(history.isOk()).toBe(true);
+    expect(JSON.stringify(history)).toContain("MCP fixture: needs-auth.");
+    expect(JSON.stringify(history)).not.toContain("secret");
+  } finally {
+    await harness.close(BACKGROUND_CONTEXT);
+    await tools.close();
+  }
+});
+
+it("retries authorization-required discovery after consent and exposes sanitized status", async () => {
+  let authorized = false;
+  let connections = 0;
+  const tools = createDurableTools({
+    mcp: [
+      {
+        name: "fixture",
+        unavailableState: () => (authorized ? "unavailable" : "needs-auth"),
+        connect: () => {
+          connections++;
+          if (!authorized) return errAsync({ code: "forbidden", message: "secret credential" });
+          const { client, server } = createInMemoryTransportPair();
+          server.onMessage((message) => {
+            if (!("method" in message) || !("id" in message)) return;
+            void server.send({
+              jsonrpc: "2.0",
+              id: message.id,
+              result:
+                message.method === "initialize"
+                  ? {
+                      protocolVersion: "2025-11-25",
+                      capabilities: { tools: {} },
+                      serverInfo: { name: "fixture", version: "1" },
+                    }
+                  : { tools: [{ name: "read", inputSchema: { type: "object" } }] },
+            });
+          });
+          void server.start();
+          return okAsync(client);
+        },
+      },
+    ],
+  });
+  try {
+    expect(connections).toBe(0);
+    const api = { diagnostic: () => {} } as unknown as ToolExecutionApi;
+    const failed = await tools.catalog.invoke("mcp_status", {}, api, BACKGROUND_CONTEXT);
+    expect(failed.isOk()).toBe(true);
+    expect(tools.mcpStatus()).toEqual([
+      {
+        name: "fixture",
+        status: "needs-auth",
+        error: { code: "forbidden", message: "MCP server unavailable" },
+      },
+    ]);
+    authorized = true;
+    await tools.catalog.invoke("mcp_status", {}, api, BACKGROUND_CONTEXT);
+    expect(tools.mcpStatus()).toEqual([{ name: "fixture", status: "available" }]);
+    const fixture = await openCodemodeHarness(tools.catalog);
+    try {
+      const discovery = await fixture.run(
+        'return typeof await describeTool("mcp__fixture__read");',
+      );
+      expect(discovery.isError).toBe(false);
+      expect(discovery.output).toContainEqual({ type: "text", text: "string" });
+    } finally {
+      await fixture.close();
+    }
+    await tools.ready();
+    expect(connections).toBe(2);
+  } finally {
+    await tools.close();
+  }
+});
 
 it("reports a failed MCP server without blocking healthy discovery and calls", async () => {
   let healthyCalls = 0;
@@ -66,8 +174,7 @@ it("reports a failed MCP server without blocking healthy discovery and calls", a
     ],
   });
   try {
-    await tools.discover(BACKGROUND_CONTEXT, "broken");
-    const ready = await tools.discover(BACKGROUND_CONTEXT, "healthy");
+    const ready = await tools.ready();
     expect(ready.isOk()).toBe(true);
     expect(JSON.stringify(ready)).not.toContain("secret-token");
     const fixture = await openCodemodeHarness(tools.catalog);
@@ -80,7 +187,7 @@ it("reports a failed MCP server without blocking healthy discovery and calls", a
     } finally {
       await fixture.close();
     }
-    const api = {} as ToolExecutionApi;
+    const api = { diagnostic: () => {} } as unknown as ToolExecutionApi;
     const status = await tools.catalog.invoke("mcp_status", {}, api, BACKGROUND_CONTEXT);
     expect(status.isOk()).toBe(true);
     if (status.isOk()) {
@@ -172,7 +279,7 @@ it("discovers MCP, executes validated QuickJS calls with fresh scoped connection
       },
     ],
   });
-  expect((await tools.discover(BACKGROUND_CONTEXT, "mock")).isOk()).toBe(true);
+  expect((await tools.ready()).isOk()).toBe(true);
   expect(auth).toBe(1);
   expect(effects).toBe(0);
   const faux = fauxProvider();
@@ -273,7 +380,7 @@ it("rejects explicit null for parameterless MCP tools before hooks, authorizatio
     catalog,
   );
   try {
-    expect((await mcp.discover(BACKGROUND_CONTEXT, "fixture")).isOk()).toBe(true);
+    expect((await mcp.discover(BACKGROUND_CONTEXT)).isOk()).toBe(true);
     expect(credentials).toBe(1);
     expect(
       catalog.definitions().find((tool) => tool.name === "mcp__fixture__ping")?.parameters,
@@ -369,7 +476,7 @@ it("rejects raw MCP arguments before native coercion, hooks, authorization and c
     catalog,
   );
   try {
-    expect((await mcp.discover(BACKGROUND_CONTEXT, "strict")).isOk()).toBe(true);
+    expect((await mcp.discover(BACKGROUND_CONTEXT)).isOk()).toBe(true);
     expect(credentials).toBe(1);
     expect(
       catalog.definitions().find((tool) => tool.name === "mcp__strict__echo")?.parameters,
@@ -472,7 +579,7 @@ it("discovers oversized MCP arguments and safely explains missing required field
     ],
   });
   try {
-    expect((await tools.discover(BACKGROUND_CONTEXT, "posthog")).isOk()).toBe(true);
+    expect((await tools.ready()).isOk()).toBe(true);
     const fixture = await openCodemodeHarness(tools.catalog);
     try {
       const invalid = await fixture.run(
@@ -507,3 +614,47 @@ it("discovers oversized MCP arguments and safely explains missing required field
     await tools.close();
   }
 });
+
+it.each(["timeout", "http", "abort"] as const)(
+  "records sanitized %s discovery failure with the active phase and elapsed time",
+  async (kind) => {
+    let now = 0;
+    const failures: unknown[] = [];
+    const controller = new AbortController();
+    const { client } = createInMemoryTransportPair();
+    client.start = async () => {
+      now = 9;
+      if (kind === "abort") controller.abort();
+      throw kind === "timeout"
+        ? new McpTimeoutError(30_000)
+        : new McpHttpError(503, "SECRET", "SECRET");
+    };
+    const mcp = new McpTools(
+      [{ name: "fixture", connect: () => okAsync(client) }],
+      new CallableCatalog([]),
+      { now: () => now, record: (failure) => failures.push(failure) },
+    );
+    try {
+      const result = await mcp.discover(withAbortSignal(controller.signal, BACKGROUND_CONTEXT));
+      expect(result.isErr()).toBe(kind === "abort");
+      expect(failures).toEqual([
+        {
+          server: "fixture",
+          phase: "initialize",
+          elapsedMs: 9,
+          aborted: kind === "abort",
+          errorCategory:
+            kind === "timeout" ? "request_timeout" : kind === "abort" ? "cancelled" : "http",
+          ...(kind === "timeout"
+            ? { requestTimeoutMs: 30_000 }
+            : kind === "http"
+              ? { httpStatus: 503 }
+              : {}),
+        },
+      ]);
+      expect(JSON.stringify(failures)).not.toContain("SECRET");
+    } finally {
+      await mcp.close();
+    }
+  },
+);

@@ -226,12 +226,7 @@ export function codemodeTool(
             diagnostics: result.diagnostics.map((diagnostic) =>
               diagnostic.code === "invalid_arguments"
                 ? { ...diagnostic, message: catalog.invalidArgumentsMessage(name, value) }
-                : diagnostic.code === "tool_unavailable" && name.startsWith("mcp__")
-                  ? {
-                      ...diagnostic,
-                      message: "MCP tools unavailable; call mcp_discover again in a new script.",
-                    }
-                  : diagnostic,
+                : diagnostic,
             ),
           };
         },

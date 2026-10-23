@@ -26,37 +26,19 @@ export interface McpEndpoint {
   connect(context: Context): ResultAsync<McpTransport, ToolError>;
 }
 export type McpServerStatus =
-  | { name: string; status: "available" | "unprobed" }
+  | { name: string; status: "available" }
   | { name: string; status: "unavailable" | "needs-auth"; error: ToolError };
-export interface McpDiscoveryFailure {
-  server: string;
-  phase: "transport" | "initialize" | "list_tools" | "close";
-  outcome: "failed" | "aborted";
-  elapsedMs: number;
-  discoveryElapsedMs: number;
-  errorCategory:
-    | ToolError["code"]
-    | "request_timeout"
-    | "http"
-    | "auth_required"
-    | "network"
-    | "abort";
-  failureStage?: "credential" | "http";
-  httpStatus?: number;
-}
 export interface McpDiscoveryDiagnostics {
   now(): number;
-  record(failure: McpDiscoveryFailure): void;
-}
-/** Typed rejection required by the SDK's Fetch/AuthProvider contracts. */
-export class McpAdapterFailure extends Error {
-  readonly category: "auth_required" | "unavailable" | "network" | "abort";
-  readonly stage: "credential" | "http";
-  constructor(category: McpAdapterFailure["category"], stage: McpAdapterFailure["stage"]) {
-    super(stage === "credential" ? "MCP credential unavailable" : "MCP request unavailable");
-    this.category = category;
-    this.stage = stage;
-  }
+  record(failure: {
+    server: string;
+    phase: "transport" | "initialize" | "list_tools" | "close";
+    elapsedMs: number;
+    aborted: boolean;
+    errorCategory: ToolError["code"] | "request_timeout" | "http" | "auth_required";
+    httpStatus?: number;
+    requestTimeoutMs?: number;
+  }): void;
 }
 function invalidResponse(): ToolExecutionResult {
   return {
@@ -70,42 +52,27 @@ export class McpTools {
   status(): readonly McpServerStatus[] {
     return this.statuses;
   }
-  statusTool() {
+  statusTool(discover: (ctx: Context) => ResultAsync<readonly McpServerStatus[], ToolError>) {
     return defineTool({
       name: "mcp_status",
       description:
-        "Inspect configured MCP servers and cached status without connecting. Use mcp_discover to connect or retry unprobed/unavailable servers.",
+        "Discover MCP tools and inspect availability. Use discovered tools in the next script.",
       parameters: Type.Object({}, { additionalProperties: false }),
       replay: "safe",
-      execute: async () => ({
-        output: [{ type: "text" as const, text: JSON.stringify(this.statuses) }],
-      }),
-    });
-  }
-  discoveryTool(
-    discover: (
-      context: Context,
-      server: string,
-    ) => ResultAsync<readonly McpServerStatus[], ToolError>,
-  ) {
-    return defineTool({
-      name: "mcp_discover",
-      description:
-        "Connect one MCP server and discover tools. Retry failures explicitly. Newly discovered tools are callable in the next codemode script.",
-      parameters: Type.Object({ server: Type.String() }, { additionalProperties: false }),
-      replay: "safe",
-      execute: async (args, api, context) => {
-        const result = await discover(context, args.server);
+      execute: async (_args, api, ctx) => {
+        const previous = this.statuses;
+        const result = await discover(ctx);
         if (result.isErr()) return errorResult(result.error);
-        const statuses = result.value.filter((status) => status.name === args.server);
-        for (const status of statuses)
-          if (status.status === "unavailable" || status.status === "needs-auth")
+        for (const status of result.value) {
+          const before = previous.find((entry) => entry.name === status.name)?.status;
+          if (before !== status.status && (status.status !== "available" || before !== undefined))
             api.diagnostic({
               severity: "info",
               code: "mcp_status",
-              message: `MCP ${status.name}: ${status.status}.`,
+              message: `MCP ${status.name}: ${status.status === "available" ? "connected" : status.status}.`,
             });
-        return { output: [{ type: "text", text: JSON.stringify(statuses) }] };
+        }
+        return { output: [{ type: "text", text: JSON.stringify(result.value) }] };
       },
     });
   }
@@ -235,16 +202,9 @@ export class McpTools {
     catalog: CallableCatalog,
     diagnostics?: McpDiscoveryDiagnostics,
   ) {
-    this.diagnostics = diagnostics;
     this.endpoints = endpoints;
     this.catalog = catalog;
-    this.statuses = endpoints.map((endpoint) => ({ name: endpoint.name, status: "unprobed" }));
-    for (const endpoint of endpoints)
-      this.catalog.namespace({
-        name: `mcp__${endpoint.name}`,
-        ...(endpoint.description ? { description: endpoint.description } : {}),
-        instructions: `Use mcp_discover({server:${JSON.stringify(endpoint.name)}}) before using this server.`,
-      });
+    this.diagnostics = diagnostics;
   }
   private using<T>(
     endpoint: McpEndpoint,
@@ -258,33 +218,35 @@ export class McpTools {
     this.running.add(client);
     return ResultAsync.fromSafePromise(
       (async () => {
-        const startedAt = diagnostics?.now() ?? 0;
-        let phase: McpDiscoveryFailure["phase"] = "transport";
-        let phaseStartedAt = startedAt;
+        let phase: Parameters<McpDiscoveryDiagnostics["record"]>[0]["phase"] = "transport";
+        let started = diagnostics?.now() ?? 0;
         let reported = false;
-        const stage = (next: McpDiscoveryFailure["phase"]) => {
+        const stage = (next: typeof phase) => {
           phase = next;
-          phaseStartedAt = diagnostics?.now() ?? 0;
+          started = diagnostics?.now() ?? 0;
         };
-        const report = (errorCategory: McpDiscoveryFailure["errorCategory"], error?: unknown) => {
+        const report = (category: ToolError["code"], cause?: unknown) => {
           if (!diagnostics || reported) return;
           reported = true;
-          const now = diagnostics.now();
           diagnostics.record({
             server: endpoint.name,
             phase,
-            outcome: ctx.abortSignal?.aborted ? "aborted" : "failed",
-            elapsedMs: now - phaseStartedAt,
-            discoveryElapsedMs: now - startedAt,
-            errorCategory,
-            ...(error instanceof McpAdapterFailure ? { failureStage: error.stage } : {}),
-            ...(error instanceof McpHttpError
-              ? { failureStage: "http" as const, httpStatus: error.status }
-              : {}),
+            elapsedMs: diagnostics.now() - started,
+            aborted: ctx.abortSignal?.aborted ?? false,
+            errorCategory:
+              cause instanceof McpTimeoutError
+                ? "request_timeout"
+                : cause instanceof McpAuthRequiredError
+                  ? "auth_required"
+                  : cause instanceof McpHttpError
+                    ? "http"
+                    : category,
+            ...(cause instanceof McpHttpError ? { httpStatus: cause.status } : {}),
+            ...(cause instanceof McpTimeoutError ? { requestTimeoutMs: cause.timeoutMs } : {}),
           });
         };
         const abort = () => {
-          report("abort");
+          report("cancelled");
           void ResultAsync.fromPromise(client.close(), () => ({
             code: "cancelled" as const,
             message: "MCP cancelled",
@@ -312,19 +274,8 @@ export class McpTools {
               })).andThen(() =>
                 errAsync<T, ToolError>({ code: "cancelled", message: "MCP cancelled" }),
               );
-            const failed = (error: unknown): ToolError => {
-              report(
-                error instanceof McpTimeoutError
-                  ? "request_timeout"
-                  : error instanceof McpAdapterFailure
-                    ? error.category
-                    : error instanceof McpAuthRequiredError
-                      ? "auth_required"
-                      : error instanceof McpHttpError
-                        ? "http"
-                        : "unavailable",
-                error,
-              );
+            const failed = (cause: unknown): ToolError => {
+              report("unavailable", cause);
               return {
                 code: ctx.abortSignal?.aborted ? "cancelled" : "unavailable",
                 message: `MCP ${endpoint.name} request failed`,
@@ -360,20 +311,19 @@ export class McpTools {
       })(),
     ).andThen((value) => value);
   }
-  async discover(ctx: Context, server: string) {
+  async discover(ctx: Context) {
     if (ctx.abortSignal?.aborted)
       return err<readonly McpServerStatus[], ToolError>({
         code: "cancelled",
         message: "MCP cancelled",
       });
-    if (!this.endpoints.some((endpoint) => endpoint.name === server))
-      return err<readonly McpServerStatus[], ToolError>({
-        code: "invalid_arguments",
-        message: "MCP server does not exist",
-      });
-    for (const endpoint of this.endpoints.filter((endpoint) => endpoint.name === server)) {
-      if (this.statuses.some((status) => status.name === server && status.status === "available"))
+    const statuses: McpServerStatus[] = [];
+    for (const endpoint of this.endpoints) {
+      const previous = this.statuses.find((status) => status.name === endpoint.name);
+      if (previous?.status === "available") {
+        statuses.push(previous);
         continue;
+      }
       const discovered = await this.using(
         endpoint,
         ctx,
@@ -389,19 +339,14 @@ export class McpTools {
       );
       if (discovered.isErr()) {
         if (discovered.error.code === "cancelled") return err(discovered.error);
-        const status: McpServerStatus = {
+        statuses.push({
           name: endpoint.name,
           status: endpoint.unavailableState?.() ?? "unavailable",
           error: { code: discovered.error.code, message: "MCP server unavailable" },
-        };
-        this.statuses = this.statuses.map((previous) =>
-          previous.name === endpoint.name ? status : previous,
-        );
-        return ok(this.statuses);
+        });
+        continue;
       }
-      this.statuses = this.statuses.map((status) =>
-        status.name === endpoint.name ? { name: endpoint.name, status: "available" } : status,
-      );
+      statuses.push({ name: endpoint.name, status: "available" });
       const namespace = {
         name: `mcp__${endpoint.name}`,
         ...(discovered.value.description ? { description: discovered.value.description } : {}),
@@ -499,6 +444,7 @@ export class McpTools {
         });
       }
     }
+    this.statuses = statuses;
     return ok(this.statuses);
   }
   close(): ResultAsync<void, ToolError> {

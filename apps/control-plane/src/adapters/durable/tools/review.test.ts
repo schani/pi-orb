@@ -57,7 +57,7 @@ it("keeps resources-only instructions in namespace discovery, not initial provid
   });
   let harness: Harness | undefined;
   try {
-    expect((await bundle.discover(ctx, "docs")).isOk()).toBe(true);
+    expect((await bundle.ready()).isOk()).toBe(true);
     const registry = createRegistry();
     registry.install(bundle.extension);
     const faux = fauxProvider();
