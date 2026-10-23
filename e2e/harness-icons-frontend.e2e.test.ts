@@ -1,11 +1,9 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { expect as check, chromium, webkit } from "@playwright/test";
-import { createServer } from "vite";
+import { expect as check } from "@playwright/test";
 import { it } from "vitest";
-import { listenFrontend } from "./frontend-listen.ts";
 import { gotoFrontendFixture } from "./testkit/frontend-fixture.ts";
+import { createFrontendFixture } from "./testkit/frontend-owned.ts";
 import { observeProjectCreates } from "./testkit/project-create-observer.ts";
 
 type NativeElement = {
@@ -42,20 +40,24 @@ type NativeBrowser = {
 it.each(["chromium", "webkit"] as const)(
   "%s: shared project headers create the selected harness in place and preserve retry intent",
   async (engine) => {
-    const root = join(import.meta.dirname, "../apps/web");
-    const cacheDir = await mkdtemp(join(tmpdir(), "harness-icons-frontend-"));
-    const vite = await createServer({
-      root,
-      cacheDir,
-      configFile: join(root, "vite.config.ts"),
-      mode: "frontend",
-      server: { host: "127.0.0.1", port: 0 },
+    const fixture = await createFrontendFixture(engine);
+    const { page, origin } = fixture;
+    const context = page.context();
+    const created: Record<string, unknown>[] = [];
+    const stopCreated = observeProjectCreates(context, created);
+    fixture.cleanup(async () => {
+      stopCreated();
+      const outcomes = await Promise.allSettled(
+        [...new Set(created.map((post) => post["id"]))].map(async (id) => {
+          if (typeof id !== "string") return;
+          const path = `${origin}/api/v1/orbs/${id}`;
+          const response = await page.request.delete(path);
+          check([202, 404]).toContain(response.status());
+          await check.poll(async () => (await page.request.get(path)).status()).toBe(404);
+        }),
+      );
+      check(outcomes.filter((outcome) => outcome.status === "rejected")).toEqual([]);
     });
-    const browser =
-      engine === "chromium"
-        ? await chromium.launch({ channel: "chromium", headless: true })
-        : await webkit.launch({ headless: true });
-    const context = await browser.newContext();
     const releasePending = new Set<() => void>();
     const nativeEvidence: {
       activation: string;
@@ -66,12 +68,6 @@ it.each(["chromium", "webkit"] as const)(
     }[] = [];
     await context.tracing.start({ screenshots: true, snapshots: true });
     try {
-      await listenFrontend(vite);
-      const address = vite.httpServer?.address();
-      check(address && typeof address !== "string").toBeTruthy();
-      if (!address || typeof address === "string") return;
-      const origin = `http://127.0.0.1:${address.port}`;
-      const page = await context.newPage();
       const projectsResponse = await page.request.get(`${origin}/api/v1/projects`);
       check(projectsResponse.status()).toBe(200);
       const projects = structuredClone(await projectsResponse.json());
@@ -404,10 +400,6 @@ it.each(["chromium", "webkit"] as const)(
       throw error;
     } finally {
       for (const release of releasePending) release();
-      await context.close();
-      await browser.close();
-      await vite.close();
-      await rm(cacheDir, { recursive: true, force: true });
     }
   },
 );

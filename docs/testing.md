@@ -1797,3 +1797,5 @@ Diagnostic cutoff counts parsed frame bytes, excluding a following incomplete UT
 **Decision (2026-10-22):** CI exports nested scenario diagnostics by exact producer leaf allowlists on both acceptance workflows. Copied host/workspace/auth trees and raw alert/sleep request bodies stay private. Missing-orb evidence is exported by both workflows.
 
 **Decision (2026-10-22):** Docker endpoint parsing is pure root-unit coverage; it requires no image build or provider startup.
+
+**Decision (2026-10-22):** Tablet touch-focus coverage shares the stronger hidden/visible and full-focus-history assertions: Chromium covers both emulation modes, WebKit retains touch/mobile. Native modified and middle harness activation remains in the two-engine harness suite, with all created IDs deleted and acknowledged before resource disposal.
