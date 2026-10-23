@@ -4,7 +4,7 @@ import { expect, it } from "vitest";
 import { ComposedClaudeFixture, ScheduledClaudeQuery } from "../testkit/claude-composed.ts";
 import { runDst } from "../testkit/sim.ts";
 import { ClaudeOrbAgent } from "./agent.ts";
-import { claudeBootEntries } from "./boot-notification.ts";
+import { claudeBootEntries, pendingBootContext } from "./boot-notification.ts";
 import { planBootNotification } from "./boot-policy.ts";
 import { ClaudeHistory } from "./history.ts";
 
@@ -105,6 +105,78 @@ it("a crash or abort after the durable boot claim cancels admission before the n
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
     } finally {
+      f.dispose();
+    }
+  });
+});
+
+it("abort before query admission leaves passive context pending without an automatic turn", async () => {
+  await runDst({ name: "claude-passive-boot-before-human", iterations: 20 }, async (sim) => {
+    let releaseAccount: () => void = () => undefined;
+    const account = new Promise<void>((resolve) => {
+      releaseAccount = resolve;
+    });
+    const f = new ComposedClaudeFixture(account);
+    f.append({ type: "user", uuid: "human", message: { role: "user", content: "work" } });
+    f.append({
+      type: "assistant",
+      uuid: "done",
+      message: { role: "assistant", content: "done", stop_reason: "end_turn" },
+    });
+    let admitted = false;
+    try {
+      expect(
+        (await f.agent.attachSession(f.state, f.history, f.configDir, "commit", null)).isOk(),
+      ).toBe(true);
+      expect(f.queries).toHaveLength(1);
+      const marker = pendingBootContext(f.history.view)[0];
+      expect(marker).toBeDefined();
+      const result = await sim.runTasks([
+        {
+          name: "human",
+          f: async (task) => {
+            await task.checkpoint(
+              "legitimate input claims admission before native account barrier",
+            );
+            const submitted = f.agent.submitMessage(
+              [{ type: "text", text: "new task" }],
+              "human-operation",
+            );
+            admitted = true;
+            await task.checkpoint("human claimed; native initialization blocked");
+            expect((await submitted).isErr()).toBe(true);
+          },
+        },
+        {
+          name: "abort",
+          f: async (task) => {
+            while (!admitted) await task.checkpoint("wait for legitimate admission");
+            expect(f.agent.gateView().activity).toBe("busy");
+            await task.checkpoint("abort before passive context and human can enter native FIFO");
+            const aborted = f.agent.abortOperation();
+            releaseAccount();
+            f.query.exit();
+            f.query.endOutput();
+            await aborted;
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(await f.query.input.next()).toMatchObject({ done: true });
+      expect(f.state.deliveries).toEqual({});
+      expect(pendingBootContext(f.history.view)).toEqual([marker]);
+      const entries = claudeBootEntries(f.history.view);
+      expect(
+        planBootNotification(entries, entries, {
+          runtimeInstanceId: "next",
+          executionId: null,
+          incarnation: "0",
+        }),
+      ).toMatchObject({ triggerTurn: false });
+    } finally {
+      releaseAccount();
+      f.query.exit();
+      f.query.endOutput();
       f.dispose();
     }
   });

@@ -34,14 +34,21 @@ function startResponse(response, block) {
   });
   emit("content_block_start", {
     index: 0,
-    content_block: block.type === "text" ? { type: "text", text: "" } : { ...block, input: {} },
+    content_block:
+      block.type === "text"
+        ? { type: "text", text: "" }
+        : block.type === "thinking"
+          ? { type: "thinking", thinking: "", signature: "" }
+          : { ...block, input: {} },
   });
   emit("content_block_delta", {
     index: 0,
     delta:
-      block.type === "text"
-        ? { type: "text_delta", text: block.text }
-        : { type: "input_json_delta", partial_json: JSON.stringify(block.input) },
+      block.type === "thinking"
+        ? { type: "thinking_delta", thinking: "Controlled thinking in flight." }
+        : block.type === "text"
+          ? { type: "text_delta", text: block.text }
+          : { type: "input_json_delta", partial_json: JSON.stringify(block.input) },
   });
   return () => {
     emit("content_block_stop", { index: 0 });
@@ -55,7 +62,7 @@ function startResponse(response, block) {
 }
 
 /** Genuine pinned SDK/CLI; owned loopback provider, explicit barriers, no agents or credentials. */
-export async function probeSteering(mode) {
+export async function probeSteering(mode, onMessage, nextInput) {
   const home = await mkdtemp(join(tmpdir(), "claude-steering-contract-"));
   const cwd = join(home, "workspace");
   const config = join(home, "config");
@@ -71,8 +78,8 @@ export async function probeSteering(mode) {
     cwd.replace(/[^a-zA-Z0-9]/g, "-"),
     `${sessionId}.jsonl`,
   );
-  const firstUuid = randomUUID();
-  const steerUuid = randomUUID();
+  let firstUuid = randomUUID();
+  let steerUuid = randomUUID();
   const marker = "NATIVE_STEER_CHANGE_COURSE";
   let toolCompleted = false;
   let steeredWhileToolBlocked = false;
@@ -80,6 +87,7 @@ export async function probeSteering(mode) {
   let unexpectedRequest;
   let heldResponse;
   const results = [];
+  const events = [];
   const server = createServer((request, response) => {
     if (request.method === "POST" && request.url?.split("?")[0] === "/v1/messages") {
       let body = "";
@@ -95,16 +103,19 @@ export async function probeSteering(mode) {
           steeredWhileToolBlocked ||= mode === "tool" && !toolCompleted;
           releaseTool.resolve();
         }
-        if (requests === 1 && mode === "tool") {
+        if (requests === 1 && (mode === "tool" || mode === "tool-thinking")) {
           startResponse(response, {
             type: "tool_use",
             id: "toolu_steering_hold",
             name: "mcp__steering__hold",
             input: {},
           })();
-        } else if (requests === 1) {
+        } else if (requests === 1 || (requests === 2 && mode === "tool-thinking")) {
           heldResponse = response;
-          startResponse(response, { type: "text", text: "Initial response is still streaming." });
+          startResponse(response, {
+            type: mode === "thinking" || mode === "tool-thinking" ? "thinking" : "text",
+            text: "Initial response is still streaming.",
+          });
         } else {
           startResponse(response, { type: "text", text: "Steering acknowledged." })();
         }
@@ -124,26 +135,36 @@ export async function probeSteering(mode) {
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const port = server.address().port;
+  let inputFailure;
   const input = {
     async *[Symbol.asyncIterator]() {
-      yield {
-        type: "user",
-        uuid: firstUuid,
-        parent_tool_use_id: null,
-        priority: "now",
-        origin: { kind: "human" },
-        message: { role: "user", content: "Run the fixed tool, then finish." },
-      };
-      await ready.promise;
-      yield {
-        type: "user",
-        uuid: steerUuid,
-        parent_tool_use_id: null,
-        priority: "now",
-        origin: { kind: "human" },
-        message: { role: "user", content: marker },
-      };
-      await endInput.promise;
+      try {
+        const first = nextInput ? await nextInput("first", { sessionId, marker }) : undefined;
+        if (first) firstUuid = first.uuid;
+        yield first ?? {
+          type: "user",
+          uuid: firstUuid,
+          parent_tool_use_id: null,
+          priority: "now",
+          ...(mode === "thinking" || mode === "tool-thinking" ? {} : { origin: { kind: "human" } }),
+          message: { role: "user", content: "Run the fixed tool, then finish." },
+        };
+        await ready.promise;
+        const steer = nextInput ? await nextInput("steer", { sessionId, marker }) : undefined;
+        if (steer) steerUuid = steer.uuid;
+        yield steer ?? {
+          type: "user",
+          uuid: steerUuid,
+          parent_tool_use_id: null,
+          priority: "now",
+          origin: { kind: "human" },
+          message: { role: "user", content: marker },
+        };
+        await endInput.promise;
+      } catch (error) {
+        inputFailure = error;
+        throw error;
+      }
     },
   };
   let child;
@@ -180,14 +201,16 @@ export async function probeSteering(mode) {
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         mcpServers:
-          mode === "tool"
+          mode === "tool" || mode === "tool-thinking"
             ? {
                 steering: createSdkMcpServer({
                   name: "steering",
                   tools: [
                     tool("hold", "Fixed blocked native steering contract", {}, async () => {
-                      ready.resolve();
-                      await releaseTool.promise;
+                      if (mode === "tool") {
+                        ready.resolve();
+                        await releaseTool.promise;
+                      }
                       toolCompleted = true;
                       return { content: [{ type: "text", text: "Fixed tool completed." }] };
                     }),
@@ -232,10 +255,19 @@ export async function probeSteering(mode) {
       },
     });
     for await (const message of sdk) {
+      events.push(message);
+      if (onMessage) {
+        const source = await readFile(rootPath, "utf8").catch((error) => {
+          if (error.code === "ENOENT") return "";
+          throw error;
+        });
+        await onMessage(message, { source, sessionId });
+      }
       if (
-        mode === "response" &&
+        mode !== "tool" &&
         message.type === "stream_event" &&
-        message.event.type === "content_block_delta"
+        message.event.type === "content_block_delta" &&
+        (mode !== "tool-thinking" || message.event.delta.type === "thinking_delta")
       )
         ready.resolve();
       if (message.type !== "result") continue;
@@ -264,7 +296,9 @@ export async function probeSteering(mode) {
       );
     if (unexpectedRequest) throw new Error(`Unexpected local request: ${unexpectedRequest}`);
     const root = { source: await readFile(rootPath, "utf8"), sessionId, steerUuid };
-    return { requests, results, steeredWhileToolBlocked, toolCompleted, root };
+    return { requests, results, steeredWhileToolBlocked, toolCompleted, root, events };
+  } catch (error) {
+    throw inputFailure ?? error;
   } finally {
     clearTimeout(timer);
     ready.resolve();

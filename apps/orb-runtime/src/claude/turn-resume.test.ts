@@ -239,9 +239,13 @@ describe("detectInterruptedTurn", () => {
     });
   });
 
-  it("counts boot notices against the same budget, including after a settled notice", () => {
+  it("counts triggering host notices against the same budget, including after a settled notice", () => {
     const head = assistantToolCalls("call-1");
-    const boot = () => entry("custom_message", { customType: "pi-orb.host-restarted" });
+    const boot = () =>
+      entry("custom_message", {
+        customType: "pi-orb.host-restarted",
+        details: { operationId: "triggering-host-notice" },
+      });
     const records = [user(), assistantText(), boot(), assistantText(), boot(), head];
     expect(detectInterruptedTurn(records).resume).toBe(true);
     records.push(resumeMarker());
@@ -250,6 +254,26 @@ describe("detectInterruptedTurn", () => {
       reason: "already_resumed",
       suppressed: { announced: false },
     });
+  });
+
+  it("passive host context neither interrupts settled work nor spends an attempt", () => {
+    const passive = () =>
+      entry("custom_message", { customType: "pi-orb.host-restarted", details: {} });
+    expect(detectInterruptedTurn([user(), assistantText(), passive()])).toEqual({
+      resume: false,
+      reason: "settled_tail",
+    });
+    expect(
+      detectInterruptedTurn([
+        user(),
+        assistantToolCalls("c"),
+        passive(),
+        passive(),
+        passive(),
+        resumeMarker(),
+        resumeMarker(),
+      ]),
+    ).toMatchObject({ resume: true });
   });
 
   it("does not resume a fourth time for one interruption", () => {

@@ -8,6 +8,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Complete predeployment qualification for Claude interrupted-thinking retirement and passive restart context** (2026-10-23 PDT; `docs/postmortems/2026-10-22-claude-timeline-identity-gap.md`). Complete exact-source full-suite, full E2E/Docker and CI gates, including supervised local-fake qualification. Scoped local passes do not authorize deployment or target replay/restart; preserve first-failure evidence and unknown historical attribution.
+
 - **Optional PR 162 diagnostic follow-up** (`docs/testing.md`): capture token-safe hosted-provider HTTP/transport outcomes and correct the manual helper's uncaught MCP rejection before reusing its completion oracle. Historical-stall attribution is waived for merge (user-approved 2026-10-22); no cause or fix is claimed.
 
 - **Fix Chromium usage-page viewport overflow qualification** ([CI failure](https://github.com/schani/pi-orb/actions/runs/39530906083/job/118996304627), `e2e/usage-frontend.e2e.test.ts:442`): root-width assertion failed; cause unproven. Preserve `.context/central-work-campaign/cleanup-ci-failure/report.md`; a passing rerun does not clear this blocker.

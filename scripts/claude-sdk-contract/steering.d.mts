@@ -1,4 +1,7 @@
+import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+
 export interface SteeringProbeResult {
+  readonly events: readonly SDKMessage[];
   readonly root: {
     readonly source: string;
     readonly sessionId: string;
@@ -15,4 +18,11 @@ export interface SteeringProbeResult {
   readonly toolCompleted: boolean;
 }
 
-export function probeSteering(mode: "tool" | "response"): Promise<SteeringProbeResult>;
+export function probeSteering(
+  mode: "tool" | "response" | "thinking" | "tool-thinking",
+  onMessage?: (message: SDKMessage, root: { source: string; sessionId: string }) => Promise<void>,
+  nextInput?: (
+    kind: "first" | "steer",
+    context: { sessionId: string; marker: string },
+  ) => Promise<SDKUserMessage>,
+): Promise<SteeringProbeResult>;
