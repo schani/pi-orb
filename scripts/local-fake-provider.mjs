@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 
-export const PIN = "eaa274c562ea7b1ec6dce496a1442cfbb55b4106";
+export const PIN = "5597120466a5785efb480428b0173d631ffb46fa";
 export const FLING_INTEGRITY =
   "sha512-OpjCWlRfDf7uvgYBHlNMzrAdSem7/iwe8T/K3wLaZqL/0XCf/vdNNn0yG+z4ELWhIEzmPz4UZZAYKhZ8xew84g==";
 const boundary = (type, fn) => ResultAsync.fromThrowable(fn, () => ({ type }))();
@@ -23,6 +23,15 @@ export function validatePins(head, lock, installed) {
     fling.resolved === "https://registry.npmjs.org/flingit/-/flingit-0.0.70.tgz"
     ? ok(undefined)
     : err({ type: "pin_mismatch" });
+}
+export function validateInstallPolicy(npmVersion, project) {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(npmVersion);
+  const [, major, minor, patch] = match?.map(Number) ?? [];
+  if (!match || major < 11 || (major === 11 && (minor < 19 || (minor === 19 && patch < 1))))
+    return err({ type: "npm_version_unsupported" });
+  return project?.allowScripts?.cloudflared === false
+    ? ok(undefined)
+    : err({ type: "install_policy_mismatch" });
 }
 export function canonicalOrigin(backend, gateway) {
   if (backend === "process") return ok("http://127.0.0.1:3210");
@@ -414,7 +423,8 @@ export async function runLocalFake(command, env = process.env) {
   };
   const preparationPhases = [];
   const tool = async (file, args, cwd = root) => {
-    const phase = file === "npm" ? "install" : `${file}_${args[0]}`;
+    const phase =
+      file === "npm" ? (args[0] === "ci" ? "install" : "npm_version") : `${file}_${args[0]}`;
     preparationPhases.push({ phase, at: new Date().toISOString(), state: "started" });
     const toolEnv =
       file === "docker" && env.DOCKER_HOST ? { ...safeEnv, DOCKER_HOST: env.DOCKER_HOST } : safeEnv;
@@ -480,6 +490,16 @@ export async function runLocalFake(command, env = process.env) {
     if (lock.isErr()) return lock;
     const pinned = validatePins(head.value.trim(), lock.value, "0.0.70");
     if (pinned.isErr()) return pinned;
+    const project = await boundary("install_policy_read", async () =>
+      JSON.parse(await fs.readFile(join(source, "package.json"), "utf8")),
+    );
+    if (project.isErr()) return project;
+    const npm = await tool("npm", ["--version"], source);
+    if (npm.isErr()) return npm;
+    const npmVersion = npm.value.trim();
+    manifest.npm = /^\d+\.\d+\.\d+$/.test(npmVersion) ? npmVersion : null;
+    const policy = validateInstallPolicy(npmVersion, project.value);
+    if (policy.isErr()) return policy;
     const install = await tool("npm", ["ci", "--no-audit", "--no-fund"], source);
     if (install.isErr()) return install;
     const installed = await boundary(
