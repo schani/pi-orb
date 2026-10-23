@@ -1,7 +1,11 @@
 import { type Context, isJsonValue, type JsonValue } from "@earendil-works/chord";
 import { type TSchema, Type } from "@earendil-works/pi-ai";
 import {
+  defineExtension,
   defineTool,
+  GenerationTask,
+  hook,
+  section,
   type ToolExecutionApi,
   type ToolExecutionResult,
   type ToolRegistration,
@@ -26,7 +30,7 @@ export interface McpEndpoint {
   connect(context: Context): ResultAsync<McpTransport, ToolError>;
 }
 export type McpServerStatus =
-  | { name: string; status: "available" }
+  | { name: string; status: "pending" | "available" }
   | { name: string; status: "unavailable" | "needs-auth"; error: ToolError };
 export interface McpDiscoveryDiagnostics {
   now(): number;
@@ -52,11 +56,48 @@ export class McpTools {
   status(): readonly McpServerStatus[] {
     return this.statuses;
   }
+  contextExtension() {
+    if (!this.endpoints.length)
+      return defineExtension({ name: "orb.mcp-status", sections: [], hooks: [] });
+    const name = "mcp-status";
+    const render = () =>
+      this.statuses.map((s) => `MCP ${s.name}: ${s.status}. Namespace: mcp__${s.name}.`).join("\n");
+    const tagged = () => `<${name}>\n${render()}\n</${name}>`;
+    return defineExtension({
+      name: "orb.mcp-status",
+      sections: [section(name, render)],
+      hooks: [
+        hook(GenerationTask, {
+          beforeRequest: ({ messages }) => {
+            const current = tagged();
+            const shown = messages.findLast(
+              (m) => m.role === "system" && m.sections?.[name] !== undefined,
+            );
+            if (shown?.role === "system" && shown.sections?.[name] === current) return undefined;
+            return {
+              messages: [
+                ...messages,
+                { role: "system", content: "", sections: { [name]: current }, timestamp: 0 },
+              ],
+            };
+          },
+        }),
+      ],
+    });
+  }
   statusTool(discover: (ctx: Context) => ResultAsync<readonly McpServerStatus[], ToolError>) {
     return defineTool({
       name: "mcp_status",
       description:
-        "Discover MCP tools and inspect availability. Use discovered tools in the next script.",
+        "Inspect cached MCP availability; retry failed discovery in the background. Discovery starts automatically. Use discovered tools in the next script. " +
+        this.statuses
+          .map((s) => {
+            const description = this.endpoints.find(
+              (endpoint) => endpoint.name === s.name,
+            )?.description;
+            return `MCP ${s.name}: ${s.status} (mcp__${s.name})${description ? `: ${description}` : ""}`;
+          })
+          .join("; "),
       parameters: Type.Object({}, { additionalProperties: false }),
       replay: "safe",
       execute: async (_args, api, ctx) => {
@@ -205,6 +246,12 @@ export class McpTools {
     this.endpoints = endpoints;
     this.catalog = catalog;
     this.diagnostics = diagnostics;
+    this.statuses = endpoints.map(({ name }) => ({ name, status: "pending" }));
+    for (const endpoint of endpoints)
+      this.catalog.namespace({
+        name: `mcp__${endpoint.name}`,
+        description: `${endpoint.description ?? endpoint.name}: discovery pending`,
+      });
   }
   private using<T>(
     endpoint: McpEndpoint,
@@ -304,26 +351,35 @@ export class McpTools {
         });
         ctx.abortSignal?.removeEventListener("abort", abort);
         this.running.delete(client);
-        if (ctx.abortSignal?.aborted)
+        if (this.closed || ctx.abortSignal?.aborted)
           return err<T, ToolError>({ code: "cancelled", message: "MCP cancelled" });
         if (result.isErr()) return result;
         return cleanup.map(() => result.value);
       })(),
     ).andThen((value) => value);
   }
-  async discover(ctx: Context) {
+  async discover(
+    ctx: Context,
+    publish: (
+      status: McpServerStatus,
+      previous?: McpServerStatus,
+    ) => ResultAsync<void, ToolError> = () => okAsync(undefined),
+  ) {
     if (ctx.abortSignal?.aborted)
       return err<readonly McpServerStatus[], ToolError>({
         code: "cancelled",
         message: "MCP cancelled",
       });
-    const statuses: McpServerStatus[] = [];
+    const publishStatus = async (status: McpServerStatus) => {
+      if (this.closed || ctx.abortSignal?.aborted)
+        return err<void, ToolError>({ code: "cancelled", message: "MCP cancelled" });
+      const previous = this.statuses.find((s) => s.name === status.name);
+      this.statuses = this.statuses.map((s) => (s.name === status.name ? status : s));
+      return publish(status, previous);
+    };
     for (const endpoint of this.endpoints) {
       const previous = this.statuses.find((status) => status.name === endpoint.name);
-      if (previous?.status === "available") {
-        statuses.push(previous);
-        continue;
-      }
+      if (previous?.status === "available") continue;
       const discovered = await this.using(
         endpoint,
         ctx,
@@ -339,14 +395,19 @@ export class McpTools {
       );
       if (discovered.isErr()) {
         if (discovered.error.code === "cancelled") return err(discovered.error);
-        statuses.push({
+        const status: McpServerStatus = {
           name: endpoint.name,
           status: endpoint.unavailableState?.() ?? "unavailable",
           error: { code: discovered.error.code, message: "MCP server unavailable" },
+        };
+        this.catalog.namespace({
+          name: `mcp__${endpoint.name}`,
+          description: `${endpoint.description ?? endpoint.name}: ${status.status}`,
         });
+        const published = await publishStatus(status);
+        if (published.isErr()) return err(published.error);
         continue;
       }
-      statuses.push({ name: endpoint.name, status: "available" });
       const namespace = {
         name: `mcp__${endpoint.name}`,
         ...(discovered.value.description ? { description: discovered.value.description } : {}),
@@ -443,8 +504,9 @@ export class McpTools {
           deferred: true,
         });
       }
+      const published = await publishStatus({ name: endpoint.name, status: "available" });
+      if (published.isErr()) return err(published.error);
     }
-    this.statuses = statuses;
     return ok(this.statuses);
   }
   close(): ResultAsync<void, ToolError> {

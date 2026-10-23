@@ -180,6 +180,7 @@ export interface DurableAgentOptions {
   /** Usage ledger tap; never awaited by the model call. */
   readonly recordModelCall?: (use: ModelCallUse, response: AssistantMessage) => void;
   readonly registry: Registry;
+  readonly activateResources?: (appendAlert: DurableAgent["appendAlert"]) => () => void;
   readonly bindNativeConversation?: (resolve: Harness["conversation"]) => void;
   readonly modelTools?: readonly ToolRegistration[];
   /** Child-only tools; the root conversation removes it on open. */
@@ -234,6 +235,7 @@ export class DurableAgent implements AgentSessionFacade {
   private operationId: string | null = null;
   private readonly operationKind = "agent";
   private closing = false;
+  private revokeResources: (() => void) | undefined;
   private paused: boolean;
   private closeResult: ResultAsync<void, RuntimeClientError> | null = null;
   private operationOutcome: "completed" | "aborted" | "failed" = "completed";
@@ -547,6 +549,7 @@ export class DurableAgent implements AgentSessionFacade {
         stage = "resume";
         if (options.resume !== false) {
           await root.submitMany([], context);
+          agent.revokeResources = options.activateResources?.(agent.appendAlert.bind(agent));
           harness.resume();
         }
         return ok(agent);
@@ -659,6 +662,7 @@ export class DurableAgent implements AgentSessionFacade {
   revoke(): void {
     if (this.closing) return;
     this.closing = true;
+    this.revokeResources?.();
     for (const listener of this.invalidationListeners) listener();
     this.invalidationListeners.clear();
     this.listeners.clear();

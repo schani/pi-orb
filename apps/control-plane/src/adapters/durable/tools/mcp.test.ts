@@ -25,7 +25,7 @@ import { createDurableTools } from "./index.ts";
 import { McpTools } from "./mcp.ts";
 import { openCodemodeHarness } from "./testkit/codemode.ts";
 
-it("projects authorization-required diagnostics into durable user-visible history", async () => {
+it("returns sanitized cached authorization-required status in durable tool history", async () => {
   const tools = createDurableTools({
     mcp: [
       {
@@ -48,6 +48,7 @@ it("projects authorization-required diagnostics into durable user-visible histor
   registry.install(tools.extension);
   const harness = await Harness.open(new MemoryStorage(), { models, registry }, BACKGROUND_CONTEXT);
   try {
+    expect((await tools.ready()).isOk()).toBe(true);
     const root = await harness.root(BACKGROUND_CONTEXT, {
       agent: { model: { provider: "faux", modelId: "faux-1" } },
     });
@@ -58,7 +59,7 @@ it("projects authorization-required diagnostics into durable user-visible histor
     const records = await root.entries({}, 100, undefined, BACKGROUND_CONTEXT);
     const history = projectHistory(records.items, "session");
     expect(history.isOk()).toBe(true);
-    expect(JSON.stringify(history)).toContain("MCP fixture: needs-auth.");
+    expect(JSON.stringify(history)).toContain("needs-auth");
     expect(JSON.stringify(history)).not.toContain("secret");
   } finally {
     await harness.close(BACKGROUND_CONTEXT);
@@ -104,6 +105,7 @@ it("retries authorization-required discovery after consent and exposes sanitized
     const api = { diagnostic: () => {} } as unknown as ToolExecutionApi;
     const failed = await tools.catalog.invoke("mcp_status", {}, api, BACKGROUND_CONTEXT);
     expect(failed.isOk()).toBe(true);
+    expect((await tools.ready()).isOk()).toBe(true);
     expect(tools.mcpStatus()).toEqual([
       {
         name: "fixture",
@@ -113,6 +115,7 @@ it("retries authorization-required discovery after consent and exposes sanitized
     ]);
     authorized = true;
     await tools.catalog.invoke("mcp_status", {}, api, BACKGROUND_CONTEXT);
+    expect((await tools.ready()).isOk()).toBe(true);
     expect(tools.mcpStatus()).toEqual([{ name: "fixture", status: "available" }]);
     const fixture = await openCodemodeHarness(tools.catalog);
     try {

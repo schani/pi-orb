@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
@@ -14,6 +15,7 @@ import {
 import { type AuthProvider, StreamableHttpTransport } from "@earendil-works/pi-mcp";
 import type { McpConfig } from "@pi-orb/protocol";
 import { err, ok, okAsync, Result, ResultAsync } from "neverthrow";
+import type { DurableAgent } from "./adapters/durable/agent.ts";
 import { NativeResourceContext } from "./adapters/durable/context-storage.ts";
 import { executionWaitProgress } from "./adapters/durable/execution-wait-progress.ts";
 import type { DurableAgentPlaneOptions } from "./adapters/durable/manager.ts";
@@ -267,6 +269,7 @@ export function createProcessAgentContext(
         appendSystem: processAgentSystemContext(orb.userTimeZone),
       });
       const resourcesAbort = new AbortController();
+      if (lease?.signal.aborted) resourcesAbort.abort();
       lease?.signal.addEventListener("abort", () => resourcesAbort.abort(), { once: true });
       const loadReady = (
         binding: ExecutionBinding & { release?: () => void },
@@ -427,7 +430,31 @@ export function createProcessAgentContext(
             .mapErr((): ToolError => ({ code: "forbidden", message: "Agent ownership revoked" })),
       });
       const notifyParent = options.notifyParent;
+      let appendMcpAlert: DurableAgent["appendAlert"] | undefined;
       const tools = createDurableTools({
+        mcpContext: withAbortSignal(resourcesAbort.signal, BACKGROUND_CONTEXT),
+        mcpChanged: (status, previous) => {
+          if (resourcesAbort.signal.aborted) return okAsync(undefined);
+          installTools();
+          if (
+            status.status === "pending" ||
+            (status.status === "available" &&
+              (previous?.status === "pending" || previous === undefined)) ||
+            status.status === previous?.status ||
+            !appendMcpAlert
+          )
+            return okAsync(undefined);
+          return appendMcpAlert(
+            randomUUID(),
+            `MCP ${status.name}: ${status.status === "available" ? "connected" : status.status}.`,
+          )
+            .map(() => undefined)
+            .orElse(() => {
+              if (!resourcesAbort.signal.aborted)
+                logOrbEvent(task, orb.id, "durable.mcp_alert_failed", { server: status.name });
+              return okAsync(undefined);
+            });
+        },
         mcpDiscovery: {
           now: () => task.monotonicNow(),
           record: (failure) =>
@@ -472,6 +499,7 @@ export function createProcessAgentContext(
           let state: "needs-auth" | "available" | "unavailable" = "unavailable";
           return {
             name: server.name,
+            ...(server.description ? { description: server.description } : {}),
             unavailableState: () => (state === "needs-auth" ? "needs-auth" : "unavailable"),
             connect: (ctx) =>
               ResultAsync.fromSafePromise(
@@ -679,6 +707,11 @@ export function createProcessAgentContext(
             }
           : {}),
         registry,
+        activateResources: (appendAlert: DurableAgent["appendAlert"]) => {
+          appendMcpAlert = appendAlert;
+          void tools.ready();
+          return () => resourcesAbort.abort();
+        },
         bindNativeConversation: (resolve: Harness["conversation"]) => {
           conversation = resolve;
         },

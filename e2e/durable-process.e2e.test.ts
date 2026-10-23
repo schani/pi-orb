@@ -191,6 +191,10 @@ it.runIf(process.env["PI_ORB_E2E_BACKEND"] === "process")(
       { stdio: "ignore" },
     );
     const calls: { method: string; authorization: string | undefined }[] = [];
+    let published!: () => void;
+    const registryBarrier = new Promise<void>((resolve) => {
+      published = resolve;
+    });
     const remote = createServer(
       { key: readFileSync(key), cert: readFileSync(cert) },
       async (req, res) => {
@@ -201,6 +205,23 @@ it.runIf(process.env["PI_ORB_E2E_BACKEND"] === "process")(
         let body = "";
         for await (const chunk of req) body += chunk;
         const message = JSON.parse(body);
+        if (req.url === "/registry-barrier") {
+          if (message.method === "initialize") published();
+          if (message.id === undefined) res.writeHead(202).end();
+          else
+            res.writeHead(200, { "content-type": "application/json" }).end(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: message.id,
+                result: {
+                  protocolVersion: message.params?.protocolVersion,
+                  capabilities: {},
+                  serverInfo: { name: "barrier", version: "1" },
+                },
+              }),
+            );
+          return;
+        }
         calls.push({ method: message.method, authorization: req.headers.authorization });
         if (req.headers.authorization !== "Bearer synthetic-durable") {
           res.writeHead(401).end();
@@ -313,21 +334,10 @@ text('DURABLE_SCRIPT_DONE');`;
           },
           {
             match: { userMessage: { regex: "^DURABLE_ACCEPTANCE$" } },
-            steps: [codemode("text(await tools.mcp_status({})); text('DURABLE_MCP_READY');"), stop],
-          },
-          {
-            match: { toolResultContains: { regex: "DURABLE_MCP_READY" } },
             steps: [{ type: "toolCall", name: "codemode", arguments: { code: script } }, stop],
           },
           {
             match: { userMessage: { regex: "^DURABLE_CHILD$" } },
-            steps: [
-              codemode("text(await tools.mcp_status({})); text('DURABLE_CHILD_MCP_READY');"),
-              stop,
-            ],
-          },
-          {
-            match: { toolResultContains: { regex: "DURABLE_CHILD_MCP_READY" } },
             steps: [
               {
                 type: "toolCall",
@@ -500,6 +510,12 @@ text('NOTIFY_PARENT_HANDLED');`),
                 url: `https://127.0.0.1:${address.port}/mcp`,
                 headers: { Authorization: { secret: "MCP_KEY", prefix: "Bearer " } },
               },
+              {
+                name: "registry-barrier",
+                description: "Registry initialization barrier",
+                url: `https://127.0.0.1:${address.port}/registry-barrier`,
+                headers: {},
+              },
             ],
           })
         ).status,
@@ -529,6 +545,7 @@ text('NOTIFY_PARENT_HANDLED');`),
         },
         { timeoutMs: 300_000 },
       );
+      await registryBarrier;
       expect(
         (
           await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${randomUUID()}`, {
@@ -583,7 +600,9 @@ text('NOTIFY_PARENT_HANDLED');`),
       await expectPage(
         page.getByRole("button", { name: "Change model", exact: true }),
       ).toContainText("Sol");
-      expect(calls).toEqual([]);
+      expect(calls.filter((call) => call.method === "tools/list")).toHaveLength(1);
+      expect(calls.filter((call) => call.method === "tools/call")).toHaveLength(0);
+      expect(calls.every((call) => call.authorization === "Bearer synthetic-durable")).toBe(true);
       await thinking.click();
       await page.getByRole("option", { name: "low", exact: true }).click();
       await expectPage(thinking).toHaveText("low");

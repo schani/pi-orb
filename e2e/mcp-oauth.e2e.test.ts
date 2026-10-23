@@ -51,6 +51,14 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
   let grant = 0;
   let refreshes = 0;
   let acceptedCalls = 0;
+  const registryBarriers = [0, 1].map(() => {
+    let published!: () => void;
+    const promise = new Promise<void>((resolve) => {
+      published = resolve;
+    });
+    return { promise, published };
+  });
+  let registryPublications = 0;
   let rejectAccess = false;
   let rejectRefresh = false;
   const codes = new Map<string, { challenge: string; redirect: string }>();
@@ -138,6 +146,22 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
         res.writeHead(405).end();
         return;
       }
+      if (url.pathname === "/registry-barrier") {
+        const message = JSON.parse(raw);
+        if (message.method === "initialize") registryBarriers[registryPublications++]?.published();
+        if (message.id === undefined) res.writeHead(202).end();
+        else
+          json({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              protocolVersion: message.params?.protocolVersion,
+              capabilities: {},
+              serverInfo: { name: "barrier", version: "1" },
+            },
+          });
+        return;
+      }
       if (rejectAccess || req.headers.authorization !== `Bearer fixture-access-${grant}`) {
         res.writeHead(401).end();
         return;
@@ -169,6 +193,39 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
     auth: { accountId: "oauth-e2e", device: { manualApprove: true } },
     model: {
       rules: [7, 0, 1, 2, 3, 4, 5, 6].flatMap((index) => [
+        ...(index === 0
+          ? [
+              {
+                match: { userMessage: { regex: "^OAuth retry$" } },
+                steps: [
+                  {
+                    type: "toolCall" as const,
+                    name: "codemode",
+                    arguments: {
+                      code: "text(await tools.mcp_status({})); text('OAUTH_RETRY_STARTED');",
+                    },
+                  },
+                  { type: "stop" as const, status: "completed" as const },
+                ],
+              },
+              {
+                match: { toolResultContains: { regex: "OAUTH_RETRY_STARTED" } },
+                steps: [
+                  { type: "text" as const, content: "OAUTH_RETRY_DONE" },
+                  { type: "stop" as const, status: "completed" as const },
+                ],
+              },
+              {
+                match: {
+                  userMessage: { regex: "^Write a single short desktop-notification sentence" },
+                },
+                steps: [
+                  { type: "text" as const, content: "Reconnected OAuth." },
+                  { type: "stop" as const, status: "completed" as const },
+                ],
+              },
+            ]
+          : []),
         {
           match: { userMessage: { regex: `^OAuth ${index}$` } },
           steps: [
@@ -176,7 +233,7 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
               type: "toolCall" as const,
               name: "codemode",
               arguments: {
-                code: `text(await tools.mcp_status({})); text('OAUTH_MCP_READY_${index}');`,
+                code: `text(await describeNamespace("mcp__fixture")); text('OAUTH_MCP_READY_${index}');`,
               },
             },
             { type: "stop" as const, status: "completed" as const },
@@ -277,15 +334,17 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
     });
   };
   const configUrl = `${cp.baseUrl}/projects/${project}/mcp`;
+  const fixtureConnection = page.locator(".project-mcp-connection").filter({
+    has: page.locator("summary").filter({ hasText: /^fixture · / }),
+  });
+  const fixtureSummary = fixtureConnection.locator("summary");
   const consent = async () => {
     await page.goto(configUrl);
-    await page.locator(".project-mcp-connection > summary").click();
-    await page.getByRole("button", { name: /^(connect|reconnect)$/ }).click();
+    await fixtureSummary.click();
+    await fixtureConnection.getByRole("button", { name: /^(connect|reconnect)$/ }).click();
     await page.getByRole("link", { name: "Authorize fixture" }).click();
     await expectPage(page).toHaveURL(configUrl);
-    await expectPage(page.locator(".project-mcp-connection > summary")).toContainText(
-      "grant stored",
-    );
+    await expectPage(fixtureSummary).toContainText("grant stored");
   };
   const message = async (orb: string, index: number) => {
     expect(
@@ -306,7 +365,7 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
           status: number;
         }[];
         return history.includes(`OAUTH_DONE_${index}`) &&
-          requests.some((r) => r.matchedRuleIndex === (index + 1) * 4 + 3 && r.status === 200)
+          requests.some((r) => r.matchedRuleIndex === (index + 1) * 4 + 6 && r.status === 200)
           ? true
           : null;
       },
@@ -335,6 +394,12 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
               description: "OAuth test",
               headers: {},
               oauth: { id: connection },
+            },
+            {
+              name: "registry-barrier",
+              description: "Registry initialization barrier",
+              url: `${origin}/registry-barrier`,
+              headers: {},
             },
           ],
         })
@@ -389,6 +454,27 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
         expect(initial.status).toBe("ready");
         expect(initial.sessionId).toBeTruthy();
         expect(initial.runtimeInstanceId).toBeTruthy();
+        await waitFor(
+          "automatic authorization-required alert before input",
+          async () => {
+            const history = (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`))
+              .body as unknown as DisplayHistoryView;
+            expect(
+              history.records.filter(
+                (record) => record.type === "message" && record.role === "user",
+              ),
+            ).toHaveLength(0);
+            return history.records.some(
+              (record) =>
+                record.type === "event" &&
+                record.eventType === "orb.alert" &&
+                record.alert?.message === "MCP fixture: needs-auth.",
+            )
+              ? true
+              : null;
+          },
+          { timeoutMs: 60_000 },
+        );
         expect(
           (
             await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${randomUUID()}`, {
@@ -428,7 +514,10 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
             return user &&
               assistant.includes("stop") &&
               needsAuth &&
-              requests.some((request) => request.matchedRuleIndex === 0 && request.status === 200)
+              requests.some(
+                (request) => request.matchedRuleIndex === 0 && request.status === 200,
+              ) &&
+              requests.some((request) => request.matchedRuleIndex === 3 && request.status === 200)
               ? true
               : null;
           },
@@ -437,7 +526,13 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
         expect(acceptedCalls).toBe(0);
         expect(grant).toBe(0);
         await consent();
-        await message(orb, index);
+        expect(
+          (
+            await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${randomUUID()}`, {
+              content: [{ type: "text", text: "OAuth retry" }],
+            })
+          ).status,
+        ).toBe(202);
         await waitFor(
           "connected recovery history",
           async () => {
@@ -448,10 +543,19 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
             );
             if (detail.isErr() && detail.error.type !== "detail_missing")
               throw new FatalProbeError(`MCP detail ${detail.error.type} (${detail.error.status})`);
-            return detail.isOk() && detail.value ? true : null;
+            const requests = (await fakeControl(fake.sessionKey, "/requests")) as unknown as {
+              matchedRuleIndex: number;
+              status: number;
+            }[];
+            return detail.isOk() &&
+              detail.value &&
+              requests.some((request) => request.matchedRuleIndex === 6 && request.status === 200)
+              ? true
+              : null;
           },
           { timeoutMs: 60_000 },
         );
+        await message(orb, index);
         const recovered = await health();
         expect(recovered).toMatchObject({
           status: "ready",
@@ -461,7 +565,10 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
         expect(
           (JSON.parse(readFileSync(metadataPath, "utf8")) as { incarnation: number }).incarnation,
         ).toBe(before.incarnation);
-      } else await message(orb, index);
+      } else {
+        await registryBarriers[index]!.promise;
+        await message(orb, index);
+      }
     }
     expect(grant).toBe(1);
     expect(acceptedCalls).toBe(2);
@@ -511,11 +618,9 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
     await message(orbs[0], 6);
     expect(acceptedCalls).toBe(5);
     await page.goto(configUrl);
-    await page.locator(".project-mcp-connection > summary").click();
-    await page.getByRole("button", { name: "disconnect", exact: true }).click();
-    await expectPage(page.locator(".project-mcp-connection > summary")).toContainText(
-      "authorization required",
-    );
+    await fixtureSummary.click();
+    await fixtureConnection.getByRole("button", { name: "disconnect", exact: true }).click();
+    await expectPage(fixtureSummary).toContainText("authorization required");
     expect((await runtimeTokenRequest(orbs[0])).status).toBe(401);
     const history = JSON.stringify(
       (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orbs[0]}/history`)).body,

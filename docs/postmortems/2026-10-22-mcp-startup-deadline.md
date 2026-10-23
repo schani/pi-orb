@@ -25,6 +25,10 @@ Two cancellation limitations were identified: the scoped fetch wrapper replaced 
 
 ## Resulting decision
 
-Remote MCP discovery cannot gate startup or unrelated tools. On-demand discovery through `mcp_status` isolates optional providers from startup and unrelated scripts; failures enter agent output, the parent's replicated diagnostics, and sanitized failure-only lifecycle traces. Discovery retains serial per-server failure tolerance and the SDK per-request timeout. Caller cancellation stays cancellation. Preserve local configuration fail-closed behavior and mandatory owner/admission checks.
+Remote MCP discovery starts automatically but cannot gate startup or unrelated tools. Rejected: discovery triggered only by `mcp_status`; it hides configured tools and depends on model choice. Native search ranks tool descriptions. Configured pending namespaces and inventory in the real status-tool description make providers searchable immediately.
+
+An activation callback starts one resource-lease-owned background job after native initialization/projection/final admission, before Harness resume. The incoming ten-second operation is not its lifetime. Each endpoint publishes its schemas/status before moving to the next; a later held provider cannot hide earlier results. Existing native `orb.alert` failure entries inform the user automatically. Cached dynamic system context and a before-request hook inform inference without adding user input or starting a turn. Revocation aborts discovery before Harness close; final resource cleanup joins the job and notifications even if cleanup fails. Status inspection always returns cached progress immediately; a background consent retry shares the same ownership and publishes failed→available recovery alerts.
+
+Discovery retains serial per-server failure tolerance and the SDK per-request timeout. Caller cancellation stays cancellation. Preserve local configuration fail-closed behavior and mandatory owner/admission checks. Sanitized failure-only lifecycle traces retain server, phase, elapsed time and SDK category/status.
 
 Current contract and observability fields: `docs/mcp.md`. No schema, timeout policy, deployment or target restart is part of this change.
