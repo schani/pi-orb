@@ -127,6 +127,7 @@ Subsystem designs:
 Tracking:
 
 - [docs/postmortems/2026-10-22-claude-steering-hidden-message.md](docs/postmortems/2026-10-22-claude-steering-hidden-message.md) — consumed Claude image input hidden by a contentless receipt; frontend inbox/receipt presentation handoff
+- [docs/postmortems/2026-10-22-replacement-smoke-fixture-budget.md](docs/postmortems/2026-10-22-replacement-smoke-fixture-budget.md) — controlled fixture CPU/startup amplification, bounded failure evidence; historical attribution unresolved
 - [docs/postmortems/2026-10-22-local-fake-npm-preparation.md](docs/postmortems/2026-10-22-local-fake-npm-preparation.md) — provider install exited 152 before tests; safe diagnostics, historical attribution waived
 - [docs/postmortems/2026-10-22-durable-browser-apt-stall.md](docs/postmortems/2026-10-22-durable-browser-apt-stall.md) — browser dependency acquisition stalled before tests; runner helper coverage corrected, historical cause unproven
 - [docs/postmortems/2026-10-22-no-repository-e2e-preemption.md](docs/postmortems/2026-10-22-no-repository-e2e-preemption.md) — confirmed Spot preemption interrupted E2E; full qualification pending

@@ -8,6 +8,9 @@ import subprocess
 import tempfile
 import unittest
 
+from infra.smoke_replacement_fixture import run_fixture
+from infra.smoke_replacement_fixture_test import ReplacementFixtureTest
+
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ID = "00000000-0000-4000-8000-000000000001"
 ORB_ID = "00000000-0000-4000-8000-000000000002"
@@ -15,28 +18,29 @@ USER_ID = "00000000-0000-4000-8000-000000000003"
 SECRETS = ("runtime-SENSITIVE-0", "runtime-SENSITIVE-1", "runtime-SENSITIVE-2",
            "metadata-SENSITIVE", "disk-SENSITIVE", "row-SENSITIVE", "auth-SENSITIVE")
 
-FAKE = r'''#!/usr/bin/env python3
-import json, os, stat, subprocess, sys, time
-from pathlib import Path
+FAKE = r'''#!/usr/bin/env -S python3 -S
+import json, os, sys
 a = sys.argv[1:]
-root = Path(os.environ["FAKE_ROOT"])
-state_file = root / "state.json"
-s = json.loads(state_file.read_text())
-name = Path(sys.argv[0]).name
-with (root / "commands.jsonl").open("a") as f:
+root = os.environ["FAKE_ROOT"]
+state_file = root + "/state.json"
+with open(state_file) as f: s = json.load(f)
+name = os.path.basename(sys.argv[0])
+with open(root + "/commands.jsonl", "a") as f:
     f.write(json.dumps([name, *a]) + "\n")
 orb = os.environ["PI_ORB_SMOKE_ORB_ID"]
 project = os.environ["PI_ORB_SMOKE_PROJECT_ID"]
 inst = lambda i: "pi-orb-" + orb + "-i" + str(i)
 disk = "pi-orb-data-" + orb
 mode = os.environ.get("FAKE_MODE", "")
-def save(): state_file.write_text(json.dumps(s))
+def save():
+    with open(state_file, "w") as f: json.dump(s, f)
 def flag(key, default=None):
     for i, v in enumerate(a):
         if v == key: return a[i + 1]
         if v.startswith(key + "="): return v.split("=", 1)[1]
     return default
 if name == "jq":
+    import stat, subprocess
     payload = sys.stdin.buffer.read()
     if b"runtime-SENSITIVE-" in payload:
         s["sensitive_jq_inputs"] = s.get("sensitive_jq_inputs", 0) + 1; save()
@@ -46,9 +50,9 @@ if name == "jq":
     sys.stdout.buffer.write(reply.stdout); sys.stderr.buffer.write(reply.stderr)
     sys.exit(reply.returncode)
 if name == "date":
+    import time
     s["clock_calls"] = s.get("clock_calls", 0) + 1; save()
     print(int(time.time()) + s["clock_calls"] * 60); sys.exit(0)
-if name == "sleep": sys.exit(0)
 if name == "fake-stage2":
     if mode == "stage2-failure": sys.exit(7)
     s["stage2"] = True; save(); sys.exit(0)
@@ -106,7 +110,7 @@ elif name == "curl":
     if "-K" in a and flag("-K") == "-":
         config = sys.stdin.read()
         # Store presence, never the credential itself.
-        with (root / "configs.jsonl").open("a") as f:
+        with open(root + "/configs.jsonl", "a") as f:
             f.write(json.dumps({"runtime": "runtime-SENSITIVE-0" in config,
                                 "auth": "auth-SENSITIVE" in config}) + "\n")
     status = "200"
@@ -132,13 +136,15 @@ elif name == "curl":
                              path.endswith(orb) and not s.get("orb_created")):
         status, body = "404", {"error": {"code": "not_found"}}
     elif method == "POST" and path == "/api/v1/projects":
-        evidence = list((root / "evidence").glob("*/fixtures.jsonl"))
+        from pathlib import Path
+        evidence = list((Path(root) / "evidence").glob("*/fixtures.jsonl"))
         if any('"outcome":"requested"' in p.read_text() and project in p.read_text() for p in evidence):
             s.setdefault("recorded_before_create", []).append("project")
         s["project_created"] = True; save()
         body = {"id": project}
     elif method == "POST" and path.endswith("/orbs"):
-        evidence = list((root / "evidence").glob("*/fixtures.jsonl"))
+        from pathlib import Path
+        evidence = list((Path(root) / "evidence").glob("*/fixtures.jsonl"))
         if any('"outcome":"requested"' in p.read_text() and orb in p.read_text() for p in evidence):
             s.setdefault("recorded_before_create", []).append("orb")
         s["orb_created"] = True; save()
@@ -154,9 +160,10 @@ elif name == "curl":
         body = {"id": orb, "state": s["state"], "unrelated": "row-SENSITIVE"}
     output = flag("--output", flag("-o"))
     if output:
-        Path(output).write_text(json.dumps(body))
+        with open(output, "w") as f: json.dump(body, f)
     if flag("--dump-header"):
-        Path(flag("--dump-header")).write_text("HTTP/1.1 " + status + "\r\ncontent-type: application/json\r\n")
+        with open(flag("--dump-header"), "w") as f:
+            f.write("HTTP/1.1 " + status + "\r\ncontent-type: application/json\r\n")
     if "-w" in a or "--write-out" in a: print(status, end="")
     elif not output: print(json.dumps(body))
 else:
@@ -173,8 +180,13 @@ class ReplacementSmokeTest(unittest.TestCase):
         adapter = root / "adapter"
         adapter.write_text(FAKE)
         adapter.chmod(0o700)
-        for name in ("gcloud", "curl", "sleep", "fake-stage2"):
+        for name in ("gcloud", "curl", "fake-stage2"):
             (root / "bin" / name).symlink_to(adapter)
+        sleep = root / "bin/sleep"
+        sleep.write_text("""#!/bin/sh
+{ printf '["sleep"'; for arg do printf ',"%s"' "$arg"; done; printf ']\\n'; } >> "$FAKE_ROOT/commands.jsonl"
+""")
+        sleep.chmod(0o700)
         if mode == "large-metadata":
             (root / "bin/jq").symlink_to(adapter)
         if mode in {"provider-leak", "cleanup-orb-present"}:
@@ -199,9 +211,18 @@ class ReplacementSmokeTest(unittest.TestCase):
         if stage2:
             # Login shells reset PATH; this deliberately uses the owned absolute adapter.
             env["PI_ORB_SMOKE_STAGE2_DEPLOY_COMMAND"] = str(root / "bin/fake-stage2")
-        result = subprocess.run(["bash", str(ROOT / "infra/smoke-compute-replacement.sh")],
-                                env=env, capture_output=True, text=True, timeout=90)
+        result = run_fixture(["bash", str(ROOT / "infra/smoke-compute-replacement.sh")],
+                             env, root, mode, stage2)
         return root, evidence, sentinel, result
+
+    def test_fake_sleep_preserves_log_without_starting_python(self):
+        root, _, _, _ = self.run_smoke(user="")
+        sleep = root / "bin/sleep"
+        self.assertFalse(sleep.is_symlink(), "stateless sleep must not start the Python dispatcher")
+        result = subprocess.run([str(sleep), "1"], env={**os.environ, "FAKE_ROOT": str(root)}, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(self.commands(root), [["sleep", "1"]])
+        self.assertEqual(json.loads((root / "state.json").read_text()), {"state": "running", "starts": 0, "incarnation": 0})
 
     def assert_private_evidence(self, root, evidence, sentinel, result):
         self.assertEqual(sentinel.read_text(), "untouched", "preexisting symlink followed")
@@ -238,7 +259,13 @@ class ReplacementSmokeTest(unittest.TestCase):
             self.assertIn("--tunnel-through-iap", command)
         state = json.loads((root / "state.json").read_text())
         self.assertEqual(state["recorded_before_create"], ["project", "orb"])
-        self.assertGreater(state["sensitive_jq_inputs"], 0)
+        self.assertEqual(state["sensitive_jq_inputs"], 17)
+        commands = self.commands(root)
+        self.assertEqual(sum(c[0] == "sleep" for c in commands), 130)
+        self.assertEqual(sum(c[0] == "jq" for c in commands), 323)
+        self.assertEqual(sum(c[0] == "curl" for c in commands), 151)
+        self.assertEqual(sum(c[0] == "gcloud" for c in commands), 305)
+        self.assertEqual(sum(c[0] == "fake-stage2" for c in commands), 1)
 
     def commands(self, root):
         return [json.loads(line) for line in (root / "commands.jsonl").read_text().splitlines()]
