@@ -6,7 +6,7 @@
 
 ## Audit assertion trust (2026-10-22)
 
-Assert simulation task Results outside the task, with failure diagnostics; task assertions otherwise become ignored Err values.
+Assert simulation task Results outside the task, with failure diagnostics; task assertions otherwise become ignored Err values. Assert captured HTTP arguments after awaiting the adapter and require a schema-valid successful response; assertions inside a caught fetch can become network errors.
 
 ## Local fake-provider npm preparation (2026-10-22)
 
