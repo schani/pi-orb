@@ -190,9 +190,12 @@ describe("orb boot hooks (DST)", () => {
               await waitUntil(
                 task,
                 "setup reported",
-                () => harness.deps.control.getBootProbe(ORB)?.setupRunningSinceMono !== null,
+                () => harness.deps.control.getBootProbe(ORB)?.setupRunningSinceMono != null,
                 { timeoutMs: CONVERGE_MS },
               );
+              expect(harness.deps.control.getBootProbe(ORB)).toMatchObject({
+                setupRunning: true,
+              });
               // The runtime goes dark mid-hook and answers nothing again, while
               // the host still observes as running — the shape of a wedged or
               // preempted runtime. The hold must not read that silence as a

@@ -1538,3 +1538,7 @@ Native integration rejects unknown control stages before reading fixtures.
 Preparation records the authenticated login; running control writes application
 expectations from it and the accepted public checkoutCommit. Application checks
 consume that owned file. These manual studies/probes are not production CI gates.
+
+## Domain and lifecycle test oracles (2026-10-22 PDT)
+
+Mid-setup silence requires an observed running setup probe before injection.
