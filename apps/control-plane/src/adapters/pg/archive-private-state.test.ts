@@ -1,34 +1,16 @@
-import { randomUUID } from "node:crypto";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { createRegistry, defineDoc, Harness } from "@earendil-works/pi-durable";
-import { NoSimulationTask } from "determined";
 import { expect, it } from "vitest";
-import { makeOrbRow, makeProjectRow } from "../../testkit/fixtures.ts";
-import { composeControlPlaneDatabase } from "../database.ts";
+import { openOrbSqlFixture } from "../../testkit/sql-fixture.ts";
 import { projectNativeCommit } from "../durable/atomic-history.ts";
 import { PgAgentArtifacts } from "../durable/pg-artifacts.ts";
 import { PgDurableAuthority } from "../durable-pg/index.ts";
-import { PGliteClient } from "./pglite-client.ts";
 import { PgResourceSnapshots } from "./resource-snapshots.ts";
 
 it("seals the retained transcript and deletes private authority, resources and spills atomically", async () => {
-  const db = new PGliteClient();
-  const database = composeControlPlaneDatabase(db);
-  const task = new NoSimulationTask("archive-private", false);
-  const project = makeProjectRow(randomUUID());
-  const orb = makeOrbRow(randomUUID(), project.id, "running");
-  try {
-    (await database.migrate())._unsafeUnwrap();
-    (
-      await database.users.resolveUser(
-        task,
-        { issuer: "test", subject: "owner", email: null },
-        { id: project.ownerUserId, now: 0 },
-      )
-    )._unsafeUnwrap();
-    (await database.store.insertProject(task, project))._unsafeUnwrap();
-    (await database.store.insertOrb(task, orb))._unsafeUnwrap();
+  const { db, database, task, orb } = await openOrbSqlFixture("archive-private", "running");
+  {
     const authority = new PgDurableAuthority(db, () => 0);
     const owner = (await authority.acquire(orb.id, "test", 0, 0, 1000))._unsafeUnwrap();
     (await new PgAgentArtifacts(authority, owner).write(Buffer.from("private")))._unsafeUnwrap();
@@ -137,7 +119,5 @@ it("seals the retained transcript and deletes private authority, resources and s
     )._unsafeUnwrap();
     expect(deletion.rows).toHaveLength(1);
     expect(deletion.rows[0]?.history_sealed_at).toStrictEqual(new Date(0));
-  } finally {
-    await database.close();
   }
 });

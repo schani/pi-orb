@@ -36,6 +36,8 @@ Source-order contracts require every anchor and an ordered nonempty slice before
 
 ## Adapter boundary assertions (2026-10-22)
 
+Normal SQL fixtures share only client ownership and identical owner/project/orb or two-user seeding. Cleanup registers before migration; scenario DDL, migration assertions and persisted-state checks stay local.
+
 Fixed foreign-disk and failed-GET model rejections run once: those paths reach no scheduler choice. Keep their model-state checks and retain provisioning/discard/recovery/enrollment scheduling.
 
 SQL fixtures register clients before fallible setup; table-driven settings suites capture each acquired subject in `onTestFinished`, without teardown of an unacquired or stale client; process observations/crash markers live under immediately registered roots. Teardown reports cleanup failures separately, attempts every owned release, and retains the original test failure.

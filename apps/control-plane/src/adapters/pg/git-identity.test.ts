@@ -1,43 +1,21 @@
 import { NoSimulationTask } from "determined";
-import { afterEach, beforeEach, expect, it } from "vitest";
-import { openThrowawayPostgres } from "../../testkit/postgres.ts";
-import { type ControlPlaneDatabase, composeControlPlaneDatabase } from "../database.ts";
+import { beforeEach, expect, it } from "vitest";
+import { ALICE, BOB, openTwoUserSqlFixture } from "../../testkit/sql-fixture.ts";
+import type { ControlPlaneDatabase } from "../database.ts";
 import type { PostgreSQLClient } from "./client.ts";
 import { PostgreSQLGitIdentityStore } from "./git-identity.ts";
-import { PGliteClient } from "./pglite-client.ts";
 
 const task = new NoSimulationTask("git-identity SQL", false);
-const ALICE = "00000000-0000-4000-8000-000000000001";
-const BOB = "00000000-0000-4000-8000-000000000002";
 let db: PostgreSQLClient;
 let database: ControlPlaneDatabase;
 let store: PostgreSQLGitIdentityStore;
 beforeEach(async () => {
-  const connectionString = process.env["PI_ORB_TEST_DATABASE_URL"];
-  if (connectionString) {
-    const subject = await openThrowawayPostgres(connectionString);
-    db = subject.client;
-    database = subject.database;
-  } else {
-    db = new PGliteClient();
-    database = composeControlPlaneDatabase(db);
-  }
-  expect((await database.migrate())._unsafeUnwrap()).toContain("042_git_identities.sql");
-  for (const [id, subject] of [
-    [ALICE, "alice"],
-    [BOB, "bob"],
-  ] as const)
-    (
-      await database.users.resolveUser(
-        task,
-        { issuer: "test", subject, email: null },
-        { id, now: 0 },
-      )
-    )._unsafeUnwrap();
+  const fixture = await openTwoUserSqlFixture(task);
+  db = fixture.db;
+  database = fixture.database;
+  const { migrations } = fixture;
+  expect(migrations).toContain("042_git_identities.sql");
   store = new PostgreSQLGitIdentityStore(db);
-});
-afterEach(async () => {
-  await db.end();
 });
 
 it("reads a missing row as cleared and overwrites per user", async () => {
