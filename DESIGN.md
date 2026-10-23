@@ -91,6 +91,7 @@ Subsystem designs:
 - [docs/orb-messaging.md](docs/orb-messaging.md) — locally implemented same-owner cross-project peer input, Correspondence band, wake policy and minimal persistence; qualification pending
 - [docs/runtime-protocol.md](docs/runtime-protocol.md) — the browser↔runtime wire protocol: handshake, display frames, detail HTTP, ordering, backpressure
 - [docs/history-replication.md](docs/history-replication.md) — the harness-agnostic history model, pull-only replication, PostgreSQL schema, and implemented explicit offline recovery (2026-10-05, America/Cancun)
+- [docs/history-search.md](docs/history-search.md) — approved owner-scoped BM25 history search, Pi tool and Claude CLI; implementation underway, qualification pending
 - [docs/pi-adapter.md](docs/pi-adapter.md) — central Pi execution, admission, resource policy and product history
 - [docs/claude-code-ui-research.md](docs/claude-code-ui-research.md) — research on Claude Code custom UIs, SDK integration, and authentication caveats; no adoption decision
 - [docs/claude-agent-sdk.md](docs/claude-agent-sdk.md) — approved co-located POC, owner-central subscription auth, accepted long-lived guest bearer, native history/idle contracts and qualification

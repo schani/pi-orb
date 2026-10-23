@@ -77,6 +77,7 @@ import { DEFAULT_BROKER_CONSTANTS, DEFAULT_ISSUER_CONSTANTS } from "./domain/con
 import { ControlState } from "./domain/control-state.ts";
 import { GithubAuthGate } from "./domain/github-auth.ts";
 import { HarnessAgentPlane } from "./domain/harness-agent-plane.ts";
+import { searchGuestOrbHistory } from "./domain/history-search.ts";
 import {
   readOrbBootContext,
   requestOrbArchive,
@@ -872,6 +873,8 @@ export async function main(
     initialCheckoutCommit: (task: SimulationTask, orb: import("./domain/orb.ts").OrbRow) =>
       resourceGate.initialPin(task, orb),
     send: (task, caller, request) => sendGuestOrbMessage(task, deps, caller, request),
+    searchHistory: (task, caller, request) =>
+      searchGuestOrbHistory(task, deps, caller, request, appOrigin),
     spawn: (task, caller, orbId, request) => spawnOrb(task, deps, caller, orbId, request),
     sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
       requestOrbSleep(task, deps, orbId, caller, durationSeconds, sleepId),
