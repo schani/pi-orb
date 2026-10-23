@@ -11,7 +11,8 @@ The earlier 69.402s receipt covers **two** cases, not this case alone.
 
 Aggregate infrastructure-test/control-plane-image intervals overlapped, but
 neither the failing case's interval nor its resource schedule is known.
-Concurrent building is not an established historical cause. No waiver applies.
+Concurrent building is not an established historical cause; attribution remains
+unknown.
 Private evidence: `.context/test-audit-remediation/smoke-timeout-analysis.md`.
 
 ## Controlled mechanism and correction
@@ -46,9 +47,17 @@ were restored before the full successful case (40.387s without the quota).
 
 This establishes avoidable interpreter/import cost as a causal contributor to
 **controlled** timeouts and corrects that environmental performance assumption.
-It does not reconstruct the original case's cause. Historical attribution remains
-unresolved and blocking under the no-waiver instruction; passing qualification
-must not silently close it.
+It does not reconstruct the original case's cause; attribution remains unknown
+and no fix for that failure is claimed.
+
+## Historical attribution exception (user-approved 2026-10-23 PDT)
+
+The user waived attribution of only the original local 90s `TimeoutExpired` in
+`final-batch-infra-correct-env.log` as a merge/deployment prerequisite. Preserve
+its first-failure evidence. This does not waive the controlled 40%-CPU failures,
+new failures, exact-head gates, assertions, production rules, fixture cleanup or
+DST replay/root-cause requirements. Fixture correction, diagnostics and ownership
+remain mandatory.
 
 ## Failure ownership and evidence
 
