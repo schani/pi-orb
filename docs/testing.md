@@ -8,6 +8,8 @@ Merged main `42cf1061` into the test audit, retaining structured orb results, sc
 
 Ownership schedules require successful archive, final archived state, sealed public rows and no native entries. Drain/commit losers must retain the typed stale-owner cause; admission rejection alone does not prove archive.
 
+Root and child tool visibility require actual provider requests: catalog-native checks each scope’s declarations; steer requires five root and two child requests. Registration owns catalog membership.
+
 ## Domain/HTTP assertion boundaries (2026-10-22)
 
 Real-socket upload backpressure observes server-side read consumption and queued request bytes only after blocked storage entry, without adding draining listeners. An eager-buffer mutation must fail this boundary. Disconnect tests wait for a pending storage read, require request-abort propagation before the deadline and await source closure. Socket readiness uses read-entry, writable-backpressure and closure signals, not sleeps.

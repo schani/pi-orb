@@ -19,6 +19,9 @@ describe("native Durable codemode integration", () => {
           ?.filter((tool) => tool.name !== "codemode")
           .every((tool) => tool.callers?.join() === "tools"),
       ).toBe(true);
+      const catalogNames = bundle.catalog.definitions().map((tool) => tool.name);
+      expect(catalogNames).toContain("subagent");
+      expect(catalogNames).not.toContain("codemode");
       const childNames = bundle.childExtension.tools?.map((tool) => tool.name) ?? [];
       expect(childNames).toContain("read");
       expect(childNames).not.toContain("subagent");
