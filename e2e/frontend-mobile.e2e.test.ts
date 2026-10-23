@@ -1,4 +1,3 @@
-import { expectTabletTouchFocus } from "./testkit/tablet-touch-focus.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -11,6 +10,7 @@ import { closeRoutedPage } from "./testkit/close-routed-page.ts";
 import { gotoFrontendFixture, gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
 import { waitForFixtureMedia } from "./testkit/media-ready.ts";
 import { armNativeWheel } from "./testkit/native-wheel.ts";
+import { expectTabletTouchFocus } from "./testkit/tablet-touch-focus.ts";
 
 const WEB_ROOT = join(import.meta.dirname, "../apps/web");
 const ORB_PATH = "/orbs/frontend-fixture-orb";

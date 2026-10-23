@@ -1,4 +1,3 @@
-import { expectTabletTouchFocus } from "./testkit/tablet-touch-focus.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -18,6 +17,7 @@ import {
 import { waitForFixtureMedia } from "./testkit/media-ready.ts";
 import { observeProjectCreates } from "./testkit/project-create-observer.ts";
 import { projectFixtureHistory } from "./testkit/projected-history.ts";
+import { expectTabletTouchFocus } from "./testkit/tablet-touch-focus.ts";
 
 const WEB_ROOT = join(import.meta.dirname, "../apps/web");
 const ORB_PATH = "/orbs/frontend-fixture-orb";
