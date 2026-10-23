@@ -1515,3 +1515,6 @@ stderr byte count, never provider stderr content.
 Worker checkpoints retain only allowlisted metadata from the latest successful
 public replication snapshot. A later health/snapshot failure preserves nonempty
 normalized rows without retaining content, credentials or raw provider errors.
+The manual network-change reproducer validates modes before resource creation,
+bounds Docker calls and tears down browser/server on failure. Its output remains
+observations, not assertions that network changes caused a browser failure.
