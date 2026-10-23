@@ -120,6 +120,21 @@ describe("queued message list updates", () => {
       overflow: {},
     };
 
+    const receipt = displayRecord({
+      id: "receipt",
+      parentId: null,
+      timestamp: delivered.updatedAt,
+      overflow: {},
+      type: "event",
+      eventType: "claude.input_receipt",
+      inboxMessageIds: [delivered.id],
+    });
+    expect(messagesAwaitingHistory([delivered], [receipt])).toEqual([delivered]);
+    expect(hasDeliveredMessageAwaitingHistory([delivered], [receipt])).toBe(false);
+    expect(hasDeliveredMessageAwaitingHistory([message("other", "delivered")], [receipt])).toBe(
+      true,
+    );
+    expect(messagesAwaitingHistory([delivered], [receipt, displayRecord(represented)])).toEqual([]);
     expect(messagesAwaitingHistory([delivered], [])).toEqual([delivered]);
     expect(hasDeliveredMessageAwaitingHistory([delivered], [])).toBe(true);
     expect(messagesAwaitingHistory([delivered], [displayRecord(represented)])).toEqual([]);

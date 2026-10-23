@@ -629,6 +629,47 @@ describe("HistoryView turn structure", () => {
     expect(html).toContain('class="visually-hidden">You:</span>');
   });
 
+  it("places receipt batches once, prefers canonical content and preserves the live tail", () => {
+    const inbox = (id: string): OrbMessageView => ({
+      id,
+      orbId: "orb-1",
+      content: [{ type: "text", text: `body-${id}` }],
+      status: "delivered",
+      createdAt: "now",
+      updatedAt: "now",
+    });
+    const receipt = (id: string, ids: string[]): HistoryRecord => ({
+      id,
+      parentId: null,
+      timestamp: "now",
+      overflow: {},
+      type: "event",
+      eventType: "claude.input_receipt",
+      inboxMessageIds: ids,
+    });
+    const html = renderToStaticMarkup(
+      <HistoryView
+        records={[
+          receipt("batch", ["b", "a", "c"]),
+          receipt("duplicate", ["a", "b"]),
+          { ...message("canonical", "user", "body-c"), inboxMessageIds: ["c"] },
+          message("after", "assistant", "After receipt."),
+        ]}
+        liveBlocks={[
+          { blockId: "live", blockType: "text", text: "Live continuation.", revision: 1 },
+        ]}
+        tools={[]}
+        busy
+        queuedMessages={[inbox("a"), inbox("b"), inbox("c")]}
+      />,
+    );
+    expect(html.match(/body-[abc]/g)).toEqual(["body-b", "body-a", "body-c"]);
+    expect(html).toContain("Live continuation.");
+    expect(html).toContain('data-history-row="batch"');
+    expect(html).not.toContain('data-history-row="duplicate"');
+    expect(html.match(/class="rec rec-orb"/g)).toHaveLength(1);
+  });
+
   it("shows a message the runtime rejected as failed, with its reason", () => {
     const failed = {
       id: "00000000-0000-4000-8000-000000000126",

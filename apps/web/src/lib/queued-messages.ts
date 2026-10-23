@@ -35,7 +35,7 @@ export function createMutationEpoch(): MutationEpoch {
   };
 }
 
-export function representedInboxMessageIds(records: readonly DisplayRecord[]): Set<string> {
+function acknowledgedInboxMessageIds(records: readonly DisplayRecord[]): Set<string> {
   return new Set(
     records.flatMap((record) =>
       record.type === "message" || record.type === "event" ? (record.inboxMessageIds ?? []) : [],
@@ -43,12 +43,22 @@ export function representedInboxMessageIds(records: readonly DisplayRecord[]): S
   );
 }
 
+/** Contentless Claude consumption receipts need the existing inbox body for presentation. */
+export function representedInboxMessageIds(records: readonly DisplayRecord[]): Set<string> {
+  return acknowledgedInboxMessageIds(
+    records.filter(
+      (record) => record.type !== "event" || record.eventType !== "claude.input_receipt",
+    ),
+  );
+}
+
 /**
- * Inbox rows that still need a provisional transcript turn.
+ * Inbox rows whose bodies are still needed for transcript presentation.
  *
  * `delivered` is a control-plane replication fact, not proof that this browser
  * has applied the corresponding record. Retire it only at the identity-based
- * history handoff. Failed rows are terminal UI resources and remain visible.
+ * content-bearing history handoff. Failed rows remain visible; hidden Claude
+ * consumption receipts retain their inbox body at the receipt position.
  */
 export function messagesAwaitingHistory(
   items: readonly OrbMessageView[],
@@ -91,8 +101,8 @@ export function hasDeliveredMessageAwaitingHistory(
   items: readonly OrbMessageView[],
   records: readonly DisplayRecord[],
 ): boolean {
-  const represented = representedInboxMessageIds(records);
-  return items.some((message) => message.status === "delivered" && !represented.has(message.id));
+  const acknowledged = acknowledgedInboxMessageIds(records);
+  return items.some((message) => message.status === "delivered" && !acknowledged.has(message.id));
 }
 
 /** Append an unseen enqueue acknowledgement; observed rows retain order and newer metadata. */
