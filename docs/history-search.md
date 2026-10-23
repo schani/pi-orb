@@ -6,13 +6,17 @@ Sources: [docs/history-replication.md](history-replication.md) (records, commit 
 
 ## Interface and authorization
 
-Pi registration contract (proposed; registration and exact wording pending user approval):
+Pi return shape approved; registration and exact prose remain pending user approval:
 
 ```ts
 orb_search_history({query, scope?: "orb" | "project" | "user", orbId?, limit?}): Promise<{hits: HistorySearchHit[]} | {error: OrbAgentError}>
 ```
 
 `OrbAgentError` is `{code: "unauthorized" | "not_found" | "conflict" | "unavailable" | "internal" | "invalid_request", message: string}`. Return the outcome through native `structuredOutput` with a matching output schema, so code-mode callers receive the object without `JSON.parse`, including when `isError` is true. Validation, policy, cancellation and infrastructure failures can still reject. No framework changes are needed. `--json` serializes only at the CLI shell boundary.
+
+- Pending tool description: `Search your committed public history with BM25. Defaults to this orb; project searches this project and user searches all your orbs. Returns ranked snippets; use orb_transcript for full context.`
+- Pending CLI help: only the existing usage line below plus summary `Search your committed public history with BM25.` No other new help prose, examples or retry text is proposed.
+- These proposals replace the earlier verbose help proposal, not existing runtime help. Registration and new prose are not applied; system/Claude/namespace/other tool descriptions stay unchanged.
 
 ```sh
 pi-orb search QUERY [--orb ID | --project | --all] [--limit N] [--json]
