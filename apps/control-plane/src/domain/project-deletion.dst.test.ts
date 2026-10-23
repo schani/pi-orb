@@ -204,6 +204,24 @@ describe("project deletion (DST)", () => {
           name: "driver",
           f: async (task) => {
             seed(task, harness);
+            const archived = ORBS[2];
+            harness.world.configureOrb(archived, { initDurationMs: 0 });
+            harness.world.ensureSessionExists(archived);
+            const record = harness.world.appendMessage(archived, "retained archived history");
+            const session = harness.world.sessionHeaderOf(archived);
+            expect(session).not.toBeNull();
+            if (session === null) return;
+            const committed = await harness.store.commitPullBatch(task, {
+              orbId: archived,
+              expectedCursor: null,
+              session,
+              records: [record],
+              nextCursor: record.id,
+              nextHeadId: record.id,
+            });
+            expect(committed.isOk(), committed.isErr() ? committed.error.type : "").toBe(true);
+            expect(harness.store.replicaRecords(archived)).toEqual([record]);
+
             const requested = await requestProjectDeletion(task, harness.deps, PROJECT);
             expect(requested.isOk()).toBe(true);
             expect(harness.store.projectSnapshot(PROJECT)?.state).toBe("deleting");
