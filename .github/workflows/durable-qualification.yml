@@ -47,20 +47,11 @@ jobs:
         with:
           name: nested-process-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            test-failures/stopped-cache-*/evidence.json
-            test-failures/stopped-cache-*/failure.png
-            test-failures/stopped-cache-*/trace.zip
             test-failures/full-slice-orb-*/failure.txt
             test-failures/full-slice-orb-*/control-plane.log
             test-failures/full-slice-orb-*/failing-orb.json
             test-failures/full-slice-orb-*/failing-history.json
             test-failures/full-slice-orb-*/capture-outcomes.json
-            .context/empty-live-reasoning/simplification/*-first-failure/error.txt
-            .context/empty-live-reasoning/simplification/*-first-failure/frames.json
-            .context/empty-live-reasoning/simplification/*-first-failure/detail-requests.json
-            .context/empty-live-reasoning/simplification/*-first-failure/page-errors.json
-            .context/empty-live-reasoning/simplification/*-first-failure/page.html
-            .context/empty-live-reasoning/simplification/*-first-failure/page.png
             .context/orb-alerts/evidence/*/failure.txt
             .context/orb-alerts/evidence/*/control-plane.log
             .context/orb-alerts/evidence/*/orb.json
@@ -74,18 +65,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 14
-      - name: Upload missing-orb navigation failure evidence
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
-        with:
-          name: process-missing-orb-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            test-failures/missing-orb-*/failure.json
-            test-failures/missing-orb-*/desktop.png
-            test-failures/missing-orb-*/geometry.json
-          if-no-files-found: ignore
-          retention-days: 14
-
       - name: Upload local provider provenance
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)

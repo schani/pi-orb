@@ -110,16 +110,6 @@ jobs:
             .context/empty-live-reasoning/simplification/*-first-failure/page-errors.json
             .context/empty-live-reasoning/simplification/*-first-failure/page.html
             .context/empty-live-reasoning/simplification/*-first-failure/page.png
-            .context/orb-alerts/evidence/*/failure.txt
-            .context/orb-alerts/evidence/*/control-plane.log
-            .context/orb-alerts/evidence/*/orb.json
-            .context/orb-alerts/evidence/*/history.json
-            .context/orb-sleep/evidence/*/failure.txt
-            .context/orb-sleep/evidence/*/manifest.json
-            .context/orb-sleep/evidence/*/control-plane.log
-            .context/orb-sleep/evidence/*/orb-view.json
-            .context/orb-sleep/evidence/*/history.json
-            .context/orb-sleep/evidence/*/messages.json
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 14

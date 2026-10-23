@@ -25,7 +25,7 @@ Executable acceptance scenarios own scheduling/effects; unit contracts own strea
 
 ### CI and listeners
 
-CI exports only exact allowlisted diagnostic leaves, never workspace/auth trees or raw alert/sleep bodies. Foundation OpenTofu checks use `infra/foundation/test-tofu.sh`; `test:infra` owns the Node contracts once. Release-report contracts own deployment uploads/policy; browser-evidence contracts own diagnostic producers/E2E uploads.
+CI exports exact allowlisted diagnostic leaves only from jobs selecting their producers, never workspace/auth trees or raw alert/sleep bodies. Foundation OpenTofu checks use `infra/foundation/test-tofu.sh`; `test:infra` owns the Node contracts once. Release-report contracts own deployment uploads/policy; browser-evidence contracts own diagnostic producers/E2E uploads.
 
 Qualification requires `checks`, the existing `control-plane-image` offline packaged-worker/Git/skills proof, and all eight provider shard contexts on the first exact-source main attempt. Branch-protection API access was denied (403), not permission to drop a context. Both installation and post-seal SSH graphs execute their existing boot-graph checks.
 
