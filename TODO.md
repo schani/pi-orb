@@ -8,7 +8,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Root-cause PR 162's relay→hosted-fake stalls before clearing qualification** (`docs/testing.md`): retain first summary/manual failures, capture token-safe HTTP/transport outcomes, and correct the manual helper's uncaught MCP rejection before exact-source qualification; retries do not clear this blocker.
+- **Optional PR 162 diagnostic follow-up** (`docs/testing.md`): capture token-safe hosted-provider HTTP/transport outcomes and correct the manual helper's uncaught MCP rejection before reusing its completion oracle. Historical-stall attribution is waived for merge (user-approved 2026-10-22); no cause or fix is claimed.
 
 - **Gate first history-search deployment on verified old-writer quiescence before migration 049**; normal schema-before-retirement is unsafe. Qualify a safe maintenance path, including old control-plane/native receipt drain and retirement through new writer activation, before deployment (`docs/history-search.md`).
 
