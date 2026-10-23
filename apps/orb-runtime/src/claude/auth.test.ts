@@ -73,19 +73,31 @@ describe("Claude subscription boundary", () => {
     });
     expect(base.CLAUDE_CODE_OAUTH_TOKEN).toBe("other");
   });
-  it.each([401, 409, 500])("rejects HTTP %s without leaking bodies", async (status) => {
+  it.each([
+    [401, "claude_auth_required", false],
+    [409, "claude_auth_required", false],
+    [429, "claude_auth_unavailable", true],
+    [500, "claude_auth_unavailable", true],
+  ])("rejects HTTP %s without leaking bodies", async (status, code, retryable) => {
     const result = await fetchClaudeSubscription(
       { controlPlaneUrl: "http://cp", runtimeToken: "guest" },
       async () => new Response("secret", { status }),
     );
-    expect(result.isErr()).toBe(true);
-    if (result.isErr()) expect(result.error.message).not.toContain("secret");
+    expect(result._unsafeUnwrapErr()).toMatchObject({ code, retryable });
+    expect(result._unsafeUnwrapErr().message).not.toContain("secret");
   });
   it("rejects malformed success and maps transport rejection", async () => {
     const broker = { controlPlaneUrl: "http://cp", runtimeToken: "guest" };
-    expect(
-      (await fetchClaudeSubscription(broker, async () => new Response('{"token":""}'))).isErr(),
-    ).toBe(true);
+    for (const body of [
+      { token: "", generation: 3 },
+      { token: "valid" },
+      { token: "valid", generation: -1 },
+      { token: "valid", generation: 1.5 },
+    ]) {
+      expect(
+        (await fetchClaudeSubscription(broker, async () => Response.json(body)))._unsafeUnwrapErr(),
+      ).toMatchObject({ code: "claude_auth_unavailable", retryable: false });
+    }
     expect(
       (await fetchClaudeSubscription(broker, () => Promise.reject("secret")))._unsafeUnwrapErr()
         .message,
