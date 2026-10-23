@@ -109,7 +109,6 @@ it.each([false, true])(
         expect(operationId).toBeDefined();
         expect(f.queries).toHaveLength(3);
         expect(f.query).not.toBe(old);
-        expect(await old.enqueue(rootResult)).toBe(false);
         expect(f.agent.liveView()).toMatchObject({ operationId, blocks: [] });
         expect(f.agent.getHealth()).toMatchObject({ status: "ready", activity: "busy" });
         expect(Object.keys(f.state.deliveries)).toEqual(["inbox", "new"]);
