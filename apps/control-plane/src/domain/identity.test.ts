@@ -7,10 +7,12 @@ const task = new NoSimulationTask("identity", false);
 
 describe("principal resolution", () => {
   it("passes verified identity, generated id, and clock to the user store", async () => {
+    const identityTask = new NoSimulationTask("identity", false);
+    identityTask.wallNow = () => 123_456;
     const identity = { issuer: "issuer", subject: "subject", email: "a@example.test" };
     const seen: unknown[] = [];
     const result = await resolveUserPrincipal(
-      task,
+      identityTask,
       { verify: () => okAsync(identity) },
       {
         getUser: () => okAsync(null),
@@ -27,6 +29,7 @@ describe("principal resolution", () => {
       user: { id: "00000000-0000-4000-8000-000000000001", email: identity.email },
     });
     expect(seen[0]).toEqual(identity);
+    expect(seen[1]).toEqual({ id: "00000000-0000-4000-8000-000000000001", now: 123_456 });
   });
 
   it("does not touch the store when verification fails", async () => {
