@@ -22,6 +22,8 @@ Root and child tool visibility require actual provider requests: catalog-native 
 
 ## Domain/HTTP assertion boundaries (2026-10-22)
 
+Display fixtures share only stopped-orb/session seeding, successful history commit and route installation. Expected projections, persisted originals and headline source-publication timing remain scenario-local.
+
 Real-socket upload backpressure observes server-side read consumption and queued request bytes only after blocked storage entry, without adding draining listeners. An eager-buffer mutation must fail this boundary. Disconnect tests wait for a pending storage read, require request-abort propagation before the deadline and await source closure. Socket readiness uses read-entry, writable-backpressure and closure signals, not sleeps.
 
 Signing-key rotation failpoints follow a fault-free seed, faulted rotation and explicit fault-free repair on the same recorded trace. Repair must return exactly one active key with readable private material and a matching JWKS entry; outage-phase safety alone is insufficient.

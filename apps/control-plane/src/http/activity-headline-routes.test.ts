@@ -4,6 +4,7 @@ import Fastify from "fastify";
 import { errAsync, okAsync } from "neverthrow";
 import { expect, it, vi } from "vitest";
 import type { ActivityHeadlineGenerationError } from "../domain/ports.ts";
+import { headlineSource, seedDisplayHistory } from "../testkit/display-history.ts";
 import { makeHarness, makeOrbRow, makeProjectRow, TEST_SYSTEM_VIEW } from "../testkit/fixtures.ts";
 import { registerAuthenticatedBrowserRoutes } from "./browser-identity.ts";
 import { registerRoutes } from "./routes.ts";
@@ -15,31 +16,9 @@ it.each([true, false])(
     const h = makeHarness();
     h.store.seedProject(makeProjectRow("project"));
     h.store.seedOrb(makeOrbRow("orb", "project", "stopped"));
-    await h.store.commitPullBatch(task, {
-      orbId: "orb",
-      expectedCursor: null,
-      session: { id: "session", overflow: {} },
-      records: [
-        {
-          id: "record",
-          parentId: null,
-          overflow: {},
-          timestamp: "2026-10-05T00:00:00Z",
-          type: "message",
-          role: "assistant",
-          content: [
-            {
-              type: "tool_call",
-              callId: "call",
-              name: "codemode",
-              arguments: { code: "PRIVATE_SOURCE_CANARY" },
-            },
-          ],
-        },
-      ],
-      nextCursor: "record",
-      nextHeadId: "record",
-    });
+    await seedDisplayHistory(task, h, [
+      headlineSource("PRIVATE_SOURCE_CANARY", "2026-10-05T00:00:00Z"),
+    ]);
     let calls = 0;
     const generate = vi.fn(() =>
       ++calls === 2 && recover
@@ -77,31 +56,7 @@ it("POST accepts only URL identities and returns only headline; history enriches
   const h = makeHarness();
   h.store.seedProject(makeProjectRow("project"));
   h.store.seedOrb(makeOrbRow("orb", "project", "stopped"));
-  await h.store.commitPullBatch(task, {
-    orbId: "orb",
-    expectedCursor: null,
-    session: { id: "session", overflow: {} },
-    records: [
-      {
-        id: "record",
-        parentId: null,
-        overflow: {},
-        timestamp: "2026-10-04T00:00:00Z",
-        type: "message",
-        role: "assistant",
-        content: [
-          {
-            type: "tool_call",
-            callId: "call",
-            name: "codemode",
-            arguments: { code: "Inspect configuration" },
-          },
-        ],
-      },
-    ],
-    nextCursor: "record",
-    nextHeadId: "record",
-  });
+  await seedDisplayHistory(task, h, [headlineSource()]);
   const generate = vi.fn(() => okAsync("Inspect project configuration"));
   const app = Fastify({ logger: false });
   registerRoutes(app, task, { ...h.deps, headlineGenerator: { generate } }, {}, TEST_SYSTEM_VIEW);
@@ -181,31 +136,7 @@ it("an open WS and a null initial harness session do not strand a held source PO
     await missingRead;
     expect(generate).not.toHaveBeenCalled();
     expect(socket.readyState).toBe(1);
-    await h.store.commitPullBatch(task, {
-      orbId: "orb",
-      expectedCursor: null,
-      session: { id: "session", overflow: {} },
-      records: [
-        {
-          id: "record",
-          parentId: null,
-          overflow: {},
-          timestamp: "2026-10-04T00:00:00Z",
-          type: "message",
-          role: "assistant",
-          content: [
-            {
-              type: "tool_call",
-              callId: "call",
-              name: "codemode",
-              arguments: { code: "Inspect configuration" },
-            },
-          ],
-        },
-      ],
-      nextCursor: "record",
-      nextHeadId: "record",
-    });
+    await seedDisplayHistory(task, h, [headlineSource()]);
     expect((await post).statusCode).toBe(200);
     expect(generate).toHaveBeenCalledOnce();
     expect(reads).toBeGreaterThan(1);
