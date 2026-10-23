@@ -1,9 +1,9 @@
+import { runStudy } from "./study-browser.mjs";
 import assert from 'node:assert/strict';
-import { chromium } from '@playwright/test';
 
 const url = process.env.STUDY_URL || new URL('./orb-drag-drop.html', import.meta.url).href;
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', args: ['--no-sandbox'] });
-try {
+await runStudy("orb-drag-drop", async ({ browser, artifact, outputDir }) => {
+
   const page = await browser.newPage({ viewport: { width: 1440, height: 980 } });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -132,16 +132,15 @@ try {
   assert.equal(heads[0], heads[1]);
   const opacity = await page.locator('[data-design="1"] .drop-treatment').first().evaluate(el => getComputedStyle(el).backgroundColor);
   assert.match(opacity, /0\.7[0-9]/);
-  await page.screenshot({ path: '/tmp/orb-drag-drop-desktop.png', fullPage: true });
+  await page.screenshot({ path: artifact('orb-drag-drop-desktop.png'), fullPage: true });
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `overflow at ${width}px`);
   }
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: '/tmp/orb-drag-drop-mobile.png', fullPage: true });
+  await page.screenshot({ path: artifact('orb-drag-drop-mobile.png'), fullPage: true });
   assert.deepEqual(errors, []);
   console.log('PASS: five designs, split destinations, simulation, native hover/drop/leave, stopped, mixed, XSS, draft, mobile, no browser errors');
-  console.log('Screenshots: /tmp/orb-drag-drop-desktop.png /tmp/orb-drag-drop-mobile.png');
-} finally {
-  await browser.close();
-}
+  console.log(`Screenshots: ${outputDir}`);
+
+});

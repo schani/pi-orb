@@ -1,13 +1,13 @@
+import { runStudy } from "./study-browser.mjs";
 import assert from 'node:assert/strict';
-import { chromium } from '@playwright/test';
 
 const url = process.env.STUDY_URL || 'http://127.0.0.1:8765/design-prototypes/response-copy.html';
 const origin = new URL(url).origin;
 const rich = '### I found two constraints:\n\n- Preserve the `stale_head` guard.\n- Copy the [raw response](https://example.test/runtime), not rendered text.\n\n```ts\nconst head = snapshot.head;\nawait socket.send({ head });\n```\n\nThe **snapshot gate** remains unchanged.';
 const short = 'Done — the response source stays intact.';
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', args: ['--no-sandbox'] });
+await runStudy("response-copy", async ({ browser, artifact, outputDir }) => {
 
-try {
+
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
   const page = await context.newPage();
@@ -83,11 +83,11 @@ try {
   await page.reload();
   assert.ok(await page.locator('.response-copy').evaluateAll(buttons => buttons.every(button => button.getAttribute('aria-label') === 'Copy response Markdown' && !button.hasAttribute('data-state'))));
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.screenshot({ path: '/tmp/response-copy-desktop.png', fullPage: true });
+  await page.screenshot({ path: artifact('response-copy-desktop.png'), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: '/tmp/response-copy-mobile-390.png', fullPage: true });
+  await page.screenshot({ path: artifact('response-copy-mobile-390.png'), fullPage: true });
   await page.setViewportSize({ width: 320, height: 740 });
-  await page.screenshot({ path: '/tmp/response-copy-mobile-320.png', fullPage: true });
+  await page.screenshot({ path: artifact('response-copy-mobile-320.png'), fullPage: true });
   assert.deepEqual(errors, []);
   await context.close();
 
@@ -119,7 +119,7 @@ try {
     }), false, `manual fallback overlaps design ${design} copy action`);
   }
   assert.ok(await denied.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-  await denied.screenshot({ path: '/tmp/response-copy-blocked.png', fullPage: true });
+  await denied.screenshot({ path: artifact('response-copy-blocked.png'), fullPage: true });
   assert.deepEqual(deniedErrors, []);
   await deniedContext.close();
 
@@ -138,7 +138,6 @@ try {
   await unavailableContext.close();
 
   console.log('PASS: five selectors, ten exact response copies, keyboard, raw Markdown, code distinction, denied/unavailable fallback, 320/390px, feedback, no browser errors');
-  console.log('Screenshots: /tmp/response-copy-desktop.png /tmp/response-copy-mobile-390.png /tmp/response-copy-mobile-320.png /tmp/response-copy-blocked.png');
-} finally {
-  await browser.close();
-}
+  console.log(`Screenshots: ${outputDir}`);
+
+});

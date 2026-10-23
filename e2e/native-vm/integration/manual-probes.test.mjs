@@ -54,3 +54,102 @@ test("preemption proves recovery without sampling starting", async () => {
   );
   assert(writes.length > 0);
 });
+
+test("unknown control stage is rejected before fixture reads or operations", async () => {
+  const source = (await readFile(new URL("./control.mjs", import.meta.url), "utf8")).replace(
+    /^import .*;$/gm,
+    "",
+  );
+  let touched = false;
+  await assert.rejects(
+    new AsyncFunction("assert", "readFileSync", "process", source)(
+      assert,
+      () => {
+        touched = true;
+        throw Error("fixture read");
+      },
+      { env: {}, argv: ["node", "control", "typo"] },
+    ),
+    /unknown.*stage/i,
+  );
+  assert.equal(touched, false);
+});
+
+test("application probe expectations come from the owned fixture", async () => {
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { spawnSync } = await import("node:child_process");
+  const root = await mkdtemp(".context/application-expectations-test-");
+  const expected = root + "/application-expectations.json";
+  const commit = "a".repeat(40);
+  await writeFile(
+    expected,
+    JSON.stringify({ githubLogin: "fixture-login", checkoutCommit: commit }),
+  );
+  const source = (await readFile(new URL("./application-check.sh", import.meta.url), "utf8")).split(
+    'test "$NATIVE_VM_SECRET"',
+  )[0];
+  try {
+    for (const [login, sha, accepted] of [
+      ["fixture-login", commit, true],
+      ["wrong-login", commit, false],
+      ["fixture-login", "b".repeat(40), false],
+    ]) {
+      const result = spawnSync(
+        "bash",
+        [
+          "-ec",
+          `
+        id() { :; }; sudo() { :; }
+        gh() { printf '%s' '${login}'; }
+        git() { printf '%s' '${sha}'; }
+        ${source}
+      `,
+          "application-check",
+          expected,
+        ],
+        { encoding: "utf8", timeout: 3000, env: { PATH: process.env.PATH } },
+      );
+      assert.equal(result.status === 0, accepted, result.stderr);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("ready control publishes login and accepted checkout from its owned fixture", async () => {
+  const source = (await readFile(new URL("./control.mjs", import.meta.url), "utf8")).replace(
+    /^import .*;$/gm,
+    "",
+  );
+  const fixture = { orbId: "owned", expectedGitHubLogin: "fixture-login" };
+  const row = { state: "running", checkoutCommit: "c".repeat(40) };
+  const writes = [];
+  await new AsyncFunction(
+    "assert",
+    "readFileSync",
+    "writeFileSync",
+    "api",
+    "waitFor",
+    "fetch",
+    "process",
+    "console",
+    source,
+  )(
+    assert,
+    () => JSON.stringify(fixture),
+    (path, data) => writes.push([path, JSON.parse(data)]),
+    async () => ({ body: row }),
+    async (_label, poll) => {
+      const result = await poll();
+      assert(result);
+      return result;
+    },
+    async () => ({ ok: true }),
+    { env: {}, argv: ["node", "control", "ready"] },
+    { log() {} },
+  );
+  assert.deepEqual(writes.find(([path]) => path.endsWith("application-expectations.json"))?.[1], {
+    githubLogin: "fixture-login",
+    checkoutCommit: row.checkoutCommit,
+  });
+});

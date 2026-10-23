@@ -1,16 +1,16 @@
+import { runStudy } from "./study-browser.mjs";
 import assert from 'node:assert/strict';
-import { chromium } from '@playwright/test';
 import { pathToFileURL } from 'node:url';
 
 const local = pathToFileURL(new URL('./ink-rail-refinements.html', import.meta.url).pathname).href;
 const url = process.env.STUDY_URL || local;
 const slugs = ['detached', 'short', 'heavy', 'open', 'bracket'];
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', args: ['--no-sandbox'] });
+await runStudy("ink-rail-refinements", async ({ browser, artifact, outputDir }) => {
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
 
-try {
+
   await page.goto(url);
   assert.equal(await page.locator('.candidate').count(), 5);
   assert.equal(await page.locator('.candidate:visible').count(), 5);
@@ -166,12 +166,11 @@ try {
     await page.evaluate(() => scrollTo(0, 0));
     await page.screenshot({ path, fullPage: true });
   };
-  await capture(1440, 1000, '/tmp/ink-rail-refinements-desktop.png');
-  await capture(390, 844, '/tmp/ink-rail-refinements-mobile-390.png');
-  await capture(320, 740, '/tmp/ink-rail-refinements-mobile-320.png');
+  await capture(1440, 1000, artifact('ink-rail-refinements-desktop.png'));
+  await capture(390, 844, artifact('ink-rail-refinements-mobile-390.png'));
+  await capture(320, 740, artifact('ink-rail-refinements-mobile-320.png'));
   assert.deepEqual(errors, []);
   console.log('PASS: five external rails, painted bounds, stable geometry, blur, contrast, labels, keyboard focus, drafts, queries, 44px targets, and 320/390/760/1440 containment');
-  console.log('Screenshots: /tmp/ink-rail-refinements-desktop.png /tmp/ink-rail-refinements-mobile-390.png /tmp/ink-rail-refinements-mobile-320.png');
-} finally {
-  await browser.close();
-}
+  console.log(`Screenshots: ${outputDir}`);
+
+});

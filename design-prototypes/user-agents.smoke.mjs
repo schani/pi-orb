@@ -1,8 +1,8 @@
-import { chromium } from '@playwright/test';
+import { runStudy } from "./study-browser.mjs";
 import assert from 'node:assert/strict';
 
 // Static presentation study only; no production routes or runtime calls.
-const browser = await chromium.launch({ headless: true });
+await runStudy("user-agents", async ({ browser, artifact }) => {
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
@@ -50,9 +50,11 @@ for (const width of [1440, 390]) {
       await page.mouse.move(0, 0);
     }
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${name} overflow at ${width}`);
-    await page.screenshot({ path: `/tmp/user-agents-${index + 1}-${width}.png`, fullPage: true });
+    await page.screenshot({ path: artifact(`user-agents-${index + 1}-${width}.png`), fullPage: true });
   }
 }
 assert.deepEqual(errors, []);
-await browser.close();
+
 console.log('Five proposals × desktop/phone: entry, edit, failed save, successful save, dismissal, draft retention, scope, width, script errors passed.');
+
+});

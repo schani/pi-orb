@@ -1,10 +1,10 @@
+import { runStudy } from "./study-browser.mjs";
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
-import { chromium } from '@playwright/test';
 
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', args: ['--no-sandbox'] });
-try {
+await runStudy("nine-cell-instruments", async ({ browser, artifact }) => {
+
   const page = await browser.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -62,11 +62,10 @@ try {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1440, height: 1100 });
   await page.evaluate(() => document.getAnimations().forEach(animation => { animation.pause(); animation.currentTime = 800; }));
-  await page.screenshot({ path: '/tmp/nine-cell-instruments.png', fullPage: true });
+  await page.screenshot({ path: artifact('nine-cell-instruments.png'), fullPage: true });
   await page.setViewportSize({ width: 390, height: 850 });
-  await page.screenshot({ path: '/tmp/nine-cell-instruments-mobile.png', fullPage: true });
+  await page.screenshot({ path: artifact('nine-cell-instruments-mobile.png'), fullPage: true });
   assert.deepEqual(errors, []);
   console.log('PASS: ten animated monochrome designs, actual-size geometry, focus/compare, lifecycle previews, four widths, tempo, pause, reduced motion');
-} finally {
-  await browser.close();
-}
+
+});

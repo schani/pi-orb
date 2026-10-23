@@ -1,10 +1,10 @@
-import { chromium } from '@playwright/test';
+import { runStudy } from "./study-browser.mjs";
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 
 const file = new URL('./text-field-focus.html', import.meta.url);
 const url = process.env.STUDY_URL ?? pathToFileURL(file.pathname).href;
-const browser = await chromium.launch({ headless: true });
+await runStudy("text-field-focus", async ({ browser, artifact }) => {
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
@@ -123,10 +123,12 @@ for (const width of [320, 390, 1440]) {
     });
     assert.ok(geometry.variantBottom <= geometry.sceneTop, `variant controls overlap scenes at ${width}px`);
     assert.ok(geometry.activeBottom >= geometry.viewport, `active scene does not fill ${width}px viewport`);
-    await page.screenshot({ path: `/tmp/text-field-focus-${variant}-${width}.png`, fullPage: true });
+    await page.screenshot({ path: artifact(`text-field-focus-${variant}-${width}.png`), fullPage: true });
   }
 }
 
 assert.deepEqual(errors, []);
-await browser.close();
+
 console.log('14 fields × 2 variants; focus/drafts retained, submissions blocked, Config tabs wired, 320/390/1440 geometry, and 6 screenshots passed.');
+
+});

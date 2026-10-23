@@ -1,15 +1,15 @@
+import { runStudy } from "./study-browser.mjs";
 import assert from 'node:assert/strict';
-import { chromium } from '@playwright/test';
 import { pathToFileURL } from 'node:url';
 
 const local = pathToFileURL(new URL('./focus-alternatives.html', import.meta.url).pathname).href;
 const url = process.env.STUDY_URL || local;
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', args: ['--no-sandbox'] });
+await runStudy("focus-alternatives", async ({ browser, artifact, outputDir }) => {
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
 
-try {
+
   await page.goto(url);
   const slugs = ['ink', 'crop', 'ledger', 'carbon', 'graphite'];
   assert.equal(await page.locator('.candidate').count(), 5);
@@ -139,14 +139,13 @@ try {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.reload();
   assert.equal(await page.locator('#preview-toggle').getAttribute('aria-pressed'), 'true');
-  await page.screenshot({ path: '/tmp/focus-alternatives-desktop.png', fullPage: true });
+  await page.screenshot({ path: artifact('focus-alternatives-desktop.png'), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: '/tmp/focus-alternatives-mobile-390.png', fullPage: true });
+  await page.screenshot({ path: artifact('focus-alternatives-mobile-390.png'), fullPage: true });
   await page.setViewportSize({ width: 320, height: 740 });
-  await page.screenshot({ path: '/tmp/focus-alternatives-mobile-320.png', fullPage: true });
+  await page.screenshot({ path: artifact('focus-alternatives-mobile-320.png'), fullPage: true });
   assert.deepEqual(errors, []);
   console.log('PASS: five variants, baseline geometry, non-layout focus, preview, real focus/blur and Tab, drafts, deep links, 44px mobile controls, 320/390/760/1440 containment, no page errors');
-  console.log('Screenshots: /tmp/focus-alternatives-desktop.png /tmp/focus-alternatives-mobile-390.png /tmp/focus-alternatives-mobile-320.png');
-} finally {
-  await browser.close();
-}
+  console.log(`Screenshots: ${outputDir}`);
+
+});

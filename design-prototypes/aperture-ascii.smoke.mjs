@@ -1,10 +1,10 @@
+import { runStudy } from "./study-browser.mjs";
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
-import { chromium } from '@playwright/test';
 
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', args: ['--no-sandbox'] });
-try {
+await runStudy("aperture-ascii", async ({ browser, artifact }) => {
+
   const page = await browser.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -75,7 +75,7 @@ try {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   // Keep all specimens in the viewport when seeking screenshot poses; Chromium
   // can defer offscreen animation paint during a full-page capture.
-  for (const [width, path] of [[1440, '/tmp/aperture-ascii.png'], [390, '/tmp/aperture-ascii-mobile.png']]) {
+  for (const [width, path] of [[1440, artifact('aperture-ascii.png')], [390, artifact('aperture-ascii-mobile.png')]]) {
     await page.setViewportSize({ width, height: 850 });
     const height = await page.evaluate(() => document.documentElement.scrollHeight);
     await page.setViewportSize({ width, height });
@@ -84,6 +84,5 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log('PASS: ten variants, four widths, family/focus controls, states, pause/tempo, every animation pose, ASCII geometry, reduced motion');
-} finally {
-  await browser.close();
-}
+
+});

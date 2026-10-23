@@ -1,10 +1,11 @@
-import { chromium, expect } from '@playwright/test';
+import { runStudy } from "./study-browser.mjs";
+import { expect } from '@playwright/test';
 import assert from 'node:assert/strict';
 
 // Static presentation study only; no production routes or runtime calls.
 // Serve design-prototypes/ (e.g. python3 -m http.server 5173 --bind 127.0.0.1) and run with node.
 const url = process.env.STUDY_URL ?? 'http://127.0.0.1:5173/git-identity.html';
-const browser = await chromium.launch({ headless: true });
+await runStudy("git-identity", async ({ browser, artifact }) => {
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
@@ -27,7 +28,7 @@ const box = async locator => (await locator.boundingBox()) ?? assert.fail('missi
 let width = 1440;
 
 async function shot(index, label) {
-  await page.screenshot({ path: `/tmp/git-identity-${index + 1}-${width}-${label}.png`, fullPage: true });
+  await page.screenshot({ path: artifact(`git-identity-${index + 1}-${width}-${label}.png`), fullPage: true });
 }
 
 /** Failure keeps the draft; a held save locks the dialog; release completes once. */
@@ -291,5 +292,7 @@ for (width of [1440, 390]) {
   }
 }
 assert.deepEqual(errors, []);
-await browser.close();
+
 console.log('Five proposals × 1440/390: edit, validation, failed save + draft retention, held save locks dialog, success receipt, backdrop/Escape/focus, reopen retention, source switching incl. disabled GitHub, signature Enter/Escape/parse/unset, project inherit/override, 16px/48px phone targets, no overflow, no console or script errors.');
+
+});

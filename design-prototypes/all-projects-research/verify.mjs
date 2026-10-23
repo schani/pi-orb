@@ -1,18 +1,15 @@
+import { runStudy } from "../study-browser.mjs";
 // Run after npm ci, with the repository served by a static HTTP server.
 // STUDY_URL may point to the published study; CHROMIUM_PATH selects an installed browser.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chromium } from "playwright";
 
 const url = process.env.STUDY_URL ?? "http://localhost:8091/design-prototypes/all-projects-orb.html";
-const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_PATH ?? "/usr/bin/chromium",
-  args: ["--no-sandbox"],
-});
+await runStudy("all-projects", async ({ browser }) => {
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 const errors = [];
 page.on("pageerror", (error) => errors.push(error.message));
-try {
+
   await page.goto(url);
   assert.equal(
     createHash("sha256").update(await page.locator("#product-css").textContent()).digest("hex"),
@@ -112,6 +109,5 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log("PASS: six layouts; exact product CSS/geometry; all projects/assets; navigation/Back; drafts; archives; disclosures; reference screenshots; 1024px canvas.");
-} finally {
-  await browser.close();
-}
+
+});

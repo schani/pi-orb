@@ -1,8 +1,8 @@
+import { runStudy } from "./study-browser.mjs";
 import assert from 'node:assert/strict';
-import { chromium } from '@playwright/test';
 
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', args: ['--no-sandbox'] });
-try {
+await runStudy("thinking-markers", async ({ browser, artifact }) => {
+
   const page = await browser.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -34,9 +34,8 @@ try {
   assert.equal(await page.locator('.margin-mark').evaluate(el => getComputedStyle(el, '::before').animationName), 'none');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1440, height: 1100 });
-  await page.screenshot({ path: '/tmp/thinking-markers.png', fullPage: true });
+  await page.screenshot({ path: artifact('thinking-markers.png'), fullPage: true });
   assert.deepEqual(errors, []);
   console.log('PASS: five designs, focus/compare, four phases, four widths, pause, reduced motion, no page errors');
-} finally {
-  await browser.close();
-}
+
+});

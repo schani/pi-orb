@@ -65,3 +65,9 @@ service/container image, WIF pool/provider and service account grants/account.
 Delete model fixtures and local credential copies; stop tunnels/browser sessions.
 Never run a project-wide instance cleanup or revoke the user's GitHub credential
 or the production Tailscale OAuth secret.
+
+Application expectations are fixture-owned: preparation records the authenticated
+GitHub login; a running control probe writes application-expectations.json with
+that login and the accepted public checkoutCommit. Copy this file to
+/workspace/application-expectations.json alongside the application probe, or
+pass its path as the probe's first argument. Refresh it after a new checkout.

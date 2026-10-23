@@ -1525,3 +1525,12 @@ No concurrent lifecycle command belongs in that experiment.
 Lifecycle and workload-identity smokes share bounded state polling and one-shot
 commands through smoke-fixtures.sh; each retains its scenario and cleanup owner.
 Identity JSON access uses Python, already required alongside jq.
+All fourteen manual study validators share browser finally cleanup and explicit
+CHROMIUM_PATH selection. Each run allocates a fresh artifact subdirectory under
+STUDY_OUTPUT_DIR (default .context/studies). Their proposal assertions remain
+distinct; the all-projects research validator still pins its researched CSS hash.
+
+Native integration rejects unknown control stages before reading fixtures.
+Preparation records the authenticated login; running control writes application
+expectations from it and the accepted public checkoutCommit. Application checks
+consume that owned file. These manual studies/probes are not production CI gates.
