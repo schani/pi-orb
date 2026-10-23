@@ -17,7 +17,7 @@ import {
   type TestHarness,
 } from "../testkit/fixtures.ts";
 import { assertAtMostOneHost, assertReplicaComplete } from "../testkit/invariants.ts";
-import { LogCapture, runDst, waitUntil } from "../testkit/sim.ts";
+import { LogCapture, runDst, sleepInSteps, waitUntil } from "../testkit/sim.ts";
 import { isDeclineMarker, isResumeMarker } from "../testkit/world.ts";
 import { ControlState } from "./control-state.ts";
 import { reconcileOrbOnce, requestOrbStart, requestOrbStop } from "./lifecycle.ts";
@@ -107,21 +107,6 @@ it("the FIFO oracle checks identity order within squashed batches", () => {
   expect(() => assertInboxFifo(harness, ORB, ["first", "second"])).toThrow();
   expect(() => assertInboxFifo(harness, ORB, ["missing"])).toThrow();
 });
-
-/**
- * Wait `totalMs` in short steps. One long timer is not a long wait to this
- * scheduler: its late-firing exploration may pick that timer and teleport
- * virtual time past every other deadline in the simulation at once — here it
- * starved the history poller for a full minute and produced an
- * `unreachable-restart` no stalled caller could have caused (2026-08-11; the
- * same reasoning as `HANG_STEP_MS` in testkit/world.ts).
- */
-async function sleepInSteps(task: SimulationTask, totalMs: number, reason: string): Promise<void> {
-  const until = task.monotonicNow() + totalMs;
-  while (task.monotonicNow() < until) {
-    await task.sleep(Math.min(until - task.monotonicNow(), 500), reason);
-  }
-}
 
 function seedCreatingOrb(
   task: SimulationTask,

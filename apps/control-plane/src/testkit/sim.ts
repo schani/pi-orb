@@ -59,6 +59,18 @@ export class LogCapture implements Logger {
   }
 }
 
+/** Wait in bounded virtual steps so late-timer exploration cannot skip unrelated deadlines. */
+export async function sleepInSteps(
+  task: SimulationTask,
+  totalMs: number,
+  reason: string,
+): Promise<void> {
+  const until = task.monotonicNow() + totalMs;
+  while (task.monotonicNow() < until) {
+    await task.sleep(Math.min(until - task.monotonicNow(), 500), reason);
+  }
+}
+
 export interface DstOptions {
   readonly name: string;
   readonly iterations?: number;
