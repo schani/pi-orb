@@ -301,6 +301,7 @@ it("escalates termination and bounds unconfirmed exit without claiming cleanup",
   await cleaned;
 });
 afterEach(async () => {
+  vi.unstubAllEnvs();
   state.cleanupGate = undefined;
   state.cleanupFailed = false;
   state.cleanupFinished = undefined;
@@ -312,7 +313,7 @@ afterEach(async () => {
 });
 it("contains child termination exceptions during timeout and excludes ambient config", async () => {
   vi.useFakeTimers();
-  process.env["ANTHROPIC_API_KEY"] = "ambient-secret";
+  vi.stubEnv("ANTHROPIC_API_KEY", "ambient-secret");
   const events: unknown[] = [];
   const started = await new ClaudePtyAuthTransport().start((event) => events.push(event));
   expect(started.isOk()).toBe(true);
@@ -324,5 +325,4 @@ it("contains child termination exceptions during timeout and excludes ambient co
   expect(events).toEqual([{ error: "Claude sign-in timed out", stage: "timeout" }]);
   state.onExit?.({ exitCode: 1 });
   await started._unsafeUnwrap().drain();
-  delete process.env["ANTHROPIC_API_KEY"];
 });
