@@ -72,7 +72,10 @@ it.each(["chromium", "webkit"] as const)(
       if (!address || typeof address === "string") return;
       const origin = `http://127.0.0.1:${address.port}`;
       const page = await context.newPage();
-      const projectsResponse = await page.request.get(`${origin}/api/v1/projects`);
+      const projectsResponse = await page.request.get(`${origin}/api/v1/projects`, {
+        headers: { Connection: "close" },
+      });
+      check(projectsResponse.headers()["connection"]).toBe("close");
       check(projectsResponse.status()).toBe(200);
       const projects = structuredClone(await projectsResponse.json());
       projects.items[0].name = "Signal and Boards with a project name long enough to truncate";
@@ -197,7 +200,10 @@ it.each(["chromium", "webkit"] as const)(
           await check(page).toHaveURL(/\/orbs\/[0-9a-f-]+$/);
           check(posts).toHaveLength(2);
           check(posts[1]).toEqual(posts[0]);
-          const read = await page.request.get(`${origin}/api/v1/orbs/${posts[0]?.["id"]}`);
+          const read = await page.request.get(`${origin}/api/v1/orbs/${posts[0]?.["id"]}`, {
+            headers: { Connection: "close" },
+          });
+          check(read.headers()["connection"]).toBe("close");
           check((await read.json()).harness).toBe(harness);
           await page.unroute(endpoint);
         }
