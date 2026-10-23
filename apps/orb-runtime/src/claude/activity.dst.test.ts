@@ -44,7 +44,8 @@ it("duplicate root results during drain preserve handoffs and independent child 
   activity.taskHandoff("late", "Awaiting native result handoff");
   activity.rootFinished();
   activity.rootFinished();
-  expect(activity.children.map((child) => child.id)).toEqual(["independent", "late"]);
+  expect(activity.children.map((child) => child.id)).toEqual(["independent"]);
+  expect(activity.drainHolds).toContain("handoffs");
   activity.handoffInterrupted("late");
   expect(activity.children.map((child) => child.id)).toEqual(["independent"]);
 });
@@ -117,11 +118,11 @@ it("a result for inference started before a task notification cannot finish its 
   activity.taskHandoff("task", "Awaiting native result handoff");
   activity.rootFinished(true);
   expect(activity.canDrain).toBe(false);
-  expect(activity.children.map((child) => child.id)).toEqual(["task"]);
+  expect(activity.drainHolds).toContain("handoffs");
   activity.rootRequested();
   activity.rootFinished(false);
   expect(activity.canDrain).toBe(false);
-  expect(activity.children.map((child) => child.id)).toEqual(["task"]);
+  expect(activity.drainHolds).toContain("handoffs");
   expect(activity.rootFinished(true)).toEqual(["task"]);
   expect(activity.canDrain).toBe(true);
 });
@@ -134,7 +135,7 @@ it("a requesting snapshot releases only handoffs already present when inference 
   activity.taskHandoff("second", "second");
   activity.rootStarted();
   expect(activity.rootFinished(true)).toEqual(["first"]);
-  expect(activity.children.map((child) => child.id)).toEqual(["second"]);
+  expect(activity.drainHolds).toContain("handoffs");
   expect(activity.canDrain).toBe(false);
   activity.rootRequested();
   expect(activity.rootFinished(true)).toEqual(["second"]);
@@ -149,5 +150,5 @@ it("late requesting and inference results during drain cannot consume retained h
   activity.taskHandoff("late", "late");
   activity.rootRequested();
   expect(activity.rootFinished(true)).toEqual([]);
-  expect(activity.children.map((child) => child.id)).toEqual(["late"]);
+  expect(activity.drainHolds).toContain("handoffs");
 });

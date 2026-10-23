@@ -3042,6 +3042,8 @@ function acceptLiveSocket(state: MockState, socket: WebSocket, orbId: string): v
             { id: "fixture-charts", description: "Build chart embeds", phase: "running" },
             { id: "fixture-datadog", description: "Check Datadog widgets", phase: "queued" },
             { id: "fixture-layout", description: "Review transcript layout", phase: "finishing" },
+            { id: "fixture-tests", kind: "shell", description: "Run tests", phase: "running" },
+            { id: "fixture-build", kind: "shell", description: "Build frontend", phase: "running" },
           ],
         },
         { type: "status", activity: "busy", operationId },

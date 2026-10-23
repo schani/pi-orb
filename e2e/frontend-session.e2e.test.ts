@@ -913,15 +913,23 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
-  it.each([1280, 390, 320])(
-    "keeps the active-only subagent rail above the terminal at %ipx",
-    async (width) => {
-      const page = await browser.newPage({ viewport: { width, height: 740 } });
+  it.each(
+    ["chromium", "webkit"].flatMap((engine) =>
+      [1280, 390, 320].map((width) => ({ engine, width })),
+    ),
+  )(
+    "keeps independent active-only subagent and shell rails above the terminal at $width px ($engine)",
+    async ({ engine, width }) => {
+      const ownedBrowser = engine === "webkit" ? await webkit.launch({ headless: true }) : browser;
+      const page = await ownedBrowser.newPage({ viewport: { width, height: 740 } });
       const id = "frontend-fixture-orb";
       const children = [
         { id: "child-a", description: "Check deployment", phase: "running" },
         { id: "child-b", description: "Check services", phase: "queued" },
         { id: "child-c", description: "Clean up", phase: "finishing" },
+        { id: "shell-a", kind: "shell", description: "Run tests", phase: "running" },
+        { id: "shell-b", kind: "shell", description: "Build frontend", phase: "running" },
+        { id: "shell-c", kind: "shell", description: "Finish upload", phase: "finishing" },
       ];
       let emit: (event: object) => void = () => {};
       let disconnect: () => void = () => {};
@@ -1012,10 +1020,15 @@ describe("frontend-only browser behavior", () => {
       });
       try {
         await gotoFrontendFixture(page, `${origin}/orbs/${id}`);
-        const rail = page.locator(".subagent-live-rail");
+        const rail = page.locator('.subagent-live-rail[data-kind="subagent"]');
+        const shell = page.locator('.subagent-live-rail[data-kind="shell"]');
         await expectPage(rail).toContainText("1 running");
         await expectPage(rail).toContainText("1 queued");
         await expectPage(rail).toContainText("1 finishing");
+        await expectPage(shell).toContainText("2 running");
+        await expectPage(shell).toContainText("1 finishing");
+        await expectPage(shell).not.toContainText("Check deployment");
+        await expectPage(rail).not.toContainText("Run tests");
         const receipt = page.locator(".subagent-notice");
         await receipt.locator(":scope > summary").click();
         await expectPage(receipt).toContainText("Unsupported model");
@@ -1044,6 +1057,11 @@ describe("frontend-only browser behavior", () => {
         const topBefore = (await terminal.boundingBox())?.y ?? Number.NaN;
         await rail.locator(":scope > summary").click();
         await expectPage(rail.locator(".subagent-roster")).toBeVisible();
+        await expectPage(shell).not.toHaveAttribute("open");
+        await shell.locator(":scope > summary").click();
+        await expectPage(shell.locator(".subagent-roster")).toBeVisible();
+        await expectPage(shell.locator(".subagent-roster > li")).toHaveCount(3);
+        await expectPage(rail).toHaveAttribute("open", "");
         await expectPage(rail.locator(".subagent-roster > li")).toHaveCount(3);
         await expectPage(
           rail.locator(".subagent-roster details, .subagent-roster summary"),
@@ -1058,7 +1076,7 @@ describe("frontend-only browser behavior", () => {
         await expectPage
           .poll(async () => {
             const t = await terminal.boundingBox(),
-              r = await rail.boundingBox(),
+              r = await shell.boundingBox(),
               c = await page.locator(".composer").boundingBox();
             return (
               t !== null &&
@@ -1086,13 +1104,31 @@ describe("frontend-only browser behavior", () => {
         holdReconnect = true;
         disconnect();
         await expectPage(rail).toHaveCount(0);
+        await expectPage(shell).toHaveCount(0);
         await expectPage.poll(() => snapshots).toBe(2);
         await expectPage(rail).toHaveCount(0);
+        await expectPage(shell).toHaveCount(0);
         emit({ type: "operation_started", operationId: "children-op" });
         emit({ type: "subagents", operationId: "children-op", children });
         await expectPage(rail).toBeVisible();
+        await expectPage(shell).toBeVisible();
+        emit({
+          type: "subagents",
+          operationId: "children-op",
+          children: children.filter((child) => child.kind === "shell"),
+        });
+        await expectPage(rail).toHaveCount(0);
+        await expectPage(shell).toBeVisible();
+        emit({
+          type: "subagents",
+          operationId: "children-op",
+          children: children.filter((child) => child.kind !== "shell"),
+        });
+        await expectPage(rail).toBeVisible();
+        await expectPage(shell).toHaveCount(0);
         emit({ type: "subagents", operationId: "children-op", children: [] });
         await expectPage(rail).toHaveCount(0);
+        await expectPage(shell).toHaveCount(0);
         await expectPage(terminal.locator('[data-test-session="retained"]')).toBeVisible();
         expectPage(terminalSockets, terminalEdges.join("; ")).toBe(terminalConnectionsReady);
         if (width < 600) await page.getByRole("button", { name: "Write message" }).click();
@@ -1111,6 +1147,7 @@ describe("frontend-only browser behavior", () => {
       } finally {
         await page.unrouteAll({ behavior: "wait" });
         await page.close();
+        if (ownedBrowser !== browser) await ownedBrowser.close();
       }
     },
   );
@@ -5317,26 +5354,37 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
-  it.each([1280, 390])(
-    "previews enclosed Files and Subagents over scrollable history at %ipx",
-    async (width) => {
-      const page = await browser.newPage({ viewport: { width, height: 740 } });
+  it.each(
+    ["chromium", "webkit"].flatMap((engine) => [1280, 390].map((width) => ({ engine, width }))),
+  )(
+    "previews enclosed Files, Subagents and Shell over scrollable history at $width px ($engine)",
+    async ({ engine, width }) => {
+      const ownedBrowser = engine === "webkit" ? await webkit.launch({ headless: true }) : browser;
+      const page = await ownedBrowser.newPage({ viewport: { width, height: 740 } });
       const id = "frontend-sticky-bars";
       try {
         expectPage((await page.request.get(`${origin}/api/v1/orbs/${id}`)).status()).toBe(200);
         await gotoFrontendHistory(page, `${origin}/orbs/${id}`, id);
         const files = page.locator(".hosted-files");
-        const agents = page.locator(".subagent-live-rail");
+        const agents = page.locator('.subagent-live-rail[data-kind="subagent"]');
+        const shell = page.locator('.subagent-live-rail[data-kind="shell"]');
         await expectPage(files.locator("summary")).toHaveText("files (1)");
         await expectPage(agents).toContainText("1 running");
         await expectPage(agents).toContainText("1 queued");
         await expectPage(agents).toContainText("1 finishing");
+        await expectPage(shell).toContainText("2 running");
         await agents.locator("summary").click();
+        await shell.locator("summary").click();
         await files.locator("summary").click();
         await expectPage(agents.locator(".subagent-roster > li")).toHaveCount(3);
         await expectPage(files.getByRole("link", { name: "index.html" })).toBeVisible();
         const geometry = await files.evaluate((element) => {
-          const rail = element.ownerDocument.querySelector(".subagent-live-rail");
+          const rail = element.ownerDocument.querySelector(
+            '.subagent-live-rail[data-kind="subagent"]',
+          );
+          const shell = element.ownerDocument.querySelector(
+            '.subagent-live-rail[data-kind="shell"]',
+          );
           const view = element.ownerDocument.defaultView;
           const summarize = (node: typeof element | null) => {
             const summary = node?.querySelector("summary");
@@ -5347,12 +5395,22 @@ describe("frontend-only browser behavior", () => {
               label: node?.querySelector(".activity-rail-summary")?.getBoundingClientRect().left,
             };
           };
-          return { files: summarize(element), agents: summarize(rail) };
+          return {
+            files: summarize(element),
+            agents: summarize(rail),
+            shell: summarize(shell),
+            order: [...element.parentElement.querySelectorAll(".activity-rail-summary")].map(
+              (label) => label.textContent,
+            ),
+          };
         });
         expectPage(geometry.files).toEqual(geometry.agents);
+        expectPage(geometry.files).toEqual(geometry.shell);
+        expectPage(geometry.order).toEqual(["subagents", "shell", "files (1)"]);
         expectPage(geometry.files.border).toMatch(/^1px solid/);
         const filesBefore = await files.boundingBox();
         const agentsBefore = await agents.boundingBox();
+        const shellBefore = await shell.boundingBox();
         const scroller = page.locator(".orb-transcript-scroll");
         await scroller.evaluate((element) => {
           element.scrollTop = 0;
@@ -5364,10 +5422,13 @@ describe("frontend-only browser behavior", () => {
         expectPage(await scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(1000);
         expectPage(await files.boundingBox()).toEqual(filesBefore);
         expectPage(await agents.boundingBox()).toEqual(agentsBefore);
+        expectPage(await shell.boundingBox()).toEqual(shellBefore);
         await expectPage(files).toBeInViewport();
         await expectPage(agents).toBeInViewport();
+        await expectPage(shell).toBeInViewport();
       } finally {
         await closeRoutedPage(page);
+        if (ownedBrowser !== browser) await ownedBrowser.close();
       }
     },
   );
