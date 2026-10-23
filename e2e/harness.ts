@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { OrbHistoryView } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
+import { createControlPlaneForwarder } from "./testkit/control-plane-forwarder.ts";
 import { durableFakeRelay } from "./testkit/durable-fake-relay.ts";
 import { centralModelScenario } from "./testkit/durable-model-fixture.ts";
 
@@ -766,6 +767,27 @@ export async function startControlPlane(options: {
   const relay = await durableFakeRelay(
     options.extraEnv?.["PI_ORB_FAKE_OPENAI_INFERENCE_URL"] ?? options.fake.inferenceBaseUrl,
   );
+  let ingress: Awaited<ReturnType<typeof createControlPlaneForwarder>>;
+  try {
+    ingress = await createControlPlaneForwarder(
+      options.port,
+      options.pglitePath === undefined ? "0.0.0.0" : "127.0.0.1",
+    );
+  } catch (cause) {
+    const cleanup = await Promise.allSettled([relay.close()]);
+    if (ownedAuthDir) rmSync(authDir, { recursive: true, force: true });
+    if (ownedHostingRoot) rmSync(hostingRoot, { recursive: true, force: true });
+    throw new AggregateError(
+      [cause, ...cleanup.filter((result) => result.status === "rejected")],
+      "control-plane ingress startup failed",
+      { cause },
+    );
+  }
+  const publicOrigin = options.extraEnv?.["PI_ORB_APP_ORIGIN"] ?? ingress.baseUrl;
+  const brokerOrigin =
+    options.pglitePath === undefined
+      ? `http://host.docker.internal:${ingress.port}`
+      : ingress.baseUrl;
   const entry =
     options.entry ??
     (options.resourceRepository === undefined
@@ -788,7 +810,7 @@ export async function startControlPlane(options: {
             PI_ORB_HOST_PROVIDER: "process",
             PI_ORB_PROCESS_STATE_DIR: options.processStateDirectory,
           }),
-      PORT: String(options.port),
+      PORT: "0",
       PI_ORB_AUTH_DIR: authDir,
       PI_ORB_AUTH_MODE: "local",
       PI_ORB_DURABLE_STATE_DIR: fixtureAuthorityDirectory(authDir, options.durableStateDirectory),
@@ -796,8 +818,9 @@ export async function startControlPlane(options: {
       PI_ORB_HOSTING_STORE: "filesystem",
       PI_ORB_HOSTING_ROOT: hostingRoot,
       PI_ORB_WEB_DIST: options.webDist,
-      PI_ORB_APP_ORIGIN: `http://127.0.0.1:${options.port}`,
-      PI_ORB_HOSTING_ORIGIN: `http://files.localhost:${options.port}`,
+      PI_ORB_APP_ORIGIN: publicOrigin,
+      PI_ORB_BROKER_URL: brokerOrigin,
+      PI_ORB_HOSTING_ORIGIN: `http://files.localhost:${ingress.port}`,
       PI_ORB_DOCKER_NETWORK: options.dockerNetwork,
       PI_ORB_E2E_LAUNCH_FAILURE_MARKER: options.launchFailureMarker,
       PI_ORB_HOST_SPEC_GENERATION: String(options.hostSpecGeneration ?? 0),
@@ -838,26 +861,34 @@ export async function startControlPlane(options: {
         child.once("exit", finish);
         child.kill("SIGTERM");
       }
-    }).then(() => relay.close());
+    }).then(async () => {
+      const cleanup = await Promise.allSettled([relay.close(), ingress.close()]);
+      const failures = cleanup.filter((result) => result.status === "rejected");
+      if (failures.length)
+        throw new AggregateError(failures, "control-plane ingress cleanup failed");
+    });
     return stopped;
   };
-  let baseUrl = `http://127.0.0.1:${options.port}`;
+  const baseUrl = ingress.baseUrl;
   try {
     if (clock !== undefined) {
       const ready = await clock.ready;
       if (ready.isErr())
         throw new Error(`controlled clock initialization failed: ${ready.error.type}`);
     }
-    baseUrl = await waitForOwnedControlPlane(
+    const listener = await waitForOwnedControlPlane(
       child,
       logs,
-      baseUrl,
+      "http://127.0.0.1:0",
       30_000,
-      options.readinessHeaders,
+      options.readinessHeaders ?? { host: new URL(publicOrigin).host },
       options.readinessPath,
     );
+    ingress.setTarget(Number(new URL(listener).port));
   } catch (cause) {
-    await stop();
+    const cleanup = await Promise.allSettled([stop()]);
+    if (cleanup[0]?.status === "rejected")
+      logs.push(`ingress cleanup failed: ${String(cleanup[0].reason)}\n`);
     if (ownedAuthDir) rmSync(authDir, { recursive: true, force: true });
     throw new Error(`control plane startup failed: ${String(cause)}\n${logs.join("")}`, { cause });
   }

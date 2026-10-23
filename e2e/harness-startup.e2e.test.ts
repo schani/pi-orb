@@ -14,7 +14,7 @@ const fake = {
 const entry = "e2e/testkit/control-plane-readiness-probe.ts";
 
 describe("startControlPlane", () => {
-  it("uses the child's owned ephemeral port and public readiness path with exact Host", async () => {
+  it("preserves exact public Host through owned ephemeral child and ingress listeners", async () => {
     const cp = await startControlPlane({
       port: 0,
       fake,
@@ -31,6 +31,26 @@ describe("startControlPlane", () => {
     } finally {
       await cp.stop();
       rmSync(cp.authDir, { recursive: true, force: true });
+    }
+  });
+
+  it("boots the actual local composition through an owned ephemeral public endpoint", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pi-orb-actual-startup-"));
+    let cp: Awaited<ReturnType<typeof startControlPlane>> | undefined;
+    try {
+      cp = await startControlPlane({
+        port: 0,
+        fake: { ...fake, inferenceBaseUrl: "http://127.0.0.1:1" },
+        pglitePath: join(directory, "db"),
+        processStateDirectory: join(directory, "hosts"),
+        authDir: join(directory, "auth"),
+        hostingRoot: join(directory, "hosting"),
+      });
+      expect(cp.port).toBeGreaterThan(0);
+      expect((await fetch(`${cp.baseUrl}/api/v1/projects`)).status).toBe(200);
+    } finally {
+      await cp?.stop();
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 
