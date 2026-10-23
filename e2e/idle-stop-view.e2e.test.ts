@@ -14,6 +14,7 @@ import {
   type FakeSession,
   FatalProbeError,
   fakeControl,
+  forceReconcilePass,
   startControlPlane,
   waitFor,
 } from "./harness.ts";
@@ -59,6 +60,7 @@ it("viewing an idle-stopped orb leaves it stopped; sending a message starts it",
       authDir: join(root, "auth"),
       hostingRoot: join(root, "hosting"),
       controlledClockEpoch: Date.now(),
+      extraEnv: { PI_ORB_E2E_RECONCILE_CHECKPOINTS: "1" },
     });
     const activeCp = cp;
     const clock = activeCp.clock;
@@ -132,14 +134,11 @@ it("viewing an idle-stopped orb leaves it stopped; sending a message starts it",
       frames.some((frame) => frame.type === "sync.completed") ? true : null,
     );
 
-    // A stopped orb is reconciled once per terminal backstop interval, so this
-    // window covers at least one reconcile pass under visible presence.
-    const windowEnd = Date.now() + DEFAULT_LIFECYCLE_CONSTANTS.hostBackstopIntervalMs + 10_000;
-    while (Date.now() < windowEnd) {
+    for (let pass = 0; pass < 3; pass += 1) {
+      await forceReconcilePass(activeCp, orbId);
       const current = await view();
       expect(current["state"]).toBe("stopped");
       expect(current["stopReason"]).toBe("idle");
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
     }
 
     expect(
