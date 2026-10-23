@@ -761,10 +761,11 @@ async function restartControlPlaneWithSpec(spec: string, generation: number): Pr
     throw new Error("restartControlPlaneWithSpec kills process-backend compute; use SIGHUP");
   }
   const authDir = controlPlane.authDir;
+  const port = controlPlane.port;
   await controlPlane.stop();
   controlPlane = await startControlPlane({
     databaseUrl,
-    port: 0,
+    port,
     fake,
     nameFake,
     dockerNetwork: NETWORK,

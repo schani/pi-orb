@@ -885,6 +885,7 @@ export async function startControlPlane(options: {
       options.readinessPath,
     );
     ingress.setTarget(Number(new URL(listener).port));
+    logs.push(`E2E control plane ingress ${baseUrl} -> ${listener}\n`);
   } catch (cause) {
     const cleanup = await Promise.allSettled([stop()]);
     if (cleanup[0]?.status === "rejected")
