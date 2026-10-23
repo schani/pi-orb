@@ -1,5 +1,13 @@
 # Testing
 
+## npm maintenance (2026-10-22; local, undeployed)
+
+Before updating, clean installation, 75 focused protocol/HTTP/WebSocket/PGlite/Markdown test files (706 passed, four conditional skips) and the web production build passed on `9fa0828c`. Clean installation of the maintenance lock also passes all four Pi patch seals; `npm ls --all` reports no problems.
+
+Biome 2.6 enables Markdown/YAML formatting, which would rewrite 154 unrelated files. Keep those formatters disabled. Its component-factory rule mistakes two `Intl.DateTimeFormat` test doubles for React components; disable only that rule in `create-orb-request.test.ts`. First diagnostics: `/tmp/npm-maintenance-evidence/updated-lint-first.log` and `biome-diagnostics-first.json`. No source cleanup or assertion changes.
+
+[Playwright 1.64](https://github.com/microsoft/playwright/releases/tag/v1.64.0) changes device-screen emulation and hidden-iframe visibility; 1.64.1 fixes routed cross-origin preflights. Browser acceptance must qualify the managed Chromium/WebKit revisions, not merely the installed system Chromium. [Vite 8.3.5](https://github.com/vitejs/vite/releases/tag/v8.3.5) changes chunk/preload hashing and dev/HMR behavior. Updated type/lint/unit/infra/build and browser receipts are pending; full runtime E2E, Durable qualification and image checks remain CI gates. Local heavy checks share `/tmp/pi-orb-dependency-heavy-check.lock`; network PostgreSQL uses the dedicated `npm_maintenance` database. No deployment.
+
 ## Local fake-provider npm preparation (2026-10-22)
 
 Failed npm installation retains only finite allowlisted code/errno fields in existing phase artifacts, from at most 64 KiB of private combined output. Missing/conflicting/oversized fields remain unknown; unreadable output is marked unavailable. Raw logs stay private. npm defaults, one install invocation and the 300s tool timeout are unchanged.
