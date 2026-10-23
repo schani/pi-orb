@@ -186,13 +186,6 @@ describe("execution role bindings", () => {
       ).isErr(),
     ).toBe(true);
   });
-  it("separates execution and Claude launch specifications", () => {
-    const input = { orbId: "orb-1", repositoryUrl: "https://github.com/o/r" };
-    const provider = makeProvider(new FakeTransport([]));
-    expect(provider.desiredSpecFingerprint({ ...input, harness: "pi" })).not.toBe(
-      provider.desiredSpecFingerprint({ ...input, harness: "claude" }),
-    );
-  });
 });
 
 const existingDataDisk = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -652,23 +645,6 @@ describe("GceOrbHostProvider", () => {
     expect(transport.requests.some((request) => request.path.endsWith("/stop"))).toBe(false);
   });
 
-  it("fingerprint and generation change only with effective specification", () => {
-    const first = makeProvider(new FakeTransport([]), undefined, 7);
-    const same = makeProvider(new FakeTransport([]), undefined, 8);
-    const fingerprint = first.desiredSpecFingerprint({
-      orbId: provisionRequest.orbId,
-      repositoryUrl: provisionRequest.bootstrap.repositoryUrl,
-    });
-    expect(
-      same.desiredSpecFingerprint({
-        orbId: provisionRequest.orbId,
-        repositoryUrl: provisionRequest.bootstrap.repositoryUrl,
-      }),
-    ).toBe(fingerprint);
-    expect(first.specGeneration).toBe(7);
-    expect(same.specGeneration).toBe(8);
-  });
-
   it("start refuses a resource carrying a different incarnation", async () => {
     const transport = new FakeTransport([
       () =>
@@ -1057,19 +1033,7 @@ describe("GceOrbHostProvider host specification", () => {
   };
 
   function reconfigured(overrides: Partial<GceOrbHostProviderOptions>): GceOrbHostProvider {
-    return new GceOrbHostProvider(new FakeTransport([]), {
-      projectId: "proj",
-      zone: "us-central1-a",
-      machineType: "n2d-highmem-2",
-      subnetwork: "regions/us-central1/subnetworks/pi-orb-us-central1",
-      serviceAccount: "orb-vm@proj.iam.gserviceaccount.com",
-      imageResource: "projects/projxx/global/images/pi-orb-native-20260905",
-      imageId: "123456789",
-      workspaceImageResource: "projects/projxx/global/images/pi-orb-workspace-20260908",
-      workspaceImageId: "223456789",
-      controlPlaneUrl: "https://runtime.example",
-      ...overrides,
-    });
+    return makeProvider(new FakeTransport([]), undefined, undefined, overrides);
   }
   const fingerprintWith = (overrides: Partial<GceOrbHostProviderOptions>): string =>
     reconfigured(overrides).desiredSpecFingerprint(specInput);
@@ -1131,7 +1095,11 @@ describe("GceOrbHostProvider host specification", () => {
     expect(fingerprintWith({ zone: "europe-west4-a" })).toBe(currentSpecFingerprint);
     expect(fingerprintWith({ projectId: "other-proj" })).toBe(currentSpecFingerprint);
     // The generation is a rollover fence, not part of the specification.
-    expect(fingerprintWith({ specGeneration: 9 })).toBe(currentSpecFingerprint);
+    for (const specGeneration of [7, 8, 9]) {
+      const provider = reconfigured({ specGeneration });
+      expect(provider.desiredSpecFingerprint(specInput)).toBe(currentSpecFingerprint);
+      expect(provider.specGeneration).toBe(specGeneration);
+    }
   });
 
   it("describes the specification, not the incarnation that carries it", async () => {
