@@ -1,78 +1,48 @@
 # Testing
 
-## Main integration qualification (2026-10-22 PDT; undeployed)
+## Qualification boundaries (decisions 2026-10-22 PDT)
 
-Merged main `42cf1061` into the test audit, retaining structured orb results, scenario barriers, task-Result assertions and replay/ownership contracts. Node 24.22.1 / npm 11.19.1 clean installation applies all four patches and reports no vulnerabilities. Focused qualification passes 475 Vitest, 72 Node and 24 Python tests, root workspace/E2E typecheck and scoped Biome (warnings remain). Full unit/infra, browser/runtime E2E, container and cloud gates were not run for this merge.
+- Assert fallible task/adapter Results and captured arguments outside callbacks that catch failures. Require successful nonempty premises before absence/order assertions; source slices require every anchor and nonempty ordered bounds.
+- Register each resource immediately, before fallible setup. Release gates and join processes/streams on every exit; run independent cleanup even after another release fails, preserving the primary failure. Publish synthetic readiness atomically by rename. Restore environment overrides unconditionally.
+- Use observed entry/closure barriers, not sleeps or global counts. Summary barriers match the current phase and exact orb. HTTP reads are not SSE frames; PTY execution markers must differ from input. Cancellation must reach the pending read before closure.
+- Tenant tests share storage with colliding native IDs and distinct bytes; read, replace, retire and archive must preserve the other tenant. Namespace tests likewise require simultaneous distinct objects and independent deletion. Denied writes preserve nonempty state/revisions.
+- Assert lifecycle telemetry after successful tasks in each recorded iteration. Recovery requires healthy post-fault state, not merely outage safety. FakeWorld models one slot per orb; physical uniqueness belongs to provider contracts. Ended fake queues cannot prove a production identity fence.
+- Run once only where recorded traces contain no entropy or timer events. Ownership, failpoint, process/EOF and deadline races retain schedule exploration.
 
-## Durable audit boundaries (2026-10-22 PDT)
+### Replay
 
-Ownership schedules require successful archive, final archived state, sealed public rows and no native entries. Drain/commit losers must retain the typed stale-owner cause; admission rejection alone does not prove archive.
+Replay requires the same invariant message and first failure origin, not another exception or a successful run. Retain original error/stack/identity and replay verdict; unexpected failures keep their traces. Expected-failure selftests remove owned traces only after all assertions pass.
 
-Forced catalog authorization cancellation uses the unit barrier and typed cancellation assertion. Composed SQL drain waits for real drain entry, checks closed admission, then releases its held commit directly; PGlite and PostgreSQL retain root/child recovery and lifecycle telemetry.
+`runDst` restart phases use fresh single-use simulations through `nextPhase`, sharing recorded entropy, options and lifecycle capture. Only the wall-clock epoch may change; capture resets between scenarios, not phases. Automatic and explicit replay must reproduce command/clock evidence and failure origin.
 
-Manager health tables union structured initialization failures and unproven error combinations, retaining execution-readiness identity, retryability and explicit replacement checks. Settings ACK/projection ordering remains an independent agent boundary.
+### Owners and execution
 
-Durable SQL, HTTP, storage, tools and agent fixtures register independent reverse-order test-finished cleanup immediately after acquisition, before initialization. Each cleanup runs even if setup or another cleanup fails; the original failure remains reported.
+`openThrowawayPostgres` owns one schema per subject with pool-wide `search_path` and schema-only disposal. Use a test-only database with schema privileges. PGlite/PostgreSQL locking contracts observe the competing SELECT through `pg_blocking_pids` before committing the deletion fence; no guessed sleeps.
 
-Resource ordering waits for preparation entry while holding its gate; teardown releases the gate and joins health/plane closure even after assertion failure.
+Frontend fixtures own Vite/browser/cache before startup, clean partial acquisition and release editor gates on every exit. OAuth retains its HTTP owner and environment restoration around CP startup. Browser cases own mounted behavior; SSR proves markup only. Shared-owner units cover cleanup failures; actual callers are qualified through browser scenarios.
 
-Tenant storage tests share a database with colliding native conversation/document IDs. Base replacement exercises translated DELETE, retirement exercises UPDATE, and archive must leave the other tenant’s native records unchanged.
+Executable acceptance scenarios own scheduling/effects; unit contracts own stream/model/resource boundaries. Manual study/native/network probes own validation, bounded commands, authenticated expectations and finally cleanup; their observations do not establish live product acceptance or network causality. Studies use fresh `STUDY_OUTPUT_DIR` subdirectories and explicit `CHROMIUM_PATH`.
 
-Root and child tool visibility require actual provider requests: catalog-native checks each scope’s declarations; steer requires five root and two child requests. Registration owns catalog membership.
+### CI and listeners
 
-## Domain/HTTP assertion boundaries (2026-10-22)
+CI exports only exact allowlisted diagnostic leaves, never workspace/auth trees or raw alert/sleep bodies. Foundation OpenTofu checks use `infra/foundation/test-tofu.sh`; `test:infra` owns the Node contracts once. Release-report contracts own deployment uploads/policy; browser-evidence contracts own diagnostic producers/E2E uploads.
 
-Display fixtures share only stopped-orb/session seeding, successful history commit and route installation. Expected projections, persisted originals and headline source-publication timing remain scenario-local.
+Qualification requires `checks`, the existing `control-plane-image` offline packaged-worker/Git/skills proof, and all eight provider shard contexts on the first exact-source main attempt. Branch-protection API access was denied (403), not permission to drop a context. Both installation and post-seal SSH graphs execute their existing boot-graph checks.
 
-Real-socket upload backpressure observes server-side read consumption and queued request bytes only after blocked storage entry, without adding draining listeners. An eager-buffer mutation must fail this boundary. Disconnect tests wait for a pending storage read, require request-abort propagation before the deadline and await source closure. Socket readiness uses read-entry, writable-backpressure and closure signals, not sleeps.
+Explicit E2E projects partition frontend, forced-process, genuine-provider and PostgreSQL contracts. Docker's four contexts select frontend/provider/postgres; process's four select process/provider. Only full-slice/cross-axis run in both. Collection rejects orphaned/multiply classified files; actual sequencing proves four nonempty disjoint shards per matrix. Standalone `test:e2e` selects all projects; frontend precedes serial process/provider/PostgreSQL forks.
 
-Signing-key rotation failpoints follow a fault-free seed, faulted rotation and explicit fault-free repair on the same recorded trace. Repair must return exactly one active key with readable private material and a matching JWKS entry; outage-phase safety alone is insufficient.
+E2E ingress binds before CP startup; the child binds port zero and announces its owned listener. Ingress preserves Host and duplex upgrades. Docker advertises `host.docker.internal` separately from browser/public origins. Restart scenarios rebind the first actual public endpoint to preserve stable-origin contracts; released reservations were rejected. Diagnostics retain ingress and child addresses.
 
-Instruction route writes require GET equality, including revisions and clear. Project isolation keeps distinct nonempty A/B documents simultaneously. MCP route validation starts from a nonempty HTTPS/OAuth catalog, varies one field per denial and requires the expected error with no catalog/revision change.
+**Decision (2026-10-23 PDT):** Readiness overlays caller headers on the public Host default, preserving case-insensitive explicit overrides. Issuer defaults to the advertised public origin before startup; explicit configuration remains authoritative. Real-main readiness/discovery/JWKS and full-slice token signatures/issuer claims qualify this boundary.
 
-Hosted namespace isolation publishes the same path with different bytes under two bearer identities, checks both inventories, and verifies deletion leaves the other namespace readable.
+### Replacement smoke
 
-Runtime self children coverage accepts a child through the spawn route, observes it before deletion, finalizes deletion and then excludes it while retaining archived-child and unrelated-orb controls.
+Offline adapters qualify selected-user auth, private allowlisted evidence, stdin-only bearers/raw descriptions, bounded calls, exact namespace ownership and verified API/provider cleanup, including Stage 2. Permission/transport errors cannot prove disposal or negative observations; failed owned fixtures remain inspectable. These tests do not qualify live GCE.
 
-Source-order contracts require every anchor and an ordered nonempty slice before order or negative-content checks. Keep these architectural checks at the source boundary.
+Keep the 90s fixture deadline, 65,536-character payload, both 65-observation windows and 17 sensitive-input guards. Capture bounded allowlisted timeout evidence before directory cleanup and join owned groups/detached Linux descendants without touching foreign processes. Controlled CPU experiments establish startup cost, not the original timeout's cause. Evidence: `docs/postmortems/2026-10-22-replacement-smoke-fixture-budget.md`.
 
-## Adapter boundary assertions (2026-10-22)
+**Historical replacement-smoke exception (user-approved 2026-10-23, PDT):** attribution of only the original local 90s `TimeoutExpired` in `final-batch-infra-correct-env.log` is waived as a merge/deployment prerequisite. Preserve first-failure evidence; its cause remains unknown and no fix is claimed. Controlled 40%-CPU failures, new failures, exact-head gates, assertions, production rules, fixture cleanup and DST replay/root-cause requirements are not waived.
 
-Normal SQL fixtures share only client ownership and identical owner/project/orb or two-user seeding. Cleanup registers before migration; scenario DDL, migration assertions and persisted-state checks stay local.
-
-Fixed foreign-disk and failed-GET model rejections run once: those paths reach no scheduler choice. Keep their model-state checks and retain provisioning/discard/recovery/enrollment scheduling.
-
-SQL fixtures register clients before fallible setup; table-driven settings suites capture each acquired subject in `onTestFinished`, without teardown of an unacquired or stale client; process observations/crash markers live under immediately registered roots. Teardown reports cleanup failures separately, attempts every owned release, and retains the original test failure.
-
-Synthetic process fixtures write observed JSON to a PID-local temporary file and rename it to publish readiness. Readers parse only the published path, without partial-JSON retries; readiness results exclude the unpublished/null state. A native child test interrupts the write and requires both hidden partial bytes and complete final publication.
-
-PTY environment overrides use Vitest stubs and unconditional teardown restoration, including failed assertions and preexisting credentials.
-
-PTY redaction fixtures first publish a recognizable native challenge, then suppress secret-bearing echoed challenges and distinguish submitted token-shaped input from an issued token after exit/cleanup. Native process contracts remain independent.
-
-Exact-generation delete contracts require the original object after a wrong-generation delete and absence after the correct delete. Concurrent GCE model provisioning inspects every domain Result, requires a stamped success, constrains retryable losers, and verifies post-operation read-back convergence. Offline filesystem and modeled GCS qualify this invariant; live GCS remains opt-in.
-
-## PostgreSQL subject isolation (2026-10-22)
-
-`openThrowawayPostgres` owns a unique schema per subject, sets pool-wide `search_path`, and drops only that schema on close. Concurrent subjects migrate independently; migration contracts retain their schema-relative catalog checks. Use a test-only database with schema privileges. MCP and project-instructions share behavioral cases across PGlite and real PostgreSQL. Two-client witnesses hold the project row, observe `pg_blocking_pids` on the competing locking SELECT, commit a deletion fence, then require conflict and unchanged publication state; no guessed sleeps. Pending-abort uses the common `PI_ORB_TEST_DATABASE_URL` driver selection and verifies its isolated schema. Local audit receipts use PostgreSQL 15.19 over an owned Unix socket, not CI’s PostgreSQL 16.
-
-## Synthetic manual-probe regression selection (2026-10-22)
-
-`test:infra` selects synthetic ownership regressions for the network reproducer, study validators and native integration probes. They own temporary fixtures independently of checkout path or prior tests; no browser, Docker or cloud operation runs. Manual rendering and live qualification remain separate.
-
-## Manual replacement smoke evidence
-
-`infra/smoke_replacement_test.py` runs the manual replacement script with synthetic command adapters; `test:infra` selects it. Private evidence must contain only allowlisted summaries, including failure dumps. Bearers stay out of evidence and process arguments; the existing Stage 2 happy path also rejects regular-file stdin for large raw descriptions. Permission and transport failures must fail disposal/negative observations, not masquerade as empty inventory. Success requires selected-user authentication, verified API/provider cleanup and bounded external calls, including Stage 2; failed owned fixtures remain for inspection. `infra/smoke_external_test.py` controls process/HTTP responses and clocks to prove bounds and refusal status without live access. These offline regressions do not qualify live GCE behavior.
-
-## Audit assertion trust (2026-10-22)
-
-Assert simulation task Results outside the task, with failure diagnostics; task assertions otherwise become ignored Err values. Assert captured HTTP arguments after awaiting the adapter and require a schema-valid successful response; assertions inside a caught fetch can become network errors.
-
-## DST replay identity (2026-10-22)
-
-Runtime and control-plane replay compare the invariant message and first failure origin through a dependency-neutral helper. Runtime artifacts retain the original error, stack and identity before replay, then the replay diagnostics and verdict. Another exception, a different origin or a successful replay does not reproduce the failure. Expected-failure selftests own their trace fixtures and remove them only after every assertion passes; unexpected failures retain their evidence.
-
-Multi-phase scenarios use `runDst`'s `nextPhase` factory: fresh single-use simulations share one recorded/replayed entropy source, inherited options and lifecycle capture. Only the wall-clock epoch may be overridden. Capture resets between scenarios, not phases; every restart phase belongs to the saved trace. The helper regression requires identical command/clock evidence and failure origin in automatic and explicit replay.
 MCP E2E waits for registry publication through `test_registry_published` only under the existing `PI_ORB_E2E_HISTORY_INSPECTION=1` guard; production remains healthy-silent, and failure/recovery assertions require committed native alerts.
 
 **Independent-fixture ordering (2026-10-22):** [Durable run 39896251674](https://github.com/schani/pi-orb/actions/runs/39896251674) failed six cases because the first scripted response called `mcp__web__search` before automatic discovery published it. Captured tool output confirms the missing callable, followed by a fake-provider unmatched-rule response. Waiting before model login approval deadlocked: model composition resolves auth before creating MCP tools (local evidence: `/tmp/pr162-fixture-fix-e2e/`). The fixture instead approves auth, waits for registry publication, then sends the first scripted MCP input while execution readiness remains held. Git-cancellation cases retain their queued pre-admission input. No production discovery gate, status prerequisite or timeout increase is added. First logs/artifacts: `/tmp/pr162-babysit-ci/`. This correction does not explain the separate hosted-provider stalls.
@@ -1583,129 +1553,6 @@ Head `b21404b8` passed eleven first-attempt CI checks; that combined tree does n
 
 **User exception — 2026-10-16:** explanation of only the original local PostgreSQL MCP `beforeEach` 10s and aggregate-image 30s timeouts is waived; no cause or fix is claimed. First failures, measurements and full historical records remain private under `/workspace/evidence/c9a30a6d/scope-cleanup/` and its referenced directories for a docs-only followup, including the separate release-500 waiver (not revoked). No new failure, assertion, exact-head gate or DST replay/root-cause requirement is waived.
 
-## Acceptance fixture ownership (2026-10-22 PDT)
-
-Guest acceptance requires an actual /workspace mount whose canonical device equals
-google-pi-orb-data, then checks that device's filesystem and capacity.
-Task-handoff failure cleanup joins native process close (including stdio) before
-removing its gates and home or settling the helper.
-Receipt-order fixtures publish journal state by rename, then append one complete
-native line; the real watcher remains armed across both publications.
-The drain fixture owns IPC/error/close listeners from fork through one joined
-completion promise. Early exit rejects pending waits with status and bounded
-stderr byte count, never provider stderr content.
-Worker checkpoints retain only allowlisted metadata from the latest successful
-public replication snapshot. A later health/snapshot failure preserves nonempty
-normalized rows without retaining content, credentials or raw provider errors.
-The manual network-change reproducer validates modes before resource creation,
-bounds Docker calls and tears down browser/server on failure. Its output remains
-observations, not assertions that network changes caused a browser failure.
-The owned manual preemption experiment records before/recovered public versions
-and stateChangedAt. Running with at least two version advances and a later state
-transition timestamp witnesses recovery even when starting falls between polls.
-No concurrent lifecycle command belongs in that experiment.
-Lifecycle and workload-identity smokes share bounded state polling and one-shot
-commands through smoke-fixtures.sh; each retains its scenario and cleanup owner.
-Identity JSON access uses Python, already required alongside jq.
-All fourteen manual study validators share browser finally cleanup and explicit
-CHROMIUM_PATH selection. Each run allocates a fresh artifact subdirectory under
-STUDY_OUTPUT_DIR (default .context/studies). Their proposal assertions remain
-distinct; the all-projects research validator still pins its researched CSS hash.
-
-Native integration rejects unknown control stages before reading fixtures.
-Preparation records the authenticated login; running control writes application
-expectations from it and the accepted public checkoutCommit. Application checks
-consume that owned file. These manual studies/probes are not production CI gates.
-
-## Domain and lifecycle test oracles (2026-10-22 PDT)
-
-Mid-setup silence requires an observed running setup probe before injection.
-
-Sleep telemetry is asserted after successful tasks in every recorded iteration.
-
-Ordinary store outages must retry finitely within the backoff cap and return to the healthy cadence.
-
-Concurrent snapshot tests require successful nonempty reads during held writes; hosted replacement races retain typed transient open failures.
-
-Project deletion proves retained archived history exists before asserting its removal.
-
-Healthy restart qualification checks both sides of the persisted idle deadline before a restart-anchored countdown could expire.
-
-Forced provision races witness a nonretryable conflict before winner commit and require forward-only recovery.
-
-Deferred-restart telemetry is asserted inside every recorded iteration after task success.
-
-Inbox FIFO compares flattened identities, including order within squashed records; exactly-once remains a separate oracle.
-
-Pending-delivery retry qualification observes the same request and duplicate response before crashing, then requires exactly-once recovery.
-
-Stopping qualification covers absent and stopped hosts without restarting either.
-
-Outage telemetry must emit one blind edge per outage and one recovery edge between outages.
-
-Campaign results retain command and caller identity plus typed error diagnostics without content or credentials.
-
-One precommit GitHub retry scenario checks exact credentials, retryability, single ceremony and monotonic publication; pacing and ambiguous commits remain distinct.
-
-Stop override uses one comprehensive transition contract against both memory and PGlite.
-
-Sequential orphan collection is one ordinary test retaining pointer readability and complete version cleanup.
-
-Poll and reconcile concurrency share one mailbox with call counts, worker identity, rejection and joined shutdown contracts.
-
-Shared chunked waits and revision seeds preserve explicit reasons, project identities, initialization and revision baselines; scenario drivers remain local.
-
-FakeWorld models one host slot per orb; creation history, refs and incarnation fences qualify modeled replacement, while physical uniqueness belongs to real-provider contracts.
-
-Invalid identity CLI input must exit with usage, empty stdout and zero endpoint requests. (2026-10-22 PDT).
-
-Sleep request qualification asserts the exact 3000ms deadline independently of abort mapping. (2026-10-22 PDT).
-
-Summary completion compares all callbacks without deduplication; timeout or success remains valid. (2026-10-22 PDT).
-
-Lossless transcript qualification deep-compares real CLI JSON against the complete served peer transcript. (2026-10-22 PDT).
-
-Hosted upload qualification checks independently computed SHA-256, streamed bytes, URL, method and authorization; it makes no reopen-order claim. (2026-10-22 PDT).
-
-Transport mapping tests inject owned fetch rejections rather than assuming fixed-port availability. (2026-10-22 PDT).
-
-Runtime role children bind port zero and report the actual bound port through the test-only preload IPC probe. (2026-10-22 PDT).
-
-Socket servers, PTYs, fake timers and temporary roots register unconditional cleanup immediately; independent teardown hooks preserve assertion failures. (2026-10-22 PDT).
-
-Boot-secret retries use advancing time and a permanent outage must terminate at the explicit budget without later requests. (2026-10-22 PDT).
-
-Corrupt-index qualification first restores and validates the native transcript, then requires the typed index error. (2026-10-22 PDT).
-
-Each native settings source independently rejects auth overrides, malformed JSON, invalid shapes and read errors without private values. (2026-10-22 PDT).
-
-Credential response tests vary one invalid field at a time and pin HTTP error codes and retryability including throttling. (2026-10-22 PDT).
-
-MCP close remains pending after upstream close until the test independently releases the admitted request. (2026-10-22 PDT).
-
-Inbox reset qualification first exhausts all three claims and observes decline, then requires the inbox boundary to resume. (2026-10-22 PDT).
-
-Recovery hashes normalize every ownership map and submitted delivery order, ignoring unsubmitted and duplicate operation identities. (2026-10-22 PDT).
-
-Fairness qualification retains held-yield cancellation and successor admission. Ended fake queues cannot prove the production identity fence; rotation joins the consumer before successor admission, so no unsupported takeover is invented. (2026-10-22 PDT).
-
-Launch-proof parser qualification independently rejects missing, negative and fractional values for both incarnations. (2026-10-22 PDT).
-
-Native usage exports retain distinct nonzero input, output and cache canaries; malformed receiver requests emit safe typed diagnostics without sink delivery. (2026-10-22 PDT).
-
-One lock-graph contract scans the root lock for vulnerable tooling; patch application and byte-identity contracts remain separate. (2026-10-22 PDT).
-
-The initialization failure matrix also pins unchanged flag-call counts after blocked settings reuse, including the models row baseline. (2026-10-22 PDT).
-
-Default native qualification retains root fanout and worker denial; foreground-definition research stays reproducible through the documented manual probe. (2026-10-22 PDT).
-
-Shared instructions failures use one status/schema/sanitization table; wrapper smokes retain exact authenticated paths and error scope. (2026-10-22 PDT).
-
-CLI suites share bounded UTF-8 output capture, fresh cwd, explicit environment, deadline and joined process-group termination; command responders and output contracts stay local. (2026-10-22 PDT).
-
-Lifecycle and publication fixtures reuse ScheduledClaudeQuery queue and independent process/EOF latches; model, filesystem, scheduling and failure behavior remain local. (2026-10-22 PDT).
-
-Only scripts with observed traces containing no entropy or timer events run once. Concurrent process/EOF, failpoint and deadline qualification retains schedule exploration. (2026-10-22 PDT).
 
 ## Node 24.22.1 security qualification (2026-10-22; undeployed)
 
@@ -1733,93 +1580,3 @@ passes: 107 Node, 220 Python and 33 native-guest tests, plus filesystem/service
 checks. Local heavy phases were serialized across the dependency worktrees.
 CI owns the full unit/DST suite, runtime E2E and container builds; native cloud-image,
 acceptance and retained-workspace qualification have not run. No deployment.
-
-Native image cleanup tests observe the injected delete submitter: owned resources submit once; conflicting/missing labels and failed snapshots submit nothing. (2026-10-22 PDT).
-
-Cancellation cleanup qualification observes signal identity and its non-aborted state at each cleanup entry. (2026-10-22 PDT).
-
-Foundation adoption qualification rejects every non-read gcloud operation during dry run and pins the complete guarded execute mutation inventory, including changed-generation refusal. (2026-10-22 PDT).
-
-Dependency patch CLI cases share installation/cwd/environment setup while retaining byte seals, atomic refusal, drift and idempotence assertions. (2026-10-22 PDT).
-
-Native-image cleanup fixtures share only typed input defaults; temporary directories, cloud phases, ownership and simulation timing remain local. (2026-10-22 PDT).
-
-Manual inference tracing qualification asserts exact forwarded frames and status, private-text exclusion and record inventory. Client cancellation waits for upstream close; split-frame cutoff forwards each byte once. (2026-10-22 PDT).
-
-SSR history checks summary markup only; mounted lazy-transcript qualification counts every closed tool detail path, then asserts retry and cache reads after opening. Backdrop clicks remain browser-owned. (2026-10-22 PDT).
-
-Generic tool label bounds require an existing nonempty truncated label before comparing tooltip and byte length. (2026-10-22 PDT).
-
-Inbox races qualify the production poller and mutation epoch, including post-unmount publication fencing; pure acknowledgement/retirement contracts remain independent. (2026-10-22 PDT).
-
-Gated retry-before-response, single-actor publication reentrancy and deletion-before-image-publication compositions run once per explicit action. They draw no random inputs or advance timers; multi-actor ownership/deadline races retain exploration. (2026-10-22 PDT).
-
-Status asset distinctness compares graphical markup without title/accessibility metadata or colors and requires positive graphical primitives. (2026-10-22 PDT).
-
-Critical responsive source checks stay within balanced matching media blocks. Chromium/WebKit dashboard geometry checks assert computed action dimensions across breakpoints; viewport tests own effective overflow and composer pinning, including phone relative positioning. (2026-10-22 PDT).
-
-Transcript cache qualification reads the actual immutable default budget (256 MiB); small injected-budget cases exercise eviction and oversized replacements. (2026-10-22 PDT).
-
-DetailBody owns generic argument/result and image-body rendering once; ToolActivity/HistoryView retain their summary, deferral, role, chart and projection integration assertions. (2026-10-22 PDT).
-
-Composer normalization contracts live with composer-mode; command-options tests exercise option selection only. (2026-10-22 PDT).
-
-Default detail render fixtures use fresh shared detailContext caches and pending maps at each render site. (2026-10-22 PDT).
-
-Background-admission projection keeps one missing-native discriminator alongside independent native identity/status failures. (2026-10-22 PDT).
-
-Closed-schema tests own top-level event/message and nested custom-field rejection together. (2026-10-22 PDT).
-
-One successful builder-create fixture pins both machine type and instance-only SSH metadata. (2026-10-22 PDT).
-
-Alert helper tests name snapshot and acknowledgement behavior; mounted late-arrival chronology remains in orb-alerts frontend coverage. (2026-10-22 PDT).
-
-Source-evaluating diagnostic tests require mock bindings and exclude their live imports before evaluation; argument-injected probes reject leftover imports and shell snippets require their extraction boundary. (2026-10-22 PDT).
-
-The colliding-tenant storage fixture positively requires both owners before archive/validation. (2026-10-22 PDT).
-
-Diagnostic cutoff counts parsed frame bytes, excluding a following incomplete UTF-8 tail. Both complete terminal-frame and partial-tail cases retain exact-byte assertions. (2026-10-22 PDT).
-
-**Decision (2026-10-22):** PTY execution markers must differ from command input; an open terminal remains covered by the controlled-stop socket-close assertion.
-
-**Decision (2026-10-22):** Held-stream consumers assemble the framed delta before checking the completion fence; HTTP read boundaries are not SSE boundaries. A fragmented-read control retains exact bytes.
-
-**Decision (2026-10-22):** Failed-copy visibility is checked after composer focus and pointer exit, with the page clock beyond the success-reset interval; removing failure visibility must fail the browser assertion.
-
-**Decision (2026-10-22):** Visible idle-stopped subscriptions are checked after three acknowledged reconciliation passes. Clock-driven idle expiry and message-triggered wake still use the real lifecycle composition.
-
-**Decision (2026-10-22):** Summary barriers select the current phase’s queued operation for the exact orb, then require its successful outcome; scoped summary failures fail immediately. Global completion counts cannot acknowledge a turn.
-
-**Decision (2026-10-22):** Child and Docker listeners bind port zero and publish their owned endpoints. Public Host adapters remain separate. Artifact restart reuses the first actual endpoint to preserve its stable-origin contract, not a released reservation.
-
-**Decision (2026-10-22):** Ordinary frontend tests use a test-scoped Vite/browser/cache owner, registered before startup. Partial initialization cleans acquired resources; cleanup attempts every resource and retains startup failure as the cause. Route gates and evidence remain local; special HTTP/auth fixtures retain their separate owners.
-
-**Decision (2026-10-22):** CI exports nested scenario diagnostics by exact producer leaf allowlists on both acceptance workflows. Copied host/workspace/auth trees and raw alert/sleep request bodies stay private. Missing-orb evidence is exported by both workflows.
-
-**Decision (2026-10-22):** Docker endpoint parsing is pure root-unit coverage; it requires no image build or provider startup.
-
-**Decision (2026-10-22):** Tablet touch-focus coverage shares the stronger hidden/visible and full-focus-history assertions: Chromium covers both emulation modes, WebKit retains touch/mobile. Native modified and middle harness activation remains in the two-engine harness suite, with all created IDs deleted and acknowledged before resource disposal.
-
-**Decision (2026-10-22):** Executable acceptance scenarios own their scheduling and effect assertions; unit tests exercise stream phases, model conversion and resource outcomes directly. Constructed fake-model matcher data is compiled before submission. Framework collection/sequencing and deployment/security contracts remain separate executable/configuration boundaries.
-
-**Decision (2026-10-22):** CI runs foundation OpenTofu/mock-plan checks through `infra/foundation/test-tofu.sh`; `test:infra` owns the three Node suites once. `infra/foundation/test.sh` remains the full local foundation command, including release SSH and operator-budget checks.
-
-**Decision (2026-10-22):** Release-report contracts own the complete deployment upload action/policy inventory. Browser-evidence contracts own diagnostic producers and E2E uploads; both extract named workflow steps through one small parser.
-
-**Decision (2026-10-22):** CI’s existing `control-plane-image` check owns the sole control-plane build and offline packaged-worker/Git/skills proof. Qualification requires that CI job plus `checks` and all eight provider shard contexts on the first exact-source main attempt. The shared `control-plane-image` context remains served; branch-protection API access was unavailable (403), not evidence that a context may be dropped. Installation and post-seal SSH graphs both execute `boot-graph-verifier.sh` at their existing phases, for their distinct unit sets.
-
-**Decision (2026-10-22):** Explicit Vitest projects partition E2E files into shared `frontend` fixtures, forced `process` integration, genuine `provider` compositions, and `postgres` driver contracts. Docker’s four existing contexts select frontend/provider/postgres; the four process contexts select process/provider. Only full-slice and cross-axis execute in both. Actual framework collection checks every independent-process registration and rejects orphaned or multiply classified files; the real sequencer proves each selected matrix has four nonempty disjoint shards. Standalone `test:e2e` selects all projects; `test:e2e:frontend` remains its documented file subset. Frontend threads precede serial process/provider/PostgreSQL forks (orders 1/2/3/4).
-
-**Decision (2026-10-22):** E2E startup binds its advertised TCP ingress before spawning the control plane; the child independently binds port zero. The ingress preserves HTTP Host and duplex upgrade bytes, then targets the child’s existing owned-listen announcement. Docker ingress listens on the host interface and advertises `host.docker.internal`; browser/public origins remain separate. This avoids composing hosting/broker URLs with port zero without changing production guards. Artifact and Docker host-spec restart scenarios rebind their previously owned public endpoint because browser, CLI and retained base URLs require a stable origin. Startup diagnostics retain both ingress and child addresses.
-
-**Decision (2026-10-23):** E2E readiness overlays caller headers on the public Host default, preserving explicit Host overrides case-insensitively. The issuer defaults to the advertised public origin before child startup; explicit app/issuer configuration remains authoritative. Actual-main regressions cover principal-only readiness and reachable discovery/JWKS; full-slice verifies minted token signatures and exact issuer claims. Private child listeners still bind port zero.
-
-**Cleanup oracle follow-up (2026-10-22):** Pending-create tests capture the actual REST target and resource/operation state at submission, then assert outside fallible callbacks. Failed predecessor/log observations and absent-resource cleanup inject denying submitters and require zero submissions. Slow-delete duration, exact operation scope and terminal-error evidence remain separate witnesses.
-
-**Frontend ownership follow-up (2026-10-22):** Git/personal editors use the ordinary frontend owner and release held read/write gates on every exit. OAuth keeps its HTTP fixture: root, server, each fake session, CP and browser are owned immediately; environment restoration encloses CP startup. Diagnostic roots/Vite/browsers and session browser/Vite teardown release independently. Synthetic startup/cleanup failures cover those callers; Chromium exercises both editors, both boot diagnostics and the complete OAuth recovery/refresh/reconnect flow.
-
-**Replacement-fixture budget (2026-10-22):** Offline command adapters avoid stateless Python sleep and unused imports; all 130 observations, Stage 2 and 17 sensitive-input jq guards remain mandatory. Timeout evidence is bounded/allowlisted and captured before directory cleanup; an isolated Linux subreaper joins detached fixture descendants. No raw command/output/token artifacts or larger deadline. Controlled 55%-CPU original RED/corrected GREEN demonstrates the startup-cost mechanism, not historical attribution. `docs/postmortems/2026-10-22-replacement-smoke-fixture-budget.md`.
-
-**Historical replacement-smoke exception (user-approved 2026-10-23, PDT):** attribution of only the original local 90s `TimeoutExpired` in `final-batch-infra-correct-env.log` is waived as a merge/deployment prerequisite. Preserve first-failure evidence; its cause remains unknown and no fix is claimed. Controlled 40%-CPU failures, new failures, exact-head gates, assertions, production rules, fixture cleanup and DST replay/root-cause requirements are not waived.
-
-**Main integration (2026-10-22, undeployed):** Normal merge of `1e10e602` preserves independent MCP discovery/publication and current CLI/runtime contracts. Test-audit lazy root help, lossless peer transcript JSON and orb-correlated summary barriers remain; MCP registry publication precedes scripted tool selection. Qualification is recorded against the resulting merge, not inherited from either parent.
