@@ -250,3 +250,72 @@ class MixedTerminalTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class ReplacementTransportTest(unittest.TestCase):
+    def test_replacement_operations_have_owned_timeouts_and_no_deploy_replay(self):
+        base = ExternalSmokeTest()
+        for operation in ("resource-names", "disk-describe", "ssh-replacement", "stage2-deploy"):
+            with self.subTest(operation=operation):
+                result, calls, sleeps, log = base.invoke(
+                    [(0, b"ok", b"")], operation=operation, budget=12)
+                self.assertEqual(result.returncode, 0, log)
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(calls[0][1]["timeout"], 12)
+                self.assertEqual(sleeps, [])
+        result, calls, sleeps, log = base.invoke(
+            [subprocess.TimeoutExpired("secret", 12, stderr=b"secret")],
+            operation="stage2-deploy", budget=12, duration=12)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((len(calls), sleeps), (1, []))
+        self.assertIn("outcome=deadline", log)
+        result, calls, sleeps, _ = base.invoke(
+            [(1, b"", b"UNAVAILABLE")], operation="stage2-deploy")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((len(calls), sleeps), (1, []))
+
+    def test_external_dispatch_keeps_cloud_scope_iap_and_deploy_budget(self):
+        import os
+        from types import SimpleNamespace
+        env = {"PI_ORB_GCP_PROJECT": "fake-project", "PI_ORB_GCE_ZONE": "fake-zone",
+               "PI_ORB_SMOKE_DEADLINE": "1100", "PI_ORB_SMOKE_STAGE2_DEPLOY_COMMAND": "exit 0"}
+        for operation, values, expected in (
+            ("resource-names", ["disks", "boot-0"], ["gcloud", "compute", "disks", "list"]),
+            ("disk-describe", ["data"], ["gcloud", "compute", "disks", "describe"]),
+            ("ssh-replacement", ["instance", "true"], ["gcloud", "compute", "ssh"]),
+            ("stage2-deploy", [], ["bash", "-lc", "exit 0"]),
+        ):
+            with self.subTest(operation=operation), patch.dict(os.environ, env), \
+                 patch("sys.argv", ["smoke_http.py", "external", operation, *values]), \
+                 patch.object(smoke_http.time, "time", return_value=100), \
+                 patch.object(smoke_http.time, "monotonic", return_value=0), \
+                 patch.object(smoke_http, "bounded_process", return_value=subprocess.CompletedProcess([], 0, b"", b"")) as run, \
+                 patch("sys.stdout", SimpleNamespace(buffer=io.BytesIO())), patch("sys.stdin", SimpleNamespace(buffer=io.BytesIO())):
+                self.assertEqual(smoke_http.external_main(), 0)
+                args = run.call_args.args[1]
+                self.assertEqual(args[:len(expected)], expected)
+                if operation != "stage2-deploy":
+                    self.assertIn("--project=fake-project", args)
+                if operation == "resource-names":
+                    self.assertIn("--filter=zone:(fake-zone) AND name=boot-0", args)
+                if operation == "ssh-replacement":
+                    self.assertIn("--tunnel-through-iap", args)
+                self.assertEqual(run.call_args.args[2], 900 if operation == "stage2-deploy" else 60)
+
+    def test_runtime_negative_requires_completed_401_and_keeps_bearer_in_stdin(self):
+        for code, status in ((0, b"401"), (0, b"200"), (0, b"403"), (28, b"401")):
+            with self.subTest(code=code, status=status), \
+                 patch.object(smoke_http.time, "monotonic", return_value=0), \
+                 patch.object(smoke_http.subprocess, "run", return_value=subprocess.CompletedProcess([], code, status, b"secret")) as run, \
+                 patch("sys.stderr", io.StringIO()) as log:
+                result = smoke_http.runtime_refused("https://fake.invalid", b"secret-token", 12)
+                self.assertEqual(result, 0 if (code, status) == (0, b"401") else 1)
+                args, kwargs = run.call_args
+                self.assertEqual(kwargs["timeout"], 12)
+                self.assertIn(b"secret-token", kwargs["input"])
+                self.assertNotIn("secret-token", " ".join(args[0]))
+                self.assertIn("--max-time", args[0])
+                self.assertIn("--connect-timeout", args[0])
+                self.assertIn("/dev/null", args[0])
+                self.assertNotIn("secret", log.getvalue())
+                self.assertIn("http=" + status.decode(), log.getvalue())
+                self.assertIn("exit=" + str(code), log.getvalue())

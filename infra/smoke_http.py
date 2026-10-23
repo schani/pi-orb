@@ -58,8 +58,9 @@ def retry_after(headers):
 TRANSIENT = {"resource_exhausted", "unavailable", "deadline_exceeded", "timeout",
              "dns_temporary", "connection_reset", "connection_refused", "iap_not_ready"}
 PROCESS_PHASES = {"auth": "auth", "fixture-auth": "auth", "instances-list": "cloud", "instance-describe": "cloud",
+                  "resource-names": "cloud", "disk-describe": "cloud", "stage2-deploy": "deploy",
                   "tofu-app": "config", "tofu-issuer": "config",
-                  **{f"ssh-{step}": "ssh" for step in ("ready", "preview", "mint", "environment", "probe")}}
+                  **{f"ssh-{step}": "ssh" for step in ("ready", "preview", "mint", "environment", "probe", "replacement")}}
 
 
 TERMINAL_MARKERS = (
@@ -166,8 +167,8 @@ def bounded_process(operation, args, deadline, data=None):
         result = subprocess.CompletedProcess(args, code, b"", b"")
         if remaining > 0:
             try:
-                runner = ssh_run if phase == "ssh" else subprocess.run
-                result = runner(args, input=data, capture_output=True, timeout=min(30, remaining))
+                runner = ssh_run if phase in {"ssh", "deploy"} else subprocess.run
+                result = runner(args, input=data, capture_output=True, timeout=remaining if phase == "deploy" else min(30, remaining))
                 code = result.returncode
                 if phase == "ssh":
                     relay_diagnostics(result.stderr)
@@ -186,7 +187,7 @@ def bounded_process(operation, args, deadline, data=None):
                 result = subprocess.CompletedProcess(args, code, b"", b"")
         remaining = max(0, deadline - time.monotonic())
         delay = 2 ** (attempt - 1)
-        can_retry = category in TRANSIENT and not terminal_diagnostic(diagnostic)
+        can_retry = phase != "deploy" and category in TRANSIENT and not terminal_diagnostic(diagnostic)
         if phase == "ssh" and code != 255 and not timed_out and category != "iap_not_ready":
             can_retry = False
         outcome = ("deadline" if remaining <= 0 else
@@ -293,9 +294,42 @@ def config_request(operation, config, output, deadline):
     return "000"
 
 
+def runtime_refused(origin, token, deadline):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        print("smoke-http: operation=runtime-refused phase=http outcome=deadline", file=sys.stderr)
+        return 1
+    config = b'header = "authorization: Bearer ' + token.strip() + b'"\n'
+    code, status, category = 28, "000", "timeout"
+    try:
+        result = subprocess.run([
+            "curl", "-s", "-K", "-", "-X", "POST", origin + "/runtime/v1/tokens/model",
+            "-H", "content-type:application/json", "--data", '{"reason":"startup"}',
+            "--output", "/dev/null", "--write-out", "%{http_code}",
+            "--connect-timeout", str(min(10, remaining)), "--max-time", str(min(30, remaining)),
+        ], input=config, capture_output=True, timeout=min(30, remaining))
+        code = result.returncode
+        status = result.stdout.decode(errors="replace")
+        if not re.fullmatch(r"[0-9]{3}", status):
+            status = "000"
+        category, _ = http_category(code, status, b"", result.stderr)
+        success = code == 0 and status == "401" and time.monotonic() < deadline
+    except subprocess.TimeoutExpired:
+        success = False
+    except OSError:
+        code, category, success = 2, "exec", False
+    print(f"smoke-http: operation=runtime-refused phase=http exit={code} http={status} error={category} outcome=" +
+          ("ok" if success else "failed"), file=sys.stderr)
+    return 0 if success else 1
+
+
 def external_main():
     operation, *values = sys.argv[2:]
-    deadline = time.monotonic() + min(60, float(os.environ["PI_ORB_SMOKE_DEADLINE"]) - time.time())
+    deadline = time.monotonic() + min(900 if operation == "stage2-deploy" else 60,
+                                      float(os.environ["PI_ORB_SMOKE_DEADLINE"]) - time.time())
+    if operation == "runtime-refused":
+        origin, = values
+        return runtime_refused(origin, sys.stdin.buffer.read(), deadline)
     if operation in {"sts", "sts-negative", "impersonate", "read"}:
         print(config_request(operation, *values, deadline))
         return 0
@@ -303,9 +337,22 @@ def external_main():
         args = ["tofu", "-chdir=" + str(Path(__file__).resolve().parent), "output", "-raw",
                 "app_url" if operation == "tofu-app" else "issuer_url"]
         data = None
-    elif operation in {"instances-list", "instance-describe"}:
+    elif operation == "stage2-deploy":
+        if values:
+            return 2
+        args = ["bash", "-lc", os.environ["PI_ORB_SMOKE_STAGE2_DEPLOY_COMMAND"]]
+        data = None
+    elif operation == "resource-names":
+        kind, name = values
+        if kind not in {"instances", "disks"}:
+            return 2
+        args = ["gcloud", "compute", kind, "list", "--project=" + os.environ["PI_ORB_GCP_PROJECT"],
+                "--filter=zone:(" + os.environ["PI_ORB_GCE_ZONE"] + ") AND name=" + name,
+                "--format=value(name)"]
+        data = None
+    elif operation in {"instances-list", "instance-describe", "disk-describe"}:
         name, = values
-        args = ["gcloud", "compute", "instances"]
+        args = ["gcloud", "compute", "disks" if operation == "disk-describe" else "instances"]
         if operation == "instances-list":
             args += ["list", "--filter=zone:(" + os.environ["PI_ORB_GCE_ZONE"] +
                      ") AND labels.pi-orb-orb-id=" + name, "--format=value(name)"]
