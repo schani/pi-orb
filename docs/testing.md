@@ -1505,3 +1505,5 @@ Head `b21404b8` passed eleven first-attempt CI checks; that combined tree does n
 
 Guest acceptance requires an actual /workspace mount whose canonical device equals
 google-pi-orb-data, then checks that device's filesystem and capacity.
+Task-handoff failure cleanup joins native process close (including stdio) before
+removing its gates and home or settling the helper.

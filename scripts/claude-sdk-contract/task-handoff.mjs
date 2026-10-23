@@ -237,6 +237,7 @@ export async function probeTaskHandoff({ cwd, configDir, sessionId, input, relea
     endInput();
     sdk?.close();
     kill();
+    await exited?.catch(() => {});
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
     await Promise.all(gates.map((gate) => rm(gate, { force: true })));
