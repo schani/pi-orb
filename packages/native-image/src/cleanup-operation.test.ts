@@ -123,16 +123,30 @@ describe("cleanup operation evidence", () => {
   });
 
   it("maps a null predecessor description to a typed failure", async () => {
+    let submissions = 0;
     const predecessor = "create-operation";
-    const effects = new GcloudImageBuildEffects(async (_command, args) => {
-      if (args[1] === "operations" && args[2] === "list")
-        return {
-          stdout: JSON.stringify([{ name: predecessor, status: "RUNNING", targetLink: target }]),
-          stderr: "",
-        };
-      if (args[1] === "operations" && args[2] === "describe") return { stdout: "null", stderr: "" };
-      throw new Error("must not inspect or delete the target");
-    });
+    const effects = new GcloudImageBuildEffects(
+      async (_command, args) => {
+        if (args[1] === "operations" && args[2] === "list")
+          return {
+            stdout: JSON.stringify([{ name: predecessor, status: "RUNNING", targetLink: target }]),
+            stderr: "",
+          };
+        if (args[1] === "operations" && args[2] === "describe")
+          return { stdout: "null", stderr: "" };
+        throw new Error("must not inspect or delete the target");
+      },
+      undefined,
+      undefined,
+      undefined,
+      () => {
+        submissions++;
+        return errAsync({
+          type: "delete_submit_failed",
+          message: "unexpected DELETE",
+        });
+      },
+    );
 
     const result = await effects.run(
       "cleanup",
@@ -141,6 +155,7 @@ describe("cleanup operation evidence", () => {
       new AbortController().signal,
     );
 
+    expect(submissions).toBe(0);
     expect(result.isErr() && result.error).toMatchObject({
       type: "image_build_failed",
       stage: "cleanup",
@@ -258,6 +273,7 @@ describe("cleanup operation evidence", () => {
 });
 
 it("keeps cleanup evidence when the composed build returns its primary failure", async () => {
+  let submissions = 0;
   const buildInput = await input();
   const evidencePath = join(buildInput.outputDir, "cleanup.json");
   const published: CleanupEvidence[][] = [];
@@ -279,10 +295,18 @@ it("keeps cleanup evidence when the composed build returns its primary failure",
     undefined,
     undefined,
     writer,
+    () => {
+      submissions++;
+      return errAsync({
+        type: "delete_submit_failed",
+        message: "unexpected DELETE",
+      });
+    },
   );
 
   const result = await buildNativeImage(buildInput, effects, new AbortController().signal);
 
+  expect(submissions).toBe(0);
   expect(result.isErr() && result.error).toMatchObject({
     stage: "prerequisites",
     message: "primary build failure",
