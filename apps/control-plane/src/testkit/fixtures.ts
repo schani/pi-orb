@@ -381,9 +381,9 @@ export function seedRunningOrb(
   harness: TestHarness,
   orbId: string,
   config?: FakeOrbConfig,
-  options?: { legacy?: boolean },
+  options?: { legacy?: boolean; projectId?: string },
 ): void {
-  const projectId = `project-of-${orbId}`;
+  const projectId = options?.projectId ?? `project-of-${orbId}`;
   harness.store.seedProject(makeProjectRow(projectId));
   harness.world.configureOrb(orbId, { initDurationMs: 0, ...config });
   const repositoryUrl = makeProjectRow(projectId).repositoryUrl;
@@ -518,31 +518,7 @@ export function seedRunningOnRevisions(
 ): void {
   const owner = revisions[0];
   if (owner === undefined) throw new Error("seedRunningOnRevisions needs an owner");
-  harness.world.configureOrb(orbId, config);
-  harness.store.seedProject(makeProjectRow(projectId));
-  const provisioned = harness.world.provisionHost(
-    task,
-    orbId,
-    0,
-    owner.hostProvider.specGeneration,
-    owner.hostProvider.desiredSpecFingerprint({
-      orbId,
-      repositoryUrl: makeProjectRow(projectId).repositoryUrl,
-    }),
-  );
-  harness.world.finishBoot(task, orbId);
-  harness.world.ensureSessionExists(orbId);
-  harness.store.seedOrb(
-    makeOrbRow(orbId, projectId, "running", {
-      hostRef: provisioned.ref.resourceId,
-      runtimeTokenHash: provisioned.runtimeTokenHash,
-      hostSpecFingerprint: provisioned.specFingerprint,
-      hostSpecGeneration: provisioned.specGeneration,
-      checkoutCommit: "commit-0",
-      lastReadyAt: task.wallNow(),
-      stateChangedAt: task.wallNow(),
-    }),
-  );
+  seedRunningOrb(task, { ...harness, deps: owner }, orbId, config, { projectId });
   for (const revision of revisions) {
     revision.control.resetLivenessBaseline(orbId, task.monotonicNow());
   }
