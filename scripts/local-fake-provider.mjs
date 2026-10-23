@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 
-export const PIN = "63df19b02b1d80da3ff69ac7ffc2c4ffe225283f";
+export const PIN = "5597120466a5785efb480428b0173d631ffb46fa";
 export const FLING_INTEGRITY =
   "sha512-OpjCWlRfDf7uvgYBHlNMzrAdSem7/iwe8T/K3wLaZqL/0XCf/vdNNn0yG+z4ELWhIEzmPz4UZZAYKhZ8xew84g==";
 const boundary = (type, fn) => ResultAsync.fromThrowable(fn, () => ({ type }))();
