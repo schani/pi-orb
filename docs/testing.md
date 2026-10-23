@@ -1544,3 +1544,5 @@ consume that owned file. These manual studies/probes are not production CI gates
 Mid-setup silence requires an observed running setup probe before injection.
 
 Sleep telemetry is asserted after successful tasks in every recorded iteration.
+
+Ordinary store outages must retry finitely within the backoff cap and return to the healthy cadence.

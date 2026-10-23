@@ -1,6 +1,8 @@
 import { NoSimulationTask } from "determined";
+import { errAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
+import { LogCapture, runDst } from "../testkit/sim.ts";
 import {
   PollDispatcher,
   pollAllOnce,
@@ -111,7 +113,63 @@ describe("loop handling of a store invariant", () => {
     expect(calls).toBe(2);
   });
 
-  it("keeps ordinary store outages on their normal retry cadence", async () => {
+  it("retries an ordinary store outage with bounded backoff and recovers", async () => {
+    const capture = new LogCapture();
+    await runDst(
+      { name: "ordinary-store-outage-retry", iterations: 5, logCapture: capture },
+      async (sim) => {
+        const harness = makeHarness();
+        harness.store.seedProject(makeProjectRow("project-live"));
+        harness.store.seedOrb(makeOrbRow("orb-live", "project-live", "stopped"));
+        const getOrb = harness.store.getOrb.bind(harness.store);
+        let reads = 0;
+        harness.store.getOrb = (...args) => {
+          reads++;
+          return reads <= 2
+            ? errAsync({
+                type: "store_error",
+                code: "unavailable",
+                message: "scripted outage",
+                retryable: true,
+              })
+            : getOrb(...args);
+        };
+        const result = await sim.runTasks([
+          {
+            name: "outage-driver",
+            f: async (task) => {
+              const key = "reconcile:orb-live";
+              for (let attempt = 1; attempt <= 2; attempt++) {
+                const before = task.monotonicNow();
+                await reconcileAllOnce(task, harness.deps);
+                expect(reads).toBe(attempt);
+                const due = harness.deps.control.getNextAttemptAt(key);
+                expect(due - before).toBeGreaterThanOrEqual(
+                  harness.deps.constants.retryBackoffBaseMs,
+                );
+                expect(due - task.monotonicNow()).toBeLessThanOrEqual(
+                  harness.deps.constants.retryBackoffCapMs,
+                );
+                expect(Number.isFinite(due)).toBe(true);
+                await reconcileAllOnce(task, harness.deps);
+                expect(reads).toBe(attempt);
+                await task.sleep(due - task.monotonicNow(), "wait for ordinary outage retry");
+              }
+              await reconcileAllOnce(task, harness.deps);
+              expect(reads).toBe(3);
+              expect(harness.deps.control.getNextAttemptAt(key) - task.monotonicNow()).toBeCloseTo(
+                harness.deps.constants.hostBackstopIntervalMs,
+              );
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(capture.matching("reconcile-retry")).toHaveLength(1);
+      },
+    );
+  });
+
+  it("schedules a healthy terminal orb at the host backstop", async () => {
     const task = new RecordingTask("reconcile healthy");
     const harness = makeHarness();
     harness.store.seedProject(makeProjectRow("project-live"));
