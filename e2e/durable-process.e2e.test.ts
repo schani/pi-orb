@@ -524,6 +524,13 @@ text('NOTIFY_PARENT_HANDLED');`),
         },
         { timeoutMs: 300_000 },
       );
+      await waitFor("MCP registry publication", async () =>
+        cp!.logs
+          .join("")
+          .includes(`lifecycle: orb=${orb} test_registry_published server=fixture status=available`)
+          ? true
+          : null,
+      );
       expect(
         (
           await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${randomUUID()}`, {
@@ -578,6 +585,9 @@ text('NOTIFY_PARENT_HANDLED');`),
       await expectPage(
         page.getByRole("button", { name: "Change model", exact: true }),
       ).toContainText("Sol");
+      expect(calls.filter((call) => call.method === "tools/list")).toHaveLength(1);
+      expect(calls.filter((call) => call.method === "tools/call")).toHaveLength(0);
+      expect(calls.every((call) => call.authorization === "Bearer synthetic-durable")).toBe(true);
       await thinking.click();
       await page.getByRole("option", { name: "low", exact: true }).click();
       await expectPage(thinking).toHaveText("low");

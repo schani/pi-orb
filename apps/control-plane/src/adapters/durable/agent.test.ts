@@ -26,11 +26,12 @@ import { type ServerFrame, ServerFrameSchema } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { StorageFailure } from "../durable-pg/storage-boundary.ts";
 import { DurableAgent } from "./agent.ts";
 import { durableError } from "./manager.ts";
 import { MemoryAgentPersistence } from "./memory-persistence.testkit.ts";
+import { sectionExtension } from "./prompt.ts";
 
 function barrier() {
   let resolve!: () => void;
@@ -326,6 +327,7 @@ describe("central Durable agent", () => {
       throw new Error("PRIVATE initialization");
     };
     let closes = 0;
+    const activateResources = vi.fn();
     const opened = await DurableAgent.open({
       orbId: "orb",
       storage,
@@ -334,6 +336,7 @@ describe("central Durable agent", () => {
       env: new NodeExecutionEnv({ cwd: "/tmp" }),
       checkoutCommit: "commit",
       instructions: "instruction",
+      activateResources,
       closeResources: () => {
         closes++;
         return okAsync(undefined);
@@ -342,6 +345,7 @@ describe("central Durable agent", () => {
     expect(opened.isErr()).toBe(true);
     expect(JSON.stringify(opened)).not.toContain("PRIVATE");
     expect(closes).toBe(1);
+    expect(activateResources).not.toHaveBeenCalled();
   });
 
   it("releases tool resources even when native storage close rejects", async () => {
@@ -469,6 +473,8 @@ describe("central Durable agent", () => {
         })
       )._unsafeUnwrap();
     // The projection barrier must complete before admission is acknowledged.
+    let appendActivated!: DurableAgent["appendAlert"];
+    let revoked = false;
     const agent = (
       await DurableAgent.open({
         orbId: "orb",
@@ -479,6 +485,12 @@ describe("central Durable agent", () => {
         checkoutCommit: "commit",
         instructions: "PRIVATE",
         initialSettings,
+        activateResources: (appendAlert) => {
+          appendActivated = appendAlert;
+          return () => {
+            revoked = true;
+          };
+        },
         commitHistory: (snapshot) => {
           if (hold && snapshot.records.some((record) => record.type === "event" && record.alert)) {
             entered.resolve();
@@ -490,7 +502,7 @@ describe("central Durable agent", () => {
     )._unsafeUnwrap();
     try {
       let acknowledged = false;
-      const pending = agent.appendAlert("alert-1", "look here").map((receipt) => {
+      const pending = appendActivated("alert-1", "look here").map((receipt) => {
         acknowledged = true;
         return receipt;
       });
@@ -516,6 +528,8 @@ describe("central Durable agent", () => {
         },
       ]);
       await agent.close();
+      expect(revoked).toBe(true);
+      expect((await appendActivated("late", "late")).isErr()).toBe(true);
       const reopened = await open();
       try {
         expect((await reopened.appendAlert("alert-1", "look here"))._unsafeUnwrap()).toEqual({
@@ -849,6 +863,12 @@ describe("central Durable agent", () => {
   it("reopens an already-prepared request with current instructions and stable input identity", async () => {
     const directory = await mkdtemp(join(tmpdir(), "durable-prepared-"));
     const authority = new MemoryAgentPersistence();
+    let mcp = "MCP fixture: pending.";
+    const registry = () => {
+      const registry = createRegistry();
+      registry.install(sectionExtension("mcp-status", () => mcp));
+      return registry;
+    };
     const entered = barrier();
     const firstModel = fauxProvider();
     firstModel.setResponses([
@@ -869,7 +889,7 @@ describe("central Durable agent", () => {
         orbId: "orb",
         storage: (await authority.openOrb("orb", false))._unsafeUnwrap().storage,
         models: firstModels,
-        registry: createRegistry(),
+        registry: registry(),
         env: new NodeExecutionEnv({ cwd: directory }),
         checkoutCommit: "commit",
         instructions: "OLD",
@@ -887,12 +907,17 @@ describe("central Durable agent", () => {
       await entered.promise;
       expect((await first.close()).isOk()).toBe(true);
       expect(outcomes).not.toContain("aborted");
+      mcp = "MCP fixture: unavailable.";
       let current = "";
       let resumedRequests = 0;
       const secondModel = fauxProvider();
       secondModel.setResponses([
         (request) => {
           resumedRequests++;
+          const status = request.messages.findLast(
+            (m) => m.role === "system" && m.sections?.["mcp-status"] !== undefined,
+          );
+          expect(status?.role === "system" && status.sections?.["mcp-status"]).toContain(mcp);
           expect(JSON.stringify(request.messages)).not.toContain("recovery is resuming");
           current = JSON.stringify(
             request.messages.filter((message) => message.role === "system").at(-1),
@@ -906,7 +931,7 @@ describe("central Durable agent", () => {
         orbId: "orb",
         storage: (await authority.openOrb("orb", true))._unsafeUnwrap().storage,
         models: secondModels,
-        registry: createRegistry(),
+        registry: registry(),
         env: new NodeExecutionEnv({ cwd: directory }),
         checkoutCommit: "commit",
         instructions: "NEW",
@@ -920,7 +945,7 @@ describe("central Durable agent", () => {
           orbId: "orb",
           storage: (await authority.openOrb("orb", true))._unsafeUnwrap().storage,
           models: secondModels,
-          registry: createRegistry(),
+          registry: registry(),
           env: new NodeExecutionEnv({ cwd: directory }),
           checkoutCommit: "commit",
           instructions: "NEW",

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
@@ -14,6 +15,7 @@ import {
 import { type AuthProvider, StreamableHttpTransport } from "@earendil-works/pi-mcp";
 import type { McpConfig } from "@pi-orb/protocol";
 import { err, ok, okAsync, Result, ResultAsync } from "neverthrow";
+import type { DurableAgent } from "./adapters/durable/agent.ts";
 import { NativeResourceContext } from "./adapters/durable/context-storage.ts";
 import { executionWaitProgress } from "./adapters/durable/execution-wait-progress.ts";
 import type { DurableAgentPlaneOptions } from "./adapters/durable/manager.ts";
@@ -22,14 +24,13 @@ import { fenceModels } from "./adapters/durable/model-fence.ts";
 import { createDurableModels } from "./adapters/durable/models.ts";
 import type { ParentNotification } from "./adapters/durable/notifications.ts";
 import { loadPlatformResources } from "./adapters/durable/platform-resources.ts";
-import { renderPrompt } from "./adapters/durable/prompt.ts";
+import { renderPrompt, sectionExtension } from "./adapters/durable/prompt.ts";
 import {
   type PersistedPlatformContext,
   prepareResourceContext,
 } from "./adapters/durable/resource-context.ts";
 import { createAgentToolFiles } from "./adapters/durable/tool-files.ts";
 import { createDurableTools, type ToolError } from "./adapters/durable/tools/index.ts";
-import type { McpServerStatus } from "./adapters/durable/tools/mcp.ts";
 import { createOrbTools } from "./adapters/durable/tools/orb-tools.ts";
 import { RemoteExecutionEnv } from "./adapters/execution-client/env.ts";
 import { LazyExecutionEnv } from "./adapters/execution-client/lazy-env.ts";
@@ -95,37 +96,18 @@ export function processAgentSystemContext(userTimeZone: string | null): string {
   ].join("\n\n");
 }
 
-export function refreshProcessMcpTool(
+export function refreshProcessTools(
   tool: ToolRegistration,
-  discover: (context: Context) => ResultAsync<readonly McpServerStatus[], ToolError>,
-  currentAgent?: (api: ToolExecutionApi, context: Context) => ResultAsync<Agent, ToolError>,
-  reported = new Map<string, McpServerStatus["status"]>(),
+  currentAgent: (api: ToolExecutionApi, context: Context) => ResultAsync<Agent, ToolError>,
 ): ToolRegistration {
   return {
     ...tool,
     execute: async (args, api, context) => {
-      const statuses = await discover(context);
-      if (statuses.isErr())
-        return {
-          isError: true,
-          output: [{ type: "text", text: "MCP discovery cancelled or unavailable" }],
-        };
-      for (const status of statuses.value) {
-        const previous = reported.get(status.name);
-        if (previous !== status.status && (status.status !== "available" || previous !== undefined))
-          api.diagnostic({
-            severity: "info",
-            code: "mcp_status",
-            message: `MCP ${status.name}: ${status.status === "available" ? "connected" : status.status}.`,
-          });
-        reported.set(status.name, status.status);
-      }
-      if (!currentAgent) return tool.execute(args, api, context);
       const agent = await currentAgent(api, context);
       if (agent.isErr())
         return {
           isError: true,
-          output: [{ type: "text", text: "MCP discovery cancelled or unavailable" }],
+          output: [{ type: "text", text: "Tool catalog unavailable" }],
         };
       return tool.execute(args, { ...api, agent: async () => agent.value }, context);
     },
@@ -169,29 +151,20 @@ export function closeProcessAgentResources(
   ]).map(() => undefined);
 }
 
-export function discoverProcessTools(
+export function admitProcessTools(
   tools: {
-    ready: (context: Context) => ResultAsync<readonly McpServerStatus[], ToolError>;
     close: () => ResultAsync<void, ToolError>;
   },
   env: { cleanup: (context: Context) => Promise<void> },
   context: Context,
   admit: () => ResultAsync<void, RuntimeClientError> = () => okAsync(undefined),
-): ResultAsync<readonly McpServerStatus[], RuntimeClientError> {
+): ResultAsync<void, RuntimeClientError> {
   return ResultAsync.fromSafePromise(
     (async () => {
-      const discovered = await tools.ready(context);
-      if (discovered.isErr() || context.abortSignal?.aborted) {
-        await closeProcessAgentResources(tools, env);
-        return err<readonly McpServerStatus[], RuntimeClientError>({
-          ...durableError("tool discovery cancelled or unavailable", true),
-          ...(context.abortSignal?.aborted ? { code: "cancelled" as const } : {}),
-        });
-      }
       const admitted = await admit();
       if (admitted.isErr() || context.abortSignal?.aborted) {
         await closeProcessAgentResources(tools, env);
-        return err<readonly McpServerStatus[], RuntimeClientError>(
+        return err<void, RuntimeClientError>(
           context.abortSignal?.aborted
             ? { ...durableError("agent composition cancelled"), code: "cancelled" }
             : admitted.isErr()
@@ -199,7 +172,7 @@ export function discoverProcessTools(
               : durableError("agent admission unavailable"),
         );
       }
-      return ok<readonly McpServerStatus[], RuntimeClientError>(discovered.value);
+      return ok<void, RuntimeClientError>(undefined);
     })(),
   ).andThen((result) => result);
 }
@@ -296,6 +269,7 @@ export function createProcessAgentContext(
         appendSystem: processAgentSystemContext(orb.userTimeZone),
       });
       const resourcesAbort = new AbortController();
+      if (lease?.signal.aborted) resourcesAbort.abort();
       lease?.signal.addEventListener("abort", () => resourcesAbort.abort(), { once: true });
       const loadReady = (
         binding: ExecutionBinding & { release?: () => void },
@@ -456,7 +430,46 @@ export function createProcessAgentContext(
             .mapErr((): ToolError => ({ code: "forbidden", message: "Agent ownership revoked" })),
       });
       const notifyParent = options.notifyParent;
+      let appendMcpAlert: DurableAgent["appendAlert"] | undefined;
       const tools = createDurableTools({
+        mcpContext: withAbortSignal(resourcesAbort.signal, BACKGROUND_CONTEXT),
+        mcpChanged: (status, previous) => {
+          if (resourcesAbort.signal.aborted) return okAsync(undefined);
+          installTools();
+          if (process.env["PI_ORB_E2E_HISTORY_INSPECTION"] === "1")
+            logOrbEvent(task, orb.id, "test_registry_published", {
+              server: status.name,
+              status: status.status,
+            });
+          if (
+            status.status === "pending" ||
+            (status.status === "available" &&
+              (previous?.status === "pending" || previous === undefined)) ||
+            status.status === previous?.status ||
+            !appendMcpAlert
+          )
+            return okAsync(undefined);
+          return appendMcpAlert(
+            randomUUID(),
+            `MCP ${status.name}: ${status.status === "available" ? "connected" : status.status}.`,
+          )
+            .map(() => undefined)
+            .orElse(() => {
+              if (!resourcesAbort.signal.aborted)
+                logOrbEvent(task, orb.id, "durable.mcp_alert_failed", { server: status.name });
+              return okAsync(undefined);
+            });
+        },
+        mcpDiscovery: {
+          now: () => task.monotonicNow(),
+          record: (failure) =>
+            logOrbEvent(task, orb.id, "durable.mcp_unavailable", {
+              ...failure,
+              stage: "discovery",
+              processId: process.pid,
+              admission_version: orb.agentAdmissionVersion,
+            }),
+        },
         orb: { id: orb.id, task },
         files: {
           read: (request, api, ctx) =>
@@ -491,6 +504,7 @@ export function createProcessAgentContext(
           let state: "needs-auth" | "available" | "unavailable" = "unavailable";
           return {
             name: server.name,
+            ...(server.description ? { description: server.description } : {}),
             unavailableState: () => (state === "needs-auth" ? "needs-auth" : "unavailable"),
             connect: (ctx) =>
               ResultAsync.fromSafePromise(
@@ -525,7 +539,10 @@ export function createProcessAgentContext(
                     const response = await fetch(input, {
                       ...init,
                       headers,
-                      signal: ctx.abortSignal ?? init?.signal ?? null,
+                      signal:
+                        ctx.abortSignal && init?.signal
+                          ? AbortSignal.any([ctx.abortSignal, init.signal])
+                          : (ctx.abortSignal ?? init?.signal ?? null),
                     });
                     if (response.status === 401) state = "needs-auth";
                     return response;
@@ -570,7 +587,7 @@ export function createProcessAgentContext(
           };
         }),
       });
-      const discovered = await discoverProcessTools(tools, env, context, () =>
+      const composed = await admitProcessTools(tools, env, context, () =>
         deps.store
           .getProject(task, orb.projectId)
           .mapErr(() => durableError("orb project unavailable", true))
@@ -580,7 +597,7 @@ export function createProcessAgentContext(
               : err(durableError("orb owner changed")),
           ),
       );
-      if (discovered.isErr()) return err(discovered.error);
+      if (composed.isErr()) return err(composed.error);
       const admitted = await deps.store.getOrb(task, orb.id);
       if (
         admitted.isErr() ||
@@ -595,22 +612,17 @@ export function createProcessAgentContext(
         await closeProcessAgentResources(tools, env);
         return err(durableError("agent admission superseded"));
       }
-      if (discovered.isOk()) {
-        for (const status of discovered.value) {
-          if (status.status !== "available")
-            logOrbEvent(task, orb.id, "durable.mcp_unavailable", {
-              server: status.name,
-              status: status.status,
-              stage: "discovery",
-              errorCategory: status.error.code,
-              processId: process.pid,
-            });
-        }
-      }
       const registry = createRegistry();
+      if (catalog.value.servers.length)
+        registry.install(
+          sectionExtension("mcp-status", () =>
+            tools
+              .mcpStatus()
+              .map((s) => `MCP ${s.name}: ${s.status}. Namespace: mcp__${s.name}.`)
+              .join("\n"),
+          ),
+        );
       let conversation: Harness["conversation"] | undefined;
-      const rootMcpStatus = new Map<string, McpServerStatus["status"]>();
-      const childMcpStatus = new Map<string, McpServerStatus["status"]>();
       const currentAgent = (api: ToolExecutionApi, ctx: Context): ResultAsync<Agent, ToolError> =>
         ResultAsync.fromThrowable(
           async () => {
@@ -635,17 +647,12 @@ export function createProcessAgentContext(
           },
           (): ToolError => ({ code: "unavailable", message: "Native tool refresh unavailable" }),
         )().andThen((result) => result);
-      const instrument = (
-        extension: Extension,
-        reported: Map<string, McpServerStatus["status"]>,
-      ): Extension => ({
+      const instrument = (extension: Extension): Extension => ({
         ...extension,
         tools: (extension.tools ?? []).map((tool) =>
           (() => {
             const registration =
-              tool.name === "codemode"
-                ? refreshProcessMcpTool(tool, tools.ready, currentAgent, reported)
-                : tool;
+              tool.name === "codemode" ? refreshProcessTools(tool, currentAgent) : tool;
             return {
               ...registration,
               execute: async (args, api, ctx) => {
@@ -685,8 +692,8 @@ export function createProcessAgentContext(
         ),
       });
       const installTools = () => {
-        registry.install(instrument(tools.extension, rootMcpStatus));
-        registry.install(instrument(tools.childExtension, childMcpStatus));
+        registry.install(instrument(tools.extension));
+        registry.install(instrument(tools.childExtension));
       };
       installTools();
       const recordModelCall = (use: ModelCallUse, response: AssistantMessage) =>
@@ -714,6 +721,11 @@ export function createProcessAgentContext(
             }
           : {}),
         registry,
+        activateResources: (appendAlert: DurableAgent["appendAlert"]) => {
+          appendMcpAlert = appendAlert;
+          void tools.ready();
+          return () => resourcesAbort.abort();
+        },
         bindNativeConversation: (resolve: Harness["conversation"]) => {
           conversation = resolve;
         },
