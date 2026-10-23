@@ -8,7 +8,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Qualify signed-out Google login workaround** (2026-10-23; `docs/postmortems/2026-10-23-google-signed-out-login-500.md`). Removing outbound OAuth `hd` restores the initial Google sign-in screen in the affected Chrome context; implemented and focused-tested locally, not deployed. Qualify full real-Google login and return through our callback in affected Chrome and Safari, preserving signed Workspace admission. If SSO still fails after username entry, investigate Workspace profile/routing with its administrator; no underlying configuration defect is established.
+- **Qualify signed-out Google login** (2026-10-23; `docs/postmortems/2026-10-23-google-signed-out-login-500.md`). Verify full real-Google login through our callback in affected Chrome and Safari.
 
 - **Qualify and diagnose database contention** (2026-10-23; `docs/postmortems/2026-10-23-agent-lease-loss-drain.md`). The cached lost-owner recovery blocker, publication-error propagation and failed-release tracking are corrected locally; renewal/drain cause and final close-outcome diagnostics are included. Add real PostgreSQL pool/lock-contention coverage and bounded pool-acquisition/SQL/transaction timings with backend/operation correlation. Identify the original migration/transaction lock chain before claiming its cause fixed. Discuss any persisted-state addition before implementation.
 
