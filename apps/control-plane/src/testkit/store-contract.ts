@@ -3529,6 +3529,8 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
         { kind: "sleep_wake", sleepUntil: null },
         { kind: "sleep_wake" },
         { kind: "unknown", sleepUntil: "deadline" },
+        { kind: null, sleepUntil: "x" },
+        { kind: "sleep_wake", sleepUntil: "x", extra: true },
       ]) {
         const valid = ordinal < 14;
         const result = await client.query(
@@ -3742,27 +3744,6 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
         true,
       );
       expect((await client.query("SELECT * FROM orb_spawns"))._unsafeUnwrap().rows).toHaveLength(0);
-    });
-
-    it("rejects malformed system inbox provenance at the schema boundary", async () => {
-      await seed();
-      for (const [index, system] of [
-        {},
-        { kind: null, sleepUntil: "x" },
-        { kind: "sleep_wake" },
-        { kind: "sleep_wake", sleepUntil: "x", extra: true },
-      ].entries()) {
-        const inserted = await client.query(
-          `INSERT INTO orb_messages (orb_id, message_id, content, system)
-           VALUES ($1, $2, '[]'::jsonb, $3::jsonb)`,
-          [
-            orb.id,
-            `00000000-0000-4000-8000-${String(index + 51).padStart(12, "0")}`,
-            jsonParam(system),
-          ],
-        );
-        expect(inserted.isErr()).toBe(true);
-      }
     });
 
     // The regression from
