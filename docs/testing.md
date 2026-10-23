@@ -1795,3 +1795,5 @@ Diagnostic cutoff counts parsed frame bytes, excluding a following incomplete UT
 **Decision (2026-10-22):** Ordinary frontend tests use a test-scoped Vite/browser/cache owner, registered before startup. Partial initialization cleans acquired resources; cleanup attempts every resource and retains startup failure as the cause. Route gates and evidence remain local; special HTTP/auth fixtures retain their separate owners.
 
 **Decision (2026-10-22):** CI exports nested scenario diagnostics by exact producer leaf allowlists on both acceptance workflows. Copied host/workspace/auth trees and raw alert/sleep request bodies stay private. Missing-orb evidence is exported by both workflows.
+
+**Decision (2026-10-22):** Docker endpoint parsing is pure root-unit coverage; it requires no image build or provider startup.
