@@ -13,77 +13,13 @@ import {
 } from "../testkit/fixtures.ts";
 import { assertReplicaComplete } from "../testkit/invariants.ts";
 import { LogCapture, runDst, waitUntil } from "../testkit/sim.ts";
+import { SimulationTaskRunner } from "../testkit/simulation-task-runner.ts";
 import { commitAgentHistory } from "./agent-history.ts";
 import type { AgentPlane } from "./agent-ports.ts";
 import { HarnessAgentPlane } from "./harness-agent-plane.ts";
 import { requestOrbDeletion, requestOrbStop } from "./lifecycle.ts";
 import { pollLoop, type ReconcileTaskRunner, reconcileLoop } from "./loops.ts";
 import type { CommitPullBatchParams } from "./ports.ts";
-
-type ReconcileJob = {
-  readonly run: (task: SimulationTask) => Promise<void>;
-  readonly resolve: () => void;
-  readonly reject: (error: unknown) => void;
-};
-
-/**
- * `determined` models concurrency with distinct SimulationTasks. Production
- * creates one real-time task per dispatched lane; this mailbox gives each
- * statically declared DST worker its own task while exercising the same
- * dispatcher contract.
- */
-class SimulationPollTaskRunner {
-  calls = 0;
-  private readonly queued = new Map<string, ReconcileJob>();
-  private readonly waiting = new Map<string, (job: ReconcileJob | null) => void>();
-
-  readonly run: ReconcileTaskRunner = (orbId, operation) =>
-    new Promise<void>((resolve, reject) => {
-      this.calls++;
-      const job = { run: operation, resolve, reject };
-      const waiter = this.waiting.get(orbId);
-      if (waiter !== undefined) {
-        this.waiting.delete(orbId);
-        waiter(job);
-        return;
-      }
-      if (this.queued.has(orbId)) throw new Error(`duplicate queued reconcile for ${orbId}`);
-      this.queued.set(orbId, job);
-    });
-
-  async worker(task: SimulationTask, orbId: string, stop: AbortSignal): Promise<void> {
-    while (!stop.aborted) {
-      const job = await this.next(orbId, stop);
-      if (job === null) return;
-      try {
-        await job.run(task);
-        job.resolve();
-      } catch (error) {
-        job.reject(error);
-      }
-    }
-  }
-
-  private next(orbId: string, stop: AbortSignal): Promise<ReconcileJob | null> {
-    const queued = this.queued.get(orbId);
-    if (queued !== undefined) {
-      this.queued.delete(orbId);
-      return Promise.resolve(queued);
-    }
-    if (stop.aborted) return Promise.resolve(null);
-    return new Promise((resolve) => {
-      const onAbort = (): void => {
-        this.waiting.delete(orbId);
-        resolve(null);
-      };
-      stop.addEventListener("abort", onAbort, { once: true });
-      this.waiting.set(orbId, (job) => {
-        stop.removeEventListener("abort", onAbort);
-        resolve(job);
-      });
-    });
-  }
-}
 
 const phases = ["health", "claim", "delivery", "history", "commit", "naming", "catchup"] as const;
 
@@ -119,7 +55,7 @@ describe("real multi-orb polling (DST)", () => {
           let pollFinished = false;
           const stop = new AbortController();
           const workersStop = new AbortController();
-          const runner = new SimulationPollTaskRunner();
+          const runner = new SimulationTaskRunner();
           const deliveries: string[] = [];
           const records = new Map<string, HistoryRecord[]>([
             ["a", []],
@@ -364,7 +300,7 @@ for (const ending of ["shutdown", "fatal"] as const) {
         const gate = new ConditionVariable("catchup boundary");
         const stop = new AbortController();
         const workersStop = new AbortController();
-        const runner = new SimulationPollTaskRunner();
+        const runner = new SimulationTaskRunner();
         const crash = new Error("crashed history lane");
         let pulls = 0;
         let commits = 0;
@@ -714,7 +650,7 @@ it.each(boundaryCases)(
           const deps = { ...h.deps, agentPlane: new HarnessAgentPlane(pi, sdk, h.store) };
           const stop = new AbortController(),
             workersStop = new AbortController();
-          const runner = new SimulationPollTaskRunner();
+          const runner = new SimulationTaskRunner();
           const active = new Set<string>();
           const run: ReconcileTaskRunner = (lane, operation) => {
             expect(active.has(lane), `overlapping ${lane}`).toBe(false);

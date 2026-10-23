@@ -1572,3 +1572,5 @@ One precommit GitHub retry scenario checks exact credentials, retryability, sing
 Stop override uses one comprehensive transition contract against both memory and PGlite.
 
 Sequential orphan collection is one ordinary test retaining pointer readability and complete version cleanup.
+
+Poll and reconcile concurrency share one mailbox with call counts, worker identity, rejection and joined shutdown contracts.
