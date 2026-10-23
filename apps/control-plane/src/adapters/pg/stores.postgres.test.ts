@@ -9,8 +9,8 @@ import { storeContractTests } from "../../testkit/store-contract.ts";
  * and `npm run test:e2e` provisions a container for
  * `e2e/postgres-store.e2e.test.ts`, which runs this same contract (docs/testing.md).
  *
- * Each test drops and recreates schema `public`: point the variable at a
- * throwaway database only.
+ * Each subject owns an isolated schema, removed when its client closes.
+ * Use a test-only database with schema creation privileges.
  */
 const connectionString = process.env["PI_ORB_TEST_DATABASE_URL"];
 

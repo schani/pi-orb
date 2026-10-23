@@ -1,31 +1,39 @@
-import { expect } from "vitest";
+import { randomUUID } from "node:crypto";
+import { ResultAsync } from "neverthrow";
 import { composeControlPlaneDatabase } from "../adapters/database.ts";
 import { PgClient } from "../adapters/pg/client.ts";
 import type { StoreContractSubject } from "./store-contract.ts";
 
-/**
- * Open the store contract against a real PostgreSQL server over the
- * node-postgres driver.
- *
- * PGlite is not a faithful stand-in for it — the two drivers bind parameters
- * differently (see the parameter-intent note in `adapters/pg/client.ts` and
- * `docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md`) — so the
- * contract has to be exercised here too.
- *
- * The database is reset per test by dropping and recreating `public`, so the
- * connection string must point at a throwaway database.
- */
+/** Real node-postgres subject with an owned schema and pool-wide search_path. */
 export async function openThrowawayPostgres(
   connectionString: string,
 ): Promise<StoreContractSubject> {
-  const reset = new PgClient(connectionString);
-  const dropped = await reset.query("DROP SCHEMA IF EXISTS public CASCADE");
-  expect(dropped.isOk(), `reset schema: ${dropped.isErr() ? dropped.error.message : ""}`).toBe(
-    true,
+  const url = new URL(connectionString);
+  const schema = `test_${randomUUID().replaceAll("-", "")}`;
+  const admin = new PgClient(connectionString);
+  const created = await admin.query(`CREATE SCHEMA "${schema}"`);
+  if (created.isErr()) {
+    await admin.end();
+    created._unsafeUnwrap();
+  }
+  url.searchParams.set(
+    "options",
+    `${url.searchParams.get("options") ?? ""} -c search_path=${schema}`.trim(),
   );
-  const created = await reset.query("CREATE SCHEMA public");
-  expect(created.isOk()).toBe(true);
-  expect((await reset.end()).isOk()).toBe(true);
-  const client = new PgClient(connectionString);
+  class SubjectClient extends PgClient {
+    override end() {
+      return new ResultAsync(
+        (async () => {
+          const ended = await super.end();
+          const dropped = await admin.query(`DROP SCHEMA "${schema}" CASCADE`);
+          const closed = await admin.end();
+          if (ended.isErr()) return ended;
+          if (dropped.isErr()) return dropped.map(() => undefined);
+          return closed;
+        })(),
+      );
+    }
+  }
+  const client = new SubjectClient(url.toString());
   return { database: composeControlPlaneDatabase(client), client };
 }
