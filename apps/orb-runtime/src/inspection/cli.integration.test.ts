@@ -19,6 +19,27 @@ const orb = {
   },
 } as const;
 
+const transcript = {
+            v: 1,
+            orb,
+            session: { id: "session-a", overflow: { native: { privateDuplicate: true } } },
+            cursor: "record-1",
+            headId: "record-1",
+            records: [
+              {
+                id: "record-1",
+                parentId: null,
+                timestamp: "2026-08-27T00:00:01.000Z",
+                type: "event",
+                eventType: "orb.message",
+                sender: { orbId: "11111111-1111-4111-8111-111111111111" },
+                inboxMessageIds: ["inbox-peer"],
+                content: [{ type: "text", text: "Fix parsing" }],
+                overflow: { native: { privateDuplicate: true } },
+              },
+            ],
+          };
+
 interface CommandResult {
   readonly code: number | null;
   readonly stdout: string;
@@ -112,24 +133,7 @@ describe("pi-orb inspection CLI entry point", () => {
       }
       if (request.url === "/runtime/v1/orbs/orb-sibling/transcript") {
         response.end(
-          JSON.stringify({
-            v: 1,
-            orb,
-            session: { id: "session-a", overflow: { native: { privateDuplicate: true } } },
-            cursor: "record-1",
-            headId: "record-1",
-            records: [
-              {
-                id: "record-1",
-                parentId: null,
-                timestamp: "2026-08-27T00:00:01.000Z",
-                type: "message",
-                role: "user",
-                content: [{ type: "text", text: "Fix parsing" }],
-                overflow: { native: { privateDuplicate: true } },
-              },
-            ],
-          }),
+          JSON.stringify(transcript),
         );
         return;
       }
@@ -187,9 +191,7 @@ describe("pi-orb inspection CLI entry point", () => {
     const result = await runCli(baseUrl, ["transcript", "orb-sibling", "--json"]);
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
-    const body = JSON.parse(result.stdout) as { records?: unknown[] };
-    expect(body.records).toHaveLength(1);
-    expect(result.stdout).toContain('"privateDuplicate": true');
+    expect(JSON.parse(result.stdout)).toEqual(transcript);
   });
 
   it("uses the unauthorized exit class without writing stdout", async () => {

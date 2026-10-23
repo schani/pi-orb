@@ -1584,3 +1584,5 @@ Invalid identity CLI input must exit with usage, empty stdout and zero endpoint 
 Sleep request qualification asserts the exact 3000ms deadline independently of abort mapping. (2026-10-22 PDT).
 
 Summary completion compares all callbacks without deduplication; timeout or success remains valid. (2026-10-22 PDT).
+
+Lossless transcript qualification deep-compares real CLI JSON against the complete served peer transcript. (2026-10-22 PDT).
