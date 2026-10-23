@@ -5,6 +5,7 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ServerFrame } from "@pi-orb/protocol";
 import { ok } from "neverthrow";
 import { afterEach, expect, it } from "vitest";
+import { probeSteering } from "../../../../scripts/claude-sdk-contract/steering.mjs";
 import { ScheduledClaudeQuery } from "../testkit/claude-composed.ts";
 import { ClaudeOrbAgent, type NativeState } from "./agent.ts";
 import { ClaudeHistory, nativeHistoryFiles } from "./history.ts";
@@ -20,12 +21,12 @@ const dirs: string[] = [];
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
-function fixture() {
+function fixture(sessionId = "8aceb374-0491-4c82-b761-2a21769a4a88") {
   const dir = mkdtempSync(join(tmpdir(), "claude-publication-"));
   dirs.push(dir);
   const configDir = join(dir, "config");
   const state: NativeState = {
-    id: "8aceb374-0491-4c82-b761-2a21769a4a88",
+    id: sessionId,
     timestamp: "2026-10-04T00:00:00Z",
     cwd: "/repo",
     deliveries: {},
@@ -96,6 +97,7 @@ function fixture() {
     history,
     frames,
     nativeReads: () => nativeReads,
+    takeInput: () => sdk.input.next(),
     attach: () => agent.attachSession(state, history, configDir, "commit"),
     emit: (message: SDKMessage) => sdk.emitUnscheduled(message),
     awaitCloseRequest: (count: number) =>
@@ -349,3 +351,164 @@ it("bounds diagnostic samples and redacts unsafe identities and content", async 
   expect(health.error.message.length).toBeLessThan(4096);
   expect(health.error.message).not.toMatch(/PRIVATE|owner-2|omitted:0/);
 });
+
+it.each([
+  "current",
+  "older",
+  "text",
+  "redacted",
+  "owned",
+  "late-owned",
+  "nonabort",
+  "missing-reason",
+] as const)("drains only explicitly interrupted current unowned thinking: %s", async (mode) => {
+  const f = fixture();
+  expect((await f.attach()).isOk()).toBe(true);
+  expect((await f.agent.submitMessage([{ type: "text", text: "start" }], "op")).isOk()).toBe(true);
+  const input = await f.takeInput();
+  if (input.done) throw new Error("missing accepted input");
+  f.persist({ type: "user", uuid: input.value.uuid, message: input.value.message });
+  const emit = (message: object) =>
+    f.emit({ session_id: f.state.id, parent_tool_use_id: null, ...message } as SDKMessage);
+  const block = (uuid: string) =>
+    emit({
+      type: "stream_event",
+      uuid,
+      event: {
+        type: "content_block_start",
+        index: 0,
+        content_block: {
+          type: mode === "text" ? "text" : mode === "redacted" ? "redacted_thinking" : "thinking",
+          text: "partial",
+          thinking: "partial",
+        },
+      },
+    });
+  if (mode === "older") await block("older");
+  await emit({
+    type: "stream_event",
+    uuid: "start",
+    event: { type: "message_start", message: { id: "api" } },
+  });
+  await block("current");
+  if (mode === "owned")
+    await emit({
+      type: "assistant",
+      uuid: "missing-owner",
+      message: { role: "assistant", content: [] },
+    });
+  await emit({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    num_turns: 1,
+    terminal_reason:
+      mode === "nonabort"
+        ? "completed"
+        : mode === "missing-reason"
+          ? undefined
+          : "aborted_streaming",
+    queued_turn_count: mode === "late-owned" ? 1 : 0,
+  });
+  if (mode === "late-owned") {
+    await emit({
+      type: "assistant",
+      uuid: "late-owner",
+      message: { role: "assistant", content: [] },
+    });
+    await emit({ type: "result", subtype: "success", is_error: false, num_turns: 1 });
+  }
+  await f.awaitCloseRequest(2);
+  expect(f.agent.liveView()?.blocks.map((block) => block.blockId)).toContain("current:0");
+  f.exit();
+  await f.agent.closeExtensions();
+  await f.agent.waitForStream();
+  if (mode === "current") {
+    expect(f.agent.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
+    expect(f.agent.liveView()).toBeNull();
+    expect(
+      f.frames.some(
+        (frame) => frame.type === "runtime.event" && frame.event.type === "operation_finished",
+      ),
+    ).toBe(true);
+  } else {
+    expect(f.agent.getHealth()).toMatchObject({
+      status: "failed",
+      error: { code: "claude_stream_identity_gap" },
+    });
+    expect(f.agent.liveView()?.blocks.map((block) => block.blockId)).toEqual([
+      mode === "older" ? "older:0" : "current:0",
+    ]);
+  }
+});
+
+it
+  .skipIf(process.platform !== "linux" || process.arch !== "x64")
+  .each(["thinking", "tool-thinking"] as const)(
+  "drains admitted native interrupted %s after final native history",
+  async (mode) => {
+    let f: ReturnType<typeof fixture> | undefined;
+    try {
+      const probe = await probeSteering(
+        mode,
+        async (message) => {
+          if (f === undefined) throw new Error("missing admission");
+          await f.emit(message);
+        },
+        async (kind, context) => {
+          f ??= fixture(context.sessionId);
+          if (kind === "first") expect((await f.attach()).isOk()).toBe(true);
+          const admitted = await f.agent.deliverInboxMessage(
+            kind,
+            [kind],
+            [{ type: "text", text: context.marker }],
+            kind === "first"
+              ? { kind: "orb_message", senderOrbId: "22222222-2222-4222-8222-222222222222" }
+              : undefined,
+          );
+          expect(admitted.isOk()).toBe(true);
+          const input = await f.takeInput();
+          if (input.done) throw new Error("missing accepted input");
+          return input.value;
+        },
+      );
+      if (f === undefined) throw new Error("missing admission");
+      expect(probe.events.find((message) => message.type === "result")).toMatchObject({
+        terminal_reason: "aborted_streaming",
+        subtype: mode === "thinking" ? "error_during_execution" : "success",
+      });
+      await f.awaitCloseRequest(2);
+      expect(f.agent.liveView()?.blocks.some((block) => block.blockType === "reasoning")).toBe(
+        true,
+      );
+      for (const line of probe.root.source.trim().split("\n")) f.persist(JSON.parse(line));
+      f.exit();
+      await f.agent.closeExtensions();
+      await f.agent.waitForStream();
+      expect(f.agent.getHealth(), JSON.stringify(f.agent.getHealth())).toMatchObject({
+        status: "ready",
+        activity: "idle",
+      });
+      expect(f.agent.liveView()).toBeNull();
+      const interrupted = probe.events.findIndex((message) => message.type === "result");
+      expect(
+        probe.events.slice(interrupted + 1).some((message) => message.type === "assistant"),
+      ).toBe(true);
+      expect(
+        f.frames.find(
+          (frame) => frame.type === "runtime.event" && frame.event.type === "operation_finished",
+        ),
+      ).toMatchObject({ event: { outcome: mode === "thinking" ? "failed" : "completed" } });
+      for (const frame of f.frames)
+        if (frame.type === "history.record" && frame.record.type === "event")
+          expect(frame.retiredBlockIds).toHaveLength(0);
+    } finally {
+      if (f !== undefined) {
+        f.exit();
+        await f.agent.closeExtensions();
+        await f.agent.waitForStream();
+      }
+    }
+  },
+  30_000,
+);

@@ -31,7 +31,7 @@ Ops GET/PUT requires `X-Pi-Orb-User-Id` containing a known UUID; user principals
 
 ## Project model
 
-The first version requires no local checkout or user-operated CLI: lifecycle and conversation input are web-driven. A narrow CLI inside each running orb can read sibling-orb metadata and replicated transcripts so the agent can coordinate with prior work.
+The first version requires no local checkout or user-operated CLI: lifecycle and conversation input are web-driven. A narrow CLI inside each running orb can read sibling-orb metadata and replicated transcripts so the agent can coordinate with prior work. Owner-scoped committed-history search uses authenticated `POST /runtime/v1/history/search` with a JSON query body and `{v:1,hits}` response; contract: `docs/history-search.md`.
 
 A signed-in user registers an owned project in the web UI with:
 

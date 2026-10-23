@@ -39,12 +39,12 @@ describe("boot notification decision", () => {
   it("records a silent baseline for a fresh conversation", () => {
     expect(planBootNotification([], [], boot)).toEqual({ kind: "baseline", identity: boot });
   });
-  it("wakes a settled conversation immediately with process-loss context", () => {
+  it("records settled process-loss context without starting a turn", () => {
     const plan = notice(settled);
-    expect(plan.triggerTurn).toBe(true);
+    expect(plan.triggerTurn).toBe(false);
     expect(plan.marker.customType).toBe("pi-orb.host-restarted");
     expect(plan.marker.content).toBe(
-      "The host was restarted involuntarily. Continue whatever you were doing, but note: All processes running before the restart were killed, including servers, background jobs, and shell sessions. Reassess any assumptions about running processes; restart only what is still needed for the user's task. Do not repeat completed work. Do not resume aborted work.",
+      "The host was restarted. All processes running before the restart were killed, including servers, background jobs, and shell sessions. Reassess any assumptions about running processes; restart only what is still needed for the user's task. Do not repeat completed work. Do not resume aborted work.",
     );
     expect(plan.marker.details).toMatchObject({
       ...boot,
@@ -67,7 +67,7 @@ describe("boot notification decision", () => {
     }
   });
   it("deduplicates the same runtime boot even after compaction", () => {
-    const marker = persisted(notice(settled));
+    const marker = persisted(notice([initialBoot, user, dangling]));
     expect(planBootNotification([...settled, marker], [finished], boot).kind).toBe("none");
   });
   it("combines a sleep wake with restart context and inbox identity", () => {
@@ -116,18 +116,24 @@ describe("boot notification decision", () => {
     expect(plan.marker.content).not.toContain("Continue whatever you were doing");
   });
   it("claims three attempts even when a notification crashes before inference", () => {
-    const marker = persisted(notice(settled));
-    const second = notice([...settled, marker], { ...boot, runtimeInstanceId: "runtime-3" });
+    const marker = persisted(notice([initialBoot, user, dangling]));
+    const second = notice([initialBoot, user, dangling, marker], {
+      ...boot,
+      runtimeInstanceId: "runtime-3",
+    });
     expect(second.triggerTurn).toBe(true);
-    const third = notice([...settled, marker, persisted(second)], {
+    const third = notice([initialBoot, user, dangling, marker, persisted(second)], {
       ...boot,
       runtimeInstanceId: "runtime-4",
     });
     expect(third.triggerTurn).toBe(true);
-    const plan = notice([...settled, marker, persisted(second), persisted(third)], {
-      ...boot,
-      runtimeInstanceId: "runtime-5",
-    });
+    const plan = notice(
+      [initialBoot, user, dangling, marker, persisted(second), persisted(third)],
+      {
+        ...boot,
+        runtimeInstanceId: "runtime-5",
+      },
+    );
     expect(plan.triggerTurn).toBe(false);
     expect(plan.marker.details.reason).toBe("declined_already_resumed");
     expect(plan.marker.content).toContain("will not be resumed automatically");
@@ -155,7 +161,7 @@ describe("boot notification decision", () => {
     });
   });
   it("compaction cannot erase the notification crash-loop budget", () => {
-    const marker = persisted(notice(settled));
+    const marker = persisted(notice([initialBoot, user, dangling]));
     const compacted = {
       type: "compaction",
       id: "compact",
@@ -173,33 +179,26 @@ describe("boot notification decision", () => {
     expect(plan.kind === "message" && plan.triggerTurn).toBe(false);
   });
   it("does not grant a notification-generated tool turn an extra retry", () => {
-    const marker = persisted(notice(settled));
+    const marker = persisted(notice([initialBoot, user, dangling]));
     const plan = notice([...settled, marker, marker, marker, dangling], {
       ...boot,
       runtimeInstanceId: "runtime-3",
     });
     expect(plan.triggerTurn).toBe(false);
   });
-  it("allows notices on later real restart edges once the notification turn settled", () => {
-    const marker = persisted(notice(settled));
-    expect(
-      notice([...settled, marker, finished], { ...boot, runtimeInstanceId: "runtime-3" })
-        .triggerTurn,
-    ).toBe(true);
-  });
-  it("keeps completed restart notices triggering beyond three claims", () => {
+  it("repeated settled boots neither infer nor spend the recovery budget", () => {
     let records: unknown[] = settled;
-    for (const runtimeInstanceId of ["runtime-2", "runtime-3", "runtime-4"]) {
+    for (const runtimeInstanceId of ["runtime-2", "runtime-3", "runtime-4", "runtime-5"]) {
       const plan = notice(records, { ...boot, runtimeInstanceId });
-      expect(plan.triggerTurn).toBe(true);
-      records = [...records, persisted(plan), finished];
+      expect(plan.triggerTurn).toBe(false);
+      expect(plan.marker.details.reason).not.toBe("declined_already_resumed");
+      records = [...records, persisted(plan)];
     }
-    const fourth = notice(records, { ...boot, runtimeInstanceId: "runtime-5" });
-    expect(fourth.triggerTurn).toBe(true);
-    expect(fourth.marker.customType).toBe("pi-orb.host-restarted");
-    expect(
-      notice([...records, user], { ...boot, runtimeInstanceId: "runtime-5" }).triggerTurn,
-    ).toBe(true);
+    const interrupted = notice([...records, user, dangling], {
+      ...boot,
+      runtimeInstanceId: "runtime-6",
+    });
+    expect(interrupted.triggerTurn).toBe(true);
   });
   it("a durable inbox user message resets the loop guard", () => {
     let records: unknown[] = settled;
@@ -222,12 +221,12 @@ describe("boot notification decision", () => {
     expect(plan.marker.customType).toBe("pi-orb.host-restarted");
     expect(plan.marker.content).toContain("Do not repeat completed work.");
     expect(plan.marker.content).toContain("Do not resume aborted work.");
-    expect(plan.triggerTurn).toBe(true);
+    expect(plan.triggerTurn).toBe(false);
   });
 });
 
 it("peer messages at the tail cannot reopen an exhausted interrupted-turn budget", () => {
-  const marker = persisted(notice(settled));
+  const marker = persisted(notice([initialBoot, user, dangling]));
   const peer = {
     type: "custom_message",
     id: "peer",

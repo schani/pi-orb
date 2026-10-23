@@ -1,6 +1,7 @@
 import type {
   HarnessSessionMetadata,
   HistoryRecord,
+  HistorySearchHit,
   MessageInputBlock,
   OrbBootContext,
   OrbMessageSystem,
@@ -199,6 +200,22 @@ export interface CommitPullBatchParams {
   readonly records: readonly HistoryRecord[];
   readonly nextCursor: string;
   readonly nextHeadId: string | null;
+}
+
+export interface HistorySearchParams {
+  readonly ownerUserId: string;
+  readonly projectId?: string;
+  readonly orbId?: string;
+  readonly query: string;
+  readonly limit: number;
+}
+
+export type HistorySearchMatch = Omit<HistorySearchHit, "orbUrl">;
+
+export interface HistorySearchPage {
+  readonly hits: HistorySearchMatch[];
+  readonly documentCount: number;
+  readonly candidateCount: number;
 }
 
 /**
@@ -536,6 +553,11 @@ export interface ControlPlaneStore extends ActivityHeadlineStore {
     sessionId: string,
     recordId: string,
   ): ResultAsync<HistoryRecord | null, StoreError>;
+
+  searchHistory(
+    task: SimulationTask,
+    params: HistorySearchParams,
+  ): ResultAsync<HistorySearchPage, StoreError>;
 
   /** Consistent snapshot for the history API and live handoff (docs/history-replication.md). */
   readHistorySnapshot(

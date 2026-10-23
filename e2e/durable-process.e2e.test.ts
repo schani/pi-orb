@@ -256,7 +256,7 @@ it.runIf(process.env["PI_ORB_E2E_BACKEND"] === "process")(
     });
     const script = `
 const orbNamespace = await describeNamespace('orb');
-if (!orbNamespace?.instructions || !orbNamespace.tools.includes('orb_self')) throw new Error('missing orb namespace');
+if (!orbNamespace?.instructions || !orbNamespace.tools.includes('orb_self') || !orbNamespace.tools.includes('orb_search_history')) throw new Error('missing orb namespace');
 text('ORB_NAMESPACE_OK');
 text(await tools.mcp__fixture__echo({value:'root'}));
 text(await tools.write({path:'durable-file.txt',content:'REMOTE_WRITE_OK'}));
@@ -274,7 +274,11 @@ text(await tools.cancel_subagent({agent_id:cancelled.agent_id}));
 const self = await tools.orb_self({});
 if (typeof self !== 'object' || !self.orb?.id) throw new Error('orb_self must return an object');
 text(self);
-text(await tools.orb_alert({message:'DURABLE_NATIVE_ALERT'}));
+const alert = await tools.orb_alert({message:'DURABLE_NATIVE_ALERT'});
+text(alert);
+if (!alert.recordId) throw new Error('missing committed alert receipt');
+const search = await tools.orb_search_history({query:'DURABLE_NATIVE_ALERT',limit:50});
+if (!search.hits.some(hit => hit.recordId === alert.recordId && hit.orbId === self.orb.id && hit.snippet.includes('DURABLE_NATIVE_ALERT'))) throw new Error('committed alert missing from search');
 text('DURABLE_SCRIPT_DONE');`;
     const fake = await createFakeSession(`durable-process-${randomUUID()}`, {
       auth: { accountId: "durable-process", device: { manualApprove: true } },

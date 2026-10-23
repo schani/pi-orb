@@ -39,6 +39,27 @@ describe("orb inspection HTTP endpoint", () => {
     );
   });
 
+  it("posts search privately with bearer authentication", async () => {
+    const request = { query: "sensitive needle", scope: "project" as const, limit: 10 };
+    const fetchMock = vi.fn(async () => response(200, { v: 1, hits: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await new HttpOrbInspectionEndpoint(env).search(task, request)).toEqual({
+      kind: "search",
+      value: { v: 1, hits: [] },
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://runtime.example/runtime/v1/history/search",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify(request),
+        headers: {
+          authorization: "Bearer runtime-secret",
+          "content-type": "application/json",
+        },
+      }),
+    );
+  });
+
   it("consumes a large chunked transcript through real HTTP before the existing deadline", async () => {
     const app = Fastify({ logger: false });
     const text = "x".repeat(33 * 1024 * 1024);

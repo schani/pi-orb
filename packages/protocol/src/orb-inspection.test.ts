@@ -102,11 +102,11 @@ describe("orb inspection schemas", () => {
     ).toBe(true);
   });
 
-  it("keeps inspection failures on one typed envelope", () => {
+  it.each(["not_found", "invalid_request"])("keeps %s failures on one typed envelope", (code) => {
     expect(
       Check(OrbInspectionErrorSchema, {
         v: 1,
-        error: { code: "not_found", message: "orb not found", retryable: false },
+        error: { code, message: "orb inspection failed", retryable: false },
       }),
     ).toBe(true);
   });
