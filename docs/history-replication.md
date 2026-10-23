@@ -518,3 +518,5 @@ COMMIT;
 Lifecycle transitions use `state_version` compare-and-swap, increment it, and update `state_changed_at`. Replication updates change neither `state_version` nor `state_changed_at`, and lifecycle updates do not change replication fields, so the two correctness checks remain logically independent even though PostgreSQL may briefly serialize writes to the same orb row.
 
 Keep the first migration as one hand-written `001_initial.sql`. The `pg` adapter executes migrations and repository operations with explicit `BEGIN`/`COMMIT`/`ROLLBACK`, wrapping every driver call in `ResultAsync.fromThrowable`.
+
+Committed public history is also searchable without waking compute through a PostgreSQL-maintained GIN expression index on `history_records.record`; source writes require no search maintenance. Exact query-time BM25, eligibility, privacy and cost: `docs/history-search.md`.

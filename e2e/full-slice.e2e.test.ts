@@ -15,6 +15,7 @@ import { basename, dirname, join } from "node:path";
 import {
   DEFAULT_TTL_SECONDS,
   type DisplayRecord,
+  type HistorySearchResponse,
   ID_TOKEN_PATH,
   RUNTIME_SUBPROTOCOL,
   type ServerFrame,
@@ -2292,6 +2293,36 @@ describe("full slice E2E", () => {
       "ORB_INSPECT_TRANSCRIPT_DONE",
     );
     expect(transcriptFromSibling).toContain("The check succeeded: E2E_TOOL_OK.");
+
+    const committed = await readReplicatedHistorySnapshot(controlPlane, orbId);
+    const marker = committed.records.find(
+      (record) =>
+        record.type === "message" &&
+        record.role === "assistant" &&
+        record.content.some(
+          (block) => block.type === "text" && block.text === "The check succeeded: E2E_TOOL_OK.",
+        ),
+    );
+    expect(marker).toBeDefined();
+    const searched = await terminalRun(
+      secondOrbId,
+      `pi-orb search succeeded --orb ${orbId} --limit 50 --json; printf '\\123\\105\\101\\122\\103\\110\\137\\104\\117\\116\\105\\012'`,
+      "SEARCH_DONE",
+    );
+    const searchResult = JSON.parse(
+      searched.slice(searched.indexOf('{\r\n  "v"'), searched.indexOf("SEARCH_DONE")),
+    ) as HistorySearchResponse;
+    expect(searchResult.v).toBe(1);
+    expect(searchResult.hits).toContainEqual(
+      expect.objectContaining({
+        orbId,
+        recordId: marker?.id,
+        sessionId: committed.session?.id,
+        snippet: "The check succeeded: E2E_TOOL_OK.",
+        orbUrl: `${base}/orbs/${orbId}`,
+      }),
+    );
+    expect((await api(base, "GET", `/api/v1/orbs/${orbId}`)).body["state"]).toBe("stopped");
 
     const spawnedOrbId = randomUUID();
     scenarioEvidence.target = spawnedOrbId;

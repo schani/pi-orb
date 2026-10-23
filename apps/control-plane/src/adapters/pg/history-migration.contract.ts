@@ -11,6 +11,7 @@ import { jsonParam, mapPgError, PgClient } from "./client.ts";
 import { runMigrations } from "./migrate.ts";
 
 const migration = "044_lossless_history_json.sql";
+const searchMigration = "049_history_search.sql";
 
 // Real relation locks, not PGlite; sessions and backoff gates belong to each schema.
 export function historyMigrationContractTests(label: string, connectionString: () => string) {
@@ -50,7 +51,10 @@ export function historyMigrationContractTests(label: string, connectionString: (
           )
         )._unsafeUnwrap();
         (
-          await client.query("INSERT INTO schema_migrations (name) VALUES ($1)", [migration])
+          await client.query("INSERT INTO schema_migrations (name) VALUES ($1), ($2)", [
+            migration,
+            searchMigration,
+          ])
         )._unsafeUnwrap();
         (await runMigrations(client))._unsafeUnwrap();
 
@@ -90,7 +94,10 @@ export function historyMigrationContractTests(label: string, connectionString: (
           )
         )._unsafeUnwrap();
         (
-          await client.query("DELETE FROM schema_migrations WHERE name=$1", [migration])
+          await client.query("DELETE FROM schema_migrations WHERE name IN ($1, $2)", [
+            migration,
+            searchMigration,
+          ])
         )._unsafeUnwrap();
         if (outcome === "rollback") {
           // Fail after both ALTERs, at the runner's ledger INSERT.
@@ -177,8 +184,13 @@ export function historyMigrationContractTests(label: string, connectionString: (
           { last_value: outcome === "exhaustion" ? "119" : "1" },
         ]);
         if (outcome === "commit") {
-          expect(migrated._unsafeUnwrap()).toEqual([migration]);
-          expect(stages).toEqual([`${migration}:started`, `${migration}:applied`]);
+          expect(migrated._unsafeUnwrap()).toEqual([migration, searchMigration]);
+          expect(stages).toEqual([
+            `${migration}:started`,
+            `${migration}:applied`,
+            `${searchMigration}:started`,
+            `${searchMigration}:applied`,
+          ]);
         } else {
           expect(migrated.isErr() && migrated.error.sqlState).toBe(
             outcome === "exhaustion" ? "55P03" : "23514",
@@ -202,9 +214,19 @@ export function historyMigrationContractTests(label: string, connectionString: (
         ]);
         expect(
           (
-            await query("SELECT name FROM schema_migrations WHERE name=$1", [migration])
+            await query("SELECT name FROM schema_migrations WHERE name IN ($1, $2) ORDER BY name", [
+              migration,
+              searchMigration,
+            ])
           )._unsafeUnwrap().rows,
-        ).toEqual(outcome === "commit" ? [{ name: migration }] : []);
+        ).toEqual(outcome === "commit" ? [{ name: migration }, { name: searchMigration }] : []);
+        expect(
+          (
+            await query(
+              "SELECT indexname FROM pg_indexes WHERE schemaname=current_schema() AND indexname='history_records_search_idx'",
+            )
+          )._unsafeUnwrap().rows,
+        ).toEqual(outcome === "commit" ? [{ indexname: "history_records_search_idx" }] : []);
         const constraints = (
           await query(
             `SELECT conname FROM pg_constraint

@@ -1,7 +1,8 @@
-import { type OrbSpawnRequest, previewHost } from "@pi-orb/protocol";
+import { type HistorySearchRequest, type OrbSpawnRequest, previewHost } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, ResultAsync } from "neverthrow";
 import { acceptsCentralAgentCaller } from "./agent-authorization.ts";
+import { searchOrbHistory } from "./history-search.ts";
 import { requestOrbArchive, requestOrbDeletion, requestOrbSleep } from "./lifecycle.ts";
 import type { OrbRow } from "./orb.ts";
 import { sendOrbMessage } from "./orb-messaging.ts";
@@ -20,6 +21,7 @@ export interface OrbAgentIdentity {
 export type OrbAgentRequest =
   | { kind: "self" | "list" | "archive" | "delete" | "notification_admission" }
   | { kind: "transcript"; orbId: string }
+  | ({ kind: "search" } & HistorySearchRequest)
   | ({ kind: "spawn" } & OrbSpawnRequest)
   | { kind: "alert"; message: string }
   | { kind: "send"; orbId: string; message: string }
@@ -143,6 +145,10 @@ export function createOrbAgentOperations(
                 (a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id),
               );
               return ok({ currentOrbId: orb.id, items });
+            }
+            case "search": {
+              const { kind: _kind, ...search } = request;
+              return await searchOrbHistory(task, deps.store, identity, search, options.appOrigin);
             }
             case "transcript": {
               // Explicit company-wide inspection matches the runtime CLI policy; discovery is owner-scoped.

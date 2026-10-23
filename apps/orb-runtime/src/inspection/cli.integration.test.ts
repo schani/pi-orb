@@ -74,6 +74,34 @@ describe("pi-orb inspection CLI entry point", () => {
         );
         return;
       }
+      if (request.url === "/runtime/v1/history/search") {
+        expect(request.method).toBe("POST");
+        let body = "";
+        request.on("data", (chunk) => {
+          body += chunk;
+        });
+        request.on("end", () => {
+          expect(JSON.parse(body)).toEqual({ query: "needle", orbId: "orb-sibling", limit: 50 });
+          response.end(
+            JSON.stringify({
+              v: 1,
+              hits: [
+                {
+                  orbId: orb.id,
+                  sessionId: "s",
+                  recordId: "r",
+                  name: orb.name,
+                  projectName: orb.project.name,
+                  snippet: "public needle",
+                  score: 1,
+                  orbUrl: "https://app/orbs/orb-sibling",
+                },
+              ],
+            }),
+          );
+        });
+        return;
+      }
       if (request.url === "/runtime/v1/orb/self") {
         if (mode === "unavailable") {
           response.statusCode = 503;
@@ -146,6 +174,25 @@ describe("pi-orb inspection CLI entry point", () => {
 
   afterEach(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it("dispatches search as JSON or text and preserves errors", async () => {
+    const args = ["search", "needle", "--orb", "orb-sibling", "--limit", "50"];
+    const json = await runCli(baseUrl, [...args, "--json"]);
+    expect(json).toMatchObject({ code: 0, stderr: "" });
+    expect(JSON.parse(json.stdout)).toMatchObject({
+      v: 1,
+      hits: [{ recordId: "r", snippet: "public needle" }],
+    });
+    const text = await runCli(baseUrl, args);
+    expect(text).toMatchObject({ code: 0, stderr: "" });
+    expect(text.stdout).toContain("public needle");
+    mode = "missing";
+    expect(await runCli(baseUrl, [...args, "--json"])).toMatchObject({
+      code: 4,
+      stdout: "",
+      stderr: "pi-orb: orb not found\n",
+    });
   });
 
   it("prints self as a summary or structured JSON", async () => {
