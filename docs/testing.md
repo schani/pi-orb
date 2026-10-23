@@ -1749,3 +1749,5 @@ Critical responsive source checks stay within balanced matching media blocks. Ch
 Transcript cache qualification reads the actual immutable default budget (256 MiB); small injected-budget cases exercise eviction and oversized replacements. (2026-10-22 PDT).
 
 DetailBody owns generic argument/result and image-body rendering once; ToolActivity/HistoryView retain their summary, deferral, role, chart and projection integration assertions. (2026-10-22 PDT).
+
+Composer normalization contracts live with composer-mode; command-options tests exercise option selection only. (2026-10-22 PDT).
