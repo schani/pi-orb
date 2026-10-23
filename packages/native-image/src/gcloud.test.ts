@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { errAsync, okAsync } from "neverthrow";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CleanupEvidence } from "./cleanup-evidence.ts";
 import {
   type CommandRunner,
@@ -726,35 +726,47 @@ describe("GCloud native-image adapter", () => {
     expect(requests).toBe(1);
   });
 
-  it("refuses to delete a foreign resource", async () => {
-    const calls: string[][] = [];
-    const effects = new GcloudImageBuildEffects(async (_command, args) => {
-      calls.push(args);
-      if (args[1] === "operations") return { stdout: "[]", stderr: "" };
-      return {
-        stdout: JSON.stringify({
-          name: "pi-orb-builder-v1-0123456789abcdef",
-          labels: { "pi-orb-native-build": "another-owner" },
-        }),
-        stderr: "",
-      };
-    });
-    const value = await effects.run(
-      "cleanup",
-      "delete-builder",
-      await input(),
-      new AbortController().signal,
-    );
-    expect(value.isErr() && value.error.message).toContain("refusing to delete foreign");
-    expect(calls).toHaveLength(2);
-    expect(calls[1]).toContain("--format=json(name,labels)");
-  });
+  it.each(["conflict", "missing label", "snapshot failure"] as const)(
+    "refuses image deletion after %s",
+    async (scenario) => {
+      const submit = vi.fn(() => okAsync({}));
+      const effects = new GcloudImageBuildEffects(
+        async (_command, args) => {
+          if (args[1] === "operations") return { stdout: "[]", stderr: "" };
+          if (scenario === "snapshot failure") throw new Error("snapshot unavailable");
+          return {
+            stdout: JSON.stringify({
+              name: "pi-orb-image-v1-0123456789abcdef",
+              labels: scenario === "conflict" ? { "pi-orb-native-build": "another-owner" } : {},
+            }),
+            stderr: "",
+          };
+        },
+        undefined,
+        undefined,
+        undefined,
+        submit,
+      );
+      const result = await effects.run(
+        "cleanup",
+        "delete-image",
+        await input(),
+        new AbortController().signal,
+      );
+      expect(result.isErr()).toBe(true);
+      expect(result.isErr() && result.error.message).toContain(
+        scenario === "snapshot failure" ? "snapshot unavailable" : "refusing to delete foreign",
+      );
+      expect(submit).not.toHaveBeenCalled();
+    },
+  );
 
   it("deletes only after the ownership label matches", async () => {
     const calls: string[][] = [];
     const target =
       "projects/target-project/zones/us-central1-a/instances/pi-orb-builder-v1-0123456789abcdef";
     const operation = "delete-builder-operation";
+    const deletes: string[] = [];
     const effects = new GcloudImageBuildEffects(
       async (_command, args) => {
         calls.push(args);
@@ -791,14 +803,16 @@ describe("GCloud native-image adapter", () => {
       undefined,
       undefined,
       undefined,
-      () =>
-        okAsync({
+      (target) => {
+        deletes.push(target);
+        return okAsync({
           name: operation,
           operationType: "delete",
           status: "RUNNING",
           targetLink: target,
           selfLink: `projects/target-project/zones/us-central1-a/operations/${operation}`,
-        }),
+        });
+      },
     );
     const value = await effects.run(
       "cleanup",
@@ -807,6 +821,7 @@ describe("GCloud native-image adapter", () => {
       new AbortController().signal,
     );
     expect(value.isOk()).toBe(true);
+    expect(deletes).toEqual([target]);
     expect(calls.map((args) => args.slice(0, 3))).toEqual([
       ["compute", "operations", "list"],
       ["compute", "instances", "describe"],

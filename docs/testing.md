@@ -1721,3 +1721,5 @@ passes: 107 Node, 220 Python and 33 native-guest tests, plus filesystem/service
 checks. Local heavy phases were serialized across the dependency worktrees.
 CI owns the full unit/DST suite, runtime E2E and container builds; native cloud-image,
 acceptance and retained-workspace qualification have not run. No deployment.
+
+Native image cleanup tests observe the injected delete submitter: owned resources submit once; conflicting/missing labels and failed snapshots submit nothing. (2026-10-22 PDT).
