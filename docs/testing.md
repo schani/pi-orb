@@ -1759,3 +1759,5 @@ Background-admission projection keeps one missing-native discriminator alongside
 Closed-schema tests own top-level event/message and nested custom-field rejection together. (2026-10-22 PDT).
 
 One successful builder-create fixture pins both machine type and instance-only SSH metadata. (2026-10-22 PDT).
+
+Alert helper tests name snapshot and acknowledgement behavior; mounted late-arrival chronology remains in orb-alerts frontend coverage. (2026-10-22 PDT).

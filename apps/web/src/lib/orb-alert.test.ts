@@ -17,16 +17,14 @@ describe("alert entry acknowledgement", () => {
     );
     expect(beginAlertEntry(null, latestEntryAlertId([], null)).recordId).toBeNull();
   });
-  it("captures the alert observed on entry, never a later poll or live arrival", () => {
+  it("keeps a newer alert unread when acknowledging the entry snapshot", () => {
     const entry = beginAlertEntry("a", "a");
-    expect(entry.recordId).toBe("a");
     expect(entry.recordId).toBe("a");
     expect(resolveAlertAck(entry, "b", null)).toEqual({ unreadAlertId: "b", error: null });
   });
 
-  it("consumes an unflagged entry rather than acknowledging a late alert", () => {
+  it("captures a null alert for an unflagged entry", () => {
     const entry = beginAlertEntry(null, null);
-    expect(entry.recordId).toBeNull();
     expect(entry.recordId).toBeNull();
   });
 
