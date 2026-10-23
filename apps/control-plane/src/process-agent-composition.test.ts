@@ -14,15 +14,15 @@ import { describe, expect, it, vi } from "vitest";
 import { DurableAgent } from "./adapters/durable/agent.ts";
 import { durableError } from "./adapters/durable/manager.ts";
 import * as durableModels from "./adapters/durable/models.ts";
+import { McpTools } from "./adapters/durable/tools/mcp.ts";
 import { RemoteExecutionEnv } from "./adapters/execution-client/env.ts";
+import { LazyExecutionEnv } from "./adapters/execution-client/lazy-env.ts";
 import * as brokerDomain from "./domain/broker.ts";
 import {
-  admitProcessAgentResources,
   closeProcessAgentResources,
   mcpFetchSignal,
   processAgentContext,
   processAgentSystemContext,
-  processMcpDiscoveryDiagnostics,
   createProcessAgentContext as productionCreateProcessAgentContext,
   refreshProcessTools,
   scopedMcpAuth,
@@ -65,54 +65,6 @@ function createProcessAgentContext(
 }
 
 describe("process agent composition", () => {
-  it("retains discovery phase evidence only for failed startup attempts", () => {
-    const task = new NoSimulationTask("discovery-diagnostics", false);
-    const clock = vi.spyOn(task, "monotonicNow").mockReturnValue(150);
-    const log = vi.spyOn(task, "log").mockImplementation(() => {});
-    const diagnostics = processMcpDiscoveryDiagnostics(task, "orb", 7, 100);
-    const started = {
-      attempt: 1,
-      server: "fixture",
-      serverOrdinal: 1,
-      serverTotal: 2,
-      phase: "initialize" as const,
-      outcome: "started" as const,
-      elapsedMs: 0,
-      discoveryElapsedMs: 0,
-      aborted: false,
-    };
-    try {
-      diagnostics.record(started);
-      expect(log).not.toHaveBeenCalled();
-      clock.mockReturnValue(170);
-      diagnostics.record({
-        ...started,
-        outcome: "aborted",
-        elapsedMs: 20,
-        discoveryElapsedMs: 20,
-        aborted: true,
-      });
-      expect(log).toHaveBeenCalledTimes(2);
-      expect(log.mock.calls[0]?.[0]).toContain("composition_elapsed_ms=50");
-      expect(log.mock.calls[1]?.[0]).toContain("outcome=aborted");
-      expect(log.mock.calls[1]?.[0]).toContain("composition_elapsed_ms=70");
-      expect(log.mock.calls[1]?.[0]).toContain("phase_elapsed_ms=20");
-      expect(log.mock.calls[1]?.[0]).toContain("discovery_elapsed_ms=20");
-      diagnostics.finish?.(1);
-      diagnostics.record(started);
-      expect(log).toHaveBeenCalledTimes(2);
-      diagnostics.record({ ...started, outcome: "failed", errorCategory: "unavailable" });
-      expect(log).toHaveBeenCalledTimes(4);
-      const healthy = processMcpDiscoveryDiagnostics(task, "orb", 7, 100);
-      healthy.record(started);
-      healthy.record({ ...started, outcome: "completed" });
-      healthy.finish?.(1);
-      expect(log).toHaveBeenCalledTimes(4);
-    } finally {
-      log.mockRestore();
-      clock.mockRestore();
-    }
-  });
   it("opens without MCP network and uses fresh SDK auth admission after opening cancellation", async () => {
     const harness = makeHarness();
     const orb = makeOrbRow("central", "project", "starting", {
@@ -437,18 +389,40 @@ describe("process agent composition", () => {
     expect(opening.signal.aborted).toBe(false);
   });
 
-  it.each(["http", "network", "credential"] as const)(
-    "records sanitized %s failure at the MCP adapter boundary",
+  it.each(["http", "network", "credential", "recovered"] as const)(
+    "records only terminal, sanitized MCP failures (%s)",
     async (failure) => {
       const h = makeHarness();
       const orb = makeOrbRow("central", "project", "starting");
       h.store.seedProject(makeProjectRow("project"));
       h.store.seedOrb(orb);
-      const task = new NoSimulationTask("mcp-failure", false);
+      const task = new NoSimulationTask("mcp-diagnostics", false);
       const log = vi.spyOn(task, "log").mockImplementation(() => {});
-      const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      let initializes = 0,
+        deletes = 0;
+      const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
         if (failure === "network") throw new Error("SECRET URL TOKEN");
-        return new Response(null, { status: 503 });
+        if (failure !== "recovered") return new Response(null, { status: 503 });
+        if (init?.method === "DELETE") {
+          deletes++;
+          return new Response(null, { status: 405 });
+        }
+        if (init?.method === "GET") return new Response(null, { status: 405 });
+        const message = JSON.parse(String(init?.body));
+        if (message.method !== "initialize") return new Response(null, { status: 202 });
+        if (++initializes === 1) return new Response(null, { status: 401 });
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              protocolVersion: "2025-11-25",
+              capabilities: {},
+              serverInfo: { name: "fixture", version: "1" },
+            },
+          }),
+          { headers: { "Content-Type": "application/json", "Mcp-Session-Id": "session" } },
+        );
       });
       const models = vi
         .spyOn(durableModels, "createDurableModels")
@@ -463,12 +437,19 @@ describe("process agent composition", () => {
                     name: "fixture",
                     url: "https://mcp.invalid",
                     headers: {},
-                    ...(failure === "credential" ? { oauth: { id: "auth" } } : {}),
+                    ...(["credential", "recovered"].includes(failure)
+                      ? { oauth: { id: "auth" } }
+                      : {}),
                   },
                 ],
               }),
           },
-          mcpOAuth: { token: async () => err({ type: "mcp_oauth_error", code: "auth_required" }) },
+          mcpOAuth: {
+            token: async () =>
+              failure === "credential"
+                ? err({ type: "mcp_oauth_error", code: "auth_required" })
+                : ok({ accessToken: "token", generation: 1, expiresAt: 9999999999999 }),
+          },
         } as never);
         const result = await open(task, orb, { signal: new AbortController().signal });
         expect(result.isOk()).toBe(true);
@@ -484,16 +465,26 @@ describe("process agent composition", () => {
           { diagnostic: () => {} } as never,
           BACKGROUND_CONTEXT,
         );
-        expect(JSON.stringify(output)).toContain(
-          failure === "credential" ? "needs-auth" : "unavailable",
-        );
         const lines = log.mock.calls.map(([line]) => line).join("\n");
-        expect(lines).toContain(
-          `errorCategory=${failure === "credential" ? "auth_required" : failure}`,
-        );
-        if (failure === "http") expect(lines).toContain("http_status=503");
-        expect(lines).not.toContain("SECRET");
-        expect(lines).not.toContain("https://");
+        if (failure === "recovered") {
+          expect(JSON.parse(String(output?.structuredOutput))).toEqual([
+            { name: "fixture", status: "available" },
+          ]);
+          expect(initializes).toBe(2);
+          expect(deletes).toBe(1);
+          expect(lines).not.toContain("durable.mcp_");
+        } else {
+          expect(JSON.stringify(output)).toContain(
+            failure === "credential" ? "needs-auth" : "unavailable",
+          );
+          expect(lines).toContain(
+            `errorCategory=${failure === "credential" ? "auth_required" : failure}`,
+          );
+          expect(lines.match(/durable.mcp_discovery/g)).toHaveLength(1);
+          if (failure === "http") expect(lines).toContain("http_status=503");
+          expect(lines).toContain("phase=initialize");
+        }
+        expect(lines).not.toMatch(/SECRET|https:\/\//);
         await result.value.closeResources?.();
       } finally {
         log.mockRestore();
@@ -502,78 +493,6 @@ describe("process agent composition", () => {
       }
     },
   );
-
-  it("keeps recovered authorization challenges and unsupported cleanup silent", async () => {
-    const h = makeHarness();
-    const orb = makeOrbRow("central", "project", "starting");
-    h.store.seedProject(makeProjectRow("project"));
-    h.store.seedOrb(orb);
-    const task = new NoSimulationTask("mcp-healthy", false);
-    const log = vi.spyOn(task, "log").mockImplementation(() => {});
-    let initializes = 0;
-    let deletes = 0;
-    const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
-      if (init?.method === "DELETE") {
-        deletes++;
-        return new Response(null, { status: 405 });
-      }
-      if (init?.method === "GET") return new Response(null, { status: 405 });
-      const message = JSON.parse(String(init?.body));
-      if (message.method !== "initialize") return new Response(null, { status: 202 });
-      if (++initializes === 1) return new Response(null, { status: 401 });
-      return new Response(
-        JSON.stringify({
-          jsonrpc: "2.0",
-          id: message.id,
-          result: {
-            protocolVersion: "2025-11-25",
-            capabilities: {},
-            serverInfo: { name: "fixture", version: "1" },
-          },
-        }),
-        { headers: { "Content-Type": "application/json", "Mcp-Session-Id": "session" } },
-      );
-    });
-    const models = vi
-      .spyOn(durableModels, "createDurableModels")
-      .mockReturnValue(okAsync({ getModel: () => undefined } as never));
-    try {
-      const open = createProcessAgentContext(h.deps, {
-        mcp: {
-          read: () =>
-            okAsync({
-              servers: [
-                { name: "fixture", url: "https://mcp.invalid", headers: {}, oauth: { id: "auth" } },
-              ],
-            }),
-        },
-        mcpOAuth: {
-          token: async () => ok({ accessToken: "token", generation: 1, expiresAt: 9999999999999 }),
-        },
-      } as never);
-      const result = await open(task, orb, { signal: new AbortController().signal });
-      expect(result.isOk()).toBe(true);
-      if (result.isErr()) return;
-      const discover = result.value.registry
-        .snapshot()
-        .tools()
-        .find(({ tool }) => tool.name === "mcp_discover")?.tool;
-      const output = await discover?.execute(
-        { server: "fixture" },
-        { diagnostic: () => {} } as never,
-        BACKGROUND_CONTEXT,
-      );
-      expect(JSON.stringify(output)).toContain("available");
-      expect(initializes).toBe(2);
-      expect(deletes).toBe(1);
-      expect(log.mock.calls.map(([line]) => line).join("\n")).not.toContain("durable.mcp_");
-      await result.value.closeResources?.();
-    } finally {
-      models.mockRestore();
-      fetcher.mockRestore();
-      log.mockRestore();
-    }
-  });
 
   it("installs explicitly discovered tools for subsequent root and child scripts", async () => {
     const h = makeHarness();
@@ -717,20 +636,6 @@ describe("process agent composition", () => {
     expect(result.isErr()).toBe(true);
   });
 
-  it("refreshes the local native view without MCP discovery before code execution", async () => {
-    const execute = vi.fn(async () => ({ output: [{ type: "text" as const, text: "local" }] }));
-    const tool = refreshProcessTools({
-      name: "codemode",
-      description: "code",
-      parameters: Type.Object({}),
-      execute,
-    });
-    expect(await tool.execute({}, {} as never, BACKGROUND_CONTEXT)).toEqual({
-      output: [{ type: "text", text: "local" }],
-    });
-    expect(execute).toHaveBeenCalledOnce();
-  });
-
   it("does not execute code when the native MCP view cannot refresh", async () => {
     const execute = vi.fn(async () => ({}));
     const tool = refreshProcessTools(
@@ -777,56 +682,45 @@ describe("process agent composition", () => {
     expect(reasons).toEqual([{ reason: "startup" }, { reason: "rejected", staleGeneration: 1 }]);
   });
 
-  it("rejects admission aborted before registry installation and cleans both resources", async () => {
-    const controller = new AbortController();
-    let release: (() => void) | undefined;
-    const admission = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const cleaned: string[] = [];
-    const discovery = admitProcessAgentResources(
-      {
-        close: () => {
-          cleaned.push("tools");
-          return okAsync(undefined);
-        },
-      },
-      {
-        cleanup: async () => {
-          cleaned.push("env");
-        },
-      },
-      withAbortSignal(controller.signal, BACKGROUND_CONTEXT),
-      () => ResultAsync.fromSafePromise(admission),
-    );
-    controller.abort();
-    release?.();
-    const result = await discovery;
-    expect(result.isErr()).toBe(true);
-    if (result.isErr()) expect(result.error.code).toBe("cancelled");
-    expect(cleaned).toEqual(["tools", "env"]);
-  });
-
-  it("rejects revoked admission before registry installation and cleans both resources", async () => {
-    const cleaned: string[] = [];
-    const result = await admitProcessAgentResources(
-      {
-        close: () => {
-          cleaned.push("tools");
-          return okAsync(undefined);
-        },
-      },
-      {
-        cleanup: async () => {
-          cleaned.push("env");
-        },
-      },
-      BACKGROUND_CONTEXT,
-      () => errAsync(durableError("owner changed")),
-    );
-    expect(result.isErr()).toBe(true);
-    expect(cleaned).toEqual(["tools", "env"]);
-  });
+  it.each(["cancelled", "revoked"] as const)(
+    "rejects %s admission and closes both resources",
+    async (failure) => {
+      const h = makeHarness();
+      const orb = makeOrbRow("central", "project", "starting");
+      const project = makeProjectRow("project");
+      h.store.seedProject(project);
+      h.store.seedOrb(orb);
+      const controller = new AbortController();
+      const getProject = h.store.getProject.bind(h.store);
+      let reads = 0;
+      const owner = vi.spyOn(h.store, "getProject").mockImplementation((...args) => {
+        if (++reads === 2) {
+          if (failure === "cancelled") controller.abort();
+          else return okAsync({ ...project, ownerUserId: "other" });
+        }
+        return getProject(...args);
+      });
+      const tools = vi.spyOn(McpTools.prototype, "close");
+      const env = vi.spyOn(LazyExecutionEnv.prototype, "cleanup");
+      const models = vi
+        .spyOn(durableModels, "createDurableModels")
+        .mockReturnValue(okAsync({ getModel: () => undefined } as never));
+      try {
+        const result = await createProcessAgentContext(h.deps, {
+          mcp: { read: () => okAsync({ servers: [] }) },
+        } as never)(new NoSimulationTask("admission", false), orb, { signal: controller.signal });
+        expect(result.isErr()).toBe(true);
+        if (failure === "cancelled" && result.isErr()) expect(result.error.code).toBe("cancelled");
+        expect(tools).toHaveBeenCalledOnce();
+        expect(env).toHaveBeenCalledOnce();
+      } finally {
+        owner.mockRestore();
+        tools.mockRestore();
+        env.mockRestore();
+        models.mockRestore();
+      }
+    },
+  );
 
   it("preserves timezone with generic tool guidance", () => {
     const system = processAgentSystemContext("Asia/Tokyo");

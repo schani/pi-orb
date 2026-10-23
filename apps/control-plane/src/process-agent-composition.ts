@@ -13,8 +13,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { type AuthProvider, StreamableHttpTransport } from "@earendil-works/pi-mcp";
 import type { McpConfig } from "@pi-orb/protocol";
-import type { SimulationTask } from "determined";
-import { err, ok, okAsync, Result, ResultAsync } from "neverthrow";
+import { err, ok, okAsync, type Result, ResultAsync } from "neverthrow";
 import { NativeResourceContext } from "./adapters/durable/context-storage.ts";
 import { executionWaitProgress } from "./adapters/durable/execution-wait-progress.ts";
 import type { DurableAgentPlaneOptions } from "./adapters/durable/manager.ts";
@@ -30,7 +29,7 @@ import {
 } from "./adapters/durable/resource-context.ts";
 import { createAgentToolFiles } from "./adapters/durable/tool-files.ts";
 import { createDurableTools, type ToolError } from "./adapters/durable/tools/index.ts";
-import { McpAdapterFailure, type McpDiscoveryDiagnostics } from "./adapters/durable/tools/mcp.ts";
+import { McpAdapterFailure } from "./adapters/durable/tools/mcp.ts";
 import { createOrbTools } from "./adapters/durable/tools/orb-tools.ts";
 import { RemoteExecutionEnv } from "./adapters/execution-client/env.ts";
 import { LazyExecutionEnv } from "./adapters/execution-client/lazy-env.ts";
@@ -105,12 +104,11 @@ export function processAgentSystemContext(userTimeZone: string | null): string {
 
 export function refreshProcessTools(
   tool: ToolRegistration,
-  currentAgent?: (api: ToolExecutionApi, context: Context) => ResultAsync<Agent, ToolError>,
+  currentAgent: (api: ToolExecutionApi, context: Context) => ResultAsync<Agent, ToolError>,
 ): ToolRegistration {
   return {
     ...tool,
     execute: async (args, api, context) => {
-      if (!currentAgent) return tool.execute(args, api, context);
       const agent = await currentAgent(api, context);
       if (agent.isErr())
         return { isError: true, output: [{ type: "text", text: "Tool catalog unavailable" }] };
@@ -149,50 +147,6 @@ export function scopedMcpAuth(
   };
 }
 
-export function processMcpDiscoveryDiagnostics(
-  task: SimulationTask,
-  orbId: string,
-  admissionVersion: number,
-  compositionStartedAt: number,
-): McpDiscoveryDiagnostics {
-  const attempts = new Map<
-    number,
-    { pending: Parameters<typeof logOrbEvent>[3][]; failed: boolean }
-  >();
-  return {
-    now: () => task.monotonicNow(),
-    record: (event) => {
-      const attempt = attempts.get(event.attempt) ?? { pending: [], failed: false };
-      attempts.set(event.attempt, attempt);
-      attempt.pending.push({
-        processId: process.pid,
-        admission_version: admissionVersion,
-        composition_started_at: compositionStartedAt,
-        composition_elapsed_ms: task.monotonicNow() - compositionStartedAt,
-        attempt: event.attempt,
-        server: event.server,
-        server_ordinal: event.serverOrdinal,
-        server_total: event.serverTotal,
-        phase: event.phase,
-        outcome: event.outcome,
-        phase_elapsed_ms: event.elapsedMs,
-        discovery_elapsed_ms: event.discoveryElapsedMs,
-        signal_aborted: event.aborted,
-        errorCategory: event.errorCategory,
-        failure_stage: event.failureStage,
-        http_status: event.httpStatus,
-      });
-      attempt.failed ||= event.outcome === "failed" || event.outcome === "aborted";
-      if (attempt.failed)
-        for (const fields of attempt.pending.splice(0))
-          logOrbEvent(task, orbId, "durable.mcp_discovery", fields);
-    },
-    finish: (attempt) => {
-      attempts.delete(attempt);
-    },
-  };
-}
-
 export function closeProcessAgentResources(
   tools: { close: () => ResultAsync<void, ToolError> },
   env: { cleanup: (context: typeof BACKGROUND_CONTEXT) => Promise<void> },
@@ -203,30 +157,6 @@ export function closeProcessAgentResources(
       durableError("execution cleanup failed"),
     ),
   ]).map(() => undefined);
-}
-
-export function admitProcessAgentResources(
-  tools: { close: () => ResultAsync<void, ToolError> },
-  env: { cleanup: (context: Context) => Promise<void> },
-  context: Context,
-  admit: () => ResultAsync<void, RuntimeClientError>,
-): ResultAsync<void, RuntimeClientError> {
-  return ResultAsync.fromSafePromise(
-    (async () => {
-      const admitted = await admit();
-      if (admitted.isErr() || context.abortSignal?.aborted) {
-        await closeProcessAgentResources(tools, env);
-        return err<void, RuntimeClientError>(
-          context.abortSignal?.aborted
-            ? { ...durableError("agent composition cancelled"), code: "cancelled" }
-            : admitted.isErr()
-              ? admitted.error
-              : durableError("agent admission unavailable"),
-        );
-      }
-      return ok<void, RuntimeClientError>(undefined);
-    })(),
-  ).andThen((result) => result);
 }
 
 export function createProcessAgentContext(
@@ -265,7 +195,6 @@ export function createProcessAgentContext(
     };
     const context = withAbortSignal(operation.signal, BACKGROUND_CONTEXT);
     const run = async () => {
-      const compositionStartedAt = task.monotonicNow();
       if (operation.signal.aborted)
         return err({ ...durableError("agent composition cancelled"), code: "cancelled" as const });
       const project = await deps.store.getProject(task, orb.projectId);
@@ -482,14 +411,23 @@ export function createProcessAgentContext(
             .mapErr((): ToolError => ({ code: "forbidden", message: "Agent ownership revoked" })),
       });
       const notifyParent = options.notifyParent;
-      const discoveryDiagnostics = processMcpDiscoveryDiagnostics(
-        task,
-        orb.id,
-        orb.agentAdmissionVersion,
-        compositionStartedAt,
-      );
       const tools = createDurableTools({
-        mcpDiscovery: discoveryDiagnostics,
+        mcpDiscovery: {
+          now: () => task.monotonicNow(),
+          record: (failure) =>
+            logOrbEvent(task, orb.id, "durable.mcp_discovery", {
+              processId: process.pid,
+              admission_version: orb.agentAdmissionVersion,
+              server: failure.server,
+              phase: failure.phase,
+              outcome: failure.outcome,
+              phase_elapsed_ms: failure.elapsedMs,
+              discovery_elapsed_ms: failure.discoveryElapsedMs,
+              errorCategory: failure.errorCategory,
+              failure_stage: failure.failureStage,
+              http_status: failure.httpStatus,
+            }),
+        },
         orb: { id: orb.id, task },
         files: {
           read: (request, api, ctx) =>
@@ -526,8 +464,8 @@ export function createProcessAgentContext(
             name: server.name,
             unavailableState: () => (state === "needs-auth" ? "needs-auth" : "unavailable"),
             connect: (ctx) =>
-              ResultAsync.fromSafePromise(
-                (async () => {
+              ResultAsync.fromThrowable(
+                async () => {
                   const fetcher: typeof fetch = async (input, init) => {
                     const current = await deps.store.getProject(task, orb.projectId);
                     if (current.isErr() || current.value?.ownerUserId !== ownerUserId)
@@ -589,36 +527,22 @@ export function createProcessAgentContext(
                         },
                       )
                     : undefined;
-                  return Result.fromThrowable(
-                    () =>
-                      new StreamableHttpTransport({
-                        url: server.url,
-                        fetch: fetcher,
-                        ...(authProvider ? { authProvider } : {}),
-                      }),
-                    (): ToolError => ({
-                      code: "unavailable",
-                      message: "MCP transport unavailable",
-                    }),
-                  )();
-                })(),
-              ).andThen((result) => result),
+                  return new StreamableHttpTransport({
+                    url: server.url,
+                    fetch: fetcher,
+                    ...(authProvider ? { authProvider } : {}),
+                  });
+                },
+                (): ToolError => ({ code: "unavailable", message: "MCP transport unavailable" }),
+              )(),
           };
         }),
       });
-      const admission = await admitProcessAgentResources(tools, env, context, () =>
-        deps.store
-          .getProject(task, orb.projectId)
-          .mapErr(() => durableError("orb project unavailable", true))
-          .andThen((current) =>
-            current?.ownerUserId === ownerUserId
-              ? ok(undefined)
-              : err(durableError("orb owner changed")),
-          ),
-      );
-      if (admission.isErr()) return err(admission.error);
+      const currentProject = await deps.store.getProject(task, orb.projectId);
       const admitted = await deps.store.getOrb(task, orb.id);
       if (
+        currentProject.isErr() ||
+        currentProject.value?.ownerUserId !== ownerUserId ||
         admitted.isErr() ||
         !admitted.value ||
         admitted.value.agentAdmissionVersion !== orb.agentAdmissionVersion ||
@@ -629,7 +553,11 @@ export function createProcessAgentContext(
       ) {
         resourcesAbort.abort();
         await closeProcessAgentResources(tools, env);
-        return err(durableError("agent admission superseded"));
+        return err(
+          operation.signal.aborted
+            ? { ...durableError("agent composition cancelled"), code: "cancelled" as const }
+            : durableError("agent admission superseded"),
+        );
       }
       const registry = createRegistry();
       let conversation: Harness["conversation"] | undefined;

@@ -4,7 +4,7 @@ import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
 import { errAsync, okAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
-import { type McpDiscoveryEvent, McpTools } from "./mcp.ts";
+import { type McpDiscoveryFailure, McpTools } from "./mcp.ts";
 
 function deferred() {
   let resolve!: () => void;
@@ -14,101 +14,41 @@ function deferred() {
   return { promise, resolve };
 }
 
-it("records serial discovery stages and elapsed time without rediscovering available servers", async () => {
-  let now = 0;
-  const events: McpDiscoveryEvent[] = [];
-  const held = deferred();
-  const release = deferred();
-  const connected: string[] = [];
-  const mcp = new McpTools(
-    ["first", "second"].map((name) => ({
-      name,
-      connect: () => {
-        connected.push(name);
-        now += 2;
-        const { client, server } = createInMemoryTransportPair();
-        server.onMessage(async (message) => {
-          if (!("method" in message) || !("id" in message)) return;
-          if (message.method === "initialize") {
-            now += 3;
-            await server.send({
-              jsonrpc: "2.0",
-              id: message.id,
-              result: {
-                protocolVersion: "2025-11-25",
-                capabilities: { tools: {} },
-                serverInfo: { name, version: "1" },
-              },
-            });
-          }
-          if (message.method === "tools/list") {
-            if (name === "first") {
-              held.resolve();
-              await release.promise;
-            }
-            now += 5;
-            await server.send({ jsonrpc: "2.0", id: message.id, result: { tools: [] } });
-          }
-        });
-        void server.start();
-        return okAsync(client);
-      },
-    })),
-    new CallableCatalog([]),
-    { now: () => now, record: (event) => events.push(event) },
-  );
-  const discovery = mcp.discover(BACKGROUND_CONTEXT);
-  await held.promise;
-  expect(connected).toEqual(["first"]);
-  expect(events.at(-1)).toMatchObject({ server: "first", phase: "list_tools", outcome: "started" });
-  release.resolve();
-  expect((await discovery).isOk()).toBe(true);
-  expect(connected).toEqual(["first", "second"]);
-  expect(
-    events
-      .filter((event) => event.outcome === "completed")
-      .map(({ server, phase, elapsedMs, aborted }) => ({ server, phase, elapsedMs, aborted })),
-  ).toEqual(
-    ["first", "second"].flatMap((server) => [
-      { server, phase: "transport", elapsedMs: 2, aborted: false },
-      { server, phase: "initialize", elapsedMs: 3, aborted: false },
-      { server, phase: "list_tools", elapsedMs: 5, aborted: false },
-      { server, phase: "close", elapsedMs: 0, aborted: false },
-    ]),
-  );
-  const count = events.length;
-  await mcp.discover(BACKGROUND_CONTEXT);
-  expect(events).toHaveLength(count);
-  await mcp.close();
-});
-
 it.each(["initialize", "list_tools", "close"] as const)(
-  "records outer cancellation while %s is active, including cleanup",
+  "records cancellation during %s before cleanup settles",
   async (phase) => {
     let now = 0;
-    const events: McpDiscoveryEvent[] = [];
-    const entered = deferred();
-    const release = deferred();
+    const failures: McpDiscoveryFailure[] = [];
+    const entered = deferred(),
+      release = deferred();
     const controller = new AbortController();
     const { client, server } = createInMemoryTransportPair();
     server.onMessage(async (message) => {
       if (!("method" in message) || !("id" in message)) return;
-      if (message.method === "initialize" && phase !== "initialize")
-        await server.send({
-          jsonrpc: "2.0",
-          id: message.id,
-          result: {
-            protocolVersion: "2025-11-25",
-            capabilities: { tools: {} },
-            serverInfo: { name: "fixture", version: "1" },
-          },
-        });
-      if (message.method === "tools/list" && phase !== "list_tools")
-        await server.send({ jsonrpc: "2.0", id: message.id, result: { tools: [] } });
+      if (
+        (message.method === "initialize" && phase === "initialize") ||
+        (message.method === "tools/list" && phase === "list_tools")
+      ) {
+        entered.resolve();
+        return;
+      }
+      await server.send({
+        jsonrpc: "2.0",
+        id: message.id,
+        result:
+          message.method === "initialize"
+            ? {
+                protocolVersion: "2025-11-25",
+                capabilities: { tools: {} },
+                serverInfo: { name: "fixture", version: "1" },
+              }
+            : { tools: [] },
+      });
     });
     if (phase === "close") {
       const close = client.close.bind(client);
       client.close = async () => {
+        entered.resolve();
         await release.promise;
         await close();
       };
@@ -117,73 +57,65 @@ it.each(["initialize", "list_tools", "close"] as const)(
     const mcp = new McpTools(
       [{ name: "fixture", connect: () => okAsync(client) }],
       new CallableCatalog([]),
-      {
-        now: () => now,
-        record: (event) => {
-          events.push(event);
-          if (event.phase === phase && event.outcome === "started") entered.resolve();
-        },
-      },
+      { now: () => now, record: (failure) => failures.push(failure) },
     );
-    const discovery = mcp.discover(withAbortSignal(controller.signal, BACKGROUND_CONTEXT));
+    const discovery = mcp.discover(
+      withAbortSignal(controller.signal, BACKGROUND_CONTEXT),
+      "fixture",
+    );
     await entered.promise;
     now = 9;
     controller.abort();
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        attempt: 1,
+    expect(failures).toEqual([
+      {
         server: "fixture",
         phase,
         outcome: "aborted",
         elapsedMs: 9,
-        aborted: true,
-        serverOrdinal: 1,
-        serverTotal: 1,
         discoveryElapsedMs: 9,
-      }),
-    );
+        errorCategory: "abort",
+      },
+    ]);
     release.resolve();
     const result = await discovery;
-    expect(result.isErr()).toBe(true);
-    if (result.isErr()) expect(result.error.code).toBe("cancelled");
-    expect(events.some((event) => event.phase === "close")).toBe(true);
-    expect(events.some((event) => event.errorCategory === "request_timeout")).toBe(false);
+    expect(result.isErr() && result.error.code).toBe("cancelled");
     await mcp.close();
   },
 );
 
-it("distinguishes an SDK timeout from an outer abort and omits raw errors", async () => {
-  const events: McpDiscoveryEvent[] = [];
+it("distinguishes SDK timeout from credential rejection without raw errors", async () => {
+  const failures: McpDiscoveryFailure[] = [];
   const { client } = createInMemoryTransportPair();
   client.start = async () => {
     throw new McpTimeoutError(30_000);
   };
   const mcp = new McpTools(
     [
-      { name: "secret-failure", connect: () => errAsync({ code: "forbidden", message: "SECRET" }) },
+      { name: "credential", connect: () => errAsync({ code: "forbidden", message: "SECRET" }) },
       { name: "timeout", connect: () => okAsync(client) },
     ],
     new CallableCatalog([]),
-    { now: () => 0, record: (event) => events.push(event) },
+    { now: () => 0, record: (failure) => failures.push(failure) },
   );
-  expect((await mcp.discover(BACKGROUND_CONTEXT)).isOk()).toBe(true);
-  expect(events).toContainEqual(
-    expect.objectContaining({
-      server: "secret-failure",
+  for (const server of ["credential", "timeout"])
+    expect((await mcp.discover(BACKGROUND_CONTEXT, server)).isOk()).toBe(true);
+  expect(failures).toEqual([
+    {
+      server: "credential",
       phase: "transport",
       outcome: "failed",
+      elapsedMs: 0,
+      discoveryElapsedMs: 0,
       errorCategory: "forbidden",
-    }),
-  );
-  expect(events).toContainEqual(
-    expect.objectContaining({
+    },
+    {
       server: "timeout",
       phase: "initialize",
       outcome: "failed",
+      elapsedMs: 0,
+      discoveryElapsedMs: 0,
       errorCategory: "request_timeout",
-      aborted: false,
-    }),
-  );
-  expect(JSON.stringify(events)).not.toContain("SECRET");
+    },
+  ]);
   await mcp.close();
 });

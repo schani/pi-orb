@@ -327,7 +327,9 @@ text(await tools.mcp_discover({server:'fixture'})); text('DURABLE_DISCOVERED');`
           {
             match: { userMessage: { regex: "^DURABLE_CHILD$" } },
             steps: [
-              codemode("text(await tools.mcp_discover({})); text('DURABLE_CHILD_DISCOVERED');"),
+              codemode(
+                "text(await tools.mcp_discover({server:'fixture'})); text('DURABLE_CHILD_DISCOVERED');",
+              ),
               stop,
             ],
           },

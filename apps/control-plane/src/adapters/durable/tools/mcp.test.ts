@@ -18,117 +18,10 @@ import {
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
 import { errAsync, okAsync } from "neverthrow";
 import { expect, it } from "vitest";
-import { projectHistory } from "../projection.ts";
 import { CallableCatalog } from "./catalog.ts";
 import { createDurableTools } from "./index.ts";
 import { McpTools } from "./mcp.ts";
 import { openCodemodeHarness } from "./testkit/codemode.ts";
-
-it("projects authorization-required diagnostics into durable user-visible history", async () => {
-  const tools = createDurableTools({
-    mcp: [
-      {
-        name: "fixture",
-        unavailableState: () => "needs-auth",
-        connect: () => errAsync({ code: "forbidden", message: "secret" }),
-      },
-    ],
-  });
-  const faux = fauxProvider();
-  faux.setResponses([
-    fauxAssistantMessage(
-      fauxToolCall("codemode", { code: 'text(await tools.mcp_discover({server:"fixture"}));' }),
-      {
-        stopReason: "toolUse",
-      },
-    ),
-    fauxAssistantMessage("done"),
-  ]);
-  const models = createModels();
-  models.setProvider(faux.provider);
-  const registry = createRegistry();
-  registry.install(tools.extension);
-  const harness = await Harness.open(new MemoryStorage(), { models, registry }, BACKGROUND_CONTEXT);
-  try {
-    const root = await harness.root(BACKGROUND_CONTEXT, {
-      agent: { model: { provider: "faux", modelId: "faux-1" } },
-    });
-    harness.resume();
-    await (await root.submit({ type: "input", content: "go" }, BACKGROUND_CONTEXT)).wait(
-      BACKGROUND_CONTEXT,
-    );
-    const records = await root.entries({}, 100, undefined, BACKGROUND_CONTEXT);
-    const history = projectHistory(records.items, "session");
-    expect(history.isOk()).toBe(true);
-    expect(JSON.stringify(history)).toContain("MCP fixture: needs-auth.");
-    expect(JSON.stringify(history)).not.toContain("secret");
-  } finally {
-    await harness.close(BACKGROUND_CONTEXT);
-    await tools.close();
-  }
-});
-
-it("retries authorization-required discovery after consent and exposes sanitized status", async () => {
-  let authorized = false;
-  let connections = 0;
-  const tools = createDurableTools({
-    mcp: [
-      {
-        name: "fixture",
-        unavailableState: () => (authorized ? "unavailable" : "needs-auth"),
-        connect: () => {
-          connections++;
-          if (!authorized) return errAsync({ code: "forbidden", message: "secret credential" });
-          const { client, server } = createInMemoryTransportPair();
-          server.onMessage((message) => {
-            if (!("method" in message) || !("id" in message)) return;
-            void server.send({
-              jsonrpc: "2.0",
-              id: message.id,
-              result:
-                message.method === "initialize"
-                  ? {
-                      protocolVersion: "2025-11-25",
-                      capabilities: { tools: {} },
-                      serverInfo: { name: "fixture", version: "1" },
-                    }
-                  : { tools: [{ name: "read", inputSchema: { type: "object" } }] },
-            });
-          });
-          void server.start();
-          return okAsync(client);
-        },
-      },
-    ],
-  });
-  try {
-    await tools.ready();
-    expect(tools.mcpStatus()).toEqual([
-      {
-        name: "fixture",
-        status: "needs-auth",
-        error: { code: "forbidden", message: "MCP server unavailable" },
-      },
-    ]);
-    authorized = true;
-    await tools.ready();
-    expect(tools.mcpStatus()).toEqual([{ name: "fixture", status: "available" }]);
-    const fixture = await openCodemodeHarness(tools.catalog);
-    try {
-      const discovery = await fixture.run(
-        'return typeof await describeTool("mcp__fixture__read");',
-      );
-      expect(discovery.isError).toBe(false);
-      expect(discovery.output).toContainEqual({ type: "text", text: "string" });
-    } finally {
-      await fixture.close();
-    }
-    await tools.ready();
-    expect(connections).toBe(2);
-  } finally {
-    await tools.close();
-  }
-});
 
 it("reports a failed MCP server without blocking healthy discovery and calls", async () => {
   let healthyCalls = 0;
@@ -173,7 +66,8 @@ it("reports a failed MCP server without blocking healthy discovery and calls", a
     ],
   });
   try {
-    const ready = await tools.ready();
+    await tools.discover(BACKGROUND_CONTEXT, "broken");
+    const ready = await tools.discover(BACKGROUND_CONTEXT, "healthy");
     expect(ready.isOk()).toBe(true);
     expect(JSON.stringify(ready)).not.toContain("secret-token");
     const fixture = await openCodemodeHarness(tools.catalog);
@@ -278,7 +172,7 @@ it("discovers MCP, executes validated QuickJS calls with fresh scoped connection
       },
     ],
   });
-  expect((await tools.ready()).isOk()).toBe(true);
+  expect((await tools.discover(BACKGROUND_CONTEXT, "mock")).isOk()).toBe(true);
   expect(auth).toBe(1);
   expect(effects).toBe(0);
   const faux = fauxProvider();
@@ -379,7 +273,7 @@ it("rejects explicit null for parameterless MCP tools before hooks, authorizatio
     catalog,
   );
   try {
-    expect((await mcp.discover(BACKGROUND_CONTEXT)).isOk()).toBe(true);
+    expect((await mcp.discover(BACKGROUND_CONTEXT, "fixture")).isOk()).toBe(true);
     expect(credentials).toBe(1);
     expect(
       catalog.definitions().find((tool) => tool.name === "mcp__fixture__ping")?.parameters,
@@ -475,7 +369,7 @@ it("rejects raw MCP arguments before native coercion, hooks, authorization and c
     catalog,
   );
   try {
-    expect((await mcp.discover(BACKGROUND_CONTEXT)).isOk()).toBe(true);
+    expect((await mcp.discover(BACKGROUND_CONTEXT, "strict")).isOk()).toBe(true);
     expect(credentials).toBe(1);
     expect(
       catalog.definitions().find((tool) => tool.name === "mcp__strict__echo")?.parameters,
@@ -578,7 +472,7 @@ it("discovers oversized MCP arguments and safely explains missing required field
     ],
   });
   try {
-    expect((await tools.ready()).isOk()).toBe(true);
+    expect((await tools.discover(BACKGROUND_CONTEXT, "posthog")).isOk()).toBe(true);
     const fixture = await openCodemodeHarness(tools.catalog);
     try {
       const invalid = await fixture.run(

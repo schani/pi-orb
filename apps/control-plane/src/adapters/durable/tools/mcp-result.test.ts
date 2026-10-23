@@ -1,3 +1,4 @@
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
 import { okAsync } from "neverthrow";
 import { expect, it } from "vitest";
@@ -53,7 +54,7 @@ it("preserves MCP structuredContent/isError/metadata in script results and decla
   });
   let fixture: Awaited<ReturnType<typeof openCodemodeHarness>> | undefined;
   try {
-    await bundle.ready();
+    await bundle.discover(BACKGROUND_CONTEXT, "case");
     fixture = await openCodemodeHarness(bundle.catalog);
     const declaration = await fixture.run('return await describeTool("mcp__case__value");');
     expect(declaration.isError).toBe(false);

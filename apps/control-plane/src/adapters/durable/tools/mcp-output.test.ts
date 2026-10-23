@@ -45,7 +45,7 @@ it.each([{ n: 7 }, [1, null, "value"], null])(
     };
     const { mcp, catalog } = fixture(response);
     try {
-      await mcp.discover(BACKGROUND_CONTEXT);
+      await mcp.discover(BACKGROUND_CONTEXT, "fixture");
       const tool = catalog.definitions().find((entry) => entry.name === "mcp__fixture__value")!;
       expect(tool).toHaveProperty("structuredOutputSchema");
       const result = await tool.execute({}, {} as ToolExecutionApi, BACKGROUND_CONTEXT);
@@ -68,7 +68,7 @@ it("rejects non-JSON MCP structured output at the adapter boundary", async () =>
     structuredContent: { value: Number.NaN },
   });
   try {
-    await mcp.discover(BACKGROUND_CONTEXT);
+    await mcp.discover(BACKGROUND_CONTEXT, "fixture");
     const tool = catalog.definitions().find((entry) => entry.name === "mcp__fixture__value")!;
     const result = await tool.execute({}, {} as ToolExecutionApi, BACKGROUND_CONTEXT);
     expect(result).toMatchObject({
@@ -85,7 +85,7 @@ it("rejects non-JSON MCP structured output at the adapter boundary", async () =>
 it("does not connect or change server availability for a cancelled MCP call", async () => {
   const { mcp, catalog, connect } = fixture({ content: [] });
   try {
-    await mcp.discover(BACKGROUND_CONTEXT);
+    await mcp.discover(BACKGROUND_CONTEXT, "fixture");
     const tool = catalog.definitions().find((entry) => entry.name === "mcp__fixture__value")!;
     const scope = withCancel(BACKGROUND_CONTEXT);
     scope.cancel();
@@ -107,7 +107,7 @@ it("does not connect or change server availability for a cancelled MCP call", as
 it("cancels before deferred broker acquisition without starting another connection", async () => {
   const { mcp, catalog, connect } = fixture({ content: [] });
   try {
-    await mcp.discover(BACKGROUND_CONTEXT);
+    await mcp.discover(BACKGROUND_CONTEXT, "fixture");
     const tool = catalog.definitions().find((entry) => entry.name === "mcp__fixture__value")!;
     const scope = withCancel(BACKGROUND_CONTEXT);
     const pending = tool.execute({}, {} as ToolExecutionApi, scope.context);

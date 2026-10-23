@@ -1,5 +1,4 @@
 import type { Context } from "@earendil-works/chord";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import { defineExtension, type ToolRegistration } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
@@ -8,12 +7,7 @@ import { ResultAsync } from "neverthrow";
 import { type AuthorizeTool, CallableCatalog, type ToolError } from "./catalog.ts";
 import { codemodeExtension } from "./codemode.ts";
 import type { AgentToolFiles } from "./files.ts";
-import {
-  type McpDiscoveryDiagnostics,
-  type McpEndpoint,
-  type McpServerStatus,
-  McpTools,
-} from "./mcp.ts";
+import { type McpDiscoveryDiagnostics, type McpEndpoint, McpTools } from "./mcp.ts";
 
 export type { AgentToolFiles } from "./files.ts";
 
@@ -122,21 +116,17 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
       modelTools: [code] as const,
     };
   };
-  const ready = (
-    context: Context = BACKGROUND_CONTEXT,
-    server?: string,
-    observed?: (status: McpServerStatus) => void,
-  ): ResultAsync<readonly McpServerStatus[], ToolError> =>
-    ResultAsync.fromSafePromise(mcp.discover(context, server, observed)).andThen((result) => {
+  const discover = (context: Context, server: string) =>
+    ResultAsync.fromSafePromise(mcp.discover(context, server)).andThen((result) => {
       Object.assign(bundle, extensions());
       return result;
     });
-  catalog.add(mcp.discoveryTool(ready));
+  catalog.add(mcp.discoveryTool(discover));
   const bundle = {
     ...extensions(),
     catalog,
     mcpStatus: () => mcp.status(),
-    ready,
+    discover,
     close: (): ResultAsync<void, ToolError> =>
       ResultAsync.fromPromise(
         Promise.all([...running].map((s) => s.close())).then(() => undefined),
