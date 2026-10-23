@@ -160,46 +160,21 @@ describe("native image build orchestration", () => {
     ]);
   });
 
-  it("removes a rejected candidate and never writes an accepted manifest", async () => {
-    const effects = new FakeEffects();
-    effects.failAt = "validate:probe";
-    const result = await buildNativeImage(input(), effects, effects.controller.signal);
-    expect(result.isErr()).toBe(true);
-    expect(effects.manifest).toBeUndefined();
-    expect(effects.actions).toContain("cleanup:delete-image");
-    expect(effects.actions).toContain("cleanup:delete-workspace-image");
-    expect(effects.failure).toMatchObject({ stage: "validate" });
-  });
-
   it("rejects the first acceptance failure even if a retry could succeed", async () => {
     const failure: ImageBuildError = {
       type: "image_build_failed",
       stage: "validate",
-      message: "native_acceptance_failed line=44",
+      message: "not ready",
       retryable: true,
     };
-    class AssertionEffects extends FakeEffects {
-      probes = 0;
-      override run(
-        stage: ImageBuildStage,
-        action: string,
-        input: ImageBuildInput,
-        signal: AbortSignal,
-      ): ResultAsync<void, ImageBuildError> {
-        if (stage === "validate" && action === "probe" && ++this.probes === 1) {
-          this.actions.push("validate:probe");
-          return errAsync(failure);
-        }
-        return super.run(stage, action, input, signal);
-      }
-    }
-    const effects = new AssertionEffects();
+    const effects = new FakeEffects();
+    effects.retryOnceAt = "validate:probe";
     const events: string[] = [];
     const result = await buildNativeImage(input(), effects, effects.controller.signal, (event) =>
       events.push(`${event.stage}:${event.action}:${event.status}`),
     );
     expect(result.isErr() && result.error).toEqual(failure);
-    expect(effects.probes).toBe(1);
+    expect(effects.actions.filter((action) => action === "validate:probe")).toHaveLength(1);
     expect(effects.failure).toEqual(failure);
     expect(effects.manifest).toBeUndefined();
     expect(effects.actions).toContain("cleanup:collect-evidence");

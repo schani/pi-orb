@@ -270,35 +270,6 @@ afterEach(async () => {
 });
 
 describe("ProcessOrbHostProvider", () => {
-  launchIt.each([
-    { harness: "pi", runtimeMode: "execution" },
-    { harness: "claude", runtimeMode: "claude" },
-  ] as const)(
-    "launches harness-derived %s role and persists initial commit",
-    async ({ harness, runtimeMode }) => {
-      const observedEnv = ownedFile("observed.json");
-      const { provider } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
-      const commit = "b".repeat(40);
-      const provisioned = await provider.provision(
-        task,
-        {
-          ...request,
-          bootstrap: {
-            ...request.bootstrap,
-            harness,
-            initialCheckoutCommit: commit,
-            awaitInitialCheckoutCommit: true,
-          },
-        },
-        context,
-      );
-      expect(provisioned.isOk()).toBe(true);
-      const observed = await eventually<Record<string, string>>(() => readObserved(observedEnv));
-      expect(observed.runtimeMode).toBe(runtimeMode);
-      expect(observed.initialCheckoutCommit).toBe(commit);
-      expect(observed.awaitInitialCheckoutCommit).toBe("1");
-    },
-  );
   launchIt(
     "exposes execution credentials only for the exact current host incarnation",
     async () => {
@@ -323,6 +294,7 @@ describe("ProcessOrbHostProvider", () => {
   );
   launchIt.each(["pi", "claude"] as const)("launches %s with isolated env", async (harness) => {
     const observedEnv = ownedFile("observed.json");
+    const commit = "b".repeat(40);
     vi.stubEnv("XDG_CONFIG_HOME", join(tmpdir(), "developer-config"));
     const { provider, root } = makeProvider({
       OBSERVED_ENV_FILE: observedEnv,
@@ -331,7 +303,15 @@ describe("ProcessOrbHostProvider", () => {
     });
     const provisioned = await provider.provision(
       task,
-      { ...request, bootstrap: { ...request.bootstrap, harness } },
+      {
+        ...request,
+        bootstrap: {
+          ...request.bootstrap,
+          harness,
+          initialCheckoutCommit: commit,
+          awaitInitialCheckoutCommit: true,
+        },
+      },
       context,
     );
     expect(provisioned.isOk()).toBe(true);
@@ -340,6 +320,8 @@ describe("ProcessOrbHostProvider", () => {
     const values = await eventually<Record<string, string>>(() => readObserved(observedEnv));
     expect(values.orbId).toBe(request.orbId);
     expect(values.runtimeMode).toBe(harness === "claude" ? "claude" : "execution");
+    expect(values.initialCheckoutCommit).toBe(commit);
+    expect(values.awaitInitialCheckoutCommit).toBe("1");
     expect(values.repositoryUrl).toBe(request.bootstrap.repositoryUrl);
     expect(values.incarnation).toBe(String(request.incarnation));
     expect(values.container).toBe("0");

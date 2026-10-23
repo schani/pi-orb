@@ -1,17 +1,11 @@
-import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { describe, expect, it, onTestFinished } from "vitest";
+import { runCli } from "../testkit/cli.ts";
 
 describe("identity CLI diagnostic stream", () => {
   it("validates invalid arguments before contacting the endpoint", async () => {
-    const cwd = await mkdtemp(join(tmpdir(), "invalid-id-token-cli-"));
-    onTestFinished(() => rm(cwd, { recursive: true, force: true }));
     let requests = 0;
     const server = createServer((_request, response) => {
       requests += 1;
@@ -23,28 +17,21 @@ describe("identity CLI diagnostic stream", () => {
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const { port } = server.address() as AddressInfo;
-    const result = await new Promise<{ code: number | string; stdout: string; stderr: string }>(
-      (resolve) => {
-        execFile(
-          process.execPath,
-          [
-            fileURLToPath(new URL("./cli.ts", import.meta.url)),
-            "--audience",
-            "a",
-            "--ttl-seconds",
-            "10",
-          ],
-          {
-            cwd,
-            env: {
-              ...process.env,
-              PI_ORB_CONTROL_PLANE_URL: `http://127.0.0.1:${port}`,
-              PI_ORB_RUNTIME_TOKEN: "test",
-            },
-            timeout: 15_000,
-          },
-          (error, stdout, stderr) => resolve({ code: error?.code ?? 0, stdout, stderr }),
-        );
+    const result = await runCli(
+      [
+        fileURLToPath(new URL("./cli.ts", import.meta.url)),
+        "--audience",
+        "a",
+        "--ttl-seconds",
+        "10",
+      ],
+      {
+        command: process.execPath,
+        env: {
+          ...process.env,
+          PI_ORB_CONTROL_PLANE_URL: `http://127.0.0.1:${port}`,
+          PI_ORB_RUNTIME_TOKEN: "test",
+        },
       },
     );
     expect(result.code).toBe(2);
@@ -61,19 +48,19 @@ describe("identity CLI diagnostic stream", () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     try {
       const { port } = server.address() as AddressInfo;
-      const { stdout, stderr } = await promisify(execFile)(
-        process.execPath,
+      const { code, stdout, stderr } = await runCli(
         [fileURLToPath(new URL("./cli.ts", import.meta.url)), "--audience", "TEST_ONLY_AUDIENCE"],
         {
+          command: process.execPath,
           env: {
             ...process.env,
             PI_ORB_CONTROL_PLANE_URL: `http://127.0.0.1:${port}`,
             PI_ORB_RUNTIME_TOKEN: "TEST_ONLY_BEARER",
             PI_ORB_ID_TOKEN_DIAGNOSTICS: diagnostics,
           },
-          timeout: 15_000,
         },
       );
+      expect(code).toBe(0);
       expect(stdout).toBe("TEST_ONLY_TOKEN\n");
       expect(stderr).not.toContain("TEST_ONLY");
       if (diagnostics === "0") expect(stderr).toBe("");
