@@ -188,6 +188,41 @@ export const CHART_FIXTURE_FAILURES: ChartSpec = {
   }),
 };
 
+export const CHART_FIXTURE_SERVICE_TIME: ChartSpec = {
+  kind: "compare",
+  title: "Alpine · p95 per-job service time",
+  unit: "s",
+  from: "TS 5.9",
+  to: "tsrs 0.18",
+  better: "lower",
+  rows: [
+    { label: "1 concurrent", from: 3.97, to: 0.42 },
+    { label: "2 concurrent", from: 6.97, to: 0.73 },
+    { label: "4 concurrent", from: 13, to: 1.6 },
+    { label: "8 concurrent", from: 27.7, to: 3.22 },
+  ],
+};
+
+export const CHART_FIXTURE_BENCHMARKS: ChartSpec = {
+  kind: "compare",
+  title: "benchmarks · main → feat/stream-diff",
+  unit: "ms",
+  from: "main",
+  to: "feat/stream-diff",
+  better: "lower",
+  rows: (
+    [
+      ["render 10k-line diff", 184, 61],
+      ["parse unified diff", 22.4, 9.8],
+      ["highlight · ts", 48.1, 41.2],
+      ["tokenize markdown", 12.1, 11.9],
+      ["hydrate orb list", 31.2, 33],
+      ["serialize history", 18.3, 21.7],
+      ["cold start", 420, 512],
+    ] as const
+  ).map(([label, from, to]) => ({ label, from, to })),
+};
+
 export function chartFixtureRecords(createdAt: string): HistoryRecord[] {
   const charts = [
     CHART_FIXTURE_LATENCY,
@@ -198,6 +233,8 @@ export function chartFixtureRecords(createdAt: string): HistoryRecord[] {
     CHART_FIXTURE_DISTRIBUTION,
     CHART_FIXTURE_RUN,
     CHART_FIXTURE_FAILURES,
+    CHART_FIXTURE_SERVICE_TIME,
+    CHART_FIXTURE_BENCHMARKS,
   ];
   return [
     {

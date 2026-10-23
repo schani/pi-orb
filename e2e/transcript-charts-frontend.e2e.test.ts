@@ -91,7 +91,7 @@ it.each(["chromium", "webkit"] as const)(
 
       await gotoFrontendHistory(page, `http://127.0.0.1:${address.port}/orbs/${ORB}`, ORB);
       const rows = page.locator("details.chart-strip");
-      await expect(rows).toHaveCount(8);
+      await expect(rows).toHaveCount(10);
       for (const each of await rows.all()) {
         await expect(each).toHaveAttribute("open", "");
         await expect(each.locator(".chart-canvas svg")).toBeVisible();
@@ -99,8 +99,8 @@ it.each(["chromium", "webkit"] as const)(
         await expect(each.locator(".chart-canvas > div")).toHaveCount(1);
         await expect(each.locator(".chart-strip-spark svg")).toBeVisible();
       }
-      await expect.poll(() => renders.length).toBe(8);
-      expect(renders).toEqual(Array(8).fill(expect.objectContaining({ outcome: "rendered" })));
+      await expect.poll(() => renders.length).toBe(10);
+      expect(renders).toEqual(Array(10).fill(expect.objectContaining({ outcome: "rendered" })));
 
       // Single series: latest value in the summary, not repeated as an end label.
       const latency = row(page, "checkout-api p95 latency");

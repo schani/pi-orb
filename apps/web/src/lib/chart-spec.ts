@@ -1,6 +1,7 @@
 import type {
   BarChart,
   ChartSpec,
+  CompareChart,
   HeatmapChart,
   HistogramChart,
   LineChart,
@@ -846,6 +847,213 @@ export function heatmapSpec(spec: HeatmapChart): VegaSpec {
   };
 }
 
+/** Per row: better, same (within tolerance of the baseline) or worse, and the change as text. */
+export function compareRows(spec: CompareChart) {
+  const tolerance = (spec.tolerance ?? 5) / 100;
+  return spec.rows.map((row) => {
+    const worseBy = (spec.better === "higher" ? row.from - row.to : row.to - row.from) / row.from;
+    const state: keyof typeof COMPARE_COLORS =
+      worseBy > tolerance ? "worse" : Math.abs(worseBy) <= tolerance ? "same" : "better";
+    const ratio = row.to / row.from;
+    const multiple = Math.max(ratio, 1 / ratio);
+    const shown =
+      multiple >= 10 ? Math.round(multiple) : Number(multiple.toFixed(multiple >= 2 ? 1 : 2));
+    const percent = Math.round((ratio - 1) * 100);
+    return {
+      ...row,
+      state,
+      change: state === "same" ? "same" : `${shown}× ${state}`,
+      percent: `${percent > 0 ? "+" : ""}${percent}%`,
+    };
+  });
+}
+
+/** Log when the values span a decade, so equal ratios get equal lengths; else linear from zero. */
+export function compareScale(values: readonly number[]) {
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  if (max / min >= 10) {
+    const lo = 10 ** Math.floor(Math.log10(min));
+    const hi = niceTop(max * 1.05);
+    const ticks: number[] = [];
+    for (let decade = lo; decade <= hi; decade *= 10)
+      for (const k of [1, 2, 5]) {
+        const tick = Number((k * decade).toPrecision(12));
+        if (tick <= hi) ticks.push(tick);
+      }
+    return { type: "log", domain: [lo, hi], ticks };
+  }
+  const hi = niceTop(max * 1.08);
+  return {
+    type: "linear",
+    domain: [0, hi],
+    ticks: [0, 1, 2, 3, 4].map((i) => Number(((hi * i) / 4).toPrecision(12))),
+  };
+}
+
+const COMPARE_COLORS = {
+  better: { line: INK, dot: INK, text: INK },
+  same: { line: HAIRLINE, dot: MUTED, text: MUTED },
+  worse: { line: BAD, dot: BAD, text: BAD },
+} as const;
+
+/**
+ * One row per case: hollow baseline, filled candidate, the change on the right. At phone width
+ * each row stacks its text above a full-width dumbbell.
+ */
+export function compareSpec(spec: CompareChart, { narrow }: { narrow: boolean }): VegaSpec {
+  const rows = compareRows(spec);
+  const scale = compareScale(rows.flatMap((row) => [row.from, row.to]));
+  const names = `${spec.from} → ${spec.to}`;
+  const better = spec.better === "higher" ? "↑ better" : "↓ better";
+  const data = rows.map((row) => ({
+    ...row,
+    ...COMPARE_COLORS[row.state],
+    values: `${short(row.from)} → ${formatValue(spec.unit, row.to)}`,
+    fromText: formatValue(spec.unit, row.from),
+    toText: formatValue(spec.unit, row.to),
+    tip: `${row.percent} · ${row.change}`,
+  }));
+  // Mono 11px advances 6.6px per character.
+  const px = (text: string) => text.length * 6.6;
+  const deltaW = Math.max(px(better), ...data.map((row) => px(row.change))) + 8;
+  const valueW = Math.max(px(names), ...data.map((row) => px(row.values))) + 16;
+  const plotEnd = narrow ? "width - 6" : `width - ${deltaW + valueW + 8}`;
+  const x = {
+    type: "quantitative",
+    scale: {
+      type: scale.type,
+      domain: scale.domain,
+      range: [narrow ? 6 : 0, { expr: plotEnd }],
+      nice: false,
+    },
+    axis: {
+      orient: "top",
+      values: scale.ticks,
+      tickCount: scale.ticks.length,
+      labelOverlap: "greedy",
+      grid: !narrow,
+      domain: false,
+      ticks: false,
+      title: null,
+    },
+  };
+  const y = {
+    field: "label",
+    type: "nominal",
+    sort: null,
+    scale: { paddingInner: 0, paddingOuter: 0 },
+    title: null,
+    ...(narrow ? { axis: null } : {}),
+  };
+  const offset = narrow ? 8 : 0;
+  const header = narrow ? -24 : -8;
+  const text = (props: Record<string, unknown>, encoding: Record<string, unknown>): VegaLayer => ({
+    mark: { type: "text", baseline: "middle", ...props },
+    encoding,
+  });
+  const colored = (field: string) => ({ field, type: "nominal", scale: null });
+  const layer: VegaLayer[] = [];
+  if (narrow)
+    layer.push({
+      data: {
+        values: data.flatMap((row) => scale.ticks.map((tick) => ({ label: row.label, tick }))),
+      },
+      mark: { type: "tick", color: GRID, size: 16, thickness: 1, yOffset: offset },
+      encoding: { x: { ...x, field: "tick" }, y },
+    });
+  layer.push(
+    {
+      mark: { type: "rule", strokeWidth: 2, yOffset: offset },
+      encoding: { x: { ...x, field: "from" }, x2: { field: "to" }, y, color: colored("line") },
+    },
+    {
+      mark: {
+        type: "point",
+        filled: true,
+        fill: "#fff",
+        strokeWidth: 1.5,
+        size: 40,
+        yOffset: offset,
+      },
+      encoding: { x: { ...x, field: "from" }, y, stroke: colored("line") },
+    },
+    {
+      mark: { type: "point", size: 64, strokeWidth: 0, yOffset: offset },
+      encoding: { x: { ...x, field: "to" }, y, color: colored("dot") },
+    },
+    text(
+      { align: "right", x: { expr: "width" }, yOffset: narrow ? -9 : 0 },
+      { y, text: { field: "change" }, color: colored("text") },
+    ),
+  );
+  if (narrow)
+    layer.push(
+      text({ align: "left", x: 0, yOffset: -9, color: INK }, { y, text: { field: "label" } }),
+      // Values only when they fit between the label and the change.
+      text(
+        {
+          align: "right",
+          x: { expr: `width - ${deltaW + 4}` },
+          yOffset: -9,
+          color: MUTED,
+          text: {
+            expr: `width - length(datum.label) * 6.6 - ${deltaW + 24} >= length(datum.values) * 6.6 ? datum.values : ''`,
+          },
+        },
+        { y },
+      ),
+    );
+  else
+    layer.push(
+      text(
+        { align: "left", x: { expr: `${plotEnd} + 16` }, color: MUTED },
+        { y, text: { field: "values" } },
+      ),
+    );
+  layer.push(
+    {
+      data: { values: [{ names, better }] },
+      layer: [
+        text(
+          { align: "left", x: narrow ? 0 : { expr: `${plotEnd} + 16` }, y: header, color: INK },
+          { text: { field: "names" } },
+        ),
+        text(
+          { align: "right", x: { expr: "width" }, y: header, color: MUTED },
+          { text: { field: "better" } },
+        ),
+      ],
+    },
+    // Full-width row strips carry the tooltip and the hover shade.
+    {
+      mark: { type: "rect", color: INK },
+      encoding: {
+        x: { value: 0 },
+        x2: { value: "width" },
+        y,
+        opacity: { condition: { param: "row", empty: false, value: 0.04 }, value: 0 },
+        tooltip: [
+          { field: "label", title: "row" },
+          { field: "fromText", title: "from" },
+          { field: "toText", title: "to" },
+          { field: "tip", title: "change" },
+        ],
+      },
+      params: [{ name: "row", select: { type: "point", on: "pointerover", clear: "pointerout" } }],
+    },
+  );
+  return {
+    $schema: "https://vega.github.io/schema/vega-lite/v6.json",
+    width: "container",
+    height: rows.length * (narrow ? 38 : 20),
+    autosize: { type: "fit-x", contains: "padding" },
+    padding: { top: narrow ? 26 : 4, right: 4, bottom: 0, left: 0 },
+    data: { values: data },
+    layer,
+  };
+}
+
 export function sparklineSpec(spec: ChartSpec): VegaSpec {
   const frame = {
     width: "container",
@@ -876,6 +1084,26 @@ export function sparklineSpec(spec: ChartSpec): VegaSpec {
         x2: { field: "b" },
         y: { field: "lane", type: "nominal", sort: null, axis: null, scale: { paddingInner: 0.2 } },
         color: { field: "fill", type: "nominal", scale: null },
+      },
+    };
+  }
+  if (spec.kind === "compare") {
+    const better = spec.better === "higher" ? 1 : -1;
+    return {
+      ...frame,
+      data: {
+        values: compareRows(spec).map((row, k) => ({
+          k,
+          v: better * Math.log(row.to / row.from),
+          c: COMPARE_COLORS[row.state].dot,
+        })),
+      },
+      mark: { type: "bar", cornerRadius: 0 },
+      encoding: {
+        x: { field: "k", type: "ordinal", axis: null, scale: { paddingInner: 0.25 } },
+        y: { field: "v", type: "quantitative", axis: null },
+        y2: { datum: 0 },
+        color: { field: "c", type: "nominal", scale: null },
       },
     };
   }
@@ -945,6 +1173,13 @@ export function tooltipRows(spec: ChartSpec, value: Record<string, unknown>): To
     ];
   if (spec.kind === "heatmap")
     return [{ label: String(value["cell"]), value: String(value["value"]) }];
+  if (spec.kind === "compare")
+    return [
+      { label: String(value["row"]), value: "" },
+      { label: spec.from, value: String(value["from"]) },
+      { label: spec.to, value: String(value["to"]) },
+      { label: "change", value: String(value["change"]) },
+    ];
   if (spec.kind === "timeline" || spec.kind === "histogram")
     return Object.entries(value)
       .filter(([, item]) => item !== "")
@@ -980,6 +1215,10 @@ export function tooltipRows(spec: ChartSpec, value: Record<string, unknown>): To
 
 /** The folded row carries the latest value only when one line names it unambiguously. */
 export function latestValue(spec: ChartSpec): string | null {
+  if (spec.kind === "compare") {
+    const worse = compareRows(spec).filter((row) => row.state === "worse").length;
+    return worse === 0 ? null : `${worse} worse`;
+  }
   if (spec.kind === "timeline")
     return formatDuration(
       Math.max(...spec.spans.map((span) => span.end)) -

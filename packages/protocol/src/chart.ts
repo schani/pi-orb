@@ -110,6 +110,24 @@ const heatmap = Type.Object(
   closed,
 );
 
+const compare = Type.Object(
+  {
+    kind: Type.Literal("compare"),
+    ...common,
+    /** Names of the baseline and the candidate, e.g. "main" and "feat/x". */
+    from: label,
+    to: label,
+    better: Type.Union([Type.Literal("lower"), Type.Literal("higher")]),
+    /** Percent of the baseline within which a row counts as unchanged; default 5. */
+    tolerance: Type.Optional(Type.Number({ minimum: 0, maximum: 100 })),
+    rows: Type.Array(Type.Object({ label, from: value, to: value }, closed), {
+      minItems: 1,
+      maxItems: CHART_MAX_BARS,
+    }),
+  },
+  closed,
+);
+
 /** Stored form: epoch-millisecond timestamps, finite values only. */
 export const ChartSpecSchema = Type.Union([
   line(Type.Number(), value),
@@ -117,6 +135,7 @@ export const ChartSpecSchema = Type.Union([
   histogram,
   timeline(Type.Number()),
   heatmap,
+  compare,
 ]);
 export type ChartSpec = Static<typeof ChartSpecSchema>;
 export type LineChart = Extract<ChartSpec, { kind: "line" }>;
@@ -124,6 +143,7 @@ export type BarChart = Extract<ChartSpec, { kind: "bar" }>;
 export type HistogramChart = Extract<ChartSpec, { kind: "histogram" }>;
 export type TimelineChart = Extract<ChartSpec, { kind: "timeline" }>;
 export type HeatmapChart = Extract<ChartSpec, { kind: "heatmap" }>;
+export type CompareChart = Extract<ChartSpec, { kind: "compare" }>;
 
 /** What a script may pass to chart(): epoch-ms or Date.parse-able timestamps, null points (dropped). */
 const inputTime = Type.Union([Type.Number(), Type.String()]);
@@ -133,6 +153,7 @@ const InputSchemas = {
   histogram,
   timeline: timeline(inputTime),
   heatmap,
+  compare,
 };
 
 export interface ChartSpecError {
@@ -164,7 +185,7 @@ export function parseChartSpec(input: unknown): Result<ChartSpec, ChartSpecError
     );
   const kind = typeof input === "object" && input !== null && "kind" in input ? input.kind : null;
   if (typeof kind !== "string" || !Object.hasOwn(InputSchemas, kind))
-    return invalid('expected kind "line", "bar", "histogram", "timeline" or "heatmap"');
+    return invalid('expected kind "line", "bar", "histogram", "timeline", "heatmap" or "compare"');
   const schema = InputSchemas[kind as keyof typeof InputSchemas];
   if (!Check(schema, input)) {
     const first = [...Errors(schema, input)][0];
@@ -202,6 +223,17 @@ export function parseChartSpec(input: unknown): Result<ChartSpec, ChartSpecError
       return invalid(`values must be ${input.y.length} rows of ${input.x.length} values`);
     if (!input.values.every((row) => row.every((cell) => cell >= 0)))
       return invalid("heatmap values must be non-negative");
+    return ok(input);
+  }
+  if (input.kind === "compare") {
+    if (input.from === input.to) return invalid("from and to must name different things");
+    if (!input.rows.every((row) => row.from > 0 && row.to > 0))
+      return invalid("compare values must be positive; changes are ratios");
+    const labels = new Set<string>();
+    for (const row of input.rows) {
+      if (labels.has(row.label)) return invalid(`row "${row.label}" appears twice`);
+      labels.add(row.label);
+    }
     return ok(input);
   }
   if (input.kind === "timeline") {

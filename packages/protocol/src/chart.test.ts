@@ -194,6 +194,35 @@ describe("parseChartSpec", () => {
     ).toMatch(/non-negative/);
   });
 
+  it("accepts a compare chart and rejects rows it cannot place on a ratio scale", () => {
+    const compare = {
+      kind: "compare",
+      title: "p95 per-job service time",
+      unit: "s",
+      from: "TS 5.9",
+      to: "tsrs 0.18",
+      better: "lower",
+      rows: [
+        { label: "1 concurrent", from: 3.97, to: 0.42 },
+        { label: "2 concurrent", from: 6.97, to: 0.73 },
+      ],
+    };
+    expect(parseChartSpec(compare)._unsafeUnwrap()).toEqual(compare);
+    expect(parseChartSpec({ ...compare, tolerance: 10 }).isOk()).toBe(true);
+    expect(message({ ...compare, rows: [{ label: "a", from: 0, to: 1 }] })).toMatch(/positive/);
+    expect(
+      message({
+        ...compare,
+        rows: [
+          { label: "a", from: 1, to: 2 },
+          { label: "a", from: 1, to: 2 },
+        ],
+      }),
+    ).toMatch(/row "a" appears twice/);
+    expect(message({ ...compare, to: "TS 5.9" })).toMatch(/from and to/);
+    expect(message({ ...compare, better: "faster" })).toMatch(/better/);
+  });
+
   it("tells the script to fold or split more than six series", () => {
     const series = Array.from({ length: CHART_MAX_SERIES + 1 }, (_, i) => ({
       name: `s${i}`,

@@ -1,5 +1,6 @@
 import type {
   BarChart,
+  CompareChart,
   HeatmapChart,
   HistogramChart,
   LineChart,
@@ -10,6 +11,9 @@ import { describe, expect, it } from "vitest";
 import {
   barChartSpec,
   CHART_CONFIG,
+  compareRows,
+  compareScale,
+  compareSpec,
   durationTicks,
   formatDuration,
   formatValue,
@@ -363,6 +367,72 @@ describe("heatmap", () => {
   });
 });
 
+const compare: CompareChart = {
+  kind: "compare",
+  title: "benchmarks",
+  unit: "ms",
+  from: "main",
+  to: "feat",
+  better: "lower",
+  rows: [
+    { label: "render", from: 184, to: 61 },
+    { label: "layout", from: 7.4, to: 7.6 },
+    { label: "cold start", from: 420, to: 512 },
+  ],
+};
+
+describe("compare", () => {
+  it("names each change as a multiple in the better direction, within tolerance as same", () => {
+    expect(compareRows(compare).map((row) => [row.state, row.change, row.percent])).toEqual([
+      ["better", "3× better", "-67%"],
+      ["same", "same", "+3%"],
+      ["worse", "1.22× worse", "+22%"],
+    ]);
+    const throughput = { ...compare, better: "higher" as const, tolerance: 25 };
+    expect(compareRows(throughput).map((row) => row.state)).toEqual(["worse", "same", "same"]);
+  });
+
+  it("uses a log scale when values span a decade, otherwise a linear one from zero", () => {
+    expect(compareScale([7.4, 512])).toEqual({
+      type: "log",
+      domain: [1, 600],
+      ticks: [1, 2, 5, 10, 20, 50, 100, 200, 500],
+    });
+    expect(compareScale([0.26, 0.31])).toEqual({
+      type: "linear",
+      domain: [0, 0.4],
+      ticks: [0, 0.1, 0.2, 0.3, 0.4],
+    });
+  });
+
+  it("labels rows on the axis when wide and stacks label over dumbbell at phone width", () => {
+    const wide = compareSpec(compare, { narrow: false });
+    expect(wide.height).toBe(3 * 20);
+    expect(JSON.stringify(wide)).toContain('"main → feat"');
+    const narrow = compareSpec(compare, { narrow: true });
+    expect(narrow.height).toBe(3 * 38);
+    expect(marks(narrow, "tick")).toHaveLength(1);
+    expect(JSON.stringify(narrow)).toContain('"axis":null');
+  });
+
+  it("lists baseline, candidate and change on hover, and counts breaches when folded", () => {
+    const rows = tooltipRows(compare, {
+      row: "cold start",
+      from: "420 ms",
+      to: "512 ms",
+      change: "+22% · 1.22× worse",
+    });
+    expect(rows.map((row) => [row.label, row.value])).toEqual([
+      ["cold start", ""],
+      ["main", "420 ms"],
+      ["feat", "512 ms"],
+      ["change", "+22% · 1.22× worse"],
+    ]);
+    expect(latestValue(compare)).toBe("1 worse");
+    expect(latestValue({ ...compare, rows: compare.rows.slice(0, 2) })).toBeNull();
+  });
+});
+
 describe("bar and sparkline specs", () => {
   const bars: BarChart = {
     kind: "bar",
@@ -387,6 +457,7 @@ describe("bar and sparkline specs", () => {
     expect(sparklineSpec(histogram).mark).toMatchObject({ type: "bar" });
     expect(sparklineSpec(timeline).mark).toMatchObject({ type: "bar" });
     expect(sparklineSpec(heatmap).mark).toMatchObject({ type: "rect" });
+    expect(sparklineSpec(compare).mark).toMatchObject({ type: "bar" });
   });
 });
 
@@ -427,11 +498,14 @@ describe("vega-lite compilation", () => {
     ["histogram at phone width", histogramSpec(histogram, { narrow: true, height: 160 })],
     ["timeline", timelineSpec(timeline)],
     ["heatmap", heatmapSpec(heatmap)],
+    ["compare", compareSpec(compare, { narrow: false })],
+    ["compare at phone width", compareSpec(compare, { narrow: true })],
     ["bar sparkline", sparklineSpec(bars)],
     ["line sparkline", sparklineSpec(line(4))],
     ["histogram sparkline", sparklineSpec(histogram)],
     ["timeline sparkline", sparklineSpec(timeline)],
     ["heatmap sparkline", sparklineSpec(heatmap)],
+    ["compare sparkline", sparklineSpec(compare)],
   ])("compiles the %s without warnings", (_name, spec) => {
     const warnings: string[] = [];
     const logger = {

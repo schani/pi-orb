@@ -6,6 +6,7 @@ import {
   CHART_CONFIG,
   type ChartSeriesActions,
   type ChartXAxis,
+  compareSpec,
   heatmapSpec,
   histogramSpec,
   lineChartSpec,
@@ -137,14 +138,16 @@ export function mountChart(
           ? timelineSpec(spec)
           : spec.kind === "heatmap"
             ? heatmapSpec(spec)
-            : lineChartSpec(spec, {
-                narrow: options.narrow,
-                height: options.height,
-                ...(options.xAxis === undefined ? {} : { xAxis: options.xAxis }),
-                ...(options.seriesActions === undefined
-                  ? {}
-                  : { seriesActions: options.seriesActions }),
-              });
+            : spec.kind === "compare"
+              ? compareSpec(spec, { narrow: options.narrow })
+              : lineChartSpec(spec, {
+                  narrow: options.narrow,
+                  height: options.height,
+                  ...(options.xAxis === undefined ? {} : { xAxis: options.xAxis }),
+                  ...(options.seriesActions === undefined
+                    ? {}
+                    : { seriesActions: options.seriesActions }),
+                });
   return render(container, vega, (event, value) => showTooltip(spec, event, value)).map(
     ({ view }) => {
       const isolating =

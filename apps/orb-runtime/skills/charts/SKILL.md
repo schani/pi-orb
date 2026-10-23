@@ -1,11 +1,11 @@
 ---
 name: charts
-description: 'Show the user charts (metrics, Datadog series, percentile bands, distributions, CI runs and traces, weekday × hour patterns, benchmarks, counts) as transcript rows with code-mode chart(): line, bar, histogram, timeline and heatmap spec formats, what is drawn automatically, limits, and what is not supported.'
+description: 'Show the user charts (metrics, Datadog series, percentile bands, distributions, CI runs and traces, weekday × hour patterns, baseline vs candidate benchmarks, counts) as transcript rows with code-mode chart(): line, bar, histogram, timeline, heatmap and compare spec formats, what is drawn automatically, limits, and what is not supported.'
 ---
 
 # Charts
 
-In code mode, `await chart(spec)` shows the user a chart as its own row in the transcript, under the call that produced it. The row is open by default and folds to a sparkline. Use it when a shape answers the question faster than prose: a metric over time, a before/after, several services side by side, a ranking, a distribution, where a run's time went, when something happens.
+In code mode, `await chart(spec)` shows the user a chart as its own row in the transcript, under the call that produced it. The row is open by default and folds to a sparkline. Use it when a shape answers the question faster than prose: a metric over time, a before/after, several services side by side, a ranking, a distribution, where a run's time went, when something happens, how a candidate compares with a baseline case by case.
 
 The chart's data never reaches you. Fetch, reshape and chart inside one script, and `text()` the few numbers your answer needs: you cannot see the chart.
 
@@ -54,6 +54,10 @@ Heatmap — one value per pair of categories, e.g. failures by weekday × hour, 
 
 - `kind: "heatmap"`, `title`, `x: [label, …]` (≤60), `y: [label, …]` (≤40), `values` — one row per `y` label, each with one non-negative number per `x` label.
 
+Compare — a baseline against a candidate, one row per case, e.g. `main` vs a branch per benchmark, or TS vs a port per concurrency level. Use this instead of paired bars:
+
+- `kind: "compare"`, `title`, `from` and `to` (names of baseline and candidate), `better: "lower" | "higher"`, `tolerance?` (percent of the baseline counted as unchanged, default 5), `rows: [{ label, from, to }]` — 1 to 40 rows with positive values, unique labels, drawn in the given order.
+
 Both:
 
 - `unit?` (≤12 characters, not on timelines): `"ms"`, `"%"`, `"req/s"`… Shown on the axis, labels and tooltip.
@@ -70,6 +74,7 @@ Styling is fixed; the spec has no colour, size or style options.
 - Histograms bin all series on one grid; the last series is filled black, an earlier one a grey outline, each with p50/p95/p99 ticks. Hovering a series name isolates it.
 - Timeline spans show their label and duration when they fit; the folded row shows the run's total duration.
 - Heatmap cells are shaded by value; exact values are on hover.
+- Compare draws a hollow baseline dot and a filled candidate dot per row with the change as a multiple ("9.5× better"); rows worse than `tolerance` are red, rows within it grey and "same". Values spanning a decade or more use a log scale. The folded row counts worse rows.
 
 ## Limits
 
