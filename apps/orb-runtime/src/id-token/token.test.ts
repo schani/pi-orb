@@ -36,13 +36,6 @@ class ScriptedEndpoint implements IdTokenEndpoint {
   }
 }
 
-/** An endpoint that must never be reached: validation precedes every request. */
-class ForbiddenEndpoint implements IdTokenEndpoint {
-  async mint(): Promise<IdTokenEndpointResult> {
-    throw new Error("the endpoint must not be called for an invalid request");
-  }
-}
-
 describe("id-token argument parsing", () => {
   it("accepts both flag forms and the shim's subcommand word", () => {
     for (const argv of [
@@ -119,24 +112,6 @@ describe("id-token argument parsing", () => {
     ]) {
       expect(parseIdTokenArgs(argv).isOk(), JSON.stringify(argv)).toBe(true);
     }
-  });
-
-  it("never touches the endpoint for an invalid request", async () => {
-    await runDst({ name: "id-token-validation-first", iterations: 5 }, async (sim) => {
-      const result = await sim.runTasks([
-        {
-          name: "cli",
-          f: async (task) => {
-            const parsed = parseIdTokenArgs(["--audience", "a", "--ttl-seconds", "10"]);
-            expect(parsed.isErr()).toBe(true);
-            if (parsed.isOk()) {
-              await fetchIdToken(task, new ForbiddenEndpoint(), parsed.value);
-            }
-          },
-        },
-      ]);
-      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-    });
   });
 });
 

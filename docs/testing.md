@@ -1578,3 +1578,5 @@ Poll and reconcile concurrency share one mailbox with call counts, worker identi
 Shared chunked waits and revision seeds preserve explicit reasons, project identities, initialization and revision baselines; scenario drivers remain local.
 
 FakeWorld models one host slot per orb; creation history, refs and incarnation fences qualify modeled replacement, while physical uniqueness belongs to real-provider contracts.
+
+Invalid identity CLI input must exit with usage, empty stdout and zero endpoint requests. (2026-10-22 PDT).
