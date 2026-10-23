@@ -4,7 +4,6 @@ import { fileURLToPath } from "node:url";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 import type { StoreError } from "../../domain/errors.ts";
 import type { PostgreSQLClient } from "./client.ts";
-import { backfillHistorySearch } from "./history-search.ts";
 
 const readMigrations = Result.fromThrowable(
   (dir: string) => {
@@ -65,21 +64,6 @@ export function runMigrations(
     for (const migration of migrations.value) {
       if (applied.has(migration.name)) continue;
       options.observe?.(migration.name, "started");
-      if (migration.name === "049_history_search.sql") {
-        const created = await db.transaction<void, StoreError>(async (_query, execute) =>
-          execute(migration.sql),
-        );
-        if (created.isErr()) return err(created.error);
-        const backfilled = await backfillHistorySearch(db);
-        if (backfilled.isErr()) return err(backfilled.error);
-        const recorded = await db.query("INSERT INTO schema_migrations (name) VALUES ($1)", [
-          migration.name,
-        ]);
-        if (recorded.isErr()) return err(recorded.error);
-        ran.push(migration.name);
-        options.observe?.(migration.name, "applied");
-        continue;
-      }
       const outcome = await db.transaction<void, StoreError>(async (query, execute) => {
         let owner = options.originalOwner;
         if (migration.name === "024_user_credential_pointers.sql") {

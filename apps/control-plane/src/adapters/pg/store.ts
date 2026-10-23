@@ -35,8 +35,6 @@ import type {
   EnqueueOrbMessageParams,
   FailOrbAndRequestComputeDiscardParams,
   FinalizeHostDiscardParams,
-  HistorySearchParams,
-  HistorySearchResult,
   MintSlotClaim,
   OrbMessageTargetNotFound,
   RecordHostDiscardStatusParams,
@@ -49,7 +47,6 @@ import type {
 import { hasNativeInboxAdmission } from "../durable-pg/inbox-admission.ts";
 import { removePrivateAgentState } from "./archive-private-state.ts";
 import { arrayParam, jsonParam, type PgRow, type PostgreSQLClient } from "./client.ts";
-import { indexHistorySearchRecord, searchHistory } from "./history-search.ts";
 import { PgWorkspaceUploads } from "./workspace-uploads.ts";
 
 const BOOT_CONTEXT_STATES: readonly OrbState[] = [
@@ -342,8 +339,6 @@ export async function commitHistoryTransaction(
         });
       }
     }
-    const indexed = await indexHistorySearchRecord(query, params.orbId, record);
-    if (indexed.isErr()) return err(indexed.error);
   }
   const deliveredMessageIds = params.records.flatMap(inboxMessageIds);
   for (const messageId of deliveredMessageIds) {
@@ -2463,13 +2458,6 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         ? err(result.error)
         : ok((result.value.rows[0]?.["record"] ?? null) as HistoryRecord | null);
     });
-  }
-
-  searchHistory(
-    _task: SimulationTask,
-    params: HistorySearchParams,
-  ): ResultAsync<HistorySearchResult, StoreError> {
-    return searchHistory(this.db, params);
   }
 
   readHistorySnapshot(

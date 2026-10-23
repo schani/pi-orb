@@ -52,7 +52,7 @@ case "${1:-}" in
     shift
     exec node "$app_root/apps/orb-runtime/src/hosting/cli.ts" "$@"
     ;;
-  self|orbs|transcript|search)
+  self|orbs|transcript)
     exec node "$app_root/apps/orb-runtime/src/inspection/cli.ts" "$@"
     ;;
   *)

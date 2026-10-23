@@ -159,14 +159,27 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
             }),
     );
     const faux = fauxProvider();
-    const turn = (code = "text(await tools.mcp__fixture__read({}))") => [
-      fauxAssistantMessage(fauxToolCall("codemode", { code }), { stopReason: "toolUse" as const }),
+    let waitForDiscovery: (name: string) => Promise<void>;
+    const turn = (code = "text(await tools.mcp__fixture__read({}))", readyTool?: string) => [
+      async () => {
+        if (readyTool) await waitForDiscovery(readyTool);
+        return fauxAssistantMessage(fauxToolCall("codemode", { code }), {
+          stopReason: "toolUse" as const,
+        });
+      },
       fauxAssistantMessage("done"),
     ];
+    const retry = () =>
+      fauxAssistantMessage(
+        fauxToolCall("codemode", { code: "text(await tools.mcp_status({}));" }),
+        { stopReason: "toolUse" },
+      );
     faux.setResponses([
-      ...turn(),
+      ...turn('text(await describeNamespace("mcp__fixture"));'),
+      retry(),
       ...turn(
         'text(await describeNamespace("mcp__fixture")); text(await describeTool("mcp__fixture__read")); text(await tools.mcp__fixture__read({}))',
+        "mcp__fixture__read",
       ),
       ...turn(),
     ]);
@@ -251,6 +264,22 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
           artifacts: { read: () => okAsync(null), write: () => okAsync("/orb-artifacts/fixture") },
         })
       )._unsafeUnwrap();
+      waitForDiscovery = async (name) => {
+        const found = () =>
+          options.registry
+            .snapshot()
+            .tools()
+            .some(({ tool }) => tool.name === name);
+        if (found()) return;
+        await new Promise<void>((resolve) => {
+          const unsubscribe = options.registry.subscribe(() => {
+            if (found()) {
+              unsubscribe();
+              resolve();
+            }
+          });
+        });
+      };
       let resolveConversation: Harness["conversation"] | undefined;
       agent = (
         await DurableAgent.open({
@@ -301,6 +330,20 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
         (await owner.waitForIdle())._unsafeUnwrap();
         return owner.snapshot()._unsafeUnwrap();
       };
+      const failed = () =>
+        owner
+          .snapshot()
+          ._unsafeUnwrap()
+          .records.some((record) => record.type === "event" && record.eventType === "orb.alert");
+      if (!failed())
+        await new Promise<void>((resolve) => {
+          const unsubscribe = owner.subscribe(() => {
+            if (failed()) {
+              unsubscribe();
+              resolve();
+            }
+          });
+        });
       const first = await deliver("original input");
       expect(progressBoundary).toHaveBeenCalledOnce();
       const invocationEnv = progressBoundary.mock.calls[0]?.[0].env;
@@ -316,30 +359,24 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
       const toolResults = native.items.filter((entry) => entry.kind === "pi.tool-result");
       const unavailableStatus = boundary === "typed-unavailable" ? "unavailable" : "needs-auth";
       expect(toolResults).toHaveLength(1);
-      expect(JSON.stringify(toolResults[0]?.model)).toContain(`MCP fixture: ${unavailableStatus}.`);
-      expect(toolResults[0]?.data).toEqual({
-        diagnostics: [
-          { severity: "info", code: "mcp_status", message: `MCP fixture: ${unavailableStatus}.` },
-        ],
-      });
+      expect(JSON.stringify(toolResults[0]?.model)).toContain(unavailableStatus);
+      expect(native.items.filter((entry) => entry.kind === "orb.alert")).toHaveLength(1);
       expect(JSON.stringify(toolResults)).not.toContain("PRIVATE-OAUTH-FAILURE");
-      expect(token).toHaveBeenCalledTimes(2);
+      expect(token).toHaveBeenCalledTimes(1);
       expect(requests).toBe(0);
       expect(acceptedCalls).toBe(0);
-      const publicTools = first.records
-        .filter((record) => record.type === "message")
-        .filter((record) => record.role === "tool");
-      expect(
-        JSON.stringify(publicTools.map((record) => record.content)).split(
-          `MCP fixture: ${unavailableStatus}.`,
-        ),
-      ).toHaveLength(2);
+      const publicTools = first.records.filter(
+        (record) => record.type === "event" && record.eventType === "orb.alert",
+      );
+      expect(JSON.stringify(publicTools).split(`MCP fixture: ${unavailableStatus}.`)).toHaveLength(
+        2,
+      );
       expect(JSON.stringify(first.records)).not.toContain("PRIVATE-OAUTH-FAILURE");
-      expect(logs.filter((line) => line.includes("durable.mcp_unavailable"))).toEqual([
-        expect.stringContaining(
-          `server=fixture status=${unavailableStatus} stage=discovery errorCategory=unavailable`,
-        ),
-      ]);
+      const discoveryFailures = logs.filter((line) => line.includes("durable.mcp_unavailable"));
+      expect(discoveryFailures).toHaveLength(1);
+      expect(logs.some((line) => line.includes("test_registry_published"))).toBe(false);
+      expect(discoveryFailures[0]).toContain("server=fixture phase=initialize");
+      expect(discoveryFailures[0]).toContain("stage=discovery");
       expect(
         first.records
           .filter((record) => record.type === "message")
@@ -418,13 +455,20 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
         .filter((record) => record.type === "message")
         .filter((record) => record.role === "tool");
       expect(
-        JSON.stringify(publicToolHistory.map((record) => record.content)).match(
-          /MCP fixture: connected\./g,
-        ),
+        JSON.stringify(
+          third.records.filter(
+            (record) => record.type === "event" && record.eventType === "orb.alert",
+          ),
+        ).match(/MCP fixture: connected\./g),
       ).toHaveLength(1);
       expect(
         JSON.stringify(publicToolHistory.map((record) => record.content)).split(
           `MCP fixture: ${unavailableStatus}.`,
+        ),
+      ).toHaveLength(1);
+      expect(
+        third.records.filter(
+          (record) => record.type === "event" && record.eventType === "orb.alert",
         ),
       ).toHaveLength(2);
       expect(logs.filter((line) => line.includes("durable.mcp_unavailable"))).toHaveLength(1);
@@ -490,14 +534,24 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
         expect(JSON.stringify(await state())).not.toContain("mcp__fixture__read_after_reset");
 
         authorized = false;
-        faux.setResponses(turn());
-        await deliver("consent reset");
+        faux.setResponses(
+          turn('await tools.mcp__fixture__read({}); text("ignored runtime failure");'),
+        );
+        const reset = await deliver("consent reset");
+        expect(
+          reset.records.filter(
+            (record) =>
+              record.type === "event" &&
+              record.eventType === "orb.alert" &&
+              record.alert?.message === "MCP fixture: needs-auth.",
+          ),
+        ).toHaveLength(2);
         const beforeRecovery = acceptedCalls;
         recovered = true;
         authorized = true;
         const recoveredCode =
           'text(await describeNamespace("mcp__fixture")); text(await describeTool("mcp__fixture__read_after_reset")); text(await tools.mcp__fixture__read_after_reset({}));';
-        faux.setResponses(turn(recoveredCode));
+        faux.setResponses([retry(), ...turn(recoveredCode, "mcp__fixture__read_after_reset")]);
         const restored = await deliver("root recovered after consent reset");
         expect(JSON.stringify(restored.records)).toContain("RESET_CONSENT_INSTRUCTIONS");
         expect(acceptedCalls).toBe(beforeRecovery + 1);

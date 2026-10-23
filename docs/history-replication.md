@@ -82,12 +82,6 @@ Intended tool description: “Read an orb’s committed transcript in pages usin
 
 **Rejected approach (2026-10-09):** the earlier 256 KiB hard cap used JSON text fragments and chunk/phase/offset cursor state to bound even oversized records. Rejected because atomic records and a single-record exception are simpler and avoid agent-side fragment reconstruction and extra state.
 
-## History search (approved 2026-10-22, America/Los_Angeles; core ready locally, not deployed)
-
-`docs/history-search.md` defines owner-only BM25 over committed public records without waking compute. Migration 049 adds one derived token-frequency/length table with zero-token backfill markers; projection shares the source commit transaction. A once-only bounded application backfill completes before its migration marker. Search follows current transcript eligibility, retains archived history and cascades source deletion; private/native payloads are not crawled. Pi registration and CLI help await wording approval; E2E and full validation remain pending.
-
-Old control-plane history writers, including native receipt writers, must be verified quiescent before 049 and remain so through backfill until new writer activation. Old code does not index late commits. The ordinary `infra/release.sh` schema-before-retirement rollout is unsafe for this first migration; the deployment gate is tracked in `TODO.md`. No deployment safety is claimed.
-
 ## Browser display projection (decided 2026-10-01; implemented locally, validation pending)
 
 `history_records.record`, private native authority, runtime `/v1/history` pulls, and the in-orb `pi-orb transcript --json` response remain complete normalized `HistoryRecord` (native conversation data included). No data migration or change to replication cursor/commit is needed. Only browser `GET /api/v1/orbs/:orbId/history` and WebSocket `history.record` project records to `DisplayRecord`; `DisplayHistoryView` keeps `{orbId,session,records,cursor,headId}` with minimal nullable session `{id,timestamp?}`. The CLI is not a consumer of this browser display shape. Committed detail/image reads address one record by ID through the store, falling back to an already-running runtime when the replica lags; stopped and archived reads use only the replica and never wake compute. Session identity fences both paths. Details are not a second persistent copy. See `docs/runtime-protocol.md`, `docs/control-plane-api.md`, `docs/web-ui.md` and measurement evidence in `docs/transcript-cache.md`.

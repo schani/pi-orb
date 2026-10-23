@@ -201,30 +201,6 @@ export interface CommitPullBatchParams {
   readonly nextHeadId: string | null;
 }
 
-export interface HistorySearchParams {
-  readonly ownerUserId: string;
-  readonly projectId?: string;
-  readonly orbId?: string;
-  readonly terms: readonly string[];
-  readonly limit: number;
-}
-
-export interface HistorySearchHit {
-  readonly orbId: string;
-  readonly sessionId: string;
-  readonly recordId: string;
-  readonly name: string | null;
-  readonly projectName: string;
-  readonly record: HistoryRecord;
-  readonly score: number;
-}
-
-export interface HistorySearchResult {
-  readonly hits: HistorySearchHit[];
-  readonly documentCount: number;
-  readonly candidateCount: number;
-}
-
 /**
  * The single storage boundary of the control-plane domain (docs/stack.md).
  * Every mutation is transactional in the real adapter. Lifecycle writes use
@@ -560,11 +536,6 @@ export interface ControlPlaneStore extends ActivityHeadlineStore {
     sessionId: string,
     recordId: string,
   ): ResultAsync<HistoryRecord | null, StoreError>;
-
-  searchHistory(
-    task: SimulationTask,
-    params: HistorySearchParams,
-  ): ResultAsync<HistorySearchResult, StoreError>;
 
   /** Consistent snapshot for the history API and live handoff (docs/history-replication.md). */
   readHistorySnapshot(

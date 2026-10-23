@@ -2,7 +2,6 @@ import { NoSimulationTask } from "determined";
 import { readBrokerEnv } from "../broker/endpoint.ts";
 import {
   filterOrbs,
-  formatHistorySearch,
   formatOrbList,
   formatSelf,
   formatTranscript,
@@ -15,7 +14,6 @@ function describeFailure(failure: InspectionEndpointFailure): string {
   switch (failure.kind) {
     case "unauthorized":
       return "the control plane rejected this orb's identity (replaced or retired compute?)";
-    case "invalid_request":
     case "not_found":
     case "conflict":
     case "unavailable":
@@ -26,8 +24,6 @@ function describeFailure(failure: InspectionEndpointFailure): string {
 
 function exitCode(failure: InspectionEndpointFailure): number {
   switch (failure.kind) {
-    case "invalid_request":
-      return 2;
     case "unauthorized":
       return 3;
     case "not_found":
@@ -56,19 +52,6 @@ async function main(): Promise<number> {
 
   const endpoint = new HttpOrbInspectionEndpoint(env);
   const task = new NoSimulationTask("orb-inspection-cli", false);
-  if (parsed.value.type === "search") {
-    const result = await endpoint.search(task, parsed.value.request);
-    if (result.kind !== "search") {
-      process.stderr.write(`pi-orb: ${describeFailure(result)}\n`);
-      return exitCode(result);
-    }
-    process.stdout.write(
-      parsed.value.json
-        ? `${JSON.stringify(result.value, null, 2)}\n`
-        : formatHistorySearch(result.value),
-    );
-    return 0;
-  }
   if (parsed.value.type === "self") {
     const result = await endpoint.self(task);
     if (result.kind !== "self") {

@@ -19,17 +19,6 @@ const orb = {
   },
 } as const;
 
-const searchHit = {
-  orbId: "orb-sibling",
-  sessionId: "session-a",
-  recordId: "record-1",
-  name: "Parser work",
-  projectName: "Client App",
-  snippet: "Fix parsing",
-  score: 0.125,
-  orbUrl: "https://browser.test/orbs/orb-sibling",
-};
-
 interface CommandResult {
   readonly code: number | null;
   readonly stdout: string;
@@ -63,19 +52,10 @@ function runCli(baseUrl: string, args: readonly string[]): Promise<CommandResult
 describe("pi-orb inspection CLI entry point", () => {
   let server: Server;
   let baseUrl: string;
-  let mode:
-    | "ok"
-    | "unauthorized"
-    | "missing"
-    | "unavailable"
-    | "malformed"
-    | "empty"
-    | "invalid_request";
-  let searchBody: unknown;
+  let mode: "ok" | "unauthorized" | "missing" | "unavailable" | "malformed";
 
   beforeEach(async () => {
     mode = "ok";
-    searchBody = undefined;
     server = createServer((request, response) => {
       expect(request.headers.authorization).toBe(`Bearer ${TOKEN}`);
       response.setHeader("content-type", "application/json");
@@ -92,40 +72,6 @@ describe("pi-orb inspection CLI entry point", () => {
             error: { code: "not_found", message: "orb not found", retryable: false },
           }),
         );
-        return;
-      }
-      if (request.url === "/runtime/v1/history/search") {
-        expect(request.method).toBe("POST");
-        expect(request.headers["content-type"]).toBe("application/json");
-        let body = "";
-        request.on("data", (chunk) => {
-          body += chunk.toString();
-        });
-        request.on("end", () => {
-          searchBody = JSON.parse(body);
-          if (mode === "unavailable" || mode === "invalid_request") {
-            response.statusCode = mode === "unavailable" ? 503 : 400;
-            response.end(
-              JSON.stringify({
-                v: 1,
-                error: {
-                  code: mode,
-                  message: "search refused",
-                  retryable: mode === "unavailable",
-                },
-              }),
-            );
-          } else if (mode === "malformed") {
-            response.end(JSON.stringify({ v: 1, hits: [{}] }));
-          } else {
-            response.end(
-              JSON.stringify({
-                v: 1,
-                hits: mode === "empty" ? [] : [searchHit],
-              }),
-            );
-          }
-        });
         return;
       }
       if (request.url === "/runtime/v1/orb/self") {
@@ -201,73 +147,6 @@ describe("pi-orb inspection CLI entry point", () => {
   afterEach(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
-
-  it("searches the current orb by default and prints source metadata", async () => {
-    const result = await runCli(baseUrl, ["search", "private query"]);
-    expect(result).toMatchObject({ code: 0, stderr: "" });
-    expect(searchBody).toEqual({ query: "private query" });
-    for (const text of [
-      "orb-sibling",
-      "Parser work",
-      "Client App",
-      "session-a",
-      "record-1",
-      "Fix parsing",
-      "0.125",
-      "https://browser.test/orbs/orb-sibling",
-    ])
-      expect(result.stdout).toContain(text);
-    expect(result.stdout).not.toContain("private query");
-  });
-
-  it("preserves the result DTO in JSON and sends explicit scope and limit", async () => {
-    const result = await runCli(baseUrl, [
-      "search",
-      "parser",
-      "--orb",
-      "orb-sibling",
-      "--limit",
-      "50",
-      "--json",
-    ]);
-    expect(result).toMatchObject({ code: 0, stderr: "" });
-    expect(searchBody).toEqual({ query: "parser", orbId: "orb-sibling", limit: 50 });
-    expect(JSON.parse(result.stdout)).toEqual({
-      v: 1,
-      hits: [searchHit],
-    });
-  });
-
-  it.each([
-    ["unauthorized", 3],
-    ["missing", 4],
-    ["unavailable", 6],
-    ["invalid_request", 2],
-    ["malformed", 7],
-  ] as const)("reports search %s without stdout", async (failure, code) => {
-    mode = failure;
-    const result = await runCli(baseUrl, ["search", "private query", "--all"]);
-    expect(result).toMatchObject({ code, stdout: "" });
-    expect(result.stderr).not.toContain("private query");
-  });
-
-  it("distinguishes empty search results from unavailability", async () => {
-    mode = "empty";
-    expect(await runCli(baseUrl, ["search", "x"])).toEqual({
-      code: 0,
-      stdout: "No matches.\n",
-      stderr: "",
-    });
-    expect(searchBody).toEqual({ query: "x" });
-  });
-
-  it.each([["search"], ["search", "x", "--limit", "51"], ["search", "x", "--project", "--all"]])(
-    "rejects malformed search args without issuing HTTP %j",
-    async (...args) => {
-      expect(await runCli(baseUrl, args)).toMatchObject({ code: 2, stdout: "" });
-      expect(searchBody).toBeUndefined();
-    },
-  );
 
   it("prints self as a summary or structured JSON", async () => {
     const summary = await runCli(baseUrl, ["self"]);
