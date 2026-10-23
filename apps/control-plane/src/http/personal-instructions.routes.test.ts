@@ -18,6 +18,7 @@ it("browser routes read/save one document without project scope, reject invalid 
     expect(initial.statusCode).toBe(200);
     expect(initial.json()).toEqual({ content: "", revision: 0 });
     expect(initial.headers["cache-control"]).toBe("no-store");
+    let revision = 0;
     for (const content of ["# Across projects\r\n", ""]) {
       const saved = await app.inject({
         method: "PUT",
@@ -25,8 +26,13 @@ it("browser routes read/save one document without project scope, reject invalid 
         payload: { content },
       });
       expect(saved.statusCode).toBe(200);
-      expect(saved.json().content).toBe(content);
+      revision += 1;
+      expect(saved.json()).toEqual({ content, revision });
       expect(saved.headers["cache-control"]).toBe("no-store");
+      const readback = await app.inject({ method: "GET", url: "/api/v1/personal-instructions" });
+      expect(readback.statusCode).toBe(200);
+      expect(readback.json()).toEqual(saved.json());
+      expect(readback.headers["cache-control"]).toBe("no-store");
     }
     expect(
       (
