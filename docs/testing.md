@@ -1737,3 +1737,5 @@ Manual inference tracing qualification asserts exact forwarded frames and status
 SSR history checks summary markup only; mounted lazy-transcript qualification counts every closed tool detail path, then asserts retry and cache reads after opening. Backdrop clicks remain browser-owned. (2026-10-22 PDT).
 
 Generic tool label bounds require an existing nonempty truncated label before comparing tooltip and byte length. (2026-10-22 PDT).
+
+Inbox races qualify the production poller and mutation epoch, including post-unmount publication fencing; pure acknowledgement/retirement contracts remain independent. (2026-10-22 PDT).
