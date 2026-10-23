@@ -1582,3 +1582,5 @@ FakeWorld models one host slot per orb; creation history, refs and incarnation f
 Invalid identity CLI input must exit with usage, empty stdout and zero endpoint requests. (2026-10-22 PDT).
 
 Sleep request qualification asserts the exact 3000ms deadline independently of abort mapping. (2026-10-22 PDT).
+
+Summary completion compares all callbacks without deduplication; timeout or success remains valid. (2026-10-22 PDT).
