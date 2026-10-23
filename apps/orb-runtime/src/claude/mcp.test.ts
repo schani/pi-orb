@@ -4,7 +4,7 @@ import { ListToolsResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpConfig } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { ok } from "neverthrow";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { createClaudeMcp } from "./mcp.ts";
 
 const config: McpConfig = {
@@ -166,8 +166,12 @@ describe("Claude project MCP", () => {
         finish = resolve;
       });
     });
+    let upstreamClosed!: () => void;
+    const closing = new Promise<void>((resolve) => {
+      upstreamClosed = resolve;
+    });
     vi.spyOn(upstream, "close").mockImplementation(async () => {
-      finish({ tools: [] });
+      upstreamClosed();
     });
     const result = createClaudeMcp({
       configs: [{ ...config, headers: {}, oauth: { id: "test" } }],
@@ -190,7 +194,23 @@ describe("Claude project MCP", () => {
       () => "closed",
     );
     await started;
-    expect((await result.value.close()).isOk()).toBe(true);
+    let settled = false;
+    const closed = (async () => {
+      const outcome = await result.value.close();
+      settled = true;
+      return outcome;
+    })();
+    onTestFinished(async () => {
+      finish({ tools: [] });
+      await closed;
+      await request;
+      await consumer.close();
+    });
+    await closing;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    finish({ tools: [] });
+    expect((await closed).isOk()).toBe(true);
     await request;
     expect((await result.value.close()).isOk()).toBe(true);
     expect(upstream.close).toHaveBeenCalledOnce();

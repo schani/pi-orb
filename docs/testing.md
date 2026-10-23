@@ -1602,3 +1602,5 @@ Corrupt-index qualification first restores and validates the native transcript, 
 Each native settings source independently rejects auth overrides, malformed JSON, invalid shapes and read errors without private values. (2026-10-22 PDT).
 
 Credential response tests vary one invalid field at a time and pin HTTP error codes and retryability including throttling. (2026-10-22 PDT).
+
+MCP close remains pending after upstream close until the test independently releases the admitted request. (2026-10-22 PDT).
