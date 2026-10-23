@@ -2772,9 +2772,9 @@ describe("orb lifecycle (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(capture.matching("unreachable-restart-deferred")).toHaveLength(1);
       },
     );
-    expect(capture.matching("unreachable-restart-deferred")).toHaveLength(1);
   });
 
   it("a runtime answer racing failed corroboration vetoes the restart", async () => {

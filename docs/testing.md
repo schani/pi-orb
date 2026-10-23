@@ -1554,3 +1554,5 @@ Project deletion proves retained archived history exists before asserting its re
 Healthy restart qualification checks both sides of the persisted idle deadline before a restart-anchored countdown could expire.
 
 Forced provision races witness a nonretryable conflict before winner commit and require forward-only recovery.
+
+Deferred-restart telemetry is asserted inside every recorded iteration after task success.
