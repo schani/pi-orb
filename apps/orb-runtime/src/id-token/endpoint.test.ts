@@ -155,6 +155,10 @@ describe("id-token HTTP endpoint", () => {
     const silent = createServer(() => {
       // Accepted, parsed, and deliberately never answered.
     });
+    onTestFinished(async () => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => silent.close(() => resolve()));
+    });
     silent.on("connection", (socket) => sockets.push(socket));
     await new Promise<void>((resolve) => silent.listen(0, "127.0.0.1", resolve));
     const { port } = silent.address() as AddressInfo;
@@ -177,9 +181,6 @@ describe("id-token HTTP endpoint", () => {
       message: `control plane did not answer within ${timeoutMs}ms`,
     });
     expect(elapsedMs).toBeGreaterThanOrEqual(timeoutMs - 1);
-
-    for (const socket of sockets) socket.destroy();
-    await new Promise<void>((resolve) => silent.close(() => resolve()));
   });
 
   it("uses the remaining budget for both headers and a stalled body", async () => {

@@ -50,6 +50,10 @@ describe("project-secret boot snapshot endpoint", () => {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ revision: 1, values: { TOKEN: "ready" } }));
     });
+    onTestFinished(async () => {
+      warming.closeAllConnections();
+      await new Promise<void>((resolve) => warming.close(() => resolve()));
+    });
     await new Promise<void>((resolve) => warming.listen(0, "127.0.0.1", resolve));
     const { port } = warming.address() as AddressInfo;
     const result = await fetchProjectSecretSnapshotAtBoot(
@@ -58,13 +62,16 @@ describe("project-secret boot snapshot endpoint", () => {
     );
     expect(result.isOk() && result.value.values).toEqual({ TOKEN: "ready" });
     expect(attempts).toBe(3);
-    await new Promise<void>((resolve) => warming.close(() => resolve()));
   });
 
   it("fails typed on malformed success and transport errors", async () => {
     const malformed = createServer((_request, response) => {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ revision: 1, values: { "bad-name": "secret" } }));
+    });
+    onTestFinished(async () => {
+      malformed.closeAllConnections();
+      await new Promise<void>((resolve) => malformed.close(() => resolve()));
     });
     await new Promise<void>((resolve) => malformed.listen(0, "127.0.0.1", resolve));
     const { port } = malformed.address() as AddressInfo;
@@ -73,8 +80,6 @@ describe("project-secret boot snapshot endpoint", () => {
       runtimeToken: "runtime-bearer",
     });
     expect(bad.isErr() && bad.error.code).toBe("invalid_response");
-    await new Promise<void>((resolve) => malformed.close(() => resolve()));
-
     const rejection = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("owned rejection"));
     onTestFinished(() => rejection.mockRestore());
     const unavailable = await fetchProjectSecretSnapshot({

@@ -1,12 +1,13 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { checkTestLaunchFailure } from "./test-launch-failure.ts";
 
 describe("checkTestLaunchFailure", () => {
   it("fails only the armed orb incarnation and durably records the injection", () => {
     const workDir = mkdtempSync(join(tmpdir(), "pi-orb-launch-failure-"));
+    onTestFinished(() => rmSync(workDir, { recursive: true, force: true }));
     writeFileSync(
       join(workDir, ".pi-orb-e2e-launch-failure.json"),
       JSON.stringify({ orbId: "orb-1", incarnation: 2 }),
@@ -29,6 +30,7 @@ describe("checkTestLaunchFailure", () => {
 
   it("is inert unless explicitly enabled and fails open on malformed test state", () => {
     const workDir = mkdtempSync(join(tmpdir(), "pi-orb-launch-failure-"));
+    onTestFinished(() => rmSync(workDir, { recursive: true, force: true }));
     expect(checkTestLaunchFailure({}, workDir)).toEqual({ inject: false });
     writeFileSync(join(workDir, "bad.json"), "not-json");
     expect(

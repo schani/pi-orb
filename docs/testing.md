@@ -1592,3 +1592,5 @@ Hosted upload qualification checks independently computed SHA-256, streamed byte
 Transport mapping tests inject owned fetch rejections rather than assuming fixed-port availability. (2026-10-22 PDT).
 
 Runtime role children bind port zero and report the actual bound port through the test-only preload IPC probe. (2026-10-22 PDT).
+
+Socket servers, PTYs, fake timers and temporary roots register unconditional cleanup immediately; independent teardown hooks preserve assertion failures. (2026-10-22 PDT).

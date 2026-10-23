@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { errAsync, okAsync } from "neverthrow";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import {
   type PtyFactory,
   type PtyProcess,
@@ -42,7 +45,10 @@ class FakeProcess implements PtyProcess {
 
 describe("TerminalManager", () => {
   it("spawns, resizes, and exits a real node-pty shell", async () => {
-    const manager = new TerminalManager({ cwd: process.cwd(), maxSessions: 1 });
+    const cwd = mkdtempSync(join(tmpdir(), "terminal-manager-test-"));
+    onTestFinished(() => rmSync(cwd, { recursive: true, force: true }));
+    const manager = new TerminalManager({ cwd, maxSessions: 1 });
+    onTestFinished(() => manager.closeAll());
     const opened = await manager.open(80, 24);
     expect(opened.isOk()).toBe(true);
     if (opened.isErr()) return;

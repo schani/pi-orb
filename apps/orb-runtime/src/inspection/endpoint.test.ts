@@ -19,7 +19,10 @@ function response(status: number, body: unknown): Response {
 }
 
 describe("orb inspection HTTP endpoint", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
   it("authenticates and validates the orb list", async () => {
     const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
