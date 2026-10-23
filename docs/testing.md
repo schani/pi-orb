@@ -1558,3 +1558,5 @@ Forced provision races witness a nonretryable conflict before winner commit and 
 Deferred-restart telemetry is asserted inside every recorded iteration after task success.
 
 Inbox FIFO compares flattened identities, including order within squashed records; exactly-once remains a separate oracle.
+
+Pending-delivery retry qualification observes the same request and duplicate response before crashing, then requires exactly-once recovery.

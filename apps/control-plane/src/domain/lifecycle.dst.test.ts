@@ -1888,6 +1888,26 @@ describe("orb lifecycle (DST)", () => {
         const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
         const stop = new AbortController();
         const messageId = "00000000-0000-4000-8000-000000000144";
+        const deliver = harness.deps.runtimeClient.deliverMessage.bind(harness.deps.runtimeClient);
+        let firstRequest: Parameters<typeof deliver>[1] | null = null;
+        let retryObserved = false;
+        let crashed = false;
+        harness.deps.runtimeClient.deliverMessage = (...args) => {
+          const request = args[1];
+          const pendingBefore = harness.world.pendingInboxBatchesOf(ORB).includes(messageId);
+          if (!crashed) {
+            firstRequest ??= structuredClone(request);
+            expect(request).toEqual(firstRequest);
+          }
+          return deliver(...args).map((response) => {
+            if (!crashed && pendingBefore) {
+              expect(response).toMatchObject({ messageId, status: "queued", duplicate: true });
+              expect(harness.world.pendingInboxBatchesOf(ORB)).toEqual([messageId]);
+              retryObserved = true;
+            }
+            return response;
+          });
+        };
         const result = await sim.runTasks([
           { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
           { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
@@ -1915,13 +1935,17 @@ describe("orb lifecycle (DST)", () => {
               // The batch stays claimed, so the reconciler redelivers it every
               // pass. Those retries must find it pending and do nothing —
               // otherwise one queued message becomes several agent turns.
-              await task.sleep(
-                6 * TEST_CONSTANTS.reconcileTickMs,
-                "let the control plane retry the still-claimed batch",
+              await waitUntil(
+                task,
+                "same pending batch receives a duplicate delivery response",
+                () => retryObserved,
+                { timeoutMs: 120_000 },
               );
+              expect(firstRequest).not.toBeNull();
               expect(harness.world.pendingInboxBatchesOf(ORB)).toEqual([messageId]);
               expect(harness.store.messageSnapshots(ORB)[0]?.status).toBe("delivering");
               // Now the process dies with the batch still only in memory.
+              crashed = true;
               harness.world.restartRuntimeProcess(task, ORB);
               expect(harness.world.pendingInboxBatchesOf(ORB)).toEqual([]);
               harness.world.scriptDeliverMessage(ORB, { kind: "ok" });
