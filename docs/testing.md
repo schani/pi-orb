@@ -8,6 +8,8 @@ Merged main `42cf1061` into the test audit, retaining structured orb results, sc
 
 Ownership schedules require successful archive, final archived state, sealed public rows and no native entries. Drain/commit losers must retain the typed stale-owner cause; admission rejection alone does not prove archive.
 
+Resource ordering waits for preparation entry while holding its gate; teardown releases the gate and joins health/plane closure even after assertion failure.
+
 Tenant storage tests share a database with colliding native conversation/document IDs. Base replacement exercises translated DELETE, retirement exercises UPDATE, and archive must leave the other tenant’s native records unchanged.
 
 Root and child tool visibility require actual provider requests: catalog-native checks each scope’s declarations; steer requires five root and two child requests. Registration owns catalog membership.
