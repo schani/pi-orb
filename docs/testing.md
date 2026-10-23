@@ -1618,3 +1618,5 @@ Native usage exports retain distinct nonzero input, output and cache canaries; m
 One lock-graph contract scans the root lock for vulnerable tooling; patch application and byte-identity contracts remain separate. (2026-10-22 PDT).
 
 The initialization failure matrix also pins unchanged flag-call counts after blocked settings reuse, including the models row baseline. (2026-10-22 PDT).
+
+Default native qualification retains root fanout and worker denial; foreground-definition research stays reproducible through the documented manual probe. (2026-10-22 PDT).
