@@ -1614,3 +1614,5 @@ Fairness qualification retains held-yield cancellation and successor admission. 
 Launch-proof parser qualification independently rejects missing, negative and fractional values for both incarnations. (2026-10-22 PDT).
 
 Native usage exports retain distinct nonzero input, output and cache canaries; malformed receiver requests emit safe typed diagnostics without sink delivery. (2026-10-22 PDT).
+
+One lock-graph contract scans the root lock for vulnerable tooling; patch application and byte-identity contracts remain separate. (2026-10-22 PDT).
