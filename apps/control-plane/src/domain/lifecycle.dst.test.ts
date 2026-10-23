@@ -3498,6 +3498,63 @@ describe("orb lifecycle (DST)", () => {
 });
 
 describe("idle auto-stop (DST)", () => {
+  it("uses the persisted idle deadline across a healthy process restart", async () => {
+    await runDst(
+      { name: "idle-restart-persisted-boundary", iterations: 10, lateTimerProbability: 0 },
+      async (sim, nextPhase) => {
+        const before = makeHarness();
+        let lastBusyAt = 0;
+        const seeded = await sim.runTasks([
+          {
+            name: "seed-durable-activity",
+            f: async (task) => {
+              seedRunningOrb(task, before, ORB);
+              const row = before.store.orbSnapshot(ORB);
+              expect(row).not.toBeNull();
+              if (row === null) return;
+              lastBusyAt = task.wallNow();
+              before.store.seedOrb({ ...row, lastBusyAt, stateChangedAt: lastBusyAt - 1_000 });
+            },
+          },
+        ]);
+        expect(seeded.isOk(), seeded.isErr() ? seeded.error.message : "").toBe(true);
+        const startsBefore = before.world.hostStartCountOf(ORB);
+        const after = restartControlPlane(before);
+        const idleMs = after.deps.constants.idleStopAfterMs;
+        const restartedAt = lastBusyAt + idleMs / 2;
+        const restarted = nextPhase({ wallClockEpoch: restartedAt });
+        const result = await restarted.runTasks([
+          {
+            name: "healthy-idle-boundary",
+            f: async (task) => {
+              expect((await reconcileOrbOnce(task, after.deps, ORB)).type).toBe("noop");
+              const deadline = lastBusyAt + idleMs;
+              await task.sleep(
+                deadline - 500 - task.wallNow(),
+                "just before persisted idle deadline",
+              );
+              expect((await reconcileOrbOnce(task, after.deps, ORB)).type).toBe("noop");
+              expect(after.store.orbSnapshot(ORB)?.state).toBe("running");
+              await task.sleep(
+                deadline + 500 - task.wallNow(),
+                "just after persisted idle deadline",
+              );
+              expect((await reconcileOrbOnce(task, after.deps, ORB)).type).toBe("transitioned");
+              expect(task.wallNow()).toBeLessThan(restartedAt + idleMs);
+              expect(after.store.orbSnapshot(ORB)).toMatchObject({
+                state: "stopping",
+                stopReason: "idle",
+                lastBusyAt,
+              });
+              expect(after.world.hostStartCountOf(ORB)).toBe(startsBefore);
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      },
+    );
+  });
+
   it("stops an idle orb after the idle deadline with reason idle", async () => {
     const capture = new LogCapture();
     await runDst(
