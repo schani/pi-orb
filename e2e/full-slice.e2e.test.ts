@@ -1624,7 +1624,7 @@ describe("full slice E2E", () => {
         if (control.type === "terminal.ready") {
           // Leave the shell open: the controlled stop below must close it and
           // its socket rather than leaking a process-provider descendant.
-          terminalSocket.send(Buffer.from("printf TERMINAL_E2E_OK\\n\r"));
+          terminalSocket.send(Buffer.from("printf 'TERMINAL_E2E_%s\\n' OK\r"));
         } else if (control.type === "terminal.error") {
           clearTimeout(timer);
           reject(new Error(control.error?.message ?? "terminal error"));

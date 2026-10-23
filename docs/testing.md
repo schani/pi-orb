@@ -1779,3 +1779,5 @@ Source-evaluating diagnostic tests require mock bindings and exclude their live 
 The colliding-tenant storage fixture positively requires both owners before archive/validation. (2026-10-22 PDT).
 
 Diagnostic cutoff counts parsed frame bytes, excluding a following incomplete UTF-8 tail. Both complete terminal-frame and partial-tail cases retain exact-byte assertions. (2026-10-22 PDT).
+
+**Decision (2026-10-22):** PTY execution markers must differ from command input; an open terminal remains covered by the controlled-stop socket-close assertion.
