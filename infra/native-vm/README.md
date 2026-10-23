@@ -42,11 +42,12 @@ The command creates the builder, runs installation and guest contract tests,
 captures inventory, seals the runtime image, and creates a separate empty 50 GiB
 ext4 workspace image. Validation clones that image into a 50 GiB disk, matching
 production's fixed workspace capacity, runs `/opt/pi-orb/acceptance.sh`, and verifies the exact
-validator instance's `runtime ready` record in Cloud Logging. Validator SSH
-readiness and guest acceptance each retain 60 attempts, so boot connectivity
-does not consume the acceptance allowance. There are no
-operator SSH stages. SSH and SCP always name `pi-orb-build`, never the caller's
-local username or runtime `orb`. Preflight generates an unencrypted Ed25519 key
+validator instance's `runtime ready` record in Cloud Logging. Validator readiness
+polls SSH, HTTP health and the runtime-ready guest attribute for up to 60 attempts.
+Guest/Claude acceptance runs once; any failure rejects the candidate, including
+ambiguous transport loss (decided 2026-10-22). There are no operator SSH stages.
+SSH and SCP always name `pi-orb-build`, never the caller's local username or runtime
+`orb`. Preflight generates an unencrypted Ed25519 key
 in the operation's mode-0700 `build-ssh` directory with no prompt; all connections
 use that key, IAP, quiet mode and SSH batch mode. Existing directories are refused,
 not overwritten. Cleanup removes the operation key on success, failure and handled

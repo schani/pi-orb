@@ -200,6 +200,96 @@ describe("GCloud native-image adapter", () => {
     expect(commands[1]).toContain("ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub");
   });
 
+  it.each([
+    ["ready", "runtime", "ready", 0, true],
+    ["starting", "runtime", "ready", 0, false],
+    ["ready", "bootstrap", "ready", 0, false],
+    ["ready", "runtime", "starting", 0, false],
+    ["ready", "runtime", "ready", 7, false],
+  ])(
+    "polls health=%s guest=%s/%s transport=%s before acceptance",
+    async (healthStatus, phase, guestStatus, transportExit, ready) => {
+      const buildInput = await input();
+      const commands: string[] = [];
+      const effects = new GcloudImageBuildEffects(async (_command, args) => {
+        const remote = args.find((arg) => arg.startsWith("--command="))?.slice(10) ?? "";
+        commands.push(remote);
+        return promisify(execFile)("bash", [
+          "-c",
+          `
+        curl() {
+          for arg in "$@"; do
+            case "$arg" in
+              http://127.0.0.1:8080/v1/health) printf '%s' '${JSON.stringify({ status: healthStatus })}'; return ${transportExit} ;;
+              http://metadata.google.internal/*) printf '%s' '${JSON.stringify({ schemaVersion: 1, phase, status: guestStatus })}'; return ${transportExit} ;;
+            esac
+          done
+          return 2
+        }
+        ssh-keygen() { printf '256 SHA256:stableKey= host (ED25519)\\n'; }
+        ${remote}
+      `,
+        ]);
+      });
+      const result = await effects.run(
+        "validate",
+        "ready",
+        buildInput,
+        new AbortController().signal,
+      );
+      expect(result.isOk()).toBe(ready);
+      if (!ready) expect(result.isErr() && result.error.retryable).toBe(true);
+      if (!ready && transportExit === 0) {
+        const diagnostic =
+          healthStatus !== "ready"
+            ? "validator HTTP health is not ready"
+            : "validator runtime-ready guest attribute is not visible";
+        const log = await readFile(`${buildInput.outputDir}/001-validate-gcloud.log`, "utf8");
+        expect(log.endsWith(`${diagnostic}\n`)).toBe(true);
+      }
+      expect(commands).toHaveLength(1);
+      expect(commands[0]).not.toContain("/opt/pi-orb/acceptance.sh");
+    },
+  );
+
+  it.each(["native_acceptance_failed line=44", "IAP connection lost"])(
+    "never marks acceptance failure retryable: %s",
+    async (diagnostic) => {
+      const buildInput = await input();
+      const effects = new GcloudImageBuildEffects(async () => {
+        throw Object.assign(new Error("remote command failed"), { stderr: diagnostic });
+      });
+      const result = await effects.run(
+        "validate",
+        "probe",
+        buildInput,
+        new AbortController().signal,
+      );
+      expect(result.isErr() && result.error).toEqual({
+        type: "image_build_failed",
+        stage: "validate",
+        message: "remote command failed",
+      });
+      expect(await readFile(`${buildInput.outputDir}/001-validate-gcloud.log`, "utf8")).toContain(
+        diagnostic,
+      );
+    },
+  );
+
+  it("retries validator SSH readiness transport failures", async () => {
+    const buildInput = await input();
+    let attempts = 0;
+    const effects = new GcloudImageBuildEffects(async () => {
+      if (++attempts === 1) throw new Error("IAP unavailable");
+      return { stdout: "PI_ORB_HOST_KEY_FINGERPRINT=SHA256:stableKey=\n", stderr: "" };
+    });
+    const signal = new AbortController().signal;
+    const first = await effects.run("validate", "ready", buildInput, signal);
+    expect(first.isErr() && first.error.retryable).toBe(true);
+    expect((await effects.run("validate", "ready", buildInput, signal)).isOk()).toBe(true);
+    expect(attempts).toBe(2);
+  });
+
   it("fails a confirmed validator host-key mismatch without retrying", async () => {
     const buildInput = await input();
     let calls = 0;
@@ -256,8 +346,8 @@ describe("GCloud native-image adapter", () => {
     );
     expect(result.isErr() && result.error).toMatchObject({
       message: "readiness host-key fingerprint is unavailable",
-      retryable: true,
     });
+    expect(result.isErr() && result.error).not.toHaveProperty("retryable");
     expect(result.isErr() && result.error).not.toHaveProperty("reason");
   });
 

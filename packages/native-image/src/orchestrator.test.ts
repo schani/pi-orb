@@ -164,6 +164,52 @@ describe("native image build orchestration", () => {
     expect(effects.failure).toMatchObject({ stage: "validate" });
   });
 
+  it("rejects the first acceptance failure even if a retry could succeed", async () => {
+    const failure: ImageBuildError = {
+      type: "image_build_failed",
+      stage: "validate",
+      message: "native_acceptance_failed line=44",
+      retryable: true,
+    };
+    class AssertionEffects extends FakeEffects {
+      probes = 0;
+      override run(stage: ImageBuildStage, action: string): ResultAsync<void, ImageBuildError> {
+        if (stage === "validate" && action === "probe" && ++this.probes === 1) {
+          this.actions.push("validate:probe");
+          return errAsync(failure);
+        }
+        return super.run(stage, action);
+      }
+    }
+    const effects = new AssertionEffects();
+    const events: string[] = [];
+    const result = await buildNativeImage(input(), effects, effects.controller.signal, (event) =>
+      events.push(`${event.stage}:${event.action}:${event.status}`),
+    );
+    expect(result.isErr() && result.error).toEqual(failure);
+    expect(effects.probes).toBe(1);
+    expect(effects.failure).toEqual(failure);
+    expect(effects.manifest).toBeUndefined();
+    expect(effects.actions).toContain("cleanup:collect-evidence");
+    expect(effects.actions).toContain("cleanup:delete-image");
+    expect(effects.actions).toContain("cleanup:delete-workspace-image");
+    expect(effects.actions).not.toContain("validate:cloud-log");
+    expect(events).toContain("validate:probe:failed");
+    expect(events).not.toContain("validate:probe:waiting");
+  });
+
+  it("retries validator readiness before running acceptance once", async () => {
+    const effects = new FakeEffects();
+    effects.retryOnceAt = "validate:ready";
+    const result = await buildNativeImage(input(), effects, effects.controller.signal);
+    expect(result.isOk()).toBe(true);
+    expect(effects.actions.filter((action) => action === "validate:ready")).toHaveLength(2);
+    expect(effects.actions.filter((action) => action === "validate:probe")).toHaveLength(1);
+    expect(effects.actions.lastIndexOf("validate:ready")).toBeLessThan(
+      effects.actions.indexOf("validate:probe"),
+    );
+  });
+
   it("attempts candidate cleanup when capture has an ambiguous failure", async () => {
     const effects = new FakeEffects();
     effects.failAt = "capture:create-runtime-image";
@@ -271,14 +317,14 @@ describe("native image build orchestration", () => {
   });
 
   it.each([
-    ["validate:ready", "validate:probe", 0],
-    ["validate:probe", "validate:ready", 1],
-  ])("keeps the 60-attempt validator budget for %s", async (action, otherAction, otherCount) => {
+    ["validate:ready", "validate:probe", 60, 0],
+    ["validate:probe", "validate:ready", 1, 1],
+  ])("bounds attempts for %s", async (action, otherAction, count, otherCount) => {
     const effects = new FakeEffects();
     effects.retryAlwaysAt = action;
     const result = await buildNativeImage(input(), effects, effects.controller.signal);
     expect(result.isErr()).toBe(true);
-    expect(effects.actions.filter((candidate) => candidate === action)).toHaveLength(60);
+    expect(effects.actions.filter((candidate) => candidate === action)).toHaveLength(count);
     expect(effects.actions.filter((candidate) => candidate === otherAction)).toHaveLength(
       otherCount,
     );

@@ -347,8 +347,10 @@ export async function buildNativeImage(
   }
   if (primaryFailure === undefined && !(await poll("validate", "ready", 60)))
     primaryFailure ??= cancelled("validate");
-  if (primaryFailure === undefined && !(await poll("validate", "probe", 60)))
+  if (primaryFailure === undefined && !(await step("validate", "probe"))) {
     primaryFailure ??= cancelled("validate");
+    progress({ stage: "validate", action: "probe", status: "failed" });
+  }
   if (primaryFailure === undefined && manifest !== undefined) {
     const fingerprint = await tracked("validate", "record-host-key", () =>
       effects.readValidationHostKeyFingerprint(input, signal),
