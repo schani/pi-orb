@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createStorageConformance } from "@earendil-works/pi-durable/testing";
 import { ok } from "neverthrow";
-import { expect, it } from "vitest";
+import { expect, it, onTestFinished } from "vitest";
 import { PgClient } from "../pg/client.ts";
 import { PGliteClient } from "../pg/pglite-client.ts";
 import { PgDurableAuthority } from "./index.ts";
@@ -23,16 +23,26 @@ for (const backend of ["pglite", ...(postgres ? ["postgres"] : [])]) {
     withStorage: async (use) => {
       const schema = `durable_conformance_${process.pid}_${++index}`;
       const admin = backend === "postgres" ? new PgClient(postgres!) : undefined;
-      let db = new PGliteClient() as import("../pg/client.ts").PostgreSQLClient;
+      if (admin) {
+        onTestFinished(async () => {
+          (await admin.end())._unsafeUnwrap();
+        });
+        onTestFinished(async () => {
+          (await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`))._unsafeUnwrap();
+        });
+      }
+      let db: import("../pg/client.ts").PostgreSQLClient;
       if (admin) {
         (await admin.query(`CREATE SCHEMA ${schema}`))._unsafeUnwrap();
-        await db.end();
         const url = new URL(postgres!);
         url.searchParams.set("options", `-c search_path=${schema}`);
         db = new PgClient(url.toString());
-      }
+      } else db = new PGliteClient();
+      onTestFinished(async () => {
+        (await db.end())._unsafeUnwrap();
+      });
       const orb = "00000000-0000-4000-8000-000000000001";
-      try {
+      {
         (
           await db.query(
             "CREATE TABLE orbs(id uuid PRIMARY KEY, agent_admission_version bigint NOT NULL DEFAULT 0)",
@@ -51,17 +61,8 @@ for (const backend of ["pglite", ...(postgres ? ["postgres"] : [])]) {
         const storage = (
           await authority.open(owner, { project: async () => ok(undefined) })
         )._unsafeUnwrap();
-        try {
-          await use(storage);
-        } finally {
-          await storage.close({} as never);
-        }
-      } finally {
-        (await db.end())._unsafeUnwrap();
-        if (admin) {
-          (await admin.query(`DROP SCHEMA ${schema} CASCADE`))._unsafeUnwrap();
-          (await admin.end())._unsafeUnwrap();
-        }
+        onTestFinished(() => storage.close({} as never));
+        await use(storage);
       }
     },
   });
