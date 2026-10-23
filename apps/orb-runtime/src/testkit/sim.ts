@@ -12,10 +12,7 @@ import {
   SimulationImpl,
 } from "determined";
 
-/**
- * Minimal DST runner for orb-runtime domain tests; mirrors the control
- * plane's testkit/sim.ts (workspaces cannot import each other's testkits).
- */
+import { failureIdentity } from "../../../../testkit/failure-identity.ts";
 
 const silentLogger: Logger = {
   log: () => undefined,
@@ -103,24 +100,36 @@ export async function runDst(
       const dir = join(process.cwd(), "test-failures");
       mkdirSync(dir, { recursive: true });
       const path = join(dir, `${options.name}-${Date.now()}-${i}.json`);
-      writeFileSync(
-        path,
-        JSON.stringify(
-          { name: options.name, iteration: i, records: recording.getTrace() },
-          null,
-          2,
-        ),
-      );
-      let reproduced = false;
+      const diagnostics = (failure: unknown) => ({
+        error: failure instanceof Error ? failure.message : String(failure),
+        stack: failure instanceof Error ? failure.stack : undefined,
+        failureIdentity: failureIdentity(failure),
+      });
+      const original = diagnostics(error);
+      const artifact = {
+        name: options.name,
+        iteration: i,
+        ...original,
+        records: recording.getTrace(),
+      };
+      writeFileSync(path, JSON.stringify(artifact, null, 2));
+      let replay: { reproduced: boolean } & Partial<ReturnType<typeof diagnostics>> = {
+        reproduced: false,
+      };
       try {
         await scenario(makeSimulation(options, new ReplayingTraceSource(recording.getTrace())));
-      } catch {
-        reproduced = true;
+      } catch (replayError) {
+        const replayFailure = diagnostics(replayError);
+        replay = {
+          ...replayFailure,
+          reproduced: replayFailure.failureIdentity === original.failureIdentity,
+        };
       }
-      const message = error instanceof Error ? error.message : String(error);
+      writeFileSync(path, JSON.stringify({ ...artifact, replay }, null, 2));
+      const message = original.error;
       throw new Error(
         `DST scenario "${options.name}" failed at iteration ${i} ` +
-          `(trace: ${path}, replay ${reproduced ? "reproduces" : "DID NOT reproduce"} the failure): ${message}`,
+          `(trace: ${path}, replay ${replay.reproduced ? "reproduces" : "DID NOT reproduce"} the failure): ${message}`,
         { cause: error },
       );
     }

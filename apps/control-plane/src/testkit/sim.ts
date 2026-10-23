@@ -12,6 +12,7 @@ import {
   SimulationImpl,
   type SimulationTask,
 } from "determined";
+import { failureIdentity } from "../../../../testkit/failure-identity.ts";
 import { LIFECYCLE_LOG_PREFIX } from "../domain/log.ts";
 
 const silentLogger: Logger = {
@@ -207,21 +208,7 @@ export async function runDst(
         options.logCapture?.reset();
         await scenario(replaySim);
       } catch (replayError) {
-        // Match the invariant and its origin, not this helper's recording/replay stack.
-        const identity = (failure: unknown) => {
-          const detail = failure instanceof Error ? failure.message : String(failure);
-          const origin = (
-            detail.includes("\n    at ")
-              ? detail
-              : failure instanceof Error
-                ? failure.stack
-                : detail
-          )
-            ?.split("\n    at ")[1]
-            ?.split("\n")[0];
-          return `${detail.split("\n    at ")[0]}\n${origin ?? ""}`;
-        };
-        reproduced = identity(replayError) === identity(error);
+        reproduced = failureIdentity(replayError) === failureIdentity(error);
       }
       throw new Error(
         `DST scenario "${options.name}" failed at iteration ${i} ` +

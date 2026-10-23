@@ -8,6 +8,10 @@
 
 Assert simulation task Results outside the task, with failure diagnostics; task assertions otherwise become ignored Err values. Assert captured HTTP arguments after awaiting the adapter and require a schema-valid successful response; assertions inside a caught fetch can become network errors.
 
+## DST replay identity (2026-10-22)
+
+Runtime and control-plane replay compare the invariant message and first failure origin through a dependency-neutral helper. Runtime artifacts retain the original error, stack and identity before replay, then the replay diagnostics and verdict. Another exception, a different origin or a successful replay does not reproduce the failure.
+
 ## Local fake-provider npm preparation (2026-10-22)
 
 Failed npm installation retains only finite allowlisted code/errno fields in existing phase artifacts, from at most 64 KiB of private combined output. Missing/conflicting/oversized fields remain unknown; unreadable output is marked unavailable. Raw logs stay private. npm defaults, one install invocation and the 300s tool timeout are unchanged.
