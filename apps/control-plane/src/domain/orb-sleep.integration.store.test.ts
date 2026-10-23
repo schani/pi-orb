@@ -103,47 +103,6 @@ function contract(name: string, open: () => Promise<Subject>): void {
       });
     });
 
-    it("revokes again without starting a new stop episode after cancelling sleep", async () => {
-      const sleeping = await subject.store.casTransition(task, {
-        orbId: ORB,
-        expectedStateVersion: 0,
-        toState: "stopping",
-        stopReason: "sleep",
-        now: 2_000,
-      });
-      expect(sleeping.isOk()).toBe(true);
-      expect(
-        (
-          await subject.store.requestOrbStop(task, {
-            orbId: ORB,
-            expectedStateVersion: 1,
-            now: 2_500,
-          })
-        ).isOk(),
-      ).toBe(true);
-
-      expect(
-        (
-          await subject.store.requestOrbStop(task, {
-            orbId: ORB,
-            expectedStateVersion: 2,
-            now: DEADLINE,
-          })
-        )._unsafeUnwrap(),
-      ).toMatchObject({
-        cancelledSleepId: null,
-        orb: {
-          state: "stopping",
-          stopReason: "manual",
-          sleepId: null,
-          sleepUntil: null,
-          stateVersion: 3,
-          agentAdmissionVersion: 2,
-          stateChangedAt: 2_500,
-        },
-      });
-    });
-
     it("preserves a due wake notice while Stop revokes its authority with the sleep identity", async () => {
       expect(
         (

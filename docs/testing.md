@@ -1568,3 +1568,5 @@ Outage telemetry must emit one blind edge per outage and one recovery edge betwe
 Campaign results retain command and caller identity plus typed error diagnostics without content or credentials.
 
 One precommit GitHub retry scenario checks exact credentials, retryability, single ceremony and monotonic publication; pacing and ambiguous commits remain distinct.
+
+Stop override uses one comprehensive transition contract against both memory and PGlite.
