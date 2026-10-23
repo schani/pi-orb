@@ -69,6 +69,7 @@ describe("maintained auth library contracts", () => {
     )._unsafeUnwrap();
     const url = new URL(material.authorizationUrl);
     expect(url.origin).toBe(GOOGLE_ISSUER);
+    expect(url.searchParams.has("hd")).toBe(false);
     expect(url.searchParams.get("state")).toBe(material.state);
     expect(url.searchParams.get("nonce")).toBe(material.nonce);
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");

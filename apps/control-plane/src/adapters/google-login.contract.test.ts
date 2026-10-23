@@ -92,6 +92,12 @@ it("real OIDC validates signed code exchange, nonce, PKCE and single-use code", 
     const result = await provider.complete(task, callback, material);
     expect(result.isErr() && result.error.type).toBe("unauthenticated");
   }
+  for (const hd of ["evil.example", undefined]) {
+    consumed = false;
+    claimOverrides = { hd };
+    const result = await provider.complete(task, callback, material);
+    expect(result.isErr() && result.error.type).toBe("forbidden");
+  }
   claimOverrides = {};
   consumed = false;
   nonce = "wrong-nonce";

@@ -126,6 +126,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-23-google-signed-out-login-500.md](docs/postmortems/2026-10-23-google-signed-out-login-500.md) — Google signed-out login 500; optional domain hint removed
 - [docs/postmortems/2026-10-22-mcp-startup-deadline.md](docs/postmortems/2026-10-22-mcp-startup-deadline.md) — healthy compute blocked by central discovery; explicit MCP isolation and failure telemetry
 
 - [docs/postmortems/2026-10-22-claude-steering-hidden-message.md](docs/postmortems/2026-10-22-claude-steering-hidden-message.md) — consumed Claude image input hidden by a contentless receipt; frontend inbox/receipt presentation handoff
