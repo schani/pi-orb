@@ -1612,3 +1612,5 @@ Recovery hashes normalize every ownership map and submitted delivery order, igno
 Fairness qualification retains held-yield cancellation and successor admission. Ended fake queues cannot prove the production identity fence; rotation joins the consumer before successor admission, so no unsupported takeover is invented. (2026-10-22 PDT).
 
 Launch-proof parser qualification independently rejects missing, negative and fractional values for both incarnations. (2026-10-22 PDT).
+
+Native usage exports retain distinct nonzero input, output and cache canaries; malformed receiver requests emit safe typed diagnostics without sink delivery. (2026-10-22 PDT).
