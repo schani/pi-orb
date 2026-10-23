@@ -4087,26 +4087,37 @@ describe("reconciler logging (DST)", () => {
 
   it("a store outage logs once per outage, not once per tick", async () => {
     const capture = new LogCapture();
+    const probabilities = { [FAILPOINTS.storeRead]: 1 };
     await runDst(
       {
         name: "logging-store-outage-edge",
         iterations: 5,
         logCapture: capture,
-        failpointProbabilities: { [FAILPOINTS.storeRead]: 1 },
+        failpointProbabilities: probabilities,
       },
       async (sim) => {
+        probabilities[FAILPOINTS.storeRead] = 1;
         const harness = makeHarness();
         const result = await sim.runTasks([
           {
             name: "driver",
             f: async (task) => {
               for (let tick = 0; tick < 5; tick++) await pollAllOnce(task, harness.deps);
+              expect(capture.matching("poll-loop-blind")).toHaveLength(1);
+              expect(capture.matching("poll-loop-recovered")).toHaveLength(0);
+              probabilities[FAILPOINTS.storeRead] = 0;
+              await pollAllOnce(task, harness.deps);
+              await pollAllOnce(task, harness.deps);
+              expect(capture.matching("poll-loop-recovered")).toHaveLength(1);
+              probabilities[FAILPOINTS.storeRead] = 1;
+              await pollAllOnce(task, harness.deps);
+              await pollAllOnce(task, harness.deps);
             },
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        expect(capture.matching("poll-loop-blind").length).toBe(1);
-        expect(capture.matching("poll-loop-recovered").length).toBe(0);
+        expect(capture.matching("poll-loop-blind")).toHaveLength(2);
+        expect(capture.matching("poll-loop-recovered")).toHaveLength(1);
       },
     );
   });

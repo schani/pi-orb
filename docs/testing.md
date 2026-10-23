@@ -1562,3 +1562,5 @@ Inbox FIFO compares flattened identities, including order within squashed record
 Pending-delivery retry qualification observes the same request and duplicate response before crashing, then requires exactly-once recovery.
 
 Stopping qualification covers absent and stopped hosts without restarting either.
+
+Outage telemetry must emit one blind edge per outage and one recovery edge between outages.
