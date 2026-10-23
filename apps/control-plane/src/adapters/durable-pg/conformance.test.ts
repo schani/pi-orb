@@ -1,9 +1,9 @@
-import { readFile } from "node:fs/promises";
 import { createStorageConformance } from "@earendil-works/pi-durable/testing";
 import { ok } from "neverthrow";
 import { expect, it, onTestFinished } from "vitest";
 import { PgClient } from "../pg/client.ts";
 import { PGliteClient } from "../pg/pglite-client.ts";
+import { initializeBareAuthority } from "./bare-authority.testkit.ts";
 import { PgDurableAuthority } from "./index.ts";
 
 const postgres = process.env.PI_ORB_DURABLE_PG_TEST_URL;
@@ -43,19 +43,7 @@ for (const backend of ["pglite", ...(postgres ? ["postgres"] : [])]) {
       });
       const orb = "00000000-0000-4000-8000-000000000001";
       {
-        (
-          await db.query(
-            "CREATE TABLE orbs(id uuid PRIMARY KEY, agent_admission_version bigint NOT NULL DEFAULT 0)",
-          )
-        )._unsafeUnwrap();
-        (
-          await db.query("INSERT INTO orbs(id) VALUES($1) ON CONFLICT DO NOTHING", [orb])
-        )._unsafeUnwrap();
-        const migration = await readFile(
-          new URL("../pg/migrations/036_durable_authority.sql", import.meta.url),
-          "utf8",
-        );
-        (await db.transaction(async (_query, execute) => execute(migration)))._unsafeUnwrap();
+        await initializeBareAuthority(db, orb);
         const authority = new PgDurableAuthority(db, () => 0);
         const owner = (await authority.acquire(orb, "test", 0, 0, 1000))._unsafeUnwrap();
         const storage = (

@@ -22,6 +22,7 @@ import { expect, it } from "vitest";
 import { promptExtension } from "../prompt.ts";
 import { ChildReceipts, createDurableTools } from "./index.ts";
 import { ChildAnchor, subagentTools } from "./subagents.ts";
+import { nativeCall, nativeData } from "./testkit/native-call.ts";
 import { toolData, wait } from "./testkit/subagent-wait.ts";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -48,22 +49,6 @@ function setup(
   registry.install(tools.extension);
   registry.install(tools.childExtension);
   return { models, registry, tools };
-}
-function nativeCall(name: string, args: Record<string, unknown>, id = name) {
-  return fauxToolCall(
-    "codemode",
-    { code: `text(await tools.${name}(${JSON.stringify(args)}));` },
-    { id },
-  );
-}
-function nativeData(result: { content: readonly { type: string; text?: string }[] } | undefined) {
-  expect(result?.content[0]).toMatchObject({
-    type: "text",
-    text: expect.stringMatching(/^Script completed\n/),
-  });
-  const body = result?.content[1];
-  expect(body?.type).toBe("text");
-  return JSON.parse(body?.text ?? "");
 }
 function initial(tools: ReturnType<typeof createDurableTools>) {
   return {

@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import type { JsonValue } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
@@ -20,23 +19,14 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { err, errAsync, ok } from "neverthrow";
 import { expect, it, onTestFinished, vi } from "vitest";
 import { PGliteClient } from "../pg/pglite-client.ts";
+import { initializeBareAuthority } from "./bare-authority.testkit.ts";
 import { PgDurableAuthority } from "./index.ts";
 import { storageAuthorityError } from "./storage-boundary.ts";
 
 const orb = "00000000-0000-4000-8000-000000000001";
 async function fixture() {
   const db = new PGliteClient();
-  (
-    await db.query(
-      "CREATE TABLE orbs(id uuid PRIMARY KEY, agent_admission_version bigint NOT NULL DEFAULT 0)",
-    )
-  )._unsafeUnwrap();
-  (await db.query("INSERT INTO orbs(id) VALUES($1)", [orb]))._unsafeUnwrap();
-  const migration = await readFile(
-    new URL("../pg/migrations/036_durable_authority.sql", import.meta.url),
-    "utf8",
-  );
-  (await db.transaction(async (_query, execute) => execute(migration)))._unsafeUnwrap();
+  await initializeBareAuthority(db, orb);
   let time = 0;
   return {
     db,

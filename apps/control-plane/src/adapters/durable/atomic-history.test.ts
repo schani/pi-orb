@@ -4,7 +4,7 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import { createRegistry, defineDoc, Harness } from "@earendil-works/pi-durable";
 import { NoSimulationTask } from "determined";
 import { expect, it } from "vitest";
-import { makeOrbRow, makeProjectRow } from "../../testkit/fixtures.ts";
+import { makeOrbRow, makeProjectRow, seedTestUser } from "../../testkit/fixtures.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
 import { PgDurableAuthority } from "../durable-pg/index.ts";
 import { PGliteClient } from "../pg/pglite-client.ts";
@@ -19,13 +19,7 @@ it("commits native root history and public projection without a loaded agent", a
   let harness: Harness | undefined;
   try {
     (await database.migrate())._unsafeUnwrap();
-    (
-      await database.users.resolveUser(
-        task,
-        { issuer: "test", subject: "owner", email: null },
-        { id: project.ownerUserId, now: 0 },
-      )
-    )._unsafeUnwrap();
+    (await seedTestUser(task, database.users))._unsafeUnwrap();
     (await database.store.insertProject(task, project))._unsafeUnwrap();
     (await database.store.insertOrb(task, orb))._unsafeUnwrap();
     const authority = new PgDurableAuthority(db, () => 0);

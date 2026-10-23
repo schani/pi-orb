@@ -1,24 +1,14 @@
-import { readFile } from "node:fs/promises";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { ok } from "neverthrow";
 import { expect, onTestFinished } from "vitest";
 import type { PostgreSQLClient } from "../pg/client.ts";
+import { initializeBareAuthority } from "./bare-authority.testkit.ts";
 import { PgDurableAuthority } from "./index.ts";
 
 export async function assertDrainIsolation(db: PostgreSQLClient) {
   const orb = "00000000-0000-4000-8000-000000000001";
-  (
-    await db.query(
-      "CREATE TABLE orbs(id uuid PRIMARY KEY, agent_admission_version bigint NOT NULL DEFAULT 0)",
-    )
-  )._unsafeUnwrap();
-  (await db.query("INSERT INTO orbs(id) VALUES($1)", [orb]))._unsafeUnwrap();
-  const migration = await readFile(
-    new URL("../pg/migrations/036_durable_authority.sql", import.meta.url),
-    "utf8",
-  );
-  (await db.transaction(async (_q, execute) => execute(migration)))._unsafeUnwrap();
+  await initializeBareAuthority(db, orb);
   const authority = new PgDurableAuthority(db, () => 0);
   const owner = (await authority.acquire(orb, "old", 0, 0, 100))._unsafeUnwrap();
   const project = async (query: import("./executor.ts").Query) =>
