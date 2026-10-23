@@ -2,6 +2,8 @@
 
 MCP E2E waits for registry publication through `test_registry_published` only under the existing `PI_ORB_E2E_HISTORY_INSPECTION=1` guard; production remains healthy-silent, and failure/recovery assertions require committed native alerts.
 
+**Independent-fixture ordering (2026-10-22):** [Durable run 39896251674](https://github.com/schani/pi-orb/actions/runs/39896251674) failed six cases because the first scripted response called `mcp__web__search` before automatic discovery published it. Captured tool output confirms the missing callable, followed by a fake-provider unmatched-rule response. The fixture now waits for registry publication before approving model login, while execution readiness remains held. No production discovery gate, status prerequisite or timeout increase is added. First logs/artifacts: `/tmp/pr162-babysit-ci/`. This correction does not explain the separate hosted-provider stalls; exact-head qualification remains pending.
+
 ## MCP reduction qualification (2026-10-22; blocked)
 
 Frozen base patch SHA256 `b0139c4d13d014709b6ee46efaafc86772f5158edd9abc8ad4b7c6959bffcba5` passed 44 files / 233 unit tests, typecheck, full lint and scoped Biome; no full-suite qualification is claimed.

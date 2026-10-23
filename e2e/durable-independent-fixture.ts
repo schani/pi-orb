@@ -410,7 +410,16 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
         },
         { timeoutMs: 60_000 },
       )
-        .then((code) => fakeControl(fake.sessionKey, "/deviceauth/approve", { user_code: code }))
+        .then(async (code) => {
+          await waitFor("MCP registry publication before scripted tool selection", async () =>
+            cp!.logs
+              .join("")
+              .includes(`lifecycle: orb=${orb} test_registry_published server=web status=available`)
+              ? true
+              : null,
+          );
+          return fakeControl(fake.sessionKey, "/deviceauth/approve", { user_code: code });
+        })
         .then(
           () => ({ ok: true as const }),
           (cause: unknown) => ({ ok: false as const, cause }),
