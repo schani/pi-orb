@@ -1537,3 +1537,23 @@ passes: 107 Node, 220 Python and 33 native-guest tests, plus filesystem/service
 checks. Local heavy phases were serialized across the dependency worktrees.
 CI owns the full unit/DST suite, runtime E2E and container builds; native cloud-image,
 acceptance and retained-workspace qualification have not run. No deployment.
+
+## Index-only history search (2026-10-22; local, undeployed)
+
+Shared PostgreSQL 16/PGlite contracts verify public-text privacy, lossless source JSON,
+Unicode/long-token queries, exact scoped BM25, rank-before-limit, GIN expression access,
+and existing/future source-only insertion. Native lock-order cases run migration
+044 before 049 and assert index/ledger commit or rollback. Application contracts cover
+owner binding, typed native objects/errors, HTTP and CLI dispatch. Existing process
+E2Es search a committed native alert and a stopped orb through its sibling's CLI.
+
+First local failures were deterministic: primitive JSON driver binding required a
+query-object envelope; public delivery/child-notice selection and JavaScript whitespace
+trimming required extraction corrections; historical fixtures that intentionally skip
+044 must also skip its dependent index. The lock-order fixture instead runs both actual
+migrations. Tests preceded these corrections; assertions and timeouts were not weakened.
+Logs and source manifests remain in `/workspace/history-search-index-evidence/` and
+`/tmp/search-index-rewrite-*.log`. An initial selector skipped the CLI case; its first
+executed run passed. This is isolated fixture evidence, not production qualification.
+
+Design and cost: `docs/history-search.md`.

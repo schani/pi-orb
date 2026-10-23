@@ -94,6 +94,7 @@ import {
 } from "./domain/loops.ts";
 import { McpOAuth, type McpOAuthProtocol } from "./domain/mcp-oauth.ts";
 import { mcpOAuthCleanupLoop } from "./domain/mcp-oauth-garbage.ts";
+import { createOrbAgentOperations, type OrbAgentOptions } from "./domain/orb-agent-operations.ts";
 import { sendGuestOrbMessage } from "./domain/orb-messaging.ts";
 import { spawnOrb } from "./domain/orb-spawning.ts";
 import type { BrokerDeps, ControlPlaneDeps, SigningKeyDeps } from "./domain/ports.ts";
@@ -644,6 +645,21 @@ export async function main(
       ),
   );
   let centralPlane: DurableAgentPlane | undefined;
+  const appendAlert: OrbAgentOptions["appendAlert"] = (
+    orbId,
+    requestId,
+    message,
+    expectedAdmissionVersion,
+  ) => {
+    if (!centralPlane)
+      return errAsync({ code: "unavailable" as const, message: "central agent unavailable" });
+    return centralPlane
+      .appendAlert(orbId, requestId, message, expectedAdmissionVersion)
+      .mapErr(() => ({
+        code: "unavailable" as const,
+        message: "alert admission unavailable",
+      }));
+  };
   const opened = await DurableAgentPlane.create({
     persistence: database.agentPersistence,
     prepare: (task, orb, context) =>
@@ -719,16 +735,7 @@ export async function main(
               code: "unavailable" as const,
               message: "Notification admission unavailable",
             }),
-      appendAlert: (orbId, requestId, message, expectedAdmissionVersion) => {
-        if (!centralPlane)
-          return errAsync({ code: "unavailable" as const, message: "central agent unavailable" });
-        return centralPlane
-          .appendAlert(orbId, requestId, message, expectedAdmissionVersion)
-          .mapErr(() => ({
-            code: "unavailable" as const,
-            message: "alert admission unavailable",
-          }));
-      },
+      appendAlert,
     }),
   });
   if (opened.isErr()) {
@@ -872,6 +879,18 @@ export async function main(
     initialCheckoutCommit: (task: SimulationTask, orb: import("./domain/orb.ts").OrbRow) =>
       resourceGate.initialPin(task, orb),
     send: (task, caller, request) => sendGuestOrbMessage(task, deps, caller, request),
+    agentOperations: (task, caller) =>
+      createOrbAgentOperations(
+        task,
+        deps,
+        {
+          projectId: caller.projectId,
+          orbId: caller.id,
+          incarnation: caller.hostIncarnation,
+          runtimeTokenHash: caller.runtimeTokenHash ?? "",
+        },
+        { appOrigin, ...viewConfig, appendAlert },
+      ),
     spawn: (task, caller, orbId, request) => spawnOrb(task, deps, caller, orbId, request),
     sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
       requestOrbSleep(task, deps, orbId, caller, durationSeconds, sleepId),

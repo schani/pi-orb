@@ -34,6 +34,7 @@ import {
   requestOrbDeletion,
   requestOrbSleep,
 } from "../domain/lifecycle.ts";
+import type { OrbAgentOperations } from "../domain/orb-agent-operations.ts";
 import { sendGuestOrbMessage } from "../domain/orb-messaging.ts";
 import { spawnOrb } from "../domain/orb-spawning.ts";
 import type { BrokerDeps, ControlPlaneStore, OrbNameGenerator } from "../domain/ports.ts";
@@ -65,7 +66,7 @@ import {
   FakeTokenSigner,
 } from "../testkit/workload-identity.ts";
 import { createHostingAccessPolicy, registerHostingAccessGuard } from "./hosting-access.ts";
-import { registerRuntimeRoutes } from "./runtime-routes.ts";
+import { type RuntimeRouteDeps, registerRuntimeRoutes } from "./runtime-routes.ts";
 
 const ORB = "orb-a";
 const PROJECT = "project-a";
@@ -86,6 +87,8 @@ describe("runtime broker routes", () => {
   let gitIdentity: FakeGitIdentityStore;
   let projectInstructions: FakeProjectInstructionsStore;
   let brokerUsers: string[];
+  const invoke = vi.fn<OrbAgentOperations["invoke"]>();
+  const agentOperations = vi.fn<RuntimeRouteDeps["agentOperations"]>(() => ({ invoke }));
   const spawnNudge = vi.fn();
   const initialCheckoutCommit = vi.fn(() => okAsync<string | null, StoreError>(null));
   const alertWriter = {
@@ -355,6 +358,91 @@ describe("runtime broker routes", () => {
     ).toBe(404);
   });
 
+  describe("authenticated history search", () => {
+    const path = "/runtime/v1/history/search";
+    function search(payload: unknown, token: string | null = TOKEN) {
+      return app.inject({
+        method: "POST",
+        url: path,
+        payload,
+        headers: token === null ? {} : { authorization: `Bearer ${token}` },
+      });
+    }
+    beforeEach(() => seedOrb("running"));
+    it("dispatches the body with authenticated identity and disables caching", async () => {
+      const request = { query: "private needle", scope: "project", limit: 10 };
+      const response = await search(request);
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(response.json()).toEqual({ v: 1, hits: [] });
+      expect(agentOperations).toHaveBeenCalledExactlyOnceWith(
+        task,
+        expect.objectContaining({ id: ORB }),
+      );
+      expect(invoke).toHaveBeenCalledExactlyOnceWith(
+        { kind: "search", request },
+        expect.any(String),
+      );
+      expect((await app.inject({ method: "GET", url: path })).statusCode).toBe(404);
+    });
+    it.each([null, "wrong"])("authenticates before body dispatch with bearer %s", async (token) => {
+      expect((await search({}, token)).statusCode).toBe(401);
+      expect(agentOperations).not.toHaveBeenCalled();
+      expect(invoke).not.toHaveBeenCalled();
+    });
+    it.each([
+      ["invalid_request", 400, {}],
+      ["conflict", 409, { query: "needle" }],
+    ] as const)("delegates validation and preserves %s failures", async (code, status, request) => {
+      invoke.mockReturnValue(errAsync({ code, message: "search refused" }));
+      const response = await search(request);
+      expect(invoke).toHaveBeenCalledExactlyOnceWith(
+        { kind: "search", request },
+        expect.any(String),
+      );
+      expect(response.statusCode).toBe(status);
+      expect(response.json()).toEqual({
+        v: 1,
+        error: { code, message: "search refused", retryable: false },
+      });
+    });
+    it("reports authentication store outages without leaking database details", async () => {
+      vi.spyOn(store, "getOrbByRuntimeTokenHash").mockReturnValueOnce(
+        errAsync({
+          type: "store_error",
+          code: "unavailable",
+          message: "private SQL endpoint",
+          retryable: true,
+        }),
+      );
+      const response = await search({ query: "private query" });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toEqual({
+        v: 1,
+        error: {
+          code: "unavailable",
+          message: "history search unavailable",
+          retryable: true,
+        },
+      });
+      expect(agentOperations).not.toHaveBeenCalled();
+    });
+    it("rejects malformed operation results instead of exposing private fields", async () => {
+      invoke.mockReturnValue(okAsync({ hits: [], private: "hidden" }));
+      const response = await search({ query: "needle" });
+      expect(response.statusCode).toBe(500);
+      expect(response.json()).toEqual({
+        v: 1,
+        error: {
+          code: "internal",
+          message: "malformed history search result",
+          retryable: false,
+        },
+      });
+      expect(response.body).not.toContain("hidden");
+    });
+  });
+
   const nameGenerator: OrbNameGenerator = {
     generate: () => okAsync("Repair Runtime Auth"),
   };
@@ -385,6 +473,7 @@ describe("runtime broker routes", () => {
       );
     registerRuntimeRoutes(app, task, {
       appOrigin: "https://browser.test",
+      agentOperations,
       ...(tailnetDnsName === null ? {} : { tailnetDnsName }),
       send: (task, caller, request) =>
         sendGuestOrbMessage(task, { ...makeHarness().deps, store: routeStore }, caller, request),
@@ -454,6 +543,8 @@ describe("runtime broker routes", () => {
   }
 
   beforeEach(async () => {
+    agentOperations.mockClear();
+    invoke.mockReset().mockReturnValue(okAsync({ hits: [] }));
     initialCheckoutCommit.mockClear();
     alertWriter.appendAlert.mockClear();
     store = new InMemoryControlPlaneStore(0);

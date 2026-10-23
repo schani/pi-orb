@@ -35,6 +35,32 @@ const items: OrbInspectionItem[] = [
 ];
 
 describe("orb inspection CLI arguments", () => {
+  it.each([
+    [["search", "a phrase"], { query: "a phrase" }, false],
+    [
+      ["search", "x", "--orb", "other", "--json", "--limit", "50"],
+      { query: "x", orbId: "other", limit: 50 },
+      true,
+    ],
+    [["search", "--project", "x"], { query: "x", scope: "project" }, false],
+    [["search", "x", "--all"], { query: "x", scope: "user" }, false],
+  ])("parses %j", (args, request, json) => {
+    expect(parseInspectionArgs(args)._unsafeUnwrap()).toEqual({ type: "search", request, json });
+  });
+  it.each([
+    ["search"],
+    ["search", "x", "y"],
+    ["search", "x", "--orb"],
+    ["search", "x", "--orb", "o", "--project"],
+    ["search", "x", "--all", "--all"],
+    ["search", "x", "--wat"],
+    ...["1x", "1e1"].map((n) => ["search", "x", "--limit", n]),
+    ["search", "x", "--limit"],
+    ["search", "x", "--limit", "1", "--limit", "2"],
+  ])("rejects malformed arguments %j", (...args) => {
+    expect(parseInspectionArgs(args).isErr()).toBe(true);
+  });
+
   it("lists alert in generic CLI usage", () => {
     expect(INSPECTION_USAGE).toContain('pi-orb alert "message"');
   });

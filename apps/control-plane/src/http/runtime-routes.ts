@@ -1,6 +1,8 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   GIT_IDENTITY_RUNTIME_PATH,
+  HISTORY_SEARCH_PATH,
+  HistorySearchResultSchema,
   ID_TOKEN_PATH,
   type IdTokenErrorBody,
   IdTokenRequestSchema,
@@ -59,6 +61,7 @@ import type { CommandError } from "../domain/lifecycle.ts";
 import type { McpStore } from "../domain/mcp.ts";
 import type { McpOAuth } from "../domain/mcp-oauth.ts";
 import type { OrbRow } from "../domain/orb.ts";
+import type { OrbAgentOperations } from "../domain/orb-agent-operations.ts";
 import { generateOrbName, normalizeOrbName } from "../domain/orb-naming.ts";
 import { getOrbSpawnRelations } from "../domain/orb-spawning.ts";
 import type { PersonalInstructionsStore } from "../domain/personal-instructions.ts";
@@ -83,6 +86,10 @@ import { sendMcpError } from "./mcp-routes.ts";
 import { sendProjectInstructionsError } from "./project-instructions.ts";
 
 export interface RuntimeRouteDeps {
+  readonly agentOperations: (
+    task: SimulationTask,
+    authenticatedSourceOrb: OrbRow,
+  ) => OrbAgentOperations;
   readonly send: (
     task: SimulationTask,
     caller: OrbRow,
@@ -823,6 +830,34 @@ export function registerRuntimeRoutes(
         .send({ error: { ...result.error, retryable: result.error.code === "unavailable" } });
     }
     return reply.status(202).send({ v: 1, ...result.value, requestId: request.body.requestId });
+  });
+
+  app.post(HISTORY_SEARCH_PATH, async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const fail = (status: number, code: OrbInspectionError["error"]["code"], message: string) =>
+      reply
+        .status(status)
+        .send({ v: 1, error: { code, message, retryable: code === "unavailable" } });
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind === "unavailable") return fail(503, "unavailable", "history search unavailable");
+    if (auth.kind !== "orb") return sendUnauthorized(reply);
+    const result = await deps
+      .agentOperations(task, auth.orb)
+      .invoke({ kind: "search", request: request.body }, request.id);
+    if (result.isErr()) {
+      if (result.error.code === "unauthorized") return sendUnauthorized(reply);
+      const status = {
+        invalid_request: 400,
+        not_found: 404,
+        conflict: 409,
+        unavailable: 503,
+        internal: 500,
+      }[result.error.code];
+      return fail(status, result.error.code, result.error.message);
+    }
+    if (!Check(HistorySearchResultSchema, result.value))
+      return fail(500, "internal", "malformed history search result");
+    return reply.send({ v: 1, ...result.value });
   });
 
   app.get(ORB_SELF_PATH, async (request, reply) => {

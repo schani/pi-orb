@@ -2420,6 +2420,13 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     });
   }
 
+  searchHistory(
+    _task: SimulationTask,
+    _params: import("../domain/ports.ts").HistorySearchParams,
+  ): ResultAsync<import("../domain/ports.ts").HistorySearchPage, StoreError> {
+    return okAsync({ hits: [], documentCount: 0, candidateCount: 0 });
+  }
+
   readHistorySnapshot(
     task: SimulationTask,
     orbId: string,

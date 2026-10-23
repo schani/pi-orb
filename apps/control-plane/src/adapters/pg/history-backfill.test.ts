@@ -250,7 +250,7 @@ describe(`${BACKFILL} history backfill`, () => {
     )._unsafeUnwrap();
     (
       await client.query(
-        "INSERT INTO schema_migrations (name) VALUES ('044_lossless_history_json.sql')",
+        "INSERT INTO schema_migrations (name) VALUES ('044_lossless_history_json.sql'), ('049_history_search.sql')",
       )
     )._unsafeUnwrap();
     expect((await runMigrations(client)).isOk()).toBe(true);
