@@ -369,7 +369,7 @@ describe("GCloud native-image adapter", () => {
     );
   });
 
-  it("uses the fixed e2-standard-4 disposable builder", async () => {
+  it("uses a fixed e2-standard-4 builder with instance-only SSH keys", async () => {
     const calls: string[][] = [];
     const effects = new GcloudImageBuildEffects(async (_command, args) => {
       calls.push(args);
@@ -385,21 +385,6 @@ describe("GCloud native-image adapter", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toContain("--machine-type=e2-standard-4");
     expect(calls[0]).not.toContain("--machine-type=n2d-highmem-4");
-  });
-
-  it("forces builder SSH keys into instance metadata", async () => {
-    const calls: string[][] = [];
-    const effects = new GcloudImageBuildEffects(async (_command, args) => {
-      calls.push(args);
-      return { stdout: "[]", stderr: "" };
-    });
-    const value = await effects.run(
-      "builder",
-      "create",
-      await input(),
-      new AbortController().signal,
-    );
-    expect(value.isOk()).toBe(true);
     expect(calls[0]).toContain("--metadata=block-project-ssh-keys=TRUE");
   });
 

@@ -1757,3 +1757,5 @@ Default detail render fixtures use fresh shared detailContext caches and pending
 Background-admission projection keeps one missing-native discriminator alongside independent native identity/status failures. (2026-10-22 PDT).
 
 Closed-schema tests own top-level event/message and nested custom-field rejection together. (2026-10-22 PDT).
+
+One successful builder-create fixture pins both machine type and instance-only SSH metadata. (2026-10-22 PDT).
