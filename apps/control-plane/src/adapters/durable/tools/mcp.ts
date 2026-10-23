@@ -1,12 +1,7 @@
 import { type Context, isJsonValue, type JsonValue } from "@earendil-works/chord";
 import { type TSchema, Type } from "@earendil-works/pi-ai";
 import {
-  defineExtension,
   defineTool,
-  GenerationTask,
-  hook,
-  section,
-  type ToolExecutionApi,
   type ToolExecutionResult,
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
@@ -32,6 +27,10 @@ export interface McpEndpoint {
 export type McpServerStatus =
   | { name: string; status: "pending" | "available" }
   | { name: string; status: "unavailable" | "needs-auth"; error: ToolError };
+export type McpStatusChanged = (
+  status: McpServerStatus,
+  previous?: McpServerStatus,
+) => ResultAsync<void, ToolError>;
 export interface McpDiscoveryDiagnostics {
   now(): number;
   record(failure: {
@@ -56,36 +55,7 @@ export class McpTools {
   status(): readonly McpServerStatus[] {
     return this.statuses;
   }
-  contextExtension() {
-    if (!this.endpoints.length)
-      return defineExtension({ name: "orb.mcp-status", sections: [], hooks: [] });
-    const name = "mcp-status";
-    const render = () =>
-      this.statuses.map((s) => `MCP ${s.name}: ${s.status}. Namespace: mcp__${s.name}.`).join("\n");
-    const tagged = () => `<${name}>\n${render()}\n</${name}>`;
-    return defineExtension({
-      name: "orb.mcp-status",
-      sections: [section(name, render)],
-      hooks: [
-        hook(GenerationTask, {
-          beforeRequest: ({ messages }) => {
-            const current = tagged();
-            const shown = messages.findLast(
-              (m) => m.role === "system" && m.sections?.[name] !== undefined,
-            );
-            if (shown?.role === "system" && shown.sections?.[name] === current) return undefined;
-            return {
-              messages: [
-                ...messages,
-                { role: "system", content: "", sections: { [name]: current }, timestamp: 0 },
-              ],
-            };
-          },
-        }),
-      ],
-    });
-  }
-  statusTool(discover: (ctx: Context) => ResultAsync<readonly McpServerStatus[], ToolError>) {
+  statusTool(retry: (ctx: Context) => void) {
     return defineTool({
       name: "mcp_status",
       description:
@@ -100,44 +70,31 @@ export class McpTools {
           .join("; "),
       parameters: Type.Object({}, { additionalProperties: false }),
       replay: "safe",
-      execute: async (_args, api, ctx) => {
-        const previous = this.statuses;
-        const result = await discover(ctx);
-        if (result.isErr()) return errorResult(result.error);
-        for (const status of result.value) {
-          const before = previous.find((entry) => entry.name === status.name)?.status;
-          if (before !== status.status && (status.status !== "available" || before !== undefined))
-            api.diagnostic({
-              severity: "info",
-              code: "mcp_status",
-              message: `MCP ${status.name}: ${status.status === "available" ? "connected" : status.status}.`,
-            });
-        }
-        return { output: [{ type: "text", text: JSON.stringify(result.value) }] };
+      execute: async (_args, _api, ctx) => {
+        retry(ctx);
+        return { output: [{ type: "text", text: JSON.stringify(this.statuses) }] };
       },
     });
   }
   private readonly running = new Set<McpClient>();
   private readonly resourceEndpoints = new Map<string, McpEndpoint>();
-  private unavailable(endpoint: McpEndpoint, error: ToolError, api: ToolExecutionApi): void {
-    if (error.code === "cancelled") return;
-    const status = endpoint.unavailableState?.() ?? "unavailable";
-    const previous = this.statuses.find((entry) => entry.name === endpoint.name);
-    this.statuses = this.statuses.map((entry) =>
-      entry.name === endpoint.name
-        ? {
-            name: endpoint.name,
-            status,
-            error: { code: error.code, message: "MCP server unavailable" },
-          }
-        : entry,
+  private publishStatus(status: McpServerStatus, ctx: Context): ResultAsync<void, ToolError> {
+    if (this.closed || ctx.abortSignal?.aborted)
+      return errAsync({ code: "cancelled", message: "MCP cancelled" });
+    const previous = this.statuses.find((s) => s.name === status.name);
+    this.statuses = this.statuses.map((s) => (s.name === status.name ? status : s));
+    return this.changed(status, previous);
+  }
+  private unavailable(endpoint: McpEndpoint, error: ToolError, ctx: Context) {
+    if (error.code === "cancelled") return okAsync(undefined);
+    return this.publishStatus(
+      {
+        name: endpoint.name,
+        status: endpoint.unavailableState?.() ?? "unavailable",
+        error: { code: error.code, message: "MCP server unavailable" },
+      },
+      ctx,
     );
-    if (previous?.status !== status)
-      api.diagnostic({
-        severity: "info",
-        code: "mcp_status",
-        message: `MCP ${endpoint.name}: ${status}.`,
-      });
   }
   private registerResources(): void {
     for (const name of [
@@ -162,7 +119,7 @@ export class McpTools {
             ),
         replay: "safe",
         structuredOutputSchema: Type.Object({}, { additionalProperties: true }),
-        execute: async (args, api, ctx) => {
+        execute: async (args, _api, ctx) => {
           const input = args as { server?: string; uri?: string; cursor?: string };
           if (input.cursor && !input.server)
             return errorResult({ code: "invalid_arguments", message: "cursor requires server" });
@@ -205,8 +162,8 @@ export class McpTools {
               return items.map((item) => ({ server: endpoint.name, ...item }));
             });
             if (response.isErr()) {
-              this.unavailable(endpoint, response.error, api);
-              return errorResult(response.error);
+              const published = await this.unavailable(endpoint, response.error, ctx);
+              return errorResult(published.isErr() ? published.error : response.error);
             }
             if (!isJsonValue(response.value)) return invalidResponse();
             rows.push(response.value);
@@ -238,14 +195,17 @@ export class McpTools {
   private readonly endpoints: readonly McpEndpoint[];
   private readonly catalog: CallableCatalog;
   private readonly diagnostics: McpDiscoveryDiagnostics | undefined;
+  private readonly changed: McpStatusChanged;
   constructor(
     endpoints: readonly McpEndpoint[],
     catalog: CallableCatalog,
     diagnostics?: McpDiscoveryDiagnostics,
+    changed: McpStatusChanged = () => okAsync(undefined),
   ) {
     this.endpoints = endpoints;
     this.catalog = catalog;
     this.diagnostics = diagnostics;
+    this.changed = changed;
     this.statuses = endpoints.map(({ name }) => ({ name, status: "pending" }));
     for (const endpoint of endpoints)
       this.catalog.namespace({
@@ -358,25 +318,12 @@ export class McpTools {
       })(),
     ).andThen((value) => value);
   }
-  async discover(
-    ctx: Context,
-    publish: (
-      status: McpServerStatus,
-      previous?: McpServerStatus,
-    ) => ResultAsync<void, ToolError> = () => okAsync(undefined),
-  ) {
+  async discover(ctx: Context) {
     if (ctx.abortSignal?.aborted)
       return err<readonly McpServerStatus[], ToolError>({
         code: "cancelled",
         message: "MCP cancelled",
       });
-    const publishStatus = async (status: McpServerStatus) => {
-      if (this.closed || ctx.abortSignal?.aborted)
-        return err<void, ToolError>({ code: "cancelled", message: "MCP cancelled" });
-      const previous = this.statuses.find((s) => s.name === status.name);
-      this.statuses = this.statuses.map((s) => (s.name === status.name ? status : s));
-      return publish(status, previous);
-    };
     for (const endpoint of this.endpoints) {
       const previous = this.statuses.find((status) => status.name === endpoint.name);
       if (previous?.status === "available") continue;
@@ -404,7 +351,7 @@ export class McpTools {
           name: `mcp__${endpoint.name}`,
           description: `${endpoint.description ?? endpoint.name}: ${status.status}`,
         });
-        const published = await publishStatus(status);
+        const published = await this.publishStatus(status, ctx);
         if (published.isErr()) return err(published.error);
         continue;
       }
@@ -465,8 +412,8 @@ export class McpTools {
                 message: published.error.message,
               });
             if (called.isErr()) {
-              this.unavailable(endpoint, called.error, api);
-              return errorResult(called.error);
+              const published = await this.unavailable(endpoint, called.error, context);
+              return errorResult(published.isErr() ? published.error : called.error);
             }
             const response = called.value;
             const rendered = Result.fromThrowable(
@@ -504,7 +451,7 @@ export class McpTools {
           deferred: true,
         });
       }
-      const published = await publishStatus({ name: endpoint.name, status: "available" });
+      const published = await this.publishStatus({ name: endpoint.name, status: "available" }, ctx);
       if (published.isErr()) return err(published.error);
     }
     return ok(this.statuses);

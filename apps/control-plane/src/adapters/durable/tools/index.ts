@@ -12,6 +12,7 @@ import {
   type McpDiscoveryDiagnostics,
   type McpEndpoint,
   type McpServerStatus,
+  type McpStatusChanged,
   McpTools,
 } from "./mcp.ts";
 
@@ -34,10 +35,7 @@ export interface DurableToolsOptions {
   mcp?: readonly McpEndpoint[];
   mcpDiscovery?: McpDiscoveryDiagnostics;
   mcpContext?: Context;
-  mcpChanged?: (
-    status: McpServerStatus,
-    previous?: McpServerStatus,
-  ) => ResultAsync<void, ToolError>;
+  mcpChanged?: McpStatusChanged;
   additionalTools?: readonly ToolRegistration[];
   files?: AgentToolFiles;
   orb?: { id: string; task: SimulationTask };
@@ -104,33 +102,28 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
   });
   const catalog = all.without(["notify_parent"]);
   const running = new Set<CodemodeSandbox>();
-  const mcp = new McpTools(options.mcp ?? [], catalog, options.mcpDiscovery);
-  const statusTool = () =>
-    mcp.statusTool((ctx) => {
-      void bundle.ready(ctx);
-      return okAsync(mcp.status());
-    });
+  const mcp = new McpTools(options.mcp ?? [], catalog, options.mcpDiscovery, (status, previous) => {
+    catalog.add(statusTool());
+    Object.assign(bundle, extensions());
+    return options.mcpChanged?.(status, previous) ?? okAsync(undefined);
+  });
+  const statusTool = () => mcp.statusTool((ctx) => void bundle.ready(ctx));
   catalog.add(statusTool());
   const child = all.without([...subagentTools.map((tool) => tool.name), "orb_spawn", "orb_alert"]);
   const extensions = () => {
     const native = codemodeExtension(catalog, running, options.files, options.orb);
     const childNative = codemodeExtension(child, running, options.files, options.orb);
     const code = native.tools![0]!;
-    const status = mcp.contextExtension();
     return {
       extension: defineExtension({
         ...native,
         name: TOOLS_EXTENSION,
-        sections: [...(native.sections ?? []), ...(status.sections ?? [])],
-        hooks: [...(native.hooks ?? []), ...(status.hooks ?? [])],
         tools: [...catalog.registrations(), code],
         tasks: [ChildAnchor],
       }),
       childExtension: defineExtension({
         ...childNative,
         name: CHILD_TOOLS_EXTENSION,
-        sections: [...(childNative.sections ?? []), ...(status.sections ?? [])],
-        hooks: [...(childNative.hooks ?? []), ...(status.hooks ?? [])],
         tools: [...child.registrations(), ...childNative.tools!],
       }),
       modelTools: [code] as const,
@@ -150,11 +143,7 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
       if (discovering && discovery) return discovery;
       discovering = true;
       discovery = ResultAsync.fromPromise(
-        mcp.discover(options.mcpContext ?? context, (status, previous) => {
-          catalog.add(statusTool());
-          Object.assign(bundle, extensions());
-          return options.mcpChanged?.(status, previous) ?? okAsync(undefined);
-        }),
+        mcp.discover(options.mcpContext ?? context),
         (): ToolError => ({ code: "unavailable", message: "MCP discovery failed" }),
       )
         .mapErr((error) => {

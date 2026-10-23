@@ -24,7 +24,7 @@ import { fenceModels } from "./adapters/durable/model-fence.ts";
 import { createDurableModels } from "./adapters/durable/models.ts";
 import type { ParentNotification } from "./adapters/durable/notifications.ts";
 import { loadPlatformResources } from "./adapters/durable/platform-resources.ts";
-import { renderPrompt } from "./adapters/durable/prompt.ts";
+import { renderPrompt, sectionExtension } from "./adapters/durable/prompt.ts";
 import {
   type PersistedPlatformContext,
   prepareResourceContext,
@@ -436,6 +436,11 @@ export function createProcessAgentContext(
         mcpChanged: (status, previous) => {
           if (resourcesAbort.signal.aborted) return okAsync(undefined);
           installTools();
+          if (process.env["PI_ORB_E2E_HISTORY_INSPECTION"] === "1")
+            logOrbEvent(task, orb.id, "test_registry_published", {
+              server: status.name,
+              status: status.status,
+            });
           if (
             status.status === "pending" ||
             (status.status === "available" &&
@@ -608,6 +613,15 @@ export function createProcessAgentContext(
         return err(durableError("agent admission superseded"));
       }
       const registry = createRegistry();
+      if (catalog.value.servers.length)
+        registry.install(
+          sectionExtension("mcp-status", () =>
+            tools
+              .mcpStatus()
+              .map((s) => `MCP ${s.name}: ${s.status}. Namespace: mcp__${s.name}.`)
+              .join("\n"),
+          ),
+        );
       let conversation: Harness["conversation"] | undefined;
       const currentAgent = (api: ToolExecutionApi, ctx: Context): ResultAsync<Agent, ToolError> =>
         ResultAsync.fromThrowable(

@@ -1,5 +1,14 @@
 # Testing
 
+MCP E2E waits for registry publication through `test_registry_published` only under the existing `PI_ORB_E2E_HISTORY_INSPECTION=1` guard; production remains healthy-silent, and failure/recovery assertions require committed native alerts.
+
+## MCP reduction qualification (2026-10-22; blocked)
+
+Frozen base patch SHA256 `b0139c4d13d014709b6ee46efaafc86772f5158edd9abc8ad4b7c6959bffcba5` passed 44 files / 233 unit tests, typecheck, full lint and scoped Biome; no full-suite qualification is claimed.
+Process E2E failed awaiting summary inference after real MCP execution and `DURABLE_REMOTE_DONE`; OAuth was not run after bail. The relay captured the fourth, correctly prompted summary request; the hosted fake recorded only three. The HTTP/transport cause remains unresolved, not fixed.
+Evidence: `/tmp/pr162-final-process-e2e/REPORT.md`, `e2e.log`, and `test-failures/durable-process-0acbcc65-5285-44fe-bf7d-0a1da1e2f336`; manual diagnostics remain in `/tmp/pr162-live-reduced/diagnostic-original` and `/tmp/pr162-live-reduced/continuation`.
+**Not merge/deployment-qualified:** manual provider waits remain unresolved, automatic retry does not clear them, and an uncaught expected MCP rejection invalidated the ignored-result helper's completion oracle. Neither a full manual pass nor complete process-E2E fake-session cleanup is verified.
+
 ## Local fake-provider npm preparation (2026-10-22)
 
 Failed npm installation retains only finite allowlisted code/errno fields in existing phase artifacts, from at most 64 KiB of private combined output. Missing/conflicting/oversized fields remain unknown; unreadable output is marked unavailable. Raw logs stay private. npm defaults, one install invocation and the 300s tool timeout are unchanged.

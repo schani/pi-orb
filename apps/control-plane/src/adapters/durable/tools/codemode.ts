@@ -210,7 +210,7 @@ export function codemodeTool(
       const decorated: ToolExecutionApi = {
         ...api,
         env,
-        executeTool: async (name, value, ctx, callOptions) => {
+        executeTool: (name, value, ctx, callOptions) => {
           const id = Number(callOptions?.key?.slice(1));
           if (Number.isSafeInteger(id))
             previews.set(id, {
@@ -218,17 +218,14 @@ export function codemodeTool(
               argumentKeys:
                 object(value) || Array.isArray(value) ? Object.keys(value).slice(0, 16) : [],
             });
-          const result = await api.executeTool(name, value, ctx, callOptions);
-          for (const diagnostic of result.diagnostics)
-            if (diagnostic.code === "mcp_status") api.diagnostic(diagnostic);
-          return {
+          return api.executeTool(name, value, ctx, callOptions).then((result) => ({
             ...result,
             diagnostics: result.diagnostics.map((diagnostic) =>
               diagnostic.code === "invalid_arguments"
                 ? { ...diagnostic, message: catalog.invalidArgumentsMessage(name, value) }
                 : diagnostic,
             ),
-          };
+          }));
         },
         commit: (change, ctx) =>
           api.commit(async (tx) => {

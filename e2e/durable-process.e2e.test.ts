@@ -191,10 +191,6 @@ it.runIf(process.env["PI_ORB_E2E_BACKEND"] === "process")(
       { stdio: "ignore" },
     );
     const calls: { method: string; authorization: string | undefined }[] = [];
-    let published!: () => void;
-    const registryBarrier = new Promise<void>((resolve) => {
-      published = resolve;
-    });
     const remote = createServer(
       { key: readFileSync(key), cert: readFileSync(cert) },
       async (req, res) => {
@@ -205,23 +201,6 @@ it.runIf(process.env["PI_ORB_E2E_BACKEND"] === "process")(
         let body = "";
         for await (const chunk of req) body += chunk;
         const message = JSON.parse(body);
-        if (req.url === "/registry-barrier") {
-          if (message.method === "initialize") published();
-          if (message.id === undefined) res.writeHead(202).end();
-          else
-            res.writeHead(200, { "content-type": "application/json" }).end(
-              JSON.stringify({
-                jsonrpc: "2.0",
-                id: message.id,
-                result: {
-                  protocolVersion: message.params?.protocolVersion,
-                  capabilities: {},
-                  serverInfo: { name: "barrier", version: "1" },
-                },
-              }),
-            );
-          return;
-        }
         calls.push({ method: message.method, authorization: req.headers.authorization });
         if (req.headers.authorization !== "Bearer synthetic-durable") {
           res.writeHead(401).end();
@@ -510,12 +489,6 @@ text('NOTIFY_PARENT_HANDLED');`),
                 url: `https://127.0.0.1:${address.port}/mcp`,
                 headers: { Authorization: { secret: "MCP_KEY", prefix: "Bearer " } },
               },
-              {
-                name: "registry-barrier",
-                description: "Registry initialization barrier",
-                url: `https://127.0.0.1:${address.port}/registry-barrier`,
-                headers: {},
-              },
             ],
           })
         ).status,
@@ -545,7 +518,13 @@ text('NOTIFY_PARENT_HANDLED');`),
         },
         { timeoutMs: 300_000 },
       );
-      await registryBarrier;
+      await waitFor("MCP registry publication", async () =>
+        cp!.logs
+          .join("")
+          .includes(`lifecycle: orb=${orb} test_registry_published server=fixture status=available`)
+          ? true
+          : null,
+      );
       expect(
         (
           await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${randomUUID()}`, {

@@ -49,26 +49,33 @@ export function promptExtension(instructions: string): Extension {
       : `${instructions}\n\n- You are a subagent. Your parent started you in this same orb; you share its filesystem.
 - To communicate with your parent agent you have \`notify_parent\`. Do not use \`orb_send\` for that!!!
 - Do not start subagents or orbs!`;
+  return { ...sectionExtension(SECTION, render), name: "orb.prompt" };
+}
+
+export function sectionExtension(
+  name: string,
+  render: (conversationId: string) => string,
+): Extension {
   // Tagged so a later "Updated system prompt section" names a delimited part of the instructions.
-  const tagged = (text: string) => `<${SECTION}>\n${text}\n</${SECTION}>`;
+  const tagged = (text: string) => `<${name}>\n${text}\n</${name}>`;
   // The persisted section becomes the request's instructions and is re-sent only when it changes,
   // so each request extends the previous one (prompt cache). The hook covers a request prepared
   // before the prompt changed, such as one resumed after reopen.
   return defineExtension({
-    name: "orb.prompt",
-    sections: [section(SECTION, ({ conversationId }) => render(String(conversationId)))],
+    name: `orb.${name}`,
+    sections: [section(name, ({ conversationId }) => render(String(conversationId)))],
     hooks: [
       hook(GenerationTask, {
         beforeRequest: ({ messages }, api) => {
           const current = tagged(render(String(api.conversationId)));
           const shown = messages.findLast(
-            (message) => message.role === "system" && message.sections?.[SECTION] !== undefined,
+            (message) => message.role === "system" && message.sections?.[name] !== undefined,
           );
-          if (shown?.role === "system" && shown.sections?.[SECTION] === current) return undefined;
+          if (shown?.role === "system" && shown.sections?.[name] === current) return undefined;
           return {
             messages: [
               ...messages,
-              { role: "system", content: "", sections: { [SECTION]: current }, timestamp: 0 },
+              { role: "system", content: "", sections: { [name]: current }, timestamp: 0 },
             ],
           };
         },

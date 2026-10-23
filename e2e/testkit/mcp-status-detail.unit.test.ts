@@ -79,25 +79,3 @@ it("maps rejected detail transport to a typed, payload-free error", async () => 
     await hasCommittedMcpStatus(history, "connected", () => Promise.reject(new Error("PRIVATE"))),
   ).toMatchObject({ error: { type: "detail_unavailable", status: 0 } });
 });
-
-it.each(["needs-auth", "connected"] as const)(
-  "reads automatic native %s alerts without details",
-  async (status) => {
-    const request = vi.fn();
-    const alerts: DisplayHistoryView = {
-      ...history,
-      records: [
-        {
-          id: "alert",
-          parentId: null,
-          timestamp: "now",
-          type: "event",
-          eventType: "orb.alert",
-          alert: { requestId: "request", message: `MCP fixture: ${status}.` },
-        },
-      ],
-    };
-    expect((await hasCommittedMcpStatus(alerts, status, request))._unsafeUnwrap()).toBe(true);
-    expect(request).not.toHaveBeenCalled();
-  },
-);

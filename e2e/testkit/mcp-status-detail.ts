@@ -17,14 +17,10 @@ export async function hasCommittedMcpStatus(
 ): Promise<Result<boolean, McpDetailError>> {
   const marker = `MCP fixture: ${status}.`;
   const records = history.records.filter((record) => record.type !== "compaction");
-  // Native alerts and guest status entries are inline; tool results use committed details.
+  // Guest status entries remain inline; central tool results use committed details.
   if (
-    records.some(
-      (record) =>
-        (record.type === "event" &&
-          record.eventType === "orb.alert" &&
-          record.alert?.message === marker) ||
-        record.content?.some((block) => block.type === "text" && block.text.includes(marker)),
+    records.some((record) =>
+      record.content?.some((block) => block.type === "text" && block.text.includes(marker)),
     )
   )
     return ok(true);

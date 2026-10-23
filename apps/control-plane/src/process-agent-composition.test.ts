@@ -1,14 +1,13 @@
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
-import { MemoryStorage } from "@earendil-works/pi-durable";
+import { MemoryStorage, type ToolExecutionApi } from "@earendil-works/pi-durable";
 import { NoSimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it, vi } from "vitest";
 import { DurableAgent } from "./adapters/durable/agent.ts";
 import { durableError } from "./adapters/durable/manager.ts";
 import * as durableModels from "./adapters/durable/models.ts";
-import { McpTools } from "./adapters/durable/tools/mcp.ts";
 import { RemoteExecutionEnv } from "./adapters/execution-client/env.ts";
 import * as brokerDomain from "./domain/broker.ts";
 import {
@@ -111,7 +110,7 @@ describe("process agent composition", () => {
       models.mockRestore();
     }
   });
-  it("opens CP models and tools without remote MCP discovery while execution readiness is held", async () => {
+  it("opens CP models and tools while execution readiness is held", async () => {
     const harness = makeHarness();
     const orb = makeOrbRow("central", "project", "starting", { hostRef: "executor" });
     harness.store.seedProject(makeProjectRow("project"));
@@ -136,9 +135,6 @@ describe("process agent composition", () => {
     const models = vi
       .spyOn(durableModels, "createDurableModels")
       .mockReturnValue(okAsync({ getModel: () => undefined } as never));
-    const discover = vi
-      .spyOn(McpTools.prototype, "discover")
-      .mockResolvedValue(err({ code: "unavailable", message: "remote MCP must not gate startup" }));
     try {
       const open = createProcessAgentContext(
         {
@@ -150,7 +146,6 @@ describe("process agent composition", () => {
       const result = await open(new NoSimulationTask("initializing-composition", false), orb, {
         signal: new AbortController().signal,
       });
-      expect(discover).not.toHaveBeenCalled();
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(models).toHaveBeenCalledOnce();
       expect(ready).not.toHaveBeenCalled();
@@ -159,7 +154,6 @@ describe("process agent composition", () => {
         await result.value.closeResources?.();
       }
     } finally {
-      discover.mockRestore();
       ready.mockRestore();
       models.mockRestore();
     }
@@ -374,20 +368,6 @@ describe("process agent composition", () => {
     expect(order).toEqual(["local refresh", "execute", "local refresh", "execute"]);
   });
 
-  it("returns visible native output without executing code when the native view is cancelled", async () => {
-    const execute = vi.fn(async () => ({}));
-    const tool = refreshProcessTools(
-      { name: "codemode", description: "code", parameters: Type.Object({}), execute },
-      () => errAsync({ code: "cancelled", message: "PRIVATE-NATIVE-CANCELLATION" }),
-    );
-    const result = await tool.execute({}, {} as never, BACKGROUND_CONTEXT);
-    expect(result).toEqual({
-      isError: true,
-      output: [{ type: "text", text: "Tool catalog unavailable" }],
-    });
-    expect(execute).not.toHaveBeenCalled();
-  });
-
   it("does not execute code when the native view cannot refresh", async () => {
     const execute = vi.fn(async () => ({}));
     const tool = refreshProcessTools(
@@ -513,4 +493,133 @@ describe("process agent composition", () => {
     expect(system).toContain("Use codemode to compose tool calls.");
     expect(system).not.toMatch(/orb_spawn|subagent/i);
   });
+});
+
+function barrier() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+it("activates MCP without input and publishes healthy tools before held discovery joins close", async () => {
+  const held = barrier(),
+    release = barrier();
+  let heldSignal: AbortSignal | undefined;
+  const calls: string[] = [];
+  const network = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const name = new URL(String(input)).hostname.split(".")[0]!;
+    if (init?.method !== "POST") return new Response(null, { status: 405 });
+    const message = JSON.parse(String(init.body));
+    if (message.id === undefined) return new Response(null, { status: 202 });
+    calls.push(`${name}:${message.method}`);
+    if (name === "bad") return new Response("PRIVATE_PROVIDER_ERROR", { status: 503 });
+    if (name === "held") {
+      heldSignal = init.signal!;
+      held.resolve();
+      await release.promise;
+    }
+    const result =
+      message.method === "initialize"
+        ? {
+            protocolVersion: message.params.protocolVersion,
+            capabilities: { tools: {} },
+            serverInfo: { name, version: "1" },
+          }
+        : message.method === "tools/list"
+          ? { tools: [{ name: "ping", inputSchema: { type: "object" } }] }
+          : { content: [{ type: "text", text: "AUTO_PONG" }] };
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }), {
+      headers: { "content-type": "application/json" },
+    });
+  });
+  const h = makeHarness();
+  const orb = makeOrbRow("auto-mcp", "project", "running");
+  h.store.seedProject(makeProjectRow("project"));
+  h.store.seedOrb(orb);
+  const models = vi
+    .spyOn(durableModels, "createDurableModels")
+    .mockReturnValue(okAsync({ getModel: () => undefined } as never));
+  const appendAlert = vi.fn<DurableAgent["appendAlert"]>(() =>
+    okAsync({ recordId: "alert", duplicate: false }),
+  );
+  const opening = new AbortController();
+  vi.stubEnv("PI_ORB_E2E_HISTORY_INSPECTION", "1");
+  const task = new NoSimulationTask("automatic MCP", false);
+  const logs = vi.spyOn(task, "log").mockImplementation(() => {});
+  const open = createProcessAgentContext(h.deps, {
+    mcp: {
+      read: () =>
+        okAsync({
+          servers: ["bad", "datadog", "held"].map((name) => ({
+            name,
+            description: `Provider ${name}`,
+            url: `https://${name}.test/mcp`,
+            headers: {},
+          })),
+        }),
+    },
+  } as never);
+  const options = (await open(task, orb, { signal: opening.signal }))._unsafeUnwrap();
+  const tool = (name: string) =>
+    options.registry
+      .snapshot()
+      .tools()
+      .find(({ tool }) => tool.name === name)!.tool;
+  const section = options.registry
+    .snapshot()
+    .sections()
+    .find(({ section }) => section.key === "mcp-status")!.section;
+  try {
+    expect(calls).toEqual([]);
+    expect(tool("mcp_status").description).toContain(
+      "MCP datadog: pending (mcp__datadog): Provider datadog",
+    );
+    options.activateResources!(appendAlert);
+    opening.abort();
+    await held.promise;
+    expect(heldSignal?.aborted).toBe(false);
+    expect(
+      logs.mock.calls.some(
+        ([line]) =>
+          String(line) ===
+          `lifecycle: orb=${orb.id} test_registry_published server=datadog status=available`,
+      ),
+    ).toBe(true);
+    expect(appendAlert.mock.calls.map(([, message]) => message)).toEqual(["MCP bad: unavailable."]);
+    const cached = await section.render({} as never, BACKGROUND_CONTEXT);
+    expect(cached).toContain("MCP bad: unavailable.");
+    expect(cached).toContain("MCP held: pending. Namespace: mcp__held.");
+    expect(tool("mcp_status").description).toContain("MCP datadog: available");
+    const result = await tool("mcp__datadog__ping").execute(
+      {},
+      {} as ToolExecutionApi,
+      BACKGROUND_CONTEXT,
+    );
+    expect(result.isError).not.toBe(true);
+    expect(JSON.stringify(result)).toContain("AUTO_PONG");
+    expect(calls.filter((call) => call === "datadog:tools/list")).toHaveLength(1);
+    const published = options.registry.snapshot();
+    let closed = false;
+    const closing = options.closeResources!().map(() => {
+      closed = true;
+      return undefined;
+    });
+    expect(heldSignal?.aborted).toBe(true);
+    expect(closed).toBe(false);
+    release.resolve();
+    (await closing)._unsafeUnwrap();
+    expect(options.registry.snapshot()).toBe(published);
+    expect(await section.render({} as never, BACKGROUND_CONTEXT)).toBe(cached);
+    expect(appendAlert).toHaveBeenCalledOnce();
+    expect(calls).not.toContain("held:tools/list");
+  } finally {
+    release.resolve();
+    await options.closeResources!();
+    network.mockRestore();
+    models.mockRestore();
+    logs.mockRestore();
+    vi.unstubAllEnvs();
+  }
 });

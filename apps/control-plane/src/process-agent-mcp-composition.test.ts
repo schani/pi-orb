@@ -374,6 +374,7 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
       expect(JSON.stringify(first.records)).not.toContain("PRIVATE-OAUTH-FAILURE");
       const discoveryFailures = logs.filter((line) => line.includes("durable.mcp_unavailable"));
       expect(discoveryFailures).toHaveLength(1);
+      expect(logs.some((line) => line.includes("test_registry_published"))).toBe(false);
       expect(discoveryFailures[0]).toContain("server=fixture phase=initialize");
       expect(discoveryFailures[0]).toContain("stage=discovery");
       expect(
@@ -533,8 +534,18 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
         expect(JSON.stringify(await state())).not.toContain("mcp__fixture__read_after_reset");
 
         authorized = false;
-        faux.setResponses(turn());
-        await deliver("consent reset");
+        faux.setResponses(
+          turn('await tools.mcp__fixture__read({}); text("ignored runtime failure");'),
+        );
+        const reset = await deliver("consent reset");
+        expect(
+          reset.records.filter(
+            (record) =>
+              record.type === "event" &&
+              record.eventType === "orb.alert" &&
+              record.alert?.message === "MCP fixture: needs-auth.",
+          ),
+        ).toHaveLength(2);
         const beforeRecovery = acceptedCalls;
         recovered = true;
         authorized = true;

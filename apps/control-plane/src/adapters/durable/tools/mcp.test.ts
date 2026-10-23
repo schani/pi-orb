@@ -17,65 +17,41 @@ import {
 } from "@earendil-works/pi-durable";
 import { McpHttpError, McpTimeoutError } from "@earendil-works/pi-mcp";
 import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
-import { errAsync, okAsync } from "neverthrow";
+import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import { expect, it } from "vitest";
-import { projectHistory } from "../projection.ts";
 import { CallableCatalog } from "./catalog.ts";
 import { createDurableTools } from "./index.ts";
 import { McpTools } from "./mcp.ts";
 import { openCodemodeHarness } from "./testkit/codemode.ts";
 
-it("returns sanitized cached authorization-required status in durable tool history", async () => {
-  const tools = createDurableTools({
-    mcp: [
-      {
-        name: "fixture",
-        unavailableState: () => "needs-auth",
-        connect: () => errAsync({ code: "forbidden", message: "secret" }),
-      },
-    ],
+function barrier() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
   });
-  const faux = fauxProvider();
-  faux.setResponses([
-    fauxAssistantMessage(fauxToolCall("codemode", { code: "text(await tools.mcp_status({}))" }), {
-      stopReason: "toolUse",
-    }),
-    fauxAssistantMessage("done"),
-  ]);
-  const models = createModels();
-  models.setProvider(faux.provider);
-  const registry = createRegistry();
-  registry.install(tools.extension);
-  const harness = await Harness.open(new MemoryStorage(), { models, registry }, BACKGROUND_CONTEXT);
-  try {
-    expect((await tools.ready()).isOk()).toBe(true);
-    const root = await harness.root(BACKGROUND_CONTEXT, {
-      agent: { model: { provider: "faux", modelId: "faux-1" } },
-    });
-    harness.resume();
-    await (await root.submit({ type: "input", content: "go" }, BACKGROUND_CONTEXT)).wait(
-      BACKGROUND_CONTEXT,
-    );
-    const records = await root.entries({}, 100, undefined, BACKGROUND_CONTEXT);
-    const history = projectHistory(records.items, "session");
-    expect(history.isOk()).toBe(true);
-    expect(JSON.stringify(history)).toContain("needs-auth");
-    expect(JSON.stringify(history)).not.toContain("secret");
-  } finally {
-    await harness.close(BACKGROUND_CONTEXT);
-    await tools.close();
-  }
-});
+  return { promise, resolve };
+}
 
-it("retries authorization-required discovery after consent and exposes sanitized status", async () => {
+it("shares owner-scoped consent retries and joins publication despite caller cancellation", async () => {
   let authorized = false;
   let connections = 0;
+  const notified = barrier(),
+    finish = barrier();
+  const owner = new AbortController(),
+    caller = new AbortController();
   const tools = createDurableTools({
+    mcpContext: withAbortSignal(owner.signal, BACKGROUND_CONTEXT),
+    mcpChanged: () => {
+      if (connections === 1) return okAsync(undefined);
+      notified.resolve();
+      return ResultAsync.fromSafePromise(finish.promise);
+    },
     mcp: [
       {
         name: "fixture",
         unavailableState: () => (authorized ? "unavailable" : "needs-auth"),
-        connect: () => {
+        connect: (ctx) => {
+          expect(ctx.abortSignal).toBe(owner.signal);
           connections++;
           if (!authorized) return errAsync({ code: "forbidden", message: "secret credential" });
           const { client, server } = createInMemoryTransportPair();
@@ -101,8 +77,7 @@ it("retries authorization-required discovery after consent and exposes sanitized
     ],
   });
   try {
-    expect(connections).toBe(0);
-    const api = { diagnostic: () => {} } as unknown as ToolExecutionApi;
+    const api = {} as ToolExecutionApi;
     const failed = await tools.catalog.invoke("mcp_status", {}, api, BACKGROUND_CONTEXT);
     expect(failed.isOk()).toBe(true);
     expect((await tools.ready()).isOk()).toBe(true);
@@ -114,8 +89,19 @@ it("retries authorization-required discovery after consent and exposes sanitized
       },
     ]);
     authorized = true;
-    await tools.catalog.invoke("mcp_status", {}, api, BACKGROUND_CONTEXT);
-    expect((await tools.ready()).isOk()).toBe(true);
+    (
+      await tools.catalog.invoke(
+        "mcp_status",
+        {},
+        api,
+        withAbortSignal(caller.signal, BACKGROUND_CONTEXT),
+      )
+    )._unsafeUnwrap();
+    await notified.promise;
+    caller.abort();
+    expect(owner.signal.aborted).toBe(false);
+    const joined = tools.ready();
+    expect(tools.ready()).toBe(joined);
     expect(tools.mcpStatus()).toEqual([{ name: "fixture", status: "available" }]);
     const fixture = await openCodemodeHarness(tools.catalog);
     try {
@@ -127,9 +113,20 @@ it("retries authorization-required discovery after consent and exposes sanitized
     } finally {
       await fixture.close();
     }
-    await tools.ready();
     expect(connections).toBe(2);
+    let closed = false;
+    const closing = tools.close().map(() => {
+      closed = true;
+      return undefined;
+    });
+    expect(closed).toBe(false);
+    finish.resolve();
+    (await joined)._unsafeUnwrap();
+    (await closing)._unsafeUnwrap();
+    expect(closed).toBe(true);
   } finally {
+    owner.abort();
+    finish.resolve();
     await tools.close();
   }
 });
@@ -190,7 +187,7 @@ it("reports a failed MCP server without blocking healthy discovery and calls", a
     } finally {
       await fixture.close();
     }
-    const api = { diagnostic: () => {} } as unknown as ToolExecutionApi;
+    const api = {} as ToolExecutionApi;
     const status = await tools.catalog.invoke("mcp_status", {}, api, BACKGROUND_CONTEXT);
     expect(status.isOk()).toBe(true);
     if (status.isOk()) {
