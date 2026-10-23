@@ -160,3 +160,31 @@ exit 0
     }
   });
 }
+
+for (const [view, command, accepted] of [
+  ['{"state":"running"}', "{}", true],
+  ['{"state":"failed"}', "{}", false],
+  ["{}", "{}", false],
+  ["not-json", "{}", false],
+  ['{"state":"running"}', '{"error":{"code":"conflict"}}', false],
+]) {
+  test(`shared lifecycle mechanics refuse invalid evidence: ${view} / ${command}`, () => {
+    const result = spawnSync(
+      "bash",
+      [
+        "-ec",
+        `
+      ${helpers}
+      DEADLINE=$(( $(date +%s) + 60 ))
+      say() { :; }
+      smoke_lifecycle_fail() { echo "$*" >&2; exit 9; }
+      api() { case "$1" in */stop) printf '%s' '${command}';; *) printf '%s' '${view}';; esac; }
+      smoke_wait_for_state fixture running 30 step
+      smoke_command_orb fixture stop
+    `,
+      ],
+      { encoding: "utf8", timeout: 3000 },
+    );
+    assert.equal(result.status, accepted ? 0 : 9, result.stderr);
+  });
+}

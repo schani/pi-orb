@@ -49,3 +49,30 @@ fixture_delete() { # Exit 2: API absence proven, but recording failed.
   fixture_record "$kind" "$id" cleanup-failed || true
   return 1
 }
+
+smoke_wait_for_state() {
+  local oid=$1 target=$2 timeout=$3 step=$4 limit last="" view state
+  limit=$(( $(date +%s) + timeout ))
+  [ "$limit" -le "$DEADLINE" ] || limit=$DEADLINE
+  while :; do
+    [ "$(date +%s)" -lt "$DEADLINE" ] || smoke_lifecycle_fail "$step" "overall timeout"
+    view=$(PI_ORB_SMOKE_DEADLINE="$limit" api "/api/v1/orbs/$oid") ||
+      smoke_lifecycle_fail "$step" "API unavailable"
+    state=$(jq -er '.state | select(type == "string" and length > 0)' <<<"$view") ||
+      smoke_lifecycle_fail "$step" "no orb state"
+    if [ "$state" != "$last" ]; then say "$step: $oid: $state"; last=$state; fi
+    [ "$state" != "$target" ] || return 0
+    [ "$state" != failed ] || smoke_lifecycle_fail "$step" "orb failed"
+    [ "$(date +%s)" -lt "$limit" ] ||
+      smoke_lifecycle_fail "$step" "$state after ${timeout}s (wanted $target)"
+    smoke_sleep "$limit"
+  done
+}
+
+smoke_command_orb() {
+  local oid=$1 verb=$2 response
+  response=$(api "/api/v1/orbs/$oid/$verb" '{}') ||
+    smoke_lifecycle_fail "$verb" "API unavailable"
+  jq -e '.error == null' <<<"$response" >/dev/null ||
+    smoke_lifecycle_fail "$verb" "command refused"
+}

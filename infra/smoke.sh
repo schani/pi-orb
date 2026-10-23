@@ -43,27 +43,7 @@ say() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 fail() { echo "SMOKE FAILED: $* (project=$PROJECT_ID orb=$ORB_ID)" >&2; exit 1; }
 api() { "$API" "$@"; }
 
-wait_for_state() {
-  local target=$1 timeout=$2 step=$3 limit last="" view state
-  limit=$(( $(date +%s) + timeout ))
-  [ "$limit" -le "$DEADLINE" ] || limit=$DEADLINE
-  while :; do
-    if [ "$(date +%s)" -ge "$DEADLINE" ]; then fail "$step: overall timeout"; fi
-    view=$(PI_ORB_SMOKE_DEADLINE="$limit" api "/api/v1/orbs/$ORB_ID") || fail "$step: API unavailable"
-    state=$(jq -er '.state' <<<"$view") || fail "$step: no orb state"
-    if [ "$state" != "$last" ]; then say "$step: $state"; last=$state; fi
-    if [ "$state" = "$target" ]; then return 0; fi
-    if [ "$state" = failed ]; then fail "$step: orb failed"; fi
-    if [ "$(date +%s)" -ge "$limit" ]; then fail "$step: $state after ${timeout}s (wanted $target)"; fi
-    smoke_sleep "$limit"
-  done
-}
-
-command_orb() {
-  local response
-  response=$(api "/api/v1/orbs/$ORB_ID/$1" '{}') || fail "$1: API unavailable"
-  jq -e '.error == null' <<<"$response" >/dev/null || fail "$1 refused"
-}
+smoke_lifecycle_fail() { fail "$1: $2"; }
 
 for command in jq python3 uuidgen; do command -v "$command" >/dev/null || fail "missing $command"; done
 PI_ORB_APP_ORIGIN=${PI_ORB_APP_ORIGIN:-$(python3 "$DIR/smoke_http.py" external tofu-app)} || fail "app URL unavailable"
@@ -80,11 +60,11 @@ fixture_record project "$PROJECT_ID" created
 response=$(api "/api/v1/projects/$PROJECT_ID/orbs" "$(jq -nc --arg id "$ORB_ID" '{id:$id}')") || fail "create-orb unavailable"
 jq -e --arg id "$ORB_ID" '.id == $id' <<<"$response" >/dev/null || fail "create-orb refused"
 fixture_record orb "$ORB_ID" created
-wait_for_state running "$RUNNING_TIMEOUT" first-boot
-command_orb stop
-wait_for_state stopped "$STOPPED_TIMEOUT" first-stop
-command_orb start
-wait_for_state running "$RUNNING_TIMEOUT" restart
-command_orb stop
-wait_for_state stopped "$STOPPED_TIMEOUT" final-stop
+smoke_wait_for_state "$ORB_ID" running "$RUNNING_TIMEOUT" first-boot
+smoke_command_orb "$ORB_ID" stop
+smoke_wait_for_state "$ORB_ID" stopped "$STOPPED_TIMEOUT" first-stop
+smoke_command_orb "$ORB_ID" start
+smoke_wait_for_state "$ORB_ID" running "$RUNNING_TIMEOUT" restart
+smoke_command_orb "$ORB_ID" stop
+smoke_wait_for_state "$ORB_ID" stopped "$STOPPED_TIMEOUT" final-stop
 say "Lifecycle assertions passed in $(( $(date +%s) - START_TS ))s; verifying fixture deletion."

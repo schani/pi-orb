@@ -1522,3 +1522,6 @@ The owned manual preemption experiment records before/recovered public versions
 and stateChangedAt. Running with at least two version advances and a later state
 transition timestamp witnesses recovery even when starting falls between polls.
 No concurrent lifecycle command belongs in that experiment.
+Lifecycle and workload-identity smokes share bounded state polling and one-shot
+commands through smoke-fixtures.sh; each retains its scenario and cleanup owner.
+Identity JSON access uses Python, already required alongside jq.

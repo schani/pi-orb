@@ -161,8 +161,6 @@ fi
 chmod 700 "$WORK_DIR"
 
 # --- JSON access ------------------------------------------------------------
-# python3 first (macOS ships it), jq as fallback.
-if command -v python3 >/dev/null 2>&1; then
   jget() { # jget <dotted.path> ; JSON on stdin ; prints "" when absent
     python3 -c '
 import json, sys
@@ -178,20 +176,6 @@ for key in sys.argv[1].split("."):
 print("" if doc is None else doc)
 ' "$1"
   }
-elif command -v jq >/dev/null 2>&1; then
-  jget() {
-    local doc
-    doc=$(cat)
-    printf '%s' "$doc" | jq -e . >/dev/null 2>&1 || return 3
-    printf '%s' "$doc" | jq -r --arg p "$1" '
-      ($p | split(".")) as $path
-      | (getpath($path) // "")
-      | if type == "object" or type == "array" then tojson else tostring end
-    ' 2>/dev/null || return 3
-  }
-else
-  fail "preflight" "needs python3 or jq to parse JSON responses"
-fi
 
 api() { # api <path> [json-body] [method]
   "$API" "$1" "${2-}" "${3-}"
@@ -346,42 +330,7 @@ create_orb() {
   say "orb created: $oid"
 }
 
-wait_for_state() {
-  local oid=$1 target=$2 timeout=$3 step=$4
-  local limit=$(($(date +%s) + timeout))
-  [ "$limit" -le "$DEADLINE" ] || limit=$DEADLINE
-  local last="" view state
-  while :; do
-    check_deadline "$step"
-    view=$(PI_ORB_SMOKE_DEADLINE="$limit" api "/api/v1/orbs/$oid") || fail "$step" "api.sh failed while polling"
-    state=$(printf '%s' "$view" | jget state) ||
-      fail "$step" "unparseable orb view"
-    [ -n "$state" ] || fail "$step" "orb view carried no state"
-    if [ "$state" != "$last" ]; then
-      say "  $oid: $state"
-      last=$state
-    fi
-    case "$state" in
-      "$target") return 0 ;;
-      failed)
-        fail "$step" "orb $oid failed"
-        ;;
-    esac
-    if [ "$(date +%s)" -ge "$limit" ]; then
-      fail "$step" "orb $oid stuck in '$state' after ${timeout}s (wanted '$target')"
-    fi
-    smoke_sleep "$limit"
-  done
-}
-
-command_orb() { # command_orb <orb> <start|stop>
-  local oid=$1 verb=$2 response err
-  response=$(api "/api/v1/orbs/$oid/$verb" '{}') ||
-    fail "$verb-orb" "api.sh failed"
-  err=$(printf '%s' "$response" | jget error.code) ||
-    fail "$verb-orb" "unparseable response"
-  [ -z "$err" ] || fail "$verb-orb" "control plane refused command"
-}
+smoke_lifecycle_fail() { fail "$@"; }
 
 # --- GCE steps --------------------------------------------------------------
 
@@ -466,8 +415,8 @@ create_orb "$PROJECT_ID" "$MINT_ORB"
 create_orb "$PROJECT_ID" "$STOPPED_ORB"
 
 say "step 2/7: wait for both orbs to reach running"
-wait_for_state "$MINT_ORB" running "$RUNNING_TIMEOUT" "mint-orb-boot"
-wait_for_state "$STOPPED_ORB" running "$RUNNING_TIMEOUT" "stopped-orb-boot"
+smoke_wait_for_state "$MINT_ORB" running "$RUNNING_TIMEOUT" "mint-orb-boot"
+smoke_wait_for_state "$STOPPED_ORB" running "$RUNNING_TIMEOUT" "stopped-orb-boot"
 
 say "step 3/7: locate the live compute for each orb"
 MINT_INSTANCE=$(orb_instance "$MINT_ORB") ||
@@ -631,8 +580,8 @@ case "$result" in
 esac
 say "  baseline: the live bearer mints (HTTP 200)"
 
-command_orb "$STOPPED_ORB" stop
-wait_for_state "$STOPPED_ORB" stopped "$STOPPED_TIMEOUT" "stop-probe-orb"
+smoke_command_orb "$STOPPED_ORB" stop
+smoke_wait_for_state "$STOPPED_ORB" stopped "$STOPPED_TIMEOUT" "stop-probe-orb"
 if ! result=$(probe "$STOPPED_BEARER"); then
   fail "stopped-orb-mint" "the in-VPC probe could not be run on $MINT_INSTANCE"
 fi
@@ -650,7 +599,7 @@ esac
 say "  an unknown bearer is refused: 401"
 
 say "step 7/7: stop the minting orb and dispose of both"
-command_orb "$MINT_ORB" stop
-wait_for_state "$MINT_ORB" stopped "$STOPPED_TIMEOUT" "stop-mint-orb"
+smoke_command_orb "$MINT_ORB" stop
+smoke_wait_for_state "$MINT_ORB" stopped "$STOPPED_TIMEOUT" "stop-mint-orb"
 
 say "Identity assertions passed; verifying fixture deletion."
