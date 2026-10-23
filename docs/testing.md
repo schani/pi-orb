@@ -1556,3 +1556,5 @@ Healthy restart qualification checks both sides of the persisted idle deadline b
 Forced provision races witness a nonretryable conflict before winner commit and require forward-only recovery.
 
 Deferred-restart telemetry is asserted inside every recorded iteration after task success.
+
+Inbox FIFO compares flattened identities, including order within squashed records; exactly-once remains a separate oracle.

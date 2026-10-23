@@ -86,16 +86,27 @@ function assertInboxFifo(
   orbId: string,
   messageIds: readonly string[],
 ): void {
-  const records = harness.store.replicaRecords(orbId);
-  const positions = messageIds.map((messageId) =>
-    records.findIndex((record) => inboxMessageIdsOf(record).includes(messageId)),
-  );
+  const identities = harness.store.replicaRecords(orbId).flatMap(inboxMessageIdsOf);
+  const positions = messageIds.map((messageId) => identities.indexOf(messageId));
   for (const position of positions) expect(position).toBeGreaterThanOrEqual(0);
-  // Squashed batches share one record, so equal positions are FIFO too.
   for (let index = 1; index < positions.length; index++) {
-    expect(positions[index - 1] ?? -1).toBeLessThanOrEqual(positions[index] ?? -1);
+    expect(positions[index - 1] ?? -1).toBeLessThan(positions[index] ?? -1);
   }
 }
+
+it("the FIFO oracle checks identity order within squashed batches", () => {
+  const harness = makeHarness();
+  harness.world.configureOrb(ORB, {});
+  harness.world.ensureSessionExists(ORB);
+  const record = harness.world.appendMessage(ORB);
+  expect(record.type).toBe("message");
+  if (record.type !== "message") return;
+  harness.store.replicaRecords = () => [{ ...record, inboxMessageIds: ["first", "second"] }];
+  expect(() => assertInboxFifo(harness, ORB, ["first", "second"])).not.toThrow();
+  harness.store.replicaRecords = () => [{ ...record, inboxMessageIds: ["second", "first"] }];
+  expect(() => assertInboxFifo(harness, ORB, ["first", "second"])).toThrow();
+  expect(() => assertInboxFifo(harness, ORB, ["missing"])).toThrow();
+});
 
 /**
  * Wait `totalMs` in short steps. One long timer is not a long wait to this
@@ -997,9 +1008,7 @@ describe("orb lifecycle (DST)", () => {
       const records = harness.store.replicaRecords(ORB);
       expect(inboxRecordsFor(records, olderId)).toHaveLength(1);
       expect(inboxRecordsFor(records, wakeId)).toHaveLength(1);
-      const olderIndex = records.findIndex((record) => inboxMessageIdsOf(record).includes(olderId));
-      const wakeIndex = records.findIndex((record) => inboxMessageIdsOf(record).includes(wakeId));
-      expect(olderIndex).toBeLessThanOrEqual(wakeIndex);
+      assertInboxFifo(harness, ORB, [olderId, wakeId]);
     });
   });
 
