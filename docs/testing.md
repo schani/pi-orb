@@ -1735,3 +1735,5 @@ Native-image cleanup fixtures share only typed input defaults; temporary directo
 Manual inference tracing qualification asserts exact forwarded frames and status, private-text exclusion and record inventory. Client cancellation waits for upstream close; split-frame cutoff forwards each byte once. (2026-10-22 PDT).
 
 SSR history checks summary markup only; mounted lazy-transcript qualification counts every closed tool detail path, then asserts retry and cache reads after opening. Backdrop clicks remain browser-owned. (2026-10-22 PDT).
+
+Generic tool label bounds require an existing nonempty truncated label before comparing tooltip and byte length. (2026-10-22 PDT).

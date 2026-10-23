@@ -279,6 +279,8 @@ describe("bounded call labels", () => {
       />,
     );
     const label = capped.match(/<code class="trunc" title="([^"]+)">([^<]+)<\/code>/);
+    expect(label).not.toBeNull();
+    expect(label?.[1]).toMatch(/…$/);
     expect(label?.[1]).toBe(label?.[2]);
     expect(Buffer.byteLength(label?.[1] ?? "")).toBeLessThanOrEqual(1024);
   });
