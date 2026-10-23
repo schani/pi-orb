@@ -1509,3 +1509,6 @@ Task-handoff failure cleanup joins native process close (including stdio) before
 removing its gates and home or settling the helper.
 Receipt-order fixtures publish journal state by rename, then append one complete
 native line; the real watcher remains armed across both publications.
+The drain fixture owns IPC/error/close listeners from fork through one joined
+completion promise. Early exit rejects pending waits with status and bounded
+stderr byte count, never provider stderr content.
