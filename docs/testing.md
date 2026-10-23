@@ -8,6 +8,8 @@ Signing-key rotation failpoints follow a fault-free seed, faulted rotation and e
 
 Instruction route writes require GET equality, including revisions and clear. Project isolation keeps distinct nonempty A/B documents simultaneously. MCP route validation starts from a nonempty HTTPS/OAuth catalog, varies one field per denial and requires the expected error with no catalog/revision change.
 
+Hosted namespace isolation publishes the same path with different bytes under two bearer identities, checks both inventories, and verifies deletion leaves the other namespace readable.
+
 ## Adapter boundary assertions (2026-10-22)
 
 SQL fixtures register clients before fallible setup; table-driven settings suites capture each acquired subject in `onTestFinished`, without teardown of an unacquired or stale client; process observations/crash markers live under immediately registered roots. Teardown reports cleanup failures separately, attempts every owned release, and retains the original test failure.
