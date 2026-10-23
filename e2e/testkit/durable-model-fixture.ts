@@ -16,6 +16,10 @@ export function centralModelScenario(scenario: unknown): unknown {
       rules: model["rules"].map((rule: unknown) => {
         const entry = object(rule);
         if (!entry || !Array.isArray(entry["steps"])) return rule;
+        for (const matcher of Object.values(object(entry["match"]) ?? {})) {
+          const regex = object(matcher)?.["regex"];
+          if (typeof regex === "string") new RegExp(regex);
+        }
         return {
           ...entry,
           steps: entry["steps"].map((step: unknown) => {
