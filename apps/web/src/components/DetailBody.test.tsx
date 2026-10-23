@@ -76,3 +76,17 @@ it("preserves URL-backed tool image preview and omits base64", () => {
   expect(html).toContain('src="https://example.com/preview.png"');
   expect(html).toContain("Enlarge image returned by tool result");
 });
+
+it("renders generic tool arguments and text results, and a bare-image fallback", () => {
+  const render = (body: Parameters<typeof DetailContent>[0]["body"]) =>
+    renderToStaticMarkup(
+      <DetailContent context={context} recordId="r" detailKey="r:0" body={body} />,
+    );
+  expect(render({ type: "tool_call", arguments: { task: "Inspect services" } })).toContain(
+    "Inspect services",
+  );
+  expect(
+    render({ type: "tool_result", content: [{ type: "text", text: "Four services found" }] }),
+  ).toContain("Four services found");
+  expect(render({ type: "image" })).toContain("[image]");
+});

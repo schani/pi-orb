@@ -1747,3 +1747,5 @@ Status asset distinctness compares graphical markup without title/accessibility 
 Critical responsive source checks stay within balanced matching media blocks. Chromium/WebKit dashboard geometry checks assert computed action dimensions across breakpoints; viewport tests own effective overflow and composer pinning, including phone relative positioning. (2026-10-22 PDT).
 
 Transcript cache qualification reads the actual immutable default budget (256 MiB); small injected-budget cases exercise eviction and oversized replacements. (2026-10-22 PDT).
+
+DetailBody owns generic argument/result and image-body rendering once; ToolActivity/HistoryView retain their summary, deferral, role, chart and projection integration assertions. (2026-10-22 PDT).
