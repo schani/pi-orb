@@ -102,6 +102,7 @@ it.each(["header", "cursor", "partial", "keyed"] as const)(
         const identity = defineDocFamily({
           kind: "orb.identity",
           version: 1,
+          checkpointWhen: () => false,
           scope: "conversation",
           family: true,
           history: "latest",
@@ -307,6 +308,7 @@ it.each(["malformed", "header-conflict", "head-without-cursor", "custom-session"
       const identity = defineDoc({
         kind: "orb.identity",
         version: 1,
+        checkpointWhen: () => false,
         scope: "conversation",
         history: "latest",
         fork: "initial",
@@ -398,6 +400,7 @@ it.each(["archiving", "deleting"] as const)(
       const progress = defineDoc({
         kind: "orb.private-progress",
         version: 1,
+        checkpointWhen: () => false,
         scope: "conversation",
         history: "latest",
         fork: "initial",

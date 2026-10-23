@@ -1,86 +1,8 @@
-diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js b/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js
---- a/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js
-+++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js
-@@ -23,7 +23,7 @@
-             throw new Error(`Failed to load QuickJS: ${errorMessage(error)}`);
-         }
-         const interrupt = new SharedArrayBuffer(4);
--        const workerData = { ...data, wasm: module, interrupt };
-+        const workerData = { ...data, wasm: module, interrupt, extension: options.workerData };
-         const releaseWorker = options.acquireWorker?.();
-         let worker;
-         try {
-@@ -60,4 +60,2 @@
-             void worker.terminate().catch(() => undefined);
--            // terminate() refs the worker internally; unref it after requesting termination.
--            worker.unref();
-         };
-diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js b/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js
---- a/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js
-+++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js
-@@ -39,7 +39,8 @@
-  * limit a script that prints in a loop grows the host's memory until it crashes. The item limit
-  * covers loops that print empty strings.
-  */
--export const MAX_OUTPUT_CHARS = 16 * 1024 * 1024;
-+// pi-orb's bounded worker enforces 1 MiB text / 32 MiB aggregate first; this stays a backstop above it.
-+export const MAX_OUTPUT_CHARS = 64 * 1024 * 1024;
- export const MAX_OUTPUT_ITEMS = 100_000;
- const IMAGE_HELPER_EXPECTS = 'image expects a non-empty image URL string, an object with image_url, or an image block { type: "image", data, mimeType }';
- export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJson) {
-@@ -397,6 +398,15 @@
- 		["image/webp", /^UklG.{8}RUJQ/],
- 	];
- 
-+	// A quantifier-free search avoids both per-byte JS and regexp backtracking allocations.
-+	function validBase64(data) {
-+		if (data.length === 0 || data.length % 4 !== 0) return false;
-+		const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
-+		const end = data.length - padding;
-+		const invalid = data.search(/[^A-Za-z0-9+/]/);
-+		return invalid === -1 || invalid === end;
-+	}
-+
- 	function image(value) {
- 		const url = imageUrl(value);
- 		if (url === "") throw new TypeErrorCtor(${JSON.stringify(IMAGE_HELPER_EXPECTS)});
-@@ -414,7 +424,7 @@
- 		// resent on every later turn. Line breaks from wrapped base64 are dropped. The declared type
- 		// is ignored in favor of the detected one, as providers also reject mismatches.
- 		const data = url.slice(comma + 1).replace(/\\s+/g, "");
--		if (data.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) {
-+		if (!validBase64(data)) {
- 			throw new TypeErrorCtor("invalid image output. The image data is not valid base64 (truncated or corrupted?)");
- 		}
- 		const head = data.slice(0, 16);
-diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js b/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
---- a/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
-+++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
-@@ -23,7 +23,7 @@
-         data,
-         wasm: data.wasm,
-         post,
--        shouldInterrupt: () => Atomics.load(interrupt, 0) !== 0,
-+        shouldInterrupt: () => data.checkpoint?.() || Atomics.load(interrupt, 0) !== 0,
-     });
-     parentPort?.on("message", (message) => {
-         if (isHostToWorkerMessage(message))
-diff --git a/node_modules/@earendil-works/pi-codemode/dist/types.d.ts b/node_modules/@earendil-works/pi-codemode/dist/types.d.ts
---- a/node_modules/@earendil-works/pi-codemode/dist/types.d.ts
-+++ b/node_modules/@earendil-works/pi-codemode/dist/types.d.ts
-@@ -140,6 +140,8 @@
-      * specifier of an embedded build entrypoint; other hosts usually use a URL.
-      */
-     workerUrl?: string | URL;
-+    /** Structured-cloneable data for a custom worker entry, exposed as workerData.extension. */
-+    workerData?: unknown;
-     /**
-      * Synchronously reserves capacity immediately before creating each worker, after loading wasm.
-      * Throw to deny admission without starting a worker. Return a release callback, called once if
 diff --git a/node_modules/@earendil-works/pi-codemode/dist/declarations.js b/node_modules/@earendil-works/pi-codemode/dist/declarations.js
+index f303b1e..191fb1d 100644
 --- a/node_modules/@earendil-works/pi-codemode/dist/declarations.js
 +++ b/node_modules/@earendil-works/pi-codemode/dist/declarations.js
-@@ -111,15 +111,18 @@
+@@ -111,15 +111,18 @@ function union(types) {
   * type cannot express (`// @integer @minimum 1 @default 20`); `Array<T>` for arrays. Local references
   * (`#/$defs/...`, `#/definitions/...`) resolve against `schema`; recursive and remote references
   * render as `unknown`. A result longer than `maxChars` is rendered again without the constraint tags,
@@ -102,7 +24,7 @@ diff --git a/node_modules/@earendil-works/pi-codemode/dist/declarations.js b/nod
  }
  function resolveRef(ref, root) {
      if (ref !== "#" && !ref.startsWith("#/"))
-@@ -297,7 +300,7 @@
+@@ -297,7 +300,7 @@ function objectType(schema, context) {
      if (members.length === 0)
          return "{}";
      const comments = names.map((name) => {
@@ -111,3 +33,90 @@ diff --git a/node_modules/@earendil-works/pi-codemode/dist/declarations.js b/nod
              .split(LINE_TERMINATORS)
              .map((line) => line.trim())
              .filter(Boolean);
+diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js b/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js
+index 1d9b018..09383c6 100644
+--- a/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js
++++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/host.js
+@@ -23,7 +23,7 @@ function workerLauncher(options) {
+             throw new Error(`Failed to load QuickJS: ${errorMessage(error)}`);
+         }
+         const interrupt = new SharedArrayBuffer(4);
+-        const workerData = { ...data, wasm: module, interrupt };
++        const workerData = { ...data, wasm: module, interrupt, extension: options.workerData };
+         const releaseWorker = options.acquireWorker?.();
+         let worker;
+         try {
+@@ -58,8 +58,6 @@ function workerLauncher(options) {
+             // A non-interruptible built-in can delay Bun's terminate() until it returns (#10748).
+             // Do not hold up the result while that worker exits.
+             void worker.terminate().catch(() => undefined);
+-            // terminate() refs the worker internally; unref it after requesting termination.
+-            worker.unref();
+         };
+         try {
+             options.onWorkerStarted?.(new Promise((resolve) => worker.once("exit", () => resolve())));
+diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js b/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js
+index c244f03..0268760 100644
+--- a/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js
++++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js
+@@ -39,7 +39,8 @@ export const MAX_STORE_TOTAL_CHARS = 1024 * 1024;
+  * limit a script that prints in a loop grows the host's memory until it crashes. The item limit
+  * covers loops that print empty strings.
+  */
+-export const MAX_OUTPUT_CHARS = 16 * 1024 * 1024;
++// pi-orb's bounded worker enforces 1 MiB text / 32 MiB aggregate first; this stays a backstop above it.
++export const MAX_OUTPUT_CHARS = 64 * 1024 * 1024;
+ export const MAX_OUTPUT_ITEMS = 100_000;
+ const IMAGE_HELPER_EXPECTS = 'image expects a non-empty image URL string, an object with image_url, or an image block { type: "image", data, mimeType }';
+ export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJson) {
+@@ -397,6 +398,15 @@ export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJ
+ 		["image/webp", /^UklG.{8}RUJQ/],
+ 	];
+ 
++	// A quantifier-free search avoids both per-byte JS and regexp backtracking allocations.
++	function validBase64(data) {
++		if (data.length === 0 || data.length % 4 !== 0) return false;
++		const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
++		const end = data.length - padding;
++		const invalid = data.search(/[^A-Za-z0-9+/]/);
++		return invalid === -1 || invalid === end;
++	}
++
+ 	function image(value) {
+ 		const url = imageUrl(value);
+ 		if (url === "") throw new TypeErrorCtor(${JSON.stringify(IMAGE_HELPER_EXPECTS)});
+@@ -414,7 +424,7 @@ export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJ
+ 		// resent on every later turn. Line breaks from wrapped base64 are dropped. The declared type
+ 		// is ignored in favor of the detected one, as providers also reject mismatches.
+ 		const data = url.slice(comma + 1).replace(/\\s+/g, "");
+-		if (data.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) {
++		if (!validBase64(data)) {
+ 			throw new TypeErrorCtor("invalid image output. The image data is not valid base64 (truncated or corrupted?)");
+ 		}
+ 		const head = data.slice(0, 16);
+diff --git a/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js b/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
+index eca6e30..6212e2f 100644
+--- a/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
++++ b/node_modules/@earendil-works/pi-codemode/dist/runtime/worker.js
+@@ -23,7 +23,7 @@ async function main(data) {
+         data,
+         wasm: data.wasm,
+         post,
+-        shouldInterrupt: () => Atomics.load(interrupt, 0) !== 0,
++        shouldInterrupt: () => data.checkpoint?.() || Atomics.load(interrupt, 0) !== 0,
+     });
+     parentPort?.on("message", (message) => {
+         if (isHostToWorkerMessage(message))
+diff --git a/node_modules/@earendil-works/pi-codemode/dist/types.d.ts b/node_modules/@earendil-works/pi-codemode/dist/types.d.ts
+index 76b5c58..9d1c026 100644
+--- a/node_modules/@earendil-works/pi-codemode/dist/types.d.ts
++++ b/node_modules/@earendil-works/pi-codemode/dist/types.d.ts
+@@ -140,6 +140,8 @@ export interface CodemodeSandboxOptions extends CodemodeSandboxBaseOptions {
+      * specifier of an embedded build entrypoint; other hosts usually use a URL.
+      */
+     workerUrl?: string | URL;
++    /** Structured-cloneable data for a custom worker entry, exposed as workerData.extension. */
++    workerData?: unknown;
+     /**
+      * Synchronously reserves capacity immediately before creating each worker, after loading wasm.
+      * Throw to deny admission without starting a worker. Return a release callback, called once if

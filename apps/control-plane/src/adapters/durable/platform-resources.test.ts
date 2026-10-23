@@ -116,7 +116,7 @@ it("packages upstream attribution beside the skill without adding it to prompts"
   expect(license).toMatch(/MIT License[\s\S]*Copyright \(c\) 2025 Mario Zechner/);
   expect(license).toContain("SOFTWARE.");
   expect(license).toContain(
-    "https://github.com/earendil-works/pi/tree/v1.3.0/packages/durable/src/codemode",
+    "https://github.com/earendil-works/pi/tree/v1.4.0/packages/durable/src/codemode",
   );
   const skill = Buffer.from(
     (await reader.read("/opt/pi-orb/skills/codemode/SKILL.md"))._unsafeUnwrap(),

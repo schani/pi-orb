@@ -18,15 +18,23 @@ import {
   eligibleCodexModels,
   SELECTABLE_CODEX_MODELS,
 } from "../../../../../orb-runtime/src/domain/model-select.ts";
-import { errorResult } from "./catalog.ts";
+import { errorResult, type ToolError } from "./catalog.ts";
 
 export const TOOLS_EXTENSION = "orb.tools";
+export const SUBAGENT_TOOL_NAMES: readonly string[] = [
+  "subagent",
+  "steer_subagent",
+  "get_subagent_result",
+  "list_subagents",
+  "cancel_subagent",
+];
 /** Selected only by children: their codemode lacks subagent tools, orb_spawn and orb_alert. */
 export const CHILD_TOOLS_EXTENSION = "orb.child-tools";
 type Receipt = { anchor: number; prompt: string; description: string; model?: string };
 export const ChildReceipts = defineDoc<{ children: Record<string, Receipt> }>({
   kind: "orb.children",
   version: 1,
+  checkpointWhen: () => false,
   scope: "conversation",
   history: "latest",
   fork: "initial",
@@ -35,6 +43,7 @@ export const ChildReceipts = defineDoc<{ children: Record<string, Receipt> }>({
 const ChildControl = defineDoc<{ cancelled: boolean }>({
   kind: "orb.child-control",
   version: 1,
+  checkpointWhen: () => false,
   scope: "task",
   initial: () => ({ cancelled: false }),
 });
@@ -62,9 +71,7 @@ export const ChildAnchor = defineTask<
         const agent = await tx.doc(AgentDoc, child.id);
         agent.tools = (runtime.registry.extension(CHILD_TOOLS_EXTENSION)?.tools ?? [])
           .map((tool) => tool.name)
-          .filter(
-            (name) => name !== "orb_spawn" && !subagentTools.some((tool) => tool.name === name),
-          );
+          .filter((name) => name !== "orb_spawn" && !SUBAGENT_TOOL_NAMES.includes(name));
         agent.modelTools = ["codemode"];
         agent.extensions = { remove: [TOOLS_EXTENSION] };
         if (task.input.model) agent.model = task.input.model;
@@ -280,7 +287,9 @@ async function waitStatus(api: ToolExecutionApi, id: string, ctx: Context) {
     ...(waited.value.interrupted ? { interrupted: "parent_input" } : {}),
   });
 }
-export const subagentTools = [
+export const createSubagentTools = (
+  abortTask: (id: TaskId, context: Context) => ResultAsync<void, ToolError>,
+) => [
   defineTool({
     name: "subagent",
     description:
@@ -347,6 +356,7 @@ export const subagentTools = [
       const checkpoint =
         task?.state.status === "pending" ||
         task?.state.status === "running" ||
+        task?.state.status === "sleeping" ||
         task?.state.status === "waiting"
           ? task.state.checkpoint
           : undefined;
@@ -414,6 +424,8 @@ export const subagentTools = [
         const child = await api.conversation(childId as ConversationId, ctx);
         await child?.abort(ctx, { background: true });
       }
+      const aborted = await abortTask(row.anchor as TaskId, ctx);
+      if (aborted.isErr()) return errorResult(aborted.error);
       return result(await status(api, args.agent_id, true, ctx));
     },
   }),

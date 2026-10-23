@@ -1,11 +1,11 @@
 # Pi Durable policy patch
 
-Package: `@earendil-works/pi-durable@1.3.0` (MIT).
-Upstream: https://github.com/earendil-works/pi/tree/v1.3.0/packages/durable
-Published artifact: https://registry.npmjs.org/@earendil-works/pi-durable/-/pi-durable-1.3.0.tgz
-Artifact SHA-256: `27cc33b02031d61b4865b2971cac37afa3244561542ce3218ea588c1f28871b1`.
-Artifact integrity: `sha512-2aD0xead1LH0BBwUBxex28in/PpUJEwyaEiW/nLoTFUcZ/lDYEl6LHX6mGZKJG8tUHzERwJyysDgy0ruidt84w==`.
-Patch SHA-256: `1c275400b15174c92868d55944417eb129f15b6eca7c80e5dc0495587e8c81a9`.
+Package: `@earendil-works/pi-durable@1.4.0` (MIT).
+Upstream: https://github.com/earendil-works/pi/tree/v1.4.0/packages/durable
+Published artifact: https://registry.npmjs.org/@earendil-works/pi-durable/-/pi-durable-1.4.0.tgz
+Artifact SHA-256: `6d4dedd7a342151bca8b962f35a6231312cb10e5226796734e6644ad02f48224`.
+Artifact integrity: `sha512-EtIyXH1MBSXdJSkodmy+CYXuwfve3gPrD4GNCZ0XmuRWLPupwRlNQ7fdaXjRcLoKb6SWkT/yEzK+sMmrqvYK+Q==`.
+Patch SHA-256: `3e6600e43005a0d474f3941ac80a8b9541c393bab4a9e08f3274612615221bd5`.
 
 **Decision (2026-10-16):** retain upstream native execution, task identity, journal and replay. Export the existing `CodemodeRunDoc` and `CodemodeJournalDoc` through the public code-mode JavaScript/declaration barrels so chart replay reads native successful journal entries and completion decoration updates native `run.result` in the same commit. Private imports, copied document tokens and a second task document/journal are rejected.
 
@@ -24,3 +24,5 @@ File SHA-256 pairs are pinned in `scripts/apply-dependency-patches.mjs`. Regress
 **Decision (2026-10-18):** add input-only `Conversation.submitMany(inputs, context)`. One Session commit validates and looks up all request IDs before table writes, queues each distinct input through the shared admission helper, then applies one idle boundary. Empty and duplicate-only snapshots advance an idle inbox without minting replacement submissions. Pi configures both queue modes as `all`; receipts and entries remain per input. No persisted document or submission schema changes.
 
 Terminal provider and blocking-compaction `model_error` settle failed inputs before a final boundary starts queued input. This drains already-admitted input even during Sleep, when SQL dispatch is gated. Duplicate-only `submitMany` also advances idle queued input without replaying failed input. Writable reopen guards unfinished submissions with the existing recovery budget before an empty snapshot advances the queue; passive reopen stays inert. Regression coverage: `apps/control-plane/src/adapters/durable/{agent-backlog,queued-model-error,operation-identity}.test.ts`.
+
+Published 1.4.0 artifact, all file seals and hunk-by-hunk rebase: `patches/pi-1.4.0.PROVENANCE.md`.

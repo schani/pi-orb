@@ -1,5 +1,14 @@
 # Testing
 
+## Pi 1.4 adapter qualification (2026-10-22, PDT; local, undeployed)
+
+Tests preceded implementation on clean-installed, sealed Pi 1.3: sleeping indexed-demand/constraint and 036→049 upgrade failed as expected; five-cutoff recovery lacked `restarts`. The first parking fixture incorrectly treated `createTask()`'s ID as a record; correcting the fixture established the intended missing-counter failure. Evidence: `/tmp/pi14-adapters/baseline-{red,parking-red}.log`.
+
+Pi 1.4 passes 52 upstream storage-conformance/upgrade cases across PGlite and isolated PostgreSQL16 schemas using the full production migration chain, not only 036. Combined owner-fence/public-atomicity DST, closed-drain and real root/child Stop→Start tests pass 69 cases; close restoration leaves no running records, restart counts or trace carriers. Controlled-clock tests cover persisted sleeping checkpoints, no early wake, one wake at the deadline, sleeping-only demand and deadline-independent abort. Five-cutoff tests cover parking, native retry/abort and absent task/submission carriers; deterministic schedules race retry with abort.
+
+A real interrupted generation preserves its five-count parking across reopen and queued input. Its restored public operation is abortable; after Abort, fresh input runs without replaying the interrupted request. Tests exposed fatal parking latching, late stable-handle notice loss and parked-child cancellation waiting without an abort mark. The correction keeps parking nonfatal, derives a snapshot notice for the existing handshake error frame, and commits child cancellation control before invoking the bound public Harness abort. Only `central_agent_paused` clears on operation settlement; unrelated errors remain. No new persisted flags, retry UI or Start reset. Evidence: `/tmp/pi14-adapters/`; first failures retained. Broader/native/browser qualification remains separate; no deployment.
+
+
 ## Chart hover targets in WebKit (2026-10-23; local, undeployed)
 
 Adding four transcript chart rows first failed the browser test in both engines: the region chart's tooltip stayed hidden because the rows pushed it off-screen. Each hovered chart now scrolls into view first. WebKit then failed the new histogram label-isolation assertion (expected 1 dimmed line, received 0). Instrumented WebKit showed Playwright's `boundingBox()` for SVG `<text>` 11px (one font size) below `getBoundingClientRect()`. The midpoint hit the root `<svg>`, and the existing zone-label hover landed on the label below, passing only because either label dims five lines. `hover()` now reads the DOM rect. Both engines pass with unchanged assertions.

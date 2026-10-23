@@ -329,7 +329,9 @@ function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageSta
                 code: "operation_failed",
                 message: event.message ?? "the runtime operation failed",
               }
-            : state.serverError,
+            : state.serverError?.code === "central_agent_paused"
+              ? null
+              : state.serverError,
       };
   }
 }

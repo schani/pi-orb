@@ -18,15 +18,10 @@ import { okAsync, ResultAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { MemoryAgentPersistence } from "../memory-persistence.testkit.ts";
 import { createDurableTools } from "./index.ts";
-import { ChildAnchor, subagentTools } from "./subagents.ts";
+import { ChildAnchor, SUBAGENT_TOOL_NAMES } from "./subagents.ts";
 
 const context = BACKGROUND_CONTEXT;
-const forbidden = [
-  "orb_alert",
-  "orb_spawn",
-  ...subagentTools.map((tool) => tool.name),
-  "orb_spawn_alias",
-];
+const forbidden = ["orb_alert", "orb_spawn", ...SUBAGENT_TOOL_NAMES, "orb_spawn_alias"];
 
 it.each([false, true])(
   "enforces a child's native callable whitelist, including guessed aliases and reattachment (restart: %s)",

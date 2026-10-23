@@ -41,7 +41,7 @@ export class PgAgentPersistence implements AgentPersistence {
       .query(
         `SELECT EXISTS (
         SELECT 1 FROM durable_pg_tasks WHERE orb_id=$1
-          AND status IN ('pending','running','waiting','completing')
+          AND status IN ('pending','running','sleeping','waiting','completing')
       ) OR EXISTS (
         SELECT 1 FROM durable_pg_submissions WHERE orb_id=$1 AND status IN ('queued','placed')
       ) AS demand`,

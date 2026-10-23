@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Context } from "@earendil-works/chord";
+import { withAbortSignal, withoutAbortSignal } from "@earendil-works/chord/context";
 import {
   type BinaryReader,
   type DirReader,
@@ -509,11 +510,7 @@ export class RemoteExecutionEnv implements ExecutionEnv {
     return result.isOk() ? result.value : { ok: false, error: result.error };
   }
   private releaseContext(context: Context): Context {
-    return {
-      abortSignal: AbortSignal.timeout(10_000),
-      value: (key) => context.value(key),
-      toString: () => context.toString(),
-    };
+    return withAbortSignal(AbortSignal.timeout(10_000), withoutAbortSignal(context));
   }
   async cleanup(context: Context): Promise<void> {
     await Promise.all([...this.activeCancels].map((cancel) => cancel()));

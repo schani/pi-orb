@@ -65,7 +65,14 @@ it("derives recovery demand from indexed Native status without acquiring ownersh
     expect((await persistence.recoveryDemand(task, orb, context))._unsafeUnwrap()).toBe(false);
     // No metadata or readable payload: the predicate needs only indexed status.
     for (const conversationId of [1, 20]) {
-      for (const status of ["pending", "running", "waiting", "completing", "terminal"]) {
+      for (const status of [
+        "pending",
+        "running",
+        "sleeping",
+        "waiting",
+        "completing",
+        "terminal",
+      ]) {
         (
           await db.query(
             "INSERT INTO durable_pg_tasks(orb_id,id,conversation_id,kind,status,abort_requested,background,record) VALUES($1,10,$2,'task',$3,1,1,'{}')",

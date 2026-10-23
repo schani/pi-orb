@@ -24,6 +24,7 @@ test("actual remote built-in bash failure retains stdout, stderr and safe exit d
     });
     const streamed: string[] = [];
     const api = {
+      now: () => 0,
       env,
       output: (text: string) => streamed.push(text),
       diagnostic: () => {},

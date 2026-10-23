@@ -1,0 +1,947 @@
+{
+  "root": 1,
+  "outer": 12,
+  "children": [
+    {
+      "id": 17,
+      "input": {
+        "kind": "nested",
+        "parent": 12,
+        "parentCallId": "tool:1800000000000:ptin7zjz1eq",
+        "key": "c1",
+        "call": {
+          "type": "toolCall",
+          "id": "tool:1800000000000:ptin7zjz1eq/c1",
+          "name": "record_once",
+          "arguments": {}
+        }
+      },
+      "state": {
+        "status": "terminal",
+        "outcome": { "status": "completed", "result": { "kind": "nested" } }
+      }
+    },
+    {
+      "id": 19,
+      "input": {
+        "kind": "nested",
+        "parent": 12,
+        "parentCallId": "tool:1800000000000:ptin7zjz1eq",
+        "key": "c2",
+        "call": {
+          "type": "toolCall",
+          "id": "tool:1800000000000:ptin7zjz1eq/c2",
+          "name": "hold_restart",
+          "arguments": {}
+        }
+      },
+      "state": {
+        "status": "running",
+        "checkpoint": { "phase": "execute", "arguments": {}, "replay": "safe" }
+      }
+    }
+  ],
+  "events": [
+    { "event": "prepare", "name": "record_once" },
+    { "event": "authorize", "name": "record_once", "taskId": 17 },
+    { "event": "execute", "name": "record_once", "taskId": 17 },
+    { "event": "prepare", "name": "hold_restart" },
+    { "event": "authorize", "name": "hold_restart", "taskId": 19 },
+    { "event": "execute", "name": "hold_restart", "taskId": 19 }
+  ],
+  "commits": [
+    [
+      { "type": "conversation", "value": { "id": 1 } },
+      {
+        "type": "document.create",
+        "record": {
+          "id": 2,
+          "kind": "pi.live",
+          "scope": { "kind": "conversation", "conversationId": 1 },
+          "history": "latest",
+          "fork": "initial"
+        },
+        "content": { "version": 1, "kind": "base", "value": {} }
+      },
+      {
+        "type": "document.create",
+        "record": {
+          "id": 3,
+          "kind": "pi.inbox",
+          "scope": { "kind": "conversation", "conversationId": 1 },
+          "history": "latest",
+          "fork": "initial"
+        },
+        "content": { "version": 1, "kind": "base", "value": { "items": [] } }
+      },
+      {
+        "type": "document.create",
+        "record": {
+          "id": 4,
+          "kind": "pi.usage",
+          "scope": { "kind": "conversation", "conversationId": 1 },
+          "history": "latest",
+          "fork": "initial"
+        },
+        "content": { "version": 1, "kind": "base", "value": { "models": {}, "tools": {} } }
+      },
+      {
+        "type": "document.create",
+        "record": {
+          "id": 5,
+          "kind": "pi.provider",
+          "scope": { "kind": "conversation", "conversationId": 1 },
+          "history": "latest",
+          "fork": "initial"
+        },
+        "content": {
+          "version": 1,
+          "kind": "base",
+          "value": { "sessionId": "01a3185c-5000-7038-8e0e-0e1307070707" }
+        }
+      },
+      {
+        "type": "document.create",
+        "record": {
+          "id": 6,
+          "kind": "pi.agent",
+          "scope": { "kind": "conversation", "conversationId": 1 },
+          "history": "rewindable",
+          "fork": "asOf"
+        },
+        "content": {
+          "version": 1,
+          "kind": "base",
+          "value": {
+            "model": { "provider": "faux", "modelId": "faux-1" },
+            "extensions": ["orb.tools"]
+          }
+        }
+      }
+    ],
+    [
+      {
+        "type": "entry",
+        "value": {
+          "model": [{ "role": "user", "content": "synthetic fixture", "timestamp": 1800000000000 }],
+          "kind": "pi.user",
+          "id": 7,
+          "conversationId": 1
+        }
+      },
+      {
+        "type": "submission",
+        "value": { "conversationId": 1, "type": "input", "status": "placed", "entry": 7, "id": 8 }
+      },
+      {
+        "type": "task",
+        "value": {
+          "id": 9,
+          "conversationId": 1,
+          "kind": "pi.generation",
+          "version": 1,
+          "input": {},
+          "background": false,
+          "abortRequested": false,
+          "state": { "status": "pending", "checkpoint": { "phase": "prepare", "attempt": 1 } }
+        }
+      },
+      {
+        "type": "document.change",
+        "id": 2,
+        "content": {
+          "version": 1,
+          "kind": "base",
+          "value": { "run": { "taskId": 9, "inputs": [8] } }
+        }
+      }
+    ],
+    [
+      {
+        "type": "task",
+        "value": {
+          "id": 9,
+          "conversationId": 1,
+          "kind": "pi.generation",
+          "version": 1,
+          "input": {},
+          "background": false,
+          "abortRequested": false,
+          "state": { "status": "running", "checkpoint": { "phase": "prepare", "attempt": 1 } },
+          "startedAt": 1800000000000
+        }
+      }
+    ],
+    [
+      {
+        "type": "entry",
+        "value": {
+          "model": [
+            {
+              "role": "system",
+              "content": "",
+              "sections": {
+                "tool-catalogue": "<tool-catalogue>\n### `read`\nRead text or image files. Text is truncated to 2000 lines or 50 KiB; use offset/limit to continue. Scripts receive text or image blocks; show blocks with image().\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { read(args: {\n  // Maximum number of lines to read\n  limit?: number;\n  // Line number to start reading from (1-indexed)\n  offset?: number;\n  // Path to the file to read (relative or absolute)\n  path: string;\n}): Promise<string | Array<{ data: string; mimeType: string; type: \"image\"; }>>; };\n```\n\n### `write`\nWrite content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { write(args: {\n  // Content to write to the file\n  content: string;\n  // Path to the file to write (relative or absolute)\n  path: string;\n}): Promise<string>; };\n```\n\n### `edit`\nEdit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { edit(args: {\n  // One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.\n  edits: Array<{\n    // Replacement text for this targeted edit.\n    newText: string;\n    // Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.\n    oldText: string;\n  }>;\n  // Path to the file to edit (relative or absolute)\n  path: string;\n}): Promise<string>; };\n```\n\n### `bash`\nExecute a bash command in the current working directory. Returns combined stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { bash(args: {\n  // Bash command to execute\n  command: string;\n  // Timeout in seconds (optional, no default timeout)\n  timeout?: number;\n}): Promise<{ exit_code: number; full_output_path?: string; output: string; truncated: boolean; wall_time_seconds: number; }>; };\n```\n\n### `subagent`\nStart a background subagent in the shared checkout. Returns agent_id immediately. Inherits parent instructions and authorized tools, but cannot start subagents or orbs. Runs on model, or the parent's model when omitted. No profiles or kinds.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { subagent(args: { description?: string; model?: \"Astra\" | \"Sol\" | \"Terra\" | \"Luna\"; prompt: string; }): Promise<string>; };\n```\n\n### `steer_subagent`\nSend input to a subagent.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { steer_subagent(args: { agent_id: string; message: string; }): Promise<string>; };\n```\n\n### `get_subagent_result`\nGet subagent status and its persistent completion receipt; optionally wait. Pending parent steering interrupts the wait, not the child.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { get_subagent_result(args: { agent_id: string; wait?: boolean; }): Promise<string>; };\n```\n\n### `list_subagents`\nList this conversation's subagents.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { list_subagents(args: {}): Promise<string>; };\n```\n\n### `cancel_subagent`\nCancel only this subagent and its descendants.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { cancel_subagent(args: { agent_id: string; }): Promise<string>; };\n```\n\n### `record_once`\nrecord_once\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { record_once(args: { [key: string]: unknown; }): Promise<string | Array<{ text: string; textSignature?: string; type: \"text\"; } | { data: string; mimeType: string; type: \"image\"; }>>; };\n```\n\n### `hold_restart`\nhold_restart\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { hold_restart(args: { [key: string]: unknown; }): Promise<string | Array<{ text: string; textSignature?: string; type: \"text\"; } | { data: string; mimeType: string; type: \"image\"; }>>; };\n```\n\n### `post_hold`\npost_hold\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { post_hold(args: { [key: string]: unknown; }): Promise<string | Array<{ text: string; textSignature?: string; type: \"text\"; } | { data: string; mimeType: string; type: \"image\"; }>>; };\n```\n\n### `mcp_status`\nInspect MCP server availability and sanitized connection failures.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { mcp_status(args: {}): Promise<string>; };\n```\n</tool-catalogue>"
+              },
+              "toolsAdded": [
+                {
+                  "name": "codemode",
+                  "description": "Read the codemode skill first:\ntext(await tools.read({path:\"/opt/pi-orb/skills/codemode/SKILL.md\"}));",
+                  "parameters": {
+                    "type": "object",
+                    "required": ["code"],
+                    "properties": {
+                      "code": { "type": "string", "description": "Raw JavaScript source." }
+                    }
+                  },
+                  "constrainedSampling": {
+                    "type": "grammar",
+                    "variants": {
+                      "openai_lark": "\nstart: options_source | plain_source\noptions_source: OPTIONS_LINE NEWLINE SOURCE\nplain_source: SOURCE\n\nOPTIONS_LINE: /[ \\t]*\\/\\/ @options:[^\\r\\n]*/\nNEWLINE: /\\r?\\n/\nSOURCE: /[\\s\\S]+/\n"
+                    }
+                  }
+                }
+              ],
+              "timestamp": 1800000000000
+            }
+          ],
+          "kind": "pi.system",
+          "id": 10,
+          "conversationId": 1,
+          "byTaskId": 9
+        }
+      },
+      {
+        "type": "task",
+        "value": {
+          "id": 9,
+          "conversationId": 1,
+          "kind": "pi.generation",
+          "version": 1,
+          "input": {},
+          "background": false,
+          "abortRequested": false,
+          "state": {
+            "status": "running",
+            "checkpoint": {
+              "phase": "request",
+              "attempt": 1,
+              "model": { "provider": "faux", "modelId": "faux-1" },
+              "thinkingLevel": "off",
+              "streamOptions": {},
+              "cutoff": 10
+            }
+          },
+          "startedAt": 1800000000000
+        }
+      }
+    ],
+    [
+      {
+        "type": "document.change",
+        "id": 2,
+        "content": {
+          "version": 1,
+          "kind": "delta",
+          "ops": [["s", ["generation"], { "attempt": 1 }]]
+        }
+      }
+    ],
+    [
+      {
+        "type": "entry",
+        "value": {
+          "model": [
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "toolCall",
+                  "id": "tool:1800000000000:ptin7zjz1eq",
+                  "name": "codemode",
+                  "arguments": {
+                    "code": "text(await tools.record_once({})); await tools.hold_restart({}); await tools.post_hold({}); store(\"resumed\",true);"
+                  }
+                }
+              ],
+              "api": "faux:1800000000000:5zbi8pg2cp6",
+              "provider": "faux",
+              "model": "faux-1",
+              "usage": {
+                "input": 1360,
+                "output": 34,
+                "cacheRead": 0,
+                "cacheWrite": 1360,
+                "totalTokens": 2754,
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+              },
+              "stopReason": "toolUse",
+              "timestamp": 1800000000000,
+              "durationMs": 0
+            }
+          ],
+          "kind": "pi.assistant",
+          "id": 11,
+          "conversationId": 1,
+          "byTaskId": 9
+        }
+      },
+      {
+        "type": "task",
+        "value": {
+          "id": 9,
+          "conversationId": 1,
+          "kind": "pi.generation",
+          "version": 1,
+          "input": {},
+          "background": false,
+          "abortRequested": false,
+          "state": {
+            "status": "waiting",
+            "checkpoint": { "phase": "tools", "assistant": 11, "tools": [12], "pending": [] },
+            "on": [12],
+            "policy": "allSettled"
+          },
+          "startedAt": 1800000000000
+        }
+      },
+      {
+        "type": "task",
+        "value": {
+          "id": 12,
+          "conversationId": 1,
+          "kind": "pi.tool",
+          "version": 2,
+          "input": { "kind": "model", "assistant": 11, "callId": "tool:1800000000000:ptin7zjz1eq" },
+          "owner": 9,
+          "background": false,
+          "abortRequested": false,
+          "state": { "status": "pending", "checkpoint": { "phase": "call" } }
+        }
+      },
+      {
+        "type": "document.change",
+        "id": 2,
+        "content": {
+          "version": 1,
+          "kind": "base",
+          "value": {
+            "run": { "taskId": 9, "inputs": [8] },
+            "tools": [
+              {
+                "callId": "tool:1800000000000:ptin7zjz1eq",
+                "name": "codemode",
+                "taskId": 12,
+                "status": "pending"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "type": "document.change",
+        "id": 4,
+        "content": {
+          "version": 1,
+          "kind": "base",
+          "value": {
+            "models": {
+              "faux/faux-1": {
+                "input": 1360,
+                "output": 34,
+                "cacheRead": 0,
+                "cacheWrite": 1360,
+                "totalTokens": 2754,
+                "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+              }
+            },
+            "tools": {}
+          }
+        }
+      }
+    ],
+    [
+      {
+        "type": "task",
+        "value": {
+          "id": 12,
+          "conversationId": 1,
+          "kind": "pi.tool",
+          "version": 2,
+          "input": { "kind": "model", "assistant": 11, "callId": "tool:1800000000000:ptin7zjz1eq" },
+          "owner": 9,
+          "background": false,
+          "abortRequested": false,
+          "state": { "status": "running", "checkpoint": { "phase": "call" } },
+          "startedAt": 1800000000000
+        }
+      }
+    ],
+    [
+      {
+        "type": "task",
+        "value": {
+          "id": 12,
+          "conversationId": 1,
+          "kind": "pi.tool",
+          "version": 2,
+          "input": { "kind": "model", "assistant": 11, "callId": "tool:1800000000000:ptin7zjz1eq" },
+          "owner": 9,
+          "background": false,
+          "abortRequested": false,
+          "state": {
+            "status": "running",
+            "checkpoint": {
+              "phase": "execute",
+              "arguments": {
+                "code": "text(await tools.record_once({})); await tools.hold_restart({}); await tools.post_hold({}); store(\"resumed\",true);"
+              },
+              "replay": "safe"
+            }
+          },
+          "startedAt": 1800000000000
+        }
+      },
+      {
+        "type": "document.change",
+        "id": 2,
+        "content": {
+          "version": 1,
+          "kind": "delta",
+          "ops": [["s", ["tools", 0, "status"], "running"]]
+        }
+      }
+    ],
+    [
+      {
+        "type": "document.create",
+        "record": {
+          "id": 13,
+          "kind": "pi.codemode.run",
+          "scope": { "kind": "task", "taskId": 12 }
+        },
+        "content": {
+          "version": 1,
+          "kind": "base",
+          "value": {
+            "start": {
+              "version": 2,
+              "startedAt": 1800000000000,
+              "seed": 12345,
+              "deadline": 1800000300000,
+              "tools": [
+                {
+                  "name": "read",
+                  "jsName": "read",
+                  "description": "Read text or image files. Text is truncated to 2000 lines or 50 KiB; use offset/limit to continue. Scripts receive text or image blocks; show blocks with image().\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { read(args: {\n  // Maximum number of lines to read\n  limit?: number;\n  // Line number to start reading from (1-indexed)\n  offset?: number;\n  // Path to the file to read (relative or absolute)\n  path: string;\n}): Promise<string | Array<{ data: string; mimeType: string; type: \"image\"; }>>; };\n```",
+                  "structured": true
+                },
+                {
+                  "name": "write",
+                  "jsName": "write",
+                  "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { write(args: {\n  // Content to write to the file\n  content: string;\n  // Path to the file to write (relative or absolute)\n  path: string;\n}): Promise<string>; };\n```",
+                  "structured": true
+                },
+                {
+                  "name": "edit",
+                  "jsName": "edit",
+                  "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { edit(args: {\n  // One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.\n  edits: Array<{\n    // Replacement text for this targeted edit.\n    newText: string;\n    // Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.\n    oldText: string;\n  }>;\n  // Path to the file to edit (relative or absolute)\n  path: string;\n}): Promise<string>; };\n```",
+                  "structured": true
+                },
+                {
+                  "name": "bash",
+                  "jsName": "bash",
+                  "description": "Execute a bash command in the current working directory. Returns combined stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { bash(args: {\n  // Bash command to execute\n  command: string;\n  // Timeout in seconds (optional, no default timeout)\n  timeout?: number;\n}): Promise<{ exit_code: number; full_output_path?: string; output: string; truncated: boolean; wall_time_seconds: number; }>; };\n```",
+                  "structured": true
+                },
+                {
+                  "name": "subagent",
+                  "jsName": "subagent",
+                  "description": "Start a background subagent in the shared checkout. Returns agent_id immediately. Inherits parent instructions and authorized tools, but cannot start subagents or orbs. Runs on model, or the parent's model when omitted. No profiles or kinds.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { subagent(args: { description?: string; model?: \"Astra\" | \"Sol\" | \"Terra\" | \"Luna\"; prompt: string; }): Promise<string>; };\n```",
+                  "structured": true
+                },
+                {
+                  "name": "steer_subagent",
+                  "jsName": "steer_subagent",
+                  "description": "Send input to a subagent.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { steer_subagent(args: { agent_id: string; message: string; }): Promise<string>; };\n```",
+                  "structured": true
+                },
+                {
+                  "name": "get_subagent_result",
+                  "jsName": "get_subagent_result",
+                  "description": "Get subagent status and its persistent completion receipt; optionally wait. Pending parent steering interrupts the wait, not the child.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { get_subagent_result(args: { agent_id: string; wait?: boolean; }): Promise<string>; };\n```",
+                  "structured": true
+                },
+                {
+                  "name": "list_subagents",
+                  "jsName": "list_subagents",
+                  "description": "List this conversation's subagents.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { list_subagents(args: {}): Promise<string>; };\n```",
+                  "structured": true
+                },
+                {
+                  "name": "cancel_subagent",
+                  "jsName": "cancel_subagent",
+                  "description": "Cancel only this subagent and its descendants.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { cancel_subagent(args: { agent_id: string; }): Promise<string>; };\n```",
+                  "structured": true
+                },
+                {
+                  "name": "record_once",
+                  "jsName": "record_once",
+                  "description": "record_once\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { record_once(args: { [key: string]: unknown; }): Promise<string | Array<{ text: string; textSignature?: string; type: \"text\"; } | { data: string; mimeType: string; type: \"image\"; }>>; };\n```",
+                  "structured": true
+                },
+                {
+                  "name": "hold_restart",
+                  "jsName": "hold_restart",
+                  "description": "hold_restart\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { hold_restart(args: { [key: string]: unknown; }): Promise<string | Array<{ text: string; textSignature?: string; type: \"text\"; } | { data: string; mimeType: string; type: \"image\"; }>>; };\n```",
+                  "structured": true
+                },
+                {
+                  "name": "post_hold",
+                  "jsName": "post_hold",
+                  "description": "post_hold\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { post_hold(args: { [key: string]: unknown; }): Promise<string | Array<{ text: string; textSignature?: string; type: \"text\"; } | { data: string; mimeType: string; type: \"image\"; }>>; };\n```",
+                  "structured": true
+                },
+                {
+                  "name": "mcp_status",
+                  "jsName": "mcp_status",
+                  "description": "Inspect MCP server availability and sanitized connection failures.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { mcp_status(args: {}): Promise<string>; };\n```",
+                  "structured": true
+                }
+              ],
+              "namespaces": [],
+              "globals": [
+                { "name": "searchTools", "spread": true },
+                { "name": "describeTool", "spread": true },
+                { "name": "describeNamespace", "spread": true },
+                { "name": "chart", "spread": false }
+              ],
+              "maxOutputTokens": 10000,
+              "store": {}
+            }
+          }
+        }
+      },
+      {
+        "type": "document.create",
+        "record": {
+          "id": 14,
+          "kind": "pi.codemode.store",
+          "scope": { "kind": "conversation", "conversationId": 1 },
+          "history": "rewindable",
+          "fork": "asOf"
+        },
+        "content": { "version": 1, "kind": "base", "value": { "values": {} } }
+      },
+      {
+        "type": "document.create",
+        "record": {
+          "id": 15,
+          "kind": "pi.codemode.journal",
+          "scope": { "kind": "task", "taskId": 12 }
+        },
+        "content": { "version": 1, "kind": "base", "value": { "entries": [] } }
+      }
+    ],
+    [
+      {
+        "type": "document.change",
+        "id": 13,
+        "content": {
+          "version": 1,
+          "kind": "delta",
+          "ops": [
+            [
+              "s",
+              ["start", "fingerprint"],
+              "quickjs-wasi 3.6.2, quickjs 0.17.0, prelude 1ce5a8bb, deterministic 1, stack 524288, heap 268435456, budget none"
+            ]
+          ]
+        }
+      }
+    ],
+    [
+      {
+        "type": "document.change",
+        "id": 15,
+        "content": { "version": 1, "kind": "delta", "ops": [["s", ["firstIssued"], 1]] }
+      }
+    ],
+    [
+      {
+        "type": "task",
+        "value": {
+          "id": 12,
+          "conversationId": 1,
+          "kind": "pi.tool",
+          "version": 2,
+          "input": { "kind": "model", "assistant": 11, "callId": "tool:1800000000000:ptin7zjz1eq" },
+          "owner": 9,
+          "background": false,
+          "abortRequested": false,
+          "state": {
+            "status": "running",
+            "checkpoint": {
+              "phase": "execute",
+              "arguments": {
+                "code": "text(await tools.record_once({})); await tools.hold_restart({}); await tools.post_hold({}); store(\"resumed\",true);"
+              },
+              "replay": "safe"
+            }
+          },
+          "startedAt": 1800000000000,
+          "memos": { "pi.tool.madeNestedCalls": true }
+        }
+      }
+    ],
+    [
+      {
+        "type": "task",
+        "value": {
+          "id": 17,
+          "conversationId": 1,
+          "kind": "pi.tool",
+          "version": 2,
+          "input": {
+            "kind": "nested",
+            "parent": 12,
+            "parentCallId": "tool:1800000000000:ptin7zjz1eq",
+            "key": "c1",
+            "call": {
+              "type": "toolCall",
+              "id": "tool:1800000000000:ptin7zjz1eq/c1",
+              "name": "record_once",
+              "arguments": {}
+            }
+          },
+          "owner": 12,
+          "background": false,
+          "abortRequested": false,
+          "state": { "status": "pending", "checkpoint": { "phase": "call" } }
+        }
+      },
+      {
+        "type": "document.create",
+        "record": {
+          "id": 16,
+          "kind": "pi.tool.nested-call",
+          "key": "c1",
+          "scope": { "kind": "task", "taskId": 12 }
+        },
+        "content": { "version": 1, "kind": "base", "value": { "taskId": 17 } }
+      },
+      {
+        "type": "document.change",
+        "id": 2,
+        "content": {
+          "version": 1,
+          "kind": "delta",
+          "ops": [
+            [
+              "s",
+              ["nestedTools"],
+              [
+                {
+                  "callId": "tool:1800000000000:ptin7zjz1eq/c1",
+                  "parentCallId": "tool:1800000000000:ptin7zjz1eq",
+                  "parentTaskId": 12,
+                  "name": "record_once",
+                  "taskId": 17,
+                  "arguments": {},
+                  "status": "pending"
+                }
+              ]
+            ]
+          ]
+        }
+      }
+    ],
+    [
+      {
+        "type": "task",
+        "value": {
+          "id": 17,
+          "conversationId": 1,
+          "kind": "pi.tool",
+          "version": 2,
+          "input": {
+            "kind": "nested",
+            "parent": 12,
+            "parentCallId": "tool:1800000000000:ptin7zjz1eq",
+            "key": "c1",
+            "call": {
+              "type": "toolCall",
+              "id": "tool:1800000000000:ptin7zjz1eq/c1",
+              "name": "record_once",
+              "arguments": {}
+            }
+          },
+          "owner": 12,
+          "background": false,
+          "abortRequested": false,
+          "state": { "status": "running", "checkpoint": { "phase": "call" } },
+          "startedAt": 1800000000000
+        }
+      }
+    ],
+    [
+      {
+        "type": "task",
+        "value": {
+          "id": 17,
+          "conversationId": 1,
+          "kind": "pi.tool",
+          "version": 2,
+          "input": {
+            "kind": "nested",
+            "parent": 12,
+            "parentCallId": "tool:1800000000000:ptin7zjz1eq",
+            "key": "c1",
+            "call": {
+              "type": "toolCall",
+              "id": "tool:1800000000000:ptin7zjz1eq/c1",
+              "name": "record_once",
+              "arguments": {}
+            }
+          },
+          "owner": 12,
+          "background": false,
+          "abortRequested": false,
+          "state": {
+            "status": "running",
+            "checkpoint": { "phase": "execute", "arguments": {}, "replay": "safe" }
+          },
+          "startedAt": 1800000000000
+        }
+      },
+      {
+        "type": "document.change",
+        "id": 2,
+        "content": {
+          "version": 1,
+          "kind": "delta",
+          "ops": [["s", ["nestedTools", 0, "status"], "running"]]
+        }
+      }
+    ],
+    [
+      {
+        "type": "task",
+        "value": {
+          "id": 17,
+          "conversationId": 1,
+          "kind": "pi.tool",
+          "version": 2,
+          "input": {
+            "kind": "nested",
+            "parent": 12,
+            "parentCallId": "tool:1800000000000:ptin7zjz1eq",
+            "key": "c1",
+            "call": {
+              "type": "toolCall",
+              "id": "tool:1800000000000:ptin7zjz1eq/c1",
+              "name": "record_once",
+              "arguments": {}
+            }
+          },
+          "owner": 12,
+          "background": false,
+          "abortRequested": false,
+          "state": {
+            "status": "terminal",
+            "outcome": { "status": "completed", "result": { "kind": "nested" } }
+          },
+          "startedAt": 1800000000000,
+          "endedAt": 1800000000000
+        }
+      },
+      {
+        "type": "document.change",
+        "id": 2,
+        "content": {
+          "version": 1,
+          "kind": "delta",
+          "ops": [
+            ["s", ["nestedTools", 0, "status"], "done"],
+            ["s", ["nestedTools", 0, "summary"], { "isError": false, "durationMs": 0 }]
+          ]
+        }
+      },
+      {
+        "type": "document.change",
+        "id": 16,
+        "content": {
+          "version": 1,
+          "kind": "delta",
+          "ops": [
+            [
+              "s",
+              ["result"],
+              {
+                "taskId": 17,
+                "structuredOutput": "record_once:result",
+                "isError": false,
+                "diagnostics": [],
+                "durationMs": 0
+              }
+            ]
+          ]
+        }
+      }
+    ],
+    [
+      {
+        "type": "document.change",
+        "id": 15,
+        "content": {
+          "version": 1,
+          "kind": "delta",
+          "ops": [["p", ["entries"], 0, 0, [{ "id": 1, "at": 1800000000000 }]]]
+        }
+      }
+    ],
+    [
+      {
+        "type": "document.change",
+        "id": 15,
+        "content": {
+          "version": 1,
+          "kind": "delta",
+          "ops": [["s", ["entries", 0, "issuedAfter"], 2]]
+        }
+      }
+    ],
+    [
+      {
+        "type": "task",
+        "value": {
+          "id": 19,
+          "conversationId": 1,
+          "kind": "pi.tool",
+          "version": 2,
+          "input": {
+            "kind": "nested",
+            "parent": 12,
+            "parentCallId": "tool:1800000000000:ptin7zjz1eq",
+            "key": "c2",
+            "call": {
+              "type": "toolCall",
+              "id": "tool:1800000000000:ptin7zjz1eq/c2",
+              "name": "hold_restart",
+              "arguments": {}
+            }
+          },
+          "owner": 12,
+          "background": false,
+          "abortRequested": false,
+          "state": { "status": "pending", "checkpoint": { "phase": "call" } }
+        }
+      },
+      {
+        "type": "document.create",
+        "record": {
+          "id": 18,
+          "kind": "pi.tool.nested-call",
+          "key": "c2",
+          "scope": { "kind": "task", "taskId": 12 }
+        },
+        "content": { "version": 1, "kind": "base", "value": { "taskId": 19 } }
+      },
+      {
+        "type": "document.change",
+        "id": 2,
+        "content": {
+          "version": 1,
+          "kind": "delta",
+          "ops": [
+            [
+              "p",
+              ["nestedTools"],
+              1,
+              0,
+              [
+                {
+                  "callId": "tool:1800000000000:ptin7zjz1eq/c2",
+                  "parentCallId": "tool:1800000000000:ptin7zjz1eq",
+                  "parentTaskId": 12,
+                  "name": "hold_restart",
+                  "taskId": 19,
+                  "arguments": {},
+                  "status": "pending"
+                }
+              ]
+            ]
+          ]
+        }
+      }
+    ],
+    [
+      {
+        "type": "task",
+        "value": {
+          "id": 19,
+          "conversationId": 1,
+          "kind": "pi.tool",
+          "version": 2,
+          "input": {
+            "kind": "nested",
+            "parent": 12,
+            "parentCallId": "tool:1800000000000:ptin7zjz1eq",
+            "key": "c2",
+            "call": {
+              "type": "toolCall",
+              "id": "tool:1800000000000:ptin7zjz1eq/c2",
+              "name": "hold_restart",
+              "arguments": {}
+            }
+          },
+          "owner": 12,
+          "background": false,
+          "abortRequested": false,
+          "state": { "status": "running", "checkpoint": { "phase": "call" } },
+          "startedAt": 1800000000000
+        }
+      }
+    ],
+    [
+      {
+        "type": "task",
+        "value": {
+          "id": 19,
+          "conversationId": 1,
+          "kind": "pi.tool",
+          "version": 2,
+          "input": {
+            "kind": "nested",
+            "parent": 12,
+            "parentCallId": "tool:1800000000000:ptin7zjz1eq",
+            "key": "c2",
+            "call": {
+              "type": "toolCall",
+              "id": "tool:1800000000000:ptin7zjz1eq/c2",
+              "name": "hold_restart",
+              "arguments": {}
+            }
+          },
+          "owner": 12,
+          "background": false,
+          "abortRequested": false,
+          "state": {
+            "status": "running",
+            "checkpoint": { "phase": "execute", "arguments": {}, "replay": "safe" }
+          },
+          "startedAt": 1800000000000
+        }
+      },
+      {
+        "type": "document.change",
+        "id": 2,
+        "content": {
+          "version": 1,
+          "kind": "delta",
+          "ops": [["s", ["nestedTools", 1, "status"], "running"]]
+        }
+      }
+    ]
+  ]
+}

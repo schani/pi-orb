@@ -48,7 +48,7 @@ const call = (id: string, code: string) =>
     },
   ]);
 
-// Contract with pi-durable 1.3.0 internals the ledger classification relies on (docs/model-usage.md).
+// Contract with pi-durable 1.4.0 internals the ledger classification relies on (docs/model-usage.md).
 describe("durable model usage capture", () => {
   it("classifies root, subagent and compaction calls and records the provider's usage", async () => {
     const requests: string[] = [];

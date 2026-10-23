@@ -137,3 +137,81 @@ describe("central manager schedules", () => {
     });
   });
 });
+
+it("serializes explicit retry and abort of restart-parked work", async () => {
+  const { BACKGROUND_CONTEXT: ctx } = await import("@earendil-works/chord/context");
+  const { defineTask, Harness } = await import("@earendil-works/pi-durable");
+  const { MemoryAgentPersistence } = await import("./memory-persistence.testkit.ts");
+  await runDst({ name: "durable-parked-retry-abort", iterations: 20 }, async (sim) => {
+    const authority = new MemoryAgentPersistence();
+    const storage = (await authority.openOrb("parked-dst", false))._unsafeUnwrap().storage;
+    let invocations = 0;
+    const work = defineTask<null, { phase: "run" }, null>({
+      name: "parked-race",
+      version: 1,
+      initial: () => ({ phase: "run" }),
+      abort: (_task, runtime, context) =>
+        runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
+      phases: {
+        run: async (_task, runtime, context) => {
+          invocations++;
+          await runtime.commit(
+            () => ({ status: "terminal", outcome: { status: "completed", result: null } }),
+            context,
+          );
+        },
+      },
+    });
+    const registry = createRegistry();
+    registry.install({ name: "parked-race", tasks: [work] });
+    let harness = await Harness.open(
+      storage,
+      { models: createModels(), registry, now: () => 1000 },
+      ctx,
+    );
+    try {
+      const root = await harness.root(ctx);
+      const id = await root.commit(
+        (tx) => tx.createTask(work, null, { ownership: { kind: "conversation" } }),
+        ctx,
+      );
+      await harness.close(ctx);
+      await storage.commit(
+        [{ type: "task", value: { ...(await storage.task(id, ctx))!, restarts: 5 } }],
+        ctx,
+      );
+      harness = await Harness.open(
+        storage,
+        { models: createModels(), registry, now: () => 1000 },
+        ctx,
+      );
+      const result = await sim.runTasks([
+        {
+          name: "retry",
+          f: async (task) => {
+            await task.checkpoint("before-retry");
+            await harness.retryTask(id, ctx);
+            await task.checkpoint("after-retry");
+          },
+        },
+        {
+          name: "abort",
+          f: async (task) => {
+            await task.checkpoint("before-abort");
+            await harness.abortTask(id, ctx);
+            harness.resume();
+            await task.checkpoint("after-abort");
+          },
+        },
+      ]);
+      expect(result.isErr() ? result.error : null).toBeNull();
+      await (await harness.conversation(root.id, ctx))!.waitForIdle(ctx);
+      const task = (await harness.getTask(id, ctx))!;
+      expect(task.state.status).toBe("terminal");
+      expect(task).not.toHaveProperty("restarts");
+      expect(invocations).toBeLessThanOrEqual(1);
+    } finally {
+      await harness.close(ctx);
+    }
+  });
+});

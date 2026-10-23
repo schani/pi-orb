@@ -714,8 +714,12 @@ export function createProcessAgentContext(
             }
           : {}),
         registry,
-        bindNativeConversation: (resolve: Harness["conversation"]) => {
+        bindNativeConversation: (
+          resolve: Harness["conversation"],
+          abortTask: Harness["abortTask"],
+        ) => {
           conversation = resolve;
+          tools.bindTaskAbort(abortTask);
         },
         modelTools: tools.modelTools,
         childExtension: tools.childExtension,

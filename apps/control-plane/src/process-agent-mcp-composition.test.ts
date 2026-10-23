@@ -255,9 +255,9 @@ it.each(["typed-boundary", "typed-unavailable", "pglite"] as const)(
       agent = (
         await DurableAgent.open({
           ...options,
-          bindNativeConversation: (resolve) => {
+          bindNativeConversation: (resolve, abortTask) => {
             resolveConversation = resolve;
-            options.bindNativeConversation?.(resolve);
+            options.bindNativeConversation?.(resolve, abortTask);
           },
           orbId: orb.id,
           storage,

@@ -1,10 +1,10 @@
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { CodemodeSandbox } from "@earendil-works/pi-codemode";
-import { defineExtension, type ToolRegistration } from "@earendil-works/pi-durable";
+import { defineExtension, type Harness, type ToolRegistration } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { SimulationTask } from "determined";
-import { ResultAsync } from "neverthrow";
+import { errAsync, ResultAsync } from "neverthrow";
 import { type AuthorizeTool, CallableCatalog, type ToolError } from "./catalog.ts";
 import { codemodeExtension } from "./codemode.ts";
 import type { AgentToolFiles } from "./files.ts";
@@ -13,7 +13,12 @@ import { type McpEndpoint, McpTools } from "./mcp.ts";
 export type { AgentToolFiles } from "./files.ts";
 
 import { imageReadTool } from "./read.ts";
-import { CHILD_TOOLS_EXTENSION, ChildAnchor, subagentTools, TOOLS_EXTENSION } from "./subagents.ts";
+import {
+  CHILD_TOOLS_EXTENSION,
+  ChildAnchor,
+  createSubagentTools,
+  TOOLS_EXTENSION,
+} from "./subagents.ts";
 
 export {
   type AuthorizeTool,
@@ -22,7 +27,7 @@ export {
   type ToolError,
 } from "./catalog.ts";
 export type { McpEndpoint } from "./mcp.ts";
-export { ChildAnchor, ChildReceipts, subagentTools } from "./subagents.ts";
+export { ChildAnchor, ChildReceipts } from "./subagents.ts";
 
 export interface DurableToolsOptions {
   authorize?: AuthorizeTool;
@@ -32,16 +37,29 @@ export interface DurableToolsOptions {
   orb?: { id: string; task: SimulationTask };
 }
 export function createDurableTools(options: DurableToolsOptions = {}) {
+  let abortTask: Harness["abortTask"] | undefined;
+  const cancellationFailure = (): ToolError => ({
+    code: "unavailable",
+    message: "Subagent cancellation unavailable",
+  });
+  const boundSubagents = createSubagentTools((id, context) => {
+    const abort = abortTask;
+    return abort
+      ? ResultAsync.fromThrowable(async () => {
+          await abort(id, context);
+        }, cancellationFailure)()
+      : errAsync(cancellationFailure());
+  });
   const all = new CallableCatalog(
     [
       ...(CodingTools.tools ?? []),
       imageReadTool(options.files),
-      ...subagentTools,
+      ...boundSubagents,
       ...(options.additionalTools ?? []),
     ],
     options.authorize,
   );
-  for (const name of ["write", "edit", "mcp_status", ...subagentTools.map((tool) => tool.name)]) {
+  for (const name of ["write", "edit", "mcp_status", ...boundSubagents.map((tool) => tool.name)]) {
     all.metadata(name, { ...all.metadata(name), outputSchema: { type: "string" } });
   }
   all.metadata("bash", {
@@ -80,7 +98,7 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
   const running = new Set<CodemodeSandbox>();
   const mcp = new McpTools(options.mcp ?? [], catalog);
   catalog.add(mcp.statusTool());
-  const child = all.without([...subagentTools.map((tool) => tool.name), "orb_spawn", "orb_alert"]);
+  const child = all.without([...boundSubagents.map((tool) => tool.name), "orb_spawn", "orb_alert"]);
   const extensions = () => {
     const native = codemodeExtension(catalog, running, options.files, options.orb);
     const childNative = codemodeExtension(child, running, options.files, options.orb);
@@ -102,6 +120,9 @@ export function createDurableTools(options: DurableToolsOptions = {}) {
   };
   const bundle = {
     ...extensions(),
+    bindTaskAbort: (abort: Harness["abortTask"]) => {
+      abortTask = abort;
+    },
     catalog,
     mcpStatus: () => mcp.status(),
     ready: (context: Context = BACKGROUND_CONTEXT) =>

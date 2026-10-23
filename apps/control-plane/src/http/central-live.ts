@@ -145,6 +145,9 @@ export function attachCentralLive(
       writer.enqueueSyncBatch([
         welcome,
         ...computeSyncFrames(snapshot.value, session.liveView(), frame.afterRecordId, at),
+        ...(snapshot.value.notice
+          ? [{ v: 1 as const, type: "server.error" as const, at, error: snapshot.value.notice }]
+          : []),
       ]);
       syncing = false;
       for (const event of buffered) writer.enqueue(event);

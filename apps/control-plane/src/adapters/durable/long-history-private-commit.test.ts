@@ -68,6 +68,7 @@ it("does not scan or republish multi-MiB root history for native private progres
     const identity = defineDoc({
       kind: "orb.identity",
       version: 1,
+      checkpointWhen: () => false,
       scope: "conversation",
       history: "latest",
       fork: "initial",
@@ -76,6 +77,7 @@ it("does not scan or republish multi-MiB root history for native private progres
     const progress = defineDoc({
       kind: "orb.private-progress",
       version: 1,
+      checkpointWhen: () => false,
       scope: "conversation",
       history: "latest",
       fork: "initial",
