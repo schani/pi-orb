@@ -1582,6 +1582,43 @@ executed run passed. This is isolated fixture evidence, not production qualifica
 
 Design and cost: `docs/history-search.md`.
 
+## Durable process artifact retries (2026-10-23; local, undeployed)
+
+**Historical attribution exception (user-approved, 2026-10-23 PDT):** only the two
+`Failed to CreateArtifact: Unable to make request: ETIMEDOUT` errors in
+[Durable 40032475539, job 120683831684](https://github.com/schani/pi-orb/actions/runs/40032475539/job/120683831684)
+on `587597cb`, at 15:32:20 and 15:34:35 PDT, are exempt from historical attribution.
+The process test step passed (89 tests, one skipped); both artifact uploads failed.
+Original logs, annotations, metadata, artifact inventory and four available artifacts
+remain in `.context/deploy-override-evidence/pr182-current/failure-40032475539/`.
+Shard 3's two artifacts were absent from that inventory. No cause or fix is claimed.
+The exception covers no other historical or new failure; exact-head qualification,
+original assertions, budgets and DST replay requirements remain unchanged.
+
+**Decision:** only Durable qualification's process provenance and failure-evidence
+uploads get one retry (two total attempts), each a top-level pinned action step with
+a five-minute deadline. First attempts retain `always()` / `failure()` activation,
+use stable IDs and continue on error. Their immediately following retries run only
+when not cancelled and the first step's **outcome** is `failure`; retry failure fails
+the job. Recovery cannot clear an earlier test failure. Names, allowlisted paths,
+hidden-file policy, optional-file handling and 14-day retention are identical;
+only retries set `overwrite: true`. No attempt suffix, composite action, new uploader,
+dependency or job-budget increase. Actions' visible retry step records the decision.
+
+Overwrite deletes/recreates an artifact; it is not transactional or exactly-once.
+Interruption can leave no artifact. Unresolved conflict/timeout fails closed at the
+terminal action, not silently accepted as recovery. A successful retry neither
+explains the historical failure nor independently verifies remote artifact contents.
+
+Tests-first contracts and an offline deterministic runner-decision model cover first
+success, recovery, exhausted attempts, original test failure, cancellation before
+either retry and absent optional diagnostics, plus action/input equivalence and bounds.
+They do not exercise GitHub transport, real cancellation/deadline enforcement or
+remote overwrite behavior. `npm ci`, all infrastructure tests, workspace/E2E types,
+lint and diff checks pass; actionlint is unavailable. RED/GREEN and check receipts
+remain in `.context/deploy-override-evidence/artifact-retry/`.
+No workflow rerun, merge or deployment.
+
 ## Already-open alert readiness (2026-10-23; local, undeployed)
 
 [E2E 40024098913](https://github.com/schani/pi-orb/actions/runs/40024098913)
