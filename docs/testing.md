@@ -1783,3 +1783,5 @@ Diagnostic cutoff counts parsed frame bytes, excluding a following incomplete UT
 **Decision (2026-10-22):** PTY execution markers must differ from command input; an open terminal remains covered by the controlled-stop socket-close assertion.
 
 **Decision (2026-10-22):** Held-stream consumers assemble the framed delta before checking the completion fence; HTTP read boundaries are not SSE boundaries. A fragmented-read control retains exact bytes.
+
+**Decision (2026-10-22):** Failed-copy visibility is checked after composer focus and pointer exit, with the page clock beyond the success-reset interval; removing failure visibility must fail the browser assertion.

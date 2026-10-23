@@ -896,18 +896,22 @@ describe("frontend-only browser behavior", () => {
     try {
       await page.goto(`${origin}${ORB_PATH}`);
       const copy = page.getByRole("button", { name: "Copy response Markdown" }).first();
+      await page.clock.install();
       await copy.focus();
       await page.keyboard.press("Enter");
       await expectPage(copy).toHaveAccessibleName("Copy response Markdown failed");
       await expectPage(page.getByText("copy failed", { exact: true }).first()).toBeVisible();
+      await page.getByRole("textbox").first().focus();
+      await expectPage(copy).not.toBeFocused();
       await page.mouse.move(0, 0);
-      await page.waitForTimeout(1700);
+      await page.clock.runFor(1700);
       expectPage(
         await copy.evaluate(
           (button) => button.ownerDocument.defaultView?.getComputedStyle(button).opacity,
         ),
       ).toBe("1");
       await expectPage(copy).toHaveAccessibleName("Copy response Markdown failed");
+      await expectPage(page.getByText("copy failed", { exact: true }).first()).toBeVisible();
     } finally {
       await context.close();
     }
