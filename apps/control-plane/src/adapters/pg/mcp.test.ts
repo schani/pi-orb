@@ -1,6 +1,4 @@
-import { randomUUID } from "node:crypto";
 import { NoSimulationTask } from "determined";
-import { ok } from "neverthrow";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ProjectSecretsDeps } from "../../domain/ports.ts";
 import {
@@ -10,9 +8,9 @@ import {
 } from "../../domain/project-secrets.ts";
 import { FakeSecretStore } from "../../testkit/broker.ts";
 import { makeProjectRow, seedTestUser } from "../../testkit/fixtures.ts";
-import { openThrowawayPostgres } from "../../testkit/postgres.ts";
+import { assertProjectDeletionFence, openThrowawayPostgres } from "../../testkit/postgres.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
-import { PgClient, type PostgreSQLClient } from "./client.ts";
+import type { PostgreSQLClient } from "./client.ts";
 import { PostgreSQLMcpStore } from "./mcp.ts";
 import { PGliteClient } from "./pglite-client.ts";
 
@@ -135,68 +133,14 @@ describe.each(["PGlite", ...(url ? ["PostgreSQL"] : [])])("%s mcp", (backend) =>
     "waits for the project row lock and observes the committed deletion fence",
     async () => {
       if (!url) return;
-      const schema = String(
-        (await db.query("SELECT current_schema() AS schema"))._unsafeUnwrap().rows[0]?.schema,
+      await assertProjectDeletionFence(db, url, P, (peer) =>
+        new PostgreSQLMcpStore(peer).replace(task, P, { revision: 0, servers: [] }),
       );
-      const peerUrl = new URL(url);
-      const applicationName = `audit-${randomUUID()}`;
-      peerUrl.searchParams.set("options", `-c search_path=${schema}`);
-      peerUrl.searchParams.set("application_name", applicationName);
-      const peer = new PgClient(peerUrl.toString());
-      let release!: () => void;
-      const released = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      let entered!: (pid: number) => void;
-      const locked = new Promise<number>((resolve) => {
-        entered = resolve;
-      });
-      const holder = db.transaction(async (query) => {
-        (await query("SELECT id FROM projects WHERE id = $1 FOR UPDATE", [P]))._unsafeUnwrap();
-        (await query("UPDATE projects SET state = 'deleting' WHERE id = $1", [P]))._unsafeUnwrap();
-        entered(
-          Number((await query("SELECT pg_backend_pid() AS pid"))._unsafeUnwrap().rows[0]?.pid),
-        );
-        await released;
-        return ok(undefined);
-      });
-      let writing: ReturnType<PostgreSQLMcpStore["replace"]> | undefined;
-      try {
-        const pid = await Promise.race([
-          locked,
-          holder.then((result) => {
-            result._unsafeUnwrap();
-            throw new Error("holder finished before lock acknowledgement");
-          }),
-        ]);
-        writing = new PostgreSQLMcpStore(peer).replace(task, P, { revision: 0, servers: [] });
-        await expect
-          .poll(
-            async () =>
-              (
-                await db.query(
-                  `SELECT count(*)::int AS blocked FROM pg_stat_activity
-        WHERE application_name = $1 AND wait_event_type = 'Lock'
-        AND query LIKE '%FOR UPDATE%' AND $2::int = ANY(pg_blocking_pids(pid))`,
-                  [applicationName, pid],
-                )
-              )._unsafeUnwrap().rows[0]?.blocked,
-          )
-          .toBe(1);
-        release();
-        (await holder)._unsafeUnwrap();
-        expect((await writing)._unsafeUnwrapErr().code).toBe("conflict");
-        expect(
-          (
-            await db.query("SELECT revision FROM project_mcp WHERE project_id = $1", [P])
-          )._unsafeUnwrap().rows,
-        ).toEqual([]);
-      } finally {
-        release();
-        await holder;
-        if (writing) await writing;
-        (await peer.end())._unsafeUnwrap();
-      }
+      expect(
+        (
+          await db.query("SELECT revision FROM project_mcp WHERE project_id = $1", [P])
+        )._unsafeUnwrap().rows,
+      ).toEqual([]);
     },
   );
 });
