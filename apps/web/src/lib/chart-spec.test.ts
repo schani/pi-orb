@@ -1,16 +1,32 @@
-import type { BarChart, LineChart } from "@pi-orb/protocol";
+import type {
+  BarChart,
+  CompareChart,
+  HeatmapChart,
+  HistogramChart,
+  LineChart,
+  TimelineChart,
+} from "@pi-orb/protocol";
 import { compile } from "vega-lite";
 import { describe, expect, it } from "vitest";
 import {
   barChartSpec,
   CHART_CONFIG,
+  compareRows,
+  compareScale,
+  compareSpec,
+  durationTicks,
+  formatDuration,
   formatValue,
+  heatmapSpec,
+  histogramBins,
+  histogramSpec,
   latestValue,
   lineChartSpec,
   niceTop,
   seriesStyles,
   sparklineSpec,
   spreadLabels,
+  timelineSpec,
   tooltipRows,
 } from "./chart-spec.ts";
 
@@ -203,6 +219,220 @@ describe("line chart spec", () => {
   });
 });
 
+const banded = line(1, {
+  series: [
+    {
+      name: "p50",
+      points: [
+        [1_000, 180],
+        [2_000, 190],
+      ],
+      band: {
+        name: "p5–p95",
+        points: [
+          [1_000, 90, 240],
+          [2_000, 92, 2_000],
+        ],
+      },
+    },
+  ],
+});
+const histogram: HistogramChart = {
+  kind: "histogram",
+  title: "latency",
+  unit: "ms",
+  series: [
+    { name: "before", values: [100, 150, 160, 170, 240] },
+    { name: "after", values: [110, 150, 165, 420, 430] },
+  ],
+};
+const timeline: TimelineChart = {
+  kind: "timeline",
+  title: "Deploy run",
+  spans: [
+    { lane: "setup", label: "queued", start: 0, end: 38_000, state: "queued" },
+    { lane: "setup", label: "npm ci", start: 38_000, end: 104_000, critical: true },
+    { lane: "e2e", label: "webkit", start: 104_000, end: 150_000, state: "failed" },
+    { lane: "image", label: "build", start: 104_000, end: 612_000, critical: true },
+  ],
+};
+const heatmap: HeatmapChart = {
+  kind: "heatmap",
+  title: "CI failures",
+  unit: "failures",
+  x: ["00", "01", "02"],
+  y: ["Mon", "Tue"],
+  values: [
+    [0, 1, 9],
+    [2, 0, 4],
+  ],
+};
+
+describe("band", () => {
+  it("draws the range behind its line, scales the y axis to cover it and lists it on hover", () => {
+    const spec = lineChartSpec(banded, { narrow: false, height: 180 });
+    const kinds = flatten(spec.layer ?? []).map((layer) => layer.mark?.type);
+    expect(kinds.indexOf("area")).toBeGreaterThanOrEqual(0);
+    expect(kinds.indexOf("area")).toBeLessThan(kinds.indexOf("line"));
+    expect(JSON.stringify(spec)).toContain('"domain":[0,2500]');
+    expect(JSON.stringify(spec)).toContain('"title":"p5–p95\\u0000lo"');
+  });
+
+  it("lists the range after the series in the tooltip", () => {
+    const rows = tooltipRows(banded, {
+      time: "13:15",
+      p50: 180,
+      "p5–p95\u0000lo": 90,
+      "p5–p95\u0000hi": "1,240",
+    });
+    expect(rows.map((row) => [row.label, row.value])).toEqual([
+      ["time", "13:15"],
+      ["p50", "180 ms"],
+      ["p5–p95", "90–1,240 ms"],
+    ]);
+  });
+});
+
+describe("histogram", () => {
+  it("bins every series on one shared, nice grid", () => {
+    const { step, lo, hi, series } = histogramBins(histogram);
+    expect(step).toBe(20);
+    expect([lo, hi]).toEqual([100, 440]);
+    for (const { bins, values } of series) {
+      expect(bins).toHaveLength((hi - lo) / step);
+      expect(bins.reduce((sum, n) => sum + n, 0)).toBe(values.length);
+    }
+    expect(series[1]?.percentiles).toEqual({ p50: 165, p95: 430, p99: 430 });
+  });
+
+  it("fills the last series, outlines the earlier one and isolates either from its label", () => {
+    const spec = histogramSpec(histogram, { narrow: false, height: 160 });
+    expect(spec.params).toEqual([{ name: "hl", value: null }]);
+    expect(marks(spec, "bar").length).toBeGreaterThan(0);
+    expect(JSON.stringify(marks(spec, "line"))).toContain("step-after");
+    expect(JSON.stringify(spec)).toContain("datum.s == hl");
+    const labels = flatten(spec.layer ?? []).find(
+      (layer) => (layer as { name?: string }).name === "end_labels",
+    );
+    expect(JSON.stringify(labels?.data)).toContain('"lv"');
+    expect(JSON.stringify(histogramSpec(histogram, { narrow: true, height: 160 }))).not.toContain(
+      "end_labels",
+    );
+  });
+
+  it("lists the bin range, then every series count", () => {
+    const rows = tooltipRows(histogram, { range: "100–120 ms", before: 1, after: 1 });
+    expect(rows.map((row) => [row.label, row.value])).toEqual([
+      ["range", "100–120 ms"],
+      ["before", "1"],
+      ["after", "1"],
+    ]);
+  });
+});
+
+describe("timeline", () => {
+  it("formats durations at the scale of the run", () => {
+    expect(formatDuration(450)).toBe("450 ms");
+    expect(formatDuration(8_400)).toBe("8.4s");
+    expect(formatDuration(28_000)).toBe("28s");
+    expect(formatDuration(66_000)).toBe("1m 06s");
+    expect(formatDuration(3_840_000)).toBe("1h 04m");
+    expect(durationTicks(872_000)).toEqual([
+      0, 120_000, 240_000, 360_000, 480_000, 600_000, 720_000, 840_000,
+    ]);
+  });
+
+  it("keeps lanes in first-appearance order with one bar per span", () => {
+    const spec = timelineSpec(timeline);
+    expect(spec.height).toBe(3 * 22);
+    expect(JSON.stringify(spec)).toContain('"domain":["setup","e2e","image"]');
+    expect(marks(spec, "bar")).toHaveLength(1);
+    expect((spec.data as { values: unknown[] }).values).toHaveLength(4);
+  });
+
+  it("shows the run's total duration in the folded row", () => {
+    expect(latestValue(timeline)).toBe("10m 12s");
+  });
+});
+
+describe("heatmap", () => {
+  it("sizes rows, shades by square root and keeps zero cells pale", () => {
+    const spec = heatmapSpec(heatmap);
+    expect(spec.height).toBe(2 * 22);
+    expect(JSON.stringify(spec)).toContain('"type":"sqrt"');
+    expect(JSON.stringify(spec)).toContain("datum.v == 0");
+    expect(tooltipRows(heatmap, { cell: "Mon · 02", value: "9 failures" })).toEqual([
+      { label: "Mon · 02", value: "9 failures" },
+    ]);
+  });
+});
+
+const compare: CompareChart = {
+  kind: "compare",
+  title: "benchmarks",
+  unit: "ms",
+  from: "main",
+  to: "feat",
+  better: "lower",
+  rows: [
+    { label: "render", from: 184, to: 61 },
+    { label: "layout", from: 7.4, to: 7.6 },
+    { label: "cold start", from: 420, to: 512 },
+  ],
+};
+
+describe("compare", () => {
+  it("names each change as a multiple in the better direction, within tolerance as same", () => {
+    expect(compareRows(compare).map((row) => [row.state, row.change, row.percent])).toEqual([
+      ["better", "3× better", "-67%"],
+      ["same", "same", "+3%"],
+      ["worse", "1.22× worse", "+22%"],
+    ]);
+    const throughput = { ...compare, better: "higher" as const, tolerance: 25 };
+    expect(compareRows(throughput).map((row) => row.state)).toEqual(["worse", "same", "same"]);
+  });
+
+  it("uses a log scale when values span a decade, otherwise a linear one from zero", () => {
+    expect(compareScale([7.4, 512])).toEqual({
+      type: "log",
+      domain: [1, 600],
+      ticks: [1, 2, 5, 10, 20, 50, 100, 200, 500],
+    });
+    expect(compareScale([0.26, 0.31])).toEqual({
+      type: "linear",
+      domain: [0, 0.4],
+      ticks: [0, 0.1, 0.2, 0.3, 0.4],
+    });
+  });
+
+  it("labels rows on the axis when wide and stacks label over dumbbell at phone width", () => {
+    const wide = compareSpec(compare, { narrow: false });
+    expect(wide.height).toBe(3 * 20);
+    expect(JSON.stringify(wide)).toContain('"main → feat"');
+    const narrow = compareSpec(compare, { narrow: true });
+    expect(narrow.height).toBe(3 * 38);
+    expect(marks(narrow, "tick")).toHaveLength(1);
+    expect(JSON.stringify(narrow)).toContain('"axis":null');
+  });
+
+  it("lists baseline, candidate and change on hover, and counts breaches when folded", () => {
+    const rows = tooltipRows(compare, {
+      row: "cold start",
+      from: "420 ms",
+      to: "512 ms",
+      change: "+22% · 1.22× worse",
+    });
+    expect(rows.map((row) => [row.label, row.value])).toEqual([
+      ["cold start", ""],
+      ["main", "420 ms"],
+      ["feat", "512 ms"],
+      ["change", "+22% · 1.22× worse"],
+    ]);
+    expect(latestValue(compare)).toBe("1 worse");
+    expect(latestValue({ ...compare, rows: compare.rows.slice(0, 2) })).toBeNull();
+  });
+});
+
 describe("bar and sparkline specs", () => {
   const bars: BarChart = {
     kind: "bar",
@@ -221,9 +451,13 @@ describe("bar and sparkline specs", () => {
     expect(marks(spec, "text")).toHaveLength(1);
   });
 
-  it("builds a sparkline for both kinds", () => {
+  it("builds a sparkline for every kind", () => {
     expect(sparklineSpec(bars).mark).toMatchObject({ type: "bar" });
     expect(sparklineSpec(line(4)).mark).toMatchObject({ type: "line" });
+    expect(sparklineSpec(histogram).mark).toMatchObject({ type: "bar" });
+    expect(sparklineSpec(timeline).mark).toMatchObject({ type: "bar" });
+    expect(sparklineSpec(heatmap).mark).toMatchObject({ type: "rect" });
+    expect(sparklineSpec(compare).mark).toMatchObject({ type: "bar" });
   });
 });
 
@@ -259,8 +493,19 @@ describe("vega-lite compilation", () => {
     ["line chart, one series", lineChartSpec(line(1), { narrow: false, height: 180 })],
     ["line chart, six series", lineChartSpec(line(6), { narrow: false, height: 180 })],
     ["line chart at phone width", lineChartSpec(line(3), { narrow: true, height: 180 })],
+    ["band", lineChartSpec(banded, { narrow: false, height: 180 })],
+    ["histogram", histogramSpec(histogram, { narrow: false, height: 160 })],
+    ["histogram at phone width", histogramSpec(histogram, { narrow: true, height: 160 })],
+    ["timeline", timelineSpec(timeline)],
+    ["heatmap", heatmapSpec(heatmap)],
+    ["compare", compareSpec(compare, { narrow: false })],
+    ["compare at phone width", compareSpec(compare, { narrow: true })],
     ["bar sparkline", sparklineSpec(bars)],
     ["line sparkline", sparklineSpec(line(4))],
+    ["histogram sparkline", sparklineSpec(histogram)],
+    ["timeline sparkline", sparklineSpec(timeline)],
+    ["heatmap sparkline", sparklineSpec(heatmap)],
+    ["compare sparkline", sparklineSpec(compare)],
   ])("compiles the %s without warnings", (_name, spec) => {
     const warnings: string[] = [];
     const logger = {
