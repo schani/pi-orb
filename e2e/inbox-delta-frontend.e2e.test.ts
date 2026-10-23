@@ -6,7 +6,7 @@ import { it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
 
 it.each(["chromium", "webkit"] as const)(
-  "%s: inbox deltas preserve delivered handoff, retire tracking and surface errors",
+  "%s: inbox deltas preserve consumed images, canonical handoff and errors",
   async (engine) => {
     const root = join(import.meta.dirname, "../apps/web");
     const vite = await createServer({
@@ -22,12 +22,19 @@ it.each(["chromium", "webkit"] as const)(
     const page = await browser.newPage();
     const orb = "frontend-long-history";
     const id = "00000000-0000-4000-8000-000000000042";
+    const image = Buffer.concat([
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7pcAAAAASUVORK5CYII=",
+        "base64",
+      ),
+      Buffer.alloc(1_740_000),
+    ]).toString("base64");
     const row = {
       id,
       orbId: orb,
       content: [
-        { type: "text", text: "INBOX_DELTA_PROMPT" },
-        { type: "image", mediaType: "image/png", data: "A".repeat(2_320_000) },
+        { type: "text" as const, text: "INBOX_DELTA_PROMPT" },
+        { type: "image" as const, mediaType: "image/png", data: image },
       ],
       status: "queued",
       createdAt: "2026-10-03T00:00:00.000Z",
@@ -35,7 +42,9 @@ it.each(["chromium", "webkit"] as const)(
     };
     let delivered = false,
       fail = false,
-      repairStarted = false;
+      repairStarted = false,
+      canonical = false;
+    let historyReads = 0;
     const deltas: { tracked: string; bytes: number }[] = [];
     let release = () => {};
     const gate = new Promise<void>((resolve) => {
@@ -50,6 +59,7 @@ it.each(["chromium", "webkit"] as const)(
         });
       });
       await page.route(`**/api/v1/orbs/${orb}/history`, async (route) => {
+        historyReads++;
         const response = await route.fetch();
         const view = await response.json();
         if (delivered) {
@@ -60,15 +70,26 @@ it.each(["chromium", "webkit"] as const)(
               id: "inbox-native",
               parentId: view.cursor,
               timestamp: row.createdAt,
-              type: "message",
-              role: "user",
-              content: [{ type: "text", text: "INBOX_DELTA_PROMPT" }],
+              ...(canonical
+                ? { type: "message" as const, role: "user" as const, content: row.content }
+                : { type: "event" as const, eventType: "claude.input_receipt" }),
               inboxMessageIds: [id],
               overflow: {},
             }),
           );
-          view.cursor = "inbox-native";
-          view.headId = "inbox-native";
+          view.records.push(
+            projectDisplayRecord({
+              id: "after-receipt",
+              parentId: "inbox-native",
+              timestamp: row.createdAt,
+              type: "message",
+              role: "assistant",
+              content: [{ type: "text", text: "After receipt." }],
+              overflow: {},
+            }),
+          );
+          view.cursor = "after-receipt";
+          view.headId = "after-receipt";
         }
         await route.fulfill({ response, json: view });
       });
@@ -84,7 +105,11 @@ it.each(["chromium", "webkit"] as const)(
         const { content: _content, ...update } = row;
         const body =
           query.after === 0
-            ? { items: [row], updates: [], cursor: 1 }
+            ? {
+                items: [{ ...row, status: delivered ? "delivered" : "queued" }],
+                updates: [],
+                cursor: 1,
+              }
             : {
                 items: [],
                 updates:
@@ -112,6 +137,33 @@ it.each(["chromium", "webkit"] as const)(
       await check.poll(() => repairStarted).toBe(true);
       await check(page.locator(".rec-q .rec-status")).toHaveText("delivered");
       release();
+      for (const reload of [false, true]) {
+        if (reload) await page.reload();
+        const receipt = page.locator('[data-history-row="inbox-native"]');
+        await check(receipt).toContainText("INBOX_DELTA_PROMPT");
+        await check(page.getByText("INBOX_DELTA_PROMPT", { exact: true })).toHaveCount(1);
+        await check(receipt.locator(".rec-status")).toHaveText("delivered");
+        await check(page.locator(".history .msg-image")).toHaveCount(1);
+        await check
+          .poll(() =>
+            receipt.locator("img").evaluate((img) => img.complete && img.naturalWidth === 1),
+          )
+          .toBe(true);
+        check(
+          await page
+            .locator(".history [data-history-row]")
+            .evaluateAll((rows) =>
+              rows.slice(-2).map((row) => row.getAttribute("data-history-row")),
+            ),
+        ).toEqual(["inbox-native", "after-receipt"]);
+        const reads = historyReads;
+        const polls = deltas.length;
+        await check.poll(() => deltas.length).toBeGreaterThanOrEqual(polls + 2);
+        check(historyReads).toBe(reads);
+        check(deltas.slice(polls).every((delta) => delta.tracked === id)).toBe(true);
+      }
+      canonical = true;
+      await page.reload();
       await check(page.locator(".rec-q")).toHaveCount(0);
       await check(page.locator(".history")).toContainText("INBOX_DELTA_PROMPT");
       await check.poll(() => deltas.some((delta) => delta.tracked === "")).toBe(true);

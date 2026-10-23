@@ -30,7 +30,7 @@ never uploaded. The job timeout is 240 minutes. Normal releases retain HTTP avai
 identity cutover requires the maintenance procedure below.
 never uploaded. The release job timeout is 240 minutes; no browser pause is introduced.
 
-CI, E2E and Deploy use `ubuntu-24.04` / Node `24.22.0`; E2E runs four isolated,
+CI, E2E and Deploy use `ubuntu-24.04` / Node `24.22.1`; E2E runs four isolated,
 serial shards (`docs/testing.md`). **Qualification reuse (implemented locally
 2026-10-05; not deployed or live-validated):** new GitHub releases
 wait before the release lock for successful same-repository `push`/`main` CI and

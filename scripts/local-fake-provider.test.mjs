@@ -15,6 +15,7 @@ import {
   PIN,
   runTool,
   supervise,
+  validateInstallPolicy,
   validatePins,
 } from "./local-fake-provider.mjs";
 
@@ -145,6 +146,20 @@ test("pin verification rejects HEAD, lock and installed version drift", () => {
     [PIN, lock, "0.0.71"],
   ])
     assert.equal(validatePins(...args).error.type, "pin_mismatch");
+});
+test("install policy requires supported npm and an explicit cloudflared denial", () => {
+  const project = { allowScripts: { cloudflared: false } };
+  for (const version of ["11.19.1", "11.20.0", "12.0.0"])
+    assert.equal(validateInstallPolicy(version, project).isOk(), true);
+  for (const version of ["10.9.4", "11.19.0", "11.19.1-rc.1", "", "secret"])
+    assert.equal(validateInstallPolicy(version, project).error.type, "npm_version_unsupported");
+  for (const project of [
+    null,
+    {},
+    { allowScripts: { cloudflared: true } },
+    { allowScripts: { "cloudflared@0.7.1": false } },
+  ])
+    assert.equal(validateInstallPolicy("11.19.1", project).error.type, "install_policy_mismatch");
 });
 test("canonical Docker origin uses inspected gateway, never fallback", () => {
   assert.equal(canonicalOrigin("process").value, "http://127.0.0.1:3210");
@@ -568,54 +583,66 @@ test("conflicting or oversized npm diagnostics stay unknown", () => {
     clipped: true,
   });
 });
-test("actual failed npm persists safe diagnostics without replay or changing npm defaults", async (t) => {
-  if (!linux) return t.skip("needs Linux /proc");
-  const f = await ownedFixture(t);
-  const bin = join(f.root, "bin"),
-    evidence = join(f.root, "evidence");
-  await fs.mkdir(bin);
-  const lock = {
-    packages: {
-      "node_modules/flingit": {
-        version: "0.0.70",
-        integrity: FLING_INTEGRITY,
-        resolved: "https://registry.npmjs.org/flingit/-/flingit-0.0.70.tgz",
+for (const [npmVersion, denied, expectedError] of [
+  ["11.19.1", true, "tool_failed"],
+  ["10.9.4", true, "npm_version_unsupported"],
+  ["11.19.1", false, "install_policy_mismatch"],
+])
+  test(`actual npm preparation: ${npmVersion}, denial=${denied}`, async (t) => {
+    if (!linux) return t.skip("needs Linux /proc");
+    const f = await ownedFixture(t);
+    const bin = join(f.root, "bin"),
+      evidence = join(f.root, "evidence");
+    await fs.mkdir(bin);
+    const lock = {
+      packages: {
+        "node_modules/flingit": {
+          version: "0.0.70",
+          integrity: FLING_INTEGRITY,
+          resolved: "https://registry.npmjs.org/flingit/-/flingit-0.0.70.tgz",
+        },
       },
-    },
-  };
-  await fs.writeFile(
-    join(bin, "git"),
-    `#!${process.execPath}\nconst fs=require('node:fs'), a=process.argv.slice(2);if(a[0]==='init'){fs.mkdirSync(a.at(-1));fs.writeFileSync(a.at(-1)+'/package-lock.json',${JSON.stringify(JSON.stringify(lock))});}if(a[0]==='rev-parse')console.log('${PIN}');`,
-    { mode: 0o700 },
-  );
-  const calls = join(f.root, "calls");
-  await fs.writeFile(
-    join(bin, "npm"),
-    `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2))+'\\n');console.error('npm error code ECONNRESET\\nnpm error errno -104\\nnpm error command sh -c secret https://token@private.invalid');process.exit(152);`,
-    { mode: 0o700 },
-  );
-  const wrapper = fileURLToPath(new URL("./local-fake-provider.mjs", import.meta.url));
-  const child = await f.start(
-    `import {spawn} from 'node:child_process';const c=spawn(${JSON.stringify(process.execPath)},[${JSON.stringify(wrapper)},'--',${JSON.stringify(process.execPath)},'-e','process.exit(99)'],{env:{PATH:${JSON.stringify(`${bin}:${process.env.PATH}`)},PI_ORB_E2E_BACKEND:'process',PI_ORB_LOCAL_FAKE_EVIDENCE:${JSON.stringify(evidence)}},stdio:'inherit'});c.on('exit',code=>process.exit(code));`,
-  );
-  await exited(child);
-  const log = await fs.readFile(join(f.root, "output-0.log"), "utf8");
-  const privateRoot = log.match(/local fake private diagnostics: (.*)/)?.[1];
-  assert.ok(privateRoot?.startsWith(join(tmpdir(), "pi-orb-local-fake-")));
-  t.after(() => fs.rm(privateRoot, { recursive: true, force: true }));
-  assert.equal(child.exit.code, 1);
-  assert.equal(await fs.readFile(calls, "utf8"), '["ci","--no-audit","--no-fund"]\n');
-  const manifest = JSON.parse(await fs.readFile(join(evidence, "manifest.json"), "utf8"));
-  const phases = JSON.parse(await fs.readFile(join(evidence, "phases.json"), "utf8"));
-  const installs = phases.filter((p) => p.phase === "install" && p.state === "finished");
-  assert.equal(installs.length, 1);
-  assert.deepEqual(installs[0].npm, { npmCode: "ECONNRESET", errno: -104, clipped: false });
-  assert.equal(installs[0].code, 152);
-  assert.equal(manifest.error, "tool_failed");
-  assert.equal(
-    phases.some((p) => p.phase === "command_started" || p.phase === "service_started"),
-    false,
-  );
-  for (const secret of ["secret", "token", "private.invalid", "sh -c"])
-    assert.equal(JSON.stringify({ manifest, phases }).includes(secret), false);
-});
+    };
+    await fs.writeFile(
+      join(bin, "git"),
+      `#!${process.execPath}\nconst fs=require('node:fs'), a=process.argv.slice(2);if(a[0]==='init'){fs.mkdirSync(a.at(-1));fs.writeFileSync(a.at(-1)+'/package-lock.json',${JSON.stringify(JSON.stringify(lock))});fs.writeFileSync(a.at(-1)+'/package.json',${JSON.stringify(JSON.stringify({ allowScripts: { cloudflared: denied ? false : true } }))});}if(a[0]==='rev-parse')console.log('${PIN}');`,
+      { mode: 0o700 },
+    );
+    const calls = join(f.root, "calls");
+    await fs.writeFile(
+      join(bin, "npm"),
+      `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2))+'\\n');if(process.argv[2]==='--version'){console.log('${npmVersion}');process.exit(0);}console.error('npm error code ECONNRESET\\nnpm error errno -104\\nnpm error command sh -c secret https://token@private.invalid');process.exit(152);`,
+      { mode: 0o700 },
+    );
+    const wrapper = fileURLToPath(new URL("./local-fake-provider.mjs", import.meta.url));
+    const child = await f.start(
+      `import {spawn} from 'node:child_process';const c=spawn(${JSON.stringify(process.execPath)},[${JSON.stringify(wrapper)},'--',${JSON.stringify(process.execPath)},'-e','process.exit(99)'],{env:{PATH:${JSON.stringify(`${bin}:${process.env.PATH}`)},PI_ORB_E2E_BACKEND:'process',PI_ORB_LOCAL_FAKE_EVIDENCE:${JSON.stringify(evidence)}},stdio:'inherit'});c.on('exit',code=>process.exit(code));`,
+    );
+    await exited(child);
+    const log = await fs.readFile(join(f.root, "output-0.log"), "utf8");
+    const privateRoot = log.match(/local fake private diagnostics: (.*)/)?.[1];
+    assert.ok(privateRoot?.startsWith(join(tmpdir(), "pi-orb-local-fake-")));
+    t.after(() => fs.rm(privateRoot, { recursive: true, force: true }));
+    assert.equal(child.exit.code, 1);
+    assert.equal(
+      await fs.readFile(calls, "utf8"),
+      '["--version"]\n' +
+        (expectedError === "tool_failed" ? '["ci","--no-audit","--no-fund"]\n' : ""),
+    );
+    const manifest = JSON.parse(await fs.readFile(join(evidence, "manifest.json"), "utf8"));
+    const phases = JSON.parse(await fs.readFile(join(evidence, "phases.json"), "utf8"));
+    const installs = phases.filter((p) => p.phase === "install" && p.state === "finished");
+    assert.equal(installs.length, expectedError === "tool_failed" ? 1 : 0);
+    if (expectedError === "tool_failed") {
+      assert.deepEqual(installs[0].npm, { npmCode: "ECONNRESET", errno: -104, clipped: false });
+      assert.equal(installs[0].code, 152);
+    }
+    assert.equal(manifest.error, expectedError);
+    assert.equal(manifest.npm, npmVersion);
+    assert.equal(
+      phases.some((p) => p.phase === "command_started" || p.phase === "service_started"),
+      false,
+    );
+    for (const secret of ["secret", "token", "private.invalid", "sh -c"])
+      assert.equal(JSON.stringify({ manifest, phases }).includes(secret), false);
+  });

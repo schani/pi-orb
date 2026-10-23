@@ -225,7 +225,7 @@ export function createProcessAgentContext(
       requestId: string,
       message: string,
       expectedAdmissionVersion: number,
-    ) => ResultAsync<{ recordId: string }, OrbAgentError>;
+    ) => ResultAsync<{ recordId: string; duplicate: boolean }, OrbAgentError>;
   },
 ): DurableAgentPlaneOptions["openContext"] {
   const open: DurableAgentPlaneOptions["openContext"] = (

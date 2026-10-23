@@ -410,8 +410,19 @@ describe("host-spec replacement (DST)", () => {
       async (sim) => {
         const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
         const stop = new AbortController();
+        let releaseReconciler!: () => void;
+        const stopAccepted = new Promise<void>((resolve) => {
+          releaseReconciler = resolve;
+        });
         const result = await sim.runTasks([
-          { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+          {
+            name: "reconciler",
+            f: async (task) => {
+              // Initial replication must not race an unrelated liveness replacement.
+              await stopAccepted;
+              await reconcileLoop(task, harness.deps, stop.signal);
+            },
+          },
           { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
           {
             name: "driver",
@@ -425,8 +436,28 @@ describe("host-spec replacement (DST)", () => {
               );
               const workspace = workspaceIdentity(harness);
               const legacyRef = harness.world.hostRefOf(ORB)?.resourceId ?? null;
-
-              await stopStartCycle(task, harness.deps, harness);
+              expect(harness.store.orbSnapshot(ORB)).toMatchObject({
+                hostIncarnation: 0,
+                hostSpecFingerprint: null,
+                hostSpecGeneration: null,
+              });
+              const stopped = await requestOrbStop(task, harness.deps, ORB);
+              expect(stopped.isOk(), stopped.isErr() ? stopped.error.message : "").toBe(true);
+              releaseReconciler();
+              await waitUntil(
+                task,
+                "legacy orb stopped",
+                () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+                { timeoutMs: CONVERGE_MS },
+              );
+              const started = await requestOrbStart(task, harness.deps, ORB);
+              expect(started.isOk(), started.isErr() ? started.error.message : "").toBe(true);
+              await waitUntil(
+                task,
+                "legacy orb running again",
+                () => harness.store.orbSnapshot(ORB)?.state === "running",
+                { timeoutMs: CONVERGE_MS },
+              );
 
               const spec = desiredSpecFingerprintOf(harness, ORB, REPOSITORY_URL);
               expect(harness.store.orbSnapshot(ORB)).toMatchObject({

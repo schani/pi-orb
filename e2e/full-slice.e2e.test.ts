@@ -205,7 +205,7 @@ const SCENARIO = {
             type: "toolCall",
             name: "codemode",
             arguments: {
-              code: `const self = JSON.parse(await tools.orb_self({})); text(await tools.orb_send({orbId: self.spawnedByOrb.id, message: ${JSON.stringify(PEER_BODY)}}));`,
+              code: `const self = await tools.orb_self({}); text(await tools.orb_send({orbId: self.spawnedByOrb.id, message: ${JSON.stringify(PEER_BODY)}}));`,
             },
           },
           { type: "stop", status: "completed" },

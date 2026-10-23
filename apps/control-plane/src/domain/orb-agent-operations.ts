@@ -46,7 +46,7 @@ export interface OrbAgentOptions {
     requestId: string,
     message: string,
     expectedAdmissionVersion: number,
-  ) => ResultAsync<{ recordId: string }, OrbAgentError>;
+  ) => ResultAsync<{ recordId: string; duplicate: boolean }, OrbAgentError>;
 }
 const failure = (code: OrbAgentError["code"], message: string): OrbAgentError => ({
   code,

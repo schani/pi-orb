@@ -89,12 +89,152 @@ export const CHART_FIXTURE_ENDPOINTS: ChartSpec = {
   ],
 };
 
+function gauss(random: () => number) {
+  return Math.sqrt(-2 * Math.log(1 - random())) * Math.cos(2 * Math.PI * random());
+}
+
+export const CHART_FIXTURE_BAND: ChartSpec = {
+  kind: "line",
+  title: "checkout-api latency · p50, p5–p95",
+  unit: "ms",
+  series: [
+    {
+      name: "p50",
+      points: points(31, (t, r) => Math.round((t >= DEPLOY ? 188 : 172) + gauss(r) * 5)),
+      band: {
+        name: "p5–p95",
+        points: times.map((t, index): [number, number, number] => {
+          const r = rng(1_000 + index);
+          const after = t >= DEPLOY;
+          return [
+            t,
+            Math.round((after ? 92 : 96) + gauss(r) * 3),
+            Math.round((after ? 430 : 236) + gauss(r) * (after ? 14 : 7)),
+          ];
+        }),
+      },
+    },
+  ],
+  markers: [{ at: DEPLOY, label: "deploy a41c9e2" }],
+};
+
+const latency = (seed: number, slow: number) => {
+  const random = rng(seed);
+  return Array.from({ length: 1_500 }, () =>
+    Math.round(
+      random() < slow
+        ? Math.max(200, 425 + gauss(random) * 42)
+        : Math.max(30, 168 + gauss(random) * 38),
+    ),
+  );
+};
+
+export const CHART_FIXTURE_DISTRIBUTION: ChartSpec = {
+  kind: "histogram",
+  title: "checkout-api latency distribution · before vs after a41c9e2",
+  unit: "ms",
+  series: [
+    { name: "before", values: latency(41, 0) },
+    { name: "after", values: latency(42, 0.18) },
+  ],
+};
+
+const RUN = Date.UTC(2026, 9, 13, 21, 0);
+export const CHART_FIXTURE_RUN: ChartSpec = {
+  kind: "timeline",
+  title: "Deploy run 38800758118",
+  spans: (
+    [
+      ["setup", "queued", 0, 38, "queued"],
+      ["setup", "npm ci", 38, 104, "critical"],
+      ["check", "typecheck", 104, 162],
+      ["check", "lint", 162, 190],
+      ["unit", "vitest · 2,431 tests", 104, 298],
+      ["dst", "determined · 400 seeds", 104, 262],
+      ["image", "queued", 104, 141, "queued"],
+      ["image", "build runtime image", 141, 612, "critical"],
+      ["e2e", "chromium", 298, 503],
+      ["e2e", "webkit", 503, 548, "failed"],
+      ["e2e", "webkit · retry", 548, 604],
+      ["deploy", "push", 612, 671, "critical"],
+      ["deploy", "cloud run rollout", 671, 872, "critical"],
+    ] as const
+  ).map(([lane, label, start, end, state]) => ({
+    lane,
+    label,
+    start: RUN + start * 1_000,
+    end: RUN + end * 1_000,
+    ...(state === "critical" ? { critical: true } : state === undefined ? {} : { state }),
+  })),
+};
+
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+export const CHART_FIXTURE_FAILURES: ChartSpec = {
+  kind: "heatmap",
+  title: "CI failures by weekday and hour · last 8 weeks",
+  unit: "failures",
+  x: Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, "0")),
+  y: DAYS,
+  values: DAYS.map((_, day) => {
+    const random = rng(60 + day);
+    return Array.from({ length: 24 }, (_, hour) => {
+      const work = day < 5 && hour >= 8 && hour <= 19 ? 1.4 : 0.15;
+      return (
+        Math.floor(random() * 2.2 * work) +
+        (hour === 2 ? 5 + Math.floor(random() * 4) : 0) +
+        (day === 0 && hour === 9 ? 11 : 0)
+      );
+    });
+  }),
+};
+
+export const CHART_FIXTURE_SERVICE_TIME: ChartSpec = {
+  kind: "compare",
+  title: "Alpine · p95 per-job service time",
+  unit: "s",
+  from: "TS 5.9",
+  to: "tsrs 0.18",
+  better: "lower",
+  rows: [
+    { label: "1 concurrent", from: 3.97, to: 0.42 },
+    { label: "2 concurrent", from: 6.97, to: 0.73 },
+    { label: "4 concurrent", from: 13, to: 1.6 },
+    { label: "8 concurrent", from: 27.7, to: 3.22 },
+  ],
+};
+
+export const CHART_FIXTURE_BENCHMARKS: ChartSpec = {
+  kind: "compare",
+  title: "benchmarks · main → feat/stream-diff",
+  unit: "ms",
+  from: "main",
+  to: "feat/stream-diff",
+  better: "lower",
+  rows: (
+    [
+      ["render 10k-line diff", 184, 61],
+      ["parse unified diff", 22.4, 9.8],
+      ["highlight · ts", 48.1, 41.2],
+      ["tokenize markdown", 12.1, 11.9],
+      ["hydrate orb list", 31.2, 33],
+      ["serialize history", 18.3, 21.7],
+      ["cold start", 420, 512],
+    ] as const
+  ).map(([label, from, to]) => ({ label, from, to })),
+};
+
 export function chartFixtureRecords(createdAt: string): HistoryRecord[] {
   const charts = [
     CHART_FIXTURE_LATENCY,
     CHART_FIXTURE_REGIONS,
     CHART_FIXTURE_ZONES,
     CHART_FIXTURE_ENDPOINTS,
+    CHART_FIXTURE_BAND,
+    CHART_FIXTURE_DISTRIBUTION,
+    CHART_FIXTURE_RUN,
+    CHART_FIXTURE_FAILURES,
+    CHART_FIXTURE_SERVICE_TIME,
+    CHART_FIXTURE_BENCHMARKS,
   ];
   return [
     {

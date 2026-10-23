@@ -5,7 +5,7 @@
 # tailscaled itself, in userspace-networking mode, so the container needs
 # neither a TUN device nor NET_ADMIN. Build from the repository root:
 #   docker build -f apps/orb-runtime/Dockerfile -t pi-orb-runtime:dev .
-FROM node:24.22.0-bookworm-slim
+FROM node:24.22.1-bookworm-slim
 
 COPY infra/runtime_apt.sh /usr/local/bin/runtime-apt
 RUN chmod 755 /usr/local/bin/runtime-apt \

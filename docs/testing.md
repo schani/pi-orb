@@ -1,5 +1,9 @@
 # Testing
 
+## Main integration qualification (2026-10-22 PDT; undeployed)
+
+Merged main `42cf1061` into the test audit, retaining structured orb results, scenario barriers, task-Result assertions and replay/ownership contracts. Node 24.22.1 / npm 11.19.1 clean installation applies all four patches and reports no vulnerabilities. Focused qualification passes 475 Vitest, 72 Node and 24 Python tests, root workspace/E2E typecheck and scoped Biome (warnings remain). Full unit/infra, browser/runtime E2E, container and cloud gates were not run for this merge.
+
 ## Domain/HTTP assertion boundaries (2026-10-22)
 
 Real-socket upload backpressure observes server-side read consumption and queued request bytes only after blocked storage entry, without adding draining listeners. An eager-buffer mutation must fail this boundary. Disconnect tests wait for a pending storage read, require request-abort propagation before the deadline and await source closure. Socket readiness uses read-entry, writable-backpressure and closure signals, not sleeps.
@@ -48,7 +52,39 @@ Runtime and control-plane replay compare the invariant message and first failure
 
 Multi-phase scenarios use `runDst`'s `nextPhase` factory: fresh single-use simulations share one recorded/replayed entropy source, inherited options and lifecycle capture. Only the wall-clock epoch may be overridden. Capture resets between scenarios, not phases; every restart phase belongs to the saved trace. The helper regression requires identical command/clock evidence and failure origin in automatic and explicit replay.
 
+## Chart hover targets in WebKit (2026-10-23; local, undeployed)
+
+Adding four transcript chart rows first failed the browser test in both engines: the region chart's tooltip stayed hidden because the rows pushed it off-screen. Each hovered chart now scrolls into view first. WebKit then failed the new histogram label-isolation assertion (expected 1 dimmed line, received 0). Instrumented WebKit showed Playwright's `boundingBox()` for SVG `<text>` 11px (one font size) below `getBoundingClientRect()`. The midpoint hit the root `<svg>`, and the existing zone-label hover landed on the label below, passing only because either label dims five lines. `hover()` now reads the DOM rect. Both engines pass with unchanged assertions.
+
+## npm maintenance (2026-10-22; local, undeployed)
+
+Before updating, clean installation, 75 focused protocol/HTTP/WebSocket/PGlite/Markdown test files (706 passed, four conditional skips) and the web production build passed on `9fa0828c`. Clean installation of the maintenance lock also passes all four Pi patch seals; `npm ls --all` reports no problems.
+
+Biome 2.6 enables Markdown/YAML formatting, which would rewrite 154 unrelated files. Keep those formatters disabled. Its component-factory rule mistakes two `Intl.DateTimeFormat` test doubles for React components; disable only that rule in `create-orb-request.test.ts`. First diagnostics: `/tmp/npm-maintenance-evidence/updated-lint-first.log` and `biome-diagnostics-first.json`. No source cleanup or assertion changes.
+
+[Playwright 1.64](https://github.com/microsoft/playwright/releases/tag/v1.64.0) changes device-screen emulation and hidden-iframe visibility; 1.64.1 fixes routed cross-origin preflights. Browser acceptance must qualify the managed Chromium/WebKit revisions, not merely the installed system Chromium. [Vite 8.3.5](https://github.com/vitejs/vite/releases/tag/v8.3.5) changes chunk/preload hashing and dev/HMR behavior. Updated type/lint/unit/infra/build and browser receipts are pending; full runtime E2E, Durable qualification and image checks remain CI gates. Local heavy checks share `/tmp/pi-orb-dependency-heavy-check.lock`; network PostgreSQL uses the dedicated `npm_maintenance` database. No deployment.
+
 ## Local fake-provider npm preparation (2026-10-22)
+
+**Security decision (2026-10-22):** adopt the immutable source from
+[upstream draft PR10](https://github.com/glideapps/fake-openai/pull/10), pending
+upstream review. Its owner-compatible lock refresh retains Fling0.0.70's exact
+registry URL/SHA512. The wrapper validates `allowScripts.cloudflared === false`
+and actual npm >=11.19.1 **before** `npm ci`; engines warnings alone are not an
+execution boundary. Unsupported npm or a missing denial fails closed with a
+resource-specific error and no install/service start. The sanitized npm version
+and separate version-query phases join existing private-root/evidence receipts.
+
+The retained cloudflared0.7.1 hook otherwise downloads an unchecksummed floating
+`latest` binary; an npm wrapper version bump would not fix that. The explicit
+false policy suppresses only this install hook, not SQLite/esbuild setup or
+explicit tunnel commands. This local fixture needs no tunnel. Full and production
+upstream audits retain one low
+[esbuild Windows dev-server advisory](https://github.com/advisories/GHSA-g7r4-m6w7-qqqr):
+0.27.7 belongs to Fling's `^0.27.2`; fixed0.28.1 is outside that range. The Linux
+local CLI uses context/watch/rebuild, not esbuild `serve`; this is neither an
+owner fix nor general Windows qualification. No override, package release,
+private Fling edit, Node major change or Pi change is included.
 
 Failed npm installation retains only finite allowlisted code/errno fields in existing phase artifacts, from at most 64 KiB of private combined output. Missing/conflicting/oversized fields remain unknown; unreadable output is marked unavailable. Raw logs stay private. npm defaults, one install invocation and the 300s tool timeout are unchanged.
 
@@ -450,7 +486,7 @@ PR CI runs the complete unit/DST/infrastructure suite with both real-PostgreSQL 
 
 ## Job-owned fake provider (2026-10-06; integration pending)
 
-**Decision:** PR acceptance uses the existing public fake provider pinned at `eaa274c562ea7b1ec6dce496a1442cfbb55b4106`, checked out into each job's owned temporary root and installed with its lock. The supported Fling0.0.70 command is `npm start -- --cli --be-port <worker> --fe-port <vite> --verbose`; it owns both worker and Vite, with watch enabled. SQLite, storage, secrets and HOME are temporary. No cloud login, tunnel, deployment or private runtime import is needed. The CLI exposes no literal IPv4 bind flag; readiness must prove owned-process/socket identity, migrations and IPv4 reachability, not just `/health`. Docker jobs use one discovered bridge-gateway origin reachable by runner Node and guests; returned session URLs must preserve it. No remote fallback or URL rewriting. A foreground supervisor bounds startup, latches ready worker/Vite PID and birth identities, rejects replacement or durable Files/Secrets restart edges, owns group cleanup and writes only allowlisted source/runtime/lifecycle provenance for artifacts; DB, auth roots and raw provider payloads are excluded.
+**Decision:** PR acceptance uses the existing public fake provider pinned at `5597120466a5785efb480428b0173d631ffb46fa`, checked out into each job's owned temporary root and installed with its lock. The supported Fling0.0.70 command is `npm start -- --cli --be-port <worker> --fe-port <vite> --verbose`; it owns both worker and Vite, with watch enabled. SQLite, storage, secrets and HOME are temporary. No cloud login, tunnel, deployment or private runtime import is needed. The CLI exposes no literal IPv4 bind flag; readiness must prove owned-process/socket identity, migrations and IPv4 reachability, not just `/health`. Docker jobs use one discovered bridge-gateway origin reachable by runner Node and guests; returned session URLs must preserve it. No remote fallback or URL rewriting. A foreground supervisor bounds startup, latches ready worker/Vite PID and birth identities, rejects replacement or durable Files/Secrets restart edges, owns group cleanup and writes only allowlisted source/runtime/lifecycle provenance for artifacts; DB, auth roots and raw provider payloads are excluded.
 
 This removes uncontrolled shared external runtime-API availability, not dependency-install networking or local resource exhaustion. It changes the acceptance environment from remote TLS to local HTTP; it does not prove which historical transport phase stalled. Corrected current E2E and retained approval/upload phase evidence are required before qualification. The launcher is wired into both four-shard workflows. An actual pinned local process smoke proves fresh migrations, worker/Vite socket ownership, manual device authorization, zstd SSE, native bash and the next model response; it does not qualify the complete browser/SDK pipeline. Deterministic supervisor contracts run in the normal infrastructure gate. Actual Docker-container access and coherent current-source E2E remain pending GitHub acceptance.
 
@@ -551,6 +587,10 @@ Full-main authentication acceptance waits for the model-visible completed tool: 
 Stage runtime sources, helpers and their dependency closure in an owned, guest-traversable temporary tree, cleaned after each test. No checkout `node_modules` or application symlink may cross an ancestor inaccessible to UID2000. The controlled mode0700 regression proves the permission failure class and the staged repair; the historical runner's exact ancestor permissions remain unobserved. Preserve the first-failure evidence; this is not a full historical causal finding.
 
 ## Lifecycle failure evidence (decided 2026-10-06)
+
+**Sleep stop-retry scenario availability (2026-10-22).** Superseded [PR 167 CI 39879765871](https://github.com/schani/pi-orb/actions/runs/39879765871/job/120174050823), head `ffddd348006609f7861531d8b322e12abba9451d`, failed `sleep-prepared-provider-stop-bound`, iteration 9. [Original artifact](https://github.com/schani/pi-orb/actions/runs/39879765871/artifacts/12470862747) retains `sleep-prepared-provider-stop-bound-1792716507481-9.json`. Before edits, its recorded trace reproduced the identical assertion on that exact source with Node 24.22.0 and on main `705b366d` with Node 24.22.1, each after clean `npm ci`. Logs, trace and metadata: `/tmp/dependency-integration-evidence/provider167-old-failure/`; current-main RED: `/tmp/dependency-integration-evidence/sleep-stop-qualification/replay-main-before-fix.log`.
+
+Preparation succeeded at virtual 54 ms; four forced provider-stop failures followed through 3,000 ms. The scheduler then fired observation deadlines before ready observation completions, at 10,014, 17,033 and 24,046 ms. Observation retries/backoff prevented another stop attempt before the 20-second waiter expired. The scenario now disables late-timer exploration locally: observation, preparation and history pull remain available while provider stop always fails. The 5-second budget, 20-second assertion, ten iterations and failure assertions are unchanged; other late-timer suites are untouched. This tests clock retention across retries when prerequisite operations succeed, not an unconditional wall-clock completion bound or a fix for observation starvation. Provider/network retries retain `docs/lifecycle.md` policy. The old recorded schedule lies outside the corrected fault model; its pre-fix reproductions are evidence, not a claimed post-fix replay pass. Later green checks alone did not clear the original failure.
 
 Profile-login and full-slice upload failures retain sanitized evidence in the normal four-shard E2E workflow.
 
@@ -1457,6 +1497,10 @@ Decided 2026-08-06: **the app-level log is a tested property.** `LogCapture` (`t
 
 Two lessons from writing those scenarios. A hand-driven scenario must still survive a **late-firing operation deadline**: the timer policy explores late firings, so a pending 5 s provider deadline can fire while a 50 ms provider call is in flight, jumping virtual time and turning an otherwise healthy pass into a cancelled one — scenarios that must not be interrupted by an unrelated decision push their grace/idle/drain windows far beyond any such leap instead of assuming small time steps. And an assertion about state or replica completeness *after tasks were aborted at an arbitrary running edge* is usually wrong: aborting loops mid-recovery can legitimately leave a stopped host (the `start` half of a restart cancelled by its deadline), and a runtime may flush a resume/decline marker after the final observed pull but before loop shutdown. The first made `sweep-leaves-live-orbs` flaky until it asserted sweep decisions from the log; the second was replayed on 2026-08-08 in `preemption-mid-turn-resumes`, whose final completeness assertion now follows an explicit controlled-stop drain.
 
+**Legacy stop/start scenario barrier (2026-10-22).** [PR 165 CI 39877731958](https://github.com/schani/pi-orb/actions/runs/39877731958/job/120167335958) failed `legacy-unstamped-stop-start-replacement`, iteration 5. [Original artifact](https://github.com/schani/pi-orb/actions/runs/39877731958/artifacts/12470330779): `legacy-unstamped-stop-start-replacement-1792715085954-5.json`. Before correction, `DST_REPLAY=test-failures/legacy-unstamped-stop-start-replacement-1792715085954-5.json npx vitest run apps/control-plane/src/domain/spec-replacement.dst.test.ts -t "replaces a legacy unstamped host on an ordinary stop/start"` reproduced the identical host-ID assertion failure both on the security branch and on `9fa0828c`.
+
+The trace shows cancelled pull/health requests, unreachable restart, and complete incarnation-0→1 replacement before initial replication finished. The driver then captured incarnation 1 as “legacy”; its stop/start correctly reused that stamped host. This is a scenario-premise race, not a product replacement failure. The reconciler now waits on an explicit barrier until replication, legacy identity capture and stop acceptance complete; the poller still runs. A pre-stop assertion pins the unstamped incarnation. Existing identity, specification, workspace and single-discard assertions remain unchanged; no timeout increased. The corrected file passes all eight scenarios. The old trace predates the barrier's scheduling topology; its pre-fix replay receipt is evidence, not a claimed post-fix replay pass. Original logs/traces remain under `.context/npm-security/` and `.context/spec-replacement/` in the respective worktrees. Dependency PR qualification remains blocked until the correction lands separately and fresh exact-head gates pass.
+
 DST tests must never be flaky; a non-reproducing failure is a schedule the scenario cannot survive and must be root-caused from its recorded trace (`DST_REPLAY`) before any fix (also recorded in `AGENTS.md`). Decided 2026-08-08 while fixing cross-orb head-of-line blocking: **one `SimulationTask` is one sequential coroutine and must never be shared by concurrent orb reconciliations.** Production's dispatcher creates a fresh real-time task per orb; `reconcile-concurrency.dst.test.ts` injects separately declared worker tasks through the same runner boundary. Its hand-driven dispatcher scans avoid timing assertions against unrelated deadline timers while proving cross-orb overlap, local at-most-one execution, retry timing, abort-during-list exclusion, shutdown drain, and fatal-worker propagation; a companion scenario runs two real create lifecycles concurrently through one serialized global auth flow (`docs/postmortems/2026-08-08-serial-reconciler-head-of-line-blocking.md`). Standing interplay found 2026-08-03: since idle auto-stop (docs/lifecycle.md) landed, any scenario that holds an orb in `running` across long virtual stretches without busy activity or a visible tab races the test idle window — such scenarios must either simulate activity or opt out via a `makeHarness` `idleStopAfterMs` override, as the restart-recovery lifecycle tests now do. Second standing interplay, found 2026-08-06: successful pulls are the only liveness signal, so a scenario that runs a reconciler *without* `pollLoop` and holds an orb in `running` has its host restarted every grace period — correctly, since from the reconciler's side nothing has answered. A scenario that needs an orb to stay `running` (or several to be `running` at the same instant) must run the poll loop too.
 
 Decided 2026-08-06 (from `docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md`): **three boundary rules, each closing a gap the rollout incident fell through.**
@@ -1628,3 +1672,30 @@ CLI suites share bounded UTF-8 output capture, fresh cwd, explicit environment, 
 Lifecycle and publication fixtures reuse ScheduledClaudeQuery queue and independent process/EOF latches; model, filesystem, scheduling and failure behavior remain local. (2026-10-22 PDT).
 
 Only scripts with observed traces containing no entropy or timer events run once. Concurrent process/EOF, failpoint and deadline qualification retains schedule exploration. (2026-10-22 PDT).
+
+## Node 24.22.1 security qualification (2026-10-22; undeployed)
+
+Node-only patch: 24.22.1 LTS, bundled npm 11.19.1; no npm graph or Pi changes.
+Official `SHASUMS256.txt.sig` verifies with the Node release keyring: signer
+`5BE8A3F6C8A5C01D106C0AD820B1A390B168D356` (Antoine du Hamel).
+Downloaded linux-x64 and linux-arm64 tar.xz archives both match the signed manifest:
+
+- x64: `6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6`
+- arm64: `dbabf7a1cbf947e6059ffad2c27b80041db97dea1e553b62afdee7f13fca336e`
+
+The isolated local x64 toolchain reports Node 24.22.1, addon ABI 137 and npm
+11.19.1. Clean `npm ci` applied all four existing dependency patches, added 602
+packages and audited 610; it reports three advisories (one low, two moderate).
+Dependency remediation belongs to a separate PR. Updated pin/checksum contracts
+first failed against the old production pins (two tests, eight failing subtests).
+Evidence is retained locally in `/tmp/node-security-qualification/` (`signature.log`,
+`archives.log`, `red.log`, `npm-ci.log`). Offline, network-namespace-isolated
+node-pty source rebuild using the installed headers passes; an actual shell verifies
+TTY descriptors, output, exit status and ABI 137. Full workspace/E2E typecheck and
+lint pass (411 warnings, 83 infos); pin/sharding unit contracts pass 9/9 and
+PTY/auth/runtime-image unit contracts pass 32/32 (including real spawn/resize/exit).
+Full infra
+passes: 107 Node, 220 Python and 33 native-guest tests, plus filesystem/service
+checks. Local heavy phases were serialized across the dependency worktrees.
+CI owns the full unit/DST suite, runtime E2E and container builds; native cloud-image,
+acceptance and retained-workspace qualification have not run. No deployment.
