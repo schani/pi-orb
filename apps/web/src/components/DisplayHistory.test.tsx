@@ -1,7 +1,6 @@
 import type { DisplayRecord } from "@pi-orb/protocol";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { TranscriptCache } from "../lib/transcript-cache.ts";
 import { detailContext, messageNotice } from "../testkit/display-fixtures.ts";
 import { HistoryView } from "./HistoryView.tsx";
 
@@ -43,17 +42,7 @@ describe("browser summary rendering", () => {
         liveBlocks={[]}
         tools={[]}
         busy={false}
-        detailContext={{
-          orbId: "orb",
-          sessionId: "session",
-          connected: false,
-          operationId: null,
-          cache: new TranscriptCache(),
-          getOwner: () => null,
-          livePending: new Map(),
-          committedPending: new Map(),
-          imagePending: new Map(),
-        }}
+        detailContext={detailContext()}
       />,
     );
     expect(html).toContain("2 ran");
@@ -95,17 +84,7 @@ describe("browser summary rendering", () => {
         liveBlocks={[]}
         tools={[]}
         busy={false}
-        detailContext={{
-          orbId: "orb",
-          sessionId: "session",
-          connected: false,
-          operationId: null,
-          cache: new TranscriptCache(),
-          getOwner: () => null,
-          livePending: new Map(),
-          committedPending: new Map(),
-          imagePending: new Map(),
-        }}
+        detailContext={detailContext()}
       />,
     );
     expect(html).toContain("visible prose");

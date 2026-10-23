@@ -1751,3 +1751,5 @@ Transcript cache qualification reads the actual immutable default budget (256 Mi
 DetailBody owns generic argument/result and image-body rendering once; ToolActivity/HistoryView retain their summary, deferral, role, chart and projection integration assertions. (2026-10-22 PDT).
 
 Composer normalization contracts live with composer-mode; command-options tests exercise option selection only. (2026-10-22 PDT).
+
+Default detail render fixtures use fresh shared detailContext caches and pending maps at each render site. (2026-10-22 PDT).
