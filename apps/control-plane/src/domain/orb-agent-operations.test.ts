@@ -40,7 +40,7 @@ describe("central orb operations", () => {
       identity,
       {
         appOrigin: "https://app",
-        appendAlert: () => okAsync({ recordId: "a" }),
+        appendAlert: () => okAsync({ recordId: "a", duplicate: false }),
       },
     );
     expect(
