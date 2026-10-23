@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { IncomingMessage } from "node:http";
 import { createConnection, type Socket } from "node:net";
 import { HOSTING_FILES_PATH } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
@@ -94,9 +95,11 @@ describe("hosting routes over a real HTTP socket", () => {
   let browserRequestTimeoutMs: number;
   let rawRequestAborted: Promise<void>;
   let markRawRequestAborted: () => void;
+  let observeRequest: (raw: IncomingMessage) => void;
 
   beforeEach(async () => {
     browserRequestTimeoutMs = 200;
+    observeRequest = () => {};
     rawRequestAborted = new Promise<void>((resolve) => {
       markRawRequestAborted = resolve;
     });
@@ -111,6 +114,7 @@ describe("hosting routes over a real HTTP socket", () => {
     app.addHook(
       "onRequest",
       (request: FastifyRequest, _reply: FastifyReply, done: HookHandlerDoneFunction) => {
+        observeRequest(request.raw);
         request.raw.prependOnceListener("aborted", markRawRequestAborted);
         done();
       },
@@ -639,6 +643,21 @@ describe("hosting routes over a real HTTP socket", () => {
   });
 
   it("does not eagerly drain an upload while storage is blocked", async () => {
+    let storageEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      storageEntered = resolve;
+    });
+    let consumed = 0;
+    let raw!: IncomingMessage;
+    observeRequest = (request) => {
+      raw = request;
+      const read = request.read.bind(request);
+      request.read = (...args: Parameters<typeof read>) => {
+        const chunk = read(...args);
+        if (chunk !== null) consumed += chunk.byteLength;
+        return chunk;
+      };
+    };
     Object.assign(harness.hosting.deps.bytes, {
       write: (
         _task: unknown,
@@ -646,8 +665,9 @@ describe("hosting routes over a real HTTP socket", () => {
         _source: unknown,
         _expected: unknown,
         context: { signal: AbortSignal },
-      ) =>
-        new ResultAsync<never, HostingError>(
+      ) => {
+        storageEntered();
+        return new ResultAsync<never, HostingError>(
           new Promise((resolve) =>
             context.signal.addEventListener(
               "abort",
@@ -656,7 +676,8 @@ describe("hosting routes over a real HTTP socket", () => {
               { once: true },
             ),
           ),
-        ),
+        );
+      },
     });
     const total = 8 * 1024 * 1024;
     const socket = createConnection({ host: "127.0.0.1", port });
@@ -670,11 +691,19 @@ describe("hosting routes over a real HTTP socket", () => {
         `x-pi-orb-sha256: ${"a".repeat(64)}`,
       ]),
     );
-    let written = 0;
-    const data = Buffer.alloc(64 * 1024);
-    while (written < total && socket.write(data)) written += data.byteLength;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(written).toBeLessThan(total);
-    socket.destroy();
+    // Queue the complete body; local Socket.write backpressure is not the oracle.
+    socket.write(Buffer.alloc(total));
+    try {
+      await entered;
+      expect(raw.complete).toBe(false);
+      if (raw.readableLength === 0) {
+        await new Promise<void>((resolve) => raw.once("readable", resolve));
+      }
+      expect(raw.readableLength).toBeGreaterThan(0);
+      expect(consumed).toBeLessThanOrEqual(raw.readableHighWaterMark);
+      expect(raw.readableLength).toBeLessThanOrEqual(2 * raw.readableHighWaterMark);
+    } finally {
+      socket.destroy();
+    }
   });
 });

@@ -1,5 +1,9 @@
 # Testing
 
+## Domain/HTTP assertion boundaries (2026-10-22)
+
+Real-socket upload backpressure observes server-side read consumption and queued request bytes only after blocked storage entry, without adding draining listeners. An eager-buffer mutation must fail this boundary.
+
 ## Adapter boundary assertions (2026-10-22)
 
 SQL fixtures register clients before fallible setup; table-driven settings suites capture each acquired subject in `onTestFinished`, without teardown of an unacquired or stale client; process observations/crash markers live under immediately registered roots. Teardown reports cleanup failures separately, attempts every owned release, and retains the original test failure.
