@@ -62,13 +62,14 @@ describe_instance() {
   gcloud compute instances describe "$1" --project "$PI_ORB_GCP_PROJECT" \
     --zone "$PI_ORB_GCE_ZONE" --format=json
 }
-instance_absent() {
-  ! gcloud compute instances describe "$1" --project "$PI_ORB_GCP_PROJECT" \
-    --zone "$PI_ORB_GCE_ZONE" --format='value(name)' >/dev/null 2>&1
+resource_names() {
+  gcloud compute "$1" list --project "$PI_ORB_GCP_PROJECT" \
+    --filter="zone:($PI_ORB_GCE_ZONE) AND name=$2" --format='value(name)'
 }
-disk_absent() {
-  ! gcloud compute disks describe "$1" --project "$PI_ORB_GCP_PROJECT" \
-    --zone "$PI_ORB_GCE_ZONE" --format='value(name)' >/dev/null 2>&1
+instance_absent() {
+  local names
+  names=$(resource_names instances "$1") || return 2
+  [[ -z "$names" ]]
 }
 data_disk_exists() {
   gcloud compute disks describe "$data_disk" --project "$PI_ORB_GCP_PROJECT" \
@@ -126,9 +127,12 @@ wait_orb_state() {
 }
 wait_disposed() {
   local old_instance=$1 old_boot_disk=$2 deadline=$((SECONDS + dispose_deadline_seconds))
+  local listed old_names old_disks
   while (( SECONDS < deadline )); do
-    if [[ -z "$(instances)" ]] && instance_absent "$old_instance" \
-      && disk_absent "$old_boot_disk"; then
+    listed=$(instances) || return 2
+    old_names=$(resource_names instances "$old_instance") || return 2
+    old_disks=$(resource_names disks "$old_boot_disk") || return 2
+    if [[ -z "$listed$old_names$old_disks" ]]; then
       return
     fi
     sleep 2
@@ -186,7 +190,8 @@ data_disk_exists
 # Negative observation: more than two 30-second terminal-backstop intervals
 # with no replacement instance and no state change without explicit Start.
 for (( i = 0; i < negative_window_seconds; i++ )); do
-  [[ -z "$(instances)" ]]
+  observed_instances=$(instances)
+  [[ -z "$observed_instances" ]]
   [[ $(orb_row | jq -r .state) == failed ]]
   sleep 1
 done
@@ -215,7 +220,8 @@ new_spec=$(jq -r '.metadata.items[] | select(.key == "pi-orb-host-spec-fingerpri
 
 gcloud compute ssh "$new_instance" --project "$PI_ORB_GCP_PROJECT" --zone "$PI_ORB_GCE_ZONE" --tunnel-through-iap -- \
   "sudo grep -Fx '$sentinel' /workspace/replacement-sentinel"
-[[ "$(instances)" == "$new_instance" ]]
+observed_instances=$(instances)
+[[ "$observed_instances" == "$new_instance" ]]
 instance_absent "$old_instance"
 [[ $(orb_row | jq -r .state) == running ]]
 
@@ -233,7 +239,8 @@ if [[ -n "${PI_ORB_SMOKE_STAGE2_DEPLOY_COMMAND:-}" ]]; then
   [[ $(describe_instance "$new_instance" | jq -r .id) == "$new_instance_id" ]]
   for (( i = 0; i < negative_window_seconds; i++ )); do
     [[ $(orb_row | jq -r .state) == running ]]
-    [[ "$(instances)" == "$new_instance" ]]
+    observed_instances=$(instances)
+    [[ "$observed_instances" == "$new_instance" ]]
     sleep 1
   done
   # The numeric ID at both ends of the window rules out a same-named instance

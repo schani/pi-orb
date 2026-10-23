@@ -1,6 +1,6 @@
 ## Manual replacement smoke evidence
 
-`infra/smoke_replacement_test.py` runs the manual replacement script with synthetic command adapters; `test:infra` selects it. Private evidence must contain only allowlisted summaries, including failure dumps. Bearers stay out of evidence and process arguments. These offline regressions do not qualify live GCE behavior.
+`infra/smoke_replacement_test.py` runs the manual replacement script with synthetic command adapters; `test:infra` selects it. Private evidence must contain only allowlisted summaries, including failure dumps. Bearers stay out of evidence and process arguments. Permission and transport failures must fail disposal/negative observations, not masquerade as empty inventory. These offline regressions do not qualify live GCE behavior.
 
 # Testing
 

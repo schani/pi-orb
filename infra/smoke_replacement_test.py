@@ -42,11 +42,22 @@ if name == "gcloud":
     if a[:2] == ["auth", "print-identity-token"]:
         print("auth-SENSITIVE"); sys.exit(0)
     if a[:3] == ["compute", "instances", "list"]:
-        print("" if s["state"] == "failed" or s.get("deleted") else inst(s["incarnation"]))
+        filter_value = flag("--filter", "")
+        exact = filter_value.rsplit("name=", 1)[1] if "name=" in filter_value else None
+        if s["state"] == "failed" and not exact:
+            s["failed_lists"] = s.get("failed_lists", 0) + 1; save()
+            if mode == "disposal-list-permission" or mode == "negative-list-transport" and s["failed_lists"] >= 2:
+                print("PERMISSION_DENIED" if "permission" in mode else "Connection reset by peer", file=sys.stderr)
+                sys.exit(1)
+        if mode == "old-instance-permission" and exact and s["incarnation"] == 1:
+            print("PERMISSION_DENIED", file=sys.stderr); sys.exit(1)
+        print("" if s["state"] == "failed" or s.get("deleted") or exact and exact != inst(s["incarnation"])
+              else inst(s["incarnation"]))
     elif a[:3] == ["compute", "instances", "describe"]:
         i = int(a[3].rsplit("i", 1)[1])
         if s["state"] == "failed" or i != s["incarnation"]:
-            print("NOT_FOUND", file=sys.stderr); sys.exit(1)
+            print("PERMISSION_DENIED" if mode == "old-instance-permission" else "NOT_FOUND", file=sys.stderr)
+            sys.exit(1)
         desc = {"name": inst(i), "id": str(100 + i),
                 "disks": [{"boot": True, "source": "zones/z/disks/boot-" + str(i)},
                           {"boot": False, "source": "zones/z/disks/" + disk}],
@@ -55,10 +66,17 @@ if name == "gcloud":
                     {"key": "pi-orb-host-spec-fingerprint", "value": "spec-" + str(i == 2)},
                     {"key": "unrelated", "value": "metadata-SENSITIVE"}]}}
         print(json.dumps(desc) if flag("--format") == "json" else inst(i))
+    elif a[:3] == ["compute", "disks", "list"]:
+        if mode == "disposal-disk-transport" and s["state"] == "failed":
+            print("Connection reset by peer", file=sys.stderr); sys.exit(1)
+        exact = flag("--filter", "").rsplit("name=", 1)[-1]
+        present = {disk} if s["state"] == "failed" else {disk, "boot-" + str(s["incarnation"])}
+        print(exact if exact in present and not s.get("deleted") else "")
     elif a[:3] == ["compute", "disks", "describe"]:
         d = a[3]
         if d != disk:
-            print("NOT_FOUND", file=sys.stderr); sys.exit(1)
+            print("Connection reset by peer" if mode == "disposal-disk-transport" else "NOT_FOUND", file=sys.stderr)
+            sys.exit(1)
         print(json.dumps({"name": disk, "id": "200", "metadata": "disk-SENSITIVE"})
               if flag("--format") == "json" else disk)
     elif a[:2] == ["compute", "ssh"]:
@@ -172,6 +190,14 @@ class ReplacementSmokeTest(unittest.TestCase):
             self.assertNotIn("metadata", summary)
         configs = [json.loads(line) for line in (root / "configs.jsonl").read_text().splitlines()]
         self.assertTrue(any(c["runtime"] for c in configs))
+
+    def test_observation_failures_never_prove_disposal_or_negative_windows(self):
+        for mode, starts in (("disposal-list-permission", 1), ("disposal-disk-transport", 1),
+                             ("negative-list-transport", 1), ("old-instance-permission", 2)):
+            with self.subTest(mode=mode):
+                root, _, _, result = self.run_smoke(mode=mode)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(json.loads((root / "state.json").read_text())["starts"], starts)
 
     def test_failure_dump_excludes_raw_disk_and_orb_metadata(self):
         root, evidence, sentinel, result = self.run_smoke(mode="ssh-failure")
