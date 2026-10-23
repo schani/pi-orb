@@ -4,6 +4,10 @@
 
 Merged main `42cf1061` into the test audit, retaining structured orb results, scenario barriers, task-Result assertions and replay/ownership contracts. Node 24.22.1 / npm 11.19.1 clean installation applies all four patches and reports no vulnerabilities. Focused qualification passes 475 Vitest, 72 Node and 24 Python tests, root workspace/E2E typecheck and scoped Biome (warnings remain). Full unit/infra, browser/runtime E2E, container and cloud gates were not run for this merge.
 
+## Durable audit boundaries (2026-10-22 PDT)
+
+Ownership schedules require successful archive, final archived state, sealed public rows and no native entries. Drain/commit losers must retain the typed stale-owner cause; admission rejection alone does not prove archive.
+
 ## Domain/HTTP assertion boundaries (2026-10-22)
 
 Real-socket upload backpressure observes server-side read consumption and queued request bytes only after blocked storage entry, without adding draining listeners. An eager-buffer mutation must fail this boundary. Disconnect tests wait for a pending storage read, require request-abort propagation before the deadline and await source closure. Socket readiness uses read-entry, writable-backpressure and closure signals, not sleeps.
