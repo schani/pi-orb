@@ -25,6 +25,7 @@ import type {
   StateConflict,
   StoreError,
 } from "./errors.ts";
+import type { HistorySearchParams, HistorySearchResult } from "./history-search-types.ts";
 import type {
   OrbDeletionRow,
   OrbListRow,
@@ -536,6 +537,11 @@ export interface ControlPlaneStore extends ActivityHeadlineStore {
     sessionId: string,
     recordId: string,
   ): ResultAsync<HistoryRecord | null, StoreError>;
+
+  searchHistory(
+    task: SimulationTask,
+    params: HistorySearchParams,
+  ): ResultAsync<HistorySearchResult, StoreError>;
 
   /** Consistent snapshot for the history API and live handoff (docs/history-replication.md). */
   readHistorySnapshot(

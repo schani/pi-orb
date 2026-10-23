@@ -8,6 +8,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Gate first history-search deployment on verified old-writer quiescence before migration 049**; normal schema-before-retirement is unsafe. Qualify a safe maintenance path, including old control-plane/native receipt drain and retirement through new writer activation, before deployment (`docs/history-search.md`).
+
 - **Fix Chromium usage-page viewport overflow qualification** ([CI failure](https://github.com/schani/pi-orb/actions/runs/39530906083/job/118996304627), `e2e/usage-frontend.e2e.test.ts:442`): root-width assertion failed; cause unproven. Preserve `.context/central-work-campaign/cleanup-ci-failure/report.md`; a passing rerun does not clear this blocker.
 
 - **Align boot-hooks skill context-delivery claims** (`apps/orb-runtime/skills/boot-hooks/SKILL.md:105–106,124–125`): reconcile promised env issues and failed-hook outcome/log path in model context with actual delivery; `bootHookPrompt` has no production caller. Remove its unused renderer if appropriate.

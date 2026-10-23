@@ -10,6 +10,7 @@ export * from "./frames.ts";
 export * from "./git-identity.ts";
 export * from "./harness.ts";
 export * from "./history.ts";
+export * from "./history-search.ts";
 export * from "./hosting.ts";
 export * from "./json.ts";
 export * from "./mcp.ts";

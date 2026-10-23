@@ -1,4 +1,6 @@
+import { spawn as spawnProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { join } from "node:path";
 import {
   ID_TOKEN_PATH,
   IdTokenErrorSchema,
@@ -65,7 +67,7 @@ import {
   FakeTokenSigner,
 } from "../testkit/workload-identity.ts";
 import { createHostingAccessPolicy, registerHostingAccessGuard } from "./hosting-access.ts";
-import { registerRuntimeRoutes } from "./runtime-routes.ts";
+import { type RuntimeRouteDeps, registerRuntimeRoutes } from "./runtime-routes.ts";
 
 const ORB = "orb-a";
 const PROJECT = "project-a";
@@ -86,6 +88,7 @@ describe("runtime broker routes", () => {
   let gitIdentity: FakeGitIdentityStore;
   let projectInstructions: FakeProjectInstructionsStore;
   let brokerUsers: string[];
+  const searchHistory = vi.fn<RuntimeRouteDeps["searchHistory"]>();
   const spawnNudge = vi.fn();
   const initialCheckoutCommit = vi.fn(() => okAsync<string | null, StoreError>(null));
   const alertWriter = {
@@ -355,6 +358,168 @@ describe("runtime broker routes", () => {
     ).toBe(404);
   });
 
+  describe("authenticated history search", () => {
+    const path = "/runtime/v1/history/search";
+    function search(payload: unknown, token: string | null = TOKEN) {
+      return app.inject({
+        method: "POST",
+        url: path,
+        payload,
+        headers: token === null ? {} : { authorization: `Bearer ${token}` },
+      });
+    }
+    beforeEach(() => seedOrb("running"));
+    it("delegates a validated body and authenticated caller to shared operations", async () => {
+      const request = { query: "private needle", scope: "project", limit: 10 };
+      const response = await search(request);
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(response.json()).toEqual({ v: 1, hits: [] });
+      expect(searchHistory).toHaveBeenCalledWith(
+        task,
+        expect.objectContaining({ id: ORB }),
+        request,
+      );
+      expect((await app.inject({ method: "GET", url: path })).statusCode).toBe(404);
+    });
+    it.each([
+      {},
+      { query: "" },
+      { query: "  " },
+      { query: "x", limit: 51 },
+      { query: "x", ownerUserId: "forged" },
+    ])("rejects malformed requests before service invocation %j", async (payload) => {
+      const response = await search(payload);
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({
+        v: 1,
+        error: {
+          code: "invalid_request",
+          message: "invalid history search request",
+          retryable: false,
+        },
+      });
+      expect(searchHistory).not.toHaveBeenCalled();
+    });
+    it.each([null, "wrong"])("authenticates before validation with bearer %s", async (token) => {
+      expect((await search({}, token)).statusCode).toBe(401);
+      expect(searchHistory).not.toHaveBeenCalled();
+    });
+    it.each(["stopped", "archived", "deleting"] as const)("rejects %s caller", async (state) => {
+      store.seedOrb(makeOrbRow(ORB, PROJECT, state, { runtimeTokenHash: sha256(TOKEN) }));
+      expect((await search({ query: "x" })).statusCode).toBe(401);
+      expect(searchHistory).not.toHaveBeenCalled();
+    });
+    it("rejects discard-fenced compute", async () => {
+      store.seedOrb(
+        makeOrbRow(ORB, PROJECT, "running", {
+          runtimeTokenHash: sha256(TOKEN),
+          hostDiscardThroughIncarnation: 1,
+        }),
+      );
+      expect((await search({ query: "x" })).statusCode).toBe(401);
+      expect(searchHistory).not.toHaveBeenCalled();
+    });
+    it.each([
+      ["invalid_request", 400],
+      ["unauthorized", 401],
+      ["not_found", 404],
+      ["conflict", 409],
+      ["unavailable", 503],
+      ["internal", 500],
+    ] as const)("preserves %s service failures", async (code, status) => {
+      searchHistory.mockReturnValue(errAsync({ code, message: "search refused" }));
+      const response = await search({ query: "needle" });
+      expect(response.statusCode).toBe(status);
+      expect(response.json()).toEqual(
+        code === "unauthorized"
+          ? { error: "unauthorized" }
+          : {
+              v: 1,
+              error: { code, message: "search refused", retryable: code === "unavailable" },
+            },
+      );
+    });
+    it("reports authentication store outages without leaking database details", async () => {
+      vi.spyOn(store, "getOrbByRuntimeTokenHash").mockReturnValueOnce(
+        errAsync({
+          type: "store_error",
+          code: "unavailable",
+          message: "private SQL endpoint",
+          retryable: true,
+        }),
+      );
+      const response = await search({ query: "private query" });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toEqual({
+        v: 1,
+        error: {
+          code: "unavailable",
+          message: "history search unavailable",
+          retryable: true,
+        },
+      });
+      expect(searchHistory).not.toHaveBeenCalled();
+    });
+    it("rejects malformed operation results instead of exposing private fields", async () => {
+      searchHistory.mockReturnValue(okAsync({ hits: [], private: "hidden" }));
+      const response = await search({ query: "needle" });
+      expect(response.statusCode).toBe(500);
+      expect(response.json()).toEqual({
+        v: 1,
+        error: {
+          code: "internal",
+          message: "malformed history search result",
+          retryable: false,
+        },
+      });
+      expect(response.body).not.toContain("hidden");
+    });
+    it("runs shell dispatch and authenticated transport against the actual route", async () => {
+      await app.listen({ port: 0, host: "127.0.0.1" });
+      const address = app.server.address();
+      if (address === null || typeof address === "string") throw new Error("missing listener");
+      const root = join(import.meta.dirname, "../../../..");
+      const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
+        (resolve, reject) => {
+          const child = spawnProcess(
+            join(root, "apps/orb-runtime/docker/pi-orb"),
+            ["search", "private needle", "--project", "--limit", "7", "--json"],
+            {
+              cwd: root,
+              env: {
+                ...process.env,
+                PI_ORB_CONTROL_PLANE_URL: `http://127.0.0.1:${address.port}`,
+                PI_ORB_RUNTIME_TOKEN: TOKEN,
+              },
+              stdio: ["ignore", "pipe", "pipe"],
+            },
+          );
+          let stdout = "";
+          let stderr = "";
+          child.stdout.on("data", (chunk) => {
+            stdout += chunk.toString();
+          });
+          child.stderr.on("data", (chunk) => {
+            stderr += chunk.toString();
+          });
+          child.once("error", reject);
+          child.once("close", (code) => resolve({ code, stdout, stderr }));
+        },
+      );
+      expect(result).toEqual({
+        code: 0,
+        stdout: `${JSON.stringify({ v: 1, hits: [] }, null, 2)}\n`,
+        stderr: "",
+      });
+      expect(searchHistory).toHaveBeenCalledWith(task, expect.objectContaining({ id: ORB }), {
+        query: "private needle",
+        scope: "project",
+        limit: 7,
+      });
+    });
+  });
+
   const nameGenerator: OrbNameGenerator = {
     generate: () => okAsync("Repair Runtime Auth"),
   };
@@ -385,6 +550,7 @@ describe("runtime broker routes", () => {
       );
     registerRuntimeRoutes(app, task, {
       appOrigin: "https://browser.test",
+      searchHistory,
       ...(tailnetDnsName === null ? {} : { tailnetDnsName }),
       send: (task, caller, request) =>
         sendGuestOrbMessage(task, { ...makeHarness().deps, store: routeStore }, caller, request),
@@ -454,6 +620,7 @@ describe("runtime broker routes", () => {
   }
 
   beforeEach(async () => {
+    searchHistory.mockReset().mockReturnValue(okAsync({ hits: [] }));
     initialCheckoutCommit.mockClear();
     alertWriter.appendAlert.mockClear();
     store = new InMemoryControlPlaneStore(0);

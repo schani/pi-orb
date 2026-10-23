@@ -1465,6 +1465,10 @@ The historical host-SDK probe used a static model, the real Codex SSE parser and
 
 This isolates protocol/tool ordering, not the cause of E2E run `37389785804`. Server emission logs do not establish client consumption, tool execution, or transport EOF. The scripted upload command recursively searches `../uploads` without a timeout or explicit file-readiness gate: absent files can yield successful but unmatched output, while non-regular files or stalled filesystem operations can block. No evidence links either mechanism to that run.
 
+## History search (2026-10-22, America/Los_Angeles; local, undeployed)
+
+Final focused validation passes 320 tests in 15 files (`/tmp/history-search-core-qualified.log`): text/snippets 27, service/store/operations/DST (100 deterministic schedules), protocol/CLI, runtime/issuer routes and PGlite transaction/migration contracts. This run did not use real PostgreSQL. Separate PGlite 12 and real PostgreSQL 16.15 14 pass (`/tmp/history-search-evidence/{pglite,postgres}-qualified.log`); PostgreSQL includes five explicit lock/barrier cases for atomic publication, statement snapshots, backfill/commit progress, archive and delete. Both databases exercise the actual GIN candidate plan. Global typecheck and lint pass (`/tmp/history-search-{typecheck-final,lint}.log`; baseline lint warnings remain). Full validation and Pi/CLI E2E remain pending; E2E has not run while Pi registration/help wording awaits approval. These results do not qualify the first-deployment old-writer quiescence gate (`docs/history-search.md`).
+
 ## End-to-end acceptance
 
 1. Create a project and select central Pi or native Claude.
