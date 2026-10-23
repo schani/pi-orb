@@ -145,6 +145,12 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         await gotoFrontendFixture(page, origin, page.locator(".dashboard .project-column").first());
         const columns = page.locator(".dashboard > *");
         await expectPage(columns.first()).toBeVisible();
+        const actions = page.locator(".dashboard .project-head-actions > .icon-button");
+        expectPage(await actions.count()).toBeGreaterThan(0);
+        for (const action of await actions.all()) {
+          await expectPage(action).toHaveCSS("width", width <= 600 ? "48px" : "24px");
+          await expectPage(action).toHaveCSS("height", width <= 600 ? "48px" : "24px");
+        }
         const geometry = await columns.evaluateAll((elements) =>
           elements.map((element) => element.getBoundingClientRect().width),
         );
@@ -1511,6 +1517,8 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         composer,
       );
       const scroller = page.locator(".orb-transcript-scroll");
+      await expectPage(page.locator(".orb-main")).toHaveCSS("overflow", "hidden");
+      await expectPage(scroller).toHaveCSS("overflow", "auto");
       const app = page.locator(".app");
       await expectPage(composer.getByRole("button", { name: "Write message" })).toBeVisible();
       await expectPage(app).toHaveCSS("height", "844px");
