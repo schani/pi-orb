@@ -8,7 +8,9 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Gate first history-search deployment on verified old-writer quiescence before migration 049**; normal schema-before-retirement is unsafe. Qualify a safe maintenance path, including old control-plane/native receipt drain and retirement through new writer activation, before deployment (`docs/history-search.md`).
+- **Resolve original replacement-smoke 90s timeout attribution** (2026-10-22): preserve the first traceback and evidence gap; controlled CPU-quota RED/GREEN proves avoidable fixture startup cost, not the historical cause. No waiver applies. `docs/postmortems/2026-10-22-replacement-smoke-fixture-budget.md`.
+
+- **Optional PR 162 diagnostic follow-up** (`docs/testing.md`): capture token-safe hosted-provider HTTP/transport outcomes and correct the manual helper's uncaught MCP rejection before reusing its completion oracle. Historical-stall attribution is waived for merge (user-approved 2026-10-22); no cause or fix is claimed.
 
 - **Fix Chromium usage-page viewport overflow qualification** ([CI failure](https://github.com/schani/pi-orb/actions/runs/39530906083/job/118996304627), `e2e/usage-frontend.e2e.test.ts:442`): root-width assertion failed; cause unproven. Preserve `.context/central-work-campaign/cleanup-ci-failure/report.md`; a passing rerun does not clear this blocker.
 

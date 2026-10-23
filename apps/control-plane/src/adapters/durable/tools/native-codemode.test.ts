@@ -1,11 +1,9 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, hook, ToolTask } from "@earendil-works/pi-durable";
 import { errAsync, okAsync } from "neverthrow";
-import { describe, expect, it, vi } from "vitest";
-import type { OrbAgentOperations } from "../../../domain/orb-agent-operations.ts";
+import { describe, expect, it } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
 import { createDurableTools } from "./index.ts";
-import { createOrbTools } from "./orb-tools.ts";
 import { openCodemodeHarness } from "./testkit/codemode.ts";
 
 describe("native Durable codemode integration", () => {
@@ -30,48 +28,6 @@ describe("native Durable codemode integration", () => {
       expect(childNames).not.toContain("orb_spawn");
     } finally {
       await bundle.close();
-    }
-  });
-
-  it("discovers and calls history search as typed native objects", async () => {
-    const hit = {
-      orbId: "orb",
-      sessionId: "session",
-      recordId: "record",
-      name: null,
-      projectName: "Project",
-      snippet: "marker",
-      score: 1,
-      orbUrl: "url",
-    };
-    const invoke = vi
-      .fn<OrbAgentOperations["invoke"]>()
-      .mockReturnValueOnce(okAsync({ hits: [hit] }))
-      .mockReturnValueOnce(errAsync({ code: "unavailable", message: "search unavailable" }));
-    const fixture = await openCodemodeHarness(new CallableCatalog(createOrbTools({ invoke })));
-    try {
-      const result = await fixture.run(`
-const namespace = await describeNamespace("orb");
-if (!namespace?.tools.includes("orb_search_history")) throw new Error("missing search");
-const found = await tools.orb_search_history({query:"marker"});
-if (found.hits[0].recordId !== "record" || found.hits[0].snippet !== "marker") throw new Error("not a typed hit");
-const failed = await tools.orb_search_history({query:"marker"});
-if (failed.error.code !== "unavailable") throw new Error("not a typed error");
-text("SEARCH_OBJECTS_OK");`);
-      expect(result.isError).toBe(false);
-      expect(result.output).toContainEqual({ type: "text", text: "SEARCH_OBJECTS_OK" });
-      expect(invoke.mock.calls.map(([request]) => request)).toEqual([
-        { kind: "search", query: "marker" },
-        { kind: "search", query: "marker" },
-      ]);
-      const invalid = await fixture.run(
-        'await tools.orb_search_history({query:"marker",limit:51});',
-      );
-      expect(invalid.isError).toBe(true);
-      expect(JSON.stringify(invalid.output)).toContain("Invalid arguments for");
-      expect(invoke).toHaveBeenCalledTimes(2);
-    } finally {
-      await fixture.close();
     }
   });
 

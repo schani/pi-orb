@@ -1,6 +1,6 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { ROOT_CONVERSATION_ID, type ToolExecutionApi } from "@earendil-works/pi-durable";
-import { HistorySearchRequestSchema, OrbSpawnRequestSchema } from "@pi-orb/protocol";
+import { OrbSpawnRequestSchema } from "@pi-orb/protocol";
 import { errAsync, okAsync } from "neverthrow";
 import { Check } from "typebox/value";
 import { assert, expect, it, vi } from "vitest";
@@ -20,28 +20,6 @@ it.each([{ provider: "claude", id: "opus" }])("forwards model intent %j", async 
     BACKGROUND_CONTEXT,
   );
   expect(invoke).toHaveBeenCalledWith({ kind: "spawn", prompt: "work", model }, '[42,"call"]');
-});
-
-it("uses the shared search schema and forwards default scope unchanged", async () => {
-  const invoke = vi.fn<OrbAgentOperations["invoke"]>(() => okAsync({ hits: [] }));
-  const tool = createOrbTools({ invoke }).find((tool) => tool.name === "orb_search_history");
-  assert.isDefined(tool);
-  expect(tool.description).toBe(
-    "Search your committed public history with BM25. Defaults to this orb; project searches this project and user searches all your orbs. Returns ranked snippets; use orb_transcript for full context.",
-  );
-  expect(tool.parameters).toBe(HistorySearchRequestSchema);
-  expect(Check(tool.parameters, { query: "marker", limit: 1.5 })).toBe(false);
-  expect(Check(tool.parameters, { query: "marker", limit: 51 })).toBe(false);
-  expect(tool.replay).toBe("safe");
-  await tool.execute(
-    { query: "marker" },
-    { taskId: 42, callId: "call" } as ToolExecutionApi,
-    BACKGROUND_CONTEXT,
-  );
-  expect(invoke).toHaveBeenCalledExactlyOnceWith(
-    { kind: "search", query: "marker" },
-    '[42,"call"]',
-  );
 });
 
 it("distinguishes nested calls while retaining replay identity", async () => {
@@ -66,7 +44,6 @@ it("uses durable child task identities and does not expose authority arguments",
     "orb_self",
     "orb_list",
     "orb_transcript",
-    "orb_search_history",
     "orb_spawn",
     "orb_send",
     "orb_alert",
@@ -246,24 +223,6 @@ const responses = [
     "orb_spawn",
     { prompt: "work" },
     { orbId: "orb", projectId: "project", messageId: "message", url: "url" },
-  ],
-  [
-    "orb_search_history",
-    { query: "marker" },
-    {
-      hits: [
-        {
-          orbId: "orb",
-          sessionId: "session",
-          recordId: "record",
-          name: null,
-          projectName: "Project",
-          snippet: "marker",
-          score: 1,
-          orbUrl: "url",
-        },
-      ],
-    },
   ],
   ["orb_send", { orbId: "orb", message: "hi" }, { orbId: "orb", messageId: "message" }],
   ["orb_alert", { message: "hi" }, { recordId: "record", duplicate: false }],

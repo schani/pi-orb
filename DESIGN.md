@@ -91,7 +91,6 @@ Subsystem designs:
 - [docs/orb-messaging.md](docs/orb-messaging.md) — locally implemented same-owner cross-project peer input, Correspondence band, wake policy and minimal persistence; qualification pending
 - [docs/runtime-protocol.md](docs/runtime-protocol.md) — the browser↔runtime wire protocol: handshake, display frames, detail HTTP, ordering, backpressure
 - [docs/history-replication.md](docs/history-replication.md) — the harness-agnostic history model, pull-only replication, PostgreSQL schema, and implemented explicit offline recovery (2026-10-05, America/Cancun)
-- [docs/history-search.md](docs/history-search.md) — approved owner-scoped BM25 history search, Pi tool and Claude CLI; implementation underway, qualification pending
 - [docs/pi-adapter.md](docs/pi-adapter.md) — central Pi execution, admission, resource policy and product history
 - [docs/claude-code-ui-research.md](docs/claude-code-ui-research.md) — research on Claude Code custom UIs, SDK integration, and authentication caveats; no adoption decision
 - [docs/claude-agent-sdk.md](docs/claude-agent-sdk.md) — approved co-located POC, owner-central subscription auth, accepted long-lived guest bearer, native history/idle contracts and qualification
@@ -125,6 +124,8 @@ Subsystem designs:
 - [docs/dependency-audit.md](docs/dependency-audit.md) — dated dependency inventory, replacement estimates, upgrade constraints, and security limits
 
 Tracking:
+
+- [docs/postmortems/2026-10-22-mcp-startup-deadline.md](docs/postmortems/2026-10-22-mcp-startup-deadline.md) — healthy compute blocked by central discovery; explicit MCP isolation and failure telemetry
 
 - [docs/postmortems/2026-10-22-claude-steering-hidden-message.md](docs/postmortems/2026-10-22-claude-steering-hidden-message.md) — consumed Claude image input hidden by a contentless receipt; frontend inbox/receipt presentation handoff
 - [docs/postmortems/2026-10-22-replacement-smoke-fixture-budget.md](docs/postmortems/2026-10-22-replacement-smoke-fixture-budget.md) — controlled fixture CPU/startup amplification, bounded failure evidence; historical attribution unresolved

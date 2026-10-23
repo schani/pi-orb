@@ -18,9 +18,15 @@ import {
   startControlPlane,
   waitFor,
 } from "./harness.ts";
-import { hasCommittedMcpStatus } from "./testkit/mcp-status-detail.ts";
 
 const it = baseIt.skipIf(process.platform !== "linux");
+const hasMcpAlert = (history: DisplayHistoryView, status: "needs-auth" | "connected") =>
+  history.records.some(
+    (record) =>
+      record.type === "event" &&
+      record.eventType === "orb.alert" &&
+      record.alert?.message === `MCP fixture: ${status}.`,
+  );
 
 it("initial auth recovery → two real Pi runtimes reuse the grant → rejection/refresh → reconnect → disconnect", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-oauth-e2e-"));
@@ -174,13 +180,51 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
     auth: { accountId: "oauth-e2e", device: { manualApprove: true } },
     model: {
       rules: [7, 0, 1, 2, 3, 4, 5, 6].flatMap((index) => [
+        ...(index === 0
+          ? [
+              {
+                match: { userMessage: { regex: "^OAuth retry$" } },
+                steps: [
+                  {
+                    type: "toolCall" as const,
+                    name: "codemode",
+                    arguments: {
+                      code: "text(await tools.mcp_status({})); text('OAUTH_RETRY_STARTED');",
+                    },
+                  },
+                  { type: "stop" as const, status: "completed" as const },
+                ],
+              },
+              {
+                match: { toolResultContains: { regex: "OAUTH_RETRY_STARTED" } },
+                steps: [
+                  { type: "text" as const, content: "OAUTH_RETRY_DONE" },
+                  { type: "stop" as const, status: "completed" as const },
+                ],
+              },
+              {
+                match: {
+                  userMessage: { regex: "^Write a single short desktop-notification sentence" },
+                },
+                steps: [
+                  { type: "text" as const, content: "Reconnected OAuth." },
+                  { type: "stop" as const, status: "completed" as const },
+                ],
+              },
+            ]
+          : []),
         {
           match: { userMessage: { regex: `^OAuth ${index}$` } },
           steps: [
             {
               type: "toolCall" as const,
               name: "codemode",
-              arguments: { code: "text(await tools.mcp__fixture__read({}))" },
+              arguments: {
+                code:
+                  index === 7
+                    ? 'text(await describeNamespace("mcp__fixture"))'
+                    : "text(await tools.mcp__fixture__read({}))",
+              },
             },
             { type: "stop" as const, status: "completed" as const },
           ],
@@ -313,7 +357,7 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
           status: number;
         }[];
         return history.includes(`OAUTH_DONE_${index}`) &&
-          requests.some((r) => r.matchedRuleIndex === (index + 1) * 3 + 2 && r.status === 200)
+          requests.some((r) => r.matchedRuleIndex === (index + 1) * 3 + 5 && r.status === 200)
           ? true
           : null;
       },
@@ -396,6 +440,20 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
         expect(initial.status).toBe("ready");
         expect(initial.sessionId).toBeTruthy();
         expect(initial.runtimeInstanceId).toBeTruthy();
+        await waitFor(
+          "automatic authorization-required alert before input",
+          async () => {
+            const history = (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`))
+              .body as unknown as DisplayHistoryView;
+            expect(
+              history.records.filter(
+                (record) => record.type === "message" && record.role === "user",
+              ),
+            ).toHaveLength(0);
+            return hasMcpAlert(history, "needs-auth") ? true : null;
+          },
+          { timeoutMs: 60_000 },
+        );
         expect(
           (
             await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${randomUUID()}`, {
@@ -421,12 +479,7 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
             const assistant = records
               .filter((record) => record.type === "message" && record.role === "assistant")
               .map((record) => (record.type === "message" ? record.finishReason : undefined));
-            const detail = await hasCommittedMcpStatus(history, "needs-auth", (path) =>
-              api(cp.baseUrl, "GET", path),
-            );
-            if (detail.isErr() && detail.error.type !== "detail_missing")
-              throw new FatalProbeError(`MCP detail ${detail.error.type} (${detail.error.status})`);
-            const needsAuth = detail.isOk() && detail.value;
+            const needsAuth = hasMcpAlert(history, "needs-auth");
             const modelRules = requests.map((request) => [
               request.matchedRuleIndex,
               request.status,
@@ -435,7 +488,10 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
             return user &&
               assistant.includes("stop") &&
               needsAuth &&
-              requests.some((request) => request.matchedRuleIndex === 0 && request.status === 200)
+              requests.some(
+                (request) => request.matchedRuleIndex === 0 && request.status === 200,
+              ) &&
+              requests.some((request) => request.matchedRuleIndex === 2 && request.status === 200)
               ? true
               : null;
           },
@@ -444,21 +500,30 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
         expect(acceptedCalls).toBe(0);
         expect(grant).toBe(0);
         await consent();
-        await message(orb, index);
+        expect(
+          (
+            await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${randomUUID()}`, {
+              content: [{ type: "text", text: "OAuth retry" }],
+            })
+          ).status,
+        ).toBe(202);
         await waitFor(
           "connected recovery history",
           async () => {
             const history = (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`))
               .body as unknown as DisplayHistoryView;
-            const detail = await hasCommittedMcpStatus(history, "connected", (path) =>
-              api(cp.baseUrl, "GET", path),
-            );
-            if (detail.isErr() && detail.error.type !== "detail_missing")
-              throw new FatalProbeError(`MCP detail ${detail.error.type} (${detail.error.status})`);
-            return detail.isOk() && detail.value ? true : null;
+            const requests = (await fakeControl(fake.sessionKey, "/requests")) as unknown as {
+              matchedRuleIndex: number;
+              status: number;
+            }[];
+            return hasMcpAlert(history, "connected") &&
+              requests.some((request) => request.matchedRuleIndex === 5 && request.status === 200)
+              ? true
+              : null;
           },
           { timeoutMs: 60_000 },
         );
+        await message(orb, index);
         const recovered = await health();
         expect(recovered).toMatchObject({
           status: "ready",
@@ -468,7 +533,18 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
         expect(
           (JSON.parse(readFileSync(metadataPath, "utf8")) as { incarnation: number }).incarnation,
         ).toBe(before.incarnation);
-      } else await message(orb, index);
+      } else {
+        await waitFor("MCP registry publication", async () =>
+          cp.logs
+            .join("")
+            .includes(
+              `lifecycle: orb=${orb} test_registry_published server=fixture status=available`,
+            )
+            ? true
+            : null,
+        );
+        await message(orb, index);
+      }
     }
     expect(grant).toBe(1);
     expect(acceptedCalls).toBe(2);

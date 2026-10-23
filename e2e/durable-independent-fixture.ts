@@ -384,13 +384,16 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
       expect(
         (await api(cp.baseUrl, "POST", `/api/v1/projects/${project}/orbs`, { id: orb })).status,
       ).toBe(202);
-      expect(
-        (
-          await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${firstMessage}`, {
-            content: [{ type: "text", text: "CENTRAL_FIRST" }],
-          })
-        ).status,
-      ).toBe(202);
+      const submitFirst = async () => {
+        expect(
+          (
+            await api(cp!.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${firstMessage}`, {
+              content: [{ type: "text", text: "CENTRAL_FIRST" }],
+            })
+          ).status,
+        ).toBe(202);
+      };
+      if (cancellation === "git-stop" || cancellation === "git-abort") await submitFirst();
       loginApproval = waitFor(
         "central Codex login",
         async () => {
@@ -542,6 +545,14 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
       resourceHeld?.end("resources released");
       const approval = await loginApproval;
       if (!approval.ok) throw approval.cause;
+      await waitFor("MCP registry publication before scripted tool selection", async () =>
+        cp!.logs
+          .join("")
+          .includes(`lifecycle: orb=${orb} test_registry_published server=web status=available`)
+          ? true
+          : null,
+      );
+      await submitFirst();
       await waitFor(
         "blocking setup hook entered readiness barrier before any model turn",
         async () => (held ? true : null),

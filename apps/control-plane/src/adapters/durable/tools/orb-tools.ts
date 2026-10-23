@@ -6,8 +6,6 @@ import {
   type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
 import {
-  HistorySearchRequestSchema,
-  HistorySearchResultSchema,
   OrbInspectionListSchema,
   OrbSelfSchema,
   OrbSpawnRequestSchema,
@@ -90,15 +88,6 @@ export function createOrbTools(service: OrbAgentOperations, notifyParent?: Paren
       structuredOutputSchema: resultSchema(Type.Omit(OrbTranscriptSchema, ["v"])),
       replay: "safe",
       execute: async (args, api) => output({ kind: "transcript", ...args }, api),
-    }),
-    defineTool({
-      name: "orb_search_history",
-      description:
-        "Search your committed public history with BM25. Defaults to this orb; project searches this project and user searches all your orbs. Returns ranked snippets; use orb_transcript for full context.",
-      parameters: HistorySearchRequestSchema,
-      structuredOutputSchema: resultSchema(HistorySearchResultSchema),
-      replay: "safe",
-      execute: async (args, api) => output({ kind: "search", ...args }, api),
     }),
     defineTool({
       name: "orb_spawn",
