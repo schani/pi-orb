@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 test("study lifecycle closes after callback failure and allocates distinct owned outputs", async () => {
   const source = (await readFile(new URL("./study-browser.mjs", import.meta.url), "utf8"))
     .replace('import { chromium } from "playwright";', "const { chromium } = globalThis.studyFixture;");
-  const root = await mkdtemp(".context/study-browser-test-");
+  const root = await mkdtemp(join(tmpdir(), "study-browser-test-"));
   const previous = process.env.STUDY_OUTPUT_DIR;
   process.env.STUDY_OUTPUT_DIR = root;
   let closed = 0;

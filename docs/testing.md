@@ -30,6 +30,10 @@ Exact-generation delete contracts require the original object after a wrong-gene
 
 `openThrowawayPostgres` owns a unique schema per subject, sets pool-wide `search_path`, and drops only that schema on close. Concurrent subjects migrate independently; migration contracts retain their schema-relative catalog checks. Use a test-only database with schema privileges. MCP and project-instructions share behavioral cases across PGlite and real PostgreSQL. Two-client witnesses hold the project row, observe `pg_blocking_pids` on the competing locking SELECT, commit a deletion fence, then require conflict and unchanged publication state; no guessed sleeps. Pending-abort uses the common `PI_ORB_TEST_DATABASE_URL` driver selection and verifies its isolated schema. Local audit receipts use PostgreSQL 15.19 over an owned Unix socket, not CI’s PostgreSQL 16.
 
+## Synthetic manual-probe regression selection (2026-10-22)
+
+`test:infra` selects synthetic ownership regressions for the network reproducer, study validators and native integration probes. They own temporary fixtures independently of checkout path or prior tests; no browser, Docker or cloud operation runs. Manual rendering and live qualification remain separate.
+
 ## Manual replacement smoke evidence
 
 `infra/smoke_replacement_test.py` runs the manual replacement script with synthetic command adapters; `test:infra` selects it. Private evidence must contain only allowlisted summaries, including failure dumps. Bearers stay out of evidence and process arguments; the existing Stage 2 happy path also rejects regular-file stdin for large raw descriptions. Permission and transport failures must fail disposal/negative observations, not masquerade as empty inventory. Success requires selected-user authentication, verified API/provider cleanup and bounded external calls, including Stage 2; failed owned fixtures remain for inspection. `infra/smoke_external_test.py` controls process/HTTP responses and clocks to prove bounds and refusal status without live access. These offline regressions do not qualify live GCE behavior.

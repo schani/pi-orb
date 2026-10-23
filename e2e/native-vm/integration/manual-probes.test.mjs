@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
@@ -78,7 +80,7 @@ test("unknown control stage is rejected before fixture reads or operations", asy
 test("application probe expectations come from the owned fixture", async () => {
   const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
   const { spawnSync } = await import("node:child_process");
-  const root = await mkdtemp(".context/application-expectations-test-");
+  const root = await mkdtemp(join(tmpdir(), "application-expectations-test-"));
   const expected = root + "/application-expectations.json";
   const commit = "a".repeat(40);
   await writeFile(
@@ -99,7 +101,7 @@ test("application probe expectations come from the owned fixture", async () => {
         [
           "-ec",
           `
-        id() { :; }; sudo() { :; }
+        id() { :; }; sudo() { :; }; cd() { test "$1" = /workspace/repo; }
         gh() { printf '%s' '${login}'; }
         git() { printf '%s' '${sha}'; }
         ${source}
