@@ -1624,3 +1624,5 @@ Default native qualification retains root fanout and worker denial; foreground-d
 Shared instructions failures use one status/schema/sanitization table; wrapper smokes retain exact authenticated paths and error scope. (2026-10-22 PDT).
 
 CLI suites share bounded UTF-8 output capture, fresh cwd, explicit environment, deadline and joined process-group termination; command responders and output contracts stay local. (2026-10-22 PDT).
+
+Lifecycle and publication fixtures reuse ScheduledClaudeQuery queue and independent process/EOF latches; model, filesystem, scheduling and failure behavior remain local. (2026-10-22 PDT).
