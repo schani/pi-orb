@@ -1733,3 +1733,5 @@ Dependency patch CLI cases share installation/cwd/environment setup while retain
 Native-image cleanup fixtures share only typed input defaults; temporary directories, cloud phases, ownership and simulation timing remain local. (2026-10-22 PDT).
 
 Manual inference tracing qualification asserts exact forwarded frames and status, private-text exclusion and record inventory. Client cancellation waits for upstream close; split-frame cutoff forwards each byte once. (2026-10-22 PDT).
+
+SSR history checks summary markup only; mounted lazy-transcript qualification counts every closed tool detail path, then asserts retry and cache reads after opening. Backdrop clicks remain browser-owned. (2026-10-22 PDT).

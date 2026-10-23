@@ -1,6 +1,6 @@
 import type { DisplayRecord } from "@pi-orb/protocol";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { TranscriptCache } from "../lib/transcript-cache.ts";
 import { detailContext, messageNotice } from "../testkit/display-fixtures.ts";
 import { HistoryView } from "./HistoryView.tsx";
@@ -14,7 +14,7 @@ const base = {
 };
 
 describe("browser summary rendering", () => {
-  it("shows every call in a group without fetching detail; capped title equals heading", () => {
+  it("renders every summary in a group; capped title equals heading", () => {
     const headline = `${"é".repeat(510)}…`;
     const records: DisplayRecord[] = [
       {
@@ -37,7 +37,6 @@ describe("browser summary rendering", () => {
         ],
       },
     ];
-    const read = vi.fn();
     const html = renderToStaticMarkup(
       <HistoryView
         records={records}
@@ -60,7 +59,6 @@ describe("browser summary rendering", () => {
     expect(html).toContain("2 ran");
     expect(html).toContain("other");
     expect(html).toContain(`title="${headline}"`);
-    expect(read).not.toHaveBeenCalled();
   });
   it("keeps a compact child message in the native activity rail", () => {
     const records = [messageNotice("Actual child message", "notice", "child", "Check deployment")];

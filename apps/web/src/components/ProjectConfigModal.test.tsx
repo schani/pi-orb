@@ -31,7 +31,7 @@ describe("ProjectConfigModal", () => {
     expect(html).not.toContain("show value");
   });
 
-  it("does not make the backdrop an accidental close button", () => {
+  it("renders the backdrop without button semantics", () => {
     const html = renderToStaticMarkup(
       <ProjectConfigModal project={project} onClose={() => {}} onChanged={() => {}} />,
     );
