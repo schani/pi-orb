@@ -1725,3 +1725,5 @@ acceptance and retained-workspace qualification have not run. No deployment.
 Native image cleanup tests observe the injected delete submitter: owned resources submit once; conflicting/missing labels and failed snapshots submit nothing. (2026-10-22 PDT).
 
 Cancellation cleanup qualification observes signal identity and its non-aborted state at each cleanup entry. (2026-10-22 PDT).
+
+Foundation adoption qualification rejects every non-read gcloud operation during dry run and pins the complete guarded execute mutation inventory, including changed-generation refusal. (2026-10-22 PDT).
