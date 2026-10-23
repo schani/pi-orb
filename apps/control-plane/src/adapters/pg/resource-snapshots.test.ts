@@ -1,15 +1,22 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { errAsync, okAsync } from "neverthrow";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { ResourceSnapshot } from "../../domain/resources.ts";
 import { PGliteClient } from "./pglite-client.ts";
 import { PgResourceSnapshots } from "./resource-snapshots.ts";
 
 const orbId = "00000000-0000-4000-8000-000000000001";
 describe("resource snapshot PostgreSQL persistence", () => {
+  const clients: PGliteClient[] = [];
+  afterEach(async () => {
+    for (const result of await Promise.all(clients.splice(0).map((client) => client.end()))) {
+      expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    }
+  });
   it("rolls back cancellation after a file insert, before publication commits", async () => {
     const client = new PGliteClient();
+    clients.push(client);
     await client.query("CREATE TABLE orbs(id uuid PRIMARY KEY)");
     await client.transaction(async (_query, execute) =>
       execute(
@@ -56,10 +63,10 @@ describe("resource snapshot PostgreSQL persistence", () => {
     expect(controller.signal.aborted).toBe(true);
     expect(result.isErr()).toBe(true);
     expect((await store.get(orbId))._unsafeUnwrap()).toBeNull();
-    await client.end();
   });
   it("atomically publishes bytes and manifest, reopens, pins once and cleans private data", async () => {
     const client = new PGliteClient();
+    clients.push(client);
     expect((await client.query("CREATE TABLE orbs(id uuid PRIMARY KEY)")).isOk()).toBe(true);
     expect(
       (
@@ -102,10 +109,10 @@ describe("resource snapshot PostgreSQL persistence", () => {
     expect((await store.get(orbId)).isErr()).toBe(true);
     await store.remove(orbId);
     expect((await store.get(orbId))._unsafeUnwrap()).toBe(null);
-    await client.end();
   });
   it("rolls back a manifest when asset insert fails", async () => {
     const client = new PGliteClient();
+    clients.push(client);
     await client.query("CREATE TABLE orbs(id uuid PRIMARY KEY)");
     await client.transaction(async (_query, execute) =>
       execute(
@@ -134,7 +141,6 @@ describe("resource snapshot PostgreSQL persistence", () => {
     });
     expect(r.isErr()).toBe(true);
     expect((await store.get(orbId))._unsafeUnwrap()).toBe(null);
-    await client.end();
   });
 });
 

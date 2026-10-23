@@ -60,12 +60,15 @@ export function credentialPointerMigrationContractTests(
   describe(`${label} credential pointer ownership migration`, () => {
     const clients: PostgreSQLClient[] = [];
     afterEach(async () => {
-      await Promise.all(clients.splice(0).map((client) => client.end()));
+      for (const result of await Promise.all(clients.splice(0).map((client) => client.end()))) {
+        expect(result.isOk(), JSON.stringify(result)).toBe(true);
+      }
     });
 
     it("fails closed and rolls back existing pointers without an exact mapping", async () => {
-      const client = await prepareLegacy(await open());
+      const client = await open();
       clients.push(client);
+      await prepareLegacy(client);
       await client.query(
         `INSERT INTO credential_pointers
        (provider, row_version, generation, secret_version, refresh_lease_until, last_refresh_at)
@@ -81,8 +84,9 @@ export function credentialPointerMigrationContractTests(
     });
 
     it("supports an empty credential migration without an owner", async () => {
-      const client = await prepareLegacy(await open(), false);
+      const client = await open();
       clients.push(client);
+      await prepareLegacy(client, false);
 
       expect((await runMigrations(client)).isOk()).toBe(true);
       expect(
@@ -91,8 +95,9 @@ export function credentialPointerMigrationContractTests(
     });
 
     it("selects the exact known user among multiple users", async () => {
-      const client = await prepareLegacy(await open());
+      const client = await open();
       clients.push(client);
+      await prepareLegacy(client);
       (
         await client.query(
           `INSERT INTO users (id, identity_issuer, identity_subject, created_at, updated_at)
@@ -124,8 +129,9 @@ export function credentialPointerMigrationContractTests(
     });
 
     it("rolls back for an unknown selected user", async () => {
-      const client = await prepareLegacy(await open(), false);
+      const client = await open();
       clients.push(client);
+      await prepareLegacy(client, false);
       (
         await client.query(
           `INSERT INTO credential_pointers
@@ -147,8 +153,9 @@ export function credentialPointerMigrationContractTests(
     });
 
     it("preserves exact pointer state and permits the same provider for two users", async () => {
-      const client = await prepareLegacy(await open());
+      const client = await open();
       clients.push(client);
+      await prepareLegacy(client);
       await client.query(
         `INSERT INTO credential_pointers
        (provider, row_version, generation, secret_version, refresh_lease_until, last_refresh_at)

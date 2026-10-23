@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NoSimulationTask } from "determined";
 import { ok } from "neverthrow";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { makeProjectRow, seedTestUser } from "../../testkit/fixtures.ts";
 import { openThrowawayPostgres } from "../../testkit/postgres.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
@@ -16,7 +16,7 @@ const url = process.env["PI_ORB_TEST_DATABASE_URL"];
 describe.each(["PGlite", ...(url ? ["PostgreSQL"] : [])])("%s project-instructions", (backend) => {
   let db: PostgreSQLClient;
   let store: PostgreSQLProjectInstructionsStore;
-  beforeEach(async () => {
+  beforeEach(async ({ onTestFinished }) => {
     const subject =
       backend === "PostgreSQL" && url
         ? await openThrowawayPostgres(url)
@@ -24,6 +24,10 @@ describe.each(["PGlite", ...(url ? ["PostgreSQL"] : [])])("%s project-instructio
             const client = new PGliteClient();
             return { client, database: composeControlPlaneDatabase(client) };
           })();
+    onTestFinished(async () => {
+      const closed = await subject.database.close();
+      expect(closed.isOk(), JSON.stringify(closed)).toBe(true);
+    });
     db = subject.client;
     const database = subject.database;
     (await database.migrate())._unsafeUnwrap();
@@ -31,9 +35,6 @@ describe.each(["PGlite", ...(url ? ["PostgreSQL"] : [])])("%s project-instructio
     for (const id of [A, B])
       (await database.store.insertProject(task, makeProjectRow(id)))._unsafeUnwrap();
     store = new PostgreSQLProjectInstructionsStore(db);
-  });
-  afterEach(async () => {
-    await db.end();
   });
   it("seeds empty, serializes assignments, preserves exact text and isolates projects", async () => {
     expect((await store.read(task, A))._unsafeUnwrap()).toEqual({ content: "", revision: 0 });

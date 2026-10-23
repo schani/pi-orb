@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NoSimulationTask } from "determined";
 import { ok } from "neverthrow";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { ProjectSecretsDeps } from "../../domain/ports.ts";
 import {
   deleteProjectSecret,
@@ -24,7 +24,7 @@ describe.each(["PGlite", ...(url ? ["PostgreSQL"] : [])])("%s mcp", (backend) =>
   let db: PostgreSQLClient;
   let store: PostgreSQLMcpStore;
   let secrets: ProjectSecretsDeps;
-  beforeEach(async () => {
+  beforeEach(async ({ onTestFinished }) => {
     const subject =
       backend === "PostgreSQL" && url
         ? await openThrowawayPostgres(url)
@@ -32,6 +32,10 @@ describe.each(["PGlite", ...(url ? ["PostgreSQL"] : [])])("%s mcp", (backend) =>
             const client = new PGliteClient();
             return { client, database: composeControlPlaneDatabase(client) };
           })();
+    onTestFinished(async () => {
+      const closed = await subject.database.close();
+      expect(closed.isOk(), JSON.stringify(closed)).toBe(true);
+    });
     db = subject.client;
     const database = subject.database;
     (await database.migrate())._unsafeUnwrap();
@@ -41,9 +45,6 @@ describe.each(["PGlite", ...(url ? ["PostgreSQL"] : [])])("%s mcp", (backend) =>
     store = new PostgreSQLMcpStore(db);
     secrets = { pointers: database.projectSecrets, secrets: new FakeSecretStore() };
     (await putProjectSecret(task, secrets, P, "POSTHOG_KEY", "synthetic-value"))._unsafeUnwrap();
-  });
-  afterEach(async () => {
-    await db.end();
   });
   it("fences concurrent writes by revision and isolates projects", async () => {
     const config = {
