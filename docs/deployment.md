@@ -259,19 +259,25 @@ In priority order:
    GitHub runners, 16m32s workflow elapsed. The historical serial 35m12s / 407-test
    run is not a controlled same-source benchmark; no isolated speedup is claimed.
    Evidence and shard timings are in `docs/testing.md`.
-2. **Approved: trusted BuildKit layer cache (decided 2026-10-15).**
-   Each E2E runner builds its checkout with pinned Buildx actions, imports GHA
-   scope `e2e-runtime-linux-amd64-v1`, and loads `pi-orb-runtime:dev` locally.
-   Only shard 1 of `push`/`main` exports (`mode=max`); PR/manual runs import only.
-   GitHub branch isolation keeps PR-written caches out of main qualification.
-   Setup requires the exact build-action image ID, without fallback; local runs
-   rebuild the current tree. Ten-minute builds, isolated serial shards and all
-   qualification gates remain. This reuses layers, not accepted images.
-   Build progress retains layer hits/misses; summaries retain source SHA, image
-   ID, scope and writer policy. Build-record artifacts are disabled. No registry
-   publication or cloud credentials; credentials, logs and mutable state are not
-   cache inputs. Export evidence and unvalidated fresh-runner reuse:
-   `docs/postmortems/2026-10-15-runtime-dependency-qualification.md`.
+2. **Decision (2026-10-23): isolated E2E runtime builds.**
+   Each runner builds its checkout with pinned Buildx actions and loads
+   `pi-orb-runtime:dev` locally. Setup requires the exact build-action image ID,
+   without fallback; local runs rebuild the current tree. Ten-minute builds,
+   isolated serial shards and all qualification gates remain. Build progress
+   retains phase timings; summaries retain source SHA and image ID. Build-record
+   artifacts are disabled; no registry publication or cloud credentials.
+
+   The October 15 GHA layer-cache decision was rejected after
+   [E2E 40029487129, shard 4](https://github.com/schani/pi-orb/actions/runs/40029487129/job/120673891989)
+   exhausted 600s materializing lazy remote layers for the Docker exporter:
+   all twenty Dockerfile steps were cached, but a 631.51 MB blob took 308.4s
+   and a 633.25 MB blob reached only 460.32 MB after 596.4s. The same blobs
+   took 7.3–26.9s on two successful shards. Captured disk/memory diagnostics
+   show no pressure. Removing optional E2E runtime cache import/export removes
+   that acquisition path, not a proven lower-level backend/routing defect.
+   Other caches are unchanged. First-failure evidence:
+   `.context/deploy-override-evidence/pr182/failure-40029487129/investigation.md`;
+   cold-build qualification: `docs/testing.md`.
 3. **Overlap the remote native build with checks.** Native and control-plane
    builds already run together; the additional overlap is with qualification.
    No publication or deployment before all required checks and acceptance pass.

@@ -4,6 +4,26 @@ MCP E2E waits for registry publication through `test_registry_published` only un
 
 **Independent-fixture ordering (2026-10-22):** [Durable run 39896251674](https://github.com/schani/pi-orb/actions/runs/39896251674) failed six cases because the first scripted response called `mcp__web__search` before automatic discovery published it. Captured tool output confirms the missing callable, followed by a fake-provider unmatched-rule response. Waiting before model login approval deadlocked: model composition resolves auth before creating MCP tools (local evidence: `/tmp/pr162-fixture-fix-e2e/`). The fixture instead approves auth, waits for registry publication, then sends the first scripted MCP input while execution readiness remains held. Git-cancellation cases retain their queued pre-admission input. No production discovery gate, status prerequisite or timeout increase is added. First logs/artifacts: `/tmp/pr162-babysit-ci/`. This correction does not explain the separate hosted-provider stalls.
 
+## E2E runtime image acquisition (2026-10-23)
+
+The source/image-ID checks and 600s bound remain; the optional GHA runtime-image
+cache is removed. Measured exporter failure and decision: `docs/deployment.md`.
+
+Tests first: the updated workflow contract failed on cache import/export, then
+all twelve image-ownership/workflow contracts passed. `npm ci`, infrastructure
+checks, typecheck and lint passed (447 warnings, 87 infos). After starting the
+existing local Docker service, one fresh, empty Buildx builder completed the
+actual amd64 build and image load in **305s**, under the unchanged 600s limit;
+no cache import/export, fallback or retry. All 324 retained copied-source files
+matched SHA-256, and the loaded tag matched the build's exact image ID
+`sha256:bde452183e423c7da3af6ff03df7587df4d9a77a4235b6694f6fb89529e117f6`.
+At least 32 GiB remained free. This is local Docker 29.1.3 / Buildx 0.38.1 /
+BuildKit 0.33.1 evidence, not hosted-runner performance or a full E2E pass.
+Runtime inputs are unchanged from `2452ca6`; exact-new-head hosted gates remain
+required. No cloud qualification, merge or deployment occurred. First-failure
+and cold-build receipts: `.context/deploy-override-evidence/pr182/failure-40029487129/`
+and `.context/deploy-override-evidence/cache-removal/`.
+
 ## MCP reduction qualification (2026-10-22)
 
 Frozen base patch SHA256 `b0139c4d13d014709b6ee46efaafc86772f5158edd9abc8ad4b7c6959bffcba5` passed 44 files / 233 unit tests, typecheck, full lint and scoped Biome; no full-suite qualification is claimed.

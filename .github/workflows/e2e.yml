@@ -72,16 +72,13 @@ jobs:
           tags: pi-orb-runtime:dev
           load: true
           push: false
-          cache-from: type=gha,scope=e2e-runtime-linux-amd64-v1
-          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 1 && 'type=gha,scope=e2e-runtime-linux-amd64-v1,mode=max' || '' }}
 
       - name: Report runtime image build
         env:
           SOURCE_SHA: ${{ github.sha }}
           IMAGE_ID: ${{ steps.runtime-image.outputs.imageid }}
-          CACHE_WRITE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 1 }}
         run: |
-          printf '### E2E runtime image\n\nSource: `%s`\n\nImage: `%s`\n\nCache: `e2e-runtime-linux-amd64-v1`; write: `%s`\n' "$SOURCE_SHA" "$IMAGE_ID" "$CACHE_WRITE" >> "$GITHUB_STEP_SUMMARY"
+          printf '### E2E runtime image\n\nSource: `%s`\n\nImage: `%s`\n' "$SOURCE_SHA" "$IMAGE_ID" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run end-to-end test
         env:
