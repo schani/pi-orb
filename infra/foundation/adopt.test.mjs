@@ -123,7 +123,6 @@ test("execute pushes foundation before application with generation guards", (t) 
       ],
     ],
   );
-
 });
 
 test("execute refuses a generation changed under the lock", (t) => {
