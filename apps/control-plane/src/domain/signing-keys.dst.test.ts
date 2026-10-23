@@ -22,6 +22,7 @@ import {
   ensureActiveSigningKey,
   rotateSigningKey,
   SIGNING_KEY_SECRET_PROVIDER,
+  SigningKeyMaterialCache,
 } from "./signing-keys.ts";
 import { mintIdToken } from "./workload-identity.ts";
 
@@ -587,58 +588,82 @@ describe("rotating the issuer's signing key (DST)", () => {
     );
   });
 
-  it("survives arbitrary write failures during rotation with one active key", async () => {
+  it("repairs failed rotations to exactly one readable published active key", async () => {
+    const probabilities = {
+      [FAILPOINTS.signingKeyWrite]: 0,
+      [FAILPOINTS.signingKeyRead]: 0,
+    };
     await runDst(
       {
         name: "signing-key-rotation-failpoints",
         iterations: 50,
-        failpointProbabilities: {
-          [FAILPOINTS.signingKeyWrite]: 0.3,
-          [FAILPOINTS.signingKeyRead]: 0.1,
-        },
+        failpointProbabilities: probabilities,
       },
-      async (sim) => {
+      async (sim, nextPhase) => {
+        probabilities[FAILPOINTS.signingKeyWrite] = 0;
+        probabilities[FAILPOINTS.signingKeyRead] = 0;
         const substrate = makeSubstrate();
         const harness = makeSigningKeyHarness(substrate);
-        const result = await sim.runTasks([
+        const seed = await sim.runTasks([
           {
-            name: "ops",
+            name: "healthy-boot",
+            f: async (task: SimulationTask) =>
+              ensureActiveSigningKey(task, harness.deps, { now: task.wallNow() }),
+          },
+        ] as const);
+        expect(seed.isOk(), seed.isErr() ? seed.error.message : "").toBe(true);
+        expect(seed._unsafeUnwrap()[0].isOk()).toBe(true);
+        theActiveKey(substrate.keys);
+        expectMaterialMatchesRows(substrate);
+
+        probabilities[FAILPOINTS.signingKeyWrite] = 0.3;
+        probabilities[FAILPOINTS.signingKeyRead] = 0.1;
+        const fault = await nextPhase().runTasks([
+          {
+            name: "faulted-rotation",
+            f: async (task: SimulationTask) =>
+              rotateSigningKey(task, harness.deps, { now: task.wallNow() }),
+          },
+        ] as const);
+        expect(fault.isOk(), fault.isErr() ? fault.error.message : "").toBe(true);
+        const rotated = fault._unsafeUnwrap()[0];
+        if (rotated.isErr()) {
+          expect(rotated.error).toMatchObject({ code: "unavailable", retryable: true });
+        }
+        expect(substrate.keys.activeRows().length).toBeLessThanOrEqual(1);
+        expectNoDanglingMaterial(substrate);
+
+        probabilities[FAILPOINTS.signingKeyWrite] = 0;
+        probabilities[FAILPOINTS.signingKeyRead] = 0;
+        const repair = await nextPhase().runTasks([
+          {
+            name: "healthy-repair",
             f: async (task: SimulationTask) => {
-              // Establish a key first; a rotation with nothing to rotate from
-              // is the boot case, covered above.
-              let established = false;
-              for (let attempt = 0; attempt < 12 && !established; attempt++) {
-                await task.sleep(10, "boot retry");
-                established = (
-                  await ensureActiveSigningKey(task, harness.deps, { now: task.wallNow() })
-                ).isOk();
-              }
-              if (!established) return;
-
-              // A rotation that dies anywhere: the operator sees an error and
-              // the deployment is left in one of the windows above.
-              await rotateSigningKey(task, harness.deps, { now: task.wallNow() });
-
-              // Whatever it left behind, the next boot restores an issuer that
-              // can sign, and it signs with a published key.
-              for (let attempt = 0; attempt < 12; attempt++) {
-                await task.sleep(10, "recovery retry");
-                const recovered = await ensureActiveSigningKey(task, harness.deps, {
-                  now: task.wallNow(),
-                });
-                if (recovered.isErr()) continue;
-                const kids = await tryPublishedKids(task, harness);
-                if (kids === null) continue;
-                expect(kids).toContain(recovered.value.kid);
-                expect(theActiveKey(substrate.keys).kid).toBe(recovered.value.kid);
-                expectNoDanglingMaterial(substrate);
-                return;
-              }
+              const recovered = await ensureActiveSigningKey(task, harness.deps, {
+                now: task.wallNow(),
+              }).andThen((row) =>
+                new SigningKeyMaterialCache()
+                  .load(task, harness.deps)
+                  .map((material) => ({ row, material })),
+              );
+              const jwks = await assembleJwks(task, harness.deps, { now: task.wallNow() });
+              return { recovered, jwks };
             },
           },
-        ]);
-        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        expect(substrate.keys.activeRows().length).toBeLessThanOrEqual(1);
+        ] as const);
+        expect(repair.isOk(), repair.isErr() ? repair.error.message : "").toBe(true);
+        const { recovered, jwks } = repair._unsafeUnwrap()[0];
+        expect(recovered.isOk(), JSON.stringify(recovered)).toBe(true);
+        expect(jwks.isOk(), JSON.stringify(jwks)).toBe(true);
+        const { row, material } = recovered._unsafeUnwrap();
+        expect(theActiveKey(substrate.keys).kid).toBe(row.kid);
+        expect(material.kid).toBe(row.kid);
+        expect(material.secretVersion).toBe(row.secretVersion);
+        expect(material.privateKeyPem.length).toBeGreaterThan(0);
+        expect(
+          jwks._unsafeUnwrap().keys.map((key) => String((key as { kid: string }).kid)),
+        ).toContain(row.kid);
+        expectNoDanglingMaterial(substrate);
       },
     );
   });
