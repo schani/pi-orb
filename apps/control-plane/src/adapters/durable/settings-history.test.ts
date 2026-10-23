@@ -1,6 +1,3 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, type StorageWrite } from "@earendil-works/pi-durable";
@@ -11,7 +8,6 @@ import { MemoryAgentPersistence } from "./memory-persistence.testkit.ts";
 
 describe("Durable public settings history", () => {
   it("persists canonical initial and changed settings exactly once across replay and reopen", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "settings-history-"));
     const authority = new MemoryAgentPersistence();
     const models = createModels();
     models.setProvider(
@@ -169,7 +165,6 @@ describe("Durable public settings history", () => {
     } finally {
       await agent.close();
       await authority.close();
-      await rm(directory, { recursive: true, force: true });
     }
   });
 });

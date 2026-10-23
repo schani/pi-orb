@@ -1,6 +1,3 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry } from "@earendil-works/pi-durable";
@@ -10,7 +7,6 @@ import { DurableAgent, type DurableAgentOptions } from "./agent.ts";
 import { MemoryAgentPersistence } from "./memory-persistence.testkit.ts";
 
 it("records private instruction adoption edges once across reopen, including clearing", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "instruction-history-"));
   const authority = new MemoryAgentPersistence();
   const models = createModels();
   models.setProvider(fauxProvider({ models: [{ id: "one" }] }).provider);
@@ -63,6 +59,5 @@ it("records private instruction adoption edges once across reopen, including cle
   } finally {
     await agent.close();
     await authority.close();
-    await rm(directory, { recursive: true, force: true });
   }
 });

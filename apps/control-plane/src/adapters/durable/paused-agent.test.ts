@@ -1,6 +1,3 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { createRegistry, defineTask, Harness } from "@earendil-works/pi-durable";
@@ -10,7 +7,6 @@ import { DurableAgent } from "./agent.ts";
 import { MemoryAgentPersistence } from "./memory-persistence.testkit.ts";
 
 it("a read-only reopen preserves unfinished work without advertising or dispatching it", async () => {
-  const path = await mkdtemp(join(tmpdir(), "durable-paused-agent-"));
   let effects = 0;
   const pending = defineTask<null, { phase: "run" }, null>({
     name: "paused-work",
@@ -104,6 +100,5 @@ it("a read-only reopen preserves unfinished work without advertising or dispatch
   } finally {
     await agent.close();
     await reopened.close();
-    await rm(path, { recursive: true, force: true });
   }
 });
