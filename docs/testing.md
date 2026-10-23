@@ -1586,3 +1586,5 @@ Sleep request qualification asserts the exact 3000ms deadline independently of a
 Summary completion compares all callbacks without deduplication; timeout or success remains valid. (2026-10-22 PDT).
 
 Lossless transcript qualification deep-compares real CLI JSON against the complete served peer transcript. (2026-10-22 PDT).
+
+Hosted upload qualification checks independently computed SHA-256, streamed bytes, URL, method and authorization; it makes no reopen-order claim. (2026-10-22 PDT).
