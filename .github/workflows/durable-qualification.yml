@@ -40,7 +40,7 @@ jobs:
       - name: Run central process end-to-end tests
         env:
           PI_ORB_LOCAL_FAKE_EVIDENCE: ${{ runner.temp }}/local-fake-provider
-        run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --shard=${{ matrix.shard }}/4
+        run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project process --project provider --shard=${{ matrix.shard }}/4
       - name: Upload nested scenario failure evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)

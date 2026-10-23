@@ -68,6 +68,8 @@ it("orders the actual E2E projects and gives lifecycle files one worker", async 
   ).toEqual([
     { pool: "threads", maxWorkers: 1, groupOrder: 1, testTimeout: 720_000, hookTimeout: 720_000 },
     { pool: "forks", maxWorkers: 1, groupOrder: 2, testTimeout: 720_000, hookTimeout: 720_000 },
+    { pool: "forks", maxWorkers: 1, groupOrder: 3, testTimeout: 720_000, hookTimeout: 720_000 },
+    { pool: "forks", maxWorkers: 1, groupOrder: 4, testTimeout: 720_000, hookTimeout: 720_000 },
   ]);
   const root = resolve(import.meta.dirname, "..");
   const directory = mkdtempSync(join(root, ".vitest-sequence-probe-"));
