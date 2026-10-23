@@ -1,8 +1,8 @@
-import { type HistorySearchRequest, type OrbSpawnRequest, previewHost } from "@pi-orb/protocol";
+import { HistorySearchRequestSchema, type OrbSpawnRequest, previewHost } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, ResultAsync } from "neverthrow";
+import { Check } from "typebox/value";
 import { acceptsCentralAgentCaller } from "./agent-authorization.ts";
-import { searchOrbHistory } from "./history-search.ts";
 import { requestOrbArchive, requestOrbDeletion, requestOrbSleep } from "./lifecycle.ts";
 import type { OrbRow } from "./orb.ts";
 import { sendOrbMessage } from "./orb-messaging.ts";
@@ -12,7 +12,7 @@ import { orbToolRequestId } from "./orb-tool-request-id.ts";
 import type { CentralAgentCaller, ControlPlaneDeps } from "./ports.ts";
 
 export interface OrbAgentIdentity {
-  readonly ownerUserId: string;
+  readonly ownerUserId?: string;
   readonly projectId: string;
   readonly orbId: string;
   readonly incarnation: number;
@@ -21,7 +21,7 @@ export interface OrbAgentIdentity {
 export type OrbAgentRequest =
   | { kind: "self" | "list" | "archive" | "delete" | "notification_admission" }
   | { kind: "transcript"; orbId: string }
-  | ({ kind: "search" } & HistorySearchRequest)
+  | { kind: "search"; request: unknown }
   | ({ kind: "spawn" } & OrbSpawnRequest)
   | { kind: "alert"; message: string }
   | { kind: "send"; orbId: string; message: string }
@@ -96,13 +96,18 @@ export function createOrbAgentOperations(
             return err(failure("unauthorized", "agent identity rejected"));
           const project = await deps.store.getProject(task, identity.projectId);
           if (project.isErr()) return err(unavailable());
-          if (!project.value || project.value.ownerUserId !== identity.ownerUserId)
+          if (
+            !project.value ||
+            (identity.ownerUserId !== undefined &&
+              project.value.ownerUserId !== identity.ownerUserId)
+          )
             return err(failure("unauthorized", "agent identity rejected"));
           if (
             central !== null &&
             !acceptsCentralAgentCaller(orb, project.value.ownerUserId, central)
           )
             return err(failure("unauthorized", "agent identity rejected"));
+          const ownerUserId = project.value.ownerUserId;
           if (!requestId) return err(failure("invalid_request", "request ID required"));
           switch (request.kind) {
             case "notification_admission":
@@ -133,7 +138,7 @@ export function createOrbAgentOperations(
               });
             }
             case "list": {
-              const projects = await deps.store.listProjectsByOwner(task, identity.ownerUserId);
+              const projects = await deps.store.listProjectsByOwner(task, ownerUserId);
               if (projects.isErr()) return err(unavailable());
               const items = [];
               for (const p of projects.value) {
@@ -147,8 +152,47 @@ export function createOrbAgentOperations(
               return ok({ currentOrbId: orb.id, items });
             }
             case "search": {
-              const { kind: _kind, ...search } = request;
-              return await searchOrbHistory(task, deps.store, identity, search, options.appOrigin);
+              const started = task.wallNow();
+              let scope = "invalid";
+              const fail = (code: OrbAgentError["code"], message: string) => {
+                task.log(
+                  `history-search: scope=${scope} error=${code} durationMs=${Math.max(0, task.wallNow() - started)}`,
+                );
+                return err(failure(code, message));
+              };
+              const search = request.request;
+              if (!Check(HistorySearchRequestSchema, search))
+                return fail("invalid_request", "invalid history search request");
+              scope = search.scope ?? "orb";
+              if (search.orbId !== undefined && (!search.orbId.trim() || scope !== "orb"))
+                return fail("invalid_request", "invalid history search request");
+              if (orb.state === "deleting")
+                return fail("conflict", "orb is being permanently deleted");
+              const orbId = scope === "orb" ? (search.orbId ?? orb.id) : undefined;
+              if (orbId !== undefined && orbId !== orb.id) {
+                const target = await deps.store.getOrb(task, orbId);
+                if (target.isErr()) return fail("unavailable", "history search unavailable");
+                if (!target.value) return fail("not_found", "orb not found");
+                const targetProject = await deps.store.getProject(task, target.value.projectId);
+                if (targetProject.isErr()) return fail("unavailable", "history search unavailable");
+                if (!targetProject.value || targetProject.value.ownerUserId !== ownerUserId)
+                  return fail("not_found", "orb not found");
+                if (target.value.state === "deleting")
+                  return fail("conflict", "orb is being permanently deleted");
+              }
+              const result = await deps.store.searchHistory(task, {
+                ownerUserId,
+                ...(scope === "project" ? { projectId: orb.projectId } : {}),
+                ...(orbId === undefined ? {} : { orbId }),
+                query: search.query.trim(),
+                limit: search.limit ?? 10,
+              });
+              if (result.isErr()) return fail("unavailable", "history search unavailable");
+              const hits = result.value.hits.map((hit) => ({ ...hit, orbUrl: url(hit.orbId) }));
+              task.log(
+                `history-search: scope=${scope} documents=${result.value.documentCount} candidates=${result.value.candidateCount} hits=${hits.length} durationMs=${Math.max(0, task.wallNow() - started)}`,
+              );
+              return ok({ hits });
             }
             case "transcript": {
               // Explicit company-wide inspection matches the runtime CLI policy; discovery is owner-scoped.
@@ -203,7 +247,7 @@ export function createOrbAgentOperations(
                 {
                   orbId: orb.id,
                   projectId: identity.projectId,
-                  ownerUserId: identity.ownerUserId,
+                  ownerUserId,
                   caller,
                 },
                 {

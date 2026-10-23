@@ -1,6 +1,7 @@
 import type {
   HarnessSessionMetadata,
   HistoryRecord,
+  HistorySearchHit,
   MessageInputBlock,
   OrbBootContext,
   OrbMessageSystem,
@@ -209,15 +210,7 @@ export interface HistorySearchParams {
   readonly limit: number;
 }
 
-export interface HistorySearchMatch {
-  readonly orbId: string;
-  readonly sessionId: string;
-  readonly recordId: string;
-  readonly name: string | null;
-  readonly projectName: string;
-  readonly snippet: string;
-  readonly score: number;
-}
+export type HistorySearchMatch = Omit<HistorySearchHit, "orbUrl">;
 
 export interface HistorySearchPage {
   readonly hits: HistorySearchMatch[];

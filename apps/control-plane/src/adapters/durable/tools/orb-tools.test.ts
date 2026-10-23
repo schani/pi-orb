@@ -22,26 +22,16 @@ it.each([{ provider: "claude", id: "opus" }])("forwards model intent %j", async 
   expect(invoke).toHaveBeenCalledWith({ kind: "spawn", prompt: "work", model }, '[42,"call"]');
 });
 
-it("uses the shared search schema and forwards default scope unchanged", async () => {
-  const invoke = vi.fn<OrbAgentOperations["invoke"]>(() => okAsync({ hits: [] }));
-  const tool = createOrbTools({ invoke }).find((tool) => tool.name === "orb_search_history");
+it("declares history search with the shared schema and safe replay", () => {
+  const tool = createOrbTools({ invoke: () => okAsync({}) }).find(
+    (tool) => tool.name === "orb_search_history",
+  );
   assert.isDefined(tool);
   expect(tool.description).toBe(
     "Search your committed public history with BM25. Defaults to this orb; project searches this project and user searches all your orbs. Returns ranked snippets; use orb_transcript for full context.",
   );
   expect(tool.parameters).toBe(HistorySearchRequestSchema);
-  expect(Check(tool.parameters, { query: "marker", limit: 1.5 })).toBe(false);
-  expect(Check(tool.parameters, { query: "marker", limit: 51 })).toBe(false);
   expect(tool.replay).toBe("safe");
-  await tool.execute(
-    { query: "marker" },
-    { taskId: 42, callId: "call" } as ToolExecutionApi,
-    BACKGROUND_CONTEXT,
-  );
-  expect(invoke).toHaveBeenCalledExactlyOnceWith(
-    { kind: "search", query: "marker" },
-    '[42,"call"]',
-  );
 });
 
 it("distinguishes nested calls while retaining replay identity", async () => {
@@ -283,13 +273,19 @@ it.each(responses)(
     } as ToolExecutionApi;
     const error = { code: "unavailable" as const, message: "operation unavailable" };
     for (const failed of [false, true]) {
-      const invoke: OrbAgentOperations["invoke"] = () =>
-        failed ? errAsync(error) : okAsync(value);
+      const invoke = vi.fn<OrbAgentOperations["invoke"]>(() =>
+        failed ? errAsync(error) : okAsync(value),
+      );
       const tool = createOrbTools({ invoke }, () => okAsync({ accepted: true as const })).find(
         (tool) => tool.name === name,
       );
       assert.isDefined(tool);
       const result = await tool.execute(args as never, api, BACKGROUND_CONTEXT);
+      if (name === "orb_search_history")
+        expect(invoke).toHaveBeenCalledExactlyOnceWith(
+          { kind: "search", request: args },
+          '[42,"call"]',
+        );
       const expected = failed ? { error } : value;
       expect(result.structuredOutput).toEqual(expected);
       expect(result.output).toEqual([{ type: "text", text: JSON.stringify(expected) }]);

@@ -1542,7 +1542,7 @@ acceptance and retained-workspace qualification have not run. No deployment.
 
 Shared PostgreSQL 16/PGlite contracts verify public-text privacy, lossless source JSON,
 Unicode/long-token queries, exact scoped BM25, rank-before-limit, GIN expression access,
-and source-only insert/update/delete maintenance. Native lock-order cases run migration
+and existing/future source-only insertion. Native lock-order cases run migration
 044 before 049 and assert index/ledger commit or rollback. Application contracts cover
 owner binding, typed native objects/errors, HTTP and CLI dispatch. Existing process
 E2Es search a committed native alert and a stopped orb through its sibling's CLI.
@@ -1556,7 +1556,4 @@ Logs and source manifests remain in `/workspace/history-search-index-evidence/` 
 `/tmp/search-index-rewrite-*.log`. An initial selector skipped the CLI case; its first
 executed run passed. This is isolated fixture evidence, not production qualification.
 
-The ordinary migration builds one database-maintained index and blocks conflicting
-writes during the build. Exact corpus statistics still parse all eligible scoped source
-records at query time; GIN does not establish a latency guarantee. See
-`docs/history-search.md`.
+Design and cost: `docs/history-search.md`.

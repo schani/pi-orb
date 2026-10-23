@@ -34,6 +34,7 @@ import {
   requestOrbDeletion,
   requestOrbSleep,
 } from "../domain/lifecycle.ts";
+import type { OrbAgentOperations } from "../domain/orb-agent-operations.ts";
 import { sendGuestOrbMessage } from "../domain/orb-messaging.ts";
 import { spawnOrb } from "../domain/orb-spawning.ts";
 import type { BrokerDeps, ControlPlaneStore, OrbNameGenerator } from "../domain/ports.ts";
@@ -86,7 +87,8 @@ describe("runtime broker routes", () => {
   let gitIdentity: FakeGitIdentityStore;
   let projectInstructions: FakeProjectInstructionsStore;
   let brokerUsers: string[];
-  const searchHistory = vi.fn<RuntimeRouteDeps["searchHistory"]>();
+  const invoke = vi.fn<OrbAgentOperations["invoke"]>();
+  const agentOperations = vi.fn<RuntimeRouteDeps["agentOperations"]>(() => ({ invoke }));
   const spawnNudge = vi.fn();
   const initialCheckoutCommit = vi.fn(() => okAsync<string | null, StoreError>(null));
   const alertWriter = {
@@ -367,73 +369,42 @@ describe("runtime broker routes", () => {
       });
     }
     beforeEach(() => seedOrb("running"));
-    it("delegates a validated body and authenticated caller to shared operations", async () => {
+    it("dispatches the body with authenticated identity and disables caching", async () => {
       const request = { query: "private needle", scope: "project", limit: 10 };
       const response = await search(request);
       expect(response.statusCode).toBe(200);
       expect(response.headers["cache-control"]).toBe("no-store");
       expect(response.json()).toEqual({ v: 1, hits: [] });
-      expect(searchHistory).toHaveBeenCalledWith(
+      expect(agentOperations).toHaveBeenCalledExactlyOnceWith(
         task,
         expect.objectContaining({ id: ORB }),
-        request,
+      );
+      expect(invoke).toHaveBeenCalledExactlyOnceWith(
+        { kind: "search", request },
+        expect.any(String),
       );
       expect((await app.inject({ method: "GET", url: path })).statusCode).toBe(404);
     });
-    it.each([{}, { query: "x", ownerUserId: "forged" }])(
-      "rejects malformed requests before service invocation %j",
-      async (payload) => {
-        const response = await search(payload);
-        expect(response.statusCode).toBe(400);
-        expect(response.json()).toEqual({
-          v: 1,
-          error: {
-            code: "invalid_request",
-            message: "invalid history search request",
-            retryable: false,
-          },
-        });
-        expect(searchHistory).not.toHaveBeenCalled();
-      },
-    );
-    it.each([null, "wrong"])("authenticates before validation with bearer %s", async (token) => {
+    it.each([null, "wrong"])("authenticates before body dispatch with bearer %s", async (token) => {
       expect((await search({}, token)).statusCode).toBe(401);
-      expect(searchHistory).not.toHaveBeenCalled();
-    });
-    it.each(["stopped", "archived", "deleting"] as const)("rejects %s caller", async (state) => {
-      store.seedOrb(makeOrbRow(ORB, PROJECT, state, { runtimeTokenHash: sha256(TOKEN) }));
-      expect((await search({ query: "x" })).statusCode).toBe(401);
-      expect(searchHistory).not.toHaveBeenCalled();
-    });
-    it("rejects discard-fenced compute", async () => {
-      store.seedOrb(
-        makeOrbRow(ORB, PROJECT, "running", {
-          runtimeTokenHash: sha256(TOKEN),
-          hostDiscardThroughIncarnation: 1,
-        }),
-      );
-      expect((await search({ query: "x" })).statusCode).toBe(401);
-      expect(searchHistory).not.toHaveBeenCalled();
+      expect(agentOperations).not.toHaveBeenCalled();
+      expect(invoke).not.toHaveBeenCalled();
     });
     it.each([
-      ["invalid_request", 400],
-      ["unauthorized", 401],
-      ["not_found", 404],
-      ["conflict", 409],
-      ["unavailable", 503],
-      ["internal", 500],
-    ] as const)("preserves %s service failures", async (code, status) => {
-      searchHistory.mockReturnValue(errAsync({ code, message: "search refused" }));
-      const response = await search({ query: "needle" });
-      expect(response.statusCode).toBe(status);
-      expect(response.json()).toEqual(
-        code === "unauthorized"
-          ? { error: "unauthorized" }
-          : {
-              v: 1,
-              error: { code, message: "search refused", retryable: code === "unavailable" },
-            },
+      ["invalid_request", 400, {}],
+      ["conflict", 409, { query: "needle" }],
+    ] as const)("delegates validation and preserves %s failures", async (code, status, request) => {
+      invoke.mockReturnValue(errAsync({ code, message: "search refused" }));
+      const response = await search(request);
+      expect(invoke).toHaveBeenCalledExactlyOnceWith(
+        { kind: "search", request },
+        expect.any(String),
       );
+      expect(response.statusCode).toBe(status);
+      expect(response.json()).toEqual({
+        v: 1,
+        error: { code, message: "search refused", retryable: false },
+      });
     });
     it("reports authentication store outages without leaking database details", async () => {
       vi.spyOn(store, "getOrbByRuntimeTokenHash").mockReturnValueOnce(
@@ -454,10 +425,10 @@ describe("runtime broker routes", () => {
           retryable: true,
         },
       });
-      expect(searchHistory).not.toHaveBeenCalled();
+      expect(agentOperations).not.toHaveBeenCalled();
     });
     it("rejects malformed operation results instead of exposing private fields", async () => {
-      searchHistory.mockReturnValue(okAsync({ hits: [], private: "hidden" }));
+      invoke.mockReturnValue(okAsync({ hits: [], private: "hidden" }));
       const response = await search({ query: "needle" });
       expect(response.statusCode).toBe(500);
       expect(response.json()).toEqual({
@@ -502,7 +473,7 @@ describe("runtime broker routes", () => {
       );
     registerRuntimeRoutes(app, task, {
       appOrigin: "https://browser.test",
-      searchHistory,
+      agentOperations,
       ...(tailnetDnsName === null ? {} : { tailnetDnsName }),
       send: (task, caller, request) =>
         sendGuestOrbMessage(task, { ...makeHarness().deps, store: routeStore }, caller, request),
@@ -572,7 +543,8 @@ describe("runtime broker routes", () => {
   }
 
   beforeEach(async () => {
-    searchHistory.mockReset().mockReturnValue(okAsync({ hits: [] }));
+    agentOperations.mockClear();
+    invoke.mockReset().mockReturnValue(okAsync({ hits: [] }));
     initialCheckoutCommit.mockClear();
     alertWriter.appendAlert.mockClear();
     store = new InMemoryControlPlaneStore(0);

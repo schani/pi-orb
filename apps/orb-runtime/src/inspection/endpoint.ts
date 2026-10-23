@@ -1,6 +1,5 @@
 import {
   HISTORY_SEARCH_PATH,
-  HistorySearchErrorSchema,
   type HistorySearchRequest,
   type HistorySearchResponse,
   HistorySearchResponseSchema,
@@ -154,10 +153,7 @@ function timeoutFailure(): InspectionEndpointFailure {
 
 function failureOf(outcome: HttpOutcome): InspectionEndpointFailure {
   if (outcome.status === 401) return { kind: "unauthorized" };
-  if (
-    Check(OrbInspectionErrorSchema, outcome.payload) ||
-    Check(HistorySearchErrorSchema, outcome.payload)
-  ) {
+  if (Check(OrbInspectionErrorSchema, outcome.payload)) {
     const error = outcome.payload.error;
     switch (error.code) {
       case "invalid_request":

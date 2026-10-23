@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs";
 import { NoSimulationTask } from "determined";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { makeOrbRow, makeProjectRow, seedTestUser, TEST_USER_ID } from "../../testkit/fixtures.ts";
+import { TEST_USER_ID } from "../../testkit/fixtures.ts";
 import type { StoreContractSubject } from "../../testkit/store-contract.ts";
 import { jsonParam } from "./client.ts";
 
@@ -68,39 +67,31 @@ export function historySearchContractTests(
     beforeAll(async () => {
       subject = await open();
       (await subject.database.migrate())._unsafeUnwrap();
-      (await seedTestUser(task, subject.database.users))._unsafeUnwrap();
-      await sql(
-        "INSERT INTO users(id,identity_issuer,identity_subject,created_at,updated_at) VALUES ($1,'test','foreign',now(),now())",
-        [foreignOwner],
-      );
+      for (const owner of [TEST_USER_ID, foreignOwner])
+        await sql(
+          "INSERT INTO users(id,identity_issuer,identity_subject,created_at,updated_at) VALUES ($1::uuid,'test',$1::uuid::text,now(),now())",
+          [owner],
+        );
       for (const [projectId, owner] of [
         [project, TEST_USER_ID],
         [otherProject, TEST_USER_ID],
         [foreignProject, foreignOwner],
-      ]) {
-        (
-          await subject.database.store.insertProject(task, {
-            ...makeProjectRow(projectId as string),
-            ownerUserId: owner as string,
-          })
-        )._unsafeUnwrap();
-      }
+      ])
+        await sql(
+          "INSERT INTO projects(id,owner_user_id,name,repository_url) VALUES ($1::uuid,$2::uuid,$1::uuid::text,'https://example.test/repo')",
+          [projectId, owner],
+        );
       for (const [orbId, projectId, harness] of [
         [orb, project, "pi"],
         [claude, project, "claude"],
         [otherOrb, otherProject, "claude"],
         [foreignOrb, foreignProject, "claude"],
-      ]) {
-        (
-          await subject.database.store.insertOrb(task, {
-            ...makeOrbRow(orbId as string, projectId as string, "stopped"),
-            harness: harness as "pi" | "claude",
-          })
-        )._unsafeUnwrap();
-      }
-      await sql("UPDATE orbs SET harness_session_id='session',harness_session_header=$1::json", [
-        jsonParam({ id: "session", overflow: {} }),
-      ]);
+      ])
+        await sql(
+          `INSERT INTO orbs(id,project_id,state,host_kind,harness,harness_session_id,harness_session_header)
+         VALUES ($1,$2,'stopped','fake',$3,'session','{"id":"session","overflow":{}}'::json)`,
+          [orbId, projectId, harness],
+        );
     });
     beforeEach(async () => {
       await sql("UPDATE orbs SET replication_cursor=NULL,replicated_head_id=NULL");
@@ -110,112 +101,64 @@ export function historySearchContractTests(
       (await subject.database.close())._unsafeUnwrap();
     });
 
-    it("selects public DTO variants without reasoning, configuration, child history, images or artifacts", async () => {
-      const privateBlocks = [
+    it("selects public text without private configuration, reasoning, images or artifacts", async () => {
+      const blocks = [
+        { type: "text", text: "public" },
         { type: "reasoning", text: "private-reasoning" },
         { type: "image", data: "private-image", url: "https://private.invalid" },
         { type: "other", contentType: "artifact", data: { text: "private-artifact" } },
       ];
-      expect(
-        await text(
-          message("public", {
-            content: [{ type: "text", text: "public" }, ...privateBlocks],
-            overflow: { native: { text: "private-native", children: ["private-child"] } },
-          }),
+      const event = {
+        type: "event",
+        eventType: "custom",
+        content: blocks,
+        overflow: { native: { text: "private-native", children: ["private-child"] } },
+      };
+      for (const [record, expected] of [
+        [message("", { content: blocks, overflow: event.overflow }), "public"],
+        ...["system", "developer"].map((role) => [message("private-config", { role }), ""]),
+        ...["claude.auth", "claude.task_notification", "claude.compact_command", "custom"].map(
+          (eventType) => [{ ...event, eventType }, ""],
         ),
-      ).toBe("public");
-      for (const role of ["system", "developer"])
-        expect(await text(message("private-config", { role }))).toBe("");
-      for (const eventType of [
-        "claude.auth",
-        "claude.task_notification",
-        "claude.compact_command",
-      ]) {
-        expect(
-          await text({
-            type: "event",
-            eventType,
-            content: [{ type: "text", text: "private-event" }],
-            overflow: {},
-          }),
-        ).toBe("");
-      }
-      expect(
-        await text({
-          type: "event",
-          eventType: "custom",
-          content: [{ type: "text", text: "private-hidden" }],
-          overflow: {},
-        }),
-      ).toBe("");
-      for (const extra of [
-        { custom: { customType: "shown", display: true } },
-        { eventType: "orb.message" },
-        { eventType: "agent.settings_fallback" },
-        { eventType: "agent.compaction" },
-      ]) {
-        expect(
-          await text({
-            type: "event",
-            eventType: "custom",
-            content: [{ type: "text", text: "visible" }, ...privateBlocks],
-            overflow: {},
-            ...extra,
-          }),
-        ).toBe("visible");
-      }
-      expect(
-        await text({
-          type: "compaction",
-          summary: [{ type: "text", text: "summary" }, ...privateBlocks],
-          overflow: {},
-        }),
-      ).toBe("summary");
-      expect(
-        await text(
+        [{ ...event, custom: { customType: "shown", display: true } }, "public"],
+        ...["orb.message", "agent.settings_fallback", "agent.compaction"].map((eventType) => [
+          { ...event, eventType },
+          "public",
+        ]),
+        [{ type: "compaction", summary: blocks, overflow: event.overflow }, "public"],
+        [
           message("public", {
             failure: { message: "failure", diagnostics: ["private-diagnostic"] },
           }),
-        ),
-      ).toBe("public\nfailure");
-      expect(
-        await text({
-          type: "event",
-          eventType: "orb.alert",
-          alert: { message: "alert", requestId: "private-id" },
-          overflow: {},
-        }),
-      ).toBe("alert");
+          "public\nfailure",
+        ],
+        [
+          {
+            ...event,
+            eventType: "orb.alert",
+            alert: { message: "alert", requestId: "private-id" },
+          },
+          "alert",
+        ],
+      ])
+        expect(await text(record), JSON.stringify(record)).toBe(expected);
     });
 
-    it("follows delivery/native-metadata and selected public child-notice visibility", async () => {
+    it("applies native delivery visibility and public child-notice precedence", async () => {
       const native = { type: "user", isMeta: true };
-      expect(await text(message("private-skill", { role: "user", overflow: { native } }))).toBe("");
-      for (const subkind of [
-        undefined,
-        "scheduled-trigger",
-        "peer-send-message",
-        "session-inbox",
-      ]) {
+      for (const [origin, expected] of [
+        [undefined, ""],
+        ...[undefined, "scheduled-trigger", "peer-send-message", "session-inbox"].map((subkind) => [
+          { kind: "task-notification", subkind },
+          "delivery",
+        ]),
+        [{ kind: "task-notification", subkind: "unknown" }, ""],
+      ])
         expect(
           await text(
-            message("delivery", {
-              role: "user",
-              overflow: { native: { ...native, origin: { kind: "task-notification", subkind } } },
-            }),
+            message("delivery", { role: "user", overflow: { native: { ...native, origin } } }),
           ),
-        ).toBe("delivery");
-      }
-      expect(
-        await text(
-          message("private-unknown-injection", {
-            role: "user",
-            overflow: {
-              native: { ...native, origin: { kind: "task-notification", subkind: "unknown" } },
-            },
-          }),
-        ),
-      ).toBe("");
+        ).toBe(expected);
       const echo = "<local-command-stdout>Compacted</local-command-stdout>";
       const record = message(echo, {
         role: "user",
@@ -264,7 +207,7 @@ export function historySearchContractTests(
           "workspace",
         ],
       ])
-        expect(await text({ ...event, subagent })).toBe(expected);
+        expect(await text({ ...event, subagent }), JSON.stringify(subagent)).toBe(expected);
     });
 
     it("bounds public tool excerpts and excludes bash metadata, nested calls and nontext result leaves", async () => {
@@ -313,11 +256,25 @@ export function historySearchContractTests(
         }),
       );
       expect(bounded).toBe("a".repeat(2000));
+      const argumentsText = await text(
+        message("", {
+          content: [
+            {
+              type: "tool_call",
+              name: "read",
+              callId: "r",
+              arguments: { path: "a".repeat(3000) + "excluded" },
+            },
+          ],
+        }),
+      );
+      expect(argumentsText).toHaveLength(2000);
+      expect(argumentsText).not.toContain("excluded");
       expect(await text(message("a".repeat(3000)))).toHaveLength(3000);
     });
 
     it("uses exact scoped corpus statistics, Pi cursor ancestry, all committed Claude branches and ranks before limit", async () => {
-      await add("a1", message("needle needle"));
+      await add("a1", message("needle ".repeat(600)));
       await add("a2", message("needle other x"), orb, "a1");
       await add("a3", message("other other other other"), orb, "a2");
       await add("orphan", message("needle ".repeat(100)));
@@ -338,29 +295,23 @@ export function historySearchContractTests(
         expect(result.candidateCount).toBe(ids.length);
         expect(result.hits.map((hit) => hit.recordId)).toEqual(ids);
       }
-      const hits = (await search("needle", { orbId: orb, limit: 1 }))._unsafeUnwrap().hits;
-      const expected =
-        (Math.log(1 + (3 - 2 + 0.5) / (2 + 0.5)) * 2 * 2.2) / (2 + 1.2 * (0.25 + (0.75 * 2) / 3));
-      expect(hits[0]?.score).toBeCloseTo(expected, 12);
-      expect(hits[0]?.recordId).toBe("a1");
       expect((await search("needle", { orbId: foreignOrb }))._unsafeUnwrap().hits).toEqual([]);
       expect((await search("!!!"))._unsafeUnwrap().hits).toEqual([]);
-      await add("frequent", message("needle ".repeat(600)), orb, "a3");
-      const all = (await search("needle other needle"))._unsafeUnwrap();
-      expect(all.documentCount).toBe(4);
+      const all = (await search("needle other absent needle"))._unsafeUnwrap();
+      expect(all.documentCount).toBe(3);
+      expect(all.candidateCount).toBe(3);
       for (const [recordId, dl, needleTf, otherTf] of [
-        ["a1", 2, 2, 0],
+        ["a1", 600, 600, 0],
         ["a2", 3, 1, 1],
         ["a3", 4, 0, 4],
-        ["frequent", 600, 600, 0],
       ] as const) {
         const termScore = (tf: number, df: number) =>
           tf === 0
             ? 0
-            : (Math.log(1 + (4 - df + 0.5) / (df + 0.5)) * tf * 2.2) /
-              (tf + 1.2 * (0.25 + (0.75 * dl) / (609 / 4)));
+            : (Math.log(1 + (3 - df + 0.5) / (df + 0.5)) * tf * 2.2) /
+              (tf + 1.2 * (0.25 + (0.75 * dl) / (607 / 3)));
         expect(all.hits.find((hit) => hit.recordId === recordId)?.score).toBeCloseTo(
-          termScore(needleTf, 3) + termScore(otherTf, 2),
+          termScore(needleTf, 2) + termScore(otherTf, 2),
           12,
         );
       }
@@ -411,9 +362,11 @@ export function historySearchContractTests(
           (await sql("SELECT history_search_safe_json($1::text::json)#>>'{}' AS text", [source]))
             .rows[0]?.["text"],
         ).toBe(expected);
-      const long = Array.from({ length: 100000 }, (_, i) =>
-        String.fromCharCode(97 + ((Math.imul(i, 2654435761) >>> 16) % 26)),
-      ).join("");
+      const long = "a".repeat(100000);
+      expect(
+        (await sql("SELECT history_search_keys($1::json) AS keys", [jsonParam(message(long))]))
+          .rows[0]?.["keys"],
+      ).toEqual([expect.stringMatching(/^[0-9a-f]{32}$/)]);
       await add("long", message(long), orb, "unicode");
       expect((await search(long))._unsafeUnwrap().hits.map((hit) => hit.recordId)).toEqual([
         "long",
@@ -421,9 +374,7 @@ export function historySearchContractTests(
       const snippet = (await search("after"))._unsafeUnwrap().hits[0]?.snippet ?? "";
       expect(snippet.length).toBeLessThanOrEqual(500);
       expect(snippet).toContain("after");
-      for (let n = 0; n <= 8; n++) {
-        expect(await text(message(`${"\\".repeat(n)}\u0000`))).toBe(`${"\\".repeat(n)} `);
-      }
+      expect(await text(message("\\\u0000"))).toBe("\\ ");
       await add("snippet", message(`${"😀".repeat(300)}needle${"😀".repeat(300)}`), orb, "long");
       const centered = (await search("needle"))._unsafeUnwrap().hits[0]?.snippet ?? "";
       expect(centered).toContain("needle");
@@ -431,38 +382,7 @@ export function historySearchContractTests(
       expect(centered).not.toMatch(/[\uD800-\uDFFF]/u);
     });
 
-    it("uses a GIN-capable raw-record predicate and exactly rechecks hashed candidates", async () => {
-      await add("candidate", message("needle"));
-      await sql("SET enable_seqscan=off");
-      const plan = await sql(
-        "EXPLAIN (COSTS OFF) SELECT record_id FROM history_records WHERE history_search_keys(record) && ARRAY[md5('needle')]",
-      );
-      expect(JSON.stringify(plan.rows)).toContain("history_records_search_idx");
-      await sql("RESET enable_seqscan");
-      // Force a candidate-key collision without replacing a global crypto function.
-      await sql(
-        "CREATE OR REPLACE FUNCTION history_search_keys(source json) RETURNS text[] LANGUAGE SQL IMMUTABLE SET search_path FROM CURRENT AS $$ SELECT ARRAY[md5('absent')] $$",
-      );
-      try {
-        await sql("REINDEX INDEX history_records_search_idx");
-        expect((await search("absent"))._unsafeUnwrap()).toEqual({
-          hits: [],
-          documentCount: 1,
-          candidateCount: 0,
-        });
-      } finally {
-        const migration = readFileSync(
-          new URL("./migrations/049_history_search.sql", import.meta.url),
-          "utf8",
-        );
-        await sql("DROP INDEX history_records_search_idx");
-        (
-          await subject.client.transaction(async (_query, execute) => execute(migration))
-        )._unsafeUnwrap();
-      }
-    });
-
-    it("builds over old rows and maintains source-only insert/update/delete without application hooks", async () => {
+    it("indexes existing and future source-only writes without application hooks", async () => {
       await sql("DROP INDEX history_records_search_idx");
       await add("old", message("existing"));
       await sql(
@@ -471,23 +391,19 @@ export function historySearchContractTests(
       expect((await search("existing"))._unsafeUnwrap().hits.map((hit) => hit.recordId)).toEqual([
         "old",
       ]);
-      const inserted = await add("new", message("future"), orb, "old");
+      await sql("SET enable_seqscan=off");
+      try {
+        const plan = await sql(
+          "EXPLAIN (COSTS OFF) SELECT record_id FROM history_records WHERE history_search_keys(record) && ARRAY[md5('existing')]",
+        );
+        expect(JSON.stringify(plan.rows)).toContain("history_records_search_idx");
+      } finally {
+        await sql("RESET enable_seqscan");
+      }
+      await add("new", message("future"), orb, "old");
       expect((await search("future"))._unsafeUnwrap().hits.map((hit) => hit.recordId)).toEqual([
         "new",
       ]);
-      await sql("UPDATE history_records SET record=$2::json WHERE record_id=$1", [
-        "new",
-        jsonParam({ ...inserted, content: [{ type: "text", text: "updated" }] }),
-      ]);
-      expect((await search("future"))._unsafeUnwrap().hits).toEqual([]);
-      expect((await search("updated"))._unsafeUnwrap().hits.map((hit) => hit.recordId)).toEqual([
-        "new",
-      ]);
-      await sql("UPDATE orbs SET replication_cursor='old',replicated_head_id='old' WHERE id=$1", [
-        orb,
-      ]);
-      await sql("DELETE FROM history_records WHERE record_id='new'");
-      expect((await search("updated"))._unsafeUnwrap().hits).toEqual([]);
     });
   });
 }

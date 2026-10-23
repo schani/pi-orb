@@ -98,7 +98,7 @@ export function createOrbTools(service: OrbAgentOperations, notifyParent?: Paren
       parameters: HistorySearchRequestSchema,
       structuredOutputSchema: resultSchema(HistorySearchResultSchema),
       replay: "safe",
-      execute: async (args, api) => output({ kind: "search", ...args }, api),
+      execute: async (args, api) => output({ kind: "search", request: args }, api),
     }),
     defineTool({
       name: "orb_spawn",
