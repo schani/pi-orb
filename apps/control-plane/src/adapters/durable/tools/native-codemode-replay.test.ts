@@ -18,7 +18,7 @@ import {
   CodemodeJournalDoc,
   CodemodeRunDoc,
 } from "@earendil-works/pi-durable/codemode";
-import { okAsync } from "neverthrow";
+import { errAsync, okAsync } from "neverthrow";
 import { Check } from "typebox/value";
 import { assert, describe, expect, it, vi } from "vitest";
 import { MemoryAgentPersistence } from "../memory-persistence.testkit.ts";
@@ -37,6 +37,8 @@ function deferred<T>() {
 describe("native codemode interrupted journal recovery", () => {
   for (const alteration of [
     "none",
+    "authorization",
+    "unsafe",
     "version",
     "fingerprint",
     "deadline",
@@ -96,6 +98,10 @@ describe("native codemode interrupted journal recovery", () => {
         authorize: (name, _args, api) => {
           authorizations.push({ name, taskId: api.taskId, reopening });
           trace("authorize", { name, taskId: api.taskId });
+          if (reopening && name === "hold_restart" && alteration === "authorization") {
+            resumedHold.resolve();
+            return errAsync({ code: "forbidden", message: "Current authorization denied" });
+          }
           return okAsync(undefined);
         },
         additionalTools: [
@@ -115,7 +121,7 @@ describe("native codemode interrupted journal recovery", () => {
             name: "hold_restart",
             description: "hold",
             parameters: Type.Object({ secret: Type.String() }),
-            replay: "safe",
+            replay: alteration === "unsafe" ? "unsafe" : "safe",
             execute: async (_args, api, ctx) => {
               holds++;
               const task = await api.getTask(api.taskId, ctx);
@@ -193,7 +199,7 @@ describe("native codemode interrupted journal recovery", () => {
                       code = code.replace("PENDING_CANARY", "CHANGED_PENDING_CANARY");
                     // Already-admitted safe children resume independently, even if replay is refused.
                     // Wait for that entry before validation, rather than racing parent cleanup.
-                    if (reopening) await resumedHold.promise;
+                    if (reopening && alteration !== "unsafe") await resumedHold.promise;
                     trace("parent-execute", {
                       taskId: api.taskId,
                       aborted: ctx.abortSignal?.aborted,
@@ -368,7 +374,8 @@ describe("native codemode interrupted journal recovery", () => {
         await completed.promise;
         expect(records).toBe(1);
         expect(recordAttempts).toEqual([admitted[0]!.taskId]);
-        expect(holds).toBe(2);
+        const denied = alteration === "authorization" || alteration === "unsafe";
+        expect(holds).toBe(denied ? 1 : 2);
         expect(
           holdAttempts.map(({ taskId, parent, key, abortedAtEntry }) => ({
             taskId,
@@ -377,16 +384,16 @@ describe("native codemode interrupted journal recovery", () => {
             abortedAtEntry,
           })),
         ).toEqual(
-          [1, 2].map(() => ({
+          (denied ? [1] : [1, 2]).map(() => ({
             taskId: admitted[1]!.taskId,
             parent: outer,
             key: "c3",
             abortedAtEntry: false,
           })),
         );
-        expect(holdAttempts[1]!.signal).not.toBe(holdAttempts[0]!.signal);
+        if (!denied) expect(holdAttempts[1]!.signal).not.toBe(holdAttempts[0]!.signal);
         expect(authorizations.filter(({ name }) => name === "hold_restart")).toEqual(
-          [false, true].map((reopening) => ({
+          (alteration === "unsafe" ? [false] : [false, true]).map((reopening) => ({
             name: "hold_restart",
             taskId: admitted[1]!.taskId,
             reopening,
@@ -421,7 +428,11 @@ describe("native codemode interrupted journal recovery", () => {
               true,
             );
           const output = result?.output;
-          if (alteration === "version")
+          if (alteration === "authorization")
+            expect(JSON.stringify(output)).toContain("Current authorization denied");
+          else if (alteration === "unsafe")
+            expect(JSON.stringify(output)).toMatch(/interrupted.*may have partially run/);
+          else if (alteration === "version")
             expect(output).toEqual([
               {
                 type: "text",

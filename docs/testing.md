@@ -10,7 +10,7 @@ First integrated head `d6f00804` failed [CI attempt 1](https://github.com/schani
 
 Tests preceded implementation on clean-installed, sealed Pi 1.3: sleeping indexed-demand/constraint and 036→049 upgrade failed as expected; five-cutoff recovery lacked `restarts`. The first parking fixture incorrectly treated `createTask()`'s ID as a record; correcting the fixture established the intended missing-counter failure. Evidence: `/tmp/pi14-adapters/baseline-{red,parking-red}.log`.
 
-Pi 1.4 passes 52 upstream storage-conformance/upgrade cases across PGlite and isolated PostgreSQL16 schemas using the full production migration chain, not only 036. Combined owner-fence/public-atomicity DST, closed-drain and real root/child Stop→Start tests pass 69 cases; close restoration leaves no running records, restart counts or trace carriers. Controlled-clock tests cover persisted sleeping checkpoints, no early wake, one wake at the deadline, sleeping-only demand and deadline-independent abort. Five-cutoff tests cover parking, native retry/abort and absent task/submission carriers; deterministic schedules race retry with abort.
+Pre-reduction qualification recorded 52 storage-conformance/upgrade cases across PGlite and isolated PostgreSQL16 schemas, plus 69 owner-fence/public-atomicity/drain cases. Receipts remain in `/tmp/pi14-adapters/` and `/tmp/pi14-current-main-integration/`; they do not qualify later source.
 
 A real interrupted generation preserves its five-count parking across reopen and queued input. Its restored public operation is abortable; after Abort, fresh input runs without replaying the interrupted request. Tests exposed fatal parking latching, late stable-handle notice loss and parked-child cancellation waiting without an abort mark. The correction keeps parking nonfatal, derives a snapshot notice for the existing handshake error frame, and commits child cancellation control before invoking the bound public Harness abort. Only `central_agent_paused` clears on operation settlement; unrelated errors remain. No new persisted flags, retry UI or Start reset. Evidence: `/tmp/pi14-adapters/`; first failures retained. Broader/native/browser qualification remains separate; no deployment.
 
@@ -27,14 +27,11 @@ Manual provider waits remain unresolved; automatic retry does not explain them. 
 
 **Historical-stall attribution exception (user-approved 2026-10-22, PDT):** the user explicitly authorized merging [PR 162](https://github.com/schani/pi-orb/pull/162) without root-causing only the earlier hosted-fake inference waits recorded above. Evidence remains preserved; no cause or fix is claimed. This does not waive current/new CI failures, assertions, exact-head qualification, DST replay or fixture cleanup/corrections, and authorizes no deployment. Code head `9724ac522f7a97dc0a9e89decd38db59109e19e2` passed all 11 checks: [CI](https://github.com/schani/pi-orb/actions/runs/39898288399), [E2E](https://github.com/schani/pi-orb/actions/runs/39898288361), [Central process](https://github.com/schani/pi-orb/actions/runs/39898288415). This documentation-only update requires its own exact-head CI before merge.
 
-Old-to-current code-mode checks use genuine patched 1.3 Storage-port captures
-(`apps/control-plane/src/adapters/durable/tools/fixtures/pi-1.3-compat/README.md`).
-Capture folds overwritten task/submission rows and superseded current-only document
-revisions, preserving rewindable history and commit sequences; generation compares
-restored state with the old storage. Ten checks retain decided-result reuse,
-admitted callback identity/authorization, replay refusals, store rollback/history
-and fork isolation. The store fixture keeps two old deltas; current native commits
-exercise the 64-delta base boundary.
+Current upgrade coverage reuses `tools/native-codemode-replay.test.ts`: completed callback reuse, pending identity/current authorization (including denial), unsafe pending callbacks, version/fingerprint/deadline/divergence and argument mismatch. `tools/codemode.test.ts` covers decided-result reuse, successful-write reopen/isolation and failure rollback; one inline 1.3 store base/delta checks values through the 64-delta checkpoint, reopen, as-of read and isolated fork. `durable-pg/storage.test.ts` preserves completed 1.1 receipts/public content; storage conformance covers rewindable revisions and independent historical copies. These are native replay/data contracts, not arbitrary old-script live-upgrade qualification.
+
+`paused-agent.test.ts` retains controlled sleeping-checkpoint reopen/wake with recovery demand true→false and sanitized background-pause visibility without failing the parent. `agent.test.ts` reopens running and pending real generations, preserves five-count parking through queued input, then exercises public Abort and fresh input with no trace carriers. Existing manager/atomicity DST and composed drain cover ownership, close restoration and stale owners; `tools/subagents.test.ts` aborts a parked background child before draining cancellation.
+
+Local scope-reduction checks pass root typecheck/lint and 50 replay/store/parking/manager tests. The broader port run passed 124 cases with two PostgreSQL skips and exposed an incorrect new background-idle expectation: unfinished background work is busy, but healthy. The corrected case passes; first failures and receipts remain in `/tmp/pi14-small-upgrade/`. Full current-source hosted qualification remains required.
 
 ## Chart hover targets in WebKit (2026-10-23; local, undeployed)
 

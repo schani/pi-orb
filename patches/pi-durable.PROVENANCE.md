@@ -25,4 +25,4 @@ File SHA-256 pairs are pinned in `scripts/apply-dependency-patches.mjs`. Regress
 
 Terminal provider and blocking-compaction `model_error` settle failed inputs before a final boundary starts queued input. This drains already-admitted input even during Sleep, when SQL dispatch is gated. Duplicate-only `submitMany` also advances idle queued input without replaying failed input. Writable reopen guards unfinished submissions with the existing recovery budget before an empty snapshot advances the queue; passive reopen stays inert. Regression coverage: `apps/control-plane/src/adapters/durable/{agent-backlog,queued-model-error,operation-identity}.test.ts`.
 
-Published 1.4.0 artifact, all file seals and hunk-by-hunk rebase: `patches/pi-1.4.0.PROVENANCE.md`.
+The 1.4 rebase preserves upstream OpenCode session headers and optional telemetry contracts. Batch admission adds one content-free span; single-submit statuses and per-input identity remain native. Model-error draining uses native continuation helpers; no-model retains upstream `afterFailedRun` (default `keep`).

@@ -27,4 +27,4 @@ Declaration fallback (2026-10-21): `dist/declarations.js` (`packages/codemode/sr
 
 Declarations pristine SHA-256: `00ab54f850a7412d029f8d9699fcb51b1346f3cb2c58e47b63f9189292ec260c`; patched: `93ea4e2a077874b6b273b5091965d208e5e2aa7668cb6215e538cc811c6d266a`.
 
-Published 1.4.0 artifact, all file seals and hunk-by-hunk rebase: `patches/pi-1.4.0.PROVENANCE.md`.
+All pristine/patched file hashes and four patch seals: `scripts/apply-dependency-patches.mjs`.
