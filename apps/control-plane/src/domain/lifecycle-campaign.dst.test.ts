@@ -4,11 +4,7 @@ import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { FAILPOINTS } from "../testkit/failpoints.ts";
 import { makeHarness, makeProjectRow, seedRunningOrb, TEST_USER_ID } from "../testkit/fixtures.ts";
-import {
-  assertAtMostOneHost,
-  assertReplicaComplete,
-  assertReplicaIntegrity,
-} from "../testkit/invariants.ts";
+import { assertReplicaComplete, assertReplicaIntegrity } from "../testkit/invariants.ts";
 import { LogCapture, runDst, waitUntil } from "../testkit/sim.ts";
 import type { AgentPlane } from "./agent-ports.ts";
 import {
@@ -398,7 +394,6 @@ describe("stateful lifecycle campaign", () => {
                 "accepted Sleep survives until explicit cancellation or due processing",
               ).toBe(activeSleep);
               expect(orb.sleepId === null).toBe(orb.sleepUntil === null);
-              assertAtMostOneHost(h.world, ORB);
               if (world.filesystemExists(ORB)) assertReplicaIntegrity(world, h.store, ORB);
             }
 

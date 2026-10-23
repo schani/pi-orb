@@ -16,7 +16,7 @@ import {
   TEST_USER_ID,
   type TestHarness,
 } from "../testkit/fixtures.ts";
-import { assertAtMostOneHost, assertReplicaComplete } from "../testkit/invariants.ts";
+import { assertReplicaComplete } from "../testkit/invariants.ts";
 import { LogCapture, runDst, sleepInSteps, waitUntil } from "../testkit/sim.ts";
 import { isDeclineMarker, isResumeMarker } from "../testkit/world.ts";
 import { ControlState } from "./control-state.ts";
@@ -211,7 +211,6 @@ describe("orb lifecycle (DST)", () => {
       expect(orb?.checkoutCommit).toBe("abc");
       expect(orb?.hostRef).not.toBeNull();
       expect(harness.world.hostStateOf(ORB)).toBe("running");
-      assertAtMostOneHost(harness.world, ORB);
     });
   });
 
@@ -283,7 +282,6 @@ describe("orb lifecycle (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        assertAtMostOneHost(harness.world, ORB);
       },
     );
   });
@@ -2976,7 +2974,6 @@ describe("orb lifecycle (DST)", () => {
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
         expect(harness.store.orbSnapshot(ORB)?.state).toBe("running");
         assertReplicaComplete(harness.world, harness.store, ORB);
-        assertAtMostOneHost(harness.world, ORB);
         // The recovery is legible from the log alone: whichever path won the
         // race (liveness grace expiry or the host observing `stopped` after its
         // ACPI window), the orb left `running` through `starting`...
@@ -3041,7 +3038,6 @@ describe("orb lifecycle (DST)", () => {
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      assertAtMostOneHost(harness.world, ORB);
     });
   });
 
@@ -3164,7 +3160,6 @@ describe("orb lifecycle (DST)", () => {
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
         expect(harness.world.resumeMarkersOf(ORB).length).toBe(1);
         assertReplicaComplete(harness.world, harness.store, ORB);
-        assertAtMostOneHost(harness.world, ORB);
         // The recovery is legible from the log, as in the neighbouring
         // preemption scenario...
         expect(
@@ -3265,7 +3260,6 @@ describe("orb lifecycle (DST)", () => {
         // Five recoveries plus idle stop; no restart storm.
         expect(stopsDuringScenario).toBeLessThanOrEqual(5 * MAX_STOPS_PER_RECOVERY);
         assertReplicaComplete(harness.world, harness.store, ORB);
-        assertAtMostOneHost(harness.world, ORB);
         expect(
           capture.matching("transition from=running to=starting").length,
         ).toBeGreaterThanOrEqual(5);
@@ -3408,7 +3402,6 @@ describe("orb lifecycle (DST)", () => {
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      assertAtMostOneHost(harness.world, ORB);
     });
   });
 
@@ -3493,7 +3486,6 @@ describe("orb lifecycle (DST)", () => {
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      assertAtMostOneHost(harness.world, ORB);
       expect(harness.world.hostStateOf(ORB)).toBe("stopped");
     });
   });

@@ -1576,3 +1576,5 @@ Sequential orphan collection is one ordinary test retaining pointer readability 
 Poll and reconcile concurrency share one mailbox with call counts, worker identity, rejection and joined shutdown contracts.
 
 Shared chunked waits and revision seeds preserve explicit reasons, project identities, initialization and revision baselines; scenario drivers remain local.
+
+FakeWorld models one host slot per orb; creation history, refs and incarnation fences qualify modeled replacement, while physical uniqueness belongs to real-provider contracts.

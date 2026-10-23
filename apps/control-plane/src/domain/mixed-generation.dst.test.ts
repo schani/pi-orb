@@ -9,7 +9,6 @@ import {
   seedRunningOnRevisions,
   type TestHarness,
 } from "../testkit/fixtures.ts";
-import { assertAtMostOneHost } from "../testkit/invariants.ts";
 import { LogCapture, runDst, waitUntil } from "../testkit/sim.ts";
 import { FakeOrbHostProvider } from "../testkit/world.ts";
 import { ControlState } from "./control-state.ts";
@@ -618,7 +617,6 @@ describe("mixed-generation reconcilers (DST)", () => {
         const declined = capture.matching("spec-replacement-declined");
         expect(declined.length).toBeLessThanOrEqual(1);
         declinedTotal += declined.length;
-        assertAtMostOneHost(harness.world, ORB);
       },
     );
     expect(declinedTotal).toBeGreaterThan(0);
@@ -791,7 +789,6 @@ describe("mixed-generation reconcilers (DST)", () => {
         const created = harness.world.createdHostsOf(ORB).map((host) => host.specFingerprint);
         expect(created.length).toBeLessThanOrEqual(2);
         expect(created).not.toEqual([newFingerprint, oldFingerprint]);
-        assertAtMostOneHost(harness.world, ORB);
       },
     );
   });

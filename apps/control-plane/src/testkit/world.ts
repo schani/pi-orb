@@ -809,7 +809,7 @@ export class FakeWorld {
     this.orbState(orbId).reportOrbId = reportedOrbId;
   }
 
-  /** Count of hosts that exist (any state) for invariant checks. */
+  /** Presence of the orb's single modeled host slot, in any state (0 or 1). */
   hostCount(orbId: string): number {
     return this.orbs.get(orbId)?.host === null || !this.orbs.has(orbId) ? 0 : 1;
   }

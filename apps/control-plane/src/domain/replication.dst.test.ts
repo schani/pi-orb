@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FAILPOINTS } from "../testkit/failpoints.ts";
 import { makeHarness, seedRunningOrb } from "../testkit/fixtures.ts";
-import {
-  assertAtMostOneHost,
-  assertReplicaComplete,
-  assertReplicaIntegrity,
-} from "../testkit/invariants.ts";
+import { assertReplicaComplete, assertReplicaIntegrity } from "../testkit/invariants.ts";
 import { runDst, waitUntil } from "../testkit/sim.ts";
 import { pollLoop, reconcileLoop } from "./loops.ts";
 
@@ -48,7 +44,6 @@ describe("history replication (DST)", () => {
         `simulation failed: ${result.isErr() ? result.error.message : ""}`,
       ).toBe(true);
       assertReplicaComplete(harness.world, harness.store, ORB);
-      assertAtMostOneHost(harness.world, ORB);
     });
   });
 

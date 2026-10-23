@@ -12,7 +12,6 @@ import {
   seedRunningOrb,
   type TestHarness,
 } from "../testkit/fixtures.ts";
-import { assertAtMostOneHost } from "../testkit/invariants.ts";
 import { LogCapture, runDst, sleepInSteps, waitUntil } from "../testkit/sim.ts";
 import { FakeOrbHostProvider } from "../testkit/world.ts";
 import { ControlState } from "./control-state.ts";
@@ -189,7 +188,6 @@ describe("host-spec replacement (DST)", () => {
         expect(discardRequests[0]).toContain("through_incarnation=0");
         expect(capture.matching("replacement-provisioned")).toHaveLength(1);
         expect(capture.matching("spec-replacement-declined")).toEqual([]);
-        assertAtMostOneHost(harness.world, ORB);
       },
     );
   });
@@ -234,7 +232,6 @@ describe("host-spec replacement (DST)", () => {
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
         expect(capture.matching("compute-discard-requested")).toEqual([]);
         expect(capture.matching("replacement-provisioned")).toEqual([]);
-        assertAtMostOneHost(harness.world, ORB);
       },
     );
   });
@@ -298,7 +295,6 @@ describe("host-spec replacement (DST)", () => {
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
         expect(capture.matching("compute-discard-requested")).toEqual([]);
         expect(capture.matching("spec-replacement-declined")).toEqual([]);
-        assertAtMostOneHost(harness.world, ORB);
       },
     );
   });
@@ -402,7 +398,6 @@ describe("host-spec replacement (DST)", () => {
         expect(harness.world.specFingerprintOf(ORB)).toBe(spec);
         expect(capture.matching("mismatch")).toEqual([]);
         expect(capture.matching("to=failed")).toEqual([]);
-        assertAtMostOneHost(harness.world, ORB);
       },
     );
     expect(inPlaceRestarts).toBeGreaterThan(0);
@@ -456,7 +451,6 @@ describe("host-spec replacement (DST)", () => {
         expect(discardRequests).toHaveLength(1);
         expect(discardRequests[0]).toContain("reason=host_spec_changed");
         expect(capture.matching("to=failed")).toEqual([]);
-        assertAtMostOneHost(harness.world, ORB);
       },
     );
   });
@@ -696,7 +690,6 @@ describe("host-spec replacement (DST)", () => {
         expect(capture.matching("compute-discard-requested")).toEqual([]);
         expect(capture.matching("spec-replacement-declined")).toHaveLength(1);
         expect(harness.world.createdHostsOf(ORB)).toHaveLength(1);
-        assertAtMostOneHost(harness.world, ORB);
       },
     );
   });
@@ -786,7 +779,6 @@ describe("host-spec replacement (DST)", () => {
         expect(discardRequests).toHaveLength(1);
         expect(discardRequests[0]).toContain("reason=host_spec_changed");
         expect(capture.matching("to=failed")).toEqual([]);
-        assertAtMostOneHost(harness.world, ORB);
       },
     );
   });
