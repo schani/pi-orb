@@ -10,6 +10,8 @@ Instruction route writes require GET equality, including revisions and clear. Pr
 
 Hosted namespace isolation publishes the same path with different bytes under two bearer identities, checks both inventories, and verifies deletion leaves the other namespace readable.
 
+Runtime self children coverage accepts a child through the spawn route, observes it before deletion, finalizes deletion and then excludes it while retaining archived-child and unrelated-orb controls.
+
 ## Adapter boundary assertions (2026-10-22)
 
 SQL fixtures register clients before fallible setup; table-driven settings suites capture each acquired subject in `onTestFinished`, without teardown of an unacquired or stale client; process observations/crash markers live under immediately registered roots. Teardown reports cleanup failures separately, attempts every owned release, and retains the original test failure.

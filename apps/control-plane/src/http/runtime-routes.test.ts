@@ -777,7 +777,37 @@ describe("runtime broker routes", () => {
           url: ORB_SELF_PATH,
           headers: { authorization: `Bearer ${TOKEN}`, host: "untrusted.test" },
         });
+      const deletedChild = "00000000-0000-4000-8000-000000000004";
+      const accepted = await app.inject({
+        method: "PUT",
+        url: `/runtime/v1/orbs/${deletedChild}/spawn`,
+        headers: { authorization: `Bearer ${TOKEN}` },
+        payload: { prompt: "Delete this child", name: "Deleted child" },
+      });
+      expect(accepted.statusCode).toBe(202);
+      const beforeDeletion = await inspect();
+      expect(beforeDeletion.statusCode).toBe(200);
+      expect(beforeDeletion.json().children).toHaveLength(2);
+      expect(beforeDeletion.json().children).toContainEqual({
+        id: deletedChild,
+        name: "Deleted child",
+        url: `https://browser.test/orbs/${deletedChild}`,
+      });
+      const deleting = await store.requestOrbDeletion(task, {
+        orbId: deletedChild,
+        expectedStateVersion: 0,
+        now: 100,
+        cleanupAfter: 100,
+      });
+      expect(deleting.isOk(), JSON.stringify(deleting)).toBe(true);
+      const finalized = await store.finalizeOrbDeletion(task, {
+        orbId: deletedChild,
+        expectedStateVersion: 1,
+      });
+      expect(finalized.isOk(), JSON.stringify(finalized)).toBe(true);
+      expect(store.orbSnapshot(deletedChild)).toBeNull();
       const response = await inspect();
+      expect(response.statusCode).toBe(200);
       expect(response.headers["cache-control"]).toBe("no-store");
       expect(Check(OrbSelfSchema, response.json())).toBe(true);
       expect(response.json().children).toEqual([
