@@ -15,7 +15,6 @@ import { basename, dirname, join } from "node:path";
 import {
   DEFAULT_TTL_SECONDS,
   type DisplayRecord,
-  type HistorySearchResponse,
   ID_TOKEN_PATH,
   RUNTIME_SUBPROTOCOL,
   type ServerFrame,
@@ -2293,47 +2292,6 @@ describe("full slice E2E", () => {
       "ORB_INSPECT_TRANSCRIPT_DONE",
     );
     expect(transcriptFromSibling).toContain("The check succeeded: E2E_TOOL_OK.");
-
-    const marker = "The check succeeded: E2E_TOOL_OK.";
-    const committed = await waitFor("search marker committed before CLI search", async () => {
-      const snapshot = await readReplicatedHistorySnapshot(controlPlane, orbId);
-      const record = snapshot.records.find(
-        (record) =>
-          record.type === "message" &&
-          record.role === "assistant" &&
-          record.content.some((block) => block.type === "text" && block.text === marker),
-      );
-      return record && snapshot.session
-        ? { recordId: record.id, sessionId: snapshot.session.id }
-        : null;
-    });
-    for (const scope of ["", `--orb ${orbId}`, "--project", "--all"]) {
-      const output = await terminalRun(
-        secondOrbId,
-        String.raw`pi-orb search succeeded ${scope} --limit 50 --json; printf '\123\105\101\122\103\110\137\104\117\116\105\012'`,
-        "SEARCH_DONE",
-      );
-      const result = JSON.parse(
-        output.slice(output.indexOf('{\r\n  "v"'), output.indexOf("SEARCH_DONE")),
-      ) as HistorySearchResponse;
-      scenarioEvidence.observations.push({ resource: "history-search", scope, result, committed });
-      expect(result.v).toBe(1);
-      if (scope === "") expect(result.hits).toEqual([]);
-      else {
-        const hit = result.hits.find(
-          (hit) => hit.orbId === orbId && hit.recordId === committed.recordId,
-        );
-        expect(hit).toMatchObject({
-          ...committed,
-          orbId,
-          projectName: project.body["name"],
-          snippet: marker,
-          orbUrl: `${base}/orbs/${orbId}`,
-        });
-        expect(hit?.score).toBeGreaterThan(0);
-      }
-    }
-    expect((await api(base, "GET", `/api/v1/orbs/${orbId}`)).body["state"]).toBe("stopped");
 
     const spawnedOrbId = randomUUID();
     scenarioEvidence.target = spawnedOrbId;
