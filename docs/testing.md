@@ -1570,3 +1570,5 @@ Campaign results retain command and caller identity plus typed error diagnostics
 One precommit GitHub retry scenario checks exact credentials, retryability, single ceremony and monotonic publication; pacing and ambiguous commits remain distinct.
 
 Stop override uses one comprehensive transition contract against both memory and PGlite.
+
+Sequential orphan collection is one ordinary test retaining pointer readability and complete version cleanup.

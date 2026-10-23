@@ -267,28 +267,26 @@ describe("project secrets (DST)", () => {
     });
   });
 
-  it("keeps pointers readable across crash windows and deletion collects orphan versions", async () => {
-    await runDst({ name: "project-secrets-crash-windows", iterations: 30 }, async (_sim) => {
-      const harness = makeProjectSecretsHarness(PROJECT);
-      expect(
-        (await putProjectSecret(outsideTask, harness.deps, PROJECT, "TOKEN", "current")).isOk(),
-      ).toBe(true);
-      const pointer = harness.pointers.snapshot(PROJECT);
-      expect(pointer).not.toBeNull();
-      harness.secrets.seedSecret("project-secrets", {
-        projectId: PROJECT,
-        revision: (pointer?.revision ?? 0) + 1,
-        values: { TOKEN: "orphan" },
-      });
-      expect(
-        expectSnapshot(await getProjectSecretSnapshot(outsideTask, harness.deps, PROJECT)),
-      ).toEqual({
-        TOKEN: "current",
-      });
-      await harness.pointers.markProjectDeleting(outsideTask, PROJECT);
-      expect((await deleteAllProjectSecrets(outsideTask, harness.deps, PROJECT)).isOk()).toBe(true);
-      expect(harness.secrets.liveVersions("project-secrets")).toEqual([]);
+  it("keeps the current pointer readable and collects unpublished orphans on deletion", async () => {
+    const harness = makeProjectSecretsHarness(PROJECT);
+    expect(
+      (await putProjectSecret(outsideTask, harness.deps, PROJECT, "TOKEN", "current")).isOk(),
+    ).toBe(true);
+    const pointer = harness.pointers.snapshot(PROJECT);
+    expect(pointer).not.toBeNull();
+    harness.secrets.seedSecret("project-secrets", {
+      projectId: PROJECT,
+      revision: (pointer?.revision ?? 0) + 1,
+      values: { TOKEN: "orphan" },
     });
+    expect(
+      expectSnapshot(await getProjectSecretSnapshot(outsideTask, harness.deps, PROJECT)),
+    ).toEqual({
+      TOKEN: "current",
+    });
+    await harness.pointers.markProjectDeleting(outsideTask, PROJECT);
+    expect((await deleteAllProjectSecrets(outsideTask, harness.deps, PROJECT)).isOk()).toBe(true);
+    expect(harness.secrets.liveVersions("project-secrets")).toEqual([]);
   });
 
   it("preserves pointer invariants under store failpoints", async () => {
