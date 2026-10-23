@@ -2,6 +2,26 @@
 
 ## Local fake-provider npm preparation (2026-10-22)
 
+**Security decision (2026-10-22):** adopt the immutable source from
+[upstream draft PR10](https://github.com/glideapps/fake-openai/pull/10), pending
+upstream review. Its owner-compatible lock refresh retains Fling0.0.70's exact
+registry URL/SHA512. The wrapper validates `allowScripts.cloudflared === false`
+and actual npm >=11.19.1 **before** `npm ci`; engines warnings alone are not an
+execution boundary. Unsupported npm or a missing denial fails closed with a
+resource-specific error and no install/service start. The sanitized npm version
+and separate version-query phases join existing private-root/evidence receipts.
+
+The retained cloudflared0.7.1 hook otherwise downloads an unchecksummed floating
+`latest` binary; an npm wrapper version bump would not fix that. The explicit
+false policy suppresses only this install hook, not SQLite/esbuild setup or
+explicit tunnel commands. This local fixture needs no tunnel. Full and production
+upstream audits retain one low
+[esbuild Windows dev-server advisory](https://github.com/advisories/GHSA-g7r4-m6w7-qqqr):
+0.27.7 belongs to Fling's `^0.27.2`; fixed0.28.1 is outside that range. The Linux
+local CLI uses context/watch/rebuild, not esbuild `serve`; this is neither an
+owner fix nor general Windows qualification. No override, package release,
+private Fling edit, Node major change or Pi change is included.
+
 Failed npm installation retains only finite allowlisted code/errno fields in existing phase artifacts, from at most 64 KiB of private combined output. Missing/conflicting/oversized fields remain unknown; unreadable output is marked unavailable. Raw logs stay private. npm defaults, one install invocation and the 300s tool timeout are unchanged.
 
 The user waived attribution of only [Durable 39844782648](https://github.com/schani/pi-orb/actions/runs/39844782648)'s original npm exit 152; its cause remains unknown. New failures and exact-head qualification remain mandatory. Evidence: `docs/postmortems/2026-10-22-local-fake-npm-preparation.md`.
@@ -402,7 +422,7 @@ PR CI runs the complete unit/DST/infrastructure suite with both real-PostgreSQL 
 
 ## Job-owned fake provider (2026-10-06; integration pending)
 
-**Decision:** PR acceptance uses the existing public fake provider pinned at `eaa274c562ea7b1ec6dce496a1442cfbb55b4106`, checked out into each job's owned temporary root and installed with its lock. The supported Fling0.0.70 command is `npm start -- --cli --be-port <worker> --fe-port <vite> --verbose`; it owns both worker and Vite, with watch enabled. SQLite, storage, secrets and HOME are temporary. No cloud login, tunnel, deployment or private runtime import is needed. The CLI exposes no literal IPv4 bind flag; readiness must prove owned-process/socket identity, migrations and IPv4 reachability, not just `/health`. Docker jobs use one discovered bridge-gateway origin reachable by runner Node and guests; returned session URLs must preserve it. No remote fallback or URL rewriting. A foreground supervisor bounds startup, latches ready worker/Vite PID and birth identities, rejects replacement or durable Files/Secrets restart edges, owns group cleanup and writes only allowlisted source/runtime/lifecycle provenance for artifacts; DB, auth roots and raw provider payloads are excluded.
+**Decision:** PR acceptance uses the existing public fake provider pinned at `63df19b02b1d80da3ff69ac7ffc2c4ffe225283f`, checked out into each job's owned temporary root and installed with its lock. The supported Fling0.0.70 command is `npm start -- --cli --be-port <worker> --fe-port <vite> --verbose`; it owns both worker and Vite, with watch enabled. SQLite, storage, secrets and HOME are temporary. No cloud login, tunnel, deployment or private runtime import is needed. The CLI exposes no literal IPv4 bind flag; readiness must prove owned-process/socket identity, migrations and IPv4 reachability, not just `/health`. Docker jobs use one discovered bridge-gateway origin reachable by runner Node and guests; returned session URLs must preserve it. No remote fallback or URL rewriting. A foreground supervisor bounds startup, latches ready worker/Vite PID and birth identities, rejects replacement or durable Files/Secrets restart edges, owns group cleanup and writes only allowlisted source/runtime/lifecycle provenance for artifacts; DB, auth roots and raw provider payloads are excluded.
 
 This removes uncontrolled shared external runtime-API availability, not dependency-install networking or local resource exhaustion. It changes the acceptance environment from remote TLS to local HTTP; it does not prove which historical transport phase stalled. Corrected current E2E and retained approval/upload phase evidence are required before qualification. The launcher is wired into both four-shard workflows. An actual pinned local process smoke proves fresh migrations, worker/Vite socket ownership, manual device authorization, zstd SSE, native bash and the next model response; it does not qualify the complete browser/SDK pipeline. Deterministic supervisor contracts run in the normal infrastructure gate. Actual Docker-container access and coherent current-source E2E remain pending GitHub acceptance.
 
