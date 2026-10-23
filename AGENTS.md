@@ -12,6 +12,8 @@ Discuss any change or addition to persisted state with the user before implement
 
 ## Design documentation
 
+All changes to prompts must be approved by the user before implementation.
+
 The design docs are the source of truth for pi-orb's evolving design. `DESIGN.md` is the entry point: purpose, scope, product decisions, the architecture overview, and an index of the topical docs under `docs/` (one per subsystem: host provider, lifecycle, runtime protocol, history/replication, Pi adapter, control-plane API, web UI, credentials, deployment, testing, stack). Incident forensics live in `docs/postmortems/`, undecided design questions in `docs/open-questions.md`, and actionable work in `TODO.md`.
 
 Whenever a conversation or implementation changes a requirement, decision, proposal, rejected approach, experimental finding, or open question:
