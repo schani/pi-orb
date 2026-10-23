@@ -2,6 +2,7 @@
 import importlib.util
 import io
 import json
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -441,6 +442,35 @@ class DiagnosticTest(unittest.TestCase):
         entry = json.loads(requests[-1].data)['entries'][0]
         self.assertEqual(entry['severity'], 'ERROR')
         self.assertEqual(entry['jsonPayload']['instanceId'], '123')
+
+class AcceptanceDiskTest(unittest.TestCase):
+    def test_requires_workspace_mount_and_exact_canonical_device(self):
+        source = (ROOT / 'acceptance.sh').read_text()
+        block = source[source.index('test "$(findmnt '):source.index('filesystem_metadata=')]
+        for mount, mounted, expected, accepted in [
+            ('/', '/dev/root', '/dev/data', False),
+            ('/workspace', '/dev/wrong', '/dev/data', False),
+            ('/workspace', '/dev/data', '/dev/data', True),
+        ]:
+            with self.subTest(mount=mount, mounted=mounted):
+                fixture = """
+findmnt() {
+  case "$*" in
+    *TARGET*) printf '%s\n' "$MOUNT" ;;
+    *) printf '%s\n' "$DEVICE" ;;
+  esac
+}
+readlink() {
+  case "$2" in
+    /dev/disk/by-id/google-pi-orb-data) printf '%s\n' "$EXPECTED" ;;
+    *) printf '%s\n' "$2" ;;
+  esac
+}
+"""
+                result = subprocess.run(['bash', '-ec', fixture + block],
+                    env={'MOUNT': mount, 'DEVICE': mounted, 'EXPECTED': expected},
+                    capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, accepted, result.stderr)
 
 
 if __name__ == '__main__':

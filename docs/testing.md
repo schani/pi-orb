@@ -1500,3 +1500,8 @@ Focused coverage checks indexed-root backfill/immutability, proof exclusions/con
 Head `b21404b8` passed eleven first-attempt CI checks; that combined tree does not qualify this scoped tree. Exact-head CI and the separate [UI correction, PR 139](https://github.com/schani/pi-orb/pull/139), remain merge/deployment prerequisites; the UI contract is not waived.
 
 **User exception — 2026-10-16:** explanation of only the original local PostgreSQL MCP `beforeEach` 10s and aggregate-image 30s timeouts is waived; no cause or fix is claimed. First failures, measurements and full historical records remain private under `/workspace/evidence/c9a30a6d/scope-cleanup/` and its referenced directories for a docs-only followup, including the separate release-500 waiver (not revoked). No new failure, assertion, exact-head gate or DST replay/root-cause requirement is waived.
+
+## Acceptance fixture ownership (2026-10-22 PDT)
+
+Guest acceptance requires an actual /workspace mount whose canonical device equals
+google-pi-orb-data, then checks that device's filesystem and capacity.

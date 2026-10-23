@@ -20,8 +20,10 @@ sudo -u orb sh -ec '
   git-crypt --version
 '
 
-findmnt --noheadings --output SOURCE --target /workspace | grep -q '/dev/'
+test "$(findmnt --noheadings --output TARGET --mountpoint /workspace)" = /workspace
+mounted_device=$(findmnt --noheadings --output SOURCE --mountpoint /workspace)
 workspace_device=$(readlink -f /dev/disk/by-id/google-pi-orb-data)
+test "$(readlink -f "$mounted_device")" = "$workspace_device"
 filesystem_metadata=$(tune2fs -l "$workspace_device")
 filesystem_bytes=$(printf '%s\n' "$filesystem_metadata" | awk -F: '/^Block count:/{count=$2} /^Block size:/{size=$2} END{gsub(/ /,"",count); gsub(/ /,"",size); printf "%.0f\n", count*size}')
 device_bytes=$(blockdev --getsize64 "$workspace_device")
