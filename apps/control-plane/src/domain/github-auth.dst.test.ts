@@ -275,7 +275,8 @@ describe("GitHub auth gate (DST)", () => {
           name: "caller",
           f: async (task) => {
             expect((await gate.ensureAuth(task, USER))._unsafeUnwrap().status).toBe("pending");
-            expect((await gate.ensureAuth(task, USER)).isErr()).toBe(true);
+            const failed = await gate.ensureAuth(task, USER);
+            expect(failed.isErr() && failed.error.retryable).toBe(true);
             expect((await gate.ensureAuth(task, USER))._unsafeUnwrap().status).toBe("ok");
             return await getToken(task, deps, GITHUB_PROVIDER, { reason: "startup" });
           },
@@ -290,6 +291,8 @@ describe("GitHub auth gate (DST)", () => {
       ]);
       expect(pointers.committedWrites).toHaveLength(1);
       expect(client.pollTimes).toHaveLength(1);
+      expect(client.deviceCodeRequests).toBe(1);
+      pointers.assertGenerationMonotonic();
     });
   });
 
@@ -487,34 +490,6 @@ describe("GitHub auth gate (DST)", () => {
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(harness.client.deviceCodeRequests).toBe(2);
-    });
-  });
-
-  it("retries the commit of an authorized credential without a second ceremony", async () => {
-    await runDst({ name: "github-commit-retry", iterations: 25 }, async (sim) => {
-      const harness = makeGithubHarness();
-      const result = await sim.runTasks([
-        {
-          name: "driver",
-          f: async (task) => {
-            await driveUntil(task, harness.gate, (resolution) => resolution.status === "pending");
-            harness.secrets.failWrites = true;
-            harness.client.authorize();
-            // The poll succeeds but the known pre-commit write failure is a
-            // retryable gate error; the pending credential remains reusable.
-            await task.sleep(5_001, "device poll due");
-            const failed = await harness.gate.ensureAuth(task, USER);
-            expect(failed.isErr() && failed.error.retryable).toBe(true);
-            harness.secrets.failWrites = false;
-            await driveUntil(task, harness.gate, (resolution) => resolution.status === "ok");
-          },
-        },
-      ]);
-      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      // The device code was consumed exactly once; recovery reused the
-      // in-memory credential instead of restarting the ceremony.
-      expect(harness.client.deviceCodeRequests).toBe(1);
-      harness.pointers.assertGenerationMonotonic();
     });
   });
 

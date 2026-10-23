@@ -1566,3 +1566,5 @@ Stopping qualification covers absent and stopped hosts without restarting either
 Outage telemetry must emit one blind edge per outage and one recovery edge between outages.
 
 Campaign results retain command and caller identity plus typed error diagnostics without content or credentials.
+
+One precommit GitHub retry scenario checks exact credentials, retryability, single ceremony and monotonic publication; pacing and ambiguous commits remain distinct.
