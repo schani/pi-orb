@@ -1753,3 +1753,5 @@ DetailBody owns generic argument/result and image-body rendering once; ToolActiv
 Composer normalization contracts live with composer-mode; command-options tests exercise option selection only. (2026-10-22 PDT).
 
 Default detail render fixtures use fresh shared detailContext caches and pending maps at each render site. (2026-10-22 PDT).
+
+Background-admission projection keeps one missing-native discriminator alongside independent native identity/status failures. (2026-10-22 PDT).
