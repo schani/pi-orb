@@ -43,7 +43,14 @@ describe("Instrument tiles", () => {
       readFileSync(new URL(`../../public${href}`, import.meta.url), "utf8"),
     );
     expect(new Set(assets).size).toBe(11);
-    const geometry = assets.map((svg) => svg.replace(/#[0-9a-f]{3,6}/g, "#777777"));
+    const geometry = assets.map((svg) =>
+      svg
+        .replace(/<(title|desc|metadata)\b[^>]*>[\s\S]*?<\/\1>/g, "")
+        .replace(/\s(?:aria-[\w-]+|role|id)="[^"]*"/g, "")
+        .replace(/\s(?:fill|stroke|color)="[^"]*"/g, ""),
+    );
+    for (const svg of geometry)
+      expect(svg).toMatch(/<(?:path|circle|polygon|polyline|line|ellipse)\b/);
     expect(new Set(geometry).size).toBe(11);
     for (const svg of assets) {
       expect(svg).toContain('viewBox="0 0 16 16"');

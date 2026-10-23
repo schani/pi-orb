@@ -1741,3 +1741,5 @@ Generic tool label bounds require an existing nonempty truncated label before co
 Inbox races qualify the production poller and mutation epoch, including post-unmount publication fencing; pure acknowledgement/retirement contracts remain independent. (2026-10-22 PDT).
 
 Gated retry-before-response, single-actor publication reentrancy and deletion-before-image-publication compositions run once per explicit action. They draw no random inputs or advance timers; multi-actor ownership/deadline races retain exploration. (2026-10-22 PDT).
+
+Status asset distinctness compares graphical markup without title/accessibility metadata or colors and requires positive graphical primitives. (2026-10-22 PDT).
