@@ -2499,37 +2499,51 @@ describe("orb lifecycle (DST)", () => {
     });
   });
 
-  it("an absent or already-stopped host during stopping is marked stopped directly", async () => {
-    await runDst({ name: "stop-absent-host", iterations: 20 }, async (sim) => {
-      const harness = makeHarness();
-      const stop = new AbortController();
-      const result = await sim.runTasks([
-        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
-        {
-          name: "driver",
-          f: async (task) => {
-            seedRunningOrb(task, harness, ORB);
-            harness.world.appendMessage(ORB); // will remain unreplicated: accepted caveat
-            // Host dies out from under us (e.g. crashed while stopping).
-            const orb = harness.store.orbSnapshot(ORB);
-            expect(orb?.hostRef).not.toBeNull();
-            harness.world.stopHost({ provider: "fake", resourceId: orb?.hostRef ?? "" });
-            const stopResult = await requestOrbStop(task, harness.deps, ORB);
-            expect(stopResult.isOk()).toBe(true);
-            await waitUntil(
-              task,
-              "orb stopped despite dead host",
-              () => harness.store.orbSnapshot(ORB)?.state === "stopped",
-              { timeoutMs: 300_000 },
-            );
-            stop.abort();
+  it.each(["absent", "already-stopped"] as const)(
+    "an %s host during stopping is marked stopped directly",
+    async (hostState) => {
+      await runDst({ name: `stop-${hostState}-host`, iterations: 20 }, async (sim) => {
+        const harness = makeHarness();
+        const stop = new AbortController();
+        let hostArranged = false;
+        const result = await sim.runTasks([
+          {
+            name: "reconciler",
+            f: async (task) => {
+              await waitUntil(task, "dead host arranged in stopping episode", () => hostArranged);
+              await reconcileLoop(task, harness.deps, stop.signal);
+            },
           },
-        },
-      ]);
-      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      expect(harness.store.orbSnapshot(ORB)?.state).toBe("stopped");
-    });
-  });
+          {
+            name: "driver",
+            f: async (task) => {
+              seedRunningOrb(task, harness, ORB);
+              harness.world.appendMessage(ORB); // will remain unreplicated: accepted caveat
+              const startsBefore = harness.world.hostStartCountOf(ORB);
+              const orb = harness.store.orbSnapshot(ORB);
+              expect(orb?.hostRef).not.toBeNull();
+              const stopResult = await requestOrbStop(task, harness.deps, ORB);
+              expect(stopResult.isOk()).toBe(true);
+              expect(harness.store.orbSnapshot(ORB)?.state).toBe("stopping");
+              if (hostState === "absent") harness.world.removeHost(ORB);
+              else harness.world.stopHost({ provider: "fake", resourceId: orb?.hostRef ?? "" });
+              hostArranged = true;
+              await waitUntil(
+                task,
+                "orb stopped despite dead host",
+                () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+                { timeoutMs: 300_000 },
+              );
+              expect(harness.world.hostStartCountOf(ORB)).toBe(startsBefore);
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(harness.store.orbSnapshot(ORB)?.state).toBe("stopped");
+      });
+    },
+  );
 
   it("an unreachable runtime in a live host is restarted after the grace period", async () => {
     await runDst({ name: "unreachable-restart", iterations: 20 }, async (sim) => {

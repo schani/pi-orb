@@ -1560,3 +1560,5 @@ Deferred-restart telemetry is asserted inside every recorded iteration after tas
 Inbox FIFO compares flattened identities, including order within squashed records; exactly-once remains a separate oracle.
 
 Pending-delivery retry qualification observes the same request and duplicate response before crashing, then requires exactly-once recovery.
+
+Stopping qualification covers absent and stopped hosts without restarting either.
