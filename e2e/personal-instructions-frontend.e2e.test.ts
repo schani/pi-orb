@@ -1,32 +1,28 @@
-import { join } from "node:path";
-import { expect as check, chromium, webkit } from "@playwright/test";
-import { createServer } from "vite";
+import { expect as check } from "@playwright/test";
 import { it } from "vitest";
-import { listenFrontend } from "./frontend-listen.ts";
 import { gotoFrontendFixture } from "./testkit/frontend-fixture.ts";
+import { createFrontendFixture } from "./testkit/frontend-owned.ts";
 
 it.each(["chromium", "webkit"] as const)(
   "%s personal editor: explicit save, load/failure gates, retained drafts, scope and phone geometry",
   async (engine) => {
-    const root = join(import.meta.dirname, "../apps/web");
-    const vite = await createServer({
-      root,
-      configFile: join(root, "vite.config.ts"),
-      mode: "frontend",
-      server: { host: "127.0.0.1", port: 0 },
+    const fixture = await createFrontendFixture(engine, {
+      page: { viewport: { width: 1280, height: 900 } },
     });
-    await listenFrontend(vite);
-    const address = vite.httpServer?.address();
-    if (!address || typeof address === "string") throw new Error("No owned fixture port");
-    const browser = await (engine === "chromium" ? chromium : webkit).launch({ headless: true });
-    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const { page, origin } = fixture;
     const path = "**/api/v1/personal-instructions";
-    const url = `http://127.0.0.1:${address.port}/`;
-    try {
+    const url = `${origin}/`;
+    {
       let failRead = true,
         failWrite = true;
       let releaseRead: (() => void) | undefined;
+      fixture.cleanup(async () => {
+        releaseRead?.();
+      });
       let releaseWrite: (() => void) | undefined;
+      fixture.cleanup(async () => {
+        releaseWrite?.();
+      });
       let heldRead: Promise<void> = Promise.resolve();
       let heldWrite: Promise<void> = Promise.resolve();
       await page.route(path, async (route) => {
@@ -138,9 +134,6 @@ it.each(["chromium", "webkit"] as const)(
         await gear.click();
         await check(input).toHaveValue(`draft at ${width}`);
       }
-    } finally {
-      await browser.close();
-      await vite.close();
     }
   },
 );

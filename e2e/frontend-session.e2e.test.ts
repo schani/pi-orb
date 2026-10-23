@@ -290,6 +290,10 @@ describe("frontend-only browser behavior", () => {
 
   afterAll(async () => {
     await browser?.close();
+  });
+
+  // biome-ignore lint/suspicious/noDuplicateTestHooks: Vite must close even if browser cleanup rejects.
+  afterAll(async () => {
     await vite?.close();
   });
 
