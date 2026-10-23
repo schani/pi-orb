@@ -6,7 +6,7 @@ Real-socket upload backpressure observes server-side read consumption and queued
 
 Signing-key rotation failpoints follow a fault-free seed, faulted rotation and explicit fault-free repair on the same recorded trace. Repair must return exactly one active key with readable private material and a matching JWKS entry; outage-phase safety alone is insufficient.
 
-Instruction route writes require GET equality, including revisions and clear. Project isolation keeps distinct nonempty A/B documents simultaneously.
+Instruction route writes require GET equality, including revisions and clear. Project isolation keeps distinct nonempty A/B documents simultaneously. MCP route validation starts from a nonempty HTTPS/OAuth catalog, varies one field per denial and requires the expected error with no catalog/revision change.
 
 ## Adapter boundary assertions (2026-10-22)
 
