@@ -5,7 +5,9 @@ import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import {
+  type ConversationId,
   createRegistry,
+  defineExtension,
   defineTool,
   type EntryId,
   Harness,
@@ -23,10 +25,15 @@ import {
 import { errAsync, okAsync } from "neverthrow";
 import { assert, describe, expect, it, vi } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
+import { codemodeTool } from "./codemode.ts";
 import { PiCodemodeSandbox } from "./codemode-sandbox.ts";
-import { createDurableTools } from "./index.ts";
 import { openCodemodeHarness } from "./testkit/codemode.ts";
 
+type NestedTask = {
+  id: TaskId;
+  input: { kind: string; parent: TaskId; key: string; call: { name: string } };
+  state: { status: string; checkpoint: { phase: string; replay: string } };
+};
 const context = BACKGROUND_CONTEXT;
 const directory = new URL("./fixtures/pi-1.3-compat/", import.meta.url);
 const now = 1_800_000_000_000;
@@ -74,9 +81,11 @@ describe("qualified Pi 1.3 native state on the current Pi", () => {
   });
 
   it("reuses the old decided script result without a VM or completed callback rerun", async () => {
-    const old = read<{ root: number; result: ToolExecutionResult; commits: StorageWrite[][] }>(
-      "completed.json",
-    );
+    const old = read<{
+      root: ConversationId;
+      result: ToolExecutionResult;
+      commits: StorageWrite[][];
+    }>("completed.json");
     let effects = 0;
     const result = deferred<ToolExecutionResult>();
     const starts = vi.spyOn(PiCodemodeSandbox.prototype, "start");
@@ -113,13 +122,13 @@ describe("qualified Pi 1.3 native state on the current Pi", () => {
 
   it("retains old store values, success-only writes and history through the 64-delta base", async () => {
     const old = read<{
-      root: number;
+      root: ConversationId;
       storeId: number;
       markers: Record<string, EntryId>;
       deltaCount: number;
       commits: StorageWrite[][];
     }>("store.json");
-    expect(old.deltaCount).toBe(63);
+    expect(old.deltaCount).toBe(2);
     const storage = await restore(old.commits);
     const writes: StorageWrite[] = [];
     const commit = storage.commit.bind(storage);
@@ -135,10 +144,28 @@ describe("qualified Pi 1.3 native state on the current Pi", () => {
       const historical = (entry: EntryId) =>
         fixture.harness.snapshotAsOf(CodemodeStoreDoc, fixture.root.id, entry, context);
       expect(await snapshot()).toEqual({
-        values: { counter: 63, old: { version: "1.3.0", nested: [1, true, null] } },
+        values: { counter: 2, old: { version: "1.3.0", nested: [1, true, null] } },
       });
-      expect((await historical(old.markers["32"]!))?.values.counter).toBe(32);
-      expect((await fixture.run('text(load("old")); store("counter",64);')).isError).toBe(false);
+      expect((await historical(old.markers["0"]!))?.values.counter).toBe(0);
+      expect((await historical(old.markers["2"]!))?.values.counter).toBe(2);
+      // Exercise the new checkpoint policy with current native commits, not fixture rows.
+      for (let counter = 3; counter <= 63; counter++) {
+        await fixture.root.commit(async (tx) => {
+          (await tx.doc(CodemodeStoreDoc, fixture.root.id)).values.counter = counter;
+        }, context);
+      }
+      expect(
+        writes
+          .filter((write) => write.type === "document.change" && write.id === old.storeId)
+          .map((write) => write.type === "document.change" && write.content.kind),
+      ).toEqual(Array(61).fill("delta"));
+      writes.length = 0;
+      const loaded = await fixture.run('text(load("old")); store("counter",64);');
+      expect(loaded.isError).toBe(false);
+      expect(loaded.output).toContainEqual({
+        type: "text",
+        text: JSON.stringify({ version: "1.3.0", nested: [1, true, null] }),
+      });
       expect((await snapshot())?.values.counter).toBe(64);
       expect((await fixture.run('store("counter",65);')).isError).toBe(false);
       expect((await snapshot())?.values.counter).toBe(65);
@@ -151,25 +178,25 @@ describe("qualified Pi 1.3 native state on the current Pi", () => {
         (await fixture.run('store("counter",-2); throw new Error("synthetic failure");')).isError,
       ).toBe(true);
       expect((await snapshot())?.values.counter).toBe(65);
-      expect((await historical(old.markers["63"]!))?.values.counter).toBe(63);
+      expect((await historical(old.markers["2"]!))?.values.counter).toBe(2);
       const fork = await fixture.root.fork(
-        old.markers["32"]!,
+        old.markers["0"]!,
         { ownership: { kind: "ownerless" } },
         context,
       );
       expect(
         (await fixture.harness.snapshot(CodemodeStoreDoc, fork.id, context))?.values.counter,
-      ).toBe(32);
+      ).toBe(0);
       expect(
-        (await fixture.run('text(load("counter")); store("counter",33);', fork)).output,
-      ).toContainEqual({ type: "text", text: "32" });
+        (await fixture.run('text(load("counter")); store("counter",1);', fork)).output,
+      ).toContainEqual({ type: "text", text: "0" });
       expect((await snapshot())?.values.counter).toBe(65);
       await fixture.root.submit(
-        { type: "write", entry: { kind: "fixture.context-head", head: old.markers["32"]! } },
+        { type: "write", entry: { kind: "fixture.context-head", head: old.markers["0"]! } },
         context,
       );
       expect((await snapshot())?.values.counter).toBe(65);
-      expect((await historical(old.markers["32"]!))?.values.counter).toBe(32);
+      expect((await historical(old.markers["0"]!))?.values.counter).toBe(0);
       expect((await fixture.run('text(load("counter"));')).output).toContainEqual({
         type: "text",
         text: "65",
@@ -190,18 +217,17 @@ describe("qualified Pi 1.3 native state on the current Pi", () => {
   ] as const) {
     it(`recovers old admitted callbacks without new unsafe effects: ${alteration}`, async () => {
       const old = read<{
-        root: number;
+        root: ConversationId;
         outer: TaskId;
         commits: StorageWrite[][];
-        children: {
-          id: TaskId;
-          input: { kind: string; parent: TaskId; key: string; call: { name: string } };
-          state: { status: string; checkpoint: { phase: string; replay: string } };
-        }[];
         events: { event: string; name: string; taskId?: TaskId }[];
       }>(alteration === "unsafe" ? "interrupted-unsafe.json" : "interrupted-safe.json");
-      const recorded = old.children.find((child) => child.input.call.name === "record_once")!;
-      const pending = old.children.find((child) => child.input.call.name === "hold_restart")!;
+      const storage = await restore(old.commits);
+      const oldChildren = (
+        await storage.scanTasks({ conversationId: old.root }, 1000, undefined, context)
+      ).items.filter((task) => task.owner === old.outer) as unknown as NestedTask[];
+      const recorded = oldChildren.find((child) => child.input.call.name === "record_once")!;
+      const pending = oldChildren.find((child) => child.input.call.name === "hold_restart")!;
       expect(recorded.state.status).toBe("terminal");
       expect(
         old.events.filter((event) => event.event === "prepare").map((event) => event.name),
@@ -214,7 +240,6 @@ describe("qualified Pi 1.3 native state on the current Pi", () => {
       expect(
         old.events.filter((event) => event.event === "execute").map((event) => event.name),
       ).toEqual(["record_once", "hold_restart"]);
-      const storage = await restore(old.commits);
       const effects: { name: string; taskId: TaskId }[] = [];
       const admissions: string[] = [];
       const authorizations: { name: string; taskId: TaskId }[] = [];
@@ -222,16 +247,16 @@ describe("qualified Pi 1.3 native state on the current Pi", () => {
       const ready = deferred<void>();
       const complete = deferred<ToolExecutionResult>();
       const clock = vi.spyOn(Date, "now").mockReturnValue(now);
-      const bundle = createDurableTools({
-        authorize: (name, _args, api) => {
-          authorizations.push({ name, taskId: api.taskId });
-          if (name === "hold_restart" && alteration === "authorization") {
-            ready.resolve();
-            return errAsync({ code: "forbidden", message: "Current authorization denied" });
-          }
-          return okAsync(undefined);
-        },
-        additionalTools: ["record_once", "hold_restart", "post_hold"].map((name) =>
+      const authorize: import("./catalog.ts").AuthorizeTool = (name, _args, api) => {
+        authorizations.push({ name, taskId: api.taskId });
+        if (name === "hold_restart" && alteration === "authorization") {
+          ready.resolve();
+          return errAsync({ code: "forbidden", message: "Current authorization denied" });
+        }
+        return okAsync(undefined);
+      };
+      const catalog = new CallableCatalog(
+        ["record_once", "hold_restart", "post_hold"].map((name) =>
           defineTool({
             name,
             description: name,
@@ -249,35 +274,35 @@ describe("qualified Pi 1.3 native state on the current Pi", () => {
             },
           }),
         ),
-      });
-      const native = bundle.extension.tools!.find((tool) => tool.name === "codemode")!;
-      const extension = {
-        ...bundle.extension,
-        tools: bundle.extension.tools!.map((tool) =>
-          tool !== native
-            ? tool
-            : defineTool({
-                ...native,
-                execute: async (args, api, ctx) => {
-                  // Existing safe children resume independently, even when the parent refuses replay.
-                  if (alteration !== "unsafe") await ready.promise;
-                  const result = await native.execute(
-                    args,
-                    {
-                      ...api,
-                      executeTool: (name, value, callContext, options) => {
-                        callbacks.push({ name, key: options?.key });
-                        return api.executeTool(name, value, callContext, options);
-                      },
-                    },
-                    ctx,
-                  );
-                  complete.resolve(result);
-                  return result;
+        authorize,
+      );
+      const native = codemodeTool(catalog, new Set());
+      const extension = defineExtension({
+        name: "native-test",
+        tools: [
+          ...catalog.registrations(),
+          defineTool({
+            ...native,
+            execute: async (args, api, ctx) => {
+              // Admitted safe children resume independently even when the parent refuses replay.
+              if (alteration !== "unsafe") await ready.promise;
+              const result = await native.execute(
+                args,
+                {
+                  ...api,
+                  executeTool: (name, value, callContext, options) => {
+                    callbacks.push({ name, key: options?.key });
+                    return api.executeTool(name, value, callContext, options);
+                  },
                 },
-              }),
-        ),
-      };
+                ctx,
+              );
+              complete.resolve(result);
+              return result;
+            },
+          }),
+        ],
+      });
       const registry = createRegistry();
       registry.install(extension);
       const faux = fauxProvider();
@@ -330,7 +355,7 @@ describe("qualified Pi 1.3 native state on the current Pi", () => {
               ].sort((a, b) => a - b)
             : [recorded.id, pending.id].sort((a, b) => a - b),
         );
-        for (const child of old.children) {
+        for (const child of oldChildren) {
           expect(await storage.task(child.id, context)).toMatchObject({
             id: child.id,
             owner: old.outer,
@@ -343,7 +368,7 @@ describe("qualified Pi 1.3 native state on the current Pi", () => {
         if (alteration !== "none") {
           for (const callback of callbacks)
             expect(
-              old.children.some(
+              oldChildren.some(
                 (child) =>
                   child.input.call.name === callback.name && child.input.key === callback.key,
               ),
@@ -361,7 +386,6 @@ describe("qualified Pi 1.3 native state on the current Pi", () => {
         }
       } finally {
         await harness.close(context);
-        await bundle.close();
         clock.mockRestore();
       }
     });

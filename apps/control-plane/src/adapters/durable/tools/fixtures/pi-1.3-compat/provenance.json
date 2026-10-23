@@ -101,11 +101,11 @@
       "sha256": "c9c97f22a63482eeaa1072dbd3800f50537072b15173b845026433ba9f57b6da"
     }
   ],
-  "generatorSha256": "3cd037fd707622923579e7949372f01561e293947322e115f08f4d6122f4a61f",
+  "generatorSha256": "78f1d26caae38a7c98040df357f0e22ef5ba4f12c9f589aee10309ae9aeb48dd",
   "fixtures": {
-    "store.json": "2ad223f2c983087a813a161505e72a052100ae8ab383a8856349f553d65d135f",
-    "completed.json": "5c67da52a99938bb0af5c8bc90097e32efec19b7423f18f2654aef5c12dba934",
-    "interrupted-safe.json": "d9c59796643cf3cb3a4d08923ab25a8426cb2df98c2a7783f8433577da2e607f",
-    "interrupted-unsafe.json": "33f8b904a59ac51c20a4f5b1faab8628d6c169e2dc26bc5d8d646712d8ac9567"
+    "store.json": "50e718bebcbfb055dab2919dacc493ed9393fbab35c2eb0a3266db3de908790c",
+    "completed.json": "7187f0682e087dd0002844d0541e55e750a6f45b092816e5ea9bca5d245e1d83",
+    "interrupted-safe.json": "bba3d87c7214c2ad12766522abeb75079829b56ad1fde245ed8cd5e6a097d003",
+    "interrupted-unsafe.json": "884ce9c40f0cf7dcf81de9630cd698fbc436b08da43d3852cef5977bfe4ffe02"
   }
 }

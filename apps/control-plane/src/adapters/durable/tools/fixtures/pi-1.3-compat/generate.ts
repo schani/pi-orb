@@ -5,22 +5,15 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
-import { createModels } from "@earendil-works/pi-ai/models";
 import {
-  fauxAssistantMessage,
-  fauxProvider,
-  fauxToolCall,
-} from "@earendil-works/pi-ai/providers/faux";
-import {
-  createRegistry,
   defineTool,
-  Harness,
+  type EntryId,
   MemoryStorage,
   type StorageWrite,
 } from "@earendil-works/pi-durable";
 import { CodemodeStoreDoc } from "@earendil-works/pi-durable/codemode";
 import { okAsync } from "neverthrow";
-import { assert, it, vi } from "vitest";
+import { assert, expect, it, vi } from "vitest";
 
 const context = BACKGROUND_CONTEXT;
 const now = 1_800_000_000_000;
@@ -45,6 +38,57 @@ function recording() {
     return seq;
   };
   return { storage, commits };
+}
+// Fold mutable rows and superseded current-only revisions; preserve commit positions.
+async function compact(recorded: ReturnType<typeof recording>) {
+  const rows = recorded.commits.flat();
+  const currentOnly = new Set(
+    rows.flatMap((write) =>
+      write.type === "document.create" &&
+      (write.record.scope.kind !== "conversation" || write.record.history === "latest")
+        ? [write.record.id]
+        : [],
+    ),
+  );
+  const bases = new Map<number, number>();
+  const last = new Map<string, StorageWrite>();
+  for (const [index, write] of rows.entries()) {
+    if (
+      write.type === "document.change" &&
+      currentOnly.has(write.id) &&
+      write.content.kind === "base"
+    )
+      bases.set(write.id, index);
+    if (write.type === "task" || write.type === "submission")
+      last.set(`${write.type}:${write.value.id}`, write);
+  }
+  const commits = recorded.commits.map((batch) =>
+    batch.filter((write) => {
+      if (write.type === "document.change")
+        return rows.indexOf(write) >= (bases.get(write.id) ?? 0);
+      return write.type !== "task" && write.type !== "submission"
+        ? true
+        : last.get(`${write.type}:${write.value.id}`) === write;
+    }),
+  );
+  const restored = new MemoryStorage();
+  for (const batch of commits) await restored.commit(batch, context);
+  for (const write of rows) {
+    if (write.type === "task")
+      expect(await restored.task(write.value.id, context)).toEqual(
+        await recorded.storage.task(write.value.id, context),
+      );
+    if (write.type === "submission")
+      expect(await restored.submission(write.value.id, context)).toEqual(
+        await recorded.storage.submission(write.value.id, context),
+      );
+    if (write.type === "document.create")
+      expect(await restored.document(write.record.id, "current", context)).toEqual(
+        await recorded.storage.document(write.record.id, "current", context),
+      );
+  }
+  await restored.close(context);
+  return commits;
 }
 function save(name: string, value: object) {
   const formatted = execFileSync(
@@ -76,9 +120,6 @@ it("captures synthetic old native store and interrupted callbacks", async () => 
   const { CallableCatalog } = (await import(
     join(source, "catalog.ts")
   )) as typeof import("../../catalog.ts");
-  const { createDurableTools } = (await import(
-    join(source, "index.ts")
-  )) as typeof import("../../index.ts");
   const installer = readFileSync(join(baseline, "scripts/apply-dependency-patches.mjs"), "utf8");
   const installed = [
     ...installer.matchAll(/"(node_modules[^"]+)": \[\s*"[a-f\d]{64}",\s*"([a-f\d]{64})"/g),
@@ -99,6 +140,15 @@ it("captures synthetic old native store and interrupted callbacks", async () => 
       storage: recorded.storage,
     });
     await fixture.run('store("counter",0); store("old",{version:"1.3.0",nested:[1,true,null]});');
+    const markers: Record<string, EntryId> = {};
+    const mark = async (counter: number) => {
+      const entry = await fixture.root.commit(
+        (tx) => tx.appendEntry(fixture.root.id, { kind: "fixture.marker", data: { counter } }),
+        context,
+      );
+      markers[String(counter)] = entry.id;
+    };
+    await mark(0);
     const successful = await fixture.harness.snapshot(CodemodeStoreDoc, fixture.root.id, context);
     assert(successful?.values.counter === 0);
     const failed = await fixture.run(
@@ -117,38 +167,39 @@ it("captures synthetic old native store and interrupted callbacks", async () => 
       "current",
       context,
     ))!.id;
-    const deltas = () =>
-      recorded.commits
-        .flat()
-        .filter(
-          (write) =>
-            write.type === "document.change" &&
-            write.id === storeId &&
-            write.content.kind === "delta",
-        ).length;
-    const markers: Record<string, number> = {};
-    while (deltas() < 63) {
-      const next = deltas() + 1;
-      await fixture.root.commit(async (tx) => {
-        (await tx.doc(CodemodeStoreDoc, fixture.root.id)).values.counter = next;
-      }, context);
-      if (next === 32 || next === 63) {
-        const entry = await fixture.root.commit(
-          (tx) =>
-            tx.appendEntry(fixture.root.id, { kind: "fixture.marker", data: { counter: next } }),
-          context,
-        );
-        markers[String(next)] = entry.id;
-      }
-    }
+    await fixture.root.commit(async (tx) => {
+      (await tx.doc(CodemodeStoreDoc, fixture.root.id)).values.counter = 2;
+    }, context);
+    await mark(2);
     await fixture.settle();
-    save("store.json", {
-      root: fixture.root.id,
-      storeId,
-      markers,
-      deltaCount: deltas(),
-      commits: recorded.commits,
-    });
+    // This fixture needs only the old agent/store and their history, not finished VM tasks.
+    const commits = recorded.commits.map((batch) =>
+      batch.filter(
+        (write) =>
+          write.type === "conversation" ||
+          (write.type === "entry" && write.value.kind === "fixture.marker") ||
+          (write.type === "document.create" &&
+            (write.record.kind === "pi.agent" || write.record.id === storeId)) ||
+          (write.type === "document.change" && write.id === storeId),
+      ),
+    );
+    const restored = new MemoryStorage();
+    for (const batch of commits) await restored.commit(batch, context);
+    expect(await restored.document(storeId, "current", context)).toEqual(
+      await recorded.storage.document(storeId, "current", context),
+    );
+    for (const entry of Object.values(markers)) {
+      const marker = await recorded.storage.entry(entry, context);
+      assert(marker);
+      expect(await restored.entry(entry, context)).toEqual(marker);
+      expect(await restored.document(storeId, marker.commitSeq, context)).toEqual(
+        await recorded.storage.document(storeId, marker.commitSeq, context),
+      );
+    }
+    const stored = await restored.document(storeId, "current", context);
+    assert(stored?.deltasSinceBase === 2);
+    save("store.json", { root: fixture.root.id, storeId, markers, deltaCount: 2, commits });
+    await restored.close(context);
     await fixture.close();
 
     const completedStorage = recording();
@@ -167,86 +218,63 @@ it("captures synthetic old native store and interrupted callbacks", async () => 
     const result = await completed.run(
       'text(await tools.record_once({})); store("completed",true);',
     );
-    save("completed.json", { root: completed.root.id, result, commits: completedStorage.commits });
+    save("completed.json", {
+      root: completed.root.id,
+      result,
+      commits: await compact(completedStorage),
+    });
     await completed.close();
 
     for (const replay of ["safe", "unsafe"] as const) {
       const recorded = recording();
       const held = deferred<number>();
       const events: { event: string; name: string; taskId?: number }[] = [];
-      const bundle = createDurableTools({
-        authorize: (name, _args, api) => {
-          events.push({ event: "authorize", name, taskId: api.taskId });
-          return okAsync(undefined);
-        },
-        additionalTools: ["record_once", "hold_restart", "post_hold"].map((name) =>
-          defineTool({
-            name,
-            description: name,
-            parameters: Type.Object({}),
-            replay: name === "hold_restart" ? replay : "safe",
-            prepareArguments: (args) => {
-              assert(args !== null && typeof args === "object" && !Array.isArray(args));
-              events.push({ event: "prepare", name });
-              return args;
-            },
-            execute: async (_args, api, ctx) => {
-              events.push({ event: "execute", name, taskId: api.taskId });
-              if (name === "hold_restart") {
-                const task = await api.getTask(api.taskId, ctx);
-                assert(task?.owner !== undefined);
-                held.resolve(task.owner);
-                await new Promise<void>((resolve) =>
-                  ctx.abortSignal!.addEventListener("abort", () => resolve(), { once: true }),
-                );
-              }
-              return { output: [{ type: "text", text: name + ":result" }] };
-            },
-          }),
-        ),
-      });
-      const registry = createRegistry();
-      registry.install(bundle.extension);
-      const faux = fauxProvider();
-      faux.setResponses([
-        fauxAssistantMessage(
-          fauxToolCall("codemode", {
-            code: 'text(await tools.record_once({})); await tools.hold_restart({}); await tools.post_hold({}); store("resumed",true);',
-          }),
-          { stopReason: "toolUse" },
-        ),
-        fauxAssistantMessage("done"),
-      ]);
-      const models = createModels();
-      models.setProvider(faux.provider);
-      const harness = await Harness.open(
-        recorded.storage,
-        { models, registry, now: () => now },
-        context,
+      const authorize: import("../../catalog.ts").AuthorizeTool = (name, _args, api) => {
+        events.push({ event: "authorize", name, taskId: api.taskId });
+        return okAsync(undefined);
+      };
+      const tools = ["record_once", "hold_restart", "post_hold"].map((name) =>
+        defineTool({
+          name,
+          description: name,
+          parameters: Type.Object({}),
+          replay: name === "hold_restart" ? replay : "safe",
+          prepareArguments: (args) => {
+            assert(args !== null && typeof args === "object" && !Array.isArray(args));
+            events.push({ event: "prepare", name });
+            return args;
+          },
+          execute: async (_args, api, ctx) => {
+            events.push({ event: "execute", name, taskId: api.taskId });
+            if (name === "hold_restart") {
+              const task = await api.getTask(api.taskId, ctx);
+              assert(task?.owner !== undefined);
+              held.resolve(task.owner);
+              await new Promise<void>((resolve) =>
+                ctx.abortSignal!.addEventListener("abort", () => resolve(), { once: true }),
+              );
+            }
+            return { output: [{ type: "text", text: name + ":result" }] };
+          },
+        }),
       );
-      const root = await harness.root(context, {
-        agent: {
-          model: { provider: "faux", modelId: "faux-1" },
-          extensions: [bundle.extension],
-        },
+      const fixture = await openCodemodeHarness(new CallableCatalog(tools, authorize), {
+        storage: recorded.storage,
       });
-      await root.submit({ type: "input", content: "synthetic fixture" }, context);
+      const running = fixture.run(
+        'text(await tools.record_once({})); await tools.hold_restart({}); await tools.post_hold({}); store("resumed",true);',
+      );
+      const root = fixture.root;
       const outer = await held.promise;
       // Snapshot a crash cut while the callback is running, before graceful shutdown.
-      const children = (
-        await recorded.storage.scanTasks({ conversationId: root.id }, 1000, undefined, context)
-      ).items
-        .filter((task) => task.owner === outer)
-        .map((task) => ({ id: task.id, input: task.input, state: task.state }));
       save("interrupted-" + replay + ".json", {
         root: root.id,
         outer,
-        children,
         events,
-        commits: recorded.commits,
+        commits: await compact(recorded),
       });
-      await harness.close(context);
-      await bundle.close();
+      await fixture.close();
+      await running;
     }
     const patches = ["pi-ai", "pi-coding-agent", "pi-codemode", "pi-durable"].map((name) => {
       const file = "@earendil-works+" + name + "+1.3.0.patch";

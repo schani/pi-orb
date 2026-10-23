@@ -27,6 +27,15 @@ Manual provider waits remain unresolved; automatic retry does not explain them. 
 
 **Historical-stall attribution exception (user-approved 2026-10-22, PDT):** the user explicitly authorized merging [PR 162](https://github.com/schani/pi-orb/pull/162) without root-causing only the earlier hosted-fake inference waits recorded above. Evidence remains preserved; no cause or fix is claimed. This does not waive current/new CI failures, assertions, exact-head qualification, DST replay or fixture cleanup/corrections, and authorizes no deployment. Code head `9724ac522f7a97dc0a9e89decd38db59109e19e2` passed all 11 checks: [CI](https://github.com/schani/pi-orb/actions/runs/39898288399), [E2E](https://github.com/schani/pi-orb/actions/runs/39898288361), [Central process](https://github.com/schani/pi-orb/actions/runs/39898288415). This documentation-only update requires its own exact-head CI before merge.
 
+Old-to-current code-mode checks use genuine patched 1.3 Storage-port captures
+(`apps/control-plane/src/adapters/durable/tools/fixtures/pi-1.3-compat/README.md`).
+Capture folds overwritten task/submission rows and superseded current-only document
+revisions, preserving rewindable history and commit sequences; generation compares
+restored state with the old storage. Ten checks retain decided-result reuse,
+admitted callback identity/authorization, replay refusals, store rollback/history
+and fork isolation. The store fixture keeps two old deltas; current native commits
+exercise the 64-delta base boundary.
+
 ## Chart hover targets in WebKit (2026-10-23; local, undeployed)
 
 Adding four transcript chart rows first failed the browser test in both engines: the region chart's tooltip stayed hidden because the rows pushed it off-screen. Each hovered chart now scrolls into view first. WebKit then failed the new histogram label-isolation assertion (expected 1 dimmed line, received 0). Instrumented WebKit showed Playwright's `boundingBox()` for SVG `<text>` 11px (one font size) below `getBoundingClientRect()`. The midpoint hit the root `<svg>`, and the existing zone-label hover landed on the label below, passing only because either label dims five lines. `hover()` now reads the DOM rect. Both engines pass with unchanged assertions.

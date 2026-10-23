@@ -1,46 +1,6 @@
 {
   "root": 1,
   "outer": 12,
-  "children": [
-    {
-      "id": 17,
-      "input": {
-        "kind": "nested",
-        "parent": 12,
-        "parentCallId": "tool:1800000000000:mlq95y9acom",
-        "key": "c1",
-        "call": {
-          "type": "toolCall",
-          "id": "tool:1800000000000:mlq95y9acom/c1",
-          "name": "record_once",
-          "arguments": {}
-        }
-      },
-      "state": {
-        "status": "terminal",
-        "outcome": { "status": "completed", "result": { "kind": "nested" } }
-      }
-    },
-    {
-      "id": 19,
-      "input": {
-        "kind": "nested",
-        "parent": 12,
-        "parentCallId": "tool:1800000000000:mlq95y9acom",
-        "key": "c2",
-        "call": {
-          "type": "toolCall",
-          "id": "tool:1800000000000:mlq95y9acom/c2",
-          "name": "hold_restart",
-          "arguments": {}
-        }
-      },
-      "state": {
-        "status": "running",
-        "checkpoint": { "phase": "execute", "arguments": {}, "replay": "unsafe" }
-      }
-    }
-  ],
   "events": [
     { "event": "prepare", "name": "record_once" },
     { "event": "authorize", "name": "record_once", "taskId": 17 },
@@ -112,10 +72,7 @@
         "content": {
           "version": 1,
           "kind": "base",
-          "value": {
-            "model": { "provider": "faux", "modelId": "faux-1" },
-            "extensions": ["orb.tools"]
-          }
+          "value": { "model": { "provider": "faux", "modelId": "faux-1" } }
         }
       }
     ],
@@ -123,7 +80,7 @@
       {
         "type": "entry",
         "value": {
-          "model": [{ "role": "user", "content": "synthetic fixture", "timestamp": 1800000000000 }],
+          "model": [{ "role": "user", "content": "run", "timestamp": 1800000000000 }],
           "kind": "pi.user",
           "id": 7,
           "conversationId": 1
@@ -132,46 +89,9 @@
       {
         "type": "submission",
         "value": { "conversationId": 1, "type": "input", "status": "placed", "entry": 7, "id": 8 }
-      },
-      {
-        "type": "task",
-        "value": {
-          "id": 9,
-          "conversationId": 1,
-          "kind": "pi.generation",
-          "version": 1,
-          "input": {},
-          "background": false,
-          "abortRequested": false,
-          "state": { "status": "pending", "checkpoint": { "phase": "prepare", "attempt": 1 } }
-        }
-      },
-      {
-        "type": "document.change",
-        "id": 2,
-        "content": {
-          "version": 1,
-          "kind": "base",
-          "value": { "run": { "taskId": 9, "inputs": [8] } }
-        }
       }
     ],
-    [
-      {
-        "type": "task",
-        "value": {
-          "id": 9,
-          "conversationId": 1,
-          "kind": "pi.generation",
-          "version": 1,
-          "input": {},
-          "background": false,
-          "abortRequested": false,
-          "state": { "status": "running", "checkpoint": { "phase": "prepare", "attempt": 1 } },
-          "startedAt": 1800000000000
-        }
-      }
-    ],
+    [],
     [
       {
         "type": "entry",
@@ -180,9 +100,6 @@
             {
               "role": "system",
               "content": "",
-              "sections": {
-                "tool-catalogue": "<tool-catalogue>\n### `read`\nRead text or image files. Text is truncated to 2000 lines or 50 KiB; use offset/limit to continue. Scripts receive text or image blocks; show blocks with image().\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { read(args: {\n  // Maximum number of lines to read\n  limit?: number;\n  // Line number to start reading from (1-indexed)\n  offset?: number;\n  // Path to the file to read (relative or absolute)\n  path: string;\n}): Promise<string | Array<{ data: string; mimeType: string; type: \"image\"; }>>; };\n```\n\n### `write`\nWrite content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { write(args: {\n  // Content to write to the file\n  content: string;\n  // Path to the file to write (relative or absolute)\n  path: string;\n}): Promise<string>; };\n```\n\n### `edit`\nEdit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { edit(args: {\n  // One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.\n  edits: Array<{\n    // Replacement text for this targeted edit.\n    newText: string;\n    // Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.\n    oldText: string;\n  }>;\n  // Path to the file to edit (relative or absolute)\n  path: string;\n}): Promise<string>; };\n```\n\n### `bash`\nExecute a bash command in the current working directory. Returns combined stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { bash(args: {\n  // Bash command to execute\n  command: string;\n  // Timeout in seconds (optional, no default timeout)\n  timeout?: number;\n}): Promise<{ exit_code: number; full_output_path?: string; output: string; truncated: boolean; wall_time_seconds: number; }>; };\n```\n\n### `subagent`\nStart a background subagent in the shared checkout. Returns agent_id immediately. Inherits parent instructions and authorized tools, but cannot start subagents or orbs. Runs on model, or the parent's model when omitted. No profiles or kinds.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { subagent(args: { description?: string; model?: \"Astra\" | \"Sol\" | \"Terra\" | \"Luna\"; prompt: string; }): Promise<string>; };\n```\n\n### `steer_subagent`\nSend input to a subagent.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { steer_subagent(args: { agent_id: string; message: string; }): Promise<string>; };\n```\n\n### `get_subagent_result`\nGet subagent status and its persistent completion receipt; optionally wait. Pending parent steering interrupts the wait, not the child.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { get_subagent_result(args: { agent_id: string; wait?: boolean; }): Promise<string>; };\n```\n\n### `list_subagents`\nList this conversation's subagents.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { list_subagents(args: {}): Promise<string>; };\n```\n\n### `cancel_subagent`\nCancel only this subagent and its descendants.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { cancel_subagent(args: { agent_id: string; }): Promise<string>; };\n```\n\n### `record_once`\nrecord_once\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { record_once(args: { [key: string]: unknown; }): Promise<string | Array<{ text: string; textSignature?: string; type: \"text\"; } | { data: string; mimeType: string; type: \"image\"; }>>; };\n```\n\n### `hold_restart`\nhold_restart\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { hold_restart(args: { [key: string]: unknown; }): Promise<string | Array<{ text: string; textSignature?: string; type: \"text\"; } | { data: string; mimeType: string; type: \"image\"; }>>; };\n```\n\n### `post_hold`\npost_hold\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { post_hold(args: { [key: string]: unknown; }): Promise<string | Array<{ text: string; textSignature?: string; type: \"text\"; } | { data: string; mimeType: string; type: \"image\"; }>>; };\n```\n\n### `mcp_status`\nInspect MCP server availability and sanitized connection failures.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { mcp_status(args: {}): Promise<string>; };\n```\n</tool-catalogue>"
-              },
               "toolsAdded": [
                 {
                   "name": "codemode",
@@ -210,43 +127,9 @@
           "conversationId": 1,
           "byTaskId": 9
         }
-      },
-      {
-        "type": "task",
-        "value": {
-          "id": 9,
-          "conversationId": 1,
-          "kind": "pi.generation",
-          "version": 1,
-          "input": {},
-          "background": false,
-          "abortRequested": false,
-          "state": {
-            "status": "running",
-            "checkpoint": {
-              "phase": "request",
-              "attempt": 1,
-              "model": { "provider": "faux", "modelId": "faux-1" },
-              "thinkingLevel": "off",
-              "streamOptions": {},
-              "cutoff": 10
-            }
-          },
-          "startedAt": 1800000000000
-        }
       }
     ],
-    [
-      {
-        "type": "document.change",
-        "id": 2,
-        "content": {
-          "version": 1,
-          "kind": "delta",
-          "ops": [["s", ["generation"], { "attempt": 1 }]]
-        }
-      }
-    ],
+    [],
     [
       {
         "type": "entry",
@@ -257,22 +140,22 @@
               "content": [
                 {
                   "type": "toolCall",
-                  "id": "tool:1800000000000:mlq95y9acom",
+                  "id": "tool:1800000000000:fk60svz4r5m",
                   "name": "codemode",
                   "arguments": {
                     "code": "text(await tools.record_once({})); await tools.hold_restart({}); await tools.post_hold({}); store(\"resumed\",true);"
                   }
                 }
               ],
-              "api": "faux:1800000000000:9h3sea6sweq",
+              "api": "faux:1800000000000:gsg9a4d37yq",
               "provider": "faux",
               "model": "faux-1",
               "usage": {
-                "input": 1360,
+                "input": 142,
                 "output": 34,
                 "cacheRead": 0,
-                "cacheWrite": 1360,
-                "totalTokens": 2754,
+                "cacheWrite": 142,
+                "totalTokens": 318,
                 "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
               },
               "stopReason": "toolUse",
@@ -306,20 +189,6 @@
         }
       },
       {
-        "type": "task",
-        "value": {
-          "id": 12,
-          "conversationId": 1,
-          "kind": "pi.tool",
-          "version": 2,
-          "input": { "kind": "model", "assistant": 11, "callId": "tool:1800000000000:mlq95y9acom" },
-          "owner": 9,
-          "background": false,
-          "abortRequested": false,
-          "state": { "status": "pending", "checkpoint": { "phase": "call" } }
-        }
-      },
-      {
         "type": "document.change",
         "id": 2,
         "content": {
@@ -329,7 +198,7 @@
             "run": { "taskId": 9, "inputs": [8] },
             "tools": [
               {
-                "callId": "tool:1800000000000:mlq95y9acom",
+                "callId": "tool:1800000000000:fk60svz4r5m",
                 "name": "codemode",
                 "taskId": 12,
                 "status": "pending"
@@ -347,11 +216,11 @@
           "value": {
             "models": {
               "faux/faux-1": {
-                "input": 1360,
+                "input": 142,
                 "output": 34,
                 "cacheRead": 0,
-                "cacheWrite": 1360,
-                "totalTokens": 2754,
+                "cacheWrite": 142,
+                "totalTokens": 318,
                 "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
               }
             },
@@ -360,48 +229,8 @@
         }
       }
     ],
+    [],
     [
-      {
-        "type": "task",
-        "value": {
-          "id": 12,
-          "conversationId": 1,
-          "kind": "pi.tool",
-          "version": 2,
-          "input": { "kind": "model", "assistant": 11, "callId": "tool:1800000000000:mlq95y9acom" },
-          "owner": 9,
-          "background": false,
-          "abortRequested": false,
-          "state": { "status": "running", "checkpoint": { "phase": "call" } },
-          "startedAt": 1800000000000
-        }
-      }
-    ],
-    [
-      {
-        "type": "task",
-        "value": {
-          "id": 12,
-          "conversationId": 1,
-          "kind": "pi.tool",
-          "version": 2,
-          "input": { "kind": "model", "assistant": 11, "callId": "tool:1800000000000:mlq95y9acom" },
-          "owner": 9,
-          "background": false,
-          "abortRequested": false,
-          "state": {
-            "status": "running",
-            "checkpoint": {
-              "phase": "execute",
-              "arguments": {
-                "code": "text(await tools.record_once({})); await tools.hold_restart({}); await tools.post_hold({}); store(\"resumed\",true);"
-              },
-              "replay": "safe"
-            }
-          },
-          "startedAt": 1800000000000
-        }
-      },
       {
         "type": "document.change",
         "id": 2,
@@ -431,60 +260,6 @@
               "deadline": 1800000300000,
               "tools": [
                 {
-                  "name": "read",
-                  "jsName": "read",
-                  "description": "Read text or image files. Text is truncated to 2000 lines or 50 KiB; use offset/limit to continue. Scripts receive text or image blocks; show blocks with image().\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { read(args: {\n  // Maximum number of lines to read\n  limit?: number;\n  // Line number to start reading from (1-indexed)\n  offset?: number;\n  // Path to the file to read (relative or absolute)\n  path: string;\n}): Promise<string | Array<{ data: string; mimeType: string; type: \"image\"; }>>; };\n```",
-                  "structured": true
-                },
-                {
-                  "name": "write",
-                  "jsName": "write",
-                  "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { write(args: {\n  // Content to write to the file\n  content: string;\n  // Path to the file to write (relative or absolute)\n  path: string;\n}): Promise<string>; };\n```",
-                  "structured": true
-                },
-                {
-                  "name": "edit",
-                  "jsName": "edit",
-                  "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { edit(args: {\n  // One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.\n  edits: Array<{\n    // Replacement text for this targeted edit.\n    newText: string;\n    // Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.\n    oldText: string;\n  }>;\n  // Path to the file to edit (relative or absolute)\n  path: string;\n}): Promise<string>; };\n```",
-                  "structured": true
-                },
-                {
-                  "name": "bash",
-                  "jsName": "bash",
-                  "description": "Execute a bash command in the current working directory. Returns combined stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { bash(args: {\n  // Bash command to execute\n  command: string;\n  // Timeout in seconds (optional, no default timeout)\n  timeout?: number;\n}): Promise<{ exit_code: number; full_output_path?: string; output: string; truncated: boolean; wall_time_seconds: number; }>; };\n```",
-                  "structured": true
-                },
-                {
-                  "name": "subagent",
-                  "jsName": "subagent",
-                  "description": "Start a background subagent in the shared checkout. Returns agent_id immediately. Inherits parent instructions and authorized tools, but cannot start subagents or orbs. Runs on model, or the parent's model when omitted. No profiles or kinds.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { subagent(args: { description?: string; model?: \"Astra\" | \"Sol\" | \"Terra\" | \"Luna\"; prompt: string; }): Promise<string>; };\n```",
-                  "structured": true
-                },
-                {
-                  "name": "steer_subagent",
-                  "jsName": "steer_subagent",
-                  "description": "Send input to a subagent.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { steer_subagent(args: { agent_id: string; message: string; }): Promise<string>; };\n```",
-                  "structured": true
-                },
-                {
-                  "name": "get_subagent_result",
-                  "jsName": "get_subagent_result",
-                  "description": "Get subagent status and its persistent completion receipt; optionally wait. Pending parent steering interrupts the wait, not the child.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { get_subagent_result(args: { agent_id: string; wait?: boolean; }): Promise<string>; };\n```",
-                  "structured": true
-                },
-                {
-                  "name": "list_subagents",
-                  "jsName": "list_subagents",
-                  "description": "List this conversation's subagents.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { list_subagents(args: {}): Promise<string>; };\n```",
-                  "structured": true
-                },
-                {
-                  "name": "cancel_subagent",
-                  "jsName": "cancel_subagent",
-                  "description": "Cancel only this subagent and its descendants.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { cancel_subagent(args: { agent_id: string; }): Promise<string>; };\n```",
-                  "structured": true
-                },
-                {
                   "name": "record_once",
                   "jsName": "record_once",
                   "description": "record_once\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { record_once(args: { [key: string]: unknown; }): Promise<string | Array<{ text: string; textSignature?: string; type: \"text\"; } | { data: string; mimeType: string; type: \"image\"; }>>; };\n```",
@@ -500,12 +275,6 @@
                   "name": "post_hold",
                   "jsName": "post_hold",
                   "description": "post_hold\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { post_hold(args: { [key: string]: unknown; }): Promise<string | Array<{ text: string; textSignature?: string; type: \"text\"; } | { data: string; mimeType: string; type: \"image\"; }>>; };\n```",
-                  "structured": true
-                },
-                {
-                  "name": "mcp_status",
-                  "jsName": "mcp_status",
-                  "description": "Inspect MCP server availability and sanitized connection failures.\n\ncodemode tool declaration:\n```ts\ndeclare const tools: { mcp_status(args: {}): Promise<string>; };\n```",
                   "structured": true
                 }
               ],
@@ -575,7 +344,7 @@
           "conversationId": 1,
           "kind": "pi.tool",
           "version": 2,
-          "input": { "kind": "model", "assistant": 11, "callId": "tool:1800000000000:mlq95y9acom" },
+          "input": { "kind": "model", "assistant": 11, "callId": "tool:1800000000000:fk60svz4r5m" },
           "owner": 9,
           "background": false,
           "abortRequested": false,
@@ -595,31 +364,6 @@
       }
     ],
     [
-      {
-        "type": "task",
-        "value": {
-          "id": 17,
-          "conversationId": 1,
-          "kind": "pi.tool",
-          "version": 2,
-          "input": {
-            "kind": "nested",
-            "parent": 12,
-            "parentCallId": "tool:1800000000000:mlq95y9acom",
-            "key": "c1",
-            "call": {
-              "type": "toolCall",
-              "id": "tool:1800000000000:mlq95y9acom/c1",
-              "name": "record_once",
-              "arguments": {}
-            }
-          },
-          "owner": 12,
-          "background": false,
-          "abortRequested": false,
-          "state": { "status": "pending", "checkpoint": { "phase": "call" } }
-        }
-      },
       {
         "type": "document.create",
         "record": {
@@ -642,8 +386,8 @@
               ["nestedTools"],
               [
                 {
-                  "callId": "tool:1800000000000:mlq95y9acom/c1",
-                  "parentCallId": "tool:1800000000000:mlq95y9acom",
+                  "callId": "tool:1800000000000:fk60svz4r5m/c1",
+                  "parentCallId": "tool:1800000000000:fk60svz4r5m",
                   "parentTaskId": 12,
                   "name": "record_once",
                   "taskId": 17,
@@ -656,64 +400,8 @@
         }
       }
     ],
+    [],
     [
-      {
-        "type": "task",
-        "value": {
-          "id": 17,
-          "conversationId": 1,
-          "kind": "pi.tool",
-          "version": 2,
-          "input": {
-            "kind": "nested",
-            "parent": 12,
-            "parentCallId": "tool:1800000000000:mlq95y9acom",
-            "key": "c1",
-            "call": {
-              "type": "toolCall",
-              "id": "tool:1800000000000:mlq95y9acom/c1",
-              "name": "record_once",
-              "arguments": {}
-            }
-          },
-          "owner": 12,
-          "background": false,
-          "abortRequested": false,
-          "state": { "status": "running", "checkpoint": { "phase": "call" } },
-          "startedAt": 1800000000000
-        }
-      }
-    ],
-    [
-      {
-        "type": "task",
-        "value": {
-          "id": 17,
-          "conversationId": 1,
-          "kind": "pi.tool",
-          "version": 2,
-          "input": {
-            "kind": "nested",
-            "parent": 12,
-            "parentCallId": "tool:1800000000000:mlq95y9acom",
-            "key": "c1",
-            "call": {
-              "type": "toolCall",
-              "id": "tool:1800000000000:mlq95y9acom/c1",
-              "name": "record_once",
-              "arguments": {}
-            }
-          },
-          "owner": 12,
-          "background": false,
-          "abortRequested": false,
-          "state": {
-            "status": "running",
-            "checkpoint": { "phase": "execute", "arguments": {}, "replay": "safe" }
-          },
-          "startedAt": 1800000000000
-        }
-      },
       {
         "type": "document.change",
         "id": 2,
@@ -735,11 +423,11 @@
           "input": {
             "kind": "nested",
             "parent": 12,
-            "parentCallId": "tool:1800000000000:mlq95y9acom",
+            "parentCallId": "tool:1800000000000:fk60svz4r5m",
             "key": "c1",
             "call": {
               "type": "toolCall",
-              "id": "tool:1800000000000:mlq95y9acom/c1",
+              "id": "tool:1800000000000:fk60svz4r5m/c1",
               "name": "record_once",
               "arguments": {}
             }
@@ -813,31 +501,6 @@
     ],
     [
       {
-        "type": "task",
-        "value": {
-          "id": 19,
-          "conversationId": 1,
-          "kind": "pi.tool",
-          "version": 2,
-          "input": {
-            "kind": "nested",
-            "parent": 12,
-            "parentCallId": "tool:1800000000000:mlq95y9acom",
-            "key": "c2",
-            "call": {
-              "type": "toolCall",
-              "id": "tool:1800000000000:mlq95y9acom/c2",
-              "name": "hold_restart",
-              "arguments": {}
-            }
-          },
-          "owner": 12,
-          "background": false,
-          "abortRequested": false,
-          "state": { "status": "pending", "checkpoint": { "phase": "call" } }
-        }
-      },
-      {
         "type": "document.create",
         "record": {
           "id": 18,
@@ -861,8 +524,8 @@
               0,
               [
                 {
-                  "callId": "tool:1800000000000:mlq95y9acom/c2",
-                  "parentCallId": "tool:1800000000000:mlq95y9acom",
+                  "callId": "tool:1800000000000:fk60svz4r5m/c2",
+                  "parentCallId": "tool:1800000000000:fk60svz4r5m",
                   "parentTaskId": 12,
                   "name": "hold_restart",
                   "taskId": 19,
@@ -875,6 +538,7 @@
         }
       }
     ],
+    [],
     [
       {
         "type": "task",
@@ -886,39 +550,11 @@
           "input": {
             "kind": "nested",
             "parent": 12,
-            "parentCallId": "tool:1800000000000:mlq95y9acom",
+            "parentCallId": "tool:1800000000000:fk60svz4r5m",
             "key": "c2",
             "call": {
               "type": "toolCall",
-              "id": "tool:1800000000000:mlq95y9acom/c2",
-              "name": "hold_restart",
-              "arguments": {}
-            }
-          },
-          "owner": 12,
-          "background": false,
-          "abortRequested": false,
-          "state": { "status": "running", "checkpoint": { "phase": "call" } },
-          "startedAt": 1800000000000
-        }
-      }
-    ],
-    [
-      {
-        "type": "task",
-        "value": {
-          "id": 19,
-          "conversationId": 1,
-          "kind": "pi.tool",
-          "version": 2,
-          "input": {
-            "kind": "nested",
-            "parent": 12,
-            "parentCallId": "tool:1800000000000:mlq95y9acom",
-            "key": "c2",
-            "call": {
-              "type": "toolCall",
-              "id": "tool:1800000000000:mlq95y9acom/c2",
+              "id": "tool:1800000000000:fk60svz4r5m/c2",
               "name": "hold_restart",
               "arguments": {}
             }
