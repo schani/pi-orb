@@ -1542,3 +1542,5 @@ consume that owned file. These manual studies/probes are not production CI gates
 ## Domain and lifecycle test oracles (2026-10-22 PDT)
 
 Mid-setup silence requires an observed running setup probe before injection.
+
+Sleep telemetry is asserted after successful tasks in every recorded iteration.
