@@ -2,6 +2,8 @@
 
 ## Adapter boundary assertions (2026-10-22)
 
+PTY redaction fixtures first publish a recognizable native challenge, then suppress secret-bearing echoed challenges and distinguish submitted token-shaped input from an issued token after exit/cleanup. Native process contracts remain independent.
+
 Exact-generation delete contracts require the original object after a wrong-generation delete and absence after the correct delete. Concurrent GCE model provisioning inspects every domain Result, requires a stamped success, constrains retryable losers, and verifies post-operation read-back convergence. Offline filesystem and modeled GCS qualify this invariant; live GCS remains opt-in.
 
 ## PostgreSQL subject isolation (2026-10-22)
