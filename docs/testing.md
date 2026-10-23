@@ -1765,3 +1765,5 @@ Alert helper tests name snapshot and acknowledgement behavior; mounted late-arri
 Source-evaluating diagnostic tests require mock bindings and exclude their live imports before evaluation; argument-injected probes reject leftover imports and shell snippets require their extraction boundary. (2026-10-22 PDT).
 
 The colliding-tenant storage fixture positively requires both owners before archive/validation. (2026-10-22 PDT).
+
+Diagnostic cutoff counts parsed frame bytes, excluding a following incomplete UTF-8 tail. Both complete terminal-frame and partial-tail cases retain exact-byte assertions. (2026-10-22 PDT).

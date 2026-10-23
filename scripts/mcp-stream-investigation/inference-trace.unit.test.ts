@@ -148,58 +148,69 @@ it.each([false, true])(
   },
 );
 
-it("cuts a created frame split across upstream writes without duplicating its prefix", async () => {
-  let release!: () => void;
-  const released = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const prefix = 'data: {"type":"response.';
-  const created = `${prefix}created"}\n\n`;
-  const upstream = createServer(async (req, res) => {
-    for await (const _chunk of req) {
-      /* consume request */
-    }
-    res.writeHead(200, { "content-type": "text/event-stream" });
-    res.write(prefix);
-    await released;
-    res.end('created"}\n\ndata: {"type":"response.completed"}\n\n');
-  });
-  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
-  const address = upstream.address();
-  if (!address || typeof address === "string") throw new Error("missing upstream");
-  const trace = await startInferenceTrace(`http://127.0.0.1:${address.port}/oai/test`, {
-    cutIsolationOnce: true,
-  });
-  try {
-    const response = await fetch(`${trace.baseUrl}/responses`, {
-      method: "POST",
-      body: "MCP isolation",
+it.each([false, true])(
+  "cuts a split created frame without duplicating its prefix; partial UTF-8 tail=%s",
+  async (partialTail) => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
     });
-    expect(response.status).toBe(200);
-    const reader = response.body?.getReader() ?? expect.fail("missing response reader");
-    const first = await reader.read();
-    expect(new TextDecoder().decode(first.value)).toBe(prefix);
-    release();
-    let body = prefix;
-    for (;;) {
-      const next = await reader.read();
-      if (next.done) break;
-      body += new TextDecoder().decode(next.value);
-    }
-    expect(body).toBe(created);
-    expect(trace.records).toEqual([
-      {
-        route: "responses",
+    const prefix = 'data: {"type":"response.';
+    const created = `${prefix}created"}\n\n`;
+    const upstream = createServer(async (req, res) => {
+      for await (const _chunk of req) {
+        /* consume request */
+      }
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(prefix);
+      await released;
+      res.end(
+        partialTail
+          ? Buffer.concat([Buffer.from('created"}\n\n'), Buffer.from([0xc3])])
+          : Buffer.from('created"}\n\ndata: {"type":"response.completed"}\n\n'),
+      );
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const address = upstream.address();
+    if (!address || typeof address === "string") throw new Error("missing upstream");
+    const trace = await startInferenceTrace(`http://127.0.0.1:${address.port}/oai/test`, {
+      cutIsolationOnce: true,
+    });
+    try {
+      const response = await fetch(`${trace.baseUrl}/responses`, {
         method: "POST",
-        upstreamStatus: 200,
-        eventTypes: ["response.created"],
-        outcome: "injected_cutoff",
-      },
-    ]);
-  } finally {
-    release();
-    await trace.close();
-    upstream.closeAllConnections();
-    await new Promise<void>((resolve) => upstream.close(() => resolve()));
-  }
-});
+        body: "MCP isolation",
+      });
+      expect(response.status).toBe(200);
+      const reader = response.body?.getReader() ?? expect.fail("missing response reader");
+      let body = "";
+      while (body.length < prefix.length) {
+        const first = await reader.read();
+        expect(first.done).toBe(false);
+        body += new TextDecoder().decode(first.value);
+      }
+      expect(body).toBe(prefix);
+      release();
+      for (;;) {
+        const next = await reader.read();
+        if (next.done) break;
+        body += new TextDecoder().decode(next.value);
+      }
+      expect(body).toBe(created);
+      expect(trace.records).toEqual([
+        {
+          route: "responses",
+          method: "POST",
+          upstreamStatus: 200,
+          eventTypes: ["response.created"],
+          outcome: "injected_cutoff",
+        },
+      ]);
+    } finally {
+      release();
+      await trace.close();
+      upstream.closeAllConnections();
+      await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    }
+  },
+);
