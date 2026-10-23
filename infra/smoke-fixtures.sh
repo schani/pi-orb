@@ -82,6 +82,7 @@ instance_summary() {
     spec:([.metadata.items[] | select(.key == "pi-orb-host-spec-fingerprint") | .value][0])}'
 }
 orb_summary() { jq '{id,state}'; }
+disk_summary() { jq '{name,id,status,sizeGb}'; }
 fixture_evidence() {
   jq -nc --arg kind "$1" --arg id "$2" --arg outcome "$3" \
     '{kind:$kind,id:$id,outcome:$outcome}' >>"$log_dir/fixtures.jsonl"
@@ -156,4 +157,28 @@ replacement_create() {
   response=$(api POST "$path" "$body") || return 1
   jq -e --arg id "$id" '.id == $id and .error == null' <<<"$response" >/dev/null || return 1
   record_owned "$kind" "$id" created
+}
+
+instance_absent() {
+  local names
+  names=$(resource_names instances "$1") || return 2
+  [[ -z "$names" ]]
+}
+verify_provider_cleanup() {
+  local -x PI_ORB_SMOKE_DEADLINE=$(( $(date +%s) + dispose_deadline_seconds ))
+  local listed disks disk names
+  while :; do
+    listed=$(instances) || return 1
+    disks=$(resource_names disks "$data_disk") || return 1
+    for disk in "${boot_disks[@]}"; do
+      names=$(resource_names disks "$disk") || return 1
+      disks+=$names
+    done
+    [[ -z "$listed$disks" ]] && return 0
+    if (( $(date +%s) >= PI_ORB_SMOKE_DEADLINE )); then
+      echo "smoke-cleanup: phase=provider outcome=timeout" >&2
+      return 1
+    fi
+    smoke_sleep "$PI_ORB_SMOKE_DEADLINE"
+  done
 }

@@ -120,25 +120,28 @@ class ReplacementBoundaryTest(unittest.TestCase):
     def test_private_summaries_use_raw_stdin_and_fresh_files(self):
         raw = {"name": "instance", "id": "17", "disks": [{"boot": True, "source": "boot", "secret": "secret"}],
                "metadata": {"items": [{"key": "pi-orb-host-spec-fingerprint", "value": "spec"},
-                   {"key": "pi-orb-config", "value": "secret" + "x" * 65536}]}, "unrelated": "secret"}
+                   {"key": "pi-orb-config", "value": "secret" + "x" * 65536}]}, "unrelated": "secret", "status": "READY", "sizeGb": "10"}
         result = self.shell('''umask 022
 mkdir "$ROOT/evidence"
 printf untouched > "$ROOT/sentinel"
 ln -s "$ROOT/sentinel" "$ROOT/evidence/old-instance.json"
 replacement_evidence_dir "$ROOT/evidence"
 [[ -p /dev/stdin ]]
-instance_summary > "$log_dir/instance.json"
+raw=$(cat)
+printf '%s' "$raw" | instance_summary > "$log_dir/instance.json"
+printf '%s' "$raw" | disk_summary > "$log_dir/disk.json"
 printf '%s' '{"id":"orb","state":"failed","token":"secret"}' | orb_summary > "$log_dir/orb.json"
-python3 -c 'import os, sys; print(*(oct(os.stat(p).st_mode & 0o777)[2:] for p in sys.argv[1:]), sep="\\n")' "$log_dir" "$log_dir/instance.json" "$log_dir/orb.json"
+python3 -c 'import os, sys; print(*(oct(os.stat(p).st_mode & 0o777)[2:] for p in sys.argv[1:]), sep="\\n")' "$log_dir" "$log_dir/instance.json" "$log_dir/orb.json" "$log_dir/disk.json"
 cat "$ROOT/sentinel"; echo
-jq -c . "$log_dir/instance.json" "$log_dir/orb.json"
+jq -c . "$log_dir/instance.json" "$log_dir/orb.json" "$log_dir/disk.json"
 ''', json.dumps(raw))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines()[:4], ["700", "600", "600", "untouched"])
+        self.assertEqual(result.stdout.splitlines()[:5], ["700", "600", "600", "600", "untouched"])
         self.assertNotIn("secret", result.stdout + result.stderr)
-        self.assertEqual([json.loads(line) for line in result.stdout.splitlines()[4:]], [
+        self.assertEqual([json.loads(line) for line in result.stdout.splitlines()[5:]], [
             {"name": "instance", "id": "17", "disks": [{"boot": True, "source": "boot"}], "spec": "spec"},
-            {"id": "orb", "state": "failed"}])
+            {"id": "orb", "state": "failed"},
+            {"name": "instance", "id": "17", "status": "READY", "sizeGb": "10"}])
 
     def test_both_ids_require_typed_absence_before_claim_or_mutation(self):
         for user, reply, transport, missing in [("selected-user", '{"error":{"code":"not_found"}}', 0, True),
@@ -195,6 +198,23 @@ fixture_record() {{ :; }}
 fixture_delete orb orb
 ''')
                 self.assertEqual(result.returncode == 0, accepted, result.stderr)
+
+    def test_provider_absence_requires_success_for_every_owned_disk(self):
+        for code, names, accepted in [(0, "", True), (0, "present", False), (7, "", False)]:
+            with self.subTest(code=code, names=names):
+                absent = self.shell(f'''resource_names() {{ printf '%s' '{names}'; return {code}; }}
+instance_absent old-instance
+''')
+                self.assertEqual(absent.returncode == 0, accepted, absent.stderr)
+        for failed in ("", "instances", "data", "boot", "instances-present", "data-present", "boot-present"):
+            with self.subTest(failed=failed):
+                result = self.shell(f'''data_disk=data; boot_disks=(boot); dispose_deadline_seconds=0
+instances() {{ echo instances >&2; [[ '{failed}' != instances-present ]] || echo present; [[ '{failed}' != instances ]]; }}
+resource_names() {{ echo "$*" >&2; [[ "$2-present" != '{failed}' ]] || echo present; [[ "$2" != '{failed}' ]]; }}
+verify_provider_cleanup
+''')
+                self.assertEqual(result.returncode == 0, failed == "", result.stderr)
+                if not failed: self.assertEqual(result.stderr.splitlines(), ["instances", "disks data", "disks boot"])
 
     def test_cleanup_retains_failures_and_stops_after_unconfirmed_deletion(self):
         for status, project, orb, provider in [(1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0),

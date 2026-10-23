@@ -66,11 +66,6 @@ orb_row() { api GET "/api/v1/orbs/$orb_id"; }
 instances() { external instances-list "$orb_id"; }
 describe_instance() { external instance-describe "$1"; }
 resource_names() { external resource-names "$@"; }
-instance_absent() {
-  local names
-  names=$(resource_names instances "$1") || return 2
-  [[ -z "$names" ]]
-}
 data_disk_exists() {
   local description
   description=$(external disk-describe "$data_disk") || return 1
@@ -81,30 +76,12 @@ dump_failure() {
   orb_row 2>/dev/null | orb_summary >"$log_dir/orb.json" 2>/dev/null || true
   instances >"$log_dir/instances.txt" 2>/dev/null || true
   external disk-describe "$data_disk" 2>/dev/null |
-    jq '{name,id,status,sizeGb}' >"$log_dir/data-disk.json" 2>/dev/null || true
+    disk_summary >"$log_dir/data-disk.json" 2>/dev/null || true
   echo "first-failure evidence: $log_dir" >&2
 }
 project_pending=0
 orb_pending=0
 boot_disks=()
-verify_provider_cleanup() {
-  local -x PI_ORB_SMOKE_DEADLINE=$(( $(date +%s) + dispose_deadline_seconds ))
-  local listed disks disk names
-  while :; do
-    listed=$(instances) || return 1
-    disks=$(resource_names disks "$data_disk") || return 1
-    for disk in "${boot_disks[@]}"; do
-      names=$(resource_names disks "$disk") || return 1
-      disks+=$names
-    done
-    [[ -z "$listed$disks" ]] && return 0
-    if (( $(date +%s) >= PI_ORB_SMOKE_DEADLINE )); then
-      echo "smoke-cleanup: phase=provider outcome=timeout" >&2
-      return 1
-    fi
-    smoke_sleep "$PI_ORB_SMOKE_DEADLINE"
-  done
-}
 trap on_exit EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
