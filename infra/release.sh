@@ -20,21 +20,34 @@ REMOTE_LOCK_GENERATION=""
 KEEP_REMOTE_LOCK=false
 FIRST_CONSOLIDATION=false
 QUALIFICATION=""
+MIGRATION_TIMEOUT_SECONDS=300
+MIGRATION_TIMEOUT_REASON=default
 
 usage() {
-  echo 'Usage: ./infra/release.sh [--yes] [--validate RELEASE_ID|latest] [--first-consolidation]'
+  echo 'Usage: ./infra/release.sh [--yes] [--validate RELEASE_ID|latest] [--first-consolidation] [--migration-timeout-30m]'
   echo 'Deploy the clean selected main commit, or explicitly validate a recorded deployment without rebuilding/reapplying.'
 }
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --yes) AUTO_APPROVE=true ;;
     --first-consolidation) FIRST_CONSOLIDATION=true ;;
+    --migration-timeout-30m) MIGRATION_TIMEOUT_SECONDS=1800; MIGRATION_TIMEOUT_REASON="explicit 30-minute override" ;;
     --validate) [ "$#" -ge 2 ] || { usage >&2; exit 2; }; VALIDATE=$2; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
   esac
   shift
 done
+
+if [ -n "$VALIDATE" ] && [ "$MIGRATION_TIMEOUT_SECONDS" -ne 300 ]; then
+  echo 'release: --migration-timeout-30m cannot be used with --validate' >&2
+  exit 2
+fi
+if [ -z "$VALIDATE" ]; then
+  timeout_message="Migration task timeout: ${MIGRATION_TIMEOUT_SECONDS}s ($MIGRATION_TIMEOUT_REASON)"
+  echo "release: $timeout_message"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then printf '%s\n' "$timeout_message" >> "$GITHUB_STEP_SUMMARY"; fi
+fi
 
 [[ "${PI_ORB_USER_ID:-}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ ]] || {
   echo 'release: PI_ORB_USER_ID must be an explicit UUID for smoke fixtures' >&2
@@ -278,7 +291,7 @@ if [ -z "$VALIDATE" ]; then
     --set-secrets="DATABASE_URL=pi-orb-database-url:$database_version$migration_secrets" \
     "${migration_owner_args[@]}" \
     --command=node --args=apps/control-plane/src/migrate.ts --tasks=1 --parallelism=1 \
-    --max-retries=0 --task-timeout=300s --cpu=1 --memory=512Mi --execute-now --wait --quiet
+    --max-retries=0 --task-timeout="${MIGRATION_TIMEOUT_SECONDS}s" --cpu=1 --memory=512Mi --execute-now --wait --quiet
   if [ "$FIRST_CONSOLIDATION" = false ]; then KEEP_REMOTE_LOCK=false; fi
   gcloud run jobs delete "$migration_job" --project="$PROJECT" --region="$REGION" --quiet
   if [ "$FIRST_CONSOLIDATION" = false ]; then state check-previous; fi
