@@ -1610,3 +1610,5 @@ Inbox reset qualification first exhausts all three claims and observes decline, 
 Recovery hashes normalize every ownership map and submitted delivery order, ignoring unsubmitted and duplicate operation identities. (2026-10-22 PDT).
 
 Fairness qualification retains held-yield cancellation and successor admission. Ended fake queues cannot prove the production identity fence; rotation joins the consumer before successor admission, so no unsupported takeover is invented. (2026-10-22 PDT).
+
+Launch-proof parser qualification independently rejects missing, negative and fractional values for both incarnations. (2026-10-22 PDT).
