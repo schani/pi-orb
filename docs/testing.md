@@ -4,7 +4,7 @@
 
 SQL fixtures register clients before fallible setup; table-driven settings suites capture each acquired subject in `onTestFinished`, without teardown of an unacquired or stale client; process observations/crash markers live under immediately registered roots. Teardown reports cleanup failures separately, attempts every owned release, and retains the original test failure.
 
-Synthetic process fixtures write observed JSON to a PID-local temporary file and rename it to publish readiness. Readers parse only the published path, without partial-JSON retries. A native child test interrupts the write and requires both hidden partial bytes and complete final publication.
+Synthetic process fixtures write observed JSON to a PID-local temporary file and rename it to publish readiness. Readers parse only the published path, without partial-JSON retries; readiness results exclude the unpublished/null state. A native child test interrupts the write and requires both hidden partial bytes and complete final publication.
 
 PTY environment overrides use Vitest stubs and unconditional teardown restoration, including failed assertions and preexisting credentials.
 

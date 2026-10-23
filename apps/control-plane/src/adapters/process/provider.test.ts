@@ -293,7 +293,7 @@ describe("ProcessOrbHostProvider", () => {
         context,
       );
       expect(provisioned.isOk()).toBe(true);
-      const observed = await eventually(() => readObserved(observedEnv));
+      const observed = await eventually<Record<string, string>>(() => readObserved(observedEnv));
       expect(observed.runtimeMode).toBe(runtimeMode);
       expect(observed.initialCheckoutCommit).toBe(commit);
       expect(observed.awaitInitialCheckoutCommit).toBe("1");
@@ -337,7 +337,7 @@ describe("ProcessOrbHostProvider", () => {
     expect(provisioned.isOk()).toBe(true);
     if (provisioned.isErr()) return;
 
-    const values = await eventually(() => readObserved(observedEnv));
+    const values = await eventually<Record<string, string>>(() => readObserved(observedEnv));
     expect(values.orbId).toBe(request.orbId);
     expect(values.runtimeMode).toBe(harness === "claude" ? "claude" : "execution");
     expect(values.repositoryUrl).toBe(request.bootstrap.repositoryUrl);
@@ -368,7 +368,7 @@ describe("ProcessOrbHostProvider", () => {
     const { provider } = makeProvider({ OBSERVED_ENV_FILE: observedEnv }, { commandDirectory });
     const provisioned = await provider.provision(task, request, context);
     expect(provisioned.isOk()).toBe(true);
-    const values = await eventually(() => readObserved(observedEnv));
+    const values = await eventually<Record<string, string>>(() => readObserved(observedEnv));
     expect(values.path?.split(":")[0]).toBe(commandDirectory);
     // The image's system gitconfig has no process-host equivalent, so the
     // GitHub credential helper travels in the environment with the shim.
@@ -391,7 +391,7 @@ describe("ProcessOrbHostProvider", () => {
     );
     const provisioned = await provider.provision(task, request, context);
     expect(provisioned.isOk()).toBe(true);
-    const values = await eventually(() => readObserved(observedEnv));
+    const values = await eventually<Record<string, string>>(() => readObserved(observedEnv));
     expect(values.gitConfigCount).toBe("2");
     expect(values.gitConfigKey0).toBe("user.name");
     expect(values.gitConfigValue0).toBe("inherited");
@@ -529,7 +529,7 @@ describe("ProcessOrbHostProvider", () => {
     const first = await provider.provision(task, request, context);
     expect(first.isOk()).toBe(true);
     if (first.isErr()) return;
-    await eventually(() => readObserved(observedEnv));
+    await eventually<Record<string, string>>(() => readObserved(observedEnv));
 
     const firstLifetime = readObserved(observedEnv)?.supervisorId;
     expect((await provider.stop(task, first.value.ref, context)).isOk()).toBe(true);
@@ -590,7 +590,7 @@ describe("ProcessOrbHostProvider", () => {
     const first = await provider.provision(task, request, context);
     expect(first.isOk()).toBe(true);
     if (first.isErr()) return;
-    await eventually(() => readObserved(observedEnv));
+    await eventually<Record<string, string>>(() => readObserved(observedEnv));
     await provider.close();
 
     const replacement = new ProcessOrbHostProvider({
@@ -629,7 +629,7 @@ describe("ProcessOrbHostProvider", () => {
       readFileSync(join(root, "configured-state", request.orbId, "host.json"), "utf8"),
     ).supervisorId;
     releaseRelaunch();
-    await eventually(() => readObserved(observedEnv));
+    await eventually<Record<string, string>>(() => readObserved(observedEnv));
     const metadata = JSON.parse(
       readFileSync(join(root, "configured-state", request.orbId, "host.json"), "utf8"),
     );
