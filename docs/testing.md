@@ -1622,3 +1622,5 @@ The initialization failure matrix also pins unchanged flag-call counts after blo
 Default native qualification retains root fanout and worker denial; foreground-definition research stays reproducible through the documented manual probe. (2026-10-22 PDT).
 
 Shared instructions failures use one status/schema/sanitization table; wrapper smokes retain exact authenticated paths and error scope. (2026-10-22 PDT).
+
+CLI suites share bounded UTF-8 output capture, fresh cwd, explicit environment, deadline and joined process-group termination; command responders and output contracts stay local. (2026-10-22 PDT).

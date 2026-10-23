@@ -1,10 +1,8 @@
-import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const repositoryRoot = join(import.meta.dirname, "../../../..");
-const cli = join(repositoryRoot, "apps/orb-runtime/docker/pi-orb");
+import { runCli as collectCli } from "../testkit/cli.ts";
+
 const TOKEN = "inspection-cli-token";
 
 const orb = {
@@ -20,53 +18,29 @@ const orb = {
 } as const;
 
 const transcript = {
-            v: 1,
-            orb,
-            session: { id: "session-a", overflow: { native: { privateDuplicate: true } } },
-            cursor: "record-1",
-            headId: "record-1",
-            records: [
-              {
-                id: "record-1",
-                parentId: null,
-                timestamp: "2026-08-27T00:00:01.000Z",
-                type: "event",
-                eventType: "orb.message",
-                sender: { orbId: "11111111-1111-4111-8111-111111111111" },
-                inboxMessageIds: ["inbox-peer"],
-                content: [{ type: "text", text: "Fix parsing" }],
-                overflow: { native: { privateDuplicate: true } },
-              },
-            ],
-          };
+  v: 1,
+  orb,
+  session: { id: "session-a", overflow: { native: { privateDuplicate: true } } },
+  cursor: "record-1",
+  headId: "record-1",
+  records: [
+    {
+      id: "record-1",
+      parentId: null,
+      timestamp: "2026-08-27T00:00:01.000Z",
+      type: "event",
+      eventType: "orb.message",
+      sender: { orbId: "11111111-1111-4111-8111-111111111111" },
+      inboxMessageIds: ["inbox-peer"],
+      content: [{ type: "text", text: "Fix parsing" }],
+      overflow: { native: { privateDuplicate: true } },
+    },
+  ],
+};
 
-interface CommandResult {
-  readonly code: number | null;
-  readonly stdout: string;
-  readonly stderr: string;
-}
-
-function runCli(baseUrl: string, args: readonly string[]): Promise<CommandResult> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(cli, args, {
-      cwd: repositoryRoot,
-      env: {
-        ...process.env,
-        PI_ORB_CONTROL_PLANE_URL: baseUrl,
-        PI_ORB_RUNTIME_TOKEN: TOKEN,
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-    child.once("error", reject);
-    child.once("close", (code) => resolve({ code, stdout, stderr }));
+function runCli(baseUrl: string, args: readonly string[]) {
+  return collectCli(args, {
+    env: { PATH: process.env.PATH, PI_ORB_CONTROL_PLANE_URL: baseUrl, PI_ORB_RUNTIME_TOKEN: TOKEN },
   });
 }
 
@@ -132,9 +106,7 @@ describe("pi-orb inspection CLI entry point", () => {
         return;
       }
       if (request.url === "/runtime/v1/orbs/orb-sibling/transcript") {
-        response.end(
-          JSON.stringify(transcript),
-        );
+        response.end(JSON.stringify(transcript));
         return;
       }
       response.statusCode = 404;

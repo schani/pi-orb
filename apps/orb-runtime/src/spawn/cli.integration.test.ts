@@ -1,30 +1,17 @@
-import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const root = join(import.meta.dirname, "../../../..");
+import { runCli } from "../testkit/cli.ts";
+
 const id = "00000000-0000-4000-8000-000000000003";
 const url = `https://browser.test/orbs/${id}`;
 function run(base: string, args: string[], input = "") {
-  return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(join(root, "apps/orb-runtime/docker/pi-orb"), ["spawn", ...args], {
-      env: { ...process.env, PI_ORB_CONTROL_PLANE_URL: base, PI_ORB_RUNTIME_TOKEN: "token" },
-      stdio: "pipe",
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += String(chunk);
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-    child.once("error", reject);
-    child.once("close", (code) => resolve({ code, stdout, stderr }));
-    child.stdin.end(input);
+  return runCli(["spawn", ...args], {
+    input,
+    env: { PATH: process.env.PATH, PI_ORB_CONTROL_PLANE_URL: base, PI_ORB_RUNTIME_TOKEN: "token" },
   });
 }
 
