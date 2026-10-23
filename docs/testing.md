@@ -1588,3 +1588,5 @@ Summary completion compares all callbacks without deduplication; timeout or succ
 Lossless transcript qualification deep-compares real CLI JSON against the complete served peer transcript. (2026-10-22 PDT).
 
 Hosted upload qualification checks independently computed SHA-256, streamed bytes, URL, method and authorization; it makes no reopen-order claim. (2026-10-22 PDT).
+
+Transport mapping tests inject owned fetch rejections rather than assuming fixed-port availability. (2026-10-22 PDT).

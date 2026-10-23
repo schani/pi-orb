@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { PROJECT_SECRETS_RUNTIME_PATH } from "@pi-orb/protocol";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi, onTestFinished } from "vitest";
 import type { BrokerEnv } from "../broker/endpoint.ts";
 import { fetchProjectSecretSnapshot, fetchProjectSecretSnapshotAtBoot } from "./endpoint.ts";
 
@@ -75,8 +75,10 @@ describe("project-secret boot snapshot endpoint", () => {
     expect(bad.isErr() && bad.error.code).toBe("invalid_response");
     await new Promise<void>((resolve) => malformed.close(() => resolve()));
 
+    const rejection = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("owned rejection"));
+    onTestFinished(() => rejection.mockRestore());
     const unavailable = await fetchProjectSecretSnapshot({
-      controlPlaneUrl: "http://127.0.0.1:1",
+      controlPlaneUrl: "http://control.test",
       runtimeToken: "runtime-bearer",
     });
     expect(unavailable.isErr() && unavailable.error.code).toBe("unavailable");
