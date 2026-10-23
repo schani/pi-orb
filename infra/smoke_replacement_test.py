@@ -1,6 +1,7 @@
 """Manual replacement smoke, driven only by synthetic command adapters."""
 import json
 import os
+import shutil
 from pathlib import Path
 import stat
 import subprocess
@@ -15,7 +16,7 @@ SECRETS = ("runtime-SENSITIVE-0", "runtime-SENSITIVE-1", "runtime-SENSITIVE-2",
            "metadata-SENSITIVE", "disk-SENSITIVE", "row-SENSITIVE", "auth-SENSITIVE")
 
 FAKE = r'''#!/usr/bin/env python3
-import json, os, sys, time
+import json, os, stat, subprocess, sys, time
 from pathlib import Path
 a = sys.argv[1:]
 root = Path(os.environ["FAKE_ROOT"])
@@ -35,6 +36,15 @@ def flag(key, default=None):
         if v == key: return a[i + 1]
         if v.startswith(key + "="): return v.split("=", 1)[1]
     return default
+if name == "jq":
+    payload = sys.stdin.buffer.read()
+    if b"runtime-SENSITIVE-" in payload:
+        s["sensitive_jq_inputs"] = s.get("sensitive_jq_inputs", 0) + 1; save()
+        if stat.S_ISREG(os.fstat(0).st_mode):
+            print("raw description stdin is disk-backed", file=sys.stderr); sys.exit(42)
+    reply = subprocess.run([os.environ["FAKE_REAL_JQ"], *a], input=payload, capture_output=True)
+    sys.stdout.buffer.write(reply.stdout); sys.stderr.buffer.write(reply.stderr)
+    sys.exit(reply.returncode)
 if name == "date":
     s["clock_calls"] = s.get("clock_calls", 0) + 1; save()
     print(int(time.time()) + s["clock_calls"] * 60); sys.exit(0)
@@ -70,7 +80,7 @@ if name == "gcloud":
                 "metadata": {"items": [
                     {"key": "pi-orb-config", "value": json.dumps({"PI_ORB_RUNTIME_TOKEN": "runtime-SENSITIVE-" + str(i)})},
                     {"key": "pi-orb-host-spec-fingerprint", "value": "spec-" + str(i == 2)},
-                    {"key": "unrelated", "value": "metadata-SENSITIVE"}]}}
+                    {"key": "unrelated", "value": "metadata-SENSITIVE" + ("x" * 65536 if mode == "large-metadata" else "")}]}}
         print(json.dumps(desc) if flag("--format") == "json" else inst(i))
     elif a[:3] == ["compute", "disks", "list"]:
         if mode == "disposal-disk-transport" and s["state"] == "failed":
@@ -165,6 +175,8 @@ class ReplacementSmokeTest(unittest.TestCase):
         adapter.chmod(0o700)
         for name in ("gcloud", "curl", "sleep", "fake-stage2"):
             (root / "bin" / name).symlink_to(adapter)
+        if mode == "large-metadata":
+            (root / "bin/jq").symlink_to(adapter)
         if mode in {"provider-leak", "cleanup-orb-present"}:
             (root / "bin/date").symlink_to(adapter)
         (root / "state.json").write_text(json.dumps({
@@ -178,7 +190,7 @@ class ReplacementSmokeTest(unittest.TestCase):
         env = {k: v for k, v in os.environ.items()
                if not k.startswith(("PI_ORB_", "PROJECT", "OVERALL_TIMEOUT", "POLL_INTERVAL"))}
         env.update(PATH=str(root / "bin") + ":" + os.environ["PATH"],
-                   FAKE_ROOT=str(root), FAKE_MODE=mode,
+                   FAKE_ROOT=str(root), FAKE_MODE=mode, FAKE_REAL_JQ=shutil.which("jq"),
                    PI_ORB_BASE_URL="https://fake.invalid",
                    PI_ORB_APP_ORIGIN="https://fake.invalid", PROJECT="fake-project",
                    PI_ORB_GCP_PROJECT="fake-project", PI_ORB_GCE_ZONE="fake-zone",
@@ -210,7 +222,7 @@ class ReplacementSmokeTest(unittest.TestCase):
         return child
 
     def test_private_allowlisted_evidence_and_stdin_bearer_including_stage2(self):
-        root, evidence, sentinel, result = self.run_smoke(stage2=True)
+        root, evidence, sentinel, result = self.run_smoke(mode="large-metadata", stage2=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         child = self.assert_private_evidence(root, evidence, sentinel, result)
         for name, i in (("old-instance", 0), ("new-instance", 1), ("stage2-instance", 2)):
@@ -226,6 +238,7 @@ class ReplacementSmokeTest(unittest.TestCase):
             self.assertIn("--tunnel-through-iap", command)
         state = json.loads((root / "state.json").read_text())
         self.assertEqual(state["recorded_before_create"], ["project", "orb"])
+        self.assertGreater(state["sensitive_jq_inputs"], 0)
 
     def commands(self, root):
         return [json.loads(line) for line in (root / "commands.jsonl").read_text().splitlines()]

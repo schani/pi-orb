@@ -75,7 +75,7 @@ instance_absent() {
 data_disk_exists() {
   local description
   description=$(external disk-describe "$data_disk") || return 1
-  jq -e --arg name "$data_disk" '.name == $name' <<<"$description" >/dev/null
+  printf '%s\n' "$description" | jq -e --arg name "$data_disk" '.name == $name' >/dev/null
 }
 token_refused() { printf '%s' "$1" | external runtime-refused "$base"; }
 instance_summary() {
@@ -225,12 +225,12 @@ data_disk_exists
 # Record the compute identity that must be gone after disposal: the numeric
 # instance ID, the auto-created boot disk, and the incarnation-0 runtime token.
 old_description=$(describe_instance "$old_instance")
-instance_summary <<<"$old_description" >"$log_dir/old-instance.json"
-old_instance_id=$(jq -r .id <<<"$old_description")
-old_boot_disk=$(jq -r '.disks[] | select(.boot == true) | .source | split("/") | last' \
-  <<<"$old_description")
-old_token=$(jq -r '.metadata.items[] | select(.key == "pi-orb-config") | .value | fromjson | .PI_ORB_RUNTIME_TOKEN' \
-  <<<"$old_description")
+printf '%s\n' "$old_description" | instance_summary >"$log_dir/old-instance.json"
+old_instance_id=$(printf '%s\n' "$old_description" | jq -r .id)
+old_boot_disk=$(printf '%s\n' "$old_description" |
+  jq -r '.disks[] | select(.boot == true) | .source | split("/") | last')
+old_token=$(printf '%s\n' "$old_description" |
+  jq -r '.metadata.items[] | select(.key == "pi-orb-config") | .value | fromjson | .PI_ORB_RUNTIME_TOKEN')
 [[ -n "$old_instance_id" && "$old_instance_id" != null ]]
 [[ -n "$old_boot_disk" && "$old_boot_disk" != "$data_disk" ]]
 boot_disks+=("$old_boot_disk")
@@ -274,16 +274,16 @@ new_instance=$(instances)
 [[ $(wc -w <<<"$new_instance") -eq 1 ]]
 [[ "$new_instance" == "${instance_prefix}1" ]]
 new_description=$(describe_instance "$new_instance")
-instance_summary <<<"$new_description" >"$log_dir/new-instance.json"
-new_instance_id=$(jq -r .id <<<"$new_description")
-new_boot_disk=$(jq -r '.disks[] | select(.boot == true) | .source | split("/") | last' \
-  <<<"$new_description")
-new_data_disk=$(jq -r '.disks[] | select(.boot == false) | .source | split("/") | last' \
-  <<<"$new_description")
-new_token=$(jq -r '.metadata.items[] | select(.key == "pi-orb-config") | .value | fromjson | .PI_ORB_RUNTIME_TOKEN' \
-  <<<"$new_description")
-new_spec=$(jq -r '.metadata.items[] | select(.key == "pi-orb-host-spec-fingerprint") | .value' \
-  <<<"$new_description")
+printf '%s\n' "$new_description" | instance_summary >"$log_dir/new-instance.json"
+new_instance_id=$(printf '%s\n' "$new_description" | jq -r .id)
+new_boot_disk=$(printf '%s\n' "$new_description" |
+  jq -r '.disks[] | select(.boot == true) | .source | split("/") | last')
+new_data_disk=$(printf '%s\n' "$new_description" |
+  jq -r '.disks[] | select(.boot == false) | .source | split("/") | last')
+new_token=$(printf '%s\n' "$new_description" |
+  jq -r '.metadata.items[] | select(.key == "pi-orb-config") | .value | fromjson | .PI_ORB_RUNTIME_TOKEN')
+new_spec=$(printf '%s\n' "$new_description" |
+  jq -r '.metadata.items[] | select(.key == "pi-orb-host-spec-fingerprint") | .value')
 [[ -n "$new_instance_id" && "$new_instance_id" != "$old_instance_id" ]]
 [[ -n "$new_boot_disk" && "$new_boot_disk" != "$old_boot_disk" ]]
 boot_disks+=("$new_boot_disk")
@@ -327,14 +327,14 @@ if [[ -n "${PI_ORB_SMOKE_STAGE2_DEPLOY_COMMAND:-}" ]]; then
   stage2_instance=$(instances)
   [[ "$stage2_instance" == "${instance_prefix}2" ]]
   stage2_description=$(describe_instance "$stage2_instance")
-  instance_summary <<<"$stage2_description" >"$log_dir/stage2-instance.json"
-  stage2_id=$(jq -r .id <<<"$stage2_description")
-  stage2_spec=$(jq -r '.metadata.items[] | select(.key == "pi-orb-host-spec-fingerprint") | .value' \
-    <<<"$stage2_description")
-  stage2_data_disk=$(jq -r '.disks[] | select(.boot == false) | .source | split("/") | last' \
-    <<<"$stage2_description")
-  stage2_boot_disk=$(jq -r '.disks[] | select(.boot == true) | .source | split("/") | last' \
-    <<<"$stage2_description")
+  printf '%s\n' "$stage2_description" | instance_summary >"$log_dir/stage2-instance.json"
+  stage2_id=$(printf '%s\n' "$stage2_description" | jq -r .id)
+  stage2_spec=$(printf '%s\n' "$stage2_description" |
+    jq -r '.metadata.items[] | select(.key == "pi-orb-host-spec-fingerprint") | .value')
+  stage2_data_disk=$(printf '%s\n' "$stage2_description" |
+    jq -r '.disks[] | select(.boot == false) | .source | split("/") | last')
+  stage2_boot_disk=$(printf '%s\n' "$stage2_description" |
+    jq -r '.disks[] | select(.boot == true) | .source | split("/") | last')
   # Replacement, not repair: a new instance ID, a new disposable boot disk, and
   # a new specification stamp around the one retained workspace disk. No
   # in-place repair path exists, so the identity change is what this leg
