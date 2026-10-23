@@ -82,7 +82,7 @@ it("reports a post-EOF drain failure instead of subscribing to an impossible idl
   );
   await writeFile(
     join(root, "apps/orb-runtime/src/claude/agent.ts"),
-    `import { ok } from "neverthrow";
+    `import { ok, err } from "neverthrow";
 export class ClaudeOrbAgent {
   closed = false;
   health = { status: "ready" };
@@ -92,7 +92,7 @@ export class ClaudeOrbAgent {
     this.closed = true;
     return new Promise(resolve => { this.waiting = resolve; });
   }
-  replicationSnapshot() { return ok({ closeRequested: this.closed, session: { id: "00000000-0000-4000-8000-000000000029" }, records: [{ id: "00000000-0000-4000-8000-000000000029", type: "message", content: "PRIVATE_PROVIDER_TOKEN_URL_CODE_ENV_CONTENT" }] }); }
+  replicationSnapshot() { if (this.health.status === "failed") return err({ code: "history_unavailable" }); return ok({ closeRequested: this.closed, session: { id: "00000000-0000-4000-8000-000000000029" }, records: [{ id: "00000000-0000-4000-8000-000000000029", type: "message", content: "PRIVATE_PROVIDER_TOKEN_URL_CODE_ENV_CONTENT" }] }); }
   getHealth() { return this.health; }
   sessionId() { return "00000000-0000-4000-8000-000000000029"; }
   gateView() { return { activity: "busy" }; }
@@ -127,6 +127,12 @@ export class ClaudeOrbAgent {
         expect.objectContaining({
           qualificationEvidence: expect.objectContaining({
             health: { status: "failed", code: "claude_stream_identity_gap" },
+            records: [
+              expect.objectContaining({
+                uuid: "00000000-0000-4000-8000-000000000029",
+                type: "message",
+              }),
+            ],
             nativeRows: expect.arrayContaining([
               expect.objectContaining({ uuid: "00000000-0000-4000-8000-000000000029" }),
             ]),
@@ -160,6 +166,7 @@ it("rejects an IPC wait causally when the worker exits before readiness", async 
     await rm(root, { recursive: true, force: true });
   }
 });
+
 it("rejects child errors without exposing raw diagnostics and joins an already closed worker", async () => {
   const child = Object.assign(new EventEmitter(), {
     stderr: new EventEmitter(),

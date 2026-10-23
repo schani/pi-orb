@@ -1512,3 +1512,6 @@ native line; the real watcher remains armed across both publications.
 The drain fixture owns IPC/error/close listeners from fork through one joined
 completion promise. Early exit rejects pending waits with status and bounded
 stderr byte count, never provider stderr content.
+Worker checkpoints retain only allowlisted metadata from the latest successful
+public replication snapshot. A later health/snapshot failure preserves nonempty
+normalized rows without retaining content, credentials or raw provider errors.

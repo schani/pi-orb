@@ -20,6 +20,15 @@ const streamRows = [];
 const pendingBlocks = new Map();
 let operationFailure = false;
 let traceQueue = Promise.resolve();
+let lastSnapshot;
+function replicationSnapshot() {
+  const result = agent.replicationSnapshot();
+  if (result.isOk()) {
+    const safe = safeQualificationEvidence({ snapshot: result.value });
+    lastSnapshot = { session: { id: safe.sessionId }, records: safe.records };
+  }
+  return result;
+}
 const edgeCounts = new Map();
 function sendSafe(message) {
   return Result.fromThrowable(
@@ -29,12 +38,14 @@ function sendSafe(message) {
 }
 function captureEvidence() {
   traceQueue = traceQueue.then(async () => {
+    replicationSnapshot();
     const captured = await captureNative();
     sendSafe({
       qualificationEvidence: {
         incarnation,
         ...safeQualificationEvidence({
           health: agent.getHealth(),
+          snapshot: lastSnapshot,
           ...captured,
           streamRows,
           pendingBlocks: [...pendingBlocks.values()],
@@ -221,7 +232,7 @@ function unwrap(result) {
 }
 function evidence() {
   return {
-    snapshot: unwrap(agent.replicationSnapshot()),
+    snapshot: unwrap(replicationSnapshot()),
     health: agent.getHealth(),
     started,
     exited,
