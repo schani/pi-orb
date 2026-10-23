@@ -167,12 +167,16 @@ describe("orb runtime Dockerfile contract", () => {
       if (parsed.name !== undefined) localPackages.set(parsed.name, workspacePath);
     }
 
+    const install = dockerfile.indexOf("npm ci --workspace @pi-orb/orb-runtime");
+    expect(install, "runtime npm ci must exist").toBeGreaterThan(-1);
     const runtimeDependencies = Object.keys(runtimePackage.dependencies ?? {});
     for (const dependency of runtimeDependencies) {
       const workspacePath = localPackages.get(dependency);
       if (workspacePath === undefined) continue;
-      expect(dockerfile, `${dependency} package.json must be copied before npm ci`).toContain(
-        `COPY ${workspacePath}/package.json ${workspacePath}/`,
+      const metadata = dockerfile.indexOf(`COPY ${workspacePath}/package.json ${workspacePath}/`);
+      expect(metadata, `${dependency} package.json must be copied`).toBeGreaterThan(-1);
+      expect(metadata, `${dependency} package.json must be copied before npm ci`).toBeLessThan(
+        install,
       );
       expect(dockerfile, `${dependency} source must be copied into the runtime image`).toContain(
         `COPY ${workspacePath}/src ${workspacePath}/src`,
