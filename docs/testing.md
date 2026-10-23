@@ -10,7 +10,7 @@ Assert simulation task Results outside the task, with failure diagnostics; task 
 
 ## DST replay identity (2026-10-22)
 
-Runtime and control-plane replay compare the invariant message and first failure origin through a dependency-neutral helper. Runtime artifacts retain the original error, stack and identity before replay, then the replay diagnostics and verdict. Another exception, a different origin or a successful replay does not reproduce the failure.
+Runtime and control-plane replay compare the invariant message and first failure origin through a dependency-neutral helper. Runtime artifacts retain the original error, stack and identity before replay, then the replay diagnostics and verdict. Another exception, a different origin or a successful replay does not reproduce the failure. Expected-failure selftests own their trace fixtures and remove them only after every assertion passes; unexpected failures retain their evidence.
 
 ## Local fake-provider npm preparation (2026-10-22)
 
