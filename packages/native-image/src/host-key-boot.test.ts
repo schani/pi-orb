@@ -166,6 +166,11 @@ describe("native image SSH host-key boot contract", () => {
     expect(seal).toMatch(/Requires=pi-orb-host-key-ready\.service/);
     expect(seal).toMatch(/After=pi-orb-host-key-ready\.service/);
     expect(seal).toContain("boot-graph-verifier.sh pi-orb-host-key-ready.service ssh.service");
+    const install = await readFile(
+      new URL("../../../infra/native-vm/install.sh", import.meta.url),
+      "utf8",
+    );
+    expect(install).toContain("infra/native-vm/boot-graph-verifier.sh multi-user.target");
     expect(seal.indexOf('systemctl stop "$unit"')).toBeLessThan(
       seal.indexOf("install -m755 /app/infra/native-vm/wait-google-host-keys.sh"),
     );

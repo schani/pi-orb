@@ -26,9 +26,7 @@ class BrowserEvidenceTest(unittest.TestCase):
         for value in ('pull_request:', 'contents: read', 'shard: [1, 2, 3, 4]',
                       'PI_ORB_E2E_BACKEND: process',
                       'npm run test:e2e -- --shard=',
-                      'docker build -f apps/control-plane/Dockerfile',
-                      '--network none', 'control-plane-image-proof.mjs',
-                      'retention-days: 14', 'df -h', '15728640'):
+                      'retention-days: 14'):
             self.assertIn(value, qualification)
         for value in ('id-token: write', 'google-github-actions', 'infra/release.sh'):
             self.assertNotIn(value, qualification)
@@ -53,7 +51,7 @@ class BrowserEvidenceTest(unittest.TestCase):
                 self.assertIn('test-failures/cross-axis-*/' + filename, upload)
             self.assertNotIn('/**', upload)
             self.assertNotRegex(upload, r'(?m)^            .*/\\*\\s*$')
-        proof = steps('durable-qualification.yml')['Prove packaged worker, Git and skills without network']
+        proof = steps('ci.yml')['Prove packaged worker, Git and skills without network']
         self.assertIn('2>&1 | tee', proof)
 
     def test_nested_failure_producers_have_bounded_uploads(self):

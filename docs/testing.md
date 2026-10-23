@@ -1805,3 +1805,5 @@ Diagnostic cutoff counts parsed frame bytes, excluding a following incomplete UT
 **Decision (2026-10-22):** CI runs foundation OpenTofu/mock-plan checks through `infra/foundation/test-tofu.sh`; `test:infra` owns the three Node suites once. `infra/foundation/test.sh` remains the full local foundation command, including release SSH and operator-budget checks.
 
 **Decision (2026-10-22):** Release-report contracts own the complete deployment upload action/policy inventory. Browser-evidence contracts own diagnostic producers and E2E uploads; both extract named workflow steps through one small parser.
+
+**Decision (2026-10-22):** CI’s existing `control-plane-image` check owns the sole control-plane build and offline packaged-worker/Git/skills proof. Qualification requires that CI job plus `checks` and all eight provider shard contexts on the first exact-source main attempt. The shared `control-plane-image` context remains served; branch-protection API access was unavailable (403), not evidence that a context may be dropped. Installation and post-seal SSH graphs both execute `boot-graph-verifier.sh` at their existing phases, for their distinct unit sets.
