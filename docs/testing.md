@@ -1598,3 +1598,5 @@ Socket servers, PTYs, fake timers and temporary roots register unconditional cle
 Boot-secret retries use advancing time and a permanent outage must terminate at the explicit budget without later requests. (2026-10-22 PDT).
 
 Corrupt-index qualification first restores and validates the native transcript, then requires the typed index error. (2026-10-22 PDT).
+
+Each native settings source independently rejects auth overrides, malformed JSON, invalid shapes and read errors without private values. (2026-10-22 PDT).
