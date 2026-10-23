@@ -12,6 +12,8 @@ Hosted namespace isolation publishes the same path with different bytes under tw
 
 Runtime self children coverage accepts a child through the spawn route, observes it before deletion, finalizes deletion and then excludes it while retaining archived-child and unrelated-orb controls.
 
+Source-order contracts require every anchor and an ordered nonempty slice before order or negative-content checks. Keep these architectural checks at the source boundary.
+
 ## Adapter boundary assertions (2026-10-22)
 
 SQL fixtures register clients before fallible setup; table-driven settings suites capture each acquired subject in `onTestFinished`, without teardown of an unacquired or stale client; process observations/crash markers live under immediately registered roots. Teardown reports cleanup failures separately, attempts every owned release, and retains the original test failure.
