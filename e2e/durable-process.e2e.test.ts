@@ -458,7 +458,7 @@ text('NOTIFY_PARENT_HANDLED');`),
     const orb = randomUUID();
     try {
       cp = await startControlPlane({
-        port: 7273,
+        port: 0,
         fake,
         pglitePath: join(root, "db"),
         authDir: join(root, "auth"),

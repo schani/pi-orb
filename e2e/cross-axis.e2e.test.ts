@@ -32,15 +32,6 @@ const stop = { type: "stop", reason: "stop" };
 const git = (repository: string, ...args: string[]) =>
   execFileSync("git", ["-C", repository, ...args], { encoding: "utf8" }).trim();
 
-async function unusedPort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("missing port allocation");
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  return address.port;
-}
-
 for (const composition of CROSS_AXIS_CASES) {
   const provider = process.env["PI_ORB_E2E_BACKEND"] === "process" ? "process" : "docker";
   test.runIf(composition.provider === provider)(
@@ -191,7 +182,7 @@ for (const composition of CROSS_AXIS_CASES) {
           databaseUrl = `postgres://pi-orb:pi-orb@127.0.0.1:${port.value}/pi_orb`;
         }
         cp = await startControlPlane({
-          port: await unusedPort(),
+          port: 0,
           fake,
           nameFake,
           ...(local

@@ -335,14 +335,8 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
       held?.end("released");
     };
     try {
-      // Reserve an ephemeral listener before selecting the CP port; no fixed-port fixture collision.
-      const lease = httpServer();
-      await new Promise<void>((resolve) => lease.listen(0, "127.0.0.1", resolve));
-      const address = lease.address();
-      if (!address || typeof address === "string") throw new Error("missing CP port lease");
-      await new Promise<void>((resolve) => lease.close(() => resolve()));
       const cpOptions = {
-        port: address.port,
+        port: 0,
         fake,
         nameFake: names,
         pglitePath: join(root, "db"),
@@ -362,6 +356,7 @@ export function registerIndependentCase(cancellation: IndependentCase, malformed
         },
       };
       cp = await startControlPlane(cpOptions);
+      cpOptions.port = cp.port;
       expect(
         (
           await api(cp.baseUrl, "POST", "/api/v1/projects", {

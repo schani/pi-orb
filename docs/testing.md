@@ -1789,3 +1789,5 @@ Diagnostic cutoff counts parsed frame bytes, excluding a following incomplete UT
 **Decision (2026-10-22):** Visible idle-stopped subscriptions are checked after three acknowledged reconciliation passes. Clock-driven idle expiry and message-triggered wake still use the real lifecycle composition.
 
 **Decision (2026-10-22):** Summary barriers select the current phase’s queued operation for the exact orb, then require its successful outcome; scoped summary failures fail immediately. Global completion counts cannot acknowledge a turn.
+
+**Decision (2026-10-22):** Child and Docker listeners bind port zero and publish their owned endpoints. Public Host adapters remain separate. Artifact restart reuses the first actual endpoint to preserve its stable-origin contract, not a released reservation.

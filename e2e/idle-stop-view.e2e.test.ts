@@ -20,7 +20,6 @@ import {
 } from "./harness.ts";
 
 const stop = { type: "stop", status: "completed" } as const;
-const PORT = 7187;
 
 it("viewing an idle-stopped orb leaves it stopped; sending a message starts it", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-idle-view-e2e-"));
@@ -52,7 +51,7 @@ it("viewing an idle-stopped orb leaves it stopped; sending a message starts it",
       },
     });
     cp = await startControlPlane({
-      port: PORT,
+      port: 0,
       fake,
       nameFake,
       pglitePath: join(root, "db"),
@@ -111,7 +110,7 @@ it("viewing an idle-stopped orb leaves it stopped; sending a message starts it",
     expect((await view())["stopReason"]).toBe("idle");
 
     const frames: ServerFrame[] = [];
-    socket = new WebSocket(`ws://127.0.0.1:${PORT}/api/v1/orbs/${orbId}/live`, [
+    socket = new WebSocket(`${activeCp.baseUrl.replace(/^http/, "ws")}/api/v1/orbs/${orbId}/live`, [
       RUNTIME_SUBPROTOCOL,
     ]);
     const live = socket;

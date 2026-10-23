@@ -25,6 +25,7 @@ import { chromium, expect as expectPage } from "@playwright/test";
 import { build } from "vite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
+import { parseDockerLoopbackPort } from "./docker-port.ts";
 import {
   api,
   type CommandOutcome,
@@ -61,9 +62,8 @@ import { UploadContinuationPhases } from "./testkit/upload-continuation-phases.t
  */
 
 const PG_CONTAINER = `pi-orb-e2e-pg-${randomUUID()}`;
-const PG_PORT = 5436;
-const CP_PORT = 7144;
-const NETWORK = "pi-orb";
+let databaseUrl: string;
+const NETWORK = `pi-orb-e2e-${randomUUID()}`;
 const DOCKER_INVENTORY_SCOPE = randomUUID();
 const RUNTIME_IMAGE = "pi-orb-runtime:dev";
 const REPOSITORY_URL = "https://github.com/schani/pi-orb";
@@ -496,7 +496,7 @@ const RESUME_HOOK = [
  */
 async function terminalRun(orbId: string, command: string, until: string): Promise<string> {
   try {
-    return await runTerminal(`http://127.0.0.1:${CP_PORT}`, orbId, command, until);
+    return await runTerminal(controlPlane.baseUrl, orbId, command, until);
   } catch (error) {
     await captureOrbFailure(orbId, error);
     throw error;
@@ -669,7 +669,7 @@ beforeAll(async () => {
     controlPlane = await startControlPlane({
       pglitePath: join(localStateDirectory, "control-plane.pglite"),
       processStateDirectory: join(localStateDirectory, "process-hosts"),
-      port: CP_PORT,
+      port: 0,
       fake,
       nameFake,
       launchFailureMarker: ".pi-orb-e2e-launch-failure.json",
@@ -686,7 +686,7 @@ beforeAll(async () => {
     return;
   }
 
-  await docker(["network", "create", NETWORK]).catch(() => undefined);
+  await docker(["network", "create", NETWORK]);
 
   await docker([
     "run",
@@ -700,14 +700,17 @@ beforeAll(async () => {
     "-e",
     "POSTGRES_DB=pi_orb",
     "-p",
-    `127.0.0.1:${PG_PORT}:5432`,
+    "127.0.0.1::5432",
     "postgres:16",
   ]);
   await waitForPostgres(PG_CONTAINER, "pi-orb", "pi_orb");
+  const pgPort = parseDockerLoopbackPort(await docker(["port", PG_CONTAINER, "5432/tcp"]));
+  if (pgPort.isErr()) throw new Error("invalid owned PostgreSQL port");
+  databaseUrl = `postgres://pi-orb:pi-orb@127.0.0.1:${pgPort.value}/pi_orb`;
 
   controlPlane = await startControlPlane({
-    databaseUrl: `postgres://pi-orb:pi-orb@127.0.0.1:${PG_PORT}/pi_orb`,
-    port: CP_PORT,
+    databaseUrl,
+    port: 0,
     fake,
     nameFake,
     dockerNetwork: NETWORK,
@@ -738,7 +741,10 @@ afterAll(async () => {
   try {
     await controlPlane?.stop();
   } finally {
-    if (!PROCESS_BACKEND) await docker(["rm", "-f", PG_CONTAINER]).catch(() => undefined);
+    if (!PROCESS_BACKEND) {
+      await docker(["rm", "-f", PG_CONTAINER]).catch(() => undefined);
+      await docker(["network", "rm", NETWORK]).catch(() => undefined);
+    }
     if (fake !== undefined) await deleteFakeSession(fake.sessionKey);
     if (nameFake !== undefined) await deleteFakeSession(nameFake.sessionKey);
     if (localStateDirectory !== "") rmSync(localStateDirectory, { recursive: true, force: true });
@@ -757,8 +763,8 @@ async function restartControlPlaneWithSpec(spec: string, generation: number): Pr
   const authDir = controlPlane.authDir;
   await controlPlane.stop();
   controlPlane = await startControlPlane({
-    databaseUrl: `postgres://pi-orb:pi-orb@127.0.0.1:${PG_PORT}/pi_orb`,
-    port: CP_PORT,
+    databaseUrl,
+    port: 0,
     fake,
     nameFake,
     dockerNetwork: NETWORK,
@@ -1590,7 +1596,7 @@ describe("full slice E2E", () => {
 
     // A real PTY traverses browser route → control-plane binary proxy → runtime.
     const terminalSocket = new WebSocket(
-      `ws://127.0.0.1:${CP_PORT}/api/v1/orbs/${orbId}/terminal`,
+      `${controlPlane.baseUrl.replace(/^http/, "ws")}/api/v1/orbs/${orbId}/terminal`,
       [TERMINAL_SUBPROTOCOL],
     );
     await new Promise<void>((resolve, reject) => {
@@ -1679,9 +1685,10 @@ describe("full slice E2E", () => {
     const cursor = (history.body["cursor"] as string | null) ?? null;
 
     const frames: ServerFrame[] = [];
-    const socket = new WebSocket(`ws://127.0.0.1:${CP_PORT}/api/v1/orbs/${orbId}/live`, [
-      RUNTIME_SUBPROTOCOL,
-    ]);
+    const socket = new WebSocket(
+      `${controlPlane.baseUrl.replace(/^http/, "ws")}/api/v1/orbs/${orbId}/live`,
+      [RUNTIME_SUBPROTOCOL],
+    );
     const frameWaiters: (() => void)[] = [];
     socket.on("message", (data) => {
       frames.push(JSON.parse(data.toString()) as ServerFrame);
