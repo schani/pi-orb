@@ -12,6 +12,8 @@ Assert simulation task Results outside the task, with failure diagnostics; task 
 
 Runtime and control-plane replay compare the invariant message and first failure origin through a dependency-neutral helper. Runtime artifacts retain the original error, stack and identity before replay, then the replay diagnostics and verdict. Another exception, a different origin or a successful replay does not reproduce the failure. Expected-failure selftests own their trace fixtures and remove them only after every assertion passes; unexpected failures retain their evidence.
 
+Multi-phase scenarios use `runDst`'s `nextPhase` factory: fresh single-use simulations share one recorded/replayed entropy source, inherited options and lifecycle capture. Only the wall-clock epoch may be overridden. Capture resets between scenarios, not phases; every restart phase belongs to the saved trace. The helper regression requires identical command/clock evidence and failure origin in automatic and explicit replay.
+
 ## Local fake-provider npm preparation (2026-10-22)
 
 Failed npm installation retains only finite allowlisted code/errno fields in existing phase artifacts, from at most 64 KiB of private combined output. Missing/conflicting/oversized fields remain unknown; unreadable output is marked unavailable. Raw logs stay private. npm defaults, one install invocation and the 300s tool timeout are unchanged.

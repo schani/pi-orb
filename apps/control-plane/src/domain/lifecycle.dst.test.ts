@@ -17,7 +17,7 @@ import {
   type TestHarness,
 } from "../testkit/fixtures.ts";
 import { assertAtMostOneHost, assertReplicaComplete } from "../testkit/invariants.ts";
-import { LogCapture, makeRecordingSimulation, runDst, waitUntil } from "../testkit/sim.ts";
+import { LogCapture, runDst, waitUntil } from "../testkit/sim.ts";
 import { isDeclineMarker, isResumeMarker } from "../testkit/world.ts";
 import { ControlState } from "./control-state.ts";
 import { reconcileOrbOnce, requestOrbStart, requestOrbStop } from "./lifecycle.ts";
@@ -394,7 +394,12 @@ describe("orb lifecycle (DST)", () => {
   });
 
   it("a control-plane restart during a pending login starts a fresh flow", async () => {
-    await runDst({ name: "restart-during-login", iterations: 20 }, async (sim) => {
+    const options = {
+      name: "restart-during-login",
+      iterations: 20,
+      logCapture: new LogCapture(),
+    };
+    await runDst(options, async (sim, nextPhase) => {
       const before = makeHarness({
         authMode: { kind: "requires_login", autoCompleteAfterMs: null, challengeTtlMs: 600_000 },
       });
@@ -420,10 +425,7 @@ describe("orb lifecycle (DST)", () => {
       const after = restartControlPlane(before);
       after.authGate.invalidateCredential();
       const stopAfter = new AbortController();
-      // SimulationImpl is single-use; phase 2 gets its own simulation with the
-      // same standard options (biased timer policy, fixed epoch).
-      const { makeRecordingSimulation } = await import("../testkit/sim.ts");
-      const sim2 = makeRecordingSimulation({ name: "restart-during-login-phase2" });
+      const sim2 = nextPhase();
       const phase2 = await sim2.runTasks([
         { name: "reconciler-2", f: (task) => reconcileLoop(task, after.deps, stopAfter.signal) },
         {
@@ -3712,7 +3714,12 @@ describe("idle auto-stop (DST)", () => {
   // docs/postmortems/2026-10-10-starting-deadline-restarts.md: a control plane
   // dying faster than its in-memory boot holds must still fail a dead boot.
   it("a never-answering boot fails although the control plane keeps restarting", async () => {
-    await runDst({ name: "starting-deadline-restarts", iterations: 5 }, async (sim) => {
+    const options = {
+      name: "starting-deadline-restarts",
+      iterations: 5,
+      logCapture: new LogCapture(),
+    };
+    await runDst(options, async (sim, nextPhase) => {
       const { createStartDeadlineMs, setupHookHoldMs, unreachableBootDeadlineMs } = TEST_CONSTANTS;
       let harness = makeHarness();
       let current = sim;
@@ -3745,8 +3752,7 @@ describe("idle auto-stop (DST)", () => {
           createStartDeadlineMs + setupHookHoldMs + unreachableBootDeadlineMs,
         );
         harness = restartControlPlane(harness);
-        current = makeRecordingSimulation({
-          name: `starting-deadline-restarts-${phase + 1}`,
+        current = nextPhase({
           wallClockEpoch: wall + 10_000,
         });
       }
@@ -3755,7 +3761,12 @@ describe("idle auto-stop (DST)", () => {
   });
 
   it("survives a control-plane restart on persisted state alone", async () => {
-    await runDst({ name: "idle-stop-across-restart", iterations: 10 }, async (sim) => {
+    const options = {
+      name: "idle-stop-across-restart",
+      iterations: 10,
+      logCapture: new LogCapture(),
+    };
+    await runDst(options, async (sim, nextPhase) => {
       const before = makeHarness();
       const stopBefore = new AbortController();
       let crashWall = 0;
@@ -3790,8 +3801,7 @@ describe("idle auto-stop (DST)", () => {
       // Restart: fresh in-memory state, 10s of downtime, same durable rows.
       const after = restartControlPlane(before);
       const stopAfter = new AbortController();
-      const sim2 = makeRecordingSimulation({
-        name: "idle-stop-across-restart-phase2",
+      const sim2 = nextPhase({
         wallClockEpoch: crashWall + 10_000,
       });
       let firstStopSeenAt: number | null = null;
