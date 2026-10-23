@@ -34,7 +34,7 @@ class AuthTest(unittest.TestCase):
             self.assertIsNotNone(verify(cloud, 'test-project').error)
             self.assertEqual(len(cloud.calls), 1)
 
-    def test_disabled_or_wrong_version_declines(self):
+    def test_disabled_version_declines(self):
         cloud = Cloud(); cloud.version['state'] = 'DISABLED'
         self.assertIsNotNone(verify(cloud, 'test-project').error)
         self.assertEqual(len(cloud.calls), 2)
