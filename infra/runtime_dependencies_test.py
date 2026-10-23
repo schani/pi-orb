@@ -21,20 +21,20 @@ class RuntimeDependenciesTests(unittest.TestCase):
         for name in ['ci', 'e2e', 'deploy', 'durable-qualification']:
             with self.subTest(workflow=name):
                 source = (ROOT / f'.github/workflows/{name}.yml').read_text()
-                self.assertEqual(re.findall(r"node-version: '([^']+)'", source), ['24.22.0'])
+                self.assertEqual(re.findall(r"node-version: '([^']+)'", source), ['24.22.1'])
         for app, count in [('control-plane', 3), ('orb-runtime', 1)]:
             with self.subTest(app=app):
                 source = (ROOT / f'apps/{app}/Dockerfile').read_text()
                 self.assertEqual(re.findall(r'^FROM (\S+)', source, re.M),
-                                 ['node:24.22.0-bookworm-slim'] * count)
+                                 ['node:24.22.1-bookworm-slim'] * count)
         filesystem = (ROOT / 'infra/native-vm/workspace-filesystem.test.sh').read_text()
-        self.assertIn('node:24.22.0-bookworm python3', filesystem)
+        self.assertIn('node:24.22.1-bookworm python3', filesystem)
 
     def test_native_node_archive_is_checksum_verified_before_extraction(self):
         source = (ROOT / 'infra/native-vm/install.sh').read_text()
-        download = ('curl -fsSL https://nodejs.org/dist/v24.22.0/'
-                    'node-v24.22.0-linux-x64.tar.xz -o /tmp/node.tar.xz')
-        checksum = ("echo 'cc2f601cee82d9a5a233302fe307abc600727035fd7d2c3a3571755989e95008"
+        download = ('curl -fsSL https://nodejs.org/dist/v24.22.1/'
+                    'node-v24.22.1-linux-x64.tar.xz -o /tmp/node.tar.xz')
+        checksum = ("echo '6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6"
                     "  /tmp/node.tar.xz' | sha256sum -c -")
         extraction = 'tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1'
         self.assertIn(download, source)

@@ -1417,6 +1417,10 @@ Decided 2026-08-06: **the app-level log is a tested property.** `LogCapture` (`t
 
 Two lessons from writing those scenarios. A hand-driven scenario must still survive a **late-firing operation deadline**: the timer policy explores late firings, so a pending 5 s provider deadline can fire while a 50 ms provider call is in flight, jumping virtual time and turning an otherwise healthy pass into a cancelled one — scenarios that must not be interrupted by an unrelated decision push their grace/idle/drain windows far beyond any such leap instead of assuming small time steps. And an assertion about state or replica completeness *after tasks were aborted at an arbitrary running edge* is usually wrong: aborting loops mid-recovery can legitimately leave a stopped host (the `start` half of a restart cancelled by its deadline), and a runtime may flush a resume/decline marker after the final observed pull but before loop shutdown. The first made `sweep-leaves-live-orbs` flaky until it asserted sweep decisions from the log; the second was replayed on 2026-08-08 in `preemption-mid-turn-resumes`, whose final completeness assertion now follows an explicit controlled-stop drain.
 
+**Legacy stop/start scenario barrier (2026-10-22).** [PR 165 CI 39877731958](https://github.com/schani/pi-orb/actions/runs/39877731958/job/120167335958) failed `legacy-unstamped-stop-start-replacement`, iteration 5. [Original artifact](https://github.com/schani/pi-orb/actions/runs/39877731958/artifacts/12470330779): `legacy-unstamped-stop-start-replacement-1792715085954-5.json`. Before correction, `DST_REPLAY=test-failures/legacy-unstamped-stop-start-replacement-1792715085954-5.json npx vitest run apps/control-plane/src/domain/spec-replacement.dst.test.ts -t "replaces a legacy unstamped host on an ordinary stop/start"` reproduced the identical host-ID assertion failure both on the security branch and on `9fa0828c`.
+
+The trace shows cancelled pull/health requests, unreachable restart, and complete incarnation-0→1 replacement before initial replication finished. The driver then captured incarnation 1 as “legacy”; its stop/start correctly reused that stamped host. This is a scenario-premise race, not a product replacement failure. The reconciler now waits on an explicit barrier until replication, legacy identity capture and stop acceptance complete; the poller still runs. A pre-stop assertion pins the unstamped incarnation. Existing identity, specification, workspace, single-discard and at-most-one-host assertions remain unchanged; no timeout increased. The corrected file passes all eight scenarios. The old trace predates the barrier's scheduling topology; its pre-fix replay receipt is evidence, not a claimed post-fix replay pass. Original logs/traces remain under `.context/npm-security/` and `.context/spec-replacement/` in the respective worktrees. Dependency PR qualification remains blocked until the correction lands separately and fresh exact-head gates pass.
+
 DST tests must never be flaky; a non-reproducing failure is a schedule the scenario cannot survive and must be root-caused from its recorded trace (`DST_REPLAY`) before any fix (also recorded in `AGENTS.md`). Decided 2026-08-08 while fixing cross-orb head-of-line blocking: **one `SimulationTask` is one sequential coroutine and must never be shared by concurrent orb reconciliations.** Production's dispatcher creates a fresh real-time task per orb; `reconcile-concurrency.dst.test.ts` injects separately declared worker tasks through the same runner boundary. Its hand-driven dispatcher scans avoid timing assertions against unrelated deadline timers while proving cross-orb overlap, local at-most-one execution, retry timing, abort-during-list exclusion, shutdown drain, and fatal-worker propagation; a companion scenario runs two real create lifecycles concurrently through one serialized global auth flow (`docs/postmortems/2026-08-08-serial-reconciler-head-of-line-blocking.md`). Standing interplay found 2026-08-03: since idle auto-stop (docs/lifecycle.md) landed, any scenario that holds an orb in `running` across long virtual stretches without busy activity or a visible tab races the test idle window — such scenarios must either simulate activity or opt out via a `makeHarness` `idleStopAfterMs` override, as the restart-recovery lifecycle tests now do. Second standing interplay, found 2026-08-06: successful pulls are the only liveness signal, so a scenario that runs a reconciler *without* `pollLoop` and holds an orb in `running` has its host restarted every grace period — correctly, since from the reconciler's side nothing has answered. A scenario that needs an orb to stay `running` (or several to be `running` at the same instant) must run the poll loop too.
 
 Decided 2026-08-06 (from `docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md`): **three boundary rules, each closing a gap the rollout incident fell through.**
@@ -1464,3 +1468,31 @@ Focused coverage checks indexed-root backfill/immutability, proof exclusions/con
 Head `b21404b8` passed eleven first-attempt CI checks; that combined tree does not qualify this scoped tree. Exact-head CI and the separate [UI correction, PR 139](https://github.com/schani/pi-orb/pull/139), remain merge/deployment prerequisites; the UI contract is not waived.
 
 **User exception — 2026-10-16:** explanation of only the original local PostgreSQL MCP `beforeEach` 10s and aggregate-image 30s timeouts is waived; no cause or fix is claimed. First failures, measurements and full historical records remain private under `/workspace/evidence/c9a30a6d/scope-cleanup/` and its referenced directories for a docs-only followup, including the separate release-500 waiver (not revoked). No new failure, assertion, exact-head gate or DST replay/root-cause requirement is waived.
+
+
+## Node 24.22.1 security qualification (2026-10-22; undeployed)
+
+Node-only patch: 24.22.1 LTS, bundled npm 11.19.1; no npm graph or Pi changes.
+Official `SHASUMS256.txt.sig` verifies with the Node release keyring: signer
+`5BE8A3F6C8A5C01D106C0AD820B1A390B168D356` (Antoine du Hamel).
+Downloaded linux-x64 and linux-arm64 tar.xz archives both match the signed manifest:
+
+- x64: `6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6`
+- arm64: `dbabf7a1cbf947e6059ffad2c27b80041db97dea1e553b62afdee7f13fca336e`
+
+The isolated local x64 toolchain reports Node 24.22.1, addon ABI 137 and npm
+11.19.1. Clean `npm ci` applied all four existing dependency patches, added 602
+packages and audited 610; it reports three advisories (one low, two moderate).
+Dependency remediation belongs to a separate PR. Updated pin/checksum contracts
+first failed against the old production pins (two tests, eight failing subtests).
+Evidence is retained locally in `/tmp/node-security-qualification/` (`signature.log`,
+`archives.log`, `red.log`, `npm-ci.log`). Offline, network-namespace-isolated
+node-pty source rebuild using the installed headers passes; an actual shell verifies
+TTY descriptors, output, exit status and ABI 137. Full workspace/E2E typecheck and
+lint pass (411 warnings, 83 infos); pin/sharding unit contracts pass 9/9 and
+PTY/auth/runtime-image unit contracts pass 32/32 (including real spawn/resize/exit).
+Full infra
+passes: 107 Node, 220 Python and 33 native-guest tests, plus filesystem/service
+checks. Local heavy phases were serialized across the dependency worktrees.
+CI owns the full unit/DST suite, runtime E2E and container builds; native cloud-image,
+acceptance and retained-workspace qualification have not run. No deployment.
