@@ -30,8 +30,8 @@ function fixture(directory) {
     join(directory, "gcloud"),
     `#!/usr/bin/env node
 const fs=require('fs'); const a=process.argv.slice(2); fs.appendFileSync(process.env.CALLS, JSON.stringify(a)+'\\n');
-if(a[0]==='projects'){process.stdout.write('123\\n');process.exit(0)}
-if(a[0]==='storage' && !(a[1]==='objects'&&a[2]==='describe') && !(a[1]==='cp' && a[2].startsWith('gs://') && !a[3].startsWith('gs://')) && process.env.DRY_RUN==='1'){process.stderr.write('forbidden dry-run mutation');process.exit(42)}
+if(a[0]==='projects'&&a[1]==='describe'){process.stdout.write('123\\n');process.exit(0)}
+if(process.env.DRY_RUN==='1' && !(a[0]==='projects'&&a[1]==='describe') && !(a[0]==='storage'&&a[1]==='objects'&&a[2]==='describe') && !(a[0]==='storage'&&a[1]==='cp'&&a[2].startsWith('gs://')&&!a[3].startsWith('gs://'))){process.stderr.write('forbidden dry-run mutation');process.exit(42)}
 if(a[1]==='objects'&&a[2]==='describe'){if(process.env.CHANGED==='1'&&a[3].includes('static-plane/default')&&fs.readFileSync(process.env.CALLS,'utf8').split('\\n').filter(x=>x.includes('objects')&&x.includes('static-plane/default')).length>1){process.stdout.write('12\\n');process.exit(0)}if(a[3].includes('foundation')){process.stderr.write('404 not found\\n');process.exit(1)} process.stdout.write(a[3].includes('release.lock')?'22\\n':'11\\n');process.exit(0)}
 if(a[1]==='cp'&&a[2].includes('static-plane/default.tfstate#')){fs.copyFileSync(process.env.APP_STATE,a[3]);process.exit(0)}
 if(a[1]==='cp'){process.exit(0)}
