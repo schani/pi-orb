@@ -1,5 +1,9 @@
 # Testing
 
+## Chart hover targets in WebKit (2026-10-23; local, undeployed)
+
+Adding four transcript chart rows first failed the browser test in both engines: the region chart's tooltip stayed hidden because the rows pushed it off-screen. Each hovered chart now scrolls into view first. WebKit then failed the new histogram label-isolation assertion (expected 1 dimmed line, received 0). Instrumented WebKit showed Playwright's `boundingBox()` for SVG `<text>` 11px (one font size) below `getBoundingClientRect()`. The midpoint hit the root `<svg>`, and the existing zone-label hover landed on the label below, passing only because either label dims five lines. `hover()` now reads the DOM rect. Both engines pass with unchanged assertions.
+
 ## npm maintenance (2026-10-22; local, undeployed)
 
 Before updating, clean installation, 75 focused protocol/HTTP/WebSocket/PGlite/Markdown test files (706 passed, four conditional skips) and the web production build passed on `9fa0828c`. Clean installation of the maintenance lock also passes all four Pi patch seals; `npm ls --all` reports no problems.
