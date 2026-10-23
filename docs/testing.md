@@ -1474,6 +1474,13 @@ packages and audited 610; it reports three advisories (one low, two moderate).
 Dependency remediation belongs to a separate PR. Updated pin/checksum contracts
 first failed against the old production pins (two tests, eight failing subtests).
 Evidence is retained locally in `/tmp/node-security-qualification/` (`signature.log`,
-`archives.log`, `red.log`, `npm-ci.log`). Type/lint/unit/infra and offline PTY checks
-are pending. CI owns full runtime E2E and container builds; native cloud-image,
+`archives.log`, `red.log`, `npm-ci.log`). Offline, network-namespace-isolated
+node-pty source rebuild using the installed headers passes; an actual shell verifies
+TTY descriptors, output, exit status and ABI 137. Full workspace/E2E typecheck and
+lint pass (411 warnings, 83 infos); pin/sharding unit contracts pass 9/9 and
+PTY/auth/runtime-image unit contracts pass 32/32 (including real spawn/resize/exit).
+Full infra
+passes: 107 Node, 220 Python and 33 native-guest tests, plus filesystem/service
+checks. Local heavy phases were serialized across the dependency worktrees.
+CI owns the full unit/DST suite, runtime E2E and container builds; native cloud-image,
 acceptance and retained-workspace qualification have not run. No deployment.
