@@ -23,11 +23,6 @@ import {
   extractHistorySearchText,
   historySearchTermFrequencies,
 } from "../domain/history-search-text.ts";
-import type {
-  HistorySearchHit,
-  HistorySearchParams,
-  HistorySearchResult,
-} from "../domain/history-search-types.ts";
 import { jsonEqual } from "../domain/json-equal.ts";
 import { logOrbEvent } from "../domain/log.ts";
 import { messageBatchId } from "../domain/message-batch.ts";
@@ -47,6 +42,9 @@ import type {
   EnqueueOrbMessageParams,
   FailOrbAndRequestComputeDiscardParams,
   FinalizeHostDiscardParams,
+  HistorySearchHit,
+  HistorySearchParams,
+  HistorySearchResult,
   MintSlotClaim,
   OrbMessageTargetNotFound,
   RecordHostDiscardStatusParams,

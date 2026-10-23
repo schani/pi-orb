@@ -234,60 +234,11 @@ export function historySearchContractTests(
       ).toBeNull();
     });
 
-    it("backfills bounded atomic batches, including empty markers, idempotently and cascades deletion", async () => {
+    it("backfills bounded atomic batches, resumes migration once, marks empty records and cascades deletion", async () => {
       const docs = Array.from({ length: 503 }, (_, i) =>
         record(
           `r-${String(i).padStart(4, "0")}`,
           i % 2 ? "needle" : "",
-          i ? `r-${String(i - 1).padStart(4, "0")}` : null,
-        ),
-      );
-      (await commit(ORB, docs))._unsafeUnwrap();
-      (await subject.client.query("DELETE FROM history_search_documents"))._unsafeUnwrap();
-      let batches = 0;
-      let maxBatch = 0;
-      const transaction = subject.client.transaction.bind(subject.client);
-      const observed = {
-        ...subject.client,
-        transaction: ((f: Parameters<typeof transaction>[0]) =>
-          transaction(async (query, execute) => {
-            batches++;
-            let batch = 0;
-            const outcome = await f(
-              (sql, values) =>
-                query(sql, values).map((result) => {
-                  if (/INSERT INTO history_search_documents/u.test(sql)) batch += result.rowCount;
-                  return result;
-                }),
-              execute,
-            );
-            maxBatch = Math.max(maxBatch, batch);
-            return outcome;
-          })) as typeof transaction,
-      };
-      expect((await backfillHistorySearch(observed))._unsafeUnwrap()).toBe(503);
-      expect(batches).toBeGreaterThan(1);
-      expect(maxBatch).toBeLessThanOrEqual(500);
-      expect((await backfillHistorySearch(subject.client))._unsafeUnwrap()).toBe(0);
-      expect((await search(["needle"])).documentCount).toBe(251);
-      (
-        await subject.client.query(
-          "UPDATE orbs SET replication_cursor = NULL, replicated_head_id = NULL",
-        )
-      )._unsafeUnwrap();
-      (
-        await subject.client.query("DELETE FROM history_records WHERE orb_id = $1", [ORB])
-      )._unsafeUnwrap();
-      expect(
-        (await subject.client.query("SELECT * FROM history_search_documents"))._unsafeUnwrap().rows,
-      ).toEqual([]);
-    });
-
-    it("resumes an interrupted migration only after atomic batches, and records completion once", async () => {
-      const docs = Array.from({ length: 503 }, (_, i) =>
-        record(
-          `r-${String(i).padStart(4, "0")}`,
-          "needle",
           i ? `r-${String(i - 1).padStart(4, "0")}` : null,
         ),
       );
@@ -338,6 +289,19 @@ export function historySearchContractTests(
         (await subject.client.query("SELECT * FROM history_search_documents"))._unsafeUnwrap().rows,
       ).toHaveLength(503);
       expect((await runMigrations(subject.client))._unsafeUnwrap()).toEqual([]);
+      expect((await backfillHistorySearch(subject.client))._unsafeUnwrap()).toBe(0);
+      expect((await search(["needle"])).documentCount).toBe(251);
+      (
+        await subject.client.query(
+          "UPDATE orbs SET replication_cursor = NULL, replicated_head_id = NULL",
+        )
+      )._unsafeUnwrap();
+      (
+        await subject.client.query("DELETE FROM history_records WHERE orb_id = $1", [ORB])
+      )._unsafeUnwrap();
+      expect(
+        (await subject.client.query("SELECT * FROM history_search_documents"))._unsafeUnwrap().rows,
+      ).toEqual([]);
     });
 
     it("supports the GIN jsonb_ops candidate operator in the actual ranked query plan", async () => {

@@ -14,10 +14,6 @@ import type {
   StoreError,
 } from "../../domain/errors.ts";
 import { orderHistoryForPresentation } from "../../domain/history-presentation.ts";
-import type {
-  HistorySearchParams,
-  HistorySearchResult,
-} from "../../domain/history-search-types.ts";
 import { jsonEqual } from "../../domain/json-equal.ts";
 import { logOrbEvent } from "../../domain/log.ts";
 import { messageBatchId } from "../../domain/message-batch.ts";
@@ -39,6 +35,8 @@ import type {
   EnqueueOrbMessageParams,
   FailOrbAndRequestComputeDiscardParams,
   FinalizeHostDiscardParams,
+  HistorySearchParams,
+  HistorySearchResult,
   MintSlotClaim,
   OrbMessageTargetNotFound,
   RecordHostDiscardStatusParams,

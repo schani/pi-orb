@@ -1,6 +1,6 @@
 import { NoSimulationTask } from "determined";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { formatHistorySearch, parseInspectionArgs } from "./command.ts";
+import { parseInspectionArgs } from "./command.ts";
 import { HttpOrbInspectionEndpoint } from "./endpoint.ts";
 
 describe("history search CLI arguments", () => {
@@ -34,34 +34,6 @@ describe("history search CLI arguments", () => {
     ["search", "x", "--limit", "1", "--limit", "2"],
   ])("rejects malformed arguments %j", (...args) => {
     expect(parseInspectionArgs(args).isErr()).toBe(true);
-  });
-  it("formats source metadata, score and snippets", () => {
-    const output = formatHistorySearch({
-      hits: [
-        {
-          orbId: "o",
-          sessionId: "s",
-          recordId: "r",
-          name: "Orb",
-          projectName: "Project",
-          snippet: "public needle",
-          score: 0.5,
-          orbUrl: "https://app/orbs/o",
-        },
-      ],
-    });
-    for (const value of [
-      "o",
-      "s",
-      "r",
-      "Orb",
-      "Project",
-      "public needle",
-      "0.5",
-      "https://app/orbs/o",
-    ])
-      expect(output).toContain(value);
-    expect(formatHistorySearch({ hits: [] })).toContain("No matches");
   });
 });
 

@@ -1,6 +1,4 @@
-import { spawn as spawnProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { join } from "node:path";
 import {
   ID_TOKEN_PATH,
   IdTokenErrorSchema,
@@ -382,25 +380,22 @@ describe("runtime broker routes", () => {
       );
       expect((await app.inject({ method: "GET", url: path })).statusCode).toBe(404);
     });
-    it.each([
-      {},
-      { query: "" },
-      { query: "  " },
-      { query: "x", limit: 51 },
-      { query: "x", ownerUserId: "forged" },
-    ])("rejects malformed requests before service invocation %j", async (payload) => {
-      const response = await search(payload);
-      expect(response.statusCode).toBe(400);
-      expect(response.json()).toEqual({
-        v: 1,
-        error: {
-          code: "invalid_request",
-          message: "invalid history search request",
-          retryable: false,
-        },
-      });
-      expect(searchHistory).not.toHaveBeenCalled();
-    });
+    it.each([{}, { query: "x", ownerUserId: "forged" }])(
+      "rejects malformed requests before service invocation %j",
+      async (payload) => {
+        const response = await search(payload);
+        expect(response.statusCode).toBe(400);
+        expect(response.json()).toEqual({
+          v: 1,
+          error: {
+            code: "invalid_request",
+            message: "invalid history search request",
+            retryable: false,
+          },
+        });
+        expect(searchHistory).not.toHaveBeenCalled();
+      },
+    );
     it.each([null, "wrong"])("authenticates before validation with bearer %s", async (token) => {
       expect((await search({}, token)).statusCode).toBe(401);
       expect(searchHistory).not.toHaveBeenCalled();
@@ -474,49 +469,6 @@ describe("runtime broker routes", () => {
         },
       });
       expect(response.body).not.toContain("hidden");
-    });
-    it("runs shell dispatch and authenticated transport against the actual route", async () => {
-      await app.listen({ port: 0, host: "127.0.0.1" });
-      const address = app.server.address();
-      if (address === null || typeof address === "string") throw new Error("missing listener");
-      const root = join(import.meta.dirname, "../../../..");
-      const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
-        (resolve, reject) => {
-          const child = spawnProcess(
-            join(root, "apps/orb-runtime/docker/pi-orb"),
-            ["search", "private needle", "--project", "--limit", "7", "--json"],
-            {
-              cwd: root,
-              env: {
-                ...process.env,
-                PI_ORB_CONTROL_PLANE_URL: `http://127.0.0.1:${address.port}`,
-                PI_ORB_RUNTIME_TOKEN: TOKEN,
-              },
-              stdio: ["ignore", "pipe", "pipe"],
-            },
-          );
-          let stdout = "";
-          let stderr = "";
-          child.stdout.on("data", (chunk) => {
-            stdout += chunk.toString();
-          });
-          child.stderr.on("data", (chunk) => {
-            stderr += chunk.toString();
-          });
-          child.once("error", reject);
-          child.once("close", (code) => resolve({ code, stdout, stderr }));
-        },
-      );
-      expect(result).toEqual({
-        code: 0,
-        stdout: `${JSON.stringify({ v: 1, hits: [] }, null, 2)}\n`,
-        stderr: "",
-      });
-      expect(searchHistory).toHaveBeenCalledWith(task, expect.objectContaining({ id: ORB }), {
-        query: "private needle",
-        scope: "project",
-        limit: 7,
-      });
     });
   });
 

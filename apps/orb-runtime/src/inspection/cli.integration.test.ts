@@ -19,6 +19,17 @@ const orb = {
   },
 } as const;
 
+const searchHit = {
+  orbId: "orb-sibling",
+  sessionId: "session-a",
+  recordId: "record-1",
+  name: "Parser work",
+  projectName: "Client App",
+  snippet: "Fix parsing",
+  score: 0.125,
+  orbUrl: "https://browser.test/orbs/orb-sibling",
+};
+
 interface CommandResult {
   readonly code: number | null;
   readonly stdout: string;
@@ -110,21 +121,7 @@ describe("pi-orb inspection CLI entry point", () => {
             response.end(
               JSON.stringify({
                 v: 1,
-                hits:
-                  mode === "empty"
-                    ? []
-                    : [
-                        {
-                          orbId: "orb-sibling",
-                          sessionId: "session-a",
-                          recordId: "record-1",
-                          name: "Parser work",
-                          projectName: "Client App",
-                          snippet: "Fix parsing",
-                          score: 0.125,
-                          orbUrl: "https://browser.test/orbs/orb-sibling",
-                        },
-                      ],
+                hits: mode === "empty" ? [] : [searchHit],
               }),
             );
           }
@@ -210,6 +207,7 @@ describe("pi-orb inspection CLI entry point", () => {
     expect(result).toMatchObject({ code: 0, stderr: "" });
     expect(searchBody).toEqual({ query: "private query" });
     for (const text of [
+      "orb-sibling",
       "Parser work",
       "Client App",
       "session-a",
@@ -236,18 +234,7 @@ describe("pi-orb inspection CLI entry point", () => {
     expect(searchBody).toEqual({ query: "parser", orbId: "orb-sibling", limit: 50 });
     expect(JSON.parse(result.stdout)).toEqual({
       v: 1,
-      hits: [
-        {
-          orbId: "orb-sibling",
-          sessionId: "session-a",
-          recordId: "record-1",
-          name: "Parser work",
-          projectName: "Client App",
-          snippet: "Fix parsing",
-          score: 0.125,
-          orbUrl: "https://browser.test/orbs/orb-sibling",
-        },
-      ],
+      hits: [searchHit],
     });
   });
 

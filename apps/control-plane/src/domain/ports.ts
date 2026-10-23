@@ -25,7 +25,6 @@ import type {
   StateConflict,
   StoreError,
 } from "./errors.ts";
-import type { HistorySearchParams, HistorySearchResult } from "./history-search-types.ts";
 import type {
   OrbDeletionRow,
   OrbListRow,
@@ -200,6 +199,30 @@ export interface CommitPullBatchParams {
   readonly records: readonly HistoryRecord[];
   readonly nextCursor: string;
   readonly nextHeadId: string | null;
+}
+
+export interface HistorySearchParams {
+  readonly ownerUserId: string;
+  readonly projectId?: string;
+  readonly orbId?: string;
+  readonly terms: readonly string[];
+  readonly limit: number;
+}
+
+export interface HistorySearchHit {
+  readonly orbId: string;
+  readonly sessionId: string;
+  readonly recordId: string;
+  readonly name: string | null;
+  readonly projectName: string;
+  readonly record: HistoryRecord;
+  readonly score: number;
+}
+
+export interface HistorySearchResult {
+  readonly hits: HistorySearchHit[];
+  readonly documentCount: number;
+  readonly candidateCount: number;
 }
 
 /**

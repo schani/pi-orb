@@ -5,10 +5,7 @@ import {
   extractHistorySearchText,
   historySearchTermFrequencies,
 } from "../../domain/history-search-text.ts";
-import type {
-  HistorySearchParams,
-  HistorySearchResult,
-} from "../../domain/history-search-types.ts";
+import type { HistorySearchParams, HistorySearchResult } from "../../domain/ports.ts";
 import { arrayParam, jsonParam, type PostgreSQLClient } from "./client.ts";
 
 type Query = PostgreSQLClient["query"];
