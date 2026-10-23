@@ -1755,3 +1755,5 @@ Composer normalization contracts live with composer-mode; command-options tests 
 Default detail render fixtures use fresh shared detailContext caches and pending maps at each render site. (2026-10-22 PDT).
 
 Background-admission projection keeps one missing-native discriminator alongside independent native identity/status failures. (2026-10-22 PDT).
+
+Closed-schema tests own top-level event/message and nested custom-field rejection together. (2026-10-22 PDT).
