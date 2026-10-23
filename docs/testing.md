@@ -1,8 +1,12 @@
+# Testing
+
 ## Manual replacement smoke evidence
 
 `infra/smoke_replacement_test.py` runs the manual replacement script with synthetic command adapters; `test:infra` selects it. Private evidence must contain only allowlisted summaries, including failure dumps. Bearers stay out of evidence and process arguments; the existing Stage 2 happy path also rejects regular-file stdin for large raw descriptions. Permission and transport failures must fail disposal/negative observations, not masquerade as empty inventory. Success requires selected-user authentication, verified API/provider cleanup and bounded external calls, including Stage 2; failed owned fixtures remain for inspection. `infra/smoke_external_test.py` controls process/HTTP responses and clocks to prove bounds and refusal status without live access. These offline regressions do not qualify live GCE behavior.
 
-# Testing
+## Audit assertion trust (2026-10-22)
+
+Assert simulation task Results outside the task, with failure diagnostics; task assertions otherwise become ignored Err values.
 
 ## Local fake-provider npm preparation (2026-10-22)
 
