@@ -402,10 +402,11 @@ describe("stateful lifecycle campaign", () => {
               if (world.filesystemExists(ORB)) assertReplicaIntegrity(world, h.store, ORB);
             }
 
-            async function run(task: SimulationTask, command: Command) {
+            async function run(task: SimulationTask, command: Command, id: string, actor: number) {
               const orb = h.store.orbSnapshot(ORB);
-              const id = `campaign-${seed}-${ordinal++}`;
-              task.log(`lifecycle: campaign command=${command} id=${id} state=${orb?.state}`);
+              task.log(
+                `lifecycle: campaign command=${command} id=${id} actor=${actor} state=${orb?.state}`,
+              );
               switch (command) {
                 case "human":
                   return enqueueOrbMessage(task, deps, {
@@ -509,9 +510,11 @@ describe("stateful lifecycle campaign", () => {
                     const command = present(
                       commands[Math.floor(task.random("next command") * commands.length)],
                     );
-                    const result = await run(task, command);
+                    const id = `campaign-${seed}-${ordinal++}`;
+                    const result = await run(task, command, id, actor);
+                    const error = result?.isErr() ? result.error : null;
                     task.log(
-                      `lifecycle: campaign result=${result && "isOk" in result ? result.isOk() : "environment"}`,
+                      `lifecycle: campaign result=${result ? result.isOk() : "environment"} id=${id} command=${command} actor=${actor} error_type=${error && "type" in error ? error.type : error ? "code_only" : "none"} code=${error && "code" in error ? error.code : "none"}`,
                     );
                     safety();
                     await task.sleep(task.random("command spacing") * 500, "command spacing");
@@ -646,6 +649,19 @@ describe("stateful lifecycle campaign", () => {
               },
             ]);
             expect(result.isOk(), result.isErr() ? result.error.stack : "").toBe(true);
+            const resultLines = logs.matching("campaign result=");
+            expect(resultLines).toHaveLength(commandsPerSeed);
+            for (const line of resultLines) {
+              expect(line).toMatch(
+                /result=(true|false|environment) id=campaign-\d+-\d+ command=\w+ actor=[01] error_type=\w+ code=\w+/,
+              );
+              const id = / id=(\S+)/.exec(line)?.[1];
+              const command = / command=(\S+)/.exec(line)?.[1];
+              const actor = / actor=(\S+)/.exec(line)?.[1];
+              expect(
+                logs.matching(`campaign command=${command} id=${id} actor=${actor} `),
+              ).toHaveLength(1);
+            }
           },
         );
       });

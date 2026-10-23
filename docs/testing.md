@@ -1564,3 +1564,5 @@ Pending-delivery retry qualification observes the same request and duplicate res
 Stopping qualification covers absent and stopped hosts without restarting either.
 
 Outage telemetry must emit one blind edge per outage and one recovery edge between outages.
+
+Campaign results retain command and caller identity plus typed error diagnostics without content or credentials.
