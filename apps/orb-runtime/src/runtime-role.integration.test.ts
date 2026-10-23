@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -11,19 +10,17 @@ describe("real process runtime role", () => {
     "starts authenticated %s runtime health before failed repository boot",
     async (mode) => {
       const directory = await mkdtemp(join(tmpdir(), "runtime-role-"));
-      const server = createServer();
-      server.listen(0, "127.0.0.1");
-      await once(server, "listening");
-      const address = server.address();
-      if (!address || typeof address === "string") throw new Error("test port unavailable");
-      const port = address.port;
-      await new Promise<void>((resolve) => server.close(() => resolve()));
       const listenProbe = `import { Server } from "node:net";
+        const listen = Server.prototype.listen;
+        Server.prototype.listen = function(...args) {
+          if (args[0]?.host === "0.0.0.0") args[0] = { ...args[0], port: 0 };
+          return listen.apply(this, args);
+        };
         const emit = Server.prototype.emit;
         Server.prototype.emit = function(event, ...args) {
           const emitted = emit.call(this, event, ...args);
-          if (event === "listening" && this.address()?.port === Number(process.env.PI_ORB_RUNTIME_PORT))
-            process.send?.("runtime-listening");
+          if (event === "listening" && this.address()?.address === "0.0.0.0")
+            process.send?.({ type: "runtime-listening", port: this.address().port });
           return emitted;
         };`;
       const child = spawn(
@@ -31,14 +28,15 @@ describe("real process runtime role", () => {
         [
           "--import",
           `data:text/javascript,${encodeURIComponent(listenProbe)}`,
-          "apps/orb-runtime/src/runtime-entry.ts",
+          join(import.meta.dirname, "runtime-entry.ts"),
         ],
         {
+          cwd: directory,
           env: {
             ...process.env,
             PI_ORB_RUNTIME_MODE: mode,
             PI_ORB_WORK_DIR: directory,
-            PI_ORB_RUNTIME_PORT: String(port),
+            PI_ORB_RUNTIME_PORT: "8080",
             PI_ORB_ID: "test-role",
             PI_ORB_HOST_INCARNATION: "2",
             PI_ORB_REPOSITORY_URL: "invalid-repository",
@@ -61,7 +59,10 @@ describe("real process runtime role", () => {
         const failed = once(child, "exit").then(() => {
           throw new Error(`runtime exited before listening: ${logs}`);
         });
-        expect(await Promise.race([ready, failed])).toEqual(["runtime-listening", undefined]);
+        const [message] = await Promise.race([ready, failed]);
+        expect(message).toMatchObject({ type: "runtime-listening", port: expect.any(Number) });
+        const { port } = message as { port: number };
+        expect(port).toBeGreaterThan(0);
         const response = await fetch(`http://127.0.0.1:${port}/v1/health`);
         expect(response.status, logs).toBe(200);
         expect(await response.json()).toMatchObject({ v: 1, orbId: "test-role" });
