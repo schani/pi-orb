@@ -70,6 +70,8 @@ No test may be flaky. A failure that does not reproduce on every run is evidence
 
 For a DST failure, replay the recorded trace from `test-failures/` (`DST_REPLAY=<trace> npx vitest run …`) before any fix, understand the interleaving, and only then decide whether the defect is in the product or in the scenario's assumptions. Never delete the trace to make the suite pass.
 
+**Historical PR 163 runner-crash exception (user-approved 2026-10-23, PDT):** attribution of only run `39961953749` / job `120441887000` on `5253b681` (SIGSEGV, exit 139) is waived. Preserve evidence; faulting PID/stack and cause remain unknown, with no native-crash fix claimed. New failures, exact-head gates, assertions and DST requirements remain mandatory. Evidence: `docs/testing.md`.
+
 ## Observability
 
 For every feature, before it ships, ask: **if something goes wrong with this feature in the field, what observability will we wish we had?** Then implement that observability as part of the feature, not as a follow-up. Concretely: decisions taken by autonomous machinery (reconcilers, boot hooks, guards) must be reconstructable afterwards from durable, queryable places — the `lifecycle:` event log, replicated history records, persisted columns — never only from ephemeral process stdout or guest logs; and outcomes that affect the user must be visible to the user in the product, not just to operators — a guard that declines silently is invisible at exactly the moment someone asks "why did nothing happen?". Respect the noise rules in `docs/lifecycle.md`: edges, not levels; a healthy fleet logs nothing.

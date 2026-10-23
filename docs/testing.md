@@ -35,6 +35,8 @@ E2E ingress binds before CP startup; the child binds port zero and announces its
 
 **Decision (2026-10-23 PDT):** Readiness overlays caller headers on the public Host default, preserving case-insensitive explicit overrides. Issuer defaults to the advertised public origin before startup; explicit configuration remains authoritative. Real-main readiness/discovery/JWKS and full-slice token signatures/issuer claims qualify this boundary.
 
+**Historical runner-crash exception (user-approved 2026-10-23, PDT):** attribution of only [run 39961953749 / job 120441887000](https://github.com/schani/pi-orb/actions/runs/39961953749/job/120441887000), source `5253b681`, SIGSEGV/exit 139, is waived. Faulting PID/stack and cause remain unknown; no native-crash fix is claimed. Private first logs/artifacts remain in `.context/reduction/ci-5253/` and `.context/reduction/segfault-artifacts/`; the bounded probe exited 0 (non-reproduction, not clearance). New failures, all exact-head gates, assertions and DST replay/root-cause rules remain mandatory.
+
 ### Replacement smoke
 
 Offline adapters qualify selected-user auth, private allowlisted evidence, stdin-only bearers/raw descriptions, bounded calls, exact namespace ownership and verified API/provider cleanup, including Stage 2. Permission/transport errors cannot prove disposal or negative observations; failed owned fixtures remain inspectable. These tests do not qualify live GCE.
