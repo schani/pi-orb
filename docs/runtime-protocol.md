@@ -253,6 +253,7 @@ interface SubagentsEvent {
     id: string;
     description: string;
     taskRecordId?: string; // missing-header Luna source; detailKey is `${taskRecordId}:task`
+    kind?: "shell"; // absent means subagent
     phase: "queued" | "running" | "finishing";
   }>;
 }
@@ -361,7 +362,9 @@ That status is a product outcome, not an operator detail, so it is surfaced end 
 
 **Live child headline source (2026-10-12; implemented locally, not deployed):** central Durable roster items without a supplied nonblank description carry optional `taskRecordId`, referring to a committed root task-metadata record; `<taskRecordId>:task` uses the existing root-session headline POST/cache. Supplied headers omit it. No prompt, instructions or child transcript crosses the roster frame. Child creation and its task-metadata entry commit atomically; projection publishes the reference after persistence. See `docs/activity-headlines.md`.
 
-**Live child projection (implemented locally 2026-09-14).** `subagents` replaces the current operation's complete active-child roster. Synchronization sends it after operation/tool reconstruction and before status; subsequent admissions, starts, cancellation and terminal releases publish changes. An empty roster means no currently owned child work, not aggregate idle. Queued admissions and cancelling/finishing holds remain present until release. The browser ignores mismatched-operation rosters and clears them on disconnect, synchronization reset and operation retirement/change; old history cannot restore live claims. The existing connection notice distinguishes disconnection from confirmed inactivity. Task identities/descriptions/phases are display data, not lifecycle drain authority; no private transcripts or new persistence endpoint are introduced. Durable root lifecycle edges retain diagnostic provenance (`docs/subagents.md`).
+**Live child projection (implemented locally 2026-09-14).** `subagents` replaces the current operation's complete displayable child/shell roster. Synchronization sends it after operation/tool reconstruction and before status; subsequent admissions, starts, cancellation and terminal releases publish changes. An empty roster means no displayable child/shell work, not aggregate idle. Queued admissions and cancelling/finishing holds remain present until release. The browser ignores mismatched-operation rosters and clears them on disconnect, synchronization reset and operation retirement/change; old history cannot restore live claims. The existing connection notice distinguishes disconnection from confirmed inactivity. Task identities/descriptions/phases are display data, not lifecycle drain authority; no private transcripts or new persistence endpoint are introduced. Durable root lifecycle edges retain diagnostic provenance (`docs/subagents.md`).
+
+**Decision — 2026-10-23; local, undeployed:** optional `kind: "shell"` identifies shell rows; absent means subagent. Claude admits agents through `SubagentStart` or native `task_type: "local_agent"` and shells only through `task_type: "local_bash"`; other/untyped tasks remain owned but are not classified for either disclosure. Ambient tasks remain excluded. Learned inventory types survive on extant task edges, and handoffs retain their category in memory, regardless of inventory/bookend ordering. Classification is transient; saved ownership IDs and replicated handoff/operation outcomes retain lifecycle evidence. Lifecycle authority is unchanged. Pi rows remain subagents.
 
 ### Atomic agent delivery choice
 

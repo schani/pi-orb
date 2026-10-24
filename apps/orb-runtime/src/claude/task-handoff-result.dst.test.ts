@@ -1,4 +1,4 @@
-import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { SDKMessage, SDKTaskStartedMessage } from "@anthropic-ai/claude-agent-sdk";
 import { expect, it } from "vitest";
 import {
   background,
@@ -39,6 +39,10 @@ it.each(
       { name: `claude-task-command-ack-${inventory}-${delivery}-${release}`, iterations: 30 },
       async (sim) => {
         const f = new ComposedClaudeFixture();
+        const tasks = [
+          { task_id: "first", description: "first", task_type: "local_bash" },
+          { task_id: "second", description: "second", task_type: "future_task" },
+        ];
         let finished = false;
         let ackState: { closing: boolean; handoffs: string[]; canStop: boolean } | undefined;
         try {
@@ -48,15 +52,19 @@ it.each(
               name: "native-producer",
               f: async (task) => {
                 await submitReceipt(task, f);
+                const { task_type: _taskType, ...taskStarted } = childEdge(
+                  "task_started",
+                ) as SDKTaskStartedMessage;
                 for (const id of ["first", "second"])
                   await f.query.emit(task, {
-                    ...childEdge("task_started"),
+                    ...taskStarted,
                     task_id: id,
                   } as SDKMessage);
-                await f.query.emit(
-                  task,
-                  background(["first", "second"].map((id) => ({ task_id: id, description: id }))),
-                );
+                await f.query.emit(task, background(tasks));
+                expect(f.agent.liveView()?.subagents).toEqual([
+                  { id: "first", description: "child", kind: "shell", phase: "running" },
+                ]);
+                expect(f.journal().ownedTasks).toEqual({ first: "child", second: "child" });
                 await f.query.emit(task, {
                   type: "system",
                   subtype: "status",
@@ -71,6 +79,14 @@ it.each(
                     task_id: id,
                   } as SDKMessage);
                 if (inventory === "after") await f.query.emit(task, background([]));
+                expect(f.agent.liveView()?.subagents).toEqual([
+                  {
+                    id: "first",
+                    description: "Awaiting native result handoff",
+                    kind: "shell",
+                    phase: "finishing",
+                  },
+                ]);
                 if (release === "during-response")
                   await f.query.emit(task, { ...rootResult, num_turns: 3 } as SDKMessage);
                 f.append({
@@ -105,6 +121,9 @@ it.each(
                   };
                   for (const message of continuation) await f.query.emit(task, message);
                 }
+                expect(f.agent.liveView()?.subagents).toEqual([]);
+                expect(f.agent.getHealth()).toMatchObject({ activity: "busy" });
+                expect(f.agent.prepareIdleStop().unwrapOr(false)).toBe(false);
                 finished = true;
                 await task.checkpoint("final root result before independent stdout EOF");
                 f.query.endOutput();
@@ -126,6 +145,8 @@ it.each(
                   });
                 expect(f.agent.getHealth()).toMatchObject({ status: "ready", activity: "idle" });
                 expect(f.journal().pendingHandoffs).toEqual({});
+                expect(f.journal().ownedTasks).toEqual({});
+                expect(f.journal().ownedBackgroundTasks).toEqual({});
                 expect(
                   f.history.view.find(
                     (record) =>
