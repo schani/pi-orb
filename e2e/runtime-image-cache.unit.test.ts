@@ -76,13 +76,13 @@ describe("runtime image build ownership", () => {
 describe("isolated runtime image build", () => {
   it("uses pinned BuildKit actions and loads the current checkout without publication", () => {
     expect(step("Set up Docker Buildx")).toContain(
-      "uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f",
+      "uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
     );
     const build = step("Build E2E runtime image");
     expect(build).toContain("id: runtime-image");
     expect(build).toContain("timeout-minutes: 10");
     expect(build).toContain(
-      "uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8",
+      "uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc",
     );
     for (const value of [
       "context: .",
