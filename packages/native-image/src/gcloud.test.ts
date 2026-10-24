@@ -345,9 +345,13 @@ describe("GCloud native-image adapter", () => {
         stdout: JSON.stringify([
           {
             id: "123456",
-            name: "image-v1",
+            status: "READY",
+            labels: { "pi-orb-native-build": "0123456789abcdef", "pi-orb-native-version": "v1" },
+            sourceDisk:
+              "https://www.googleapis.com/compute/v1/projects/target-project/zones/us-central1-a/disks/pi-orb-builder-v1-0123456789abcdef",
+            name: "pi-orb-image-v1-0123456789abcdef",
             selfLink:
-              "https://www.googleapis.com/compute/v1/projects/target-project/global/images/image-v1",
+              "https://www.googleapis.com/compute/v1/projects/target-project/global/images/pi-orb-image-v1-0123456789abcdef",
           },
         ]),
         stderr: "",
@@ -360,8 +364,8 @@ describe("GCloud native-image adapter", () => {
     );
     expect(value.isOk() && value.value).toEqual({
       id: "123456",
-      name: "image-v1",
-      resource: "projects/target-project/global/images/image-v1",
+      name: "pi-orb-image-v1-0123456789abcdef",
+      resource: "projects/target-project/global/images/pi-orb-image-v1-0123456789abcdef",
     });
     expect(calls[0]).toContain("--source-disk-zone=us-central1-a");
     expect(calls[0]).toContain(
@@ -1052,6 +1056,13 @@ describe("GCloud native-image adapter", () => {
             ? JSON.stringify([
                 {
                   id: "456",
+                  status: "READY",
+                  labels: {
+                    "pi-orb-native-build": "0123456789abcdef",
+                    "pi-orb-native-version": "v1",
+                  },
+                  sourceDisk:
+                    "https://www.googleapis.com/compute/v1/projects/target-project/zones/us-central1-a/disks/pi-orb-data-workspace-v1-0123456789abcdef",
                   name: "pi-orb-image-workspace-v1-0123456789abcdef",
                   selfLink:
                     "https://www.googleapis.com/compute/v1/projects/target-project/global/images/pi-orb-image-workspace-v1-0123456789abcdef",

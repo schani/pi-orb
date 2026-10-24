@@ -126,6 +126,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-24-native-image-capture-502.md](docs/postmortems/2026-10-24-native-image-capture-502.md) — native image insert succeeded while gcloud failed with 502; cleanup and unchanged production verified
 - [docs/postmortems/2026-10-23-google-signed-out-login-500.md](docs/postmortems/2026-10-23-google-signed-out-login-500.md) — Google signed-out login 500; optional domain hint removed
 - [docs/postmortems/2026-10-22-mcp-startup-deadline.md](docs/postmortems/2026-10-22-mcp-startup-deadline.md) — healthy compute blocked by central discovery; explicit MCP isolation and failure telemetry
 
