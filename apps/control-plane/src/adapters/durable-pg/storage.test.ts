@@ -18,6 +18,7 @@ import {
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { err, errAsync, ok } from "neverthrow";
 import { expect, it, onTestFinished, vi } from "vitest";
+import { makeOrbRow } from "../../testkit/fixtures.ts";
 import { PGliteClient } from "../pg/pglite-client.ts";
 import { initializeBareAuthority } from "./bare-authority.testkit.ts";
 import { PgDurableAuthority } from "./index.ts";
@@ -26,9 +27,10 @@ import { storageAuthorityError } from "./storage-boundary.ts";
 const orb = "00000000-0000-4000-8000-000000000001";
 async function fixture() {
   const db = new PGliteClient();
-  await initializeBareAuthority(db, orb);
+  const seeded = await initializeBareAuthority(db, orb);
   let time = 0;
   return {
+    ...seeded,
     db,
     authority: new PgDurableAuthority(db, () => time),
     setTime: (value: number) => {
@@ -332,14 +334,16 @@ it("persists native nested-call task documents across reopen and retires their s
 });
 
 it("isolates colliding native IDs through reads, replacement, retirement and archive", async () => {
-  const { db, authority } = await fixture();
+  const { db, authority, task, database, project } = await fixture();
   onTestFinished(async () => {
     (await db.end())._unsafeUnwrap();
   });
   const storages: Storage[] = [];
   {
     const otherOrb = "00000000-0000-4000-8000-000000000002";
-    (await db.query("INSERT INTO orbs(id) VALUES($1)", [otherOrb]))._unsafeUnwrap();
+    (
+      await database.store.insertOrb(task, makeOrbRow(otherOrb, project.id, "running"))
+    )._unsafeUnwrap();
     const owners = await Promise.all(
       [orb, otherOrb].map(async (id) =>
         (await authority.acquire(id, "writer", 0, 0, 100))._unsafeUnwrap(),
