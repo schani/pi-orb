@@ -27,8 +27,8 @@ curl -fsSL https://nodejs.org/dist/v24.22.1/node-v24.22.1-linux-x64.tar.xz -o /t
 echo '6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6  /tmp/node.tar.xz' | sha256sum -c -
 tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
 rm /tmp/node.tar.xz
-curl -fsSL https://static.rust-lang.org/rustup/archive/1.29.0/x86_64-unknown-linux-gnu/rustup-init -o /usr/local/bin/rustup
-echo '4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10  /usr/local/bin/rustup' | sha256sum -c -
+curl -fsSL https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-unknown-linux-gnu/rustup-init -o /usr/local/bin/rustup
+echo '5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4  /usr/local/bin/rustup' | sha256sum -c -
 chmod 755 /usr/local/bin/rustup
 for proxy in cargo rustc rustdoc rustfmt cargo-clippy cargo-fmt clippy-driver; do ln -s rustup "/usr/local/bin/$proxy"; done
 cd /app
