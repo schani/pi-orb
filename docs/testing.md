@@ -488,7 +488,7 @@ Local trim checks: scoped files 265 passed/four skipped, real PostgreSQL 92 pass
 
 ## Release SSH rendered contract (decision 2026-10-14)
 
-CI requires `infra/foundation/test.sh` using checksum-pinned OpenTofu 1.12.6,
+CI requires `infra/foundation/test.sh` using checksum-pinned OpenTofu 1.13.2,
 matching deployment. The native Google mock plan pins the entire three-binding
 `google_project_iam_member.deployer_iap_tunnel` expression map against independent
 constants and counts actual rendered logical operators (≤12). This is a rendered
@@ -497,7 +497,7 @@ full-expression pins avoid a new evaluator. No policy changes or cloud credentia
 are involved.
 
 The temporary real-module copy is validated before omitting only `imports.tf`
-adoption directives for the mock plan: OpenTofu 1.12.6 crashes on mock imports. Init uses
+adoption directives for the mock plan: OpenTofu 1.13.2 crashes on mock imports. Init uses
 `-backend=false -lockfile=readonly` and temporary `TF_DATA_DIR`.
 Seven isolated mutations failed contract assertions after successful init:
 `&&→||`, ungrouped OR, appended `true`, widened build and orb prefixes, extra

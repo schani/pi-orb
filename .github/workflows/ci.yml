@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Reject tracked deployment credentials, plans and state
         run: python3 infra/artifact_guard.py
@@ -49,7 +49,7 @@ jobs:
           docker image inspect "pi-orb-control-plane:ci-$GITHUB_SHA" --format '{{.Id}} {{.Size}}' || true
       - name: Upload image proof
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node 24)
         with:
           name: control-plane-image-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/control-plane-image-proof.log
@@ -77,13 +77,13 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Reject tracked deployment credentials, plans and state
         run: python3 infra/artifact_guard.py
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.22.1'
           cache: npm
@@ -100,9 +100,9 @@ jobs:
       - name: Install OpenTofu
         run: |
           set -euo pipefail
-          archive="$RUNNER_TEMP/tofu_1.12.6_linux_amd64.zip"
-          curl --fail --silent --show-error --location https://github.com/opentofu/opentofu/releases/download/v1.12.6/tofu_1.12.6_linux_amd64.zip -o "$archive"
-          printf '5dc43da4f750f33873dc25e94587128709e819e544b7be9016b255316153c3a8  %s\n' "$archive" | sha256sum --check --strict
+          archive="$RUNNER_TEMP/tofu_1.13.2_linux_amd64.zip"
+          curl --fail --silent --show-error --location https://github.com/opentofu/opentofu/releases/download/v1.13.2/tofu_1.13.2_linux_amd64.zip -o "$archive"
+          printf '723bebb0df8411daff1e5fc3862e28ff5581fe5634087f4c29a9aa41d78208b5  %s\n' "$archive" | sha256sum --check --strict
           mkdir "$RUNNER_TEMP/tofu-bin"
           unzip -q "$archive" tofu -d "$RUNNER_TEMP/tofu-bin"
           echo "$RUNNER_TEMP/tofu-bin" >> "$GITHUB_PATH"
@@ -121,7 +121,7 @@ jobs:
 
       - name: Upload deterministic failure traces
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node 24)
         with:
           name: ci-dst-failure-traces-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-failures/*.json
