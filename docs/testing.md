@@ -89,6 +89,37 @@ Current trimmed checks: **105 tests / 13 files**, existing multi-user E2E **1/1*
 
 [CI 39833808392](https://github.com/schani/pi-orb/actions/runs/39833808392) failed two now-removed duplicate boot tests whose Git-config path assumption ignored inherited `XDG_CONFIG_HOME`; no product fix is indicated (evidence: `.context/pr159-ci/REPORT.md`).
 
+## Harness-icon direct-probe ownership (2026-10-23)
+
+**Decision:** send `Connection: close` at both direct `page.request.get` sites in
+`e2e/harness-icons-frontend.e2e.test.ts`; check response ownership before payloads.
+No shared mock/product change, retry, sleep, deadline or existing assertion change.
+
+[First failure](https://github.com/schani/pi-orb/actions/runs/40038122829/job/120702494953),
+source `72b8a6fb5e3472865f77ac4051b35af55c09c1ae`: Chromium's direct orb probe
+failed with `read ECONNRESET`; browser reads of that orb succeeded. This matches
+the known idle-lease class in
+`docs/postmortems/2026-10-16-usage-mock-idle-connection.md`, but historical socket
+reuse/close ownership remains unproven. The user-approved UI stabilization
+exception permits correction without claiming that attribution.
+
+Tests first: both engines rejected `keep-alive` at the initial probe, then at the
+orb probe with only the initial request corrected. A controlled installed-Playwright
+A/B diagnostic called `server.closeIdleConnections()` at second client socket
+assignment, without sleeps: defaults reused the first socket and failed
+`socket hang up (ECONNRESET)` before reaching the server; request
+`Connection: close` assigned a new socket and returned 200. This proves ownership
+under an explicit close schedule, not CI's exact reset timing or cause.
+The complete original file passes both engines; full typecheck, scoped Biome,
+four frontend-listener cases and 20 related unit tests pass. No new DST failure.
+Exact-new-head hosted qualification remains required; no merge or deployment.
+
+Original logs/artifacts and limits:
+`.context/deploy-override-evidence/main72b8-failure/REPORT.md`.
+REDs, the controlled diagnostic, setup correction (missing managed Chromium),
+and validation receipts:
+`.context/deploy-override-evidence/harness-socket-fix/`.
+
 ## Harness-icon catalog ownership (2026-10-20; PR 151)
 
 [First CI failure](https://github.com/schani/pi-orb/actions/runs/39452155383/job/118729501183), source `2e5d24f8`: Chromium's index readiness timed out with the second StrictMode projects GET pending inside the test's decoration proxy. No crash or new DST failure; uploaded traces match historical fixtures. Logs, artifacts and controlled experiments remain in `.context/pr151-ci/`.
