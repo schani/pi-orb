@@ -34,12 +34,12 @@ RUN chmod 755 /usr/local/bin/runtime-apt \
 # the orb's persistent home and survive image updates.
 ARG TARGETARCH
 RUN case "$TARGETARCH" in \
-      amd64) rust_arch=x86_64; rustup_sha=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10 ;; \
-      arm64) rust_arch=aarch64; rustup_sha=9732d6c5e2a098d3521fca8145d826ae0aaa067ef2385ead08e6feac88fa5792 ;; \
+      amd64) rust_arch=x86_64; rustup_sha=5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4 ;; \
+      arm64) rust_arch=aarch64; rustup_sha=a9c168dbea81a84671c6b7a5c1795cb0eb699020110d107ddfca427bd797e697 ;; \
       *) echo "unsupported Rust architecture: $TARGETARCH" >&2; exit 1 ;; \
     esac \
   && curl --proto "=https" --tlsv1.2 -fsSL \
-       "https://static.rust-lang.org/rustup/archive/1.29.0/${rust_arch}-unknown-linux-gnu/rustup-init" \
+       "https://static.rust-lang.org/rustup/archive/1.29.2/${rust_arch}-unknown-linux-gnu/rustup-init" \
        -o /tmp/rustup-init \
   && echo "$rustup_sha  /tmp/rustup-init" | sha256sum --check - \
   && install -m 755 /tmp/rustup-init /usr/local/bin/rustup \
