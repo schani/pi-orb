@@ -3,25 +3,14 @@ import { errAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { runDst } from "../../../apps/control-plane/src/testkit/sim.ts";
 import { type CommandLogWriter, type CommandRunner, GcloudImageBuildEffects } from "./gcloud.ts";
-import type { ImageBuildInput } from "./orchestrator.ts";
+import { imageBuildInput } from "./testkit/image-build-input.ts";
 
-const input: ImageBuildInput = {
-  project: "target-project",
-  zone: "us-central1-a",
+const input = imageBuildInput({
   baseImage: "projects/base/global/images/base",
-  version: "v1",
   subnetwork: "subnet",
   builderServiceAccount: "builder@example.com",
   validationServiceAccount: "validator@example.com",
-  sourceCommit: "a".repeat(40),
-  sourceDirty: false,
-  sourceArchiveSha256: "b".repeat(64),
-  operationId: "0123456789abcdef",
-  validationRepositoryUrl: "https://github.com/example/repo",
-  inputInventory: {},
-  toolingInputInventory: {},
-  outputDir: "/sim/native-image",
-};
+});
 
 const timing = (task: SimulationTask) => ({
   now: () => task.monotonicNow(),
@@ -56,7 +45,8 @@ describe("GCloud cleanup under deterministic scheduling", () => {
           let listed = false;
           let operationDone = false;
           let materialized = false;
-          let deleted = false;
+          const submissions: { target: string; operationDone: boolean; materialized: boolean }[] =
+            [];
           const describedOperations: string[] = [];
           const logs: string[] = [];
           const schedule = await sim.runTasks([
@@ -115,23 +105,6 @@ describe("GCloud cleanup under deterministic scheduling", () => {
                       stderr: "",
                     };
                   }
-                  if (args[1] === "images" && args[2] === "delete") {
-                    expect(operationDone).toBe(true);
-                    expect(materialized).toBe(true);
-                    deleted = true;
-                    return {
-                      stdout: JSON.stringify([
-                        {
-                          name: "exact-delete",
-                          operationType: "delete",
-                          status: "RUNNING",
-                          targetLink: `projects/target-project/global/images/${image}`,
-                          selfLink: "projects/target-project/global/operations/exact-delete",
-                        },
-                      ]),
-                      stderr: "",
-                    };
-                  }
                   throw new Error(`unexpected command: ${args.join(" ")}`);
                 };
                 const result = await new GcloudImageBuildEffects(
@@ -139,8 +112,8 @@ describe("GCloud cleanup under deterministic scheduling", () => {
                   timing(task),
                   logWriter(task, logs, logDelay),
                   undefined,
-                  () => {
-                    deleted = true;
+                  (target) => {
+                    submissions.push({ target, operationDone, materialized });
                     return ResultAsync.fromSafePromise(
                       Promise.resolve({
                         name: "exact-delete",
@@ -174,7 +147,13 @@ describe("GCloud cleanup under deterministic scheduling", () => {
           ).toBe(true);
           expect(describedOperations).toContain("exact-create");
           expect(describedOperations).toContain("exact-delete");
-          expect(deleted).toBe(true);
+          expect(submissions).toEqual([
+            {
+              target: `projects/target-project/global/images/${image}`,
+              operationDone: true,
+              materialized: true,
+            },
+          ]);
           expect(logs.some((entry) => entry.includes("operations describe exact-delete"))).toBe(
             true,
           );
@@ -208,21 +187,6 @@ describe("GCloud cleanup under deterministic scheduling", () => {
                     }),
                     stderr: "",
                   };
-                if (args[1] === "images" && args[2] === "delete") {
-                  submitted = true;
-                  return {
-                    stdout: JSON.stringify([
-                      {
-                        name: operation,
-                        operationType: "delete",
-                        status: "RUNNING",
-                        targetLink: target,
-                        selfLink: `projects/target-project/global/operations/${operation}`,
-                      },
-                    ]),
-                    stderr: "",
-                  };
-                }
                 if (args[1] === "operations" && args[2] === "describe")
                   return {
                     stdout: JSON.stringify({
@@ -285,6 +249,7 @@ describe("GCloud cleanup under deterministic scheduling", () => {
             name: "cleanup",
             f: async (task) => {
               const waitStarts: number[] = [];
+              let submissions = 0;
               const runner: CommandRunner = async (_command, args) => {
                 await task.checkpoint("gcloud cleanup command", ...args.slice(0, 4));
                 if (args[1] === "operations" && args[2] === "list") {
@@ -323,10 +288,19 @@ describe("GCloud cleanup under deterministic scheduling", () => {
                   },
                 },
                 logWriter(task, [], 0),
+                undefined,
+                () => {
+                  submissions++;
+                  return errAsync({
+                    type: "delete_submit_failed",
+                    message: "unexpected DELETE",
+                  });
+                },
               ).run("cleanup", "delete-workspace-image", input, new AbortController().signal);
               expect(result.isErr() && result.error.message).toContain(
                 "timed out waiting for cleanup operation stuck-create",
               );
+              expect(submissions).toBe(0);
               expect(waitStarts.every((startedAt) => startedAt < 60_000)).toBe(true);
             },
           },
@@ -338,16 +312,28 @@ describe("GCloud cleanup under deterministic scheduling", () => {
 
   it("does not hide command-log persistence failure or proceed with deletion", async () => {
     let commands = 0;
+    let submissions = 0;
     const runner: CommandRunner = async () => {
       commands++;
       return { stdout: "[]", stderr: "" };
     };
-    const result = await new GcloudImageBuildEffects(runner, undefined, () =>
-      errAsync({ type: "command_log_write_failed", message: "storage unavailable" }),
+    const result = await new GcloudImageBuildEffects(
+      runner,
+      undefined,
+      () => errAsync({ type: "command_log_write_failed", message: "storage unavailable" }),
+      undefined,
+      () => {
+        submissions++;
+        return errAsync({
+          type: "delete_submit_failed",
+          message: "unexpected DELETE",
+        });
+      },
     ).run("cleanup", "delete-workspace-image", input, new AbortController().signal);
     expect(result.isErr() && result.error.message).toContain(
       "failed to preserve command log: storage unavailable",
     );
     expect(commands).toBe(1);
+    expect(submissions).toBe(0);
   });
 });

@@ -28,13 +28,13 @@ test("live smoke deadlines cover native lifecycle bounds", () => {
   for (const source of [smoke, identity]) {
     assert.match(source, /export PI_ORB_SMOKE_HTTP=1/);
     assert.match(source, /export PI_ORB_SMOKE_DEADLINE=\$DEADLINE/);
-    assert.match(source, /\[ "\$limit" -le "\$DEADLINE" \] \|\| limit=\$DEADLINE/);
-    assert.match(source, /PI_ORB_SMOKE_DEADLINE="\$limit" api/);
-    assert.match(source, /smoke_sleep "\$limit"/);
-    const command = source.match(/^command_orb\(\)[\s\S]*?^\}/m)?.[0];
-    assert.equal((command?.match(/\$\(api /g) ?? []).length, 1);
+    assert.match(source, /source "\$DIR\/smoke-fixtures.sh"/);
+    assert.match(source, /smoke_wait_for_state /);
+    assert.match(source, /smoke_command_orb /);
   }
   const fixtures = readFileSync(new URL("./smoke-fixtures.sh", import.meta.url), "utf8");
+  assert.match(fixtures, /PI_ORB_SMOKE_DEADLINE="\$limit" api/);
+  assert.match(fixtures, /smoke_sleep "\$limit"/);
   assert.match(fixtures, /deadline=\$\(\( \$\(date \+%s\) \+ 300 \)\)/);
   assert.match(
     fixtures,
@@ -129,15 +129,4 @@ test("machine user header requires the domain UUID shape", () => {
   assert.match(api, /X-Pi-Orb-User-Id: \$PI_ORB_USER_ID/);
   assert.match(api, /\[1-5\].*\[89aAbB\]/);
   assert.doesNotMatch(api, /\[0-9a-fA-F-\]\{36\}/);
-});
-
-test("compute replacement SSH always uses IAP", () => {
-  const replacement = readFileSync(
-    new URL("./smoke-compute-replacement.sh", import.meta.url),
-    "utf8",
-  );
-  const sshCommands = replacement.match(/gcloud compute ssh/g) ?? [];
-  const iapFlags = replacement.match(/--tunnel-through-iap/g) ?? [];
-  assert(sshCommands.length > 0);
-  assert.equal(iapFlags.length, sshCommands.length);
 });

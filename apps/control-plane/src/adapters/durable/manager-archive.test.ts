@@ -1,6 +1,3 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { createRegistry, defineDoc, defineTask, Harness } from "@earendil-works/pi-durable";
@@ -14,7 +11,6 @@ import { DurableAgentPlane } from "./manager.ts";
 import { MemoryAgentPersistence } from "./memory-persistence.testkit.ts";
 
 it("reads authoritative archive history after suspension without resuming retained work", async () => {
-  const path = await mkdtemp(join(tmpdir(), "durable-archive-reader-"));
   let effects = 0;
   const openModes: unknown[] = [];
   const pending = defineTask<null, { phase: "run" }, null>({
@@ -128,6 +124,5 @@ it("reads authoritative archive history after suspension without resuming retain
     expect(h.world.hostCount(orb.id)).toBe(0);
   } finally {
     await plane.close();
-    await rm(path, { recursive: true, force: true });
   }
 });

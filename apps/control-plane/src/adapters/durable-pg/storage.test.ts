@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import type { JsonValue } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
@@ -6,37 +5,32 @@ import {
   type ConversationId,
   createRegistry,
   createSession,
+  type DocumentId,
   type EntryId,
   Harness,
   NestedCallDoc,
   SessionFailed,
+  type Storage,
   StorageRequestError,
   type TaskId,
   type ToolTaskResult,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { err, errAsync, ok } from "neverthrow";
-import { expect, it, vi } from "vitest";
+import { expect, it, onTestFinished, vi } from "vitest";
+import { makeOrbRow } from "../../testkit/fixtures.ts";
 import { PGliteClient } from "../pg/pglite-client.ts";
+import { initializeBareAuthority } from "./bare-authority.testkit.ts";
 import { PgDurableAuthority } from "./index.ts";
 import { storageAuthorityError } from "./storage-boundary.ts";
 
 const orb = "00000000-0000-4000-8000-000000000001";
 async function fixture() {
   const db = new PGliteClient();
-  (
-    await db.query(
-      "CREATE TABLE orbs(id uuid PRIMARY KEY, agent_admission_version bigint NOT NULL DEFAULT 0)",
-    )
-  )._unsafeUnwrap();
-  (await db.query("INSERT INTO orbs(id) VALUES($1)", [orb]))._unsafeUnwrap();
-  const migration = await readFile(
-    new URL("../pg/migrations/036_durable_authority.sql", import.meta.url),
-    "utf8",
-  );
-  (await db.transaction(async (_query, execute) => execute(migration)))._unsafeUnwrap();
+  const seeded = await initializeBareAuthority(db, orb);
   let time = 0;
   return {
+    ...seeded,
     db,
     authority: new PgDurableAuthority(db, () => time),
     setTime: (value: number) => {
@@ -336,5 +330,92 @@ it("persists native nested-call task documents across reopen and retires their s
     }
   } finally {
     (await db.end())._unsafeUnwrap();
+  }
+});
+
+it("isolates colliding native IDs through reads, replacement, retirement and archive", async () => {
+  const { db, authority, task, database, project } = await fixture();
+  onTestFinished(async () => {
+    (await db.end())._unsafeUnwrap();
+  });
+  const storages: Storage[] = [];
+  {
+    const otherOrb = "00000000-0000-4000-8000-000000000002";
+    (
+      await database.store.insertOrb(task, makeOrbRow(otherOrb, project.id, "running"))
+    )._unsafeUnwrap();
+    const owners = await Promise.all(
+      [orb, otherOrb].map(async (id) =>
+        (await authority.acquire(id, "writer", 0, 0, 100))._unsafeUnwrap(),
+      ),
+    );
+    const [ownerA, ownerB] = owners;
+    if (ownerA === undefined || ownerB === undefined) expect.fail("fixture owners missing");
+    const conversationId = 1 as ConversationId;
+    const id = 2 as DocumentId;
+    for (const [index, owner] of owners.entries()) {
+      const storage = (
+        await authority.open(owner, { project: async () => ok(undefined) })
+      )._unsafeUnwrap();
+      onTestFinished(() => storage.close(ctx));
+      storages.push(storage);
+      await storage.commit(
+        [
+          { type: "conversation", value: { id: conversationId } },
+          {
+            type: "document.create",
+            record: {
+              id,
+              kind: "tenant",
+              scope: { kind: "conversation", conversationId },
+              history: "latest",
+              fork: "current",
+            },
+            content: { kind: "base", version: 1, value: { tenant: index } },
+          },
+        ],
+        ctx,
+      );
+    }
+    const [a, b] = storages as [Storage, Storage];
+    const original = await b.document(id, "current", ctx);
+    expect(original?.value).toEqual({ tenant: 1 });
+    expect(await a.conversation(conversationId, ctx)).toEqual({ id: conversationId });
+    expect(await b.conversation(conversationId, ctx)).toEqual({ id: conversationId });
+    expect((await a.document(id, "current", ctx))?.value).toEqual({ tenant: 0 });
+    await a.commit(
+      [
+        {
+          type: "document.change",
+          id,
+          content: { kind: "base", version: 1, value: { tenant: "changed" } },
+        },
+      ],
+      ctx,
+    );
+    expect((await a.document(id, "current", ctx))?.value).toEqual({ tenant: "changed" });
+    expect(await b.document(id, "current", ctx)).toEqual(original);
+    await a.commit([{ type: "document.retire", id }], ctx);
+    expect(await a.document(id, "current", ctx)).toBeUndefined();
+    expect(await b.document(id, "current", ctx)).toEqual(original);
+    expect(
+      (
+        await b.scanDocuments(
+          { scope: { kind: "conversation", conversationId }, at: "current" },
+          10,
+          undefined,
+          ctx,
+        )
+      ).items,
+    ).toEqual([original?.record]);
+    (await authority.archive(ownerA, async () => ok(undefined)))._unsafeUnwrap();
+    expect(await a.conversation(conversationId, ctx)).toBeUndefined();
+    expect(
+      (await db.query("SELECT id FROM durable_pg_documents WHERE orb_id=$1", [orb]))._unsafeUnwrap()
+        .rows,
+    ).toEqual([]);
+    expect(await b.conversation(conversationId, ctx)).toEqual({ id: conversationId });
+    expect(await b.document(id, "current", ctx)).toEqual(original);
+    expect((await authority.validate(ownerB)).isOk()).toBe(true);
   }
 });

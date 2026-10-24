@@ -3,6 +3,7 @@ import { Check } from "typebox/value";
 import { describe, expect, it } from "vitest";
 import {
   type ClaudeModelCall,
+  type OtlpParseError,
   parseOtlpLogs,
   startModelUsageReceiver,
   telemetryEnvironment,
@@ -94,7 +95,13 @@ describe("parseOtlpLogs", () => {
 describe("model usage receiver", () => {
   it("accepts authorized OTLP JSON on loopback and hands calls to the sink", async () => {
     const calls: ClaudeModelCall[] = [];
-    const receiver = (await startModelUsageReceiver((call) => calls.push(call)))._unsafeUnwrap();
+    const rejected: OtlpParseError[] = [];
+    const receiver = (
+      await startModelUsageReceiver(
+        (call) => calls.push(call),
+        (error) => rejected.push(error),
+      )
+    )._unsafeUnwrap();
     try {
       const env = telemetryEnvironment(receiver);
       const endpoint = env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT ?? "";
@@ -113,6 +120,14 @@ describe("model usage receiver", () => {
       expect((await post({}, payload)).status).toBe(401);
       expect((await post({ authorization: "Bearer wrong" }, payload)).status).toBe(401);
       expect((await post({ authorization }, "{")).status).toBe(400);
+      expect(rejected).toEqual([{ code: "invalid_otlp_logs", message: "Body is not JSON." }]);
+      expect(
+        (await post({ authorization }, JSON.stringify({ PRIVATE_SENTINEL: true }))).status,
+      ).toBe(400);
+      expect(rejected).toHaveLength(2);
+      expect(rejected[1]).toMatchObject({ code: "invalid_otlp_logs" });
+      expect(JSON.stringify(rejected)).not.toContain("PRIVATE_SENTINEL");
+      expect(JSON.stringify(rejected)).not.toContain(authorization);
       expect(calls).toEqual([]);
       expect((await post({ authorization }, payload)).status).toBe(200);
       expect(calls.map((call) => call.input)).toEqual([101]);

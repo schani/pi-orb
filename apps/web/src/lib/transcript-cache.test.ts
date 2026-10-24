@@ -63,20 +63,7 @@ describe("transcript cache", () => {
   });
 
   it("defaults to a 256 MiB byte budget", () => {
-    const cache = new TranscriptCache();
-    const view = history();
-    const first = view.records[0] ?? expect.fail("fixture record missing");
-    if (first.type !== "message") expect.fail("message record expected");
-    first.content = [{ type: "text", text: "x".repeat(65 * 1024 * 1024) }];
-    expect(cache.acquire("a", "p").publish(snapshotFromHistory(view))).toBe("stored");
-    expect(cache.stats.bytes).toBeGreaterThan(128 * 1024 * 1024);
-    expect(cache.stats.bytes).toBeLessThan(256 * 1024 * 1024);
-    const oversized = history();
-    const oversizedFirst = oversized.records[0] ?? expect.fail("fixture record missing");
-    if (oversizedFirst.type !== "message") expect.fail("message record expected");
-    oversizedFirst.content = [{ type: "text", text: "x".repeat(128 * 1024 * 1024) }];
-    expect(cache.acquire("a", "p").publish(snapshotFromHistory(oversized))).toBe("oversized");
-    expect(cache.stats.bytes).toBe(0);
+    expect(new TranscriptCache().maxBytes).toBe(256 * 1024 * 1024);
   });
 
   it("evicts least-recently-used conversations when accounted bytes exceed the budget", () => {

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "@playwright/test";
 import { createServer } from "vite";
-import { expect, it, vi } from "vitest";
+import { expect, it, onTestFinished, vi } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
 import { gotoFrontendFixture, observeFrontendBoot } from "./testkit/frontend-fixture.ts";
 
@@ -24,7 +24,9 @@ it("reports listen failures through the test framework and releases its error li
 });
 
 it("reports bounded browser request progress when application boot stalls", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "pi-orb-frontend-diagnostic-")));
+  const directory = await mkdtemp(join(tmpdir(), "pi-orb-frontend-diagnostic-"));
+  onTestFinished(() => rm(directory, { recursive: true, force: true }));
+  const root = await realpath(directory);
   await writeFile(
     join(root, "index.html"),
     `<body><main id="root"></main><p>static shell</p><script>
@@ -44,12 +46,15 @@ it("reports bounded browser request progress when application boot stalls", asyn
     </script></body>`,
   );
   const vite = await createServer({ root, configFile: false });
+  onTestFinished(() => vite.close());
   const browser = await chromium.launch({ headless: true });
+  onTestFinished(() => browser.close());
   let releasePending!: () => void;
   const pendingGate = new Promise<void>((resolve) => {
     releasePending = resolve;
   });
-  try {
+  onTestFinished(() => releasePending());
+  {
     await listenFrontend(vite);
     const address = vite.httpServer?.address();
     if (!address || typeof address === "string") throw new Error("No diagnostic fixture port");
@@ -104,24 +109,23 @@ it("reports bounded browser request progress when application boot stalls", asyn
     });
     releasePending();
     await pendingFinished;
-  } finally {
-    releasePending();
-    await browser.close();
-    await vite.close();
-    await rm(root, { recursive: true, force: true });
   }
 });
 
 it("rejects old-document readiness and diagnoses missing application UI", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "pi-orb-frontend-ui-diagnostic-")));
+  const directory = await mkdtemp(join(tmpdir(), "pi-orb-frontend-ui-diagnostic-"));
+  onTestFinished(() => rm(directory, { recursive: true, force: true }));
+  const root = await realpath(directory);
   await writeFile(
     join(root, "index.html"),
     `<main id="root"><p>mounted without expected control</p></main>
      <script type="module">await fetch("/api/v1/projects")</script>`,
   );
   const vite = await createServer({ root, configFile: false });
+  onTestFinished(() => vite.close());
   const browser = await chromium.launch({ headless: true });
-  try {
+  onTestFinished(() => browser.close());
+  {
     await listenFrontend(vite);
     const address = vite.httpServer?.address();
     if (!address || typeof address === "string") throw new Error("No diagnostic fixture port");
@@ -147,10 +151,6 @@ it("rejects old-document readiness and diagnoses missing application UI", async 
     expect(diagnostic).toContain(
       '"root":{"documentReadyState":"complete","present":true,"childCount":1,"fixtureControl":false}',
     );
-  } finally {
-    await browser.close();
-    await vite.close();
-    await rm(root, { recursive: true, force: true });
   }
 });
 

@@ -6,6 +6,7 @@ import { expect, it } from "vitest";
 import { runDst } from "../../testkit/sim.ts";
 import { PGliteClient } from "../pg/pglite-client.ts";
 import { PgDurableAuthority, readTransactionStorage } from "./index.ts";
+import { storageAuthorityError } from "./storage-boundary.ts";
 
 const orb = "00000000-0000-4000-8000-000000000001";
 async function initialize(db: PGliteClient) {
@@ -128,9 +129,10 @@ it("DST schedules old-owner commits, Stop ABA and archive cleanup without half-p
             }
             const storage = opened.value;
             await task.checkpoint("before-drain");
-            await authority.beginDrain(owner, storage);
+            const drained = await authority.beginDrain(owner, storage);
+            if (drained.isErr()) expect(drained.error.code).toBe("stale_owner");
             await task.checkpoint("before-old-commit");
-            await ResultAsync.fromPromise(
+            const committed = await ResultAsync.fromPromise(
               storage.commit(
                 [
                   {
@@ -145,8 +147,9 @@ it("DST schedules old-owner commits, Stop ABA and archive cleanup without half-p
                 ],
                 ctx,
               ),
-              () => "revoked",
+              storageAuthorityError,
             );
+            if (committed.isErr()) expect(committed.error).toMatchObject({ code: "stale_owner" });
             await storage.close(ctx);
           },
         },
@@ -164,9 +167,10 @@ it("DST schedules old-owner commits, Stop ABA and archive cleanup without half-p
           name: "archive",
           f: async (task) => {
             await task.checkpoint("before-archive");
-            await authority.archive(owner, async (query) =>
+            const archived = await authority.archive(owner, async (query) =>
               (await query("UPDATE public_transcript SET sealed=true")).map(() => undefined),
             );
+            expect(archived.isErr() ? archived.error : null).toBeNull();
             await task.checkpoint("after-archive");
           },
         },
@@ -179,10 +183,9 @@ it("DST schedules old-owner commits, Stop ABA and archive cleanup without half-p
       const archived = (
         await db.query("SELECT archived FROM durable_pg_owners WHERE orb_id=$1", [orb])
       )._unsafeUnwrap().rows[0]?.archived;
-      if (archived) {
-        expect(native).toHaveLength(0);
-        expect(publicRows.every((row) => row.sealed)).toBe(true);
-      } else expect(native.length).toBe(publicRows.length);
+      expect(archived).toBe(true);
+      expect(native).toHaveLength(0);
+      expect(publicRows.every((row) => row.sealed)).toBe(true);
       expect((await authority.validate(owner)).isErr()).toBe(true);
     });
   } finally {

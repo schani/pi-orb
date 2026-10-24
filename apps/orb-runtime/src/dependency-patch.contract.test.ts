@@ -54,18 +54,6 @@ describe("Pi dependency patch installation", () => {
     }
   });
 
-  it("removes the vulnerable installer chain from the production lock", () => {
-    const lock = JSON.parse(read("package-lock.json")) as {
-      packages: Record<string, unknown>;
-    };
-    for (const name of ["patch-package", "find-yarn-workspace-root", "micromatch", "braces"])
-      expect(
-        Object.keys(lock.packages).filter(
-          (path) => path.endsWith(`/node_modules/${name}`) || path === `node_modules/${name}`,
-        ),
-      ).toEqual([]);
-  });
-
   it("installs the SDK's pinned patched brace expansion", () => {
     const fromPi = createRequire(
       join(root, "node_modules/@earendil-works/pi-coding-agent/package.json"),

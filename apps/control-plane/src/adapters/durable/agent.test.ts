@@ -93,57 +93,6 @@ describe("central Durable agent", () => {
     },
   );
 
-  it("persists settings receipts and current choices across reopen", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "durable-settings-"));
-    const authority = new MemoryAgentPersistence();
-    const models = createModels();
-    models.setProvider(fauxProvider({ models: [{ id: "faux-1", reasoning: true }] }).provider);
-    const open = async () =>
-      (
-        await DurableAgent.open({
-          orbId: "orb",
-          storage: (await authority.openOrb("orb", false))._unsafeUnwrap().storage,
-          models,
-          registry: createRegistry(),
-          env: new NodeExecutionEnv({ cwd: "/tmp" }),
-          checkoutCommit: "commit",
-          instructions: "instruction",
-          initialSettings,
-        })
-      )._unsafeUnwrap();
-    let agent = await open();
-    const action = { type: "set_thinking" as const, thinkingLevel: "high" as const };
-    try {
-      expect((await agent.request("settings", action))._unsafeUnwrap()).toEqual({
-        type: "settings_applied",
-        duplicate: false,
-      });
-      expect((await agent.request("settings", action))._unsafeUnwrap()).toEqual({
-        type: "settings_applied",
-        duplicate: true,
-      });
-      expect(
-        (
-          await agent.request("settings", { type: "set_model", model: initialSettings.model })
-        )._unsafeUnwrap(),
-      ).toMatchObject({ type: "rejected", error: { code: "request_id_conflict" } });
-      await agent.close();
-      agent = await open();
-      expect((await agent.request("settings", action))._unsafeUnwrap()).toEqual({
-        type: "settings_applied",
-        duplicate: true,
-      });
-      expect(agent.snapshot()._unsafeUnwrap().settings?.settings).toEqual({
-        ...initialSettings,
-        thinkingLevel: "high",
-      });
-    } finally {
-      await agent.close();
-      await authority.close();
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
   it("summarizes completed root turns without blocking inference and drains cancellation on close", async () => {
     const models = createModels();
     const faux = fauxProvider();

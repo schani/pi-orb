@@ -1,6 +1,5 @@
 import { expect, it } from "vitest";
 import { commandOptions } from "./command-options.ts";
-import { composerModeGlyph, normalizeComposerChange } from "./composer-mode.ts";
 
 const view = {
   type: "agent_settings" as const,
@@ -53,15 +52,6 @@ it("compact executes directly and accepts optional instructions without settings
     type: "compact",
     customInstructions: "preserve decisions\n and paths",
   });
-});
-it("consumes slash only in message mode, with no shell interpretation", () => {
-  expect(normalizeComposerChange("message", "/thinking")).toEqual({
-    mode: "command",
-    text: "thinking",
-  });
-  expect(normalizeComposerChange("command", "/tmp")).toEqual({ mode: "command", text: "/tmp" });
-  expect(normalizeComposerChange("message", "a/b").mode).toBe("message");
-  expect(composerModeGlyph("command")).toBe("/");
 });
 it("offers only supported choices and never converts an unknown command to a prompt", () => {
   expect(commandOptions("", view).map((x) => x.label)).toEqual(["model", "thinking", "compact"]);

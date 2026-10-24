@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from infra.workflow_testkit import steps
 from infra.release_report import export, report
 from infra.release_state_test import STAMP, record
 
@@ -141,10 +142,10 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn('git checkout -B main "$GITHUB_SHA"', workflow)
         self.assertIn('test "$GITHUB_SHA" = "$(git rev-parse HEAD)"', workflow)
         self.assertLess(workflow.index('python3 infra/artifact_guard.py'), workflow.index('google-github-actions/auth@'))
-        steps = re.findall(r'      - name: ([^\n]+)\n(.*?)(?=      - name: |\Z)', workflow, re.S)
+        inventory = steps('deploy.yml')
         checkout = 'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09'
         upload = 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
-        actions = [(name, action) for name, body in steps for action in re.findall(r'uses: ([^\s]+)', body)]
+        actions = [(name, action) for name, body in inventory for action in re.findall(r'uses: ([^\s]+)', body)]
         self.assertEqual(re.findall(r'uses: ([^\s]+)', workflow), [action for _, action in actions])
         self.assertEqual(
             actions,
@@ -180,7 +181,7 @@ class WorkflowContractTest(unittest.TestCase):
         }
         for name, (condition, artifact, retention, paths) in uploads.items():
             with self.subTest(upload=name):
-                body = dict(steps)[name]
+                body = dict(inventory)[name]
                 lines = [line[8:].split(' #', 1)[0] for line in body.splitlines() if line.strip()]
                 self.assertEqual(lines, [
                     f'if: {condition}', f'uses: {upload}', 'with:',

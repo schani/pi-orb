@@ -17,6 +17,7 @@ import {
 import { waitForFixtureMedia } from "./testkit/media-ready.ts";
 import { observeProjectCreates } from "./testkit/project-create-observer.ts";
 import { projectFixtureHistory } from "./testkit/projected-history.ts";
+import { expectTabletTouchFocus } from "./testkit/tablet-touch-focus.ts";
 
 const WEB_ROOT = join(import.meta.dirname, "../apps/web");
 const ORB_PATH = "/orbs/frontend-fixture-orb";
@@ -289,6 +290,10 @@ describe("frontend-only browser behavior", () => {
 
   afterAll(async () => {
     await browser?.close();
+  });
+
+  // biome-ignore lint/suspicious/noDuplicateTestHooks: Vite must close even if browser cleanup rejects.
+  afterAll(async () => {
     await vite?.close();
   });
 
@@ -423,61 +428,7 @@ describe("frontend-only browser behavior", () => {
   it.each([false, true])(
     "does not autofocus a tablet-width touch composer on arrival or return (mobile emulation: %s)",
     async (isMobile) => {
-      const page = await browser.newPage({
-        viewport: { width: 820, height: 900 },
-        hasTouch: true,
-        isMobile,
-      });
-      await page.addInitScript(() => {
-        Reflect.set(globalThis, "__composerFocuses", 0);
-        Reflect.get(globalThis, "document").addEventListener(
-          "focusin",
-          (event: { target: { matches: (selector: string) => boolean } }) => {
-            if (event.target?.matches?.(".composer-input")) {
-              Reflect.set(
-                globalThis,
-                "__composerFocuses",
-                Reflect.get(globalThis, "__composerFocuses") + 1,
-              );
-            }
-          },
-        );
-      });
-      try {
-        const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
-        await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb", composer);
-        await expectPage(composer).toBeVisible();
-        expectPage(await page.evaluate(() => Reflect.get(globalThis, "__composerFocuses"))).toBe(0);
-        await expectPage(composer).toHaveCSS("font-size", "16px");
-        const rename = page.getByRole("button", { name: "Rename orb", exact: true });
-        await rename.focus();
-        await expectPage(rename).toBeFocused();
-        await page.evaluate(() => {
-          const pageDocument = Reflect.get(globalThis, "document");
-          Object.defineProperty(pageDocument, "visibilityState", {
-            configurable: true,
-            get: () => Reflect.get(globalThis, "__testVisibilityState"),
-          });
-          Reflect.set(globalThis, "__testVisibilityState", "hidden");
-          pageDocument.dispatchEvent(new Event("visibilitychange"));
-          Reflect.set(globalThis, "__testVisibilityState", "visible");
-          pageDocument.dispatchEvent(new Event("visibilitychange"));
-        });
-        await expectPage(rename).toBeFocused();
-        expectPage(await page.evaluate(() => Reflect.get(globalThis, "__composerFocuses"))).toBe(0);
-        const geometry = await page.evaluate(() => ({
-          scrollWidth: Reflect.get(globalThis, "document").documentElement.scrollWidth,
-          clientWidth: Reflect.get(globalThis, "document").documentElement.clientWidth,
-          scrollX: Reflect.get(globalThis, "window").scrollX,
-        }));
-        expectPage(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth);
-        expectPage(geometry.scrollX).toBe(0);
-        await composer.focus();
-        await expectPage(composer).toBeFocused();
-        expectPage(await page.evaluate(() => Reflect.get(globalThis, "window").scrollX)).toBe(0);
-      } finally {
-        await page.close();
-      }
+      await expectTabletTouchFocus(browser, origin, isMobile);
     },
   );
 
@@ -896,18 +847,22 @@ describe("frontend-only browser behavior", () => {
     try {
       await page.goto(`${origin}${ORB_PATH}`);
       const copy = page.getByRole("button", { name: "Copy response Markdown" }).first();
+      await page.clock.install();
       await copy.focus();
       await page.keyboard.press("Enter");
       await expectPage(copy).toHaveAccessibleName("Copy response Markdown failed");
       await expectPage(page.getByText("copy failed", { exact: true }).first()).toBeVisible();
+      await page.getByRole("textbox").first().focus();
+      await expectPage(copy).not.toBeFocused();
       await page.mouse.move(0, 0);
-      await page.waitForTimeout(1700);
+      await page.clock.runFor(1700);
       expectPage(
         await copy.evaluate(
           (button) => button.ownerDocument.defaultView?.getComputedStyle(button).opacity,
         ),
       ).toBe("1");
       await expectPage(copy).toHaveAccessibleName("Copy response Markdown failed");
+      await expectPage(page.getByText("copy failed", { exact: true }).first()).toBeVisible();
     } finally {
       await context.close();
     }
@@ -4485,44 +4440,6 @@ describe("frontend-only browser behavior", () => {
     } finally {
       release();
       if (attempts[0] !== undefined) await removeFixtureOrb(page, attempts[0]);
-      await page.close();
-    }
-  });
-
-  it("keeps modified harness clicks native without navigating the source workspace", async () => {
-    const page = await browser.newPage();
-    let popup: typeof page | undefined;
-    let createdId: string | undefined;
-    const posts: Record<string, unknown>[] = [];
-    const stopObserving = observeProjectCreates(page.context(), posts);
-    try {
-      await page.goto(`${origin}${ORB_PATH}`);
-      const index = page.getByRole("navigation", { name: "All project orbs" });
-      const node = await index.elementHandle();
-      // Native modified-link tabs have no opener: observe the context, not window.open/popups.
-      const opened = page.context().waitForEvent("page");
-      await index
-        .getByRole("link", { name: "New Claude orb in scratchpad", exact: true })
-        .click({ modifiers: [process.platform === "darwin" ? "Meta" : "Control"] });
-      popup = await opened;
-      await expectPage(popup).toHaveURL(/\/orbs\/[0-9a-f-]+$/);
-      expectPage(posts).toHaveLength(1);
-      expectPage(posts[0]?.harness).toBe("claude");
-      createdId = popup.url().split("/orbs/")[1];
-      expectPage(posts[0]?.id).toBe(createdId);
-      await expectPage(page).toHaveURL(`${origin}${ORB_PATH}`);
-      expectPage(await node?.evaluate((element) => element.isConnected)).toBe(true);
-    } catch (error) {
-      console.error("native harness tab failed", {
-        creationRequests: posts.length,
-        contextPages: page.context().pages().length,
-        sourceUnchanged: page.url() === `${origin}${ORB_PATH}`,
-      });
-      throw error;
-    } finally {
-      stopObserving();
-      if (createdId !== undefined) await removeFixtureOrb(page, createdId);
-      await popup?.close();
       await page.close();
     }
   });

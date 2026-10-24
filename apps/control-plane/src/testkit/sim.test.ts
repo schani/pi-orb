@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { setImmediate } from "node:timers";
 import { expect, it } from "vitest";
+import { withDstArtifacts } from "../../../../testkit/dst-artifacts.ts";
 import { LogCapture, runDst } from "./sim.ts";
 
 it("yields a host turn between completed DST iterations", async () => {
@@ -209,3 +210,94 @@ it("keeps late timer telemetry out of application lifecycle evidence", async () 
   );
   expect(capture.lines()).toEqual([]);
 });
+
+it("records and exactly replays an invariant failure in a fresh second phase", async () =>
+  withDstArtifacts(async (directory) => {
+    const name = `phase-replay-${process.pid}-${Date.now()}`;
+    const capture = new LogCapture();
+    const originalReplay = process.env["DST_REPLAY"];
+    const epoch = 1_800_000_000_000;
+    const runs: { values: number[]; walls: number[] }[] = [];
+    const scenario: Parameters<typeof runDst>[1] = async (sim, nextPhase) => {
+      const evidence = { values: [] as number[], walls: [] as number[] };
+      runs.push(evidence);
+      const first = await sim.runTasks([
+        {
+          name: "phase-1",
+          f: async (task) => {
+            evidence.values.push(task.random("first command"));
+            task.log("lifecycle: phase=1");
+            await task.sleep(7, "before restart");
+            evidence.walls.push(task.wallNow());
+          },
+        },
+      ]);
+      expect(first.isOk(), first.isErr() ? first.error.message : "").toBe(true);
+      const restarted = nextPhase({ wallClockEpoch: epoch + 50 });
+      expect(restarted).not.toBe(sim);
+      const second = await restarted.runTasks([
+        {
+          name: "phase-2",
+          f: async (task) => {
+            evidence.values.push(task.random("second command"));
+            task.log("lifecycle: phase=2");
+            await task.sleep(6, "second phase failure");
+            evidence.walls.push(task.wallNow());
+            throw new Error("second-phase invariant");
+          },
+        },
+        {
+          name: "phase-2-peer",
+          f: async (task) => {
+            const delay = task.random("peer delay") * 5;
+            evidence.values.push(delay);
+            await task.sleep(delay, "peer effect");
+            evidence.walls.push(task.wallNow());
+          },
+        },
+      ]);
+      if (second.isErr()) throw second.error;
+    };
+    const options = {
+      name,
+      seed: 42,
+      iterations: 1,
+      wallClockEpoch: epoch,
+      lateTimerProbability: 0,
+      logCapture: capture,
+    };
+    try {
+      delete process.env["DST_REPLAY"];
+      await expect(runDst(options, scenario)).rejects.toThrow(
+        "replay reproduces the failure): second-phase invariant",
+      );
+      const files = readdirSync(directory).filter((entry) => entry.startsWith(`${name}-`));
+      expect(files).toHaveLength(1);
+      const path = `${directory}/${files[0]}`;
+      const artifact = JSON.parse(readFileSync(path, "utf8"));
+      expect(artifact.error).toBe("second-phase invariant");
+      expect(
+        artifact.records.filter((record: { type: string }) => record.type === "run-start"),
+      ).toEqual([
+        { type: "run-start", wallClockEpoch: epoch },
+        { type: "run-start", wallClockEpoch: epoch + 50 },
+      ]);
+      expect(artifact.lifecycleLines).toHaveLength(2);
+      expect(artifact.lifecycleLines[0]).toContain("phase=1");
+      expect(artifact.lifecycleLines[1]).toContain("phase=2");
+      expect(runs[0]?.walls[0]).toBe(epoch + 7);
+      expect(runs[0]?.walls.at(-1)).toBe(epoch + 56);
+      process.env["DST_REPLAY"] = path;
+      await expect(runDst({ ...options, seed: 999 }, scenario)).rejects.toThrow(
+        "second-phase invariant",
+      );
+      expect(runs).toHaveLength(3);
+      expect(runs[1]).toEqual(runs[0]);
+      expect(runs[2]).toEqual(runs[0]);
+      expect(capture.lines()).toEqual(artifact.lifecycleLines);
+      expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(artifact);
+    } finally {
+      if (originalReplay === undefined) delete process.env["DST_REPLAY"];
+      else process.env["DST_REPLAY"] = originalReplay;
+    }
+  }));

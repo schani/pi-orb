@@ -1,6 +1,3 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { createRegistry, MemoryStorage } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
@@ -28,7 +25,6 @@ const resources = () => ({
 });
 
 it("never retargets an authorized old alert or delivery to the post-Stop owner", async () => {
-  const path = await mkdtemp(join(tmpdir(), "durable-epoch-alert-"));
   let version = 0;
   const plane = (
     await DurableAgentPlane.create({
@@ -82,7 +78,6 @@ it("never retargets an authorized old alert or delivery to the post-Stop owner",
     );
   } finally {
     await plane.close();
-    await rm(path, { recursive: true, force: true });
   }
 });
 

@@ -5,7 +5,7 @@ import { createRegistry } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import type { ServerFrame } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { makeOrbRow, makeProjectRow } from "../../testkit/fixtures.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
 import { PgDurableAuthority } from "../durable-pg/index.ts";
@@ -16,6 +16,9 @@ import { projectNativeCommit } from "./atomic-history.ts";
 describe("browser input projection into PostgreSQL", () => {
   it("keeps browser deduplication separate from UUID inbox acknowledgements", async () => {
     const db = new PGliteClient();
+    onTestFinished(async () => {
+      (await db.end())._unsafeUnwrap();
+    });
     const database = composeControlPlaneDatabase(db);
     const task = new NoSimulationTask("browser-inbox-projection", false);
     const project = makeProjectRow(randomUUID());
@@ -46,15 +49,20 @@ describe("browser input projection into PostgreSQL", () => {
     (await database.store.insertProject(task, project))._unsafeUnwrap();
     (await database.store.insertOrb(task, orb))._unsafeUnwrap();
     const owner = (await authority.acquire(orb.id, "browser-test", 0, 0, 100))._unsafeUnwrap();
-    const open = async () =>
-      (
+    onTestFinished(async () => {
+      (await authority.release(owner))._unsafeUnwrap();
+    });
+    const open = async () => {
+      const storage = (
+        await authority.open(owner, {
+          project: (query, writes) => projectNativeCommit(query, orb.id, writes),
+        })
+      )._unsafeUnwrap();
+      onTestFinished(() => storage.close({} as never));
+      const agent = (
         await DurableAgent.open({
           orbId: orb.id,
-          storage: (
-            await authority.open(owner, {
-              project: (query, writes) => projectNativeCommit(query, orb.id, writes),
-            })
-          )._unsafeUnwrap(),
+          storage,
           models,
           registry: createRegistry(),
           env: new NodeExecutionEnv({ cwd: "/tmp" }),
@@ -63,6 +71,11 @@ describe("browser input projection into PostgreSQL", () => {
           initialSettings: { model: { provider: "faux", id: "faux-1" }, thinkingLevel: "off" },
         })
       )._unsafeUnwrap();
+      onTestFinished(async () => {
+        (await agent.close())._unsafeUnwrap();
+      });
+      return agent;
+    };
     let agent = await open();
     const frames: ServerFrame[] = [];
     agent.subscribe((frame) => frames.push(frame));
@@ -72,7 +85,7 @@ describe("browser input projection into PostgreSQL", () => {
       expectedHeadId: agent.snapshot()._unsafeUnwrap().headId,
       content: [{ type: "text" as const, text: "browser question" }],
     };
-    try {
+    {
       const accepted = (await agent.request(requestId, action))._unsafeUnwrap();
       expect(accepted).toMatchObject({ type: "accepted", duplicate: false });
       const idle = await agent.waitForIdle();
@@ -122,10 +135,6 @@ describe("browser input projection into PostgreSQL", () => {
       ).toBe("delivered");
       expect(JSON.stringify(agent.snapshot()._unsafeUnwrap().records)).toContain("inbox final");
       expect(generations).toBe(2);
-    } finally {
-      await agent.close();
-      await authority.release(owner);
-      await database.close();
     }
   });
 });

@@ -11,6 +11,24 @@ import type { OrbHostProvider } from "../domain/ports.ts";
 import { makeHarness, makeOrbRow } from "../testkit/fixtures.ts";
 import { registerLiveProxy } from "./live-proxy.ts";
 
+function delegatingProvider(
+  delegate: OrbHostProvider,
+  overrides: Pick<OrbHostProvider, "observe"> & Partial<Pick<OrbHostProvider, "executionBinding">>,
+): OrbHostProvider {
+  return {
+    kind: delegate.kind,
+    specGeneration: delegate.specGeneration,
+    desiredSpecFingerprint: (input) => delegate.desiredSpecFingerprint(input),
+    provision: (task, request, context) => delegate.provision(task, request, context),
+    start: (task, ref, context) => delegate.start(task, ref, context),
+    stop: (task, ref, context) => delegate.stop(task, ref, context),
+    discardCompute: (task, request, context) => delegate.discardCompute(task, request, context),
+    destroy: (task, id, context) => delegate.destroy(task, id, context),
+    listManagedHosts: (task, context) => delegate.listManagedHosts(task, context),
+    ...overrides,
+  };
+}
+
 const openServers: Array<{ close: () => Promise<void> }> = [];
 
 async function closeWebSocketServer(server: WebSocketServer): Promise<void> {
@@ -220,16 +238,7 @@ describe("live proxy", () => {
     );
     harness.deps.control.markStopping(orbId, 1);
     const delegate = harness.deps.hostProvider;
-    const hostProvider: OrbHostProvider = {
-      kind: delegate.kind,
-      specGeneration: delegate.specGeneration,
-      desiredSpecFingerprint: (input) => delegate.desiredSpecFingerprint(input),
-      provision: (task, request, context) => delegate.provision(task, request, context),
-      start: (task, ref, context) => delegate.start(task, ref, context),
-      stop: (task, ref, context) => delegate.stop(task, ref, context),
-      discardCompute: (task, request, context) => delegate.discardCompute(task, request, context),
-      destroy: (task, id, context) => delegate.destroy(task, id, context),
-      listManagedHosts: (task, context) => delegate.listManagedHosts(task, context),
+    const hostProvider = delegatingProvider(delegate, {
       observe: (_task, ref) => {
         markObserveStarted();
         return ResultAsync.fromSafePromise(observeGate).map(() => ({
@@ -241,7 +250,7 @@ describe("live proxy", () => {
           runtimeAddress: { baseUrl: `http://127.0.0.1:${runtimeAddress.port}` },
         }));
       },
-    };
+    });
 
     const app = Fastify({ logger: false });
     openServers.push({ close: () => app.close() });
@@ -307,16 +316,7 @@ describe("live proxy", () => {
     // carries its marker from the preceding stopping episode.
     harness.deps.control.markStopping(orbId, 1);
     const delegate = harness.deps.hostProvider;
-    const hostProvider: OrbHostProvider = {
-      kind: delegate.kind,
-      specGeneration: delegate.specGeneration,
-      desiredSpecFingerprint: (input) => delegate.desiredSpecFingerprint(input),
-      provision: (task, request, context) => delegate.provision(task, request, context),
-      start: (task, ref, context) => delegate.start(task, ref, context),
-      stop: (task, ref, context) => delegate.stop(task, ref, context),
-      discardCompute: (task, request, context) => delegate.discardCompute(task, request, context),
-      destroy: (task, id, context) => delegate.destroy(task, id, context),
-      listManagedHosts: (task, context) => delegate.listManagedHosts(task, context),
+    const hostProvider = delegatingProvider(delegate, {
       observe: (_task, ref) =>
         ResultAsync.fromSafePromise(Promise.resolve()).map(() => ({
           ref,
@@ -326,16 +326,16 @@ describe("live proxy", () => {
           state: "running" as const,
           runtimeAddress: { baseUrl: `http://127.0.0.1:${runtimeAddress.port}` },
         })),
-    };
-    hostProvider.executionBinding = () =>
-      ResultAsync.fromSafePromise(
-        Promise.resolve({
-          baseUrl: `http://127.0.0.1:${runtimeAddress.port}`,
-          token: "scoped-secret",
-          incarnation: "0",
-          cwd: "/workspace",
-        }),
-      );
+      executionBinding: () =>
+        ResultAsync.fromSafePromise(
+          Promise.resolve({
+            baseUrl: `http://127.0.0.1:${runtimeAddress.port}`,
+            token: "scoped-secret",
+            incarnation: "0",
+            cwd: "/workspace",
+          }),
+        ),
+    });
     const app = Fastify({ logger: false });
     openServers.push({ close: () => app.close() });
     await registerLiveProxy(app, new NoSimulationTask("terminal proxy test", false), {
@@ -389,16 +389,7 @@ describe("live proxy", () => {
     const orbId = "orb-presence";
     harness.store.seedOrb(makeOrbRow(orbId, "project-a", "running", { hostRef: "host-b" }));
     const delegate = harness.deps.hostProvider;
-    const hostProvider: OrbHostProvider = {
-      kind: delegate.kind,
-      specGeneration: delegate.specGeneration,
-      desiredSpecFingerprint: (input) => delegate.desiredSpecFingerprint(input),
-      provision: (task, request, context) => delegate.provision(task, request, context),
-      start: (task, ref, context) => delegate.start(task, ref, context),
-      stop: (task, ref, context) => delegate.stop(task, ref, context),
-      discardCompute: (task, request, context) => delegate.discardCompute(task, request, context),
-      destroy: (task, id, context) => delegate.destroy(task, id, context),
-      listManagedHosts: (task, context) => delegate.listManagedHosts(task, context),
+    const hostProvider = delegatingProvider(delegate, {
       observe: (_task, ref) =>
         ResultAsync.fromSafePromise(Promise.resolve()).map(() => ({
           ref,
@@ -408,7 +399,7 @@ describe("live proxy", () => {
           state: "running" as const,
           runtimeAddress: { baseUrl: `http://127.0.0.1:${runtimeAddress.port}` },
         })),
-    };
+    });
 
     const app = Fastify({ logger: false });
     openServers.push({ close: () => app.close() });

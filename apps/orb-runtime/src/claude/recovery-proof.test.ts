@@ -9,6 +9,9 @@ it("accepts only bounded exact launch proof fields", () => {
     "",
     "{",
     "a".repeat(513),
+    ...["disposedIncarnation", "replacementIncarnation"].flatMap((key) =>
+      [-1, 1.5, undefined].map((value) => JSON.stringify({ ...proof, [key]: value })),
+    ),
     JSON.stringify({ ...proof, verified: true }),
     JSON.stringify({ ...proof, episode: "secret" }),
   ])

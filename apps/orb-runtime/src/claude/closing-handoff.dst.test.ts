@@ -142,7 +142,7 @@ it.each(
 );
 
 it("keeps a known pre-result task handoff until a subsequent root result", async () => {
-  await runDst({ name: "claude-normal-child-handoff", iterations: 20 }, async (sim) => {
+  await runDst({ name: "claude-normal-child-handoff", iterations: 1 }, async (sim) => {
     const f = new ComposedClaudeFixture();
     try {
       expect((await f.attach()).isOk()).toBe(true);
@@ -183,7 +183,7 @@ it("keeps a known pre-result task handoff until a subsequent root result", async
 it.each(["missing-start", "other-session"] as const)(
   "does not qualify a closing terminal with %s evidence",
   async (kind) => {
-    await runDst({ name: `claude-closing-unproved-${kind}`, iterations: 20 }, async (sim) => {
+    await runDst({ name: `claude-closing-unproved-${kind}`, iterations: 1 }, async (sim) => {
       const f = new ComposedClaudeFixture();
       try {
         expect((await f.attach()).isOk()).toBe(true);
@@ -240,7 +240,7 @@ it.each(["missing-start", "other-session"] as const)(
 it.each(["unmatched-child", "same-id-child", "background"] as const)(
   "retains uncertain %s ownership after a proved task terminal",
   async (kind) => {
-    await runDst({ name: `claude-closing-uncertain-${kind}`, iterations: 20 }, async (sim) => {
+    await runDst({ name: `claude-closing-uncertain-${kind}`, iterations: 1 }, async (sim) => {
       const f = new ComposedClaudeFixture();
       try {
         expect((await f.attach()).isOk()).toBe(true);

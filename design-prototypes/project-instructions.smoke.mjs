@@ -1,14 +1,13 @@
-import { chromium } from '@playwright/test';
+import { runStudy } from "./study-browser.mjs";
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
-import { mkdir } from 'node:fs/promises';
 
-const browser = await chromium.launch({ headless: true });
-await mkdir('/tmp/project-instructions-study', { recursive: true });
+await runStudy("project-instructions", async ({ browser, artifact, outputDir }) => {
+
 const errors = [];
 let assertions = 0;
 function check(value, message) { assert.ok(value, message); assertions++; }
-try {
+
   for (const width of [1440, 390, 320]) {
     const page = await browser.newPage({ viewport: { width, height: 1100 } });
     page.on('pageerror', error => errors.push(String(error)));
@@ -61,7 +60,7 @@ try {
         });
         check(bounds.a <= bounds.b, 'sheet leaves composer clear');
       }
-      await page.screenshot({ path: `/tmp/project-instructions-study/${width}-${variant+1}.png`, fullPage: true });
+      await page.screenshot({ path: artifact(`${width}-${variant+1}.png`), fullPage: true });
       check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'page contained horizontally');
       check(await frame.evaluate(el => el.scrollWidth <= el.clientWidth), 'product frame contained horizontally');
       check(await frame.locator('img').evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0)), 'all tiles loaded');
@@ -82,7 +81,6 @@ try {
     await page.close();
   }
   check(errors.length === 0, errors.join('\n'));
-  console.log(`${assertions} assertions passed; screenshots: /tmp/project-instructions-study`);
-} finally {
-  await browser.close();
-}
+  console.log(`Screenshots: ${outputDir}`);
+
+});

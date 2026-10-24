@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { DisplayHistoryView } from "@pi-orb/protocol";
 import { chromium, expect as expectPage } from "@playwright/test";
 import { build } from "vite";
-import { it as baseIt, expect } from "vitest";
+import { it as baseIt, expect, onTestFinished } from "vitest";
 import {
   api,
   createFakeSession,
@@ -30,6 +30,7 @@ const hasMcpAlert = (history: DisplayHistoryView, status: "needs-auth" | "connec
 
 it("initial auth recovery → two real Pi runtimes reuse the grant → rejection/refresh → reconnect → disconnect", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-oauth-e2e-"));
+  onTestFinished(() => rmSync(root, { recursive: true, force: true }));
   const key = join(root, "key.pem");
   const cert = join(root, "cert.pem");
   execFileSync(
@@ -167,6 +168,10 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
       json({ jsonrpc: "2.0", id: message.id, result });
     },
   );
+  onTestFinished(async () => {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("OAuth fixture not listening");
@@ -245,6 +250,7 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
       ]),
     },
   });
+  onTestFinished(() => deleteFakeSession(fake.sessionKey));
   const names = await createFakeSession(`oauth-names-${randomUUID()}`, {
     model: {
       rules: [0, 1, 2].map(() => ({
@@ -256,6 +262,7 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
       })),
     },
   });
+  onTestFinished(() => deleteFakeSession(names.sessionKey));
   const web = join(import.meta.dirname, "../apps/web");
   await build({
     root: web,
@@ -267,20 +274,26 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
   const priorOrigin = process.env["PI_ORB_E2E_MCP_ORIGIN"];
   process.env["NODE_EXTRA_CA_CERTS"] = cert;
   process.env["PI_ORB_E2E_MCP_ORIGIN"] = origin;
-  const cp = await startControlPlane({
-    port: 7179,
-    fake,
-    nameFake: names,
-    pglitePath: join(root, "db"),
-    processStateDirectory: join(root, "hosts"),
-    webDist: join(root, "web"),
-    entry: "e2e/mcp-oauth-entry.ts",
-    extraEnv: { PI_ORB_E2E_HISTORY_INSPECTION: "1" },
-  });
-  if (priorCert === undefined) delete process.env["NODE_EXTRA_CA_CERTS"];
-  else process.env["NODE_EXTRA_CA_CERTS"] = priorCert;
-  if (priorOrigin === undefined) delete process.env["PI_ORB_E2E_MCP_ORIGIN"];
-  else process.env["PI_ORB_E2E_MCP_ORIGIN"] = priorOrigin;
+  const cp = await (async () => {
+    try {
+      return await startControlPlane({
+        port: 7179,
+        fake,
+        nameFake: names,
+        pglitePath: join(root, "db"),
+        processStateDirectory: join(root, "hosts"),
+        webDist: join(root, "web"),
+        entry: "e2e/mcp-oauth-entry.ts",
+        extraEnv: { PI_ORB_E2E_HISTORY_INSPECTION: "1" },
+      });
+    } finally {
+      if (priorCert === undefined) delete process.env["NODE_EXTRA_CA_CERTS"];
+      else process.env["NODE_EXTRA_CA_CERTS"] = priorCert;
+      if (priorOrigin === undefined) delete process.env["PI_ORB_E2E_MCP_ORIGIN"];
+      else process.env["PI_ORB_E2E_MCP_ORIGIN"] = priorOrigin;
+    }
+  })();
+  onTestFinished(() => cp.stop());
   const executablePath =
     process.env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"] ??
     (existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined);
@@ -288,12 +301,19 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
     ...(executablePath ? { executablePath } : {}),
     args: ["--no-sandbox"],
   });
+  onTestFinished(() => browser.close());
   const page = await browser.newPage({ ignoreHTTPSErrors: true });
   const project = randomUUID();
   const otherProject = randomUUID();
   const foreignOrb = randomUUID();
   const connection = randomUUID();
   const orbs = [randomUUID(), randomUUID()] as const;
+  onTestFinished(async () => {
+    await api(cp.baseUrl, "DELETE", `/api/v1/projects/${project}`);
+  });
+  onTestFinished(async () => {
+    await api(cp.baseUrl, "DELETE", `/api/v1/projects/${otherProject}`);
+  });
   const runtimeTokenRequest = async (orbId: string) => {
     const metadata = JSON.parse(readFileSync(join(root, "hosts", orbId, "host.json"), "utf8")) as {
       runtimeToken: string;
@@ -594,19 +614,13 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
       JSON.stringify((await api(cp.baseUrl, "GET", `/api/v1/projects/${project}/mcp`)).body),
     ).not.toContain("fixture-access-");
   } catch (error) {
-    console.error("OAuth bootstrap evidence", bootstrapEvidence);
-    console.error(cp.logs.join(""));
-    console.error(await page.locator("body").innerText());
+    try {
+      console.error("OAuth bootstrap evidence", bootstrapEvidence);
+      console.error(cp.logs.join(""));
+      console.error(await page.locator("body").innerText());
+    } catch {
+      console.error("OAuth diagnostic capture failed");
+    }
     throw error;
-  } finally {
-    await browser.close();
-    await api(cp.baseUrl, "DELETE", `/api/v1/projects/${project}`);
-    await api(cp.baseUrl, "DELETE", `/api/v1/projects/${otherProject}`);
-    await cp.stop();
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    await deleteFakeSession(fake.sessionKey);
-    await deleteFakeSession(names.sessionKey);
-    rmSync(root, { recursive: true, force: true });
   }
 });

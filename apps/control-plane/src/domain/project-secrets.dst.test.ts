@@ -6,7 +6,7 @@ const outsideTask = new NoSimulationTask("project secrets assertions", false);
 
 import { FAILPOINTS } from "../testkit/failpoints.ts";
 import { makeProjectSecretsHarness } from "../testkit/project-secrets.ts";
-import { runDst } from "../testkit/sim.ts";
+import { runDst, waitUntil } from "../testkit/sim.ts";
 import {
   deleteAllProjectSecrets,
   deleteProjectSecret,
@@ -190,12 +190,29 @@ describe("project secrets (DST)", () => {
           (await putProjectSecret(outsideTask, harness.deps, PROJECT, "PAIR_B", "old-b")).isOk(),
         ).toBe(true);
         const snapshots: Record<string, string>[] = [];
+        let writerStaged = false;
+        let readDuringRotation = false;
+        const commit = harness.pointers.casWriteProjectSecretPointer.bind(harness.pointers);
+        harness.pointers.casWriteProjectSecretPointer = (...args) =>
+          new ResultAsync(
+            (async () => {
+              writerStaged = true;
+              await waitUntil(
+                args[0],
+                "snapshot before rotation commits",
+                () => readDuringRotation,
+              );
+              return commit(...args);
+            })(),
+          );
         const result = await sim.runTasks([
           {
             name: "reader",
             f: async (task) => {
+              await waitUntil(task, "rotation staged before snapshot", () => writerStaged);
               const snapshot = await getProjectSecretSnapshot(task, harness.deps, PROJECT);
-              if (snapshot.isOk()) snapshots.push(snapshot.value.values);
+              snapshots.push(expectSnapshot(snapshot));
+              readDuringRotation = true;
             },
           },
           {
@@ -208,6 +225,8 @@ describe("project secrets (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(readDuringRotation).toBe(true);
+        expect(snapshots).toHaveLength(1);
         for (const snapshot of snapshots) {
           expect(snapshot).toEqual(
             snapshot.PAIR_A === "new-a"
@@ -248,28 +267,26 @@ describe("project secrets (DST)", () => {
     });
   });
 
-  it("keeps pointers readable across crash windows and deletion collects orphan versions", async () => {
-    await runDst({ name: "project-secrets-crash-windows", iterations: 30 }, async (_sim) => {
-      const harness = makeProjectSecretsHarness(PROJECT);
-      expect(
-        (await putProjectSecret(outsideTask, harness.deps, PROJECT, "TOKEN", "current")).isOk(),
-      ).toBe(true);
-      const pointer = harness.pointers.snapshot(PROJECT);
-      expect(pointer).not.toBeNull();
-      harness.secrets.seedSecret("project-secrets", {
-        projectId: PROJECT,
-        revision: (pointer?.revision ?? 0) + 1,
-        values: { TOKEN: "orphan" },
-      });
-      expect(
-        expectSnapshot(await getProjectSecretSnapshot(outsideTask, harness.deps, PROJECT)),
-      ).toEqual({
-        TOKEN: "current",
-      });
-      await harness.pointers.markProjectDeleting(outsideTask, PROJECT);
-      expect((await deleteAllProjectSecrets(outsideTask, harness.deps, PROJECT)).isOk()).toBe(true);
-      expect(harness.secrets.liveVersions("project-secrets")).toEqual([]);
+  it("keeps the current pointer readable and collects unpublished orphans on deletion", async () => {
+    const harness = makeProjectSecretsHarness(PROJECT);
+    expect(
+      (await putProjectSecret(outsideTask, harness.deps, PROJECT, "TOKEN", "current")).isOk(),
+    ).toBe(true);
+    const pointer = harness.pointers.snapshot(PROJECT);
+    expect(pointer).not.toBeNull();
+    harness.secrets.seedSecret("project-secrets", {
+      projectId: PROJECT,
+      revision: (pointer?.revision ?? 0) + 1,
+      values: { TOKEN: "orphan" },
     });
+    expect(
+      expectSnapshot(await getProjectSecretSnapshot(outsideTask, harness.deps, PROJECT)),
+    ).toEqual({
+      TOKEN: "current",
+    });
+    await harness.pointers.markProjectDeleting(outsideTask, PROJECT);
+    expect((await deleteAllProjectSecrets(outsideTask, harness.deps, PROJECT)).isOk()).toBe(true);
+    expect(harness.secrets.liveVersions("project-secrets")).toEqual([]);
   });
 
   it("preserves pointer invariants under store failpoints", async () => {

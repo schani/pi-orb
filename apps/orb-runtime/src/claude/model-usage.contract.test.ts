@@ -32,6 +32,9 @@ nativeIt(
           exported = resolve;
         });
       expect(calls).toHaveLength(result.requestCount);
+      for (const call of calls) {
+        expect(call).toMatchObject({ input: 16, output: 8, cacheRead: 23, cacheWrite: 41 });
+      }
       expect(
         calls.every((call) => call.outcome === "ok" && call.model === "claude-sonnet-5-5"),
       ).toBe(true);

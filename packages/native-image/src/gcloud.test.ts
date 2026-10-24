@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { errAsync, okAsync } from "neverthrow";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CleanupEvidence } from "./cleanup-evidence.ts";
 import {
   type CommandRunner,
@@ -14,28 +14,14 @@ import {
 } from "./gcloud.ts";
 import type { ImageBuildInput } from "./orchestrator.ts";
 
+import { imageBuildInput } from "./testkit/image-build-input.ts";
+
 const temporaryDirectories: string[] = [];
 
 async function input(): Promise<ImageBuildInput> {
   const outputDir = await mkdtemp(join(tmpdir(), "pi-orb-native-image-test-"));
   temporaryDirectories.push(outputDir);
-  return {
-    project: "target-project",
-    zone: "us-central1-a",
-    baseImage: "projects/base-project/global/images/debian-pinned",
-    version: "v1",
-    subnetwork: "projects/target-project/regions/us-central1/subnetworks/orbs",
-    builderServiceAccount: "builder@target-project",
-    validationServiceAccount: "orb@target-project",
-    sourceCommit: "a".repeat(40),
-    sourceDirty: false,
-    sourceArchiveSha256: "b".repeat(64),
-    operationId: "0123456789abcdef",
-    outputDir,
-    validationRepositoryUrl: "https://github.com/example/repo",
-    inputInventory: {},
-    toolingInputInventory: {},
-  };
+  return imageBuildInput({ outputDir });
 }
 
 afterEach(async () => {
@@ -200,6 +186,96 @@ describe("GCloud native-image adapter", () => {
     expect(commands[1]).toContain("ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub");
   });
 
+  it.each([
+    ["ready", "runtime", "ready", 0, true],
+    ["starting", "runtime", "ready", 0, false],
+    ["ready", "bootstrap", "ready", 0, false],
+    ["ready", "runtime", "starting", 0, false],
+    ["ready", "runtime", "ready", 7, false],
+  ])(
+    "polls health=%s guest=%s/%s transport=%s before acceptance",
+    async (healthStatus, phase, guestStatus, transportExit, ready) => {
+      const buildInput = await input();
+      const commands: string[] = [];
+      const effects = new GcloudImageBuildEffects(async (_command, args) => {
+        const remote = args.find((arg) => arg.startsWith("--command="))?.slice(10) ?? "";
+        commands.push(remote);
+        return promisify(execFile)("bash", [
+          "-c",
+          `
+        curl() {
+          for arg in "$@"; do
+            case "$arg" in
+              http://127.0.0.1:8080/v1/health) printf '%s' '${JSON.stringify({ status: healthStatus })}'; return ${transportExit} ;;
+              http://metadata.google.internal/*) printf '%s' '${JSON.stringify({ schemaVersion: 1, phase, status: guestStatus })}'; return ${transportExit} ;;
+            esac
+          done
+          return 2
+        }
+        ssh-keygen() { printf '256 SHA256:stableKey= host (ED25519)\\n'; }
+        ${remote}
+      `,
+        ]);
+      });
+      const result = await effects.run(
+        "validate",
+        "ready",
+        buildInput,
+        new AbortController().signal,
+      );
+      expect(result.isOk()).toBe(ready);
+      if (!ready) expect(result.isErr() && result.error.retryable).toBe(true);
+      if (!ready && transportExit === 0) {
+        const diagnostic =
+          healthStatus !== "ready"
+            ? "validator HTTP health is not ready"
+            : "validator runtime-ready guest attribute is not visible";
+        const log = await readFile(`${buildInput.outputDir}/001-validate-gcloud.log`, "utf8");
+        expect(log.endsWith(`${diagnostic}\n`)).toBe(true);
+      }
+      expect(commands).toHaveLength(1);
+      expect(commands[0]).not.toContain("/opt/pi-orb/acceptance.sh");
+    },
+  );
+
+  it.each(["native_acceptance_failed line=44", "IAP connection lost"])(
+    "never marks acceptance failure retryable: %s",
+    async (diagnostic) => {
+      const buildInput = await input();
+      const effects = new GcloudImageBuildEffects(async () => {
+        throw Object.assign(new Error("remote command failed"), { stderr: diagnostic });
+      });
+      const result = await effects.run(
+        "validate",
+        "probe",
+        buildInput,
+        new AbortController().signal,
+      );
+      expect(result.isErr() && result.error).toEqual({
+        type: "image_build_failed",
+        stage: "validate",
+        message: "remote command failed",
+      });
+      expect(await readFile(`${buildInput.outputDir}/001-validate-gcloud.log`, "utf8")).toContain(
+        diagnostic,
+      );
+    },
+  );
+
+  it("retries validator SSH readiness transport failures", async () => {
+    const buildInput = await input();
+    let attempts = 0;
+    const effects = new GcloudImageBuildEffects(async () => {
+      if (++attempts === 1) throw new Error("IAP unavailable");
+      return { stdout: "PI_ORB_HOST_KEY_FINGERPRINT=SHA256:stableKey=\n", stderr: "" };
+    });
+    const signal = new AbortController().signal;
+    const first = await effects.run("validate", "ready", buildInput, signal);
+    expect(first.isErr() && first.error.retryable).toBe(true);
+    expect((await effects.run("validate", "ready", buildInput, signal)).isOk()).toBe(true);
+    expect(attempts).toBe(2);
+  });
+
   it("fails a confirmed validator host-key mismatch without retrying", async () => {
     const buildInput = await input();
     let calls = 0;
@@ -256,8 +332,8 @@ describe("GCloud native-image adapter", () => {
     );
     expect(result.isErr() && result.error).toMatchObject({
       message: "readiness host-key fingerprint is unavailable",
-      retryable: true,
     });
+    expect(result.isErr() && result.error).not.toHaveProperty("retryable");
     expect(result.isErr() && result.error).not.toHaveProperty("reason");
   });
 
@@ -293,7 +369,7 @@ describe("GCloud native-image adapter", () => {
     );
   });
 
-  it("uses the fixed e2-standard-4 disposable builder", async () => {
+  it("uses a fixed e2-standard-4 builder with instance-only SSH keys", async () => {
     const calls: string[][] = [];
     const effects = new GcloudImageBuildEffects(async (_command, args) => {
       calls.push(args);
@@ -309,21 +385,6 @@ describe("GCloud native-image adapter", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toContain("--machine-type=e2-standard-4");
     expect(calls[0]).not.toContain("--machine-type=n2d-highmem-4");
-  });
-
-  it("forces builder SSH keys into instance metadata", async () => {
-    const calls: string[][] = [];
-    const effects = new GcloudImageBuildEffects(async (_command, args) => {
-      calls.push(args);
-      return { stdout: "[]", stderr: "" };
-    });
-    const value = await effects.run(
-      "builder",
-      "create",
-      await input(),
-      new AbortController().signal,
-    );
-    expect(value.isOk()).toBe(true);
     expect(calls[0]).toContain("--metadata=block-project-ssh-keys=TRUE");
   });
 
@@ -636,35 +697,47 @@ describe("GCloud native-image adapter", () => {
     expect(requests).toBe(1);
   });
 
-  it("refuses to delete a foreign resource", async () => {
-    const calls: string[][] = [];
-    const effects = new GcloudImageBuildEffects(async (_command, args) => {
-      calls.push(args);
-      if (args[1] === "operations") return { stdout: "[]", stderr: "" };
-      return {
-        stdout: JSON.stringify({
-          name: "pi-orb-builder-v1-0123456789abcdef",
-          labels: { "pi-orb-native-build": "another-owner" },
-        }),
-        stderr: "",
-      };
-    });
-    const value = await effects.run(
-      "cleanup",
-      "delete-builder",
-      await input(),
-      new AbortController().signal,
-    );
-    expect(value.isErr() && value.error.message).toContain("refusing to delete foreign");
-    expect(calls).toHaveLength(2);
-    expect(calls[1]).toContain("--format=json(name,labels)");
-  });
+  it.each(["conflict", "missing label", "snapshot failure"] as const)(
+    "refuses image deletion after %s",
+    async (scenario) => {
+      const submit = vi.fn(() => okAsync({}));
+      const effects = new GcloudImageBuildEffects(
+        async (_command, args) => {
+          if (args[1] === "operations") return { stdout: "[]", stderr: "" };
+          if (scenario === "snapshot failure") throw new Error("snapshot unavailable");
+          return {
+            stdout: JSON.stringify({
+              name: "pi-orb-image-v1-0123456789abcdef",
+              labels: scenario === "conflict" ? { "pi-orb-native-build": "another-owner" } : {},
+            }),
+            stderr: "",
+          };
+        },
+        undefined,
+        undefined,
+        undefined,
+        submit,
+      );
+      const result = await effects.run(
+        "cleanup",
+        "delete-image",
+        await input(),
+        new AbortController().signal,
+      );
+      expect(result.isErr()).toBe(true);
+      expect(result.isErr() && result.error.message).toContain(
+        scenario === "snapshot failure" ? "snapshot unavailable" : "refusing to delete foreign",
+      );
+      expect(submit).not.toHaveBeenCalled();
+    },
+  );
 
   it("deletes only after the ownership label matches", async () => {
     const calls: string[][] = [];
     const target =
       "projects/target-project/zones/us-central1-a/instances/pi-orb-builder-v1-0123456789abcdef";
     const operation = "delete-builder-operation";
+    const deletes: string[] = [];
     const effects = new GcloudImageBuildEffects(
       async (_command, args) => {
         calls.push(args);
@@ -679,36 +752,29 @@ describe("GCloud native-image adapter", () => {
             }),
             stderr: "",
           };
-        return {
-          stdout:
-            args[2] === "describe"
-              ? JSON.stringify({
-                  name: "pi-orb-builder-v1-0123456789abcdef",
-                  labels: { "pi-orb-native-build": "0123456789abcdef" },
-                })
-              : JSON.stringify([
-                  {
-                    name: operation,
-                    operationType: "delete",
-                    status: "RUNNING",
-                    targetLink: target,
-                    selfLink: `projects/target-project/zones/us-central1-a/operations/${operation}`,
-                  },
-                ]),
-          stderr: "",
-        };
+        if (args[2] === "describe")
+          return {
+            stdout: JSON.stringify({
+              name: "pi-orb-builder-v1-0123456789abcdef",
+              labels: { "pi-orb-native-build": "0123456789abcdef" },
+            }),
+            stderr: "",
+          };
+        throw new Error(`unexpected command: ${args.join(" ")}`);
       },
       undefined,
       undefined,
       undefined,
-      () =>
-        okAsync({
+      (target) => {
+        deletes.push(target);
+        return okAsync({
           name: operation,
           operationType: "delete",
           status: "RUNNING",
           targetLink: target,
           selfLink: `projects/target-project/zones/us-central1-a/operations/${operation}`,
-        }),
+        });
+      },
     );
     const value = await effects.run(
       "cleanup",
@@ -717,6 +783,7 @@ describe("GCloud native-image adapter", () => {
       new AbortController().signal,
     );
     expect(value.isOk()).toBe(true);
+    expect(deletes).toEqual([target]);
     expect(calls.map((args) => args.slice(0, 3))).toEqual([
       ["compute", "operations", "list"],
       ["compute", "instances", "describe"],
@@ -806,26 +873,37 @@ describe("GCloud native-image adapter", () => {
   });
 
   it("fails cleanup when an exact operation cannot be described", async () => {
-    let deleted = false;
-    const effects = new GcloudImageBuildEffects(async (_command, args) => {
-      if (args[1] === "operations" && args[2] === "list") {
-        return {
-          stdout: JSON.stringify([
-            {
-              name: "operation-late-workspace-image",
-              status: "RUNNING",
-              targetLink:
-                "projects/target-project/global/images/pi-orb-image-workspace-v1-0123456789abcdef",
-            },
-          ]),
-          stderr: "",
-        };
-      }
-      if (args[1] === "operations" && args[2] === "describe")
-        throw new Error("operation status unavailable");
-      if (args[2] === "delete") deleted = true;
-      return { stdout: "", stderr: "" };
-    });
+    let submissions = 0;
+    const effects = new GcloudImageBuildEffects(
+      async (_command, args) => {
+        if (args[1] === "operations" && args[2] === "list") {
+          return {
+            stdout: JSON.stringify([
+              {
+                name: "operation-late-workspace-image",
+                status: "RUNNING",
+                targetLink:
+                  "projects/target-project/global/images/pi-orb-image-workspace-v1-0123456789abcdef",
+              },
+            ]),
+            stderr: "",
+          };
+        }
+        if (args[1] === "operations" && args[2] === "describe")
+          throw new Error("operation status unavailable");
+        return { stdout: "", stderr: "" };
+      },
+      undefined,
+      undefined,
+      undefined,
+      () => {
+        submissions++;
+        return errAsync({
+          type: "delete_submit_failed",
+          message: "unexpected DELETE",
+        });
+      },
+    );
     const value = await effects.run(
       "cleanup",
       "delete-workspace-image",
@@ -833,7 +911,7 @@ describe("GCloud native-image adapter", () => {
       new AbortController().signal,
     );
     expect(value.isErr() && value.error.message).toContain("operation status unavailable");
-    expect(deleted).toBe(false);
+    expect(submissions).toBe(0);
   });
 
   it("classifies transient readiness and permanent install failure", async () => {
@@ -1035,11 +1113,12 @@ describe("GCloud native-image adapter", () => {
     async (action, kind, target, scope, pollScope) => {
       const operation = `delete-${kind}`;
       const evidence: CleanupEvidence[] = [];
+      const polls: string[][] = [];
       const effects = new GcloudImageBuildEffects(
         async (_command, args) => {
           if (args[1] === "operations" && args[2] === "list") return { stdout: "[]", stderr: "" };
           if (args[1] === "operations" && args[2] === "describe") {
-            expect(args).toContain(pollScope);
+            polls.push(args);
             return {
               stdout: JSON.stringify({
                 name: operation,
@@ -1058,18 +1137,7 @@ describe("GCloud native-image adapter", () => {
               }),
               stderr: "",
             };
-          return {
-            stdout: JSON.stringify([
-              {
-                name: operation,
-                operationType: "delete",
-                status: "RUNNING",
-                targetLink: target,
-                selfLink: `projects/target-project/${scope}/operations/${operation}`,
-              },
-            ]),
-            stderr: "",
-          };
+          throw new Error(`unexpected command: ${args.join(" ")}`);
         },
         undefined,
         undefined,
@@ -1093,6 +1161,8 @@ describe("GCloud native-image adapter", () => {
         new AbortController().signal,
       );
       expect(result.isOk()).toBe(true);
+      expect(polls).toHaveLength(1);
+      expect(polls[0]).toContain(pollScope);
       expect(evidence).toEqual([
         {
           resourceKind: kind,
@@ -1142,18 +1212,7 @@ describe("GCloud native-image adapter", () => {
             }),
             stderr: "",
           };
-        return {
-          stdout: JSON.stringify([
-            {
-              name: operation,
-              operationType: "delete",
-              status: "RUNNING",
-              targetLink: target,
-              selfLink: `projects/target-project/global/operations/${operation}`,
-            },
-          ]),
-          stderr: "",
-        };
+        throw new Error(`unexpected command: ${args.join(" ")}`);
       },
       undefined,
       undefined,

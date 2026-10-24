@@ -8,7 +8,7 @@ import { makeOrbRow } from "../../testkit/fixtures.ts";
 import { DurableAgentPlane } from "./manager.ts";
 import { MemoryAgentPersistence } from "./memory-persistence.testkit.ts";
 
-it("unloads idle stopped-host state without losing the conversation identity or admitting a stale epoch", async () => {
+it("preserves conversation identity across idle unload, passive reads, and reopen", async () => {
   let orb = makeOrbRow("orb", "project", "running");
   let opens = 0;
   const persistence = new MemoryAgentPersistence();

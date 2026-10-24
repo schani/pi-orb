@@ -1,4 +1,4 @@
-import type { SimulationTask } from "determined";
+import { NoSimulationTask, type SimulationTask } from "determined";
 import { describe, expect, it } from "vitest";
 import { reconcileOrbOnce, requestOrbStart } from "../../domain/lifecycle.ts";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../../testkit/fixtures.ts";
@@ -82,23 +82,56 @@ describe("GCE adapter over deterministic stateful model (DST)", () => {
   it("pins concurrent first provisioning to one accepted workspace image", async () => {
     await runDst({ name: "gce-model-concurrent-workspace-create", iterations: 30 }, async (sim) => {
       const model = new DeterministicGceApiModel({ operationWaitPolls: 1 });
+      const providers = [provider(model), provider(model)];
+      const request = {
+        orbId: ORB,
+        incarnation: 0,
+        bootstrap: { repositoryUrl: "https://github.com/o/r" },
+      };
+      const outcomes: Array<Awaited<ReturnType<GceOrbHostProvider["provision"]>>> = [];
       const result = await sim.runTasks(
-        [provider(model), provider(model)].map((gce, index) => ({
+        providers.map((gce, index) => ({
           name: `provisioner-${index}`,
           f: async (task: SimulationTask) => {
-            await gce.provision(
-              task,
-              {
-                orbId: ORB,
-                incarnation: 0,
-                bootstrap: { repositoryUrl: "https://github.com/o/r" },
-              },
-              anyContext(),
-            );
+            outcomes[index] = await gce.provision(task, request, anyContext());
           },
         })),
       );
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(outcomes).toHaveLength(2);
+      const successes = outcomes.filter((outcome) => outcome.isOk());
+      expect(successes.length, JSON.stringify(outcomes)).toBeGreaterThanOrEqual(1);
+      for (const outcome of outcomes) {
+        if (outcome.isErr()) {
+          expect(outcome.error).toMatchObject({ operation: "provision", retryable: true });
+          expect(["unavailable", "conflict"]).toContain(outcome.error.code);
+        } else {
+          expect(outcome.value).toMatchObject({
+            ref: { provider: "gce", resourceId: instanceName(0) },
+            incarnation: 0,
+            runtimeTokenHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+            specFingerprint: providers[0]?.desiredSpecFingerprint({
+              orbId: ORB,
+              repositoryUrl: request.bootstrap.repositoryUrl,
+              harness: "pi",
+            }),
+            specGeneration: providers[0]?.specGeneration,
+          });
+        }
+      }
+      const accepted = successes[0]?._unsafeUnwrap();
+      const retried: typeof outcomes = [];
+      const convergence = await sim.runTasks(
+        providers.map((gce, index) => ({
+          name: `read-back-${index}`,
+          f: async (task: SimulationTask) => {
+            retried[index] = await gce.provision(task, request, anyContext());
+          },
+        })),
+      );
+      expect(convergence.isOk(), JSON.stringify(convergence)).toBe(true);
+      expect(retried).toHaveLength(2);
+      for (const outcome of retried) expect(outcome._unsafeUnwrap()).toEqual(accepted);
       expect(model.diskSnapshot(DISK)).toMatchObject({
         labels: { "pi-orb-orb-id": ORB },
         sourceImage: "projects/projxx/global/images/pi-orb-workspace-20260908",
@@ -196,57 +229,39 @@ describe("GCE adapter over deterministic stateful model (DST)", () => {
   });
 
   it("refuses a foreign retained disk before provisioning replacement compute", async () => {
-    await runDst({ name: "gce-model-foreign-retained-disk", iterations: 10 }, async (sim) => {
-      const model = new DeterministicGceApiModel();
-      model.seedDisk(DISK, { "pi-orb-orb-id": "another-orb" });
-      const result = await sim.runTasks([
-        {
-          name: "provisioner",
-          f: async (task) => {
-            const provisioned = await provider(model).provision(
-              task,
-              {
-                orbId: ORB,
-                incarnation: 1,
-                bootstrap: { repositoryUrl: "https://github.com/o/r" },
-              },
-              anyContext(),
-            );
-            expect(provisioned.isErr() && provisioned.error.code).toBe("conflict");
-            expect(provisioned.isErr() && provisioned.error.retryable).toBe(false);
-          },
-        },
-      ]);
-      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      expect(model.hasInstance(instanceName(1))).toBe(false);
-      expect(model.hasDisk(DISK)).toBe(true);
-    });
+    const task = new NoSimulationTask("negative-model", false);
+    const model = new DeterministicGceApiModel();
+    model.seedDisk(DISK, { "pi-orb-orb-id": "another-orb" });
+    const provisioned = await provider(model).provision(
+      task,
+      {
+        orbId: ORB,
+        incarnation: 1,
+        bootstrap: { repositoryUrl: "https://github.com/o/r" },
+      },
+      anyContext(),
+    );
+    expect(provisioned.isErr() && provisioned.error.code).toBe("conflict");
+    expect(provisioned.isErr() && provisioned.error.retryable).toBe(false);
+    expect(model.hasInstance(instanceName(1))).toBe(false);
+    expect(model.hasDisk(DISK)).toBe(true);
   });
 
   it("surfaces a failed retained-disk GET without provisioning compute", async () => {
-    await runDst({ name: "gce-model-retained-disk-get-failure", iterations: 10 }, async (sim) => {
-      const model = new DeterministicGceApiModel({ diskGetStatus: 503 });
-      const result = await sim.runTasks([
-        {
-          name: "provisioner",
-          f: async (task) => {
-            const provisioned = await provider(model).provision(
-              task,
-              {
-                orbId: ORB,
-                incarnation: 1,
-                bootstrap: { repositoryUrl: "https://github.com/o/r" },
-              },
-              anyContext(),
-            );
-            expect(provisioned.isErr() && provisioned.error.code).toBe("unavailable");
-            expect(provisioned.isErr() && provisioned.error.retryable).toBe(true);
-          },
-        },
-      ]);
-      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      expect(model.hasInstance(instanceName(1))).toBe(false);
-    });
+    const task = new NoSimulationTask("negative-model", false);
+    const model = new DeterministicGceApiModel({ diskGetStatus: 503 });
+    const provisioned = await provider(model).provision(
+      task,
+      {
+        orbId: ORB,
+        incarnation: 1,
+        bootstrap: { repositoryUrl: "https://github.com/o/r" },
+      },
+      anyContext(),
+    );
+    expect(provisioned.isErr() && provisioned.error.code).toBe("unavailable");
+    expect(provisioned.isErr() && provisioned.error.retryable).toBe(true);
+    expect(model.hasInstance(instanceName(1))).toBe(false);
   });
 
   it("a late stale discard cannot touch the explicitly started replacement", async () => {

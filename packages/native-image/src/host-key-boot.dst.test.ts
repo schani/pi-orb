@@ -11,7 +11,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { makeRecordingSimulation, runDst } from "../../../apps/control-plane/src/testkit/sim.ts";
+import { runDst } from "../../../apps/control-plane/src/testkit/sim.ts";
+import { withDstArtifacts } from "../../../testkit/dst-artifacts.ts";
 import { hostKeyAlgorithms as algorithms, generateHostKeyPairs } from "./testkit/host-key-pairs.ts";
 
 const barrierPath = new URL("../../../infra/native-vm/wait-google-host-keys.sh", import.meta.url);
@@ -243,12 +244,15 @@ describe("native validator first-boot SSH identity (DST)", () => {
     expect(schedules).toBe(process.env["DST_REPLAY"] ? 1 : 50);
   });
 
-  it("rejects a barrier that opens on an empty first-boot snapshot", async () => {
-    const alwaysReady = new Map(
-      [...barrierTable.keys()].map((state) => [state, { ready: true, clock: 0 }]),
-    );
-    await expect(
-      scenario(makeRecordingSimulation({ name: "invalid-host-key-barrier" }), alwaysReady),
-    ).rejects.toThrow("empty first-boot snapshot");
-  });
+  it("rejects a barrier that opens on an empty first-boot snapshot", async () =>
+    withDstArtifacts(async () => {
+      const alwaysReady = new Map(
+        [...barrierTable.keys()].map((state) => [state, { ready: true, clock: 0 }]),
+      );
+      await expect(
+        runDst({ name: "invalid-host-key-barrier", iterations: 1 }, async (sim) => {
+          await scenario(sim, alwaysReady);
+        }),
+      ).rejects.toThrow("empty first-boot snapshot");
+    }));
 });

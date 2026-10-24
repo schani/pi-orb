@@ -25,9 +25,9 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
   expect(source).toContain("  workflow_dispatch:\n");
   expect(source).toContain("timeout-minutes: 40");
   expect(normalRun).toContain(
-    `run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --shard=\${{ matrix.shard }}/4`,
+    `run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project frontend --project provider --project postgres --shard=\${{ matrix.shard }}/4`,
   );
-  expect(normalRun).not.toMatch(/--(?:maxWorkers|project|retry|passWithNoTests)/u);
+  expect(normalRun).not.toMatch(/--(?:maxWorkers|retry|passWithNoTests)/u);
   expect(
     source.match(/name: e2e-.*matrix\.shard.*github\.run_id.*github\.run_attempt[^\n]*/gu),
   ).toEqual([
@@ -37,7 +37,7 @@ it("runs four isolated serial E2E shards without cancelling siblings or losing f
     `name: e2e-lazy-return-\${{ matrix.shard }}-\${{ github.run_id }}-\${{ github.run_attempt }}`,
     `name: e2e-browser-failure-\${{ matrix.shard }}-\${{ github.run_id }}-\${{ github.run_attempt }}`,
   ]);
-  expect(source.match(/if: failure\(\)/gu)).toHaveLength(6);
+  expect(source.match(/if: failure\(\)/gu)).toHaveLength(7);
   const traceUpload = source
     .split("- name: Upload deterministic failure traces")[1]
     ?.split("- name:")[0];
@@ -72,7 +72,9 @@ it("the actual Vitest sequencer partitions every E2E file exactly once across fo
       ctx.projects.map((project) => [project.name, project.config.sequence.groupOrder]),
     ).toEqual([
       ["frontend", 1],
-      ["lifecycle", 2],
+      ["process", 2],
+      ["provider", 3],
+      ["postgres", 4],
     ]);
     const all = await ctx.globTestSpecifications();
     const key = (spec: (typeof all)[number]) => `${spec.project.name}:${spec.moduleId}`;
@@ -112,5 +114,59 @@ it("the actual Vitest sequencer partitions every E2E file exactly once across fo
     expect(new Set(all.map((spec) => spec.moduleId)).size).toBe(all.length);
   } finally {
     await ctx.close();
+  }
+});
+
+it("selects shared and forced-process files once but both genuine provider compositions", async () => {
+  const selected = new Map<string, string[]>();
+  for (const [backend, projects] of [
+    ["docker", ["frontend", "provider", "postgres"]],
+    ["process", ["process", "provider"]],
+  ] as const) {
+    const ctx = await createVitest({
+      root,
+      config: resolve(root, "e2e/vitest.config.ts"),
+      watch: false,
+      project: [...projects],
+    });
+    try {
+      const specs = await ctx.globTestSpecifications();
+      selected.set(backend, specs.map((spec) => spec.moduleId).sort());
+      expect(ctx.projects.map((project) => project.name).sort()).toEqual([...projects].sort());
+      const assigned: string[] = [];
+      for (const index of [1, 2, 3, 4]) {
+        ctx.config.shard = { index, count: 4 };
+        const shard = await new ctx.config.sequence.sequencer(ctx).shard([...specs]);
+        expect(shard.length).toBeGreaterThan(0);
+        assigned.push(...shard.map((spec) => spec.moduleId));
+      }
+      expect(assigned.sort()).toEqual(specs.map((spec) => spec.moduleId).sort());
+    } finally {
+      await ctx.close();
+    }
+  }
+  const docker = selected.get("docker")!;
+  const process = selected.get("process")!;
+  expect(docker.filter((file) => process.includes(file))).toEqual([
+    resolve(root, "e2e/cross-axis.e2e.test.ts"),
+    resolve(root, "e2e/full-slice.e2e.test.ts"),
+  ]);
+  expect([...new Set([...docker, ...process])].sort()).toEqual(
+    globSync("e2e/**/*.e2e.test.ts", { cwd: root })
+      .map((file) => resolve(root, file))
+      .sort(),
+  );
+  expect(docker).toContain(resolve(root, "e2e/postgres-store.e2e.test.ts"));
+  for (const file of [
+    "mcp-oauth",
+    "full-main-auth",
+    "multi-user-credentials",
+    "orb-alerts",
+    "orb-sleep",
+    "idle-stop-view",
+    "durable-independent-process",
+  ]) {
+    expect(process).toContain(resolve(root, `e2e/${file}.e2e.test.ts`));
+    expect(docker).not.toContain(resolve(root, `e2e/${file}.e2e.test.ts`));
   }
 });

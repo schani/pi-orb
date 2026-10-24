@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,11 +43,13 @@ describe("pi-orb host command", () => {
     expect(inferMediaType("asset.unknown")).toBe("application/octet-stream");
   });
 
-  it("hashes first, then streams a reopened file with exact headers", async () => {
+  it("streams exact file bytes with independent digest and request headers", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-orb-host-cli-"));
     roots.push(root);
     const file = join(root, "large.bin");
-    writeFileSync(file, Buffer.alloc(300_000, 7));
+    const expected = Buffer.alloc(300_000, 7);
+    writeFileSync(file, expected);
+    const chunks: Buffer[] = [];
     let bytes = 0;
     let headers = new Headers();
     const result = await uploadHostedFile(
@@ -57,11 +60,16 @@ describe("pi-orb host command", () => {
         requestId: "550e8400-e29b-41d4-a716-446655440000",
         type: "publish",
       },
-      async (_input, init) => {
+      async (input, init) => {
+        expect(String(input)).toBe("http://control/runtime/v1/hosting/files?path=large.bin");
+        expect(init?.method).toBe("POST");
         headers = new Headers(init?.headers);
         const body = init?.body;
         expect(body).toBeDefined();
-        for await (const chunk of body as AsyncIterable<Uint8Array>) bytes += chunk.byteLength;
+        for await (const chunk of body as AsyncIterable<Uint8Array>) {
+          chunks.push(Buffer.from(chunk));
+          bytes += chunk.byteLength;
+        }
         return Response.json(
           {
             file: {
@@ -80,7 +88,12 @@ describe("pi-orb host command", () => {
     expect(bytes).toBe(300_000);
     expect(headers.get("content-length")).toBe("300000");
     expect(headers.get("x-pi-orb-request-id")).toBe("550e8400-e29b-41d4-a716-446655440000");
-    expect(headers.get("x-pi-orb-sha256")).toHaveLength(64);
+    expect(Buffer.concat(chunks)).toEqual(expected);
+    expect(headers.get("authorization")).toBe("Bearer token");
+    expect(headers.get("content-type")).toBe("application/octet-stream");
+    expect(headers.get("x-pi-orb-sha256")).toBe(
+      createHash("sha256").update(expected).digest("hex"),
+    );
   });
 
   it("rejects directories and reports the retry identity after an unknown upload outcome", async () => {

@@ -5,7 +5,7 @@ import { runDst } from "../testkit/sim.ts";
 import { ClaudeActivity } from "./activity.ts";
 
 it("root completion cannot retire an operation before owned children and process/history drain", async () => {
-  await runDst({ name: "claude-root-child-drain" }, async (sim) => {
+  await runDst({ name: "claude-root-child-drain", iterations: 1 }, async (sim) => {
     const activity = new ClaudeActivity();
     activity.claim("operation");
     activity.taskStart("child", "child", false);

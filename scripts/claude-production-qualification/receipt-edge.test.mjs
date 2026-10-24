@@ -69,10 +69,12 @@ test("an atomic journal can arrive before the matching native write", async () =
     settled = true;
   });
   try {
-    await writeFile(state, JSON.stringify({ deliveries: { inbox: { uuid: "expected" } } }));
+    const next = join(directory, "session.next");
+    await writeFile(next, JSON.stringify({ deliveries: { inbox: { uuid: "expected" } } }));
+    await rename(next, state);
     await edge.inspect();
     assert.equal(settled, false);
-    await writeFile(native, '{"type":"user","uuid":"old"}\n{"type":"user","uuid":"expected"}\n');
+    await appendFile(native, '{"type":"user","uuid":"expected"}\n');
     await edge.promise;
     assert.equal(settled, true);
   } finally {

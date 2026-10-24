@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { PROJECT_SECRETS_RUNTIME_PATH } from "@pi-orb/protocol";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { BrokerEnv } from "../broker/endpoint.ts";
 import { fetchProjectSecretSnapshot, fetchProjectSecretSnapshotAtBoot } from "./endpoint.ts";
 
@@ -50,21 +50,63 @@ describe("project-secret boot snapshot endpoint", () => {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ revision: 1, values: { TOKEN: "ready" } }));
     });
+    onTestFinished(async () => {
+      warming.closeAllConnections();
+      await new Promise<void>((resolve) => warming.close(() => resolve()));
+    });
     await new Promise<void>((resolve) => warming.listen(0, "127.0.0.1", resolve));
     const { port } = warming.address() as AddressInfo;
+    let now = 0;
     const result = await fetchProjectSecretSnapshotAtBoot(
       { controlPlaneUrl: `http://127.0.0.1:${port}`, runtimeToken: "runtime-bearer" },
-      { retryWindowMs: 1_000, now: () => 0, sleep: async () => {} },
+      {
+        retryWindowMs: 3_000,
+        now: () => now,
+        sleep: async (ms) => {
+          now += ms;
+        },
+      },
     );
     expect(result.isOk() && result.value.values).toEqual({ TOKEN: "ready" });
     expect(attempts).toBe(3);
-    await new Promise<void>((resolve) => warming.close(() => resolve()));
+  });
+
+  it("stops a permanent outage at the explicit boot budget", async () => {
+    const attempts: number[] = [];
+    let now = 0;
+    const request = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      attempts.push(now);
+      return new Response("{}", { status: 503 });
+    });
+    onTestFinished(() => request.mockRestore());
+    const result = await fetchProjectSecretSnapshotAtBoot(
+      { controlPlaneUrl: "http://control.test", runtimeToken: "test" },
+      {
+        retryWindowMs: 3_000,
+        now: () => now,
+        sleep: async (ms) => {
+          now += ms;
+          expect(now).toBeLessThanOrEqual(3_000);
+        },
+      },
+    );
+    expect(result._unsafeUnwrapErr()).toMatchObject({
+      type: "project_secret_fetch_error",
+      code: "unavailable",
+      retryable: true,
+    });
+    expect(now).toBe(3_000);
+    expect(attempts).toEqual([0, 1_000, 2_000, 3_000]);
   });
 
   it("fails typed on malformed success and transport errors", async () => {
     const malformed = createServer((_request, response) => {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ revision: 1, values: { "bad-name": "secret" } }));
+    });
+    onTestFinished(async () => {
+      malformed.closeAllConnections();
+      await new Promise<void>((resolve) => malformed.close(() => resolve()));
     });
     await new Promise<void>((resolve) => malformed.listen(0, "127.0.0.1", resolve));
     const { port } = malformed.address() as AddressInfo;
@@ -73,10 +115,10 @@ describe("project-secret boot snapshot endpoint", () => {
       runtimeToken: "runtime-bearer",
     });
     expect(bad.isErr() && bad.error.code).toBe("invalid_response");
-    await new Promise<void>((resolve) => malformed.close(() => resolve()));
-
+    const rejection = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("owned rejection"));
+    onTestFinished(() => rejection.mockRestore());
     const unavailable = await fetchProjectSecretSnapshot({
-      controlPlaneUrl: "http://127.0.0.1:1",
+      controlPlaneUrl: "http://control.test",
       runtimeToken: "runtime-bearer",
     });
     expect(unavailable.isErr() && unavailable.error.code).toBe("unavailable");

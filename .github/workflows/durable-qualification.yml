@@ -40,7 +40,31 @@ jobs:
       - name: Run central process end-to-end tests
         env:
           PI_ORB_LOCAL_FAKE_EVIDENCE: ${{ runner.temp }}/local-fake-provider
-        run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --shard=${{ matrix.shard }}/4
+        run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project process --project provider --shard=${{ matrix.shard }}/4
+      - name: Upload nested scenario failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: nested-process-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-failures/full-slice-orb-*/failure.txt
+            test-failures/full-slice-orb-*/control-plane.log
+            test-failures/full-slice-orb-*/failing-orb.json
+            test-failures/full-slice-orb-*/failing-history.json
+            test-failures/full-slice-orb-*/capture-outcomes.json
+            .context/orb-alerts/evidence/*/failure.txt
+            .context/orb-alerts/evidence/*/control-plane.log
+            .context/orb-alerts/evidence/*/orb.json
+            .context/orb-alerts/evidence/*/history.json
+            .context/orb-sleep/evidence/*/failure.txt
+            .context/orb-sleep/evidence/*/manifest.json
+            .context/orb-sleep/evidence/*/control-plane.log
+            .context/orb-sleep/evidence/*/orb-view.json
+            .context/orb-sleep/evidence/*/history.json
+            .context/orb-sleep/evidence/*/messages.json
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Upload local provider provenance
         id: upload_provenance
         if: always()
@@ -177,40 +201,5 @@ jobs:
             test-failures/durable-independent-process/*/waiting.png
             test-failures/durable-independent-process/*/final-page.png
           include-hidden-files: true
-          if-no-files-found: ignore
-          retention-days: 14
-
-  control-plane-image:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-      - name: Check Docker disk budget
-        run: |
-          df -h
-          test "$(df -Pk . | awk 'NR == 2 {print $4}')" -ge 15728640
-      - name: Build control-plane image
-        run: docker build -f apps/control-plane/Dockerfile -t pi-orb-control-plane:qualification .
-      - name: Prove packaged worker, Git and skills without network
-        run: |
-          set -euo pipefail
-          container=$(docker create --network none pi-orb-control-plane:qualification node /app/image-proof.mjs)
-          trap 'docker rm -f "$container"' EXIT
-          docker cp scripts/control-plane-image-proof.mjs "$container:/app/image-proof.mjs"
-          docker start --attach "$container" 2>&1 | tee "$RUNNER_TEMP/control-plane-image-proof.log"
-          test "$(docker inspect --format '{{.State.ExitCode}}' "$container")" = 0
-      - name: Report image and disk provenance
-        if: always()
-        run: |
-          df -h
-          docker system df
-          docker image inspect pi-orb-control-plane:qualification --format '{{.Id}} {{.Size}}' || true
-      - name: Upload image proof
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
-        with:
-          name: control-plane-image-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/control-plane-image-proof.log
           if-no-files-found: ignore
           retention-days: 14

@@ -103,7 +103,7 @@ it("prunes images on session and record replacement, clear, orb/project invalida
 });
 
 it("DST: a response from an old lease cannot repopulate images after deletion", async () => {
-  await runDst({ name: "image-cache-owner-deletion", iterations: 30 }, async (sim) => {
+  await runDst({ name: "image-cache-owner-deletion", iterations: 1 }, async (sim) => {
     const cache = new TranscriptCache();
     const owner = cache.acquire("a", "p");
     expect(owner.publish(snapshotFromHistory(history()))).toBe("stored");

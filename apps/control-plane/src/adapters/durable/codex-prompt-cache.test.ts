@@ -3,7 +3,7 @@ import { zstdDecompressSync } from "node:zlib";
 import { createRegistry } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { okAsync } from "neverthrow";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { DurableAgent } from "./agent.ts";
 import { MemoryAgentPersistence } from "./memory-persistence.testkit.ts";
 import { createDurableModels } from "./models.ts";
@@ -99,6 +99,10 @@ describe("durable Codex prompt cache key", () => {
         response.end();
       });
     });
+    onTestFinished(async () => {
+      server.closeAllConnections();
+      if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+    });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as { port: number };
     const claims = Buffer.from(
@@ -115,9 +119,13 @@ describe("durable Codex prompt cache key", () => {
       )._unsafeUnwrap();
       const registry = createRegistry();
       const tools = createDurableTools();
+      onTestFinished(async () => {
+        (await tools.close())._unsafeUnwrap();
+      });
       registry.install(tools.extension);
       registry.install(tools.childExtension);
       const { storage } = (await persistence.openOrb("orb", false))._unsafeUnwrap();
+      onTestFinished(() => storage.close({} as never));
       return (
         await DurableAgent.open({
           orbId: "orb",
@@ -230,12 +238,17 @@ describe("durable Codex prompt cache key", () => {
         response.end();
       });
     });
+    onTestFinished(async () => {
+      server.closeAllConnections();
+      if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+    });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address() as { port: number };
     const claims = Buffer.from(
       JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "test" } }),
     ).toString("base64url");
     const { storage } = (await new MemoryAgentPersistence().openOrb("orb", false))._unsafeUnwrap();
+    onTestFinished(() => storage.close({} as never));
     const models = (
       await createDurableModels({
         token: () =>
@@ -245,6 +258,9 @@ describe("durable Codex prompt cache key", () => {
     )._unsafeUnwrap();
     const registry = createRegistry();
     const tools = createDurableTools();
+    onTestFinished(async () => {
+      (await tools.close())._unsafeUnwrap();
+    });
     registry.install(tools.extension);
     registry.install(tools.childExtension);
     const agent = (
@@ -264,6 +280,9 @@ describe("durable Codex prompt cache key", () => {
         },
       })
     )._unsafeUnwrap();
+    onTestFinished(async () => {
+      (await agent.close())._unsafeUnwrap();
+    });
     const turn = async (text: string) => {
       (
         await agent.deliver({
@@ -275,14 +294,9 @@ describe("durable Codex prompt cache key", () => {
       )._unsafeUnwrap();
       (await agent.waitForIdle())._unsafeUnwrap();
     };
-    try {
-      await turn("ROOT_TURN_ONE");
-      await turn("ROOT_TURN_TWO");
-    } finally {
-      await agent.close();
-      server.closeAllConnections();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    }
+    await turn("ROOT_TURN_ONE");
+    await turn("ROOT_TURN_TWO");
+    await agent.close();
     const conversations = new Map<unknown, Body[]>();
     for (const body of requests)
       conversations.set(body.prompt_cache_key, [

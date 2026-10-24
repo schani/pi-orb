@@ -85,8 +85,31 @@ jobs:
           DEBUG: pw:browser
           PI_ORB_LOCAL_FAKE_EVIDENCE: ${{ runner.temp }}/local-fake-provider
           PI_ORB_E2E_RUNTIME_IMAGE_ID: ${{ steps.runtime-image.outputs.imageid }}
-        run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --shard=${{ matrix.shard }}/4
+        run: node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project frontend --project provider --project postgres --shard=${{ matrix.shard }}/4
 
+      - name: Upload nested scenario failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: nested-docker-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-failures/stopped-cache-*/evidence.json
+            test-failures/stopped-cache-*/failure.png
+            test-failures/stopped-cache-*/trace.zip
+            test-failures/full-slice-orb-*/failure.txt
+            test-failures/full-slice-orb-*/control-plane.log
+            test-failures/full-slice-orb-*/failing-orb.json
+            test-failures/full-slice-orb-*/failing-history.json
+            test-failures/full-slice-orb-*/capture-outcomes.json
+            .context/empty-live-reasoning/simplification/*-first-failure/error.txt
+            .context/empty-live-reasoning/simplification/*-first-failure/frames.json
+            .context/empty-live-reasoning/simplification/*-first-failure/detail-requests.json
+            .context/empty-live-reasoning/simplification/*-first-failure/page-errors.json
+            .context/empty-live-reasoning/simplification/*-first-failure/page.html
+            .context/empty-live-reasoning/simplification/*-first-failure/page.png
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Upload local provider provenance
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)

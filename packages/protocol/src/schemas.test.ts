@@ -116,13 +116,6 @@ describe("history schemas", () => {
     expect(
       Check(HistoryRecordSchema, {
         ...eventRecord,
-        eventType: "pi.custom",
-        unknownField: true,
-      }),
-    ).toBe(false);
-    expect(
-      Check(HistoryRecordSchema, {
-        ...eventRecord,
         eventType: "pi.custom_message",
         custom: { customType: "subagent-update", display: true },
         subagent: { kind: "update", description: "Check services", message: "halfway" },

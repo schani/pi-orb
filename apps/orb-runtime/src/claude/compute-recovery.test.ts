@@ -23,6 +23,31 @@ describe("verified Claude compute recovery", () => {
         deliveries: { inbox: { uuid: "native", operationId: "other", submitted: true } },
       }),
     ).not.toBe(claudeRecoveryEpisode(state));
+    const first = {
+      ...state,
+      ownedChildren: { a: "private-a", b: "private-b" },
+      ownedTasks: { c: "private-c", d: "private-d" },
+      ownedBackgroundTasks: { e: "private-e", f: "private-f" },
+      pendingHandoffs: { g: "private-g", h: "private-h" },
+      deliveries: {
+        a: { uuid: "a", operationId: "op-a", submitted: true },
+        b: { uuid: "b", operationId: "op-b", submitted: true },
+      },
+    };
+    const reversed = {
+      ...first,
+      ownedChildren: { b: "ignored", a: "ignored" },
+      ownedTasks: { d: "ignored", c: "ignored" },
+      ownedBackgroundTasks: { f: "ignored", e: "ignored" },
+      pendingHandoffs: { h: "ignored", g: "ignored" },
+      deliveries: {
+        b: first.deliveries.b,
+        a: first.deliveries.a,
+        duplicate: { uuid: "duplicate", operationId: "op-a", submitted: true },
+        pending: { uuid: "pending", operationId: "not-submitted", submitted: false },
+      },
+    };
+    expect(claudeRecoveryEpisode(reversed)).toBe(claudeRecoveryEpisode(first));
     expect(claudeRecoveryEpisode({ ...state, id: "other" })).not.toBe(claudeRecoveryEpisode(state));
   });
   it("incarnation or unsandboxed supervisor changes do not prove physical lifetime loss", () => {

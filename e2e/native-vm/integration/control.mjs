@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { api, FatalProbeError, fakeControl, waitFor } from "../../harness.ts";
 
+const stage = process.argv[2];
+assert(
+  ["admit", "stop", "start", "ready", "failed", "fail-start", "delete"].includes(stage),
+  `unknown control stage: ${stage}`,
+);
 const root = process.env.NATIVE_INTEGRATION_ROOT ?? ".context/native-vm-integration";
 const f = JSON.parse(readFileSync(`${root}/fixture.json`));
 const base = "http://127.0.0.1:18100";
-const stage = process.argv[2];
 await waitFor(
   "isolated control plane listening",
   async () => ((await fetch(`${base}/api/v1/projects`)).ok ? true : null),
@@ -85,5 +89,17 @@ const row = await waitFor(
   },
   { timeoutMs: 900000, intervalMs: 2000 },
 );
+if (wanted === "running") {
+  assert.match(f.expectedGitHubLogin, /^[a-z0-9-]+$/i);
+  assert.match(row.checkoutCommit, /^[a-f0-9]{40}$/i);
+  writeFileSync(
+    `${root}/application-expectations.json`,
+    JSON.stringify({
+      githubLogin: f.expectedGitHubLogin,
+      checkoutCommit: row.checkoutCommit,
+    }),
+    { mode: 0o600 },
+  );
+}
 writeFileSync(`${root}/orb-${stage}.json`, JSON.stringify(row, null, 2));
 console.log(`INTEGRATION_ORB_${wanted.toUpperCase()} ${stage}`);

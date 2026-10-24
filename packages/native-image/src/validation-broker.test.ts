@@ -19,19 +19,71 @@ import { Check } from "typebox/value";
 import { afterEach, describe, expect, it } from "vitest";
 import { validationBrokerSource } from "./validation-broker.ts";
 
-const children: ChildProcess[] = [];
+const children: { child: ChildProcess; closed: Promise<void> }[] = [];
 const directories: string[] = [];
 
-afterEach(async () => {
-  for (const child of children.splice(0)) {
-    child.kill("SIGKILL");
-    if (child.exitCode === null) await once(child, "exit");
+function ownChild(child: ChildProcess): Promise<void> {
+  const closed = new Promise<void>((resolve) => child.once("close", () => resolve()));
+  children.push({ child, closed });
+  return closed;
+}
+
+async function firstMessage(child: ChildProcess, closed: Promise<void>) {
+  const waiting = new AbortController();
+  try {
+    return await Promise.race([
+      once(child, "message", { signal: waiting.signal }),
+      closed.then(() => {
+        throw new Error("validation broker exited before listening");
+      }),
+    ]);
+  } finally {
+    waiting.abort();
   }
-  for (const directory of directories.splice(0))
-    await rm(directory, { recursive: true, force: true });
+}
+
+afterEach(async () => {
+  try {
+    for (const { child, closed } of children.splice(0)) {
+      child.kill("SIGKILL");
+      await closed;
+    }
+  } finally {
+    for (const directory of directories.splice(0))
+      await rm(directory, { recursive: true, force: true });
+  }
 });
 
 describe("validation broker", () => {
+  it("joins a child already terminated by signal", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "pi-orb-validation-broker-exited-"));
+    directories.push(directory);
+    const child = spawn(
+      process.execPath,
+      ["-e", "process.send('ready'); setInterval(() => {}, 1000)"],
+      { stdio: ["ignore", "ignore", "ignore", "ipc"] },
+    );
+    const closed = ownChild(child);
+    const [ready] = await firstMessage(child, closed);
+    expect(ready).toBe("ready");
+    child.kill("SIGKILL");
+    await closed;
+    expect(child.exitCode).toBeNull();
+    expect(child.signalCode).toBe("SIGKILL");
+  });
+
+  it("rejects a child exit before its listening message", async () => {
+    const child = spawn(process.execPath, ["-e", "process.exit(1)"], {
+      stdio: ["ignore", "ignore", "ignore", "ipc"],
+    });
+    const closed = ownChild(child);
+    await expect(firstMessage(child, closed)).rejects.toThrow(
+      "validation broker exited before listening",
+    );
+    expect(child.exitCode).toBe(1);
+    expect(child.listenerCount("message")).toBe(0);
+  });
+
   it("serves only the runtime boot contracts", async () => {
     const directory = await mkdtemp(join(tmpdir(), "pi-orb-validation-broker-"));
     directories.push(directory);
@@ -46,13 +98,8 @@ describe("validation broker", () => {
       },
       stdio: ["ignore", "ignore", "ignore", "ipc"],
     });
-    children.push(child);
-    const [listening] = await Promise.race([
-      once(child, "message"),
-      once(child, "exit").then(() => {
-        throw new Error("validation broker exited before listening");
-      }),
-    ]);
+    const closed = ownChild(child);
+    const [listening] = await firstMessage(child, closed);
     expect(listening).toMatchObject({ port: expect.any(Number) });
     const port = listening.port as number;
     expect(port).toBeGreaterThan(0);

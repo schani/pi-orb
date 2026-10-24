@@ -12,7 +12,7 @@ const messageId = "00000000-0000-4000-8000-000000000013";
 const nextId = "00000000-0000-4000-8000-000000000014";
 
 it("cancels only the named pending turn, retains its visible outcome and fences ABA", async () => {
-  const url = process.env["PI_ORB_PENDING_ABORT_TEST_DATABASE_URL"];
+  const url = process.env["PI_ORB_TEST_DATABASE_URL"];
   const subject = url
     ? await openThrowawayPostgres(url)
     : (() => {
@@ -21,6 +21,11 @@ it("cancels only the named pending turn, retains its visible outcome and fences 
       })();
   const { client, database } = subject;
   try {
+    if (process.env["PI_ORB_TEST_DATABASE_URL"]) {
+      expect(
+        (await client.query("SELECT current_schema() AS schema"))._unsafeUnwrap().rows[0],
+      ).toMatchObject({ schema: expect.stringMatching(/^test_[0-9a-f]+$/) });
+    }
     (await database.migrate())._unsafeUnwrap();
     (
       await client.query(

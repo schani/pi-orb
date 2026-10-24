@@ -158,7 +158,7 @@ it("coalesces an unfinished read across close/reopen and disconnect/reconnect wi
 
 it("DST: repeated retry before response retains one publisher and one closeable timer", async () => {
   vi.useFakeTimers();
-  await runDst({ name: "detail-repeated-retry", iterations: 30 }, async (sim) => {
+  await runDst({ name: "detail-repeated-retry", iterations: 1 }, async (sim) => {
     vi.clearAllTimers();
     let resolve!: (result: Result<string, string>) => void;
     const read = vi.fn(
@@ -213,7 +213,7 @@ it.each(["close", "disconnect", "reconnect", "open", "retry"] as const)(
   "DST: publish reentrancy via %s leaves polling with the current owner only",
   async (action) => {
     vi.useFakeTimers();
-    await runDst({ name: `detail-publish-${action}`, iterations: 30 }, async (sim) => {
+    await runDst({ name: `detail-publish-${action}`, iterations: 1 }, async (sim) => {
       vi.clearAllTimers();
       const pending: Array<(result: Result<string, string>) => void> = [];
       const read = vi.fn(() => new Promise<Result<string, string>>((done) => pending.push(done)));

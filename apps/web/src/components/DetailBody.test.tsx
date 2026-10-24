@@ -1,25 +1,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
-import { TranscriptCache } from "../lib/transcript-cache.ts";
+import { detailContext } from "../testkit/display-fixtures.ts";
 import { imageIndex } from "./CommittedImage.tsx";
 import { DetailContent } from "./DetailBody.tsx";
-
-const context = {
-  orbId: "orb",
-  sessionId: "session",
-  connected: false,
-  operationId: null,
-  cache: new TranscriptCache(),
-  getOwner: () => null,
-  livePending: new Map(),
-  committedPending: new Map(),
-  imagePending: new Map(),
-};
 
 it("renders reasoning with shared Markdown semantics, preserving headings in the body", () => {
   const html = renderToStaticMarkup(
     <DetailContent
-      context={context}
+      context={detailContext()}
       recordId="r"
       detailKey="r:0"
       body={{
@@ -40,7 +28,7 @@ it("renders reasoning with shared Markdown semantics, preserving headings in the
 it("keeps remote URLs browser-managed and local images loading on initial SSR", () => {
   const external = renderToStaticMarkup(
     <DetailContent
-      context={context}
+      context={detailContext()}
       recordId="r"
       detailKey="r:0"
       body={{ type: "image", url: "https://example.com/image.png" }}
@@ -49,7 +37,7 @@ it("keeps remote URLs browser-managed and local images loading on initial SSR", 
   expect(external).toContain('src="https://example.com/image.png"');
   const internal = renderToStaticMarkup(
     <DetailContent
-      context={context}
+      context={detailContext()}
       recordId="r"
       detailKey="r:0"
       body={{ type: "image", imageRef: "r:0:0" }}
@@ -64,7 +52,7 @@ it("keeps remote URLs browser-managed and local images loading on initial SSR", 
 it("preserves URL-backed tool image preview and omits base64", () => {
   const html = renderToStaticMarkup(
     <DetailContent
-      context={context}
+      context={detailContext()}
       recordId="r"
       detailKey="r:1"
       body={{
@@ -75,4 +63,18 @@ it("preserves URL-backed tool image preview and omits base64", () => {
   );
   expect(html).toContain('src="https://example.com/preview.png"');
   expect(html).toContain("Enlarge image returned by tool result");
+});
+
+it("renders generic tool arguments and text results, and a bare-image fallback", () => {
+  const render = (body: Parameters<typeof DetailContent>[0]["body"]) =>
+    renderToStaticMarkup(
+      <DetailContent context={detailContext()} recordId="r" detailKey="r:0" body={body} />,
+    );
+  expect(render({ type: "tool_call", arguments: { task: "Inspect services" } })).toContain(
+    "Inspect services",
+  );
+  expect(
+    render({ type: "tool_result", content: [{ type: "text", text: "Four services found" }] }),
+  ).toContain("Four services found");
+  expect(render({ type: "image" })).toContain("[image]");
 });

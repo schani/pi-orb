@@ -1,6 +1,4 @@
-import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ALERT_USAGE } from "./alert/command.ts";
 import { ARCHIVE_USAGE } from "./archive/command.ts";
@@ -12,7 +10,8 @@ import { SEND_USAGE } from "./send/command.ts";
 import { SLEEP_USAGE } from "./sleep/command.ts";
 import { SPAWN_USAGE } from "./spawn/command.ts";
 
-const cli = join(import.meta.dirname, "../docker/pi-orb");
+import { runCli } from "./testkit/cli.ts";
+
 const commands = [
   "self",
   "orbs",
@@ -29,22 +28,7 @@ const commands = [
 ];
 
 function run(args: string[], env: NodeJS.ProcessEnv = {}) {
-  return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(cli, args, {
-      env: { PATH: process.env.PATH, ...env },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-    child.once("error", reject);
-    child.once("close", (code) => resolve({ code, stdout, stderr }));
-  });
+  return runCli(args, { env: { PATH: process.env.PATH, ...env } });
 }
 
 async function help(args: string[]) {
@@ -54,8 +38,10 @@ async function help(args: string[]) {
 }
 
 describe("public pi-orb help", () => {
+  let rootHelp: Promise<string> | undefined;
   it("prints root help to stdout without an orb environment", async () => {
-    const root = await help(["--help"]);
+    rootHelp ??= help(["--help"]);
+    const root = await rootHelp;
     expect(await help(["-h"])).toBe(root);
     expect(await help(["help"])).toBe(root);
     expect(root).toContain("pi-orb help [command]");
@@ -97,7 +83,8 @@ describe("public pi-orb help", () => {
         expect(output).toContain("Retry:");
         expect(output).toContain("Exit:");
       }
-      expect(await help(["--help"])).toContain(output.trimEnd());
+      rootHelp ??= help(["--help"]);
+      expect(await rootHelp).toContain(output.trimEnd());
       expect(await help([command, "-h"])).toBe(output);
       expect(await help([command, "--help", "--request-id", "help-test"])).toBe(output);
       expect(await help([command, "-h", "--json"])).toBe(output);

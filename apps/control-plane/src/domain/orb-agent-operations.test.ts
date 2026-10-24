@@ -353,7 +353,7 @@ describe("central orb operations", () => {
   it("rejects old central authority after Stop then Start and ownership loss", async () => {
     await runDst({ name: "central-native-revocation", iterations: 5 }, async (sim) => {
       const h = seed();
-      await sim.runTasks([
+      const result = await sim.runTasks([
         {
           name: "central",
           f: async (task) => {
@@ -397,6 +397,7 @@ describe("central orb operations", () => {
           },
         },
       ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
     });
   });
   it("fences guest reads and effects before access", async () => {
@@ -525,7 +526,7 @@ describe("central orb operations", () => {
     await runDst({ name: "native-orb-alert", iterations: 5 }, async (sim) => {
       const h = seed();
       const appendAlert = vi.fn(() => okAsync({ recordId: "a", duplicate: false }));
-      await sim.runTasks([
+      const result = await sim.runTasks([
         {
           name: "alert",
           f: async (task) => {
@@ -539,6 +540,7 @@ describe("central orb operations", () => {
           },
         },
       ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(appendAlert).toHaveBeenCalledWith("caller", "child:7", "look", 0);
     });
   });

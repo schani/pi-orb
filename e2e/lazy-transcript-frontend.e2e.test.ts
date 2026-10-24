@@ -1,12 +1,9 @@
-import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Browser, chromium, expect, webkit } from "@playwright/test";
-import { createServer } from "vite";
+import { expect } from "@playwright/test";
 import { it } from "vitest";
-import { listenFrontend } from "./frontend-listen.ts";
 import { gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
+import { createFrontendFixture } from "./testkit/frontend-owned.ts";
 
 const ORB = "frontend-lazy-details";
 const hidden = [
@@ -19,37 +16,15 @@ const hidden = [
 it.each(["chromium", "webkit"] as const)(
   "%s: projected summaries group without reads; individual detail retries and caches",
   async (engine) => {
-    const root = join(import.meta.dirname, "../apps/web");
-    const cacheDir = await mkdtemp(join(tmpdir(), `pi-orb-lazy-${engine}-`));
     const evidence = await mkdtemp(
       join(import.meta.dirname, `../test-failures/lazy-return-${engine}-`),
     );
-    const vite = await createServer({
-      root,
-      configFile: join(root, "vite.config.ts"),
-      cacheDir,
-      mode: "frontend",
-      server: { host: "127.0.0.1", port: 0 },
-    });
-    let browser: Browser | undefined;
-    try {
-      await listenFrontend(vite);
-      const address = vite.httpServer?.address();
-      if (!address || typeof address === "string") throw new Error("No fixture port");
-      const executable =
-        process.env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"] ??
-        (existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined);
-      browser =
-        engine === "webkit"
-          ? await webkit.launch()
-          : await chromium.launch({
-              ...(executable === undefined ? {} : { executablePath: executable }),
-              args: ["--no-sandbox"],
-            });
-      const page = await browser.newPage({
+    const { page, origin } = await createFrontendFixture(engine, {
+      page: {
         viewport: { width: 1280, height: 900 },
-      });
-      const origin = `http://127.0.0.1:${address.port}`;
+      },
+    });
+    {
       await page.context().tracing.start({ screenshots: true, snapshots: true });
       await page.addInitScript(() => {
         const scope = globalThis as unknown as {
@@ -98,6 +73,12 @@ it.each(["chromium", "webkit"] as const)(
         }
       });
       const details: string[] = [];
+      const closedToolPaths = new Set<string>();
+      const closedToolReads: string[] = [];
+      page.on("request", (request) => {
+        const path = new URL(request.url()).pathname;
+        if (closedToolPaths.has(path)) closedToolReads.push(path);
+      });
       const imageUrls: string[] = [];
       const leaks: string[] = [];
       const frames: string[] = [];
@@ -150,6 +131,16 @@ it.each(["chromium", "webkit"] as const)(
         const calls = view.records.flatMap((record) =>
           (record.content ?? []).filter((block) => block.type === "tool_call"),
         );
+        const callIds = new Set(calls.map((call) => call.callId));
+        for (const record of view.records) {
+          for (const block of record.content ?? []) {
+            if (block.detailKey && block.callId && callIds.has(block.callId)) {
+              closedToolPaths.add(
+                `/api/v1/orbs/${ORB}/details/${encodeURIComponent(record.id)}/${encodeURIComponent(block.detailKey)}`,
+              );
+            }
+          }
+        }
         const firstResultRecord = view.records.find((record) =>
           record.content?.some(
             (block) => block.type === "tool_result" && block.callId === calls[0]?.callId,
@@ -171,6 +162,7 @@ it.each(["chromium", "webkit"] as const)(
         if (secondResultRecord && secondResult?.detailKey)
           heldDetailPath = `/api/v1/orbs/${ORB}/details/${encodeURIComponent(secondResultRecord.id)}/${encodeURIComponent(secondResult.detailKey)}`;
         expect(calls).toHaveLength(30);
+        expect(closedToolPaths.size).toBeGreaterThanOrEqual(30);
         for (const call of calls) {
           expect(Buffer.byteLength(call.headline ?? "")).toBeLessThanOrEqual(1024);
         }
@@ -215,7 +207,7 @@ it.each(["chromium", "webkit"] as const)(
           has: page.locator(":scope > summary", { hasText: "read" }),
         });
         await expect(read).toHaveCount(1);
-        expect(details).toHaveLength(0);
+        expect(closedToolReads).toEqual([]);
         await read.locator(":scope > summary").click();
         const callSummaries = read
           .locator("details.tool-activity-call")
@@ -231,7 +223,7 @@ it.each(["chromium", "webkit"] as const)(
           expect(header.title).toBe(header.text);
           expect(Buffer.byteLength(header.text)).toBeLessThanOrEqual(1024);
         }
-        expect(details).toHaveLength(0);
+        expect(closedToolReads).toEqual([]);
         const first = callSummaries.first();
         await first.locator(":scope > summary").click();
         await expect(page.getByText("detail temporarily unavailable")).toBeVisible();
@@ -423,10 +415,6 @@ it.each(["chromium", "webkit"] as const)(
         releaseHeld();
         await page.close();
       }
-    } finally {
-      await browser?.close();
-      await vite.close();
-      await rm(cacheDir, { recursive: true, force: true });
     }
   },
 );

@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai/providers/faux";
 import { GenerationTask } from "@earendil-works/pi-durable";
@@ -90,22 +89,4 @@ it.each([false, true])("Native trailing partial commit: completion held=%s", asy
   expect(timers).toHaveLength(1);
   expect(partials).toHaveLength(held ? 1 : 0);
   expect(classified).toEqual(message);
-});
-
-it("full slice fences only its reasoning turn until the accepted operation publishes a patch", () => {
-  const source = readFileSync(new URL("./full-slice.e2e.test.ts", import.meta.url), "utf8");
-  expect(source).toContain(
-    'holdModelStream(fake.inferenceBaseUrl, "please run the e2e tool check");',
-  );
-  expect(source).toMatch(
-    /try\s*{\s*await controlPlane\?\.stop\(\);\s*}\s*finally\s*{\s*if \(!PROCESS_BACKEND\) await docker\(\["rm", "-f", PG_CONTAINER\]\)/,
-  );
-  expect(source).toContain('"reasoning patch before model completion"');
-  expect(source).toContain("frame.event.operationId === reasoningOperationId");
-  expect(source.indexOf('"reasoning patch before model completion"')).toBeLessThan(
-    source.indexOf(
-      "reasoningStream.release();",
-      source.indexOf('"reasoning patch before model completion"'),
-    ),
-  );
 });

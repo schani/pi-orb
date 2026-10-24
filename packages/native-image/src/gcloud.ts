@@ -656,7 +656,15 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
           input,
           stage,
           validator,
-          "printf 'PI_ORB_HOST_KEY_FINGERPRINT='; ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | awk '{print $2}'",
+          [
+            "set -eu",
+            "health=$(curl --fail --silent --show-error --max-time 5 http://127.0.0.1:8080/v1/health)",
+            `printf '%s' "$health" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("status") == "ready" else "validator HTTP health is not ready")'`,
+            "diagnostic=$(curl --fail --silent --show-error --max-time 5 -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/guest-attributes/pi-orb/boot-status)",
+            `printf '%s' "$diagnostic" | python3 -c 'import json,sys; value=json.load(sys.stdin); sys.exit(0 if (value.get("schemaVersion") == 1 and value.get("phase") == "runtime" and value.get("status") == "ready") else "validator runtime-ready guest attribute is not visible")'`,
+            "printf 'PI_ORB_HOST_KEY_FINGERPRINT='",
+            "ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | awk '{print $2}'",
+          ].join("; "),
           signal,
         )
           .andThen((result) => {
@@ -684,38 +692,32 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
           validator,
           `set -eu; test "$(cat /opt/pi-orb/image-version)" = '${input.version}'; test ! -e /run/pi-orb-validation-broker-unrecognized; sudo /opt/pi-orb/acceptance.sh; test ! -e /run/pi-orb-validation-broker-unrecognized; printf 'PI_ORB_HOST_KEY_FINGERPRINT='; ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | awk '{print $2}'`,
           signal,
-        )
-          .andThen((result) => {
-            const fingerprint = result.stdout.match(
-              /(?:^|\n)PI_ORB_HOST_KEY_FINGERPRINT=(SHA256:[A-Za-z0-9+/]+={0,2})(?:\n|$)/,
-            )?.[1];
-            const readyFingerprint = this.validationHostKeyFingerprints.get(input.operationId);
-            if (fingerprint === undefined)
-              return errAsync<void, ImageBuildError>({
+        ).andThen((result) => {
+          const fingerprint = result.stdout.match(
+            /(?:^|\n)PI_ORB_HOST_KEY_FINGERPRINT=(SHA256:[A-Za-z0-9+/]+={0,2})(?:\n|$)/,
+          )?.[1];
+          const readyFingerprint = this.validationHostKeyFingerprints.get(input.operationId);
+          if (fingerprint === undefined)
+            return errAsync<void, ImageBuildError>({
+              type: "image_build_failed",
+              stage,
+              message: "validator did not report its ED25519 host-key fingerprint",
+            });
+          if (readyFingerprint === undefined)
+            return errAsync<void, ImageBuildError>({
+              type: "image_build_failed",
+              stage,
+              message: "readiness host-key fingerprint is unavailable",
+            });
+          return fingerprint === readyFingerprint
+            ? okAsync<void, ImageBuildError>(undefined)
+            : errAsync<void, ImageBuildError>({
                 type: "image_build_failed",
                 stage,
-                message: "validator did not report its ED25519 host-key fingerprint",
+                message: `validator ED25519 host key changed after SSH readiness (ready ${readyFingerprint}, observed ${fingerprint})`,
+                reason: "ssh_host_key_mismatch",
               });
-            if (readyFingerprint === undefined)
-              return errAsync<void, ImageBuildError>({
-                type: "image_build_failed",
-                stage,
-                message: "readiness host-key fingerprint is unavailable",
-              });
-            return fingerprint === readyFingerprint
-              ? okAsync<void, ImageBuildError>(undefined)
-              : errAsync<void, ImageBuildError>({
-                  type: "image_build_failed",
-                  stage,
-                  message: `validator ED25519 host key changed after SSH readiness (ready ${readyFingerprint}, observed ${fingerprint})`,
-                  reason: "ssh_host_key_mismatch",
-                });
-          })
-          .mapErr((failure) =>
-            failure.reason === "ssh_host_key_mismatch"
-              ? failure
-              : { ...failure, retryable: true as const },
-          );
+        });
       case "validate:cloud-log":
         return this.gcloud(
           input,

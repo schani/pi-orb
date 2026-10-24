@@ -31,6 +31,7 @@ const input = (operationId = "owner-a"): ImageBuildInput => ({
 
 class FakeEffects implements ImageBuildEffects {
   readonly actions: string[] = [];
+  readonly cleanupSignals: { signal: AbortSignal; aborted: boolean }[] = [];
   manifest?: ImageBuildManifest;
   failure?: ImageBuildError;
   failAt?: string;
@@ -44,7 +45,13 @@ class FakeEffects implements ImageBuildEffects {
   now(): string {
     return "2026-09-05T00:00:00.000Z";
   }
-  run(stage: ImageBuildStage, action: string): ResultAsync<void, ImageBuildError> {
+  run(
+    stage: ImageBuildStage,
+    action: string,
+    _input: ImageBuildInput,
+    signal: AbortSignal,
+  ): ResultAsync<void, ImageBuildError> {
+    if (stage === "cleanup") this.cleanupSignals.push({ signal, aborted: signal.aborted });
     const key = `${stage}:${action}`;
     this.actions.push(key);
     if (this.abortAt === key) this.controller.abort();
@@ -153,15 +160,41 @@ describe("native image build orchestration", () => {
     ]);
   });
 
-  it("removes a rejected candidate and never writes an accepted manifest", async () => {
+  it("rejects the first acceptance failure even if a retry could succeed", async () => {
+    const failure: ImageBuildError = {
+      type: "image_build_failed",
+      stage: "validate",
+      message: "not ready",
+      retryable: true,
+    };
     const effects = new FakeEffects();
-    effects.failAt = "validate:probe";
-    const result = await buildNativeImage(input(), effects, effects.controller.signal);
-    expect(result.isErr()).toBe(true);
+    effects.retryOnceAt = "validate:probe";
+    const events: string[] = [];
+    const result = await buildNativeImage(input(), effects, effects.controller.signal, (event) =>
+      events.push(`${event.stage}:${event.action}:${event.status}`),
+    );
+    expect(result.isErr() && result.error).toEqual(failure);
+    expect(effects.actions.filter((action) => action === "validate:probe")).toHaveLength(1);
+    expect(effects.failure).toEqual(failure);
     expect(effects.manifest).toBeUndefined();
+    expect(effects.actions).toContain("cleanup:collect-evidence");
     expect(effects.actions).toContain("cleanup:delete-image");
     expect(effects.actions).toContain("cleanup:delete-workspace-image");
-    expect(effects.failure).toMatchObject({ stage: "validate" });
+    expect(effects.actions).not.toContain("validate:cloud-log");
+    expect(events).toContain("validate:probe:failed");
+    expect(events).not.toContain("validate:probe:waiting");
+  });
+
+  it("retries validator readiness before running acceptance once", async () => {
+    const effects = new FakeEffects();
+    effects.retryOnceAt = "validate:ready";
+    const result = await buildNativeImage(input(), effects, effects.controller.signal);
+    expect(result.isOk()).toBe(true);
+    expect(effects.actions.filter((action) => action === "validate:ready")).toHaveLength(2);
+    expect(effects.actions.filter((action) => action === "validate:probe")).toHaveLength(1);
+    expect(effects.actions.lastIndexOf("validate:ready")).toBeLessThan(
+      effects.actions.indexOf("validate:probe"),
+    );
   });
 
   it("attempts candidate cleanup when capture has an ambiguous failure", async () => {
@@ -187,6 +220,12 @@ describe("native image build orchestration", () => {
     effects.abortAt = "install:run";
     const result = await buildNativeImage(input(), effects, effects.controller.signal);
     expect(result.isErr()).toBe(true);
+    expect(effects.controller.signal.aborted).toBe(true);
+    expect(effects.cleanupSignals).toHaveLength(6);
+    for (const entry of effects.cleanupSignals) {
+      expect(entry.signal).not.toBe(effects.controller.signal);
+      expect(entry.aborted).toBe(false);
+    }
     expect(effects.actions.slice(-5)).toEqual([
       "cleanup:delete-validator",
       "cleanup:delete-builder",
@@ -271,14 +310,14 @@ describe("native image build orchestration", () => {
   });
 
   it.each([
-    ["validate:ready", "validate:probe", 0],
-    ["validate:probe", "validate:ready", 1],
-  ])("keeps the 60-attempt validator budget for %s", async (action, otherAction, otherCount) => {
+    ["validate:ready", "validate:probe", 60, 0],
+    ["validate:probe", "validate:ready", 1, 1],
+  ])("bounds attempts for %s", async (action, otherAction, count, otherCount) => {
     const effects = new FakeEffects();
     effects.retryAlwaysAt = action;
     const result = await buildNativeImage(input(), effects, effects.controller.signal);
     expect(result.isErr()).toBe(true);
-    expect(effects.actions.filter((candidate) => candidate === action)).toHaveLength(60);
+    expect(effects.actions.filter((candidate) => candidate === action)).toHaveLength(count);
     expect(effects.actions.filter((candidate) => candidate === otherAction)).toHaveLength(
       otherCount,
     );

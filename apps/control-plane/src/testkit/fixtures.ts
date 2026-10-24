@@ -381,9 +381,9 @@ export function seedRunningOrb(
   harness: TestHarness,
   orbId: string,
   config?: FakeOrbConfig,
-  options?: { legacy?: boolean },
+  options?: { legacy?: boolean; projectId?: string },
 ): void {
-  const projectId = `project-of-${orbId}`;
+  const projectId = options?.projectId ?? `project-of-${orbId}`;
   harness.store.seedProject(makeProjectRow(projectId));
   harness.world.configureOrb(orbId, { initDurationMs: 0, ...config });
   const repositoryUrl = makeProjectRow(projectId).repositoryUrl;
@@ -478,4 +478,48 @@ export function discardFinalized(harness: TestHarness, orbId: string): boolean {
     row.hostDiscardThroughIncarnation === null &&
     harness.world.hostCount(orbId) === 0
   );
+}
+
+/**
+ * One control-plane revision: the shared world and store (one fleet, one
+ * database) behind its own host provider and its own in-process state — which
+ * is exactly how much two Cloud Run revisions share during a rollover.
+ */
+export function makeRevision(
+  harness: TestHarness,
+  specGeneration: number,
+  desiredSpec: string,
+  unreachableBootDeadlineMs?: number,
+): ControlPlaneDeps {
+  return {
+    ...harness.deps,
+    constants:
+      unreachableBootDeadlineMs === undefined
+        ? harness.deps.constants
+        : { ...harness.deps.constants, unreachableBootDeadlineMs },
+    hostProvider: new FakeOrbHostProvider(harness.world, 50, specGeneration, desiredSpec),
+    control: new ControlState(),
+  };
+}
+
+/**
+ * Seed the orb already `running` on `revisions[0]`'s specification, with every
+ * revision's liveness baseline reset — the fleet as it stands the instant a
+ * deploy starts. The first host's boot is behind it by construction; every
+ * later start pays the full modeled boot latency.
+ */
+export function seedRunningOnRevisions(
+  task: SimulationTask,
+  harness: TestHarness,
+  orbId: string,
+  projectId: string,
+  revisions: readonly ControlPlaneDeps[],
+  config: FakeOrbConfig,
+): void {
+  const owner = revisions[0];
+  if (owner === undefined) throw new Error("seedRunningOnRevisions needs an owner");
+  seedRunningOrb(task, { ...harness, deps: owner }, orbId, config, { projectId });
+  for (const revision of revisions) {
+    revision.control.resetLivenessBaseline(orbId, task.monotonicNow());
+  }
 }

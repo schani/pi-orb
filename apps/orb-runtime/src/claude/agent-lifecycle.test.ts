@@ -16,6 +16,7 @@ import {
   nativeHookResponse,
   rootRequest,
   rootResult,
+  ScheduledClaudeQuery,
 } from "../testkit/claude-composed.ts";
 import {
   ClaudeOrbAgent,
@@ -52,14 +53,7 @@ function fixture(
   mkdirSync(join(configDir, "projects", "-repo"), { recursive: true });
   const nativePath = join(configDir, "projects", "-repo", `${state.id}.jsonl`);
   const frames: ServerFrame[] = [];
-  const messages: { message: SDKMessage; processed: () => void }[] = [];
-  let wake: (() => void) | undefined;
-  let closed = false;
-  let stdoutDone: () => void = () => undefined;
-  let stdoutEnded = new Promise<void>((resolve) => {
-    stdoutDone = resolve;
-  });
-  let exiting: (() => void) | undefined;
+  let sdk: ScheduledClaudeQuery;
   let options: Options | null = null;
   const queryOptions: Options[] = [];
   const selectedModels: string[] = [];
@@ -81,53 +75,18 @@ function fixture(
   ];
   let prompt: AsyncIterable<SDKUserMessage> | null = null;
   let failHistory = false;
-  let exited = new Promise<void>((resolve) => {
-    exiting = resolve;
-  });
   let failStartup = false;
   let closeRequests = 0;
   const closeWaiters: { count: number; resolve: () => void }[] = [];
   let accountBarrier: Promise<void> | null = null;
   let releaseAccount: (() => void) | undefined;
-  const sdk: ClaudeQuery = {
-    async *[Symbol.asyncIterator]() {
-      while (!closed || messages.length > 0) {
-        const entry = messages.shift();
-        if (entry !== undefined) {
-          yield entry.message;
-          entry.processed();
-        } else
-          await new Promise<void>((resolve) => {
-            wake = resolve;
-          });
-      }
-    },
-    close: () => {
-      closed = true;
-      wake?.();
-    },
-    interrupt: async () => undefined,
-    accountInfo: async () => {
-      await accountBarrier;
-      return account;
-    },
-    supportedModels: async () => models,
-    setModel: async (model) => {
-      if (model !== undefined) selectedModels.push(model);
-    },
-    applyFlagSettings: async (settings) => {
-      flagSettings.push(settings);
-    },
-  };
   const requestShutdown = () => {
     closeRequests++;
     for (const waiter of closeWaiters.filter((waiter) => waiter.count <= closeRequests))
       waiter.resolve();
     if (!holdMetadata && Object.keys(state.deliveries).length === 0) {
-      closed = true;
-      exiting?.();
-      stdoutDone();
-      wake?.();
+      sdk.exit();
+      sdk.endOutput();
     }
     return ok(undefined);
   };
@@ -147,20 +106,31 @@ function fixture(
     ...(modelUsage === undefined ? {} : { modelUsage }),
     sdkFactory: (input, opts) => {
       if (failStartup) return err({ message: "injected startup failure" });
-      closed = false;
-      exited = new Promise<void>((resolve) => {
-        exiting = resolve;
-      });
+      sdk = new ScheduledClaudeQuery(input, opts, false);
+      Object.assign(sdk, {
+        interrupt: async () => undefined,
+        accountInfo: async () => {
+          await accountBarrier;
+          return account;
+        },
+        supportedModels: async () => models,
+        setModel: async (model) => {
+          if (model !== undefined) selectedModels.push(model);
+        },
+        applyFlagSettings: async (settings) => {
+          flagSettings.push(settings);
+        },
+      } satisfies Pick<
+        ClaudeQuery,
+        "interrupt" | "accountInfo" | "supportedModels" | "setModel" | "applyFlagSettings"
+      >);
       options = opts;
       queryOptions.push(opts);
       prompt = input;
-      stdoutEnded = new Promise<void>((resolve) => {
-        stdoutDone = resolve;
-      });
       return ok({
         query: sdk,
-        exited,
-        stdoutEnded: stdoutEnded.then(() => ok(undefined)),
+        exited: sdk.processExit.promise,
+        stdoutEnded: sdk.stdoutEnded,
         requestShutdown,
       });
     },
@@ -194,23 +164,13 @@ function fixture(
         ...(notifyRestart ? ([null] as const) : []),
       ),
     nativePath,
-    emit: (message: SDKMessage) =>
-      new Promise<void>((resolve) => {
-        messages.push({ message, processed: resolve });
-        wake?.();
-      }),
+    emit: (message: SDKMessage) => sdk.emitUnscheduled(message),
     exit: () => {
-      exiting?.();
-      closed = true;
-      stdoutDone();
-      wake?.();
+      sdk.exit();
+      sdk.endOutput();
     },
-    exitWithoutOutput: () => exiting?.(),
-    endOutput: () => {
-      closed = true;
-      stdoutDone();
-      wake?.();
-    },
+    exitWithoutOutput: () => sdk.exit(),
+    endOutput: () => sdk.endOutput(),
     persist: (entry: object) => appendFileSync(nativePath, `${JSON.stringify(entry)}\n`),
     failHistory: () => {
       failHistory = true;

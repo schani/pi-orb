@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { okAsync } from "neverthrow";
 import { expect, it, vi } from "vitest";
 import { artifactCreateSource, artifactReadSource } from "./testkit/durable-artifact-restart.ts";
@@ -91,19 +90,4 @@ it("reads the persisted artifact selectively using the surfaced private path", (
   expect(source).toContain(`path:${JSON.stringify(path)}, offset:120, limit:1`);
   expect(source).toContain(".agents/skills/pinned/asset.txt");
   expect(source).not.toContain("tools.bash");
-});
-
-it("keeps Abort ACK ahead of source release and asserts inbox settlement, not host shutdown", () => {
-  const source = readFileSync(new URL("./durable-independent-fixture.ts", import.meta.url), "utf8");
-  const branch = source.slice(
-    source.indexOf('if (cancellation === "git-abort")'),
-    source.indexOf('if (cancellation === "git-stop")'),
-  );
-  expect(branch.indexOf("Abort ACK before resource acquisition completes")).toBeLessThan(
-    branch.indexOf('resourceHeld?.end("late resource release after Abort ACK")'),
-  );
-  expect(branch).toContain('item.status !== "queued" && item.status !== "delivering"');
-  expect(branch).toContain('view.body["activity"] === "idle"');
-  expect(branch).toContain("forceReconcilePass");
-  expect(branch).not.toContain('toBe("stopped")');
 });

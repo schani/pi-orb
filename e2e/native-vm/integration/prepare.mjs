@@ -50,7 +50,11 @@ const nameFake = await createFakeSession("native-vm-integration-naming", {
     })),
   },
 });
+const expectedGitHubLogin = execFileSync("gh", ["api", "user", "--jq", ".login"], {
+  encoding: "utf8",
+}).trim();
 const fixture = {
+  expectedGitHubLogin,
   orbId: randomUUID(),
   projectId: randomUUID(),
   gcpProject: "playground-dev-6ae7",
@@ -74,7 +78,7 @@ writeFileSync(
   JSON.stringify({
     access: token,
     refresh: "",
-    accountId: "schani",
+    accountId: expectedGitHubLogin,
     expiresAt: Date.now() + 6 * 3600000,
   }),
   { mode: 0o600 },

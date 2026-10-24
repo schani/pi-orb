@@ -22,15 +22,32 @@ it("project instruction routes isolate scope, preserve missing resources and rep
     expect(read.statusCode).toBe(200);
     expect(read.json()).toEqual({ content: "", revision: 0 });
     expect(read.headers["cache-control"]).toBe("no-store");
+    const otherPath = "/api/v1/projects/b/instructions";
+    const otherInitial = await app.inject({ method: "GET", url: otherPath });
+    expect(otherInitial.statusCode).toBe(200);
+    expect(otherInitial.json()).toEqual({ content: "", revision: 0 });
+    const otherSaved = await app.inject({
+      method: "PUT",
+      url: otherPath,
+      payload: { content: "# Project B\n" },
+    });
+    expect(otherSaved.statusCode).toBe(200);
+    expect(otherSaved.json()).toEqual({ content: "# Project B\n", revision: 1 });
+    let revision = 0;
     for (const content of ["# Extra\r\n", ""]) {
       const saved = await app.inject({ method: "PUT", url: path, payload: { content } });
       expect(saved.statusCode).toBe(200);
-      expect(saved.json().content).toBe(content);
+      revision += 1;
+      expect(saved.json()).toEqual({ content, revision });
       expect(saved.headers["cache-control"]).toBe("no-store");
+      const readback = await app.inject({ method: "GET", url: path });
+      expect(readback.statusCode).toBe(200);
+      expect(readback.json()).toEqual(saved.json());
+      expect(readback.headers["cache-control"]).toBe("no-store");
+      const other = await app.inject({ method: "GET", url: otherPath });
+      expect(other.statusCode).toBe(200);
+      expect(other.json()).toEqual(otherSaved.json());
     }
-    expect(
-      (await app.inject({ method: "GET", url: "/api/v1/projects/b/instructions" })).json(),
-    ).toEqual({ content: "", revision: 0 });
     expect(
       (await app.inject({ method: "PUT", url: path, payload: { content: "bad\0" } })).statusCode,
     ).toBe(400);
