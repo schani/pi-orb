@@ -767,8 +767,8 @@ frontend-session cases. The original failure and correction are preserved in
 unrelated WebKit crash.
 
 **Action runtime update (2026-09-13):** CI, E2E and Deploy artifact-upload steps
-pin `actions/upload-artifact` v7.0.1 at
-`043fb46d1a93c77aae656e7c1c64a875d1fc6a0a`, whose action manifest declares
+pin `actions/upload-artifact` v7.0.2 at
+`cf430e030ddbb5b0abf93d22962f4752f3646cd9`, whose action manifest declares
 `runs.using: node24`. This removes the v4 action's Node 20 deprecation warning;
 it is separate from the Node version selected for application builds. Artifact
 paths, retention, hidden-file exclusion and default ZIP packaging remain unchanged.
@@ -871,7 +871,7 @@ immutable dispatched SHA, verifies checkout equality, and creates local branch
 `main` at that exact SHA before authentication. The shared command requires a
 clean checkout and re-verifies trusted same-repository `push`/`main` qualification
 for the selected SHA before acquiring the release lock. Node 24.22.1, SDK 590.0.1 with its explicit beta component and checksum-verified
-OpenTofu 1.12.6 are pinned; actions use immutable SHAs, the runner is Ubuntu 24.04,
+OpenTofu 1.13.2 are pinned; actions use immutable SHAs, the runner is Ubuntu 24.04,
 and provider lock files are read-only. The 240-minute job budget accommodates
 checks, fresh native acceptance, migration/apply and up to 75 minutes of retirement.
 The shared checks stage builds its own Docker E2E runtime image rather than relying
