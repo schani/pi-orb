@@ -4,7 +4,7 @@
 npx vitest run apps/orb-runtime/src/claude/native-sdk.contract.test.ts
 ```
 
-Requires installed SDK **0.3.300**, bundled CLI **2.1.300**, Python 3, and Linux x86-64 with seccomp user notification. The normal test suite skips these guarded probes on other platforms. Direct probe invocation fails closed there; no unguarded fallback runs.
+Requires installed SDK **0.3.310**, bundled CLI **2.1.310**, Python 3, and Linux x86-64 with seccomp user notification. The normal test suite skips these guarded probes on other platforms. Direct probe invocation fails closed there; no unguarded fallback runs.
 
 The actual native CLI talks to an owned loopback Anthropic Messages server. Its canned SSE responses request `Bash` (`printf native-contract-fixed-output`), then finish. A separate scenario delegates that operation to a native child agent. Another submits `/compact`. The Workflow ownership regression uses `withWorkflow`, installing production hooks/native paths through `beforeQuery` and forwarding SDK messages through `onMessage`.
 

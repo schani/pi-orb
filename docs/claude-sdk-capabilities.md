@@ -5,7 +5,7 @@ User decision (2026-10-04): SDK/harness and workspace are co-located on the orb 
 
 ## Scope and evidence
 
-Pinned: SDK **0.3.300**, CLI **2.1.300** (2026-10-14).
+Pinned: SDK **0.3.310**, CLI **2.1.310**.
 
 No finite override list guarantees full native Claude Code functionality. `toolAliases` redirects model-issued calls, not harness-internal filesystem/process operations; aliases and `disallowedTools` are complementary, not an OS sandbox.
 Native settings, CLAUDE.md, Git context, auto-memory and session files remain local to the CLI. Native file checkpointing excludes remote/network files. Headless SDK runs also omit interactive CLI features.

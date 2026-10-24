@@ -26,8 +26,8 @@ nativeIt.each(["agents-only", "claude-preferred", "symlink", "import"] as const)
         requests.push(JSON.stringify(body));
       },
     });
-    expect(result.sdkVersion).toBe("0.3.300");
-    expect(result.cliVersion).toBe("2.1.300");
+    expect(result.sdkVersion).toBe("0.3.310");
+    expect(result.cliVersion).toBe("2.1.310");
     expect(result.result.isError).toBe(false);
     expect(requests.length).toBeGreaterThan(0);
     expect(requests[0]?.split(agentsMarker).length).toBe(layout === "claude-preferred" ? 1 : 2);
