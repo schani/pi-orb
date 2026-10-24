@@ -1,4 +1,4 @@
-import { type RefObject, useLayoutEffect } from "react";
+import { type RefObject, useLayoutEffect, useRef } from "react";
 import { devConsoleDebug } from "./dev-console-debug.ts";
 import { masonryColumns, placeMasonry } from "./masonry.ts";
 
@@ -6,13 +6,15 @@ import { masonryColumns, placeMasonry } from "./masonry.ts";
  * Positions the board's children absolutely in shortest-column order. Children stay where React
  * put them in the DOM, so moving a box between columns never remounts it. `probe` is a
  * zero-height sibling spanning the board's width: observing it instead of the board keeps the
- * board's own height writes from re-entering the observer.
+ * board's own height writes from re-entering the observer. Layout also runs in the commit of
+ * every board render, so an inserted box is placed before any observer can see it unplaced.
  */
 export function useMasonry(
   board: RefObject<HTMLElement | null>,
   probe: RefObject<HTMLElement | null>,
   minColumnWidth: number,
 ): void {
+  const relayout = useRef<() => void>(() => {});
   useLayoutEffect(() => {
     const boardElement = board.current;
     const probeElement = probe.current;
@@ -63,17 +65,15 @@ export function useMasonry(
         resize.observe(child);
       }
     };
-    const mutations = new MutationObserver(() => {
+    relayout.current = () => {
       observeItems();
       layout();
-    });
+    };
     resize.observe(probeElement);
-    mutations.observe(boardElement, { childList: true });
-    observeItems();
-    layout();
     return () => {
+      relayout.current = () => {};
       resize.disconnect();
-      mutations.disconnect();
     };
   }, [board, probe, minColumnWidth]);
+  useLayoutEffect(() => relayout.current());
 }
