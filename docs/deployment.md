@@ -767,8 +767,8 @@ frontend-session cases. The original failure and correction are preserved in
 unrelated WebKit crash.
 
 **Action runtime update (2026-09-13):** CI, E2E and Deploy artifact-upload steps
-pin `actions/upload-artifact` v7.0.1 at
-`043fb46d1a93c77aae656e7c1c64a875d1fc6a0a`, whose action manifest declares
+pin `actions/upload-artifact` v7.0.2 at
+`cf430e030ddbb5b0abf93d22962f4752f3646cd9`, whose action manifest declares
 `runs.using: node24`. This removes the v4 action's Node 20 deprecation warning;
 it is separate from the Node version selected for application builds. Artifact
 paths, retention, hidden-file exclusion and default ZIP packaging remain unchanged.

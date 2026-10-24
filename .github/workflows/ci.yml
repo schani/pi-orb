@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Reject tracked deployment credentials, plans and state
         run: python3 infra/artifact_guard.py
@@ -49,7 +49,7 @@ jobs:
           docker image inspect "pi-orb-control-plane:ci-$GITHUB_SHA" --format '{{.Id}} {{.Size}}' || true
       - name: Upload image proof
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node 24)
         with:
           name: control-plane-image-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/control-plane-image-proof.log
@@ -77,13 +77,13 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Reject tracked deployment credentials, plans and state
         run: python3 infra/artifact_guard.py
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.22.1'
           cache: npm
@@ -121,7 +121,7 @@ jobs:
 
       - name: Upload deterministic failure traces
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node 24)
         with:
           name: ci-dst-failure-traces-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-failures/*.json

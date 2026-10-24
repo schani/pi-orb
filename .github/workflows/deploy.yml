@@ -34,7 +34,7 @@ jobs:
       evidence: ${{ steps.qualification.outputs.evidence }}
     steps:
       - name: Check out the dispatched commit
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
       - name: Wait for exact-commit main qualification
@@ -74,7 +74,7 @@ jobs:
       CLOUDSDK_CORE_VERBOSITY: warning
     steps:
       - name: Check out the dispatched commit
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -85,7 +85,7 @@ jobs:
           git checkout -B main "$GITHUB_SHA"
           python3 infra/artifact_guard.py
       - name: Set up Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.22.1'
           cache: npm
@@ -152,7 +152,7 @@ jobs:
         run: python3 -m infra.rollout_monitor "$RUNNER_TEMP/release-result/release.json" "$RUNNER_TEMP/rollout-monitor.json" "$RUNNER_TEMP/rollout-baseline.json"
       - name: Upload rollout monitor
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node 24)
         with:
           name: rollout-monitor-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/rollout-monitor.json
@@ -161,7 +161,7 @@ jobs:
 
       - name: Upload missing-orb navigation failure evidence
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node 24)
         with:
           name: e2e-missing-orb-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -173,7 +173,7 @@ jobs:
 
       - name: Upload lazy-return browser failure evidence
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node 24)
         with:
           name: release-lazy-return-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -190,7 +190,7 @@ jobs:
           python3 -m infra.release_report "$RUNNER_TEMP/release-result/release.json" "$RUNNER_TEMP/release-artifact" "$GITHUB_SHA" "${RELEASE_OUTCOME:-skipped}" "$GITHUB_STEP_SUMMARY"
       - name: Upload only the validated release record
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node 24)
         with:
           name: release-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/release-artifact/release.json
