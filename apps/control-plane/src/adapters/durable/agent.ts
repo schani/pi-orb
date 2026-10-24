@@ -77,7 +77,7 @@ import { fenceModels } from "./model-fence.ts";
 import { meterModels } from "./model-usage.ts";
 import { nativeInputContent } from "./native-input.ts";
 import { NOTIFICATION_REQUEST_PREFIX, submitParentNotification } from "./notifications.ts";
-import type { InputAdmissionError } from "./persistence.ts";
+import type { AgentStorageLease, InputAdmissionError } from "./persistence.ts";
 import { activeSubagents, type PublicEntryReceipt, projectHistory } from "./projection.ts";
 import { promptExtension } from "./prompt.ts";
 import { startupRuntimeError } from "./startup.ts";
@@ -174,7 +174,7 @@ export interface DurableAgentOptions {
   readonly checkInputAdmission?: (browser: boolean) => ResultAsync<void, InputAdmissionError>;
   /** Consulted before resuming unfinished work; an error leaves it suspended. */
   readonly admitRecovery?: () => ResultAsync<void, RuntimeClientError>;
-  readonly beginDrain?: () => ResultAsync<void, RuntimeClientError>;
+  readonly beginDrain?: AgentStorageLease["beginDrain"];
   readonly openSignal?: AbortSignal;
   readonly ownershipSignal?: AbortSignal;
   readonly executionActive?: () => boolean;
@@ -1518,7 +1518,9 @@ export class DurableAgent implements AgentSessionFacade {
         const suspended = await ResultAsync.fromPromise(this.harness.close(context), () =>
           durableError("Harness suspension failed"),
         );
-        await this.projection;
+        const projected = await ResultAsync.fromPromise(this.projection, () =>
+          durableError("history projection failed"),
+        ).andThen((result) => result);
         await this.summaryCoordinator?.drain();
         await this.summaryOutcomes;
         this.unsubscribeCommits();
@@ -1527,22 +1529,29 @@ export class DurableAgent implements AgentSessionFacade {
         this.view.dispose();
         this.graph.dispose();
         const resources = await this.options.closeResources?.();
+        const failed = draining?.isErr()
+          ? { stage: "drain", error: draining.error }
+          : suspended.isErr()
+            ? { stage: "native", error: suspended.error }
+            : projected.isErr()
+              ? { stage: "projection", error: projected.error }
+              : resources?.isErr()
+                ? { stage: "resources", error: resources.error }
+                : undefined;
+        const drainOutcome = draining?.isOk() ? draining.value : undefined;
+        const drainCause = draining?.isErr() ? draining.error.cause : drainOutcome?.cause;
         const edge = await this.options.edge?.(
           resources?.isErr() ? "harness.resources_close_failed" : "harness.suspended",
           {
             orbId: this.options.orbId,
             sessionId: this.session.id,
+            drain_outcome: draining?.isErr() ? "failed" : (drainOutcome?.type ?? "draining"),
+            close_outcome: failed ? "failed" : "closed",
+            ...(failed ? { failed_stage: failed.stage, error_code: failed.error.code } : {}),
+            ...(drainCause ? { cause_code: drainCause.code } : {}),
           },
         );
-        return draining?.isErr()
-          ? err(draining.error)
-          : suspended.isErr()
-            ? err(suspended.error)
-            : resources?.isErr()
-              ? err(resources.error)
-              : edge?.isErr()
-                ? err(edge.error)
-                : ok(undefined);
+        return failed ? err(failed.error) : edge?.isErr() ? err(edge.error) : ok(undefined);
       })(),
       () => durableError("Harness suspension failed"),
     ).andThen((value) => value);

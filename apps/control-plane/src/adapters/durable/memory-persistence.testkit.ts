@@ -106,7 +106,19 @@ export class MemoryAgentPersistence implements AgentPersistence {
             return okAsync(undefined);
           },
           checkInputAdmission: () => okAsync(undefined),
-          beginDrain: () => okAsync(undefined),
+          beginDrain: () =>
+            this.owners.get(orb.id) !== owner ||
+            owner.expires <= this.clock() ||
+            owner.abort.signal.aborted
+              ? okAsync({
+                  type: "owner_lost" as const,
+                  cause: {
+                    type: "authority_error" as const,
+                    code: "stale_owner" as const,
+                    message: "Agent ownership revoked",
+                  },
+                })
+              : okAsync(undefined),
           release: () => {
             owner.abort.abort();
             if (this.owners.get(orb.id) === owner) this.owners.delete(orb.id);

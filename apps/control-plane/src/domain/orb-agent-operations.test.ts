@@ -23,6 +23,140 @@ function seed() {
   );
   return h;
 }
+function searchSetup(caller: Parameters<typeof createOrbAgentOperations>[2] = identity) {
+  const h = seed();
+  const task = new NoSimulationTask("search", false);
+  const log = vi.spyOn(task, "log");
+  const hit = {
+    orbId: "caller",
+    sessionId: "s",
+    recordId: "r",
+    name: null,
+    projectName: "Project",
+    snippet: "private snippet",
+    score: 0.3,
+  };
+  const search = vi
+    .spyOn(h.store, "searchHistory")
+    .mockReturnValue(okAsync({ hits: [hit], documentCount: 7, candidateCount: 3 }));
+  const service = createOrbAgentOperations(task, h.deps, caller, {
+    appOrigin: "https://app",
+    appendAlert: () => okAsync({ recordId: "a", duplicate: false }),
+  });
+  return {
+    ...h,
+    task,
+    log,
+    hit,
+    search,
+    service,
+    invoke: (request: unknown) => service.invoke({ kind: "search", request }, "search"),
+  };
+}
+describe("orb history search", () => {
+  it.each([
+    [undefined, { orbId: "caller" }],
+    ["project", { projectId: "project" }],
+    ["user", {}],
+  ] as const)("binds %s scope without fetching or waking the runtime", async (scope, selector) => {
+    const { ownerUserId: _owner, ...guest } = identity;
+    const s = searchSetup(guest);
+    s.store.seedProject({ ...makeProjectRow("project"), ownerUserId: "fresh-owner" });
+    const getOrb = vi.spyOn(s.store, "getOrb");
+    const getProject = vi.spyOn(s.store, "getProject");
+    const pull = vi.spyOn(s.deps.runtimeClient, "pullHistory");
+    const start = vi.spyOn(s.deps.hostProvider, "start");
+    const provision = vi.spyOn(s.deps.hostProvider, "provision");
+    expect((await s.invoke({ query: " Needle!? ", scope }))._unsafeUnwrap()).toEqual({
+      hits: [{ ...s.hit, orbUrl: "https://app/orbs/caller" }],
+    });
+    expect(s.search).toHaveBeenCalledWith(s.task, {
+      ownerUserId: "fresh-owner",
+      ...selector,
+      query: "Needle!?",
+      limit: 10,
+    });
+    for (const read of [getOrb, getProject]) expect(read).toHaveBeenCalledTimes(1);
+    for (const effect of [pull, start, provision]) expect(effect).not.toHaveBeenCalled();
+    expect(s.log.mock.calls.flat().join(" ")).toMatch(
+      /scope=.*documents=7.*candidates=3.*hits=1.*durationMs=/,
+    );
+    expect(s.log.mock.calls.flat().join(" ")).not.toMatch(/needle|private/i);
+    if (scope === undefined) {
+      const list = vi.spyOn(s.store, "listProjectsByOwner");
+      expect((await s.service.invoke({ kind: "list" }, "list")).isOk()).toBe(true);
+      expect(list).toHaveBeenCalledWith(s.task, "fresh-owner");
+    }
+  });
+  it.each([
+    null,
+    "needle",
+    { query: "x", kind: "self" },
+    { query: "x", ownerUserId: "another" },
+    { query: "  \n " },
+    { query: "x".repeat(4097) },
+    ...[0, 51, 1.5].map((limit) => ({ query: "x", limit })),
+    { query: "x", scope: "project", orbId: "caller" },
+    { query: "x", orbId: " " },
+  ])("rejects raw/semantic invalid input %j", async (request) => {
+    const s = searchSetup();
+    expect((await s.invoke(request))._unsafeUnwrapErr().code).toBe("invalid_request");
+    expect(s.search).not.toHaveBeenCalled();
+  });
+  it.each([
+    ["foreign", "archived", "not_found"],
+    ["project", undefined, "not_found"],
+    ["project", "deleting", "conflict"],
+    ["project", "archived", undefined],
+  ] as const)("checks explicit target %s/%s", async (projectId, state, code) => {
+    const s = searchSetup();
+    s.store.seedProject({ ...makeProjectRow("foreign"), ownerUserId: "another" });
+    if (state) s.store.seedOrb(makeOrbRow("target", projectId, state));
+    const result = await s.invoke({ query: "needle", orbId: "target", limit: 50 });
+    expect(result.isErr() ? result.error.code : undefined).toBe(code);
+    expect(s.search).toHaveBeenCalledTimes(code ? 0 : 1);
+    if (!code)
+      expect(s.search).toHaveBeenCalledWith(s.task, {
+        ownerUserId: "owner",
+        orbId: "target",
+        query: "needle",
+        limit: 50,
+      });
+  });
+  it("sanitizes database failure and telemetry", async () => {
+    const s = searchSetup();
+    s.search.mockReturnValue(
+      errAsync({
+        type: "store_error",
+        code: "unavailable",
+        retryable: true,
+        message: "private database details",
+      }),
+    );
+    expect((await s.invoke({ query: "needle" }))._unsafeUnwrapErr()).toEqual({
+      code: "unavailable",
+      message: "history search unavailable",
+    });
+    const log = s.log.mock.calls.flat().join(" ");
+    expect(log).toContain("error=unavailable");
+    expect(log).not.toMatch(/private|needle/);
+  });
+  it.each(["project", "user"])(
+    "fences source deletion after authentication for %s",
+    async (scope) => {
+      const s = searchSetup();
+      s.store.seedOrb(
+        makeOrbRow("caller", "project", "deleting", {
+          runtimeTokenHash: "token",
+          hostIncarnation: 1,
+        }),
+      );
+      expect((await s.invoke({ query: "needle", scope }))._unsafeUnwrapErr().code).toBe("conflict");
+      expect(s.search).not.toHaveBeenCalled();
+    },
+  );
+});
+
 describe("central orb operations", () => {
   it("returns path-routed self and spawned orb links", async () => {
     const h = seed();
@@ -89,6 +223,11 @@ describe("central orb operations", () => {
                 (await service.invoke({ kind: "notification_admission" }, "notify")).isOk(),
               ).toBe(true);
               expect(appendAlert).not.toHaveBeenCalled();
+              expect(
+                (
+                  await service.invoke({ kind: "search", request: { query: "needle" } }, "search")
+                ).isOk(),
+              ).toBe(true);
               expect(
                 (await service.invoke({ kind: "spawn", prompt: "work" }, "spawn")).isOk(),
               ).toBe(true);
@@ -183,6 +322,7 @@ describe("central orb operations", () => {
                 "delete",
                 "sleep",
                 "notification_admission",
+                "search",
               ] as const) {
                 const request =
                   kind === "spawn"
@@ -191,10 +331,15 @@ describe("central orb operations", () => {
                       ? { kind, message: "look" }
                       : kind === "sleep"
                         ? { kind, durationSeconds: 60 }
-                        : { kind };
+                        : kind === "search"
+                          ? { kind, request: { query: "needle" } }
+                          : { kind };
                 const continuation =
                   revocation === "archiving" &&
-                  (kind === "alert" || kind === "archive" || kind === "notification_admission");
+                  (kind === "alert" ||
+                    kind === "archive" ||
+                    kind === "notification_admission" ||
+                    kind === "search");
                 expect((await service.invoke(request, kind)).isOk()).toBe(continuation);
               }
             },
@@ -239,6 +384,11 @@ describe("central orb operations", () => {
             h.store.seedOrb(row);
             h.store.seedProject({ ...makeProjectRow("project"), ownerUserId: "other" });
             expect(
+              (
+                await service.invoke({ kind: "search", request: { query: "needle" } }, "search")
+              )._unsafeUnwrapErr().code,
+            ).toBe("unauthorized");
+            expect(
               (await service.invoke({ kind: "notification_admission" }, "old-notify")).isErr(),
             ).toBe(true);
             expect((await service.invoke({ kind: "spawn", prompt: "work" }, "old")).isErr()).toBe(
@@ -249,7 +399,7 @@ describe("central orb operations", () => {
       ]);
     });
   });
-  it("denies stale incarnation and mismatched owner before effects", async () => {
+  it("fences guest reads and effects before access", async () => {
     await runDst({ name: "native-orb-denials", iterations: 10 }, async (sim) => {
       const h = seed();
       const appendAlert = vi.fn(() => okAsync({ recordId: "alert", duplicate: false }));
@@ -257,18 +407,32 @@ describe("central orb operations", () => {
         {
           name: "invoke",
           f: async (task) => {
-            for (const bad of [
-              { ...identity, incarnation: 2 },
-              { ...identity, ownerUserId: "other" },
-              { ...identity, projectId: "other" },
-            ]) {
+            for (const [bad, patch] of [
+              [{ ...identity, incarnation: 2 }, {}],
+              [{ ...identity, runtimeTokenHash: "stale" }, {}],
+              [{ ...identity, ownerUserId: "other" }, {}],
+              [{ ...identity, projectId: "other" }, {}],
+              [{ ...identity, runtimeTokenHash: "" }, { runtimeTokenHash: null }],
+              [identity, { hostDiscardThroughIncarnation: 1 }],
+            ] as const) {
+              h.store.seedOrb(
+                makeOrbRow("caller", "project", "running", {
+                  runtimeTokenHash: "token",
+                  hostIncarnation: 1,
+                  ...patch,
+                }),
+              );
               const service = createOrbAgentOperations(task, h.deps, bad, {
                 appOrigin: "http://app",
                 appendAlert,
               });
-              expect(
-                (await service.invoke({ kind: "alert", message: "x" }, "task:1")).isErr(),
-              ).toBe(true);
+              for (const request of [
+                { kind: "alert", message: "x" },
+                { kind: "search", request: { query: "needle" } },
+              ] as const)
+                expect((await service.invoke(request, "task:1"))._unsafeUnwrapErr().code).toBe(
+                  "unauthorized",
+                );
             }
           },
         },

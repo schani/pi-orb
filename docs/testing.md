@@ -2,9 +2,11 @@
 
 ## Pi 1.4 adapter qualification (2026-10-22, PDT; local, undeployed)
 
+**Integration (2026-10-23, PDT):** merge current main `f6a4573d` without rewriting PR history. Retain restored history search and ordered migrations 049 then unchanged 050, typed lease/lost-owner drain retirement, and Pi 1.4 sleeping, parking, public Abort and checkpoint policies. No additional persisted-state or prompt change. Earlier receipts below do not qualify this integration; exact-head checks remain required.
+
 Main advanced to `cef23e5c` during qualification, adding history-search migration 049. Its migration-list conflict prevented pull-request workflows on `63aa3086`. Integration preserves main’s migration and renumbers the unchanged sleeping CHECK migration to `050_durable_sleeping.sql`; current conformance uses 050. Earlier 049 receipts below describe the pre-integration source, not deployment. Full qualification is required on the merged head.
 
-Current-main integration uses `1e10e602` (MCP independent discovery and BM25 revert). It preserves the independent MCP activation/close lifecycle alongside Pi 1.4 parking and public Harness child abort. Migration 050 remains byte-identical; the ordered upgrade list proceeds from 048 to 050. Local current-main integration passes root typecheck/lint and 20 focused files (190 passed, two PostgreSQL cases skipped): migration/storage, MCP production composition, parking/late notice, child cancellation, replay and owner/drain DST. Evidence: `/tmp/pi14-current-main-integration/`. Full exact-head hosted qualification remains required.
+Earlier current-main integration used `1e10e602` (MCP independent discovery and BM25 revert). It preserves the independent MCP activation/close lifecycle alongside Pi 1.4 parking and public Harness child abort. Migration 050 remained byte-identical; that base’s ordered upgrade list proceeded from 048 to 050. Local current-main integration passes root typecheck/lint and 20 focused files (190 passed, two PostgreSQL cases skipped): migration/storage, MCP production composition, parking/late notice, child cancellation, replay and owner/drain DST. Evidence: `/tmp/pi14-current-main-integration/`. Full exact-head hosted qualification remains required.
 
 First integrated head `d6f00804` failed [CI attempt 1](https://github.com/schani/pi-orb/actions/runs/39897588560): 12 tests across four files, plus one unhandled rejection. Local full unit qualification failed eight tests across three files (PostgreSQL cases skipped); infrastructure tests were not reached. Codex cache tests assumed top-level tools, but 1.4 anchors the initial declaration in an `additional_tools` record at the start of `input`; assertions now require that precise initial-only layout while preserving cache-key, pinned-instruction, prefix and child-isolation checks. The partial-stream double lacked native `Runtime.setTimer`, causing a TypeError and preventing its held-case barrier from resolving; it now supplies a manually controlled cancellable timer. Migration-ledger expectations included the approved sleeping migration, then numbered 049. These are test-contract corrections, not product fixes or waivers. First logs/artifacts remain in `/tmp/pi14-integration/`; hosted trace artifacts contain only byte-identical tracked historical fixtures. New-head full unit/infrastructure and all hosted gates remain required.
 
@@ -18,6 +20,32 @@ MCP E2E waits for registry publication through `test_registry_published` only un
 
 **Independent-fixture ordering (2026-10-22):** [Durable run 39896251674](https://github.com/schani/pi-orb/actions/runs/39896251674) failed six cases because the first scripted response called `mcp__web__search` before automatic discovery published it. Captured tool output confirms the missing callable, followed by a fake-provider unmatched-rule response. Waiting before model login approval deadlocked: model composition resolves auth before creating MCP tools (local evidence: `/tmp/pr162-fixture-fix-e2e/`). The fixture instead approves auth, waits for registry publication, then sends the first scripted MCP input while execution readiness remains held. Git-cancellation cases retain their queued pre-admission input. No production discovery gate, status prerequisite or timeout increase is added. First logs/artifacts: `/tmp/pr162-babysit-ci/`. This correction does not explain the separate hosted-provider stalls.
 
+Current upgrade coverage reuses `tools/native-codemode-replay.test.ts`: completed callback reuse, pending identity/current authorization (including denial), unsafe pending callbacks, version/fingerprint/deadline/divergence and argument mismatch. `tools/codemode.test.ts` covers decided-result reuse, successful-write reopen/isolation and failure rollback; one inline 1.3 store base/delta checks values through the 64-delta checkpoint, reopen, as-of read and isolated fork. `durable-pg/storage.test.ts` preserves completed 1.1 receipts/public content; storage conformance covers rewindable revisions and independent historical copies. These are native replay/data contracts, not arbitrary old-script live-upgrade qualification.
+
+`paused-agent.test.ts` retains controlled sleeping-checkpoint reopen/wake with recovery demand true→false and sanitized background-pause visibility without failing the parent. `agent.test.ts` reopens running and pending real generations, preserves five-count parking through queued input, then exercises public Abort and fresh input with no trace carriers. Existing manager/atomicity DST and composed drain cover ownership, close restoration and stale owners; `tools/subagents.test.ts` aborts a parked background child before draining cancellation.
+
+Local scope-reduction checks pass root typecheck/lint and 50 replay/store/parking/manager tests. The broader port run passed 124 cases with two PostgreSQL skips and exposed an incorrect new background-idle expectation: unfinished background work is busy, but healthy. The corrected case passes; first failures and receipts remain in `/tmp/pi14-small-upgrade/`. Full current-source hosted qualification remains required.
+
+## E2E runtime image acquisition (2026-10-23)
+
+The source/image-ID checks and 600s bound remain; the optional GHA runtime-image
+cache is removed. Measured exporter failure and decision: `docs/deployment.md`.
+
+Tests first: the updated workflow contract failed on cache import/export, then
+all twelve image-ownership/workflow contracts passed. `npm ci`, infrastructure
+checks, typecheck and lint passed (447 warnings, 87 infos). After starting the
+existing local Docker service, one fresh, empty Buildx builder completed the
+actual amd64 build and image load in **305s**, under the unchanged 600s limit;
+no cache import/export, fallback or retry. All 324 retained copied-source files
+matched SHA-256, and the loaded tag matched the build's exact image ID
+`sha256:bde452183e423c7da3af6ff03df7587df4d9a77a4235b6694f6fb89529e117f6`.
+At least 32 GiB remained free. This is local Docker 29.1.3 / Buildx 0.38.1 /
+BuildKit 0.33.1 evidence, not hosted-runner performance or a full E2E pass.
+Runtime inputs are unchanged from `2452ca6`; exact-new-head hosted gates remain
+required. No cloud qualification, merge or deployment occurred. First-failure
+and cold-build receipts: `.context/deploy-override-evidence/pr182/failure-40029487129/`
+and `.context/deploy-override-evidence/cache-removal/`.
+
 ## MCP reduction qualification (2026-10-22)
 
 Frozen base patch SHA256 `b0139c4d13d014709b6ee46efaafc86772f5158edd9abc8ad4b7c6959bffcba5` passed 44 files / 233 unit tests, typecheck, full lint and scoped Biome; no full-suite qualification is claimed.
@@ -27,11 +55,9 @@ Manual provider waits remain unresolved; automatic retry does not explain them. 
 
 **Historical-stall attribution exception (user-approved 2026-10-22, PDT):** the user explicitly authorized merging [PR 162](https://github.com/schani/pi-orb/pull/162) without root-causing only the earlier hosted-fake inference waits recorded above. Evidence remains preserved; no cause or fix is claimed. This does not waive current/new CI failures, assertions, exact-head qualification, DST replay or fixture cleanup/corrections, and authorizes no deployment. Code head `9724ac522f7a97dc0a9e89decd38db59109e19e2` passed all 11 checks: [CI](https://github.com/schani/pi-orb/actions/runs/39898288399), [E2E](https://github.com/schani/pi-orb/actions/runs/39898288361), [Central process](https://github.com/schani/pi-orb/actions/runs/39898288415). This documentation-only update requires its own exact-head CI before merge.
 
-Current upgrade coverage reuses `tools/native-codemode-replay.test.ts`: completed callback reuse, pending identity/current authorization (including denial), unsafe pending callbacks, version/fingerprint/deadline/divergence and argument mismatch. `tools/codemode.test.ts` covers decided-result reuse, successful-write reopen/isolation and failure rollback; one inline 1.3 store base/delta checks values through the 64-delta checkpoint, reopen, as-of read and isolated fork. `durable-pg/storage.test.ts` preserves completed 1.1 receipts/public content; storage conformance covers rewindable revisions and independent historical copies. These are native replay/data contracts, not arbitrary old-script live-upgrade qualification.
+## Independent shell rail (2026-10-23; local, undeployed)
 
-`paused-agent.test.ts` retains controlled sleeping-checkpoint reopen/wake with recovery demand true→false and sanitized background-pause visibility without failing the parent. `agent.test.ts` reopens running and pending real generations, preserves five-count parking through queued input, then exercises public Abort and fresh input with no trace carriers. Existing manager/atomicity DST and composed drain cover ownership, close restoration and stale owners; `tools/subagents.test.ts` aborts a parked background child before draining cancellation.
-
-Local scope-reduction checks pass root typecheck/lint and 50 replay/store/parking/manager tests. The broader port run passed 124 cases with two PostgreSQL skips and exposed an incorrect new background-idle expectation: unfinished background work is busy, but healthy. The corrected case passes; first failures and receipts remain in `/tmp/pi14-small-upgrade/`. Full current-source hosted qualification remains required.
+The first browser run failed at 390×360: the terminal extended below the composer. A shared header/composer-height roster budget fixes the geometry; unchanged assertions pass in Chromium and WebKit. Browser evidence: `/tmp/shell-rail-evidence/`; runtime projection failures: `.context/shell-roster/`. Trim DST failures replayed before correction: `childEdge` supplied `local_agent` for the intended unknown task; the fixture now omits that metadata (`.context/shell-roster/trim-dst-replay.log`). Qualification: [PR 180](https://github.com/schani/pi-orb/pull/180#issuecomment-6373866734).
 
 ## Chart hover targets in WebKit (2026-10-23; local, undeployed)
 
@@ -88,6 +114,37 @@ Historical process-backend E2E qualification on frozen source: **64 files / 460 
 Current trimmed checks: **105 tests / 13 files**, existing multi-user E2E **1/1**, typecheck and lint pass. Runtime/protocol source remains frozen; only dev-mock retry machinery was removed. Trim fixture failures, diagnoses and checks: `.context/pr159-trim/`. Original port-0 fixture failure and preview verification: `.context/no-repo/`.
 
 [CI 39833808392](https://github.com/schani/pi-orb/actions/runs/39833808392) failed two now-removed duplicate boot tests whose Git-config path assumption ignored inherited `XDG_CONFIG_HOME`; no product fix is indicated (evidence: `.context/pr159-ci/REPORT.md`).
+
+## Harness-icon direct-probe ownership (2026-10-23)
+
+**Decision:** send `Connection: close` at both direct `page.request.get` sites in
+`e2e/harness-icons-frontend.e2e.test.ts`; check response ownership before payloads.
+No shared mock/product change, retry, sleep, deadline or existing assertion change.
+
+[First failure](https://github.com/schani/pi-orb/actions/runs/40038122829/job/120702494953),
+source `72b8a6fb5e3472865f77ac4051b35af55c09c1ae`: Chromium's direct orb probe
+failed with `read ECONNRESET`; browser reads of that orb succeeded. This matches
+the known idle-lease class in
+`docs/postmortems/2026-10-16-usage-mock-idle-connection.md`, but historical socket
+reuse/close ownership remains unproven. The user-approved UI stabilization
+exception permits correction without claiming that attribution.
+
+Tests first: both engines rejected `keep-alive` at the initial probe, then at the
+orb probe with only the initial request corrected. A controlled installed-Playwright
+A/B diagnostic called `server.closeIdleConnections()` at second client socket
+assignment, without sleeps: defaults reused the first socket and failed
+`socket hang up (ECONNRESET)` before reaching the server; request
+`Connection: close` assigned a new socket and returned 200. This proves ownership
+under an explicit close schedule, not CI's exact reset timing or cause.
+The complete original file passes both engines; full typecheck, scoped Biome,
+four frontend-listener cases and 20 related unit tests pass. No new DST failure.
+Exact-new-head hosted qualification remains required; no merge or deployment.
+
+Original logs/artifacts and limits:
+`.context/deploy-override-evidence/main72b8-failure/REPORT.md`.
+REDs, the controlled diagnostic, setup correction (missing managed Chromium),
+and validation receipts:
+`.context/deploy-override-evidence/harness-socket-fix/`.
 
 ## Harness-icon catalog ownership (2026-10-20; PR 151)
 
@@ -1315,11 +1372,15 @@ process runs share fixed fixture ports and must run serially (found during hosti
 
 Central Pi admission, storage and execution use simulation-friendly boundaries in `apps/control-plane/src/adapters/durable/`; native Claude has separate task/stream ownership contracts. Operation identity is a Harness contract (`docs/pi-adapter.md`), not a dependency on host SDK session attachment.
 
-**Central-work composition campaign (2026-10-20).** `domain/central-work-campaign.dst.test.ts` generates short programs from submit/retry, independent ordinary poll/reconcile quanta, model progress, idle time and release restart. Programs are generated before execution; inspected state never chooses a restart. Initial running/ordinary idle-stopped compute and seed 0's no-restart controls provide a coverage floor. `CENTRAL_WORK_CAMPAIGN_FIRST_SEED` and `CENTRAL_WORK_CAMPAIGN_SEEDS` extend the default seeds 0–3.
+**Central-work composition campaign (2026-10-20; generalized 2026-10-23).** `domain/central-work-campaign.dst.test.ts` generates short programs from submit/retry, independent ordinary poll/reconcile quanta, model progress, idle time and release restart. Programs are generated before execution; inspected state never chooses commands or faults. Running/ordinary idle-stopped controls preserve restart coverage. A separate no-restart mode adds two-input workloads, worker pauses and an independent database environment actor: healthy/stalled durations are generated from entropy without observing SQL, owners or outcomes. Its SQL-blind gate delays query/transaction admission before entering PGlite; it never injects ownership errors or edits owner rows. `CENTRAL_WORK_CAMPAIGN_FIRST_SEED` and `CENTRAL_WORK_CAMPAIGN_SEEDS` extend the default seeds 0–3.
 
-`testkit/central-work.ts` composes the real DurableAgentPlane/manager/Harness with `composeControlPlaneDatabase`: native task/submission rows and public history/inbox projection share retained SQL. Graceful restart occurs between completed worker quanta, closes/suspends ownership, then replaces the plane, persistence and ControlState over that database. A separate acceptance ledger checks original input and public-operation/native-submission identity before replacement, rejects duplicate inputs/answers/submissions, and requires a successful terminal task plus its original submission's answer—not a delivery receipt. The 15-second virtual fair suffix releases model holds and runs only ordinary poll/reconcile, with no new input, explicit Start or direct open. Each command's single passive snapshot feeds identity, safety, completion and retained diagnostics, separately from the stable invariant message and `runDst` trace. Isolated synchronous demand/inhibition/read-error cases use `NoSimulationTask`; concurrent lifecycle cases retain DST.
+`testkit/central-work.ts` composes the real DurableAgentPlane/manager/Harness and PgAgentPersistence over retained SQL. Control-mode graceful restarts close ownership and replace the plane, persistence and ControlState; fault mode retains the same manager throughout. An acknowledged input precedes fault exploration. A separate acceptance ledger checks stable public operation IDs against persisted native submissions, correlates each input through its delivery batch, counts original input/answer occurrences (including duplicates inside one record), validates inbox provenance and requires successful terminal work—not merely delivery. The synthetic model acknowledges unacknowledged input IDs across batched/steered messages. Passive observations bypass the dependency gate and cannot open an agent or select commands.
 
-Simulation qualification is narrow: memory PGlite finishes migration/WASM initialization before `runTasks`; subsequent queries/transactions use synchronous in-memory WASM plus promise microtasks, without blobs, extensions, network or filesystem I/O. The sole orb's PgAgentPersistence heartbeat uses a dedicated statically declared task; shutdown joins it before reuse. A test-only deadline facade forwards determined's structural signal into a native AbortController for `AbortSignal.any`, preserving the abort edge/reason and unregistering on cancellation. Harness time uses the existing virtual `now` injection. SQL ownership still uses the real database clock: this is not lease-expiry, real-I/O, partial-stream/tool/retry-timer, mid-inflight crash, overlapping-release, or authority-inhibition qualification. Inputs are synthetic retries of one original ID, not a multi-input workload.
+The fair suffix waits for the finite environment to finish, restores database access, releases model holds and runs only ordinary poll/reconcile: no new inputs, explicit Start, direct open or process replacement. Healthy controls retain their 15-second bound; database-stall campaigns allow 90 virtual seconds for a remaining lease and ordinary retries. Fault/command history, authoritative owner events and lifecycle edges accompany failure snapshots. Teardown independently joins plane/persistence/client cleanup and records errors without masking the primary invariant. Isolated synchronous demand/inhibition/read-error cases use `NoSimulationTask`; concurrent lifecycle cases retain DST.
+
+Simulation qualification is narrow: memory PGlite finishes migration/WASM initialization before `runTasks`; subsequent queries/transactions use synchronous in-memory WASM plus promise microtasks, without blobs, extensions, network or filesystem I/O. The sole orb's PgAgentPersistence heartbeat uses a dedicated statically declared task; shutdown joins it before reuse. A test-only deadline facade forwards determined's structural signal into a native AbortController for `AbortSignal.any`, preserving the abort edge/reason and unregistering on cancellation. Harness and SQL authority share virtual time through PgAgentPersistence's optional authority clock; simulation floors milliseconds to match production's integer database clock. Production still defaults to SQL `clock_timestamp()`. The campaign explores natural lease expiry from dependency stalls, not real PostgreSQL lock/pool behavior, in-flight transaction interruption, partial streams/tools, overlapping releases or authority inhibition. Worker quanta remain serialized and the fault mode excludes process restarts.
+
+**Lost-owner correction (2026-10-23; local):** the generalized campaign first failed on generated stalls (seeds 0/1 completion, seed 3 cleanup), reproducing the cached failed-close blocker. All three original traces explicitly replayed before the fix. The unchanged twelve default campaigns now pass; focused controls also require foreign-capability/SQL failures, failed native/resource cleanup and publication failure to remain errors, while failed lease releases remain tracked for retry. Exact old traces diverge on fixed source when replacement introduces a new renewal timer; this is not an exact-replay green claim. Original traces remain intact. Frozen-source local qualification passes 5,159 unit tests (25 conditional skips), infrastructure suites, all 32 database-stall seeds 0–31 and seven scoped process-backed runtime/browser E2Es; root typecheck/lint pass. This is not the full Docker E2E release gate or deployment. Exact evidence and replay limits: `docs/postmortems/2026-10-23-agent-lease-loss-drain.md`.
 
 Before correction, seed 3 independently reproduced unfinished-work loss of recovery eligibility; expanded seeds 8/16/19 reproduced the same defect. Each original failure was explicitly replayed before implementation. The fixed default eight histories pass. A synchronous external command observer confirms that all four formerly failing programs are unchanged and pass on fixed source; scheduler RNG coupling did not replace the failing programs. Original exact-trace replay now diverges at the added demand deadline, not at the completion assertion; no trace or runner was changed. Focused demand/routing/SQL/visibility qualification passes 62 tests, covering true/false/read-error demand, Stop/sleep inhibition, failure edges, answered failed health, initializing/ready handling and error clearing without orb writes. Full qualification is recorded separately; these checks do not establish production recovery. Evidence and replay limits: `docs/postmortems/2026-10-20-stopped-central-agent-recovery.md`.
 
@@ -1557,3 +1618,93 @@ passes: 107 Node, 220 Python and 33 native-guest tests, plus filesystem/service
 checks. Local heavy phases were serialized across the dependency worktrees.
 CI owns the full unit/DST suite, runtime E2E and container builds; native cloud-image,
 acceptance and retained-workspace qualification have not run. No deployment.
+
+## Index-only history search (2026-10-22; local, undeployed)
+
+Shared PostgreSQL 16/PGlite contracts verify public-text privacy, lossless source JSON,
+Unicode/long-token queries, exact scoped BM25, rank-before-limit, GIN expression access,
+and existing/future source-only insertion. Native lock-order cases run migration
+044 before 049 and assert index/ledger commit or rollback. Application contracts cover
+owner binding, typed native objects/errors, HTTP and CLI dispatch. Existing process
+E2Es search a committed native alert and a stopped orb through its sibling's CLI.
+
+First local failures were deterministic: primitive JSON driver binding required a
+query-object envelope; public delivery/child-notice selection and JavaScript whitespace
+trimming required extraction corrections; historical fixtures that intentionally skip
+044 must also skip its dependent index. The lock-order fixture instead runs both actual
+migrations. Tests preceded these corrections; assertions and timeouts were not weakened.
+Logs and source manifests remain in `/workspace/history-search-index-evidence/` and
+`/tmp/search-index-rewrite-*.log`. An initial selector skipped the CLI case; its first
+executed run passed. This is isolated fixture evidence, not production qualification.
+
+Design and cost: `docs/history-search.md`.
+
+## Durable process artifact retries (2026-10-23; local, undeployed)
+
+**Historical attribution exception (user-approved, 2026-10-23 PDT):** only the two
+`Failed to CreateArtifact: Unable to make request: ETIMEDOUT` errors in
+[Durable 40032475539, job 120683831684](https://github.com/schani/pi-orb/actions/runs/40032475539/job/120683831684)
+on `587597cb`, at 15:32:20 and 15:34:35 PDT, are exempt from historical attribution.
+The process test step passed (89 tests, one skipped); both artifact uploads failed.
+Original logs, annotations, metadata, artifact inventory and four available artifacts
+remain in `.context/deploy-override-evidence/pr182-current/failure-40032475539/`.
+Shard 3's two artifacts were absent from that inventory. No cause or fix is claimed.
+The exception covers no other historical or new failure; exact-head qualification,
+original assertions, budgets and DST replay requirements remain unchanged.
+
+**Decision:** only Durable qualification's process provenance and failure-evidence
+uploads get one retry (two total attempts), each a top-level pinned action step with
+a five-minute deadline. First attempts retain `always()` / `failure()` activation,
+use stable IDs and continue on error. Their immediately following retries run only
+when not cancelled and the first step's **outcome** is `failure`; retry failure fails
+the job. Recovery cannot clear an earlier test failure. Names, allowlisted paths,
+hidden-file policy, optional-file handling and 14-day retention are identical;
+only retries set `overwrite: true`. No attempt suffix, composite action, new uploader,
+dependency or job-budget increase. Actions' visible retry step records the decision.
+
+Overwrite deletes/recreates an artifact; it is not transactional or exactly-once.
+Interruption can leave no artifact. Unresolved conflict/timeout fails closed at the
+terminal action, not silently accepted as recovery. A successful retry neither
+explains the historical failure nor independently verifies remote artifact contents.
+
+Tests-first contracts and an offline deterministic runner-decision model cover first
+success, recovery, exhausted attempts, original test failure, cancellation before
+either retry and absent optional diagnostics, plus action/input equivalence and bounds.
+They do not exercise GitHub transport, real cancellation/deadline enforcement or
+remote overwrite behavior. `npm ci`, all infrastructure tests, workspace/E2E types,
+lint and diff checks pass; actionlint is unavailable. RED/GREEN and check receipts
+remain in `.context/deploy-override-evidence/artifact-retry/`.
+No workflow rerun, merge or deployment.
+
+## Already-open alert readiness (2026-10-23; local, undeployed)
+
+[E2E 40024098913](https://github.com/schani/pi-orb/actions/runs/40024098913)
+failed the initial A badge assertion on `a716ac27`, before the delayed acknowledgement
+or B publication. [Deploy 40024279141](https://github.com/schani/pi-orb/actions/runs/40024279141)
+refused qualification; release was skipped. Original logs/artifacts and controlled
+RED evidence remain in `.context/deploy-override-evidence/main-qualification-failure/`.
+Holding all initial metadata GETs lets the old navigation helper return before mount;
+A then becomes a legitimate entry acknowledgement. This establishes a sufficient
+mechanism, not the unique historical interleaving; the UI stabilization exception applies.
+
+Decision: the keyboard Find and delayed-A/B tests pass `.orb-name` as the existing
+helper's ready locator before publishing A. Assertions and deadlines are unchanged.
+Actual Chromium/WebKit runs held both StrictMode metadata GETs behind an explicit
+gate: navigation stayed pending until release, then all four original alert scenarios
+passed. The complete file passes 7/7; workspace/E2E typecheck and scoped lint pass
+(one existing `innerText` warning). Sources and receipts remain in
+`.context/orb-alert-stabilization/`.
+
+Failures now emit up to 24 content-free metadata/ack events, acknowledged IDs/statuses,
+server unread pointer and header flag count to `test-failures/orb-alert-*.json`, covered
+by the existing E2E artifact upload. Failure-only pointer/UI snapshots run concurrently,
+each racing a one-second Node timer cleared on completion. The race covers pointer body
+parsing and UI evaluation; Playwright's locator timeout only bounds locator resolution.
+Tests-first controlled unresolved evaluation, pointer GET and pointer-body/UI gates
+verified artifacts and the identical original cause within 1,002 ms, before gate release.
+These are diagnostic promise gates, not renderer crashes. RED/GREEN sources and receipts
+remain in `.context/orb-alert-stabilization/wall-clock/`; the original four held-metadata
+schedules and evidence are unchanged. The complete uninstrumented seven-test file,
+workspace/E2E types and scoped lint pass. No product fix or historical attribution is
+claimed. Fresh exact-head qualification is still required; no workflow rerun or
+deployment was performed.

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, expect, type Page, webkit } from "@playwright/test";
 import { createServer, type ViteDevServer } from "vite";
@@ -60,6 +60,82 @@ async function unread(page: Page): Promise<string | null> {
 }
 
 const flag = 'img[src="/favicons/alert.svg"]';
+
+function observeAlerts(page: Page, name: string): () => Promise<void> {
+  const started = performance.now();
+  const timeline: Record<string, unknown>[] = [];
+  const record = (event: Record<string, unknown>) => {
+    timeline.push({ ms: Math.round(performance.now() - started), ...event });
+    if (timeline.length > 24) timeline.shift();
+  };
+  const metadataPath = `/api/v1/orbs/${id}`;
+  const endpoint = (url: string) => {
+    const path = new URL(url).pathname;
+    return path === metadataPath
+      ? "metadata"
+      : path === `${metadataPath}/alerts/ack`
+        ? "ack"
+        : null;
+  };
+  page.on("request", (request) => {
+    const api = endpoint(request.url());
+    if (!api) return;
+    record({
+      event: "request",
+      api,
+      method: request.method(),
+      ...(api === "ack" ? { recordId: request.postDataJSON()?.recordId } : {}),
+    });
+  });
+  page.on("response", (response) => {
+    const api = endpoint(response.url());
+    if (!api) return;
+    record({ event: "response", api, status: response.status() });
+    void response.json().then(
+      (body: { unreadAlertId?: string }) => {
+        record({ event: "body-complete", api, unreadAlertId: body.unreadAlertId ?? null });
+      },
+      () => record({ event: "body-unavailable", api }),
+    );
+  });
+  return async () => {
+    const snapshot = async <T>(pending: Promise<T>): Promise<T | "unavailable"> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          pending.catch(() => "unavailable" as const),
+          new Promise<"unavailable">((resolve) => {
+            timer = setTimeout(() => resolve("unavailable"), 1_000);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    const [pointer, flagCount] = await Promise.all([
+      snapshot(
+        page.request.get(`${origin}${metadataPath}`, { timeout: 1_000 }).then(async (response) => ({
+          status: response.status(),
+          unreadAlertId:
+            ((await response.json()) as { unreadAlertId?: string }).unreadAlertId ?? null,
+        })),
+      ),
+      snapshot(
+        page
+          .locator("body")
+          .evaluate(
+            (body, selector) => body.querySelectorAll(selector).length,
+            `.orb-life ${flag}`,
+            { timeout: 1_000 },
+          ),
+      ),
+    ]);
+    const evidence = JSON.stringify({ timeline, pointer, flagCount }, null, 2);
+    mkdirSync("test-failures", { recursive: true });
+    writeFileSync(`test-failures/orb-alert-${name}.json`, evidence);
+    console.error(`Alert failure ${name}: ${evidence}`);
+  };
+}
 
 it("overrides every state surface; explicit selection acknowledges the observed record, not a newer one", async () => {
   const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
@@ -153,8 +229,9 @@ for (const engine of ["chromium", "webkit"] as const) {
   it(`${engine}: keyboard Find selection acknowledges an alert on the already-open orb`, async () => {
     const ownedBrowser = engine === "webkit" ? await webkit.launch() : browser;
     const page = await ownedBrowser.newPage();
+    const reportFailure = observeAlerts(page, `${engine}-keyboard-find`);
     try {
-      await gotoFrontendHistory(page, `${origin}/orbs/${id}`, id);
+      await gotoFrontendHistory(page, `${origin}/orbs/${id}`, id, page.locator(".orb-name"));
       const recordId = await alert(page, `${engine} Find selection`);
       await expect(page.locator(".rec-alert", { hasText: `${engine} Find selection` })).toHaveCount(
         1,
@@ -179,6 +256,9 @@ for (const engine of ["chromium", "webkit"] as const) {
       await expect(page.locator(".rec-alert", { hasText: `${engine} Find selection` })).toHaveCount(
         1,
       );
+    } catch (cause) {
+      await reportFailure().catch(() => console.error("Alert diagnostics unavailable"));
+      throw cause;
     } finally {
       await page.close();
       if (engine === "webkit") await ownedBrowser.close();
@@ -188,6 +268,7 @@ for (const engine of ["chromium", "webkit"] as const) {
   it(`${engine}: a delayed acknowledgement of A cannot clear B arriving in the same open tab`, async () => {
     const ownedBrowser = engine === "webkit" ? await webkit.launch() : browser;
     const page = await ownedBrowser.newPage();
+    const reportFailure = observeAlerts(page, `${engine}-delayed-ab`);
     let releaseResponse = () => {};
     let announceFetched = () => {};
     const responseGate = new Promise<void>((resolve) => {
@@ -197,7 +278,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       announceFetched = resolve;
     });
     try {
-      await gotoFrontendHistory(page, `${origin}/orbs/${id}`, id);
+      await gotoFrontendHistory(page, `${origin}/orbs/${id}`, id, page.locator(".orb-name"));
       const a = await alert(page, `${engine} delayed A`);
       await expect(page.locator(".orb-life").locator(flag)).toHaveCount(1);
       await page.route(
@@ -243,6 +324,9 @@ for (const engine of ["chromium", "webkit"] as const) {
       await page.locator(`.ix-row[href="/orbs/${id}"]`).click();
       await expect.poll(() => unread(page)).toBeNull();
       await expect(page.locator(".rec-alert", { hasText: `${engine} newer B` })).toHaveCount(1);
+    } catch (cause) {
+      await reportFailure().catch(() => console.error("Alert diagnostics unavailable"));
+      throw cause;
     } finally {
       releaseResponse();
       await page.unrouteAll({ behavior: "wait" });

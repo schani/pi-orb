@@ -46,6 +46,7 @@ import { Check } from "typebox/value";
 import type { Plugin } from "vite";
 import { WebSocket, WebSocketServer } from "ws";
 import { chartFixtureRecords } from "./chart-fixtures.ts";
+import { diagramFixtureRecords } from "./diagram-fixtures.ts";
 import { usageFixture, usageOrbs } from "./usage-fixture.ts";
 
 const PROJECT_ID = "frontend-fixture-project";
@@ -679,6 +680,7 @@ function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
     activity: "busy",
   };
   const chartsOrb: OrbView = { ...orb, id: "frontend-charts", name: "Transcript charts" };
+  const diagramsOrb: OrbView = { ...orb, id: "frontend-diagrams", name: "Mermaid diagrams" };
   const lazyOrb: OrbView = { ...orb, id: "frontend-lazy-details", name: "Lazy details" };
   if (orbNesting) {
     longOrb.spawnedByOrb = orb.id;
@@ -825,6 +827,7 @@ function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
       [stickyBarsOrb.id, stickyBarsOrb],
       [lazyOrb.id, lazyOrb],
       [chartsOrb.id, chartsOrb],
+      [diagramsOrb.id, diagramsOrb],
       [mixedOrb.id, mixedOrb],
       [authOrb.id, authOrb],
       [archivedOrb.id, archivedOrb],
@@ -836,6 +839,7 @@ function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
       [stickyBarsOrb.id, [...longRecords]],
       [lazyOrb.id, lazyRecords],
       [chartsOrb.id, chartFixtureRecords(createdAt)],
+      [diagramsOrb.id, diagramFixtureRecords(createdAt)],
       [mixedOrb.id, mixedRecords],
       [authOrb.id, []],
       [archivedOrb.id, []],
@@ -848,6 +852,7 @@ function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
       [stickyBarsOrb.id, []],
       [lazyOrb.id, []],
       [chartsOrb.id, []],
+      [diagramsOrb.id, []],
       [authOrb.id, []],
       [archivedOrb.id, []],
     ]),

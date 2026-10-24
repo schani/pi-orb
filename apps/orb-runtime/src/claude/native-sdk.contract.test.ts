@@ -1,4 +1,5 @@
-import { readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { appendFileSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type HistoryRecord, projectDisplayRecord } from "@pi-orb/protocol";
 import { expect, it } from "vitest";
@@ -364,12 +365,30 @@ nativeIt(
 );
 
 nativeIt(
-  "reopens retained native context with shared boot continuation without replaying child work",
+  "resumes retained unanswered input with prior context without replaying child work",
   async () => {
     let continuation = "";
     const result = await probeNativeSdk({
       withSubagent: true,
       withRestart: ({ home, rootPath, sessionId }) => {
+        const native = readFileSync(rootPath, "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line));
+        const previousInput = native.find(
+          (record) => record.type === "user" && record.isMeta !== true,
+        );
+        expect(previousInput).toBeDefined();
+        // Model a crash after native input append, before the first provider response.
+        appendFileSync(
+          rootPath,
+          `${JSON.stringify({
+            ...previousInput,
+            uuid: randomUUID(),
+            parentUuid: native.findLast((record) => record.uuid)?.uuid,
+            message: { role: "user", content: "INTERRUPTED_CONTRACT_TASK" },
+          })}\n`,
+        );
         const projected = new ClaudeHistory(
           join(home, "restart-projection"),
           sessionId,
@@ -403,7 +422,10 @@ nativeIt(
         expect(plan.kind).toBe("message");
         if (plan.kind !== "message") throw new Error("Expected shared boot continuation.");
         expect(plan.triggerTurn).toBe(true);
-        expect(plan.marker.details.reason).toBe("host_restarted");
+        expect(plan.marker.details).toMatchObject({
+          reason: "resumed",
+          shape: "unanswered_user_message",
+        });
         continuation = plan.marker.content;
         return continuation;
       },
@@ -428,6 +450,7 @@ nativeIt(
     );
     expect(JSON.stringify(messages)).toContain("toolu_contract_agent");
     expect(JSON.stringify(messages)).toContain("Contract complete.");
+    expect(JSON.stringify(messages).split("INTERRUPTED_CONTRACT_TASK")).toHaveLength(2);
     // The pinned CLI appends a system token-budget message after the user turn.
     const conversational = messages?.filter((message) => message.role !== "system");
     expect(conversational?.at(-1)).toEqual({ role: "user", content: continuation });
@@ -453,7 +476,7 @@ nativeIt(
           .find(
             (record) =>
               record.type === "user" &&
-              JSON.stringify(record.message?.content).includes("/compact"),
+              JSON.stringify(record.message?.content ?? "").includes("/compact"),
           );
         expect(commandEcho?.promptId).not.toBe(compactUuid);
         expect(commandEcho?.uuid).toBe(compactUuid);

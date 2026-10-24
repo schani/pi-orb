@@ -110,7 +110,12 @@ function classify(entry: unknown): TailEntry | null {
           return { kind: "user", id };
         case "pi-orb.system-message":
           return null;
-        case "pi-orb.host-restarted":
+        case "pi-orb.host-restarted": {
+          const details = entry["details"];
+          return isRecordObject(details) && typeof details["operationId"] === "string"
+            ? { kind: "boot_marker", id }
+            : null;
+        }
         case "pi-orb.sleep-wake":
           return { kind: "boot_marker", id };
         case TURN_RESUME_CUSTOM_TYPE:

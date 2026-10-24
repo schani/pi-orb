@@ -28,6 +28,9 @@ export type AuthorityError = {
 type StorageTransactionError =
   | AuthorityError
   | { type: "invalid_storage_request"; message: string };
+/** A matching backend may retire locally after the database rejects its owner. */
+// biome-ignore lint/suspicious/noConfusingVoidType: leases without database authority return void.
+export type DrainOutcome = void | { readonly type: "owner_lost"; readonly cause: AuthorityError };
 export type Ownership = { orbId: string; ownerId: string; fence: number; admissionVersion: number };
 export type CommitOptions = {
   admit?(query: Query): Promise<Result<void, AuthorityError | StoreError>>;
@@ -171,7 +174,7 @@ export class PgDurableAuthority {
       .mapErr((error) => (error.type === "authority_error" ? error : unavailable()));
   }
 
-  beginDrain(ownership: Ownership, storage: Storage): ResultAsync<void, AuthorityError> {
+  beginDrain(ownership: Ownership, storage: Storage): ResultAsync<DrainOutcome, AuthorityError> {
     const capability = this.drains.get(storage);
     if (
       !capability ||
@@ -185,9 +188,12 @@ export class PgDurableAuthority {
       );
     // Closed storage admits no writes, but owner validation still applies.
     return this.db
-      .transaction<void, AuthorityError>(async (query) => {
+      .transaction<DrainOutcome, AuthorityError>(async (query) => {
         const guarded = await this.guard(query, ownership, true);
-        if (guarded.isErr()) return guarded;
+        if (guarded.isErr())
+          return guarded.error.code === "stale_owner"
+            ? ok({ type: "owner_lost", cause: guarded.error })
+            : err(guarded.error);
         const clock = await this.time(query);
         if (clock.isErr()) return err(clock.error);
         return (
@@ -200,7 +206,10 @@ export class PgDurableAuthority {
           .mapErr(unavailable);
       })
       .mapErr((error) => (error.type === "authority_error" ? error : unavailable()))
-      .map(() => capability.activate());
+      .map((outcome) => {
+        if (!outcome) capability.activate();
+        return outcome;
+      });
   }
 
   release(ownership: Ownership): ResultAsync<void, AuthorityError> {

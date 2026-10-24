@@ -35,6 +35,8 @@ import type {
   EnqueueOrbMessageParams,
   FailOrbAndRequestComputeDiscardParams,
   FinalizeHostDiscardParams,
+  HistorySearchPage,
+  HistorySearchParams,
   MintSlotClaim,
   OrbMessageTargetNotFound,
   RecordHostDiscardStatusParams,
@@ -47,6 +49,7 @@ import type {
 import { hasNativeInboxAdmission } from "../durable-pg/inbox-admission.ts";
 import { removePrivateAgentState } from "./archive-private-state.ts";
 import { arrayParam, jsonParam, type PgRow, type PostgreSQLClient } from "./client.ts";
+import { searchHistory } from "./history-search.ts";
 import { PgWorkspaceUploads } from "./workspace-uploads.ts";
 
 const BOOT_CONTEXT_STATES: readonly OrbState[] = [
@@ -383,6 +386,13 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   constructor(db: PostgreSQLClient) {
     this.db = db;
     this.uploads = new PgWorkspaceUploads(db);
+  }
+
+  searchHistory(
+    _task: SimulationTask,
+    params: HistorySearchParams,
+  ): ResultAsync<HistorySearchPage, StoreError> {
+    return searchHistory(this.db, params);
   }
 
   readActivityHeadline(

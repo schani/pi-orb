@@ -73,7 +73,7 @@ describe("runtime image build ownership", () => {
   });
 });
 
-describe("trusted persistent runtime layer cache", () => {
+describe("isolated runtime image build", () => {
   it("uses pinned BuildKit actions and loads the current checkout without publication", () => {
     expect(step("Set up Docker Buildx")).toContain(
       "uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f",
@@ -91,7 +91,6 @@ describe("trusted persistent runtime layer cache", () => {
       "push: false",
       "tags: pi-orb-runtime:dev",
       "platforms: linux/amd64",
-      "cache-from: type=gha,scope=e2e-runtime-linux-amd64-v1",
     ])
       expect(build).toContain(value);
     expect(source.indexOf("- name: Check Docker disk budget")).toBeLessThan(
@@ -102,12 +101,10 @@ describe("trusted persistent runtime layer cache", () => {
     );
   });
 
-  it("exports only from push/main shard 1; PRs and manual runs only import", () => {
+  it("does not import or export a remote runtime image cache", () => {
     const build = step("Build E2E runtime image");
-    expect(build?.match(/cache-to: (.+)/u)?.[1]).toBe(
-      `\${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 1 && 'type=gha,scope=e2e-runtime-linux-amd64-v1,mode=max' || '' }}`,
-    );
-    expect(source.match(/cache-to:/gu)).toHaveLength(1);
+    expect(build).not.toMatch(/cache-from:|cache-to:/u);
+    expect(step("Report runtime image build")).not.toMatch(/CACHE_WRITE|Cache:|e2e-runtime-linux/u);
     expect(source).not.toContain("pull_request_target");
     expect(source).toContain("permissions:\n  contents: read\n");
   });

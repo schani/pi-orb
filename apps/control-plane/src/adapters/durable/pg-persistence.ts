@@ -9,7 +9,12 @@ import { type AuthorityError, PgDurableAuthority } from "../durable-pg/index.ts"
 import type { PostgreSQLClient } from "../pg/client.ts";
 import { projectNativeCommit } from "./atomic-history.ts";
 import { checkNativeInputAdmission } from "./inbox-admission.ts";
-import type { AgentPersistence, AgentStorageLease, InputAdmissionError } from "./persistence.ts";
+import type {
+  AgentLeaseError,
+  AgentPersistence,
+  AgentStorageLease,
+  InputAdmissionError,
+} from "./persistence.ts";
 import { PgAgentArtifacts } from "./pg-artifacts.ts";
 import { checkNativeStartup, startupRuntimeError } from "./startup.ts";
 
@@ -30,9 +35,15 @@ export class PgAgentPersistence implements AgentPersistence {
   private closed = false;
   private readonly db: PostgreSQLClient;
   private readonly store: Pick<ControlPlaneStore, "readHistorySnapshot">;
-  constructor(db: PostgreSQLClient, store: Pick<ControlPlaneStore, "readHistorySnapshot">) {
+  private readonly authorityNow: (() => number) | undefined;
+  constructor(
+    db: PostgreSQLClient,
+    store: Pick<ControlPlaneStore, "readHistorySnapshot">,
+    authorityNow?: () => number,
+  ) {
     this.db = db;
     this.store = store;
+    this.authorityNow = authorityNow;
   }
 
   recoveryDemand(_task: SimulationTask, orb: OrbRow, context: OperationContext) {
@@ -100,7 +111,7 @@ export class PgAgentPersistence implements AgentPersistence {
     context: OperationContext,
   ): ResultAsync<AgentStorageLease, RuntimeClientError> {
     if (this.closed || context.signal.aborted) return errAsync(failure("Agent persistence closed"));
-    const authority = new PgDurableAuthority(this.db);
+    const authority = new PgDurableAuthority(this.db, this.authorityNow);
     const now = task.wallNow();
     return authority
       .acquire(orb.id, this.ownerId, orb.agentAdmissionVersion, now, now + leaseMs, (query) =>
@@ -122,18 +133,19 @@ export class PgAgentPersistence implements AgentPersistence {
             });
             const abort = new AbortController();
             let released = false;
-            const check = (): ResultAsync<void, RuntimeClientError> => {
+            const check = (): ResultAsync<void, AgentLeaseError> => {
               if (released || abort.signal.aborted)
                 return errAsync(failure("Agent ownership revoked"));
               const at = task.wallNow();
-              return authority.renew(owner, at, at + leaseMs).mapErr(() => {
+              return authority.renew(owner, at, at + leaseMs).mapErr((cause) => {
                 if (!abort.signal.aborted)
                   logOrbEvent(task, orb.id, "agent.owner_lost", {
                     fence: owner.fence,
                     admission_version: owner.admissionVersion,
+                    cause_code: cause.code,
                   });
                 abort.abort();
-                return failure("Agent ownership revoked");
+                return { ...failure("Agent ownership revoked"), cause };
               });
             };
             const heartbeat = (async () => {
@@ -155,7 +167,6 @@ export class PgAgentPersistence implements AgentPersistence {
                   abort.abort();
                   await heartbeat;
                   const result = await authority.release(owner);
-                  this.releases.delete(release);
                   if (result.isOk())
                     logOrbEvent(task, orb.id, "agent.owner_released", {
                       fence: owner.fence,
@@ -164,11 +175,25 @@ export class PgAgentPersistence implements AgentPersistence {
                   return result;
                 })(),
                 () => failure("Agent ownership release failed"),
-              ).andThen((result) =>
-                result.isOk() || result.error.code === "stale_owner"
-                  ? okAsync(undefined)
-                  : errAsync(failure("Agent ownership release failed")),
-              ));
+              )
+                .andThen((result) => {
+                  if (result.isOk() || result.error.code === "stale_owner") {
+                    this.releases.delete(release);
+                    return okAsync(undefined);
+                  }
+                  logOrbEvent(task, orb.id, "agent.owner_release_failed", {
+                    fence: owner.fence,
+                    admission_version: owner.admissionVersion,
+                    cause_code: result.error.code,
+                  });
+                  return errAsync({
+                    ...failure("Agent ownership release failed"),
+                    cause: result.error,
+                  });
+                })
+                .orTee(() => {
+                  releaseResult = undefined;
+                }));
             this.releases.add(release);
             return {
               storage,
@@ -200,7 +225,23 @@ export class PgAgentPersistence implements AgentPersistence {
               beginDrain: () =>
                 authority
                   .beginDrain(owner, storage)
-                  .mapErr(() => failure("Agent drain ownership unavailable")),
+                  .andTee((outcome) => {
+                    logOrbEvent(task, orb.id, "agent.owner_drain", {
+                      fence: owner.fence,
+                      admission_version: owner.admissionVersion,
+                      outcome: outcome?.type ?? "draining",
+                      cause_code: outcome?.cause.code,
+                    });
+                  })
+                  .mapErr((cause) => {
+                    logOrbEvent(task, orb.id, "agent.owner_drain", {
+                      fence: owner.fence,
+                      admission_version: owner.admissionVersion,
+                      outcome: "failed",
+                      cause_code: cause.code,
+                    });
+                    return { ...failure("Agent drain ownership unavailable"), cause };
+                  }),
               signal: abort.signal,
               release,
             };

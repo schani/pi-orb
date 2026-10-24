@@ -90,6 +90,7 @@ Subsystem designs:
 - [docs/orb-spawning.md](docs/orb-spawning.md) — in-orb CLI creation with an atomically queued prompt and browser URL
 - [docs/orb-messaging.md](docs/orb-messaging.md) — locally implemented same-owner cross-project peer input, Correspondence band, wake policy and minimal persistence; qualification pending
 - [docs/runtime-protocol.md](docs/runtime-protocol.md) — the browser↔runtime wire protocol: handshake, display frames, detail HTTP, ordering, backpressure
+- [docs/history-search.md](docs/history-search.md) — owner-scoped committed public history search with exact SQL BM25 and a PostgreSQL-maintained expression index
 - [docs/history-replication.md](docs/history-replication.md) — the harness-agnostic history model, pull-only replication, PostgreSQL schema, and implemented explicit offline recovery (2026-10-05, America/Cancun)
 - [docs/pi-adapter.md](docs/pi-adapter.md) — central Pi execution, admission, resource policy and product history
 - [docs/claude-code-ui-research.md](docs/claude-code-ui-research.md) — research on Claude Code custom UIs, SDK integration, and authentication caveats; no adoption decision
@@ -125,6 +126,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-23-google-signed-out-login-500.md](docs/postmortems/2026-10-23-google-signed-out-login-500.md) — Google signed-out login 500; optional domain hint removed
 - [docs/postmortems/2026-10-22-mcp-startup-deadline.md](docs/postmortems/2026-10-22-mcp-startup-deadline.md) — healthy compute blocked by central discovery; explicit MCP isolation and failure telemetry
 
 - [docs/postmortems/2026-10-22-claude-steering-hidden-message.md](docs/postmortems/2026-10-22-claude-steering-hidden-message.md) — consumed Claude image input hidden by a contentless receipt; frontend inbox/receipt presentation handoff

@@ -1,4 +1,8 @@
 import {
+  HISTORY_SEARCH_PATH,
+  type HistorySearchRequest,
+  type HistorySearchResponse,
+  HistorySearchResponseSchema,
   ORB_INSPECTION_LIST_PATH,
   ORB_SELF_PATH,
   OrbInspectionErrorSchema,
@@ -18,6 +22,7 @@ export const INSPECTION_REQUEST_TIMEOUT_MS = 3_000;
 
 export type InspectionEndpointFailure =
   | { readonly kind: "unauthorized" }
+  | { readonly kind: "invalid_request"; readonly message: string }
   | { readonly kind: "not_found"; readonly message: string }
   | { readonly kind: "conflict"; readonly message: string }
   | { readonly kind: "unavailable"; readonly message: string }
@@ -33,6 +38,10 @@ export type OrbListEndpointResult =
 
 export type TranscriptEndpointResult =
   | { readonly kind: "transcript"; readonly value: OrbTranscript }
+  | InspectionEndpointFailure;
+
+export type SearchEndpointResult =
+  | { readonly kind: "search"; readonly value: HistorySearchResponse }
   | InspectionEndpointFailure;
 
 interface HttpOutcome {
@@ -85,11 +94,29 @@ export class HttpOrbInspectionEndpoint {
     return failureOf(response.value);
   }
 
-  private request(path: string): Promise<RawOutcome> {
+  async search(
+    _task: SimulationTask,
+    request: HistorySearchRequest,
+  ): Promise<SearchEndpointResult> {
+    const response = await this.request(HISTORY_SEARCH_PATH, request);
+    if (response.kind !== "response") return response;
+    if (response.value.status === 200) {
+      return Check(HistorySearchResponseSchema, response.value.payload)
+        ? { kind: "search", value: response.value.payload }
+        : { kind: "internal", message: "malformed history search response" };
+    }
+    return failureOf(response.value);
+  }
+
+  private request(path: string, body?: HistorySearchRequest): Promise<RawOutcome> {
     const deadline = AbortSignal.timeout(INSPECTION_REQUEST_TIMEOUT_MS);
     return fetch(`${this.env.controlPlaneUrl}${path}`, {
-      method: "GET",
-      headers: { authorization: `Bearer ${this.env.runtimeToken}` },
+      method: body === undefined ? "GET" : "POST",
+      headers: {
+        authorization: `Bearer ${this.env.runtimeToken}`,
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: deadline,
     }).then(
       async (response): Promise<RawOutcome> => {
@@ -106,7 +133,12 @@ export class HttpOrbInspectionEndpoint {
           ? timeoutFailure()
           : {
               kind: "unavailable",
-              message: error instanceof Error ? error.message : String(error),
+              message:
+                body === undefined
+                  ? error instanceof Error
+                    ? error.message
+                    : String(error)
+                  : "history search unavailable",
             },
     );
   }
@@ -124,6 +156,8 @@ function failureOf(outcome: HttpOutcome): InspectionEndpointFailure {
   if (Check(OrbInspectionErrorSchema, outcome.payload)) {
     const error = outcome.payload.error;
     switch (error.code) {
+      case "invalid_request":
+        return { kind: "invalid_request", message: error.message };
       case "not_found":
         return { kind: "not_found", message: error.message };
       case "conflict":

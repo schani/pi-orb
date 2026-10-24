@@ -22,7 +22,6 @@ let requestCount = 0;
 let grants = 0;
 let mcpCalls = 0;
 let namingCalls = 0;
-let settledNotices = 0;
 let continuations = 0;
 let interrupted;
 const interruptedRequest = new Promise((resolve) => {
@@ -454,14 +453,18 @@ async function run() {
             "end_turn",
           );
         }
-        if (lastUser.includes("Do not repeat completed work. Do not resume aborted work.")) {
+        if (operation === "interrupted") {
           contractStage = "settled_restart_history";
           assert(lastUser.includes("All processes running before the restart were killed"));
-          assert.equal(operation, "completed");
-          assert.equal(++settledNotices, 1);
-          return message(response, { type: "text", text: "Restart acknowledged." }, "end_turn");
-        }
-        if (operation === "interrupted") {
+          assert.equal(
+            history.split("Do not repeat completed work. Do not resume aborted work.").length,
+            2,
+          );
+          assert(
+            lastUser.indexOf("All processes running before the restart were killed") <
+              lastUser.indexOf("[qualification:interrupted]"),
+          );
+          assert(history.includes("[qualification:completed]"));
           interrupted();
           return;
         }
@@ -578,8 +581,9 @@ async function run() {
   );
   const settled = await runtime.call("drained");
   advance("settled-restart-drained");
-  assert.equal(requestCount, 4);
-  assert.equal(settledNotices, 1);
+  assert.equal(requestCount, 3, "settled restart performed inference");
+  assert.equal(settled.started, 1, "settled restart launched more than metadata validation");
+  assert.equal(settled.nativeProcesses, 0);
   assert(
     settled.snapshot.records.some(
       (record) => record.type === "event" && record.eventType === "pi-orb.host-restarted",
@@ -610,6 +614,22 @@ async function run() {
   const inFlight = await runtime.call("snapshot");
   const interruptedReceipt = receipt(inFlight.snapshot, "inbox-interrupted");
   assert.equal(inFlight.snapshot.activity, "busy");
+  const passiveReceipts = inFlight.snapshot.records.filter(
+    (record) => record.type === "event" && record.eventType === "claude.boot_receipt",
+  );
+  assert.equal(passiveReceipts.length, 1);
+  assert(
+    settled.snapshot.records.some(
+      (record) => record.id === passiveReceipts[0].overflow.operationId,
+    ),
+  );
+  const interruptedPrefix = await readFile(rootPath, "utf8");
+  assert(interruptedPrefix.startsWith(originalPrefix));
+  assert(interruptedPrefix.indexOf(passiveReceipts[0].id) >= originalPrefix.length);
+  assert(
+    interruptedPrefix.indexOf(passiveReceipts[0].id) <
+      interruptedPrefix.indexOf(interruptedReceipt.id),
+  );
   if (mode === "fail-in-flight") throw new Error("forced_fixture_failure");
   advance("known-receipt-kill");
   await runtime.close(true);
@@ -625,7 +645,7 @@ async function run() {
   assert.equal(recovered.health.turnResume?.outcome, "resumed");
   const continued = await runtime.call("idle");
   advance("automatic-recovery-drained");
-  assert.equal(requestCount, 6);
+  assert.equal(requestCount, 5);
   assert.equal(continuations, 1);
   const claims = continued.snapshot.records.filter(
     (record) => record.type === "event" && record.eventType === "pi-orb.turn-resume",
@@ -666,7 +686,7 @@ async function run() {
   });
   assert.equal(old.duplicate, true);
   assert.equal(old.status, "persisted");
-  assert.equal(requestCount, 6);
+  assert.equal(requestCount, 5);
   advance("continued-receipts");
   receipt(continued.snapshot, "inbox-completed");
   receipt(continued.snapshot, "inbox-interrupted");
@@ -712,7 +732,7 @@ async function run() {
   assert.equal(uncertain.health.status, "failed");
   assert.equal(uncertain.health.error.code, "claude_delivery_uncertain");
   assert.equal(uncertain.nativeProcesses, 0);
-  assert.equal(requestCount, 6);
+  assert.equal(requestCount, 5);
   assert.equal(grants, 4);
   assert.equal(namingCalls, 2);
   await runtime.close();

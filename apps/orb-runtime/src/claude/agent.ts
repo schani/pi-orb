@@ -69,7 +69,7 @@ import { ClaudeActivity } from "./activity.ts";
 import { claudeChildEnvironment, fetchClaudeSubscription, verifyClaudeAccount } from "./auth.ts";
 import { validateClaudeAuthSettings } from "./auth-settings.ts";
 import { fetchBootContext } from "./boot-context.ts";
-import { claudeBootEntries } from "./boot-notification.ts";
+import { claudeBootEntries, pendingBootContext } from "./boot-notification.ts";
 import { BOOT_BASELINE_TYPE, planBootNotification, SLEEP_WAKE_TYPE } from "./boot-policy.ts";
 import { ClaudeDiagnostics, type ClaudeQueryError } from "./diagnostics.ts";
 import { claudeEnvironmentPrompt } from "./environment-prompt.ts";
@@ -273,6 +273,7 @@ export class ClaudeOrbAgent implements OrbAgent {
   private readonly hookCallbacks = new Set<Promise<unknown>>();
   private closing: Promise<void> | null = null;
   private queryId = "";
+  private readonly passiveContextUuids = new Set<string>();
   private lastRootResult: JsonObject | null = null;
   private rotationRootWork: JsonObject | null = null;
   private observeContinuation = false;
@@ -317,6 +318,7 @@ export class ClaudeOrbAgent implements OrbAgent {
   >();
   private readonly messageBlocks = new Map<string, string[]>();
   private readonly streamBlocks = new Map<number, string>();
+  private readonly interruptedThinkingBlocks = new Set<string>();
   private readonly fence: FileIdleStopFence;
   private executionId: string | null = null;
   private mcpConfigs: readonly McpConfig[] = [];
@@ -769,9 +771,9 @@ export class ClaudeOrbAgent implements OrbAgent {
           outcome:
             plan.marker.details.reason === "resumed"
               ? "resumed"
-              : plan.triggerTurn
-                ? "notified_restart"
-                : "declined_already_resumed",
+              : plan.marker.details.reason === "declined_already_resumed"
+                ? "declined_already_resumed"
+                : "notified_restart",
           ...(plan.marker.details.shape === undefined ? {} : { shape: plan.marker.details.shape }),
           ...(plan.marker.details.headRecordId === null
             ? {}
@@ -962,6 +964,7 @@ export class ClaudeOrbAgent implements OrbAgent {
     const input = new InputQueue();
     this.input = input;
     this.queryId = randomUUID();
+    this.passiveContextUuids.clear();
     this.lastRootResult = null;
     this.rotationRootWork = null;
     const queryId = this.queryId;
@@ -1384,11 +1387,17 @@ export class ClaudeOrbAgent implements OrbAgent {
             id: task.task_id,
             description: task.description,
             ambient: task.ambient === true,
+            taskType: task.task_type,
           })),
         );
       if (message.subtype === "task_started") {
         if (this.state !== null) delete this.state.handoffTerminals?.[message.task_id];
-        this.activity.taskStart(message.task_id, message.description, message.ambient === true);
+        this.activity.taskStart(
+          message.task_id,
+          message.description,
+          message.ambient === true,
+          message.task_type,
+        );
         if (this.closing !== null && message.ambient !== true)
           this.closingTaskStarts.set(message.task_id, {
             uuid: message.uuid,
@@ -1590,6 +1599,27 @@ export class ClaudeOrbAgent implements OrbAgent {
       }
     }
     if (message.type === "result") {
+      if (message.terminal_reason === "aborted_streaming")
+        for (const id of this.streamBlocks.values()) {
+          const block = this.blocks.get(id);
+          if (
+            block?.blockType === "reasoning" &&
+            !block.redacted &&
+            ![...this.messageBlocks.values()].some((ids) => ids.includes(id))
+          )
+            this.interruptedThinkingBlocks.add(id);
+        }
+      const ids =
+        message.user_message_uuids ??
+        (message.user_message_uuid === undefined ? [] : [message.user_message_uuid]);
+      if (
+        message.subtype === "success" &&
+        !message.is_error &&
+        message.num_turns === 0 &&
+        ids.length > 0 &&
+        ids.every((id) => this.passiveContextUuids.has(id))
+      )
+        return;
       this.lastRootResult = {
         resultId: message.uuid ?? null,
         subtype: message.subtype,
@@ -1763,6 +1793,16 @@ export class ClaudeOrbAgent implements OrbAgent {
     if (operationId === null) return;
     this.activity.beginDrain();
     await this.closeExtensions();
+    for (const id of this.interruptedThinkingBlocks) {
+      const block = this.blocks.get(id);
+      if (
+        block?.blockType === "reasoning" &&
+        !block.redacted &&
+        ![...this.messageBlocks.values()].some((ids) => ids.includes(id))
+      )
+        this.blocks.delete(id);
+    }
+    this.interruptedThinkingBlocks.clear();
     const flushed = this.flushHistory();
     if (flushed.isErr()) {
       this.fail("history_unavailable", flushed.error.message);
@@ -2244,6 +2284,40 @@ export class ClaudeOrbAgent implements OrbAgent {
       this.closing !== null
     )
       return err({ message: "Claude submission was cancelled before inference." });
+    const contextInputs: (SDKUserMessage & { uuid: string })[] = [];
+    if (kind === "turn") {
+      const flushed = this.flushHistory();
+      if (flushed.isErr()) {
+        this.fail("history_unavailable", flushed.error.message);
+        return err(flushed.error);
+      }
+      for (const marker of pendingBootContext(history.view)) {
+        const uuid = randomUUID();
+        const correlated = history.correlate(uuid, {
+          messageIds: [],
+          operationId: marker.id,
+          boot: true,
+        });
+        if (correlated.isErr()) {
+          this.fail("claude_input_persistence_failed", correlated.error.message);
+          return err(correlated.error);
+        }
+        contextInputs.push({
+          type: "user",
+          uuid,
+          session_id: state.id,
+          parent_tool_use_id: null,
+          isSynthetic: true,
+          shouldQuery: false,
+          message: {
+            role: "user",
+            content: (marker.content ?? []).flatMap((block) =>
+              block.type === "text" ? [{ type: "text" as const, text: block.text }] : [],
+            ),
+          },
+        });
+      }
+    }
     const uuid = randomUUID();
     const delivery: Delivery = {
       uuid,
@@ -2277,6 +2351,10 @@ export class ClaudeOrbAgent implements OrbAgent {
     if (kind === "steer") {
       this.pendingSteers.add(uuid);
       this.activity.rootStarted();
+    }
+    for (const context of contextInputs) {
+      this.passiveContextUuids.add(context.uuid);
+      input.push(context);
     }
     input.push({
       type: "user",

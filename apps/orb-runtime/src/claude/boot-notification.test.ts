@@ -1,9 +1,11 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { HistoryRecord, OrbBootContext } from "@pi-orb/protocol";
 import { describe, expect, it } from "vitest";
-import { claudeBootEntries } from "./boot-notification.ts";
+import { ComposedClaudeFixture, rootResult } from "../testkit/claude-composed.ts";
+import { claudeBootEntries, pendingBootContext } from "./boot-notification.ts";
 import { planBootNotification } from "./boot-policy.ts";
 import { ClaudeHistory } from "./history.ts";
 
@@ -49,7 +51,7 @@ describe("Claude uses Pi's boot decision", () => {
       ]),
     ).toMatchObject({
       kind: "message",
-      triggerTurn: true,
+      triggerTurn: false,
       marker: { customType: "pi-orb.host-restarted", details: { reason: "host_restarted" } },
     });
   });
@@ -218,3 +220,96 @@ describe("Claude uses Pi's boot decision", () => {
     ).toEqual({ kind: "none" });
   });
 });
+
+it.each([0, 1])(
+  "early passive acknowledgement preserves the human turn (%i turns)",
+  async (numTurns) => {
+    const f = new ComposedClaudeFixture();
+    const input = async () => {
+      const next = await f.query.input.next();
+      if (next.done || !next.value.uuid) throw new Error("Native input missing.");
+      return { ...next.value, uuid: next.value.uuid };
+    };
+    try {
+      f.history.appendPlatform(boot("old", "pi-orb.boot"))._unsafeUnwrap();
+      f.append({ type: "user", uuid: "human", message: { role: "user", content: "work" } });
+      f.append({
+        type: "assistant",
+        uuid: "done",
+        message: { role: "assistant", content: "done", stop_reason: "end_turn" },
+      });
+      (
+        await f.agent.attachSession(f.state, f.history, f.configDir, "commit", null)
+      )._unsafeUnwrap();
+      expect(f.queries).toHaveLength(1);
+      expect(f.agent.getHealth()).toMatchObject({
+        status: "ready",
+        activity: "idle",
+        turnResume: { outcome: "notified_restart" },
+      });
+      const [marker] = pendingBootContext(f.history.view);
+      if (!marker) throw new Error("Passive boot marker missing.");
+      expect(marker?.overflow.operationId).toBeUndefined();
+      expect(claudeBootEntries([marker])).toMatchObject([
+        { type: "custom", customType: "pi-orb.host-restarted" },
+      ]);
+      (
+        await f.agent.submitMessage([{ type: "text", text: "new task" }], "legitimate")
+      )._unsafeUnwrap();
+      const context = await input(),
+        human = await input();
+      expect(context).toMatchObject({ isSynthetic: true, shouldQuery: false });
+      expect(context.origin).toBeUndefined();
+      expect(f.history.correlation(context.uuid)).toMatchObject({
+        boot: true,
+        operationId: marker?.id,
+      });
+      expect(human).toMatchObject({
+        origin: { kind: "human" },
+        message: { content: [{ type: "text", text: "new task" }] },
+      });
+      await f.query.emitUnscheduled({
+        ...rootResult,
+        num_turns: 0,
+        user_message_uuids: [context.uuid],
+      } as SDKMessage);
+      expect(f.agent.gateView()).toMatchObject({
+        activity: "busy",
+        activeOperationId: "legitimate",
+      });
+      expect(f.agent.getHealth()).toMatchObject({ status: "ready" });
+      expect(f.query.closeRequested).toBe(false);
+      expect(pendingBootContext(f.history.view)).toEqual([marker]);
+      f.receipt(context);
+      f.receipt(human);
+      await f.query.emitUnscheduled({
+        ...rootResult,
+        num_turns: numTurns,
+        user_message_uuids: [human.uuid],
+      } as SDKMessage);
+      f.query.exit();
+      f.query.endOutput();
+      await f.agent.closeExtensions();
+      expect(f.agent.gateView()).toMatchObject({ activity: "idle" });
+      const reloaded = new ClaudeHistory(
+        join(f.dir, "claude"),
+        f.state.id,
+        f.state.timestamp,
+        f.files,
+      );
+      const records = reloaded.scan(f.nativePath)._unsafeUnwrap();
+      expect(pendingBootContext(records)).toEqual([]);
+      const later = { ...marker, id: "later-boot" };
+      expect(pendingBootContext([...records, later, boot("automatic")])).toEqual([later]);
+      (await f.agent.submitMessage([{ type: "text", text: "another" }], "next"))._unsafeUnwrap();
+      expect(await input()).toMatchObject({
+        origin: { kind: "human" },
+        message: { content: [{ type: "text", text: "another" }] },
+      });
+    } finally {
+      f.query.exit();
+      f.query.endOutput();
+      f.dispose();
+    }
+  },
+);

@@ -259,19 +259,25 @@ In priority order:
    GitHub runners, 16m32s workflow elapsed. The historical serial 35m12s / 407-test
    run is not a controlled same-source benchmark; no isolated speedup is claimed.
    Evidence and shard timings are in `docs/testing.md`.
-2. **Approved: trusted BuildKit layer cache (decided 2026-10-15).**
-   Each E2E runner builds its checkout with pinned Buildx actions, imports GHA
-   scope `e2e-runtime-linux-amd64-v1`, and loads `pi-orb-runtime:dev` locally.
-   Only shard 1 of `push`/`main` exports (`mode=max`); PR/manual runs import only.
-   GitHub branch isolation keeps PR-written caches out of main qualification.
-   Setup requires the exact build-action image ID, without fallback; local runs
-   rebuild the current tree. Ten-minute builds, isolated serial shards and all
-   qualification gates remain. This reuses layers, not accepted images.
-   Build progress retains layer hits/misses; summaries retain source SHA, image
-   ID, scope and writer policy. Build-record artifacts are disabled. No registry
-   publication or cloud credentials; credentials, logs and mutable state are not
-   cache inputs. Export evidence and unvalidated fresh-runner reuse:
-   `docs/postmortems/2026-10-15-runtime-dependency-qualification.md`.
+2. **Decision (2026-10-23): isolated E2E runtime builds.**
+   Each runner builds its checkout with pinned Buildx actions and loads
+   `pi-orb-runtime:dev` locally. Setup requires the exact build-action image ID,
+   without fallback; local runs rebuild the current tree. Ten-minute builds,
+   isolated serial shards and all qualification gates remain. Build progress
+   retains phase timings; summaries retain source SHA and image ID. Build-record
+   artifacts are disabled; no registry publication or cloud credentials.
+
+   The October 15 GHA layer-cache decision was rejected after
+   [E2E 40029487129, shard 4](https://github.com/schani/pi-orb/actions/runs/40029487129/job/120673891989)
+   exhausted 600s materializing lazy remote layers for the Docker exporter:
+   all twenty Dockerfile steps were cached, but a 631.51 MB blob took 308.4s
+   and a 633.25 MB blob reached only 460.32 MB after 596.4s. The same blobs
+   took 7.3–26.9s on two successful shards. Captured disk/memory diagnostics
+   show no pressure. Removing optional E2E runtime cache import/export removes
+   that acquisition path, not a proven lower-level backend/routing defect.
+   Other caches are unchanged. First-failure evidence:
+   `.context/deploy-override-evidence/pr182/failure-40029487129/investigation.md`;
+   cold-build qualification: `docs/testing.md`.
 3. **Overlap the remote native build with checks.** Native and control-plane
    builds already run together; the additional overlap is with qualification.
    No publication or deployment before all required checks and acceptance pass.
@@ -538,6 +544,8 @@ SQLSTATE are logged without raw database errors. An uncertain job execution reta
 and job identity for inspection. Successful jobs are removed. There is no
 automatic rollback of committed schema changes, nor a promise of compatibility
 for arbitrary breaking runtime/schema changes.
+
+**Migration timeout override (decision, 2026-10-23):** the migration task defaults to 300 seconds. For the authorized release following [failed retry 40015993413](https://github.com/schani/pi-orb/actions/runs/40015993413), select Deploy input `migration_timeout_30m: true` (release CLI `--migration-timeout-30m`) to allow 1800 seconds for that invocation only. No arbitrary durations, concurrent index build, migration retries, or automatic unlock are introduced. The selected timeout and reason (`default` or `explicit 30-minute override`) appear in Actions logs and the job summary, not new release-record fields. Validation-only runs reject the override. A longer ordinary index build can block history writes for longer, potentially throughout the 30-minute task window; termination does not prove rollback or lock release. Zero retries and uncertain-execution lock retention remain unchanged. The failed release `r-1792785778-ec4492a1-df47-419a-9544-d352b88031d9` retains its lock; inspect its job/execution before any explicit unlock or new deployment. Merge and exact-SHA qualification must precede the manual deployment with this override.
 
 **Migration locking (decided and deployed 2026-10-13):** [Deploy 38478055943](https://github.com/schani/pi-orb/actions/runs/38478055943) failed before apply with 044 as the deadlock victim. Transaction semantics rule out a commit from that attempt, but production catalog/ledger were not queried. Blocking ordered exclusive locks are rejected: they still deadlock with inverse-order record readers in a proven three-session schedule. Migration 044 attempts the pair NOWAIT inside an exception subtransaction catching only 55P03 and releasing partial locks before backoff: 120 attempts, 119 quarter-second backoffs (29.75 seconds scheduled sleep, not a wall-clock guarantee). Exhaustion rethrows 55P03 before DDL; existing ALTERs run once in the same transaction. Durable SQL contention/acquisition/exhaustion edges diagnose this phase. The 300-second request deadline is unchanged. No whole-migration retries or automatic unlock. Retain failed release/job/lock evidence. Incident, tests-first proof and qualification limits: `docs/postmortems/2026-10-13-history-migration-deadlock.md`.
 

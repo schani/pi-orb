@@ -68,7 +68,7 @@ function drainCheckpoint(db: PostgreSQLClient, afterCommit: () => Promise<void>)
   };
 }
 
-it.each(["before", "after_commit", "foreign", "revoked", "unavailable"] as const)(
+it.each(["before", "after_commit", "foreign", "revoked", "expired", "unavailable"] as const)(
   "closed native storage preserves drain fences: %s",
   async (schedule) => {
     const db = new PGliteClient();
@@ -102,13 +102,15 @@ it.each(["before", "after_commit", "foreign", "revoked", "unavailable"] as const
         "utf8",
       );
       (await db.transaction(async (_q, execute) => execute(migration)))._unsafeUnwrap();
-      const authority = new PgDurableAuthority(client, () => 0);
+      let now = 0;
+      const authority = new PgDurableAuthority(client, () => now);
       const owner = (await authority.acquire(id, "owner", 0, 0, 100))._unsafeUnwrap();
       storage = (
         await authority.open(owner, { project: async () => okAsync(undefined) })
       )._unsafeUnwrap();
       if (schedule !== "after_commit") await storage.close(ctx);
       if (schedule === "revoked") (await authority.release(owner))._unsafeUnwrap();
+      if (schedule === "expired") now = 100;
       unavailable = schedule === "unavailable";
       const result = await authority.beginDrain(
         schedule === "foreign" ? { ...owner, ownerId: "foreign" } : owner,
@@ -118,6 +120,11 @@ it.each(["before", "after_commit", "foreign", "revoked", "unavailable"] as const
         expect(result.isOk(), JSON.stringify(result)).toBe(true);
         await expect(storage.commit([], ctx)).rejects.toThrow(/closed/i);
         expect((await authority.validate(owner)).isOk()).toBe(true);
+      } else if (schedule === "revoked" || schedule === "expired") {
+        expect(result._unsafeUnwrap()).toMatchObject({
+          type: "owner_lost",
+          cause: { type: "authority_error", code: "stale_owner" },
+        });
       } else {
         expect(result.isErr()).toBe(true);
         expect(result._unsafeUnwrapErr().code).toBe(
