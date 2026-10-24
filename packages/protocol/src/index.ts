@@ -34,5 +34,6 @@ export * from "./stream-telemetry.ts";
 export * from "./tailscale.ts";
 export * from "./terminal.ts";
 export * from "./tool-result-context.ts";
+export * from "./turn-timeline.ts";
 export * from "./workload-identity.ts";
 export * from "./workspace-upload.ts";
