@@ -1,4 +1,4 @@
-import { parse, serialize } from "cookie";
+import { parseCookie, stringifySetCookie } from "cookie";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { Result } from "neverthrow";
 import type { ApplicationAuth } from "../domain/application-auth.ts";
@@ -27,12 +27,15 @@ export function requestAuthOrigin(
 }
 export const authCookie = Result.fromThrowable(
   (name: string, value: string, maxAge: number) =>
-    serialize(name, value, { secure: true, httpOnly: true, sameSite: "lax", path: "/", maxAge }),
+    stringifySetCookie(
+      { name, value, secure: true, httpOnly: true, sameSite: "lax", path: "/", maxAge },
+      { encode: encodeURIComponent },
+    ),
   () => ({ type: "internal" as const }),
 );
 export function requestCookie(request: FastifyRequest, name: string): string {
   return Result.fromThrowable(
-    () => parse(request.headers.cookie ?? "")[name] ?? "",
+    () => parseCookie(request.headers.cookie ?? "")[name] ?? "",
     () => "invalid_cookie",
   )().unwrapOr("");
 }

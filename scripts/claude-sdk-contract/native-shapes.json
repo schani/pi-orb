@@ -1,6 +1,6 @@
 {
-  "sdkVersion": "0.3.300",
-  "cliVersion": "2.1.300",
+  "sdkVersion": "0.3.310",
+  "cliVersion": "2.1.310",
   "compaction": {
     "metadataKeys": [
       "cumulativeDroppedTokens",
@@ -119,6 +119,7 @@
         "parentUuid",
         "permissionDecision",
         "promptId",
+        "sandboxed",
         "sessionId",
         "sourceToolAssistantUUID",
         "timestamp",

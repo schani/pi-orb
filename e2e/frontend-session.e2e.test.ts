@@ -213,7 +213,7 @@ describe("frontend-only browser behavior", () => {
               return code
                 .replace(
                   "(wt: WTerm) => {",
-                  'async (wt: WTerm) => { const gate = Reflect.get(globalThis, "__terminalReadyGate")?.(); if (gate?.pause) await gate.pause;',
+                  'async (wt: WTerm) => { const gate = Reflect.get(globalThis, "__terminalReadyGate")?.(() => ref.current?.instance === wt && wt.element.isConnected); if (gate?.pause) await gate.pause;',
                 )
                 .replace(
                   "new WebSocket(terminalUrl(orbId), TERMINAL_SUBPROTOCOL)",
@@ -3740,7 +3740,15 @@ describe("frontend-only browser behavior", () => {
       await expectPage(page.locator(".orb-terminal-window")).toBeHidden();
       await page.keyboard.press("Meta+j");
       await expectPage(panel).toHaveCSS("height", `${startHeight + 40}px`);
+      const terminalViewport = panel.locator(".wterm");
+      const terminalScroll = await terminalViewport.evaluate((node) => node.scrollTop);
+      await terminalViewport.evaluate((node) => {
+        node.scrollTop = 0;
+      });
       await expectPage(panel).toContainText("SESSION_KEPT");
+      await terminalViewport.evaluate((node, offset) => {
+        node.scrollTop = offset;
+      }, terminalScroll);
       expectPage(connections).toBe(connectionsBeforeHide);
       const firstCols = controls[0]?.cols;
       await page.setViewportSize({ width: 1000, height: 600 });
@@ -3784,16 +3792,19 @@ describe("frontend-only browser behavior", () => {
     const page = await browser.newPage();
     await page.addInitScript(() => {
       let readyCalls = 0;
-      Reflect.set(globalThis, "__terminalReadyGate", () => {
-        Reflect.set(globalThis, "__terminalReadyCalls", ++readyCalls);
+      const pending = new Map<number, { current: () => boolean; release: () => void }>();
+      Reflect.set(globalThis, "__pendingTerminalReady", () =>
+        [...pending].filter(([, entry]) => entry.current()).map(([ordinal]) => ordinal),
+      );
+      Reflect.set(globalThis, "__releaseTerminalReady", () => {
+        for (const entry of pending.values()) entry.release();
+        pending.clear();
+      });
+      Reflect.set(globalThis, "__terminalReadyGate", (current: () => boolean) => {
+        const ordinal = ++readyCalls;
         return {
-          ordinal: readyCalls,
-          pause:
-            readyCalls % 2 === 0
-              ? new Promise<void>((resolve) =>
-                  Reflect.set(globalThis, "__releaseTerminalReady", resolve),
-                )
-              : undefined,
+          ordinal,
+          pause: new Promise<void>((release) => pending.set(ordinal, { current, release })),
         };
       });
     });
@@ -3801,11 +3812,15 @@ describe("frontend-only browser behavior", () => {
     let exit = () => {};
     let opens = 0;
     const active = new Set<number>();
+    const inputs: { ordinal: number; data: Buffer }[] = [];
     await page.routeWebSocket("**/orbs/frontend-fixture-orb/terminal*", (socket) => {
       const ordinal = Number(new URL(socket.url()).searchParams.get("ready"));
       socket.onClose(() => active.delete(ordinal));
       socket.onMessage((data) => {
-        if (typeof data !== "string") return;
+        if (typeof data !== "string") {
+          inputs.push({ ordinal, data });
+          return;
+        }
         const control = JSON.parse(data);
         if (control.type !== "terminal.open") return;
         opens += 1;
@@ -3832,9 +3847,18 @@ describe("frontend-only browser behavior", () => {
       // StrictMode may retire its first emulator before OR after its socket
       // opens. Synchronize on the final emulator's identity, not a cumulative
       // count of pre-ready connections; all superseded peers must close.
-      await page.waitForFunction(() => Reflect.get(globalThis, "__terminalReadyCalls") === 2);
+      await page.waitForFunction(
+        () => Reflect.get(globalThis, "__pendingTerminalReady")().length === 1,
+      );
+      const firstPending = await page.evaluate<number[]>(() =>
+        Reflect.get(globalThis, "__pendingTerminalReady")(),
+      );
+      expectPage(firstPending).toHaveLength(1);
+      const firstIdentity = firstPending[0];
+      assert(firstIdentity !== undefined);
+      expectPage(firstIdentity).toBeGreaterThan(0);
       await page.evaluate(() => Reflect.get(globalThis, "__releaseTerminalReady")());
-      await expectPage.poll(() => [...active]).toEqual([2]);
+      await expectPage.poll(() => [...active]).toEqual([firstIdentity]);
       const firstGenerationOpens = opens;
       await header.getByRole("button", { name: "Hide terminal", exact: true }).click();
       const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
@@ -3849,9 +3873,18 @@ describe("frontend-only browser behavior", () => {
         "Terminal exited with code 7.",
       );
       await page.getByRole("button", { name: "New terminal", exact: true }).click();
-      await page.waitForFunction(() => Reflect.get(globalThis, "__terminalReadyCalls") === 4);
+      await page.waitForFunction(
+        () => Reflect.get(globalThis, "__pendingTerminalReady")().length === 1,
+      );
+      const retryPending = await page.evaluate<number[]>(() =>
+        Reflect.get(globalThis, "__pendingTerminalReady")(),
+      );
+      expectPage(retryPending).toHaveLength(1);
+      const retryIdentity = retryPending[0];
+      assert(retryIdentity !== undefined);
+      expectPage(retryIdentity).toBeGreaterThan(firstIdentity);
       await page.evaluate(() => Reflect.get(globalThis, "__releaseTerminalReady")());
-      await expectPage.poll(() => [...active]).toEqual([4]);
+      await expectPage.poll(() => [...active]).toEqual([retryIdentity]);
       expectPage(opens).toBeGreaterThan(firstGenerationOpens);
       const recoveredOpens = opens;
       accept();
@@ -3860,8 +3893,16 @@ describe("frontend-only browser behavior", () => {
         0,
       );
       await expectPage(composer).toHaveValue("keep focus here");
+      const terminalInput = page.locator(".orb-terminal-window textarea");
+      await terminalInput.focus();
+      await page.keyboard.type("LATEST_SOCKET");
+      await expectPage
+        .poll(() => Buffer.concat(inputs.map((input) => input.data)).toString())
+        .toBe("LATEST_SOCKET");
+      expectPage(inputs.length).toBeGreaterThan(0);
+      expectPage(inputs.every((input) => input.ordinal === retryIdentity)).toBe(true);
       expectPage(opens).toBe(recoveredOpens);
-      expectPage([...active]).toEqual([4]);
+      expectPage([...active]).toEqual([retryIdentity]);
     } finally {
       await page.close();
     }
@@ -5035,6 +5076,8 @@ describe("frontend-only browser behavior", () => {
     });
     await expectPage.poll(position).toEqual({ left: 0, top: 0 });
     await composer.fill(Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n"));
+    await composer.press("ArrowLeft");
+    await composer.press("ArrowRight");
     await expectPage(caret).toBeVisible();
     expectPage((await position()).top).toBeLessThan(80);
 
