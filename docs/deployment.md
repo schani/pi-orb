@@ -870,7 +870,7 @@ not duplicate the deployment algorithm. The first-release policy is recorded in
 immutable dispatched SHA, verifies checkout equality, and creates local branch
 `main` at that exact SHA before authentication. The shared command requires a
 clean checkout and re-verifies trusted same-repository `push`/`main` qualification
-for the selected SHA before acquiring the release lock. Node 24.22.1, SDK 583.0.0 with its explicit beta component and checksum-verified
+for the selected SHA before acquiring the release lock. Node 24.22.1, SDK 590.0.1 with its explicit beta component and checksum-verified
 OpenTofu 1.12.6 are pinned; actions use immutable SHAs, the runner is Ubuntu 24.04,
 and provider lock files are read-only. The 240-minute job budget accommodates
 checks, fresh native acceptance, migration/apply and up to 75 minutes of retirement.
