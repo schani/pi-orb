@@ -138,18 +138,25 @@ function ProjectArchive({ items, ...entry }: Omit<OrbEntryProps, "orb"> & { item
   );
 }
 
+export interface DashboardSnapshot {
+  projects: ProjectView[] | null;
+  orbLists: Record<string, OrbListState | undefined>;
+}
+
 interface ProjectsPageProps {
+  snapshot: DashboardSnapshot;
   focusedProjectId?: string | null;
   mcpConfigOpen?: boolean;
 }
 
 export function ProjectsPage({
+  snapshot,
   focusedProjectId = null,
   mcpConfigOpen = false,
 }: ProjectsPageProps) {
-  const [projects, setProjects] = useState<ProjectView[] | null>(null);
+  const [projects, setProjects] = useState(snapshot.projects);
   const [loadError, setLoadError] = useState<ApiError | null>(null);
-  const [orbLists, setOrbLists] = useState<Record<string, OrbListState | undefined>>({});
+  const [orbLists, setOrbLists] = useState(snapshot.orbLists);
   const [system, setSystem] = useState<SystemView | null>(null);
 
   const [name, setName] = useState("");
@@ -170,6 +177,11 @@ export function ProjectsPage({
   const focusedProjectRef = useRef<HTMLElement>(null);
   const lastFocusedProjectIdRef = useRef<string | null>(null);
   const addressedRevision = useRef(0);
+
+  useEffect(() => {
+    snapshot.projects = projects;
+    snapshot.orbLists = orbLists;
+  }, [snapshot, projects, orbLists]);
 
   const focusedProjectInDefault =
     focusedProjectId === null
@@ -271,6 +283,9 @@ export function ProjectsPage({
 
   useEffect(() => {
     refresh();
+    return () => {
+      addressedRevision.current += 1;
+    };
   }, [refresh]);
 
   useEffect(() => {
