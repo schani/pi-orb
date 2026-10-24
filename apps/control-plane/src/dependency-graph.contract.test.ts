@@ -11,6 +11,9 @@ const root = join(import.meta.dirname, "../../..");
 type Entry = { version?: string; dependencies?: Record<string, string> };
 type Lock = { packages: Record<string, Entry> };
 const json = (path: string): Lock => JSON.parse(readFileSync(join(root, path), "utf8")) as Lock;
+const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+  overrides?: Record<string, Record<string, string>>;
+};
 
 function resolved(
   packages: Record<string, Entry>,
@@ -30,7 +33,9 @@ function resolved(
 function checkGraph(lock: Lock): string[] {
   const failures: string[] = [];
   for (const [location, entry] of Object.entries(lock.packages)) {
-    for (const [name, range] of Object.entries(entry.dependencies ?? {})) {
+    for (const [name, declaredRange] of Object.entries(entry.dependencies ?? {})) {
+      const owner = location.slice(location.lastIndexOf("node_modules/") + "node_modules/".length);
+      const range = manifest.overrides?.[`${owner}@${entry.version}`]?.[name] ?? declaredRange;
       if (range.startsWith("file:") || (range === "*" && name.startsWith("@pi-orb/"))) continue;
       const versionRange = range.startsWith("npm:")
         ? range.slice(range.lastIndexOf("@") + 1)

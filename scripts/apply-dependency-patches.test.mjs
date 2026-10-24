@@ -11,6 +11,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, test } from "node:test";
@@ -355,7 +356,7 @@ test("guest execution and Claude load no patched dependency files", () => {
   );
 });
 
-test("Pi release inputs align on stable 1.4.0 without an Undici override", () => {
+test("Pi release inputs align on stable 1.4.0 with a scoped Undici security override", () => {
   for (const path of [
     "apps/control-plane/package.json",
     "apps/orb-runtime/package.json",
@@ -372,14 +373,16 @@ test("Pi release inputs align on stable 1.4.0 without an Undici override", () =>
   );
   assert.equal(family.length, 9);
   for (const [path, entry] of family) assert.equal(entry.version, "1.4.0", path);
-  assert.equal(
-    lock.packages["node_modules/@earendil-works/pi-coding-agent/node_modules/undici"].version,
-    "8.10.2",
-  );
-  assert.equal(
-    JSON.parse(readFileSync(join(repository, "package.json"), "utf8")).overrides,
-    undefined,
-  );
+  for (const [owner, version] of [
+    ["apps/control-plane", "7.30.1"],
+    ["node_modules/@earendil-works/pi-coding-agent", "8.12.3"],
+  ]) {
+    const require = createRequire(join(repository, owner, "package.json"));
+    assert.equal(require("undici/package.json").version, version, owner);
+  }
+  assert.deepEqual(JSON.parse(readFileSync(join(repository, "package.json"), "utf8")).overrides, {
+    "@earendil-works/pi-coding-agent@1.4.0": { undici: "8.12.3" },
+  });
 });
 
 for (const patch of ["pi-ai", "pi-coding-agent", "pi-codemode", "pi-durable"]) {

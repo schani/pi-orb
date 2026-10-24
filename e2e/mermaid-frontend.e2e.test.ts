@@ -105,6 +105,7 @@ it.each(["chromium", "webkit"] as const)(
 
       const flow = boards.nth(0);
       await expect(flow.locator(".mermaid-canvas svg")).toBeVisible();
+      await expect(flow.locator('[data-look="neo"]')).toHaveCount(0);
       await expect(flow.locator(".mermaid-tools")).toHaveCSS("opacity", "0");
       await flow.hover();
       await expect(flow.locator(".mermaid-tools")).toHaveCSS("opacity", "1");
@@ -146,6 +147,37 @@ it.each(["chromium", "webkit"] as const)(
       expect(measurements.length).toBeGreaterThanOrEqual(3);
       for (const measurement of measurements)
         expect(measurement).toEqual({ position: "fixed", visibility: "hidden", connected: false });
+      const source = `%%{init: {"securityLevel": "loose"}}%%
+flowchart LR
+  A["<img src=x onerror='globalThis.__mermaidUnsafe = true'>"]
+  click A "javascript:globalThis.__mermaidUnsafe=true"`;
+      const security = await page.evaluate(`(async () => {
+        const { renderMermaid } = await import("/src/lib/mermaid-render.ts");
+        const unsafe = await renderMermaid(${JSON.stringify(source)});
+        const math = await renderMermaid('flowchart LR\\n A["$$E=mc^2$$"]');
+        const template = document.createElement("template");
+        template.innerHTML = unsafe.isOk() ? unsafe.value : "";
+        const mathTemplate = document.createElement("template");
+        mathTemplate.innerHTML = math.isOk() ? math.value : "";
+        return {
+          unsafeRendered: unsafe.isOk(),
+          mathRendered: math.isOk(),
+          mathLabels: mathTemplate.content.querySelectorAll(".katex").length,
+          unsafeElements: template.content.querySelectorAll("script, [onerror], [onclick]").length,
+          unsafeLinks: [...template.content.querySelectorAll("a")].filter((a) =>
+            [...a.attributes].some((attr) => /href$/i.test(attr.name) && /^javascript:/i.test(attr.value)),
+          ).length,
+          executed: Reflect.get(globalThis, "__mermaidUnsafe") === true,
+        };
+      })()`);
+      expect(security).toEqual({
+        unsafeRendered: true,
+        mathRendered: true,
+        mathLabels: 1,
+        unsafeElements: 0,
+        unsafeLinks: 0,
+        executed: false,
+      });
       expect(errors).toEqual([]);
     } finally {
       await browser?.close();

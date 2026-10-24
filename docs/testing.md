@@ -1,5 +1,11 @@
 # Testing
 
+## First-party security refresh (2026-10-24, PDT; local, undeployed)
+
+Clean `npm ci` applies four unchanged sealed patches. Retained graph, patch-application, native provider, auth/DST, MCP security, worker and Mermaid configuration checks pass **102 tests / 13 files**; installer contracts pass **27/27**, including zero patched files in the loaded guest closure. Full/production audits and `npm ls --all` pass; typecheck and lint pass. The prior production build passed with large-chunk warnings.
+
+Mermaid configuration assertions reject the pre-upgrade adapter. Presentation policy (`docs/web-ui.md`) passed **three consecutive cold-fixture Chromium/WebKit runs**, covering hostile labels/directives/links, KaTeX, actors, source/dialog/errors and measurement cleanup. Earlier WebKit receipts showed only 1–3 outcomes at five seconds; diagnostics saw all four eventually. Import readiness alone failed. Restored layout provides corrective stabilization, not historical timing attribution; deadlines, assertions and observer scheduling are unchanged. First-failure/registry receipts: `/workspace/.preview/security-updates-evidence/`. New-head hosted CI/E2E/image qualification remains required; no deployment.
+
 ## Qualification boundaries (decisions 2026-10-22 PDT)
 
 - Assert fallible task/adapter Results and captured arguments outside callbacks that catch failures. Require successful nonempty premises before absence/order assertions; source slices require every anchor and nonempty ordered bounds.
