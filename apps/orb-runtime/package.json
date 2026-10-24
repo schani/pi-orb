@@ -13,7 +13,7 @@
     "@fastify/websocket": "^11.0.0",
     "@modelcontextprotocol/sdk": "1.32.1",
     "@pi-orb/protocol": "*",
-    "agent-browser": "0.33.2",
+    "agent-browser": "0.39.2",
     "determined": "^0.4.1",
     "fastify": "^5.0.0",
     "neverthrow": "^8.2.0",
