@@ -64,6 +64,49 @@ export type CommandRunner = (
     killSignal: NodeJS.Signals;
   },
 ) => Promise<RunResult>;
+type TransientHttpStatus = 429 | 500 | 502 | 503 | 504;
+type CommandError = ImageBuildError & {
+  readonly commandFailure?:
+    | { readonly type: "transient"; readonly status: TransientHttpStatus }
+    | { readonly type: "not_found" }
+    | { readonly type: "log_write_failed" };
+};
+
+function classifyImageCommandFailure(
+  command: string,
+  args: string[],
+  failure: Error & { stderr?: string; killed?: boolean; code?: unknown; signal?: unknown },
+): CommandError["commandFailure"] {
+  if (
+    command !== "gcloud" ||
+    args[0] !== "compute" ||
+    args[1] !== "images" ||
+    !["create", "describe"].includes(args[2] ?? "") ||
+    failure.killed ||
+    typeof failure.code === "string" ||
+    failure.signal != null
+  )
+    return undefined;
+  const envelope = failure.stderr?.match(
+    /^ERROR: \(gcloud\.compute\.images\.(create|describe)\) Could not fetch resource:\r?\n - ([\s\S]+?)\s*$/,
+  );
+  if (envelope == null || envelope[1] !== args[2]) return undefined;
+  const body = envelope[2] ?? "";
+  const status =
+    body.match(/^HTTPError (429|500|502|503|504): [^\r\n]+$/)?.[1] ??
+    (/^<!DOCTYPE html>\r?\n<html lang=en>\r?\n/.test(body)
+      ? body.match(/^ *<title>Error (500|502|503|504) \(Server Error\)!!1<\/title>$/m)?.[1]
+      : undefined);
+  if (status !== undefined)
+    return { type: "transient", status: Number(status) as TransientHttpStatus };
+  const project = args.find((arg) => arg.startsWith("--project="))?.slice(10);
+  return args[2] === "describe" &&
+    project !== undefined &&
+    body === `The resource 'projects/${project}/global/images/${args[3]}' was not found`
+    ? { type: "not_found" }
+    : undefined;
+}
+
 export interface CommandLogError {
   readonly type: "command_log_write_failed";
   readonly message: string;
@@ -184,7 +227,14 @@ export const makeDeleteSubmitter =
 const getAccessToken = makeAccessTokenGetter();
 const submitDelete = makeDeleteSubmitter(getAccessToken, (url, init) => fetch(url, init));
 
+function captureDeadline(milliseconds: number): { signal: AbortSignal; cancel(): void } {
+  const controller = new AbortController();
+  const timer = globalThis.setTimeout(() => controller.abort(), milliseconds);
+  return { signal: controller.signal, cancel: () => clearTimeout(timer) };
+}
+
 export interface CleanupTiming {
+  createDeadline?(milliseconds: number): { signal: AbortSignal; cancel(): void };
   now(): number;
   wait(milliseconds: number, signal: AbortSignal): Promise<void>;
 }
@@ -202,7 +252,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
   constructor(
     commandRunner: CommandRunner = execFileAsync,
     cleanupTiming: CleanupTiming = {
-      now: Date.now,
+      now: () => performance.now(),
       wait: (milliseconds, signal) => setTimeout(milliseconds, undefined, { signal }),
     },
     commandLogWriter: CommandLogWriter = writeCommandLog,
@@ -255,11 +305,11 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
     args: string[],
     signal: AbortSignal,
     timeout = 300_000,
-  ): ResultAsync<RunResult, ImageBuildError> {
+  ): ResultAsync<RunResult, CommandError> {
     const sequence = String(++this.commandNumber).padStart(3, "0");
     return ResultAsync.fromPromise(
-      (async (): Promise<Result<RunResult, ImageBuildError>> => {
-        let outcome: Result<RunResult, ImageBuildError>;
+      (async (): Promise<Result<RunResult, CommandError>> => {
+        let outcome: Result<RunResult, CommandError>;
         let output: RunResult;
         try {
           output = await this.commandRunner(command, args, {
@@ -270,7 +320,13 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
           });
           outcome = ok(output);
         } catch (cause) {
-          const failure = cause as Error & { stdout?: string; stderr?: string };
+          const failure = cause as Error & {
+            stdout?: string;
+            stderr?: string;
+            killed?: boolean;
+            code?: unknown;
+            signal?: unknown;
+          };
           output = {
             stdout: failure.stdout ?? "",
             stderr: failure.stderr ?? "",
@@ -283,9 +339,13 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
             /fingerprint for the [^\r\n]+ key sent by the remote host is\s+(SHA256:[A-Za-z0-9+/]+={0,2})/i,
           )?.[1];
           const sealDiagnostic = stage === "seal" ? publicSealDiagnostic(output.stderr) : undefined;
+          const commandFailure = signal.aborted
+            ? undefined
+            : classifyImageCommandFailure(command, args, failure);
           outcome = err({
             type: signal.aborted ? "cancelled" : "image_build_failed",
             stage,
+            ...(commandFailure === undefined ? {} : { commandFailure }),
             message: hostKeyMismatch
               ? baseline === undefined
                 ? "SSH host-key mismatch before a readiness fingerprint was recorded"
@@ -307,14 +367,16 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
             type: "image_build_failed",
             stage,
             message: `failed to preserve command log: ${recorded.error.message}`,
+            commandFailure: { type: "log_write_failed" },
           });
         }
         return outcome;
       })(),
-      (cause): ImageBuildError => ({
+      (cause): CommandError => ({
         type: "image_build_failed",
         stage,
         message: `failed to preserve command log: ${cause instanceof Error ? cause.message : String(cause)}`,
+        commandFailure: { type: "log_write_failed" },
       }),
     ).andThen((outcome) => outcome);
   }
@@ -325,7 +387,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
     args: string[],
     signal: AbortSignal,
     timeout?: number,
-  ): ResultAsync<RunResult, ImageBuildError> {
+  ): ResultAsync<RunResult, CommandError> {
     return this.execute(input, stage, "gcloud", args, signal, timeout);
   }
 
@@ -1272,11 +1334,214 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
     });
   }
 
+  private captureImage(
+    input: ImageBuildInput,
+    name: string,
+    source: string,
+    stdout: string,
+    createResponse: boolean,
+    expectedId?: string,
+  ): Result<{ image: CapturedImage; pending: boolean }, ImageBuildError> {
+    const invalid = (): ImageBuildError => ({
+      type: "image_build_failed",
+      stage: "capture",
+      message: "invalid image response shape",
+    });
+    return Result.fromThrowable(
+      () => JSON.parse(stdout) as unknown,
+      (): ImageBuildError => ({
+        type: "image_build_failed",
+        stage: "capture",
+        message: "invalid image response JSON",
+      }),
+    )().andThen((value) => {
+      const image = createResponse
+        ? Array.isArray(value) && value.length === 1
+          ? value[0]
+          : undefined
+        : value;
+      const prefix = "https://www.googleapis.com/compute/v1/";
+      const resource = `projects/${input.project}/global/images/${name}`;
+      if (
+        typeof image !== "object" ||
+        image === null ||
+        Array.isArray(image) ||
+        typeof image.id !== "string" ||
+        !/^[0-9]+$/.test(image.id) ||
+        (expectedId !== undefined && image.id !== expectedId) ||
+        image.name !== name ||
+        image.selfLink !== `${prefix}${resource}` ||
+        image.sourceDisk !==
+          `${prefix}projects/${input.project}/zones/${input.zone}/disks/${source}` ||
+        image.labels?.["pi-orb-native-build"] !== input.operationId ||
+        image.labels?.["pi-orb-native-version"] !== input.version ||
+        (image.status !== "READY" && (createResponse || image.status !== "PENDING"))
+      )
+        return err(invalid());
+      return ok({
+        image: { id: image.id, resource, name },
+        pending: image.status === "PENDING",
+      });
+    });
+  }
+
+  private recoverCapture(
+    input: ImageBuildInput,
+    kind: "runtime" | "workspace",
+    name: string,
+    source: string,
+    signal: AbortSignal,
+    createStatus: TransientHttpStatus,
+  ): ResultAsync<CapturedImage, ImageBuildError> {
+    const deadline = this.cleanupTiming.now() + 60_000;
+    const timer = (this.cleanupTiming.createDeadline ?? captureDeadline)(60_000);
+    const controller = new AbortController();
+    const decision = (
+      value:
+        | "started"
+        | "transient_read"
+        | "absent"
+        | "pending"
+        | "recovered"
+        | "cancelled"
+        | "exhausted"
+        | "rejected",
+      status?: TransientHttpStatus,
+    ) =>
+      console.error(
+        `capture recovery: ${kind} ${value}${status === undefined ? "" : ` http=${status}`}`,
+      );
+    const stop = (): ImageBuildError | undefined =>
+      signal.aborted
+        ? { type: "cancelled", stage: "capture", message: "capture recovery cancelled" }
+        : timer.signal.aborted || this.cleanupTiming.now() >= deadline
+          ? {
+              type: "image_build_failed",
+              stage: "capture",
+              message: "capture recovery deadline exceeded",
+            }
+          : undefined;
+    const readFailed = (): ImageBuildError => ({
+      type: "image_build_failed",
+      stage: "capture",
+      message: "capture recovery read failed; inspect private command log",
+    });
+    let interrupt: () => void = () => {};
+    const interrupted = new Promise<Result<CapturedImage, ImageBuildError>>((resolve) => {
+      interrupt = () => {
+        controller.abort();
+        resolve(err(stop() ?? readFailed()));
+      };
+    });
+    signal.addEventListener("abort", interrupt, { once: true });
+    timer.signal.addEventListener("abort", interrupt, { once: true });
+    if (signal.aborted || timer.signal.aborted) interrupt();
+    const release = () => {
+      timer.cancel();
+      signal.removeEventListener("abort", interrupt);
+      timer.signal.removeEventListener("abort", interrupt);
+      controller.abort();
+    };
+    decision("started", createStatus);
+    const recover = async (): Promise<Result<CapturedImage, ImageBuildError>> => {
+      let expectedId: string | undefined;
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const stopped = stop();
+        if (stopped !== undefined) return err(stopped);
+        const result = await this.gcloud(
+          input,
+          "capture",
+          ["compute", "images", "describe", name, `--project=${input.project}`, "--format=json"],
+          controller.signal,
+          Math.min(10_000, deadline - this.cleanupTiming.now()),
+        );
+        // The command and its private log persistence share the same recovery budget.
+        const afterRead = stop();
+        if (afterRead !== undefined) return err(afterRead);
+        if (result.isErr()) {
+          if (result.error.commandFailure?.type === "log_write_failed")
+            return err({
+              type: "image_build_failed",
+              stage: "capture",
+              message: "failed to preserve command log; inspect private command log",
+            });
+          if (result.error.commandFailure === undefined) return err(readFailed());
+          if (result.error.commandFailure.type === "transient")
+            decision("transient_read", result.error.commandFailure.status);
+          else decision("absent");
+        } else {
+          const parsed = this.captureImage(
+            input,
+            name,
+            source,
+            result.value.stdout,
+            false,
+            expectedId,
+          );
+          if (parsed.isErr()) return err(parsed.error);
+          expectedId = parsed.value.image.id;
+          if (!parsed.value.pending) return ok(parsed.value.image);
+          decision("pending");
+        }
+        const wait = await ResultAsync.fromPromise(
+          this.cleanupTiming.wait(
+            Math.min(5_000, deadline - this.cleanupTiming.now()),
+            controller.signal,
+          ),
+          (): ImageBuildError => ({
+            type: signal.aborted ? "cancelled" : "image_build_failed",
+            stage: "capture",
+            message: "capture recovery wait failed",
+          }),
+        );
+        if (wait.isErr()) return err(wait.error);
+        const afterWait = stop();
+        if (afterWait !== undefined) return err(afterWait);
+      }
+      return err({
+        type: "image_build_failed",
+        stage: "capture",
+        message: "capture recovery read limit exceeded",
+      });
+    };
+    // Only read-only recovery is raced; late command/log results remain handled.
+    return ResultAsync.fromPromise(Promise.race([recover(), interrupted]), readFailed)
+      .andThen((result) => {
+        const stopped = stop();
+        return stopped === undefined ? result : err(stopped);
+      })
+      .map((image) => {
+        release();
+        decision("recovered");
+        return image;
+      })
+      .mapErr((failure) => {
+        release();
+        decision(
+          failure.type === "cancelled"
+            ? "cancelled"
+            : [
+                  "capture recovery deadline exceeded",
+                  "capture recovery read limit exceeded",
+                ].includes(failure.message)
+              ? "exhausted"
+              : "rejected",
+        );
+        return failure;
+      });
+  }
+
   capture(
     input: ImageBuildInput,
     kind: "runtime" | "workspace",
     signal: AbortSignal,
   ): ResultAsync<CapturedImage, ImageBuildError> {
+    if (signal.aborted)
+      return errAsync({
+        type: "cancelled",
+        stage: "capture",
+        message: "capture cancelled",
+      });
     const name = this.name(input, kind === "runtime" ? "image" : "workspace-image");
     const source = this.name(input, kind === "runtime" ? "builder" : "workspace-disk");
     return this.gcloud(
@@ -1294,38 +1559,23 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
         "--format=json",
       ],
       signal,
-    ).andThen((result) =>
-      Result.fromThrowable(
-        () => JSON.parse(result.stdout) as unknown,
-        (cause): ImageBuildError => ({
-          type: "image_build_failed",
-          stage: "capture",
-          message: `invalid image response: ${String(cause)}`,
-        }),
-      )().andThen((value) => {
-        const image = Array.isArray(value) && value.length === 1 ? value[0] : undefined;
-        if (
-          typeof image !== "object" ||
-          image === null ||
-          typeof image.id !== "string" ||
-          !/^[0-9]+$/.test(image.id) ||
-          typeof image.name !== "string" ||
-          typeof image.selfLink !== "string" ||
-          !image.selfLink.startsWith("https://www.googleapis.com/compute/v1/projects/")
-        ) {
-          return err<CapturedImage, ImageBuildError>({
-            type: "image_build_failed",
-            stage: "capture",
-            message: "invalid image response shape",
-          });
-        }
-        return ok<CapturedImage, ImageBuildError>({
-          id: image.id,
-          resource: image.selfLink.replace(/^https:\/\/www.googleapis.com\/compute\/v1\//, ""),
-          name: image.name,
-        });
-      }),
-    );
+    )
+      .andThen((result) =>
+        signal.aborted
+          ? errAsync<CapturedImage, CommandError>({
+              type: "cancelled",
+              stage: "capture",
+              message: "capture cancelled",
+            })
+          : this.captureImage(input, name, source, result.stdout, true).map(({ image }) => image),
+      )
+      .orElse((failure) =>
+        failure.type !== "cancelled" &&
+        "commandFailure" in failure &&
+        failure.commandFailure?.type === "transient"
+          ? this.recoverCapture(input, kind, name, source, signal, failure.commandFailure.status)
+          : errAsync(failure),
+      );
   }
 
   resolveBaseImageId(

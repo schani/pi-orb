@@ -13,6 +13,8 @@ const input = imageBuildInput({
 });
 
 const timing = (task: SimulationTask) => ({
+  createDeadline: (milliseconds: number) =>
+    task.createDeadline(milliseconds, "capture recovery deadline"),
   now: () => task.monotonicNow(),
   wait: async (milliseconds: number, signal: AbortSignal) =>
     task.sleep(milliseconds, "wait for exact cloud operation", { signal }),
@@ -336,4 +338,209 @@ describe("GCloud cleanup under deterministic scheduling", () => {
     expect(commands).toBe(1);
     expect(submissions).toBe(0);
   });
+});
+
+describe("GCloud capture recovery under deterministic scheduling", () => {
+  for (const outcome of ["materialized", "cancelled", "deadline"] as const) {
+    it(`bounds read-only recovery when ${outcome}`, async () => {
+      await runDst(
+        { name: `native-image-capture-${outcome}`, iterations: 20, lateTimerProbability: 0 },
+        async (sim) => {
+          let createSubmitted = false;
+          let materialized = false;
+          let pendingReads = 0;
+          let transientReads = 0;
+          let creates = 0;
+          const abort = new AbortController();
+          const starts: number[] = [];
+          const schedule = await sim.runTasks([
+            {
+              name: "capture",
+              f: async (task) => {
+                const name = "pi-orb-image-v1-0123456789abcdef";
+                const prefix = "https://www.googleapis.com/compute/v1/";
+                const runner: CommandRunner = async (_command, args, options) => {
+                  await task.checkpoint("capture recovery cloud command", ...args.slice(0, 4));
+                  if (args[2] === "create") {
+                    creates++;
+                    createSubmitted = true;
+                    throw Object.assign(new Error("lost insert response"), {
+                      stderr:
+                        "ERROR: (gcloud.compute.images.create) Could not fetch resource:\n - <!DOCTYPE html>\n<html lang=en>\n<title>Error 502 (Server Error)!!1</title>\n",
+                    });
+                  }
+                  expect(args.slice(0, 3)).toEqual(["compute", "images", "describe"]);
+                  starts.push(task.monotonicNow());
+                  expect(options.timeout).toBeLessThanOrEqual(
+                    Math.min(10_000, 60_000 - task.monotonicNow()),
+                  );
+                  if (transientReads++ === 0)
+                    throw Object.assign(new Error("temporary read failure"), {
+                      stderr:
+                        "ERROR: (gcloud.compute.images.describe) Could not fetch resource:\n - HTTPError 503: Service Unavailable\n",
+                    });
+                  if (!materialized) {
+                    pendingReads++;
+                    throw Object.assign(new Error("not yet visible"), {
+                      stderr: `ERROR: (gcloud.compute.images.describe) Could not fetch resource:\n - The resource 'projects/${input.project}/global/images/${name}' was not found\n`,
+                    });
+                  }
+                  return {
+                    stdout: JSON.stringify({
+                      id: "2519867829670476835",
+                      name,
+                      selfLink: `${prefix}projects/${input.project}/global/images/${name}`,
+                      sourceDisk: `${prefix}projects/${input.project}/zones/${input.zone}/disks/pi-orb-builder-v1-0123456789abcdef`,
+                      labels: {
+                        "pi-orb-native-build": input.operationId,
+                        "pi-orb-native-version": input.version,
+                      },
+                      status: "READY",
+                    }),
+                    stderr: "",
+                  };
+                };
+                const result = await new GcloudImageBuildEffects(
+                  runner,
+                  timing(task),
+                  logWriter(task, [], 0),
+                ).capture(input, "runtime", abort.signal);
+                if (outcome === "materialized") expect(result.isOk()).toBe(true);
+                else if (outcome === "cancelled")
+                  expect(result.isErr() && result.error.type).toBe("cancelled");
+                else {
+                  expect(result.isErr() && result.error.message).toContain(
+                    "capture recovery deadline exceeded",
+                  );
+                  expect(task.monotonicNow()).toBe(60_000);
+                }
+              },
+            },
+            {
+              name: "cloud-and-cancellation",
+              f: async (task) => {
+                while (!createSubmitted) await task.checkpoint("wait for ambiguous insert");
+                await task.sleep(12_000, "delay image materialization or cancellation");
+                if (outcome === "materialized") materialized = true;
+                if (outcome === "cancelled") abort.abort();
+              },
+            },
+          ]);
+          expect(schedule.isOk(), schedule.isErr() ? schedule.error.message : "").toBe(true);
+          expect(creates).toBe(1);
+          expect(pendingReads).toBeGreaterThan(0);
+          expect(starts.every((start) => start < 60_000)).toBe(true);
+        },
+      );
+    });
+  }
+});
+
+describe("GCloud capture in-flight read/log budget", () => {
+  for (const boundary of ["read", "log"] as const) {
+    for (const cancellation of [false, true]) {
+      it(`${cancellation ? "cancels" : "exhausts deadline"} during ${boundary}`, async () => {
+        await runDst(
+          {
+            name: `native-capture-${boundary}-${cancellation}`,
+            iterations: 20,
+            lateTimerProbability: 0,
+          },
+          async (sim) => {
+            let inFlight = false;
+            let creates = 0;
+            let describes = 0;
+            const abort = new AbortController();
+            let release: () => void = () => {};
+            const delayed = new Promise<void>((resolve) => {
+              release = resolve;
+            });
+            let released = false;
+            const schedule = await sim.runTasks([
+              {
+                name: "capture",
+                f: async (task) => {
+                  const delay = async () => {
+                    inFlight = true;
+                    await delayed;
+                  };
+                  const runner: CommandRunner = async (_command, args) => {
+                    await task.checkpoint("capture in-flight command", ...args.slice(0, 4));
+                    if (args[2] === "create") {
+                      creates++;
+                      throw Object.assign(new Error("lost response"), {
+                        stderr:
+                          "ERROR: (gcloud.compute.images.create) Could not fetch resource:\n - HTTPError 502: Bad Gateway\n",
+                      });
+                    }
+                    describes++;
+                    if (boundary === "read") await delay();
+                    const name = "pi-orb-image-v1-0123456789abcdef";
+                    const prefix = "https://www.googleapis.com/compute/v1/";
+                    return {
+                      stdout: JSON.stringify({
+                        id: "123",
+                        name,
+                        selfLink: `${prefix}projects/${input.project}/global/images/${name}`,
+                        sourceDisk: `${prefix}projects/${input.project}/zones/${input.zone}/disks/pi-orb-builder-v1-0123456789abcdef`,
+                        labels: {
+                          "pi-orb-native-build": input.operationId,
+                          "pi-orb-native-version": input.version,
+                        },
+                        status: "READY",
+                      }),
+                      stderr: "",
+                    };
+                  };
+                  const result = await new GcloudImageBuildEffects(
+                    runner,
+                    timing(task),
+                    (_path, contents) =>
+                      ResultAsync.fromSafePromise(
+                        (async () => {
+                          if (!released) await task.checkpoint("capture in-flight command log");
+                          if (boundary === "log" && contents.includes("images describe"))
+                            await delay();
+                        })(),
+                      ),
+                  ).capture(input, "runtime", abort.signal);
+                  expect(released).toBe(false);
+                  if (cancellation) {
+                    expect(result.isErr() && result.error.type).toBe("cancelled");
+                    expect(task.monotonicNow()).toBe(1_000);
+                  } else {
+                    expect(result.isErr() && result.error.message).toContain(
+                      "capture recovery deadline exceeded",
+                    );
+                    expect(task.monotonicNow()).toBe(60_000);
+                  }
+                },
+              },
+              {
+                name: "delayed-adapter",
+                f: async (task) => {
+                  while (!inFlight) await task.checkpoint("adapter waits for request");
+                  await task.sleep(90_000, "adapter ignores capture deadline and cancellation");
+                  released = true;
+                  release();
+                },
+              },
+              {
+                name: "cancellation",
+                f: async (task) => {
+                  if (!cancellation) return;
+                  while (!inFlight) await task.checkpoint("wait for capture boundary");
+                  await task.sleep(1_000, "cancel during capture boundary");
+                  abort.abort();
+                },
+              },
+            ]);
+            expect(schedule.isOk(), schedule.isErr() ? schedule.error.message : "").toBe(true);
+            expect(creates).toBe(1);
+            expect(describes).toBe(1);
+          },
+        );
+      });
+    }
+  }
 });
