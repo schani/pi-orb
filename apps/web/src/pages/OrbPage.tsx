@@ -14,7 +14,6 @@ import {
 import {
   createElement,
   useCallback,
-  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -65,7 +64,6 @@ import {
 } from "../lib/api.ts";
 import { loadComposerDraft, saveComposerDraft } from "../lib/composer-draft.ts";
 import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
-import { DashboardCacheContext } from "../lib/dashboard-cache-context.ts";
 import { devConsoleDebug } from "../lib/dev-console-debug.ts";
 import { deriveOrbFaviconStatus, setOrbFavicon } from "../lib/favicon.ts";
 import { canRepairFromReplica, mergeReplicatedHistory } from "../lib/history-refresh.ts";
@@ -1028,7 +1026,6 @@ function OrbConversation({
     state.composerText,
     state.commandDraft,
   ]);
-  const dashboardCache = useContext(DashboardCacheContext);
   const [orb, setOrb] = useState<OrbView | null>(() =>
     initial.orb?.isOk() ? initial.orb.value : null,
   );
@@ -1861,7 +1858,6 @@ function OrbConversation({
     const result = await call(orbId);
     if (result.isOk()) {
       setOrb(result.value);
-      dashboardCache?.upsertOrb(result.value);
       setOrbError(null);
     } else {
       setOrbError(result.error);
@@ -1878,7 +1874,6 @@ function OrbConversation({
     const result = await archiveOrb(orbId);
     if (result.isOk()) {
       setOrb(result.value);
-      dashboardCache?.upsertOrb(result.value);
       setOrbError(null);
       setRenaming(false);
     } else {
@@ -1897,7 +1892,6 @@ function OrbConversation({
     if (result.isOk()) cache.invalidate(orbId);
     if (result.isOk()) {
       setOrb(result.value);
-      dashboardCache?.upsertOrb(result.value);
       setOrbError(null);
       setRenaming(false);
     } else {
@@ -1909,7 +1903,6 @@ function OrbConversation({
     const result = await updateOrb(orbId, { name: renameText });
     if (result.isOk()) {
       setOrb(result.value);
-      dashboardCache?.upsertOrb(result.value);
       setOrbError(null);
       setRenaming(false);
     } else {

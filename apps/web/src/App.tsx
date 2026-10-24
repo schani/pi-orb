@@ -2,8 +2,6 @@ import { useState, useSyncExternalStore } from "react";
 import { AppSearchProvider } from "./components/AppSearch.tsx";
 import { IconSprite } from "./components/Icons.tsx";
 import { SessionRibbon } from "./components/SessionRibbon.tsx";
-import { DashboardCache } from "./lib/dashboard-cache.ts";
-import { DashboardCacheContext } from "./lib/dashboard-cache-context.ts";
 import { readPath, subscribeNavigation } from "./lib/navigation.ts";
 import { readSessionPrincipal, subscribeToBrowserSession } from "./lib/session.ts";
 import { TranscriptCache } from "./lib/transcript-cache.ts";
@@ -11,7 +9,7 @@ import { TranscriptCacheContext } from "./lib/transcript-cache-context.ts";
 import { CreateOrbPage } from "./pages/CreateOrbPage.tsx";
 import { NotFoundPage } from "./pages/NotFoundPage.tsx";
 import { OrbPage } from "./pages/OrbPage.tsx";
-import { ProjectsPage } from "./pages/ProjectsPage.tsx";
+import { type DashboardSnapshot, ProjectsPage } from "./pages/ProjectsPage.tsx";
 import { UsagePage } from "./pages/UsagePage.tsx";
 
 export type Route =
@@ -60,18 +58,16 @@ export function parseRoute(url: string): Route {
   return { page: "not_found" };
 }
 
-function AppRoutes({
-  cache,
-  dashboardCache,
-}: {
-  cache: TranscriptCache;
-  dashboardCache: DashboardCache;
-}) {
+function AppRoutes({ cache }: { cache: TranscriptCache }) {
+  const [dashboardSnapshot] = useState<DashboardSnapshot>(() => ({
+    projects: null,
+    orbLists: {},
+  }));
   const path = useSyncExternalStore(subscribeNavigation, readPath);
   const route = parseRoute(path);
   return route.page === "mcp" || route.page === "projects" ? (
     <ProjectsPage
-      dashboardCache={dashboardCache}
+      snapshot={dashboardSnapshot}
       focusedProjectId={route.page === "mcp" ? route.projectId : route.focusedProjectId}
       mcpConfigOpen={route.page === "mcp"}
     />
@@ -88,14 +84,11 @@ function AppRoutes({
 
 function PrivateApp() {
   const [cache] = useState(() => new TranscriptCache());
-  const [dashboardCache] = useState(() => new DashboardCache());
   return (
     <TranscriptCacheContext.Provider value={cache}>
-      <DashboardCacheContext.Provider value={dashboardCache}>
-        <AppSearchProvider>
-          <AppRoutes cache={cache} dashboardCache={dashboardCache} />
-        </AppSearchProvider>
-      </DashboardCacheContext.Provider>
+      <AppSearchProvider>
+        <AppRoutes cache={cache} />
+      </AppSearchProvider>
     </TranscriptCacheContext.Provider>
   );
 }

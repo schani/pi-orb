@@ -400,3 +400,106 @@ it.each(["chromium", "webkit"] as const)(
     }
   },
 );
+
+it.each(["chromium", "webkit"] as const)(
+  "%s: retains dashboard rows on return, refreshes them, and isolates principals",
+  async (engine) => {
+    const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
+    const engineBrowser = engine === "webkit" ? await webkit.launch() : browser;
+    const page = await engineBrowser.newPage();
+    const project: ProjectView = {
+      id: "snapshot",
+      name: "Cached project",
+      state: "active",
+      repositoryUrl: null,
+      createdAt: "2026-10-01T00:00:00Z",
+      updatedAt: "2026-10-01T00:00:00Z",
+    };
+    const orb: OrbView = {
+      id: "cached-orb",
+      projectId: project.id,
+      name: "Cached orb",
+      harness: "pi",
+      state: "stopped",
+      stateVersion: 1,
+      stateChangedAt: project.createdAt,
+      createdAt: project.createdAt,
+      updatedAt: project.createdAt,
+    };
+    let projects = [project];
+    let orbs = [orb];
+    let principal = "alice";
+    let releaseProjects!: () => void;
+    const projectsGate = new Promise<void>((resolve) => {
+      releaseProjects = resolve;
+    });
+    let releaseOrbs!: () => void;
+    const orbsGate = new Promise<void>((resolve) => {
+      releaseOrbs = resolve;
+    });
+    let held = false;
+    try {
+      await page.clock.install();
+      await page.route("**/api/v1/session", (route) =>
+        route.fulfill({
+          json: {
+            status: "ok",
+            principal: { kind: "user", user: { id: principal, email: null } },
+          },
+        }),
+      );
+      await page.route("**/api/v1/projects", async (route) => {
+        if (held) await projectsGate;
+        await route.fulfill({ json: { items: projects } });
+      });
+      await page.route("**/api/v1/projects/snapshot/orbs", async (route) => {
+        if (held) await orbsGate;
+        await route.fulfill({ json: { items: orbs } });
+      });
+      await page.goto(origin);
+      const headings = page.locator(".project-column .project-name");
+      const rows = page.locator(".orb-entry-link");
+      await expectPage(headings).toHaveText(["Cached project"]);
+      await expectPage(rows).toHaveText(["Cached orb"]);
+      await page.getByRole("link", { name: "Token usage", exact: true }).click();
+      await expectPage(page.locator(".projects-page")).toHaveCount(0);
+      held = true;
+      projects = [{ ...project, name: "Fresh project" }];
+      orbs = [{ ...orb, id: "fresh-orb", name: "Fresh orb" }];
+      const projectRead = page.waitForRequest("**/api/v1/projects");
+      await page.getByRole("link", { name: "Dashboard", exact: true }).click();
+      await projectRead;
+      await expectPage(headings).toHaveText(["Cached project"]);
+      await expectPage(rows).toHaveText(["Cached orb"]);
+      const orbRead = page.waitForRequest("**/api/v1/projects/snapshot/orbs");
+      releaseProjects();
+      await orbRead;
+      await expectPage(headings).toHaveText(["Fresh project"]);
+      await expectPage(rows).toHaveText(["Cached orb"]);
+      releaseOrbs();
+      await expectPage(rows).toHaveText(["Fresh orb"]);
+
+      const principalGate = new Promise<void>((resolve) => {
+        releaseProjects = resolve;
+      });
+      await page.route("**/api/v1/projects", async (route) => {
+        await principalGate;
+        await route.fulfill({ json: { items: [] } });
+      });
+      principal = "bob";
+      const isolatedRead = page.waitForRequest("**/api/v1/projects");
+      await page.evaluate("window.dispatchEvent(new Event('focus'))");
+      await isolatedRead;
+      await expectPage(headings).toHaveCount(0);
+      await expectPage(rows).toHaveCount(0);
+      releaseProjects();
+      await expectPage(page.locator(".dashboard-total").first()).toHaveText("0projects");
+    } finally {
+      releaseProjects();
+      releaseOrbs();
+      await page.unrouteAll({ behavior: "wait" });
+      await page.close();
+      if (engineBrowser !== browser) await engineBrowser.close();
+    }
+  },
+);
