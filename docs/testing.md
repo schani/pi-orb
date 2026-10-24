@@ -15,7 +15,7 @@ Manual provider waits remain unresolved; automatic retry does not explain them. 
 
 ## Independent shell rail (2026-10-23; local, undeployed)
 
-The first five-case browser run passed four cases but failed the 390×360 viewport: the terminal extended below the composer. A shared header/composer-height roster budget, observing header size, fixes the geometry; the same five cases then passed. No assertions or timeouts changed. Evidence: `/tmp/shell-rail-evidence/{browser-green-1,browser-geometry-diagnostic,browser-green-2}.log`. Final managed Chromium/WebKit qualification passes all 10 cases: `/tmp/shell-rail-evidence/browser-both-engines.log`. Runtime/protocol qualification passes 81 files / 743 tests, including 40 shell/unknown-task ownership DST schedules; focused projection qualification passes 20 tests after type-only fixes. Initial projection and metadata-ordering RED logs remain in `.context/shell-roster/`; task-type fixes preserve independent drain holds. Docker E2E is unavailable locally; full E2E qualification remains separate.
+The first browser run failed at 390×360: the terminal extended below the composer. A shared header/composer-height roster budget fixes the geometry; unchanged assertions pass in Chromium and WebKit. Browser evidence: `/tmp/shell-rail-evidence/`; runtime projection failures: `.context/shell-roster/`. Trim DST failures replayed before correction: `childEdge` supplied `local_agent` for the intended unknown task; the fixture now omits that metadata (`.context/shell-roster/trim-dst-replay.log`). Qualification: [PR 180](https://github.com/schani/pi-orb/pull/180#issuecomment-6373866734).
 
 ## Chart hover targets in WebKit (2026-10-23; local, undeployed)
 

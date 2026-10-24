@@ -36,7 +36,7 @@ W does **not** mean a simple replacement callback. Preserve native orchestration
 | ExitWorktree | W | Adapt B worktree cleanup and cwd. |
 | Glob | W | B filesystem search. |
 | Grep | W | B content search. |
-| ListAgents | H | Peer-session inventory (observed 2026-10-23; `docs/web-ui.md`). |
+| ListAgents | H | Harness child inventory. |
 | ListMcpResourcesTool | R | Configure B-facing resource transport. |
 | LSP | W | B files and language-server lifecycle. |
 | Monitor | W | B commands/sockets, events and cancellation. |
