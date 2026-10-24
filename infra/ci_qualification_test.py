@@ -273,7 +273,7 @@ class ArtifactRetryTest(unittest.TestCase):
                 for step in (first, retry):
                     self.assertEqual(self.field(step, 'timeout-minutes'), '5')
                     self.assertEqual(self.field(step, 'uses'),
-                                     'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)')
+                                     'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node 24)')
                     self.assertIn('          name: ' + name +
                                   '-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}\n', step)
                     self.assertIn('          if-no-files-found: ignore\n', step)
