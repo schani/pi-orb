@@ -1,10 +1,16 @@
 import { UsageViewSchema } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
+import { Type } from "typebox";
 import { Check } from "typebox/value";
 import type { StoreError } from "../../domain/errors.ts";
 import { logEvent } from "../../domain/log.ts";
 import type { ModelCall, ModelUsageLedger } from "../../domain/model-usage.ts";
+import type {
+  RecordedModelCall,
+  TurnCallQuery,
+  TurnCallReader,
+} from "../../domain/turn-timeline.ts";
 import type { ModelUsageReader, UsageRead } from "../../domain/usage-read.ts";
 import { arrayParam, type PgRow, type PostgreSQLClient } from "./client.ts";
 
@@ -47,11 +53,56 @@ function usageRows(rows: PgRow[], boundaries: readonly number[]): Result<UsageRe
   return ok(result);
 }
 
+const count = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
+const RecordedModelCallSchema = Type.Object(
+  {
+    at: count,
+    use: Type.String(),
+    provider: Type.String(),
+    model: Type.String(),
+    outcome: Type.String(),
+    input: count,
+    output: count,
+    cacheRead: count,
+    cacheWrite: count,
+    costUsd: Type.Optional(Type.Number({ minimum: 0 })),
+    durationMs: Type.Optional(count),
+    responseId: Type.Optional(Type.String()),
+    ttftMs: Type.Optional(count),
+    thinkingMs: Type.Optional(count),
+  },
+  { additionalProperties: false },
+);
+
+/** Rows selected with `RecordedModelCall` names; NULL columns become absent fields. */
+function turnCallRows(rows: PgRow[]): Result<RecordedModelCall[], StoreError> {
+  const calls: RecordedModelCall[] = [];
+  for (const row of rows) {
+    const call = Object.fromEntries(
+      Object.entries({
+        ...row,
+        at: row["at"] instanceof Date ? row["at"].getTime() : row["at"],
+      }).filter(([, value]) => value !== null),
+    );
+    if (!Check(RecordedModelCallSchema, call))
+      return err({
+        type: "store_error",
+        code: "invariant",
+        message: "Invalid model call row",
+        retryable: false,
+      });
+    calls.push(call);
+  }
+  return ok(calls);
+}
+
 /**
  * Fire-and-forget `model_calls` inserts (docs/model-usage.md). Each row commits in its own transaction without
  * waiting for the WAL flush; an outage logs one edge when it starts and one when it ends, never per row.
  */
-export class PostgreSQLModelUsageLedger implements ModelUsageLedger, ModelUsageReader {
+export class PostgreSQLModelUsageLedger
+  implements ModelUsageLedger, ModelUsageReader, TurnCallReader
+{
   private readonly db: PostgreSQLClient;
   private readonly pending = new Set<Promise<void>>();
   private failing = false;
@@ -89,6 +140,30 @@ export class PostgreSQLModelUsageLedger implements ModelUsageLedger, ModelUsageR
       .andThen((result) => usageRows(result.rows, boundaries));
   }
 
+  /** One Pi turn's calls (docs/model-usage.md "Timeline timing"); `at` is when each call ended. */
+  readTurnCalls(
+    _task: SimulationTask,
+    orbId: string,
+    query: TurnCallQuery,
+  ): ResultAsync<RecordedModelCall[], StoreError> {
+    return this.db
+      .query(
+        `SELECT at, use, provider, model, outcome, input, output,
+           cache_read AS "cacheRead", cache_write AS "cacheWrite", cost_usd AS "costUsd",
+           duration_ms AS "durationMs", response_id AS "responseId", ttft_ms AS "ttftMs",
+           thinking_ms AS "thinkingMs"
+         FROM model_calls
+         WHERE orb_id = $1 AND at >= $2 AND CASE
+           WHEN use = 'root' THEN response_id = ANY($3::text[])
+           ELSE at - coalesce(duration_ms, 0) * interval '1 millisecond' >= $2
+             AND at - coalesce(duration_ms, 0) * interval '1 millisecond' < $4
+         END
+         ORDER BY at, id`,
+        [orbId, new Date(query.from), arrayParam(query.responseIds), new Date(query.until)],
+      )
+      .andThen((result) => turnCallRows(result.rows));
+  }
+
   record(task: SimulationTask, call: ModelCall): void {
     const write = this.db
       .transaction(async (query, execute) => {
@@ -97,8 +172,9 @@ export class PostgreSQLModelUsageLedger implements ModelUsageLedger, ModelUsageR
         return (
           await query(
             `INSERT INTO model_calls (at, owner_user_id, orb_id, use, provider, model, outcome,
-               input, output, cache_read, cache_write, cost_usd, duration_ms)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+               input, output, cache_read, cache_write, cost_usd, duration_ms,
+               response_id, ttft_ms, thinking_ms)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
             [
               new Date(task.wallNow()),
               call.ownerUserId,
@@ -113,6 +189,9 @@ export class PostgreSQLModelUsageLedger implements ModelUsageLedger, ModelUsageR
               call.cacheWrite,
               call.costUsd ?? null,
               call.durationMs ?? null,
+              call.responseId ?? null,
+              call.ttftMs ?? null,
+              call.thinkingMs ?? null,
             ],
           )
         ).andThen(() => ok(undefined));

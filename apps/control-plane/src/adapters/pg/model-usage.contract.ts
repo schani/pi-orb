@@ -28,6 +28,9 @@ const call = (orbId: string, overrides: Partial<ModelCall> = {}): ModelCall => (
   cacheWrite: 7,
   costUsd: 0.0125,
   durationMs: 2_345,
+  responseId: "resp_1",
+  ttftMs: 410,
+  thinkingMs: 1_900,
   ...overrides,
 });
 
@@ -83,6 +86,9 @@ export function modelUsageLedgerContractTests(
       const {
         durationMs: _untimed,
         costUsd: _uncosted,
+        responseId: _unidentified,
+        ttftMs: _unstreamed,
+        thinkingMs: _unreasoned,
         ...failed
       } = call(DELETED, {
         use: "turn_summary",
@@ -114,6 +120,9 @@ export function modelUsageLedgerContractTests(
           cache_write: 7,
           cost_usd: 0.0125,
           duration_ms: 2_345,
+          response_id: "resp_1",
+          ttft_ms: 410,
+          thinking_ms: 1_900,
         },
         {
           at: AT,
@@ -129,6 +138,9 @@ export function modelUsageLedgerContractTests(
           cache_write: 0,
           cost_usd: null,
           duration_ms: null,
+          response_id: null,
+          ttft_ms: null,
+          thinking_ms: null,
         },
       ]);
       expect(statements.filter((text) => /synchronous_commit/.test(text))).toEqual([
@@ -203,6 +215,9 @@ export function modelUsageLedgerContractTests(
           cache_write: 1_500,
           cost_usd: 0.042,
           duration_ms: 4_100,
+          response_id: null,
+          ttft_ms: null,
+          thinking_ms: null,
         },
       ]);
     });
@@ -435,6 +450,122 @@ export function modelUsageLedgerContractTests(
         const valid = (await ledger.read(task, TEST_USER_ID, [AT, AT + 900000]))._unsafeUnwrap();
         expect(valid.buckets[0]?.at).toBe(AT);
         expect(valid.orbs[0]?.name).toBeNull();
+      } finally {
+        query.mockRestore();
+      }
+    });
+
+    it("reads one turn's root calls by response id and other calls by start", async () => {
+      // The ledger stamps `at` inside its insert transaction, so the clock holds until it drains.
+      const at = async (offset: number, recorded: ModelCall) => {
+        const clock = vi.spyOn(task, "wallNow").mockReturnValue(AT + offset);
+        ledger.record(task, recorded);
+        expect((await ledger.drain()).isOk()).toBe(true);
+        clock.mockRestore();
+      };
+      await at(1_000, call(ARCHIVED, { responseId: "in-turn" }));
+      await at(2_000, call(ARCHIVED, { responseId: "other-turn" }));
+      await at(-1, call(ARCHIVED, { responseId: "in-turn-before-window" }));
+      await at(3_000, call(ARCHIVED, { use: "subagent", durationMs: 2_000, responseId: "sub" }));
+      await at(
+        3_000,
+        call(ARCHIVED, { use: "subagent", durationMs: 3_001, responseId: "starts-before" }),
+      );
+      await at(
+        9_999,
+        call(ARCHIVED, { use: "turn_summary", durationMs: 0, responseId: "summary" }),
+      );
+      await at(
+        11_000,
+        call(ARCHIVED, { use: "headline", durationMs: 1_000, responseId: "starts-at-until" }),
+      );
+      await at(5_000, call(DELETED, { use: "subagent", responseId: "other-orb" }));
+      const {
+        durationMs: _a,
+        costUsd: _b,
+        responseId: _c,
+        ttftMs: _d,
+        thinkingMs: _e,
+        ...bare
+      } = call(ARCHIVED, { use: "compaction" });
+      await at(4_000, bare);
+      const query = { responseIds: ["in-turn", "in-turn-before-window", "sub"], from: AT };
+      const read = await ledger.readTurnCalls(task, ARCHIVED, { ...query, until: AT + 10_000 });
+      const expected = (offset: number, overrides: Partial<ModelCall>) => {
+        const { ownerUserId: _o, orbId: _i, ...row } = call(ARCHIVED, overrides);
+        return { ...row, at: AT + offset };
+      };
+      const { ownerUserId: _o, orbId: _i, ...compaction } = bare;
+      expect(read._unsafeUnwrap()).toEqual([
+        expected(1_000, { responseId: "in-turn" }),
+        expected(3_000, { use: "subagent", durationMs: 2_000, responseId: "sub" }),
+        { ...compaction, at: AT + 4_000 },
+        expected(9_999, { use: "turn_summary", durationMs: 0, responseId: "summary" }),
+      ]);
+      expect(
+        (await ledger.readTurnCalls(task, ARCHIVED, { ...query, until: AT + 10_001 }))
+          ._unsafeUnwrap()
+          .map((row) => row.responseId ?? null),
+      ).toEqual(["in-turn", "sub", null, "summary", "starts-at-until"]);
+    });
+
+    it("rejects malformed turn call rows", async () => {
+      const row = {
+        at: new Date(AT),
+        use: "root",
+        provider: "p",
+        model: "m",
+        outcome: "stop",
+        input: 1,
+        output: 2,
+        cacheRead: 3,
+        cacheWrite: 0,
+        costUsd: null,
+        durationMs: null,
+        responseId: "r",
+        ttftMs: null,
+        thinkingMs: null,
+      };
+      const query = vi.spyOn(client, "query");
+      try {
+        for (const bad of [
+          { ...row, at: "2026" },
+          { ...row, use: null },
+          { ...row, input: -1 },
+          { ...row, output: 1.5 },
+          { ...row, costUsd: "0.1" },
+          { ...row, durationMs: -1 },
+          { ...row, responseId: 7 },
+          { ...row, ttftMs: "1" },
+          { ...row, extra: 1 },
+        ]) {
+          query.mockReturnValueOnce(okAsync({ rows: [bad], rowCount: 1 }));
+          const result = await ledger.readTurnCalls(task, ARCHIVED, {
+            responseIds: [],
+            from: AT,
+            until: AT,
+          });
+          expect(result._unsafeUnwrapErr().code).toBe("invariant");
+        }
+        query.mockReturnValueOnce(okAsync({ rows: [row], rowCount: 1 }));
+        expect(
+          (
+            await ledger.readTurnCalls(task, ARCHIVED, { responseIds: [], from: AT, until: AT })
+          )._unsafeUnwrap(),
+        ).toEqual([
+          {
+            at: AT,
+            use: "root",
+            provider: "p",
+            model: "m",
+            outcome: "stop",
+            input: 1,
+            output: 2,
+            cacheRead: 3,
+            cacheWrite: 0,
+            responseId: "r",
+          },
+        ]);
       } finally {
         query.mockRestore();
       }

@@ -89,7 +89,10 @@ export function codemodeTool(
         ...(orb ? { orb } : {}),
         execution: { conversationId: String(api.conversationId), callId: api.callId },
       });
-      const previews = new Map<number, { args: string; argumentKeys: string[] }>();
+      const previews = new Map<
+        number,
+        { args: string; argumentKeys: string[]; startedAt?: string }
+      >();
       const paths = new Map<string, string>();
       const directory = `/orb-artifacts/codemode-${api.taskId}`;
       let charts: ChartSpec[] = [];
@@ -212,20 +215,31 @@ export function codemodeTool(
         env,
         executeTool: (name, value, ctx, callOptions) => {
           const id = Number(callOptions?.key?.slice(1));
-          if (Number.isSafeInteger(id))
-            previews.set(id, {
-              args: argumentKeys(value),
-              argumentKeys:
-                object(value) || Array.isArray(value) ? Object.keys(value).slice(0, 16) : [],
-            });
-          return api.executeTool(name, value, ctx, callOptions).then((result) => ({
-            ...result,
-            diagnostics: result.diagnostics.map((diagnostic) =>
-              diagnostic.code === "invalid_arguments"
-                ? { ...diagnostic, message: catalog.invalidArgumentsMessage(name, value) }
-                : diagnostic,
-            ),
-          }));
+          const preview = Number.isSafeInteger(id)
+            ? {
+                args: argumentKeys(value),
+                argumentKeys:
+                  object(value) || Array.isArray(value) ? Object.keys(value).slice(0, 16) : [],
+              }
+            : undefined;
+          if (preview) previews.set(id, preview);
+          return api.executeTool(name, value, ctx, callOptions).then(async (result) => {
+            // The nested task's persisted start, so a replay after a restart places the call where it first ran.
+            const task = preview
+              ? await ResultAsync.fromPromise(api.getTask(result.taskId, ctx), () => null)
+              : undefined;
+            const startedAt = task?.isOk() ? task.value?.startedAt : undefined;
+            if (preview && startedAt !== undefined)
+              previews.set(id, { ...preview, startedAt: new Date(startedAt).toISOString() });
+            return {
+              ...result,
+              diagnostics: result.diagnostics.map((diagnostic) =>
+                diagnostic.code === "invalid_arguments"
+                  ? { ...diagnostic, message: catalog.invalidArgumentsMessage(name, value) }
+                  : diagnostic,
+              ),
+            };
+          });
         },
         commit: (change, ctx) =>
           api.commit(async (tx) => {

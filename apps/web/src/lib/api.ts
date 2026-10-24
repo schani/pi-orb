@@ -35,6 +35,8 @@ import {
   SessionProbeSchema,
   type SystemView,
   SystemViewSchema,
+  TurnTimelineSchema,
+  turnTimelinePath,
   type UpdateOrbRequest,
   type UpdateProjectRequest,
   type UploadBatch,
@@ -513,6 +515,13 @@ export function listOrbMessages(orbId: string, after = 0, tracked: readonly stri
 
 export function getOrbHistory(orbId: string): Promise<Result<DisplayHistoryView, ApiError>> {
   return apiFetch(DisplayHistoryViewSchema, `/api/v1/orbs/${encodeURIComponent(orbId)}/history`);
+}
+
+export function getTurnTimeline(orbId: string, turnId: string, signal: AbortSignal) {
+  return apiFetch(TurnTimelineSchema, turnTimelinePath(orbId, turnId), {
+    cache: "no-store",
+    signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+  });
 }
 
 export function getActivityHeadline(

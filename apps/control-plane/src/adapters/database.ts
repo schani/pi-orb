@@ -50,7 +50,9 @@ export interface ControlPlaneDatabase {
   readonly mcp: McpStore;
   readonly mcpOAuth: McpOAuthStore & import("../domain/mcp-oauth-garbage.ts").McpOAuthGarbageStore;
   readonly users: UserStore;
-  readonly modelUsage: ModelUsageLedger & import("../domain/usage-read.ts").ModelUsageReader;
+  readonly modelUsage: ModelUsageLedger &
+    import("../domain/usage-read.ts").ModelUsageReader &
+    import("../domain/turn-timeline.ts").TurnCallReader;
   migrate(options?: MigrationOptions): ResultAsync<string[], StoreError>;
   close(): ResultAsync<void, StoreError>;
 }

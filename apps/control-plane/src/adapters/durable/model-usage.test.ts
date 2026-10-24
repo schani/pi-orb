@@ -1,6 +1,10 @@
 import { createServer } from "node:http";
 import { zstdDecompressSync } from "node:zlib";
-import { type AssistantMessage, createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import {
+  type AssistantMessage,
+  type AssistantMessageEvent,
+  createAssistantMessageEventStream,
+} from "@earendil-works/pi-ai";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { createRegistry } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
@@ -37,6 +41,11 @@ function completed(id: string, items: unknown[], total?: number) {
 }
 const text = (id: string, value: string, total?: number) =>
   completed(id, [{ type: "message", id, content: [{ type: "output_text", text: value }] }], total);
+const reasoned = (id: string, value: string) =>
+  completed(id, [
+    { type: "reasoning", id: `rs_${id}`, summary: [{ type: "summary_text", text: "Think." }] },
+    { type: "message", id, content: [{ type: "output_text", text: value }] },
+  ]);
 const call = (id: string, code: string) =>
   completed(id, [
     {
@@ -92,7 +101,7 @@ describe("durable model usage capture", () => {
             : owner === "child"
               ? text("child", "child done")
               : userText?.some((value) => value.startsWith("ROOT_TURN_THREE"))
-                ? text("third", "third done")
+                ? reasoned("third", "third done")
                 : userText?.some((value) => value.startsWith("ROOT_TURN_TWO"))
                   ? // A full context window makes the next generation compact first.
                     text("second", "second done", 10_000_000)
@@ -106,7 +115,7 @@ describe("durable model usage capture", () => {
                           "wait",
                           'text(JSON.parse(await tools.get_subagent_result({agent_id:load("child"),wait:true})).receipt);',
                         )
-                      : text("first", "first done");
+                      : reasoned("first", "first done");
         response.writeHead(200, { "content-type": "text/event-stream" });
         for (const event of events) response.write(`data: ${JSON.stringify(event)}\n\n`);
         response.end();
@@ -149,8 +158,8 @@ describe("durable model usage capture", () => {
           model: { provider: "openai-codex", id: "gpt-6-astra" },
           thinkingLevel: "off",
         },
-        recordModelCall: (use, response) => {
-          recorded.push(modelCall({ ownerUserId: "owner", orbId: "orb", use }, response));
+        recordModelCall: (use, response, timing) => {
+          recorded.push(modelCall({ ownerUserId: "owner", orbId: "orb", use }, response, timing));
           if (recorded.length === 7) allRecorded();
         },
       })
@@ -190,7 +199,7 @@ describe("durable model usage capture", () => {
       "root",
       "subagent",
     ]);
-    for (const { use: _, ...call } of recorded)
+    for (const { use, responseId, ttftMs, thinkingMs, ...call } of recorded) {
       expect(call).toEqual({
         ownerUserId: "owner",
         orbId: "orb",
@@ -204,6 +213,155 @@ describe("durable model usage capture", () => {
         costUsd: expect.any(Number),
         durationMs: expect.any(Number),
       });
+      // completeSimple does not stream; every streamed response had content.
+      if (use === "compaction") {
+        expect([responseId, ttftMs, thinkingMs]).toEqual(["summary", undefined, undefined]);
+        continue;
+      }
+      const ttft = ttftMs ?? -1;
+      const answered = thinkingMs ?? ttft;
+      expect(ttft).toBeGreaterThanOrEqual(0);
+      expect(answered).toBeGreaterThanOrEqual(ttft);
+      expect(answered).toBeLessThanOrEqual(call.durationMs ?? -1);
+      expect(thinkingMs !== undefined).toBe(responseId === "first" || responseId === "third");
+    }
+    // Ledger rows join exactly to the public history's native assistant messages.
+    const history = agent
+      .snapshot()
+      ._unsafeUnwrap()
+      .records.flatMap((record) => {
+        const native = record.overflow["native"] as { message?: { responseId?: string } };
+        return native?.message?.responseId === undefined ? [] : [native.message.responseId];
+      });
+    expect(
+      recorded
+        .filter(({ use }) => use === "root")
+        .map(({ responseId }) => responseId)
+        .sort(),
+    ).toEqual([...history].sort());
+    expect(history.sort()).toEqual(["first", "second", "spawn", "third", "wait"]);
+  });
+
+  it("times the first content and the first answer back from the response's end", async () => {
+    let clock = 0;
+    const message = (durationMs?: number): AssistantMessage => ({
+      role: "assistant",
+      content: [],
+      api: "openai-codex-responses",
+      provider: "openai-codex",
+      model: "gpt-6-astra",
+      responseId: "resp",
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: 0,
+      ...(durationMs === undefined ? {} : { durationMs }),
+    });
+    let script: ReadonlyArray<readonly [number, AssistantMessageEvent["type"]]> = [];
+    let durationMs: number | undefined;
+    const stub = {
+      streamSimple: () => {
+        const stream = createAssistantMessageEventStream();
+        const partial = message();
+        queueMicrotask(() => {
+          for (const [at, type] of script) {
+            clock = at;
+            stream.push(
+              type === "done"
+                ? { type, reason: "stop", message: message(durationMs) }
+                : type === "start"
+                  ? { type, partial }
+                  : ({ type, contentIndex: 0, partial } as AssistantMessageEvent),
+            );
+          }
+        });
+        return stream;
+      },
+      completeSimple: () => Promise.resolve(message(7)),
+    } as unknown as Models;
+    const recorded: ModelCall[] = [];
+    const metered = meterModels(
+      stub,
+      () => "root",
+      () => clock,
+      (use, response, timing) =>
+        recorded.push(modelCall({ ownerUserId: "owner", orbId: "orb", use }, response, timing)),
+    );
+    const model = {} as Parameters<Models["streamSimple"]>[0];
+    const run = async (events: typeof script, duration?: number) => {
+      script = events;
+      durationMs = duration;
+      await metered.streamSimple(model, { messages: [] }, { sessionId: "root" }).result();
+      await Promise.resolve();
+      return recorded.at(-1);
+    };
+    // Reasoning first: thinking runs to the first text; the stream started 50 ms before `start`.
+    expect(
+      await run(
+        [
+          [100, "start"],
+          [130, "thinking_start"],
+          [150, "thinking_delta"],
+          [180, "text_start"],
+          [190, "toolcall_start"],
+          [200, "done"],
+        ],
+        150,
+      ),
+    ).toMatchObject({ responseId: "resp", durationMs: 150, ttftMs: 80, thinkingMs: 130 });
+    // No reasoning: no thinking time.
+    const plain = await run(
+      [
+        [100, "start"],
+        [140, "toolcall_start"],
+        [200, "done"],
+      ],
+      150,
+    );
+    expect(plain).toMatchObject({ ttftMs: 90 });
+    expect(plain).not.toHaveProperty("thinkingMs");
+    // A clock that disagrees with the response's own duration is clamped into it.
+    expect(
+      await run(
+        [
+          [0, "thinking_start"],
+          [500, "text_start"],
+          [400, "done"],
+        ],
+        150,
+      ),
+    ).toMatchObject({ ttftMs: 0, thinkingMs: 150 });
+    // Without a measured duration, or without content, nothing is anchored.
+    for (const [events, duration] of [
+      [
+        [
+          [100, "text_start"],
+          [200, "done"],
+        ],
+        undefined,
+      ],
+      [
+        [
+          [100, "start"],
+          [200, "done"],
+        ],
+        150,
+      ],
+    ] as const) {
+      const untimed = await run(events, duration);
+      expect(untimed).not.toHaveProperty("ttftMs");
+      expect(untimed).not.toHaveProperty("thinkingMs");
+    }
+    await metered.completeSimple(model, { messages: [] }, {});
+    await Promise.resolve();
+    expect(recorded.at(-1)).toMatchObject({ use: "compaction", responseId: "resp", durationMs: 7 });
+    expect(recorded.at(-1)).not.toHaveProperty("ttftMs");
   });
 
   it("returns responses while the ledger write never settles", async () => {
@@ -245,6 +403,7 @@ describe("durable model usage capture", () => {
     const metered = meterModels(
       stub,
       () => "root-session",
+      () => 0,
       (use, response) =>
         ledger.record(task, modelCall({ ownerUserId: "owner", orbId: "orb", use }, response)),
     );

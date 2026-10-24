@@ -28,6 +28,7 @@ const followingMigrations = [
   "048_optional_project_repository.sql",
   "049_history_search.sql",
   "050_durable_sleeping.sql",
+  "051_model_call_timing.sql",
 ];
 const first = {
   userId: "00000000-0000-4000-8000-000000000001",

@@ -79,13 +79,28 @@ CREATE TABLE model_calls (
   cache_read integer NOT NULL,
   cache_write integer NOT NULL,
   duration_ms integer,
-  cost_usd double precision         -- list-price estimate; NULL before 2026-10-14
+  cost_usd double precision,        -- list-price estimate; NULL before 2026-10-14
+  response_id text,                 -- Pi AssistantMessage.responseId; NULL for Claude and before 2026-10-24
+  ttft_ms integer,                  -- Pi streamed calls: request start → first content event
+  thinking_ms integer               -- Pi streamed calls: request start → first answer after reasoning
 );
 CREATE INDEX model_calls_at ON model_calls (at);
 CREATE INDEX model_calls_orb_at ON model_calls (orb_id, at);
 ```
 
 No foreign keys: archival, orb deletion and project deletion leave rows intact. Rows contain no prompts, responses, tool data or names, so retaining them does not conflict with the deletion contract in `docs/orb-deletion.md`. Pi counts are pi-ai's normalized `Usage`; a failed call records whatever the provider reported, often zeros. `cost_usd` is pi-ai's `usage.cost.total` or Claude Code's `cost_usd`: both are list-price estimates (**decided 2026-10-14**), not subscription charges.
+
+## Timeline timing (decided 2026-10-24)
+
+Purpose: the Pi transcript timeline (`docs/web-ui.md`) joins ledger rows to history and splits each call into waiting, thinking and streaming. Pi only; Claude rows leave all three columns NULL (migration `051_model_call_timing.sql`).
+
+- `response_id` is the `AssistantMessage.responseId` that `modelCall` maps for every Pi capture point, including `completeSimple` and `completeLuna`. It is the same value as the native message's `responseId` in the root history record, so root rows join exactly to history; the contract test asserts this. NULL when the provider reported none.
+- `ttft_ms` is the offset of the first **content** event: the first stream event other than `start`, `done` and `error`. With the Codex Responses API that is `thinking_start`, `text_start` or `toolcall_start`, emitted on `response.output_item.added`, i.e. when the model begins its first output item. `start` is not counted: pi-ai emits it when the response headers arrive, before any token.
+- `thinking_ms` is the offset of the first `text_*` or `toolcall_*` event, set only when a `thinking_*` event came before it; NULL without streamed reasoning or without an answer. Waiting is `ttft_ms`, thinking `thinking_ms − ttft_ms`, streaming `duration_ms − (thinking_ms ?? ttft_ms)`.
+
+`meterModels` observes events by wrapping the returned stream's `push`, so nothing is consumed or altered. Offsets share `duration_ms`'s origin: pi-ai times a response from the provider stream's creation, after auth, with a monotonic clock. The wrapper reads the agent's clock (`DurableAgent` `now`, else `Date.now`) at each counted event and at the terminal event, and subtracts the distance to the terminal event from `durationMs`; results are clamped so `0 ≤ ttft_ms ≤ thinking_ms ≤ duration_ms` holds by construction. Without `durationMs` (deferred responses) or without content, both stay NULL. `completeSimple` (compaction) and `completeLuna` (summaries, headlines, names) do not stream through the wrapper and record only `response_id`. Rejected: measuring from a clock read before `streamSimple` (it includes auth, so offsets could exceed `duration_ms`) and iterating the stream (it is single-consumer).
+
+**Read (2026-10-24).** `readTurnCalls` returns one orb's root rows by `response_id` and its other rows whose start (`at − duration_ms`) falls in the turn's window, both from `at` ≥ the turn's start so the `(orb_id, at)` index applies; rows are validated at the adapter and a malformed row is a storage invariant. Placement rules: `docs/web-ui.md`.
 
 ## Write path
 

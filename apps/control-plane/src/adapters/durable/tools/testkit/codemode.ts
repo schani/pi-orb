@@ -43,6 +43,7 @@ export async function openCodemodeHarness(
     onResult?: (source: string, result: ToolExecutionResult) => void;
     holdForReplay?: boolean;
     hooks?: readonly HookRegistration[];
+    now?: () => number;
   } = {},
 ) {
   const code = codemodeTool(catalog, new Set(), options.files, options.orb);
@@ -100,6 +101,7 @@ export async function openCodemodeHarness(
       models,
       registry,
       ...(options.env ? { env: () => options.env! } : {}),
+      ...(options.now ? { now: options.now } : {}),
     },
     context,
   );
