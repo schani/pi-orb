@@ -37,5 +37,10 @@
   },
   "allowScripts": {
     "node-pty@1.1.0": true
+  },
+  "overrides": {
+    "@earendil-works/pi-coding-agent@1.4.0": {
+      "undici": "8.12.3"
+    }
   }
 }

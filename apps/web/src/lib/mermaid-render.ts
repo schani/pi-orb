@@ -13,6 +13,8 @@ mermaid.initialize({
   startOnLoad: false,
   securityLevel: "strict",
   theme: "base",
+  look: "classic",
+  layout: "dagre",
   fontFamily: MONO,
   fontSize: 12,
   themeVariables: {
@@ -60,7 +62,15 @@ mermaid.initialize({
     .flowchart-link { stroke-width: 1px; }
     marker path { fill: #000; stroke: #000; }
   `,
-  flowchart: { useMaxWidth: false, curve: "basis", padding: 10, nodeSpacing: 36, rankSpacing: 56 },
+  flowchart: {
+    useMaxWidth: false,
+    curve: "basis",
+    padding: 10,
+    nodeSpacing: 36,
+    rankSpacing: 56,
+    wrappingWidth: 200,
+    minNodeWidth: 0,
+  },
   sequence: {
     useMaxWidth: false,
     mirrorActors: false,
