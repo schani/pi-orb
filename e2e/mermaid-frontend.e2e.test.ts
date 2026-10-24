@@ -49,6 +49,38 @@ it.each(["chromium", "webkit"] as const)(
       await page.exposeFunction("__mermaidRender", (detail: { outcome: string }) =>
         renders.push(detail),
       );
+      await page.addInitScript(`
+        const load = document.fonts.load.bind(document.fonts);
+        document.fonts.load = (...args) =>
+          load(...args).then((fonts) => {
+            const history = document.querySelector(".history");
+            if (!args[0].startsWith("12px") || !history) return fonts;
+            // Release measuring renders during deep observer delivery, not a timer.
+            return new Promise((resolve) => {
+              const probe = document.createElement("div");
+              history.append(probe);
+              const observer = new ResizeObserver(() => {
+                observer.disconnect();
+                probe.remove();
+                resolve(fonts);
+              });
+              observer.observe(probe);
+            });
+          });
+        const measurements = [];
+        Reflect.set(globalThis, "__mermaidMeasurements", measurements);
+        new MutationObserver((records) => {
+          for (const record of records) {
+            for (const node of record.addedNodes) {
+              if (!(node instanceof HTMLDivElement) || !node.id.startsWith("dpi-mermaid-"))
+                continue;
+              const parent = record.target;
+              const style = parent.style;
+              measurements.push({ position: style.position, visibility: style.visibility, parent });
+            }
+          }
+        }).observe(document, { childList: true, subtree: true });
+      `);
       await page.addInitScript(() => {
         const debug = console.debug.bind(console);
         console.debug = (...args) => {
@@ -99,6 +131,21 @@ it.each(["chromium", "webkit"] as const)(
       await expect(broken.locator(".mermaid-error")).toHaveText("Mermaid: parse error on line 4");
       await expect(broken.locator("pre code")).toContainText('A --> S["Support API"');
       await expect(broken.getByRole("button", { name: "Open diagram" })).toHaveCount(0);
+      const measurements = await page.evaluate(() =>
+        (
+          Reflect.get(globalThis, "__mermaidMeasurements") as {
+            position: string;
+            visibility: string;
+            parent: { isConnected: boolean };
+          }[]
+        ).map(({ parent, ...style }) => ({
+          ...style,
+          connected: parent.isConnected,
+        })),
+      );
+      expect(measurements.length).toBeGreaterThanOrEqual(3);
+      for (const measurement of measurements)
+        expect(measurement).toEqual({ position: "fixed", visibility: "hidden", connected: false });
       expect(errors).toEqual([]);
     } finally {
       await browser?.close();

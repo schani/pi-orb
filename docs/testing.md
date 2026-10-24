@@ -89,6 +89,10 @@ Current trimmed checks: **105 tests / 13 files**, existing multi-user E2E **1/1*
 
 [CI 39833808392](https://github.com/schani/pi-orb/actions/runs/39833808392) failed two now-removed duplicate boot tests whose Git-config path assumption ignored inherited `XDG_CONFIG_HOME`; no product fix is indicated (evidence: `.context/pr159-ci/REPORT.md`).
 
+## Responsive chart ownership (2026-10-23)
+
+Browser actions target the intended responsive DOM owner before focusing, not a same-named element awaiting replacement. Mermaid measurement stays outside document flow and releases its container. Controlled schedules and preserved first failures: `docs/postmortems/2026-10-23-frontend-chart-qualification.md`.
+
 ## Harness-icon direct-probe ownership (2026-10-23)
 
 **Decision:** send `Connection: close` at both direct `page.request.get` sites in

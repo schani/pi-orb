@@ -113,7 +113,16 @@ export function renderMermaid(source: string): ResultAsync<string, MermaidRender
     .andThen(() =>
       // Mermaid measures label text; measuring a fallback face misplaces every box.
       ResultAsync.fromPromise(
-        document.fonts.load(`12px ${MONO}`).then(() => mermaid.render(id, source)),
+        document.fonts.load(`12px ${MONO}`).then(async () => {
+          const container = document.createElement("div");
+          container.style.cssText = "position:fixed;inset:0;visibility:hidden;pointer-events:none";
+          document.body.append(container);
+          try {
+            return await mermaid.render(id, source, container);
+          } finally {
+            container.remove();
+          }
+        }),
         (cause): MermaidRenderError => ({ type: "mermaid_render_failed", message: message(cause) }),
       ),
     )
