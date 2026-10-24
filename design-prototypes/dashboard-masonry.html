@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>pi-orb · dashboard masonry</title>
+<style>
+@font-face{font-family:"Iosevka Etoile";src:url("../apps/web/public/fonts/iosevka-etoile-regular-989cbc25c646.woff2") format("woff2");font-weight:400}
+@font-face{font-family:"Iosevka Etoile";src:url("../apps/web/public/fonts/iosevka-etoile-bold-7ec739ec82b2.woff2") format("woff2");font-weight:700}
+@font-face{font-family:"JetBrains Mono";src:url("../apps/web/public/fonts/jetbrains-mono-regular-fa06becb7e66.woff2") format("woff2");font-weight:400}
+:root{color-scheme:light;--w:#fff;--k:#000;--g1:#f2f2f2;--g2:#999;--g3:#555;--ok:#1a7e37;--bad:#b42318;
+  --st-busy:var(--ok);--st-idle:var(--ok);--st-start:#966100;--st-stop:#777;--st-fail:var(--bad);--st-arch:#666;
+  --text:"Iosevka Etoile",serif;--mono:"JetBrains Mono",monospace;--row:20px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--w);color:var(--k);font:13px/20px var(--text);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit}
+
+/* page chrome */
+.top{position:sticky;top:0;z-index:50;display:flex;align-items:center;height:28px;background:var(--w);border-bottom:1px solid var(--k)}
+.top b{padding:0 12px;text-transform:uppercase;letter-spacing:.08em}
+.top a{padding:0 12px;line-height:28px;color:var(--g3);border-left:1px solid var(--k)}
+.top a:hover{background:var(--k);color:var(--w)}
+.intro{padding:16px 12px;color:var(--g3);max-width:900px}
+.intro b{color:var(--k)}
+.design{padding:16px 12px 28px;border-top:1px solid var(--k);scroll-margin-top:28px}
+.design h2{margin:0;font-size:18px;line-height:24px;text-transform:uppercase;letter-spacing:.08em}
+.design p{margin:2px 0 10px;color:var(--g3);max-width:900px}
+.frame{position:relative;display:flex;flex-direction:column;height:760px;border:1px solid var(--k);overflow:hidden}
+
+/* product primitives, lifted from apps/web/src/styles.css */
+.ic{width:16px;height:16px}
+.icon-button{width:20px;height:20px;flex:none;display:inline-flex;align-items:center;justify-content:center;padding:0;border:0;color:var(--g3);background:transparent;cursor:pointer}
+.icon-button:hover{background:var(--k);color:var(--w)}
+.icon-button.danger{color:var(--bad)}
+.icon-button.danger:hover{background:var(--bad);color:var(--w)}
+.glyph{display:inline-flex;flex:none;width:16px;height:16px}
+.glyph svg{width:16px;height:16px}
+.dashboard-totals{display:flex;flex:none;height:24px;align-items:center;border-bottom:1px solid var(--k)}
+.dashboard-total{display:flex;height:24px;min-width:132px;align-items:baseline;gap:6px;padding:0 12px;line-height:24px;border-right:1px solid var(--k)}
+.dashboard-total span{color:var(--g3);text-transform:uppercase;letter-spacing:.08em}
+.dashboard-actions{display:flex;margin-left:auto}
+.dashboard-actions .icon-button{width:28px;height:24px;border-left:1px solid var(--k)}
+.dashboard-footer{display:flex;flex:none;height:24px;align-items:center;gap:8px;padding:0 12px;color:var(--g3);border-top:1px solid var(--k)}
+.dashboard-footer button{background:none;border:1px solid var(--k);padding:0 8px;line-height:18px;color:var(--k)}
+.dashboard-footer i{font-style:normal;color:var(--g2)}
+.board{flex:1;min-height:0;overflow:auto}
+.project-head{flex:none;padding:0 10px;border-bottom:1px solid var(--k)}
+.project-head-line{display:flex;height:24px;min-width:0;align-items:center;gap:8px;white-space:nowrap}
+.project-name{min-width:0;flex:1;overflow:hidden;font-size:18px;line-height:24px;text-overflow:ellipsis;text-transform:uppercase;letter-spacing:.08em;font-weight:700}
+.project-head-actions{display:flex;flex:none;align-items:center;margin-left:auto;gap:4px}
+.project-head-actions .icon-button,.new-orb{width:24px;height:24px}
+.new-orb{display:inline-flex;align-items:center;justify-content:center;color:var(--g3)}
+.new-orb:hover{background:var(--k);color:var(--w)}
+.orb-entry{flex:none;padding:4px 10px 4px 8px;border-left:2px solid var(--g2);border-bottom:1px solid var(--g1)}
+.orb-entry:hover{background:var(--g1)}
+.orb-entry-title{display:flex;height:22px;min-width:0;align-items:center;gap:6px}
+.orb-entry-link{overflow:hidden;font-size:14px;line-height:22px;text-overflow:ellipsis;white-space:nowrap}
+.orb-entry-meta{display:flex;height:20px;align-items:center;gap:6px;color:var(--g3)}
+.orb-entry-actions{margin-left:auto;display:flex;gap:8px}
+.orb-entry-detail{height:20px;overflow:hidden;color:var(--bad);text-overflow:ellipsis;white-space:nowrap}
+.s-busy{border-left-color:var(--st-busy)}.s-idle{border-left-color:var(--st-idle)}.s-stop,.s-sleep{border-left-color:var(--st-stop)}
+.s-fail{border-left-color:var(--st-fail)}.s-arch{border-left-color:var(--st-arch)}
+.s-busy .orb-entry-link,.s-fail .orb-entry-link,.s-busy .n,.s-fail .n{font-weight:700}
+.s-arch .orb-entry-link,.s-arch .n{color:var(--g3)}
+.project-archive{flex:none;background:var(--g1);border-top:1px solid var(--g2)}
+.project-archive>summary{display:flex;height:20px;gap:8px;padding:0 10px;color:var(--g3);cursor:pointer;list-style:none}
+.project-archive>summary::-webkit-details-marker{display:none}
+.project-archive>summary::before{content:"▸"}
+.project-archive[open]>summary::before{content:"▾"}
+.project-archive>summary:hover{background:#e9e9e9}
+.project-archive .orb-entry{border-bottom-color:#e6e6e6}
+
+
+/* page chrome additions */
+.tools{display:flex;gap:0;margin:0 0 8px}
+.tools button{background:var(--w);color:var(--g3);border:1px solid var(--g2);margin-left:-1px;padding:0 8px;line-height:18px;cursor:pointer}
+.tools button.on,.tools button:hover{background:var(--k);color:var(--w);border-color:var(--k)}
+.frame{margin:0 auto 0 0;max-width:100%}
+
+/* masonry: each project one box, dropped into the shortest column */
+.masonry{display:flex;min-height:100%}
+.mcol{flex:1 1 0;min-width:0;display:flex;flex-direction:column;border-left:1px solid var(--k)}
+.mcol:first-child{border-left:0}
+.box{display:flex;flex-direction:column;border-bottom:1px solid var(--k)}
+.new-project{padding:0 10px 10px}
+.new-project h2{margin:0;font-size:18px;line-height:24px;text-transform:uppercase;letter-spacing:.08em}
+.new-project label{display:block;color:var(--g3)}
+.new-project input{display:block;width:100%;height:24px;border:1px solid var(--k);font:inherit}
+.new-project button{align-self:flex-start;margin-top:10px;background:var(--k);color:var(--w);border:0;padding:0 12px;line-height:24px}
+</style>
+</head>
+<body>
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-archive" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M3 6v7h10V6 M2 3h12v3H2z M6 9h4"/></symbol>
+  <symbol id="i-bin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="square"><path d="M4 6h16M9 6V3h6v3M6 9v11h12V9M10 10v6M14 10v6"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M6.5 1.5h3l.5 2 1.5 1 2-.5 1.5 2.5-1.5 1.5v1l1.5 1.5-1.5 2.5-2-.5-1.5 1-.5 2h-3l-.5-2-1.5-1-2 .5L1 10.5 2.5 9V8L1 6.5 2.5 4l2 .5 1.5-1z M10.5 8.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 1 1 5 0"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M8 3v10M3 8h10"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M3 10 10 3l3 3-7 7H3z M8 5l3 3"/></symbol>
+  <symbol id="i-pi" viewBox="0 0 16 16" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="1" width="14" height="14" rx="2" fill="#555" stroke="none"/><path d="M4 5h8M6 5v3.5Q6 10 5 11M10 5v5q0 1 1 1"/></symbol>
+  <symbol id="i-claude" viewBox="0 0 24 24" fill="currentColor"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></symbol>
+</svg>
+
+<nav class="top"><b>pi-orb · dashboard masonry</b><a href="#m1">fleet from screenshot</a><a href="#m2">busier fleet</a></nav>
+<div class="intro">Each project stays one box. Boxes keep their order and each drops into the currently shortest column; columns flex to fill the width (one per 300px). Width buttons reflow; opening an archive reflows too.</div>
+<section class="design" id="m1"><h2>Fleet from screenshot</h2>
+<div class="tools"></div><div class="frame" data-set="a"></div></section>
+<section class="design" id="m2"><h2>Busier fleet</h2>
+<div class="tools"></div><div class="frame" data-set="b"></div></section>
+
+<script>
+const P=[
+ {name:"GLIDEOS",archive:81,orbs:[
+  ["Find and Fix Critical Bugs in GlideOS","busy","5s"],
+  ["Evaluate TypeScript-to-Rust port feasibility","stopped","1h"],
+  ["Create Low-Cost Animated Gradient Backgrounds","stopped","3h"],
+  ["Build Analyst Onboarding Session Briefing","stopped","3h"],
+  ["#17056: Native handoff credentials","stopped","1d"],
+  ["#17057: Slack workspace ownership","stopped","1d"],
+  ["#17010: Staff gate SSO trust","stopped","1d"],
+  ["#17009: Private-app short-id collisions","stopped","1d"],
+  ["Investigate SSO Role Exposure Risk","stopped","2d"],
+  ["Locate UI implementation in GlideOS","stopped","3d"],
+  ["Check Open Bug Issues for Existing Fixes","stopped","4d"],
+  ["Identify In-App Sales Concierge Triggers","stopped","5d"],
+  ["Databricks Performance Issues Analysis","stopped","1w"],
+  ["Telemetry Review of Recent Shipments","failed","2w","deadline_exceeded: orb did not become ready within 300s"]]},
+ {name:"PI-ORB",archive:210,orbs:[["Claude Tool Visual Enrichment Map","stopped","1w"]]},
+ {name:"QUICKTYPE",archive:37,orbs:[["Swift 6 strict concurrency output","running","12m"],["Kotlin sealed-class unions","stopped","2d"]]},
+ {name:"DETERMINED",archive:14,orbs:[]},
+ {name:"GLIDE",archive:2,orbs:[["Recent Glide repository activity overview","sleeping","1d"],["Enterprise Subscription Downgrade Flow","stopped","3w"],["Explore Hosting Glide Frontend on Workers","stopped","3w"]]},
+ {name:"MINIMACS",archive:3,orbs:[]},
+ {name:"FAKE-OPENAI",archive:1,orbs:[]},
+];
+const ARCH=["Fix flaky WebKit navigation test","Dashboard Find keyboard focus","Replay DST trace for reconciler","Upgrade Vite to 7","Audit lifecycle event noise","Postgres pool exhaustion","Subagent rail spacing","Orb sleep crescent icon","Secrets dialog tab order","Hosted files listing","MCP OAuth reconnect","Terminal resize jitter","Credential handoff smoke","Archive shelf ordering","Image build timeout forensics","Composer draft retention","Viewport resume on focus","Runtime APT size mismatch","Session ribbon copy","Release notes for v0.0.1","Speaker treatment variants","Mermaid diagram sizing","Usage chart periods","Git identity settings","Orb alert badge","Replacement smoke budget","Project instructions editor","Cookie v2 upgrade","Native crash triage","Deploy run qualification"];
+const AGES=["4h","9h","1d","1d","2d","3d","4d","5d","6d","1w","1w","2w","2w","3w","3w","4w","1mo","1mo","2mo","2mo","3mo","3mo","4mo","5mo","6mo","7mo","8mo","9mo","10mo","11mo"];
+const G={
+ busy:'<svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="2" fill="#1a7e37"/><g fill="#fff"><circle cx="5" cy="8" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="11" cy="8" r="1"/></g></svg>',
+ running:'<svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="2" fill="#1a7e37"/><circle cx="8" cy="8" r="3" fill="none" stroke="#fff" stroke-width="1.5"/></svg>',
+ stopped:'<svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="2" fill="#777"/><path d="M5 8h6" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>',
+ failed:'<svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="2" fill="#b42318"/><path d="m5 5 6 6m0-6-6 6" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>',
+ sleeping:'<svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="2" fill="#777"/><path d="M10.15 3.35a4.9 4.9 0 1 0 1.65 7.2 3.35 3.35 0 0 1-1.65-7.2Z" fill="#fff"/></svg>',
+ archived:'<svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="2" fill="#666"/><path d="M5 5h6v6H5zM5 7h6" fill="none" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>'};
+const S={busy:"busy",running:"idle",stopped:"stop",sleeping:"sleep",failed:"fail",archived:"arch"};
+const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;");
+const ic=n=>`<svg class="ic"><use href="#i-${n}"/></svg>`;
+const btn=(n,c="")=>`<button class="icon-button ${c}" title="${n}">${ic(n)}</button>`;
+const glyph=s=>`<span class="glyph" title="${s}">${G[s]}</span>`;
+const orbActs=a=>a?btn("bin","danger"):btn("archive")+btn("bin","danger");
+const headActs=()=>`<span class="project-head-actions"><a class="new-orb" href="#" title="new pi orb">${ic("pi")}</a><a class="new-orb" href="#" title="new claude orb">${ic("claude")}</a>${btn("gear")}${btn("bin","danger")}</span>`;
+const head=p=>`<div class="project-head"><div class="project-head-line"><span class="project-name">${p.name}</span>${headActs()}</div></div>`;
+const archived=(p,k)=>{const i=p.name.length*7;return Array.from({length:Math.min(p.archive,k)},(_,j)=>[ARCH[(i+j)%ARCH.length],"archived",AGES[j]])};
+const entry=([n,s,age,d])=>`<div class="orb-entry s-${S[s]}"><div class="orb-entry-title">${glyph(s)}<a class="orb-entry-link" href="#">${esc(n)}</a></div><div class="orb-entry-meta">${age}<span class="orb-entry-actions">${orbActs(s==="archived")}</span></div>${d?`<div class="orb-entry-detail">${d}</div>`:""}</div>`;
+const line=([n,s,age,d])=>`<div class="orb-line s-${S[s]}">${glyph(s)}<a class="n" href="#">${esc(n)}</a><span class="age">${age}</span><span class="acts">${orbActs(s==="archived")}</span></div>${d?`<div class="line-detail">${d}</div>`:""}`;
+const archive=(p,render=entry)=>`<details class="project-archive"><summary>archive · ${p.archive}</summary>${archived(p,6).map(render).join("")}</details>`;
+const toSec=a=>{const m=a.match(/(\d+)(mo|[smhdw])/);return +m[1]*{s:1,m:60,h:3600,d:86400,w:604800,mo:2592000}[m[2]]};
+const orbsCount=P.reduce((a,p)=>a+p.orbs.length,0);
+
+const EXTRA=[
+ {name:"INFRA",archive:44,orbs:[["Terraform state drift on staging","busy","40s"],["Rotate GCE service account keys","stopped","6h"],["Cloud Run cold start budget","stopped","2d"],["Postgres 17 upgrade rehearsal","stopped","4d"],["Egress cost breakdown","stopped","2w"]]},
+ {name:"BLOG",archive:6,orbs:[["Draft: deterministic simulation in practice","stopped","3d"]]},
+ {name:"DOTFILES",archive:11,orbs:[]},
+ {name:"RESEARCH",archive:27,orbs:[["Compare Rust async runtimes for agents","running","8m"],["Survey CRDT text libraries","stopped","1d"],["Read: Raft membership changes","stopped","5d"],["Notes on WebKit visualViewport quirks","stopped","1w"]]},
+ {name:"PLAYGROUND",archive:0,orbs:[["Try Bun 2 test runner","stopped","2h"]]},
+];
+const SETS={a:P,b:[P[0],EXTRA[0],P[1],P[2],EXTRA[1],P[3],P[4],EXTRA[2],EXTRA[3],P[5],EXTRA[4],P[6]]};
+const archiveBox=p=>p.archive?`<details class="project-archive"><summary>archive · ${p.archive}</summary>${archived(p,6).map(entry).join("")}</details>`:"";
+const box=p=>`<section class="box">${head(p)}${p.orbs.map(entry).join("")}${archiveBox(p)}</section>`;
+const newProject=`<section class="box new-project"><h2>New project</h2><label>project name<input></label><label>repository URL<input></label><button>Create project</button></section>`;
+const totalsFor=ps=>{const o=ps.flatMap(p=>p.orbs);const c=s=>o.filter(x=>x[1]===s).length;
+ return `<div class="dashboard-totals"><span class="dashboard-total"><b>${ps.length}</b><span>projects</span></span><span class="dashboard-total"><b>${o.length}</b><span>orbs</span></span><span class="dashboard-total"><b>${c("busy")}</b><span>busy</span></span><span class="dashboard-total"><b>${c("failed")}</b><span>failed</span></span><span class="dashboard-actions"><button class="icon-button" title="personal instructions">${ic("pen")}</button></span></div>`};
+const footer=`<div class="dashboard-footer"><button>Sign out</button><span>gce host</span><i>·</i><span>postgres</span><i>·</i><span>v0.0.1</span></div>`;
+
+function layout(board){
+ const boxes=board._boxes;
+ const n=Math.max(1,Math.floor(board.clientWidth/300));
+ const cols=Array.from({length:n},()=>{const c=document.createElement("div");c.className="mcol";return c});
+ const m=document.createElement("div");m.className="masonry";cols.forEach(c=>m.append(c));
+ board.replaceChildren(m);
+ const h=c=>[...c.children].reduce((t,b)=>t+b.offsetHeight,0);
+ for(const b of boxes){cols.reduce((a,c)=>h(c)<h(a)?c:a).append(b)}
+ board._n=n;
+}
+for(const f of document.querySelectorAll(".frame")){
+ const ps=SETS[f.dataset.set];
+ f.innerHTML=totalsFor(ps)+`<div class="board"></div>`+footer;
+ const board=f.querySelector(".board");
+ const tmp=document.createElement("div");tmp.innerHTML=ps.map(box).join("")+newProject;
+ board._boxes=[...tmp.children];
+ layout(board);
+ new ResizeObserver(()=>{if(Math.max(1,Math.floor(board.clientWidth/300))!==board._n)layout(board)}).observe(board);
+ board.addEventListener("toggle",()=>layout(board),true);
+ const tools=f.previousElementSibling;
+ tools.innerHTML=[["900px","900"],["1300px","1300"],["1700px","1700"],["","full"]].map(([w,l])=>`<button data-w="${w}"${w?"":' class="on"'}>${l}</button>`).join("");
+ tools.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;tools.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));f.style.width=b.dataset.w});
+}
+document.addEventListener("click",e=>{if(e.target.closest("a[href='#']"))e.preventDefault()});
+</script>
+</body>
+</html>
