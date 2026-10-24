@@ -1,16 +1,15 @@
-import { readFile } from "node:fs/promises";
+import { NoSimulationTask } from "determined";
+import { makeOrbRow, makeProjectRow, seedTestUser } from "../../testkit/fixtures.ts";
+import { composeControlPlaneDatabase } from "../database.ts";
 import type { PostgreSQLClient } from "../pg/client.ts";
+import { runMigrations } from "../pg/migrate.ts";
 
 export async function initializeBareAuthority(db: PostgreSQLClient, orb: string) {
-  (
-    await db.query(
-      "CREATE TABLE orbs(id uuid PRIMARY KEY, agent_admission_version bigint NOT NULL DEFAULT 0)",
-    )
-  )._unsafeUnwrap();
-  (await db.query("INSERT INTO orbs(id) VALUES($1)", [orb]))._unsafeUnwrap();
-  const migration = await readFile(
-    new URL("../pg/migrations/036_durable_authority.sql", import.meta.url),
-    "utf8",
-  );
-  (await db.transaction(async (_q, execute) => execute(migration)))._unsafeUnwrap();
+  (await runMigrations(db))._unsafeUnwrap();
+  const task = new NoSimulationTask("conformance", false);
+  const database = composeControlPlaneDatabase(db);
+  const project = makeProjectRow("00000000-0000-4000-8000-000000000002");
+  (await seedTestUser(task, database.users))._unsafeUnwrap();
+  (await database.store.insertProject(task, project))._unsafeUnwrap();
+  (await database.store.insertOrb(task, makeOrbRow(orb, project.id, "running")))._unsafeUnwrap();
 }

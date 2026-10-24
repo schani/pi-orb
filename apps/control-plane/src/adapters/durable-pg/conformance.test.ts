@@ -3,8 +3,8 @@ import { createStorageConformance } from "@earendil-works/pi-durable/testing";
 import { ok } from "neverthrow";
 import { expect, it, onTestFinished } from "vitest";
 import { PgClient } from "../pg/client.ts";
-import { runMigrations } from "../pg/migrate.ts";
 import { PGliteClient } from "../pg/pglite-client.ts";
+import { initializeBareAuthority } from "./bare-authority.testkit.ts";
 import { PgDurableAuthority } from "./index.ts";
 
 const postgres = process.env.PI_ORB_DURABLE_PG_TEST_URL;
@@ -44,20 +44,7 @@ for (const backend of ["pglite", ...(postgres ? ["postgres"] : [])]) {
       });
       const orb = "00000000-0000-4000-8000-000000000001";
       {
-        (await runMigrations(db))._unsafeUnwrap();
-        const { NoSimulationTask } = await import("determined");
-        const { composeControlPlaneDatabase } = await import("../database.ts");
-        const { makeOrbRow, makeProjectRow, seedTestUser } = await import(
-          "../../testkit/fixtures.ts"
-        );
-        const task = new NoSimulationTask("conformance", false);
-        const database = composeControlPlaneDatabase(db);
-        const project = makeProjectRow("00000000-0000-4000-8000-000000000002");
-        (await seedTestUser(task, database.users))._unsafeUnwrap();
-        (await database.store.insertProject(task, project))._unsafeUnwrap();
-        (
-          await database.store.insertOrb(task, makeOrbRow(orb, project.id, "running"))
-        )._unsafeUnwrap();
+        await initializeBareAuthority(db, orb);
         const authority = new PgDurableAuthority(db, () => 0);
         const owner = (await authority.acquire(orb, "test", 0, 0, 1000))._unsafeUnwrap();
         const storage = (
