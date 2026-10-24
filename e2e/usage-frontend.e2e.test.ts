@@ -500,11 +500,12 @@ async function checkOrbLinks(page: Page, origin: string) {
   // Desktop SVG anchors and phone HTML anchors keep native new-tab and keyboard behavior.
   for (const width of [1440, 320]) {
     await page.setViewportSize({ width, height: 1000 });
+    const legend = timeline.locator(width === 320 ? ".chart-key" : ".chart-canvas svg");
     const namedOrb = metadata.find((orb) => orb.name !== null);
     const deletedOrb = metadata.find((orb) => orb.name === null);
     if (!namedOrb || !deletedOrb) throw new Error("Missing legend fixture metadata");
     for (const orb of [namedOrb, deletedOrb]) {
-      const link = timeline.getByRole("link", { name: orb.name ?? orb.id, exact: true });
+      const link = legend.getByRole("link", { name: orb.name ?? orb.id, exact: true });
       const href = "/orbs/" + encodeURIComponent(orb.id);
       await expect(link).toHaveAttribute("href", href);
       await link.focus();
@@ -523,7 +524,7 @@ async function checkOrbLinks(page: Page, origin: string) {
       await expect(page).toHaveURL(origin + "/usage");
     }
     for (const activation of ["click", "keyboard"]) {
-      const link = timeline.getByRole("link", { name: namedOrb.name ?? namedOrb.id, exact: true });
+      const link = legend.getByRole("link", { name: namedOrb.name ?? namedOrb.id, exact: true });
       if (activation === "click") await link.click();
       else {
         await link.focus();
