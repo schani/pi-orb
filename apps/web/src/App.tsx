@@ -2,6 +2,8 @@ import { useState, useSyncExternalStore } from "react";
 import { AppSearchProvider } from "./components/AppSearch.tsx";
 import { IconSprite } from "./components/Icons.tsx";
 import { SessionRibbon } from "./components/SessionRibbon.tsx";
+import { DashboardCache } from "./lib/dashboard-cache.ts";
+import { DashboardCacheContext } from "./lib/dashboard-cache-context.ts";
 import { readPath, subscribeNavigation } from "./lib/navigation.ts";
 import { readSessionPrincipal, subscribeToBrowserSession } from "./lib/session.ts";
 import { TranscriptCache } from "./lib/transcript-cache.ts";
@@ -58,11 +60,18 @@ export function parseRoute(url: string): Route {
   return { page: "not_found" };
 }
 
-function AppRoutes({ cache }: { cache: TranscriptCache }) {
+function AppRoutes({
+  cache,
+  dashboardCache,
+}: {
+  cache: TranscriptCache;
+  dashboardCache: DashboardCache;
+}) {
   const path = useSyncExternalStore(subscribeNavigation, readPath);
   const route = parseRoute(path);
   return route.page === "mcp" || route.page === "projects" ? (
     <ProjectsPage
+      dashboardCache={dashboardCache}
       focusedProjectId={route.page === "mcp" ? route.projectId : route.focusedProjectId}
       mcpConfigOpen={route.page === "mcp"}
     />
@@ -79,11 +88,14 @@ function AppRoutes({ cache }: { cache: TranscriptCache }) {
 
 function PrivateApp() {
   const [cache] = useState(() => new TranscriptCache());
+  const [dashboardCache] = useState(() => new DashboardCache());
   return (
     <TranscriptCacheContext.Provider value={cache}>
-      <AppSearchProvider>
-        <AppRoutes cache={cache} />
-      </AppSearchProvider>
+      <DashboardCacheContext.Provider value={dashboardCache}>
+        <AppSearchProvider>
+          <AppRoutes cache={cache} dashboardCache={dashboardCache} />
+        </AppSearchProvider>
+      </DashboardCacheContext.Provider>
     </TranscriptCacheContext.Provider>
   );
 }

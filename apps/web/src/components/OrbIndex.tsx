@@ -1,7 +1,8 @@
 import type { OrbView, ProjectView } from "@pi-orb/protocol";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { type ApiError, describeApiError, listOrbs, listProjects } from "../lib/api.ts";
 import type { AppSearchItem } from "../lib/app-search.ts";
+import { DashboardCacheContext } from "../lib/dashboard-cache-context.ts";
 import {
   buildDashboardSearchSource,
   type DashboardOrbListSnapshot,
@@ -173,6 +174,7 @@ export function OrbIndex({
   onSenderNamesChange?: (names: ReadonlyMap<string, string | null>) => void;
   onSelect: () => void;
 }) {
+  const dashboardCache = useContext(DashboardCacheContext);
   const [projects, setProjects] = useState<ProjectView[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [lists, setLists] = useState<Record<string, OrbList>>({});
@@ -232,7 +234,7 @@ export function OrbIndex({
           Object.entries(visibleLists).map(([id, list]): [string, DashboardOrbListSnapshot] => [
             id,
             list.error !== null
-              ? { type: "failed" }
+              ? { type: "failed", items: list.items ?? [] }
               : list.items === null
                 ? { type: "loading" }
                 : { type: "loaded", items: list.items },
@@ -260,18 +262,33 @@ export function OrbIndex({
       if (inFlight) return;
       inFlight = true;
       const started = revision.current;
+      const cacheRevision = dashboardCache?.revision;
+      const stale = () =>
+        cancelled || started !== revision.current || cacheRevision !== dashboardCache?.revision;
       const result = await listProjects();
-      if (cancelled || started !== revision.current) {
+      if (stale()) {
         inFlight = false;
         return;
       }
       if (result.isErr()) {
         setError(result.error);
+        dashboardCache?.update((previous) => ({ ...previous, loadError: result.error }));
         inFlight = false;
         return;
       }
       setError(null);
       const incoming = result.value.items;
+      dashboardCache?.update((previous) => ({
+        ...previous,
+        projects: incoming,
+        loadError: null,
+        orbLists: Object.fromEntries(
+          incoming.map((project) => [
+            project.id,
+            previous.orbLists[project.id] ?? { type: "loading" },
+          ]),
+        ),
+      }));
       setProjects((previous) => mergeIndexProjects(previous ?? [], incoming));
       setLists((previous) =>
         Object.fromEntries(
@@ -286,7 +303,25 @@ export function OrbIndex({
         incoming.map(async (project) => [project.id, await listOrbs(project.id)] as const),
       );
       inFlight = false;
-      if (cancelled || started !== revision.current) return;
+      if (stale()) return;
+      dashboardCache?.update((previous) => ({
+        ...previous,
+        orbLists: Object.fromEntries(
+          results.map(([id, orbs]) => {
+            const old = previous.orbLists[id];
+            return [
+              id,
+              orbs.isOk()
+                ? { type: "loaded", items: orbs.value.items }
+                : {
+                    type: "failed",
+                    error: orbs.error,
+                    items: old?.type === "loading" ? [] : (old?.items ?? []),
+                  },
+            ];
+          }),
+        ),
+      }));
       setLists((previous) => ({
         ...previous,
         ...Object.fromEntries(
@@ -305,7 +340,7 @@ export function OrbIndex({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [dashboardCache]);
   // A project appears only with its list, so it never pushes down a header already shown.
   const shown =
     visibleProjects?.flatMap((project) => {
@@ -354,6 +389,7 @@ export function OrbIndex({
           onSelect={onSelect}
           onCreated={(created) => {
             revision.current += 1;
+            dashboardCache?.upsertOrb(created);
             setLists((previous) => ({
               ...previous,
               [created.projectId]: {
@@ -370,6 +406,12 @@ export function OrbIndex({
           }}
           onChanged={(changed) => {
             revision.current += 1;
+            if (dashboardCache !== null) dashboardCache.revision += 1;
+            dashboardCache?.update((previous) => ({
+              ...previous,
+              projects:
+                previous.projects?.map((item) => (item.id === changed.id ? changed : item)) ?? null,
+            }));
             setProjects(
               (previous) =>
                 previous?.map((entry) => (entry.id === changed.id ? changed : entry)) ?? null,

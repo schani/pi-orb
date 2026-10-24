@@ -11,7 +11,7 @@ import {
 export type DashboardOrbListSnapshot =
   | { type: "loading" }
   | { type: "loaded"; items: OrbView[] }
-  | { type: "failed" };
+  | { type: "failed"; items?: OrbView[] };
 
 export interface DashboardSearchSnapshot {
   projects: readonly ProjectView[];
@@ -87,9 +87,8 @@ export function buildDashboardSearchSource(snapshot: DashboardSearchSnapshot): A
     }
     if (orbList.type === "failed") {
       hasFailedOrbs = true;
-      continue;
     }
-    const shelves = splitProjectOrbs(orbList.items, snapshot.orbOrder);
+    const shelves = splitProjectOrbs(orbList.items ?? [], snapshot.orbOrder);
     items.push(
       ...buildProjectOrbTree(shelves.working).map(({ orb }) =>
         orbItem(project, orb, false, snapshot.now),

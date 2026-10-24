@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { type ApiError, createOrb, describeApiError, getProject } from "../lib/api.ts";
 import { createOrbRequest } from "../lib/create-orb-request.ts";
+import { DashboardCacheContext } from "../lib/dashboard-cache-context.ts";
 import { navigate } from "../lib/navigation.ts";
 import { generateUuid } from "../lib/uuid.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
@@ -14,6 +15,7 @@ type CreationState =
   | { type: "failed"; attempt: number; error: ApiError };
 
 export function CreateOrbPage({ projectId }: CreateOrbPageProps) {
+  const dashboardCache = useContext(DashboardCacheContext);
   const [projectReady, setProjectReady] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [projectError, setProjectError] = useState<ApiError | null>(null);
@@ -57,6 +59,7 @@ export function CreateOrbPage({ projectId }: CreateOrbPageProps) {
         setState({ type: "failed", attempt: state.attempt, error: result.error });
         return;
       }
+      dashboardCache?.upsertOrb(result.value);
       if (window.location.href === source)
         navigate(`/orbs/${encodeURIComponent(result.value.id)}`, true);
     });
@@ -65,7 +68,7 @@ export function CreateOrbPage({ projectId }: CreateOrbPageProps) {
       window.removeEventListener("popstate", changedRoute);
       window.removeEventListener("pi-orb:navigate", changedRoute);
     };
-  }, [projectId, projectReady, request, state]);
+  }, [dashboardCache, projectId, projectReady, request, state]);
 
   if (
     (projectError?.type === "http" && projectError.status === 404) ||

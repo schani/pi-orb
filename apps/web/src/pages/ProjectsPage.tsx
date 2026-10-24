@@ -13,6 +13,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { useAppSearchSource } from "../components/AppSearch.tsx";
 import { Icon } from "../components/Icons.tsx";
@@ -24,7 +25,6 @@ import { ProjectOrbTree } from "../components/ProjectOrbTree.tsx";
 import { StateTile } from "../components/StateTile.tsx";
 import { TextFieldFrame } from "../components/TextFieldFrame.tsx";
 import {
-  type ApiError,
   archiveOrb,
   createProject,
   deleteOrb,
@@ -33,15 +33,14 @@ import {
   listOrbs,
   listProjects,
 } from "../lib/api.ts";
+import type { DashboardCache, DashboardOrbList } from "../lib/dashboard-cache.ts";
 import { buildDashboardSearchSource } from "../lib/dashboard-search-source.ts";
 import { navigate } from "../lib/navigation.ts";
 import { projectDeletionProgressText } from "../lib/project-deletion.ts";
 import {
   dashboardTotals,
   formatProjectOrbAge,
-  type OrbOrderCache,
   orderProjects,
-  type ProjectOrderCache,
   projectOrbActions,
   projectOrbGlyph,
   splitProjectOrbs,
@@ -50,11 +49,6 @@ import { TranscriptCacheContext } from "../lib/transcript-cache-context.ts";
 import { useAddressedProject } from "../lib/use-addressed-project.ts";
 import { generateUuid } from "../lib/uuid.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
-
-type OrbListState =
-  | { type: "loading" }
-  | { type: "loaded"; items: OrbView[] }
-  | { type: "failed"; error: ApiError };
 
 interface OrbEntryProps {
   orb: OrbView;
@@ -139,17 +133,22 @@ function ProjectArchive({ items, ...entry }: Omit<OrbEntryProps, "orb"> & { item
 }
 
 interface ProjectsPageProps {
+  dashboardCache: DashboardCache;
   focusedProjectId?: string | null;
   mcpConfigOpen?: boolean;
 }
 
 export function ProjectsPage({
+  dashboardCache,
   focusedProjectId = null,
   mcpConfigOpen = false,
 }: ProjectsPageProps) {
-  const [projects, setProjects] = useState<ProjectView[] | null>(null);
-  const [loadError, setLoadError] = useState<ApiError | null>(null);
-  const [orbLists, setOrbLists] = useState<Record<string, OrbListState | undefined>>({});
+  const { projects, loadError, orbLists } = useSyncExternalStore(
+    dashboardCache.subscribe,
+    dashboardCache.getSnapshot,
+  );
+  const setProjects = (change: (current: ProjectView[] | null) => ProjectView[] | null) =>
+    dashboardCache.update((previous) => ({ ...previous, projects: change(previous.projects) }));
   const [system, setSystem] = useState<SystemView | null>(null);
 
   const [name, setName] = useState("");
@@ -161,8 +160,7 @@ export function ProjectsPage({
   const cache = useContext(TranscriptCacheContext);
   const [archivingOrb, setArchivingOrb] = useState<string | null>(null);
   const [ageNow, setAgeNow] = useState(() => Date.now());
-  const [orbOrder] = useState<OrbOrderCache>(() => new Map());
-  const [projectOrder] = useState<ProjectOrderCache>(() => new Map());
+  const { orbOrder, projectOrder } = dashboardCache;
   const [orbCreateError, setOrbCreateError] = useState<{
     projectId: string;
     message: string;
@@ -200,9 +198,10 @@ export function ProjectsPage({
   );
   const addressedId = addressed?.id;
   const addressedOrbs = addressed?.orbs;
-  const addressedOrbList = useMemo<OrbListState | null>(() => {
+  const addressedOrbList = useMemo<DashboardOrbList | null>(() => {
     if (addressed?.project == null || addressedOrbs === undefined) return null;
-    if (addressedOrbs.error !== null) return { type: "failed", error: addressedOrbs.error };
+    if (addressedOrbs.error !== null)
+      return { type: "failed", error: addressedOrbs.error, items: addressedOrbs.items ?? [] };
     return addressedOrbs.items === null
       ? { type: "loading" }
       : { type: "loaded", items: addressedOrbs.items };
@@ -227,7 +226,7 @@ export function ProjectsPage({
       buildDashboardSearchSource({
         projects: visibleProjects ?? [],
         projectsLoading: projects === null && loadError === null,
-        projectsFailed: projects === null && loadError !== null,
+        projectsFailed: loadError !== null,
         orbLists: visibleOrbLists,
         now: ageNow,
         orbOrder,
@@ -236,42 +235,74 @@ export function ProjectsPage({
   );
   useAppSearchSource(focusedProjectMissing ? null : searchSource);
 
-  const refresh = useCallback(async () => {
-    const started = addressedRevision.current;
-    const result = await listProjects();
-    if (started !== addressedRevision.current) return;
-    if (result.isErr()) {
-      setLoadError(result.error);
-      return;
-    }
-    setLoadError(null);
-    setProjects(result.value.items);
-    setOrbLists((previous) => {
-      const next: Record<string, OrbListState | undefined> = {};
-      for (const project of result.value.items) {
-        next[project.id] = previous[project.id] ?? { type: "loading" };
-      }
-      return next;
-    });
-    const orbEntries = await Promise.all(
-      result.value.items.map(async (project) => [project.id, await listOrbs(project.id)] as const),
-    );
-    if (started !== addressedRevision.current) return;
-    setOrbLists(
-      Object.fromEntries(
-        orbEntries.map(([projectId, orbsResult]) => [
-          projectId,
-          orbsResult.isOk()
-            ? ({ type: "loaded", items: orbsResult.value.items } satisfies OrbListState)
-            : ({ type: "failed", error: orbsResult.error } satisfies OrbListState),
-        ]),
-      ),
-    );
-  }, []);
-
+  const refreshRef = useRef<() => Promise<void>>(async () => {});
+  const refresh = useCallback(() => refreshRef.current(), []);
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    let stopped = false;
+    let inFlight = false;
+    const poll = async () => {
+      if (stopped || inFlight) return;
+      inFlight = true;
+      const started = addressedRevision.current;
+      const cacheRevision = dashboardCache.revision;
+      const stale = () =>
+        stopped ||
+        started !== addressedRevision.current ||
+        cacheRevision !== dashboardCache.revision;
+      try {
+        const result = await listProjects();
+        if (stale()) return;
+        if (result.isErr()) {
+          dashboardCache.update((previous) => ({ ...previous, loadError: result.error }));
+          return;
+        }
+        dashboardCache.update((previous) => ({
+          ...previous,
+          projects: result.value.items,
+          loadError: null,
+          orbLists: Object.fromEntries(
+            result.value.items.map((project) => [
+              project.id,
+              previous.orbLists[project.id] ?? { type: "loading" },
+            ]),
+          ),
+        }));
+        const orbEntries = await Promise.all(
+          result.value.items.map(
+            async (project) => [project.id, await listOrbs(project.id)] as const,
+          ),
+        );
+        if (stale()) return;
+        dashboardCache.update((previous) => ({
+          ...previous,
+          orbLists: Object.fromEntries(
+            orbEntries.map(([projectId, orbsResult]) => {
+              const old = previous.orbLists[projectId];
+              return [
+                projectId,
+                orbsResult.isOk()
+                  ? { type: "loaded", items: orbsResult.value.items }
+                  : {
+                      type: "failed",
+                      error: orbsResult.error,
+                      items: old?.type === "loading" ? [] : (old?.items ?? []),
+                    },
+              ];
+            }),
+          ),
+        }));
+      } finally {
+        inFlight = false;
+      }
+    };
+    refreshRef.current = poll;
+    void poll();
+    const timer = window.setInterval(() => void poll(), 2_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [dashboardCache]);
 
   useEffect(() => {
     let stopped = false;
@@ -312,12 +343,6 @@ export function ProjectsPage({
       focusedProjectRef.current?.querySelector<HTMLElement>("[data-project-heading]")?.focus();
   }, [focusedProjectId, settledProjects, mcpConfigOpen]);
 
-  // Keep names and activity current, including when no lifecycle work is pending.
-  useEffect(() => {
-    const timer = window.setInterval(() => void refresh(), 2_000);
-    return () => window.clearInterval(timer);
-  }, [refresh]);
-
   const onCreateProject = async (event: FormEvent) => {
     event.preventDefault();
     const trimmedName = name.trim();
@@ -346,6 +371,12 @@ export function ProjectsPage({
     }
     setName("");
     setRepositoryUrl("");
+    addressedRevision.current += 1;
+    dashboardCache.revision += 1;
+    setProjects((current) => [
+      ...(current ?? []).filter((item) => item.id !== result.value.id),
+      result.value,
+    ]);
     refresh();
   };
 
@@ -365,6 +396,7 @@ export function ProjectsPage({
     }
     addressedRevision.current += 1;
     upsertAddressedOrb(result.value);
+    dashboardCache.upsertOrb(result.value);
     await refresh();
   };
 
@@ -381,6 +413,7 @@ export function ProjectsPage({
       cache?.invalidate(orb.id);
       addressedRevision.current += 1;
       upsertAddressedOrb(result.value);
+      dashboardCache.upsertOrb(result.value);
     }
     setDeletingOrb(null);
     if (result.isErr()) {
@@ -395,7 +428,7 @@ export function ProjectsPage({
   const loadedOrbs = Object.fromEntries(
     Object.entries(visibleOrbLists).map(([projectId, list]) => [
       projectId,
-      list?.type === "loaded" ? list.items : [],
+      list?.type === "loading" ? [] : (list?.items ?? []),
     ]),
   );
   const ordered =
@@ -446,7 +479,7 @@ export function ProjectsPage({
           const orbList = visibleOrbLists[project.id] ?? { type: "loading" as const };
           const deleting = project.state === "deleting";
           const shelves = splitProjectOrbs(
-            orbList.type === "loaded" ? orbList.items : [],
+            orbList.type === "loading" ? [] : orbList.items,
             orbOrder,
           );
           const entryProps = {
@@ -468,21 +501,7 @@ export function ProjectsPage({
                 onCreated={(created) => {
                   addressedRevision.current += 1;
                   upsertAddressedOrb(created);
-                  setOrbLists((previous) => {
-                    const list = previous[created.projectId];
-                    return {
-                      ...previous,
-                      [created.projectId]: {
-                        type: "loaded",
-                        items: [
-                          ...(list?.type === "loaded" ? list.items : []).filter(
-                            (entry) => entry.id !== created.id,
-                          ),
-                          created,
-                        ],
-                      },
-                    };
-                  });
+                  dashboardCache.upsertOrb(created);
                 }}
                 onChanged={async (changed) => {
                   setProjects(
@@ -490,6 +509,7 @@ export function ProjectsPage({
                       current?.map((item) => (item.id === changed.id ? changed : item)) ?? null,
                   );
                   addressedRevision.current += 1;
+                  dashboardCache.revision += 1;
                   replaceAddressedProject(changed);
                   await refresh();
                 }}
@@ -510,7 +530,7 @@ export function ProjectsPage({
                   <ProjectOrbTree items={shelves.working}>
                     {(orb) => <OrbEntry orb={orb} {...entryProps} />}
                   </ProjectOrbTree>
-                  {orbList.type === "loaded" && (
+                  {orbList.type !== "loading" && (
                     <ProjectArchive items={shelves.archive} {...entryProps} />
                   )}
                 </>
@@ -568,6 +588,7 @@ export function ProjectsPage({
                 current?.map((project) => (project.id === changed.id ? changed : project)) ?? null,
             );
             addressedRevision.current += 1;
+            dashboardCache.revision += 1;
             replaceAddressedProject(changed);
           }}
           onClose={() => {

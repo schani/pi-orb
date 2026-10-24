@@ -197,6 +197,18 @@ describe("dashboard search source", () => {
     expect(matchAppSearchItems(source.items, "archived")).toEqual([]);
   });
 
+  it("keeps cached rows searchable when their refresh fails", () => {
+    const source = buildDashboardSearchSource({
+      projects: [project("project-1", "Atlas", null)],
+      projectsLoading: false,
+      projectsFailed: false,
+      now,
+      orbLists: { "project-1": { type: "failed", items: [orb("cached", "Cached", "running")] } },
+    });
+    expect(source.items.map((item) => item.title)).toEqual(["Atlas", "Cached"]);
+    expect(source.status.type).toBe("partial_error");
+  });
+
   it("reports partial and loading snapshots without hiding loaded items", () => {
     const projects = [
       project("loaded", "Loaded", "https://github.com/acme/loaded"),
