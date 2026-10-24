@@ -75,7 +75,13 @@ function result(
   id: string,
   endOffset: number,
   callId: string,
-  options: { durationMs?: number; text?: string; isError?: boolean; calls?: JsonObject[] } = {},
+  options: {
+    durationMs?: number;
+    text?: string;
+    isError?: boolean;
+    calls?: JsonObject[];
+    omittedCalls?: number;
+  } = {},
 ): HistoryRecord {
   return {
     id,
@@ -99,7 +105,16 @@ function result(
           toolCallId: callId,
           timestamp: T + endOffset,
           ...(options.durationMs === undefined ? {} : { durationMs: options.durationMs }),
-          ...(options.calls === undefined ? {} : { details: { calls: options.calls } }),
+          ...(options.calls === undefined
+            ? {}
+            : {
+                details: {
+                  calls: options.calls,
+                  ...(options.omittedCalls === undefined
+                    ? {}
+                    : { omittedCalls: options.omittedCalls }),
+                },
+              }),
         },
       },
     },
@@ -342,6 +357,14 @@ describe("Pi turn timeline assembly", () => {
     ]);
   });
 
+  it("pairs a compaction whose ledger row was stamped after the summary was placed", async () => {
+    // The ledger stamps `at` inside its insert transaction, which can commit after pi-durable places the summary.
+    const records = [user("u1", 0), compaction("k1", iso(4000))];
+    expect(
+      await rows(records, "u1", [modelCall({ at: T + 4005, use: "compaction", durationMs: 2000 })]),
+    ).toEqual([expect.objectContaining({ kind: "model", id: "k1", start: T + 2005 })]);
+  });
+
   it("renders records from before 2026-10-24 without invented timing", async () => {
     const records = [
       user("u1", 0),
@@ -382,6 +405,7 @@ describe("Pi turn timeline assembly", () => {
         durationMs: 1900,
         isError: true,
         text: "Error: boom",
+        omittedCalls: 70,
         calls: [
           { id: 2, name: "grep", status: "cancelled", startedAt: iso(1500), argumentKeys: [] },
           {
@@ -405,7 +429,7 @@ describe("Pi turn timeline assembly", () => {
       ),
     ).toEqual([
       ["a1"],
-      ["c1", 100, 2000, false, "error", 3],
+      ["c1", 100, 2000, false, "error", 73],
       ["c1:1", 300, 341, true, "ok", undefined],
       ["c1:3", 900, 910, true, "error", undefined],
       ["c1:2", 1500, 1500, true, "cancelled", undefined],

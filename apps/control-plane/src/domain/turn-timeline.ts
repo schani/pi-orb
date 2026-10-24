@@ -257,7 +257,9 @@ function assembleTurnTimeline(
         nested: false,
         status: block.isError === true ? "error" : "ok",
         ...(result === undefined ? {} : { result }),
-        ...(inner === undefined ? {} : { calls: inner.length }),
+        ...(inner === undefined
+          ? {}
+          : { calls: inner.length + (number(details?.["omittedCalls"]) ?? 0) }),
       });
       const children = (inner ?? []).flatMap((value, index): ToolRow[] => {
         const entry = object(value);
@@ -295,12 +297,16 @@ function assembleTurnTimeline(
       status: "unfinished",
     });
   }
-  // A compaction record pairs with the latest compaction call since the previous one.
+  // A compaction record pairs with the latest compaction call started since the previous one. By start, because the
+  // ledger stamps `at` when its insert runs, which can be after pi-durable placed the summary.
   const paired = new Set<RecordedModelCall>();
   let after = Number.NEGATIVE_INFINITY;
   for (const compaction of compactions.sort((a, b) => a.at - b.at)) {
     const match = calls
-      .filter((call) => call.use === "compaction" && call.at > after && call.at <= compaction.at)
+      .filter(
+        (call) =>
+          call.use === "compaction" && callStart(call) > after && callStart(call) <= compaction.at,
+      )
       .at(-1);
     after = compaction.at;
     if (match === undefined) {
