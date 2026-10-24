@@ -166,7 +166,6 @@ it("provides all scripting guidance and caps in one bounded skill", async () => 
     /max_output_tokens[\s\S]*not[\s\S]*caps/i,
     /ALL_TOOLS[\s\S]*describeNamespace/,
     /structuredContent[\s\S]*exit_code|exit_code[\s\S]*structuredContent/,
-    /await chart\(spec\)[\s\S]*source[\s\S]*8 charts/,
     /Images are returned inline/,
     /Promise\.allSettled/,
     /<console_output>/,
@@ -183,6 +182,9 @@ it("provides all scripting guidance and caps in one bounded skill", async () => 
     /Use server names from MCP namespaces; list resources\/templates before reading unfamiliar URIs\./,
   ])
     expect(content).toMatch(requirement);
+  expect(content.split("## Charts\n\n")[1]?.split("\n\n## ")[0]).toBe(
+    "`await chart(spec)` shows the user a separate chart row. Its data is not returned to the model. Read the `charts` skill for more information.",
+  );
 });
 
 it.each([
@@ -253,4 +255,16 @@ it("describes code-mode charts with the limits chart() enforces", async () => {
   ])
     expect(content).toContain(limit);
   expect(content).toContain("await chart(");
+  const spec = content.split("## Spec\n\n")[1]?.split("\n## ")[0];
+  expect(
+    spec?.match(/^(Compare|Line chart|Histogram|Timeline|Heatmap|Bar chart|Both)(?: —|:)/gm),
+  ).toEqual([
+    "Compare —",
+    "Line chart —",
+    "Histogram —",
+    "Timeline —",
+    "Heatmap —",
+    "Bar chart —",
+    "Both:",
+  ]);
 });

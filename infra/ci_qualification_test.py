@@ -235,5 +235,105 @@ class QualificationTest(unittest.TestCase):
             self.assertFalse(valid_evidence(value, SHA))
 
 
+class ArtifactRetryTest(unittest.TestCase):
+    """Offline runner-decision model; no GitHub transport or overwrite atomicity claim."""
+
+    def setUp(self):
+        self.source = Path('.github/workflows/durable-qualification.yml').read_text()
+        process = self.source.split('\n  control-plane-image:', 1)[0]
+        self.steps = ['      - name: ' + part.rstrip() + '\n'
+                      for part in process.split('      - name: ')[1:]]
+        self.uploads = [step for step in self.steps if 'uses: actions/upload-artifact@' in step]
+
+    @staticmethod
+    def field(step, key):
+        match = re.search(r'^        ' + re.escape(key) + r': (.+)$', step, re.MULTILINE)
+        return match[1] if match else None
+
+    def test_two_adjacent_top_level_attempts_with_identical_inputs(self):
+        self.assertEqual(len(self.uploads), 4)
+        for first, retry, step_id, condition, name, hidden in [
+            (*self.uploads[:2], 'upload_provenance', 'always()', 'local-fake-process', False),
+            (*self.uploads[2:], 'upload_failure_evidence', 'failure()', 'central-process', True),
+        ]:
+            with self.subTest(step_id=step_id):
+                self.assertEqual(self.steps.index(retry), self.steps.index(first) + 1)
+                self.assertEqual(self.field(first, 'id'), step_id)
+                self.assertEqual(self.field(first, 'if'), condition)
+                self.assertEqual(self.field(retry, 'if'),
+                                 "${{ !cancelled() && steps." + step_id + ".outcome == 'failure' }}")
+                self.assertEqual(self.field(first, 'continue-on-error'), 'true')
+                self.assertIsNone(self.field(retry, 'continue-on-error'))
+                self.assertNotIn('          overwrite:', first)
+                self.assertIn('          overwrite: true\n', retry)
+                for step in (first, retry):
+                    self.assertEqual(self.field(step, 'timeout-minutes'), '5')
+                    self.assertEqual(self.field(step, 'uses'),
+                                     'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)')
+                    self.assertIn('          name: ' + name +
+                                  '-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}\n', step)
+                    self.assertIn('          if-no-files-found: ignore\n', step)
+                    self.assertIn('          retention-days: 14\n', step)
+                    self.assertEqual('          include-hidden-files: true\n' in step, hidden)
+                self.assertEqual(first.split('        with:\n')[1],
+                                 retry.split('        with:\n')[1].replace('          overwrite: true\n', ''))
+        test_step = next(step for step in self.steps if 'run: node scripts/local-fake-provider.mjs' in step)
+        self.assertIsNone(self.field(test_step, 'continue-on-error'))
+        self.assertIsNone(self.field(test_step, 'if'))
+        self.assertIn('    timeout-minutes: 60\n', self.source)
+        self.assertIn('    timeout-minutes: 30\n', self.source)
+        self.assertEqual(self.source.count('continue-on-error:'), 2)
+        self.assertEqual(self.source.count('overwrite:'), 2)
+
+    def decide(self, results, *, test_failed=False, cancel_before=None):
+        # Consume scheduled action outcomes using the checked-in predicates and COE.
+        failed, cancelled = test_failed, False
+        outcomes, calls = {}, []
+        results = iter(results)
+        for index, step in enumerate(self.uploads):
+            cancelled = cancelled or index == cancel_before
+            condition = self.field(step, 'if')
+            if condition == 'always()':
+                active = True
+            elif condition == 'failure()':
+                active = failed
+            else:
+                match = re.fullmatch(r"\$\{\{ !cancelled\(\) && steps\.(\w+)\.outcome == 'failure' }}", condition or '')
+                self.assertIsNotNone(match, condition)
+                active = not cancelled and outcomes.get(match[1]) == 'failure'
+            if not active:
+                continue
+            outcome = next(results)
+            # Missing optional files are a successful no-op in upload-artifact.
+            if outcome == 'absent':
+                self.assertIn('          if-no-files-found: ignore\n', step)
+                outcome = 'success'
+            calls.append(index)
+            outcomes[self.field(step, 'id')] = outcome
+            failed = failed or (outcome == 'failure' and self.field(step, 'continue-on-error') != 'true')
+        self.assertEqual(list(results), [], 'unused scheduled outcomes')
+        return calls, 'cancelled' if cancelled else 'failure' if failed else 'success'
+
+    def test_deterministic_decisions(self):
+        cases = [
+            ('first success', ['success'], {}, [0], 'success'),
+            ('retry recovers', ['failure', 'success'], {}, [0, 1], 'success'),
+            ('two failures', ['failure', 'failure', 'absent'], {}, [0, 1, 2], 'failure'),
+            ('optional provenance absent', ['absent'], {}, [0], 'success'),
+            ('original test failure', ['success', 'success'], {'test_failed': True}, [0, 2], 'failure'),
+            ('failure evidence recovers', ['success', 'failure', 'success'], {'test_failed': True}, [0, 2, 3], 'failure'),
+            ('failure evidence twice fails', ['success', 'failure', 'failure'], {'test_failed': True}, [0, 2, 3], 'failure'),
+            ('optional diagnostics absent', ['success', 'absent'], {'test_failed': True}, [0, 2], 'failure'),
+            ('both recover with test failure', ['failure', 'success', 'failure', 'success'], {'test_failed': True}, [0, 1, 2, 3], 'failure'),
+            ('cancel before provenance retry', ['failure'], {'cancel_before': 1}, [0], 'cancelled'),
+            ('cancel before evidence retry', ['success', 'failure'], {'test_failed': True, 'cancel_before': 3}, [0, 2], 'cancelled'),
+            ('already cancelled', ['failure'], {'cancel_before': 0}, [0], 'cancelled'),
+        ]
+        self.assertEqual(len(self.uploads), 4)
+        for label, results, options, calls, conclusion in cases:
+            with self.subTest(label=label):
+                self.assertEqual(self.decide(results, **options), (calls, conclusion))
+
+
 if __name__ == '__main__':
     unittest.main()

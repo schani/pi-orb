@@ -1,3 +1,5 @@
+import { ActiveSubagentSchema } from "@pi-orb/protocol";
+import { Check } from "typebox/value";
 import { expect, it } from "vitest";
 import { runDst } from "../testkit/sim.ts";
 import { ClaudeActivity } from "./activity.ts";
@@ -44,20 +46,25 @@ it("duplicate root results during drain preserve handoffs and independent child 
   activity.taskHandoff("late", "Awaiting native result handoff");
   activity.rootFinished();
   activity.rootFinished();
-  expect(activity.children.map((child) => child.id)).toEqual(["independent", "late"]);
+  expect(activity.children.map((child) => child.id)).toEqual(["independent"]);
+  expect(activity.drainHolds).toContain("handoffs");
   activity.handoffInterrupted("late");
   expect(activity.children.map((child) => child.id)).toEqual(["independent"]);
 });
-it("background levels and task edges cannot release each other's holds", () => {
+it("unclassified task edges and inventories cannot release each other's holds", () => {
   const activity = new ClaudeActivity();
   activity.claim("op");
   activity.rootFinished();
   activity.taskStart("edge", "edge", false);
   activity.replaceTasks([]);
+  expect(activity.children).toEqual([]);
+  expect(activity.drainHolds).toEqual(["tasks"]);
   expect(activity.canDrain).toBe(false);
   activity.taskEnd("edge");
-  activity.replaceTasks([{ id: "level", description: "level" }]);
+  activity.replaceTasks([{ id: "level", description: "level", taskType: "future_type" }]);
   activity.taskEnd("level");
+  expect(activity.children).toEqual([]);
+  expect(activity.drainHolds).toEqual(["inventory"]);
   expect(activity.canDrain).toBe(false);
   activity.replaceTasks([]);
   expect(activity.canDrain).toBe(true);
@@ -117,11 +124,11 @@ it("a result for inference started before a task notification cannot finish its 
   activity.taskHandoff("task", "Awaiting native result handoff");
   activity.rootFinished(true);
   expect(activity.canDrain).toBe(false);
-  expect(activity.children.map((child) => child.id)).toEqual(["task"]);
+  expect(activity.drainHolds).toContain("handoffs");
   activity.rootRequested();
   activity.rootFinished(false);
   expect(activity.canDrain).toBe(false);
-  expect(activity.children.map((child) => child.id)).toEqual(["task"]);
+  expect(activity.drainHolds).toContain("handoffs");
   expect(activity.rootFinished(true)).toEqual(["task"]);
   expect(activity.canDrain).toBe(true);
 });
@@ -134,7 +141,7 @@ it("a requesting snapshot releases only handoffs already present when inference 
   activity.taskHandoff("second", "second");
   activity.rootStarted();
   expect(activity.rootFinished(true)).toEqual(["first"]);
-  expect(activity.children.map((child) => child.id)).toEqual(["second"]);
+  expect(activity.drainHolds).toContain("handoffs");
   expect(activity.canDrain).toBe(false);
   activity.rootRequested();
   expect(activity.rootFinished(true)).toEqual(["second"]);
@@ -149,5 +156,55 @@ it("late requesting and inference results during drain cannot consume retained h
   activity.taskHandoff("late", "late");
   activity.rootRequested();
   expect(activity.rootFinished(true)).toEqual([]);
-  expect(activity.children.map((child) => child.id)).toEqual(["late"]);
+  expect(activity.drainHolds).toContain("handoffs");
+});
+
+it("projects only positively identified agents and shells from task edges and inventory", () => {
+  const activity = new ClaudeActivity();
+  activity.claim("operation");
+  activity.replaceTasks([
+    { id: "agent", description: "review", taskType: "local_agent" },
+    { id: "shell", description: "HTTP server", taskType: "local_bash" },
+    { id: "monitor", description: "watch", taskType: "local_monitor" },
+    { id: "workflow", description: "workflow", taskType: "local_workflow" },
+    { id: "mcp", description: "MCP task", taskType: "mcp_task" },
+    { id: "unknown", description: "unknown" },
+    { id: "ambient", description: "ambient", taskType: "local_bash", ambient: true },
+  ]);
+  activity.childAdmitted("admitted", "Native Claude agent");
+  activity.taskStart("admitted", "review", false);
+  activity.taskStart("shell", "HTTP server", false, "local_bash");
+  expect(activity.children).toEqual([
+    { id: "agent", description: "review", phase: "running" },
+    { id: "shell", description: "HTTP server", phase: "running", kind: "shell" },
+    { id: "admitted", description: "Native Claude agent", phase: "running" },
+  ]);
+});
+
+it.each(["before", "after"] as const)(
+  "retains inventory metadata received %s an untyped task edge through handoff",
+  (inventory) => {
+    const activity = new ClaudeActivity();
+    const tasks = [{ id: "shell", description: "server", taskType: "local_bash" }];
+    if (inventory === "before") activity.replaceTasks(tasks);
+    activity.taskStart("shell", "server", false);
+    if (inventory === "after") activity.replaceTasks(tasks);
+    activity.replaceTasks([]);
+    expect(activity.children).toEqual([
+      { id: "shell", description: "server", phase: "running", kind: "shell" },
+    ]);
+    activity.taskHandoff("shell", "handoff");
+    activity.taskEnd("shell");
+    activity.cancel();
+    expect(activity.children).toEqual([
+      { id: "shell", description: "handoff", phase: "finishing", kind: "shell" },
+    ]);
+  },
+);
+
+it("the live protocol accepts shell rows and rejects other kind values", () => {
+  const child = { id: "task", description: "task", phase: "running" };
+  expect(Check(ActiveSubagentSchema, child)).toBe(true);
+  expect(Check(ActiveSubagentSchema, { ...child, kind: "shell" })).toBe(true);
+  expect(Check(ActiveSubagentSchema, { ...child, kind: "unknown" })).toBe(false);
 });

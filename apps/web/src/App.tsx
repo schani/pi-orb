@@ -9,7 +9,7 @@ import { TranscriptCacheContext } from "./lib/transcript-cache-context.ts";
 import { CreateOrbPage } from "./pages/CreateOrbPage.tsx";
 import { NotFoundPage } from "./pages/NotFoundPage.tsx";
 import { OrbPage } from "./pages/OrbPage.tsx";
-import { ProjectsPage } from "./pages/ProjectsPage.tsx";
+import { type DashboardSnapshot, ProjectsPage } from "./pages/ProjectsPage.tsx";
 import { UsagePage } from "./pages/UsagePage.tsx";
 
 export type Route =
@@ -59,10 +59,15 @@ export function parseRoute(url: string): Route {
 }
 
 function AppRoutes({ cache }: { cache: TranscriptCache }) {
+  const [dashboardSnapshot] = useState<DashboardSnapshot>(() => ({
+    projects: null,
+    orbLists: {},
+  }));
   const path = useSyncExternalStore(subscribeNavigation, readPath);
   const route = parseRoute(path);
   return route.page === "mcp" || route.page === "projects" ? (
     <ProjectsPage
+      snapshot={dashboardSnapshot}
       focusedProjectId={route.page === "mcp" ? route.projectId : route.focusedProjectId}
       mcpConfigOpen={route.page === "mcp"}
     />

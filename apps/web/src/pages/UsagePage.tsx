@@ -127,6 +127,7 @@ function LoadedUsage({
               identity={identity}
               height={280}
               xAxis={xAxis}
+              yAxisFormat=".3~s"
               seriesActions={seriesActions}
             />
           </section>

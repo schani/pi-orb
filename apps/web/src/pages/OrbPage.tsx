@@ -2120,7 +2120,10 @@ function OrbConversation({
             </OrbNotice>
           )}
           {canConnectLive(orb) && connected && state.subagents.length > 0 && (
-            <SubagentRail agents={state.subagents} context={detailContext} />
+            <>
+              <SubagentRail agents={state.subagents} context={detailContext} />
+              <SubagentRail agents={state.subagents} context={detailContext} kind="shell" />
+            </>
           )}
           <HostedFiles inventory={hostedFiles} error={hostedFilesError} />
           {uploads.progress}

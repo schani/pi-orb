@@ -1,5 +1,14 @@
 import type { ActiveSubagent } from "@pi-orb/protocol";
 
+type TaskKind = "agent" | "shell";
+type TaskActivity = { description: string; ambient: boolean; kind: TaskKind | undefined };
+
+function taskKind(taskType: string | undefined): TaskKind | undefined {
+  if (taskType === "local_agent") return "agent";
+  if (taskType === "local_bash") return "shell";
+  return undefined;
+}
+
 /** Native result is only a root edge. Idle requires supervised process exit and committed history. */
 export class ClaudeActivity {
   private operation: string | null = null;
@@ -8,9 +17,12 @@ export class ClaudeActivity {
   private cancelled = false;
   private readonly hooks = new Set<string>();
   private readonly admittedChildren = new Map<string, string>();
-  private readonly handoffs = new Map<string, { description: string; requested: boolean }>();
-  private readonly tasks = new Map<string, { description: string; ambient: boolean }>();
-  private readonly edgeTasks = new Map<string, { description: string; ambient: boolean }>();
+  private readonly handoffs = new Map<
+    string,
+    { description: string; requested: boolean; kind: TaskKind | undefined }
+  >();
+  private readonly tasks = new Map<string, TaskActivity>();
+  private readonly edgeTasks = new Map<string, TaskActivity>();
   get operationId(): string | null {
     return this.operation;
   }
@@ -44,16 +56,22 @@ export class ClaudeActivity {
   get children(): ActiveSubagent[] {
     const children = new Map(
       [...this.tasks, ...this.edgeTasks]
-        .filter(([, task]) => !task.ambient)
+        .filter(([id, task]) => !task.ambient && this.kind(id) !== undefined)
         .map(([id, task]) => [id, task.description]),
     );
     for (const [id, description] of this.admittedChildren) children.set(id, description);
-    for (const [id, handoff] of this.handoffs) children.set(id, handoff.description);
+    for (const [id, handoff] of this.handoffs)
+      if (handoff.kind !== undefined) children.set(id, handoff.description);
     return [...children].map(([id, description]) => ({
       id,
       description,
+      ...(this.kind(id) === "shell" ? { kind: "shell" as const } : {}),
       phase: this.cancelled || this.draining || this.handoffs.has(id) ? "finishing" : "running",
     }));
+  }
+  private kind(id: string): TaskKind | undefined {
+    if (this.admittedChildren.has(id)) return "agent";
+    return this.handoffs.get(id)?.kind ?? this.edgeTasks.get(id)?.kind ?? this.tasks.get(id)?.kind;
   }
   childAdmitted(id: string, description: string): void {
     this.admittedChildren.set(id, description);
@@ -101,7 +119,7 @@ export class ClaudeActivity {
     this.handoffs.delete(id);
   }
   taskHandoff(id: string, description: string): void {
-    this.handoffs.set(id, { description, requested: false });
+    this.handoffs.set(id, { description, requested: false, kind: this.kind(id) });
     this.rootDone = false;
   }
   rootStarted(): void {
@@ -113,16 +131,26 @@ export class ClaudeActivity {
   hookEnd(id: string): void {
     this.hooks.delete(id);
   }
-  taskStart(id: string, description: string, ambient: boolean): void {
-    this.edgeTasks.set(id, { description, ambient });
+  taskStart(id: string, description: string, ambient: boolean, taskType?: string): void {
+    this.edgeTasks.set(id, { description, ambient, kind: taskKind(taskType) ?? this.kind(id) });
   }
   taskEnd(id: string): void {
     this.edgeTasks.delete(id);
   }
-  replaceTasks(tasks: readonly { id: string; description: string; ambient?: boolean }[]): void {
+  replaceTasks(
+    tasks: readonly { id: string; description: string; ambient?: boolean; taskType?: string }[],
+  ): void {
     this.tasks.clear();
-    for (const task of tasks)
-      this.tasks.set(task.id, { description: task.description, ambient: task.ambient === true });
+    for (const task of tasks) {
+      const kind = taskKind(task.taskType);
+      this.tasks.set(task.id, {
+        description: task.description,
+        ambient: task.ambient === true,
+        kind,
+      });
+      const edge = this.edgeTasks.get(task.id);
+      if (edge !== undefined && kind !== undefined) edge.kind = kind;
+    }
   }
   cancel(): void {
     this.cancelled = true;

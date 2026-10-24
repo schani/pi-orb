@@ -1,3 +1,6 @@
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -16,6 +19,79 @@ class FakeCloud:
 
 
 class PreflightTest(unittest.TestCase):
+    def test_migration_timeout_default_override_and_durable_diagnostic(self):
+        source = Path("infra/release.sh").read_text()
+        parser = source.split('[[ "${PI_ORB_USER_ID:-}"', 1)[0]
+        migration = source.split('  release_run_child gcloud run jobs create ', 1)[1].split('\n  if [ "$FIRST_CONSOLIDATION"', 1)[0]
+        script = parser + """
+release_run_child() { printf '%s\\n' "$@"; }
+jq() { echo test-value; }
+migration_job=test-job
+RECORD=test-record
+foundation='{}'
+database_version=1
+migration_secrets=''
+migration_owner_args=()
+release_run_child gcloud run jobs create """ + migration
+        for args, seconds, reason in [
+            ([], 300, "default"),
+            (["--migration-timeout-30m"], 1800, "explicit 30-minute override"),
+        ]:
+            with self.subTest(args=args), tempfile.TemporaryDirectory() as directory:
+                summary = Path(directory) / "summary"
+                result = subprocess.run(
+                    ["bash", "-c", script, "infra/release.sh", *args],
+                    env={**os.environ, "GITHUB_STEP_SUMMARY": str(summary)},
+                    text=True, capture_output=True, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"--task-timeout={seconds}s", result.stdout.splitlines())
+                self.assertIn("--max-retries=0", result.stdout.splitlines())
+                diagnostic = f"Migration task timeout: {seconds}s ({reason})"
+                self.assertIn(diagnostic, result.stdout)
+                self.assertIn(diagnostic, summary.read_text())
+        self.assertIn('KEEP_REMOTE_LOCK=true\n  release_run_child gcloud run jobs create', source)
+
+    def test_invalid_migration_override_fails_before_cloud_access(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "cloud-called"
+            gcloud = Path(directory) / "gcloud"
+            gcloud.write_text(f'#!/bin/sh\ntouch "{marker}"\nexit 99\n')
+            gcloud.chmod(0o700)
+            for args in [
+                ["--migration-timeout-30m=invalid"],
+                ["--migration-timeout-30m", "3600"],
+                ["--migration-timeout-30m", "--validate", "latest"],
+            ]:
+                with self.subTest(args=args):
+                    result = subprocess.run(
+                        ["bash", "infra/release.sh", *args],
+                        env={**os.environ, "PATH": directory + ":" + os.environ["PATH"]},
+                        text=True, capture_output=True, check=False,
+                    )
+                    self.assertEqual(result.returncode, 2)
+                    self.assertFalse(marker.exists())
+                    self.assertNotIn("PI_ORB_USER_ID", result.stderr)
+
+    def test_workflow_quotes_migration_override_and_passes_only_explicit_flag(self):
+        workflow = Path(".github/workflows/deploy.yml").read_text()
+        self.assertIn("      migration_timeout_30m:\n", workflow)
+        declaration = workflow.split("      migration_timeout_30m:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertIn("type: boolean", declaration)
+        self.assertIn("default: false", declaration)
+        self.assertIn("MIGRATION_TIMEOUT_30M: ${{ inputs.migration_timeout_30m }}", workflow)
+        run = workflow.split("          args=(--yes)\n", 1)[1].split('\n          exec ./infra/release.sh', 1)[0]
+        script = "set -eu\nargs=(--yes)\n" + run + '\nprintf "%s\\n" "${args[@]}"\n'
+        for value, accepted in [("", True), ("false", True), ("true", True), ("invalid", False), ("true; exit 0", False)]:
+            with self.subTest(value=value):
+                result = subprocess.run(["bash", "-c", script], text=True, capture_output=True, check=False,
+                                        env={**os.environ, "MIGRATION_TIMEOUT_30M": value,
+                                             "VALIDATE_RELEASE": "", "FIRST_CONSOLIDATION": "false"})
+                self.assertEqual(result.returncode, 0 if accepted else 2, result.stderr)
+                if accepted:
+                    self.assertEqual(result.stdout.splitlines(),
+                                     ["--yes"] + (["--migration-timeout-30m"] if value == "true" else []))
+
     def test_complete_authority_is_read_only(self):
         cloud = FakeCloud(Result({"permissions": list(EXCLUSION_PERMISSIONS)}))
         self.assertTrue(check_exclusion_authority(cloud, "example-project").value)

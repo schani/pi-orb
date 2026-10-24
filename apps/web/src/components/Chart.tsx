@@ -137,12 +137,14 @@ export function Chart({
   identity,
   height = CHART_HEIGHT,
   xAxis,
+  yAxisFormat,
   seriesActions,
 }: {
   spec: ChartSpec;
   identity: Readonly<Record<string, string | number>>;
   height?: number;
   xAxis?: ChartXAxis;
+  yAxisFormat?: string;
   seriesActions?: ChartSeriesActions;
 }) {
   const phone = usePhoneLayout();
@@ -164,6 +166,7 @@ export function Chart({
           narrow: phone,
           height,
           ...(xAxis === undefined ? {} : { xAxis }),
+          ...(yAxisFormat === undefined ? {} : { yAxisFormat }),
           ...(seriesActions === undefined ? {} : { seriesActions }),
           onHighlight: (series) => {
             if (active) setHighlighted(series);
@@ -199,7 +202,7 @@ export function Chart({
       chart.current = null;
       host.remove();
     };
-  }, [spec, phone, identity, height, xAxis, seriesActions]);
+  }, [spec, phone, identity, height, xAxis, yAxisFormat, seriesActions]);
   const source = spec.source === undefined ? null : sourceLabel(spec.source);
   return (
     <>

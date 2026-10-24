@@ -13,6 +13,11 @@ on:
         required: false
         type: boolean
         default: false
+      migration_timeout_30m:
+        description: 'Allow this release migration up to 30 minutes; may block history writes longer'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -121,6 +126,7 @@ jobs:
         env:
           VALIDATE_RELEASE: ${{ inputs.validate_release }}
           FIRST_CONSOLIDATION: ${{ inputs.first_consolidation }}
+          MIGRATION_TIMEOUT_30M: ${{ inputs.migration_timeout_30m }}
           TF_VAR_google_client_id: 1077475695242-hs53alaasigvrurtme2j73ej37vqre63.apps.googleusercontent.com
           GH_TOKEN: ${{ github.token }}
           PI_ORB_CI_QUALIFICATION: ${{ needs.qualify.outputs.evidence }}
@@ -131,6 +137,11 @@ jobs:
           args=(--yes)
           if [ -n "$VALIDATE_RELEASE" ]; then args+=(--validate "$VALIDATE_RELEASE"); fi
           if [ "$FIRST_CONSOLIDATION" = true ]; then args+=(--first-consolidation); fi
+          case "$MIGRATION_TIMEOUT_30M" in
+            true) args+=(--migration-timeout-30m) ;;
+            false|"") ;;
+            *) echo 'Invalid migration_timeout_30m input' >&2; exit 2 ;;
+          esac
           exec ./infra/release.sh "${args[@]}"
 
       - name: Observe central rollout independently for fifteen minutes

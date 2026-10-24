@@ -2090,6 +2090,108 @@ pre,
   background: none;
 }
 
+/* Mermaid fences: the code block's board on white paper; tools on hover (docs/web-ui.md). */
+.mermaid-diagram {
+  position: relative;
+  min-height: 70px;
+  margin: 0 0 8px;
+  color: var(--k);
+  background: var(--w);
+  border: 1px solid var(--k);
+}
+
+.mermaid-diagram[data-view="source"] {
+  background: var(--g1);
+}
+
+.mermaid-tools {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  opacity: 0;
+}
+
+.mermaid-diagram:hover > .mermaid-tools,
+.mermaid-diagram:focus-within > .mermaid-tools,
+.mermaid-diagram[data-view="source"] > .mermaid-tools,
+.mermaid-tools:has([data-state="copied"], [data-state="failed"]) {
+  opacity: 1;
+}
+
+.mermaid-tools > .markdown-code-copy {
+  position: static;
+}
+
+@media (hover: none) {
+  .mermaid-tools {
+    opacity: 1;
+  }
+}
+
+.mermaid-canvas {
+  margin-right: 26px;
+  padding: 12px;
+  overflow-x: auto;
+}
+
+/* Shrinks to the column down to 75% of natural size, then scrolls; never upscales. */
+.mermaid-canvas svg {
+  display: block;
+  width: 100%;
+  max-width: var(--mermaid-width);
+  min-width: calc(var(--mermaid-width) * 0.75);
+  height: auto;
+}
+
+.chat-markdown .mermaid-diagram pre {
+  margin: 0 26px 0 0;
+  padding: 2px 8px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.mermaid-error {
+  padding: 2px 8px;
+  color: var(--bad);
+  background: var(--bad-bg);
+  border-top: 1px solid var(--bad);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.mermaid-dialog {
+  width: calc(100vw - 32px);
+  height: calc(100dvh - 32px);
+  max-width: none;
+  max-height: none;
+  padding: 28px 8px 8px;
+  color: var(--k);
+  background: var(--w);
+  border: 1px solid var(--k);
+  border-radius: 0;
+  outline: none;
+}
+
+@media (max-width: 600px), (any-pointer: coarse) {
+  .mermaid-dialog {
+    padding-top: 44px;
+  }
+}
+
+.mermaid-dialog::backdrop {
+  background: rgb(0 0 0 / 72%);
+}
+
+.mermaid-dialog-canvas,
+.mermaid-dialog-canvas svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .rec-you .chat-markdown :not(pre) > code {
   color: var(--k);
   background: var(--w);
@@ -2098,6 +2200,10 @@ pre,
 .rec-you .markdown-code-block {
   color: var(--k);
   background: var(--w);
+  border-color: var(--w);
+}
+
+.rec-you .mermaid-diagram {
   border-color: var(--w);
 }
 
@@ -2526,7 +2632,6 @@ pre,
 .usage-timeline .chart-key button {
   display: inline-flex;
   align-items: center;
-  min-height: 44px;
 }
 
 .chart-series-action {

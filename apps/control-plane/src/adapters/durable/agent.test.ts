@@ -297,7 +297,73 @@ describe("central Durable agent", () => {
     expect(activateResources).not.toHaveBeenCalled();
   });
 
-  it("releases tool resources even when native storage close rejects", async () => {
+  it.each([false, true])(
+    "joins lost-owner teardown and caches resource failure=%s",
+    async (fails) => {
+      const storage = new MemoryStorage();
+      const nativeClose = vi.spyOn(storage, "close");
+      const entered = barrier(),
+        release = barrier();
+      const models = createModels();
+      models.setProvider(fauxProvider().provider);
+      const resources = vi.fn(() => {
+        entered.resolve();
+        return ResultAsync.fromSafePromise(release.promise).andThen(() =>
+          fails ? errAsync(durableError("resource failure")) : okAsync(undefined),
+        );
+      });
+      const edges: Array<{ code: string; facts: unknown }> = [];
+      const agent = (
+        await DurableAgent.open({
+          orbId: "orb",
+          storage,
+          models,
+          registry: createRegistry(),
+          env: new NodeExecutionEnv({ cwd: "/tmp" }),
+          checkoutCommit: "commit",
+          instructions: "",
+          initialSettings,
+          beginDrain: () =>
+            okAsync({
+              type: "owner_lost" as const,
+              cause: {
+                type: "authority_error" as const,
+                code: "stale_owner" as const,
+                message: "revoked",
+              },
+            }),
+          closeResources: resources,
+          edge: (code, facts) => {
+            edges.push({ code, facts });
+            return okAsync(undefined);
+          },
+        })
+      )._unsafeUnwrap();
+      let settled = false;
+      const closing = agent.close();
+      const result = (async () => {
+        const value = await closing;
+        settled = true;
+        return value;
+      })();
+      await entered.promise;
+      expect(nativeClose).toHaveBeenCalledTimes(1);
+      expect(settled).toBe(false);
+      expect(agent.close()).toBe(closing);
+      release.resolve();
+      expect((await result).isErr()).toBe(fails);
+      expect(resources).toHaveBeenCalledTimes(1);
+      expect(edges.at(-1)).toMatchObject({
+        facts: {
+          drain_outcome: "owner_lost",
+          close_outcome: fails ? "failed" : "closed",
+          ...(fails ? { failed_stage: "resources" } : {}),
+        },
+      });
+    },
+  );
+
+  it("preserves native storage close failure despite confirmed owner loss", async () => {
     const storage = new MemoryStorage();
     const nativeClose = storage.close.bind(storage);
     storage.close = async (context) => {
@@ -311,6 +377,15 @@ describe("central Durable agent", () => {
       await DurableAgent.open({
         orbId: "orb",
         storage,
+        beginDrain: () =>
+          okAsync({
+            type: "owner_lost" as const,
+            cause: {
+              type: "authority_error" as const,
+              code: "stale_owner" as const,
+              message: "revoked",
+            },
+          }),
         models,
         registry: createRegistry(),
         env: new NodeExecutionEnv({ cwd: "/tmp" }),
@@ -806,7 +881,8 @@ describe("central Durable agent", () => {
     expect((await agent.deliver({ ...input, messageId: "new", messageIds: ["new"] })).isErr()).toBe(
       true,
     );
-    expect((await agent.close()).isOk()).toBe(true);
+    expect((await agent.close())._unsafeUnwrapErr().message).toBe("projection unavailable");
+    expect((await agent.close()).isErr()).toBe(true);
   });
 
   it("reopens an already-prepared request with current instructions and stable input identity", async () => {

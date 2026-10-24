@@ -140,11 +140,14 @@ export function lineChartSpec(
     narrow,
     height,
     xAxis,
+    yAxisFormat,
     seriesActions,
   }: {
     narrow: boolean;
     height: number;
     xAxis?: ChartXAxis;
+    /** Vega number format, without the unit suffix; tooltips retain their units. */
+    yAxisFormat?: string;
     seriesActions?: ChartSeriesActions;
   },
 ): VegaSpec {
@@ -302,7 +305,10 @@ export function lineChartSpec(
       x,
       y: {
         ...y,
-        axis: { labelExpr: `datum.label + ${JSON.stringify(unitSuffix(spec.unit))}` },
+        axis:
+          yAxisFormat === undefined
+            ? { labelExpr: `datum.label + ${JSON.stringify(unitSuffix(spec.unit))}` }
+            : { format: yAxisFormat },
         scale: { domain: [lo, hi], nice: false },
       },
       color,

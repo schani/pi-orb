@@ -125,6 +125,7 @@ export function mountChart(
     narrow: boolean;
     height: number;
     xAxis?: ChartXAxis;
+    yAxisFormat?: string;
     seriesActions?: ChartSeriesActions;
     onHighlight: (series: string | null) => void;
   },
@@ -144,6 +145,9 @@ export function mountChart(
                   narrow: options.narrow,
                   height: options.height,
                   ...(options.xAxis === undefined ? {} : { xAxis: options.xAxis }),
+                  ...(options.yAxisFormat === undefined
+                    ? {}
+                    : { yAxisFormat: options.yAxisFormat }),
                   ...(options.seriesActions === undefined
                     ? {}
                     : { seriesActions: options.seriesActions }),

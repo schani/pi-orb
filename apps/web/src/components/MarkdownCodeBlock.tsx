@@ -1,16 +1,23 @@
 import {
   type ComponentPropsWithoutRef,
+  createContext,
   isValidElement,
   type ReactNode,
+  useContext,
   useEffect,
   useRef,
   useState,
 } from "react";
+import type { ExtraProps } from "react-markdown";
 import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
 import { Icon } from "./Icons.tsx";
+import { MermaidDiagram } from "./MermaidDiagram.tsx";
 
 type CopyState = "idle" | "copied" | "failed";
-type MarkdownPreProps = ComponentPropsWithoutRef<"pre"> & { node?: unknown };
+type MarkdownPreProps = ComponentPropsWithoutRef<"pre"> & ExtraProps;
+
+/** The Markdown being rendered, so a fence can tell whether its closing fence has arrived. */
+export const MarkdownSource = createContext("");
 
 function nodeText(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
@@ -24,7 +31,20 @@ export function markdownCodeText(children: ReactNode): string {
   return nodeText(children).replace(/\n$/, "");
 }
 
-export function MarkdownCodeBlock({ children, node: _node, ...props }: MarkdownPreProps) {
+function isMermaid(children: ReactNode): boolean {
+  return (
+    isValidElement<{ className?: string }>(children) &&
+    children.props.className === "language-mermaid"
+  );
+}
+
+/** A streaming fence has no closing fence yet; its source runs to the end of the Markdown. */
+function isClosedFence(raw: string): boolean {
+  return /\n[\s>]*(`{3,}|~{3,})\s*$/.test(raw);
+}
+
+export function MarkdownCodeBlock({ children, node, ...props }: MarkdownPreProps) {
+  const markdown = useContext(MarkdownSource);
   const [copyState, setCopyState] = useState<CopyState>("idle");
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -62,6 +82,13 @@ export function MarkdownCodeBlock({ children, node: _node, ...props }: MarkdownP
       <Icon name="copy" />
     </button>
   );
+
+  const { start, end } = node?.position ?? {};
+  if (
+    isMermaid(children) &&
+    isClosedFence(markdown.slice(start?.offset ?? 0, end?.offset ?? markdown.length))
+  )
+    return <MermaidDiagram source={markdownCodeText(children)} copyButton={copyButton} />;
 
   return (
     <div className="markdown-code-block">

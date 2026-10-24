@@ -31,7 +31,12 @@ export async function assertDrainIsolation(db: PostgreSQLClient) {
   expect((await authority.release(owner)).isErr()).toBe(true);
   expect((await authority.validate(successor)).isOk()).toBe(true);
   await expect(storage.commit([], ctx)).rejects.toThrow("revoked");
-  expect((await authority.beginDrain(owner, storage)).isErr()).toBe(true);
+  expect((await authority.beginDrain(owner, storage))._unsafeUnwrap()).toMatchObject({
+    type: "owner_lost",
+    cause: { type: "authority_error", code: "stale_owner" },
+  });
+  await expect(storage.commit([], ctx)).rejects.toThrow("revoked");
+  expect((await authority.validate(successor)).isOk()).toBe(true);
   const fresh = (await authority.open(successor, { project }))._unsafeUnwrap();
   onTestFinished(() => fresh.close(ctx));
   (await db.query("UPDATE orbs SET agent_admission_version=2"))._unsafeUnwrap();

@@ -14,7 +14,9 @@ export type IconName =
   | "send"
   | "back"
   | "more"
-  | "trend";
+  | "trend"
+  | "source"
+  | "expand";
 
 const PATHS: Record<IconName, string> = {
   trend: "M2 2v12h12 M4 10l3-4 3 2 4-5",
@@ -33,6 +35,8 @@ const PATHS: Record<IconName, string> = {
   x: "m4 4 8 8m0-8-8 8",
   copy: "M6 6h7v8H6z M3 10H2V2h8v1",
   terminal: "M3 4l4 4-4 4 M9 12h4",
+  source: "M5 4 1 8l4 4 M11 4l4 4-4 4",
+  expand: "M2 6V2h4 M10 2h4v4 M14 10v4h-4 M6 14H2v-4",
 };
 
 /** Square-ended utility controls; the crisp bin retains its selected 24px geometry. */

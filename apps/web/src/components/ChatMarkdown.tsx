@@ -2,7 +2,7 @@ import type { ComponentPropsWithoutRef } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChatLink } from "./ChatText.tsx";
-import { MarkdownCodeBlock } from "./MarkdownCodeBlock.tsx";
+import { MarkdownCodeBlock, MarkdownSource } from "./MarkdownCodeBlock.tsx";
 
 function MarkdownTable({ children }: ComponentPropsWithoutRef<"table">) {
   return (
@@ -16,12 +16,14 @@ function MarkdownTable({ children }: ComponentPropsWithoutRef<"table">) {
 export function ChatMarkdown({ children }: { children: string }) {
   return (
     <div className="chat-markdown">
-      <Markdown
-        remarkPlugins={[remarkGfm]}
-        components={{ a: ChatLink, pre: MarkdownCodeBlock, table: MarkdownTable }}
-      >
-        {children}
-      </Markdown>
+      <MarkdownSource.Provider value={children}>
+        <Markdown
+          remarkPlugins={[remarkGfm]}
+          components={{ a: ChatLink, pre: MarkdownCodeBlock, table: MarkdownTable }}
+        >
+          {children}
+        </Markdown>
+      </MarkdownSource.Provider>
     </div>
   );
 }

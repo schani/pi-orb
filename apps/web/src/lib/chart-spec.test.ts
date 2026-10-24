@@ -114,6 +114,33 @@ describe("end-label spreading", () => {
 });
 
 describe("line chart spec", () => {
+  it("opts into compact unit-free y labels without changing default labels or exact tooltips", () => {
+    const input = line(1, {
+      unit: "tokens",
+      series: [{ name: "Cached input", points: [[1_000, 100_000_001]] }],
+    });
+    for (const narrow of [false, true]) {
+      const compact = lineChartSpec(input, { narrow, height: 180, yAxisFormat: ".3~s" });
+      const plain = lineChartSpec(input, { narrow, height: 180 });
+      expect(marks(compact, "line")[0]?.encoding?.["y"]).toMatchObject({
+        axis: { format: ".3~s" },
+      });
+      expect(marks(compact, "line")[0]?.encoding?.["y"]).not.toHaveProperty("axis.labelExpr");
+      expect(marks(plain, "line")[0]?.encoding?.["y"]).toMatchObject({
+        axis: { labelExpr: 'datum.label + " tokens"' },
+      });
+      expect(() => compile(compact as Parameters<typeof compile>[0])).not.toThrow();
+    }
+    expect(tooltipRows(input, { time: "00:00", "Cached input": "100,000,001" })).toEqual([
+      { label: "time", value: "00:00" },
+      { label: "Cached input", value: "100,000,001 tokens" },
+    ]);
+    const milliseconds = lineChartSpec(line(1), { narrow: false, height: 180 });
+    expect(marks(milliseconds, "line")[0]?.encoding?.["y"]).toMatchObject({
+      axis: { labelExpr: 'datum.label + " ms"' },
+    });
+  });
+
   it("labels caller-supplied positions over dense unlabeled ticks", () => {
     const ticks = Array.from({ length: 183 }, (_, i) => Date.UTC(2026, 3, 13 + i, 17));
     const labels = Array.from({ length: 6 }, (_, i) => Date.UTC(2026, 4 + i, 1));
