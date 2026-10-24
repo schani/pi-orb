@@ -243,7 +243,11 @@ class ArtifactRetryTest(unittest.TestCase):
         process = self.source.split('\n  control-plane-image:', 1)[0]
         self.steps = ['      - name: ' + part.rstrip() + '\n'
                       for part in process.split('      - name: ')[1:]]
-        self.uploads = [step for step in self.steps if 'uses: actions/upload-artifact@' in step]
+        upload_ids = ('upload_provenance', 'upload_failure_evidence')
+        self.uploads = [step for step in self.steps if 'uses: actions/upload-artifact@' in step
+                        and (self.field(step, 'id') in upload_ids or any(
+                            self.field(step, 'if') == "${{ !cancelled() && steps." + step_id + ".outcome == 'failure' }}"
+                            for step_id in upload_ids))]
 
     @staticmethod
     def field(step, key):
@@ -281,7 +285,7 @@ class ArtifactRetryTest(unittest.TestCase):
         self.assertIsNone(self.field(test_step, 'continue-on-error'))
         self.assertIsNone(self.field(test_step, 'if'))
         self.assertIn('    timeout-minutes: 60\n', self.source)
-        self.assertIn('    timeout-minutes: 30\n', self.source)
+        self.assertIn('    timeout-minutes: 30\n', Path('.github/workflows/ci.yml').read_text())
         self.assertEqual(self.source.count('continue-on-error:'), 2)
         self.assertEqual(self.source.count('overwrite:'), 2)
 
