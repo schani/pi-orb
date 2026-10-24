@@ -1,8 +1,17 @@
 import Fastify from "fastify";
 import { errAsync, okAsync } from "neverthrow";
 import { expect, it } from "vitest";
-import { registerAuthRoutes } from "./auth-routes.ts";
+import { authCookie, registerAuthRoutes } from "./auth-routes.ts";
 import { createHostingAccessPolicy, registerHostingAccessGuard } from "./hosting-access.ts";
+
+it("preserves encoded auth cookie bytes and clearing options", () => {
+  expect(authCookie("__Host-pi-orb-session", "sealed:/=+%", 604800)._unsafeUnwrap()).toBe(
+    "__Host-pi-orb-session=sealed%3A%2F%3D%2B%25; Max-Age=604800; Path=/; HttpOnly; Secure; SameSite=Lax",
+  );
+  expect(authCookie("__Host-pi-orb-login", "", 0)._unsafeUnwrap()).toBe(
+    "__Host-pi-orb-login=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax",
+  );
+});
 
 it("scopes login/callback to configured hosts and protects app-only logout", async () => {
   const app = Fastify();
