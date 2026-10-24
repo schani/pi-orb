@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import type { ToolDiagnostic, ToolExecutionApi } from "@earendil-works/pi-durable";
 import { NoSimulationTask } from "determined";
@@ -184,6 +184,7 @@ async function invoke(
   const abort = new AbortController();
   const diagnostics: ToolDiagnostic[] = [];
   const api = {
+    now: () => 0,
     agent: async () => ({}),
     env: required(bundle.envFor)({ conversationId: "root" } as never),
     taskId: 1,
@@ -197,10 +198,7 @@ async function invoke(
       }
     },
   } as unknown as ToolExecutionApi;
-  const result = await tool.execute(args, api, {
-    ...BACKGROUND_CONTEXT,
-    abortSignal: abort.signal,
-  });
+  const result = await tool.execute(args, api, withAbortSignal(abort.signal, BACKGROUND_CONTEXT));
   return { ...result, diagnostics: [...diagnostics, ...(result.diagnostics ?? [])] };
 }
 

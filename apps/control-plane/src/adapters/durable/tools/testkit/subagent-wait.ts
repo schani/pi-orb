@@ -18,7 +18,7 @@ import {
   type WatchEnd,
 } from "@earendil-works/pi-durable";
 import { expect } from "vitest";
-import { ChildReceipts, subagentTools } from "../subagents.ts";
+import { ChildReceipts, createSubagentTools } from "../subagents.ts";
 
 export function deferred<T = void>() {
   let resolve!: (value: T) => void;
@@ -32,9 +32,9 @@ export function deferred<T = void>() {
 
 type Child = TaskRecord<JsonValue, JsonValue, JsonValue>;
 
-export const wait = subagentTools.find(
-  (tool) => tool.name === "get_subagent_result",
-) as ToolRegistration;
+export const wait = createSubagentTools(() => {
+  expect.fail("Unexpected child cancellation");
+}).find((tool) => tool.name === "get_subagent_result") as ToolRegistration;
 export const waitArgs = { agent_id: "child", wait: true };
 export function toolData(value: ToolExecutionResult) {
   return JSON.parse(value.output?.find((block) => block.type === "text")?.text ?? "");
@@ -90,6 +90,7 @@ export class WaitBoundary {
   waitFailure: unknown;
 
   readonly api = {
+    now: () => 0,
     conversationId: 0 as ConversationId,
     taskId: 9 as TaskId,
     callId: "wait",

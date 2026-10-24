@@ -1,5 +1,12 @@
 # History model and replication
 
+## Pi 1.4 persistence (decision 2026-10-22; local, undeployed)
+
+Migration `050_durable_sleeping.sql` widens only the existing task-status constraint. Existing task JSON holds `state.until`, checkpoint and restart count; no new columns/tables or history/auth rewrite. Native code-mode store checkpoints after 64 deltas change representation, not values, rewind or as-of-fork semantics. Trace carriers remain absent.
+
+Graceful Harness close restores running tasks to pending through the same owner-fenced native/public transaction and `beginDrain` capability; it does not count as a crash. Revoked owners cannot publish close writes. Public snapshots derive interruption-pause notices from current blocked tasks without persisting duplicate alerts. Abort/child cancellation settles native work and removes the notice. `docs/pi-durable-evaluation.md` defines recovery policy.
+
+
 ## Claude replacement receipt barrier
 
 **Decision — 2026-10-06; implemented locally, undeployed.** Automatic uncertain-worker recovery preserves native session/result identities and inbox receipt UUIDs. Verified compute replacement publishes idempotent interruption outcomes before releasing retained ownership; disposition publication/save failure remains failed. The controller pulls/commits canonical receipts before dispatching any retained inbox batch after recovery. It never marks an unacknowledged head delivered to unblock the queue. A repeated UUID is acknowledged from its retained native receipt, not inferred from compute disposal; new queued messages may then start ordinary turns. No old root inference or tool invocation is replayed. Recovery authority and attempt fencing: `docs/lifecycle.md`; runtime proof: `docs/claude-agent-sdk.md`.

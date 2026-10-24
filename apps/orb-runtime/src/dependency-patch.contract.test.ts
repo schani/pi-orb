@@ -19,7 +19,7 @@ const json = (
     devDependencies?: Record<string, string>;
   };
 
-const piVersion = "1.3.0";
+const piVersion = "1.4.0";
 const helperPath = "scripts/apply-dependency-patches.mjs";
 const patchPath = `patches/@earendil-works+pi-coding-agent+${piVersion}.patch`;
 
@@ -167,10 +167,10 @@ describe("Pi dependency patch installation", () => {
     );
 
     const patchFiles = [
-      "@earendil-works+pi-ai+1.3.0.patch",
-      "@earendil-works+pi-codemode+1.3.0.patch",
-      "@earendil-works+pi-durable+1.3.0.patch",
-      "@earendil-works+pi-coding-agent+1.3.0.patch",
+      "@earendil-works+pi-ai+1.4.0.patch",
+      "@earendil-works+pi-codemode+1.4.0.patch",
+      "@earendil-works+pi-durable+1.4.0.patch",
+      "@earendil-works+pi-coding-agent+1.4.0.patch",
     ];
     expect(
       readdirSync(join(root, "patches"))

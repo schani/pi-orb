@@ -30,7 +30,7 @@ it.each([
     expect(prompt.split(environmentPrompt)).toHaveLength(2);
     expect(
       prompt.startsWith(
-        `You are a coding assistant. Use tools to inspect and change the project. Be concise.\n\n${environmentPrompt}\n\n`,
+        `You are a coding assistant. Use tools to inspect and change the project. Be concise. Produce Markdown. Mermaid is supported.\n\n${environmentPrompt}\n\n`,
       ),
     ).toBe(true);
     expect(prompt.indexOf(environmentPrompt)).toBeLessThan(prompt.indexOf("APPEND"));

@@ -1,6 +1,12 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
-import { defineTool } from "@earendil-works/pi-durable";
+import {
+  type ConversationId,
+  type DocumentId,
+  defineTool,
+  type EntryId,
+} from "@earendil-works/pi-durable";
+import { CodemodeStoreDoc } from "@earendil-works/pi-durable/codemode";
 import { NoSimulationTask } from "determined";
 import { okAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
@@ -81,6 +87,104 @@ describe("Durable native code-mode store", () => {
       await fixture.close();
       fixture = await open("store");
       expect(output(await fixture.run('text(load("deleted") === undefined);'))).toContain("true");
+    } finally {
+      await fixture.close();
+      await authority.close();
+    }
+  });
+
+  it("reads a 1.3 store base/delta across the 64-delta checkpoint and as-of fork", async () => {
+    const context = BACKGROUND_CONTEXT;
+    const authority = new MemoryAgentPersistence();
+    const storage = (await authority.openOrb("old-store", false))._unsafeUnwrap().storage;
+    const root = 1 as ConversationId,
+      store = 14 as DocumentId,
+      marker = 19 as EntryId;
+    // Essential logical records from the patched 1.3 store, without model/task history.
+    await storage.commit(
+      [
+        { type: "conversation", value: { id: root } },
+        {
+          type: "document.create",
+          record: {
+            id: store,
+            kind: "pi.codemode.store",
+            scope: { kind: "conversation", conversationId: root },
+            history: "rewindable",
+            fork: "asOf",
+          },
+          content: { version: 1, kind: "base", value: { values: {} } },
+        },
+      ],
+      context,
+    );
+    const saved = { version: "1.3.0", nested: [1, true, null] };
+    await storage.commit(
+      [
+        {
+          type: "document.change",
+          id: store,
+          content: {
+            version: 1,
+            kind: "delta",
+            ops: [
+              ["s", ["values", "counter"], 0],
+              ["s", ["values", "old"], saved],
+            ],
+          },
+        },
+        {
+          type: "entry",
+          value: {
+            id: marker,
+            conversationId: root,
+            kind: "fixture.marker",
+            data: { counter: 0 },
+          },
+        },
+      ],
+      context,
+    );
+    let fixture = await openCodemodeHarness(new CallableCatalog([]), { storage });
+    try {
+      await fixture.root.configure({ model: { provider: "faux", modelId: "faux-1" } }, context);
+      expect((await fixture.run('text(load("old"));')).output).toContainEqual({
+        type: "text",
+        text: JSON.stringify(saved),
+      });
+      for (let counter = 1; counter <= 63; counter++) {
+        await fixture.root.commit(async (tx) => {
+          (await tx.doc(CodemodeStoreDoc, root)).values.counter = counter;
+        }, context);
+      }
+      expect((await storage.document(store, "current", context))?.deltasSinceBase).toBe(64);
+      expect((await fixture.run('store("counter",64);')).isError).toBe(false);
+      expect(await storage.document(store, "current", context)).toMatchObject({
+        deltasSinceBase: 0,
+        value: { values: { counter: 64, old: saved } },
+      });
+      await fixture.close();
+      fixture = await openCodemodeHarness(new CallableCatalog([]), {
+        storage: (await authority.openOrb("old-store", true))._unsafeUnwrap().storage,
+      });
+      expect((await fixture.run('text(load("old"));')).output).toContainEqual({
+        type: "text",
+        text: JSON.stringify(saved),
+      });
+      expect(await fixture.harness.snapshot(CodemodeStoreDoc, root, context)).toEqual({
+        values: { counter: 64, old: saved },
+      });
+      expect(await fixture.harness.snapshotAsOf(CodemodeStoreDoc, root, marker, context)).toEqual({
+        values: { counter: 0, old: saved },
+      });
+      const fork = await fixture.root.fork(marker, { ownership: { kind: "ownerless" } }, context);
+      await fork.configure({ model: { provider: "faux", modelId: "faux-1" } }, context);
+      expect(
+        (await fixture.run('text(load("counter")); store("counter",1);', fork)).output,
+      ).toContainEqual({ type: "text", text: "0" });
+      expect(
+        (await fixture.harness.snapshot(CodemodeStoreDoc, root, context))?.values.counter,
+      ).toBe(64);
     } finally {
       await fixture.close();
       await authority.close();

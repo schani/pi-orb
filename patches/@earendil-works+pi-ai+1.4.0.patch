@@ -1,4 +1,5 @@
 diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js b/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
+index 45bcd08..7b5cac0 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
 +++ b/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
 @@ -1,7 +1,7 @@
@@ -10,7 +11,7 @@ diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.
  import { formatProviderError, normalizeProviderError } from "../utils/error-body.js";
  import { AssistantMessageEventStream } from "../utils/event-stream.js";
  import { headersToRecord } from "../utils/headers.js";
-@@ -30,6 +30,38 @@
+@@ -30,6 +30,38 @@ const CODEX_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]
  const WEBSOCKET_MESSAGE_TOO_BIG_CLOSE_CODE = 1009;
  const WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE = "websocket_connection_limit_reached";
  const PREVIOUS_RESPONSE_NOT_FOUND_CODE = "previous_response_not_found";
@@ -49,7 +50,7 @@ diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.
  const CODEX_RESPONSE_STATUSES = new Set([
      "completed",
      "incomplete",
-@@ -162,6 +194,12 @@
+@@ -162,6 +194,12 @@ export const stream = (model, context, options) => {
              stopReason: "pending",
              timestamp: Date.now(),
          };
@@ -62,7 +63,7 @@ diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.
          try {
              const apiKey = options?.apiKey;
              if (!apiKey) {
-@@ -183,7 +221,6 @@
+@@ -185,7 +223,6 @@ export const stream = (model, context, options) => {
              const httpTimeoutMs = normalizeTimeoutMs(options?.timeoutMs);
              const websocketConnectTimeoutMs = normalizeTimeoutMs(options?.websocketConnectTimeoutMs);
              const transport = options?.transport || "auto";
@@ -70,7 +71,7 @@ diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.
              const websocketDisabledForSession = transport !== "sse" && isWebSocketSseFallbackActive(cacheSessionId);
              if (websocketDisabledForSession) {
                  recordWebSocketSseFallback(cacheSessionId);
-@@ -192,10 +229,17 @@
+@@ -194,10 +231,17 @@ export const stream = (model, context, options) => {
                  let websocketStarted = false;
                  let retriedWebSocketConnectionLimit = false;
                  let retriedMissingWebSocketContinuation = false;
@@ -89,7 +90,7 @@ diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.
                              websocketStarted = true;
                              if (!startEmitted) {
                                  startEmitted = true;
-@@ -215,6 +259,7 @@
+@@ -217,6 +261,7 @@ export const stream = (model, context, options) => {
                          return;
                      }
                      catch (error) {
@@ -97,7 +98,7 @@ diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.
                          const aborted = options?.signal?.aborted;
                          const connectionLimitBeforeStart = !websocketStarted && isWebSocketConnectionLimitReachedError(error);
                          const previousResponseNotFound = isPreviousResponseNotFoundError(error);
-@@ -229,18 +274,24 @@
+@@ -231,18 +276,24 @@ export const stream = (model, context, options) => {
                          if (aborted || (isCodexNonTransportError(error) && !connectionLimitBeforeStart)) {
                              throw error;
                          }
@@ -129,7 +130,7 @@ diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.
                          break;
                      }
                  }
-@@ -258,6 +309,9 @@
+@@ -260,6 +311,9 @@ export const stream = (model, context, options) => {
              let lastError;
              const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
              for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -139,7 +140,7 @@ diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.
                  if (options?.signal?.aborted) {
                      throw new Error("Request was aborted");
                  }
-@@ -265,7 +319,10 @@
+@@ -267,7 +321,10 @@ export const stream = (model, context, options) => {
                      const headerTimeoutSignal = httpTimeoutMs !== undefined && httpTimeoutMs > 0 ? AbortSignal.timeout(httpTimeoutMs) : undefined;
                      const combinedSignal = combineAbortSignals([options?.signal, headerTimeoutSignal]);
                      try {
@@ -151,7 +152,7 @@ diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.
                              method: "POST",
                              headers: sseHeaders,
                              body: sseBody,
-@@ -282,6 +339,7 @@
+@@ -284,6 +341,7 @@ export const stream = (model, context, options) => {
                          combinedSignal.cleanup();
                      }
                      await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
@@ -159,7 +160,7 @@ diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.
                      if (response.ok) {
                          break;
                      }
-@@ -300,6 +358,7 @@
+@@ -302,6 +360,7 @@ export const stream = (model, context, options) => {
                          statusText: response.statusText,
                      });
                      const info = await parseErrorResponse(fakeResponse);
@@ -167,7 +168,7 @@ diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.
                      throw new Error(info.friendlyMessage || info.message);
                  }
                  catch (error) {
-@@ -326,6 +385,7 @@
+@@ -328,6 +387,7 @@ export const stream = (model, context, options) => {
              if (!response.body) {
                  throw new Error("No response body");
              }
@@ -175,7 +176,7 @@ diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.
              if (!startEmitted) {
                  startEmitted = true;
                  stream.push({ type: "start", partial: output });
-@@ -345,7 +405,13 @@
+@@ -347,7 +407,13 @@ export const stream = (model, context, options) => {
                  delete block.customInput;
              }
              output.stopReason = options?.signal?.aborted ? "aborted" : "error";
@@ -190,7 +191,7 @@ diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.
              stream.push({ type: "error", reason: output.stopReason, error: output });
              stream.end();
          }
-@@ -366,6 +432,7 @@
+@@ -368,6 +434,7 @@ export const streamSimple = (model, context, options) => {
      return stream(model, context, {
          ...base,
          reasoningEffort,
@@ -198,7 +199,7 @@ diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.
      });
  };
  // ============================================================================
-@@ -1173,7 +1240,7 @@
+@@ -1179,7 +1246,7 @@ async function* startWebSocketOutputOnFirstEvent(events, onStart) {
  async function processWebSocketStream(url, body, headers, output, stream, model, onStart, idleTimeoutMs, websocketConnectTimeoutMs, cacheSessionId, accountId, grammarToolInputProperties, options) {
      const { socket, entry, reused, release } = await acquireWebSocket(url, headers, cacheSessionId, accountId, options?.signal, websocketConnectTimeoutMs, options?.env);
      let keepConnection = true;
@@ -207,7 +208,7 @@ diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.
      // ChatGPT Codex Responses rejects `store: true` ("Store must be set to false").
      // WebSocket continuation still works via connection-scoped previous_response_id state.
      const fullBody = body;
-@@ -1242,11 +1309,12 @@
+@@ -1248,11 +1315,12 @@ async function parseErrorResponse(response) {
      const raw = await response.text();
      let message = raw || response.statusText || "Request failed";
      let friendlyMessage;
@@ -221,7 +222,7 @@ diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.
              if (/usage_limit_reached|usage_not_included|rate_limit_exceeded/i.test(code) || response.status === 429) {
                  const plan = err.plan_type ? ` (${err.plan_type.toLowerCase()} plan)` : "";
                  const mins = err.resets_at
-@@ -1259,7 +1327,7 @@
+@@ -1265,7 +1333,7 @@ async function parseErrorResponse(response) {
          }
      }
      catch { }
@@ -231,9 +232,10 @@ diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.
  // ============================================================================
  // Auth & Headers
 diff --git a/node_modules/@earendil-works/pi-ai/dist/auth/resolve.js b/node_modules/@earendil-works/pi-ai/dist/auth/resolve.js
+index fca09b1..d65c86c 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/auth/resolve.js
 +++ b/node_modules/@earendil-works/pi-ai/dist/auth/resolve.js
-@@ -75,7 +75,8 @@
+@@ -75,7 +75,8 @@ export async function refreshStoredOAuthCredential(credentials, providerId, oaut
              if (!needsRefresh(current))
                  return undefined; // another process/request refreshed
              try {
@@ -244,9 +246,10 @@ diff --git a/node_modules/@earendil-works/pi-ai/dist/auth/resolve.js b/node_modu
              catch (error) {
                  throw new ModelsError("oauth", `OAuth refresh failed for ${providerId}`, { cause: error });
 diff --git a/node_modules/@earendil-works/pi-ai/dist/types.d.ts b/node_modules/@earendil-works/pi-ai/dist/types.d.ts
+index e92eefd..2936f85 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/types.d.ts
 +++ b/node_modules/@earendil-works/pi-ai/dist/types.d.ts
-@@ -99,6 +99,8 @@
+@@ -105,6 +105,8 @@ export interface ProviderRequestOptions<TModel = Model<Api>> {
      maxRetryDelayMs?: number;
  }
  export interface StreamOptions extends ProviderRequestOptions<Model<Api>> {

@@ -22,6 +22,15 @@ const waitCode =
   'text(JSON.parse(await tools.get_subagent_result({agent_id:load("child"),wait:true})).receipt);';
 const toolOutputs = (body: Body) =>
   body.input?.filter((item) => item.type === "custom_tool_call_output") ?? [];
+function expectCodemodeDeclaration(body: Body) {
+  expect(body.tools).toBeUndefined();
+  expect(body.input?.[0]).toEqual({
+    type: "additional_tools",
+    role: "developer",
+    tools: [expect.objectContaining({ type: "custom", name: "codemode" })],
+  });
+  expect(body.input?.filter((item) => item.type === "additional_tools")).toEqual([body.input?.[0]]);
+}
 
 function completed(id: string, items: unknown[]) {
   return [
@@ -170,8 +179,7 @@ describe("durable Codex prompt cache key", () => {
       expect(new Set(root)).toEqual(new Set([root[0]]));
       expect(child[0]).toEqual(expect.stringMatching(/\S/));
       expect(child[0]).not.toBe(root[0]);
-      for (const { body } of requests)
-        expect(body.tools).toEqual([expect.objectContaining({ type: "custom", name: "codemode" })]);
+      for (const { body } of requests) expectCodemodeDeclaration(body);
       const lastRoot = requests.filter((request) => request.owner === "root").at(-1)!;
       expect(toolOutputs(lastRoot.body)[1]?.output?.split("\n").at(-1)).toBe(
         JSON.stringify({ status: "completed", result: { output: "child done" } }),
@@ -319,9 +327,9 @@ describe("durable Codex prompt cache key", () => {
         expect(sections.find((match) => match[1] === "tool-catalogue")?.[2]).toEqual(
           expect.stringMatching(/\S/),
         );
-        expect(body.tools).toEqual([expect.objectContaining({ type: "custom", name: "codemode" })]);
+        expectCodemodeDeclaration(body);
         expect(input).not.toContain("PINNED_PROMPT");
-        expect(body.input?.filter((item) => item.role === "developer")).toEqual([]);
+        expect(body.input?.filter((item) => item.role === "developer")).toEqual([body.input?.[0]]);
         if (input.includes("ROOT_TURN") && toolOutputs(body).length >= 2)
           expect(toolOutputs(body)[1]?.output?.split("\n").at(-1)).toBe(
             JSON.stringify({ status: "completed", result: { output: "child done" } }),

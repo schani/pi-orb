@@ -35,7 +35,7 @@ export class MemoryAgentPersistence implements AgentPersistence {
     if (!storage) return okAsync(false);
     return ResultAsync.fromPromise(
       (async () => {
-        for (const status of ["pending", "running", "waiting", "completing"] as const) {
+        for (const status of ["pending", "running", "sleeping", "waiting", "completing"] as const) {
           const page = await storage.scanTasks({ status }, 1, undefined, BACKGROUND_CONTEXT);
           if (page.items.length) return true;
         }

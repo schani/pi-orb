@@ -52,10 +52,10 @@ function sealedFixture(root = fixture()) {
   rmSync(join(root, "patches"), { recursive: true });
   cpSync(join(repository, "patches"), join(root, "patches"), { recursive: true });
   for (const patch of [
-    "@earendil-works+pi-ai+1.3.0.patch",
-    "@earendil-works+pi-coding-agent+1.3.0.patch",
-    "@earendil-works+pi-codemode+1.3.0.patch",
-    "@earendil-works+pi-durable+1.3.0.patch",
+    "@earendil-works+pi-ai+1.4.0.patch",
+    "@earendil-works+pi-coding-agent+1.4.0.patch",
+    "@earendil-works+pi-codemode+1.4.0.patch",
+    "@earendil-works+pi-durable+1.4.0.patch",
   ]) {
     const source = readFileSync(join(root, "patches", patch), "utf8");
     const paths = [...source.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map((match) => match[1]);
@@ -140,7 +140,7 @@ for (const symlinked of [false, true]) {
 test("CLI seals code-mode's bounded image prelude", () => {
   const root = sealedFixture();
   const target = "node_modules/@earendil-works/pi-codemode/dist/runtime/prelude-source.js";
-  const patch = "@earendil-works+pi-codemode+1.3.0.patch";
+  const patch = "@earendil-works+pi-codemode+1.4.0.patch";
   for (const path of [
     target,
     "node_modules/@earendil-works/pi-codemode/package.json",
@@ -167,7 +167,7 @@ test("CLI seals code-mode's bounded image prelude", () => {
   const run = sealedCli(root);
   const first = run();
   assert.equal(first.status, 0, first.stderr);
-  assert.match(first.stdout, /pi-codemode\+1\.3\.0\.patch: applied/);
+  assert.match(first.stdout, /pi-codemode\+1\.4\.0\.patch: applied/);
   assert.equal(hash(), "5a52984e773985827e45490c9fb60a6fe6ec2302a8e2cbc1ffda5d5cc9737d06");
   assert.equal(run().status, 0);
   writeFileSync(join(root, target), `${readFileSync(join(root, target), "utf8")}\n// drift\n`);
@@ -191,7 +191,7 @@ test("CLI ignores inherited repository selection", () => {
     },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /@earendil-works\+pi-ai\+1\.3\.0\.patch/);
+  assert.match(result.stdout, /@earendil-works\+pi-ai\+1\.4\.0\.patch/);
   assert.equal(readFileSync(join(ancestor, "node_modules/example/index.js"), "utf8"), "before\n");
 });
 
@@ -224,8 +224,8 @@ test("CLI resolves its installation root even when launched from a workspace", (
     encoding: "utf8",
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /@earendil-works\+pi-ai\+1\.3\.0\.patch: applied/);
-  assert.match(result.stdout, /@earendil-works\+pi-ai\+1\.3\.0\.patch/);
+  assert.match(result.stdout, /@earendil-works\+pi-ai\+1\.4\.0\.patch: applied/);
+  assert.match(result.stdout, /@earendil-works\+pi-ai\+1\.4\.0\.patch/);
   const target = join(root, "node_modules/@earendil-works/pi-ai/dist/types.d.ts");
   writeFileSync(target, `${readFileSync(target, "utf8")}\n// drift\n`);
   const failure = run();
@@ -272,7 +272,7 @@ for (const nested of [false, true]) {
 
 test("coding-agent patch covers only central provider diagnostics", () => {
   const patch = readFileSync(
-    join(repository, "patches/@earendil-works+pi-coding-agent+1.3.0.patch"),
+    join(repository, "patches/@earendil-works+pi-coding-agent+1.4.0.patch"),
     "utf8",
   );
   assert.deepEqual(
@@ -354,3 +354,65 @@ test("guest execution and Claude load no patched dependency files", () => {
     [],
   );
 });
+
+test("Pi release inputs align on stable 1.4.0 without an Undici override", () => {
+  for (const path of [
+    "apps/control-plane/package.json",
+    "apps/orb-runtime/package.json",
+    "packages/luna/package.json",
+  ]) {
+    const manifest = JSON.parse(readFileSync(join(repository, path), "utf8"));
+    for (const [name, version] of Object.entries(manifest.dependencies)) {
+      if (name.startsWith("@earendil-works/")) assert.equal(version, "1.4.0", `${path}: ${name}`);
+    }
+  }
+  const lock = JSON.parse(readFileSync(join(repository, "package-lock.json"), "utf8"));
+  const family = Object.entries(lock.packages).filter(([path]) =>
+    /(?:^|\/)node_modules\/@earendil-works\/[^/]+$/.test(path),
+  );
+  assert.equal(family.length, 9);
+  for (const [path, entry] of family) assert.equal(entry.version, "1.4.0", path);
+  assert.equal(
+    lock.packages["node_modules/@earendil-works/pi-coding-agent/node_modules/undici"].version,
+    "8.10.2",
+  );
+  assert.equal(
+    JSON.parse(readFileSync(join(repository, "package.json"), "utf8")).overrides,
+    undefined,
+  );
+});
+
+for (const patch of ["pi-ai", "pi-coding-agent", "pi-codemode", "pi-durable"]) {
+  test(`CLI seals every ${patch} file before applying any patch`, () => {
+    const source = readFileSync(
+      join(repository, `patches/@earendil-works+${patch}+1.4.0.patch`),
+      "utf8",
+    );
+    const paths = [...source.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map((match) => match[1]);
+    for (const path of paths) {
+      const root = sealedFixture();
+      const run = sealedCli(root);
+      const target = join(root, "node_modules/@earendil-works/pi-ai/dist/types.d.ts");
+      writeFileSync(join(root, path), `${readFileSync(join(root, path), "utf8")}\n// drift\n`);
+      const before = readFileSync(target);
+      const result = run();
+      assert.equal(result.status, 1, path);
+      assert.match(result.stderr, /installed bytes mismatch/);
+      assert.deepEqual(readFileSync(target), before, path);
+    }
+  });
+  test(`CLI rejects a wrong ${patch} version before applying any patch`, () => {
+    const root = sealedFixture();
+    const run = sealedCli(root);
+    const target = join(root, "node_modules/@earendil-works/pi-ai/dist/types.d.ts");
+    const before = readFileSync(target);
+    writeFileSync(
+      join(root, `node_modules/@earendil-works/${patch}/package.json`),
+      '{"version":"1.3.0"}',
+    );
+    const result = run();
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /wrong installed version/);
+    assert.deepEqual(readFileSync(target), before);
+  });
+}

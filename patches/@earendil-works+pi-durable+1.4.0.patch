@@ -1,7 +1,8 @@
 diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js b/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js
+index 774212f..ac547ab 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js
 +++ b/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js
-@@ -227,7 +227,12 @@
+@@ -232,7 +232,12 @@ class CodemodeCall {
              ...models.map((name) => ({ name, spread: true })),
              ...(this.options.globals ?? []).map((global) => ({ name: global.name, spread: global.spread === true })),
          ];
@@ -15,7 +16,7 @@ diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js b
          for (const tool of callable) {
              const namespace = namespaceOf(tool.name, this.options.namespaces ?? []);
              if (namespace === undefined)
-@@ -628,7 +633,7 @@
+@@ -633,7 +638,7 @@ class CodemodeCall {
          const made = input.call;
          if (call.target === "tool" && made.name === call.name && sameJson(made.arguments, call.args ?? {}))
              return undefined;
@@ -24,7 +25,7 @@ diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js b
      }
      /** Run one live call and journal its result. */
      launch(call) {
-@@ -660,7 +665,7 @@
+@@ -668,7 +673,7 @@ class CodemodeCall {
      }
      async callTool(call) {
          // Passed as the script gave them; validation reports arguments that are not an object.
@@ -33,7 +34,7 @@ diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js b
          const model = call.name.startsWith(CODEMODE_INTERNAL_PREFIX);
          if (model) {
              await this.modelSlot();
-@@ -689,7 +694,7 @@
+@@ -697,7 +702,7 @@ class CodemodeCall {
      started(call) {
          if (this.rows.has(call.id))
              return;
@@ -42,7 +43,7 @@ diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js b
          const name = call.name.startsWith(CODEMODE_INTERNAL_PREFIX)
              ? call.name.slice(CODEMODE_INTERNAL_PREFIX.length)
              : call.name;
-@@ -753,7 +758,7 @@
+@@ -761,7 +766,7 @@ class CodemodeCall {
          const { namespaces } = this.start;
          const tools = this.start.tools.filter((tool) => tool.hidden !== true);
          const namespaceOfTool = (name) => namespaces.find((namespace) => namespace.tools.includes(name));
@@ -51,7 +52,7 @@ diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js b
          if (call.name === "describeTool") {
              const [name] = args;
              if (typeof name !== "string")
-@@ -867,8 +872,11 @@
+@@ -875,8 +880,11 @@ function countImages(value) {
      const output = typeof value === "object" && value !== null ? value.output : undefined;
      return Array.isArray(output) ? output.filter((item) => item?.type === "image").length : 0;
  }
@@ -65,6 +66,7 @@ diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/codemode.js b
  /** Structural JSON equality; key order does not matter. */
  function sameJson(a, b) {
 diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts b/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts
+index 3e1c49c..2af19e7 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts
 +++ b/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts
 @@ -1,3 +1,3 @@
@@ -74,6 +76,7 @@ diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/index.d.ts b/
  //# sourceMappingURL=index.d.ts.map
 \ No newline at end of file
 diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/index.js b/node_modules/@earendil-works/pi-durable/dist/codemode/index.js
+index 0556d0b..f1b75a4 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/codemode/index.js
 +++ b/node_modules/@earendil-works/pi-durable/dist/codemode/index.js
 @@ -1,3 +1,3 @@
@@ -83,9 +86,10 @@ diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/index.js b/no
  //# sourceMappingURL=index.js.map
 \ No newline at end of file
 diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/output.js b/node_modules/@earendil-works/pi-durable/dist/codemode/output.js
+index d28306e..27d7672 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/codemode/output.js
 +++ b/node_modules/@earendil-works/pi-durable/dist/codemode/output.js
-@@ -106,7 +106,10 @@
+@@ -106,7 +106,10 @@ async function truncate(items, maxTokens, limits, write) {
  async function saveImages(items, write) {
      const labels = new Map();
      const label = async ({ data, mimeType }, index) => {
@@ -97,97 +101,137 @@ diff --git a/node_modules/@earendil-works/pi-durable/dist/codemode/output.js b/n
          const kind = `${mimeType}, ${bytes.length} bytes`;
          // A failed write must not discard the result of a script whose calls already ran: it becomes part of the label.
          const saved = await write(`image-${index}${IMAGE_EXTENSIONS[mimeType] ?? ".bin"}`, bytes);
+diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/generation.js b/node_modules/@earendil-works/pi-durable/dist/harness/generation.js
+index d046232..14da10d 100644
+--- a/node_modules/@earendil-works/pi-durable/dist/harness/generation.js
++++ b/node_modules/@earendil-works/pi-durable/dist/harness/generation.js
+@@ -259,7 +259,7 @@ function compactionFailure(outcome) {
+ /** Settle the run's inputs `unanswered` with `model_error` and fail with `text`. */
+ async function failModelError(runtime, text, context) {
+     await runtime.commit(async (tx) => {
+-        const failure = await prepareFailure(tx, runtime);
++        const failure = await prepareFailure(tx, runtime, "continue");
+         const live = await tx.doc(LiveDoc, runtime.conversationId);
+         await endFailedRun(tx, runtime, live, failure, { status: "unanswered", reason: "model_error", detail: text });
+         return {
+@@ -278,9 +278,8 @@ async function failNoModel(runtime, ref, context) {
+         return { status: "terminal", outcome: { status: "failed", error: { message, detail: { reason: "no_model" } } } };
+     }, context);
+ }
+-async function prepareFailure(tx, runtime) {
++async function prepareFailure(tx, runtime, policy = runtime.settings.afterFailedRun) {
+     const settings = runtime.settings;
+-    const policy = settings.afterFailedRun;
+     if (policy !== "continue")
+         return { policy };
+     return { policy, boundary: await prepareBoundary(tx, runtime.conversationId, settings) };
+@@ -429,7 +428,7 @@ async function classify(runtime, request, message, context) {
+     const until = retry ? runtime.now() + retryDelayMs(policy, attempt) : 0;
+     await runtime.commit(async (tx) => {
+         // Read before the first table write; only a failure uses it.
+-        const failure = retry ? undefined : await prepareFailure(tx, runtime);
++        const failure = retry ? undefined : await prepareFailure(tx, runtime, "continue");
+         const live = await tx.doc(LiveDoc, conversationId);
+         await appendAssistant(tx, conversationId, message);
+         if (failure === undefined) {
 diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/harness.js b/node_modules/@earendil-works/pi-durable/dist/harness/harness.js
+index 29ef22e..588370a 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/harness/harness.js
 +++ b/node_modules/@earendil-works/pi-durable/dist/harness/harness.js
-@@ -33,6 +33,9 @@
-     }
+@@ -38,6 +38,9 @@ class ConversationImpl {
      submit(submission, context) {
          return this.#host.submissions.submit(this.id, submission, context);
-+    }
+     }
 +    submitMany(inputs, context) {
 +        return this.#host.submissions.submitMany(this.id, inputs, context);
-     }
++    }
      compact(instructions, context) {
          this.#host.tasks.resume();
-diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts b/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts
---- a/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts
-+++ b/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts
-@@ -598,6 +598,12 @@
-      * even mid-run, as it changes nothing the model sees.
-      */
-     submit(submission: SubmissionDraft, context: Context): Promise<Submission>;
-+    /** Admit a finite input snapshot atomically before scheduling; an empty snapshot advances an idle inbox. */
-+    submitMany(inputs: readonly InputSubmissionDraft[], context: Context): Promise<{
-+        readonly submissions: readonly Submission[];
-+        readonly busy: boolean;
-+        readonly inputId?: SubmissionId;
-+    }>;
-     /**
-      * Admit a write of a `pi.reset` entry that starts a new context, carrying `handoff` as a user message when given.
-      * Resolves after admission; while busy, it is placed at the next boundary.
+         const input = { reason: "manual", ...(instructions === undefined ? {} : { instructions }) };
 diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js b/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
+index 8496124..3bd3ad8 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
 +++ b/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
-@@ -33,6 +33,51 @@
-         const id = await this.#session.commitWith((tx) => admitSubmission(tx, conversationId, draft, this.#now(), this.#queueModes()), context);
-         return new SubmissionHandle(id, this);
+@@ -54,6 +54,73 @@ export class Submissions {
+             }
+         });
      }
 +    /** Admit the snapshot on one Session line, preserving each submission's identity. */
 +    async submitMany(conversationId, inputs, context) {
 +        this.#resume();
-+        const admitted = await this.#session.commitWith(async (tx) => {
-+            const existing = [];
-+            for (const input of inputs) {
-+                if (input.type !== "input")
-+                    throw new TypeError("submitMany accepts only inputs");
-+                if (input.entry !== undefined)
-+                    checkInputEntry(input.entry);
-+                const record = input.requestId === undefined ? undefined : await tx.submissionByRequest(conversationId, input.requestId);
-+                if (record !== undefined && record.type !== "input")
-+                    throw new Error(`Request ${input.requestId} already identifies a submission of type ${record.type}`);
-+                existing.push(record);
++        return createTypedSpanStarter(this.#telemetry, [DURABLE_TELEMETRY_SCHEMA])("pi.durable.submit", {
++            "submission.type": "input",
++            "conversation.id": conversationId,
++        }, async (span) => {
++            span.addLink({ context: context.telemetry });
++            try {
++                const admitted = await this.#session.commitWith(async (tx) => {
++                    const existing = [];
++                    for (const input of inputs) {
++                        if (input.type !== "input")
++                            throw new TypeError("submitMany accepts only inputs");
++                        if (input.entry !== undefined)
++                            checkInputEntry(input.entry);
++                        const record = input.requestId === undefined ? undefined : await tx.submissionByRequest(conversationId, input.requestId);
++                        if (record !== undefined && record.type !== "input")
++                            throw new Error(`Request ${input.requestId} already identifies a submission of type ${record.type}`);
++                        existing.push(record);
++                    }
++                    const live = await tx.doc(LiveDoc, conversationId);
++                    const busy = live.run !== undefined;
++                    if (busy && inputs.some((input, index) => existing[index] === undefined && input.whenBusy === "reject"))
++                        throw new ConversationBusy(conversationId);
++                    if (live.run !== undefined && span.propagation !== undefined && inputs.some((input) => input.whenBusy === "steer")) {
++                        const run = await tx.task(live.run.taskId);
++                        if (run?.trace !== undefined)
++                            span.addLink({ context: span.propagation.extract(run.trace) });
++                    }
++                    const boundary = await prepareBoundary(tx, conversationId, this.#queueModes());
++                    const ids = [];
++                    const requests = new Map();
++                    for (let index = 0; index < inputs.length; index++) {
++                        const input = inputs[index];
++                        let id = existing[index]?.id ?? requests.get(input.requestId);
++                        if (id === undefined) {
++                            id = await queueSubmission(tx, input, boundary.inbox, {
++                                conversationId,
++                                requestId: input.requestId,
++                                trace: span.propagation?.inject(span),
++                            });
++                            if (input.requestId !== undefined)
++                                requests.set(input.requestId, id);
++                        }
++                        ids.push(id);
++                    }
++                    if (live.run === undefined) {
++                        const { users } = await applyBoundary(tx, boundary, "final", this.#now());
++                        if (users.length > 0)
++                            await startRun(tx, conversationId, live, users);
++                    }
++                    return { ids, busy, inputId: live.run?.inputs[0] };
++                }, withTelemetry(span, context));
++                return {
++                    submissions: admitted.ids.map((id) => new SubmissionHandle(id, this)),
++                    busy: admitted.busy,
++                    inputId: admitted.inputId,
++                };
 +            }
-+            const live = await tx.doc(LiveDoc, conversationId);
-+            const busy = live.run !== undefined;
-+            if (busy && inputs.some((input, index) => existing[index] === undefined && input.whenBusy === "reject"))
-+                throw new ConversationBusy(conversationId);
-+            const boundary = await prepareBoundary(tx, conversationId, this.#queueModes());
-+            const ids = [];
-+            const requests = new Map();
-+            for (let index = 0; index < inputs.length; index++) {
-+                const input = inputs[index];
-+                let id = existing[index]?.id ?? requests.get(input.requestId);
-+                if (id === undefined) {
-+                    id = await queueSubmission(tx, conversationId, input, boundary.inbox);
-+                    if (input.requestId !== undefined)
-+                        requests.set(input.requestId, id);
-+                }
-+                ids.push(id);
++            catch (error) {
++                // Error text may contain caller content. Record only the status.
++                span.setStatus({ status: "error" });
++                throw error;
 +            }
-+            if (live.run === undefined) {
-+                const { users } = await applyBoundary(tx, boundary, "final", this.#now());
-+                if (users.length > 0)
-+                    await startRun(tx, conversationId, live, users);
-+            }
-+            return { ids, busy, inputId: live.run?.inputs[0] };
-+        }, context);
-+        return {
-+            submissions: admitted.ids.map((id) => new SubmissionHandle(id, this)),
-+            busy: admitted.busy,
-+            inputId: admitted.inputId,
-+        };
++        });
 +    }
      /** Handle for an existing submission, or `undefined`. */
      async get(id, context) {
          const record = await this.#session.readOnLine(() => this.#storage.submission(id, context));
-@@ -150,25 +195,8 @@
+@@ -179,24 +246,8 @@ export async function admitSubmission(tx, conversationId, draft, now, queueModes
      // A boundary reads the table, so it is prepared before the first table write; a busy one needs none.
      const boundary = busy ? undefined : await prepareBoundary(tx, conversationId, queueModes);
      if (boundary === undefined || boundary.inbox.items.length > 0) {
 -        const { id } = await tx.createSubmission({
--            conversationId,
--            ...requestId,
+-            ...fields,
 -            type: draft.type,
 -            status: "queued",
 -        });
@@ -205,21 +249,19 @@ diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
 -            items.push({ id, mode, content, ...entry });
 -        }
 +        const inbox = boundary?.inbox ?? (await tx.doc(InboxDoc, conversationId));
-+        const id = await queueSubmission(tx, conversationId, draft, inbox);
++        const id = await queueSubmission(tx, draft, inbox, fields);
          if (boundary === undefined)
-             return id;
+             return { id, status: "queued" };
          const { users } = await applyBoundary(tx, boundary, "final", now);
-@@ -191,4 +219,29 @@
+@@ -222,4 +273,27 @@ export async function admitSubmission(tx, conversationId, draft, now, queueModes
      await startRun(tx, conversationId, live, [id]);
-     return id;
+     return { id, status: "placed" };
  }
 +
 +/** Shared queued admission; callers finish table reads before creating submissions. */
-+async function queueSubmission(tx, conversationId, draft, inbox) {
-+    const requestId = draft.requestId === undefined ? {} : { requestId: draft.requestId };
++async function queueSubmission(tx, draft, inbox, fields) {
 +    const { id } = await tx.createSubmission({
-+        conversationId,
-+        ...requestId,
++        ...fields,
 +        type: draft.type,
 +        status: "queued",
 +    });
@@ -240,40 +282,20 @@ diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/submissions.js
 +}
  //# sourceMappingURL=submissions.js.map
 \ No newline at end of file
-diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/generation.js b/node_modules/@earendil-works/pi-durable/dist/harness/generation.js
---- a/node_modules/@earendil-works/pi-durable/dist/harness/generation.js
-+++ b/node_modules/@earendil-works/pi-durable/dist/harness/generation.js
-@@ -244,9 +244,14 @@
- }
- /** Settle the run's inputs `unanswered` with `model_error` and fail with `text`. */
- async function failModelError(runtime, text, context) {
-+    const conversationId = runtime.conversationId;
-     await runtime.commit(async (tx) => {
--        const live = await tx.doc(LiveDoc, runtime.conversationId);
-+        const boundary = await prepareBoundary(tx, conversationId, runtime.settings);
-+        const live = await tx.doc(LiveDoc, conversationId);
-         endRun(tx, live, runtime.taskId, { status: "unanswered", reason: "model_error", detail: text });
-+        const { users } = await applyBoundary(tx, boundary, "final", runtime.now());
-+        if (users.length > 0)
-+            await startRun(tx, conversationId, live, users);
-         return {
-             status: "terminal",
-             outcome: { status: "failed", error: { message: text, detail: { reason: "model_error" } } },
-@@ -390,6 +395,7 @@
-         attempt <= policy.maxRetries;
-     const until = retry ? runtime.now() + retryDelayMs(policy, attempt) : 0;
-     await runtime.commit(async (tx) => {
-+        const boundary = retry ? undefined : await prepareBoundary(tx, conversationId, runtime.settings);
-         const live = await tx.doc(LiveDoc, conversationId);
-         await appendAssistant(tx, conversationId, message);
-         if (retry) {
-@@ -404,6 +410,9 @@
-         }
-         const text = message.errorMessage ?? `Model response ended with stop reason ${message.stopReason}`;
-         endRun(tx, live, runtime.taskId, { status: "unanswered", reason: "model_error", detail: text });
-+        const { users } = await applyBoundary(tx, boundary, "final", runtime.now());
-+        if (users.length > 0)
-+            await startRun(tx, conversationId, live, users);
-         return {
-             status: "terminal",
-             outcome: { status: "failed", error: { message: text, detail: { reason: "model_error" } } },
+diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts b/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts
+index 192a9cc..fc951e4 100644
+--- a/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts
++++ b/node_modules/@earendil-works/pi-durable/dist/harness/types.d.ts
+@@ -681,6 +681,12 @@ export interface Conversation {
+      * even mid-run, as it changes nothing the model sees.
+      */
+     submit(submission: SubmissionDraft, context: Context): Promise<Submission>;
++    /** Admit a finite input snapshot atomically before scheduling; an empty snapshot advances an idle inbox. */
++    submitMany(inputs: readonly InputSubmissionDraft[], context: Context): Promise<{
++        readonly submissions: readonly Submission[];
++        readonly busy: boolean;
++        readonly inputId?: SubmissionId;
++    }>;
+     /**
+      * Admit a write of a `pi.reset` entry that starts a new context, carrying `handoff` as a user message when given.
+      * Resolves after admission; while busy, it is placed at the next boundary.

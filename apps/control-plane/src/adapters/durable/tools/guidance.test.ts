@@ -6,11 +6,11 @@ import { expect, it, vi } from "vitest";
 import { CallableCatalog } from "./catalog.ts";
 import { CODEMODE_BOOTSTRAP, codemodeTool } from "./codemode.ts";
 import { PiCodemodeSandbox } from "./codemode-sandbox.ts";
-import { subagentTools } from "./subagents.ts";
+import { createSubagentTools } from "./subagents.ts";
 import { openCodemodeHarness } from "./testkit/codemode.ts";
 
 it("declares inherited subagent configuration with a named model selector", async () => {
-  const catalog = new CallableCatalog(subagentTools);
+  const catalog = new CallableCatalog(createSubagentTools(() => okAsync(undefined)));
   const fixture = await openCodemodeHarness(catalog);
   try {
     const result = await fixture.run('return await describeTool("subagent");');
@@ -31,7 +31,10 @@ it("declares inherited subagent configuration with a named model selector", asyn
 });
 
 it("offers only the literal skill bootstrap and preserves the native tool contract", () => {
-  const tool = codemodeTool(new CallableCatalog(subagentTools), new Set());
+  const tool = codemodeTool(
+    new CallableCatalog(createSubagentTools(() => okAsync(undefined))),
+    new Set(),
+  );
   const native = createCodemodeTool({ sandbox: new PiCodemodeSandbox(), models: false });
   expect(tool.description).toBe(CODEMODE_BOOTSTRAP);
   expect(tool.description).toBe(

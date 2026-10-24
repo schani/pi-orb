@@ -36,6 +36,7 @@ it("commits native root history and public projection without a loaded agent", a
     const identity = defineDoc({
       kind: "orb.identity",
       version: 1,
+      checkpointWhen: () => false,
       scope: "conversation",
       history: "latest",
       fork: "initial",

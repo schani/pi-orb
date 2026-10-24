@@ -170,7 +170,7 @@ esac
         for package in ['@gotgenes/pi-subagents', '@earendil-works/pi-coding-agent',
                         '@earendil-works/pi-tui', '@pi-orb/luna', '@pi-orb/mock-openai']:
             self.assertNotIn(package, dependencies)
-        self.assertEqual(dependencies['@earendil-works/pi-durable'], '1.3.0')
+        self.assertEqual(dependencies['@earendil-works/pi-durable'], '1.4.0')
         self.assertIn('@anthropic-ai/claude-agent-sdk', dependencies)
 
     def test_host_subagent_artifact_is_absent_from_lockfile(self):

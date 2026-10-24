@@ -97,6 +97,7 @@ it.each([
     },
     ctx,
   );
+  tools.bindTaskAbort(harness.abortTask.bind(harness));
   try {
     const root = await harness.root(ctx, {
       agent: {
