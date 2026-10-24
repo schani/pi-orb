@@ -28,6 +28,9 @@ const call = (orbId: string, overrides: Partial<ModelCall> = {}): ModelCall => (
   cacheWrite: 7,
   costUsd: 0.0125,
   durationMs: 2_345,
+  responseId: "resp_1",
+  ttftMs: 410,
+  thinkingMs: 1_900,
   ...overrides,
 });
 
@@ -83,6 +86,9 @@ export function modelUsageLedgerContractTests(
       const {
         durationMs: _untimed,
         costUsd: _uncosted,
+        responseId: _unidentified,
+        ttftMs: _unstreamed,
+        thinkingMs: _unreasoned,
         ...failed
       } = call(DELETED, {
         use: "turn_summary",
@@ -114,6 +120,9 @@ export function modelUsageLedgerContractTests(
           cache_write: 7,
           cost_usd: 0.0125,
           duration_ms: 2_345,
+          response_id: "resp_1",
+          ttft_ms: 410,
+          thinking_ms: 1_900,
         },
         {
           at: AT,
@@ -129,6 +138,9 @@ export function modelUsageLedgerContractTests(
           cache_write: 0,
           cost_usd: null,
           duration_ms: null,
+          response_id: null,
+          ttft_ms: null,
+          thinking_ms: null,
         },
       ]);
       expect(statements.filter((text) => /synchronous_commit/.test(text))).toEqual([
@@ -203,6 +215,9 @@ export function modelUsageLedgerContractTests(
           cache_write: 1_500,
           cost_usd: 0.042,
           duration_ms: 4_100,
+          response_id: null,
+          ttft_ms: null,
+          thinking_ms: null,
         },
       ]);
     });

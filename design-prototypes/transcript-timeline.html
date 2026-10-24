@@ -1,0 +1,1414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>pi-orb · transcript timeline study</title>
+<style>
+/* Product faces, served from the repository; system monospace when opened elsewhere. */
+@font-face{font-family:"Iosevka Etoile";src:url("../apps/web/public/fonts/iosevka-etoile-regular-989cbc25c646.woff2") format("woff2");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:"Iosevka Etoile";src:url("../apps/web/public/fonts/iosevka-etoile-bold-7ec739ec82b2.woff2") format("woff2");font-weight:700;font-style:normal;font-display:swap}
+@font-face{font-family:"JetBrains Mono";src:url("../apps/web/public/fonts/jetbrains-mono-regular-fa06becb7e66.woff2") format("woff2");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:"JetBrains Mono";src:url("../apps/web/public/fonts/jetbrains-mono-bold-f73d6b79ab0c.woff2") format("woff2");font-weight:700;font-style:normal;font-display:swap}
+
+/* Signal / Boards tokens (apps/web/src/styles.css) plus the chart constants
+   (apps/web/src/lib/chart-spec.ts: PALE, GRID). Dark is a study-only inversion:
+   the product is light-only by decision (docs/web-ui.md, Visual design). */
+:root{color-scheme:light;--w:#fff;--k:#000;--g1:#f2f2f2;--g2:#999;--g3:#555;--pale:#d9d9d9;--grid:#e6e6e6;--ok:#1a7e37;--bad:#b42318;--bad-bg:#fdecea;--start:#966100;--alert:#b21f2d;
+  --text:"Iosevka Etoile",ui-monospace,"SF Mono",Menlo,Consolas,monospace;--mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+:root[data-theme=dark]{color-scheme:dark;--w:#0f0f0f;--k:#ececec;--g1:#1e1e1e;--g2:#6a6a6a;--g3:#a6a6a6;--pale:#3d3d3d;--grid:#242424;--ok:#4cbf6b;--bad:#ff6b5d;--bad-bg:#3b1612;--start:#d39a2c;--alert:#c42a37}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--w);color:var(--k);font:13px/20px var(--text);font-variant-numeric:tabular-nums;font-feature-settings:"calt" 1;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:var(--w);border:1px solid var(--k);border-radius:0;padding:0 8px;min-height:20px;cursor:pointer;line-height:18px}
+button:hover,button[aria-pressed=true]{background:var(--k);color:var(--w)}
+button:focus-visible,[tabindex]:focus-visible,summary:focus-visible{outline:2px solid var(--k);outline-offset:2px}
+.mono{font-family:var(--mono)}
+
+/* study chrome */
+.study{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:6px 12px;border-bottom:1px solid var(--k)}
+.study h1{margin:0;font-size:13px;line-height:20px;text-transform:uppercase;letter-spacing:.08em}
+.study nav{display:flex;flex-wrap:wrap;gap:4px}
+.study .theme{margin-left:auto}
+.orb-header{display:flex;align-items:center;gap:10px;height:24px;padding:0 12px;border-bottom:1px solid var(--k);white-space:nowrap;overflow:hidden}
+.orb-header .name{font-weight:700;overflow:hidden;text-overflow:ellipsis}
+.orb-header .totals{margin-left:auto;color:var(--g3);font:11px/24px var(--mono)}
+.tile{width:16px;height:16px;flex:none;display:inline-block;vertical-align:middle}
+.tile.s12{width:12px;height:12px}
+.vbar{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:6px 12px;border-bottom:1px solid var(--g1);font:11px/20px var(--mono)}
+.vbar .sep{width:8px}
+.vbar .crumbs{display:flex;flex-wrap:wrap;gap:0 4px;min-width:0;color:var(--g3)}
+.vbar .crumbs button{border:0;padding:0 2px;max-width:28ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vbar .crumbs button:last-child{color:var(--k)}
+.vbar .crumbs button:last-child:hover{color:var(--w)}
+section[hidden]{display:none}
+
+/* shared encodings: model wait outlined, thinking as a bit raster, streaming ink,
+   tools pale, failure red, Luna grey, compaction hatched */
+.ev{position:absolute;z-index:1;cursor:pointer}
+.seg{position:absolute;top:0;bottom:0}
+.s-wait{background:var(--w);border:1px solid var(--k)}
+.s-think{background:repeating-conic-gradient(var(--k) 0 25%,var(--w) 0 50%) 0 0/4px 4px}
+.s-stream{background:var(--k)}
+.llm.err .s-wait,.llm.err .s-think{border:1px solid var(--bad);background:var(--bad-bg)}
+.llm.err .s-think{background:repeating-conic-gradient(var(--bad) 0 25%,var(--bad-bg) 0 50%) 0 0/4px 4px}
+.call{background:var(--pale);color:var(--k);font:11px/11px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:3px}
+.call.fail{background:var(--bad);color:var(--w)}
+.call.aborted{background:var(--w);border:1px solid var(--bad);color:var(--bad)}
+.call.inner{background:var(--g1);border:1px solid var(--pale);line-height:7px;font-size:9px}
+.luna{background:var(--g2)}
+.compact{background:repeating-linear-gradient(135deg,var(--g2) 0 1px,var(--w) 1px 4px);border:1px solid var(--g2)}
+.hot{outline:2px solid var(--k);outline-offset:1px;z-index:3}
+.crop{position:absolute;pointer-events:none;z-index:6}
+.crop i{position:absolute;width:9px;height:9px;border:0 solid var(--k)}
+.crop i:nth-child(1){left:0;top:0;border-width:2px 0 0 2px}
+.crop i:nth-child(2){right:0;top:0;border-width:2px 2px 0 0}
+.crop i:nth-child(3){left:0;bottom:0;border-width:0 0 2px 2px}
+.crop i:nth-child(4){right:0;bottom:0;border-width:0 2px 2px 0}
+
+/* tooltip: the chart tooltip (chart-tip) */
+.tip{position:fixed;z-index:50;max-width:min(380px,calc(100vw - 16px));padding:2px 8px;color:var(--k);background:var(--w);border:1px solid var(--k);font:11px/16px var(--mono);pointer-events:none}
+.tip b{display:block;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tip table{border-collapse:collapse}.tip td.k{white-space:nowrap}.tip td{padding:0;vertical-align:top}.tip td+td{padding-left:12px}
+.tip .k,.inspect dt,.kv dt{color:var(--g3)}
+.tip .bad,.inspect .bad,.kv .bad{color:var(--bad)}
+
+/* inspection: bordered box, mono facts */
+.inspect{margin:8px 12px 12px;border:1px solid var(--k);background:var(--w)}
+.inspect-h{display:flex;align-items:center;gap:8px;min-height:22px;padding:0 0 0 8px;border-bottom:1px solid var(--k)}
+.inspect-h strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inspect-h button{border:0;border-left:1px solid var(--k);width:24px;height:22px;padding:0}
+.kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:0 16px;margin:0;padding:4px 8px;font:11px/18px var(--mono)}
+.kv dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap}
+@media(min-width:900px){.inspect .kv{grid-template-columns:max-content minmax(0,1fr) max-content minmax(0,1fr)}}
+
+/* ---------- A · lanes ---------- */
+.a-wrap{display:grid;grid-template-columns:var(--lab,104px) minmax(0,1fr);border-bottom:1px solid var(--k)}
+.a-labels{position:relative;border-right:1px solid var(--k)}
+.a-lab{position:absolute;left:0;right:0;padding:0 6px 0 12px;font:11px/16px var(--mono);color:var(--g3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.a-scroll{position:relative;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;cursor:grab}
+.a-scroll.drag{cursor:grabbing}
+.a-canvas{position:relative}
+.a-lane{position:absolute;left:0;right:0;border-bottom:1px solid var(--g1)}
+.a-tick{position:absolute;top:0;bottom:0;width:1px;background:var(--grid)}
+.a-ticklab{position:absolute;top:3px;font:11px/16px var(--mono);color:var(--g3);white-space:nowrap;transform:translateX(-50%)}
+.a-gap{position:absolute;top:0;bottom:0;background:var(--g1);border-left:1px solid var(--g2);border-right:1px solid var(--g2)}
+.a-gap::before,.a-gap::after{content:"";position:absolute;top:6px;width:7px;height:12px;border-left:1px solid var(--g3);transform:skewX(-20deg)}
+.a-gap::before{left:3px}.a-gap::after{right:-1px}
+.a-gaplab{position:absolute;top:22px;left:0;right:0;text-align:center;font:11px/16px var(--mono);color:var(--g3);white-space:nowrap}
+.a-turn{position:absolute;width:1px;background:var(--g2)}
+.mk-user{position:absolute;width:8px;height:8px;background:var(--k)}
+.mk-user.hollow{background:var(--w);border:1px dotted var(--k)}
+.mk-queue{position:absolute;height:8px;border:1px solid var(--k);border-right:0;background:var(--w)}
+.mk-abort{position:absolute;width:2px;background:var(--bad)}
+.mk-abort::before{content:"✕";position:absolute;left:-4px;top:-14px;font:11px/12px var(--mono);color:var(--bad)}
+.mk-alert{position:absolute;width:2px;background:var(--bad)}
+.mk-alert::before{content:"";position:absolute;left:2px;top:0;border-top:7px solid var(--bad);border-right:12px solid transparent}
+.mk-link{position:absolute;z-index:0;width:0;border-left:1px dashed var(--g3);pointer-events:none}
+.mk-notify{position:absolute;width:7px;height:7px;background:var(--w);border:1px solid var(--k);transform:rotate(45deg)}
+.mk-done{position:absolute;width:7px;height:7px;background:var(--k)}
+.run-rule{position:absolute;height:1px;background:var(--k);pointer-events:none}
+.life{background:var(--g1);display:flex;align-items:center;padding-left:2px;overflow:hidden}
+.life.starting{background:var(--w);border:1px solid var(--start)}
+.life.replace{background:repeating-linear-gradient(135deg,var(--start) 0 1px,transparent 1px 4px);border:1px solid var(--start)}
+.life.restart{background:var(--start)}
+.life.point{background:none;padding:0}
+
+/* ---------- B · rail clock ---------- */
+.b-feed{position:relative;padding:8px 0 24px}
+.b-row{display:grid;grid-template-columns:64px 52px minmax(0,1fr);align-items:start}
+.b-time{font:11px/20px var(--mono);color:var(--g3);text-align:right;padding-right:8px;white-space:nowrap}
+.b-body{min-width:0;padding-right:12px}
+.b-body.nested{padding-left:16px}
+.b-row.hot .rail>summary,.b-row.hot .b-plain{background:var(--g1)}
+.b-bars{position:absolute;top:0;bottom:0;left:64px;width:52px}
+.b-bars .ev{min-height:2px}
+.b-bars .vrule{position:absolute;width:1px;background:var(--grid)}
+.b-nest{position:absolute;width:1px;background:var(--k);pointer-events:none}
+.b-user{padding:9px 12px;margin:4px 0;color:var(--w);background:var(--k);white-space:pre-wrap;overflow-wrap:anywhere}
+.b-user.q{border-left:2px dotted var(--w)}
+.rec-status{margin-right:6px;padding:0 5px;border:1px solid currentcolor;line-height:16px}
+.rail{margin:0}
+.rail>summary{display:grid;grid-template-columns:2ch minmax(0,1fr) auto;gap:8px;align-items:center;min-height:20px;padding:0 8px;cursor:pointer;list-style:none;user-select:none}
+.rail>summary::-webkit-details-marker{display:none}
+.rail>summary:hover{background:var(--g1)}
+.rail .mk{color:var(--g3)}.rail .mk::before{content:"\25b8"}.rail[open]>summary .mk::before{content:"\25be"}
+.rail .sm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rail .hl,.rail .mt{color:var(--g3);white-space:nowrap}
+.rail .mt{font:11px/20px var(--mono)}
+.rail.failed .lb,.rail.failed .mk{color:var(--bad)}
+.rail-body{padding:2px 8px 4px calc(2ch + 16px);background:var(--g1);color:var(--g3)}
+.rail-body .kv{padding:0}
+.inner-list{margin:2px 0 6px;padding:0;list-style:none;font:11px/18px var(--mono)}
+.inner-list li{display:grid;grid-template-columns:minmax(0,1fr) 56px auto;gap:8px;align-items:center;color:var(--k)}
+.inner-list li span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inner-list .ib{position:relative;height:6px;background:var(--w)}
+.inner-list .ib i{position:absolute;top:0;bottom:0;background:var(--g3)}
+.b-prose{margin:2px 0 6px;padding:0 8px;overflow-wrap:anywhere}
+.b-plain{padding:0 8px;color:var(--g3);display:flex;align-items:center;gap:8px;min-height:20px}
+.b-plain.bad{color:var(--bad)}
+.alert-band{margin:4px 0;padding:10px 12px;background:var(--alert);color:#fff;white-space:pre-wrap;overflow-wrap:anywhere}
+.b-gap{margin:6px 0;height:28px;display:flex;align-items:center;justify-content:center;gap:6px;font:11px/16px var(--mono);color:var(--g3);background:var(--g1);border-top:1px solid var(--g2);border-bottom:1px solid var(--g2)}
+.b-gaprow .b-time{line-height:40px}
+
+/* ---------- C · icicle ---------- */
+.c-stage{position:relative;margin:0 12px;overflow:hidden}
+.c-axis{position:relative;height:36px;border-bottom:1px solid var(--k)}
+.c-axis span{position:absolute;top:3px;font:11px/16px var(--mono);color:var(--g3);white-space:nowrap}
+.c-grid{position:absolute;top:36px;bottom:0;width:1px;background:var(--grid)}
+.c-node{position:absolute;height:20px;overflow:hidden;cursor:pointer;background:var(--w);border:1px solid var(--g2);font:11px/14px var(--mono);white-space:nowrap}
+.c-node>span{display:block;padding:1px 4px 0;overflow:hidden;text-overflow:ellipsis}
+.c-node .strip{position:absolute;left:0;right:0;bottom:0;height:5px}
+.c-node .strip.call{padding:0}
+.c-node.c-step{background:var(--g1);border-color:var(--w);color:var(--k)}
+.c-node.c-turn{background:var(--k);border-color:var(--k);color:var(--w);font-family:var(--text);font-size:13px;line-height:18px}
+.c-node.c-run{border-color:var(--k)}
+.c-node.fail{border-color:var(--bad);color:var(--bad)}
+.c-node.thin{border:0;background:none}
+.c-node.thin .strip{height:100%}
+.c-node:hover{outline:1px solid var(--k);z-index:2}
+.c-band{position:absolute;left:0;right:0;font:11px/16px var(--mono);color:var(--g3)}
+.c-mark{position:absolute;top:18px;bottom:0;width:0;border-left:1px dashed var(--k);pointer-events:none}
+.c-mark.bad{border-left:2px solid var(--bad)}
+.c-pin{position:absolute;top:22px;width:8px;height:8px;margin-left:-4px;cursor:pointer}
+.c-pin.steer{background:var(--w);border:1px dotted var(--k)}
+.c-pin.notify{background:var(--w);border:1px solid var(--k);transform:rotate(45deg)}
+.c-pin.alert{background:var(--bad)}
+.c-pin.abort{color:var(--bad);font:11px/8px var(--mono);width:auto}
+.c-pin.life{top:19px;width:12px;height:12px;margin-left:-6px}
+.c-where{position:relative;height:20px;margin:12px 12px 0;display:flex}
+.c-where>div{position:relative;height:20px;overflow:hidden;font:11px/20px var(--mono);white-space:nowrap;cursor:default}
+.c-where>div+div{border-left:2px solid var(--w)}
+.c-where span{position:relative;padding:0 4px;background:var(--w);color:var(--k)}
+.c-where .s-stream span{background:none;color:var(--w)}
+.c-where .call span{background:none}
+.c-where .idle{background:var(--g1)}
+.c-where .idle span{background:none;color:var(--g3)}
+
+/* ---------- D · waterfall ---------- */
+.d-scroll{overflow:auto;max-height:calc(100dvh - 120px)}
+.d-table{width:100%;table-layout:fixed;border-collapse:collapse;font:11px/18px var(--mono)}
+.d-table col.c-start{width:calc(8ch + 16px)}
+.d-table col.c-call{width:min(32ch,22vw)}
+.d-table th{position:sticky;top:0;z-index:4;background:var(--w);border-bottom:1px solid var(--k);font-weight:400;color:var(--g3);text-align:left;padding:2px 8px;white-space:nowrap}
+.d-table td{padding:0 8px;text-align:left;vertical-align:top;white-space:nowrap;border-bottom:1px solid var(--g1)}
+.d-table td.name{overflow:hidden;text-overflow:ellipsis}
+.d-table td.name .a{color:var(--g3)}
+.d-table td.wf{position:relative;padding:0}
+.wfi{position:absolute;top:0;bottom:0;left:8px;right:12px}
+.d-table tr[data-did]{cursor:pointer}
+.d-table tr.ev-row:hover td{background:var(--g1)}
+.d-table tr.sel td:not(.wf){background:var(--k)!important;color:var(--w)}
+.d-table tr.sel td.name{white-space:normal;overflow-wrap:anywhere}
+.d-table tr.sel td .a,.d-table tr.sel td .bad{color:var(--w)}
+.d-table .bad{color:var(--bad)}
+.d-table tr.side td{color:var(--g3)}
+.d-table tr.band td{background:var(--k);color:var(--w);border-bottom:0;font:13px/20px var(--text);padding-top:4px;padding-bottom:4px;vertical-align:top}
+.d-table tr.band td.n{font:11px/20px var(--mono)}
+.d-table tr.band td.txt{white-space:normal;overflow-wrap:anywhere}
+.d-table tr.alertrow td,.d-table tr.alertrow:hover td{background:var(--alert);color:#fff;overflow:hidden;text-overflow:ellipsis}
+.d-table tr.alertrow.sel td{white-space:normal;overflow-wrap:anywhere}
+.d-table tr.gaprow td{background:var(--g1);color:var(--g3);text-align:center}
+.d-table tr.detail td{background:var(--g1);white-space:normal;padding:2px 8px 6px}
+.wfbar{position:absolute;top:4px;height:10px}
+.wfbar.inst{width:2px;background:var(--k)}.wfbar.inst.bad{background:var(--bad)}
+.tip b.full{white-space:normal;overflow-wrap:anywhere}
+.d-ind{display:inline-block;width:2ch;color:var(--g2)}
+.d-nest{border-left:1px solid var(--k);padding-left:1ch;margin-left:.5ch}
+
+/* ---------- E · tide ---------- */
+.e-scroll{position:relative;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;border-bottom:1px solid var(--k)}
+.e-inner{position:relative}
+.e-y{position:sticky;left:0;width:0;height:0;z-index:7;pointer-events:none}
+.e-y span{position:absolute;left:0;padding:0 4px 0 12px;background:var(--w);font:11px/14px var(--mono);color:var(--g3);white-space:nowrap}
+.e-canvas{position:relative}
+.e-canvas>svg{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
+.e-canvas>svg.top{z-index:3}
+.e-canvas .a-gap{z-index:4;cursor:pointer}
+.e-canvas .call{font-size:0;padding:0}
+.e-area{fill:var(--g1)}
+.e-line{fill:none;stroke:var(--k);stroke-width:2}
+.e-sub{fill:none;stroke:var(--g3);stroke-width:1.5}
+.e-cost{fill:none;stroke:var(--k);stroke-width:1}
+.e-grid{stroke:var(--grid);stroke-width:1}
+.e-ceil{stroke:var(--k);stroke-width:1}
+.e-base{stroke:var(--g2);stroke-width:1}
+.e-cross{stroke:var(--k);stroke-width:1;stroke-dasharray:2 2}
+.e-dot{fill:var(--w);stroke:var(--k);stroke-width:2}
+.e-sel{stroke:var(--k);stroke-width:6}
+.e-lab{font:11px var(--mono);fill:var(--g3)}
+
+/* ---------- F · metro ---------- */
+.f-scroll{overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;border-bottom:1px solid var(--k)}
+.f-canvas{position:relative}
+.f-canvas svg{display:block;overflow:visible}
+.f-main{stroke:var(--k);stroke-width:6}
+.f-main.tunnel{stroke-dasharray:5 4}
+.f-branch{fill:none;stroke:var(--k);stroke-width:4;stroke-linejoin:round}
+.f-luna{stroke:var(--g2);stroke-width:2}
+.f-host{stroke:var(--g3);stroke-width:2}
+.f-host.off{stroke-dasharray:2 3}
+.f-link{stroke:var(--k);stroke-width:1;stroke-dasharray:2 2}
+.f-spur{stroke:var(--pale);stroke-width:3}
+.f-spur.fail{stroke:var(--bad)}
+.f-spur.aborted{stroke:var(--bad);stroke-dasharray:2 2}
+.f-cap{fill:var(--w);stroke:var(--g3);stroke-width:1}
+.f-st{cursor:pointer;outline:none}
+.f-st .hit{fill:transparent}
+.f-st:hover .hit,.f-st:focus-visible .hit{stroke:var(--g3);stroke-width:1}
+.f-stop{fill:var(--w);stroke:var(--k);stroke-width:2}
+.f-ix{fill:var(--w);stroke:var(--k);stroke-width:3}
+.f-ix.steer{stroke-width:2;stroke-dasharray:2 2}
+.f-ixn{font:700 11px var(--mono);fill:var(--k);text-anchor:middle;dominant-baseline:central}
+.f-err{fill:var(--bad);stroke:var(--w);stroke-width:1.5}
+.f-hb{fill:var(--w)}.f-hl{stroke:var(--g2);stroke-width:1.5}
+.f-compact{fill:url(#f-hatch);stroke:var(--g2);stroke-width:1}
+.f-done{fill:var(--k)}
+.f-alert{fill:var(--bad)}
+.f-notify{fill:var(--w);stroke:var(--k);stroke-width:1.5}
+.f-abort{fill:var(--w);stroke:var(--bad);stroke-width:2}
+.f-x{stroke:var(--bad);stroke-width:1.5}
+.f-lunast{fill:var(--g2)}
+.f-lab{font:11px var(--mono);fill:var(--g3)}
+.f-lab.ix{fill:var(--k);font-weight:700}
+.f-lab.bad{fill:var(--bad)}
+
+/* ---------- G · replay ---------- */
+.g-time{margin-left:auto;color:var(--k)}
+.g-scrub{position:relative;height:44px;margin:8px 12px 0;border-bottom:1px solid var(--k);cursor:ew-resize;touch-action:none;user-select:none}
+.g-scrub:focus-visible{outline:2px solid var(--k);outline-offset:4px}
+.g-scrub .call{font-size:0;padding:0}
+.g-scrub .a-gap::before,.g-scrub .a-gap::after{top:14px}
+.g-future{position:absolute;top:0;bottom:-1px;right:0;background:var(--w);opacity:.62;z-index:5;pointer-events:none}
+.g-head{position:absolute;top:-6px;bottom:-1px;width:2px;margin-left:-1px;background:var(--k);z-index:6;pointer-events:none}
+.g-head::before{content:"";position:absolute;top:0;left:-4px;width:10px;height:5px;background:var(--k)}
+.g-stage{display:grid;grid-template-columns:minmax(0,1fr);align-items:start;overflow:auto;overscroll-behavior:contain;margin-top:8px;border-top:1px solid var(--g1)}
+.g-stage.split{grid-template-columns:minmax(0,1fr) minmax(280px,36%)}
+.g-main{min-width:0;padding:4px 12px 12px}
+.g-side{min-width:0;position:sticky;bottom:0;align-self:end;border-left:1px solid var(--k);background:var(--w);padding:4px 12px 12px}
+.g-side[hidden]{display:none}
+.g-sideh{font:11px/20px var(--mono);color:var(--g3);text-align:right;padding:0 8px}
+.g-sum{display:grid;grid-template-columns:2ch minmax(0,1fr) auto;gap:8px;align-items:center;min-height:20px;padding:0 8px}
+.rail.running .lb,.rail.running .mk,.rail.running .mt{color:var(--ok)}
+.g-out{padding:0 8px 0 calc(2ch + 16px);font:11px/18px var(--mono);color:var(--g3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.g-out.bad{color:var(--bad)}
+.rail.running .inner-list{padding-left:calc(2ch + 16px);padding-right:8px}
+.inner-list li.running{color:var(--ok)}
+.inner-list li.running .ib i{background:var(--ok)}
+.g-busy{padding:2px 8px}
+.bit-register{display:inline-block;width:calc(3ch + 6px);height:16px;padding:0 3px;margin-left:2px;color:var(--w);background:var(--k);font:13px/16px var(--mono);vertical-align:middle;user-select:none}
+.g-busy .bit-register{margin-left:0}
+
+/* phones */
+@media(max-width:760px){
+  .study,.vbar{padding-inline:8px}
+  .study button,.vbar button{min-height:32px}
+  .orb-header{padding:0 8px}
+  .a-wrap{--lab:58px}
+  .a-lab{padding:0 4px 0 8px}
+  .b-row{grid-template-columns:44px 40px minmax(0,1fr)}
+  .b-time{font-size:10px;padding-right:4px}
+  .b-time .hh{display:none}
+  .b-bars{left:44px;width:40px}
+  .b-body{padding-right:8px}
+  .c-stage,.c-where{margin-inline:8px}
+  .inspect{margin-inline:8px}
+  .d-table col.c-start{width:calc(8ch + 8px)}
+  .d-table col.c-call{width:calc(15ch + 8px)}
+  .d-table th,.d-table td{padding-inline:4px}
+  .d-table td.wf{padding:0}
+  .wfi{left:4px;right:8px}
+  .g-scrub{margin-inline:8px}
+  .g-main{padding-inline:8px}
+  .g-stage.split{grid-template-columns:minmax(0,1fr)}
+  .g-side{position:static;margin:0 8px 12px 16px;padding:4px 0 8px 8px}
+}
+@media(max-width:480px){.orb-header .totals{display:none}}
+</style>
+</head>
+<body>
+<header class="study">
+  <h1>Transcript timeline</h1>
+  <nav aria-label="Variant">
+    <button type="button" data-tab="a">A · Lanes</button>
+    <button type="button" data-tab="b">B · Rail clock</button>
+    <button type="button" data-tab="c">C · Icicle</button>
+    <button type="button" data-tab="d">D · Waterfall</button>
+    <button type="button" data-tab="e">E · Tide</button>
+    <button type="button" data-tab="f">F · Metro</button>
+    <button type="button" data-tab="g">G · Replay</button>
+  </nav>
+  <button type="button" class="theme" id="theme" aria-pressed="false">dark</button>
+</header>
+<div class="orb-header"><span class="name">heatmap zero rows</span><span id="orb-tile"></span><span class="totals" id="totals"></span></div>
+
+<section id="v-a" hidden>
+  <div class="vbar" id="a-bar"></div>
+  <div class="a-wrap"><div class="a-labels" id="a-labels"></div><div class="a-scroll" id="a-scroll"><div class="a-canvas" id="a-canvas"></div></div></div>
+  <div id="a-inspect"></div>
+</section>
+<section id="v-b" hidden>
+  <div class="b-feed" id="b-feed"></div>
+</section>
+<section id="v-c" hidden>
+  <div class="vbar" id="c-bar"></div>
+  <div class="c-stage" id="c-stage"></div>
+  <div class="c-where" id="c-where"></div>
+  <div id="c-inspect"></div>
+</section>
+<section id="v-d" hidden>
+  <div class="vbar" id="d-bar"></div>
+  <div class="d-scroll"><table class="d-table" id="d-table" data-owntip></table></div>
+</section>
+<section id="v-e" hidden>
+  <div class="e-scroll" id="e-scroll"><div class="e-inner" id="e-inner" data-owntip></div></div>
+  <div id="e-inspect"></div>
+</section>
+<section id="v-f" hidden>
+  <div class="f-scroll" id="f-scroll"><div class="f-canvas" id="f-canvas"></div></div>
+  <div id="f-inspect"></div>
+</section>
+<section id="v-g" hidden>
+  <div class="vbar" id="g-bar"></div>
+  <div class="g-scrub" id="g-scrub" role="slider" tabindex="0" aria-label="Playhead"></div>
+  <div class="g-stage" id="g-stage"><div class="g-main" id="g-main"></div><div class="g-side" id="g-side" hidden></div></div>
+</section>
+<div class="tip" id="tip" hidden></div>
+
+<script>
+'use strict';
+const $=(s,r=document)=>r.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ======================================================================
+   Shared fake session: one Pi orb, 09:12:04 → 11:46, five turns,
+   one subagent, one code-mode script, sleep/wake and a manual Stop/Start.
+   ====================================================================== */
+const S=1000;
+const at=s=>{let v=0;for(const x of s.split(':'))v=v*60+Number(x);return Math.round(v*S)};
+const BASE=9*3600+12*60+4;
+const p2=n=>String(n).padStart(2,'0');
+const clock=(ms,frac)=>{const s=BASE+ms/S;const r=`${p2(Math.floor(s/3600)%24)}:${p2(Math.floor(s/60)%60)}:${p2(Math.floor(s%60))}`;return frac?r+'.'+Math.floor(s*10%10):r};
+const MODEL={sol:'openai-codex/gpt-6.1-sol',terra:'openai-codex/gpt-5.6-terra',luna:'openai-codex/gpt-6-luna'};
+const PRICE={sol:[1.25,.125,10],terra:[.5,.05,4],luna:[.1,.01,.8]}; // $ per M: input, cache read, output
+const CTX_LIMIT={sol:128000,terra:128000,luna:32000}; // context window, tokens
+const EV=[];let N=0,TURN=0;
+const add=e=>{e.id='e'+(++N);if(e.turn==null)e.turn=TURN;EV.push(e);return e};
+const ctx={root:14200,sub1:9800},lastIn={root:0,sub1:0};
+function user(t,text,o={}){if(o.mode!=='steering')TURN++;return add({kind:'user',lane:'you',start:t,end:t,text,mode:o.mode||'message',delivered:o.delivered??t})}
+function llm(lane,t,o){
+  const model=o.model||(lane==='root'?'sol':'terra');
+  const w=(o.ttft||0)*S,th=(o.think||0)*S,st=(o.stream||0)*S,err=o.stop==='error';
+  const inp=err?0:ctx[lane],cr=err?0:Math.min(lastIn[lane],inp),out=err?0:(o.out||0),p=PRICE[model];
+  const e=add({kind:'llm',lane,model,start:t,ttft:t+w,thinkEnd:t+w+th,end:t+w+th+st,inp,cr,out,cost:((inp-cr)*p[0]+cr*p[1]+out*p[2])/1e6,limit:CTX_LIMIT[model],stop:o.stop||'toolUse',head:o.head,text:o.text,say:o.say,err:o.err,attempt:o.attempt,backoff:o.backoff});
+  if(!err){lastIn[lane]=inp;ctx[lane]+=out+(o.add??900)*3}
+  return e;
+}
+function calls(lane,t,parent,list){let end=t;list.forEach(([name,arg,dur,ok=true,out],i)=>{const s=t+i*14;const kind=name==='codemode'?'code':name==='subagent'?'spawn':'tool';const e=add({kind,lane,name,arg,start:s,end:s+dur*S,ok,out,parent:parent.id});end=Math.max(end,e.end)});return end}
+function step(lane,t,o,list){const L=llm(lane,t,o);const end=list?calls(lane,L.end+30,L,list):L.end;return {L,t:end+(list?80:0)}}
+function inner(code,off,dur,name,arg,ok,out){return add({kind:'inner',lane:code.lane,name,arg,start:code.start+off*S,end:code.start+(off+dur)*S,ok,out,parent:code.id})}
+function luna(purpose,t,dur,inp,out,text){const p=PRICE.luna;return add({kind:'luna',lane:'luna',model:'luna',purpose,start:t,end:t+dur*S,inp,out,cr:0,cost:(inp*p[0]+out*p[2])/1e6,text})}
+function life(state,t,end,text){return add({kind:'life',lane:'host',state,start:t,end,text})}
+const last=()=>EV[EV.length-1];
+
+// Turn 1 · find and fix
+user(0,'The heatmap renders blank in WebKit when a whole row is zero. Find out why and fix it.');
+luna('orb name',300,1.7,2100,9,'heatmap zero rows');
+let r={t:350};
+r=step('root',r.t,{ttft:2.6,think:5.8,stream:1.9,out:540,head:'Locate the heatmap spec builder',say:'Starting where the heatmap spec is built.',add:9200},[
+  ['bash','rg -n "heatmap" apps/web/src',.38,true,'14 matches in 4 files'],
+  ['read','apps/web/src/lib/chart-spec.ts',.04,true,'1,244 lines'],
+  ['read','apps/web/src/components/Chart.tsx',.03,true,'318 lines']]);
+r=step('root',r.t,{ttft:1.8,think:9.2,stream:1.1,out:410,head:'Square-root scale over an all-zero row',say:'An all-zero row gives the square-root scale an empty domain. Checking the heatmap tests before changing it.',add:2600},[
+  ['read','apps/web/src/lib/chart-spec.ts:880–1010',.03,true,'131 lines'],
+  ['bash','npx vitest run src/lib/chart-spec.test.ts -t heatmap',13.8,true,'4 passed']]);
+r=step('root',r.t,{ttft:2.1,think:14.6,stream:6.4,out:1320,head:'Guard the zero domain',say:'Guarding the zero domain so empty rows keep a 1px floor.',add:300},[['edit','apps/web/src/lib/chart-spec.ts',.06,true,'+9 −2']]);
+r=step('root',r.t,{ttft:1.5,think:2.2,stream:3.9,out:760,add:300},[['edit','apps/web/src/lib/chart-spec.test.ts',.05,true,'+24 −0']]);
+r=step('root',r.t,{ttft:1.4,stream:1.2,out:96,add:700},[['bash','npx vitest run src/lib/chart-spec.test.ts -t heatmap',9.1,true,'5 passed']]);
+r=step('root',r.t,{ttft:1.3,stream:1.1,out:88,add:2400},[['bash','npm run test:browser -- charts.spec.ts --project=webkit',108.2,false,'exit 1 · expect(locator).toHaveCount(36) — received 30']]);
+luna('headline',last().start+600,1.3,1400,8,'Run WebKit chart tests');
+r=step('root',r.t,{ttft:1.9,think:11.8,stream:2.4,out:520,head:'WebKit drops zero-height rect marks',say:'WebKit draws 30 of 36 cells where Chromium draws all of them: zero-height rects are dropped, not drawn transparent.',add:1800},[['read','apps/web/e2e/charts.spec.ts:40–96',.03,true,'57 lines']]);
+r=step('root',r.t,{ttft:1.4,think:3.0,stream:2.8,out:380,add:300},[['edit','apps/web/src/lib/chart-spec.ts',.05,true,'+4 −1']]);
+r=step('root',r.t,{ttft:1.6,stream:1.0,out:90,add:600},[['bash','npm run test:browser -- charts.spec.ts --project=webkit',97.6,true,'12 passed']]);
+r=step('root',r.t,{ttft:1.5,stream:1.2,out:110,add:900},[
+  ['bash','npm run typecheck',38.4,true,'0 errors'],
+  ['bash','npm run lint -- apps/web/src/lib',21.7,true,'0 problems']]);
+let f=llm('root',r.t,{ttft:1.7,think:3.2,stream:9.8,out:690,stop:'stop',add:200,text:'WebKit skips rect marks whose height rounds to zero, so a row of zeros on the square-root scale vanished. Zero cells now draw at a 1px minimum in the pale fill; the WebKit chart suite passes.'});
+luna('turn summary',f.end+300,2.4,3800,46,'Heatmap zero rows fixed; WebKit charts pass');
+
+// Turn 2 · code mode against Datadog, provider error and retry
+user(at('9:40'),'Chart heatmap render time against cell count from Datadog for the last day.');
+r=step('root',at('9:40')+300,{ttft:2.2,think:7.4,stream:8.8,out:1450,head:'Query render timings by cell count',say:'Querying p95 render time and render counts per cell bucket in one script.',add:4200},[['codemode','const [p95, n] = await Promise.all([mcp__datadog__query_metrics(…), …]); await chart({kind: "line", …})',11.4,true,'chart · Heatmap render time by cells']]);
+{const code=last();
+inner(code,.2,1.4,'mcp__datadog__search_metrics','chart.render.*',true,'6 metrics');
+inner(code,1.7,7.9,'mcp__datadog__query_metrics','p95:chart.render.ms{kind:heatmap} by {cells}',true,'1,440 points × 4');
+inner(code,1.72,6.1,'mcp__datadog__query_metrics','sum:chart.render.count{kind:heatmap}.as_count()',true,'1,440 points');
+inner(code,9.7,.9,'orb_messages','search "render timings"',true,'2 messages');
+inner(code,10.7,.25,'chart','Heatmap render time by cells',true,'line · 4 series · 1,440 points');}
+{const e1=llm('root',r.t,{ttft:21.0,stop:'error',err:'503 upstream connect error or disconnect/reset before headers',attempt:1});
+f=llm('root',e1.end+2000,{ttft:2.4,think:4.1,stream:7.6,out:820,stop:'stop',attempt:2,backoff:2000,add:100,text:'p95 render time stays under 4ms up to 1,600 cells and rises to 23ms at 2,400. Zero rows render as fast as filled ones.'});
+f.retryOf=e1.id;}
+luna('turn summary',f.end+300,2.1,3100,38,'Render time charted from Datadog');
+life('stopped',at('11:30'),at('13:10'),'Stop');
+life('starting',at('13:10'),at('13:31'),'Start');
+
+// Turn 3 · subagent in parallel, steering, notification, alert
+user(at('13:40'),'Have a subagent audit the other chart kinds for the same zero bug while you write the regression test.');
+r=step('root',at('13:40')+300,{ttft:2.0,think:6.1,stream:3.4,out:610,head:'Split the audit from the regression test',say:'A subagent takes the audit; I will write the regression test meanwhile.',add:1200},[
+  ['subagent','Audit zero-value handling in every chart kind',.6,true,'started'],
+  ['read','apps/web/e2e/charts.spec.ts',.03,true,'212 lines']]);
+const spawn=EV.find(e=>e.kind==='spawn');
+{let s={t:spawn.end+400};
+s=step('sub1',s.t,{ttft:3.1,think:4.2,stream:2.0,out:380,head:'Where domains are computed',say:'Mapping where each chart kind computes its domain.',add:3100},[
+  ['bash','rg -n "domain" apps/web/src/lib/chart-spec.ts',.31,true,'22 matches'],
+  ['bash','rg -n "values.length" apps/web/src/lib',.28,true,'7 matches'],
+  ['read','apps/web/src/lib/chart-spec.ts:460–560',.03,true,'101 lines']]);
+s=step('sub1',s.t,{ttft:2.4,think:9.1,stream:1.6,out:300,head:'Histogram bins and timeline spans',add:2600},[
+  ['read','apps/web/src/lib/chart-spec.ts:700–800',.03,true,'101 lines'],
+  ['read','apps/web/src/lib/chart-spec.ts:1060–1120',.03,true,'61 lines']]);
+s=step('sub1',s.t,{ttft:2.0,think:5.5,stream:4.8,out:880,head:'Probe every kind with zeros',say:'One zero-value probe per chart kind, so every failure shows up in a single run.',add:400},[['edit','apps/web/src/lib/chart-spec.test.ts',.05,true,'+41 −0']]);
+s=step('sub1',s.t,{ttft:1.3,stream:.9,out:70,add:1900},[['bash','npx vitest run src/lib/chart-spec.test.ts -t zero',11.2,false,'exit 1 · histogram: expected 30 bins, received 27']]);
+s=step('sub1',s.t,{ttft:2.2,think:12.0,stream:4.1,out:610,head:'Histogram drops zero-count bins',say:'Histogram drops zero-count bins. Reporting that to the parent before finishing.',add:200},[['notify_parent','Histogram drops zero-count bins at phone width; the heatmap fix does not cover it.',.2,true,'delivered']]);
+const np=last();
+add({kind:'notify',lane:'root',start:np.end,end:np.end,text:np.arg,from:np.id});
+const sf=llm('sub1',s.t,{ttft:1.4,stream:2.6,out:240,stop:'stop',text:'Histogram is the only other kind affected; a failing test reproduces it.'});
+add({kind:'done',lane:'sub1',start:sf.end,end:sf.end,text:'completed',from:spawn.id});}
+r=step('root',r.t,{ttft:1.9,think:4.0,stream:5.2,out:940,head:'Zero-row regression test',add:300},[['edit','apps/web/e2e/charts.spec.ts',.05,true,'+38 −0']]);
+r=step('root',r.t,{ttft:1.5,stream:1.0,out:84,add:1500},[['bash','npm run test:browser -- charts.spec.ts',158.4,true,'24 passed']]);
+const steer=user(last().start+61000,'Cover the 320px viewport too.',{mode:'steering'});
+r=step('root',r.t,{ttft:1.8,think:3.3,stream:4.4,out:720,head:'Add the 320px case',add:300},[['edit','apps/web/e2e/charts.spec.ts',.05,true,'+12 −1']]);
+steer.delivered=r.L.start;
+r=step('root',r.t,{ttft:1.4,stream:.9,out:80,add:1400},[['bash','npm run test:browser -- charts.spec.ts',151.1,true,'26 passed']]);
+r=step('root',r.t,{ttft:2.1,think:8.8,stream:6.0,out:1100,head:'Histogram zero-count bins',say:'Applying the same floor to histogram bins.',add:300},[['edit','apps/web/src/lib/chart-spec.ts',.06,true,'+7 −3']]);
+r=step('root',r.t,{ttft:1.4,stream:1.0,out:90,add:900},[['bash','npx vitest run src/lib/chart-spec.test.ts',8.9,true,'61 passed']]);
+r=step('root',r.t,{ttft:1.7,think:2.9,stream:1.6,out:160,head:'Production is affected',say:'The histogram path ships in the current release, so this is live.',add:100},[['orb_alert','Histogram zero-bin bug is live in production.',.7,true,'alert raised']]);
+add({kind:'alert',lane:'root',start:last().end,end:last().end,text:'Histogram zero-bin bug is live in production.'});
+f=llm('root',r.t,{ttft:1.9,think:2.6,stream:8.9,out:640,stop:'stop',add:100,text:'Heatmap and histogram both keep zero rows now, with Chromium and 320px regression tests. The audit found no other affected kinds.'});
+luna('turn summary',f.end+300,2.6,4400,52,'Zero bins fixed in heatmap and histogram');
+life('sleeping',at('24:00'),at('2:17:10'),'idle sleep');
+
+// Turn 4 · queued message wakes the orb onto a replacement host; auto-compaction; abort
+const q=user(at('2:17:10'),'Run the full browser suite, then open a PR.',{mode:'queued'});
+life('starting',at('2:17:10'),at('2:17:52'),'Wake');
+life('replace',at('2:17:13'),at('2:17:41'),'previous host reclaimed; replacement provisioned');
+q.delivered=at('2:17:53');
+add({kind:'compact',lane:'root',start:at('2:17:53'),end:at('2:18:24'),before:ctx.root,after:22400,auto:true});
+ctx.root=22400;lastIn.root=0;
+r=step('root',at('2:18:24')+100,{ttft:3.4,think:6.0,stream:2.1,out:310,head:'Full browser suite',say:'Running the full browser suite first.',add:0},[['bash','npm run test:browser',1,'aborted','killed by abort']]);
+{const b=last();b.end=at('2:20:05');}
+add({kind:'abort',lane:'root',start:at('2:20:05'),end:at('2:20:05'),text:'aborted by user'});
+
+// Turn 5 · interrupt, harness restart, PR
+user(at('2:20:21'),'Only Chromium; skip WebKit on this host.');
+r=step('root',at('2:20:21')+300,{ttft:2.6,think:2.4,stream:1.3,out:120,head:'Chromium only',say:'Restricting the run to Chromium.',add:2600},[['bash','npm run test:browser -- --project=chromium',371,true,'118 passed']]);
+luna('headline',last().start+500,1.2,1300,7,'Run Chromium browser suite');
+{const hr=llm('root',r.t,{ttft:1.9,think:3.0,stop:'error',err:'agent connection lost: runtime exited 137',attempt:1});
+life('restart',hr.end,hr.end+6200,'runtime exited 137; harness restarted');
+r=step('root',hr.end+6400,{ttft:2.2,think:2.8,stream:1.4,out:150,attempt:2,backoff:6400,head:'Review the diff',say:'Checking the diff before committing.',add:900},[
+  ['bash','git status --short',.09,true,'M 3 files'],
+  ['bash','git diff --stat',.11,true,'3 files changed, 112 insertions(+), 6 deletions(-)']]);
+r.L.retryOf=hr.id;}
+r=step('root',r.t,{ttft:1.6,think:1.2,stream:2.2,out:210,add:200},[['bash','git switch -c fix/chart-zero-domains && git commit -am "Keep zero rows in heatmap and histogram"',.42,true,'[fix/chart-zero-domains 9c41e07]']]);
+r=step('root',r.t,{ttft:1.3,stream:.8,out:60,add:200},[['bash','git push -u origin fix/chart-zero-domains',2.8,true,'new branch']]);
+r=step('root',r.t,{ttft:1.5,think:1.0,stream:3.6,out:330,add:200},[['bash','gh pr create --fill',3.1,true,'https://github.com/schani/pi-orb/pull/174']]);
+r=step('root',r.t,{ttft:1.4,stream:.9,out:70,add:1600},[['bash','gh pr checks 174 --watch',274,true,'9 checks passed']]);
+f=llm('root',r.t,{ttft:1.6,think:1.4,stream:4.9,out:260,stop:'stop',text:'Chromium suite passes (118). PR #174 is open and its checks are green.'});
+luna('turn summary',f.end+300,2.2,3600,31,'PR #174 opened; Chromium suite green');
+life('stop',at('2:43:00'),at('2:43:00'),'idle stop');
+
+/* ---------------- derived ---------------- */
+EV.sort((a,b)=>a.start-b.start||a.id.localeCompare(b.id,undefined,{numeric:true}));
+const byId=Object.fromEntries(EV.map(e=>[e.id,e]));
+const END=Math.max(...EV.map(e=>e.end));
+const AGENT=new Set(['root','sub1']);
+const TURNS=EV.filter(e=>e.kind==='user'&&e.mode!=='steering').map(u=>({n:u.turn,user:u,start:u.start,end:u.start}));
+for(const e of EV){const T=TURNS.find(t=>t.n===e.turn);if(T&&AGENT.has(e.lane))T.end=Math.max(T.end,e.end)}
+const turnOf=n=>TURNS.find(t=>t.n===n);
+const GAPS=(()=>{
+  const iv=EV.filter(e=>e.kind!=='life'||['starting','replace','restart','stop'].includes(e.state)).map(e=>[e.start,e.end]).sort((a,b)=>a[0]-b[0]);
+  const m=[];for(const [a,b] of iv){if(m.length&&a<=m[m.length-1][1])m[m.length-1][1]=Math.max(m[m.length-1][1],b);else m.push([a,b])}
+  const g=[];for(let i=1;i<m.length;i++){const s=m[i-1][1],e=m[i][0];if(e-s>=40*S){const l=EV.find(h=>h.kind==='life'&&h.start<e&&h.end>s&&(h.state==='sleeping'||h.state==='stopped'));g.push({kind:'gap',id:'g'+i,start:s,end:e,reason:l?l.state:'waiting',lane:'all'})}}
+  return g;
+})();
+GAPS.forEach(g=>byId[g.id]=g);
+const ACTIVE=END-GAPS.reduce((s,g)=>s+g.end-g.start,0);
+const LLMS=EV.filter(e=>e.kind==='llm');
+
+/* ---------------- formatting ---------------- */
+function fmtDur(ms){ms=Math.max(0,ms);if(ms<1000)return Math.round(ms)+'ms';const s=ms/S;if(s<10)return s.toFixed(1)+'s';if(s<60)return Math.round(s)+'s';const m=Math.floor(s/60);if(m<60)return m+'m '+p2(Math.floor(s%60))+'s';return Math.floor(m/60)+'h '+p2(m%60)+'m'}
+const fmtTok=n=>n<1000?String(n):n<100000?(n/1000).toFixed(1)+'k':n<1e6?Math.round(n/1000)+'k':(n/1e6).toFixed(2)+'M';
+const fmtCost=c=>c===0?'$0':c<.001?'<$0.001':c<.1?'$'+c.toFixed(3):'$'+c.toFixed(2);
+const base=a=>a.replace(/^.*\//,'');
+const STATE_WORD={stopped:'stopped',starting:'starting',sleeping:'sleeping',replace:'host replaced',restart:'harness restarted',stop:'stopped'};
+function callLabel(e){
+  if(e.kind==='code')return 'codemode';
+  if(e.kind==='spawn')return 'subagent · '+e.arg;
+  if(e.name==='read'||e.name==='edit')return e.name+' '+base(e.arg);
+  if(e.name==='bash')return e.arg;
+  if(e.kind==='inner')return e.name.replace(/^mcp__([a-z]+)__/,'$1.')+' '+e.arg;
+  return e.name+' · '+e.arg;
+}
+function title(e){
+  switch(e.kind){
+    case 'llm':return e.stop==='error'?(e.err.startsWith('agent')?'interrupted call':'provider error'):(e.head||(e.stop==='stop'?'response':'call'));
+    case 'user':return e.text;
+    case 'tool':case 'code':case 'spawn':case 'inner':return callLabel(e);
+    case 'luna':return 'luna · '+e.purpose;
+    case 'life':return STATE_WORD[e.state];
+    case 'compact':return 'context compacted';
+    case 'abort':return 'aborted';
+    case 'alert':return e.text;
+    case 'notify':return 'notification · '+e.text;
+    case 'done':return 'subagent completed';
+    case 'gap':return e.reason==='waiting'?'waiting':e.reason;
+  }
+  return e.kind;
+}
+const failed=e=>(e.kind==='llm'&&e.stop==='error')||e.ok===false||e.ok==='aborted';
+function facts(e){
+  const f=[],D=(k,v,c)=>{if(v!=null&&v!=='')f.push([k,v,c])};
+  const dur=fmtDur(e.end-e.start);
+  switch(e.kind){
+    case 'llm':
+      D('model',MODEL[e.model]);D('start',clock(e.start,1));
+      if(e.stop==='error'){D('failed after',dur,'bad');D('error',e.err,'bad');if(e.thinkEnd>e.ttft)D('thinking',fmtDur(e.thinkEnd-e.ttft))}
+      else{
+        D('first token',fmtDur(e.ttft-e.start));if(e.thinkEnd>e.ttft)D('thinking',fmtDur(e.thinkEnd-e.ttft));
+        D('streaming',fmtDur(e.end-e.thinkEnd));D('total',dur);
+        D('input',fmtTok(e.inp)+(e.cr?' · '+Math.round(e.cr/e.inp*100)+'% cache read':' · cache write'));D('output',fmtTok(e.out)+' · '+Math.round(e.out/((e.end-e.ttft)/S))+' tok/s');D('cost',fmtCost(e.cost));D('stop',e.stop);
+      }
+      if(e.attempt)D('attempt',e.attempt+(e.backoff?' · after '+fmtDur(e.backoff):''));
+      if(e.stop!=='error')D('context',Math.round(e.inp/e.limit*100)+'% of '+fmtTok(e.limit));
+      if(e.say)D('said',e.say);
+      if(e.text)D('response',e.text);
+      break;
+    case 'tool':case 'code':case 'spawn':case 'inner':
+      D('tool',e.name);D('args',e.arg);D('start',clock(e.start,1));D('duration',dur);
+      D('result',e.ok===true?e.out:e.ok==='aborted'?'aborted · '+e.out:e.out,e.ok===true?null:'bad');
+      if(e.kind==='code'){const k=EV.filter(i=>i.parent===e.id);D('inner calls',k.length+' · '+fmtDur(k.reduce((s,i)=>s+i.end-i.start,0))+' summed')}
+      if(e.kind==='spawn'){const d=EV.find(x=>x.kind==='done');D('child model',MODEL.terra);D('child run',fmtDur(d.end-e.start))}
+      break;
+    case 'user':D('sent',clock(e.start,1));if(e.mode!=='message')D(e.mode==='queued'?'delivered':'delivered',clock(e.delivered,1)+' · after '+fmtDur(e.delivered-e.start));D('text',e.text);break;
+    case 'luna':D('model',MODEL.luna);D('start',clock(e.start,1));D('duration',dur);D('tokens',fmtTok(e.inp)+' in · '+e.out+' out');D('cost',fmtCost(e.cost));D('text',e.text);break;
+    case 'life':D('from',clock(e.start));if(e.end>e.start)D('duration',dur);D('reason',e.text);break;
+    case 'compact':D('start',clock(e.start,1));D('duration',dur);D('context',fmtTok(e.before)+' → '+fmtTok(e.after));D('trigger','auto');break;
+    case 'abort':case 'alert':case 'done':D('at',clock(e.start,1));D('text',e.text);break;
+    case 'notify':D('at',clock(e.start,1));D('from','subagent');D('message',e.text);break;
+    case 'gap':{D('from',clock(e.start));D('to',clock(e.end));D('duration',dur);const l=EV.find(h=>h.kind==='life'&&h.state===e.reason&&h.start>=e.start&&h.start<e.end);if(l)D(e.reason,'from '+clock(l.start)+' · '+l.text);break}
+  }
+  return f;
+}
+const kvHTML=fs=>`<dl class="kv">${fs.map(([k,v,c])=>`<dt>${esc(k)}</dt><dd${c?` class="${c}"`:''}>${esc(v)}</dd>`).join('')}</dl>`;
+function inspectHTML(e,extra=''){if(!e)return '';const t=title(e);return `<div class="inspect"><div class="inspect-h"><strong>${esc(t)}</strong><button type="button" data-close aria-label="Close" title="Close">✕</button></div>${extra}${kvHTML(facts(e).filter(([,v])=>v!==t&&'subagent · '+v!==t&&'notification · '+v!==t))}</div>`}
+const TIP_SKIP=new Set(['response','said','text','args','message','reason','model','tool']);
+function tipHTML(e){
+  const fs=facts(e).filter(([k])=>!TIP_SKIP.has(k)).slice(0,6);
+  return `<b>${esc(title(e))}</b><table>${fs.map(([k,v,c])=>`<tr><td class="k">${esc(k)}</td><td${c?` class="${c}"`:''}>${esc(v)}</td></tr>`).join('')}</table>`;
+}
+
+/* ---------------- shared helpers ---------------- */
+const TILES={
+  sleeping:'<rect x="1" y="1" width="14" height="14" rx="2" fill="#777"/><path d="M10.15 3.35a4.9 4.9 0 1 0 1.65 7.2 3.35 3.35 0 0 1-1.65-7.2Z" fill="white"/>',
+  stopped:'<rect x="1" y="1" width="14" height="14" rx="2" fill="#777"/><path d="M5 8h6" stroke="white" stroke-width="1.5" stroke-linecap="round"/>',
+  starting:'<rect x="1" y="1" width="14" height="14" rx="2" fill="#966100"/><path d="M5 4h6v1L5 11v1h6v-1L5 5z" fill="none" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>',
+  restart:'<rect x="1" y="1" width="14" height="14" rx="2" fill="#966100"/><path d="M11.2 6.2A3.5 3.5 0 1 0 11.5 9" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round"/><path d="M11.6 3.6v2.8H8.8" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  idle:'<rect x="1" y="1" width="14" height="14" rx="2" fill="#777"/><path d="M5 8h6" stroke="white" stroke-width="1.5" stroke-linecap="round"/>'
+};
+TILES.replace=TILES.starting;TILES.stop=TILES.stopped;
+const tile=(state,cls='')=>`<svg class="tile ${cls}" viewBox="0 0 16 16" aria-hidden="true">${TILES[state]}</svg>`;
+// LLM segments horizontally or vertically, positions given by f(time) relative to the bar's origin.
+function segs(e,f,o,vertical){
+  const parts=e.stop==='error'?[['s-wait',e.start,e.ttft],['s-think',e.ttft,e.thinkEnd]]:[['s-wait',e.start,e.ttft],['s-think',e.ttft,e.thinkEnd],['s-stream',e.thinkEnd,e.end]];
+  return parts.filter(([,a,b])=>b>a).map(([c,a,b])=>{const p=f(a)-o,s=Math.max(1,f(b)-f(a));return `<span class="seg ${c}" style="${vertical?`top:${p}px;height:${s}px;left:0;right:0`:`left:${p}px;width:${s}px`}"></span>`}).join('');
+}
+const callCls=e=>'call'+(e.kind==='inner'?' inner':'')+(e.ok===false?' fail':e.ok==='aborted'?' aborted':'');
+const fits=(text,w)=>w>=text.length*6.6+8;
+function pack(list,key){const ends=[];for(const e of [...list].sort((a,b)=>a.start-b.start)){let r=ends.findIndex(x=>x<=e.start);if(r<0){r=ends.length;ends.push(0)}ends[r]=e.end;e[key]=r}return ends.length}
+const PACK={};
+for(const lane of ['root','sub1']){
+  PACK[lane]={tools:pack(EV.filter(e=>e.lane===lane&&['tool','code','spawn'].includes(e.kind)),'row'),inner:pack(EV.filter(e=>e.lane===lane&&e.kind==='inner'),'row')};
+}
+function makeScale(k,gapPx,collapse){
+  const T=[0],X=[0];let x=0,t=0;
+  if(collapse)for(const g of GAPS){x+=(g.start-t)*k;T.push(g.start);X.push(x);x+=gapPx;T.push(g.end);X.push(x);t=g.end}
+  x+=(END-t)*k;T.push(END);X.push(x);
+  const look=(A,B,v)=>{if(v<=A[0])return B[0]+(v-A[0])*(B===X?k:1/k);if(v>=A[A.length-1])return B[B.length-1]+(v-A[A.length-1])*(B===X?k:1/k);let lo=0,hi=A.length-1;while(hi-lo>1){const m=(lo+hi)>>1;if(A[m]<=v)lo=m;else hi=m}const d=A[hi]-A[lo];return d?B[lo]+(v-A[lo])/d*(B[hi]-B[lo]):B[lo]};
+  const fn=v=>look(T,X,v);fn.inv=px=>look(X,T,px);fn.width=x;fn.k=k;return fn;
+}
+const isPhone=()=>innerWidth<=760;
+
+/* tooltip + hover */
+const tip=$('#tip');
+let tipFor=null;
+function showTip(id,ev,html){const e=byId[id];if(!e){hideTip();return}const key=html?id+'|'+html:id;if(tipFor!==key){tip.innerHTML=html||tipHTML(e);tipFor=key}tip.hidden=false;const r=tip.getBoundingClientRect();let x=ev.clientX+14,y=ev.clientY+14;if(x+r.width>innerWidth-8)x=ev.clientX-r.width-14;if(y+r.height>innerHeight-8)y=ev.clientY-r.height-14;tip.style.left=Math.max(8,x)+'px';tip.style.top=Math.max(8,y)+'px'}
+function hideTip(){tip.hidden=true;tipFor=null}
+document.addEventListener('pointermove',ev=>{if(ev.pointerType!=='mouse')return;const t=ev.target.closest('[data-id]');if(t&&!t.closest('.inspect,.rail-body,tr.detail,.b-body,.g-stage'))showTip(t.dataset.id,ev);else if(!ev.target.closest('[data-owntip]'))hideTip()});
+document.addEventListener('pointerleave',hideTip);
+document.addEventListener('scroll',hideTip,true);
+function cropAround(el,host){const a=el.getBoundingClientRect(),b=host.getBoundingClientRect();const c=document.createElement('div');c.className='crop';c.style.cssText=`left:${a.left-b.left+host.scrollLeft-4}px;top:${a.top-b.top+host.scrollTop-4}px;width:${a.width+8}px;height:${a.height+8}px`;c.innerHTML='<i></i><i></i><i></i><i></i>';host.append(c)}
+
+/* ======================================================================
+   A · Lanes — one lane per agent, Luna and host; broken axis for idle gaps.
+   ====================================================================== */
+const A={k:null,collapse:true,sel:null,focus:'all'};
+const GAP_PX=()=>isPhone()?40:52;
+function aLanes(){
+  const tl=n=>4+14+3+PACK[n].tools*13+(PACK[n].inner?2+PACK[n].inner*11:0)+4;
+  const sub=EV.find(e=>e.kind==='spawn');
+  const L=[{id:'axis',label:'',h:40},{id:'you',label:'you',h:18},{id:'root',label:'orb',h:tl('root')},{id:'sub1',label:sub.arg,h:tl('sub1')},{id:'luna',label:'luna',h:16},{id:'host',label:'host',h:22}];
+  let y=0;for(const l of L){l.y=y;y+=l.h}L.total=y;return L;
+}
+function aFit(range){
+  const W=$('#a-scroll').clientWidth-16;
+  if(range!=='all'){const T=turnOf(range),end=Math.max(T.end,...EV.filter(e=>e.turn===T.n&&e.kind==='luna').map(e=>e.end));A.k=(W-24)/(end-T.start);return T.start}
+  A.k=A.collapse?(W-GAPS.length*GAP_PX())/ACTIVE:W/END;return 0;
+}
+function aBar(){
+  $('#a-bar').innerHTML=`${TURNS.map(t=>`<button type="button" data-turn="${t.n}" aria-pressed="${A.focus===t.n}">${t.n}</button>`).join('')}<button type="button" data-turn="all" aria-pressed="${A.focus==='all'}">all</button><span class="sep"></span><button type="button" data-zoom="-1" aria-label="Zoom out" title="Zoom out">−</button><button type="button" data-zoom="1" aria-label="Zoom in" title="Zoom in">+</button><span class="sep"></span><button type="button" data-gaps aria-pressed="${A.collapse}" aria-label="Collapse idle gaps" title="Collapse idle gaps"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" style="vertical-align:-1px"><path d="M4 1 1 11M11 1 8 11" stroke="currentColor" stroke-width="1.5"/></svg></button>`;
+}
+function renderA(keep){
+  const scroll=$('#a-scroll'),canvas=$('#a-canvas');
+  if(A.k==null)aFit('all');
+  const L=aLanes(),Y=Object.fromEntries(L.map(l=>[l.id,l]));
+  const X=makeScale(A.k,GAP_PX(),A.collapse),PAD=8,x=t=>X(t)+PAD;
+  const W=X.width+PAD*2;
+  const h=[];
+  // gaps and ticks
+  if(A.collapse)for(const g of GAPS){const a=x(g.start),b=x(g.end);h.push(`<div class="a-gap" data-id="${g.id}" style="left:${a}px;width:${b-a}px"><div class="a-gaplab">${fmtDur(g.end-g.start).replace(/ \d+s$/,'')}</div></div>`)}
+  const STEPS=[1,2,5,10,15,30,60,120,300,600,900,1800,3600,7200].map(s=>s*S);
+  const st=STEPS.find(s=>s*A.k>=(isPhone()?64:84))||7200*S;
+  for(let t=Math.ceil(BASE*S/st)*st-BASE*S;t<=END;t+=st){
+    if(A.collapse&&GAPS.some(g=>t>g.start-30/A.k&&t<g.end+30/A.k))continue;
+    const px=x(t);h.push(`<div class="a-tick" style="left:${px}px;top:${Y.you.y}px"></div><div class="a-ticklab" style="left:${px}px">${st>=60*S?clock(t).slice(0,5):clock(t)}</div>`);
+  }
+  for(const l of L.slice(1))h.push(`<div class="a-lane" style="top:${l.y}px;height:${l.h}px"></div>`);
+  // turn rules
+  for(const T of TURNS)h.push(`<div class="a-turn" style="left:${x(T.user.delivered)}px;top:${Y.you.y}px;height:${L.total-Y.you.y}px"></div>`);
+  // user messages
+  for(const u of EV.filter(e=>e.kind==='user')){
+    const yy=Y.you.y+5;
+    if(u.mode==='queued')h.push(`<div class="mk-queue ev" data-id="${u.id}" style="left:${x(u.start)}px;top:${yy}px;width:${Math.max(2,x(u.delivered)-x(u.start))}px"></div><div class="mk-user ev" data-id="${u.id}" style="left:${x(u.delivered)-1}px;top:${yy}px"></div>`);
+    else h.push(`<div class="mk-user ev${u.mode==='steering'?' hollow':''}" data-id="${u.id}" style="left:${x(u.start)-4}px;top:${yy}px"></div>`);
+  }
+  // agent lanes
+  for(const lane of ['root','sub1']){
+    const ly=Y[lane].y,toolY=ly+21;
+    for(const e of EV.filter(e=>e.lane===lane)){
+      const a=x(e.start),w=Math.max(1,x(e.end)-a);
+      if(e.kind==='llm')h.push(`<div tabindex="0" class="ev llm${e.stop==='error'?' err':''}" data-id="${e.id}" style="left:${a}px;top:${ly+4}px;width:${w}px;height:14px">${segs(e,x,a)}</div>`);
+      else if(e.kind==='compact')h.push(`<div class="ev compact" data-id="${e.id}" style="left:${a}px;top:${ly+4}px;width:${w}px;height:14px"></div>`);
+      else if(['tool','code','spawn','inner'].includes(e.kind)){
+        const inn=e.kind==='inner',yy=inn?toolY+(byId[e.parent].row+1)*13+e.row*11:toolY+e.row*13,hh=inn?9:11,lab=callLabel(e);
+        h.push(`<div tabindex="0" class="ev ${callCls(e)}" data-id="${e.id}" style="left:${a}px;top:${yy}px;width:${w}px;height:${hh}px">${w>=40?esc(lab):''}</div>`);
+      }
+      else if(e.kind==='abort')h.push(`<div class="mk-abort ev" data-id="${e.id}" style="left:${a-1}px;top:${ly+16}px;height:${Y[lane].h-18}px"></div>`);
+      else if(e.kind==='alert')h.push(`<div class="mk-alert ev" data-id="${e.id}" style="left:${a-1}px;top:${ly+2}px;height:${Y[lane].h-4}px"></div>`);
+      else if(e.kind==='notify'){const src=byId[e.from];h.push(`<div class="mk-link" style="left:${a}px;top:${ly+11}px;height:${Y.sub1.y+21+src.row*13-ly-11}px"></div><div class="mk-notify ev" data-id="${e.id}" style="left:${a-4}px;top:${ly+7}px"></div>`)}
+      else if(e.kind==='done')h.push(`<div class="mk-done ev" data-id="${e.id}" style="left:${a-3}px;top:${ly+7}px"></div>`);
+    }
+  }
+  // subagent run rule + spawn link
+  {const sp=EV.find(e=>e.kind==='spawn'),dn=EV.find(e=>e.kind==='done');const a=x(sp.start);
+    h.push(`<div class="mk-link" style="left:${a}px;top:${Y.root.y+21+sp.row*13+11}px;height:${Y.sub1.y-(Y.root.y+21+sp.row*13+11)+2}px"></div><div class="run-rule" style="left:${a}px;top:${Y.sub1.y+1}px;width:${x(dn.end)-a}px"></div>`)}
+  // luna
+  for(const e of EV.filter(e=>e.kind==='luna')){const a=x(e.start);h.push(`<div class="ev luna" data-id="${e.id}" style="left:${a}px;top:${Y.luna.y+4}px;width:${Math.max(2,x(e.end)-a)}px;height:8px"></div>`)}
+  // host
+  for(const e of EV.filter(e=>e.kind==='life')){
+    const a=x(e.start),w=x(e.end)-a,yy=Y.host.y+3;
+    if(e.end===e.start)h.push(`<div class="ev life point" data-id="${e.id}" style="left:${a-6}px;top:${yy+2}px;width:12px;height:12px">${tile(e.state,'s12')}</div>`);
+    else h.push(`<div class="ev life ${e.state}" data-id="${e.id}" style="left:${a}px;top:${yy+(e.state==='replace'?3:0)}px;width:${Math.max(2,w)}px;height:${e.state==='replace'?10:16}px">${w>=16&&e.state!=='replace'?tile(e.state,'s12'):''}</div>`);
+  }
+  canvas.style.width=W+'px';canvas.style.height=L.total+'px';canvas.innerHTML=h.join('');
+  $('#a-labels').innerHTML=L.slice(1).map(l=>`<div class="a-lab" style="top:${l.y+(l.id==='root'||l.id==='sub1'?3:Math.max(0,(l.h-16)/2))}px" title="${esc(l.label)}">${esc(l.label)}</div>`).join('');
+  $('#a-labels').style.height=L.total+'px';
+  if(keep!=null)scroll.scrollLeft=keep;
+  aSelect(A.sel);
+}
+function aSelect(id){
+  A.sel=id;$('#a-canvas').querySelectorAll('.crop').forEach(c=>c.remove());
+  const el=id&&$(`#a-canvas [data-id="${id}"]`);if(el)cropAround(el,$('#a-canvas'));
+  $('#a-inspect').innerHTML=id?inspectHTML(byId[id]):'';
+}
+function aZoom(f,px){
+  const sc=$('#a-scroll'),X=makeScale(A.k,GAP_PX(),A.collapse);
+  const anchor=px??sc.clientWidth/2,t=X.inv(sc.scrollLeft+anchor-8);
+  A.k=Math.min(.4,Math.max(1e-6,A.k*f));A.focus=null;aBar();
+  const X2=makeScale(A.k,GAP_PX(),A.collapse);renderA(X2(t)+8-anchor);
+}
+$('#a-bar').addEventListener('click',ev=>{
+  const b=ev.target.closest('button');if(!b)return;
+  if(b.dataset.turn){A.focus=b.dataset.turn==='all'?'all':+b.dataset.turn;const t0=aFit(A.focus);aBar();const X=makeScale(A.k,GAP_PX(),A.collapse);renderA(A.focus==='all'?0:X(t0));}
+  else if(b.dataset.zoom)aZoom(b.dataset.zoom>0?1.6:1/1.6);
+  else if(b.hasAttribute('data-gaps')){A.collapse=!A.collapse;const t0=aFit(A.focus==null?'all':A.focus);aBar();const X=makeScale(A.k,GAP_PX(),A.collapse);renderA(A.focus&&A.focus!=='all'?X(t0):0)}
+});
+$('#a-scroll').addEventListener('wheel',ev=>{if(!(ev.ctrlKey||ev.metaKey))return;ev.preventDefault();const r=$('#a-scroll').getBoundingClientRect();aZoom(Math.exp(-ev.deltaY*.0025),ev.clientX-r.left)},{passive:false});
+{let drag=null,moved=false;const sc=$('#a-scroll');
+  sc.addEventListener('pointerdown',ev=>{if(ev.pointerType!=='mouse')return;drag={x:ev.clientX,l:sc.scrollLeft};moved=false});
+  addEventListener('pointermove',ev=>{if(!drag)return;const dx=ev.clientX-drag.x;if(Math.abs(dx)>3){moved=true;sc.classList.add('drag')}sc.scrollLeft=drag.l-dx});
+  addEventListener('pointerup',()=>{drag=null;sc.classList.remove('drag')});
+  sc.addEventListener('click',ev=>{if(moved){moved=false;return}const t=ev.target.closest('[data-id]');aSelect(t&&!t.classList.contains('a-gap')?t.dataset.id:null)});
+}
+for(const id of ['#a-canvas','#c-stage'])$(id).addEventListener('keydown',ev=>{if((ev.key==='Enter'||ev.key===' ')&&ev.target.matches('[data-id]')){ev.preventDefault();ev.target.click()}});
+$('#a-inspect').addEventListener('click',ev=>{if(ev.target.closest('[data-close]'))aSelect(null)});
+
+/* ======================================================================
+   B · Rail clock — the transcript itself; spacing and the gutter carry time.
+   ====================================================================== */
+const B={open:new Set(),k:2.6};
+const RAIL_LABEL={bash:'command',read:'read',edit:'edit',codemode:'codemode',subagent:'subagent',notify_parent:'notify_parent',orb_alert:'orb_alert'};
+function bRows(){
+  const rows=[];let gi=0;
+  for(const e of EV){
+    while(gi<GAPS.length&&GAPS[gi].start<=e.start){rows.push({gap:GAPS[gi],t:GAPS[gi].start});gi++}
+    if(['inner','luna'].includes(e.kind))continue;
+    if(e.kind==='life'&&['replace','sleeping','stopped'].includes(e.state))continue;
+    rows.push({e,t:e.start,nested:e.lane==='sub1'});
+  }
+  return rows;
+}
+function bRowHTML(row,i){
+  if(row.gap)return `<div class="b-row b-gaprow" data-i="${i}"><div class="b-time"></div><div></div><div class="b-body"><div class="b-gap" data-id="${row.gap.id}">${row.gap.reason!=='waiting'?tile(row.gap.reason,'s12'):''}${fmtDur(row.gap.end-row.gap.start)}</div></div></div>`;
+  const e=row.e,open=B.open.has(e.id);let body='';
+  const rail=(lb,hl,mt,cls='',extra='')=>`<details class="rail ${cls}" data-id="${e.id}"${open?' open':''}><summary><span class="mk"></span><span class="sm"><span class="lb">${esc(lb)}</span>${hl?` · <span class="hl">${esc(hl)}</span>`:''}</span><span class="mt">${esc(mt)}</span></summary><div class="rail-body">${extra}${kvHTML(facts(e).filter(([k])=>k!=='response'&&k!=='start'))}</div></details>`;
+  switch(e.kind){
+    case 'user':body=`<div class="b-user${e.mode!=='message'?' q':''}" data-id="${e.id}">${e.mode!=='message'?`<span class="rec-status">${e.mode}</span>`:''}${esc(e.text)}</div>`;break;
+    case 'llm':body=e.stop==='error'?rail(title(e),e.err,fmtDur(e.end-e.start),'failed'):rail(e.thinkEnd>e.ttft?'thinking':'call',e.head||'',fmtDur(e.end-e.start))+(e.text?`<p class="b-prose">${esc(e.text)}</p>`:'');break;
+    case 'tool':case 'code':case 'spawn':{
+      let extra='';
+      if(e.kind==='code'){const k=EV.filter(i=>i.parent===e.id),d=e.end-e.start;extra=`<ul class="inner-list">${k.map(i=>`<li data-id="${i.id}"><span>${esc(callLabel(i))}</span><span class="ib"><i style="left:${(i.start-e.start)/d*100}%;width:${Math.max(2,(i.end-i.start)/d*100)}%"></i></span><span>${fmtDur(i.end-i.start)}</span></li>`).join('')}</ul>`}
+      body=rail(RAIL_LABEL[e.name]||e.name,e.name==='read'||e.name==='edit'?base(e.arg):e.name==='notify_parent'||e.name==='orb_alert'?'':e.arg,e.ok===true?fmtDur(e.end-e.start):e.ok==='aborted'?'aborted':'failed',e.ok===true?'':'failed',extra);break;}
+    case 'compact':body=rail('context compacted',fmtTok(e.before)+' → '+fmtTok(e.after),fmtDur(e.end-e.start));break;
+    case 'notify':body=rail('notification',e.text,'');break;
+    case 'done':{const sp=byId[e.from];body=rail('subagent',e.text,fmtDur(e.end-sp.start));break}
+    case 'abort':body=`<div class="b-plain bad" data-id="${e.id}">aborted</div>`;break;
+    case 'alert':body=`<div class="alert-band" data-id="${e.id}">${esc(e.text)}</div>`;break;
+    case 'life':{const rep=e.state==='starting'&&EV.find(x=>x.state==='replace'&&x.start>=e.start&&x.start<e.end);body=`<div class="b-plain" data-id="${e.id}">${tile(e.state)}${STATE_WORD[e.state]}${rep?' · host replaced':''}</div>`;break}
+  }
+  const prev=B_ROWS[i-1],tm=clock(e.start),same=prev&&!prev.gap&&clock(prev.e.start)===tm;
+  return `<div class="b-row" data-i="${i}" data-id="${e.id}"><div class="b-time">${same?'':`<span class="hh">${tm.slice(0,3)}</span>${tm.slice(3)}`}</div><div></div><div class="b-body${row.nested?' nested':''}">${body}</div></div>`;
+}
+let B_ROWS=null;
+function renderB(){
+  B_ROWS=B_ROWS||bRows();
+  const feed=$('#b-feed');feed.innerHTML=B_ROWS.map(bRowHTML).join('')+'<div class="b-bars" id="b-bars"></div>';
+  layoutB();
+}
+function layoutB(){
+  const feed=$('#b-feed'),els=[...feed.querySelectorAll('.b-row')];
+  els.forEach(el=>el.style.marginTop='0px');
+  for(let i=1;i<els.length;i++){
+    const prev=B_ROWS[i-1],row=B_ROWS[i];if(prev.gap||row.gap)continue;
+    const want=Math.min((row.t-prev.t)/S*B.k,240),hPrev=els[i-1].offsetHeight;
+    els[i].style.marginTop=Math.max(0,want-hPrev)+'px';
+  }
+  // elastic time → y anchors
+  const T=[],Yv=[];
+  const push=(t,y)=>{if(T.length&&t<=T[T.length-1])return;T.push(t);Yv.push(y)};
+  els.forEach((el,i)=>{const row=B_ROWS[i];if(row.gap){push(row.gap.start,el.offsetTop+6);push(row.gap.end,el.offsetTop+el.offsetHeight-6)}else push(row.t,el.offsetTop)});
+  push(END+1,feed.scrollHeight);
+  const Y=t=>{let lo=0,hi=T.length-1;if(t<=T[0])return Yv[0];if(t>=T[hi])return Yv[hi];while(hi-lo>1){const m=(lo+hi)>>1;if(T[m]<=t)lo=m;else hi=m}return Yv[lo]+(t-T[lo])/(T[hi]-T[lo])*(Yv[hi]-Yv[lo])};
+  const ph=isPhone(),COL=ph?{root:2,rootT:[9,13,17],sub:23,subT:[29,32,35],luna:38}:{root:3,rootT:[11,15,19],sub:26,subT:[33,37,41],luna:47};
+  const h=[];
+  for(const x of [COL.root+2,COL.sub+2])h.push(`<div class="vrule" style="left:${x}px;top:0;bottom:0"></div>`);
+  for(const e of EV){
+    const y0=Y(e.start),y1=Math.max(y0+2,Y(e.end));
+    if(e.kind==='llm'){const left=e.lane==='root'?COL.root:COL.sub;h.push(`<div class="ev llm${e.stop==='error'?' err':''}" data-id="${e.id}" style="left:${left}px;width:5px;top:${y0}px;height:${y1-y0}px">${segs(e,Y,y0,true)}</div>`)}
+    else if(e.kind==='compact')h.push(`<div class="ev compact" data-id="${e.id}" style="left:${COL.root}px;width:5px;top:${y0}px;height:${y1-y0}px"></div>`);
+    else if(['tool','code','spawn'].includes(e.kind)){const left=(e.lane==='root'?COL.rootT:COL.subT)[e.row];h.push(`<div class="ev ${callCls(e)}" data-id="${e.id}" style="left:${left}px;width:3px;padding:0;top:${y0}px;height:${y1-y0}px"></div>`)}
+    else if(e.kind==='luna')h.push(`<div class="ev luna" data-id="${e.id}" style="left:${COL.luna}px;width:3px;top:${y0}px;height:${y1-y0}px"></div>`);
+  }
+  $('#b-bars').innerHTML=h.join('');
+  // nested rule for the subagent rows
+  const sp=EV.find(e=>e.kind==='spawn'),dn=EV.find(e=>e.kind==='done');
+  const first=feed.querySelector('.b-body.nested');
+  if(first){const nr=document.createElement('div');nr.className='b-nest';const lx=first.offsetLeft+4;nr.style.cssText=`left:${lx}px;top:${Y(sp.end)}px;height:${Y(dn.end)+20-Y(sp.end)}px`;feed.append(nr)}
+}
+$('#b-feed').addEventListener('toggle',ev=>{const d=ev.target;if(!d.matches?.('details.rail'))return;d.open?B.open.add(d.dataset.id):B.open.delete(d.dataset.id);layoutB()},true);
+$('#b-feed').addEventListener('pointerover',ev=>{
+  const t=ev.target.closest('[data-id]');$('#b-feed').querySelectorAll('.hot').forEach(x=>x.classList.remove('hot'));if(!t)return;
+  const id=t.dataset.id;$('#b-feed').querySelectorAll(`[data-id="${id}"]`).forEach(x=>x.classList.add(x.classList.contains('b-row')||x.classList.contains('ev')?'hot':'x'));
+});
+$('#b-feed').addEventListener('click',ev=>{const bar=ev.target.closest('.b-bars .ev');if(!bar)return;const row=$(`#b-feed .b-row[data-id="${bar.dataset.id}"]`);const d=row&&row.querySelector('details');if(d){d.open=!d.open;row.scrollIntoView({block:'nearest',behavior:'smooth'})}});
+
+/* ======================================================================
+   C · Icicle — one turn; width is time; click a frame to zoom into it.
+   ====================================================================== */
+const C={turn:3,path:[],sel:null};
+function cTree(n){
+  const T=turnOf(n),inT=e=>e.turn===n;
+  const mk=(kind,start,end,label,e,children=[])=>({kind,start,end,label,e,children});
+  const leaf=c=>mk('call',c.start,c.end,callLabel(c),c,EV.filter(i=>i.parent===c.id).map(leaf));
+  const steps=lane=>EV.filter(e=>inT(e)&&e.lane===lane&&e.kind==='llm').map(L=>{
+    const kids=EV.filter(e=>e.parent===L.id);
+    return mk('step',L.start,Math.max(L.end,...kids.map(k=>k.end)),L.head||'',L,[mk('llm',L.start,L.end,'',L),...kids.map(leaf)]);
+  });
+  const comp=EV.filter(e=>inT(e)&&e.kind==='compact').map(e=>mk('compact',e.start,e.end,'compaction',e));
+  const root=mk('turn',T.start,T.end,T.user.text,T.user,[...comp,...steps('root')]);
+  const runs=[];
+  const subs=EV.filter(e=>inT(e)&&e.lane==='sub1'&&e.kind==='llm');
+  if(subs.length){const sp=EV.find(e=>e.kind==='spawn'),dn=EV.find(e=>e.kind==='done');runs.push(mk('run',sp.end,dn.end,sp.arg,sp,steps('sub1')))}
+  return {root,runs};
+}
+function cPlace(top){
+  const rows=[];
+  const place=(node,min,parent)=>{let r=min;const free=r=>!(rows[r]||[]).some(([a,b])=>node.start<b&&node.end>a);while(!free(r))r++;(rows[r]=rows[r]||[]).push([node.start,node.end]);node.row=r;node.parent=parent;node.children.sort((a,b)=>a.start-b.start).forEach(c=>place(c,r+1,node))};
+  place(top,0,null);return rows.length;
+}
+function cBar(){
+  const crumbs=C.path.map((nd,i)=>`<button type="button" data-crumb="${i}" title="${esc(nd.label||title(nd.e))}">${esc(i===0?'turn '+C.turn:nd.kind==='step'?(nd.label||'step'):nd.kind==='run'?'subagent':nd.label)}</button>`).join('<span>›</span>');
+  $('#c-bar').innerHTML=`${TURNS.map(t=>`<button type="button" data-cturn="${t.n}" aria-pressed="${C.turn===t.n}">${t.n}</button>`).join('')}<span class="sep"></span><span class="crumbs">${crumbs}</span>`;
+}
+let C_TREE=null;
+function renderC(){
+  if(!C_TREE||C_TREE.n!==C.turn){C_TREE=cTree(C.turn);C_TREE.n=C.turn;C.path=[C_TREE.root]}
+  cBar();
+  const stage=$('#c-stage'),W=stage.clientWidth;
+  const focus=C.path[C.path.length-1],v0=focus.start,v1=Math.max(focus.end,v0+1);
+  const x=t=>(t-v0)/(v1-v0)*W;
+  const RH=22,h=[];
+  // ticks relative to the turn start
+  const T=turnOf(C.turn),span=v1-v0;
+  const STEPS=[.1,.2,.5,1,2,5,10,15,30,60,120,300,600].map(s=>s*S);
+  const st=STEPS.find(s=>s/span*W>=(isPhone()?56:80))||600*S;
+  const tf=ms=>ms%60000===0&&ms>0?ms/60000+'m':fmtDur(ms);
+  const ax=[];for(let t=Math.ceil((v0-T.start)/st)*st+T.start;t<=v1;t+=st){const px=x(t),lab='+'+tf(Math.round(t-T.start));if(px+3+lab.length*6.6<=W)ax.push(`<span style="left:${px+3}px">${lab}</span>`);h.push(`<div class="c-grid" style="left:${px}px"></div>`)}
+  // instants pinned on the axis
+  const pins=[];
+  for(const e of EV.filter(e=>e.turn===C.turn&&['user','notify','alert','abort'].includes(e.kind)&&!(e.kind==='user'&&e.mode!=='steering'))){
+    if(e.start<v0||e.start>v1)continue;const px=x(e.start);
+    const cls=e.kind==='user'?'steer':e.kind;
+    pins.push(`<div class="c-pin ${cls}" data-id="${e.id}" style="left:${px}px">${e.kind==='abort'?'✕':''}</div>`);
+    h.push(`<div class="c-mark${e.kind==='abort'||e.kind==='alert'?' bad':''}" style="left:${px}px"></div>`);
+  }
+  for(const e of EV.filter(e=>e.kind==='life'&&['restart','replace','starting'].includes(e.state)&&e.start>=T.start-60*S&&e.start<=v1&&e.end>=v0)){
+    const px=Math.max(0,x(e.start));pins.push(`<div class="c-pin life" data-id="${e.id}" style="left:${px+6}px">${tile(e.state,'s12')}</div>`);
+  }
+  const nodeHTML=(nd,y)=>{
+    if(nd.end<v0||nd.start>v1)return '';
+    const a=Math.max(0,x(nd.start)),b=Math.min(W,x(nd.end)),w=Math.max(1,b-a),thin=w<4&&nd.kind!=='turn';
+    const fail=nd.e&&nd.kind!=='step'&&nd.kind!=='turn'&&failed(nd.e);
+    let strip='',label=nd.label;
+    if(nd.kind==='llm'){const ox=x(nd.start);strip=`<div class="strip${nd.e.stop==='error'?' llm err':''}">${segs(nd.e,x,ox)}</div>`;label=w>=90?fmtDur(nd.end-nd.start)+' · '+fmtTok(nd.e.out)+' out':w>=44?fmtDur(nd.end-nd.start):''}
+    else if(nd.kind==='call')strip=`<div class="strip ${callCls(nd.e)}"></div>`;
+    else if(nd.kind==='compact'){strip='<div class="strip compact"></div>'}
+    if(nd.kind==='step')label=(nd.label?nd.label+' · ':'')+fmtDur(nd.end-nd.start);
+    const lab=label&&(nd.kind==='llm'?fits(label,w):w>=44)?esc(label):'';
+    return `<div tabindex="0" class="c-node c-${nd.kind}${fail?' fail':''}${thin?' thin':''}" data-id="${nd.e?nd.e.id:''}" data-node="${nd.kind}:${nd.e?nd.e.id:''}" style="left:${a}px;top:${y+nd.row*RH}px;width:${w}px" ${nd.kind!=='turn'?`title="${esc(nd.label)}"`:''}>${thin?'':`<span>${lab}</span>`}${strip}</div>`;
+  };
+  const walk=(nd,y)=>{h.push(nodeHTML(nd,y));nd.children.forEach(c=>walk(c,y))};
+  let y=36;
+  const rootRows=cPlace(C_TREE.root);
+  // Focus within a subagent run zooms the run only.
+  const inRun=C.path.some(p=>p.kind==='run');
+  if(!inRun){walk(C_TREE.root,y);y+=rootRows*RH}
+  for(const run of C_TREE.runs){
+    if(run.end<v0||run.start>v1)continue;
+    const n=cPlace(run);y+=12;walk(run,y);y+=n*RH;
+    const sp=byId[run.e.id];if(!inRun&&sp.start>=v0)h.push(`<div class="c-mark" style="left:${x(sp.start)}px;top:36px;bottom:auto;height:${y-36-n*RH}px"></div>`);
+  }
+  stage.style.height=y+4+'px';
+  stage.innerHTML=`<div class="c-axis">${ax.join('')}${pins.join('')}</div>`+h.join('');
+  renderWhere(focus,inRun?'sub1':'root',v0,v1);
+  cSelect(C.sel);
+}
+function renderWhere(focus,lane,v0,v1){
+  const cats=[['s-wait','first token'],['s-think','thinking'],['s-stream','streaming'],['call','tools'],['compact','compaction'],['idle','waiting']];
+  const tot=Object.fromEntries(cats.map(([c])=>[c,0]));
+  const L=EV.filter(e=>e.lane===lane&&e.end>v0&&e.start<v1);
+  const dt=Math.max(20,(v1-v0)/4000);
+  for(let t=v0;t<v1;t+=dt){
+    let c='idle';
+    const l=L.find(e=>e.kind==='llm'&&t>=e.start&&t<e.end);
+    if(l)c=t<l.ttft?'s-wait':t<l.thinkEnd?'s-think':'s-stream';
+    else if(L.some(e=>e.kind==='compact'&&t>=e.start&&t<e.end))c='compact';
+    else if(L.some(e=>['tool','code','spawn'].includes(e.kind)&&t>=e.start&&t<e.end))c='call';
+    tot[c]+=dt;
+  }
+  const sum=Object.values(tot).reduce((a,b)=>a+b,0)||1,W=$('#c-where').clientWidth;
+  $('#c-where').innerHTML=cats.filter(([c])=>tot[c]>0).map(([c,name])=>{const w=tot[c]/sum*W,txt=`${name} ${fmtDur(tot[c])}`;return `<div class="${c}" style="width:${w}px;flex:none" title="${esc(txt)}">${fits(txt,w)?`<span>${esc(txt)}</span>`:fits(name,w)?`<span>${esc(name)}</span>`:''}</div>`}).join('');
+}
+function cSelect(id){
+  C.sel=id;const st=$('#c-stage');st.querySelectorAll('.crop').forEach(c=>c.remove());
+  const el=id&&st.querySelector(`.c-node:not(.c-step):not(.c-turn):not(.c-run)[data-id="${id}"], .c-pin[data-id="${id}"]`);
+  if(el)cropAround(el,st);
+  $('#c-inspect').innerHTML=id&&el?inspectHTML(byId[id]):'';
+}
+function cFind(nd,key){if(`${nd.kind}:${nd.e?nd.e.id:''}`===key)return [nd];for(const c of nd.children){const p=cFind(c,key);if(p)return [nd,...p]}return null}
+$('#c-stage').addEventListener('click',ev=>{
+  const pin=ev.target.closest('.c-pin');if(pin){cSelect(pin.dataset.id);return}
+  const n=ev.target.closest('.c-node');if(!n){cSelect(null);return}
+  const key=n.dataset.node,kind=key.split(':')[0];
+  if(kind==='step'||kind==='turn'||kind==='run'||(kind==='call'&&byId[n.dataset.id].kind==='code')){
+    let p=cFind(C_TREE.root,key);if(!p)for(const run of C_TREE.runs){const q=cFind(run,key);if(q){p=[C_TREE.root,...q];break}}
+    if(p){C.path=p;if(kind==='call')C.sel=n.dataset.id;else C.sel=null;renderC();return}
+  }
+  cSelect(n.dataset.id);
+});
+$('#c-bar').addEventListener('click',ev=>{const b=ev.target.closest('button');if(!b)return;if(b.dataset.cturn){C.turn=+b.dataset.cturn;C.sel=null;C_TREE=null;renderC()}else if(b.dataset.crumb){C.path=C.path.slice(0,+b.dataset.crumb+1);renderC()}});
+$('#c-inspect').addEventListener('click',ev=>{if(ev.target.closest('[data-close]'))cSelect(null)});
+
+/* ======================================================================
+   D · Waterfall — every call as a row: start, call, and its bar on the
+   turn's time scale. Timing, tokens, cost and status on hover and expand.
+   ====================================================================== */
+const D={show:{llm:true,tools:true,luna:true,host:true},errors:false,open:null};
+function dVisible(e){
+  if(D.errors&&!failed(e)&&e.kind!=='abort'&&e.kind!=='alert')return false;
+  if(e.kind==='llm'||e.kind==='compact')return D.show.llm;
+  if(['tool','code','spawn','inner'].includes(e.kind))return D.show.tools;
+  if(e.kind==='luna')return D.show.luna;
+  if(e.kind==='life')return D.show.host;
+  return !D.errors||e.kind==='abort'||e.kind==='alert';
+}
+function dBar(){
+  const chip=(k,lab)=>`<button type="button" data-show="${k}" aria-pressed="${D.show[k]}">${lab}</button>`;
+  $('#d-bar').innerHTML=`${chip('llm','llm')}${chip('tools','tools')}${chip('luna','luna')}${chip('host','host')}<span class="sep"></span><button type="button" data-errors aria-pressed="${D.errors}">errors</button>`;
+}
+function dWf(e,v0,v1){
+  const pct=t=>Math.min(100,Math.max(0,(t-v0)/(v1-v0)*100));
+  if(e.end===e.start)return e.kind==='life'?'':`<div class="wfbar inst${e.kind==='abort'||e.kind==='alert'?' bad':''}" style="left:${pct(e.start)}%"></div>`;
+  const a=pct(e.start),w=Math.max(.4,pct(e.end)-a);
+  if(e.kind==='llm')return `<div class="wfbar ev llm${e.stop==='error'?' err':''}" style="left:${a}%;width:${w}%;position:absolute">${(e.stop==='error'?[['s-wait',e.start,e.ttft],['s-think',e.ttft,e.thinkEnd]]:[['s-wait',e.start,e.ttft],['s-think',e.ttft,e.thinkEnd],['s-stream',e.thinkEnd,e.end]]).filter(([,p,q])=>q>p).map(([c,p,q])=>`<span class="seg ${c}" style="left:${(p-e.start)/(e.end-e.start)*100}%;width:${(q-p)/(e.end-e.start)*100}%"></span>`).join('')}</div>`;
+  const cls=e.kind==='luna'?'luna':e.kind==='compact'?'compact':e.kind==='life'?'life '+e.state:callCls(e);
+  return `<div class="wfbar ${cls}" style="left:${a}%;width:${w}%;padding:0"></div>`;
+}
+// The call cell's [name, argument]; facts that repeat it or the start column stay out of the tooltip and detail.
+function dCall(e){
+  if(e.kind==='llm')return [e.model,e.stop==='error'?e.err:(e.head||'')];
+  if(['tool','code','spawn','inner'].includes(e.kind))return [e.kind==='inner'?e.name.replace(/^mcp__([a-z]+)__/,'$1.'):e.name,e.name==='read'||e.name==='edit'?base(e.arg):e.kind==='code'||e.name==='orb_alert'?'':e.arg];
+  if(e.kind==='notify')return ['notification',e.text];
+  if(e.kind==='luna')return ['luna',e.purpose];
+  if(e.kind==='life')return [STATE_WORD[e.state],''];
+  if(e.kind==='user')return [e.mode,e.text];
+  if(e.kind==='alert')return [e.text,''];
+  return [title(e),''];
+}
+const D_AT=new Set(['start','sent','at','from']);
+function dFacts(e){const [name,arg]=dCall(e);return facts(e).filter(([k,v])=>!D_AT.has(k)&&v!==name&&v!==arg)}
+function dTip(e){const [name,arg]=dCall(e);return `<b class="full">${esc((name+' '+arg).trim())}</b><table>${dFacts(e).filter(([k])=>!TIP_SKIP.has(k)).map(([k,v,c])=>`<tr><td class="k">${esc(k)}</td><td${c?` class="${c}"`:''}>${esc(v)}</td></tr>`).join('')}</table>`}
+function dTurnFacts(T){
+  const all=EV.filter(e=>e.turn===T.n),L=all.filter(e=>e.kind==='llm'),u=T.user;
+  const f=[['duration',fmtDur(T.end-T.start)],['input',fmtTok(L.reduce((a,e)=>a+e.inp,0))],['output',fmtTok(L.reduce((a,e)=>a+e.out,0))],['cost',fmtCost(all.reduce((a,e)=>a+(e.cost||0),0))]];
+  if(u.mode!=='message')f.push(['delivered',clock(u.delivered,1)+' · after '+fmtDur(u.delivered-u.start)]);
+  return f;
+}
+const dDetail=fs=>fs.length?`<tr class="detail"><td colspan="3">${kvHTML(fs)}</td></tr>`:'';
+function dRow(e,v0,v1){
+  const sel=D.open===e.id?' sel':'';
+  if(e.kind==='alert')return `<tr class="alertrow${sel}" data-did="${e.id}"><td>${clock(e.start)}</td><td colspan="2">${esc(e.text)}</td></tr>`+(sel?dDetail(dFacts(e)):'');
+  const [name,arg]=dCall(e);
+  const bad=failed(e)||e.kind==='abort',side=e.kind==='luna'||e.kind==='life';
+  const pre=(e.lane==='sub1'?'<span class="d-nest"></span>':'')+(e.kind==='inner'?'<span class="d-ind">└</span>':'')+(e.kind==='life'?tile(e.state,'s12')+' ':'');
+  const nm=e.kind==='user'?`<span class="rec-status">${esc(name)}</span>${esc(arg)}`:`<span${bad?' class="bad"':''}>${esc(name)}</span> <span class="a">${esc(arg)}</span>`;
+  return `<tr class="ev-row${side?' side':''}${sel}" data-did="${e.id}"><td>${clock(e.start)}</td><td class="name">${pre}${nm}</td><td class="wf"><div class="wfi">${dWf(e,v0,v1)}</div></td></tr>`+(sel?dDetail(dFacts(e)):'');
+}
+function renderD(){
+  dBar();
+  const rows=[];
+  let gi=0;
+  const flush=t=>{while(gi<GAPS.length&&GAPS[gi].start<=t){const g=GAPS[gi++];rows.push(`<tr class="gaprow" data-did="${g.id}"><td colspan="3">${g.reason!=='waiting'?tile(g.reason,'s12')+' ':''}${fmtDur(g.end-g.start)}</td></tr>`)}};
+  for(const T of TURNS){
+    flush(T.start-1);
+    const evs=EV.filter(e=>e.turn===T.n&&e!==T.user&&dVisible(e));
+    const v0=T.start,v1=Math.max(T.end,...evs.filter(e=>e.kind==='luna').map(e=>e.end));
+    const q=T.user.mode==='queued'?'<span class="rec-status">queued</span>':'';
+    rows.push(`<tr class="band" data-did="${T.user.id}" data-turn="${T.n}"><td class="n">${clock(T.start)}</td><td class="txt" colspan="2">${q}${esc(T.user.text)}</td></tr>`+(D.open===T.user.id?dDetail(dTurnFacts(T)):''));
+    for(const e of evs){
+      flush(e.start);
+      if(e.kind==='life'&&(e.state==='sleeping'||e.state==='stopped'))continue;
+      rows.push(dRow(e,v0,v1));
+    }
+  }
+  flush(Infinity);
+  $('#d-table').innerHTML=`<colgroup><col class="c-start"><col class="c-call"><col></colgroup><thead><tr><th>start</th><th>call</th><th></th></tr></thead><tbody>${rows.join('')}</tbody>`;
+}
+$('#d-bar').addEventListener('click',ev=>{const b=ev.target.closest('button');if(!b)return;if(b.dataset.show)D.show[b.dataset.show]=!D.show[b.dataset.show];else if(b.hasAttribute('data-errors'))D.errors=!D.errors;renderD()});
+$('#d-table').addEventListener('click',ev=>{
+  const tr=ev.target.closest('tr[data-did]');if(!tr||tr.classList.contains('gaprow'))return;D.open=D.open===tr.dataset.did?null:tr.dataset.did;renderD();
+});
+$('#d-table').addEventListener('pointermove',ev=>{
+  if(ev.pointerType!=='mouse')return;
+  const tr=ev.target.closest('tr[data-did]'),id=tr?.dataset.did;
+  if(!tr||id===D.open){hideTip();return}
+  if(tr.classList.contains('gaprow'))showTip(id,ev);
+  else if(tr.dataset.turn)showTip(id,ev,`<b>turn ${tr.dataset.turn}</b><table>${dTurnFacts(turnOf(+tr.dataset.turn)).map(([k,v])=>`<tr><td class="k">${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}</table>`);
+  else showTip(id,ev,dTip(byId[id]));
+});
+
+/* ======================================================================
+   E · Tide — context fill as a stepped strip chart over the broken axis,
+   cumulative cost on its own strip, calls notched along the baseline.
+   ====================================================================== */
+const E={sel:null,g:null};
+function eChanges(lane){
+  const ch=LLMS.filter(e=>e.lane===lane&&e.stop!=='error').map(e=>({t:e.start,v:e.inp,id:e.id}));
+  for(const c of EV.filter(e=>e.kind==='compact'&&e.lane===lane))ch.push({t:c.start,v:c.before,id:c.id},{t:c.end,v:c.after,id:c.id,ramp:true});
+  return ch.sort((a,b)=>a.t-b.t);
+}
+function eLevel(ch,t){
+  let i=-1;for(let j=0;j<ch.length&&ch[j].t<=t;j++)i=j;if(i<0)return null;
+  const n=ch[i+1];if(n&&n.ramp)return {v:ch[i].v+(n.v-ch[i].v)*(t-ch[i].t)/(n.t-ch[i].t),id:n.id};
+  return {v:ch[i].v,id:ch[i].id};
+}
+const E_COST=EV.filter(e=>e.cost>0).sort((a,b)=>a.end-b.end);
+const eCum=t=>E_COST.reduce((s,e)=>e.end<=t?s+e.cost:s,0);
+const E_CH={root:eChanges('root'),sub1:eChanges('sub1')};
+const E_END={root:Math.max(...EV.filter(e=>e.lane==='root').map(e=>e.end)),sub1:EV.find(e=>e.kind==='done').end};
+function renderE(){
+  const ph=isPhone(),sc=$('#e-scroll'),W=Math.max(sc.clientWidth,ph?680:0);
+  const PADL=48,PADR=16,gp=GAP_PX();
+  const X=makeScale((W-PADL-PADR-GAPS.length*gp)/ACTIVE,gp,true),x=t=>X(t)+PADL;
+  const PT=44,PH=ph?150:210,B=PT+PH,LIM=CTX_LIMIT.sol,y=v=>B-v/LIM*PH;
+  const TR=B+4,TS=TR+PACK.root.tools*8+2,CT=TS+PACK.sub1.tools*8+16,CH=ph?40:52,CB=CT+CH,H=CB+12;
+  const total=E_COST.reduce((s,e)=>s+e.cost,0),cstep=[.05,.1,.2,.25,.3,.5,1,2].find(s=>total/s<=2),cmax=Math.ceil(total/cstep)*cstep,yc=c=>CB-c/cmax*CH;
+  E.g={X,x,y,yc,PT,B,CB,PADL};
+  const lo=[],hi=[],h=[],lab=[];
+  // time ticks
+  const STEPS=[1,2,5,10,15,30,60,120,300,600,900,1800,3600,7200].map(s=>s*S),k=X.k;
+  const st=STEPS.find(s=>s*k>=(ph?64:84))||7200*S;
+  for(let t=Math.ceil(BASE*S/st)*st-BASE*S;t<=END;t+=st){
+    if(GAPS.some(g=>t>g.start-30/k&&t<g.end+30/k))continue;
+    const px=x(t);h.push(`<div class="a-tick" style="left:${px}px;top:${PT}px;bottom:auto;height:${CB-PT}px"></div><div class="a-ticklab" style="left:${px}px">${st>=60*S?clock(t).slice(0,5):clock(t)}</div>`);
+  }
+  // context grid, ceiling, baseline; cost grid
+  for(const v of [LIM/4,LIM/2,LIM*3/4]){lo.push(`<line class="e-grid" x1="${PADL}" x2="${W-PADR}" y1="${y(v)}" y2="${y(v)}"/>`);lab.push([y(v),v/1000+'k'])}
+  lo.push(`<line class="e-ceil" x1="${PADL}" x2="${W-PADR}" y1="${PT}" y2="${PT}"/><line class="e-base" x1="${PADL}" x2="${W-PADR}" y1="${B}" y2="${B}"/>`);lab.push([PT,LIM/1000+'k']);
+  for(let c=cstep;c<=cmax+1e-9;c+=cstep){lo.push(`<line class="e-grid" x1="${PADL}" x2="${W-PADR}" y1="${yc(c)}" y2="${yc(c)}"/>`);lab.push([yc(c),'$'+c.toFixed(2)])}
+  lo.push(`<line class="e-base" x1="${PADL}" x2="${W-PADR}" y1="${CB}" y2="${CB}"/>`);
+  // context traces
+  const path=(ch,end)=>ch.map((c,i)=>i===0?`M${x(c.t)},${y(c.v)}`:c.ramp?`L${x(c.t)},${y(c.v)}`:`H${x(c.t)}V${y(c.v)}`).join('')+`H${x(end)}`;
+  const rp=path(E_CH.root,E_END.root);
+  lo.unshift(`<path class="e-area" d="${rp}V${B}H${x(E_CH.root[0].t)}Z"/>`);
+  hi.push(`<path class="e-line" d="${rp}"/>`);
+  const sp=path(E_CH.sub1,E_END.sub1),sl=E_CH.sub1[E_CH.sub1.length-1];
+  hi.push(`<path class="e-sub" d="${sp}"/><text class="e-lab" x="${x(E_END.sub1)+4}" y="${y(sl.v)+4}">subagent</text>`);
+  // cumulative cost
+  let cd=`M${x(0)},${yc(0)}`,cum=0;for(const e of E_COST){cum+=e.cost;cd+=`H${x(e.end)}V${yc(cum)}`}
+  hi.push(`<path class="e-cost" d="${cd}H${x(END)}"/>`);
+  hi.push(`<line class="e-cross" id="e-cross" x1="0" x2="0" y1="${PT}" y2="${CB}" display="none"/><circle class="e-dot" id="e-dot" r="3.5" display="none"/><circle class="e-dot" id="e-cdot" r="2.5" display="none"/>`);
+  // turns and messages
+  for(const T of TURNS)h.push(`<div class="a-turn" style="left:${x(T.user.delivered)}px;top:${PT-14}px;height:${B-PT+14}px"></div>`);
+  for(const u of EV.filter(e=>e.kind==='user'))h.push(`<div class="mk-user ev${u.mode==='steering'?' hollow':''}" data-id="${u.id}" style="left:${x(u.mode==='queued'?u.delivered:u.start)-4}px;top:${PT-14}px"></div>`);
+  // notches: LLM above the baseline, tools beneath
+  for(const e of EV){
+    const a=x(e.start),w=Math.max(1,x(e.end)-a);
+    if(e.kind==='llm'){const top=e.lane==='root'?B-9:B-19;h.push(`<div tabindex="0" class="ev llm${e.stop==='error'?' err':''}" data-id="${e.id}" style="left:${a}px;top:${top}px;width:${Math.max(2,w)}px;height:8px">${segs(e,x,a)}</div>`)}
+    else if(['tool','code','spawn'].includes(e.kind))h.push(`<div tabindex="0" class="ev ${callCls(e)}" data-id="${e.id}" style="left:${a}px;top:${(e.lane==='root'?TR:TS)+e.row*8}px;width:${Math.max(2,w)}px;height:6px"></div>`);
+    else if(e.kind==='compact')h.push(`<div tabindex="0" class="ev compact" data-id="${e.id}" style="left:${a}px;top:${y(e.before)}px;width:${w}px;height:${y(e.after)-y(e.before)}px"></div>`);
+  }
+  for(const g of GAPS){const a=x(g.start),b=x(g.end);h.push(`<div class="a-gap" data-id="${g.id}" style="left:${a}px;width:${b-a}px"><div class="a-gaplab">${b-a>=44?fmtDur(g.end-g.start).replace(/ \d+s$/,''):''}</div></div>`)}
+  const svg=(cls,body)=>`<svg class="${cls}" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true">${body.join('')}</svg>`;
+  $('#e-inner').style.width=W+'px';
+  $('#e-inner').innerHTML=`<div class="e-y">${lab.map(([yy,t])=>`<span style="top:${yy-7}px">${t}</span>`).join('')}</div><div class="e-canvas" id="e-canvas" style="width:${W}px;height:${H}px">${svg('lo',lo)}${h.join('')}${svg('top',hi)}</div>`;
+  eSelect(E.sel);
+}
+function ePick(px,py){
+  const g=E.g;if(!g||py<g.PT-4||py>g.B+2)return null;
+  const t=g.X.inv(px-g.PADL);if(t<0||t>END||GAPS.some(q=>t>q.start&&t<q.end))return null;
+  const c=[];
+  for(const lane of ['root','sub1']){if(t>E_END[lane])continue;const l=eLevel(E_CH[lane],t);if(l)c.push({...l,lane,t,px,d:Math.abs(py-g.y(l.v))})}
+  return c.sort((a,b)=>a.d-b.d)[0]||null;
+}
+function eCross(p){
+  const g=E.g,cr=$('#e-cross'),d=$('#e-dot'),cd=$('#e-cdot');if(!cr)return;
+  for(const el of [cr,d,cd])el.setAttribute('display',p?'inline':'none');if(!p)return;
+  cr.setAttribute('x1',p.px);cr.setAttribute('x2',p.px);d.setAttribute('cx',p.px);d.setAttribute('cy',g.y(p.v));cd.setAttribute('cx',p.px);cd.setAttribute('cy',g.yc(eCum(p.t)));
+}
+function eTipHTML(p){
+  const e=byId[p.id],r=[];
+  if(e.kind==='llm'){r.push(['context',fmtTok(e.inp)+' · '+Math.round(e.inp/e.limit*100)+'%']);if(e.cr)r.push(['cache read',Math.round(e.cr/e.inp*100)+'%']);r.push(['output',fmtTok(e.out)],['call',fmtCost(e.cost)])}
+  else r.push(['context',fmtTok(e.before)+' → '+fmtTok(e.after)],['duration',fmtDur(e.end-e.start)]);
+  r.push(['spent',fmtCost(eCum(p.t))],['at',clock(p.t)]);
+  return `<b>${esc(title(e))}</b><table>${r.map(([k,v])=>`<tr><td class="k">${k}</td><td>${esc(v)}</td></tr>`).join('')}</table>`;
+}
+function eSelect(id){
+  E.sel=id;const cv=$('#e-canvas');if(!cv)return;cv.querySelectorAll('.crop,.e-sel').forEach(c=>c.remove());
+  // the selected call's level, held until the next change
+  for(const lane of ['root','sub1']){const ch=E_CH[lane],i=ch.findIndex(c=>c.id===id&&!c.ramp);if(i<0)continue;const g=E.g,a=g.x(ch[i].t),b=g.x(ch[i+1]?ch[i+1].t:E_END[lane]),yy=g.y(ch[i].v);cv.querySelector('svg.top').insertAdjacentHTML('afterbegin',`<line class="e-sel" x1="${a}" x2="${b}" y1="${yy}" y2="${yy}"/>`)}
+  const el=id&&cv.querySelector(`[data-id="${id}"]`);if(el)cropAround(el,cv);
+  $('#e-inspect').innerHTML=id&&byId[id]?inspectHTML(byId[id]):'';
+}
+$('#e-inner').addEventListener('pointermove',ev=>{
+  if(ev.pointerType!=='mouse')return;
+  if(ev.target.closest('[data-id]')){eCross(null);return}
+  const r=$('#e-canvas').getBoundingClientRect(),p=ePick(ev.clientX-r.left,ev.clientY-r.top);
+  eCross(p);if(p)showTip(p.id,ev,eTipHTML(p));else hideTip();
+});
+$('#e-inner').addEventListener('pointerleave',()=>eCross(null));
+$('#e-inner').addEventListener('click',ev=>{
+  const t=ev.target.closest('[data-id]');if(t){eSelect(t.dataset.id);return}
+  const r=$('#e-canvas').getBoundingClientRect(),p=ePick(ev.clientX-r.left,ev.clientY-r.top);eSelect(p?p.id:null);
+});
+$('#e-inner').addEventListener('keydown',ev=>{if((ev.key==='Enter'||ev.key===' ')&&ev.target.matches('[data-id]')){ev.preventDefault();ev.target.click()}});
+$('#e-inspect').addEventListener('click',ev=>{if(ev.target.closest('[data-close]'))eSelect(null)});
+
+/* ======================================================================
+   F · Metro — schematic transit map: one slot per station, not to scale.
+   Desktop runs left→right; phones transpose the same layout top→bottom.
+   ====================================================================== */
+const F={sel:null};
+const fmtEl=ms=>{const s=Math.floor(ms/S),h=Math.floor(s/3600),m=Math.floor(s/60)%60;return h?`${h}:${p2(m)}:${p2(s%60)}`:`${m}:${p2(s%60)}`};
+const F_PLAN=(()=>{
+  const spawn=EV.find(e=>e.kind==='spawn'),done=EV.find(e=>e.kind==='done');
+  const list=EV.filter(e=>e.kind==='user'||(e.kind==='llm'&&AGENT.has(e.lane))||['compact','notify','done','alert','abort'].includes(e.kind));
+  const firstSub=list.find(e=>e.lane==='sub1'),st=[],tunnels=[];let s=0,gi=0,spawnS=0;
+  const gapsUntil=t=>{while(gi<GAPS.length&&GAPS[gi].end<=t){const g=GAPS[gi++];if(g.reason==='waiting')s+=.6;else{tunnels.push({g,s0:s+.6,s1:s+4.6});s+=5.2}}};
+  for(const e of list){
+    gapsUntil(e.start);s+=1;
+    if(e===firstSub)s=Math.max(s,spawnS+3);
+    st.push({e,line:e.lane==='sub1'?'branch':'main',s});
+    if(e.id===spawn.parent)spawnS=s+.5;
+  }
+  gapsUntil(Infinity);
+  const doneS=st.find(x=>x.e===done).s;
+  // time → slot, for side-line stops
+  const A=[...st.map(x=>[x.e.start,x.s]),...tunnels.flatMap(u=>[[u.g.start,u.s0],[u.g.end,u.s1]])].sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+  const tS=t=>{if(t<=A[0][0])return A[0][1];for(let i=1;i<A.length;i++)if(t<=A[i][0]){const [t0,s0]=A[i-1],[t1,s1]=A[i];return t1>t0?s0+(t-t0)/(t1-t0)*(s1-s0):s1}return A[A.length-1][1]+.8};
+  const side=(evs,min)=>{let p=-Infinity;return evs.map(e=>{const v=Math.max(tS(e.start),p+min);p=v;return {e,s:v}})};
+  const lunas=side(EV.filter(e=>e.kind==='luna'),.9),hosts=side(EV.filter(e=>e.kind==='life'),.9);
+  const off=EV.filter(e=>e.kind==='life'&&(e.state==='stopped'||e.state==='sleeping')).map(e=>[tS(e.start),tS(e.end)]);
+  return {st,tunnels,spawnS,doneS,lunas,hosts,off,total:Math.max(s,...hosts.map(h=>h.s))+1};
+})();
+function renderF(){
+  const ph=isPhone(),P=F_PLAN,cv=$('#f-canvas'),W0=$('#f-scroll').clientWidth;
+  const C=ph?{host:12,luna:28,main:100,branch:140}:{host:14,luna:34,main:104,branch:146};
+  const step=ph?22:Math.min(30,Math.max(20,(W0-80)/P.total)),O=ph?14:20;
+  const u=s=>O+s*step,D=C.branch-C.main;
+  const pt=(s,c)=>ph?[c,u(s)]:[u(s),c];
+  const L=(s0,c0,s1,c1,cls,extra='')=>{const [x1,y1]=pt(s0,c0),[x2,y2]=pt(s1,c1);return `<line class="${cls}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"${extra}/>`};
+  const h=[],top=[];
+  const mains=P.st.filter(x=>x.line==='main'),s0=P.st[0].s,sEnd=P.total-.5;
+  // side lines
+  h.push(L(s0,C.luna,sEnd,C.luna,'f-luna'));
+  {let a=s0;for(const [p,q] of P.off){h.push(L(a,C.host,p,C.host,'f-host'),L(p,C.host,q,C.host,'f-host off'));a=q}h.push(L(a,C.host,sEnd,C.host,'f-host'))}
+  // main line with tunnels
+  {let a=mains[0].s;for(const t of P.tunnels){h.push(L(a,C.main,t.s0,C.main,'f-main'),L(t.s0,C.main,t.s1,C.main,'f-main tunnel'));a=t.s1}h.push(L(a,C.main,mains[mains.length-1].s,C.main,'f-main'))}
+  // subagent branch: 45° out at spawn, 45° back after done
+  {const d=D/step,ps=[pt(P.spawnS,C.main),pt(P.spawnS+d,C.branch),pt(P.doneS,C.branch),pt(P.doneS+d,C.main)];h.push(`<path class="f-branch" d="M${ps.map(p=>p.join(',')).join('L')}"/>`)}
+  // notify: a transfer passage from branch to main
+  for(const x of P.st.filter(x=>x.e.kind==='notify'))h.push(L(x.s,C.branch,x.s,C.main,'f-link'));
+  // tool spurs between a stop and the next stop on its line
+  for(const x of P.st.filter(x=>x.e.kind==='llm')){
+    const kids=EV.filter(k=>k.parent===x.e.id&&(k.kind==='tool'||k.kind==='code'));if(!kids.length)continue;
+    const next=P.st.find(y=>y.line===x.line&&y.s>x.s),span=Math.min(1,next?next.s-x.s:1),c=C[x.line],dir=x.line==='main'?1:-1,r0=x.line==='main'?4:3;
+    kids.forEach((k,i)=>{
+      const s=x.s+span*(i+1)/(kids.length+1),len=5+9*Math.min(1,Math.log10(1+(k.end-k.start)/S)/Math.log10(400));
+      const cls='f-spur'+(k.ok===false?' fail':k.ok==='aborted'?' aborted':''),[ex,ey]=pt(s,c+dir*(r0+len));
+      top.push(`<g class="f-st" data-id="${k.id}" tabindex="0">${L(s,c+dir*r0,s,c+dir*(r0+len),cls,' stroke-linecap="butt"')}${k.kind==='code'?`<rect class="f-cap" x="${ex-2.5}" y="${ey-2.5}" width="5" height="5"/>`:''}<rect class="hit" x="${Math.min(...[pt(s,c)[0],ex])-4}" y="${Math.min(pt(s,c)[1],ey)-4}" width="${Math.abs(ex-pt(s,c)[0])+8}" height="${Math.abs(ey-pt(s,c)[1])+8}" opacity="0"/></g>`);
+    });
+  }
+  // tunnels: hit area, state tile, duration
+  for(const t of P.tunnels){
+    const sm=(t.s0+t.s1)/2,[mx,my]=pt(sm,C.main),[ax,ay]=pt(t.s0,C.main),[bx,by]=pt(t.s1,C.main),dur=fmtDur(t.g.end-t.g.start).replace(/ \d+s$/,'');
+    const ic=`<svg x="${ph?mx+12:mx-6}" y="${ph?my-6:my+10}" width="12" height="12" viewBox="0 0 16 16">${TILES[t.g.reason]}</svg>`;
+    const tx=ph?`<text class="f-lab" x="${mx+30}" y="${my+4}">${dur}</text>`:`<text class="f-lab" x="${mx}" y="${my+34}" text-anchor="middle">${dur}</text>`;
+    top.push(`<g class="f-st" data-id="${t.g.id}" tabindex="0"><rect class="hit" x="${Math.min(ax,bx)-4}" y="${Math.min(ay,by)-6}" width="${Math.abs(bx-ax)+8}" height="${Math.abs(by-ay)+12}" opacity="0"/>${ic}${tx}</g>`);
+  }
+  // stations; a label repeating the previous one on its line is dropped
+  const prevLab={};
+  for(const x of P.st){
+    const e=x.e,c=C[x.line],[px,py]=pt(x.s,c);let shape,lc='f-lab';
+    if(e.kind==='user'){shape=e.mode==='steering'?'<circle class="f-ix steer" r="5"/>':`<circle class="f-ix" r="8"/><text class="f-ixn">${e.turn}</text>`;lc+=e.mode==='steering'?'':' ix'}
+    else if(e.kind==='llm')shape=e.stop==='error'?'<circle class="f-err" r="5"/>':`<circle class="f-stop" r="${e.stop==='stop'?4.5:3.5}"/>`;
+    else if(e.kind==='compact')shape='<rect class="f-compact" x="-6" y="-6" width="12" height="12"/>';
+    else if(e.kind==='notify')shape='<rect class="f-notify" x="-4" y="-4" width="8" height="8" transform="rotate(45)"/>';
+    else if(e.kind==='done')shape='<rect class="f-done" x="-4.5" y="-4.5" width="9" height="9"/>';
+    else if(e.kind==='alert')shape='<rect class="f-alert" x="-5" y="-5" width="10" height="10"/>';
+    else if(e.kind==='abort')shape='<circle class="f-abort" r="6"/><path class="f-x" d="M-3,-3L3,3M3,-3L-3,3"/>';
+    if(failed(e)||e.kind==='abort'||e.kind==='alert')lc+=' bad';
+    const t=fmtEl(e.kind==='user'?e.delivered:e.start),main=x.line==='main',dup=prevLab[x.line]===t;prevLab[x.line]=t;
+    const lab=dup?'':ph?`<text class="${lc}" x="${main?-14:12}" y="4" text-anchor="${main?'end':'start'}">${t}</text>`
+      :`<text class="${lc}" transform="translate(3,${main?-11:10}) rotate(${main?-45:45})" dominant-baseline="${main?'auto':'hanging'}">${t}</text>`;
+    top.push(`<g class="f-st" data-id="${e.id}" tabindex="0" transform="translate(${px},${py})"><circle class="hit" r="10"/>${shape}${lab}</g>`);
+  }
+  // side-line stops: Luna dots, host state tiles
+  for(const l of P.lunas){const [px,py]=pt(l.s,C.luna);top.push(`<g class="f-st" data-id="${l.e.id}" tabindex="0" transform="translate(${px},${py})"><circle class="hit" r="8"/><circle class="f-lunast" r="3.5"/></g>`)}
+  for(const l of P.hosts){const [px,py]=pt(l.s,C.host);top.push(`<g class="f-st" data-id="${l.e.id}" tabindex="0" transform="translate(${px},${py})"><circle class="hit" r="9"/><svg x="-7" y="-7" width="14" height="14" viewBox="0 0 16 16">${TILES[l.e.state]}</svg></g>`)}
+  const len=u(P.total)+(ph?20:56),cross=C.branch+(ph?96:58);
+  const [Wd,Hd]=ph?[cross,len]:[len,cross];
+  cv.style.width=Wd+'px';cv.style.height=Hd+'px';
+  cv.innerHTML=`<svg width="${Wd}" height="${Hd}" viewBox="0 0 ${Wd} ${Hd}" role="img" aria-label="Session map"><defs><pattern id="f-hatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect class="f-hb" width="4" height="4"/><line class="f-hl" x1="0" y1="0" x2="0" y2="4"/></pattern></defs>${h.join('')}${top.join('')}</svg>`;
+  fSelect(F.sel);
+}
+function fSelect(id){
+  F.sel=id;const cv=$('#f-canvas');cv.querySelectorAll('.crop').forEach(c=>c.remove());
+  const el=id&&cv.querySelector(`.f-st[data-id="${id}"]`);if(el)cropAround(el.querySelector('.hit')||el,cv);
+  $('#f-inspect').innerHTML=id&&el?inspectHTML(byId[id]):'';
+}
+$('#f-canvas').addEventListener('click',ev=>{const t=ev.target.closest('.f-st');fSelect(t?t.dataset.id:null)});
+$('#f-canvas').addEventListener('keydown',ev=>{if((ev.key==='Enter'||ev.key===' ')&&ev.target.matches('.f-st')){ev.preventDefault();fSelect(ev.target.dataset.id)}});
+$('#f-inspect').addEventListener('click',ev=>{if(ev.target.closest('[data-close]'))fSelect(null)});
+
+/* ======================================================================
+   G · Replay — a playhead over the session (idle compressed) rebuilds the
+   transcript as it was at that moment; the scrubber is A in miniature.
+   ====================================================================== */
+const G={t:866*S,playing:false,speed:10,open:new Set(),wall:0,last:0,raf:0,drag:false,X:null,cache:new Map()};
+const G_GAP=20*S,GC=makeScale(1,G_GAP,true); // a gap replays as 20s of session time
+const BIT=['001','011','010','110','111','101','100','000'];
+const gBit=()=>`<span class="bit-register" aria-hidden="true">${BIT[Math.floor(G.wall/400)%8]}</span>`;
+const G_TOK={};
+const gTokens=e=>G_TOK[e.id]||(G_TOK[e.id]=(e.text||e.say||'').match(/\s*\S{1,4}/g)||[]);
+const G_ITEMS=(()=>{
+  const it=[];let gi=0;
+  for(const e of EV){
+    while(gi<GAPS.length&&GAPS[gi].start<=e.start){const g=GAPS[gi++];it.push({key:g.id,gap:g,col:'main'})}
+    if(['inner','luna'].includes(e.kind)||(e.kind==='life'&&['replace','sleeping','stopped'].includes(e.state)))continue;
+    it.push({key:e.id,e,col:e.lane==='sub1'&&e.kind!=='done'?'sub':'main'});
+  }
+  while(gi<GAPS.length){const g=GAPS[gi++];it.push({key:g.id,gap:g,col:'main'})}
+  return it;
+})();
+const G_SPAWN=EV.find(e=>e.kind==='spawn'),G_DONE=EV.find(e=>e.kind==='done');
+function gRail(e,lb,hl,mt,cls='',extra=''){
+  return `<details class="rail ${cls}" data-id="${e.id}"${G.open.has(e.id)?' open':''}><summary><span class="mk"></span><span class="sm"><span class="lb">${esc(lb)}</span>${hl?` · <span class="hl">${esc(hl)}</span>`:''}</span><span class="mt">${esc(mt)}</span></summary><div class="rail-body">${extra}${kvHTML(facts(e).filter(([k])=>!['response','said','result','start'].includes(k)))}</div></details>`;
+}
+const gLive=(e,lb,hl,mt,extra='')=>`<div class="rail running" data-id="${e.id}"><div class="g-sum"><span class="mk"></span><span class="sm"><span class="lb">${esc(lb)}</span>${hl?` · <span class="hl">${esc(hl)}</span>`:''}</span><span class="mt">${esc(mt)}</span></div>${extra}</div>`;
+function gInner(e,t){
+  const d=e.end-e.start;
+  return `<ul class="inner-list">${EV.filter(i=>i.parent===e.id&&i.start<=t).map(i=>{const run=t<i.end,w=Math.max(.5,(Math.min(t,i.end)-i.start)/d*100);return `<li class="${run?'running':''}" data-id="${i.id}"><span>${esc(callLabel(i))}</span><span class="ib"><i style="left:${(i.start-e.start)/d*100}%;width:${w}%"></i></span><span>${fmtDur(Math.min(t,i.end)-i.start)}</span></li>`}).join('')}</ul>`;
+}
+function gItem(it,t){
+  if(it.gap){const g=it.gap;if(t<g.start)return null;return `<div class="b-gap" data-id="${g.id}">${g.reason!=='waiting'?tile(g.reason,'s12'):''}${fmtDur(Math.min(t,g.end)-g.start)}</div>`}
+  const e=it.e;if(t<e.start)return null;
+  const live=t<e.end;
+  switch(e.kind){
+    case 'user':return `<div class="b-user${e.mode!=='message'?' q':''}">${e.mode!=='message'&&t<e.delivered?`<span class="rec-status">${e.mode}</span>`:''}${esc(e.text)}</div>`;
+    case 'llm':{
+      const think=e.thinkEnd>e.ttft;let out='';
+      if(e.stop==='error'){
+        if(live)return think&&t>=e.ttft?gLive(e,'thinking','',fmtDur(t-e.ttft)):null;
+        return gRail(e,title(e),e.err,fmtDur(e.end-e.start),'failed');
+      }
+      if(t<e.ttft)return null;
+      if(t<e.thinkEnd)return gLive(e,'thinking','',fmtDur(t-e.ttft));
+      if(think||!live)out+=gRail(e,think?'thinking':'call',e.head||'',fmtDur(think?e.thinkEnd-e.ttft:e.end-e.start));
+      const tk=gTokens(e);
+      if(tk.length){const n=live?Math.ceil(tk.length*(t-e.thinkEnd)/(e.end-e.thinkEnd)):tk.length;out+=`<p class="b-prose">${esc(tk.slice(0,n).join(''))}${live?gBit():''}</p>`}
+      return out;
+    }
+    case 'tool':case 'code':case 'spawn':{
+      const lb=RAIL_LABEL[e.name]||e.name,hl=e.name==='read'||e.name==='edit'?base(e.arg):e.name==='notify_parent'||e.name==='orb_alert'?'':e.arg;
+      if(live)return gLive(e,lb,hl,fmtDur(t-e.start),e.kind==='code'?gInner(e,t):'');
+      const ok=e.ok===true;
+      return gRail(e,lb,hl,ok?fmtDur(e.end-e.start):e.ok==='aborted'?'aborted':'failed',ok?'':'failed',e.kind==='code'?gInner(e,t):'')+`<div class="g-out${ok?'':' bad'}">${esc(e.out)}</div>`;
+    }
+    case 'compact':return live?gLive(e,'compacting',fmtTok(e.before),fmtDur(t-e.start)):gRail(e,'context compacted',fmtTok(e.before)+' → '+fmtTok(e.after),fmtDur(e.end-e.start));
+    case 'notify':return gRail(e,'notification',e.text,'');
+    case 'done':return gRail(e,'subagent',e.text,fmtDur(e.end-G_SPAWN.start));
+    case 'abort':return `<div class="b-plain bad" data-id="${e.id}">aborted</div>`;
+    case 'alert':return `<div class="alert-band" data-id="${e.id}">${esc(e.text)}</div>`;
+    case 'life':{
+      const rep=e.state==='starting'&&EV.find(x=>x.state==='replace'&&x.start>=e.start&&x.start<e.end&&x.start<=t);
+      return `<div class="b-plain" data-id="${e.id}">${tile(e.state)}${STATE_WORD[e.state]}${rep?' · host replaced':''}${e.end>e.start?' · '+fmtDur(Math.min(t,e.end)-e.start):''}</div>`;
+    }
+  }
+  return null;
+}
+// busy: an LLM call is waiting or thinking and has no streaming prose to carry the register
+const gBusy=(lane,t)=>EV.some(e=>e.kind==='llm'&&e.lane===lane&&t>=e.start&&t<e.end&&(t<e.thinkEnd||!gTokens(e).length));
+function gFill(host,items,t,busy){
+  const want=[];for(const it of items){const html=gItem(it,t);if(html)want.push([it.key,html])}
+  if(busy)want.push(['busy',`<div class="g-busy">${gBit()}</div>`]);
+  let cur=host.firstChild;
+  for(const [key,html] of want){
+    let el=G.cache.get(host.id+key);
+    if(!el){el=document.createElement('div');el.dataset.key=key;el._html='';G.cache.set(host.id+key,el)}
+    if(el._html!==html){el.innerHTML=html;el._html=html}
+    if(el!==cur)host.insertBefore(el,cur);else cur=cur.nextSibling;
+  }
+  while(cur){const n=cur.nextSibling;cur.remove();cur=n}
+}
+function gUpdate(tail){
+  const t=G.t,st=$('#g-stage'),follow=tail||st.scrollHeight-st.scrollTop-st.clientHeight<40;
+  $('#g-clock').textContent=clock(t);
+  const sc=$('#g-scrub'),px=G.X?G.X(t):0;
+  sc.setAttribute('aria-valuetext',clock(t));sc.setAttribute('aria-valuenow',Math.round(t/S));
+  $('#g-head').style.left=px+'px';$('#g-future').style.left=px+'px';
+  const run=t>=G_SPAWN.end&&t<G_DONE.end;
+  st.classList.toggle('split',run);$('#g-side').hidden=!run;
+  gFill($('#g-main'),G_ITEMS.filter(i=>i.col==='main'),t,gBusy('root',t));
+  if(run){
+    const side=$('#g-side');if(!side.firstChild||!side.firstChild.classList.contains('g-sideh')){side.innerHTML='<div class="g-sideh"></div><div id="g-subrows"></div>'}
+    side.firstChild.textContent=fmtDur(t-G_SPAWN.start);
+    gFill($('#g-subrows'),G_ITEMS.filter(i=>i.col==='sub'),t,gBusy('sub1',t));
+  }
+  if(follow)st.scrollTop=st.scrollHeight;
+}
+function gBar(){
+  const play=G.playing?'<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 0h3v10H1zM6 0h3v10H6z" fill="currentColor"/></svg>':'<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 0l9 5-9 5z" fill="currentColor"/></svg>';
+  $('#g-bar').innerHTML=`<button type="button" data-play aria-label="${G.playing?'Pause':'Play'}" title="${G.playing?'Pause':'Play'}" aria-pressed="${G.playing}">${play}</button><span class="sep"></span>${[1,10,60].map(s=>`<button type="button" data-speed="${s}" aria-pressed="${G.speed===s}">${s}×</button>`).join('')}<span class="g-time" id="g-clock"></span>`;
+}
+function gScrub(){
+  const sc=$('#g-scrub'),W=sc.clientWidth,gp=isPhone()?12:20,X=makeScale((W-GAPS.length*gp)/ACTIVE,gp,true);G.X=X;
+  const Y={you:2,root:9,rootT:16,sub:22,subT:29,luna:34,host:38},h=[];
+  for(const g of GAPS){const a=X(g.start);h.push(`<div class="a-gap" data-id="${g.id}" style="left:${a}px;width:${X(g.end)-a}px"></div>`)}
+  for(const e of EV){
+    const a=X(e.start),w=Math.max(1,X(e.end)-a);
+    if(e.kind==='user')h.push(`<div class="ev" data-id="${e.id}" style="left:${X(e.delivered)-1}px;top:${Y.you}px;width:3px;height:5px;background:var(--k)"></div>`);
+    else if(e.kind==='llm')h.push(`<div class="ev llm${e.stop==='error'?' err':''}" data-id="${e.id}" style="left:${a}px;top:${e.lane==='root'?Y.root:Y.sub}px;width:${w}px;height:6px">${segs(e,X,a)}</div>`);
+    else if(['tool','code','spawn'].includes(e.kind))h.push(`<div class="ev ${callCls(e)}" data-id="${e.id}" style="left:${a}px;top:${e.lane==='root'?Y.rootT:Y.subT}px;width:${w}px;height:4px"></div>`);
+    else if(e.kind==='compact')h.push(`<div class="ev compact" data-id="${e.id}" style="left:${a}px;top:${Y.root}px;width:${w}px;height:6px"></div>`);
+    else if(e.kind==='luna')h.push(`<div class="ev luna" data-id="${e.id}" style="left:${a}px;top:${Y.luna}px;width:${Math.max(2,w)}px;height:3px"></div>`);
+    else if(e.kind==='life'&&e.end>e.start)h.push(`<div class="ev life ${e.state}" data-id="${e.id}" style="left:${a}px;top:${Y.host}px;width:${Math.max(2,w)}px;height:4px;padding:0"></div>`);
+    else if(e.kind==='abort'||e.kind==='alert')h.push(`<div class="ev" data-id="${e.id}" style="left:${a-1}px;top:${Y.root-2}px;width:2px;height:${Y.subT-Y.root}px;background:var(--bad)"></div>`);
+  }
+  sc.setAttribute('aria-valuemin','0');sc.setAttribute('aria-valuemax',String(Math.round(END/S)));
+  sc.innerHTML=h.join('')+'<div class="g-future" id="g-future"></div><div class="g-head" id="g-head"></div>';
+}
+function renderG(){
+  gBar();gScrub();G.cache.clear();$('#g-main').textContent='';$('#g-side').textContent='';
+  const st=$('#g-stage');st.style.height=Math.max(240,innerHeight-st.getBoundingClientRect().top-8)+'px';
+  gUpdate(true);
+}
+function gTick(now){
+  if(!G.playing||cur!=='g'){G.playing=false;G.raf=0;gBar();gUpdate();return}
+  const dt=Math.min(100,now-G.last);G.last=now;G.wall+=dt;
+  G.t=Math.min(END,GC.inv(GC(G.t)+dt*G.speed));
+  if(G.t>=END){G.playing=false;gBar()}
+  gUpdate();
+  G.raf=G.playing?requestAnimationFrame(gTick):0;
+}
+function gPlay(on){
+  G.playing=on;if(on&&G.t>=END)G.t=0;gBar();
+  if(on&&!G.raf){G.last=performance.now();G.raf=requestAnimationFrame(gTick)}
+  gUpdate();
+}
+function gSeek(clientX,tail=true){const r=$('#g-scrub').getBoundingClientRect();G.t=Math.min(END,Math.max(0,G.X.inv(clientX-r.left)));gUpdate(tail)}
+$('#g-bar').addEventListener('click',ev=>{const b=ev.target.closest('button');if(!b)return;if(b.hasAttribute('data-play'))gPlay(!G.playing);else if(b.dataset.speed){G.speed=+b.dataset.speed;gBar();gUpdate()}});
+{const sc=$('#g-scrub');
+  sc.addEventListener('pointerdown',ev=>{G.drag=true;sc.setPointerCapture(ev.pointerId);gSeek(ev.clientX)});
+  sc.addEventListener('pointermove',ev=>{if(G.drag)gSeek(ev.clientX)});
+  sc.addEventListener('pointerup',()=>{G.drag=false});
+  sc.addEventListener('keydown',ev=>{
+    const d={ArrowLeft:-1,ArrowRight:1}[ev.key];
+    if(d){ev.preventDefault();G.t=Math.min(END,Math.max(0,GC.inv(GC(G.t)+d*(ev.shiftKey?60:5)*S)));gUpdate(true)}
+    else if(ev.key==='Home'||ev.key==='End'){ev.preventDefault();G.t=ev.key==='Home'?0:END;gUpdate(true)}
+    else if(ev.key===' '){ev.preventDefault();gPlay(!G.playing)}
+  });
+}
+$('#g-stage').addEventListener('toggle',ev=>{const d=ev.target;if(!d.matches?.('details.rail'))return;d.open?G.open.add(d.dataset.id):G.open.delete(d.dataset.id)},true);
+
+/* ======================================================================
+   page: totals, tabs, theme
+   ====================================================================== */
+{const cost=EV.reduce((a,e)=>a+(e.cost||0),0);
+$('#totals').textContent=`${fmtDur(END)} · ${fmtDur(ACTIVE).replace(/ \d+s$/,'')} active · ${LLMS.length} calls · ${fmtCost(cost)}`;
+$('#orb-tile').innerHTML=tile('stopped');$('#orb-tile').title='stopped';}
+const RENDER={a:()=>{aBar();renderA()},b:renderB,c:renderC,d:renderD,e:renderE,f:renderF,g:renderG};
+let cur='a';
+function setTab(t){
+  cur=RENDER[t]?t:'a';
+  document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.tab===cur)));
+  document.querySelectorAll('main,section[id^=v-]').forEach(s=>s.hidden=s.id!=='v-'+cur);
+  hideTip();RENDER[cur]();
+}
+document.querySelector('.study nav').addEventListener('click',ev=>{const b=ev.target.closest('[data-tab]');if(b){history.replaceState(null,'','#'+b.dataset.tab+(document.documentElement.dataset.theme==='dark'?'/dark':''));setTab(b.dataset.tab)}});
+function setTheme(dark){document.documentElement.dataset.theme=dark?'dark':'light';$('#theme').setAttribute('aria-pressed',String(dark))}
+$('#theme').addEventListener('click',()=>{const d=document.documentElement.dataset.theme!=='dark';setTheme(d);history.replaceState(null,'','#'+cur+(d?'/dark':''))});
+function fromHash(){const [t,th]=location.hash.slice(1).split('/');setTheme(th?th==='dark':matchMedia('(prefers-color-scheme: dark)').matches);setTab(t||'a')}
+fromHash();addEventListener('hashchange',fromHash);
+let rz;addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(()=>{if(cur==='a'&&A.focus!=null){const t0=aFit(A.focus);renderA(A.focus==='all'?0:makeScale(A.k,GAP_PX(),A.collapse)(t0))}else RENDER[cur]()},120)});
+document.fonts?.ready.then(()=>RENDER[cur]());
+</script>
+</body>
+</html>

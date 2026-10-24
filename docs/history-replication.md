@@ -211,6 +211,7 @@ interface MessageRecord extends HistoryRecordBase {
 }
 
 interface CompactionRecord extends HistoryRecordBase {
+  // Pi Durable `timestamp`: when the summary was placed; the epoch before 2026-10-24 (docs/pi-adapter.md).
   type: "compaction";
   summary: ContentBlock[];
 }

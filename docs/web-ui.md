@@ -74,6 +74,12 @@ A closed ` ```mermaid ` fence in any transcript Markdown (user, assistant, reaso
 
 Rejected: Plate (rules above and below, no box) and Tabs (a `diagram | source` head row) from the [prototype](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/0e0745fc-1d47-4731-a6f6-dbd46825af55/mermaid-diagrams/index.html); always-visible icons; stick-figure actors; pan/zoom in the dialog (fit-only is enough; touch devices pinch-zoom natively).
 
+## Pi transcript timeline (Per-turn waterfall selected 2026-10-24; not implemented)
+
+**Decision:** a waterfall of one Pi turn (Pi only, not Claude): model calls split into waiting, thinking and streaming, code-mode nested calls, and compactions on one time axis. Columns are start time and a narrow call cell; bars take most of the width; details live in the hover tooltip and click-to-expand row. A control on each user band swaps that turn's activity for its waterfall in place; several turns may be open at once.
+
+Rejected entry points (`design-prototypes/transcript-timeline-access.html`): a separate `/timeline` route (never beside the transcript), a `/timeline` command-mode flip (undiscoverable), an activity-rail drawer (hidden gesture, halves the transcript), a bottom dock (costs transcript height). Rejected layouts (`design-prototypes/transcript-timeline.html`): lanes, rail clock, icicle, tide, metro, replay. The data it needs is recorded since 2026-10-24: `model_calls.response_id`/`ttft_ms`/`thinking_ms` (`docs/model-usage.md`), code-mode `details.calls[].startedAt` and real compaction timestamps (`docs/pi-adapter.md`). Orb lifecycle edges on the axis are deferred (question 83 in `docs/open-questions.md`). Building the view: `TODO.md`.
+
 ## Token usage display (implemented locally 2026-10-13)
 
 **Approved 2026-10-14:** Top Orbs uses native whole-row ID links with full accessible labels, exact counts, proportional bars, gray hover, visible keyboard focus and mobile/coarse targets ≥44px. Rationale, missing-resource behavior, prototype and validation: `docs/model-usage.md`.

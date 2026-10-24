@@ -93,6 +93,7 @@ describe("native codemode interrupted journal recovery", () => {
         sentinels = 0;
       let reopening = false;
       let holdTaskId: TaskId | undefined;
+      let persistedStarts: (number | undefined)[] = [];
       let result: { output?: unknown; details?: unknown; isError?: boolean } | undefined;
       const bundle = createDurableTools({
         authorize: (name, _args, api) => {
@@ -351,7 +352,9 @@ describe("native codemode interrupted journal recovery", () => {
             status: "pending",
             checkpoint: { phase: "execute" },
           });
-          expect((await tx.task(admitted[0]!.taskId))?.state.status).toBe("terminal");
+          const recorded = await tx.task(admitted[0]!.taskId);
+          expect(recorded?.state.status).toBe("terminal");
+          persistedStarts = [recorded?.startedAt, child?.startedAt];
           trace("reopened-child", {
             taskId: holdTaskId,
             owner: child?.owner,
@@ -420,6 +423,18 @@ describe("native codemode interrupted journal recovery", () => {
             { taskId: expect.any(Number), parent: outer, key: "c4", name: "post_hold" },
           ]);
           expect(JSON.stringify(result?.output)).toContain("continued");
+          // Calls made before the restart keep their first run's start.
+          const [recordStart, holdStart] = persistedStarts.map((at) =>
+            at === undefined ? undefined : new Date(at).toISOString(),
+          );
+          expect([typeof recordStart, typeof holdStart]).toEqual(["string", "string"]);
+          expect(result?.details).toMatchObject({
+            calls: [
+              { id: 2, name: "record_once", startedAt: recordStart },
+              { id: 3, name: "hold_restart", startedAt: holdStart },
+              { id: 4, name: "post_hold", startedAt: expect.any(String) },
+            ],
+          });
         } else {
           expect(inventory()).toEqual(admitted);
           // Existing-key executeTool calls can reject changed arguments without admitting a task.
