@@ -11,7 +11,7 @@ cp "$root/foundation/"*.tf "$root/foundation/.terraform.lock.hcl" "$module/"
 cp -R "$root/foundation/tests" "$module/"
 tofu -chdir="$module" init -backend=false -input=false -lockfile=readonly >/dev/null
 tofu -chdir="$module" validate
-# OpenTofu 1.12.6 cannot import in mock tests; omit only adoption directives.
+# OpenTofu 1.13.2 cannot import in mock tests; omit only adoption directives.
 rm "$module/imports.tf"
 tofu -chdir="$module" test
 grep -R -q 'roles/compute.imageUser' "$root/foundation"
