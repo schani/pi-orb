@@ -141,7 +141,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Follow-ups
 
-- **Build the Pi transcript timeline view** (2026-10-24; `docs/web-ui.md`). Pi only. A waterfall of one transcript from history plus `model_calls` joined by `response_id`: waiting/thinking/streaming from `ttft_ms`/`thinking_ms`/`duration_ms` (`docs/model-usage.md`), code-mode nested calls at `details.calls[].startedAt`, compactions at their record time (`docs/pi-adapter.md`). Entry: per-turn control on the user band (`design-prototypes/transcript-timeline-access.html`, proposal 3); records before 2026-10-24 lack these fields.
+- **Run the Pi turn-timeline browser test in WebKit** (2026-10-24; `docs/web-ui.md`). `e2e/transcript-timeline-frontend.e2e.test.ts` passed in Chromium only; the container could not launch WebKit (missing GTK/GStreamer libraries).
 
 - **Verify the iPad status-bar band and input-bar viewport on the installed app** (2026-10-20; `docs/web-ui.md`). Browser checks prove the band is invisible, click-through and qualifies geometrically, and that the orb page follows a simulated shrunken/panned visual viewport at iPad width. Confirm on the user's iPadOS 26 home-screen install that the status-bar blur is gone (including with menus/dialogs open) and that focusing the composer with a hardware keyboard keeps the header in view.
 

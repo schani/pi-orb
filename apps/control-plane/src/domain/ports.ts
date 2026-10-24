@@ -1261,5 +1261,6 @@ export interface ControlPlaneDeps {
   readonly gitIdentity: import("./git-identity.ts").GitIdentityStore;
   readonly projectInstructions: import("./project-instructions.ts").ProjectInstructionsStore;
   readonly userScope: import("./user-scope.ts").UserScope;
-  readonly modelUsage: import("./usage-read.ts").ModelUsageReader;
+  readonly modelUsage: import("./usage-read.ts").ModelUsageReader &
+    import("./turn-timeline.ts").TurnCallReader;
 }

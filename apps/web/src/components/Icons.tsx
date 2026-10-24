@@ -16,10 +16,12 @@ export type IconName =
   | "more"
   | "trend"
   | "source"
-  | "expand";
+  | "expand"
+  | "timeline";
 
 const PATHS: Record<IconName, string> = {
   trend: "M2 2v12h12 M4 10l3-4 3 2 4-5",
+  timeline: "M2 4h5 M5 8h6 M9 12h5",
   fold: "m3 6 5 5 5-5",
   send: "M8 13V3M3 8l5-5 5 5",
   back: "M10 3 5 8l5 5",
