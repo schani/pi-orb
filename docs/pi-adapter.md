@@ -91,6 +91,8 @@ Code-mode chart specs commit with terminal results; only validated chart leaves 
 
 ## Context
 
+**Built-in preamble (user-approved 2026-10-23).** `You are a coding assistant. Use tools to inspect and change the project. Be concise. Produce Markdown. Mermaid is supported.`
+
 Required pinned repository instructions/skills and managed personal/project instructions precede the first model request. Confirmed absence is valid; acquisition failure blocks visibly. Explicit workspace reads use live files once execution is ready. Context policy and rejected alternatives: `docs/pi-durable-evaluation.md`.
 
 **Name-only projects (decision 2026-10-22).** A null repository URL skips Git acquisition, not managed personal/project instructions or bundled platform skills. The first model context needs no checkout, Git credentials or execution readiness. No repository pin or snapshot is invented; the fenced `resources.ready` event records a null commit and zero repository files/bytes. Adding a URL before any repository snapshot exists allows acquisition on the next context open; explicit Stop/Start recreates that context, but saving or restarting execution alone does not refresh an open context. The first successful pin remains authoritative after further URL edits or removal. Acquisition failure still blocks required context rather than reverting to no repository resources. This never clones into or rewrites the retained workspace. Private platform context still publishes under admission/owner fences and restores offline. Automatic naming accepts the null URL as quoted context.
