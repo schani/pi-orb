@@ -100,9 +100,9 @@ jobs:
       - name: Install OpenTofu
         run: |
           set -euo pipefail
-          archive="$RUNNER_TEMP/tofu_1.12.6_linux_amd64.zip"
-          curl --fail --silent --show-error --location https://github.com/opentofu/opentofu/releases/download/v1.12.6/tofu_1.12.6_linux_amd64.zip -o "$archive"
-          printf '5dc43da4f750f33873dc25e94587128709e819e544b7be9016b255316153c3a8  %s\n' "$archive" | sha256sum --check --strict
+          archive="$RUNNER_TEMP/tofu_1.13.2_linux_amd64.zip"
+          curl --fail --silent --show-error --location https://github.com/opentofu/opentofu/releases/download/v1.13.2/tofu_1.13.2_linux_amd64.zip -o "$archive"
+          printf '723bebb0df8411daff1e5fc3862e28ff5581fe5634087f4c29a9aa41d78208b5  %s\n' "$archive" | sha256sum --check --strict
           mkdir "$RUNNER_TEMP/tofu-bin"
           unzip -q "$archive" tofu -d "$RUNNER_TEMP/tofu-bin"
           echo "$RUNNER_TEMP/tofu-bin" >> "$GITHUB_PATH"

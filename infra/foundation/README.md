@@ -207,7 +207,7 @@ creates that service-account-level binding.
 
 ### Release SSH contract gate (decision 2026-10-14)
 
-Run `infra/foundation/test.sh` with OpenTofu 1.12.6. CI installs the same
+Run `infra/foundation/test.sh` with OpenTofu 1.13.2. CI installs the same
 checksum-pinned binary as deployment and requires this separate gate.
 `tests/release_ssh.tftest.hcl` uses a Google mock plan to pin the complete
 `deployer_iap_tunnel` expression map: three exact keys, port 22 conjoined
@@ -215,6 +215,6 @@ with grouped exact IP prefixes, and at most 12 rendered logical operators.
 This pins rendered policy text, not CEL evaluation or live IAM enforcement.
 
 The gate validates a temporary copy of the real module, then omits only
-`imports.tf` adoption directives for the mock plan: OpenTofu 1.12.6 crashes on
+`imports.tf` adoption directives for the mock plan: OpenTofu 1.13.2 crashes on
 mock imports. Init disables the backend and keeps the lockfile readonly; no
 cloud credentials are needed. Mutation evidence and scope: `docs/testing.md`.
