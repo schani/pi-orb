@@ -5076,6 +5076,8 @@ describe("frontend-only browser behavior", () => {
     });
     await expectPage.poll(position).toEqual({ left: 0, top: 0 });
     await composer.fill(Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n"));
+    await composer.press("ArrowLeft");
+    await composer.press("ArrowRight");
     await expectPage(caret).toBeVisible();
     expectPage((await position()).top).toBeLessThan(80);
 
