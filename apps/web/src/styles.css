@@ -2691,9 +2691,7 @@ pre,
   }
 }
 
-/* Pi turn waterfall (docs/web-ui.md "Pi transcript timeline"). Prototypes:
-   design-prototypes/transcript-timeline-access.html proposal 3 and
-   design-prototypes/transcript-timeline.html variant D. Model waiting is
+/* Pi turn waterfall (docs/web-ui.md "Pi transcript timeline"). Model waiting is
    outlined, thinking a bit raster, streaming ink; tools pale; failures red;
    compaction hatched; Luna side calls grey. */
 .rec-you:has(> .band-timeline) {
