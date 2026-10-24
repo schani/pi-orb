@@ -33,6 +33,10 @@ Manual provider waits remain unresolved; automatic retry does not explain them. 
 
 **Historical-stall attribution exception (user-approved 2026-10-22, PDT):** the user explicitly authorized merging [PR 162](https://github.com/schani/pi-orb/pull/162) without root-causing only the earlier hosted-fake inference waits recorded above. Evidence remains preserved; no cause or fix is claimed. This does not waive current/new CI failures, assertions, exact-head qualification, DST replay or fixture cleanup/corrections, and authorizes no deployment. Code head `9724ac522f7a97dc0a9e89decd38db59109e19e2` passed all 11 checks: [CI](https://github.com/schani/pi-orb/actions/runs/39898288399), [E2E](https://github.com/schani/pi-orb/actions/runs/39898288361), [Central process](https://github.com/schani/pi-orb/actions/runs/39898288415). This documentation-only update requires its own exact-head CI before merge.
 
+## Independent shell rail (2026-10-23; local, undeployed)
+
+The first browser run failed at 390×360: the terminal extended below the composer. A shared header/composer-height roster budget fixes the geometry; unchanged assertions pass in Chromium and WebKit. Browser evidence: `/tmp/shell-rail-evidence/`; runtime projection failures: `.context/shell-roster/`. Trim DST failures replayed before correction: `childEdge` supplied `local_agent` for the intended unknown task; the fixture now omits that metadata (`.context/shell-roster/trim-dst-replay.log`). Qualification: [PR 180](https://github.com/schani/pi-orb/pull/180#issuecomment-6373866734).
+
 ## Chart hover targets in WebKit (2026-10-23; local, undeployed)
 
 Adding four transcript chart rows first failed the browser test in both engines: the region chart's tooltip stayed hidden because the rows pushed it off-screen. Each hovered chart now scrolls into view first. WebKit then failed the new histogram label-isolation assertion (expected 1 dimmed line, received 0). Instrumented WebKit showed Playwright's `boundingBox()` for SVG `<text>` 11px (one font size) below `getBoundingClientRect()`. The midpoint hit the root `<svg>`, and the existing zone-label hover landed on the label below, passing only because either label dims five lines. `hover()` now reads the DOM rect. Both engines pass with unchanged assertions.
@@ -88,6 +92,41 @@ Historical process-backend E2E qualification on frozen source: **64 files / 460 
 Current trimmed checks: **105 tests / 13 files**, existing multi-user E2E **1/1**, typecheck and lint pass. Runtime/protocol source remains frozen; only dev-mock retry machinery was removed. Trim fixture failures, diagnoses and checks: `.context/pr159-trim/`. Original port-0 fixture failure and preview verification: `.context/no-repo/`.
 
 [CI 39833808392](https://github.com/schani/pi-orb/actions/runs/39833808392) failed two now-removed duplicate boot tests whose Git-config path assumption ignored inherited `XDG_CONFIG_HOME`; no product fix is indicated (evidence: `.context/pr159-ci/REPORT.md`).
+
+## Responsive chart ownership (2026-10-23)
+
+Browser actions target the intended responsive DOM owner before focusing, not a same-named element awaiting replacement. Mermaid measurement stays outside document flow and releases its container. Controlled schedules and preserved first failures: `docs/postmortems/2026-10-23-frontend-chart-qualification.md`.
+
+## Harness-icon direct-probe ownership (2026-10-23)
+
+**Decision:** send `Connection: close` at both direct `page.request.get` sites in
+`e2e/harness-icons-frontend.e2e.test.ts`; check response ownership before payloads.
+No shared mock/product change, retry, sleep, deadline or existing assertion change.
+
+[First failure](https://github.com/schani/pi-orb/actions/runs/40038122829/job/120702494953),
+source `72b8a6fb5e3472865f77ac4051b35af55c09c1ae`: Chromium's direct orb probe
+failed with `read ECONNRESET`; browser reads of that orb succeeded. This matches
+the known idle-lease class in
+`docs/postmortems/2026-10-16-usage-mock-idle-connection.md`, but historical socket
+reuse/close ownership remains unproven. The user-approved UI stabilization
+exception permits correction without claiming that attribution.
+
+Tests first: both engines rejected `keep-alive` at the initial probe, then at the
+orb probe with only the initial request corrected. A controlled installed-Playwright
+A/B diagnostic called `server.closeIdleConnections()` at second client socket
+assignment, without sleeps: defaults reused the first socket and failed
+`socket hang up (ECONNRESET)` before reaching the server; request
+`Connection: close` assigned a new socket and returned 200. This proves ownership
+under an explicit close schedule, not CI's exact reset timing or cause.
+The complete original file passes both engines; full typecheck, scoped Biome,
+four frontend-listener cases and 20 related unit tests pass. No new DST failure.
+Exact-new-head hosted qualification remains required; no merge or deployment.
+
+Original logs/artifacts and limits:
+`.context/deploy-override-evidence/main72b8-failure/REPORT.md`.
+REDs, the controlled diagnostic, setup correction (missing managed Chromium),
+and validation receipts:
+`.context/deploy-override-evidence/harness-socket-fix/`.
 
 ## Harness-icon catalog ownership (2026-10-20; PR 151)
 

@@ -97,18 +97,7 @@ Output-budget truncation can spill text to a private PostgreSQL artifact and rep
 
 ## Charts
 
-`await chart(spec)` shows the user a separate chart row; its data is not returned to the model. Use it for quantitative information that fits line or bar charts.
-
-```js
-await chart({
-  kind: "line",
-  title: "Latency",
-  unit: "ms",
-  series: [{ name: "p95", points: [["2026-10-17T12:00:00Z", 42]] }],
-});
-```
-
-`spec` is `{kind:'line',title,unit?,source?,series:[{name,points:[[time,value|null]]}],markers?:[{at:time,label}],thresholds?:[{value,label}]}` (ISO or epoch-ms time, at most 6 series/5000 points) or `{kind:'bar',title,unit?,source?,bars:[{label,value}]}`. `source` is an http(s) origin link. At most 8 charts per script. For chart rendering details, read [charts](/opt/pi-orb/skills/charts/SKILL.md).
+`await chart(spec)` shows the user a separate chart row. Its data is not returned to the model. Read the `charts` skill for more information.
 
 ## Bounded summary example
 

@@ -1387,11 +1387,17 @@ export class ClaudeOrbAgent implements OrbAgent {
             id: task.task_id,
             description: task.description,
             ambient: task.ambient === true,
+            taskType: task.task_type,
           })),
         );
       if (message.subtype === "task_started") {
         if (this.state !== null) delete this.state.handoffTerminals?.[message.task_id];
-        this.activity.taskStart(message.task_id, message.description, message.ambient === true);
+        this.activity.taskStart(
+          message.task_id,
+          message.description,
+          message.ambient === true,
+          message.task_type,
+        );
         if (this.closing !== null && message.ambient !== true)
           this.closingTaskStarts.set(message.task_id, {
             uuid: message.uuid,
