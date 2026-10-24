@@ -17,6 +17,7 @@ import {
 import { useAppSearchSource } from "../components/AppSearch.tsx";
 import { Icon } from "../components/Icons.tsx";
 import { LogoutButton } from "../components/LogoutButton.tsx";
+import { MasonryBoard } from "../components/MasonryBoard.tsx";
 import { PersonalInstructionsButton } from "../components/PersonalInstructions.tsx";
 import { ProjectConfigModal } from "../components/ProjectConfigModal.tsx";
 import { ProjectHeader } from "../components/ProjectHeader.tsx";
@@ -456,7 +457,7 @@ export function ProjectsPage({
           failed to load project: {describeApiError(addressed.error)}
         </div>
       )}
-      <div className="dashboard">
+      <MasonryBoard minColumnWidth={316}>
         {ordered.map((project) => {
           const orbList = visibleOrbLists[project.id] ?? { type: "loading" as const };
           const deleting = project.state === "deleting";
@@ -570,7 +571,7 @@ export function ProjectsPage({
             {formError !== null && <div className="banner banner-error">{formError}</div>}
           </form>
         </section>
-      </div>
+      </MasonryBoard>
 
       {configProject && (
         <ProjectConfigModal

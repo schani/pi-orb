@@ -488,7 +488,7 @@ Local trim checks: scoped files 265 passed/four skipped, real PostgreSQL 92 pass
 
 ## Release SSH rendered contract (decision 2026-10-14)
 
-CI requires `infra/foundation/test.sh` using checksum-pinned OpenTofu 1.12.6,
+CI requires `infra/foundation/test.sh` using checksum-pinned OpenTofu 1.13.2,
 matching deployment. The native Google mock plan pins the entire three-binding
 `google_project_iam_member.deployer_iap_tunnel` expression map against independent
 constants and counts actual rendered logical operators (≤12). This is a rendered
@@ -497,7 +497,7 @@ full-expression pins avoid a new evaluator. No policy changes or cloud credentia
 are involved.
 
 The temporary real-module copy is validated before omitting only `imports.tf`
-adoption directives for the mock plan: OpenTofu 1.12.6 crashes on mock imports. Init uses
+adoption directives for the mock plan: OpenTofu 1.13.2 crashes on mock imports. Init uses
 `-backend=false -lockfile=readonly` and temporary `TF_DATA_DIR`.
 Seven isolated mutations failed contract assertions after successful init:
 `&&→||`, ungrouped OR, appended `true`, widened build and orb prefixes, extra
@@ -1639,6 +1639,8 @@ Focused coverage checks indexed-root backfill/immutability, proof exclusions/con
 
 **Recorded CI crash; investigation waived (user-approved 2026-10-15, America/Los_Angeles):** PR 124 head `d56f89b1`, [run 38823555927, shard 3/4](https://github.com/schani/pi-orb/actions/runs/38823555927/job/116725597504), exited 139 at 2026-10-15 16:33:03 PDT after both reported browser cases passed. Crashing component/cause is unproven; no stack, PID or core was supplied. All 19 uploaded DST traces match committed historical traces; no new DST trace identifies this crash. Logs/artifacts and comparison remain in `ci-first-failure/` under the evidence directory. The user explicitly approved waiving investigation of this recorded crash for PR 124; no cause or fix is claimed. Fresh exact-head qualification and investigation of any new failure remain mandatory; a passing rerun alone clears neither. No deployment, recovery or target mutation is authorized.
 
+
+**PR 192 exception (user-approved 2026-10-24).** Investigation of [run 40114091476, job 120931701773](https://github.com/schani/pi-orb/actions/runs/40114091476/job/120931701773), head `a9c15f5d`, attempt 1 native E2E shard-4 exit 139, is waived. The failed gate and evidence are retained; no cause or fix is claimed. New failures, assertions, DST replay and exact-head qualification remain mandatory.
 
 ## Claude SDK cooperative responsiveness (2026-10-16; local, undeployed)
 

@@ -23,7 +23,7 @@ export class ClaudePtyAuthTransport implements ClaudeAuthTransport {
       (async () => {
         const require = createRequire(import.meta.url);
         const pkg = require("@anthropic-ai/claude-code/package.json") as { version: string };
-        if (pkg.version !== "2.1.300") return err(failure());
+        if (pkg.version !== "2.1.310") return err(failure());
         const root = await mkdtemp(join(tmpdir(), "pi-orb-claude-auth-"));
         const cleanup = () =>
           ResultAsync.fromPromise(rm(root, { recursive: true, force: true }), failure);

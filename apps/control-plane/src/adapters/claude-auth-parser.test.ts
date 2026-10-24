@@ -4,7 +4,7 @@ import { ClaudeSetupTokenParser } from "./claude-auth-parser.ts";
 const nativeUrl = `https://claude.com/cai/oauth/authorize?code=true&client_id=00000000-0000-0000-0000-000000000000&response_type=code&redirect_uri=${encodeURIComponent("https://platform.claude.com/oauth/code/callback")}&scope=user%3Ainference&code_challenge=${"c".repeat(43)}&code_challenge_method=S256&state=${"s".repeat(43)}`;
 const prompt = "\nPaste code here if prompted > ";
 
-describe("Claude 2.1.300 setup-token parser", () => {
+describe("Claude 2.1.310 setup-token parser", () => {
   it("publishes only a complete native consent URL after the code prompt", () => {
     const p = new ClaudeSetupTokenParser();
     p.feed(`${nativeUrl.slice(0, 240)}\n`);

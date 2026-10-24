@@ -14,7 +14,8 @@ export type DebugTraceEvent =
   | "frame_received"
   | "sync_state"
   | "scroll_pin"
-  | "viewport";
+  | "viewport"
+  | "masonry";
 
 export interface DebugTraceInput {
   event: DebugTraceEvent;

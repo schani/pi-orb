@@ -143,8 +143,8 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn('test "$GITHUB_SHA" = "$(git rev-parse HEAD)"', workflow)
         self.assertLess(workflow.index('python3 infra/artifact_guard.py'), workflow.index('google-github-actions/auth@'))
         inventory = steps('deploy.yml')
-        checkout = 'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09'
-        upload = 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
+        checkout = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
+        upload = 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9'
         actions = [(name, action) for name, body in inventory for action in re.findall(r'uses: ([^\s]+)', body)]
         self.assertEqual(re.findall(r'uses: ([^\s]+)', workflow), [action for _, action in actions])
         self.assertEqual(
@@ -152,7 +152,7 @@ class WorkflowContractTest(unittest.TestCase):
             [
                 ('Check out the dispatched commit', checkout),
                 ('Check out the dispatched commit', checkout),
-                ('Set up Node.js', 'actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444'),
+                ('Set up Node.js', 'actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1'),
                 ('Authenticate the GitHub deployment identity', 'google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093'),
                 ('Set up Google Cloud SDK', 'google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db'),
                 ('Upload rollout monitor', upload),

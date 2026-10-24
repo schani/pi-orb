@@ -767,8 +767,8 @@ frontend-session cases. The original failure and correction are preserved in
 unrelated WebKit crash.
 
 **Action runtime update (2026-09-13):** CI, E2E and Deploy artifact-upload steps
-pin `actions/upload-artifact` v7.0.1 at
-`043fb46d1a93c77aae656e7c1c64a875d1fc6a0a`, whose action manifest declares
+pin `actions/upload-artifact` v7.0.2 at
+`cf430e030ddbb5b0abf93d22962f4752f3646cd9`, whose action manifest declares
 `runs.using: node24`. This removes the v4 action's Node 20 deprecation warning;
 it is separate from the Node version selected for application builds. Artifact
 paths, retention, hidden-file exclusion and default ZIP packaging remain unchanged.
@@ -870,8 +870,8 @@ not duplicate the deployment algorithm. The first-release policy is recorded in
 immutable dispatched SHA, verifies checkout equality, and creates local branch
 `main` at that exact SHA before authentication. The shared command requires a
 clean checkout and re-verifies trusted same-repository `push`/`main` qualification
-for the selected SHA before acquiring the release lock. Node 24.22.1, SDK 583.0.0 with its explicit beta component and checksum-verified
-OpenTofu 1.12.6 are pinned; actions use immutable SHAs, the runner is Ubuntu 24.04,
+for the selected SHA before acquiring the release lock. Node 24.22.1, SDK 590.0.1 with its explicit beta component and checksum-verified
+OpenTofu 1.13.2 are pinned; actions use immutable SHAs, the runner is Ubuntu 24.04,
 and provider lock files are read-only. The 240-minute job budget accommodates
 checks, fresh native acceptance, migration/apply and up to 75 minutes of retirement.
 The shared checks stage builds its own Docker E2E runtime image rather than relying
@@ -927,5 +927,7 @@ Authentication must be keyless: GitHub OIDC to a Google Workload Identity Federa
 The initial proposal separated publisher, deployer and smoke identities. The implemented POC instead reuses the existing scoped deployer and admitted repository project, avoiding new authority or another identity bootstrap for recurring deployment. State access is high trust, not clerical: the current state contains the generated database password and complete connection URL. The foundation split now separately owns project APIs, stable IAM/admission and networking. The application root retains Cloud SQL, Secret Manager, Cloud Run and application-resource access policies, so its authority is still high trust. Generic Owner/Editor remains rejected; validate new permissions against real plans and Cloud Audit Logs.
 
 Supply-chain requirements for the workflow: pin every third-party action by immutable commit SHA; pin the OpenTofu CLI and runner versions; use the committed OpenTofu lock files read-only during ordinary deploys; preserve the root `.dockerignore` exclusions for `.git`, generated credentials, state, plans, and unrelated workspace files; and retain digest/generation release metadata. Hosted GitHub runners are not tailnet members. The mandatory preview gate dials through the already-owned smoke orb's Tailscale daemon; it never skips because of runner networking.
+
+**Decision (2026-10-24):** The user defers Google provider majors and paired Docker/containerd refresh: [Google 8](https://github.com/opentofu/terraform-provider-google/blob/v8.8.1/website/docs/guides/version_8_upgrade.html.markdown) converts resource state; [Docker 29.9](https://github.com/moby/moby/blob/docker-v29.9.2/daemon/daemon.go#L419) normalizes retained container configuration. Random 3.9.1 leaves password schema version 3, Read and planning unchanged.
 
 Rollback cannot mean shifting traffic to an old Cloud Run revision because `infra/deploy.sh` deliberately deletes drained revisions. It is another forward deployment of retained last-known-good image digests with a newer generation, followed by the same repair and smoke sequence. Artifact Registry retention must guarantee those referenced digests survive. Automatic rollback is not proposed for releases containing database migrations or static-plane changes: migrations commit before any new service is applied, but old revisions can overlap the changed schema and a prior image may not understand it. Such a release needs explicit detection and approval/maintenance policy, a verified Cloud SQL recovery point, and a rehearsed forward-fix or migration-specific rollback runbook; the POC deliberately has no backwards-compatibility choreography.
