@@ -182,26 +182,18 @@ describe("dashboard layout contract", () => {
       "width: 48px",
     );
   });
-  it("lays projects out as fixed-width columns that fill rows from the left", () => {
-    expect(rule(".dashboard")).toContain("grid-template-columns: repeat(auto-fill, 316px)");
-    expect(rule(".dashboard")).toContain("grid-auto-rows: minmax(min-content, 1fr)");
-    expect(rule(".dashboard")).toContain("align-content: stretch");
-    expect(rule(".dashboard")).toContain("justify-content: start");
+  it("positions project boxes absolutely for masonry placement", () => {
+    expect(rule(".dashboard")).toContain("position: relative");
+    expect(rule(".dashboard")).toContain("flex: 1 0 auto");
+    expect(rule(".dashboard")).toContain("background-repeat: no-repeat");
+    expect(rule(".dashboard")).toContain("background-size: 1px 100%");
+    expect(rule(".dashboard > *")).toContain("position: absolute");
+    expect(rule(".dashboard-probe")).toContain("height: 0");
     expect(rule(".project-column")).toContain("border-left: 1px solid var(--k)");
     expect(rule(".project-column")).toContain("border-bottom: 1px solid var(--k)");
     expect(rule(".new-project")).toContain("border-left: 1px dashed var(--k)");
-  });
-
-  it("fills available width whenever two fixed columns cannot fit", () => {
-    expect(css).toMatch(
-      /@media \(width < 632px\)\s*\{\s*\.dashboard\s*\{\s*grid-template-columns: minmax\(0, 1fr\);/,
-    );
-  });
-
-  it("sizes single-column project sections to content without stretching into spare height", () => {
-    const singleColumn = /@media \(width < 632px\)\s*\{\s*\.dashboard\s*\{([^}]*)\}/.exec(css)?.[1];
-    expect(singleColumn).toContain("grid-auto-rows: max-content");
-    expect(singleColumn).toContain("align-content: start");
+    // Covers the column rule painted beneath the dashed border.
+    expect(rule(".new-project")).toContain("background: var(--w)");
   });
 
   it("rules the board from the totals strip to the bottom-pinned footer", () => {

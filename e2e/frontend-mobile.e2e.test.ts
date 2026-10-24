@@ -124,7 +124,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
   );
 
   it.each([320, 390, 402, 600, 631, 632, 1280])(
-    "fills single-column dashboard width and retains fixed multi-column tracks at %ipx",
+    "fills dashboard width with one column or equal masonry columns at %ipx",
     async (width) => {
       const page = await browser.newPage({
         viewport: { width, height: 844 },
@@ -157,7 +157,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         );
         expectPage(geometry.length).toBeGreaterThan(1);
         for (const columnWidth of geometry) {
-          expectPage(columnWidth).toBe(width < 632 ? width : 316);
+          expectPage(columnWidth).toBe(Math.floor(width / Math.max(1, Math.floor(width / 316))));
         }
         expectPage(
           await page.evaluate(() => {
