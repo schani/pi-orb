@@ -1,21 +1,13 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { setImmediate } from "node:timers/promises";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, MemoryStorage } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { RuntimeHealthSchema, type ServerFrame } from "@pi-orb/protocol";
-import { NoSimulationTask } from "determined";
+import type { ServerFrame } from "@pi-orb/protocol";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
-import { Check } from "typebox/value";
 import { describe, expect, it } from "vitest";
-import type { RuntimeClientError } from "../../domain/errors.ts";
-import { makeOrbRow } from "../../testkit/fixtures.ts";
 import { DurableAgent } from "./agent.ts";
-import { DurableAgentPlane, durableError } from "./manager.ts";
-import { MemoryAgentPersistence } from "./memory-persistence.testkit.ts";
+import { durableError } from "./manager.ts";
 
 function barrier() {
   let resolve!: () => void;
@@ -167,99 +159,6 @@ describe("frozen process qualification regressions", () => {
       );
     } finally {
       await agent.close();
-    }
-  });
-
-  it.each([
-    { code: "e2e_launch_failure", retryable: false },
-    { code: "e2e_launch_failure", retryable: true },
-    { code: "clone_failed", retryable: true },
-  ])(
-    "reports structured $code with retryable=$retryable and permits explicit replacement",
-    async ({ code, retryable }) => {
-      const directory = await mkdtemp(join(tmpdir(), "durable-qualified-health-"));
-      const initializationError = {
-        code,
-        message: code === "clone_failed" ? "git checkout failed" : "test launch failure injected",
-        retryable,
-      };
-      const failedHealth = {
-        v: 1 as const,
-        orbId: "orb",
-        runtimeInstanceId: "agent:orb",
-        status: "failed" as const,
-        error: initializationError,
-      };
-      expect(Check(RuntimeHealthSchema, failedHealth)).toBe(true);
-      let attempts = 0;
-      const plane = (
-        await DurableAgentPlane.create({
-          persistence: new MemoryAgentPersistence(),
-          openContext: () => {
-            attempts++;
-            return attempts === 1
-              ? errAsync({
-                  type: "runtime_client_error" as const,
-                  code: "initialization_failed" as const,
-                  answered: true,
-                  message: initializationError.message,
-                  retryable,
-                  initializationError,
-                })
-              : okAsync(agentOptions());
-          },
-        })
-      )._unsafeUnwrap();
-      const task = new NoSimulationTask("qualified-health", false);
-      const context = { signal: new AbortController().signal };
-      const orb = makeOrbRow("orb", "project", "starting", { hostIncarnation: 1 });
-      try {
-        const result = await plane.health(task, orb, context);
-        expect(result.isOk()).toBe(true);
-        expect(result._unsafeUnwrap()).toEqual(failedHealth);
-        expect(plane.session("orb")).toBeNull();
-        await plane.suspend(task, "orb", context);
-        const ready = (
-          await plane.health(task, { ...orb, hostIncarnation: 2 }, context)
-        )._unsafeUnwrap();
-        expect(ready.status).toBe("ready");
-        expect(attempts).toBe(2);
-      } finally {
-        await plane.close();
-        await rm(directory, { recursive: true, force: true });
-      }
-    },
-  );
-
-  it.each([
-    { code: "unreachable", answered: false, retryable: true },
-    { code: "http_error", answered: true, retryable: true },
-    { code: "invalid_response", answered: true, retryable: false },
-    { code: "initialization_failed", answered: true, retryable: true },
-  ] as const)("preserves unproven $code as Err", async (detail) => {
-    const directory = await mkdtemp(join(tmpdir(), "durable-unproven-health-"));
-    const failure: RuntimeClientError = {
-      type: "runtime_client_error",
-      message: "not ready",
-      ...detail,
-    };
-    const plane = (
-      await DurableAgentPlane.create({
-        persistence: new MemoryAgentPersistence(),
-        openContext: () => errAsync(failure),
-      })
-    )._unsafeUnwrap();
-    try {
-      const result = await plane.health(
-        new NoSimulationTask("unproven-health", false),
-        makeOrbRow("orb", "project", "starting", { hostIncarnation: 1 }),
-        { signal: new AbortController().signal },
-      );
-      expect(result.isErr()).toBe(true);
-      if (result.isErr()) expect(result.error).toBe(failure);
-    } finally {
-      await plane.close();
-      await rm(directory, { recursive: true, force: true });
     }
   });
 });

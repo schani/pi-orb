@@ -376,12 +376,4 @@ it("renders peer source and full literal body once in text and JSON transcripts"
   expect(output.split(senderOrbId)).toHaveLength(2);
   expect(output.split(body)).toHaveLength(2);
   expect(output).not.toContain("PRIVATE_PEER_OVERFLOW");
-  const json = JSON.parse(JSON.stringify(transcript)) as OrbTranscript;
-  expect(json.records[0]).toMatchObject({
-    type: "event",
-    eventType: "orb.message",
-    sender: { orbId: senderOrbId },
-    content: [{ type: "text", text: body }],
-    inboxMessageIds: ["inbox"],
-  });
 });

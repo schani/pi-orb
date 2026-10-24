@@ -7,6 +7,8 @@ import { type CleanupEvidence, fileCleanupEvidenceWriter } from "./cleanup-evide
 import { type CleanupTiming, GcloudImageBuildEffects } from "./gcloud.ts";
 import { buildNativeImage, type ImageBuildInput } from "./orchestrator.ts";
 
+import { imageBuildInput } from "./testkit/image-build-input.ts";
+
 const directories: string[] = [];
 afterEach(async () => {
   for (const directory of directories.splice(0))
@@ -16,23 +18,7 @@ afterEach(async () => {
 async function input(): Promise<ImageBuildInput> {
   const outputDir = await mkdtemp(join(tmpdir(), "cleanup-operation-"));
   directories.push(outputDir);
-  return {
-    project: "target-project",
-    zone: "us-central1-a",
-    baseImage: "projects/base-project/global/images/debian-pinned",
-    version: "v1",
-    subnetwork: "projects/target-project/regions/us-central1/subnetworks/orbs",
-    builderServiceAccount: "builder@target-project",
-    validationServiceAccount: "orb@target-project",
-    sourceCommit: "a".repeat(40),
-    sourceDirty: false,
-    sourceArchiveSha256: "b".repeat(64),
-    operationId: "0123456789abcdef",
-    outputDir,
-    validationRepositoryUrl: "https://github.com/example/repo",
-    inputInventory: {},
-    toolingInputInventory: {},
-  };
+  return imageBuildInput({ outputDir });
 }
 
 const image = "pi-orb-image-v1-0123456789abcdef";
@@ -137,16 +123,30 @@ describe("cleanup operation evidence", () => {
   });
 
   it("maps a null predecessor description to a typed failure", async () => {
+    let submissions = 0;
     const predecessor = "create-operation";
-    const effects = new GcloudImageBuildEffects(async (_command, args) => {
-      if (args[1] === "operations" && args[2] === "list")
-        return {
-          stdout: JSON.stringify([{ name: predecessor, status: "RUNNING", targetLink: target }]),
-          stderr: "",
-        };
-      if (args[1] === "operations" && args[2] === "describe") return { stdout: "null", stderr: "" };
-      throw new Error("must not inspect or delete the target");
-    });
+    const effects = new GcloudImageBuildEffects(
+      async (_command, args) => {
+        if (args[1] === "operations" && args[2] === "list")
+          return {
+            stdout: JSON.stringify([{ name: predecessor, status: "RUNNING", targetLink: target }]),
+            stderr: "",
+          };
+        if (args[1] === "operations" && args[2] === "describe")
+          return { stdout: "null", stderr: "" };
+        throw new Error("must not inspect or delete the target");
+      },
+      undefined,
+      undefined,
+      undefined,
+      () => {
+        submissions++;
+        return errAsync({
+          type: "delete_submit_failed",
+          message: "unexpected DELETE",
+        });
+      },
+    );
 
     const result = await effects.run(
       "cleanup",
@@ -155,6 +155,7 @@ describe("cleanup operation evidence", () => {
       new AbortController().signal,
     );
 
+    expect(submissions).toBe(0);
     expect(result.isErr() && result.error).toMatchObject({
       type: "image_build_failed",
       stage: "cleanup",
@@ -272,6 +273,7 @@ describe("cleanup operation evidence", () => {
 });
 
 it("keeps cleanup evidence when the composed build returns its primary failure", async () => {
+  let submissions = 0;
   const buildInput = await input();
   const evidencePath = join(buildInput.outputDir, "cleanup.json");
   const published: CleanupEvidence[][] = [];
@@ -293,10 +295,18 @@ it("keeps cleanup evidence when the composed build returns its primary failure",
     undefined,
     undefined,
     writer,
+    () => {
+      submissions++;
+      return errAsync({
+        type: "delete_submit_failed",
+        message: "unexpected DELETE",
+      });
+    },
   );
 
   const result = await buildNativeImage(buildInput, effects, new AbortController().signal);
 
+  expect(submissions).toBe(0);
   expect(result.isErr() && result.error).toMatchObject({
     stage: "prerequisites",
     message: "primary build failure",

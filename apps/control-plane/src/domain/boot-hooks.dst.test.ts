@@ -10,7 +10,7 @@ import {
   TEST_CONSTANTS,
   type TestHarness,
 } from "../testkit/fixtures.ts";
-import { LogCapture, runDst, waitUntil } from "../testkit/sim.ts";
+import { LogCapture, runDst, sleepInSteps, waitUntil } from "../testkit/sim.ts";
 import { reconcileOrbOnce, requestOrbStart, requestOrbStop } from "./lifecycle.ts";
 import { pollLoop, reconcileLoop } from "./loops.ts";
 import type { ControlPlaneDeps } from "./ports.ts";
@@ -48,18 +48,6 @@ async function waitForRunning(task: SimulationTask, harness: TestHarness): Promi
 function view(harness: TestHarness): ReturnType<typeof orbView> | null {
   const row = harness.store.orbSnapshot(ORB);
   return row === null || row === undefined ? null : orbView(row, harness.deps.control, {});
-}
-
-/**
- * Wait in short steps: a single long timer is not a long wait to this
- * scheduler, whose late-firing exploration can teleport virtual time past
- * every other deadline at once (docs/testing.md).
- */
-async function sleepInSteps(task: SimulationTask, totalMs: number, reason: string): Promise<void> {
-  const until = task.monotonicNow() + totalMs;
-  while (task.monotonicNow() < until) {
-    await task.sleep(Math.min(until - task.monotonicNow(), 500), reason);
-  }
 }
 
 async function stopStartCycle(
@@ -190,9 +178,12 @@ describe("orb boot hooks (DST)", () => {
               await waitUntil(
                 task,
                 "setup reported",
-                () => harness.deps.control.getBootProbe(ORB)?.setupRunningSinceMono !== null,
+                () => harness.deps.control.getBootProbe(ORB)?.setupRunningSinceMono != null,
                 { timeoutMs: CONVERGE_MS },
               );
+              expect(harness.deps.control.getBootProbe(ORB)).toMatchObject({
+                setupRunning: true,
+              });
               // The runtime goes dark mid-hook and answers nothing again, while
               // the host still observes as running — the shape of a wedged or
               // preempted runtime. The hold must not read that silence as a

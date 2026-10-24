@@ -4,7 +4,6 @@ import {
   type FauxResponseFactory,
   fauxAssistantMessage,
   fauxProvider,
-  fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
 import {
   createRegistry,
@@ -15,23 +14,9 @@ import {
 import { expect, it } from "vitest";
 import { createDurableTools } from "./index.ts";
 
+import { nativeCall, nativeData } from "./testkit/native-call.ts";
+
 const ctx = BACKGROUND_CONTEXT;
-function nativeCall(name: string, args: Record<string, unknown>) {
-  return fauxToolCall(
-    "codemode",
-    { code: `text(await tools.${name}(${JSON.stringify(args)}));` },
-    { id: name },
-  );
-}
-function nativeData(result: { content: readonly { type: string; text?: string }[] } | undefined) {
-  expect(result?.content[0]).toMatchObject({
-    type: "text",
-    text: expect.stringMatching(/^Script completed\n/),
-  });
-  const body = result?.content[1];
-  expect(body?.type).toBe("text");
-  return JSON.parse(body?.text ?? "");
-}
 it.each([
   { stopReason: "error" as const, status: "failed", output: "", reason: "model_error" },
   { stopReason: "aborted" as const, status: "aborted", output: "", reason: "aborted" },

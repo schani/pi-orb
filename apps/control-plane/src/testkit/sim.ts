@@ -12,6 +12,7 @@ import {
   SimulationImpl,
   type SimulationTask,
 } from "determined";
+import { failureIdentity } from "../../../../testkit/failure-identity.ts";
 import { LIFECYCLE_LOG_PREFIX } from "../domain/log.ts";
 
 const silentLogger: Logger = {
@@ -55,6 +56,18 @@ export class LogCapture implements Logger {
   /** Every captured line containing `pattern` (a plain substring). */
   matching(pattern: string): readonly string[] {
     return this.captured.filter((line) => line.includes(pattern));
+  }
+}
+
+/** Wait in bounded virtual steps so late-timer exploration cannot skip unrelated deadlines. */
+export async function sleepInSteps(
+  task: SimulationTask,
+  totalMs: number,
+  reason: string,
+): Promise<void> {
+  const until = task.monotonicNow() + totalMs;
+  while (task.monotonicNow() < until) {
+    await task.sleep(Math.min(until - task.monotonicNow(), 500), reason);
   }
 }
 
@@ -135,28 +148,32 @@ export function makeSimulation(options: DstOptions, entropy: EntropySource): Sim
   );
 }
 
-/** A fresh recording simulation with the standard test options (for multi-phase scenarios). */
-export function makeRecordingSimulation(options: DstOptions): SimulationImpl {
-  return makeSimulation(options, new RecordingTraceSource(new SimpleEntropySource()));
-}
-
 /**
  * Runs `scenario` under many recorded entropy schedules. On failure the full
  * trace is saved to `test-failures/`, replayed once to prove the failure
  * reproduces, and rethrown wrapped with the trace path. Set the `DST_REPLAY`
  * environment variable to a saved trace file to re-run only that schedule.
+ * `nextPhase` creates a fresh simulation sharing the scenario's trace and options;
+ * only its wall-clock epoch may change. Capture resets per scenario, not per phase.
  */
 export async function runDst(
   options: DstOptions,
-  scenario: (sim: Simulation) => Promise<void>,
+  scenario: (
+    sim: Simulation,
+    nextPhase: (overrides?: Pick<DstOptions, "wallClockEpoch">) => Simulation,
+  ) => Promise<void>,
 ): Promise<void> {
+  const runScenario = (entropy: EntropySource) => {
+    const nextPhase = (overrides?: Pick<DstOptions, "wallClockEpoch">) =>
+      makeSimulation({ ...options, ...overrides }, entropy);
+    return scenario(nextPhase(), nextPhase);
+  };
   const replayPath = process.env["DST_REPLAY"];
   if (replayPath !== undefined && replayPath !== "") {
     const { readFileSync } = await import("node:fs");
     const trace = JSON.parse(readFileSync(replayPath, "utf8"));
-    const replaySim = makeSimulation(options, new ReplayingTraceSource(trace.records));
     options.logCapture?.reset();
-    await scenario(replaySim);
+    await runScenario(new ReplayingTraceSource(trace.records));
     return;
   }
 
@@ -177,9 +194,8 @@ export async function runDst(
           };
     const recording = new RecordingTraceSource(entropy);
     options.logCapture?.reset();
-    const sim = makeSimulation(options, recording);
     try {
-      await scenario(sim);
+      await runScenario(recording);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const lifecycleLines = options.logCapture?.lines();
@@ -203,25 +219,10 @@ export async function runDst(
       // Prove the trace reproduces the failure before reporting it.
       let reproduced = false;
       try {
-        const replaySim = makeSimulation(options, new ReplayingTraceSource(recording.getTrace()));
         options.logCapture?.reset();
-        await scenario(replaySim);
+        await runScenario(new ReplayingTraceSource(recording.getTrace()));
       } catch (replayError) {
-        // Match the invariant and its origin, not this helper's recording/replay stack.
-        const identity = (failure: unknown) => {
-          const detail = failure instanceof Error ? failure.message : String(failure);
-          const origin = (
-            detail.includes("\n    at ")
-              ? detail
-              : failure instanceof Error
-                ? failure.stack
-                : detail
-          )
-            ?.split("\n    at ")[1]
-            ?.split("\n")[0];
-          return `${detail.split("\n    at ")[0]}\n${origin ?? ""}`;
-        };
-        reproduced = identity(replayError) === identity(error);
+        reproduced = failureIdentity(replayError) === failureIdentity(error);
       }
       throw new Error(
         `DST scenario "${options.name}" failed at iteration ${i} ` +

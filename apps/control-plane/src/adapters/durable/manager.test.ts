@@ -69,12 +69,17 @@ describe("execution initialization health", () => {
     }
   });
 
-  it.each([true, false])(
-    "reports proven clone failure with retryable=%s and permits a fresh explicit start",
-    async (retryable) => {
+  it.each([
+    { code: "clone_failed", retryable: true },
+    { code: "clone_failed", retryable: false },
+    { code: "e2e_launch_failure", retryable: true },
+    { code: "e2e_launch_failure", retryable: false },
+  ])(
+    "reports proven $code retryable=$retryable and permits a fresh explicit start",
+    async ({ code, retryable }) => {
       const directory = await mkdtemp(join(tmpdir(), "durable-init-health-"));
       const initializationError = {
-        code: "clone_failed",
+        code,
         message: "repository unavailable",
         retryable,
       };
@@ -147,6 +152,7 @@ describe("execution initialization health", () => {
     { code: "http_error", answered: true, retryable: true },
     { code: "invalid_response", answered: true, retryable: false },
     { code: "initialization_failed", answered: true, retryable: false },
+    { code: "initialization_failed", answered: true, retryable: true },
   ] as const)(
     "keeps unproven/transient error $code retryable=$retryable as Err",
     async (detail) => {

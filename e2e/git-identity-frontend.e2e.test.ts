@@ -1,35 +1,28 @@
-import { join } from "node:path";
-import { expect as check, chromium, webkit } from "@playwright/test";
-import { createServer } from "vite";
+import { expect as check } from "@playwright/test";
 import { it } from "vitest";
-import { listenFrontend } from "./frontend-listen.ts";
 import { gotoFrontendFixture } from "./testkit/frontend-fixture.ts";
+import { createFrontendFixture } from "./testkit/frontend-owned.ts";
 
 it.each(["chromium", "webkit"] as const)(
   "%s git identity: tab order, load gate, validation, explicit save, retained draft and phone geometry",
   async (engine) => {
-    const root = join(import.meta.dirname, "../apps/web");
-    const vite = await createServer({
-      root,
-      configFile: join(root, "vite.config.ts"),
-      mode: "frontend",
-      server: { host: "127.0.0.1", port: 0 },
+    const fixture = await createFrontendFixture(engine, {
+      page: { viewport: { width: 1280, height: 900 } },
     });
-    await listenFrontend(vite);
-    const address = vite.httpServer?.address();
-    if (!address || typeof address === "string") throw new Error("No owned fixture port");
-    const browser = await (engine === "chromium" ? chromium : webkit).launch({ headless: true });
-    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-    const url = `http://127.0.0.1:${address.port}/`;
+    const { page, origin } = fixture;
+    const url = `${origin}/`;
     const failure = (message: string) => ({
       status: 503,
       contentType: "application/json",
       body: JSON.stringify({ error: { code: "unavailable", message, retryable: true } }),
     });
-    try {
+    {
       let failRead = true,
         failWrite = true;
       let releaseWrite: (() => void) | undefined;
+      fixture.cleanup(async () => {
+        releaseWrite?.();
+      });
       let heldWrite: Promise<void> = Promise.resolve();
       await page.route("**/api/v1/git-identity", async (route) => {
         if (route.request().method() === "GET") {
@@ -124,9 +117,6 @@ it.each(["chromium", "webkit"] as const)(
             .evaluate((element) => element.scrollWidth <= element.clientWidth),
         ).toBe(true);
       }
-    } finally {
-      await browser.close();
-      await vite.close();
     }
   },
 );

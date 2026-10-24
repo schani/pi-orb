@@ -157,3 +157,22 @@ describe("central model fixtures", () => {
     expect(request.input[0]?.type).toBe("custom_tool_call_output");
   });
 });
+
+it("validates constructed matcher data before submitting a fake session", async () => {
+  const request = vi.spyOn(globalThis, "fetch");
+  try {
+    expect(() =>
+      centralModelScenario({
+        model: { rules: [{ match: { userMessage: { regex: "[" } }, steps: [] }] },
+      }),
+    ).toThrow();
+    expect(request).not.toHaveBeenCalled();
+    expect(() =>
+      centralModelScenario({
+        model: { rules: [{ match: { toolResultContains: { regex: "retry[.]" } }, steps: [] }] },
+      }),
+    ).not.toThrow();
+  } finally {
+    request.mockRestore();
+  }
+});

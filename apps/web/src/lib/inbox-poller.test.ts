@@ -169,3 +169,22 @@ it("keeps optimistic rows, deduplicates new rows, and does not advance on error"
   await poller.poll(() => true);
   expect(poller.rows()).toEqual([message, { ...peer, status: "delivered" }]);
 });
+
+it("rejects a late poll after unmount without publishing rows or advancing the cursor", async () => {
+  let finish!: (result: Result<OrbMessageListView, ApiError>) => void;
+  const poller = createInboxPoller(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  let mounted = true;
+  const publish = vi.fn();
+  const pending = poller.poll(() => mounted, publish);
+  mounted = false;
+  finish(ok(delta));
+  expect((await pending)._unsafeUnwrap()).toBeNull();
+  expect(publish).not.toHaveBeenCalled();
+  expect(poller.rows()).toEqual([]);
+  expect(poller.cursor()).toBe(0);
+});

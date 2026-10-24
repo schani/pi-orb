@@ -1,11 +1,11 @@
+import { runStudy } from "./study-browser.mjs";
 import assert from 'node:assert/strict';
-import { chromium } from '@playwright/test';
 import { statSync, readFileSync } from 'node:fs';
 
 assert.ok(statSync(new URL('./programming-fonts.html', import.meta.url)).size < 8 * 1024 * 1024, 'HTML exceeds 8 MiB');
 
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', args: ['--no-sandbox'] });
-try {
+await runStudy("programming-fonts", async ({ browser, artifact }) => {
+
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [];
   const remote = [];
@@ -158,9 +158,9 @@ try {
     assert.ok(!on.equals(off), `no native textarea shaping change: ${fonts[index].name}`);
     await page.locator('#ligatures').check();
     if (/Monaspace|Fira Code|Recursive/.test(fonts[index].name)) {
-      await editor.screenshot({ path: `/tmp/programming-fonts-shaping-${index}-on.png`, caret: 'hide' });
+      await editor.screenshot({ path: artifact(`programming-fonts-shaping-${index}-on.png`), caret: 'hide' });
       await page.locator('#ligatures').uncheck();
-      await editor.screenshot({ path: `/tmp/programming-fonts-shaping-${index}-off.png`, caret: 'hide' });
+      await editor.screenshot({ path: artifact(`programming-fonts-shaping-${index}-off.png`), caret: 'hide' });
       await page.locator('#ligatures').check();
     }
   }
@@ -206,11 +206,11 @@ try {
   assert.ok((await prompt.inputValue()).endsWith(' native'));
   assert.equal(await page.locator('#comparisons .prose table').count(), fonts.length);
   assert.equal(await page.locator('#comparisons .prose pre').count(), fonts.length);
-  await page.screenshot({ path: '/tmp/programming-fonts-desktop.png' });
-  await page.locator('#comparisons').screenshot({ path: '/tmp/programming-fonts-comparisons.png' });
-  await page.locator('#comparisons .card').first().screenshot({ path: '/tmp/programming-fonts-card-fira.png' });
-  await page.locator('#comparisons .card').nth(fonts.findIndex(font => font.kind === 'proportional')).screenshot({ path: '/tmp/programming-fonts-card-proportional.png' });
-  await page.locator('#comparisons .card').nth(fonts.findIndex(font => font.category === 'Proportional')).screenshot({ path: '/tmp/programming-fonts-card-recursive.png' });
+  await page.screenshot({ path: artifact('programming-fonts-desktop.png') });
+  await page.locator('#comparisons').screenshot({ path: artifact('programming-fonts-comparisons.png') });
+  await page.locator('#comparisons .card').first().screenshot({ path: artifact('programming-fonts-card-fira.png') });
+  await page.locator('#comparisons .card').nth(fonts.findIndex(font => font.kind === 'proportional')).screenshot({ path: artifact('programming-fonts-card-proportional.png') });
+  await page.locator('#comparisons .card').nth(fonts.findIndex(font => font.category === 'Proportional')).screenshot({ path: artifact('programming-fonts-card-recursive.png') });
   await page.evaluate(() => document.activeElement.blur());
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });
@@ -223,7 +223,7 @@ try {
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Sources overflow at ${width}`);
     await page.locator('.licenses').evaluate(node => { node.open = false; });
     await page.evaluate(() => scrollTo(0, 0));
-    await page.screenshot({ path: `/tmp/programming-fonts-mobile-${width}.png` });
+    await page.screenshot({ path: artifact(`programming-fonts-mobile-${width}.png`) });
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
   const html = readFileSync(new URL('./programming-fonts.html', import.meta.url), 'utf8');
@@ -248,6 +248,5 @@ try {
   assert.deepEqual(remote, []);
   assert.deepEqual(errors, []);
   console.log(`PASS: ${fonts.length} embedded fonts loaded${cdp ? ' and rendered (CDP)' : ' from standalone file'}, native textarea shaping pixel changes, matching transcript/prompt, editing, size/ligature controls, proportional widths, Markdown, 320/390px, independent monospace code picker with per-font ON/OFF features, confusables, editorial family ratings with dated sources and accessible stars, optional licensed-font file mechanics (fixture identity unverified, no inherited reputation), no remote requests or browser errors`);
-} finally {
-  await browser.close();
-}
+
+});

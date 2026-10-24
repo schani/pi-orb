@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
 import { ID_TOKEN_PATH } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { BrokerEnv } from "../broker/endpoint.ts";
 import { HttpIdTokenEndpoint } from "./endpoint.ts";
 import { CLI_ID_TOKEN_CONSTANTS, type IdTokenEndpointResult } from "./token.ts";
@@ -155,6 +155,10 @@ describe("id-token HTTP endpoint", () => {
     const silent = createServer(() => {
       // Accepted, parsed, and deliberately never answered.
     });
+    onTestFinished(async () => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => silent.close(() => resolve()));
+    });
     silent.on("connection", (socket) => sockets.push(socket));
     await new Promise<void>((resolve) => silent.listen(0, "127.0.0.1", resolve));
     const { port } = silent.address() as AddressInfo;
@@ -177,9 +181,6 @@ describe("id-token HTTP endpoint", () => {
       message: `control plane did not answer within ${timeoutMs}ms`,
     });
     expect(elapsedMs).toBeGreaterThanOrEqual(timeoutMs - 1);
-
-    for (const socket of sockets) socket.destroy();
-    await new Promise<void>((resolve) => silent.close(() => resolve()));
   });
 
   it("uses the remaining budget for both headers and a stalled body", async () => {
@@ -229,10 +230,11 @@ describe("id-token HTTP endpoint", () => {
     }
   });
 
-  it("maps an unreachable control plane to a retryable outcome, never a throw", async () => {
+  it("maps owned transport rejection to a retryable outcome, never a throw", async () => {
+    const rejection = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("owned rejection"));
+    onTestFinished(() => rejection.mockRestore());
     const endpoint = new HttpIdTokenEndpoint({
-      // Port 1 on loopback: nothing listens, so the connection is refused.
-      controlPlaneUrl: "http://127.0.0.1:1",
+      controlPlaneUrl: "http://control.test",
       runtimeToken: "runtime-bearer",
     });
     const outcome = await endpoint.mint(

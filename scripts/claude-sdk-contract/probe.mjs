@@ -25,7 +25,12 @@ function reply(response, turn, withSubagent, withWorkflow) {
       content: [],
       stop_reason: null,
       stop_sequence: null,
-      usage: { input_tokens: 16, output_tokens: 0 },
+      usage: {
+        input_tokens: 16,
+        output_tokens: 0,
+        cache_read_input_tokens: 23,
+        cache_creation_input_tokens: 41,
+      },
     },
   });
   if ((withSubagent || withWorkflow) && turn === 1) {

@@ -42,6 +42,7 @@ import {
   onlyCodemodeCatalog,
   requestedTools,
 } from "./testkit/durable-model-fixture.ts";
+import { waitForSummary } from "./testkit/durable-summary.ts";
 import { committedToolOutput } from "./testkit/durable-wait-barriers.ts";
 
 const message =
@@ -457,7 +458,7 @@ text('NOTIFY_PARENT_HANDLED');`),
     const orb = randomUUID();
     try {
       cp = await startControlPlane({
-        port: 7273,
+        port: 0,
         fake,
         pglitePath: join(root, "db"),
         authDir: join(root, "auth"),
@@ -531,6 +532,7 @@ text('NOTIFY_PARENT_HANDLED');`),
           ? true
           : null,
       );
+      const remoteCheckpoint = cp.logs.join("").length;
       expect(
         (
           await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${randomUUID()}`, {
@@ -542,9 +544,7 @@ text('NOTIFY_PARENT_HANDLED');`),
         const history = await api(cp!.baseUrl, "GET", `/api/v1/orbs/${orb}/history`);
         return JSON.stringify(history.body).includes("DURABLE_REMOTE_DONE") ? true : null;
       });
-      await waitFor("remote turn summary settled", async () =>
-        cp!.logs.join("").includes("harness.summary_completed") ? true : null,
-      );
+      await waitForSummary(cp, orb, remoteCheckpoint);
       const workspace = join(root, "hosts", orb, "workspace");
       expect(readFileSync(join(workspace, "repo", "durable-file.txt"), "utf8")).toBe(
         "REMOTE_WRITE_OK",
@@ -591,6 +591,7 @@ text('NOTIFY_PARENT_HANDLED');`),
       await thinking.click();
       await page.getByRole("option", { name: "low", exact: true }).click();
       await expectPage(thinking).toHaveText("low");
+      const acceptanceCheckpoint = cp.logs.join("").length;
       expect(
         (
           await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${randomUUID()}`, {
@@ -689,9 +690,7 @@ text('NOTIFY_PARENT_HANDLED');`),
       await page.reload();
       await expectPage(page.getByText("DURABLE_ACCEPTANCE_DONE", { exact: true })).toBeVisible();
       await expectPage(thinking).toHaveText("low");
-      await waitFor("acceptance turn summary settled", async () =>
-        cp!.logs.join("").split("harness.summary_completed").length === 3 ? true : null,
-      );
+      await waitForSummary(cp, orb, acceptanceCheckpoint);
       await waitFor("completed central work becomes idle", async () =>
         (await api(cp!.baseUrl, "GET", `/api/v1/orbs/${orb}`)).body["activity"] === "idle"
           ? true
@@ -745,6 +744,7 @@ text('NOTIFY_PARENT_HANDLED');`),
       const view = async () => (await api(active.baseUrl, "GET", `/api/v1/orbs/${orb}`)).body;
       const history = async () => readReplicatedHistorySnapshot(active, orb);
       const unreadBefore = (await view())["unreadAlertId"];
+      const notificationCheckpoint = cp.logs.join("").length;
       expect(
         (
           await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${randomUUID()}`, {
@@ -888,13 +888,12 @@ text('NOTIFY_PARENT_HANDLED');`),
       await waitFor("parent notification response committed", async () =>
         JSON.stringify(await history()).includes("NOTIFY_PARENT_DONE") ? true : null,
       );
-      await waitFor("notification turn summary settled", async () =>
-        active.logs.join("").split("harness.summary_completed").length === 4 ? true : null,
-      );
+      await waitForSummary(cp, orb, notificationCheckpoint);
       expect(JSON.stringify(await history())).toContain("NOTIFY_CHILD_RECEIPT");
       await waitFor("notification work idle", async () =>
         (await view())["activity"] === "idle" ? true : null,
       );
+      const escalationCheckpoint = cp.logs.join("").length;
       expect(
         (
           await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${randomUUID()}`, {
@@ -924,9 +923,7 @@ text('NOTIFY_PARENT_HANDLED');`),
             record.alert?.message === "ROOT_PUBLIC_ESCALATION",
         ),
       ).toMatchObject([{ alert: { message: "ROOT_PUBLIC_ESCALATION" } }]);
-      await waitFor("escalation turn summary settled", async () =>
-        active.logs.join("").split("harness.summary_completed").length === 5 ? true : null,
-      );
+      await waitForSummary(cp, orb, escalationCheckpoint);
       canonical = await history();
       expect((await api(cp.baseUrl, "POST", `/api/v1/orbs/${orb}/stop`)).status).toBe(202);
       await waitFor("stopped", async () =>

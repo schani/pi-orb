@@ -3,6 +3,30 @@ import { zstdCompressSync } from "node:zlib";
 import { expect, it } from "vitest";
 import { holdModelStream, isModelCompletion } from "./held-model-stream.ts";
 
+async function readDelta(reader: ReadableStreamDefaultReader<Uint8Array>, delta: string) {
+  const decoder = new TextDecoder();
+  let received = "";
+  while (!received.includes("\n\n")) {
+    const next = await reader.read();
+    expect(next.done).toBe(false);
+    received += decoder.decode(next.value, { stream: true });
+  }
+  expect(received).toBe(delta);
+}
+
+it("collects a delta fragmented across transport reads", async () => {
+  const delta = 'data: {"delta":"visible"}\n\n';
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const part of [delta.slice(0, 9), delta.slice(9, -1), delta.slice(-1)]) {
+        controller.enqueue(new TextEncoder().encode(part));
+      }
+      controller.close();
+    },
+  });
+  await readDelta(stream.getReader(), delta);
+});
+
 it.each([false, true])(
   "forwards model deltas while completion remains held: compressed=%s",
   async (compressed) => {
@@ -37,8 +61,7 @@ it.each([false, true])(
         headers: compressed ? { "content-encoding": "zstd" } : {},
       });
       const reader = response.body!.getReader();
-      const first = await reader.read();
-      expect(new TextDecoder().decode(first.value)).toBe(delta);
+      await readDelta(reader, delta);
       expect(relay.held()).toBe(true);
       expect(relay.observations[0]).toMatchObject({
         targeted: true,

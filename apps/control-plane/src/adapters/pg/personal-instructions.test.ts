@@ -1,43 +1,19 @@
 import { NoSimulationTask } from "determined";
-import { afterEach, beforeEach, expect, it } from "vitest";
-import { openThrowawayPostgres } from "../../testkit/postgres.ts";
-import { type ControlPlaneDatabase, composeControlPlaneDatabase } from "../database.ts";
+import { beforeEach, expect, it } from "vitest";
+import { ALICE, BOB, openTwoUserSqlFixture } from "../../testkit/sql-fixture.ts";
+import type { ControlPlaneDatabase } from "../database.ts";
 import type { PostgreSQLClient } from "./client.ts";
 import { PostgreSQLPersonalInstructionsStore } from "./personal-instructions.ts";
-import { PGliteClient } from "./pglite-client.ts";
 
 const task = new NoSimulationTask("personal-instructions SQL", false);
-const ALICE = "00000000-0000-4000-8000-000000000001";
-const BOB = "00000000-0000-4000-8000-000000000002";
 let db: PostgreSQLClient;
 let database: ControlPlaneDatabase;
 let store: PostgreSQLPersonalInstructionsStore;
 beforeEach(async () => {
-  const connectionString = process.env["PI_ORB_TEST_DATABASE_URL"];
-  if (connectionString) {
-    const subject = await openThrowawayPostgres(connectionString);
-    db = subject.client;
-    database = subject.database;
-  } else {
-    db = new PGliteClient();
-    database = composeControlPlaneDatabase(db);
-  }
-  (await database.migrate())._unsafeUnwrap();
-  for (const [id, subject] of [
-    [ALICE, "alice"],
-    [BOB, "bob"],
-  ] as const)
-    (
-      await database.users.resolveUser(
-        task,
-        { issuer: "test", subject, email: null },
-        { id, now: 0 },
-      )
-    )._unsafeUnwrap();
+  const fixture = await openTwoUserSqlFixture(task);
+  db = fixture.db;
+  database = fixture.database;
   store = new PostgreSQLPersonalInstructionsStore(db);
-});
-afterEach(async () => {
-  await db.end();
 });
 
 it("keeps implicit defaults and revisions independent per user", async () => {

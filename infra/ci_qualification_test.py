@@ -89,21 +89,25 @@ class QualificationTest(unittest.TestCase):
                 self.assertRegex(source, r'(?m)^  push:\n    branches:\n      - main$')
         source = Path('.github/workflows/durable-qualification.yml').read_text()
         self.assertIn('  workflow_dispatch:', source)
-        self.assertIn('  control-plane-image:', source)
+        self.assertNotIn('  control-plane-image:', source)
+        self.assertIn('  control-plane-image:', Path('.github/workflows/ci.yml').read_text())
         self.assertIn('name: Central process (${{ matrix.shard }}/4)', source)
         self.assertIn('shard: [1, 2, 3, 4]', source)
 
-    def test_missing_central_image_cannot_be_substituted_by_ci_image(self):
+    def test_control_plane_image_proof_has_one_ci_owner(self):
+        ci = Path('.github/workflows/ci.yml').read_text()
+        durable = Path('.github/workflows/durable-qualification.yml').read_text()
+        self.assertEqual((ci + durable).count('docker build -f apps/control-plane/Dockerfile'), 1)
+        for value in ('control-plane-image-proof.mjs', '--network none', '2>&1 | tee'):
+            self.assertIn(value, ci)
+            self.assertNotIn(value, durable)
         api = FakeAPI()
-        central_run = api.runs['durable-qualification.yml'][0]['id']
-        api.jobs[central_run] = [job for job in api.jobs[central_run]
-                                 if job['name'] != 'control-plane-image']
+        api.jobs[1] = [job for job in api.jobs[1] if job['name'] != 'control-plane-image']
         self.assertIsNotNone(inspect(api, SHA).error)
 
     def test_central_qualification_is_required_for_production(self):
         self.assertEqual(EXPECTED.get('durable-qualification.yml'),
-                         ('Durable qualification', ('control-plane-image',
-                          *(f'Central process ({i}/4)' for i in range(1, 5)))))
+                         ('Durable qualification', tuple(f'Central process ({i}/4)' for i in range(1, 5))))
         api = FakeAPI()
         api.runs['durable-qualification.yml'] = []
         self.assertEqual(inspect(api, SHA).error.kind, 'pending')
@@ -239,7 +243,11 @@ class ArtifactRetryTest(unittest.TestCase):
         process = self.source.split('\n  control-plane-image:', 1)[0]
         self.steps = ['      - name: ' + part.rstrip() + '\n'
                       for part in process.split('      - name: ')[1:]]
-        self.uploads = [step for step in self.steps if 'uses: actions/upload-artifact@' in step]
+        upload_ids = ('upload_provenance', 'upload_failure_evidence')
+        self.uploads = [step for step in self.steps if 'uses: actions/upload-artifact@' in step
+                        and (self.field(step, 'id') in upload_ids or any(
+                            self.field(step, 'if') == "${{ !cancelled() && steps." + step_id + ".outcome == 'failure' }}"
+                            for step_id in upload_ids))]
 
     @staticmethod
     def field(step, key):
@@ -277,7 +285,7 @@ class ArtifactRetryTest(unittest.TestCase):
         self.assertIsNone(self.field(test_step, 'continue-on-error'))
         self.assertIsNone(self.field(test_step, 'if'))
         self.assertIn('    timeout-minutes: 60\n', self.source)
-        self.assertIn('    timeout-minutes: 30\n', self.source)
+        self.assertIn('    timeout-minutes: 30\n', Path('.github/workflows/ci.yml').read_text())
         self.assertEqual(self.source.count('continue-on-error:'), 2)
         self.assertEqual(self.source.count('overwrite:'), 2)
 

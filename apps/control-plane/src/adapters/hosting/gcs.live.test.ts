@@ -56,9 +56,10 @@ describe.skipIf(bucket === undefined)("GcsHostedByteStore live contract", () => 
         expect(
           (await store.deleteExact(task, { ...object.ref, generation: "1" }, context())).isOk(),
         ).toBe(true);
-        expect((await store.statExact(task, object.ref, context())).isOk()).toBe(true);
+        expect(await store.statExact(task, object.ref, context())).toEqual({ value: object });
         expect((await store.deleteExact(task, object.ref, context())).isOk()).toBe(true);
         expect((await store.deleteExact(task, object.ref, context())).isOk()).toBe(true);
+        expect(await store.statExact(task, object.ref, context())).toEqual({ value: null });
         const terminal = await store.cancel(task, sessionId, context());
         expect(terminal.isOk()).toBe(true);
         object = undefined;

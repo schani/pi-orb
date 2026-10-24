@@ -72,6 +72,8 @@ export async function startInferenceTrace(
       }
       const decoder = new TextDecoder();
       let pending = "";
+      let parsedBytes = 0;
+      let forwardedBytes = 0;
       for (;;) {
         const next = await reader.read();
         if (next.done) {
@@ -84,6 +86,7 @@ export async function startInferenceTrace(
         while (boundary !== -1) {
           const frame = pending.slice(0, boundary);
           pending = pending.slice(boundary + 2);
+          parsedBytes += Buffer.byteLength(frame) + 2;
           for (const line of frame.split("\n")) {
             if (!line.startsWith("data: ")) continue;
             try {
@@ -95,13 +98,14 @@ export async function startInferenceTrace(
           }
           if (cutThisStream && record.eventTypes.includes("response.created")) {
             record.outcome = "injected_cutoff";
-            res.end(`${frame}\n\n`);
+            res.end(next.value.subarray(0, parsedBytes - forwardedBytes));
             controller.abort();
             return;
           }
           boundary = pending.indexOf("\n\n");
         }
         res.write(next.value);
+        forwardedBytes += next.value.byteLength;
       }
     } catch (cause) {
       if (record.outcome === undefined) record.outcome = "upstream_error";

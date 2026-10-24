@@ -1,12 +1,13 @@
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ServerFrame } from "@pi-orb/protocol";
 import { ok } from "neverthrow";
 import { afterEach, expect, it } from "vitest";
 import { probeSteering } from "../../../../scripts/claude-sdk-contract/steering.mjs";
-import { ClaudeOrbAgent, type ClaudeQuery, type NativeState } from "./agent.ts";
+import { ScheduledClaudeQuery } from "../testkit/claude-composed.ts";
+import { ClaudeOrbAgent, type NativeState } from "./agent.ts";
 import { ClaudeHistory, nativeHistoryFiles } from "./history.ts";
 
 function gapDiagnostics(agent: ClaudeOrbAgent) {
@@ -34,54 +35,13 @@ function fixture(sessionId = "8aceb374-0491-4c82-b761-2a21769a4a88") {
   mkdirSync(join(configDir, "projects", "-repo"), { recursive: true });
   const nativePath = join(configDir, "projects", "-repo", `${state.id}.jsonl`);
   const frames: ServerFrame[] = [];
-  const messages: { message: SDKMessage; processed: () => void }[] = [];
-  let wake: (() => void) | undefined;
-  let closed = false;
-  let exiting: () => void = () => undefined;
-  let stdoutDone: () => void = () => undefined;
+  let sdk: ScheduledClaudeQuery;
   let closeRequests = 0;
   let nativeReads = 0;
-  let nativeInput: AsyncIterator<SDKUserMessage> | undefined;
   const closeWaiters: { count: number; resolve: () => void }[] = [];
   const exit = () => {
-    exiting();
-    stdoutDone();
-    closed = true;
-    wake?.();
-  };
-  const sdk: ClaudeQuery = {
-    async *[Symbol.asyncIterator]() {
-      while (!closed || messages.length > 0) {
-        const entry = messages.shift();
-        if (entry !== undefined) {
-          yield entry.message;
-          entry.processed();
-        } else
-          await new Promise<void>((resolve) => {
-            wake = resolve;
-          });
-      }
-    },
-    close: () => {
-      closed = true;
-      wake?.();
-    },
-    interrupt: async () => undefined,
-    accountInfo: async () => ({
-      apiProvider: "firstParty",
-      apiKeySource: "none",
-      tokenSource: "CLAUDE_CODE_OAUTH_TOKEN",
-    }),
-    supportedModels: async () => [
-      {
-        value: "opus",
-        displayName: "Default (Opus)",
-        description: "",
-        supportedEffortLevels: ["low", "high"],
-      },
-    ],
-    setModel: async () => undefined,
-    applyFlagSettings: async () => undefined,
+    sdk.exit();
+    sdk.endOutput();
   };
   const history = new ClaudeHistory(join(dir, "claude"), state.id, state.timestamp, {
     ...nativeHistoryFiles,
@@ -96,19 +56,30 @@ function fixture(sessionId = "8aceb374-0491-4c82-b761-2a21769a4a88") {
     workDir: dir,
     skillsDir: null,
     broker: null,
-    sdkFactory: (input) => {
-      nativeInput = input[Symbol.asyncIterator]();
-      closed = false;
-      const exited = new Promise<void>((resolve) => {
-        exiting = resolve;
-      });
-      const stdoutEnded = new Promise<void>((resolve) => {
-        stdoutDone = resolve;
+    sdkFactory: (input, options) => {
+      sdk = new ScheduledClaudeQuery(input, options, false);
+      Object.assign(sdk, {
+        interrupt: async () => undefined,
+        accountInfo: async () => ({
+          apiProvider: "firstParty",
+          apiKeySource: "none",
+          tokenSource: "CLAUDE_CODE_OAUTH_TOKEN",
+        }),
+        supportedModels: async () => [
+          {
+            value: "opus",
+            displayName: "Default (Opus)",
+            description: "",
+            supportedEffortLevels: ["low", "high"],
+          },
+        ],
+        setModel: async () => undefined,
+        applyFlagSettings: async () => undefined,
       });
       return ok({
         query: sdk,
-        exited,
-        stdoutEnded: stdoutEnded.then(() => ok(undefined)),
+        exited: sdk.processExit.promise,
+        stdoutEnded: sdk.stdoutEnded,
         requestShutdown: () => {
           closeRequests++;
           for (const waiter of closeWaiters.filter((waiter) => waiter.count <= closeRequests))
@@ -126,16 +97,9 @@ function fixture(sessionId = "8aceb374-0491-4c82-b761-2a21769a4a88") {
     history,
     frames,
     nativeReads: () => nativeReads,
-    takeInput: () => {
-      if (nativeInput === undefined) throw new Error("missing native input queue");
-      return nativeInput.next();
-    },
+    takeInput: () => sdk.input.next(),
     attach: () => agent.attachSession(state, history, configDir, "commit"),
-    emit: (message: SDKMessage) =>
-      new Promise<void>((resolve) => {
-        messages.push({ message, processed: resolve });
-        wake?.();
-      }),
+    emit: (message: SDKMessage) => sdk.emitUnscheduled(message),
     awaitCloseRequest: (count: number) =>
       closeRequests >= count
         ? Promise.resolve()

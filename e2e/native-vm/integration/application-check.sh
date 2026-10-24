@@ -4,9 +4,14 @@ export HOME=/workspace/home
 cd /workspace/repo
 id
 sudo -n true
-test "$(gh api user --jq .login)" = schani
+expectations=${1:-/workspace/application-expectations.json}
+expected_login=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["githubLogin"])' "$expectations")
+expected_commit=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["checkoutCommit"])' "$expectations")
+test -n "$expected_login"
+test -n "$expected_commit"
+test "$(gh api user --jq .login)" = "$expected_login"
 printf 'GITHUB_BROKER_OK\n'
-test "$(git rev-parse HEAD)" = 7fd1a60b01f91b314f59955a4e4d4e80d8edf11d
+test "$(git rev-parse HEAD)" = "$expected_commit"
 printf 'LIVE_CLONE_OK\n'
 test "$NATIVE_VM_SECRET" = fixture-only-value
 printf 'PROJECT_SECRET_OK\n'

@@ -12,6 +12,7 @@ import {
 } from "../harness.ts";
 import { onlyCodemodeCatalog, requestedTools } from "./durable-model-fixture.ts";
 import { appendModelStage } from "./durable-stage-rules.ts";
+import { waitForSummary } from "./durable-summary.ts";
 
 export const artifactCreateSource =
   '// @options: {"max_output_tokens":128}\ntext(Array.from({length:200}, (_, i) => i === 119 ? "RETAINED_PRIVATE_SPILL_MARKER" : "PRIVATE_SPILL_FILLER_" + "x".repeat(512)).join("\\n"));';
@@ -65,11 +66,10 @@ export async function runArtifactRestart(f: RestartFixture): Promise<void> {
     },
     summary,
   ]);
+  const spillCheckpoint = f.cp.logs.join("").length;
   await f.submit("CREATE_PRIVATE_SPILL");
   await expectPage(f.page.getByText("PRIVATE_SPILL_CREATED", { exact: true })).toBeVisible();
-  await waitFor("spill summary settled before graceful CP restart", async () =>
-    f.cp.logs.join("").split("harness.summary_completed").length >= 3 ? true : null,
-  );
+  await waitForSummary(f.cp, f.orb, spillCheckpoint);
   const history = await readReplicatedHistorySnapshot(f.cp, f.orb);
   const serialized = JSON.stringify(history);
   const path = serialized.match(/\/orb-artifacts\/[0-9a-f-]{36}/)?.[0];

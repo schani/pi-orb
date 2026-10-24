@@ -26,6 +26,9 @@ describe("single control-plane composition", () => {
     const browser = source.indexOf("registerAuthenticatedBrowserRoutes(");
     const claude = source.indexOf("registerClaudeAuthRoutes(browser,");
     const runtime = source.indexOf("registerRuntimeRoutes(app,");
+    expect(browser).toBeGreaterThanOrEqual(0);
+    expect(claude).toBeGreaterThanOrEqual(0);
+    expect(runtime).toBeGreaterThanOrEqual(0);
     expect(claude).toBeGreaterThan(browser);
     expect(claude).toBeLessThan(runtime);
     expect(source).toContain(
@@ -34,10 +37,12 @@ describe("single control-plane composition", () => {
   });
 
   it("keeps central model configuration out of compute launch inputs", () => {
-    const launchInputs = source.slice(
-      source.indexOf("const runtimeExtraEnv:"),
-      source.indexOf("const extraEnvOption"),
-    );
+    const start = source.indexOf("const runtimeExtraEnv:");
+    const end = source.indexOf("const extraEnvOption");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const launchInputs = source.slice(start, end);
     for (const centralInput of [
       "mockOpenAi",
       "MOCK_OPENAI_OAUTH_URL_ENV",
@@ -50,7 +55,10 @@ describe("single control-plane composition", () => {
 
   it("keeps signing-key repair before activation and all autonomous loops after it", () => {
     const activation = source.indexOf("await waitForReleaseActivation(");
-    expect(activation).toBeGreaterThan(source.indexOf("void ensureSigningKeyInBackground()"));
+    const repair = source.indexOf("void ensureSigningKeyInBackground()");
+    expect(repair).toBeGreaterThanOrEqual(0);
+    expect(activation).toBeGreaterThanOrEqual(0);
+    expect(activation).toBeGreaterThan(repair);
     for (const loop of [
       "pollLoop",
       "reconcileLoop",
@@ -59,7 +67,9 @@ describe("single control-plane composition", () => {
       "hostingCleanupLoop",
       "mcpOAuthCleanupLoop",
     ]) {
-      expect(source.lastIndexOf(`${loop}(`)).toBeGreaterThan(activation);
+      const invocation = source.lastIndexOf(`${loop}(`);
+      expect(invocation, loop).toBeGreaterThanOrEqual(0);
+      expect(invocation, loop).toBeGreaterThan(activation);
     }
   });
 });

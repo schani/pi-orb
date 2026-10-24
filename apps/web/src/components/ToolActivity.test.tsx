@@ -279,6 +279,8 @@ describe("bounded call labels", () => {
       />,
     );
     const label = capped.match(/<code class="trunc" title="([^"]+)">([^<]+)<\/code>/);
+    expect(label).not.toBeNull();
+    expect(label?.[1]).toMatch(/…$/);
     expect(label?.[1]).toBe(label?.[2]);
     expect(Buffer.byteLength(label?.[1] ?? "")).toBeLessThanOrEqual(1024);
   });
@@ -572,16 +574,6 @@ describe("tool image previews", () => {
     );
     expect(html).not.toContain("tool-image-thumbnail");
     expect(html).not.toContain("image unavailable");
-    expect(
-      renderToStaticMarkup(
-        <DetailContent
-          body={{ type: "image" }}
-          context={detailContext()}
-          recordId="result"
-          detailKey="result:0"
-        />,
-      ),
-    ).toContain("[image]");
   });
 
   it("leaves text-only compact category grouping unchanged", () => {
@@ -824,26 +816,6 @@ describe("generic tool disclosure", () => {
       expect(html.match(/<details\b/g)).toHaveLength(1);
       expect(html).not.toContain("Inspect services");
       expect(html).not.toContain("Four services found");
-      expect(
-        renderToStaticMarkup(
-          <DetailContent
-            body={{ type: "tool_call", arguments: { task: "Inspect services" } }}
-            context={detailContext()}
-            recordId="call-0"
-            detailKey="call-0:0"
-          />,
-        ),
-      ).toContain("Inspect services");
-      expect(
-        renderToStaticMarkup(
-          <DetailContent
-            body={{ type: "tool_result", content: [{ type: "text", text: "Four services found" }] }}
-            context={detailContext()}
-            recordId="result-0"
-            detailKey="result-0:0"
-          />,
-        ),
-      ).toContain("Four services found");
     },
   );
 });

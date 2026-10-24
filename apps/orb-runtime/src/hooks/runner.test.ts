@@ -484,13 +484,10 @@ describe("the hook env file", () => {
     expect(raw).not.toContain("super-secret-value");
   });
 
-  it("takes a late resume's variables on the next start", async () => {
+  it("rereads an environment file written between starts", async () => {
     const orb = makeOrb();
-    writeHook(orb, "resume");
     const spawner = new FakeHookSpawner();
     const first = makeRunner(orb, spawner, task);
-    // The hook outlives its blocking window: nothing it writes afterwards can
-    // reach this boot's agent, because the merge has already happened.
     const firstTarget: Record<string, string | undefined> = {};
     expect(await first.applyHookEnv(firstTarget)).toBeNull();
     writeEnvFile(orb, "LATE=arrived\n");

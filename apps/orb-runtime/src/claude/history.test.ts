@@ -415,8 +415,18 @@ describe("native Claude root authority", () => {
     const file = join(dir, "root.jsonl");
     writeFileSync(file, "null\n");
     expect(new ClaudeHistory(dir, "s", "2026-10-04T00:00:00Z").scan(file).isErr()).toBe(true);
+    writeFileSync(
+      file,
+      `${JSON.stringify({ type: "user", uuid: "valid", message: { role: "user", content: "valid" } })}\n`,
+    );
+    expect(new ClaudeHistory(dir, "s", "2026-10-04T00:00:00Z").scan(file).isOk()).toBe(true);
     writeFileSync(join(dir, "index.json"), '{"records":null,"fingerprints":[]}');
-    expect(new ClaudeHistory(dir, "s", "2026-10-04T00:00:00Z").scan(file).isErr()).toBe(true);
+    expect(
+      new ClaudeHistory(dir, "s", "2026-10-04T00:00:00Z").scan(file)._unsafeUnwrapErr(),
+    ).toEqual({
+      type: "claude_history_error",
+      message: "Malformed Claude history index.",
+    });
   });
   it("does not publish or advance on failed index commit", () => {
     const dir = fixture();

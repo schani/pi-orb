@@ -49,6 +49,10 @@ it("does not acquire ownership or compose models before the required resource sn
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
   const events: string[] = [];
   const plane = (
     await DurableAgentPlane.create({
@@ -64,6 +68,7 @@ it("does not acquire ownership or compose models before the required resource sn
       },
       prepare: () => {
         events.push("resources");
+        entered();
         return ResultAsync.fromSafePromise(gate);
       },
       openContext: () => {
@@ -77,11 +82,15 @@ it("does not acquire ownership or compose models before the required resource sn
     makeOrbRow("orb", "project", "starting"),
     { signal: new AbortController().signal },
   );
-  await Promise.resolve();
-  await Promise.resolve();
-  expect(events).toEqual(["resources"]);
-  release();
-  expect((await health).isErr()).toBe(true);
-  expect(events).toEqual(["resources", "lease"]);
-  await plane.close();
+  try {
+    await started;
+    expect(events).toEqual(["resources"]);
+    release();
+    expect((await health).isErr()).toBe(true);
+    expect(events).toEqual(["resources", "lease"]);
+  } finally {
+    release();
+    await health;
+    await plane.close();
+  }
 });

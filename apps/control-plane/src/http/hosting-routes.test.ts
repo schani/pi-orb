@@ -81,17 +81,89 @@ describe("hosting HTTP routes", () => {
   });
 
   it("lists and removes only the authenticated orb namespace", async () => {
-    const headers = { authorization: `Bearer ${TOKEN}`, host: "app.example.test" };
-    const listed = await app.inject({ method: "GET", url: HOSTING_FILES_PATH, headers });
-    expect(listed.statusCode).toBe(200);
-    expect(listed.json()).toEqual({ files: [], cleanupIssues: [] });
+    const otherOrb = "00000000-0000-4000-8000-000000000072";
+    const otherToken = "other-runtime-token";
+    harness.store.seedOrb(
+      makeOrbRow(otherOrb, "project", "running", {
+        runtimeTokenHash: hash(otherToken),
+        hostIncarnation: 1,
+      }),
+    );
+    const namespaces = [
+      {
+        orbId: ORB,
+        token: TOKEN,
+        body: "alpha",
+        requestId: "00000000-0000-4000-8000-000000000091",
+      },
+      {
+        orbId: otherOrb,
+        token: otherToken,
+        body: "bravo-b",
+        requestId: "00000000-0000-4000-8000-000000000092",
+      },
+    ];
+    const published = [];
+    for (const { orbId, token, body, requestId } of namespaces) {
+      const uploaded = await app.inject({
+        method: "POST",
+        url: `${HOSTING_FILES_PATH}?path=x.txt`,
+        headers: {
+          authorization: `Bearer ${token}`,
+          host: "app.example.test",
+          "content-type": "text/plain",
+          "content-length": String(body.length),
+          "x-pi-orb-request-id": requestId,
+          "x-pi-orb-sha256": hash(body),
+        },
+        payload: body,
+      });
+      expect(uploaded.statusCode).toBe(201);
+      expect(uploaded.json().file.url).toBe(`https://files.example.test/s/${orbId}/x.txt`);
+      published.push(uploaded.json().file);
+    }
+    for (const [index, { orbId, token, body }] of namespaces.entries()) {
+      const listed = await app.inject({
+        method: "GET",
+        url: HOSTING_FILES_PATH,
+        headers: { authorization: `Bearer ${token}`, host: "app.example.test" },
+      });
+      expect(listed.statusCode).toBe(200);
+      expect(listed.json()).toEqual({ files: [published[index]], cleanupIssues: [] });
+      const download = await app.inject({
+        method: "GET",
+        url: `/s/${orbId}/x.txt`,
+        headers: { host: "files.example.test" },
+      });
+      expect(download.statusCode).toBe(200);
+      expect(download.body).toBe(body);
+    }
     const removed = await app.inject({
       method: "DELETE",
       url: `${HOSTING_FILES_PATH}?path=x.txt`,
-      headers,
+      headers: { authorization: `Bearer ${TOKEN}`, host: "app.example.test" },
     });
     expect(removed.statusCode).toBe(200);
     expect(removed.json()).toEqual({ path: "x.txt" });
+    for (const [index, { orbId, token }] of namespaces.entries()) {
+      const listed = await app.inject({
+        method: "GET",
+        url: HOSTING_FILES_PATH,
+        headers: { authorization: `Bearer ${token}`, host: "app.example.test" },
+      });
+      expect(listed.statusCode).toBe(200);
+      expect(listed.json()).toEqual({
+        files: index === 0 ? [] : [published[index]],
+        cleanupIssues: [],
+      });
+      const download = await app.inject({
+        method: "GET",
+        url: `/s/${orbId}/x.txt`,
+        headers: { host: "files.example.test" },
+      });
+      expect(download.statusCode).toBe(index === 0 ? 404 : 200);
+      if (index === 1) expect(download.body).toBe("bravo-b");
+    }
   });
 
   it("serves a published immutable snapshot with private revalidation headers", async () => {

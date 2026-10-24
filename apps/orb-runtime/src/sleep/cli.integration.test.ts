@@ -1,20 +1,11 @@
-import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const cli = join(import.meta.dirname, "../../docker/pi-orb");
-function run(args: string[], url: string) {
-  return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(cli, args, {
-      env: { ...process.env, PI_ORB_CONTROL_PLANE_URL: url, PI_ORB_RUNTIME_TOKEN: "sleep-token" },
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk));
-    child.stderr.on("data", (chunk: Buffer) => (stderr += chunk));
-    child.on("error", reject);
-    child.on("close", (code) => resolve({ code, stdout, stderr }));
+import { runCli } from "../testkit/cli.ts";
+
+function run(args: string[], url: string, token = "sleep-token") {
+  return runCli(args, {
+    env: { PATH: process.env.PATH, PI_ORB_CONTROL_PLANE_URL: url, PI_ORB_RUNTIME_TOKEN: token },
   });
 }
 

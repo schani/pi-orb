@@ -428,26 +428,15 @@ it.each(failures)(
     expect(f.agent.gateView()).toMatchObject({ configuring: false, acceptingWork: false });
     expect(settings(f)).toMatchObject({ event: { writable: false } });
     expect(f.closeRequests()).toBe(2);
+    const flagCalls = f.flagCalls();
+    if (failure === "models") expect(flagCalls).toBe(1);
     expect(
       (await f.agent.changeSettings({ type: "set_thinking", thinkingLevel: "high" })).isErr(),
     ).toBe(true);
+    expect(f.flagCalls()).toBe(flagCalls);
     expect(f.factories()).toBe(2);
   },
 );
-
-it("rejects actual settings reuse of a partially initialized rotated query", async () => {
-  const f = fixture();
-  expect((await f.attach()).isOk()).toBe(true);
-  f.fail("models");
-  expect(
-    (await f.agent.changeSettings({ type: "set_thinking", thinkingLevel: "low" })).isErr(),
-  ).toBe(true);
-  const reused = await f.agent.changeSettings({ type: "set_thinking", thinkingLevel: "high" });
-  expect(reused.isErr()).toBe(true);
-  expect(f.flagCalls()).toBe(1);
-  expect(f.factories()).toBe(2);
-  expect(settings(f)).toMatchObject({ event: { writable: false } });
-});
 
 it("holds failed settings initialization through native exit, stdout drain and final history publication", async () => {
   const f = fixture(false);

@@ -3,11 +3,31 @@ import { describe, expect, it } from "vitest";
 
 const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 
-function rule(selector: string): string {
+function rule(selector: string, source = css): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css);
+  const match = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(source);
   expect(match, `missing CSS rule ${selector}`).not.toBeNull();
   return match?.[1] ?? "";
+}
+
+function media(condition: string): string {
+  const opener = `@media ${condition} {`;
+  const blocks: string[] = [];
+  let start = css.indexOf(opener);
+  while (start !== -1) {
+    const body = start + opener.length;
+    let depth = 1;
+    let end = body;
+    for (; end < css.length && depth > 0; end++) {
+      if (css[end] === "{") depth++;
+      if (css[end] === "}") depth--;
+    }
+    expect(depth, `unclosed media ${condition}`).toBe(0);
+    blocks.push(css.slice(body, end - 1));
+    start = css.indexOf(opener, end);
+  }
+  expect(blocks.length, `missing media ${condition}`).toBeGreaterThan(0);
+  return blocks.join("\n");
 }
 
 it("hides a failed chart canvas while retaining its mount target", () => {
@@ -143,12 +163,9 @@ describe("shared text fields", () => {
     expect(
       rule(".personal-instructions-dialog textarea,\n.project-instructions-editor textarea"),
     ).toContain("border: 0");
-    expect(css).toMatch(
-      /@media \(max-width: 600px\)[\s\S]*?\.orb-rename-form \{[^}]*flex-wrap: wrap/,
-    );
-    expect(css).toMatch(
-      /@media \(max-width: 600px\)[\s\S]*?\.orb-rename-form > \.text-field-frame \{[^}]*width: 80px/,
-    );
+    const phone = media("(max-width: 600px)");
+    expect(rule(".orb-rename-form", phone)).toContain("flex-wrap: wrap");
+    expect(rule(".orb-rename-form > .text-field-frame", phone)).toContain("width: 80px");
   });
 
   it("uses a neutral highlight on every paper surface", () => {
@@ -161,8 +178,8 @@ describe("dashboard layout contract", () => {
   it("uses icon-only creation without a bottom text action", () => {
     expect(css).not.toContain(".project-new-orb-row");
     expect(rule(".project-name")).toContain("min-width: 0");
-    expect(css).toMatch(
-      /@media \(max-width: 600px\)[\s\S]*?\.project-head-actions > \.icon-button \{[^}]*width: 48px/,
+    expect(rule(".project-head-actions > .icon-button", media("(max-width: 600px)"))).toContain(
+      "width: 48px",
     );
   });
   it("lays projects out as fixed-width columns that fill rows from the left", () => {
@@ -310,7 +327,7 @@ describe("orb workspace layout contract", () => {
     expect(rule(".app:has(> .session-ribbon) .orb-index")).toContain(
       "height: calc(var(--visual-viewport-height, 100dvh) - var(--ribbon))",
     );
-    const phone = css.slice(css.indexOf("@media (max-width: 600px)"));
+    const phone = media("(max-width: 600px)");
     expect(phone).toMatch(/\.orb-main \{\s*grid-column: 1;/);
     expect(phone).toMatch(/\.orb-index \{\s*display: none;/);
     expect(rule(".orb-index")).toContain("border-right: 1px solid var(--k)");

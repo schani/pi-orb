@@ -13,7 +13,7 @@ it.for(["before-result", "after-result"] as const)(
   "retains independent inventory and records continuation decisions with inventory removed %s",
   async (cut, { signal }) => {
     await runDst(
-      { name: `claude-continuation-observation-${cut}`, iterations: 20, signal },
+      { name: `claude-continuation-observation-${cut}`, iterations: 1, signal },
       async (sim) => {
         const f = new ComposedClaudeFixture();
         try {

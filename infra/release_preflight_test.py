@@ -128,7 +128,7 @@ release_run_child gcloud run jobs create """ + migration
                          "playwright install --with-deps chromium webkit")
         for path, command in [
             ("infra/release.sh", "npm run test:e2e\n"),
-            (".github/workflows/e2e.yml", "npm run test:e2e -- --shard=${{ matrix.shard }}/4\n"),
+            (".github/workflows/e2e.yml", "npm run test:e2e -- --project frontend --project provider --project postgres --shard=${{ matrix.shard }}/4\n"),
         ]:
             script = Path(path).read_text()
             self.assertLess(script.index("npm ci"), script.index("npm run test:e2e:install"))

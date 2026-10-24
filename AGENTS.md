@@ -66,7 +66,11 @@ No test may be flaky. A failure that does not reproduce on every run is evidence
 
 **Historical npm preparation exception (user-approved 2026-10-22):** attribution of Durable `39844782648`'s original npm exit 152 is waived. Preserve evidence; no cause or fix is claimed. New failures, exact-head qualification, assertions and DST replay remain mandatory. Evidence: `docs/postmortems/2026-10-22-local-fake-npm-preparation.md`.
 
+**Historical replacement-smoke exception (user-approved 2026-10-23, PDT):** attribution of only the original local 90s `TimeoutExpired` in `final-batch-infra-correct-env.log` is waived as a merge/deployment prerequisite. Preserve first-failure evidence; its cause remains unknown and no fix is claimed. Controlled 40%-CPU failures, new failures, exact-head gates, assertions, production rules, fixture cleanup and DST replay/root-cause requirements are not waived. Evidence: `docs/postmortems/2026-10-22-replacement-smoke-fixture-budget.md`.
+
 For a DST failure, replay the recorded trace from `test-failures/` (`DST_REPLAY=<trace> npx vitest run …`) before any fix, understand the interleaving, and only then decide whether the defect is in the product or in the scenario's assumptions. Never delete the trace to make the suite pass.
+
+**Historical PR 163 runner-crash exception (user-approved 2026-10-23, PDT):** attribution of only run `39961953749` / job `120441887000` on `5253b681` (SIGSEGV, exit 139) is waived. Preserve evidence; faulting PID/stack and cause remain unknown, with no native-crash fix claimed. New failures, exact-head gates, assertions and DST requirements remain mandatory. Evidence: `docs/testing.md`.
 
 ## Observability
 

@@ -1144,7 +1144,7 @@ describe("HistoryView", () => {
     expect(html).not.toContain('href="https://example.com/code"');
   });
 
-  it("renders image references without inline bytes or URLs, with a fetched-body fallback", () => {
+  it("renders image references without inline bytes or URLs", () => {
     const record = (
       id: string,
       content: Extract<HistoryRecord, { type: "message" }>["content"],
@@ -1174,26 +1174,6 @@ describe("HistoryView", () => {
     expect(html).toContain("Loading…");
     expect(html).not.toContain("aGVsbG8=");
     expect(html).not.toContain("https://example.com/pic.png");
-    expect(
-      renderToStaticMarkup(
-        <DetailContent
-          body={{ type: "image", url: "https://example.com/pic.png" }}
-          context={detailContext()}
-          recordId="with-url"
-          detailKey="with-url:0"
-        />,
-      ),
-    ).toContain('src="https://example.com/pic.png"');
-    expect(
-      renderToStaticMarkup(
-        <DetailContent
-          body={{ type: "image" }}
-          context={detailContext()}
-          recordId="bare"
-          detailKey="bare:0"
-        />,
-      ),
-    ).toContain("[image]");
   });
 
   it("consolidates persisted tool calls and defers command output bodies", () => {

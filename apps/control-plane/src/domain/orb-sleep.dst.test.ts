@@ -452,11 +452,11 @@ describe("scheduled sleep lifecycle (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        const override = capture.matching("sleep-cancelled").join("\n");
+        expect(override).toContain("00000000-0000-4000-8000-000000000027");
+        expect(override).toContain("override=graceful_sleep_stop");
       },
     );
-    const override = capture.matching("sleep-cancelled").join("\n");
-    expect(override).toContain("00000000-0000-4000-8000-000000000027");
-    expect(override).toContain("override=graceful_sleep_stop");
   });
 
   it("finishes a sleep drain after preparation was busy beyond the create/start deadline", async () => {
@@ -585,10 +585,10 @@ describe("scheduled sleep lifecycle (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(capture.matching("override=graceful_sleep_stop")).toHaveLength(1);
+        expect(capture.matching("sleep-cancelled")).toEqual([]);
       },
     );
-    expect(capture.matching("override=graceful_sleep_stop")).toHaveLength(1);
-    expect(capture.matching("sleep-cancelled")).toEqual([]);
   });
 
   it("atomically stops a running sleeper without losing its cancellation identity", async () => {
@@ -619,10 +619,10 @@ describe("scheduled sleep lifecycle (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(capture.matching("sleep-cancelled").join("\n")).toContain(
+          "00000000-0000-4000-8000-000000000025",
+        );
       },
-    );
-    expect(capture.matching("sleep-cancelled").join("\n")).toContain(
-      "00000000-0000-4000-8000-000000000025",
     );
   });
 
@@ -701,10 +701,10 @@ describe("scheduled sleep lifecycle (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(capture.matching("sleep-cancelled").join("\n")).toContain(
+          "00000000-0000-4000-8000-000000000020",
+        );
       },
-    );
-    expect(capture.matching("sleep-cancelled").join("\n")).toContain(
-      "00000000-0000-4000-8000-000000000020",
     );
   });
 
@@ -740,10 +740,10 @@ describe("scheduled sleep lifecycle (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(capture.matching("sleep-cancelled").join("\n")).toContain(
+          "00000000-0000-4000-8000-000000000022",
+        );
       },
-    );
-    expect(capture.matching("sleep-cancelled").join("\n")).toContain(
-      "00000000-0000-4000-8000-000000000022",
     );
   });
 });

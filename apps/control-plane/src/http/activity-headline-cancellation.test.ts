@@ -2,6 +2,7 @@ import { NoSimulationTask } from "determined";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { ok, ResultAsync } from "neverthrow";
 import { expect, it } from "vitest";
+import { headlineSource, seedDisplayHistory } from "../testkit/display-history.ts";
 import { makeHarness, makeOrbRow, makeProjectRow, TEST_SYSTEM_VIEW } from "../testkit/fixtures.ts";
 import { registerRoutes } from "./routes.ts";
 
@@ -10,31 +11,7 @@ it("bodyless POST survives normal IncomingMessage close; premature response clos
   const h = makeHarness();
   h.store.seedProject(makeProjectRow("project"));
   h.store.seedOrb(makeOrbRow("orb", "project", "stopped"));
-  await h.store.commitPullBatch(task, {
-    orbId: "orb",
-    expectedCursor: null,
-    session: { id: "session", overflow: {} },
-    records: [
-      {
-        id: "record",
-        parentId: null,
-        overflow: {},
-        timestamp: "2026-10-04T00:00:00Z",
-        type: "message",
-        role: "assistant",
-        content: [
-          {
-            type: "tool_call",
-            callId: "call",
-            name: "codemode",
-            arguments: { code: "Inspect configuration" },
-          },
-        ],
-      },
-    ],
-    nextCursor: "record",
-    nextHeadId: "record",
-  });
+  await seedDisplayHistory(task, h, [headlineSource()]);
   const signals: AbortSignal[] = [];
   const requests: FastifyRequest[] = [];
   const replies: FastifyReply[] = [];

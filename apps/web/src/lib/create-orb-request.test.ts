@@ -18,17 +18,30 @@ describe("browser orb creation request", () => {
   });
   it("sends the browser's zone with the orb ID", async () => {
     browserTimeZone("America/Los_Angeles");
-    const fetchMock = vi.fn(async (_path: string, init?: RequestInit) => {
-      expect(JSON.parse(String(init?.body))).toEqual({
-        id: "new-orb",
-        userTimeZone: "America/Los_Angeles",
-      });
-      return Response.json({});
-    });
+    const orb = {
+      id: "new-orb",
+      projectId: "project",
+      harness: "pi",
+      name: null,
+      state: "creating",
+      stateVersion: 0,
+      stateChangedAt: "2026-10-22T00:00:00Z",
+      createdAt: "2026-10-22T00:00:00Z",
+      updatedAt: "2026-10-22T00:00:00Z",
+    };
+    const fetchMock = vi.fn(async (_path: string, _init?: RequestInit) => Response.json(orb));
     vi.stubGlobal("fetch", fetchMock);
 
-    await createOrb("project", createOrbRequest("new-orb"));
+    const result = await createOrb("project", createOrbRequest("new-orb"));
     expect(fetchMock).toHaveBeenCalledOnce();
+    const [path, init] = fetchMock.mock.calls[0] ?? [];
+    expect(path).toBe("/api/v1/projects/project/orbs");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      id: "new-orb",
+      userTimeZone: "America/Los_Angeles",
+    });
+    expect(result._unsafeUnwrap()).toEqual(orb);
   });
 
   it("keeps the creation snapshot when the browser zone later changes", () => {

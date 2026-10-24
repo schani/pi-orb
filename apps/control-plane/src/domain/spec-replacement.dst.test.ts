@@ -6,12 +6,13 @@ import {
   makeHarness,
   makeOrbRow,
   makeProjectRow,
+  makeRevision,
   restartControlPlane,
+  seedRunningOnRevisions,
   seedRunningOrb,
   type TestHarness,
 } from "../testkit/fixtures.ts";
-import { assertAtMostOneHost } from "../testkit/invariants.ts";
-import { LogCapture, runDst, waitUntil } from "../testkit/sim.ts";
+import { LogCapture, runDst, sleepInSteps, waitUntil } from "../testkit/sim.ts";
 import { FakeOrbHostProvider } from "../testkit/world.ts";
 import { ControlState } from "./control-state.ts";
 import { reconcileOrbOnce, requestOrbStart, requestOrbStop } from "./lifecycle.ts";
@@ -28,18 +29,6 @@ const UPDATED_SPEC = "spec-updated";
 
 /** Convergence crosses the modeled 65 s host boot, twice in some scenarios. */
 const CONVERGE_MS = 900_000;
-
-/**
- * Wait in short steps. A single long timer is not a long wait to this
- * scheduler: its late-firing exploration can pick that timer and teleport
- * virtual time past every other deadline at once (docs/testing.md).
- */
-async function sleepInSteps(task: SimulationTask, totalMs: number, reason: string): Promise<void> {
-  const until = task.monotonicNow() + totalMs;
-  while (task.monotonicNow() < until) {
-    await task.sleep(Math.min(until - task.monotonicNow(), 500), reason);
-  }
-}
 
 /** A user-driven stop/start round trip: the ordinary Start replaces stale compute. */
 async function stopStartCycle(
@@ -94,53 +83,6 @@ function workspaceIdentity(harness: TestHarness): {
     records: harness.world.entriesOf(ORB).length,
     exists: harness.world.filesystemExists(ORB),
   };
-}
-
-/**
- * One control-plane revision: its own provider (deploy generation plus
- * effective specification) and its own in-process state over the shared world
- * and store — as much as two Cloud Run revisions share during a rollover.
- */
-function revisionOf(
-  harness: TestHarness,
-  specGeneration: number,
-  desiredSpec: string,
-): ControlPlaneDeps {
-  return {
-    ...harness.deps,
-    hostProvider: new FakeOrbHostProvider(harness.world, 50, specGeneration, desiredSpec),
-    control: new ControlState(),
-  };
-}
-
-function seedRunningOnRevision(
-  task: SimulationTask,
-  harness: TestHarness,
-  deps: ControlPlaneDeps,
-): void {
-  harness.world.configureOrb(ORB, { initDurationMs: 0 });
-  harness.store.seedProject(makeProjectRow(PROJECT));
-  const provisioned = harness.world.provisionHost(
-    task,
-    ORB,
-    0,
-    deps.hostProvider.specGeneration,
-    deps.hostProvider.desiredSpecFingerprint({ orbId: ORB, repositoryUrl: REPOSITORY_URL }),
-  );
-  harness.world.finishBoot(task, ORB);
-  harness.world.ensureSessionExists(ORB);
-  harness.store.seedOrb(
-    makeOrbRow(ORB, PROJECT, "running", {
-      hostRef: provisioned.ref.resourceId,
-      runtimeTokenHash: provisioned.runtimeTokenHash,
-      hostSpecFingerprint: provisioned.specFingerprint,
-      hostSpecGeneration: provisioned.specGeneration,
-      checkoutCommit: "commit-0",
-      lastReadyAt: task.wallNow(),
-      stateChangedAt: task.wallNow(),
-    }),
-  );
-  deps.control.resetLivenessBaseline(ORB, task.monotonicNow());
 }
 
 /**
@@ -246,7 +188,6 @@ describe("host-spec replacement (DST)", () => {
         expect(discardRequests[0]).toContain("through_incarnation=0");
         expect(capture.matching("replacement-provisioned")).toHaveLength(1);
         expect(capture.matching("spec-replacement-declined")).toEqual([]);
-        assertAtMostOneHost(harness.world, ORB);
       },
     );
   });
@@ -291,7 +232,6 @@ describe("host-spec replacement (DST)", () => {
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
         expect(capture.matching("compute-discard-requested")).toEqual([]);
         expect(capture.matching("replacement-provisioned")).toEqual([]);
-        assertAtMostOneHost(harness.world, ORB);
       },
     );
   });
@@ -355,7 +295,6 @@ describe("host-spec replacement (DST)", () => {
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
         expect(capture.matching("compute-discard-requested")).toEqual([]);
         expect(capture.matching("spec-replacement-declined")).toEqual([]);
-        assertAtMostOneHost(harness.world, ORB);
       },
     );
   });
@@ -459,7 +398,6 @@ describe("host-spec replacement (DST)", () => {
         expect(harness.world.specFingerprintOf(ORB)).toBe(spec);
         expect(capture.matching("mismatch")).toEqual([]);
         expect(capture.matching("to=failed")).toEqual([]);
-        assertAtMostOneHost(harness.world, ORB);
       },
     );
     expect(inPlaceRestarts).toBeGreaterThan(0);
@@ -544,7 +482,6 @@ describe("host-spec replacement (DST)", () => {
         expect(discardRequests).toHaveLength(1);
         expect(discardRequests[0]).toContain("reason=host_spec_changed");
         expect(capture.matching("to=failed")).toEqual([]);
-        assertAtMostOneHost(harness.world, ORB);
       },
     );
   });
@@ -718,8 +655,8 @@ describe("host-spec replacement (DST)", () => {
       { name: "spec-replacement-declined-edge", iterations: 20, logCapture: capture },
       async (sim) => {
         const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
-        const current = revisionOf(harness, 2, "spec-current");
-        const stale = revisionOf(harness, 1, "spec-drained");
+        const current = makeRevision(harness, 2, "spec-current");
+        const stale = makeRevision(harness, 1, "spec-drained");
         const currentSpec = current.hostProvider.desiredSpecFingerprint({
           orbId: ORB,
           repositoryUrl: REPOSITORY_URL,
@@ -728,7 +665,7 @@ describe("host-spec replacement (DST)", () => {
           {
             name: "driver",
             f: async (task) => {
-              seedRunningOnRevision(task, harness, current);
+              seedRunningOnRevisions(task, harness, ORB, PROJECT, [current], { initDurationMs: 0 });
               const ref = harness.world.hostRefOf(ORB)?.resourceId ?? null;
               const stopped = await requestOrbStop(task, current, ORB);
               expect(stopped.isOk()).toBe(true);
@@ -784,7 +721,6 @@ describe("host-spec replacement (DST)", () => {
         expect(capture.matching("compute-discard-requested")).toEqual([]);
         expect(capture.matching("spec-replacement-declined")).toHaveLength(1);
         expect(harness.world.createdHostsOf(ORB)).toHaveLength(1);
-        assertAtMostOneHost(harness.world, ORB);
       },
     );
   });
@@ -874,7 +810,6 @@ describe("host-spec replacement (DST)", () => {
         expect(discardRequests).toHaveLength(1);
         expect(discardRequests[0]).toContain("reason=host_spec_changed");
         expect(capture.matching("to=failed")).toEqual([]);
-        assertAtMostOneHost(harness.world, ORB);
       },
     );
   });

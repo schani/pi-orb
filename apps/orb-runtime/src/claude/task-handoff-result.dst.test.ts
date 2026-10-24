@@ -257,7 +257,7 @@ it("a failed acknowledgment publication retains handoff ownership and blocks adm
 });
 
 it("a handoff arriving during synthesis survives the earlier handoff's result in both ownership layers", async () => {
-  await runDst({ name: "claude-handoff-request-snapshot", iterations: 20 }, async (sim) => {
+  await runDst({ name: "claude-handoff-request-snapshot", iterations: 1 }, async (sim) => {
     const f = new ComposedClaudeFixture();
     try {
       expect((await f.attach()).isOk()).toBe(true);

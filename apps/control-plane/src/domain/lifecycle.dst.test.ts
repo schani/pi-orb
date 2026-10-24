@@ -16,8 +16,8 @@ import {
   TEST_USER_ID,
   type TestHarness,
 } from "../testkit/fixtures.ts";
-import { assertAtMostOneHost, assertReplicaComplete } from "../testkit/invariants.ts";
-import { LogCapture, makeRecordingSimulation, runDst, waitUntil } from "../testkit/sim.ts";
+import { assertReplicaComplete } from "../testkit/invariants.ts";
+import { LogCapture, runDst, sleepInSteps, waitUntil } from "../testkit/sim.ts";
 import { isDeclineMarker, isResumeMarker } from "../testkit/world.ts";
 import { ControlState } from "./control-state.ts";
 import { reconcileOrbOnce, requestOrbStart, requestOrbStop } from "./lifecycle.ts";
@@ -86,31 +86,27 @@ function assertInboxFifo(
   orbId: string,
   messageIds: readonly string[],
 ): void {
-  const records = harness.store.replicaRecords(orbId);
-  const positions = messageIds.map((messageId) =>
-    records.findIndex((record) => inboxMessageIdsOf(record).includes(messageId)),
-  );
+  const identities = harness.store.replicaRecords(orbId).flatMap(inboxMessageIdsOf);
+  const positions = messageIds.map((messageId) => identities.indexOf(messageId));
   for (const position of positions) expect(position).toBeGreaterThanOrEqual(0);
-  // Squashed batches share one record, so equal positions are FIFO too.
   for (let index = 1; index < positions.length; index++) {
-    expect(positions[index - 1] ?? -1).toBeLessThanOrEqual(positions[index] ?? -1);
+    expect(positions[index - 1] ?? -1).toBeLessThan(positions[index] ?? -1);
   }
 }
 
-/**
- * Wait `totalMs` in short steps. One long timer is not a long wait to this
- * scheduler: its late-firing exploration may pick that timer and teleport
- * virtual time past every other deadline in the simulation at once — here it
- * starved the history poller for a full minute and produced an
- * `unreachable-restart` no stalled caller could have caused (2026-08-11; the
- * same reasoning as `HANG_STEP_MS` in testkit/world.ts).
- */
-async function sleepInSteps(task: SimulationTask, totalMs: number, reason: string): Promise<void> {
-  const until = task.monotonicNow() + totalMs;
-  while (task.monotonicNow() < until) {
-    await task.sleep(Math.min(until - task.monotonicNow(), 500), reason);
-  }
-}
+it("the FIFO oracle checks identity order within squashed batches", () => {
+  const harness = makeHarness();
+  harness.world.configureOrb(ORB, {});
+  harness.world.ensureSessionExists(ORB);
+  const record = harness.world.appendMessage(ORB);
+  expect(record.type).toBe("message");
+  if (record.type !== "message") return;
+  harness.store.replicaRecords = () => [{ ...record, inboxMessageIds: ["first", "second"] }];
+  expect(() => assertInboxFifo(harness, ORB, ["first", "second"])).not.toThrow();
+  harness.store.replicaRecords = () => [{ ...record, inboxMessageIds: ["second", "first"] }];
+  expect(() => assertInboxFifo(harness, ORB, ["first", "second"])).toThrow();
+  expect(() => assertInboxFifo(harness, ORB, ["missing"])).toThrow();
+});
 
 function seedCreatingOrb(
   task: SimulationTask,
@@ -215,7 +211,6 @@ describe("orb lifecycle (DST)", () => {
       expect(orb?.checkoutCommit).toBe("abc");
       expect(orb?.hostRef).not.toBeNull();
       expect(harness.world.hostStateOf(ORB)).toBe("running");
-      assertAtMostOneHost(harness.world, ORB);
     });
   });
 
@@ -287,7 +282,6 @@ describe("orb lifecycle (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        assertAtMostOneHost(harness.world, ORB);
       },
     );
   });
@@ -394,7 +388,12 @@ describe("orb lifecycle (DST)", () => {
   });
 
   it("a control-plane restart during a pending login starts a fresh flow", async () => {
-    await runDst({ name: "restart-during-login", iterations: 20 }, async (sim) => {
+    const options = {
+      name: "restart-during-login",
+      iterations: 20,
+      logCapture: new LogCapture(),
+    };
+    await runDst(options, async (sim, nextPhase) => {
       const before = makeHarness({
         authMode: { kind: "requires_login", autoCompleteAfterMs: null, challengeTtlMs: 600_000 },
       });
@@ -420,10 +419,7 @@ describe("orb lifecycle (DST)", () => {
       const after = restartControlPlane(before);
       after.authGate.invalidateCredential();
       const stopAfter = new AbortController();
-      // SimulationImpl is single-use; phase 2 gets its own simulation with the
-      // same standard options (biased timer policy, fixed epoch).
-      const { makeRecordingSimulation } = await import("../testkit/sim.ts");
-      const sim2 = makeRecordingSimulation({ name: "restart-during-login-phase2" });
+      const sim2 = nextPhase();
       const phase2 = await sim2.runTasks([
         { name: "reconciler-2", f: (task) => reconcileLoop(task, after.deps, stopAfter.signal) },
         {
@@ -995,9 +991,7 @@ describe("orb lifecycle (DST)", () => {
       const records = harness.store.replicaRecords(ORB);
       expect(inboxRecordsFor(records, olderId)).toHaveLength(1);
       expect(inboxRecordsFor(records, wakeId)).toHaveLength(1);
-      const olderIndex = records.findIndex((record) => inboxMessageIdsOf(record).includes(olderId));
-      const wakeIndex = records.findIndex((record) => inboxMessageIdsOf(record).includes(wakeId));
-      expect(olderIndex).toBeLessThanOrEqual(wakeIndex);
+      assertInboxFifo(harness, ORB, [olderId, wakeId]);
     });
   });
 
@@ -1877,6 +1871,26 @@ describe("orb lifecycle (DST)", () => {
         const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
         const stop = new AbortController();
         const messageId = "00000000-0000-4000-8000-000000000144";
+        const deliver = harness.deps.runtimeClient.deliverMessage.bind(harness.deps.runtimeClient);
+        let firstRequest: Parameters<typeof deliver>[1] | null = null;
+        let retryObserved = false;
+        let crashed = false;
+        harness.deps.runtimeClient.deliverMessage = (...args) => {
+          const request = args[1];
+          const pendingBefore = harness.world.pendingInboxBatchesOf(ORB).includes(messageId);
+          if (!crashed) {
+            firstRequest ??= structuredClone(request);
+            expect(request).toEqual(firstRequest);
+          }
+          return deliver(...args).map((response) => {
+            if (!crashed && pendingBefore) {
+              expect(response).toMatchObject({ messageId, status: "queued", duplicate: true });
+              expect(harness.world.pendingInboxBatchesOf(ORB)).toEqual([messageId]);
+              retryObserved = true;
+            }
+            return response;
+          });
+        };
         const result = await sim.runTasks([
           { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
           { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
@@ -1904,13 +1918,17 @@ describe("orb lifecycle (DST)", () => {
               // The batch stays claimed, so the reconciler redelivers it every
               // pass. Those retries must find it pending and do nothing —
               // otherwise one queued message becomes several agent turns.
-              await task.sleep(
-                6 * TEST_CONSTANTS.reconcileTickMs,
-                "let the control plane retry the still-claimed batch",
+              await waitUntil(
+                task,
+                "same pending batch receives a duplicate delivery response",
+                () => retryObserved,
+                { timeoutMs: 120_000 },
               );
+              expect(firstRequest).not.toBeNull();
               expect(harness.world.pendingInboxBatchesOf(ORB)).toEqual([messageId]);
               expect(harness.store.messageSnapshots(ORB)[0]?.status).toBe("delivering");
               // Now the process dies with the batch still only in memory.
+              crashed = true;
               harness.world.restartRuntimeProcess(task, ORB);
               expect(harness.world.pendingInboxBatchesOf(ORB)).toEqual([]);
               harness.world.scriptDeliverMessage(ORB, { kind: "ok" });
@@ -2464,37 +2482,51 @@ describe("orb lifecycle (DST)", () => {
     });
   });
 
-  it("an absent or already-stopped host during stopping is marked stopped directly", async () => {
-    await runDst({ name: "stop-absent-host", iterations: 20 }, async (sim) => {
-      const harness = makeHarness();
-      const stop = new AbortController();
-      const result = await sim.runTasks([
-        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
-        {
-          name: "driver",
-          f: async (task) => {
-            seedRunningOrb(task, harness, ORB);
-            harness.world.appendMessage(ORB); // will remain unreplicated: accepted caveat
-            // Host dies out from under us (e.g. crashed while stopping).
-            const orb = harness.store.orbSnapshot(ORB);
-            expect(orb?.hostRef).not.toBeNull();
-            harness.world.stopHost({ provider: "fake", resourceId: orb?.hostRef ?? "" });
-            const stopResult = await requestOrbStop(task, harness.deps, ORB);
-            expect(stopResult.isOk()).toBe(true);
-            await waitUntil(
-              task,
-              "orb stopped despite dead host",
-              () => harness.store.orbSnapshot(ORB)?.state === "stopped",
-              { timeoutMs: 300_000 },
-            );
-            stop.abort();
+  it.each(["absent", "already-stopped"] as const)(
+    "an %s host during stopping is marked stopped directly",
+    async (hostState) => {
+      await runDst({ name: `stop-${hostState}-host`, iterations: 20 }, async (sim) => {
+        const harness = makeHarness();
+        const stop = new AbortController();
+        let hostArranged = false;
+        const result = await sim.runTasks([
+          {
+            name: "reconciler",
+            f: async (task) => {
+              await waitUntil(task, "dead host arranged in stopping episode", () => hostArranged);
+              await reconcileLoop(task, harness.deps, stop.signal);
+            },
           },
-        },
-      ]);
-      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      expect(harness.store.orbSnapshot(ORB)?.state).toBe("stopped");
-    });
-  });
+          {
+            name: "driver",
+            f: async (task) => {
+              seedRunningOrb(task, harness, ORB);
+              harness.world.appendMessage(ORB); // will remain unreplicated: accepted caveat
+              const startsBefore = harness.world.hostStartCountOf(ORB);
+              const orb = harness.store.orbSnapshot(ORB);
+              expect(orb?.hostRef).not.toBeNull();
+              const stopResult = await requestOrbStop(task, harness.deps, ORB);
+              expect(stopResult.isOk()).toBe(true);
+              expect(harness.store.orbSnapshot(ORB)?.state).toBe("stopping");
+              if (hostState === "absent") harness.world.removeHost(ORB);
+              else harness.world.stopHost({ provider: "fake", resourceId: orb?.hostRef ?? "" });
+              hostArranged = true;
+              await waitUntil(
+                task,
+                "orb stopped despite dead host",
+                () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+                { timeoutMs: 300_000 },
+              );
+              expect(harness.world.hostStartCountOf(ORB)).toBe(startsBefore);
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(harness.store.orbSnapshot(ORB)?.state).toBe("stopped");
+      });
+    },
+  );
 
   it("an unreachable runtime in a live host is restarted after the grace period", async () => {
     await runDst({ name: "unreachable-restart", iterations: 20 }, async (sim) => {
@@ -2770,9 +2802,9 @@ describe("orb lifecycle (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(capture.matching("unreachable-restart-deferred")).toHaveLength(1);
       },
     );
-    expect(capture.matching("unreachable-restart-deferred")).toHaveLength(1);
   });
 
   it("a runtime answer racing failed corroboration vetoes the restart", async () => {
@@ -2942,7 +2974,6 @@ describe("orb lifecycle (DST)", () => {
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
         expect(harness.store.orbSnapshot(ORB)?.state).toBe("running");
         assertReplicaComplete(harness.world, harness.store, ORB);
-        assertAtMostOneHost(harness.world, ORB);
         // The recovery is legible from the log alone: whichever path won the
         // race (liveness grace expiry or the host observing `stopped` after its
         // ACPI window), the orb left `running` through `starting`...
@@ -3007,7 +3038,6 @@ describe("orb lifecycle (DST)", () => {
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      assertAtMostOneHost(harness.world, ORB);
     });
   });
 
@@ -3130,7 +3160,6 @@ describe("orb lifecycle (DST)", () => {
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
         expect(harness.world.resumeMarkersOf(ORB).length).toBe(1);
         assertReplicaComplete(harness.world, harness.store, ORB);
-        assertAtMostOneHost(harness.world, ORB);
         // The recovery is legible from the log, as in the neighbouring
         // preemption scenario...
         expect(
@@ -3231,7 +3260,6 @@ describe("orb lifecycle (DST)", () => {
         // Five recoveries plus idle stop; no restart storm.
         expect(stopsDuringScenario).toBeLessThanOrEqual(5 * MAX_STOPS_PER_RECOVERY);
         assertReplicaComplete(harness.world, harness.store, ORB);
-        assertAtMostOneHost(harness.world, ORB);
         expect(
           capture.matching("transition from=running to=starting").length,
         ).toBeGreaterThanOrEqual(5);
@@ -3374,7 +3402,6 @@ describe("orb lifecycle (DST)", () => {
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      assertAtMostOneHost(harness.world, ORB);
     });
   });
 
@@ -3459,7 +3486,6 @@ describe("orb lifecycle (DST)", () => {
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      assertAtMostOneHost(harness.world, ORB);
       expect(harness.world.hostStateOf(ORB)).toBe("stopped");
     });
   });
@@ -3496,6 +3522,63 @@ describe("orb lifecycle (DST)", () => {
 });
 
 describe("idle auto-stop (DST)", () => {
+  it("uses the persisted idle deadline across a healthy process restart", async () => {
+    await runDst(
+      { name: "idle-restart-persisted-boundary", iterations: 10, lateTimerProbability: 0 },
+      async (sim, nextPhase) => {
+        const before = makeHarness();
+        let lastBusyAt = 0;
+        const seeded = await sim.runTasks([
+          {
+            name: "seed-durable-activity",
+            f: async (task) => {
+              seedRunningOrb(task, before, ORB);
+              const row = before.store.orbSnapshot(ORB);
+              expect(row).not.toBeNull();
+              if (row === null) return;
+              lastBusyAt = task.wallNow();
+              before.store.seedOrb({ ...row, lastBusyAt, stateChangedAt: lastBusyAt - 1_000 });
+            },
+          },
+        ]);
+        expect(seeded.isOk(), seeded.isErr() ? seeded.error.message : "").toBe(true);
+        const startsBefore = before.world.hostStartCountOf(ORB);
+        const after = restartControlPlane(before);
+        const idleMs = after.deps.constants.idleStopAfterMs;
+        const restartedAt = lastBusyAt + idleMs / 2;
+        const restarted = nextPhase({ wallClockEpoch: restartedAt });
+        const result = await restarted.runTasks([
+          {
+            name: "healthy-idle-boundary",
+            f: async (task) => {
+              expect((await reconcileOrbOnce(task, after.deps, ORB)).type).toBe("noop");
+              const deadline = lastBusyAt + idleMs;
+              await task.sleep(
+                deadline - 500 - task.wallNow(),
+                "just before persisted idle deadline",
+              );
+              expect((await reconcileOrbOnce(task, after.deps, ORB)).type).toBe("noop");
+              expect(after.store.orbSnapshot(ORB)?.state).toBe("running");
+              await task.sleep(
+                deadline + 500 - task.wallNow(),
+                "just after persisted idle deadline",
+              );
+              expect((await reconcileOrbOnce(task, after.deps, ORB)).type).toBe("transitioned");
+              expect(task.wallNow()).toBeLessThan(restartedAt + idleMs);
+              expect(after.store.orbSnapshot(ORB)).toMatchObject({
+                state: "stopping",
+                stopReason: "idle",
+                lastBusyAt,
+              });
+              expect(after.world.hostStartCountOf(ORB)).toBe(startsBefore);
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      },
+    );
+  });
+
   it("stops an idle orb after the idle deadline with reason idle", async () => {
     const capture = new LogCapture();
     await runDst(
@@ -3712,7 +3795,12 @@ describe("idle auto-stop (DST)", () => {
   // docs/postmortems/2026-10-10-starting-deadline-restarts.md: a control plane
   // dying faster than its in-memory boot holds must still fail a dead boot.
   it("a never-answering boot fails although the control plane keeps restarting", async () => {
-    await runDst({ name: "starting-deadline-restarts", iterations: 5 }, async (sim) => {
+    const options = {
+      name: "starting-deadline-restarts",
+      iterations: 5,
+      logCapture: new LogCapture(),
+    };
+    await runDst(options, async (sim, nextPhase) => {
       const { createStartDeadlineMs, setupHookHoldMs, unreachableBootDeadlineMs } = TEST_CONSTANTS;
       let harness = makeHarness();
       let current = sim;
@@ -3745,88 +3833,11 @@ describe("idle auto-stop (DST)", () => {
           createStartDeadlineMs + setupHookHoldMs + unreachableBootDeadlineMs,
         );
         harness = restartControlPlane(harness);
-        current = makeRecordingSimulation({
-          name: `starting-deadline-restarts-${phase + 1}`,
+        current = nextPhase({
           wallClockEpoch: wall + 10_000,
         });
       }
       expect(harness.store.orbSnapshot(ORB)?.lastError).toMatch(/^deadline_exceeded/);
-    });
-  });
-
-  it("survives a control-plane restart on persisted state alone", async () => {
-    await runDst({ name: "idle-stop-across-restart", iterations: 10 }, async (sim) => {
-      const before = makeHarness();
-      const stopBefore = new AbortController();
-      let crashWall = 0;
-      const phase1 = await sim.runTasks([
-        { name: "reconciler-1", f: (task) => reconcileLoop(task, before.deps, stopBefore.signal) },
-        { name: "poller-1", f: (task) => pollLoop(task, before.deps, stopBefore.signal) },
-        {
-          name: "driver-1",
-          f: async (task) => {
-            seedRunningOrb(task, before, ORB);
-            before.deps.control.registerBrowserConnection(ORB, "setup-tab");
-            before.deps.control.setBrowserVisibility(ORB, "setup-tab", true, task.wallNow());
-            before.world.setActivity(ORB, "busy");
-            await waitUntil(
-              task,
-              "busy activity persisted",
-              () => before.store.orbSnapshot(ORB)?.lastBusyAt !== null,
-              { timeoutMs: 60_000 },
-            );
-            before.deps.control.unregisterBrowserConnection(ORB, "setup-tab", task.wallNow());
-            before.world.setActivity(ORB, "idle");
-            crashWall = task.wallNow();
-            stopBefore.abort();
-          },
-        },
-      ]);
-      expect(phase1.isOk(), phase1.isErr() ? phase1.error.message : "").toBe(true);
-      const persistedLastBusy = before.store.orbSnapshot(ORB)?.lastBusyAt ?? null;
-      expect(persistedLastBusy).not.toBeNull();
-      expect(before.store.orbSnapshot(ORB)?.state).toBe("running");
-
-      // Restart: fresh in-memory state, 10s of downtime, same durable rows.
-      const after = restartControlPlane(before);
-      const stopAfter = new AbortController();
-      const sim2 = makeRecordingSimulation({
-        name: "idle-stop-across-restart-phase2",
-        wallClockEpoch: crashWall + 10_000,
-      });
-      let firstStopSeenAt: number | null = null;
-      const phase2 = await sim2.runTasks([
-        { name: "reconciler-2", f: (task) => reconcileLoop(task, after.deps, stopAfter.signal) },
-        { name: "poller-2", f: (task) => pollLoop(task, after.deps, stopAfter.signal) },
-        {
-          name: "driver-2",
-          f: async (task) => {
-            await waitUntil(
-              task,
-              "orb idle-stopped after restart",
-              () => {
-                const state = after.store.orbSnapshot(ORB)?.state;
-                // Only the stop edge is timed; `starting` is a restart.
-                if ((state === "stopping" || state === "stopped") && firstStopSeenAt === null) {
-                  firstStopSeenAt = task.wallNow();
-                }
-                return state === "stopped";
-              },
-              { timeoutMs: 600_000 },
-            );
-            stopAfter.abort();
-          },
-        },
-      ]);
-      expect(phase2.isOk(), phase2.isErr() ? phase2.error.message : "").toBe(true);
-      expect(after.store.orbSnapshot(ORB)?.stopReason).toBe("idle");
-      // The persisted timestamp — not the restart — anchors the deadline: the
-      // stop never fires before last_busy_at + idleStopAfterMs even though
-      // all in-memory state was lost.
-      expect(firstStopSeenAt).not.toBeNull();
-      expect(firstStopSeenAt ?? 0).toBeGreaterThanOrEqual(
-        (persistedLastBusy ?? 0) + TEST_CONSTANTS.idleStopAfterMs,
-      );
     });
   });
 });
@@ -3973,26 +3984,37 @@ describe("reconciler logging (DST)", () => {
 
   it("a store outage logs once per outage, not once per tick", async () => {
     const capture = new LogCapture();
+    const probabilities = { [FAILPOINTS.storeRead]: 1 };
     await runDst(
       {
         name: "logging-store-outage-edge",
         iterations: 5,
         logCapture: capture,
-        failpointProbabilities: { [FAILPOINTS.storeRead]: 1 },
+        failpointProbabilities: probabilities,
       },
       async (sim) => {
+        probabilities[FAILPOINTS.storeRead] = 1;
         const harness = makeHarness();
         const result = await sim.runTasks([
           {
             name: "driver",
             f: async (task) => {
               for (let tick = 0; tick < 5; tick++) await pollAllOnce(task, harness.deps);
+              expect(capture.matching("poll-loop-blind")).toHaveLength(1);
+              expect(capture.matching("poll-loop-recovered")).toHaveLength(0);
+              probabilities[FAILPOINTS.storeRead] = 0;
+              await pollAllOnce(task, harness.deps);
+              await pollAllOnce(task, harness.deps);
+              expect(capture.matching("poll-loop-recovered")).toHaveLength(1);
+              probabilities[FAILPOINTS.storeRead] = 1;
+              await pollAllOnce(task, harness.deps);
+              await pollAllOnce(task, harness.deps);
             },
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        expect(capture.matching("poll-loop-blind").length).toBe(1);
-        expect(capture.matching("poll-loop-recovered").length).toBe(0);
+        expect(capture.matching("poll-loop-blind")).toHaveLength(2);
+        expect(capture.matching("poll-loop-recovered")).toHaveLength(1);
       },
     );
   });

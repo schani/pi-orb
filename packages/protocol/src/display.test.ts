@@ -1048,10 +1048,9 @@ describe("native background admission display", () => {
     "native-failed",
     "ambiguous-results",
     "failed",
-    "text-only",
   ])("does not classify %s", (kind) => {
     const record = admissionRecord();
-    if (kind === "no-native" || kind === "text-only") record.overflow = {};
+    if (kind === "no-native") record.overflow = {};
     else if (kind === "human-receipt") record.inboxMessageIds = ["human-inbox"];
     else if (
       kind === "failed" &&

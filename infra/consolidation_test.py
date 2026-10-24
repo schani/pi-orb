@@ -8,6 +8,15 @@ from infra.release_state import SERVICES
 
 
 class ConsolidationTest(unittest.TestCase):
+    def test_foundation_commands_have_one_ci_node_owner(self):
+        suites = ['state_split.test.mjs', 'adopt.test.mjs', 'iam_contract.test.mjs']
+        scripts = json.loads(Path('package.json').read_text())['scripts']
+        ci = Path('.github/workflows/ci.yml').read_text()
+        self.assertIn('run: infra/foundation/test-tofu.sh', ci)
+        self.assertNotIn('run: infra/foundation/test.sh', ci)
+        for suite in suites:
+            self.assertEqual(scripts['test:infra'].count('infra/foundation/' + suite), 1)
+
     def test_one_service_preserves_issuer_resource(self):
         source = Path('infra/run.tf').read_text()
         resources = '\n'.join(path.read_text() for path in Path('infra').glob('*.tf'))

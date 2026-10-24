@@ -1,16 +1,9 @@
 import { DisplayHistoryViewSchema } from "@pi-orb/protocol";
-import { NoSimulationTask } from "determined";
-import Fastify from "fastify";
 import { Check } from "typebox/value";
 import { expect, it } from "vitest";
-import { makeHarness, makeOrbRow, makeProjectRow, TEST_SYSTEM_VIEW } from "../testkit/fixtures.ts";
-import { registerRoutes } from "./routes.ts";
+import { openDisplayHistory } from "../testkit/display-history.ts";
 
 it("serves compact browser history while retaining full persisted records", async () => {
-  const task = new NoSimulationTask("display history", false);
-  const harness = makeHarness();
-  harness.store.seedProject(makeProjectRow("project"));
-  harness.store.seedOrb(makeOrbRow("orb", "project", "stopped"));
   const hidden = `HIDDEN_BROWSER_HISTORY_CANARY_${"x".repeat(100_000)}`;
   const records = Array.from({ length: 30 }, (_, i) => ({
     id: `record-${i}`,
@@ -33,21 +26,8 @@ it("serves compact browser history while retaining full persisted records", asyn
     ],
     overflow: { native: hidden },
   }));
-  expect(
-    (
-      await harness.store.commitPullBatch(task, {
-        orbId: "orb",
-        expectedCursor: null,
-        session: { id: "session", overflow: {} },
-        records,
-        nextCursor: "record-29",
-        nextHeadId: "record-29",
-      })
-    ).isOk(),
-  ).toBe(true);
-  const app = Fastify({ logger: false });
-  try {
-    registerRoutes(app, task, harness.deps, {}, TEST_SYSTEM_VIEW);
+  const { app, harness, task } = await openDisplayHistory(records);
+  {
     const response = await app.inject({ method: "GET", url: "/api/v1/orbs/orb/history" });
     expect(response.statusCode).toBe(200);
     const body = response.json();
@@ -71,7 +51,5 @@ it("serves compact browser history while retaining full persisted records", asyn
     }
     const persisted = await harness.store.readHistorySnapshot(task, "orb");
     expect(persisted.isOk() && persisted.value.records[0]?.overflow?.native).toBe(hidden);
-  } finally {
-    await app.close();
   }
 });

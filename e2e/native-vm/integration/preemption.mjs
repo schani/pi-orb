@@ -32,7 +32,7 @@ await execute("gcloud", [
   `--zone=${f.zone}`,
   "--quiet",
 ]);
-const states = [];
+const states = [before];
 await waitFor(
   "preemption recovery",
   async () => {
@@ -41,9 +41,17 @@ await waitFor(
       states.push(r);
       writeFileSync(`${root}/preemption-states.json`, JSON.stringify(states, null, 2));
     }
-    return r.state === "running" && r.stateVersion > before.stateVersion ? r : null;
+    return r.state === "running" &&
+      r.stateVersion >= before.stateVersion + 2 &&
+      Date.parse(r.stateChangedAt) > Date.parse(before.stateChangedAt)
+      ? r
+      : null;
   },
   { timeoutMs: 900000, intervalMs: 2000 },
 );
-assert(states.some((r) => r.state === "starting"));
+const recovered = states.at(-1);
+assert.equal(recovered.state, "running");
+assert(recovered.stateVersion > before.stateVersion);
+assert(Date.parse(recovered.stateChangedAt) > Date.parse(before.stateChangedAt));
+writeFileSync(`${root}/preemption-witness.json`, JSON.stringify({ before, recovered }, null, 2));
 console.log("REAL_SPOT_PREEMPTION_RECOVERED");

@@ -68,9 +68,3 @@ export function assertReplicaComplete(
     );
   }
 }
-
-export function assertAtMostOneHost(world: FakeWorld, orbId: string): void {
-  if (world.hostCount(orbId) > 1) {
-    throw new Error(`orb ${orbId} has more than one host`);
-  }
-}

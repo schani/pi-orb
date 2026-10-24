@@ -64,18 +64,44 @@ function cleanupStarted(): Promise<void> {
   });
 }
 
+const nativeUrl = `https://claude.com/cai/oauth/authorize?code=true&client_id=00000000-0000-0000-0000-000000000000&response_type=code&redirect_uri=${encodeURIComponent("https://platform.claude.com/oauth/code/callback")}&scope=user%3Ainference&code_challenge=${"c".repeat(43)}&code_challenge_method=S256&state=${"s".repeat(43)}`;
+const nativePrompt = "\nPaste code here if prompted > ";
+
 it("never republishes submitted codes echoed by the PTY", async () => {
   const events: unknown[] = [];
   const started = (
     await new ClaudePtyAuthTransport().start((event) => events.push(event))
   )._unsafeUnwrap();
-  state.onData?.("https://claude.com/cai/oauth/authorize?state=initial\n");
-  started.sendCode("https://claude.com/cai/oauth/authorize?state=private-code");
-  state.onData?.("https://claude.com/cai/oauth/authorize?state=private-code\n");
+  state.onData?.(nativeUrl + nativePrompt);
+  expect(events).toEqual([{ challenge: { url: nativeUrl, needsCode: true } }]);
+  const echoedUrl = nativeUrl.replace("s".repeat(43), "private-code".padEnd(43, "x"));
+  expect(started.sendCode(echoedUrl).isOk()).toBe(true);
+  state.onData?.(echoedUrl + nativePrompt);
+  expect(events).toEqual([{ challenge: { url: nativeUrl, needsCode: true } }]);
   expect(JSON.stringify(events)).not.toContain("private-code");
   started.cancel();
   state.onExit?.({ exitCode: 1 });
   await started.drain();
+});
+
+it("publishes the issued token rather than a submitted token-shaped echo", async () => {
+  const events: unknown[] = [];
+  const started = (
+    await new ClaudePtyAuthTransport().start((event) => events.push(event))
+  )._unsafeUnwrap();
+  state.onData?.(nativeUrl + nativePrompt);
+  expect(events).toEqual([{ challenge: { url: nativeUrl, needsCode: true } }]);
+  expect(started.sendCode("sk-ant-oat01-private-echo").isOk()).toBe(true);
+  state.onData?.(
+    "sk-ant-oat01-private-echo\nYour OAuth token (valid for 1 year):\nsk-ant-oat01-issued\n",
+  );
+  state.onExit?.({ exitCode: 0 });
+  await started.drain();
+  expect(events).toEqual([
+    { challenge: { url: nativeUrl, needsCode: true } },
+    { token: "sk-ant-oat01-issued" },
+  ]);
+  expect(JSON.stringify(events)).not.toContain("private-echo");
 });
 
 it("waits for native exit after submission, suppressing repeated prompts and raw errors", async () => {
@@ -275,6 +301,7 @@ it("escalates termination and bounds unconfirmed exit without claiming cleanup",
   await cleaned;
 });
 afterEach(async () => {
+  vi.unstubAllEnvs();
   state.cleanupGate = undefined;
   state.cleanupFailed = false;
   state.cleanupFinished = undefined;
@@ -286,7 +313,7 @@ afterEach(async () => {
 });
 it("contains child termination exceptions during timeout and excludes ambient config", async () => {
   vi.useFakeTimers();
-  process.env["ANTHROPIC_API_KEY"] = "ambient-secret";
+  vi.stubEnv("ANTHROPIC_API_KEY", "ambient-secret");
   const events: unknown[] = [];
   const started = await new ClaudePtyAuthTransport().start((event) => events.push(event));
   expect(started.isOk()).toBe(true);
@@ -298,5 +325,4 @@ it("contains child termination exceptions during timeout and excludes ambient co
   expect(events).toEqual([{ error: "Claude sign-in timed out", stage: "timeout" }]);
   state.onExit?.({ exitCode: 1 });
   await started._unsafeUnwrap().drain();
-  delete process.env["ANTHROPIC_API_KEY"];
 });

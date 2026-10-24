@@ -9,6 +9,16 @@ import { chromium } from "playwright";
 // docker-stop-held, docker-start-after. Requires Docker, Chromium, and the
 // pi-orb-runtime:dev image. This diagnostic is not part of an automated suite.
 const mode = process.argv[2] ?? "control";
+if (
+  ![
+    "control",
+    "docker-network-create-held",
+    "docker-start-held",
+    "docker-stop-held",
+    "docker-start-after",
+  ].includes(mode)
+)
+  throw new Error(`unknown mode: ${mode}`);
 const owner = `porb-fanout-${process.pid}-${randomUUID().slice(0, 8)}`;
 const network = `${owner}-network`;
 const container = `${owner}-container`;
@@ -20,6 +30,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const docker = (...args) =>
   execFileSync("docker", args, {
     encoding: "utf8",
+    timeout: 30_000,
+    killSignal: "SIGKILL",
     stdio: ["ignore", "pipe", "pipe"],
   }).trim();
 const inspect = (kind, name) => {
@@ -111,94 +123,103 @@ async function run() {
     }
     response.writeHead(404).end();
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  if (address === null || typeof address === "string") throw new Error("server did not bind TCP");
+  let browser;
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("server did not bind TCP");
 
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
-  page.on("request", (request) => {
-    if (/\/module-\d+\.js$/.test(new URL(request.url()).pathname)) browserModulesRequested += 1;
-  });
-  page.on("requestfailed", (request) => {
-    failures.push({ error: request.failure()?.errorText });
-  });
-  const navigation = page
-    .goto(`http://127.0.0.1:${address.port}/`, { waitUntil: "load", timeout: 15_000 })
-    .then(
-      () => ({ ok: true }),
-      (error) => ({ ok: false, error: error.message.split("\n")[0] }),
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    page.on("request", (request) => {
+      if (/\/module-\d+\.js$/.test(new URL(request.url()).pathname)) browserModulesRequested += 1;
+    });
+    page.on("requestfailed", (request) => {
+      failures.push({ error: request.failure()?.errorText });
+    });
+    const navigation = page
+      .goto(`http://127.0.0.1:${address.port}/`, { waitUntil: "load", timeout: 15_000 })
+      .then(
+        () => ({ ok: true }),
+        (error) => ({ ok: false, error: error.message.split("\n")[0] }),
+      );
+
+    await waitUntil(() => entered === heldConnectionCount, "six server-entered module requests");
+    await waitUntil(() => browserModulesRequested === moduleCount, "64 browser module requests");
+    timeline.push({ at: now(), event: "gate-satisfied", entered, browserModulesRequested });
+
+    if (mode === "control") {
+      timeline.push({ at: now(), event: "control-no-mutation" });
+    } else if (mode === "docker-network-create-held") {
+      timeline.push({ at: now(), event: "mutation-begin", operation: "docker network create" });
+      docker("network", "create", network);
+      timeline.push({ at: now(), event: "mutation-end" });
+    } else if (mode === "docker-start-held") {
+      timeline.push({ at: now(), event: "mutation-begin", operation: "docker start" });
+      docker("start", container);
+      timeline.push({ at: now(), event: "mutation-end" });
+    } else if (mode === "docker-stop-held") {
+      timeline.push({ at: now(), event: "mutation-begin", operation: "docker stop" });
+      docker("stop", "--time", "0", container);
+      timeline.push({ at: now(), event: "mutation-end" });
+    }
+
+    if (mode === "docker-start-after") {
+      heldResponses.forEach((release) => {
+        release();
+      });
+      await page.waitForSelector("#root > span", { state: "attached", timeout: 5000 });
+      timeline.push({ at: now(), event: "all-modules-finished-root-mounted" });
+      docker("start", container);
+      await sleep(settleMs);
+    } else {
+      await sleep(settleMs);
+      timeline.push({
+        at: now(),
+        event: "releasing-six-held-responses",
+        failuresBeforeRelease: failures.length,
+        serverEntriesBeforeRelease: entered,
+      });
+      heldResponses.forEach((release) => {
+        release();
+      });
+    }
+
+    const nav = await navigation;
+    await sleep(250);
+    const state = await page.evaluate(() => ({
+      readyState: document.readyState,
+      rootChildren: document.querySelector("#root")?.childElementCount ?? null,
+    }));
+    const failureErrors = Object.fromEntries(
+      [...new Set(failures.map((failure) => failure.error))].map((error) => [
+        error,
+        failures.filter((failure) => failure.error === error).length,
+      ]),
     );
-
-  await waitUntil(() => entered === heldConnectionCount, "six server-entered module requests");
-  await waitUntil(() => browserModulesRequested === moduleCount, "64 browser module requests");
-  timeline.push({ at: now(), event: "gate-satisfied", entered, browserModulesRequested });
-
-  if (mode === "control") {
-    timeline.push({ at: now(), event: "control-no-mutation" });
-  } else if (mode === "docker-network-create-held") {
-    timeline.push({ at: now(), event: "mutation-begin", operation: "docker network create" });
-    docker("network", "create", network);
-    timeline.push({ at: now(), event: "mutation-end" });
-  } else if (mode === "docker-start-held") {
-    timeline.push({ at: now(), event: "mutation-begin", operation: "docker start" });
-    docker("start", container);
-    timeline.push({ at: now(), event: "mutation-end" });
-  } else if (mode === "docker-stop-held") {
-    timeline.push({ at: now(), event: "mutation-begin", operation: "docker stop" });
-    docker("stop", "--time", "0", container);
-    timeline.push({ at: now(), event: "mutation-end" });
-  } else if (mode !== "docker-start-after") {
-    throw new Error(`unknown mode: ${mode}`);
+    console.log(
+      JSON.stringify({
+        mode,
+        gate: { heldConnectionCount, moduleCount },
+        nav,
+        state,
+        browserModulesRequested,
+        serverModuleEntries: entered,
+        failureErrors,
+        timeline,
+      }),
+    );
+  } finally {
+    try {
+      await browser?.close();
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
   }
-
-  if (mode === "docker-start-after") {
-    heldResponses.forEach((release) => {
-      release();
-    });
-    await page.waitForSelector("#root > span", { state: "attached", timeout: 5000 });
-    timeline.push({ at: now(), event: "all-modules-finished-root-mounted" });
-    docker("start", container);
-    await sleep(settleMs);
-  } else {
-    await sleep(settleMs);
-    timeline.push({
-      at: now(),
-      event: "releasing-six-held-responses",
-      failuresBeforeRelease: failures.length,
-      serverEntriesBeforeRelease: entered,
-    });
-    heldResponses.forEach((release) => {
-      release();
-    });
-  }
-
-  const nav = await navigation;
-  await sleep(250);
-  const state = await page.evaluate(() => ({
-    readyState: document.readyState,
-    rootChildren: document.querySelector("#root")?.childElementCount ?? null,
-  }));
-  const failureErrors = Object.fromEntries(
-    [...new Set(failures.map((failure) => failure.error))].map((error) => [
-      error,
-      failures.filter((failure) => failure.error === error).length,
-    ]),
-  );
-  console.log(
-    JSON.stringify({
-      mode,
-      gate: { heldConnectionCount, moduleCount },
-      nav,
-      state,
-      browserModulesRequested,
-      serverModuleEntries: entered,
-      failureErrors,
-      timeline,
-    }),
-  );
-  await browser.close();
-  await new Promise((resolve) => server.close(resolve));
 }
 
 try {

@@ -55,7 +55,7 @@ describe("sleep command", () => {
 
   it("bounds the single request and honestly reports unknown acceptance", async () => {
     const controller = new AbortController();
-    expect(vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal));
+    const deadline = vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal);
     vi.stubGlobal(
       "fetch",
       (_url: string, init: RequestInit) =>
@@ -69,6 +69,7 @@ describe("sleep command", () => {
       { controlPlaneUrl: "http://control-plane.test", runtimeToken: "secret" },
       { durationSeconds: 1 },
     );
+    expect(deadline).toHaveBeenCalledExactlyOnceWith(3_000);
     controller.abort();
     const result = await pending;
     expect(result._unsafeUnwrapErr()).toMatchObject({ code: "unknown_outcome" });

@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { expect, it } from "vitest";
+import { runCli } from "../testkit/cli.ts";
 
 it("dispatches send through the guest control-plane route and prints stable retry identity", async () => {
   const orbId = "abcdef00-0000-4000-8000-000000000001";
@@ -28,30 +28,14 @@ it("dispatches send through the guest control-plane route and prints stable retr
   try {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("missing test listener");
-    const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
-      (resolve, reject) => {
-        const child = spawn(
-          new URL("../../docker/pi-orb", import.meta.url).pathname,
-          ["send", orbId.toUpperCase(), "literal <peer>", "--request-id", "fixed"],
-          {
-            env: {
-              ...process.env,
-              PI_ORB_CONTROL_PLANE_URL: `http://127.0.0.1:${address.port}`,
-              PI_ORB_RUNTIME_TOKEN: "test-token",
-            },
-            stdio: ["ignore", "pipe", "pipe"],
-          },
-        );
-        let stdout = "";
-        let stderr = "";
-        child.stdout.on("data", (chunk) => {
-          stdout += chunk.toString();
-        });
-        child.stderr.on("data", (chunk) => {
-          stderr += chunk.toString();
-        });
-        child.once("error", reject);
-        child.once("close", (code) => resolve({ code, stdout, stderr }));
+    const result = await runCli(
+      ["send", orbId.toUpperCase(), "literal <peer>", "--request-id", "fixed"],
+      {
+        env: {
+          PATH: process.env.PATH,
+          PI_ORB_CONTROL_PLANE_URL: `http://127.0.0.1:${address.port}`,
+          PI_ORB_RUNTIME_TOKEN: "test-token",
+        },
       },
     );
     expect(result).toEqual({

@@ -50,8 +50,7 @@ describe("turn summary coordinator DST", () => {
             await coordinator.drain();
             // Determined may fire a deadline later than nominal and before a shorter model timer;
             // either outcome is valid, but every operation must reach exactly one terminal path.
-            expect(new Set([...delivered, ...failed])).toEqual(new Set(["op-first", "op-second"]));
-            expect(delivered.filter((id) => failed.includes(id))).toEqual([]);
+            expect([...delivered, ...failed].sort()).toEqual(["op-first", "op-second"]);
           },
         },
       ]);

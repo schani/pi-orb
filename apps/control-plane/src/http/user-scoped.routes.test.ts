@@ -125,38 +125,9 @@ it("retries name-only creation canonically and attaches and clears a repository"
   expect(read.json()).toMatchObject({ name: "Name only", repositoryUrl: null });
 });
 
-it.each(["schani/pi-orb", "github.com/schani/pi-orb"])(
-  "persists canonical repository URLs for create and edit shorthand %s",
-  async (repositoryUrl) => {
-    const app = setup();
-    const id = "10000000-0000-4000-8000-000000000004";
-    const created = await inject(app, "alice", {
-      method: "POST",
-      url: "/api/v1/projects",
-      payload: { ...project(id), repositoryUrl },
-    });
-    expect(created.statusCode).toBe(201);
-    expect(created.json().repositoryUrl).toBe("https://github.com/schani/pi-orb");
-    const retry = await inject(app, "alice", {
-      method: "POST",
-      url: "/api/v1/projects",
-      payload: { ...project(id), repositoryUrl: "https://github.com/schani/pi-orb" },
-    });
-    expect(retry.statusCode).toBe(201);
-    const edited = await inject(app, "alice", {
-      method: "PATCH",
-      url: `/api/v1/projects/${id}`,
-      payload: { name: "Edited", repositoryUrl: repositoryUrl.replace("pi-orb", "pi-orb.git") },
-    });
-    expect(edited.statusCode).toBe(200);
-    expect(edited.json().repositoryUrl).toBe("https://github.com/schani/pi-orb.git");
-    const stored = await inject(app, "alice", { method: "GET", url: `/api/v1/projects/${id}` });
-    expect(stored.json().repositoryUrl).toBe("https://github.com/schani/pi-orb.git");
-  },
-);
-
 it.each([
   ["schani/pi-orb", "https://github.com/schani/pi-orb"],
+  ["github.com/schani/pi-orb", "https://github.com/schani/pi-orb"],
   ["schani/pi-orb.git", "https://github.com/schani/pi-orb.git"],
   ["https://GitHub.com/schani/pi-orb", "https://github.com/schani/pi-orb"],
   ["git@github.com:schani/pi-orb.git", "https://github.com/schani/pi-orb.git"],
@@ -191,6 +162,24 @@ it.each([
   });
   expect(repeated.statusCode).toBe(201);
   expect(repeated.json()).toEqual(created.json());
+  if (input === "schani/pi-orb" || input === "github.com/schani/pi-orb") {
+    const edited = await inject(app, "alice", {
+      method: "PATCH",
+      url: `/api/v1/projects/${payload.id}`,
+      payload: { name: "Edited", repositoryUrl: input.replace("pi-orb", "pi-orb.git") },
+    });
+    expect(edited.statusCode).toBe(200);
+    expect(edited.json().repositoryUrl).toBe("https://github.com/schani/pi-orb.git");
+    const stored = await inject(app, "alice", {
+      method: "GET",
+      url: `/api/v1/projects/${payload.id}`,
+    });
+    expect(stored.statusCode).toBe(200);
+    expect(stored.json()).toMatchObject({
+      name: "Edited",
+      repositoryUrl: "https://github.com/schani/pi-orb.git",
+    });
+  }
 });
 
 it.each([

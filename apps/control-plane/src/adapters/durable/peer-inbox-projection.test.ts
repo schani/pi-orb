@@ -6,7 +6,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { orbMessageContext, projectDisplayRecords } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { expect, it } from "vitest";
-import { makeOrbRow, makeProjectRow } from "../../testkit/fixtures.ts";
+import { makeOrbRow, makeProjectRow, seedTestUser } from "../../testkit/fixtures.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
 import { PgDurableAuthority } from "../durable-pg/index.ts";
 import { PGliteClient } from "../pg/pglite-client.ts";
@@ -36,13 +36,7 @@ it("atomically retains peer source, context, receipt and deduplication across re
   let agent: DurableAgent | undefined;
   try {
     (await database.migrate())._unsafeUnwrap();
-    (
-      await database.users.resolveUser(
-        task,
-        { issuer: "test", subject: "owner", email: null },
-        { id: project.ownerUserId, now: 0 },
-      )
-    )._unsafeUnwrap();
+    (await seedTestUser(task, database.users))._unsafeUnwrap();
     (await database.store.insertProject(task, project))._unsafeUnwrap();
     (await database.store.insertOrb(task, orb))._unsafeUnwrap();
     (await database.store.insertOrb(task, sender))._unsafeUnwrap();

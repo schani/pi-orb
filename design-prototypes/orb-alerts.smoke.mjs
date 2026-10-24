@@ -1,11 +1,11 @@
+import { runStudy } from "./study-browser.mjs";
 import assert from 'node:assert/strict';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readFile } from 'node:fs/promises';
-import { chromium } from '@playwright/test';
 
 const url = pathToFileURL(fileURLToPath(new URL('./orb-alerts.html', import.meta.url))).href;
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', args: ['--no-sandbox'] });
-try {
+await runStudy("orb-alerts", async ({ browser, artifact, outputDir }) => {
+
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -59,16 +59,17 @@ try {
       assert.equal(await page.locator('.candidate .header-link:visible').count(), 5);
       assert.ok(await page.locator('.candidate .alert-icon:visible').evaluateAll(icons => icons.every(icon => icon.closest('.orb-header'))));
     }
-    await page.screenshot({ path: `/tmp/orb-alerts-${width}.png`, fullPage: true });
+    await page.screenshot({ path: artifact(`orb-alerts-${width}.png`), fullPage: true });
   }
   await page.locator('#message').fill('The migration is ready. Approve the production run.');
   await page.locator('#lifecycle').selectOption('running');
   await page.locator('#message').blur();
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.screenshot({ path: '/tmp/orb-alerts-desktop.png', fullPage: true });
+  await page.screenshot({ path: artifact('orb-alerts-desktop.png'), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: '/tmp/orb-alerts-phone.png', fullPage: true });
+  await page.screenshot({ path: artifact('orb-alerts-phone.png'), fullPage: true });
   assert.deepEqual(errors, []);
   console.log('PASS: five styles, exact favicon assets, ten lifecycle overrides, header/sidebar entry, keyboard, literal unsafe text, phone layout, 320/390/desktop containment');
-  console.log('Screenshots: /tmp/orb-alerts-desktop.png /tmp/orb-alerts-phone.png /tmp/orb-alerts-320.png');
-} finally { await browser.close(); }
+  console.log(`Screenshots: ${outputDir}`);
+
+});

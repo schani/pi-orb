@@ -3,27 +3,17 @@ import { ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
 import { runDst, TEST_WALL_EPOCH } from "../testkit/sim.ts";
+import { SimulationTaskRunner } from "../testkit/simulation-task-runner.ts";
 import { SerializedAuthGate } from "./auth-gates.ts";
 import { ControlState } from "./control-state.ts";
 import { requestOrbStart } from "./lifecycle.ts";
-import {
-  ReconcileDispatcher,
-  type ReconcileOne,
-  type ReconcileTaskRunner,
-  reconcileLoop,
-} from "./loops.ts";
+import { ReconcileDispatcher, type ReconcileOne, reconcileLoop } from "./loops.ts";
 import type { ControlPlaneStore } from "./ports.ts";
 
 const BLOCKED_ORBS = ["cleanup-a", "cleanup-b", "cleanup-c"] as const;
 const NEW_ORB = "new-create";
 const PROJECT = "project";
 const ALL_ORBS = [...BLOCKED_ORBS, NEW_ORB] as const;
-
-type ReconcileJob = {
-  readonly run: (task: SimulationTask) => Promise<void>;
-  readonly resolve: () => void;
-  readonly reject: (error: unknown) => void;
-};
 
 type Deferred<T> = {
   readonly promise: Promise<T>;
@@ -36,63 +26,6 @@ function deferred<T>(): Deferred<T> {
     resolve = settle;
   });
   return { promise, resolve };
-}
-
-/**
- * `determined` models concurrency with distinct SimulationTasks. Production
- * creates one real-time task per dispatched orb; this mailbox gives each
- * statically declared DST worker its own task while exercising the same
- * dispatcher contract.
- */
-class SimulationReconcileTaskRunner {
-  private readonly queued = new Map<string, ReconcileJob>();
-  private readonly waiting = new Map<string, (job: ReconcileJob | null) => void>();
-
-  readonly run: ReconcileTaskRunner = (orbId, operation) =>
-    new Promise<void>((resolve, reject) => {
-      const job = { run: operation, resolve, reject };
-      const waiter = this.waiting.get(orbId);
-      if (waiter !== undefined) {
-        this.waiting.delete(orbId);
-        waiter(job);
-        return;
-      }
-      if (this.queued.has(orbId)) throw new Error(`duplicate queued reconcile for ${orbId}`);
-      this.queued.set(orbId, job);
-    });
-
-  async worker(task: SimulationTask, orbId: string, stop: AbortSignal): Promise<void> {
-    while (!stop.aborted) {
-      const job = await this.next(orbId, stop);
-      if (job === null) return;
-      try {
-        await job.run(task);
-        job.resolve();
-      } catch (error) {
-        job.reject(error);
-      }
-    }
-  }
-
-  private next(orbId: string, stop: AbortSignal): Promise<ReconcileJob | null> {
-    const queued = this.queued.get(orbId);
-    if (queued !== undefined) {
-      this.queued.delete(orbId);
-      return Promise.resolve(queued);
-    }
-    if (stop.aborted) return Promise.resolve(null);
-    return new Promise((resolve) => {
-      const onAbort = (): void => {
-        this.waiting.delete(orbId);
-        resolve(null);
-      };
-      stop.addEventListener("abort", onAbort, { once: true });
-      this.waiting.set(orbId, (job) => {
-        stop.removeEventListener("abort", onAbort);
-        resolve(job);
-      });
-    });
-  }
 }
 
 describe("reconcile concurrency (DST)", () => {
@@ -116,7 +49,7 @@ describe("reconcile concurrency (DST)", () => {
         return { type: "progressed" };
       };
       const stop = new AbortController();
-      const runner = new SimulationReconcileTaskRunner();
+      const runner = new SimulationTaskRunner();
       const schedulerDeps = { ...harness.deps, control: new ControlState() };
       const dispatcher = new ReconcileDispatcher(schedulerDeps, runner.run, reconcile);
       const result = await sim.runTasks([
@@ -164,7 +97,7 @@ describe("reconcile concurrency (DST)", () => {
         return { type: "progressed" };
       };
       const stop = new AbortController();
-      const runner = new SimulationReconcileTaskRunner();
+      const runner = new SimulationTaskRunner();
       const dispatcher = new ReconcileDispatcher(harness.deps, runner.run, reconcile);
       const result = await sim.runTasks([
         {
@@ -225,7 +158,7 @@ describe("reconcile concurrency (DST)", () => {
       };
 
       const stop = new AbortController();
-      const runner = new SimulationReconcileTaskRunner();
+      const runner = new SimulationTaskRunner();
       const dispatcher = new ReconcileDispatcher(harness.deps, runner.run, reconcile);
       const result = await sim.runTasks([
         ...ALL_ORBS.map((orbId) => ({
@@ -286,7 +219,7 @@ describe("reconcile concurrency (DST)", () => {
       }
       const deps = { ...harness.deps, authGate: new SerializedAuthGate(harness.authGate) };
       const stop = new AbortController();
-      const runner = new SimulationReconcileTaskRunner();
+      const runner = new SimulationTaskRunner();
       const dispatcher = new ReconcileDispatcher(deps, runner.run);
       const result = await sim.runTasks([
         ...orbIds.map((orbId) => ({
@@ -326,7 +259,7 @@ describe("reconcile concurrency (DST)", () => {
         return { type: "retryable", message: "scripted retry" };
       };
       const stop = new AbortController();
-      const runner = new SimulationReconcileTaskRunner();
+      const runner = new SimulationTaskRunner();
       const dispatcher = new ReconcileDispatcher(harness.deps, runner.run, reconcile);
       const result = await sim.runTasks([
         {
@@ -388,7 +321,7 @@ describe("reconcile concurrency (DST)", () => {
           return { type: "noop" };
         };
         const stop = new AbortController();
-        const runner = new SimulationReconcileTaskRunner();
+        const runner = new SimulationTaskRunner();
         const dispatcher = new ReconcileDispatcher(
           { ...harness.deps, store },
           runner.run,
@@ -443,7 +376,7 @@ describe("reconcile concurrency (DST)", () => {
         throw new Error("scripted loop worker crash");
       };
       const stop = new AbortController();
-      const runner = new SimulationReconcileTaskRunner();
+      const runner = new SimulationTaskRunner();
       const deps = harness.deps;
       const result = await sim.runTasks([
         {
@@ -501,7 +434,7 @@ describe("reconcile concurrency (DST)", () => {
         throw new Error("scripted worker crash");
       };
       const stop = new AbortController();
-      const runner = new SimulationReconcileTaskRunner();
+      const runner = new SimulationTaskRunner();
       const dispatcher = new ReconcileDispatcher(harness.deps, runner.run, reconcile);
       const result = await sim.runTasks([
         {

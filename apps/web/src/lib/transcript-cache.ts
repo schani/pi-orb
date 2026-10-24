@@ -62,7 +62,7 @@ export class TranscriptCache {
   get invalidationEpoch(): number {
     return this.invalidationSerial;
   }
-  private readonly maxBytes: number;
+  readonly maxBytes: number;
 
   constructor(limits: { maxBytes?: number } = {}) {
     this.maxBytes = limits.maxBytes ?? 256 * 1024 * 1024;
