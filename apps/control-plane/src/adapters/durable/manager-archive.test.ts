@@ -51,6 +51,7 @@ it("reads authoritative archive history after suspension without resuming retain
   const identity = defineDoc({
     kind: "orb.identity",
     version: 1,
+    checkpointWhen: () => false,
     scope: "conversation",
     history: "latest",
     fork: "initial",

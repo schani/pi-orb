@@ -15,6 +15,7 @@ it("returns native image bytes through the remote reader without a second filesy
   const bytes = Buffer.from(image, "base64");
   let reads = 0;
   const api = {
+    now: () => 0,
     agent: async () => ({}),
     env: {
       absolutePath: async () => ({ ok: true, value: "/remote/image.png" }),

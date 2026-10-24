@@ -21,7 +21,7 @@ import {
 import { expect, it } from "vitest";
 import { promptExtension } from "../prompt.ts";
 import { ChildReceipts, createDurableTools } from "./index.ts";
-import { ChildAnchor, subagentTools } from "./subagents.ts";
+import { ChildAnchor } from "./subagents.ts";
 import { toolData, wait } from "./testkit/subagent-wait.ts";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -90,6 +90,7 @@ it("rejects direct model subagent calls before creating a child", async () => {
   ]);
   const storage = new MemoryStorage();
   const harness = await Harness.open(storage, s, ctx);
+  s.tools.bindTaskAbort(harness.abortTask.bind(harness));
   try {
     const root = await harness.root(ctx, initial(s.tools));
     harness.resume();
@@ -145,6 +146,7 @@ it("cancels only the selected child; root abort drains its sibling", async () =>
     ...Array(5).fill(respond),
   ]);
   const harness = await Harness.open(new MemoryStorage(), s, ctx);
+  s.tools.bindTaskAbort(harness.abortTask.bind(harness));
   try {
     const root = await harness.root(ctx, initial(s.tools));
     harness.resume();
@@ -201,6 +203,7 @@ it("reopens persisted anchors without recreating children or rerunning the spawn
     },
   }) as Storage;
   let harness = await Harness.open(storage, s, ctx);
+  s.tools.bindTaskAbort(harness.abortTask.bind(harness));
   try {
     const root = await harness.root(ctx, initial(s.tools));
     harness.resume();
@@ -309,6 +312,7 @@ it("children inherit pinned instructions but neither see nor start subagents", a
   s.registry.install(promptExtension("PINNED_PROMPT"));
   const storage = new MemoryStorage();
   const harness = await Harness.open(storage, s, ctx);
+  s.tools.bindTaskAbort(harness.abortTask.bind(harness));
   try {
     const root = await harness.root(ctx, initial(s.tools));
     harness.resume();
@@ -386,6 +390,7 @@ it("starts a child on the selected model and rejects an unavailable one before c
   );
   const storage = new MemoryStorage();
   const harness = await Harness.open(storage, s, ctx);
+  s.tools.bindTaskAbort(harness.abortTask.bind(harness));
   try {
     const root = await harness.root(ctx, {
       agent: {
@@ -417,6 +422,7 @@ it("parent input interrupts a real child wait without aborting its anchor or con
     },
   ]);
   const harness = await Harness.open(new MemoryStorage(), s, ctx);
+  s.tools.bindTaskAbort(harness.abortTask.bind(harness));
   try {
     const root = await harness.root(ctx, initial(s.tools));
     const api = {
@@ -430,7 +436,7 @@ it("parent input interrupts a real child wait without aborting its anchor or con
       waitForTask: harness.waitForTask.bind(harness),
       watchDoc: harness.watchDoc.bind(harness),
     } as unknown as ToolExecutionApi;
-    const spawn = subagentTools.find((tool) => tool.name === "subagent");
+    const spawn = s.tools.catalog.registrations().find((tool) => tool.name === "subagent");
     if (!spawn) throw new Error("Missing subagent tool");
     const agentId = toolData(await spawn.execute({ prompt: "work" }, api, ctx)).agent_id;
     harness.resume();
@@ -462,6 +468,62 @@ it("parent input interrupts a real child wait without aborting its anchor or con
     );
   } finally {
     release.resolve();
+    await harness.close(ctx);
+    await s.tools.close();
+  }
+});
+
+it("cancels a restart-parked child anchor before waiting for its terminal receipt", async () => {
+  const { MemoryAgentPersistence } = await import("../memory-persistence.testkit.ts");
+  const authority = new MemoryAgentPersistence();
+  const storage = (await authority.openOrb("parked-child", false))._unsafeUnwrap().storage;
+  const s = setup([
+    fauxAssistantMessage(nativeCall("cancel_subagent", { agent_id: "child" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("cancelled"),
+  ]);
+  let harness = await Harness.open(storage, s, ctx);
+  s.tools.bindTaskAbort(harness.abortTask.bind(harness));
+  try {
+    const root = await harness.root(ctx, initial(s.tools));
+    const id = await root.commit(
+      (tx) =>
+        tx.createTask(
+          ChildAnchor,
+          { prompt: "must not run", description: "parked" },
+          { ownership: { kind: "conversation" }, background: true },
+        ),
+      ctx,
+    );
+    await root.commit(async (tx) => {
+      (await tx.doc(ChildReceipts, root.id)).children.child = {
+        anchor: id,
+        prompt: "must not run",
+        description: "parked",
+      };
+    }, ctx);
+    await harness.close(ctx);
+    await storage.commit(
+      [{ type: "task", value: { ...(await storage.task(id, ctx))!, restarts: 5 } }],
+      ctx,
+    );
+    harness = await Harness.open(storage, s, ctx);
+    const reopened = (await harness.conversation(root.id, ctx))!;
+    s.tools.bindTaskAbort(harness.abortTask.bind(harness));
+    harness.resume();
+    await (await reopened.submit({ type: "input", content: "cancel parked child" }, ctx)).wait(ctx);
+    const entries = await reopened.entries({}, 100, undefined, ctx);
+    const result = entries.items
+      .flatMap((entry) => entry.model ?? [])
+      .find((message) => message.role === "toolResult");
+    expect(result?.role === "toolResult" ? nativeData(result) : undefined).toMatchObject({
+      status: "aborted",
+    });
+    expect(await harness.getTask(id, ctx)).toMatchObject({
+      state: { status: "terminal", outcome: { status: "aborted" } },
+    });
+  } finally {
     await harness.close(ctx);
     await s.tools.close();
   }

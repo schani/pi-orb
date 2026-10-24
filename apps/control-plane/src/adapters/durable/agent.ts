@@ -14,6 +14,7 @@ import {
   type ConversationView,
   type Cursor,
   configure,
+  DEFAULT_RESTART_LIMIT,
   defineDoc,
   type EntryRecord,
   type EnvTarget,
@@ -22,6 +23,7 @@ import {
   type LiveState,
   ProviderDoc,
   type Registry,
+  type ReportInfo,
   type Storage,
   StorageRequestError,
   type TaskGraph,
@@ -99,6 +101,7 @@ const Identity = defineDoc<{
 }>({
   kind: "orb.identity",
   version: 1,
+  checkpointWhen: () => false,
   scope: "conversation",
   history: "latest",
   fork: "initial",
@@ -115,6 +118,7 @@ const Identity = defineDoc<{
 const InstructionAdoptions = defineDoc<Record<string, { revision: number; sha256: string }>>({
   kind: "orb.instruction-adoptions",
   version: 1,
+  checkpointWhen: () => false,
   scope: "conversation",
   history: "latest",
   fork: "initial",
@@ -153,6 +157,7 @@ async function appendSettingsHistory(
 const AlertReceipts = defineDoc<Record<string, { message: string; entryId: number }>>({
   kind: "orb.alert-receipts",
   version: 1,
+  checkpointWhen: () => false,
   scope: "conversation",
   history: "latest",
   fork: "initial",
@@ -181,7 +186,10 @@ export interface DurableAgentOptions {
   readonly recordModelCall?: (use: ModelCallUse, response: AssistantMessage) => void;
   readonly registry: Registry;
   readonly activateResources?: (appendAlert: DurableAgent["appendAlert"]) => () => void;
-  readonly bindNativeConversation?: (resolve: Harness["conversation"]) => void;
+  readonly bindNativeConversation?: (
+    resolve: Harness["conversation"],
+    abortTask: Harness["abortTask"],
+  ) => void;
   readonly modelTools?: readonly ToolRegistration[];
   /** Child-only tools; the root conversation removes it on open. */
   readonly childExtension?: Extension;
@@ -316,7 +324,7 @@ export class DurableAgent implements AgentSessionFacade {
     let harness: Harness | undefined;
     let stage = "registry";
     let owner: DurableAgent | undefined;
-    let reported = false;
+    const reports: ReportInfo[] = [];
     let unexpectedClose = false;
     let resourceClose: ResultAsync<void, RuntimeClientError> | undefined;
     const closeResources = () =>
@@ -340,19 +348,21 @@ export class DurableAgent implements AgentSessionFacade {
             settings: { steeringMode: "all", followUpMode: "all" },
             env: (target) => options.envFor?.(target) ?? options.env,
             ...(options.now === undefined ? {} : { now: options.now }),
-            onReport: (error) => {
+            onReport: (error, info) => {
               if (unexpectedClose) {
                 owner?.storageFailed(error);
                 return;
               }
-              reported = true;
-              owner?.reportFailure();
-              void options.edge?.("harness.reported_failure", { orbId: options.orbId });
+              if (owner) void owner.reportFailure(info);
+              else reports.push(info);
             },
           },
           context,
         );
-        options.bindNativeConversation?.(harness.conversation.bind(harness));
+        options.bindNativeConversation?.(
+          harness.conversation.bind(harness),
+          harness.abortTask.bind(harness),
+        );
         const initial = options.initialSettings ?? {
           model: { provider: "openai-codex", id: PINNED_CODEX_MODEL_ID },
           thinkingLevel: "high" as const,
@@ -419,7 +429,7 @@ export class DurableAgent implements AgentSessionFacade {
         );
         const agent = new DurableAgent({ ...options, closeResources }, harness, root);
         owner = agent;
-        if (reported) agent.reportFailure();
+        for (const info of reports) await agent.reportFailure(info);
         agent.session = {
           id: identity.sessionId,
           timestamp: new Date(identity.timestamp).toISOString(),
@@ -460,6 +470,16 @@ export class DurableAgent implements AgentSessionFacade {
         agent.graph = await harness.taskGraph(context);
         agent.updateView(agent.view.value);
         agent.tasks = agent.graph.value;
+        const inspection = await harness.inspect(context);
+        for (const task of inspection.tasks) {
+          if (
+            task.state.kind === "blocked" &&
+            task.state.reason === "restart_limit" &&
+            !reports.some((info) => info.type === "task_parked" && info.task.id === task.record.id)
+          ) {
+            await agent.reportFailure({ type: "task_parked", task: task.record });
+          }
+        }
         agent.unsubscribeView = agent.view.subscribe((value) => agent.updateView(value));
         agent.unsubscribeGraph = agent.graph.subscribe((value) => {
           agent.tasks = value;
@@ -608,30 +628,80 @@ export class DurableAgent implements AgentSessionFacade {
     void this.close();
   }
 
-  private reportFailure(): void {
-    this.publish({
+  private parkingNotice(background: boolean): ServerFrame & { type: "server.error" } {
+    return {
       v: 1,
       type: "server.error",
       at: new Date(this.now()).toISOString(),
       error: {
-        code: "central_agent_report",
-        message: "Agent extension reported a failure",
+        code: "central_agent_paused",
+        message: background
+          ? "Background task paused after five consecutive interruptions without progress"
+          : "Agent paused after five consecutive interruptions without progress; abort the interrupted turn to continue",
         retryable: false,
       },
-    });
-    void ResultAsync.fromPromise(this.harness.inspect(context), () =>
+    };
+  }
+
+  private reportFailure(info: ReportInfo): PromiseLike<void> {
+    const parked = info.type === "task_parked";
+    return ResultAsync.fromPromise(this.harness.inspect(context), () =>
       durableError("Harness inspection failed"),
     ).then((inspection) => {
+      const task = "task" in info ? info.task : undefined;
+      const tasks = inspection.isOk() ? inspection.value.tasks : [];
+      const record = tasks.find((entry) => entry.record.id === task?.id)?.record;
+      const blocksRoot = (record: (typeof tasks)[number]["record"]): boolean => {
+        if (record.conversationId !== this.root.id) return false;
+        let current: typeof record | undefined = record;
+        while (current) {
+          if (current.background) return false;
+          const owner: typeof current.owner = current.owner;
+          current =
+            owner === undefined
+              ? undefined
+              : tasks.find((entry) => entry.record.id === owner)?.record;
+        }
+        return true;
+      };
+      const message = parked
+        ? this.parkingNotice(record !== undefined && !blocksRoot(record)).error.message
+        : "Agent extension reported a failure";
+      this.publish({
+        v: 1,
+        type: "server.error",
+        at: new Date(this.now()).toISOString(),
+        error: {
+          code: parked ? "central_agent_paused" : "central_agent_report",
+          message,
+          retryable: false,
+        },
+      });
+      const facts = {
+        orbId: this.options.orbId,
+        type: info.type,
+        ...(task ? { task: task.id, conversation: task.conversationId, kind: task.kind } : {}),
+        ...("reason" in info ? { reason: info.reason } : {}),
+        ...(parked || ("reason" in info && info.reason === "restart_limit")
+          ? { restarts: record?.restarts ?? DEFAULT_RESTART_LIMIT, limit: DEFAULT_RESTART_LIMIT }
+          : {}),
+      };
+      void this.options.edge?.("harness.reported_failure", facts);
       if (
         inspection.isErr() ||
-        inspection.value.tasks.some((task) => task.state.kind === "blocked")
+        tasks.some(
+          (entry) =>
+            entry.state.kind === "blocked" &&
+            entry.state.reason !== "restart_limit" &&
+            blocksRoot(entry.record),
+        )
       ) {
         this.failure = inspection.isErr()
           ? inspection.error
-          : durableError("Agent execution is blocked");
+          : durableError(parked ? message : "Agent execution is blocked");
         this.operationOutcome = "failed";
-        void this.options.edge?.("harness.execution_blocked", { orbId: this.options.orbId });
       }
+      if (parked || this.failure) void this.options.edge?.("harness.execution_blocked", facts);
     });
   }
 
@@ -900,7 +970,14 @@ export class DurableAgent implements AgentSessionFacade {
 
   snapshot(): Result<AgentSnapshot, { message: string }> {
     if (this.failure) return err({ message: this.failure.message });
+    const parked = Object.values(this.tasks.tasks).find((task) => task.blocked === "restart_limit");
     return ok({
+      ...(parked
+        ? {
+            notice: this.parkingNotice(parked.background || parked.conversationId !== this.root.id)
+              .error,
+          }
+        : {}),
       orbId: this.options.orbId,
       runtimeInstanceId: this.runtimeInstanceId,
       session: this.session,

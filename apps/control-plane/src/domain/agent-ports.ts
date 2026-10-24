@@ -9,6 +9,7 @@ import type {
   PullHistoryResponse,
   RequestResultFrame,
   RuntimeHealth,
+  ServerErrorFrame,
   ServerFrame,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
@@ -35,6 +36,7 @@ export interface AgentSnapshot {
   readonly records: readonly HistoryRecord[];
   readonly headId: string | null;
   readonly settings?: AgentSettingsEvent | null;
+  readonly notice?: ServerErrorFrame["error"];
 }
 
 export interface AgentLiveView {

@@ -1,4 +1,4 @@
-Adapted from Pi's code-mode documentation under MIT. Current behavior uses `@earendil-works/pi-durable/codemode` and `@earendil-works/pi-codemode` 1.3.0: [upstream source](https://github.com/earendil-works/pi/tree/v1.3.0/packages/durable/src/codemode), [sandbox documentation](https://github.com/earendil-works/pi/blob/v1.3.0/packages/codemode/README.md). Policy checked against pi-orb `apps/control-plane/src/adapters/durable/tools/{codemode,catalog,codemode-sandbox}.ts`; local patch provenance: `patches/pi-codemode.PROVENANCE.md`, `patches/pi-durable.PROVENANCE.md`.
+Adapted from Pi's code-mode documentation under MIT. Current behavior uses `@earendil-works/pi-durable/codemode` and `@earendil-works/pi-codemode` 1.4.0: [upstream source](https://github.com/earendil-works/pi/tree/v1.4.0/packages/durable/src/codemode), [sandbox documentation](https://github.com/earendil-works/pi/blob/v1.4.0/packages/codemode/README.md). Policy checked against pi-orb `apps/control-plane/src/adapters/durable/tools/{codemode,catalog,codemode-sandbox}.ts`; local patch provenance: `patches/pi-codemode.PROVENANCE.md`, `patches/pi-durable.PROVENANCE.md`.
 
 MIT License
 

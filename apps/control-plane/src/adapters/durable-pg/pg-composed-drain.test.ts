@@ -350,6 +350,12 @@ it.for([
           orb.id,
         ])
       )._unsafeUnwrap().rows;
+      for (const row of stoppedTasks) {
+        expect(row.record).not.toMatchObject({ state: { status: "running" } });
+        expect(row.record).not.toHaveProperty("restarts");
+        expect(row.record).not.toHaveProperty("trace");
+        expect(row.record).not.toHaveProperty("links");
+      }
       const terminal = stoppedTasks.filter(
         (row) => (row.record as { state: { status: string } }).state.status === "terminal",
       );
@@ -392,7 +398,10 @@ it.for([
             return async (...args: Parameters<Storage["commit"]>) => {
               const result = await target.commit(...args);
               for (const write of args[0])
-                if (write.type === "task") taskRecords.set(write.value.id, write.value);
+                if (write.type === "task") {
+                  expect(write.value).not.toHaveProperty("restarts");
+                  taskRecords.set(write.value.id, write.value);
+                }
               const pending = (
                 await db.query(
                   "SELECT id FROM durable_pg_tasks WHERE orb_id=$1 AND status<>'terminal'",

@@ -17,10 +17,10 @@ import { afterEach, describe, expect, it } from "vitest";
 const root = join(import.meta.dirname, "../../..");
 const helper = join(root, "scripts/apply-dependency-patches.mjs");
 const names = [
-  "@earendil-works+pi-ai+1.3.0.patch",
-  "@earendil-works+pi-coding-agent+1.3.0.patch",
-  "@earendil-works+pi-codemode+1.3.0.patch",
-  "@earendil-works+pi-durable+1.3.0.patch",
+  "@earendil-works+pi-ai+1.4.0.patch",
+  "@earendil-works+pi-coding-agent+1.4.0.patch",
+  "@earendil-works+pi-codemode+1.4.0.patch",
+  "@earendil-works+pi-durable+1.4.0.patch",
 ];
 const scratch: string[] = [];
 const sha = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
@@ -194,7 +194,7 @@ describe("sealed dependency patch application", () => {
         kind === "package"
           ? "node_modules/@earendil-works/pi-durable/package.json"
           : kind === "patch"
-            ? "patches/@earendil-works+pi-durable+1.3.0.patch"
+            ? "patches/@earendil-works+pi-durable+1.4.0.patch"
             : "node_modules/@earendil-works/pi-durable/dist/codemode/index.js";
       const target = join(dir, files(names[0] as string)[0] as string);
       const before = sha(target);
@@ -261,10 +261,10 @@ describe("sealed dependency patch application", () => {
     expect(sha(target)).toBe(before);
   });
   it("preserves every shipped patch checksum", () => {
-    const evidence = `e709d41ab45ae8e5847ffe96171751d8e7618afc0f54f47a6ca2ddb4c52d5abf  patches/@earendil-works+pi-ai+1.3.0.patch
- 5ccd27bea08593d9ac2307ed5d3d6ee977d88b6cc531bedf59db55aa46329348  patches/@earendil-works+pi-coding-agent+1.3.0.patch
- ce5992310bf98e79f2c3242a76a80a008383a822a5a0447b354cda097480cfa1  patches/@earendil-works+pi-codemode+1.3.0.patch
- 1c275400b15174c92868d55944417eb129f15b6eca7c80e5dc0495587e8c81a9  patches/@earendil-works+pi-durable+1.3.0.patch`;
+    const evidence = `2f29dcf0d8b9931bfc1a16360ac48686b642fd5ce335731d33ef7755d9e48e44  patches/@earendil-works+pi-ai+1.4.0.patch
+ 6f0b5e53c1bd021892743b9da101bf32847b8d6423edcf706e65b0165365f381  patches/@earendil-works+pi-coding-agent+1.4.0.patch
+ 1558d89f7352b7bea216a090fdbbaa50deb0e778bb65f4c0ae9aa785757d8978  patches/@earendil-works+pi-codemode+1.4.0.patch
+ 3e6600e43005a0d474f3941ac80a8b9541c393bab4a9e08f3274612615221bd5  patches/@earendil-works+pi-durable+1.4.0.patch`;
     for (const line of evidence.trim().split("\n")) {
       const [hash, path] = line.trim().split(/\s+/);
       expect(sha(join(root, path as string))).toBe(hash);

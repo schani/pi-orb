@@ -19,10 +19,10 @@ RUN apt-get update \
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY scripts/apply-dependency-patches.mjs scripts/apply-dependency-patches.mjs
-COPY patches/@earendil-works+pi-ai+1.3.0.patch patches/@earendil-works+pi-ai+1.3.0.patch
-COPY patches/@earendil-works+pi-coding-agent+1.3.0.patch patches/@earendil-works+pi-coding-agent+1.3.0.patch
-COPY patches/@earendil-works+pi-codemode+1.3.0.patch patches/@earendil-works+pi-codemode+1.3.0.patch
-COPY patches/@earendil-works+pi-durable+1.3.0.patch patches/@earendil-works+pi-durable+1.3.0.patch
+COPY patches/@earendil-works+pi-ai+1.4.0.patch patches/@earendil-works+pi-ai+1.4.0.patch
+COPY patches/@earendil-works+pi-coding-agent+1.4.0.patch patches/@earendil-works+pi-coding-agent+1.4.0.patch
+COPY patches/@earendil-works+pi-codemode+1.4.0.patch patches/@earendil-works+pi-codemode+1.4.0.patch
+COPY patches/@earendil-works+pi-durable+1.4.0.patch patches/@earendil-works+pi-durable+1.4.0.patch
 COPY patches/pi-codemode.* patches/
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/mock-openai/package.json packages/mock-openai/

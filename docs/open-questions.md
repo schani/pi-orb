@@ -215,3 +215,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 ## Code-mode store cutover — 81
 
 81. **Resolved (user-approved 2026-10-16, PDT):** no carryover of legacy `orb.codemode-store` values into Pi 1.3 `CodemodeStoreDoc`. The user decided: “No need to carry old store/load values over!” A new native store starts empty; legacy keys are absent from native `load()`. Existing legacy records and existing native stores remain untouched: no import, deletion, reset or compatibility machinery. Success-only writes, rewind/as-of-fork semantics, completed history and task-recovery policy remain unchanged (`docs/pi-durable-evaluation.md`). This removes the saved-value policy hold, not PR 140's Draft status or its no-ready/merge/deploy restriction.
+
+## Pi 1.4 persisted state — 82
+
+82. **Resolved (user-approved 2026-10-22, PDT):** adopt the minimal Pi 1.4 persisted-state change in `docs/pi-durable-evaluation.md`. Scope: one task-status CHECK migration; sleeping/wake-time and restart-count task JSON; native code-mode store base checkpoints after 64 deltas without changing values/as-of-fork semantics; explicit unchanged custom-document delta policies; visible parking through existing error/lifecycle paths. No new columns/tables, trace carriers, history rewrite, store-value reset or auth migration. Parking is a nonfatal, visible pause; existing Abort abandons the interrupted turn before new input. Automatic reopen and Start do not clear the counter. No separate retry UI or persisted configuration.

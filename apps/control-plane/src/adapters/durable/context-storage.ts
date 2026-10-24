@@ -16,6 +16,7 @@ const ContextSnapshot = defineDoc<{
 }>({
   kind: "orb.resource-context",
   version: 1,
+  checkpointWhen: () => false,
   scope: "session",
   initial: () => ({ platform: null, managed: null }),
 });

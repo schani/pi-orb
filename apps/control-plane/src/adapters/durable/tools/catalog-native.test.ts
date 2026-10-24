@@ -24,7 +24,7 @@ import { CODEMODE_BOOTSTRAP } from "./codemode.ts";
 import { PiCodemodeSandbox } from "./codemode-sandbox.ts";
 import { createDurableTools } from "./index.ts";
 import { createOrbTools } from "./orb-tools.ts";
-import { ChildAnchor, subagentTools } from "./subagents.ts";
+import { ChildAnchor, SUBAGENT_TOOL_NAMES } from "./subagents.ts";
 import { openCodemodeHarness } from "./testkit/codemode.ts";
 
 async function nativeMetadata(
@@ -235,7 +235,7 @@ it.each(["root", "child"] as const)(
               ? name !== "notify_parent"
               : !["orb_spawn", "orb_alert"].includes(name),
           ),
-        ...(scope === "root" ? subagentTools.map((tool) => tool.name) : []),
+        ...(scope === "root" ? SUBAGENT_TOOL_NAMES : []),
       ];
       const { metadata, result } = await nativeMetadata(
         bundle,

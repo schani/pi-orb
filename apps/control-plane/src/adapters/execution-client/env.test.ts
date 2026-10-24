@@ -4,14 +4,12 @@ import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
+import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import { afterEach, expect, test } from "vitest";
 import { RemoteExecutionEnv } from "./env.ts";
 
-const context = (abortSignal?: AbortSignal): Context => ({
-  abortSignal,
-  value: () => undefined,
-  toString: () => "test",
-});
+const context = (abortSignal?: AbortSignal): Context =>
+  abortSignal ? withAbortSignal(abortSignal, BACKGROUND_CONTEXT) : BACKGROUND_CONTEXT;
 let child: ChildProcess | undefined;
 let directory: string | undefined;
 afterEach(async () => {
