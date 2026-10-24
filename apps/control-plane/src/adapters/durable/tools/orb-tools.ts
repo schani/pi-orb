@@ -4,6 +4,7 @@ import {
   defineTool,
   ROOT_CONVERSATION_ID,
   type ToolExecutionApi,
+  type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import {
   HistorySearchRequestSchema,
@@ -24,7 +25,10 @@ import type {
 import type { ParentNotification } from "../notifications.ts";
 
 /** Calls the application service directly, never a guest CLI or runtime HTTP endpoint. */
-export function createOrbTools(service: OrbAgentOperations, notifyParent?: ParentNotification) {
+export function createOrbTools(
+  service: OrbAgentOperations,
+  notifyParent?: ParentNotification,
+): ToolRegistration[] {
   const resultOutput = (result: Awaited<ResultAsync<unknown, OrbAgentError>>) => {
     const value = result.isOk() ? result.value : { error: result.error };
     return {
