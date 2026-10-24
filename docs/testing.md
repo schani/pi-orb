@@ -2,6 +2,8 @@
 
 ## Pi 1.4 adapter qualification (2026-10-22, PDT; local, undeployed)
 
+**Historical HTTP 500 attribution exception (user-approved 2026-10-24, PDT):** attribution of only [E2E 39960599734, attempt 1, shard-3 job 120437327491](https://github.com/schani/pi-orb/actions/runs/39960599734/job/120437327491)'s `postgres:16` acquisition HTTP 500 / Docker exit 125 on `b0e62d53` is waived. Original logs/artifacts remain preserved under `/workspace/.preview/pi14-babysit-evidence/` and in the linked run; underlying origin remains unproven and no fix is claimed. All new failures, exact-head qualification, assertions and DST replay/root-cause requirements remain mandatory.
+
 **Integration (2026-10-23, PDT):** merge current main `f6a4573d` without rewriting PR history. Retain restored history search and ordered migrations 049 then unchanged 050, typed lease/lost-owner drain retirement, and Pi 1.4 sleeping, parking, public Abort and checkpoint policies. No additional persisted-state or prompt change. Earlier receipts below do not qualify this integration; exact-head checks remain required.
 
 Main advanced to `cef23e5c` during qualification, adding history-search migration 049. Its migration-list conflict prevented pull-request workflows on `63aa3086`. Integration preserves main’s migration and renumbers the unchanged sleeping CHECK migration to `050_durable_sleeping.sql`; current conformance uses 050. Earlier 049 receipts below describe the pre-integration source, not deployment. Full qualification is required on the merged head.
