@@ -26,6 +26,7 @@ const response: AssistantMessage = {
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.0021 },
   },
   stopReason: "stop",
+  responseId: "resp_luna",
   durationMs: 512,
   timestamp: 0,
 };
@@ -39,6 +40,7 @@ const call = {
   cacheWrite: 0,
   costUsd: 0.0021,
   durationMs: 512,
+  responseId: "resp_luna",
 };
 
 it("attributes durable and turn-summary calls to the orb and its owner", async () => {
@@ -84,7 +86,11 @@ it("attributes durable and turn-summary calls to the orb and its owner", async (
     });
     expect(opened.isOk(), opened.isErr() ? opened.error.message : "").toBe(true);
     const options = opened._unsafeUnwrap();
-    options.recordModelCall?.("subagent", { ...response, model: "gpt-6-astra" });
+    options.recordModelCall?.(
+      "subagent",
+      { ...response, model: "gpt-6-astra" },
+      { ttftMs: 40, thinkingMs: 300 },
+    );
     const summary = await options.turnSummary?.summarizer.summarize(
       { transcript: "turn" },
       { signal: new AbortController().signal },
@@ -92,7 +98,7 @@ it("attributes durable and turn-summary calls to the orb and its owner", async (
     expect(summary?._unsafeUnwrap()).toBe("Fixed the parser.");
     const scope = { ownerUserId: TEST_USER_ID, orbId: orb.id };
     expect(recorded).toEqual([
-      { ...call, model: "gpt-6-astra", ...scope, use: "subagent" },
+      { ...call, model: "gpt-6-astra", ...scope, use: "subagent", ttftMs: 40, thinkingMs: 300 },
       { ...call, ...scope, use: "turn_summary" },
     ]);
     await options.closeResources?.();

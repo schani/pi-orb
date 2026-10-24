@@ -189,6 +189,40 @@ describe("native Durable codemode integration", () => {
     }
   });
 
+  it("places each nested call at its task's persisted start", async () => {
+    const start = Date.UTC(2026, 9, 24, 12);
+    let clock = start;
+    const fixture = await openCodemodeHarness(
+      new CallableCatalog([
+        defineTool({
+          name: "tick",
+          description: "tick",
+          parameters: Type.Object({}),
+          replay: "safe",
+          execute: async () => {
+            clock += 1_000;
+            return { output: [] };
+          },
+        }),
+      ]),
+      { holdForReplay: true, now: () => clock },
+    );
+    try {
+      const result = await fixture.run("await tools.tick({}); await tools.tick({});");
+      expect(result.isError).toBe(false);
+      expect(result.details).toMatchObject({
+        calls: [
+          { id: 1, name: "tick", startedAt: new Date(start).toISOString() },
+          { id: 2, name: "tick", startedAt: new Date(start + 1_000).toISOString() },
+        ],
+      });
+      clock += 60_000;
+      expect(await fixture.replay()).toEqual(result);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("runs native nested ToolTask hooks with parent ownership", async () => {
     const hooks: string[] = [];
     const fixture = await openCodemodeHarness(

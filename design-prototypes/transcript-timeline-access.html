@@ -1,0 +1,1100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>pi-orb · timeline access study</title>
+<style>
+/* Product faces, served from the repository; system faces when opened elsewhere. */
+@font-face{font-family:"Iosevka Etoile";src:url("../apps/web/public/fonts/iosevka-etoile-regular-989cbc25c646.woff2") format("woff2");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:"Iosevka Etoile";src:url("../apps/web/public/fonts/iosevka-etoile-bold-7ec739ec82b2.woff2") format("woff2");font-weight:700;font-style:normal;font-display:swap}
+@font-face{font-family:"Iosevka Etoile";src:url("../apps/web/public/fonts/iosevka-etoile-italic-ff9ea6b1ef88.woff2") format("woff2");font-weight:400;font-style:italic;font-display:swap}
+@font-face{font-family:"JetBrains Mono";src:url("../apps/web/public/fonts/jetbrains-mono-regular-fa06becb7e66.woff2") format("woff2");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:"JetBrains Mono";src:url("../apps/web/public/fonts/jetbrains-mono-bold-f73d6b79ab0c.woff2") format("woff2");font-weight:700;font-style:normal;font-display:swap}
+
+/* Signal / Boards tokens (apps/web/src/styles.css) plus the chart constants used by
+   the waterfall (design-prototypes/transcript-timeline.html, variant D). Light only. */
+:root{color-scheme:light;--w:#fff;--k:#000;--g1:#f2f2f2;--g2:#999;--g3:#555;--pale:#d9d9d9;--grid:#e6e6e6;--ok:#1a7e37;--bad:#b42318;--bad-bg:#fdecea;--start:#966100;--alert:#b21f2d;
+  --text:"Iosevka Etoile",ui-monospace,"SF Mono",Menlo,Consolas,monospace;--mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;--row:20px}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--w);color:var(--k);font:13px/20px var(--text);font-variant-numeric:tabular-nums;font-feature-settings:"calt" 1;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none;border-bottom:1px solid currentcolor}
+a:hover{background:var(--k);color:var(--w);border-color:var(--k)}
+button,input,textarea{font:inherit;color:inherit;background:transparent;border:0;margin:0;font-variant-numeric:tabular-nums}
+button{cursor:pointer;padding:0 8px;line-height:18px;border:1px solid var(--k);background:var(--w);border-radius:0}
+button:hover:not(:disabled){background:var(--k);color:var(--w)}
+:focus-visible{outline:0;background:var(--k);color:var(--w)}
+button.icon-button,a.icon-button{width:20px;height:20px;flex:none;display:inline-flex;align-items:center;justify-content:center;padding:0;border:0;color:var(--g3);background:transparent}
+button.icon-button:hover:not(:disabled),a.icon-button:hover{background:var(--k);color:var(--w)}
+button.icon-button.danger{color:var(--bad)}
+button.icon-button.danger:hover:not(:disabled){background:var(--bad);color:var(--w)}
+.ic{display:block;width:16px;height:16px}
+.glyph{display:inline-block;width:16px;height:16px;flex:none;vertical-align:middle}
+.tile{width:16px;height:16px;flex:none;display:inline-block;vertical-align:middle}
+.tile.s12{width:12px;height:12px}
+.trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.up{text-transform:uppercase;letter-spacing:.08em;font-weight:700}
+.error-text{color:var(--bad)}
+h1,h2{margin:0;font-size:13px;line-height:20px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+
+/* ================= study shell ================= */
+body.shell{display:flex;flex-direction:column;height:100dvh;overflow:hidden;background:var(--g1)}
+.study,.why,.addr{flex:none}
+.study{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:6px 12px;background:var(--w);border-bottom:1px solid var(--k)}
+.study nav,.study .dev{display:flex;flex-wrap:wrap;gap:4px}
+.study .dev{margin-left:auto}
+.study button{min-height:20px}
+.study button[aria-pressed=true]{background:var(--k);color:var(--w)}
+.why{display:flex;gap:8px;align-items:baseline;padding:2px 12px;background:var(--w);border-bottom:1px solid var(--g2);white-space:nowrap;overflow:hidden}
+.why b{flex:none}
+.why span{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--g3)}
+.addr{display:flex;background:var(--w);border-bottom:1px solid var(--k)}
+.addr input{flex:1;min-width:0;padding:0 12px;font:11px/20px var(--mono);color:var(--g3)}
+.addr input:focus{outline:0;color:var(--k);background:var(--w)}
+.stage{display:flex;flex:1;min-height:0;overflow:auto}
+.stage iframe{display:block;flex:none;border:0;background:var(--w);width:100%;height:100%}
+.stage.phone{padding:12px 0;justify-content:center;align-items:flex-start}
+.stage.phone iframe{width:392px;height:min(846px,100%);border:1px solid var(--k)}
+@media(max-width:600px){
+    .study{padding-inline:8px}.why{display:block;white-space:normal;padding-inline:8px}.why span{overflow:visible}
+  .study button{min-height:32px}
+  .study .dev{display:none}
+  .stage.phone{padding:0}
+  .stage iframe,.stage.phone iframe{width:100%;height:100%;border:0}
+}
+
+/* ================= product mock (apps/web/src/styles.css) ================= */
+body.frame{overflow:hidden;overscroll-behavior:none}
+.app{position:fixed;inset:0;display:flex;flex-direction:column;overflow:hidden}
+.orb-page{display:grid;flex:1;min-height:0;overflow:hidden;grid-template-columns:236px minmax(0,1fr)}
+.orb-index{position:fixed;top:0;left:0;width:236px;height:100dvh;overflow-y:auto;border-right:1px solid var(--k)}
+.ix-brand{gap:8px;position:sticky;z-index:4;top:0;display:flex;height:24px;align-items:center;padding:0 10px;background:var(--w);border-bottom:1px solid var(--k)}
+.ix-project+.ix-project{border-top:1px solid var(--k)}
+.project-head{padding:0 10px;border-bottom:1px solid var(--k);position:sticky;z-index:3;top:24px;background:var(--w)}
+.project-head-line{display:flex;height:24px;min-width:0;align-items:center;gap:8px;white-space:nowrap}
+.project-name{min-width:0;flex:1;overflow:hidden;font-size:18px;line-height:24px;text-overflow:ellipsis}
+a.project-new-orb-icon{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:0;color:var(--g3);margin-right:-10px;border-left:1px solid var(--k)}
+.ix-row{display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:8px;align-items:center;height:20px;padding:0 10px 0 12px;border-bottom:1px solid var(--g1)}
+.ix-row:hover{color:inherit;background:var(--g1);border-bottom-color:var(--g1)}
+.ix-age{color:var(--g3);font-size:11px}
+.ix-row-current,.ix-row-current:hover{color:var(--w);background:var(--k);border-bottom-color:var(--k);font-weight:700}
+.ix-row-current .ix-age{color:var(--w)}
+.orb-main{grid-column:2;display:flex;min-width:0;min-height:0;overflow:hidden;flex-direction:column}
+.orb-header-stack{position:relative;z-index:20;display:flex;flex:none;min-width:0;flex-direction:column;background:var(--w)}
+.orb-header{position:relative;display:flex;height:24px;flex:none;align-items:center;gap:0;padding:0;background:var(--w);border-bottom:1px solid var(--k);white-space:nowrap}
+.orb-name{overflow:hidden;text-overflow:ellipsis;font-weight:700}
+.orb-life{display:inline-flex;flex:none;align-items:center;gap:6px;order:1;height:23px;padding:0 8px;border-left:1px solid var(--k)}
+.orb-identity{display:flex;align-items:center;justify-content:space-between;gap:10px;flex:1;min-width:50px;height:23px;padding:0 8px 0 12px}
+.orb-header-actions{display:contents}
+.orb-header-actions>button[aria-label="Stop orb"]{order:2;margin-right:4px}
+.orb-settings{display:flex;order:3;height:23px;min-width:70px;max-width:40%;flex:0 1 auto}
+.orb-settings button{border:0;border-left:1px solid var(--k);padding:0 8px;color:var(--g3);background:transparent;line-height:23px}
+.orb-settings button:hover:not(:disabled){background:var(--k);color:var(--w)}
+.orb-header-actions>button:not([aria-label="Stop orb"]){order:4;position:relative;width:20px;height:20px;margin:0 4px}
+.orb-header-actions>button[aria-label="Open terminal"]::before,.orb-header-actions>button[aria-label="Archive orb"]::before,.orb-header-actions>button[aria-label="Delete orb"]::before{content:"";position:absolute;left:-4px;top:-2px;height:23px;width:1px;background:var(--k)}
+.orb-header-actions>.icon-button[aria-pressed=true]{color:var(--w);background:var(--k)}
+.orb-phone-home,button.orb-phone-menu{display:none}
+.orb-work{position:relative;display:flex;flex:1;min-height:0;min-width:0}
+.orb-body{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0}
+.orb-body[hidden]{display:none}
+.orb-transcript-scroll{position:relative;display:block;flex:1;min-height:40px;overflow:auto;overscroll-behavior:contain}
+.orb-transcript-content{position:relative;display:flow-root}
+.history{display:flex;min-width:0;flex-direction:column;padding-bottom:8px}
+.rec{display:block;padding:4px 12px}
+.rec-bd{min-width:0}
+.rec-you{position:relative;padding:9px 12px;color:var(--w);background:var(--k);border-top:1px solid var(--k);border-bottom:1px solid var(--k)}
+.rec-alert{padding:4px 0}
+.alert-band{padding:10px 12px;background:var(--alert);color:#fff;white-space:pre-wrap;overflow-wrap:anywhere}
+.rec-status{margin-right:6px;padding:0 5px;color:inherit;border:1px solid currentcolor;line-height:16px}
+.chat-markdown{overflow-wrap:anywhere}
+.chat-markdown p{margin:0 0 8px}
+.chat-markdown>:last-child{margin-bottom:0}
+.response-markdown{position:relative;min-width:0;padding-right:24px;overflow-wrap:anywhere;margin:2px 0 6px}
+.rec-bd>.error-text{margin:0 0 4px}
+code{font-family:var(--mono);font-size:12px}
+.activity-rail-row{margin-bottom:4px;background:var(--w);border:1px solid var(--g2)}
+.activity-rail-row>summary{display:grid;grid-template-columns:2ch minmax(0,1fr) auto;gap:8px;align-items:center;min-height:20px;cursor:pointer;list-style:none;padding:0 8px;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.activity-rail-row>summary::-webkit-details-marker{display:none}
+.activity-rail-row>summary:hover{background:var(--g1)}
+.rec-orb>.rec-bd>.activity-rail-row{position:relative;border:0}
+.rec-orb>.rec-bd>.response-markdown+.activity-rail-row{margin-top:4px}
+.rec-orb>.rec-bd>.activity-rail-row::before{position:absolute;z-index:1;top:0;bottom:-4px;left:calc(8px + .5ch);width:1px;background:var(--g2);content:"";pointer-events:none}
+.rec-orb>.rec-bd>.activity-rail-row:not(.activity-rail-row+.activity-rail-row)::before{top:12px}
+.rec-orb>.rec-bd>.activity-rail-row:not(:has(+.activity-rail-row))::before{bottom:0}
+.rec-orb>.rec-bd>.activity-rail-row:not([open]):not(:has(+.activity-rail-row))::before{bottom:calc(100% - 12px)}
+.activity-rail-marker{color:var(--g3)}
+.activity-rail-marker::before{content:"\25b8"}
+.activity-rail-row[open]>summary .activity-rail-marker::before{content:"\25be"}
+.rec-orb>.rec-bd>.activity-rail-row>summary .activity-rail-marker{position:relative;z-index:2;width:1ch;height:12px;line-height:12px;align-self:center;background:var(--w);text-align:center}
+.activity-rail-summary{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.activity-rail-headline,.activity-rail-metric{color:var(--g3);white-space:nowrap}
+.activity-rail-row-failed .activity-rail-marker,.activity-rail-row-failed .activity-rail-label,.tool-activity-failed,.tool-diff-removed{color:var(--bad)}
+.tool-diff-added{color:var(--ok)}
+.reasoning-body,.tool-activity-calls{margin:0;padding:2px 8px 4px calc(2ch + 16px);color:var(--g3);background:var(--g1);white-space:pre-wrap;overflow-wrap:anywhere}
+.tool-activity-calls div{font:12px/18px var(--mono)}
+.tool-activity-calls .out{color:var(--g3);padding-left:2ch}
+.tool-activity-calls .out.bad{color:var(--bad)}
+.composer{position:relative;z-index:30;flex:none;padding:4px 12px;background:var(--w);border-top:1px solid var(--k)}
+.composer-line{position:relative;display:grid;grid-template-columns:2ch minmax(0,1fr) auto;gap:1ch}
+.composer-prefix{color:var(--k);font-weight:700;text-align:right}
+.text-field-frame{display:block;position:relative;min-width:0}
+.text-field-frame:focus-within::after{position:absolute;z-index:2;inset:-3px;content:"";pointer-events:none;background:linear-gradient(var(--k),var(--k)) left top/11px 1px no-repeat,linear-gradient(var(--k),var(--k)) left top/1px 11px no-repeat,linear-gradient(var(--k),var(--k)) right top/11px 1px no-repeat,linear-gradient(var(--k),var(--k)) right top/1px 11px no-repeat,linear-gradient(var(--k),var(--k)) left bottom/11px 1px no-repeat,linear-gradient(var(--k),var(--k)) left bottom/1px 11px no-repeat,linear-gradient(var(--k),var(--k)) right bottom/11px 1px no-repeat,linear-gradient(var(--k),var(--k)) right bottom/1px 11px no-repeat}
+.composer-input{display:block;width:100%;height:80px;min-height:80px;padding:0;resize:vertical;border:0;line-height:20px;color:var(--k);background:var(--w);caret-color:var(--k)}
+.composer-input:focus,.composer-input:focus-visible{outline:0;background:var(--w);color:var(--k)}
+.composer-phone-pad,.composer-phone-rail{display:none}
+.command-picker{position:absolute;grid-column:2/-1;z-index:25;bottom:calc(100% + 4px);left:0;width:min(420px,100%);max-height:280px;overflow-y:auto;padding:4px;border:1px solid var(--k);background:var(--w)}
+
+.command-picker button{display:flex;justify-content:space-between;gap:16px;text-align:left;width:100%;padding:5px 8px;border:0}
+.command-picker button.selected{background:var(--k);color:var(--w)}
+.page{display:flex;flex-direction:column;gap:8px}
+.simple-page{padding:20px 12px;align-items:flex-start}
+/* ===== waterfall encodings, tooltip and table: transcript-timeline.html (variant D) ===== */
+/* shared encodings: model wait outlined, thinking as a bit raster, streaming ink,
+   tools pale, failure red, Luna grey, compaction hatched */
+.ev{position:absolute;z-index:1;cursor:pointer}
+.seg{position:absolute;top:0;bottom:0}
+.s-wait{background:var(--w);border:1px solid var(--k)}
+.s-think{background:repeating-conic-gradient(var(--k) 0 25%,var(--w) 0 50%) 0 0/4px 4px}
+.s-stream{background:var(--k)}
+.llm.err .s-wait,.llm.err .s-think{border:1px solid var(--bad);background:var(--bad-bg)}
+.llm.err .s-think{background:repeating-conic-gradient(var(--bad) 0 25%,var(--bad-bg) 0 50%) 0 0/4px 4px}
+.call{background:var(--pale);color:var(--k);font:11px/11px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:3px}
+.call.fail{background:var(--bad);color:var(--w)}
+.call.aborted{background:var(--w);border:1px solid var(--bad);color:var(--bad)}
+.call.inner{background:var(--g1);border:1px solid var(--pale);line-height:7px;font-size:9px}
+.luna{background:var(--g2)}
+.compact{background:repeating-linear-gradient(135deg,var(--g2) 0 1px,var(--w) 1px 4px);border:1px solid var(--g2)}
+.hot{outline:2px solid var(--k);outline-offset:1px;z-index:3}
+.crop{position:absolute;pointer-events:none;z-index:6}
+.crop i{position:absolute;width:9px;height:9px;border:0 solid var(--k)}
+.crop i:nth-child(1){left:0;top:0;border-width:2px 0 0 2px}
+.crop i:nth-child(2){right:0;top:0;border-width:2px 2px 0 0}
+.crop i:nth-child(3){left:0;bottom:0;border-width:0 0 2px 2px}
+.crop i:nth-child(4){right:0;bottom:0;border-width:0 2px 2px 0}
+
+/* tooltip: the chart tooltip (chart-tip) */
+.tip{position:fixed;z-index:50;max-width:min(380px,calc(100vw - 16px));padding:2px 8px;color:var(--k);background:var(--w);border:1px solid var(--k);font:11px/16px var(--mono);pointer-events:none}
+.tip b{display:block;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tip table{border-collapse:collapse}.tip td.k{white-space:nowrap}.tip td{padding:0;vertical-align:top}.tip td+td{padding-left:12px}
+.tip .k,.inspect dt,.kv dt{color:var(--g3)}
+.tip .bad,.inspect .bad,.kv .bad{color:var(--bad)}
+
+/* inspection: bordered box, mono facts */
+.inspect{margin:8px 12px 12px;border:1px solid var(--k);background:var(--w)}
+.inspect-h{display:flex;align-items:center;gap:8px;min-height:22px;padding:0 0 0 8px;border-bottom:1px solid var(--k)}
+.inspect-h strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inspect-h button{border:0;border-left:1px solid var(--k);width:24px;height:22px;padding:0}
+.kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:0 16px;margin:0;padding:4px 8px;font:11px/18px var(--mono)}
+.kv dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap}
+@media(min-width:900px){.inspect .kv{grid-template-columns:max-content minmax(0,1fr) max-content minmax(0,1fr)}}
+/* ---------- D · waterfall ---------- */
+.d-scroll{overflow:auto;max-height:calc(100dvh - 120px)}
+.d-table{width:100%;table-layout:fixed;border-collapse:collapse;font:11px/18px var(--mono)}
+.d-table col.c-start{width:calc(8ch + 16px)}
+.d-table col.c-call{width:min(32ch,22vw)}
+.d-table th{position:sticky;top:0;z-index:4;background:var(--w);border-bottom:1px solid var(--k);font-weight:400;color:var(--g3);text-align:left;padding:2px 8px;white-space:nowrap}
+.d-table td{padding:0 8px;text-align:left;vertical-align:top;white-space:nowrap;border-bottom:1px solid var(--g1)}
+.d-table td.name{overflow:hidden;text-overflow:ellipsis}
+.d-table td.name .a{color:var(--g3)}
+.d-table td.wf{position:relative;padding:0}
+.wfi{position:absolute;top:0;bottom:0;left:8px;right:12px}
+.d-table tr[data-did]{cursor:pointer}
+.d-table tr.ev-row:hover td{background:var(--g1)}
+.d-table tr.sel td:not(.wf){background:var(--k)!important;color:var(--w)}
+.d-table tr.sel td.name{white-space:normal;overflow-wrap:anywhere}
+.d-table tr.sel td .a,.d-table tr.sel td .bad{color:var(--w)}
+.d-table .bad{color:var(--bad)}
+.d-table tr.side td{color:var(--g3)}
+.d-table tr.band td{background:var(--k);color:var(--w);border-bottom:0;font:13px/20px var(--text);padding-top:4px;padding-bottom:4px;vertical-align:top}
+.d-table tr.band td.n{font:11px/20px var(--mono)}
+.d-table tr.band td.txt{white-space:normal;overflow-wrap:anywhere}
+.d-table tr.alertrow td,.d-table tr.alertrow:hover td{background:var(--alert);color:#fff;overflow:hidden;text-overflow:ellipsis}
+.d-table tr.alertrow.sel td{white-space:normal;overflow-wrap:anywhere}
+.d-table tr.gaprow td{background:var(--g1);color:var(--g3);text-align:center}
+.d-table tr.detail td{background:var(--g1);white-space:normal;padding:2px 8px 6px}
+.wfbar{position:absolute;top:4px;height:10px}
+.wfbar.inst{width:2px;background:var(--k)}.wfbar.inst.bad{background:var(--bad)}
+.tip b.full{white-space:normal;overflow-wrap:anywhere}
+.d-ind{display:inline-block;width:2ch;color:var(--g2)}
+.d-nest{border-left:1px solid var(--k);padding-left:1ch;margin-left:.5ch}
+
+[hidden]{display:none!important}
+/* ================= waterfall host (variant D) ================= */
+.wf{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;background:var(--w)}
+.wf-scroll{position:relative;flex:1;min-height:0;overflow:auto;overscroll-behavior:contain}
+.vbar{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:6px 12px;border-bottom:1px solid var(--g1);font:11px/20px var(--mono);background:var(--w)}
+.vbar .sep{width:8px}
+.vbar button[aria-pressed=true]{background:var(--k);color:var(--w)}
+.d-table th{border-bottom:0!important;box-shadow:inset 0 -1px 0 var(--k)}
+.d-table tr.band.thin td{padding-top:0;padding-bottom:0;font:11px/14px var(--mono)}
+.d-table tr.hot td:not(.wf),.d-table tr.pin td:not(.wf){background:var(--g1)}
+.d-table tr.hot td:first-child,.d-table tr.pin td:first-child,.d-table tr.inview td:first-child{box-shadow:inset 3px 0 0 var(--k)}
+.d-table tr.band.inview td:first-child,.d-table tr.band.hot td:first-child{box-shadow:inset 3px 0 0 var(--g2)}
+.d-table tr.band.hot td{background:var(--g3)}
+.tip{position:fixed;z-index:80;max-width:min(380px,calc(100vw - 16px));padding:2px 8px;color:var(--k);background:var(--w);border:1px solid var(--k);font:11px/16px var(--mono);pointer-events:none}
+.tip[hidden]{display:none}
+.tip table{border-collapse:collapse}.tip td.k{white-space:nowrap}.tip td{padding:0;vertical-align:top}.tip td+td{padding-left:12px}
+
+/* transcript ↔ timeline link */
+.tx-hot{background:var(--g1)!important}
+.tx-hot>summary .activity-rail-marker{background:var(--g1)!important}
+.rec-you.tx-hot,.rec-alert .alert-band.tx-hot{background:var(--k)!important;outline:2px solid var(--g2);outline-offset:-5px}
+.rec-alert .alert-band.tx-hot{background:var(--alert)!important}
+
+/* 1 · route */
+.route-tl{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0}
+.route-tl[hidden]{display:none}
+
+/* 2 · flip */
+#tx.flipped>.orb-transcript-content{display:none}
+#tx>.d-table{display:none}
+#tx.flipped>.d-table{display:table}
+
+/* 3 · per turn */
+.band-time{position:absolute;top:9px;right:8px}
+.rec-you:has(.band-time){padding-right:40px}
+.rec-you button.band-time{color:var(--g2);opacity:0}
+.rec-you:hover button.band-time,.rec-you button.band-time:focus-visible,.rec-you button.band-time[aria-pressed=true]{opacity:1}
+.rec-you button.band-time:hover:not(:disabled),.rec-you button.band-time[aria-pressed=true]{background:var(--w);color:var(--k)}
+@media(hover:none){.rec-you button.band-time{opacity:1}}
+.turn-wf{margin:0 0 8px;border-bottom:1px solid var(--k)}
+.turn-wf .vbar{padding:4px 12px}
+.turn-wf .wf-scroll{overflow:visible}
+.turn-body[hidden],.turn-wf[hidden]{display:none}
+
+/* 4 · rail drawer */
+.drawer{display:flex;flex-direction:column;flex:none;width:58%;min-width:0;min-height:0;border-left:1px solid var(--k);background:var(--w)}
+.drawer[hidden]{display:none}
+.drawer-head{display:flex;align-items:flex-start;flex:none;border-bottom:1px solid var(--k)}
+.drawer-head .vbar{flex:1;border:0;min-width:0}
+.drawer-head .icon-button{margin:6px 8px 0 0}
+.rail-hit{position:absolute;z-index:3;width:11px;cursor:pointer}
+.rail-hit::after{content:"";position:absolute;top:0;bottom:0;left:5px;width:1px}
+.rail-hit:hover::after,.rail-hit.on::after{left:4px;width:3px;background:var(--k)}
+.rail-scrub{position:absolute;z-index:4;left:0;right:0;height:1px;background:var(--k);pointer-events:none}
+
+/* 5 · dock */
+.dock-grip{position:relative;z-index:35;flex:none;height:0}
+.dock-grip button{position:absolute;left:50%;top:-5px;width:56px;height:11px;margin-left:-28px;padding:0;border:0;background:transparent;cursor:row-resize;touch-action:none}
+.dock-grip button::before{content:"";position:absolute;left:16px;right:16px;top:3px;height:4px;background:var(--k)}
+.dock-grip button:hover:not(:disabled),.dock-grip button:focus-visible{background:transparent}
+.dock-grip button:hover::before,.dock-grip button:focus-visible::before,.dock-grip button[aria-expanded=true]::before{left:12px;right:12px}
+.dock{display:flex;flex-direction:column;flex:none;min-height:0;border-top:1px solid var(--k);background:var(--w)}
+.dock[hidden]{display:none}
+
+/* ================= phone (≤600px, apps/web/src/styles.css) ================= */
+@media(max-width:760px){
+  .d-table col.c-start{width:calc(8ch + 8px)}
+  .d-table col.c-call{width:calc(15ch + 8px)}
+  .d-table th,.d-table td{padding-inline:4px}
+  .d-table td.wf{padding:0}
+  .wfi{left:4px;right:8px}
+  .vbar{padding-inline:8px}
+  .vbar button{min-height:32px}
+}
+@media(max-width:600px){
+  .orb-page{grid-template-columns:minmax(0,1fr)}
+  .orb-main{grid-column:1}
+  .orb-index{display:none}
+  .orb-transcript-scroll{min-height:0;overscroll-behavior:none}
+  .orb-header{height:auto;min-height:44px;flex-wrap:wrap;gap:0 8px;padding:0 12px}
+  .orb-identity{display:contents}
+  .orb-life{order:0;height:auto;padding:0;border:0}
+  .orb-settings{display:none}
+  .orb-phone-home,button.orb-phone-menu{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;flex:none;border:0;margin-left:-12px}
+  button.orb-phone-menu{margin:0 -12px 0 0}
+  .orb-name{flex:1;min-width:0}
+  .orb-identity>.icon-button{width:44px;height:44px}
+  .orb-life-word{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .orb-header-actions{display:none;width:100%;justify-content:flex-end;border-top:1px solid var(--g2);gap:8px}
+  .orb-header[data-phone-actions=true] .orb-header-actions{display:flex}
+  .orb-header-actions>button.icon-button,.orb-header-actions>button:not([aria-label="Stop orb"]){width:44px;height:44px;margin:0;order:0}
+  .orb-header-actions>button::before{display:none}
+  .composer{padding:0 12px env(safe-area-inset-bottom)}
+  .composer-phone-pad{display:grid;grid-template-columns:minmax(0,1fr) 44px;gap:12px;height:44px}
+  .composer-open{display:grid;grid-template-columns:2ch minmax(0,1fr);gap:1ch;align-items:center;min-width:0;height:44px;padding:0;border:0;text-align:left;background:var(--w)}
+  .composer-open:hover:not(:disabled){background:var(--w);color:var(--k)}
+  .composer-draft-preview{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--g3)}
+  .composer:not([data-expanded=true]) .composer-line,.composer[data-expanded=true] .composer-phone-pad{display:none}
+  .composer-line{grid-template-columns:2ch minmax(0,1fr) 44px}
+  .composer-line>.composer-prefix{padding-top:12px}
+  .composer-input{height:88px;min-height:88px;padding:12px 0;resize:none;font-size:16px}
+  .composer-phone-rail{display:flex;flex-direction:column}
+  .composer-phone-rail>button.icon-button{width:44px;height:44px}
+  button.composer-send{color:var(--w);background:var(--k)}
+  .command-picker{max-height:min(240px,35dvh);width:auto;right:0}
+  .composer-line>.command-picker{left:0}
+  .command-picker button{min-height:44px;align-items:center}
+  .response-markdown{padding-right:0}
+  .rec-you:has(.band-time){padding-right:52px}
+  .rec-you button.band-time{top:0;right:0;width:44px;height:44px;opacity:1}
+  .drawer{position:absolute;inset:0;z-index:40;width:auto;border-left:0}
+  .drawer-head .icon-button{width:44px;height:44px;margin:0}
+  .dock-grip button{top:-40px;height:44px;width:72px;margin-left:-36px}
+  .dock-grip button::before{left:20px;right:20px;top:38px}
+  .dock-grip button:hover::before,.dock-grip button[aria-expanded=true]::before{left:18px;right:18px}
+}
+</style>
+</head>
+<body>
+<script>
+'use strict';
+const $=(s,r=document)=>r.querySelector(s);
+const $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ======================================================================
+   Shared fake session (transcript-timeline.html): one Pi orb, five turns,
+   one subagent, one code-mode script, sleep/wake and a manual Stop/Start.
+   ====================================================================== */
+const S=1000;
+const at=s=>{let v=0;for(const x of s.split(':'))v=v*60+Number(x);return Math.round(v*S)};
+const BASE=9*3600+12*60+4;
+const p2=n=>String(n).padStart(2,'0');
+const clock=(ms,frac)=>{const s=BASE+ms/S;const r=`${p2(Math.floor(s/3600)%24)}:${p2(Math.floor(s/60)%60)}:${p2(Math.floor(s%60))}`;return frac?r+'.'+Math.floor(s*10%10):r};
+const MODEL={sol:'openai-codex/gpt-6.1-sol',terra:'openai-codex/gpt-5.6-terra',luna:'openai-codex/gpt-6-luna'};
+const PRICE={sol:[1.25,.125,10],terra:[.5,.05,4],luna:[.1,.01,.8]}; // $ per M: input, cache read, output
+const CTX_LIMIT={sol:128000,terra:128000,luna:32000}; // context window, tokens
+const EV=[];let N=0,TURN=0;
+const add=e=>{e.id='e'+(++N);if(e.turn==null)e.turn=TURN;EV.push(e);return e};
+const ctx={root:14200,sub1:9800},lastIn={root:0,sub1:0};
+function user(t,text,o={}){if(o.mode!=='steering')TURN++;return add({kind:'user',lane:'you',start:t,end:t,text,mode:o.mode||'message',delivered:o.delivered??t})}
+function llm(lane,t,o){
+  const model=o.model||(lane==='root'?'sol':'terra');
+  const w=(o.ttft||0)*S,th=(o.think||0)*S,st=(o.stream||0)*S,err=o.stop==='error';
+  const inp=err?0:ctx[lane],cr=err?0:Math.min(lastIn[lane],inp),out=err?0:(o.out||0),p=PRICE[model];
+  const e=add({kind:'llm',lane,model,start:t,ttft:t+w,thinkEnd:t+w+th,end:t+w+th+st,inp,cr,out,cost:((inp-cr)*p[0]+cr*p[1]+out*p[2])/1e6,limit:CTX_LIMIT[model],stop:o.stop||'toolUse',head:o.head,text:o.text,say:o.say,err:o.err,attempt:o.attempt,backoff:o.backoff});
+  if(!err){lastIn[lane]=inp;ctx[lane]+=out+(o.add??900)*3}
+  return e;
+}
+function calls(lane,t,parent,list){let end=t;list.forEach(([name,arg,dur,ok=true,out],i)=>{const s=t+i*14;const kind=name==='codemode'?'code':name==='subagent'?'spawn':'tool';const e=add({kind,lane,name,arg,start:s,end:s+dur*S,ok,out,parent:parent.id});end=Math.max(end,e.end)});return end}
+function step(lane,t,o,list){const L=llm(lane,t,o);const end=list?calls(lane,L.end+30,L,list):L.end;return {L,t:end+(list?80:0)}}
+function inner(code,off,dur,name,arg,ok,out){return add({kind:'inner',lane:code.lane,name,arg,start:code.start+off*S,end:code.start+(off+dur)*S,ok,out,parent:code.id})}
+function luna(purpose,t,dur,inp,out,text){const p=PRICE.luna;return add({kind:'luna',lane:'luna',model:'luna',purpose,start:t,end:t+dur*S,inp,out,cr:0,cost:(inp*p[0]+out*p[2])/1e6,text})}
+function life(state,t,end,text){return add({kind:'life',lane:'host',state,start:t,end,text})}
+const last=()=>EV[EV.length-1];
+
+// Turn 1 · find and fix
+user(0,'The heatmap renders blank in WebKit when a whole row is zero. Find out why and fix it.');
+luna('orb name',300,1.7,2100,9,'heatmap zero rows');
+let r={t:350};
+r=step('root',r.t,{ttft:2.6,think:5.8,stream:1.9,out:540,head:'Locate the heatmap spec builder',say:'Starting where the heatmap spec is built.',add:9200},[
+  ['bash','rg -n "heatmap" apps/web/src',.38,true,'14 matches in 4 files'],
+  ['read','apps/web/src/lib/chart-spec.ts',.04,true,'1,244 lines'],
+  ['read','apps/web/src/components/Chart.tsx',.03,true,'318 lines']]);
+r=step('root',r.t,{ttft:1.8,think:9.2,stream:1.1,out:410,head:'Square-root scale over an all-zero row',say:'An all-zero row gives the square-root scale an empty domain. Checking the heatmap tests before changing it.',add:2600},[
+  ['read','apps/web/src/lib/chart-spec.ts:880–1010',.03,true,'131 lines'],
+  ['bash','npx vitest run src/lib/chart-spec.test.ts -t heatmap',13.8,true,'4 passed']]);
+r=step('root',r.t,{ttft:2.1,think:14.6,stream:6.4,out:1320,head:'Guard the zero domain',say:'Guarding the zero domain so empty rows keep a 1px floor.',add:300},[['edit','apps/web/src/lib/chart-spec.ts',.06,true,'+9 −2']]);
+r=step('root',r.t,{ttft:1.5,think:2.2,stream:3.9,out:760,add:300},[['edit','apps/web/src/lib/chart-spec.test.ts',.05,true,'+24 −0']]);
+r=step('root',r.t,{ttft:1.4,stream:1.2,out:96,add:700},[['bash','npx vitest run src/lib/chart-spec.test.ts -t heatmap',9.1,true,'5 passed']]);
+r=step('root',r.t,{ttft:1.3,stream:1.1,out:88,add:2400},[['bash','npm run test:browser -- charts.spec.ts --project=webkit',108.2,false,'exit 1 · expect(locator).toHaveCount(36) — received 30']]);
+luna('headline',last().start+600,1.3,1400,8,'Run WebKit chart tests');
+r=step('root',r.t,{ttft:1.9,think:11.8,stream:2.4,out:520,head:'WebKit drops zero-height rect marks',say:'WebKit draws 30 of 36 cells where Chromium draws all of them: zero-height rects are dropped, not drawn transparent.',add:1800},[['read','apps/web/e2e/charts.spec.ts:40–96',.03,true,'57 lines']]);
+r=step('root',r.t,{ttft:1.4,think:3.0,stream:2.8,out:380,add:300},[['edit','apps/web/src/lib/chart-spec.ts',.05,true,'+4 −1']]);
+r=step('root',r.t,{ttft:1.6,stream:1.0,out:90,add:600},[['bash','npm run test:browser -- charts.spec.ts --project=webkit',97.6,true,'12 passed']]);
+r=step('root',r.t,{ttft:1.5,stream:1.2,out:110,add:900},[
+  ['bash','npm run typecheck',38.4,true,'0 errors'],
+  ['bash','npm run lint -- apps/web/src/lib',21.7,true,'0 problems']]);
+let f=llm('root',r.t,{ttft:1.7,think:3.2,stream:9.8,out:690,stop:'stop',add:200,text:'WebKit skips rect marks whose height rounds to zero, so a row of zeros on the square-root scale vanished. Zero cells now draw at a 1px minimum in the pale fill; the WebKit chart suite passes.'});
+luna('turn summary',f.end+300,2.4,3800,46,'Heatmap zero rows fixed; WebKit charts pass');
+
+// Turn 2 · code mode against Datadog, provider error and retry
+user(at('9:40'),'Chart heatmap render time against cell count from Datadog for the last day.');
+r=step('root',at('9:40')+300,{ttft:2.2,think:7.4,stream:8.8,out:1450,head:'Query render timings by cell count',say:'Querying p95 render time and render counts per cell bucket in one script.',add:4200},[['codemode','const [p95, n] = await Promise.all([mcp__datadog__query_metrics(…), …]); await chart({kind: "line", …})',11.4,true,'chart · Heatmap render time by cells']]);
+{const code=last();
+inner(code,.2,1.4,'mcp__datadog__search_metrics','chart.render.*',true,'6 metrics');
+inner(code,1.7,7.9,'mcp__datadog__query_metrics','p95:chart.render.ms{kind:heatmap} by {cells}',true,'1,440 points × 4');
+inner(code,1.72,6.1,'mcp__datadog__query_metrics','sum:chart.render.count{kind:heatmap}.as_count()',true,'1,440 points');
+inner(code,9.7,.9,'orb_messages','search "render timings"',true,'2 messages');
+inner(code,10.7,.25,'chart','Heatmap render time by cells',true,'line · 4 series · 1,440 points');}
+{const e1=llm('root',r.t,{ttft:21.0,stop:'error',err:'503 upstream connect error or disconnect/reset before headers',attempt:1});
+f=llm('root',e1.end+2000,{ttft:2.4,think:4.1,stream:7.6,out:820,stop:'stop',attempt:2,backoff:2000,add:100,text:'p95 render time stays under 4ms up to 1,600 cells and rises to 23ms at 2,400. Zero rows render as fast as filled ones.'});
+f.retryOf=e1.id;}
+luna('turn summary',f.end+300,2.1,3100,38,'Render time charted from Datadog');
+life('stopped',at('11:30'),at('13:10'),'Stop');
+life('starting',at('13:10'),at('13:31'),'Start');
+
+// Turn 3 · subagent in parallel, steering, notification, alert
+user(at('13:40'),'Have a subagent audit the other chart kinds for the same zero bug while you write the regression test.');
+r=step('root',at('13:40')+300,{ttft:2.0,think:6.1,stream:3.4,out:610,head:'Split the audit from the regression test',say:'A subagent takes the audit; I will write the regression test meanwhile.',add:1200},[
+  ['subagent','Audit zero-value handling in every chart kind',.6,true,'started'],
+  ['read','apps/web/e2e/charts.spec.ts',.03,true,'212 lines']]);
+const spawn=EV.find(e=>e.kind==='spawn');
+{let s={t:spawn.end+400};
+s=step('sub1',s.t,{ttft:3.1,think:4.2,stream:2.0,out:380,head:'Where domains are computed',say:'Mapping where each chart kind computes its domain.',add:3100},[
+  ['bash','rg -n "domain" apps/web/src/lib/chart-spec.ts',.31,true,'22 matches'],
+  ['bash','rg -n "values.length" apps/web/src/lib',.28,true,'7 matches'],
+  ['read','apps/web/src/lib/chart-spec.ts:460–560',.03,true,'101 lines']]);
+s=step('sub1',s.t,{ttft:2.4,think:9.1,stream:1.6,out:300,head:'Histogram bins and timeline spans',add:2600},[
+  ['read','apps/web/src/lib/chart-spec.ts:700–800',.03,true,'101 lines'],
+  ['read','apps/web/src/lib/chart-spec.ts:1060–1120',.03,true,'61 lines']]);
+s=step('sub1',s.t,{ttft:2.0,think:5.5,stream:4.8,out:880,head:'Probe every kind with zeros',say:'One zero-value probe per chart kind, so every failure shows up in a single run.',add:400},[['edit','apps/web/src/lib/chart-spec.test.ts',.05,true,'+41 −0']]);
+s=step('sub1',s.t,{ttft:1.3,stream:.9,out:70,add:1900},[['bash','npx vitest run src/lib/chart-spec.test.ts -t zero',11.2,false,'exit 1 · histogram: expected 30 bins, received 27']]);
+s=step('sub1',s.t,{ttft:2.2,think:12.0,stream:4.1,out:610,head:'Histogram drops zero-count bins',say:'Histogram drops zero-count bins. Reporting that to the parent before finishing.',add:200},[['notify_parent','Histogram drops zero-count bins at phone width; the heatmap fix does not cover it.',.2,true,'delivered']]);
+const np=last();
+add({kind:'notify',lane:'root',start:np.end,end:np.end,text:np.arg,from:np.id});
+const sf=llm('sub1',s.t,{ttft:1.4,stream:2.6,out:240,stop:'stop',text:'Histogram is the only other kind affected; a failing test reproduces it.'});
+add({kind:'done',lane:'sub1',start:sf.end,end:sf.end,text:'completed',from:spawn.id});}
+r=step('root',r.t,{ttft:1.9,think:4.0,stream:5.2,out:940,head:'Zero-row regression test',add:300},[['edit','apps/web/e2e/charts.spec.ts',.05,true,'+38 −0']]);
+r=step('root',r.t,{ttft:1.5,stream:1.0,out:84,add:1500},[['bash','npm run test:browser -- charts.spec.ts',158.4,true,'24 passed']]);
+const steer=user(last().start+61000,'Cover the 320px viewport too.',{mode:'steering'});
+r=step('root',r.t,{ttft:1.8,think:3.3,stream:4.4,out:720,head:'Add the 320px case',add:300},[['edit','apps/web/e2e/charts.spec.ts',.05,true,'+12 −1']]);
+steer.delivered=r.L.start;
+r=step('root',r.t,{ttft:1.4,stream:.9,out:80,add:1400},[['bash','npm run test:browser -- charts.spec.ts',151.1,true,'26 passed']]);
+r=step('root',r.t,{ttft:2.1,think:8.8,stream:6.0,out:1100,head:'Histogram zero-count bins',say:'Applying the same floor to histogram bins.',add:300},[['edit','apps/web/src/lib/chart-spec.ts',.06,true,'+7 −3']]);
+r=step('root',r.t,{ttft:1.4,stream:1.0,out:90,add:900},[['bash','npx vitest run src/lib/chart-spec.test.ts',8.9,true,'61 passed']]);
+r=step('root',r.t,{ttft:1.7,think:2.9,stream:1.6,out:160,head:'Production is affected',say:'The histogram path ships in the current release, so this is live.',add:100},[['orb_alert','Histogram zero-bin bug is live in production.',.7,true,'alert raised']]);
+add({kind:'alert',lane:'root',start:last().end,end:last().end,text:'Histogram zero-bin bug is live in production.'});
+f=llm('root',r.t,{ttft:1.9,think:2.6,stream:8.9,out:640,stop:'stop',add:100,text:'Heatmap and histogram both keep zero rows now, with Chromium and 320px regression tests. The audit found no other affected kinds.'});
+luna('turn summary',f.end+300,2.6,4400,52,'Zero bins fixed in heatmap and histogram');
+life('sleeping',at('24:00'),at('2:17:10'),'idle sleep');
+
+// Turn 4 · queued message wakes the orb onto a replacement host; auto-compaction; abort
+const q=user(at('2:17:10'),'Run the full browser suite, then open a PR.',{mode:'queued'});
+life('starting',at('2:17:10'),at('2:17:52'),'Wake');
+life('replace',at('2:17:13'),at('2:17:41'),'previous host reclaimed; replacement provisioned');
+q.delivered=at('2:17:53');
+add({kind:'compact',lane:'root',start:at('2:17:53'),end:at('2:18:24'),before:ctx.root,after:22400,auto:true});
+ctx.root=22400;lastIn.root=0;
+r=step('root',at('2:18:24')+100,{ttft:3.4,think:6.0,stream:2.1,out:310,head:'Full browser suite',say:'Running the full browser suite first.',add:0},[['bash','npm run test:browser',1,'aborted','killed by abort']]);
+{const b=last();b.end=at('2:20:05');}
+add({kind:'abort',lane:'root',start:at('2:20:05'),end:at('2:20:05'),text:'aborted by user'});
+
+// Turn 5 · interrupt, harness restart, PR
+user(at('2:20:21'),'Only Chromium; skip WebKit on this host.');
+r=step('root',at('2:20:21')+300,{ttft:2.6,think:2.4,stream:1.3,out:120,head:'Chromium only',say:'Restricting the run to Chromium.',add:2600},[['bash','npm run test:browser -- --project=chromium',371,true,'118 passed']]);
+luna('headline',last().start+500,1.2,1300,7,'Run Chromium browser suite');
+{const hr=llm('root',r.t,{ttft:1.9,think:3.0,stop:'error',err:'agent connection lost: runtime exited 137',attempt:1});
+life('restart',hr.end,hr.end+6200,'runtime exited 137; harness restarted');
+r=step('root',hr.end+6400,{ttft:2.2,think:2.8,stream:1.4,out:150,attempt:2,backoff:6400,head:'Review the diff',say:'Checking the diff before committing.',add:900},[
+  ['bash','git status --short',.09,true,'M 3 files'],
+  ['bash','git diff --stat',.11,true,'3 files changed, 112 insertions(+), 6 deletions(-)']]);
+r.L.retryOf=hr.id;}
+r=step('root',r.t,{ttft:1.6,think:1.2,stream:2.2,out:210,add:200},[['bash','git switch -c fix/chart-zero-domains && git commit -am "Keep zero rows in heatmap and histogram"',.42,true,'[fix/chart-zero-domains 9c41e07]']]);
+r=step('root',r.t,{ttft:1.3,stream:.8,out:60,add:200},[['bash','git push -u origin fix/chart-zero-domains',2.8,true,'new branch']]);
+r=step('root',r.t,{ttft:1.5,think:1.0,stream:3.6,out:330,add:200},[['bash','gh pr create --fill',3.1,true,'https://github.com/schani/pi-orb/pull/174']]);
+r=step('root',r.t,{ttft:1.4,stream:.9,out:70,add:1600},[['bash','gh pr checks 174 --watch',274,true,'9 checks passed']]);
+f=llm('root',r.t,{ttft:1.6,think:1.4,stream:4.9,out:260,stop:'stop',text:'Chromium suite passes (118). PR #174 is open and its checks are green.'});
+luna('turn summary',f.end+300,2.2,3600,31,'PR #174 opened; Chromium suite green');
+
+/* ---------------- derived ---------------- */
+EV.sort((a,b)=>a.start-b.start||a.id.localeCompare(b.id,undefined,{numeric:true}));
+const byId=Object.fromEntries(EV.map(e=>[e.id,e]));
+const END=Math.max(...EV.map(e=>e.end));
+const AGENT=new Set(['root','sub1']);
+const TURNS=EV.filter(e=>e.kind==='user'&&e.mode!=='steering').map(u=>({n:u.turn,user:u,start:u.start,end:u.start}));
+for(const e of EV){const T=TURNS.find(t=>t.n===e.turn);if(T&&AGENT.has(e.lane))T.end=Math.max(T.end,e.end)}
+const turnOf=n=>TURNS.find(t=>t.n===n);
+const GAPS=(()=>{
+  const iv=EV.filter(e=>e.kind!=='life'||['starting','replace','restart','stop'].includes(e.state)).map(e=>[e.start,e.end]).sort((a,b)=>a[0]-b[0]);
+  const m=[];for(const [a,b] of iv){if(m.length&&a<=m[m.length-1][1])m[m.length-1][1]=Math.max(m[m.length-1][1],b);else m.push([a,b])}
+  const g=[];for(let i=1;i<m.length;i++){const s=m[i-1][1],e=m[i][0];if(e-s>=40*S){const l=EV.find(h=>h.kind==='life'&&h.start<e&&h.end>s&&(h.state==='sleeping'||h.state==='stopped'));g.push({kind:'gap',id:'g'+i,start:s,end:e,reason:l?l.state:'waiting',lane:'all'})}}
+  return g;
+})();
+GAPS.forEach(g=>byId[g.id]=g);
+const ACTIVE=END-GAPS.reduce((s,g)=>s+g.end-g.start,0);
+const LLMS=EV.filter(e=>e.kind==='llm');
+
+/* ---------------- formatting ---------------- */
+function fmtDur(ms){ms=Math.max(0,ms);if(ms<1000)return Math.round(ms)+'ms';const s=ms/S;if(s<10)return s.toFixed(1)+'s';if(s<60)return Math.round(s)+'s';const m=Math.floor(s/60);if(m<60)return m+'m '+p2(Math.floor(s%60))+'s';return Math.floor(m/60)+'h '+p2(m%60)+'m'}
+const fmtTok=n=>n<1000?String(n):n<100000?(n/1000).toFixed(1)+'k':n<1e6?Math.round(n/1000)+'k':(n/1e6).toFixed(2)+'M';
+const fmtCost=c=>c===0?'$0':c<.001?'<$0.001':c<.1?'$'+c.toFixed(3):'$'+c.toFixed(2);
+const base=a=>a.replace(/^.*\//,'');
+const STATE_WORD={stopped:'stopped',starting:'starting',sleeping:'sleeping',replace:'host replaced',restart:'harness restarted',stop:'stopped'};
+function callLabel(e){
+  if(e.kind==='code')return 'codemode';
+  if(e.kind==='spawn')return 'subagent · '+e.arg;
+  if(e.name==='read'||e.name==='edit')return e.name+' '+base(e.arg);
+  if(e.name==='bash')return e.arg;
+  if(e.kind==='inner')return e.name.replace(/^mcp__([a-z]+)__/,'$1.')+' '+e.arg;
+  return e.name+' · '+e.arg;
+}
+function title(e){
+  switch(e.kind){
+    case 'llm':return e.stop==='error'?(e.err.startsWith('agent')?'interrupted call':'provider error'):(e.head||(e.stop==='stop'?'response':'call'));
+    case 'user':return e.text;
+    case 'tool':case 'code':case 'spawn':case 'inner':return callLabel(e);
+    case 'luna':return 'luna · '+e.purpose;
+    case 'life':return STATE_WORD[e.state];
+    case 'compact':return 'context compacted';
+    case 'abort':return 'aborted';
+    case 'alert':return e.text;
+    case 'notify':return 'notification · '+e.text;
+    case 'done':return 'subagent completed';
+    case 'gap':return e.reason==='waiting'?'waiting':e.reason;
+  }
+  return e.kind;
+}
+const failed=e=>(e.kind==='llm'&&e.stop==='error')||e.ok===false||e.ok==='aborted';
+function facts(e){
+  const f=[],D=(k,v,c)=>{if(v!=null&&v!=='')f.push([k,v,c])};
+  const dur=fmtDur(e.end-e.start);
+  switch(e.kind){
+    case 'llm':
+      D('model',MODEL[e.model]);D('start',clock(e.start,1));
+      if(e.stop==='error'){D('failed after',dur,'bad');D('error',e.err,'bad');if(e.thinkEnd>e.ttft)D('thinking',fmtDur(e.thinkEnd-e.ttft))}
+      else{
+        D('first token',fmtDur(e.ttft-e.start));if(e.thinkEnd>e.ttft)D('thinking',fmtDur(e.thinkEnd-e.ttft));
+        D('streaming',fmtDur(e.end-e.thinkEnd));D('total',dur);
+        D('input',fmtTok(e.inp)+(e.cr?' · '+Math.round(e.cr/e.inp*100)+'% cache read':' · cache write'));D('output',fmtTok(e.out)+' · '+Math.round(e.out/((e.end-e.ttft)/S))+' tok/s');D('cost',fmtCost(e.cost));D('stop',e.stop);
+      }
+      if(e.attempt)D('attempt',e.attempt+(e.backoff?' · after '+fmtDur(e.backoff):''));
+      if(e.stop!=='error')D('context',Math.round(e.inp/e.limit*100)+'% of '+fmtTok(e.limit));
+      if(e.say)D('said',e.say);
+      if(e.text)D('response',e.text);
+      break;
+    case 'tool':case 'code':case 'spawn':case 'inner':
+      D('tool',e.name);D('args',e.arg);D('start',clock(e.start,1));D('duration',dur);
+      D('result',e.ok===true?e.out:e.ok==='aborted'?'aborted · '+e.out:e.out,e.ok===true?null:'bad');
+      if(e.kind==='code'){const k=EV.filter(i=>i.parent===e.id);D('inner calls',k.length+' · '+fmtDur(k.reduce((s,i)=>s+i.end-i.start,0))+' summed')}
+      if(e.kind==='spawn'){const d=EV.find(x=>x.kind==='done');D('child model',MODEL.terra);D('child run',fmtDur(d.end-e.start))}
+      break;
+    case 'user':D('sent',clock(e.start,1));if(e.mode!=='message')D(e.mode==='queued'?'delivered':'delivered',clock(e.delivered,1)+' · after '+fmtDur(e.delivered-e.start));D('text',e.text);break;
+    case 'luna':D('model',MODEL.luna);D('start',clock(e.start,1));D('duration',dur);D('tokens',fmtTok(e.inp)+' in · '+e.out+' out');D('cost',fmtCost(e.cost));D('text',e.text);break;
+    case 'life':D('from',clock(e.start));if(e.end>e.start)D('duration',dur);D('reason',e.text);break;
+    case 'compact':D('start',clock(e.start,1));D('duration',dur);D('context',fmtTok(e.before)+' → '+fmtTok(e.after));D('trigger','auto');break;
+    case 'abort':case 'alert':case 'done':D('at',clock(e.start,1));D('text',e.text);break;
+    case 'notify':D('at',clock(e.start,1));D('from','subagent');D('message',e.text);break;
+    case 'gap':{D('from',clock(e.start));D('to',clock(e.end));D('duration',dur);const l=EV.find(h=>h.kind==='life'&&h.state===e.reason&&h.start>=e.start&&h.start<e.end);if(l)D(e.reason,'from '+clock(l.start)+' · '+l.text);break}
+  }
+  return f;
+}
+const kvHTML=fs=>`<dl class="kv">${fs.map(([k,v,c])=>`<dt>${esc(k)}</dt><dd${c?` class="${c}"`:''}>${esc(v)}</dd>`).join('')}</dl>`;
+function inspectHTML(e,extra=''){if(!e)return '';const t=title(e);return `<div class="inspect"><div class="inspect-h"><strong>${esc(t)}</strong><button type="button" data-close aria-label="Close" title="Close">✕</button></div>${extra}${kvHTML(facts(e).filter(([,v])=>v!==t&&'subagent · '+v!==t&&'notification · '+v!==t))}</div>`}
+const TIP_SKIP=new Set(['response','said','text','args','message','reason','model','tool']);
+function tipHTML(e){
+  const fs=facts(e).filter(([k])=>!TIP_SKIP.has(k)).slice(0,6);
+  return `<b>${esc(title(e))}</b><table>${fs.map(([k,v,c])=>`<tr><td class="k">${esc(k)}</td><td${c?` class="${c}"`:''}>${esc(v)}</td></tr>`).join('')}</table>`;
+}
+
+const TILES={
+  sleeping:'<rect x="1" y="1" width="14" height="14" rx="2" fill="#777"/><path d="M10.15 3.35a4.9 4.9 0 1 0 1.65 7.2 3.35 3.35 0 0 1-1.65-7.2Z" fill="white"/>',
+  stopped:'<rect x="1" y="1" width="14" height="14" rx="2" fill="#777"/><path d="M5 8h6" stroke="white" stroke-width="1.5" stroke-linecap="round"/>',
+  starting:'<rect x="1" y="1" width="14" height="14" rx="2" fill="#966100"/><path d="M5 4h6v1L5 11v1h6v-1L5 5z" fill="none" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>',
+  restart:'<rect x="1" y="1" width="14" height="14" rx="2" fill="#966100"/><path d="M11.2 6.2A3.5 3.5 0 1 0 11.5 9" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round"/><path d="M11.6 3.6v2.8H8.8" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  idle:'<rect x="1" y="1" width="14" height="14" rx="2" fill="#777"/><path d="M5 8h6" stroke="white" stroke-width="1.5" stroke-linecap="round"/>'
+};
+TILES.replace=TILES.starting;TILES.stop=TILES.stopped;
+const tile=(state,cls='')=>`<svg class="tile ${cls}" viewBox="0 0 16 16" aria-hidden="true">${TILES[state]}</svg>`;
+// LLM segments horizontally or vertically, positions given by f(time) relative to the bar's origin.
+function segs(e,f,o,vertical){
+  const parts=e.stop==='error'?[['s-wait',e.start,e.ttft],['s-think',e.ttft,e.thinkEnd]]:[['s-wait',e.start,e.ttft],['s-think',e.ttft,e.thinkEnd],['s-stream',e.thinkEnd,e.end]];
+  return parts.filter(([,a,b])=>b>a).map(([c,a,b])=>{const p=f(a)-o,s=Math.max(1,f(b)-f(a));return `<span class="seg ${c}" style="${vertical?`top:${p}px;height:${s}px;left:0;right:0`:`left:${p}px;width:${s}px`}"></span>`}).join('');
+}
+const callCls=e=>'call'+(e.kind==='inner'?' inner':'')+(e.ok===false?' fail':e.ok==='aborted'?' aborted':'');
+
+function dWf(e,v0,v1){
+  const pct=t=>Math.min(100,Math.max(0,(t-v0)/(v1-v0)*100));
+  if(e.end===e.start)return e.kind==='life'?'':`<div class="wfbar inst${e.kind==='abort'||e.kind==='alert'?' bad':''}" style="left:${pct(e.start)}%"></div>`;
+  const a=pct(e.start),w=Math.max(.4,pct(e.end)-a);
+  if(e.kind==='llm')return `<div class="wfbar ev llm${e.stop==='error'?' err':''}" style="left:${a}%;width:${w}%;position:absolute">${(e.stop==='error'?[['s-wait',e.start,e.ttft],['s-think',e.ttft,e.thinkEnd]]:[['s-wait',e.start,e.ttft],['s-think',e.ttft,e.thinkEnd],['s-stream',e.thinkEnd,e.end]]).filter(([,p,q])=>q>p).map(([c,p,q])=>`<span class="seg ${c}" style="left:${(p-e.start)/(e.end-e.start)*100}%;width:${(q-p)/(e.end-e.start)*100}%"></span>`).join('')}</div>`;
+  const cls=e.kind==='luna'?'luna':e.kind==='compact'?'compact':e.kind==='life'?'life '+e.state:callCls(e);
+  return `<div class="wfbar ${cls}" style="left:${a}%;width:${w}%;padding:0"></div>`;
+}
+// The call cell's [name, argument]; facts that repeat it or the start column stay out of the tooltip and detail.
+function dCall(e){
+  if(e.kind==='llm')return [e.model,e.stop==='error'?e.err:(e.head||'')];
+  if(['tool','code','spawn','inner'].includes(e.kind))return [e.kind==='inner'?e.name.replace(/^mcp__([a-z]+)__/,'$1.'):e.name,e.name==='read'||e.name==='edit'?base(e.arg):e.kind==='code'||e.name==='orb_alert'?'':e.arg];
+  if(e.kind==='notify')return ['notification',e.text];
+  if(e.kind==='luna')return ['luna',e.purpose];
+  if(e.kind==='life')return [STATE_WORD[e.state],''];
+  if(e.kind==='user')return [e.mode,e.text];
+  if(e.kind==='alert')return [e.text,''];
+  return [title(e),''];
+}
+const D_AT=new Set(['start','sent','at','from']);
+function dFacts(e){const [name,arg]=dCall(e);return facts(e).filter(([k,v])=>!D_AT.has(k)&&v!==name&&v!==arg)}
+function dTip(e){const [name,arg]=dCall(e);return `<b class="full">${esc((name+' '+arg).trim())}</b><table>${dFacts(e).filter(([k])=>!TIP_SKIP.has(k)).map(([k,v,c])=>`<tr><td class="k">${esc(k)}</td><td${c?` class="${c}"`:''}>${esc(v)}</td></tr>`).join('')}</table>`}
+function dTurnFacts(T){
+  const all=EV.filter(e=>e.turn===T.n),L=all.filter(e=>e.kind==='llm'),u=T.user;
+  const f=[['duration',fmtDur(T.end-T.start)],['input',fmtTok(L.reduce((a,e)=>a+e.inp,0))],['output',fmtTok(L.reduce((a,e)=>a+e.out,0))],['cost',fmtCost(all.reduce((a,e)=>a+(e.cost||0),0))]];
+  if(u.mode!=='message')f.push(['delivered',clock(u.delivered,1)+' · after '+fmtDur(u.delivered-u.start)]);
+  return f;
+}
+const dDetail=fs=>fs.length?`<tr class="detail"><td colspan="3">${kvHTML(fs)}</td></tr>`:'';
+
+/* ======================================================================
+   Study: five ways to reach the waterfall from the orb page.
+   ?p=N renders the orb page mock for proposal N; no query renders the shell.
+   ====================================================================== */
+const ORB_ID='7f3a9c2e',ORB_PATH='/orbs/'+ORB_ID;
+const PROPS=[
+  {n:1,tab:'Route',title:'Header icon → /orbs/:id/timeline',why:'Own URL (reload, link, back) and full width for bars; opens where you were reading, but never beside the transcript.'},
+  {n:2,tab:'Flip',title:'/timeline flips the transcript',why:'No new chrome; the same scroller changes form and keeps your place both ways — invisible unless you know the command.'},
+  {n:3,tab:'Per turn',title:'Control on each paper band',why:'Answers “why was this turn slow” where it is asked; one turn at a time, so idle gaps and cross-turn patterns stay hidden.'},
+  {n:4,tab:'Rail drawer',title:'Click or drag the rail → drawer',why:'The rail already means activity: a click lands on that moment and hover links both views; hidden gesture, half-width transcript.'},
+  {n:5,tab:'Dock',title:'Pull-up dock, scroll-locked',why:'Devtools habit: both views live and scroll-locked at a dragged height; costs transcript height for as long as it is open.'},
+];
+const PROP=Number(new URLSearchParams(location.search).get('p'))||0;
+
+/* ---------------- shell ---------------- */
+function shell(){
+  document.body.className='shell';
+  document.body.innerHTML=`<header class="study"><h1>Timeline access</h1><nav aria-label="Proposal">${PROPS.map(p=>`<button type="button" data-p="${p.n}">${p.n} · ${p.tab}</button>`).join('')}</nav><span class="dev" role="group" aria-label="Width"><button type="button" data-dev="desktop">desktop</button><button type="button" data-dev="phone">390</button></span></header>
+<div class="why"><b id="why-t"></b><span id="why-l"></span></div>
+<form class="addr" id="addr"><input id="url" aria-label="Address" spellcheck="false" autocomplete="off"></form>
+<div class="stage" id="stage"><iframe id="fr" title="Orb page"></iframe></div>`;
+  const fr=$('#fr');let cur=0,dev='';
+  function set(p,d,force){
+    p=PROPS.some(x=>x.n===p)?p:1;d=d==='phone'?'phone':'desktop';
+    if(p!==cur||force){cur=p;fr.src=`${location.pathname}?p=${p}#${ORB_PATH}`}
+    dev=d;
+    $$('[data-p]').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.p===cur)));
+    $$('[data-dev]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.dev===dev)));
+    const P=PROPS[cur-1];$('#why-t').textContent=P.n+' · '+P.title;$('#why-l').textContent=P.why;
+    $('#stage').classList.toggle('phone',dev==='phone');
+    history.replaceState(null,'',`#${cur}${dev==='phone'?'/phone':''}`);
+  }
+  $('.study nav').addEventListener('click',ev=>{const b=ev.target.closest('[data-p]');if(b)set(+b.dataset.p,dev)});
+  $('.dev').addEventListener('click',ev=>{const b=ev.target.closest('[data-dev]');if(b)set(cur,b.dataset.dev)});
+  addEventListener('message',ev=>{if(ev.source===fr.contentWindow&&ev.data&&typeof ev.data.route==='string')$('#url').value=ev.data.route});
+  $('#addr').addEventListener('submit',ev=>{ev.preventDefault();fr.contentWindow.postMessage({nav:$('#url').value},'*')});
+  const fromHash=force=>{const [p,d]=location.hash.slice(1).split('/');set(+p||1,d||'desktop',force)};
+  addEventListener('hashchange',()=>fromHash(false));fromHash(true);
+}
+
+/* ---------------- icons, tiles ---------------- */
+const PATHS={fold:'m3 6 5 5 5-5',send:'M8 13V3M3 8l5-5 5 5',back:'M10 3 5 8l5 5',more:'M3 8h1m3 0h1m3 0h1',plus:'M8 3v10M3 8h10',upload:'M3 10v3h10v-3 M8 10V2 M5 5l3-3 3 3',start:'M5 3l7 5-7 5z',stop:'M4 4h8v8H4z',pen:'M3 10 10 3l3 3-7 7H3z M8 5l3 3',archive:'M3 6v7h10V6 M2 3h12v3H2z M6 9h4',bin:'M4 6h16M9 6V3h6v3M6 9v11h12V9M10 10v6M14 10v6',x:'m4 4 8 8m0-8-8 8',terminal:'M3 4l4 4-4 4 M9 12h4',
+  timeline:'M2 4h5 M5 8h6 M9 12h5'}; // proposed: three staggered waterfall bars
+const sprite=()=>`<svg style="display:none" aria-hidden="true" focusable="false">${Object.entries(PATHS).map(([n,d])=>{const solid=n==='start'||n==='stop';return `<symbol id="i-${n}" viewBox="${n==='bin'?'0 0 24 24':'0 0 16 16'}" fill="${solid?'currentColor':'none'}" stroke="${solid?'none':'currentColor'}" stroke-width="${n==='bin'?1.9:1.5}" stroke-linecap="square"><path d="${d}"/></symbol>`}).join('')}</svg>`;
+const icon=n=>`<svg class="ic" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+const FAV={
+  running:'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="white" stroke-width="1.5"><rect x="1" y="1" width="14" height="14" rx="2" fill="#1a7e37" stroke="none"/><circle cx="8" cy="8" r="3"/></svg>',
+  stopped:'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round"><rect x="1" y="1" width="14" height="14" rx="2" fill="#777777" stroke="none"/><path d="M5 8h6"/></svg>',
+  sleeping:'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="2" fill="#777"/><path d="M10.15 3.35a4.9 4.9 0 1 0 1.65 7.2 3.35 3.35 0 0 1-1.65-7.2Z" fill="white"/></svg>',
+  neutral:'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="1" width="14" height="14" rx="2" fill="#555555" stroke="none"/><path d="M4 5h8M6 5v3.5Q6 10 5 11M10 5v5q0 1 1 1"/></svg>'
+};
+const fav=(k,cls='glyph')=>`<img class="${cls}" src="data:image/svg+xml,${encodeURIComponent(FAV[k])}" width="16" height="16" alt="">`;
+
+/* ---------------- transcript model: what the orb page shows for the same session ---------------- */
+const TXB=[],TX_OF={},TX_IDS={};let TK=0;
+const bind=(k,ids)=>{(TX_IDS[k]||(TX_IDS[k]=[])).push(...ids);for(const id of ids)if(!(id in TX_OF))TX_OF[id]=k};
+const CAT={bash:['commands','command'],read:['read','read'],edit:['edit','edit']};
+{
+  const spawnE=EV.find(e=>e.kind==='spawn');
+  for(const T of TURNS){
+    const turn={n:T.n,blocks:[]};TXB.push(turn);
+    const bandKey='x'+(++TK);turn.blocks.push({type:'you',key:bandKey,ev:T.user});bind(bandKey,[T.user.id]);
+    let orb=null,pend=[],lastKey=bandKey;
+    const ensure=()=>orb||(orb={type:'orb',items:[]},turn.blocks.push(orb),orb);
+    const item=it=>{it.key='x'+(++TK);ensure().items.push(it);return it};
+    for(const e of EV.filter(e=>e.turn===T.n&&e!==T.user&&(e.lane!=='sub1'||e.kind==='done')&&e.kind!=='inner')){
+      switch(e.kind){
+        case 'user':{orb=null;const k='x'+(++TK);turn.blocks.push({type:'you',key:k,ev:e});bind(k,[...pend,e.id]);pend=[];lastKey=k;break}
+        case 'llm':{
+          if(e.stop==='error'){const it=item({t:'err',text:e.err});bind(it.key,[...pend,e.id]);pend=[];lastKey=it.key;break}
+          let used=false;
+          if(e.thinkEnd>e.ttft){const it=item({t:'rail',label:'thinking',headline:e.head});bind(it.key,[...pend,e.id]);pend=[];lastKey=it.key;used=true}
+          const prose=e.text||e.say;
+          if(prose){const it=item({t:'prose',text:prose});bind(it.key,used?[e.id]:[...pend,e.id]);if(!used)pend=[];used=true;lastKey=it.key}
+          if(!used)pend.push(e.id);
+          break}
+        case 'tool':case 'code':case 'spawn':{
+          const cat=CAT[e.name],items=ensure().items,prev=items[items.length-1];let it;
+          if(cat&&prev&&prev.t==='rail'&&prev.label===cat[0]&&prev.key===lastKey){prev.calls.push(e);it=prev}
+          else it=item({t:'rail',label:cat?cat[0]:e.kind==='code'?'codemode':e.name,kind:cat?cat[1]:e.kind,calls:[e]});
+          bind(it.key,[...pend,e.id]);pend=[];lastKey=it.key;
+          if(e.kind==='code'){const kids=EV.filter(i=>i.parent===e.id);bind(it.key,kids.filter(k=>k.name!=='chart').map(k=>k.id));const ch=kids.find(k=>k.name==='chart');if(ch){const c=item({t:'rail',label:'chart',headline:ch.arg,metric:'4 series'});bind(c.key,[ch.id]);lastKey=c.key}}
+          if(e.kind==='spawn')bind(it.key,EV.filter(x=>x.lane==='sub1'&&x.kind!=='done').map(x=>x.id));
+          break}
+        case 'notify':{const it=item({t:'rail',label:'subagent',headline:e.text,metric:'message'});bind(it.key,[e.id]);lastKey=it.key;break}
+        case 'done':{const it=item({t:'rail',label:'subagent',headline:spawnE.arg,metric:'completed'});bind(it.key,[e.id]);lastKey=it.key;break}
+        case 'alert':{orb=null;const k='x'+(++TK);turn.blocks.push({type:'alert',key:k,text:e.text});bind(k,[e.id]);lastKey=k;break}
+        case 'compact':{orb=null;const it=item({t:'rail',label:'context compacted',metric:fmtTok(e.before)+' → '+fmtTok(e.after)});bind(it.key,[...pend,e.id]);pend=[];orb=null;lastKey=it.key;break}
+                default:bind(lastKey,[e.id]);
+      }
+    }
+    if(pend.length)bind(lastKey,pend);
+  }
+  for(const g of GAPS){const e=EV.find(x=>x.start>=g.end&&TX_OF[x.id]);if(e)bind(TX_OF[e.id],[g.id])}
+}
+function railHTML(it){
+  let {label,headline,metric}=it,state='',body='';const hl=headline!=null?esc(headline):null;let hlHTML=hl;
+  if(it.calls){
+    const c=it.calls,one=c.length===1,bad=c.filter(x=>x.ok!==true).length,files=new Set(c.map(x=>x.arg)).size;
+    if(it.kind==='read'){hlHTML=files===1?esc(base(c[0].arg)):null;metric=files>1?files+' files':null}
+    else if(it.kind==='edit'){hlHTML=files===1?esc(base(c[0].arg)):null;let a=0,r=0;for(const x of c){const m=/\+(\d+) −(\d+)/.exec(x.out);if(m){a+=+m[1];r+=+m[2]}}metric=`<span class="tool-diff-added">+${a}</span> <span class="tool-diff-removed">−${r}</span>`}
+    else if(it.kind==='command'){hlHTML=one?esc(c[0].arg):null;const lead=one?'':c.length+' ran',trail=c.some(x=>x.ok==='aborted')?'<span class="tool-activity-failed">aborted</span>':bad?`<span class="tool-activity-failed">${bad} failed</span>`:'';metric=[lead,trail].filter(Boolean).join(' · ')}
+    else if(it.kind==='code'){hlHTML=`<code>${esc(c[0].arg)}</code>`;metric=null}
+    else if(it.kind==='spawn'){hlHTML=esc(c[0].arg);metric='started'}
+    else {hlHTML=null;metric=null}
+    if(bad)state=' activity-rail-row-failed';
+    body=`<div class="tool-activity-calls">${c.map(x=>`<div>${esc(x.name==='bash'?'$ '+x.arg:callLabel(x))}</div><div class="out${x.ok===true?'':' bad'}">${esc(x.out)}</div>`).join('')}</div>`;
+  }
+  return `<details class="activity-rail-row${state}" data-tx="${it.key}"><summary><span class="activity-rail-marker" aria-hidden="true"></span><span class="activity-rail-summary"><span class="activity-rail-label">${esc(label)}</span>${hlHTML!=null?` · <span class="activity-rail-headline">${hlHTML}</span>`:''}</span>${metric?`<span class="activity-rail-metric">${metric}</span>`:''}</summary>${body}</details>`;
+}
+function blockHTML(b,first){
+  if(b.type==='you')return `<article class="rec rec-you" data-tx="${b.key}"><div class="rec-bd"><div class="chat-markdown"><p>${esc(b.ev.text)}</p></div></div>${first&&PROP===3?`<button type="button" class="icon-button band-time" aria-label="Turn timeline" title="timeline" aria-pressed="false">${icon('timeline')}</button>`:''}</article>`;
+  if(b.type==='alert')return `<article class="rec rec-alert"><div class="rec-bd"><div class="alert-band" data-tx="${b.key}">${esc(b.text)}</div></div></article>`;
+  return `<article class="rec rec-orb"><div class="rec-bd">${b.items.map(it=>it.t==='rail'?railHTML(it):it.t==='prose'?`<div class="response-markdown" data-tx="${it.key}"><div class="chat-markdown"><p>${esc(it.text)}</p></div></div>`:`<p class="error-text" data-tx="${it.key}">${esc(it.text)}</p>`).join('')}</div></article>`;
+}
+const historyHTML=()=>TXB.map(t=>`<section class="turn" data-turn="${t.n}">${blockHTML(t.blocks[0],true)}<div class="turn-body">${t.blocks.slice(1).map(b=>blockHTML(b)).join('')}</div>${PROP===3?'<div class="turn-wf" hidden></div>':''}</section>`).join('');
+
+/* ---------------- tooltip ---------------- */
+let tipFor=null;
+function showTip(key,ev,html){const tip=$('#tip');if(!tip)return;if(tipFor!==key){tip.innerHTML=html;tipFor=key}tip.hidden=false;const r=tip.getBoundingClientRect();let x=ev.clientX+14,y=ev.clientY+14;if(x+r.width>innerWidth-8)x=ev.clientX-r.width-14;if(y+r.height>innerHeight-8)y=ev.clientY-r.height-14;tip.style.left=Math.max(8,x)+'px';tip.style.top=Math.max(8,y)+'px'}
+function hideTip(){const t=$('#tip');if(t)t.hidden=true;tipFor=null}
+
+/* ---------------- waterfall (variant D) as a mountable component ---------------- */
+function makeWF({turns=null,bands='full'}={}){
+  const st={show:{llm:true,tools:true,luna:true,host:true},errors:false,open:null};
+  const bar=document.createElement('div');bar.className='vbar';
+  const table=document.createElement('table');table.className='d-table';
+  const W={st,bar,table,scroll:null,onHover:null,onRender:null};
+  const vis=e=>{if(st.errors&&!failed(e)&&e.kind!=='abort'&&e.kind!=='alert')return false;if(e.kind==='llm'||e.kind==='compact')return st.show.llm;if(['tool','code','spawn','inner'].includes(e.kind))return st.show.tools;if(e.kind==='luna')return st.show.luna;if(e.kind==='life')return st.show.host;return !st.errors||e.kind==='abort'||e.kind==='alert'};
+  function band(T){
+    const det=st.open===T.user.id?dDetail(dTurnFacts(T)):'';
+    if(thin())return `<tr class="band thin" data-did="${T.user.id}" data-turn="${T.n}"><td class="n">${clock(T.start)}</td><td colspan="2"></td></tr>`+det;
+    return `<tr class="band" data-did="${T.user.id}" data-turn="${T.n}"><td class="n">${clock(T.start)}</td><td class="txt" colspan="2">${T.user.mode==='queued'?'<span class="rec-status">queued</span>':''}${esc(T.user.text)}</td></tr>`+det;
+  }
+  // Beside the transcript (thin bands), rows do not repeat text the transcript already shows.
+  const thin=()=>bands==='thin'||(bands==='auto'&&innerWidth>600);
+  function row(e,v0,v1){
+    const sel=st.open===e.id?' sel':'';
+    if(e.kind==='alert')return `<tr class="alertrow${sel}" data-did="${e.id}"><td>${clock(e.start)}</td><td colspan="2">${thin()?'':esc(e.text)}</td></tr>`+(sel?dDetail(dFacts(e)):'');
+    const [name,arg]=dCall(e),bad=failed(e)||e.kind==='abort',side=e.kind==='luna'||e.kind==='life';
+    const pre=(e.lane==='sub1'?'<span class="d-nest"></span>':'')+(e.kind==='inner'?'<span class="d-ind">└</span>':'')+(e.kind==='life'?tile(e.state,'s12')+' ':'');
+    const nm=e.kind==='user'?`<span class="rec-status">${esc(name)}</span>${thin()?'':esc(arg)}`:`<span${bad?' class="bad"':''}>${esc(name)}</span> <span class="a">${esc(arg)}</span>`;
+    return `<tr class="ev-row${side?' side':''}${sel}" data-did="${e.id}"><td>${clock(e.start)}</td><td class="name">${pre}${nm}</td><td class="wf"><div class="wfi">${dWf(e,v0,v1)}</div></td></tr>`+(sel?dDetail(dFacts(e)):'');
+  }
+  W.render=()=>{
+    const chip=(k)=>`<button type="button" data-show="${k}" aria-pressed="${st.show[k]}">${k}</button>`;
+    bar.innerHTML=`${chip('llm')}${chip('tools')}${chip('luna')}${chip('host')}<span class="sep"></span><button type="button" data-errors aria-pressed="${st.errors}">errors</button>`;
+    const rows=[];
+    for(const T of TURNS.filter(T=>!turns||turns.includes(T.n))){
+      const next=TURNS.find(x=>x.n===T.n+1),hi=next?next.start:Infinity;
+      const gaps=GAPS.filter(g=>g.start>=T.start&&g.start<hi);let gi=0;
+      const flush=t=>{while(gi<gaps.length&&gaps[gi].start<=t){const g=gaps[gi++];rows.push(`<tr class="gaprow" data-did="${g.id}"><td colspan="3">${g.reason!=='waiting'?tile(g.reason,'s12')+' ':''}${fmtDur(g.end-g.start)}</td></tr>`)}};
+      const evs=EV.filter(e=>e.turn===T.n&&e!==T.user&&vis(e));
+      const v0=T.start,v1=Math.max(T.end,...evs.filter(e=>e.kind==='luna').map(e=>e.end));
+      if(bands!=='none')rows.push(band(T));
+      for(const e of evs){flush(e.start);if(e.kind==='life'&&(e.state==='sleeping'||e.state==='stopped'))continue;rows.push(row(e,v0,v1))}
+      flush(Infinity);
+    }
+    table.innerHTML=`<colgroup><col class="c-start"><col class="c-call"><col></colgroup><thead><tr><th>start</th><th>call</th><th></th></tr></thead><tbody>${rows.join('')}</tbody>`;
+    W.hot&&W.setHot(W.hot);W.pin&&W.setPin(W.pin);
+    W.onRender&&W.onRender();
+  };
+  W.rows=()=>[...table.querySelectorAll('tbody tr[data-did]')];
+  W.rowFor=id=>table.querySelector(`tbody tr[data-did="${id}"]`);
+  W.rowNear=id=>{const r=W.rowFor(id);if(r)return r;const t=byId[id]?.start??0;return W.rows().find(r=>(byId[r.dataset.did]?.start??0)>=t)||W.rows().pop()};
+  W.thH=()=>table.tHead?table.tHead.offsetHeight:0;
+  W.topRow=()=>{const top=W.scroll.getBoundingClientRect().top+W.thH();return W.rows().find(r=>r.getBoundingClientRect().bottom>top+1)};
+  W.scrollToRow=(r,y)=>{const h=W.scroll;h.scrollTop+=r.getBoundingClientRect().top-h.getBoundingClientRect().top-(y??W.thH())};
+  W.setPin=id=>{W.pin=id;table.querySelectorAll('tr.pin').forEach(r=>r.classList.remove('pin'));if(id)W.rowFor(id)?.classList.add('pin')};
+  W.setHot=ids=>{W.hot=ids;table.querySelectorAll('tr.hot').forEach(r=>r.classList.remove('hot'));for(const id of ids||[])W.rowFor(id)?.classList.add('hot')};
+  bar.addEventListener('click',ev=>{const b=ev.target.closest('button');if(!b)return;if(b.dataset.show)st.show[b.dataset.show]=!st.show[b.dataset.show];else if(b.hasAttribute('data-errors'))st.errors=!st.errors;W.render()});
+  table.addEventListener('click',ev=>{const tr=ev.target.closest('tr[data-did]');if(!tr||tr.classList.contains('gaprow'))return;st.open=st.open===tr.dataset.did?null:tr.dataset.did;W.render()});
+  table.addEventListener('pointermove',ev=>{
+    const tr=ev.target.closest('tr[data-did]'),id=tr?.dataset.did;
+    W.onHover&&W.onHover(id||null);
+    if(ev.pointerType!=='mouse')return;
+    if(!tr||id===st.open){hideTip();return}
+    if(tr.classList.contains('gaprow'))showTip(id,ev,tipHTML(byId[id]));
+    else if(tr.dataset.turn)showTip(id,ev,`<b>turn ${tr.dataset.turn}</b><table>${dTurnFacts(turnOf(+tr.dataset.turn)).map(([k,v])=>`<tr><td class="k">${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}</table>`);
+    else showTip(id,ev,dTip(byId[id]));
+  });
+  table.addEventListener('pointerleave',()=>{hideTip();W.onHover&&W.onHover(null)});
+  return W;
+}
+function mountWF(W,host){const s=document.createElement('div');s.className='wf-scroll';s.append(W.table);host.append(W.bar,s);W.scroll=s;s.addEventListener('scroll',hideTip,{passive:true});return s}
+
+/* ---------------- orb page mock ---------------- */
+const IX=[['pi-orb',[['heatmap zero rows','running','1m',true],['release notes for 0.9','stopped','2h'],['mcp oauth refresh','sleeping','5h'],['webkit drawer hit test','stopped','1d'],['usage page ranking','stopped','3d']]],['infra',[['gcp quota alerts','stopped','4d'],['pg vacuum tuning','sleeping','6d']]]];
+const indexHTML=()=>`<nav class="orb-index" aria-label="All project orbs"><a class="ix-brand up" href="#/">${fav('neutral','')}pi-orb</a>${IX.map(([p,rows])=>`<section class="ix-project" aria-label="${p}"><div class="project-head"><div class="project-head-line project-head-name"><h2 class="project-name">${p}</h2><a class="project-new-orb-icon" href="#/" aria-label="New orb" title="new orb">${icon('plus')}</a></div></div>${rows.map(([n,s,age,cur])=>`<a class="ix-row${cur?' ix-row-current':''}" href="#${cur?ORB_PATH:'/'}" title="${n}"${cur?' aria-current="page"':''}>${fav(s)}<span class="trunc">${n}</span><span class="ix-age">${age}</span></a>`).join('')}</section>`).join('')}</nav>`;
+const headerHTML=()=>`<header class="orb-header" id="hdr" data-phone-actions="false">
+<a class="orb-phone-home" id="home" href="#/" aria-label="Dashboard" title="dashboard">${icon('back')}</a>
+<div class="orb-identity"><span class="orb-name">heatmap zero rows</span><button type="button" class="icon-button" aria-label="Rename orb" title="rename">${icon('pen')}</button></div>
+<span class="orb-life">${fav('running')}<span class="orb-life-word">running</span></span>
+<button type="button" class="icon-button orb-phone-menu" id="more" aria-label="Orb actions" aria-expanded="false">${icon('more')}</button>
+<div class="orb-settings"><button type="button" title="Change model" aria-label="Change model">GPT-6.1 Sol</button><button type="button" title="Change thinking" aria-label="Change thinking">medium</button></div>
+<div class="orb-header-actions">
+<button type="button" class="icon-button" aria-label="Open terminal" title="terminal">${icon('terminal')}</button>
+<button type="button" class="icon-button" aria-label="Upload files" title="upload">${icon('upload')}</button>
+${PROP===1?`<button type="button" class="icon-button" id="tl-btn" aria-label="Timeline" title="timeline" aria-pressed="false">${icon('timeline')}</button>`:''}
+<button type="button" class="icon-button" aria-label="Stop orb" title="stop">${icon('stop')}</button>
+<button type="button" class="icon-button" aria-label="Archive orb" title="archive">${icon('archive')}</button>
+<button type="button" class="icon-button danger" aria-label="Delete orb" title="delete">${icon('bin')}</button>
+</div></header>`;
+const composerHTML=()=>`<div class="composer" id="composer" data-expanded="false">
+<div class="composer-phone-pad"><button type="button" class="composer-open" id="pad" aria-label="Write message" aria-expanded="false"><span class="composer-prefix">&gt;</span><span class="composer-draft-preview"></span></button></div>
+<div class="composer-line"><span class="composer-prefix" id="prefix">&gt;</span><div class="text-field-frame composer-editor"><textarea class="composer-input" id="input" rows="4" aria-label="Message the orb"></textarea></div>
+<div class="composer-phone-rail"><button type="button" class="icon-button" id="fold" aria-label="Fold editor" title="fold">${icon('fold')}</button><button type="button" class="icon-button composer-send" aria-label="Send message" title="send">${icon('send')}</button></div></div></div>`;
+
+let built=false;
+function frame(){
+  document.body.className='frame';
+  document.body.innerHTML=sprite()+`<div class="app"><div class="orb-page">${indexHTML()}<main class="orb-main" id="main"></main></div></div><div class="tip" id="tip" hidden></div>`;
+  addEventListener('hashchange',route);
+  addEventListener('message',ev=>{const d=ev.data;if(d&&typeof d.nav==='string'){const p=d.nav.trim().replace(/^#/,'');location.hash=p.startsWith('/')?p:'/'+p}});
+  // The dashboard and other orbs are outside the mock.
+  document.addEventListener('click',ev=>{if(ev.target.closest('a[href="#/"]'))ev.preventDefault()});
+  if(!location.hash)history.replaceState(null,'','#'+ORB_PATH);
+  route();
+  let rz;addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(()=>REFLOW.forEach(f=>f()),100)});
+  document.fonts?.ready.then(()=>REFLOW.forEach(f=>f()));
+}
+const REFLOW=[];
+function route(){
+  const path=location.hash.slice(1)||'/';
+  if(parent!==window)parent.postMessage({route:path},'*');
+  hideTip();
+  const m=/^\/orbs\/([^/]+)(\/[^/]*)?\/?$/.exec(path);
+  if(path==='/'){built=false;$('#main').innerHTML=`<div class="page simple-page"><a href="#${ORB_PATH}">heatmap zero rows</a></div>`;return}
+  if(!m){notFound('Page');return}
+  if(m[1]!==ORB_ID){notFound('Orb');return}
+  const sub=m[2]||'';
+  if(sub===''){ensureOrb();if(PROP===1)P1.show(false);return}
+  if(sub==='/timeline'&&PROP===1){ensureOrb();P1.show(true);return}
+  notFound('Page');
+}
+function notFound(subject){built=false;$('#main').innerHTML=`<div class="page simple-page"><h1>${subject} doesn't exist</h1><a href="#/">Back to dashboard</a></div>`}
+function ensureOrb(){
+  if(built)return;built=true;
+  $('#main').innerHTML=`<div class="orb-header-stack">${headerHTML()}<div class="orb-header-scroll" id="hscroll"></div></div><div class="orb-work" id="work"><div class="orb-body" id="body"><div class="orb-transcript-scroll" id="tx"><div class="orb-transcript-content" id="txc"><div class="history" id="hist">${historyHTML()}</div></div></div>${composerHTML()}</div></div>`;
+  $('#more').addEventListener('click',()=>{const h=$('#hdr'),o=h.dataset.phoneActions!=='true';h.dataset.phoneActions=String(o);$('#more').setAttribute('aria-expanded',String(o))});
+  $('#tx').addEventListener('scroll',hideTip,{passive:true});
+  wireComposer();
+  ({1:P1,2:P2,3:P3,4:P4,5:P5})[PROP].init();
+  $('#tx').scrollTop=$('#tx').scrollHeight;
+}
+const closePhoneActions=()=>{const h=$('#hdr');if(h){h.dataset.phoneActions='false';$('#more').setAttribute('aria-expanded','false')}};
+
+/* transcript geometry helpers */
+function topTx(){const sc=$('#tx'),top=sc.getBoundingClientRect().top;for(const el of $$('#hist [data-tx]')){if(!el.offsetParent)continue;const r=el.getBoundingClientRect();if(r.bottom>top+1)return {el,off:r.top-top}}return null}
+const txFor=id=>{const k=TX_OF[id];return k?$(`#hist [data-tx="${k}"]`):null};
+const idsOf=el=>TX_IDS[el.dataset.tx]||[];
+function scrollTxTo(el,y=0){const sc=$('#tx');sc.scrollTop+=el.getBoundingClientRect().top-sc.getBoundingClientRect().top-y}
+function nearestInView(el){const sc=$('#tx'),a=sc.getBoundingClientRect(),r=el.getBoundingClientRect();if(r.top<a.top+8)sc.scrollTop+=r.top-a.top-24;else if(r.bottom>a.bottom-8)sc.scrollTop+=Math.min(r.bottom-a.bottom+24,r.top-a.top-24)}
+
+/* composer with command mode (docs/web-ui.md, command mode) */
+const C={mode:'message',sel:0};
+function commandOptions(text){const o=['model','thinking','compact'];if(PROP===2)o.push(P2.on?'transcript':'timeline');return o.filter(n=>n.startsWith(text.trim().toLowerCase()))}
+function wireComposer(){
+  const input=$('#input'),line=$('.composer-line');
+  const paint=()=>{
+    $('#prefix').textContent=C.mode==='command'?'/':'>';$('#pad .composer-prefix').textContent=C.mode==='command'?'/':'>';
+    $('#pad .composer-draft-preview').textContent=input.value;
+    line.querySelector('.command-picker')?.remove();
+    if(C.mode!=='command')return;
+    const opts=commandOptions(input.value);C.sel=Math.min(C.sel,Math.max(0,opts.length-1));
+    const p=document.createElement('div');p.className='command-picker';p.setAttribute('role','listbox');p.setAttribute('aria-label','Commands');
+    p.innerHTML=opts.length?opts.map((o,i)=>`<button type="button" role="option" aria-selected="${i===C.sel}" class="${i===C.sel?'selected':''}" data-cmd="${o}"><span>${o}</span><span aria-hidden="true">${o==='model'||o==='thinking'?'→':''}</span></button>`).join(''):'<div class="command-empty">No matching command or value.</div>';
+    p.addEventListener('mousedown',ev=>ev.preventDefault());
+    p.addEventListener('click',ev=>{const b=ev.target.closest('[data-cmd]');if(b)choose(b.dataset.cmd)});
+    line.prepend(p);
+  };
+  const reset=()=>{C.mode='message';C.sel=0;input.value='';paint()};
+  const choose=cmd=>{if(cmd==='model'||cmd==='thinking'){input.value=cmd+' ';paint();return}reset();if(cmd==='timeline'||cmd==='transcript'){fold();P2.flip(cmd==='timeline')}};
+  const fold=()=>{$('#composer').dataset.expanded='false';$('#pad').setAttribute('aria-expanded','false');input.blur()};
+  C.paint=paint;
+  input.addEventListener('keydown',ev=>{
+    if(C.mode==='command'){
+      const opts=commandOptions(input.value);
+      if(ev.key==='ArrowDown'||ev.key==='ArrowUp'){ev.preventDefault();C.sel=opts.length?(C.sel+(ev.key==='ArrowDown'?1:-1)+opts.length)%opts.length:0;paint();return}
+      if(ev.key==='Enter'||(ev.key==='Tab'&&!ev.shiftKey)){ev.preventDefault();if(opts[C.sel])choose(opts[C.sel]);return}
+      if(ev.key==='Escape'||(ev.key==='Backspace'&&input.value===''&&input.selectionStart===0)){ev.preventDefault();reset();return}
+    }
+    if(ev.key==='/'&&C.mode==='message'&&input.selectionStart===0&&input.selectionEnd===0&&!ev.metaKey&&!ev.ctrlKey&&!ev.altKey){ev.preventDefault();C.mode='command';C.sel=0;paint()}
+  });
+  input.addEventListener('input',()=>{if(C.mode==='message'&&input.value.startsWith('/')){C.mode='command';input.value=input.value.slice(1)}C.sel=0;paint()});
+  $('#pad').addEventListener('click',()=>{$('#composer').dataset.expanded='true';$('#pad').setAttribute('aria-expanded','true');input.focus()});
+  $('#fold').addEventListener('click',fold);
+}
+
+/* ======================================================================
+   1 · Route — a header icon opens /orbs/:id/timeline in place of the
+   transcript and composer. The icon stays pressed there; it, browser back
+   and the phone back chevron return to the transcript where it was.
+   ====================================================================== */
+const P1={on:false,saved:null,fromTx:false,W:null,
+  init(){
+    $('#tl-btn').addEventListener('click',()=>{if(P1.on)P1.back();else{P1.fromTx=true;P1.anchor=topTx();closePhoneActions();location.hash=ORB_PATH+'/timeline'}});
+    $('#home').addEventListener('click',ev=>{if(!P1.on)return;ev.preventDefault();ev.stopPropagation();P1.back()},true);
+    const v=document.createElement('div');v.className='route-tl';v.id='route';v.hidden=true;$('#work').append(v);
+    P1.W=makeWF({bands:'full'});mountWF(P1.W,v);
+  },
+  back(){if(P1.fromTx)history.back();else location.hash=ORB_PATH},
+  show(on){
+    if(on===P1.on)return;P1.on=on;
+    const W=P1.W,btn=$('#tl-btn'),home=$('#home');
+    if(on){
+      P1.saved=$('#tx').scrollTop;$('#body').hidden=true;$('#route').hidden=false;W.render();
+      const id=P1.anchor?idsOf(P1.anchor.el)[0]:null;
+      if(id)W.scrollToRow(W.rowNear(id));else W.scroll.scrollTop=W.scroll.scrollHeight;
+      btn.setAttribute('aria-pressed','true');home.setAttribute('aria-label','Transcript');home.title='transcript';home.href='#'+ORB_PATH;
+    }else{
+      $('#route').hidden=true;$('#body').hidden=false;if(P1.saved!=null)$('#tx').scrollTop=P1.saved;
+      btn.setAttribute('aria-pressed','false');home.setAttribute('aria-label','Dashboard');home.title='dashboard';home.href='#/';P1.fromTx=false;P1.anchor=null;
+    }
+  }};
+
+/* ======================================================================
+   2 · Flip — `/timeline` in command mode turns the transcript scroller into
+   the waterfall; `/transcript` or Escape turns it back. The row (or message)
+   at the top keeps its height on screen in both directions.
+   ====================================================================== */
+const P2={on:false,W:null,
+  init(){
+    P2.W=makeWF({bands:'full'});P2.W.scroll=$('#tx');$('#tx').append(P2.W.table);
+    P2.W.bar.hidden=true;$('#hscroll').append(P2.W.bar);
+    document.addEventListener('keydown',ev=>{if(ev.key==='Escape'&&P2.on&&!ev.target.closest('textarea'))P2.flip(false)});
+  },
+  flip(on){
+    if(on===P2.on)return;const W=P2.W,sc=$('#tx');
+    if(on){
+      const a=topTx();W.render();P2.on=true;sc.classList.add('flipped');W.bar.hidden=false;
+      const id=a&&idsOf(a.el)[0];const r=id&&W.rowNear(id);
+      if(r)W.scrollToRow(r,Math.max(W.thH(),a.off));
+    }else{
+      const r=W.topRow(),off=r?r.getBoundingClientRect().top-sc.getBoundingClientRect().top:0;
+      P2.on=false;sc.classList.remove('flipped');W.bar.hidden=true;hideTip();
+      const el=r&&txFor(r.dataset.did);if(el)scrollTxTo(el,Math.max(0,off-W.thH()));
+    }
+    C.paint&&C.paint();
+  }};
+
+/* ======================================================================
+   3 · Per turn — a waterfall control on each paper band swaps that turn's
+   activity for its own waterfall (same rows, turn time scale); the band
+   stays put on screen. Several turns can be open at once.
+   ====================================================================== */
+const P3={
+  init(){
+    $('#hist').addEventListener('click',ev=>{
+      const b=ev.target.closest('.band-time');if(!b)return;
+      const sec=b.closest('.turn'),n=+sec.dataset.turn,band=b.closest('.rec-you'),body=sec.querySelector('.turn-body'),box=sec.querySelector('.turn-wf');
+      const y=band.getBoundingClientRect().top,open=b.getAttribute('aria-pressed')!=='true';
+      if(open){if(!box.W){box.W=makeWF({turns:[n],bands:'none'});mountWF(box.W,box);box.W.scroll=$('#tx')}box.W.render();body.hidden=true;box.hidden=false}
+      else{box.hidden=true;body.hidden=false;hideTip()}
+      b.setAttribute('aria-pressed',String(open));
+      $('#tx').scrollTop+=band.getBoundingClientRect().top-y;
+    });
+  }};
+
+/* ======================================================================
+   4 · Rail drawer — the activity rail is the handle. Click (or drag) a
+   point on it: a drawer opens with the waterfall at that moment; hovering
+   rows lights the transcript and vice versa. Phone: long-press a rail row.
+   ====================================================================== */
+const P4={W:null,open:false,drag:null,
+  init(){
+    const d=document.createElement('aside');d.className='drawer';d.id='drawer';d.hidden=true;d.setAttribute('aria-label','Timeline');
+    d.innerHTML='<div class="drawer-head"></div>';$('#work').append(d);
+    const W=P4.W=makeWF({bands:'auto'});
+    d.querySelector('.drawer-head').append(W.bar);
+    d.querySelector('.drawer-head').insertAdjacentHTML('beforeend',`<button type="button" class="icon-button" id="drawer-close" aria-label="Close timeline" title="close">${icon('x')}</button>`);
+    const s=document.createElement('div');s.className='wf-scroll';s.append(W.table);d.append(s);W.scroll=s;s.addEventListener('scroll',hideTip,{passive:true});
+    $('#drawer-close').addEventListener('click',()=>P4.close());
+    W.onHover=id=>{$$('#hist .tx-hot').forEach(e=>e.classList.remove('tx-hot'));if(!id)return;const el=txFor(id);if(el){el.classList.add('tx-hot');nearestInView(el)}};
+    $('#hist').addEventListener('pointerover',ev=>{if(!P4.open||ev.pointerType!=='mouse')return;const el=ev.target.closest('[data-tx]');W.setHot(el?idsOf(el):null)});
+    $('#hist').addEventListener('pointerleave',()=>{if(P4.open)W.setHot(null)});
+    $('#hist').addEventListener('toggle',()=>P4.layout(),true);
+    document.addEventListener('keydown',ev=>{if(ev.key==='Escape'&&P4.open)P4.close()});
+    // rail hit strips
+    const txc=$('#txc');
+    txc.addEventListener('pointerdown',ev=>{const h=ev.target.closest('.rail-hit');if(!h)return;ev.preventDefault();h.setPointerCapture(ev.pointerId);P4.drag={id:ev.pointerId};P4.at(ev.clientY)});
+    txc.addEventListener('pointermove',ev=>{if(P4.drag&&P4.drag.id===ev.pointerId)P4.at(ev.clientY)});
+    const end=ev=>{if(P4.drag&&P4.drag.id===ev.pointerId)P4.drag=null};
+    txc.addEventListener('pointerup',end);txc.addEventListener('pointercancel',end);
+    // phone: long-press a rail row
+    let lp=null,swallow=false;
+    $('#hist').addEventListener('pointerdown',ev=>{const s=ev.target.closest('.activity-rail-row>summary');if(!s||ev.button>0)return;const x=ev.clientX,y=ev.clientY;clearTimeout(lp?.t);lp={x,y,t:setTimeout(()=>{lp=null;swallow=true;const ids=idsOf(s.parentElement);P4.openAt(byId[ids[0]].start,ids)},500)}});
+    const cancel=()=>{if(lp){clearTimeout(lp.t);lp=null}};
+    $('#hist').addEventListener('pointermove',ev=>{if(lp&&Math.hypot(ev.clientX-lp.x,ev.clientY-lp.y)>8)cancel()});
+    $('#hist').addEventListener('pointerup',cancel);$('#hist').addEventListener('pointercancel',cancel);$('#tx').addEventListener('scroll',cancel,{passive:true});
+    $('#hist').addEventListener('click',ev=>{if(swallow){swallow=false;ev.preventDefault();ev.stopPropagation()}},true);
+    $('#hist').addEventListener('contextmenu',ev=>{if(ev.target.closest('.activity-rail-row>summary'))ev.preventDefault()});
+    REFLOW.push(()=>{if(P4.open)P4.W.render();P4.layout()});
+    P4.layout();
+  },
+  // One strip per visible stretch of rail between two chevrons; each remembers the rows it joins.
+  layout(){
+    const txc=$('#txc');if(!txc)return;txc.querySelectorAll('.rail-hit').forEach(h=>h.remove());
+    const base=txc.getBoundingClientRect();const out=[];
+    for(const bd of $$('#hist .rec-orb>.rec-bd')){
+      if(!bd.offsetParent)continue;
+      const rows=[...bd.children].filter(c=>c.matches('.activity-rail-row'));
+      for(let i=0;i<rows.length;i++){
+        const r=rows[i],m=r.querySelector('.activity-rail-marker').getBoundingClientRect(),cx=m.left+m.width/2-base.left,cy=m.top+m.height/2-base.top;
+        const nx=r.nextElementSibling&&r.nextElementSibling.matches('.activity-rail-row')?r.nextElementSibling:null;
+        let y1;if(nx){const n=nx.querySelector('.activity-rail-marker').getBoundingClientRect();y1=n.top+n.height/2-base.top-7}else if(r.open)y1=r.getBoundingClientRect().bottom-base.top;else continue;
+        const y0=cy+7;if(y1-y0<3)continue;
+        out.push(`<div class="rail-hit" data-a="${r.dataset.tx}" data-b="${(nx||r).dataset.tx}" style="left:${cx-5.5}px;top:${y0}px;height:${y1-y0}px"></div>`);
+      }
+    }
+    txc.insertAdjacentHTML('beforeend',out.join(''));
+  },
+  // A y position on the rail → a moment: interpolate from the end of the row above to the start of the row below.
+  at(clientY){
+    const hits=$$('#txc .rail-hit');if(!hits.length)return;
+    let best=null,bd=Infinity;for(const h of hits){const r=h.getBoundingClientRect(),d=clientY<r.top?r.top-clientY:clientY>r.bottom?clientY-r.bottom:0;if(d<bd){bd=d;best=h}}
+    const r=best.getBoundingClientRect(),f=Math.min(1,Math.max(0,(clientY-r.top)/r.height));
+    const own=k=>{const l=TX_IDS[k].map(i=>byId[i]).filter(e=>e.lane!=='sub1'&&e.kind!=='luna'&&e.kind!=='life'&&e.kind!=='gap');return l.length?l:TX_IDS[k].map(i=>byId[i])};const A=own(best.dataset.a),B=own(best.dataset.b);
+    let ta=best.dataset.a===best.dataset.b?Math.min(...A.map(e=>e.start)):Math.max(...A.map(e=>e.end)),tb=best.dataset.a===best.dataset.b?Math.max(...A.map(e=>e.end)):Math.min(...B.map(e=>e.start));
+    tb=Math.max(ta,tb);hits.forEach(h=>h.classList.toggle('on',h===best));
+    const el=$(`#hist [data-tx="${best.dataset.a}"]`),sc=$('#tx').getBoundingClientRect();
+    P4.openAt(ta+(tb-ta)*f,null,{el,off:el.getBoundingClientRect().top-sc.top});
+  },
+  openAt(t,ids,anchor){
+    const W=P4.W;
+    if(!P4.open){const a=anchor||topTx();P4.open=true;$('#drawer').hidden=false;W.render();if(a)scrollTxTo(a.el,a.off);P4.layout()}
+    const rows=W.rows().filter(r=>!r.classList.contains('band'));let pick=rows[0];for(const r of rows){if((byId[r.dataset.did]?.start??0)<=t)pick=r;else break}
+    if(ids){const r=ids.map(i=>W.rowFor(i)).find(Boolean);if(r)pick=r}
+    if(pick){W.setPin(pick.dataset.did);W.scrollToRow(pick,W.scroll.clientHeight/3)}
+  },
+  close(){const a=topTx();P4.open=false;$('#drawer').hidden=true;P4.W.setHot(null);P4.W.setPin(null);$$('#txc .rail-hit.on').forEach(h=>h.classList.remove('on'));$$('#hist .tx-hot').forEach(e=>e.classList.remove('tx-hot'));hideTip();if(a)scrollTxTo(a.el,a.off);P4.layout()}
+};
+
+/* ======================================================================
+   5 · Dock — a grip on the composer's top rule pulls a waterfall up from
+   under the transcript. Drag to size, click to toggle. Both panes scroll
+   together: whichever one you touch leads; the rows on screen in the
+   transcript carry a black edge in the dock.
+   ====================================================================== */
+const P5={W:null,open:false,h:0,lead:'tx',busy:false,
+  init(){
+    const g=document.createElement('div');g.className='dock-grip';g.innerHTML='<button type="button" id="grip" aria-label="Timeline" title="timeline" aria-expanded="false"></button>';
+    const d=document.createElement('div');d.className='dock';d.id='dock';d.hidden=true;d.setAttribute('aria-label','Timeline');
+    $('#body').insertBefore(g,$('#composer'));$('#body').insertBefore(d,$('#composer'));
+    const W=P5.W=makeWF({bands:'thin'});mountWF(W,d);
+    W.onRender=()=>{P5.mark();if(P5.lead==='tx')P5.follow()};
+    const grip=$('#grip');let drag=null;
+    grip.addEventListener('pointerdown',ev=>{ev.preventDefault();grip.setPointerCapture(ev.pointerId);drag={y:ev.clientY,h:P5.open?P5.h:0,moved:false}});
+    grip.addEventListener('pointermove',ev=>{if(!drag)return;const dy=ev.clientY-drag.y;if(Math.abs(dy)>3)drag.moved=true;if(!drag.moved)return;const h=drag.h-dy;if(h>24){if(!P5.open)P5.show(true,h);else P5.size(h)}else if(P5.open)P5.size(24)});
+    grip.addEventListener('pointerup',()=>{if(!drag)return;const d=drag;drag=null;if(!d.moved)P5.show(!P5.open);else if(P5.open&&P5.h<64)P5.show(false)});
+    grip.addEventListener('pointercancel',()=>{drag=null});
+    grip.addEventListener('keydown',ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();P5.show(!P5.open)}else if(P5.open&&(ev.key==='ArrowUp'||ev.key==='ArrowDown')){ev.preventDefault();P5.size(P5.h+(ev.key==='ArrowUp'?24:-24))}});
+    const claim=who=>()=>{P5.lead=who};
+    for(const t of ['wheel','touchstart','pointerdown','keydown']){$('#tx').addEventListener(t,claim('tx'),{passive:true});W.scroll.addEventListener(t,claim('dock'),{passive:true})}
+    let raf=0;const on=src=>()=>{if(!P5.open||P5.busy)return;cancelAnimationFrame(raf);raf=requestAnimationFrame(()=>{if(src==='tx'){P5.mark();if(P5.lead==='tx')P5.follow()}else if(P5.lead==='dock')P5.pull()})};
+    $('#tx').addEventListener('scroll',on('tx'),{passive:true});W.scroll.addEventListener('scroll',on('dock'),{passive:true});
+    document.addEventListener('keydown',ev=>{if(ev.key==='Escape'&&P5.open&&!ev.target.closest('textarea'))P5.show(false)});
+    REFLOW.push(()=>{if(P5.open)P5.size(P5.h)});
+  },
+  max(){return $('#body').clientHeight-(innerWidth<=600?96:120)},
+  size(h){P5.h=Math.max(24,Math.min(P5.max(),Math.round(h)));$('#dock').style.height=P5.h+'px'},
+  show(on,h){
+    const a=topTx();
+    P5.open=on;$('#dock').hidden=!on;$('#grip').setAttribute('aria-expanded',String(on));
+    if(on){P5.size(h??$('#body').clientHeight*(innerWidth<=600?.5:.42));P5.lead='tx';P5.W.render()}else hideTip();
+    if(a)scrollTxTo(a.el,a.off);
+    if(on)P5.follow();
+  },
+  // transcript leads: the dock puts the transcript's top message's row at its top
+  follow(){const a=topTx();if(!a)return;const W=P5.W,id=idsOf(a.el)[0],r=id&&W.rowNear(id);if(!r)return;P5.busy=true;W.scrollToRow(r);requestAnimationFrame(()=>{P5.busy=false})},
+  // dock leads: the transcript puts the dock's top row's message at its top
+  pull(){const r=P5.W.topRow();const el=r&&txFor(r.dataset.did);if(!el)return;P5.busy=true;scrollTxTo(el,0);P5.mark();requestAnimationFrame(()=>{P5.busy=false})},
+  mark(){
+    const W=P5.W,sc=$('#tx').getBoundingClientRect(),ids=new Set();
+    for(const el of $$('#hist [data-tx]')){const r=el.getBoundingClientRect();if(r.bottom>sc.top&&r.top<sc.bottom)for(const id of idsOf(el))ids.add(id)}
+    W.table.querySelectorAll('tr.inview').forEach(r=>r.classList.remove('inview'));
+    for(const r of W.rows())if(ids.has(r.dataset.did))r.classList.add('inview');
+  }};
+
+/* ---------------- boot ---------------- */
+if(PROP>=1&&PROP<=5)frame();else shell();
+</script>
+</body>
+</html>

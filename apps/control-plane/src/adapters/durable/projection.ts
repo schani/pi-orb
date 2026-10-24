@@ -86,6 +86,7 @@ function publicMessage(message: NonNullable<EntryRecord["model"]>[number]) {
             ...(typeof call.id === "number" ? { id: call.id } : {}),
             ...(typeof call.name === "string" ? { name: call.name } : {}),
             ...(typeof call.status === "string" ? { status: call.status } : {}),
+            ...(typeof call.startedAt === "string" ? { startedAt: call.startedAt } : {}),
             ...(typeof call.durationMs === "number" ? { durationMs: call.durationMs } : {}),
             argumentKeys:
               Array.isArray(call.argumentKeys) &&
@@ -197,10 +198,11 @@ export function projectEntry(
             : message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])),
         )
         .join("\n") ?? "";
+    // pi-durable stamps the summary message when it places the compaction.
     return ok({
       id,
       parentId,
-      timestamp: new Date(0).toISOString(),
+      timestamp: new Date(entry.model?.[0]?.timestamp ?? 0).toISOString(),
       overflow: {},
       type: "compaction",
       summary: [{ type: "text", text: summary }],

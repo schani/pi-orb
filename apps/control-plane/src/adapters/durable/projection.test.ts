@@ -72,6 +72,33 @@ describe("Durable root projection", () => {
       activeSubagents(graph, 1 as import("@earendil-works/pi-durable").ConversationId),
     ).toEqual([{ id: "2", description: "Subagent 2", phase: "running" }]);
   });
+  it("stamps a compaction with the time its summary was placed", () => {
+    expect(
+      projectEntry(
+        entry({
+          kind: "pi.compaction",
+          head: 1,
+          data: { reason: "threshold" },
+          model: [
+            {
+              role: "user",
+              content: [{ type: "text", text: "Summary." }],
+              timestamp: Date.UTC(2026, 9, 24, 12),
+            },
+          ],
+        }),
+        "session:1",
+        "session",
+      )._unsafeUnwrap(),
+    ).toEqual({
+      id: "session:2",
+      parentId: "session:1",
+      timestamp: "2026-10-24T12:00:00.000Z",
+      overflow: {},
+      type: "compaction",
+      summary: [{ type: "text", text: "Summary." }],
+    });
+  });
   it("projects image input and assistant reasoning without exposing prompts", () => {
     const user = projectEntry(
       entry({
@@ -174,6 +201,7 @@ it.each(["ok", "error", "cancelled"])(
                   arguments: [secret],
                   argumentKeys: ["token"],
                   status,
+                  startedAt: "2026-10-24T12:00:00.000Z",
                   durationMs: 2,
                   error: secret,
                   private: { token: secret },
@@ -192,7 +220,16 @@ it.each(["ok", "error", "cancelled"])(
       expect(projected?.overflow.native).toMatchObject({
         message: {
           details: {
-            calls: [{ id: 1, name: "inner", argumentKeys: ["token"], status, durationMs: 2 }],
+            calls: [
+              {
+                id: 1,
+                name: "inner",
+                argumentKeys: ["token"],
+                status,
+                startedAt: "2026-10-24T12:00:00.000Z",
+                durationMs: 2,
+              },
+            ],
           },
         },
       });

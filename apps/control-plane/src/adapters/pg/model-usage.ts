@@ -97,8 +97,9 @@ export class PostgreSQLModelUsageLedger implements ModelUsageLedger, ModelUsageR
         return (
           await query(
             `INSERT INTO model_calls (at, owner_user_id, orb_id, use, provider, model, outcome,
-               input, output, cache_read, cache_write, cost_usd, duration_ms)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+               input, output, cache_read, cache_write, cost_usd, duration_ms,
+               response_id, ttft_ms, thinking_ms)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
             [
               new Date(task.wallNow()),
               call.ownerUserId,
@@ -113,6 +114,9 @@ export class PostgreSQLModelUsageLedger implements ModelUsageLedger, ModelUsageR
               call.cacheWrite,
               call.costUsd ?? null,
               call.durationMs ?? null,
+              call.responseId ?? null,
+              call.ttftMs ?? null,
+              call.thinkingMs ?? null,
             ],
           )
         ).andThen(() => ok(undefined));

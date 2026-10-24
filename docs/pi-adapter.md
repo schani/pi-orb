@@ -96,6 +96,8 @@ Committed root entries project into normalized product history in the same Postg
 
 Code-mode chart specs commit with terminal results; only validated chart leaves reach browser detail projection. Native nested-call summaries belong to their parent result, not invented standalone tool rows (`docs/runtime-protocol.md`).
 
+**Timeline timestamps (decided 2026-10-24; for the Pi transcript timeline in `docs/web-ui.md`).** Each public code-mode `details.calls[]` entry may carry `startedAt`, an ISO time copied from its nested tool task's persisted `startedAt` (stamped by the Harness clock on the task's first change to `running`, kept through recovery). `codemodeTool` reads the task record (`getTask`, one storage read per nested call) after each nested result, so a script replayed after a restart reports where each call first ran, not when the replay reattached; `durationMs` remains that attempt's execution time. Calls that never returned a result to the script (cancelled while held or running) have none. Only tool calls are rows; globals such as `chart()` are not. Older records lack the field; there is no backfill. Rejected: stamping a clock at dispatch (a replay would restamp it) and joining task records during projection (projection is a pure function of entries). `pi.compaction` records use the summary message's timestamp, which pi-durable sets when it places the summary, i.e. when compaction finished; before 2026-10-24 they carried the epoch. The compaction model call's duration is in `model_calls` (`docs/model-usage.md`).
+
 ## Context
 
 **Built-in preamble (user-approved 2026-10-23).** `You are a coding assistant. Use tools to inspect and change the project. Be concise. Produce Markdown. Mermaid is supported.`
