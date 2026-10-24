@@ -2632,7 +2632,6 @@ pre,
 .usage-timeline .chart-key button {
   display: inline-flex;
   align-items: center;
-  min-height: 44px;
 }
 
 .chart-series-action {

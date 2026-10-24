@@ -66,9 +66,9 @@ Rejected: Plate (rules above and below, no box) and Tabs (a `diagram | source` h
 
 Trend beside Settings opens `/usage`: Comparison lines with a left summary, last day/week/month/6 months, token-kind/use/model/orb breakdowns and top-orb/use bars. Period changes preserve filters. Owner-scoped `/api/v1/usage` reads recorded Pi + Luna usage; errors offer Retry, empty reads show no recorded calls. No persisted state changes.
 
-**Decided 2026-10-14:** Usage token-kind labels/phone keys select Measure; Orb labels/keys are native ID links, including deleted-name fallbacks. Aggregate Other is inert. Keyboard activation and hover isolation coexist; actionable phone keys are ≥44px tall. Actions are render-only props, not persisted chart data. Details: `docs/model-usage.md`.
+**Decided 2026-10-14:** Usage token-kind labels/phone keys select Measure; Orb labels/keys are native ID links, including deleted-name fallbacks. Aggregate Other is inert. Keyboard activation and hover isolation coexist. **Decided 2026-10-23:** Phone keys remain compact, without a minimum touch-target height, by user preference. Actions are render-only props, not persisted chart data. Details: `docs/model-usage.md`.
 
-Transcript charts, the usage timeline and Use ranking share `Chart.tsx`, spec builders, renderer and CSS. Hover shows exact point values; end-label/phone-key hover isolates series. Dense 15-minute/hourly/6-hour/daily ticks retain every point; labels sit on local civil boundaries. At ≤900 CSS px, the summary and rankings stack; phones use 44px controls. Bounds use browser-local civil time, including DST. API, coverage, rationale and validation: `docs/model-usage.md`. Not deployed.
+Transcript charts, the usage timeline and Use ranking share `Chart.tsx`, spec builders, renderer and CSS. Hover shows exact point values; end-label/phone-key hover isolates series. Dense 15-minute/hourly/6-hour/daily ticks retain every point; labels sit on local civil boundaries. At ≤900 CSS px, the summary and rankings stack; phone filters and ranking links use 44px controls, while timeline keys remain compact. Bounds use browser-local civil time, including DST. API, coverage, rationale and validation: `docs/model-usage.md`. Not deployed.
 
 ## Resource warnings and blocked delivery (decided 2026-10-09; implemented and focused-test qualified locally, not deployed)
 

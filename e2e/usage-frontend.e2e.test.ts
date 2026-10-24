@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { UsageView } from "@pi-orb/protocol";
-import { type Browser, chromium, expect, type Page, webkit } from "@playwright/test";
+import { type Browser, chromium, expect, type Locator, type Page, webkit } from "@playwright/test";
 import { createServer } from "vite";
 import { it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
@@ -294,13 +294,7 @@ it.each(["chromium", "webkit"] as const)(
         await page.setViewportSize({ width, height: 900 });
         const key = timeline.locator(".chart-key");
         await expect(key).toBeVisible();
-        expect(
-          await key
-            .locator("a, button")
-            .evaluateAll((nodes) =>
-              nodes.every((node) => node.getBoundingClientRect().height >= 44),
-            ),
-        ).toBe(true);
+        await expectCompactKey(key);
         await key.locator('[data-series="Output"]').hover();
         await key.getByRole("button", { name: "Uncached input", exact: true }).click();
         await expect(page.getByLabel("Measure")).toHaveValue("input");
@@ -390,6 +384,35 @@ it.each(["chromium", "webkit"] as const)(
           .locator("html")
           .evaluate((n) => n.scrollWidth <= (n.ownerDocument.defaultView?.innerWidth ?? 0)),
       ).toBe(true);
+      for (const width of [320, 390, 1440]) {
+        await page.setViewportSize({ width, height: 1000 });
+        const yLabels = timeline.locator('g[aria-label^="Y-axis"] .role-axis-label text');
+        await expect(yLabels).toHaveText(["0", "2G", "4G", "6G", "8G", "10G", "12G"]);
+        await expect
+          .poll(() =>
+            timeline
+              .locator("g.mark-line path")
+              .first()
+              .evaluate((line, width) => {
+                const svg = line.closest("svg")?.getBoundingClientRect();
+                const plot = line.getBoundingClientRect();
+                return (
+                  svg !== undefined &&
+                  plot.left - svg.left <= 48 &&
+                  (width > 390 || plot.width >= svg.width - 56)
+                );
+              }, width),
+          )
+          .toBe(true);
+        const plot = await timeline.locator("g.mark-line path").first().boundingBox();
+        const svg = await timeline.locator(".chart-canvas svg").boundingBox();
+        if (plot === null || svg === null) throw new Error("No large usage plot bounds");
+        await page.mouse.move(plot.x + 1, svg.y + svg.height / 2);
+        await expect(page.locator(".chart-tip")).toContainText("10,000,000,000 tokens");
+        await page.mouse.move(0, 0);
+        await expect(page.locator(".chart-tip")).toBeHidden();
+        await timeline.screenshot({ path: `/tmp/usage-large-${engine}-${width}.png` });
+      }
       await page.unroute("**/api/v1/usage?*");
       await checkOrbLinks(page, origin);
       await checkAggregateLegend(page);
@@ -401,6 +424,43 @@ it.each(["chromium", "webkit"] as const)(
     }
   },
 );
+
+async function expectCompactKey(key: Locator) {
+  const controls = await key.locator("a, button").evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const box = node.getBoundingClientRect();
+      const style = node.ownerDocument.defaultView?.getComputedStyle(node);
+      return {
+        top: box.top,
+        bottom: box.bottom,
+        left: box.left,
+        right: box.right,
+        height: box.height,
+        display: style?.display,
+        alignItems: style?.alignItems,
+      };
+    }),
+  );
+  expect(controls.length).toBeGreaterThan(1);
+  let rows = 1;
+  for (const [index, control] of controls.entries()) {
+    expect(control.height).toBeGreaterThan(0);
+    expect(control.height).toBeLessThanOrEqual(24);
+    expect(control.display).toBe("flex");
+    expect(control.alignItems).toBe("center");
+    const previous = controls[index - 1];
+    if (previous === undefined) continue;
+    if (Math.abs(control.top - previous.top) < 1) {
+      expect(control.left - previous.right).toBeCloseTo(12, 0);
+    } else {
+      rows++;
+      expect(control.top - previous.bottom).toBeCloseTo(4, 0);
+    }
+  }
+  expect(rows).toBeGreaterThan(1);
+  const bounds = await key.boundingBox();
+  expect(bounds?.height).toBeLessThanOrEqual(rows * 24 + (rows - 1) * 4);
+}
 
 async function checkOrbLinks(page: Page, origin: string) {
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -426,11 +486,7 @@ async function checkOrbLinks(page: Page, origin: string) {
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     await expect(timeline.locator(".chart-key [data-series]")).toHaveCount(5);
-    expect(
-      await timeline
-        .locator(".chart-key a")
-        .evaluateAll((nodes) => nodes.every((node) => node.getBoundingClientRect().height >= 44)),
-    ).toBe(true);
+    await expectCompactKey(timeline.locator(".chart-key"));
     for (const orb of metadata)
       await expect(
         timeline.locator('.chart-key [data-series="' + (orb.name ?? orb.id) + '"]'),
