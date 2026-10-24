@@ -21,7 +21,7 @@ import {
 import { expect, it } from "vitest";
 import { promptExtension } from "../prompt.ts";
 import { ChildReceipts, createDurableTools } from "./index.ts";
-import { ChildAnchor, subagentTools } from "./subagents.ts";
+import { ChildAnchor } from "./subagents.ts";
 import { nativeCall, nativeData } from "./testkit/native-call.ts";
 import { toolData, wait } from "./testkit/subagent-wait.ts";
 
