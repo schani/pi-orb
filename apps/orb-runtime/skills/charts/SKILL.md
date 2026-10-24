@@ -30,6 +30,10 @@ text({ before: values[0], latest: values.at(-1), max: Math.max(...values) });
 
 ## Spec
 
+Compare — a baseline against a candidate, one row per case, e.g. `main` vs a branch per benchmark, or TS vs a port per concurrency level. Use this instead of paired bars:
+
+- `kind: "compare"`, `title`, `from` and `to` (names of baseline and candidate), `better: "lower" | "higher"`, `tolerance?` (percent of the baseline counted as unchanged, default 5), `rows: [{ label, from, to }]` — 1 to 40 rows with positive values, unique labels, drawn in the given order.
+
 Line chart — values over time:
 
 - `kind: "line"`, `title` (≤120 characters).
@@ -37,10 +41,6 @@ Line chart — values over time:
 - `markers?: [{ at: time, label }]` — up to 8 vertical dashed rules, e.g. deploys or incidents.
 - `thresholds?: [{ value, label }]` — up to 4 horizontal red rules, e.g. SLOs. Red means a limit; do not use thresholds for decoration.
 - A series may carry `band: { name, points: [[time, low, high], …] }`, a shaded range behind its line, e.g. `{ name: "p5–p95" }` around a p50 line, or min–max over benchmark runs. `null` low or high drops the point. Band names must differ from series names; band points count toward the point limit.
-
-Bar chart — one value per category, drawn in the given order (sort first):
-
-- `kind: "bar"`, `title`, `bars: [{ label, value }]` — 1 to 40 bars.
 
 Histogram — distribution of raw values, e.g. request latencies or test durations:
 
@@ -54,9 +54,9 @@ Heatmap — one value per pair of categories, e.g. failures by weekday × hour, 
 
 - `kind: "heatmap"`, `title`, `x: [label, …]` (≤60), `y: [label, …]` (≤40), `values` — one row per `y` label, each with one non-negative number per `x` label.
 
-Compare — a baseline against a candidate, one row per case, e.g. `main` vs a branch per benchmark, or TS vs a port per concurrency level. Use this instead of paired bars:
+Bar chart — one value per category, drawn in the given order (sort first):
 
-- `kind: "compare"`, `title`, `from` and `to` (names of baseline and candidate), `better: "lower" | "higher"`, `tolerance?` (percent of the baseline counted as unchanged, default 5), `rows: [{ label, from, to }]` — 1 to 40 rows with positive values, unique labels, drawn in the given order.
+- `kind: "bar"`, `title`, `bars: [{ label, value }]` — 1 to 40 bars.
 
 Both:
 
