@@ -70,6 +70,7 @@ const RecordedModelCallSchema = Type.Object(
     responseId: Type.Optional(Type.String()),
     ttftMs: Type.Optional(count),
     thinkingMs: Type.Optional(count),
+    sessionId: Type.Optional(Type.String()),
   },
   { additionalProperties: false },
 );
@@ -151,7 +152,7 @@ export class PostgreSQLModelUsageLedger
         `SELECT at, use, provider, model, outcome, input, output,
            cache_read AS "cacheRead", cache_write AS "cacheWrite", cost_usd AS "costUsd",
            duration_ms AS "durationMs", response_id AS "responseId", ttft_ms AS "ttftMs",
-           thinking_ms AS "thinkingMs"
+           thinking_ms AS "thinkingMs", session_id AS "sessionId"
          FROM model_calls
          WHERE orb_id = $1 AND at >= $2 AND CASE
            WHEN use = 'root' THEN response_id = ANY($3::text[])
@@ -173,8 +174,8 @@ export class PostgreSQLModelUsageLedger
           await query(
             `INSERT INTO model_calls (at, owner_user_id, orb_id, use, provider, model, outcome,
                input, output, cache_read, cache_write, cost_usd, duration_ms,
-               response_id, ttft_ms, thinking_ms)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+               response_id, ttft_ms, thinking_ms, session_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
             [
               new Date(task.wallNow()),
               call.ownerUserId,
@@ -192,6 +193,7 @@ export class PostgreSQLModelUsageLedger
               call.responseId ?? null,
               call.ttftMs ?? null,
               call.thinkingMs ?? null,
+              call.sessionId ?? null,
             ],
           )
         ).andThen(() => ok(undefined));

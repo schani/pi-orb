@@ -73,7 +73,9 @@ export function callCell(row: TimelineRow): { name: string; arg: string; failed:
   if (row.kind === "tool") return { name: row.name, arg: row.arg ?? "", failed: bad };
   const arg =
     row.error ??
-    (row.use === "root" ? (row.said?.split("\n")[0] ?? "") : row.use.replaceAll("_", " "));
+    (row.use === "root"
+      ? (row.said?.split("\n")[0] ?? "")
+      : (row.subject ?? row.use.replaceAll("_", " ")));
   return { name: row.model, arg, failed: bad };
 }
 

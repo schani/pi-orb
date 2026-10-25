@@ -31,6 +31,7 @@ const call = (orbId: string, overrides: Partial<ModelCall> = {}): ModelCall => (
   responseId: "resp_1",
   ttftMs: 410,
   thinkingMs: 1_900,
+  sessionId: "session_1",
   ...overrides,
 });
 
@@ -89,6 +90,7 @@ export function modelUsageLedgerContractTests(
         responseId: _unidentified,
         ttftMs: _unstreamed,
         thinkingMs: _unreasoned,
+        sessionId: _sessionless,
         ...failed
       } = call(DELETED, {
         use: "turn_summary",
@@ -123,6 +125,7 @@ export function modelUsageLedgerContractTests(
           response_id: "resp_1",
           ttft_ms: 410,
           thinking_ms: 1_900,
+          session_id: "session_1",
         },
         {
           at: AT,
@@ -141,6 +144,7 @@ export function modelUsageLedgerContractTests(
           response_id: null,
           ttft_ms: null,
           thinking_ms: null,
+          session_id: null,
         },
       ]);
       expect(statements.filter((text) => /synchronous_commit/.test(text))).toEqual([
@@ -218,6 +222,7 @@ export function modelUsageLedgerContractTests(
           response_id: null,
           ttft_ms: null,
           thinking_ms: null,
+          session_id: null,
         },
       ]);
     });
@@ -486,6 +491,7 @@ export function modelUsageLedgerContractTests(
         responseId: _c,
         ttftMs: _d,
         thinkingMs: _e,
+        sessionId: _f,
         ...bare
       } = call(ARCHIVED, { use: "compaction" });
       await at(4_000, bare);

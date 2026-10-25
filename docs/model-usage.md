@@ -82,7 +82,8 @@ CREATE TABLE model_calls (
   cost_usd double precision,        -- list-price estimate; NULL before 2026-10-14
   response_id text,                 -- Pi AssistantMessage.responseId; NULL for Claude and before 2026-10-24
   ttft_ms integer,                  -- Pi streamed calls: request start → first content event
-  thinking_ms integer               -- Pi streamed calls: request start → first answer after reasoning
+  thinking_ms integer,              -- Pi streamed calls: request start → first answer after reasoning
+  session_id text                   -- Pi Durable calls: the conversation's pi.provider sessionId; NULL for Claude, Luna and before 2026-10-25
 );
 CREATE INDEX model_calls_at ON model_calls (at);
 CREATE INDEX model_calls_orb_at ON model_calls (orb_id, at);
@@ -101,6 +102,10 @@ Purpose: the Pi transcript timeline (`docs/web-ui.md`) joins ledger rows to hist
 `meterModels` observes events by wrapping the returned stream's `push`, so nothing is consumed or altered. Offsets share `duration_ms`'s origin: pi-ai times a response from the provider stream's creation, after auth, with a monotonic clock. The wrapper reads the agent's clock (`DurableAgent` `now`, else `Date.now`) at each counted event and at the terminal event, and subtracts the distance to the terminal event from `durationMs`; results are clamped so `0 ≤ ttft_ms ≤ thinking_ms ≤ duration_ms` holds by construction. Without `durationMs` (deferred responses) or without content, both stay NULL. `completeSimple` (compaction) and `completeLuna` (summaries, headlines, names) do not stream through the wrapper and record only `response_id`. Rejected: measuring from a clock read before `streamSimple` (it includes auth, so offsets could exceed `duration_ms`) and iterating the stream (it is single-consumer).
 
 **Read (2026-10-24).** `readTurnCalls` returns one orb's root rows by `response_id` and its other rows whose start (`at − duration_ms`) falls in the turn's window, both from `at` ≥ the turn's start so the `(orb_id, at)` index applies; rows are validated at the adapter and a malformed row is a storage invariant. Placement rules: `docs/web-ui.md`.
+
+## Subagent session (decided 2026-10-25)
+
+`session_id` (migration `052_model_call_session.sql`) is the `sessionId` pi-durable passes to `streamSimple`/`completeSimple`, which `meterModels` already reads to tell root from subagent; it now records it on every Durable row (root, subagent, compaction). The child-create transaction writes the same value into the `orb.subagent-task` entry (pi-durable's creation hook materializes `pi.provider` in that commit), so the timeline names a subagent call with its task's description (`docs/web-ui.md`); the contract test asserts the two match. Purpose: a turn with several subagents otherwise shows indistinguishable `subagent` rows. Rejected: a `conversation_id` column — the metered `Models` sees only the provider options, so it would need a session → conversation map rebuilt from storage on every restart, for the same answer.
 
 ## Write path
 

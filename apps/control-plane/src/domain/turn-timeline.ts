@@ -3,6 +3,7 @@ import {
   isUserBand,
   type JsonValue,
   piTurnStarts,
+  subagentLabel,
   type TimelineRow,
   type TurnTimeline,
 } from "@pi-orb/protocol";
@@ -187,12 +188,21 @@ function markerOf(
 /**
  * One Pi turn as waterfall rows (docs/web-ui.md "Pi transcript timeline"): the turn's public history
  * records from `turn[0]` (its user band) plus the orb's `model_calls` rows for it. Times are epoch ms.
+ * Subagent calls are labelled from every `subagentTask` in `records`, since a child can outlive its turn.
  */
 function assembleTurnTimeline(
+  records: readonly HistoryRecord[],
   turn: readonly HistoryRecord[],
   start: number,
   calls: readonly RecordedModelCall[],
 ): TurnTimeline {
+  const subagents = new Map(
+    records.flatMap((record) =>
+      record.type === "event" && record.subagentTask?.sessionId !== undefined
+        ? [[record.subagentTask.sessionId, subagentLabel(record.subagentTask)] as const]
+        : [],
+    ),
+  );
   const roots = new Map(
     calls.flatMap((call) =>
       call.use === "root" && call.responseId !== undefined
@@ -317,8 +327,12 @@ function assembleTurnTimeline(
     rows.push(callRow(compaction.id, match, callStart(match)));
   }
   calls.forEach((call, index) => {
-    if (call.use !== "root" && !paired.has(call))
-      rows.push(callRow(`call:${index}`, call, callStart(call)));
+    if (call.use === "root" || paired.has(call)) return;
+    const subject = call.use === "subagent" ? subagents.get(call.sessionId ?? "") : undefined;
+    rows.push({
+      ...callRow(`call:${index}`, call, callStart(call)),
+      ...(subject === undefined ? {} : { subject }),
+    });
   });
   return {
     start,
@@ -373,6 +387,6 @@ export function readTurnTimeline(
       return deps.modelUsage
         .readTurnCalls(task, orbId, { responseIds, from, until })
         .mapErr(failed("model_calls"))
-        .map((calls) => assembleTurnTimeline(turn, from, calls));
+        .map((calls) => assembleTurnTimeline(records, turn, from, calls));
     });
 }

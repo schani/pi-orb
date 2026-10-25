@@ -2,10 +2,10 @@ import type { JsonObject, JsonValue } from "@earendil-works/pi-ai";
 import type { ConversationId, EntryRecord, TaskGraph } from "@earendil-works/pi-durable";
 import {
   type ActiveSubagent,
-  capHeadline,
   type HistoryRecord,
   OrbMessageSystemSchema,
   type SystemInput,
+  subagentLabel,
   systemInputEvent,
 } from "@pi-orb/protocol";
 import { err, ok, Result } from "neverthrow";
@@ -28,10 +28,7 @@ export function activeSubagents(
             [
               record.subagentTask.id,
               {
-                description:
-                  record.subagentTask.description.trim() !== ""
-                    ? capHeadline(record.subagentTask.description)
-                    : `Subagent ${record.subagentTask.id}`,
+                description: subagentLabel(record.subagentTask),
                 ...(record.subagentTask.description.trim() === "" &&
                 record.subagentTask.prompt.trim() !== ""
                   ? { taskRecordId: record.id }
@@ -133,6 +130,7 @@ export function projectEntry(
         id: String(data["childId"]),
         prompt: data["prompt"],
         description: data["description"],
+        ...(typeof data["sessionId"] === "string" ? { sessionId: data["sessionId"] } : {}),
       },
     });
   if (entry.kind === "orb.model-change" || entry.kind === "orb.thinking-level-change")

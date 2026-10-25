@@ -39,7 +39,7 @@ function timeStream(stream: ReturnType<Models["streamSimple"]>, now: () => numbe
 /**
  * Report every terminal response for the usage ledger without consuming stream events (docs/model-usage.md).
  * pi-durable 1.1.0 generates with `streamSimple` and compacts with `completeSimple`, both under the conversation's
- * `pi.provider` session ID; the contract test pins both. Only streamed responses are timed.
+ * `pi.provider` session ID, which each row records; the contract test pins both. Only streamed responses are timed.
  */
 export function meterModels<T extends Models>(
   models: T,
@@ -49,10 +49,18 @@ export function meterModels<T extends Models>(
 ): T {
   const report = (
     use: ModelCallUse,
+    sessionId: string | undefined,
     response: Promise<AssistantMessage>,
     timing: (response: AssistantMessage) => ModelCallTiming = () => ({}),
   ) =>
-    void response.then((message) => record(use, message, timing(message))).catch(() => undefined);
+    void response
+      .then((message) =>
+        record(use, message, {
+          ...timing(message),
+          ...(sessionId === undefined ? {} : { sessionId }),
+        }),
+      )
+      .catch(() => undefined);
   return new Proxy(models, {
     get(target, property) {
       const value: unknown = Reflect.get(target, property);
@@ -63,6 +71,7 @@ export function meterModels<T extends Models>(
           const sessionId = args[2]?.sessionId;
           report(
             sessionId !== undefined && sessionId === rootSessionId() ? "root" : "subagent",
+            sessionId,
             stream.result(),
             timeStream(stream, now),
           );
@@ -73,7 +82,7 @@ export function meterModels<T extends Models>(
           const response = Reflect.apply(value, target, args) as ReturnType<
             Models["completeSimple"]
           >;
-          report("compaction", response);
+          report("compaction", args[2]?.sessionId, response);
           return response;
         };
       return value.bind(target);

@@ -304,6 +304,11 @@ describe("Pi turn timeline assembly", () => {
 
   it("places other model calls by start and pairs compactions with their call", async () => {
     const records = [
+      // Spawned before the turn: subagent calls are named from the whole history.
+      event("s1", -100, {
+        eventType: "agent.subagent_task",
+        subagentTask: { id: "7", prompt: "p", description: "Audit charts", sessionId: "child" },
+      }),
       user("u1", 0),
       assistant("a1", 10, { durationMs: 100 }),
       compaction("k1", iso(4000)),
@@ -311,7 +316,13 @@ describe("Pi turn timeline assembly", () => {
     ];
     expect(
       await rows(records, "u1", [
-        modelCall({ at: T + 2500, use: "subagent", durationMs: 1000, ttftMs: 200 }),
+        modelCall({
+          at: T + 2500,
+          use: "subagent",
+          durationMs: 1000,
+          ttftMs: 200,
+          sessionId: "child",
+        }),
         modelCall({ at: T + 3000, use: "compaction", outcome: "error", durationMs: 500 }),
         modelCall({ at: T + 3990, use: "compaction", durationMs: 1990, costUsd: 0.02 }),
         modelCall({ at: T + 5000, use: "turn_summary", model: "gpt-6-luna" }),
@@ -325,6 +336,7 @@ describe("Pi turn timeline assembly", () => {
         end: T + 2500,
         use: "subagent",
         model: "gpt-6-astra",
+        subject: "Audit charts",
         ttftMs: 200,
         input: 1,
         output: 2,

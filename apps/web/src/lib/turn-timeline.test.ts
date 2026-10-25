@@ -90,8 +90,10 @@ describe("timeline rows", () => {
     expect(barSegments(row)).toEqual([{ phase: "wait", from: 0, to: 1 }]);
   });
 
-  it("labels other model calls by their use", () => {
+  it("labels other model calls by their subagent, else their use", () => {
     expect(callCell(model({ use: "turn_summary" }, "said")).arg).toBe("turn summary");
+    expect(callCell(model({ use: "subagent" })).arg).toBe("subagent");
+    expect(callCell(model({ use: "subagent", subject: "Audit charts" })).arg).toBe("Audit charts");
   });
 
   it("describes tools by duration and result", () => {

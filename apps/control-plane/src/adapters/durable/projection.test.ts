@@ -146,6 +146,7 @@ it("projects child task headers independently of private child history", () => {
             childId: id,
             prompt: `Task ${id}`,
             description: id === 54 ? "Existing header" : " \n ",
+            ...(id === 54 ? { sessionId: "session-54" } : {}),
             timestamp: 1000,
             instructions: "PRIVATE",
           },
@@ -160,6 +161,9 @@ it("projects child task headers independently of private child history", () => {
     subagentTask: { id: "42", prompt: "Task 42" },
     overflow: {},
   });
+  expect(
+    records.map((record) => record.type === "event" && record.subagentTask?.sessionId),
+  ).toEqual([undefined, "session-54"]);
   const graph = {
     tasks: {
       a: { conversationId: 42, conversations: [], state: { status: "running" } },

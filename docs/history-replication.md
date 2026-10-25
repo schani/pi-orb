@@ -232,7 +232,7 @@ interface EventRecord extends HistoryRecordBase {
   custom?: { customType: string; display: boolean };
 
   /** Central child launch metadata; omitted from browser display records. */
-  subagentTask?: { id: string; prompt: string; description: string };
+  subagentTask?: { id: string; prompt: string; description: string; sessionId?: string }; // sessionId: child's pi.provider session, since 2026-10-25
   /** Present iff the custom message is a subagent receipt. */
   subagent?: {
     kind: "notification" | "update" | "workspace_notice";

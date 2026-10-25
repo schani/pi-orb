@@ -199,7 +199,7 @@ describe("durable model usage capture", () => {
       "root",
       "subagent",
     ]);
-    for (const { use, responseId, ttftMs, thinkingMs, ...call } of recorded) {
+    for (const { use, responseId, ttftMs, thinkingMs, sessionId: _, ...call } of recorded) {
       expect(call).toEqual({
         ownerUserId: "owner",
         orbId: "orb",
@@ -240,6 +240,21 @@ describe("durable model usage capture", () => {
         .sort(),
     ).toEqual([...history].sort());
     expect(history.sort()).toEqual(["first", "second", "spawn", "third", "wait"]);
+    // Root and compaction share the root session; the child's is the one its task record carries.
+    const sessions = new Map(recorded.map(({ use, sessionId }) => [use, sessionId]));
+    expect([...new Set(recorded.map(({ sessionId }) => sessionId))]).toEqual([
+      expect.any(String),
+      expect.any(String),
+    ]);
+    expect(sessions.get("compaction")).toBe(sessions.get("root"));
+    expect(
+      agent
+        .snapshot()
+        ._unsafeUnwrap()
+        .records.flatMap((record) =>
+          record.type === "event" && record.subagentTask ? [record.subagentTask.sessionId] : [],
+        ),
+    ).toEqual([sessions.get("subagent")]);
   });
 
   it("times the first content and the first answer back from the response's end", async () => {

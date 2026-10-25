@@ -23,6 +23,8 @@ export const TimelineModelRowSchema = Type.Object(
     /** `model_calls.use`: root, subagent, compaction, turn_summary, headline, orb_name. */
     use: Type.String(),
     model: Type.String(),
+    /** Subagent calls: the label of the subagent whose session made the call. */
+    subject: Type.Optional(Type.String()),
     ttftMs: Type.Optional(ms),
     thinkingMs: Type.Optional(ms),
     input: Type.Optional(count),
