@@ -219,3 +219,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 ## Pi 1.4 persisted state — 82
 
 82. **Resolved (user-approved 2026-10-22, PDT):** adopt the minimal Pi 1.4 persisted-state change in `docs/pi-durable-evaluation.md`. Scope: one task-status CHECK migration; sleeping/wake-time and restart-count task JSON; native code-mode store base checkpoints after 64 deltas without changing values/as-of-fork semantics; explicit unchanged custom-document delta policies; visible parking through existing error/lifecycle paths. No new columns/tables, trace carriers, history rewrite, store-value reset or auth migration. Parking is a nonfatal, visible pause; existing Abort abandons the interrupted turn before new input. Automatic reopen and Start do not clear the counter. No separate retry UI or persisted configuration.
+
+## Orb lifecycle edges on the transcript timeline — 83
+
+83. **Deferred (user, 2026-10-24):** should the Pi transcript timeline (`docs/web-ui.md`) show orb lifecycle edges (Stop/Start, compute replacement), persisted in a small `orb_lifecycle_events` table? Today those edges exist only in the `lifecycle:` log stream, which the product cannot query. Not part of the first timeline data changes (`docs/model-usage.md`, `docs/pi-adapter.md`).

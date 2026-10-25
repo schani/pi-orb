@@ -59,6 +59,7 @@ import {
   publishSigningKey,
   type RotationError,
 } from "../domain/signing-keys.ts";
+import { readTurnTimeline } from "../domain/turn-timeline.ts";
 import { readModelUsage } from "../domain/usage-read.ts";
 import { registerActivityHeadlineRoutes } from "./activity-headline-routes.ts";
 import { requirePrincipal } from "./browser-identity.ts";
@@ -946,6 +947,35 @@ export function registerRoutes(
     reply.header("content-type", result.value.mediaType);
     return reply.send(result.value.data);
   });
+
+  app.get<{ Params: { orbId: string; turnId: string } }>(
+    "/api/v1/orbs/:orbId/turns/:turnId/timeline",
+    async (request, reply) => {
+      const { orbId, turnId } = request.params;
+      const timeline = await readTurnTimeline(task, deps, orbId, turnId);
+      if (timeline.isOk()) {
+        reply.header("cache-control", "private, no-store");
+        return reply.send(timeline.value);
+      }
+      const error = timeline.error;
+      logOrbEvent(task, orbId, "turn-timeline-read-failed", {
+        reason: error.type,
+        ...(error.type === "store_error" ? { source: error.source, code: error.error.code } : {}),
+      });
+      switch (error.type) {
+        case "orb_missing":
+          return reply.status(404).send(httpError("not_found", "orb not found", false));
+        case "turn_missing":
+          return reply.status(404).send(httpError("not_found", "turn not found", false));
+        case "not_pi":
+          return reply.status(409).send(httpError("conflict", "orb is not a Pi orb", false));
+        case "store_error":
+          return error.error.code === "invariant"
+            ? reply.status(500).send(httpError("internal", "turn timeline unavailable", false))
+            : reply.status(503).send(httpError("unavailable", "turn timeline unavailable", true));
+      }
+    },
+  );
 
   app.get<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId/history", async (request, reply) => {
     const orb = await deps.store.getOrb(task, request.params.orbId);

@@ -132,7 +132,10 @@ export function makeHarness(options?: {
     hosting: hosting.deps,
     personalInstructions: new FakePersonalInstructionsStore([TEST_USER_ID]),
     gitIdentity: new FakeGitIdentityStore(),
-    modelUsage: { read: () => okAsync({ buckets: [], orbs: [] }) },
+    modelUsage: {
+      read: () => okAsync({ buckets: [], orbs: [] }),
+      readTurnCalls: () => okAsync([]),
+    },
     projectInstructions: new FakeProjectInstructionsStore(
       (id) => store.projectSnapshot(id)?.state ?? null,
     ),

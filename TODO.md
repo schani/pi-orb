@@ -141,6 +141,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Follow-ups
 
+- **Run the Pi turn-timeline browser test in WebKit** (2026-10-24; `docs/web-ui.md`). `e2e/transcript-timeline-frontend.e2e.test.ts` passed in Chromium only; the container could not launch WebKit (missing GTK/GStreamer libraries).
+
 - **Verify the iPad status-bar band and input-bar viewport on the installed app** (2026-10-20; `docs/web-ui.md`). Browser checks prove the band is invisible, click-through and qualifies geometrically, and that the orb page follows a simulated shrunken/panned visual viewport at iPad width. Confirm on the user's iPadOS 26 home-screen install that the status-bar blur is gone (including with menus/dialogs open) and that focusing the composer with a hardware keyboard keeps the header in view.
 
 - **Verify external links open in Safari from the installed iPad app** (2026-10-20; `docs/web-ui.md`). Unit and Chromium/WebKit checks prove the click-time `x-safari-` rewrite and its standalone/touch gate; `x-safari-https://` was verified only from Slack. On the user's iPadOS 26 home-screen install, confirm that tapping a transcript link and a hosted-file link opens Safari (not the in-app sheet, not nothing) and that hosted-file Google sign-in completes there, with an `auth-callback` following `auth-files_login`.

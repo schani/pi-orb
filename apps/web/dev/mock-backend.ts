@@ -47,6 +47,12 @@ import type { Plugin } from "vite";
 import { WebSocket, WebSocketServer } from "ws";
 import { chartFixtureRecords } from "./chart-fixtures.ts";
 import { diagramFixtureRecords } from "./diagram-fixtures.ts";
+import {
+  TIMELINE_ORB_ID,
+  TIMELINE_RETRY_TURN,
+  timelineFixture,
+  timelineFixtureRecords,
+} from "./timeline-fixture.ts";
 import { usageFixture, usageOrbs } from "./usage-fixture.ts";
 
 const PROJECT_ID = "frontend-fixture-project";
@@ -96,6 +102,8 @@ interface MockState {
   personalInstructions: PersonalInstructions;
   gitIdentity: GitIdentity;
   projectInstructions: Map<string, ProjectInstructions>;
+  /** Whether the retry turn's timeline still fails; a fixture control heals it. */
+  timelineFailing: boolean;
 }
 
 function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
@@ -681,6 +689,12 @@ function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
   };
   const chartsOrb: OrbView = { ...orb, id: "frontend-charts", name: "Transcript charts" };
   const diagramsOrb: OrbView = { ...orb, id: "frontend-diagrams", name: "Mermaid diagrams" };
+  const timelineOrb: OrbView = {
+    ...orb,
+    id: TIMELINE_ORB_ID,
+    name: "Turn timeline",
+    state: "stopped",
+  };
   const lazyOrb: OrbView = { ...orb, id: "frontend-lazy-details", name: "Lazy details" };
   if (orbNesting) {
     longOrb.spawnedByOrb = orb.id;
@@ -828,6 +842,7 @@ function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
       [lazyOrb.id, lazyOrb],
       [chartsOrb.id, chartsOrb],
       [diagramsOrb.id, diagramsOrb],
+      [timelineOrb.id, timelineOrb],
       [mixedOrb.id, mixedOrb],
       [authOrb.id, authOrb],
       [archivedOrb.id, archivedOrb],
@@ -840,6 +855,7 @@ function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
       [lazyOrb.id, lazyRecords],
       [chartsOrb.id, chartFixtureRecords(createdAt)],
       [diagramsOrb.id, diagramFixtureRecords(createdAt)],
+      [timelineOrb.id, timelineFixtureRecords(createdAt)],
       [mixedOrb.id, mixedRecords],
       [authOrb.id, []],
       [archivedOrb.id, []],
@@ -853,6 +869,7 @@ function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
       [lazyOrb.id, []],
       [chartsOrb.id, []],
       [diagramsOrb.id, []],
+      [timelineOrb.id, []],
       [authOrb.id, []],
       [archivedOrb.id, []],
     ]),
@@ -904,6 +921,7 @@ function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
     personalInstructions: { content: "", revision: 0 },
     gitIdentity: { name: "", email: "" },
     projectInstructions: new Map(),
+    timelineFailing: true,
     mcpGrants: new Set([
       `${PROJECT_ID}/10000000-0000-4000-8000-000000000001`,
       `${PROJECT_ID}/10000000-0000-4000-8000-000000000002`,
@@ -1301,6 +1319,33 @@ async function handleApi(
         user: { id: "00000000-0000-4000-8000-000000000001", email: "developer@local" },
       },
     });
+    return true;
+  }
+
+  if (method === "POST" && path === `/api/v1/orbs/${TIMELINE_ORB_ID}/fixture-timeline-heal`) {
+    state.timelineFailing = false;
+    sendJson(response, 200, {});
+    return true;
+  }
+  const timelineRoute = /^\/api\/v1\/orbs\/([^/]+)\/turns\/([^/]+)\/timeline$/.exec(path);
+  if (method === "GET" && timelineRoute !== null) {
+    const orbId = decodeURIComponent(timelineRoute[1] ?? "");
+    const turnId = decodeURIComponent(timelineRoute[2] ?? "");
+    const first = state.histories.get(orbId)?.[0];
+    if (orbId !== TIMELINE_ORB_ID || first === undefined) {
+      notFound(response);
+      return true;
+    }
+    const timeline = timelineFixture(Date.parse(first.timestamp), turnId);
+    if (turnId === TIMELINE_RETRY_TURN && state.timelineFailing)
+      sendJson(response, 503, {
+        error: { code: "unavailable", message: "turn timeline unavailable", retryable: true },
+      });
+    else if (timeline === null)
+      sendJson(response, 404, {
+        error: { code: "not_found", message: "turn not found", retryable: false },
+      });
+    else sendJson(response, 200, timeline);
     return true;
   }
 

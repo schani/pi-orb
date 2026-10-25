@@ -1644,3 +1644,35 @@ describe("orb correspondence", () => {
     },
   );
 });
+
+describe("HistoryView Pi turn timeline control", () => {
+  const assistant = (id: string, finishReason: string): MessageRecord => ({
+    ...message(id, "assistant", "ok"),
+    finishReason,
+  });
+  const records = [
+    message("u1", "user", "First."),
+    assistant("a1", "toolUse"),
+    message("steer", "user", "Also this."),
+    assistant("a2", "stop"),
+    message("u2", "user", "Second."),
+  ];
+
+  it("puts a control on each band that starts a turn, not on steering bands", () => {
+    const html = renderToStaticMarkup(
+      <HistoryView records={records} liveBlocks={[]} tools={[]} busy={false} timelineOrbId="orb" />,
+    );
+    expect(html.match(/aria-label="Turn timeline"/g)).toHaveLength(2);
+    expect(html).toContain('aria-pressed="false"');
+    const bands = html.split('<article class="rec rec-you"').slice(1);
+    expect(bands.map((band) => band.includes("Turn timeline"))).toEqual([true, false, true]);
+  });
+
+  it("offers no control without a Pi orb", () => {
+    expect(
+      renderToStaticMarkup(
+        <HistoryView records={records} liveBlocks={[]} tools={[]} busy={false} />,
+      ),
+    ).not.toContain("Turn timeline");
+  });
+});

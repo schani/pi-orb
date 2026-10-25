@@ -44,7 +44,7 @@ import { admitAgentRecovery } from "./domain/lifecycle.ts";
 import { logOrbEvent } from "./domain/log.ts";
 import type { McpStore } from "./domain/mcp.ts";
 import type { McpOAuth } from "./domain/mcp-oauth.ts";
-import type { ModelCallUse, ModelUsageLedger } from "./domain/model-usage.ts";
+import type { ModelCallTiming, ModelCallUse, ModelUsageLedger } from "./domain/model-usage.ts";
 import {
   createCentralOrbAgentOperations,
   type OrbAgentError,
@@ -696,8 +696,15 @@ export function createProcessAgentContext(
         registry.install(instrument(tools.childExtension));
       };
       installTools();
-      const recordModelCall = (use: ModelCallUse, response: AssistantMessage) =>
-        options.modelUsage.record(task, modelCall({ ownerUserId, orbId: orb.id, use }, response));
+      const recordModelCall = (
+        use: ModelCallUse,
+        response: AssistantMessage,
+        timing?: ModelCallTiming,
+      ) =>
+        options.modelUsage.record(
+          task,
+          modelCall({ ownerUserId, orbId: orb.id, use }, response, timing),
+        );
       const summaryModel = models.value.getModel(CODEX_PROVIDER, "gpt-6-luna");
       return ok({
         env,

@@ -67,7 +67,7 @@ import {
 } from "../../../../orb-runtime/src/domain/turn-summary.ts";
 import type { AgentLiveView, AgentSessionFacade, AgentSnapshot } from "../../domain/agent-ports.ts";
 import type { RuntimeClientError } from "../../domain/errors.ts";
-import type { ModelCallUse } from "../../domain/model-usage.ts";
+import type { ModelCallTiming, ModelCallUse } from "../../domain/model-usage.ts";
 import type { OrbAgentError } from "../../domain/orb-agent-operations.ts";
 import type { DeliverMessageClientRequest } from "../../domain/ports.ts";
 import type { AuthorityError } from "../durable-pg/index.ts";
@@ -183,7 +183,11 @@ export interface DurableAgentOptions {
   ) => ResultAsync<void, RuntimeClientError>;
   readonly models: Models;
   /** Usage ledger tap; never awaited by the model call. */
-  readonly recordModelCall?: (use: ModelCallUse, response: AssistantMessage) => void;
+  readonly recordModelCall?: (
+    use: ModelCallUse,
+    response: AssistantMessage,
+    timing: ModelCallTiming,
+  ) => void;
   readonly registry: Registry;
   readonly activateResources?: (appendAlert: DurableAgent["appendAlert"]) => () => void;
   readonly bindNativeConversation?: (
@@ -332,7 +336,12 @@ export class DurableAgent implements AgentSessionFacade {
     // Bound by the identity commit, before scheduling can start a generation.
     let rootSessionId: string | undefined;
     const models = options.recordModelCall
-      ? meterModels(options.models, () => rootSessionId, options.recordModelCall)
+      ? meterModels(
+          options.models,
+          () => rootSessionId,
+          () => options.now?.() ?? Date.now(),
+          options.recordModelCall,
+        )
       : options.models;
     return ResultAsync.fromPromise(
       (async () => {

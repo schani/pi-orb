@@ -1577,6 +1577,7 @@ function OrbConversation({
   const pinnedRef = useRef(true);
   const autoScrollYRef = useRef<number | null>(null);
   const onHistoryCompensatedRef = useRef<(() => void) | null>(null);
+  const releaseTailRef = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
     const target = scrollRef.current;
     const view = () => ({
@@ -1613,10 +1614,11 @@ function OrbConversation({
       previousView = current;
       autoScrollYRef.current = null;
     };
-    const readerIntent = (reason: "wheel" | "key" | "touch") => {
+    const readerIntent = (reason: "wheel" | "key" | "touch" | "timeline") => {
       setPinned(false, reason);
       autoScrollYRef.current = null;
     };
+    releaseTailRef.current = () => readerIntent("timeline");
     const pointerIntent = () => {
       pointerActive = true;
     };
@@ -1691,6 +1693,7 @@ function OrbConversation({
     if (scrollContentRef.current) observer.observe(scrollContentRef.current);
     return () => {
       onHistoryCompensatedRef.current = null;
+      releaseTailRef.current = null;
       observer.disconnect();
       target?.removeEventListener("keydown", keyboardIntent);
       target?.removeEventListener("keyup", keyboardSettled);
@@ -2289,6 +2292,8 @@ function OrbConversation({
             queuedMessages={queuedMessages}
             senderNames={senderNames}
             orbState={orb?.state}
+            timelineOrbId={orb?.harness === "pi" ? orbId : undefined}
+            releaseTailRef={releaseTailRef}
           />
         </div>
       </div>

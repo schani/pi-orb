@@ -17,7 +17,7 @@ it("reads selected-user usage, refuses user overrides, validates input and expos
   registerRoutes(
     app,
     new NoSimulationTask("usage routes", false),
-    { ...h.deps, modelUsage: { read } },
+    { ...h.deps, modelUsage: { ...h.deps.modelUsage, read } },
     {},
     TEST_SYSTEM_VIEW,
   );

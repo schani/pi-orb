@@ -9,6 +9,7 @@ import {
   defineTool,
   InboxDoc,
   type ModelRef,
+  ProviderDoc,
   ROOT_CONVERSATION_ID,
   type TaskId,
   type ToolExecutionApi,
@@ -81,6 +82,8 @@ export const ChildAnchor = defineTask<
             childId: child.id,
             prompt: task.input.prompt,
             description: task.input.description,
+            // Materialized by pi-durable's creation hook in this commit; names the child's `model_calls` rows.
+            sessionId: (await tx.doc(ProviderDoc, child.id)).sessionId,
             timestamp: runtime.now(),
           },
         });

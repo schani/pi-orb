@@ -269,7 +269,16 @@ export const EventRecordSchema = Type.Object(
     /** Set on `pi.custom_message` and orb-emitted custom events such as MCP status. */
     custom: Type.Optional(CustomMessageSchema),
     subagentTask: Type.Optional(
-      Type.Object({ id: Type.String(), prompt: Type.String(), description: Type.String() }, closed),
+      Type.Object(
+        {
+          id: Type.String(),
+          prompt: Type.String(),
+          description: Type.String(),
+          /** The child's `pi.provider` session, matching its `model_calls.session_id`; absent before 2026-10-25. */
+          sessionId: Type.Optional(Type.String()),
+        },
+        closed,
+      ),
     ),
     /** Present iff the custom message is a subagent receipt. */
     subagent: Type.Optional(SubagentNoticeSchema),

@@ -3,6 +3,7 @@ import {
   type DisplayRecord,
   type OrbMessageView,
   type OrbView,
+  piTurnStarts,
   ToolResultContext,
 } from "@pi-orb/protocol";
 import {
@@ -27,6 +28,7 @@ import { ChatMarkdown as UnmemoizedChatMarkdown } from "./ChatMarkdown.tsx";
 import { PlainChatText } from "./ChatText.tsx";
 import { CommittedImage, imageIndex } from "./CommittedImage.tsx";
 import { CommittedBody, type DetailContext, RunningBody } from "./DetailBody.tsx";
+import { Icon } from "./Icons.tsx";
 import { ResponseMarkdown as UnmemoizedResponseMarkdown } from "./ResponseMarkdown.tsx";
 import { isSubagentNotice, SubagentNotice } from "./SubagentNotice.tsx";
 import {
@@ -35,6 +37,7 @@ import {
   type ToolCallBlock,
   type ToolResultBlock,
 } from "./ToolActivity.tsx";
+import { TurnTimeline } from "./TurnTimeline.tsx";
 
 const ChatMarkdown = memo(UnmemoizedChatMarkdown);
 const ResponseMarkdown = memo(UnmemoizedResponseMarkdown);
@@ -75,6 +78,10 @@ interface HistoryViewProps {
   queuedMessages?: readonly OrbMessageView[];
   orbState?: OrbView["state"] | undefined;
   senderNames?: ReadonlyMap<string, string | null>;
+  /** A Pi orb's ID: each turn-starting band gets its waterfall control (docs/web-ui.md). */
+  timelineOrbId?: string | undefined;
+  /** Releases tail following, so opening a turn keeps its band where it is. */
+  releaseTailRef?: RefObject<(() => void) | null>;
 }
 
 const EMPTY_SENDER_NAMES: ReadonlyMap<string, string | null> = new Map();
@@ -750,6 +757,12 @@ function renderInboxMessage(
   );
 }
 
+/** A turn-starting band's waterfall control. */
+interface TimelineControl {
+  open: boolean;
+  onToggle: () => void;
+}
+
 function renderTurn(
   turn: Turn,
   pairing: ToolPairing,
@@ -759,6 +772,7 @@ function renderTurn(
   busy = false,
   compactionIdentity?: string,
   orbState?: OrbView["state"],
+  timeline?: TimelineControl,
 ): ReactNode {
   switch (turn.kind) {
     case "inbox-receipt":
@@ -784,6 +798,18 @@ function renderTurn(
           <div className="rec-bd">
             <MessageBlocks record={turn.record} />
           </div>
+          {timeline !== undefined && (
+            <button
+              type="button"
+              className="icon-button band-timeline"
+              aria-label="Turn timeline"
+              title="timeline"
+              aria-pressed={timeline.open}
+              onClick={timeline.onToggle}
+            >
+              <Icon name="timeline" />
+            </button>
+          )}
         </article>
       );
     case "agent":
@@ -862,6 +888,8 @@ export const HistoryView = memo(function HistoryView({
   detailAliases = EMPTY_ALIASES,
   viewportRef,
   onCompensatedRef,
+  timelineOrbId,
+  releaseTailRef,
 }: HistoryViewProps) {
   const sharedHeadlineSlots = useContext(HeadlineSlots);
   const [headlineSlots] = useState(() => new HeadlineLimiter());
@@ -876,6 +904,33 @@ export const HistoryView = memo(function HistoryView({
     };
   }, [records, queuedMessages]);
   const keys = useMemo(() => turns.map(turnKey), [turns]);
+  // Each turn-starting band owns the turns up to the next one; `last` reloads an open waterfall.
+  const timelines = useMemo(() => {
+    const starts = timelineOrbId === undefined ? new Set<string>() : piTurnStarts(records);
+    const last = new Map<string, string>();
+    let current: string | null = null;
+    for (const record of records) {
+      if (starts.has(record.id)) current = record.id;
+      if (current !== null) last.set(current, record.id);
+    }
+    const owners: (string | null)[] = [];
+    current = null;
+    for (const turn of turns) {
+      if (turn.kind === "user" && starts.has(turn.record.id)) current = turn.record.id;
+      owners.push(current);
+    }
+    return { last, owners };
+  }, [records, turns, timelineOrbId]);
+  const [openTimelines, setOpenTimelines] = useState<ReadonlySet<string>>(() => new Set());
+  // Content below a band never moves it; only tail following could.
+  const toggleTimeline = (id: string) => {
+    releaseTailRef?.current?.();
+    setOpenTimelines((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  };
   const historyRef = useRef<HTMLDivElement>(null);
   const firstMounted = useHistoryTail(keys, historyRef, viewportRef, onCompensatedRef);
   const openDetailValue = useMemo(
@@ -921,30 +976,62 @@ export const HistoryView = memo(function HistoryView({
     blocks: liveBlocks,
     tools: uncommittedTools,
   };
+  // An open turn's activity becomes its waterfall's children, shown until the waterfall loads.
+  const renderedTurns: ReactNode[] = [];
+  let section: { owner: string; children: ReactNode[] } | null = null;
+  const closeSection = () => {
+    if (section === null || timelineOrbId === undefined) return;
+    renderedTurns.push(
+      <TurnTimeline
+        key={`${section.owner}:timeline`}
+        orbId={timelineOrbId}
+        turnId={section.owner}
+        version={timelines.last.get(section.owner) ?? section.owner}
+      >
+        {section.children}
+      </TurnTimeline>,
+    );
+    section = null;
+  };
+  turns.slice(firstMounted).forEach((turn, offset) => {
+    const index = offset + firstMounted;
+    const owner = timelines.owners[index] ?? null;
+    const band = turn.kind === "user" && turn.record.id === owner;
+    if (band) closeSection();
+    const rendered =
+      index === mergedTurnIndex
+        ? renderTurn(turn, pairing, tools, senderNames, liveAgentContent, busy)
+        : renderTurn(
+            turn,
+            pairing,
+            tools,
+            senderNames,
+            undefined,
+            false,
+            turn.kind === "compaction" && turn.record.id === compactionResult?.id
+              ? compaction?.operationId
+              : undefined,
+            orbState,
+            band
+              ? {
+                  open: openTimelines.has(turn.record.id),
+                  onToggle: () => toggleTimeline(turn.record.id),
+                }
+              : undefined,
+          );
+    if (section !== null) section.children.push(rendered);
+    else renderedTurns.push(rendered);
+    if (band && openTimelines.has(turn.record.id))
+      section = { owner: turn.record.id, children: [] };
+  });
+  closeSection();
   return createElement(
     HeadlineSlots.Provider,
     { value: sharedHeadlineSlots ?? headlineSlots },
     <DetailContextValue.Provider value={detailContext}>
       <OpenDetailValue.Provider value={openDetailValue}>
         <div className="history" ref={historyRef}>
-          {turns
-            .slice(firstMounted)
-            .map((turn, index) =>
-              index + firstMounted === mergedTurnIndex
-                ? renderTurn(turn, pairing, tools, senderNames, liveAgentContent, busy)
-                : renderTurn(
-                    turn,
-                    pairing,
-                    tools,
-                    senderNames,
-                    undefined,
-                    false,
-                    turn.kind === "compaction" && turn.record.id === compactionResult?.id
-                      ? compaction?.operationId
-                      : undefined,
-                    orbState,
-                  ),
-            )}
+          {renderedTurns}
           {pendingMessages.map((message) => renderInboxMessage(message, orbState, senderNames))}
           {hasAgentLive && !mergeLiveIntoFinalTurn && (
             <article className="rec rec-orb">

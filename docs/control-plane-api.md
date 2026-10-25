@@ -109,6 +109,7 @@ GET  /api/v1/orbs/:orbId/details/:recordId/:detailKey?sessionId=...
 POST /api/v1/orbs/:orbId/headlines/:recordId/:detailKey?sessionId=...
 GET  /api/v1/orbs/:orbId/details/live/:operationId/:blockId?sessionId=...
 GET  /api/v1/orbs/:orbId/images/:recordId/:detailKey/:imageIndex?sessionId=...
+GET  /api/v1/orbs/:orbId/turns/:turnId/timeline
 GET  /api/v1/orbs/:orbId/hosted-files
 PUT  /api/v1/orbs/:orbId/messages/:messageId
 POST /api/v1/orbs/:orbId/messages/poll
@@ -328,6 +329,12 @@ interface DisplayHistoryView {
 The browser history response and live `history.record` frames carry `DisplayRecord`, not full `HistoryRecord`. `DisplayHistoryView` retains the existing cursor/head envelope with nullable minimal session identity and no version field. The in-orb transcript CLI and runtime replication pull retain complete records. Details and images use the routes above; each requires `sessionId` to fence a replaced session. A committed response is `{v:1,sessionId,recordId,detailKey,state:"committed",body}`; live reads return `{v:1,sessionId,operationId,blockId,state:"running"|"completed"|"unavailable",body?}`. The committed body is a typed reasoning, tool-call, tool-result, image, compaction, or subagent detail. Live bodies are reasoning or tool-result progress. Images return binary bytes with a safe image Content-Type; no base64 enters JSON display responses. Successful responses are private, no-store.
 
 The control plane reads one addressed record from the replica before considering the current runtime. Missing orb/detail returns typed 404, session mismatch 409, unavailable runtime/storage 503; malformed query 400. Errors use `ControlPlaneHttpError` and the detail-read failure is logged as a content-free `display-detail-read-failed` edge with source and reason. A stopped/archived orb never wakes for a detail. See `docs/runtime-protocol.md` for runtime routes and `docs/web-ui.md` for disclosure polling.
+
+### Pi turn timeline (implemented locally 2026-10-24)
+
+`GET /api/v1/orbs/:orbId/turns/:turnId/timeline` returns one Pi turn's waterfall, `TurnTimeline` in `packages/protocol/src/turn-timeline.ts`: `{start, rows}` with epoch-millisecond times and rows already in display order (by start; code-mode nested calls directly after their parent). `turnId` is the turn's user record ID. Rows are `model` (`use`, `model`, optional `ttftMs`/`thinkingMs` offsets from `start`, token counts, `costUsd`, `stop`, `error`, bounded `said`), `tool` (`name`, bounded `arg`/`result`, `status` `ok`/`error`/`cancelled`/`unfinished`, `nested`, code-mode `calls`) and `marker` (`steering`, `message`, `notification`, `alert`, `restart`, `wake`, `compaction`, optional bounded `text`). A domain service assembles it from the replicated history snapshot and the orb's `model_calls` rows; it reads no private Durable state and never wakes compute. Turn boundaries, placement and pre-2026-10-24 records: `docs/web-ui.md`.
+
+Success is `private, no-store`. A missing or deleting orb and an ID that is not a turn-starting band return 404 (`orb not found` / `turn not found`), a Claude orb 409, an unavailable store 503 and an invalid ledger row or other storage invariant 500. Each failure logs one content-free `turn-timeline-read-failed` edge with `reason`, plus `source`/`code` for storage failures. Like the other orb reads, any authenticated coworker may read it.
 
 ### Lazy activity headlines (implemented locally 2026-10-04; full qualification in progress, not deployed)
 

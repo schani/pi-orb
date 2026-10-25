@@ -12,3 +12,8 @@ export function capHeadline(value: string): string {
   }
   return `${prefix}…`;
 }
+
+/** A subagent's rail and timeline label: its description, else its ID. */
+export function subagentLabel(task: { readonly id: string; readonly description: string }): string {
+  return task.description.trim() !== "" ? capHeadline(task.description) : `Subagent ${task.id}`;
+}

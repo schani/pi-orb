@@ -2,10 +2,10 @@ import type { JsonObject, JsonValue } from "@earendil-works/pi-ai";
 import type { ConversationId, EntryRecord, TaskGraph } from "@earendil-works/pi-durable";
 import {
   type ActiveSubagent,
-  capHeadline,
   type HistoryRecord,
   OrbMessageSystemSchema,
   type SystemInput,
+  subagentLabel,
   systemInputEvent,
 } from "@pi-orb/protocol";
 import { err, ok, Result } from "neverthrow";
@@ -28,10 +28,7 @@ export function activeSubagents(
             [
               record.subagentTask.id,
               {
-                description:
-                  record.subagentTask.description.trim() !== ""
-                    ? capHeadline(record.subagentTask.description)
-                    : `Subagent ${record.subagentTask.id}`,
+                description: subagentLabel(record.subagentTask),
                 ...(record.subagentTask.description.trim() === "" &&
                 record.subagentTask.prompt.trim() !== ""
                   ? { taskRecordId: record.id }
@@ -86,6 +83,7 @@ function publicMessage(message: NonNullable<EntryRecord["model"]>[number]) {
             ...(typeof call.id === "number" ? { id: call.id } : {}),
             ...(typeof call.name === "string" ? { name: call.name } : {}),
             ...(typeof call.status === "string" ? { status: call.status } : {}),
+            ...(typeof call.startedAt === "string" ? { startedAt: call.startedAt } : {}),
             ...(typeof call.durationMs === "number" ? { durationMs: call.durationMs } : {}),
             argumentKeys:
               Array.isArray(call.argumentKeys) &&
@@ -132,6 +130,7 @@ export function projectEntry(
         id: String(data["childId"]),
         prompt: data["prompt"],
         description: data["description"],
+        ...(typeof data["sessionId"] === "string" ? { sessionId: data["sessionId"] } : {}),
       },
     });
   if (entry.kind === "orb.model-change" || entry.kind === "orb.thinking-level-change")
@@ -197,10 +196,11 @@ export function projectEntry(
             : message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])),
         )
         .join("\n") ?? "";
+    // pi-durable stamps the summary message when it places the compaction.
     return ok({
       id,
       parentId,
-      timestamp: new Date(0).toISOString(),
+      timestamp: new Date(entry.model?.[0]?.timestamp ?? 0).toISOString(),
       overflow: {},
       type: "compaction",
       summary: [{ type: "text", text: summary }],

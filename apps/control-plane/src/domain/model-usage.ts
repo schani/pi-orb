@@ -26,7 +26,18 @@ export interface ModelCall {
   /** Provider-side list-price estimate. */
   readonly costUsd?: number;
   readonly durationMs?: number;
+  /** Provider response ID, equal to the history message's `responseId`; Pi only. */
+  readonly responseId?: string;
+  /** Milliseconds from request start to the first streamed content event; Pi streamed calls only. */
+  readonly ttftMs?: number;
+  /** Milliseconds from request start to the first answer (text or tool call) after streamed reasoning. */
+  readonly thinkingMs?: number;
+  /** Pi Durable calls: the conversation's `pi.provider` session ID. */
+  readonly sessionId?: string;
 }
+
+/** What a capture point observed besides the response: stream timing and the provider session. */
+export type ModelCallTiming = Pick<ModelCall, "ttftMs" | "thinkingMs" | "sessionId">;
 
 /** Content-free ledger of platform-managed model calls; `record` stamps the time and never blocks or fails the call. */
 export interface ModelUsageLedger {

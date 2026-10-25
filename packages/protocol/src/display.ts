@@ -18,7 +18,7 @@ import { type JsonObject, JsonValueSchema } from "./json.ts";
 import { OrbMessageSenderSchema } from "./orb-message-context.ts";
 import { reasoningHeadline } from "./reasoning-headline.ts";
 
-export { capHeadline } from "./headline.ts";
+export { capHeadline, subagentLabel } from "./headline.ts";
 
 const closed = { additionalProperties: false } as const;
 const text = Type.Object({ type: Type.Literal("text"), text: Type.String() }, closed);
