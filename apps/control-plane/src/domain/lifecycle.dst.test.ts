@@ -2452,7 +2452,8 @@ describe("orb lifecycle (DST)", () => {
   });
 
   it("stopping an orb that never became ready skips the drain", async () => {
-    await runDst({ name: "stop-never-ready", iterations: 20 }, async (sim) => {
+    const capture = new LogCapture();
+    await runDst({ name: "stop-never-ready", iterations: 20, logCapture: capture }, async (sim) => {
       const harness = makeHarness();
       const stop = new AbortController();
       const result = await sim.runTasks([
@@ -2462,9 +2463,12 @@ describe("orb lifecycle (DST)", () => {
           f: async (task) => {
             harness.world.configureOrb(ORB, { initOutcome: "never_ready" });
             seedCreatingOrb(task, harness);
-            await waitUntil(task, "host exists", () => harness.world.hostStateOf(ORB) !== null, {
-              timeoutMs: 120_000,
-            });
+            await waitUntil(
+              task,
+              "provision reference committed",
+              () => harness.store.orbSnapshot(ORB)?.hostRef != null,
+              { timeoutMs: 120_000 },
+            );
             const stopResult = await requestOrbStop(task, harness.deps, ORB);
             expect(stopResult.isOk()).toBe(true);
             await waitUntil(
@@ -2479,6 +2483,7 @@ describe("orb lifecycle (DST)", () => {
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(harness.world.hostStateOf(ORB)).toBe("stopped");
+      expect(capture.matching("drain-skipped").length).toBeGreaterThan(0);
     });
   });
 
