@@ -62,6 +62,21 @@ describe("project secret browser routes", () => {
     expect(removed.json().items).toEqual([]);
   });
 
+  it("rejects oversized bundles with typed 400 without publication", async () => {
+    const rejected = await app.inject({
+      method: "PUT",
+      url: `/api/v1/projects/${PROJECT}/secrets/TOKEN`,
+      payload: { value: "a".repeat(64 * 1024) },
+    });
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.json().error).toMatchObject({ code: "invalid_request", retryable: false });
+    const listed = await app.inject({
+      method: "GET",
+      url: `/api/v1/projects/${PROJECT}/secrets`,
+    });
+    expect(listed.json()).toEqual({ revision: 0, items: [] });
+  });
+
   it("rejects reserved names and missing projects", async () => {
     expect(
       (
