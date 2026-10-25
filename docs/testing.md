@@ -1785,3 +1785,15 @@ schedules and evidence are unchanged. The complete uninstrumented seven-test fil
 workspace/E2E types and scoped lint pass. No product fix or historical attribution is
 claimed. Fresh exact-head qualification is still required; no workflow rerun or
 deployment was performed.
+
+## Usage chart resize readiness (2026-10-24; local, undeployed)
+
+Decision: poll the unchanged no-overflow predicate after viewport changes with existing
+default settings; no sleeps, explicit timeout changes, production UI or harness changes.
+[E2E 40152653410/job 121047239261](https://github.com/schani/pi-orb/actions/runs/40152653410/job/121047239261)
+failed the immediate Chromium check on `2b6ad4b2`. Controlled held ResizeObserver
+callbacks (alternate window-resize path suppressed) prove the old check fails after
+grid readiness; the new poll stays pending until release. CI's failing viewport was
+unrecorded: this establishes a mechanism, not exact attribution; the UI exception applies.
+Local official Chromium + WebKit pass (2/2). Ignored evidence:
+`.context/pr208-babysit/{e2e-2-first.log,usage-controlled-first.log,usage-controlled-poll-green.log,usage-scoped-green.log}`.
