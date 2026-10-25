@@ -46,11 +46,8 @@ describe("project-secret boot snapshot endpoint", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(JSON.stringify({ revision: 1, values })));
     onTestFinished(() => request.mockRestore());
-    const result = await fetchProjectSecretSnapshotAtBoot(env, {
-      sleep: async () => {
-        throw new Error("invalid snapshots must not retry");
-      },
-    });
+    const sleep = vi.fn();
+    const result = await fetchProjectSecretSnapshotAtBoot(env, { sleep });
     expect(result._unsafeUnwrapErr()).toEqual({
       type: "project_secret_fetch_error",
       code: "invalid_response",
@@ -58,6 +55,7 @@ describe("project-secret boot snapshot endpoint", () => {
       retryable: false,
     });
     expect(request).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
   });
 
   it("retries bounded bootstrap authorization/schema races", async () => {

@@ -11,6 +11,7 @@ import {
   deleteAllProjectSecrets,
   deleteProjectSecret,
   getProjectSecretSnapshot,
+  listProjectSecrets,
   putProjectSecret,
 } from "./project-secrets.ts";
 
@@ -329,4 +330,81 @@ describe("project secrets (DST)", () => {
       },
     );
   });
+});
+
+describe("project secret validation", () => {
+  const task = outsideTask;
+  it.each([
+    ["__proto__", "private-value"],
+    ["TOKEN", "private-prefix\0suffix"],
+    ["BAD\0NAME", "private-value"],
+    ["__proto__", null],
+  ])("rejects unsafe %s without publication", async (name, value) => {
+    const h = makeProjectSecretsHarness(PROJECT);
+    (await putProjectSecret(task, h.deps, PROJECT, "KEEP", "unchanged"))._unsafeUnwrap();
+    const before = h.pointers.snapshot(PROJECT);
+    const versions = h.secrets.liveVersions("project-secrets");
+    const result =
+      value === null
+        ? await deleteProjectSecret(task, h.deps, PROJECT, name)
+        : await putProjectSecret(task, h.deps, PROJECT, name, value);
+    expect(result._unsafeUnwrapErr().type).toBe("project_secret_invalid");
+    expect(JSON.stringify(result._unsafeUnwrapErr())).not.toContain("private-");
+    expect(h.pointers.snapshot(PROJECT)).toEqual(before);
+    expect(h.secrets.liveVersions("project-secrets")).toEqual(versions);
+    expect(h.secrets.destroyedVersions()).toEqual([]);
+  });
+
+  it.each(["constructor", "toString"])("uses own-property membership for %s", async (name) => {
+    const h = makeProjectSecretsHarness(PROJECT);
+    expect((await deleteProjectSecret(task, h.deps, PROJECT, name))._unsafeUnwrap().revision).toBe(
+      0,
+    );
+    expect(h.secrets.liveVersions("project-secrets")).toEqual([]);
+    (await putProjectSecret(task, h.deps, PROJECT, name, " snow\n雪 "))._unsafeUnwrap();
+    expect(expectSnapshot(await getProjectSecretSnapshot(task, h.deps, PROJECT))).toEqual({
+      [name]: " snow\n雪 ",
+    });
+    expect((await deleteProjectSecret(task, h.deps, PROJECT, name))._unsafeUnwrap()).toEqual({
+      revision: 2,
+      items: [],
+    });
+    expect(expectSnapshot(await getProjectSecretSnapshot(task, h.deps, PROJECT))).toEqual({});
+  });
+
+  it.each(["replace", "delete"])(
+    "blocks stored NUL consumption but allows %s",
+    async (operation) => {
+      const h = makeProjectSecretsHarness(PROJECT);
+      const secretVersion = h.secrets.seedSecret("project-secrets", {
+        projectId: PROJECT,
+        revision: 1,
+        values: { TOKEN: "private-\0value", KEEP: "preserved" },
+      });
+      (
+        await h.pointers.casWriteProjectSecretPointer(task, PROJECT, null, {
+          revision: 1,
+          entries: { TOKEN: 1, KEEP: 1 },
+          secretVersion,
+          updatedAt: 1,
+        })
+      )._unsafeUnwrap();
+      const rejected = (await getProjectSecretSnapshot(task, h.deps, PROJECT))._unsafeUnwrapErr();
+      expect(rejected.type).toBe("project_secret_corruption");
+      expect(JSON.stringify(rejected)).not.toContain("private-");
+      expect(
+        (await listProjectSecrets(task, h.deps, PROJECT))
+          ._unsafeUnwrap()
+          .items.map((item) => item.name),
+      ).toEqual(["KEEP", "TOKEN"]);
+      const repaired =
+        operation === "replace"
+          ? await putProjectSecret(task, h.deps, PROJECT, "TOKEN", "repaired")
+          : await deleteProjectSecret(task, h.deps, PROJECT, "TOKEN");
+      expect(repaired._unsafeUnwrap().revision).toBe(2);
+      expect(expectSnapshot(await getProjectSecretSnapshot(task, h.deps, PROJECT))).toEqual(
+        operation === "replace" ? { KEEP: "preserved", TOKEN: "repaired" } : { KEEP: "preserved" },
+      );
+    },
+  );
 });

@@ -62,25 +62,6 @@ describe("project secret browser routes", () => {
     expect(removed.json().items).toEqual([]);
   });
 
-  it.each([
-    ["__proto__", "private-value"],
-    ["TOKEN", "private-prefix\0private-suffix"],
-  ])("returns typed 400 for unsafe %s without leaking or publishing", async (name, value) => {
-    const rejected = await app.inject({
-      method: "PUT",
-      url: `/api/v1/projects/${PROJECT}/secrets/${name}`,
-      payload: { value },
-    });
-    expect(rejected.statusCode).toBe(400);
-    expect(rejected.json()).toMatchObject({ error: { code: "invalid_request", retryable: false } });
-    expect(rejected.body).not.toContain("private-");
-    const listed = await app.inject({
-      method: "GET",
-      url: `/api/v1/projects/${PROJECT}/secrets`,
-    });
-    expect(listed.json()).toEqual({ revision: 0, items: [] });
-  });
-
   it("rejects reserved names and missing projects", async () => {
     expect(
       (
