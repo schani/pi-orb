@@ -221,9 +221,40 @@ describe("Claude uses Pi's boot decision", () => {
   });
 });
 
-it.each([0, 1])(
-  "early passive acknowledgement preserves the human turn (%i turns)",
-  async (numTurns) => {
+it.each([
+  ["claude.input_receipt", "boot", "host-marker", true],
+  ["claude.input_receipt", "boot", "other", false],
+  ["claude.input_receipt", "boot", null, false],
+  ["claude.input_receipt", "human", "host-marker", false],
+  ["claude.input_receipt", "peer", "host-marker", false],
+  ["claude.platform_message", "boot", "host-marker", false],
+  ["orb.message", "boot", "host-marker", false],
+] as const)(
+  "boot receipt authority: %s / %s / %s",
+  (eventType, inputKind, operationId, acknowledged) => {
+    const marker = boot("host-marker", "pi-orb.host-restarted");
+    const later = { ...marker, id: "later-host-marker" };
+    const receipt: HistoryRecord = {
+      ...base,
+      id: "receipt",
+      type: "event",
+      eventType,
+      overflow: { inputKind, ...(operationId === null ? {} : { operationId }) },
+    };
+    expect(pendingBootContext([marker, receipt, human, later])).toEqual(
+      acknowledged ? [later] : [marker, later],
+    );
+  },
+);
+
+it.each([
+  [0, 0],
+  [1, 0],
+  [1, 1],
+  [1, 2],
+])(
+  "early passive acknowledgement preserves the human turn (%i turns, %i copies)",
+  async (numTurns, copies) => {
     const f = new ComposedClaudeFixture();
     const input = async () => {
       const next = await f.query.input.next();
@@ -280,7 +311,30 @@ it.each([0, 1])(
       expect(f.agent.getHealth()).toMatchObject({ status: "ready" });
       expect(f.query.closeRequested).toBe(false);
       expect(pendingBootContext(f.history.view)).toEqual([marker]);
-      f.receipt(context);
+      if (copies === 0) f.receipt(context);
+      else {
+        for (let index = 0; index < copies; index++)
+          f.append({
+            type: "attachment",
+            uuid: `boot-attachment-${index}`,
+            sessionId: f.state.id,
+            attachment: {
+              type: "queued_command",
+              source_uuid: context.uuid,
+              delivery_id: "boot-delivery",
+              prompt: context.message.content,
+              isMeta: true,
+            },
+          });
+        f.append({
+          type: "queue-operation",
+          operation: "remove",
+          reason: "absorbed_mid_turn",
+          commandUuid: context.uuid,
+          deliveryId: "boot-delivery",
+          sessionId: f.state.id,
+        });
+      }
       f.receipt(human);
       await f.query.emitUnscheduled({
         ...rootResult,

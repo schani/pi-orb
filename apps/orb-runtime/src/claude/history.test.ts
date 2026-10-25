@@ -586,6 +586,55 @@ describe("consumed queued input", () => {
     expect(readFileSync(f.path, "utf8")).toBe(f.source);
   });
 
+  it.each([false, true])(
+    "matches the last equivalent boot delivery copy (reordered payload=%s)",
+    (reordered) => {
+      const first = {
+        ...attachment,
+        parentUuid: null,
+        attachment: { ...attachment.attachment, isMeta: true, origin: { kind: "internal" } },
+      };
+      const f = setup([first], false);
+      f.history
+        .correlate("input", { messageIds: [], operationId: "host-marker", boot: true })
+        ._unsafeUnwrap();
+      const before = [...f.history.scan(f.path)._unsafeUnwrap()];
+      const payload = reordered
+        ? Object.fromEntries(Object.entries(first.attachment).reverse())
+        : first.attachment;
+      const copy = { ...first, uuid: "copy", parentUuid: "attachment", attachment: payload };
+      const tail = [
+        copy,
+        consumed,
+        { type: "assistant", uuid: "final", parentUuid: "copy", message: { content: "done" } },
+      ];
+      appendFileSync(f.path, tail.map((row) => JSON.stringify(row)).join("\n") + "\n");
+      const native = readFileSync(f.path, "utf8");
+      const view = f.history.scan(f.path)._unsafeUnwrap();
+      expect(view.slice(0, before.length)).toEqual(before);
+      expect(view.find((record) => record.id === "final")?.parentId).toBe("copy");
+      expect(view.at(-1)).toMatchObject({
+        id: "input",
+        eventType: "claude.input_receipt",
+        inboxMessageIds: [],
+        overflow: {
+          operationId: "host-marker",
+          inputKind: "boot",
+          attachmentId: "copy",
+          attachmentLine: 2,
+          consumptionLine: 3,
+        },
+      });
+      expect(JSON.stringify(view.at(-1))).not.toContain("PRIVATE");
+      const saved = readFileSync(f.indexPath, "utf8");
+      expect(new ClaudeHistory(f.dir, "session", "later").scan(f.path)._unsafeUnwrap()).toEqual(
+        view,
+      );
+      expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
+      expect(readFileSync(f.path, "utf8")).toBe(native);
+    },
+  );
+
   it.each([
     [[attachment], true],
     [[consumed, attachment], true],
@@ -601,6 +650,23 @@ describe("consumed queued input", () => {
     const view = f.history.scan(f.path)._unsafeUnwrap();
     expect(view.some((record) => record.id === "input")).toBe(false);
     expect(qualifyClaudeRestart(state, view, "host").isErr()).toBe(true);
+  });
+
+  it.each([
+    { ...attachment.attachment, source_uuid: "other-input" },
+    { ...attachment.attachment, delivery_id: "other-delivery" },
+    { ...attachment.attachment, prompt: "DIFFERENT" },
+    { ...attachment.attachment, isMeta: true },
+    { ...attachment.attachment, origin: { kind: "human" } },
+  ])("rejects conflicting delivery-copy payload atomically: %j", (payload) => {
+    const f = setup([attachment]);
+    const before = [...f.history.scan(f.path)._unsafeUnwrap()];
+    const saved = readFileSync(f.indexPath, "utf8");
+    const tail = [{ ...attachment, uuid: "copy", attachment: payload }, consumed];
+    appendFileSync(f.path, tail.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    expect(f.history.scan(f.path).isErr()).toBe(true);
+    expect(f.history.view).toEqual(before);
+    expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
   });
 
   it.each([
@@ -625,6 +691,32 @@ describe("consumed queued input", () => {
     expect(f.history.scan(f.path).isErr()).toBe(true);
     expect(f.history.view).toEqual(before);
     expect(nativeHistoryFiles.read(f.indexPath)).toBe(saved);
+  });
+
+  it("never rewrites an already committed receipt when a later copy appears", () => {
+    const f = setup([attachment, consumed]);
+    const before = [...f.history.scan(f.path)._unsafeUnwrap()];
+    const saved = readFileSync(f.indexPath, "utf8");
+    appendFileSync(f.path, JSON.stringify({ ...attachment, uuid: "later-copy" }) + "\n");
+    const reopened = new ClaudeHistory(f.dir, "session", "later");
+    const result = reopened.scan(f.path);
+    expect(result.isErr() && result.error.message).toBe(
+      "Consumed Claude input receipt proof conflicts: delivery copy follows consumption.",
+    );
+    expect(reopened.view).toEqual(before);
+    expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
+  });
+
+  it("ignores a child delivery copy when selecting root proof", () => {
+    const f = setup([
+      attachment,
+      { ...attachment, sessionId: "child", uuid: "child-copy" },
+      consumed,
+    ]);
+    expect(f.history.scan(f.path)._unsafeUnwrap().at(-1)).toMatchObject({
+      id: "input",
+      overflow: { attachmentId: "attachment", attachmentLine: 1, consumptionLine: 3 },
+    });
   });
 
   it("publishes no receipt when its index commit fails", () => {

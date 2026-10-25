@@ -15,7 +15,9 @@ function passiveBootMarker(record: HistoryRecord): boolean {
 export function pendingBootContext(records: readonly HistoryRecord[]): BootMarker[] {
   const received = new Set(
     records.flatMap((record) =>
-      record.type === "event" && record.eventType === "claude.boot_receipt"
+      record.type === "event" &&
+      (record.eventType === "claude.boot_receipt" ||
+        (record.eventType === "claude.input_receipt" && record.overflow.inputKind === "boot"))
         ? [record.overflow.operationId]
         : [],
     ),
