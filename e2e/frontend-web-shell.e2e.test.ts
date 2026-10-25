@@ -103,7 +103,7 @@ it.each(["/", "/orbs/missing-orb"])(
   },
 );
 
-it("keeps projects with working orbs first in the sidebar across polls", async () => {
+it("prioritizes running then sleeping projects in the sidebar across polls", async () => {
   const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
   const page = await browser.newPage();
   await page.clock.install();
@@ -134,8 +134,14 @@ it("keeps projects with working orbs first in the sidebar across polls", async (
     stopped: [{ ...makeOrb("stopped", "stopped"), sleepUntil: "2100-01-01T00:00:00Z" }],
     empty: [],
     idle: [{ ...makeOrb("idle", "running"), activity: "idle" }],
-    live: (["creating", "starting", "stopping"] as const).map((s) => makeOrb("live", s)),
-    failed: [makeOrb("failed", "failed")],
+    live: [
+      { ...makeOrb("live", "running"), activity: "busy" },
+      { ...makeOrb("live", "stopped"), sleepUntil: "2100-01-01T00:00:00Z" },
+    ],
+    failed: (["failed", "creating", "starting", "stopping"] as const).map((s) => ({
+      ...makeOrb("failed", s),
+      sleepUntil: "2100-01-01T00:00:00Z",
+    })),
   };
   try {
     await page.route("**/api/v1/projects", (route) => route.fulfill({ json: { items: incoming } }));
@@ -146,19 +152,21 @@ it("keeps projects with working orbs first in the sidebar across polls", async (
     await page.goto(`${origin}/orbs/missing-orb`);
     const sections = page.locator(".orb-index .ix-project");
     const names = sections.locator(".project-name");
-    await expectPage(names).toHaveText(["Stopped", "Idle", "Live", "Failed", "Archive", "Empty"]);
-    const stoppedSection = await sections.filter({ hasText: "Stopped" }).elementHandle();
+    await expectPage(names).toHaveText(["Idle", "Live", "Stopped", "Archive", "Empty", "Failed"]);
+    const stoppedSection = await page
+      .getByRole("region", { name: "Stopped", exact: true })
+      .elementHandle();
     incoming = [...projects].reverse();
-    lists.archive = [makeOrb("archive", "stopped")];
-    lists.stopped = [makeOrb("stopped", "archived")];
-    lists.idle = [];
+    lists.archive = [makeOrb("archive", "running")];
+    lists.idle = [{ ...makeOrb("idle", "stopped"), sleepUntil: "2100-01-01T00:00:00Z" }];
     await page.clock.runFor(2000);
-    await expectPage(names).toHaveText(["Archive", "Live", "Failed", "Stopped", "Empty", "Idle"]);
+    await expectPage(names).toHaveText(["Archive", "Live", "Stopped", "Idle", "Empty", "Failed"]);
     expect(await stoppedSection?.evaluate((node) => node.isConnected)).toBe(true);
+    lists.archive = [makeOrb("archive", "archived")];
     lists.stopped = [makeOrb("stopped", "stopped")];
     lists.idle = [{ ...makeOrb("idle", "running"), activity: "busy" }];
     await page.clock.runFor(2000);
-    await expectPage(names).toHaveText(["Archive", "Stopped", "Idle", "Live", "Failed", "Empty"]);
+    await expectPage(names).toHaveText(["Idle", "Live", "Archive", "Stopped", "Empty", "Failed"]);
   } finally {
     await page.unrouteAll({ behavior: "wait" });
     await page.close();
