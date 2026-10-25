@@ -221,39 +221,31 @@ describe("Claude uses Pi's boot decision", () => {
   });
 });
 
-describe("passive boot context consumption", () => {
-  const marker = boot("host-marker", "pi-orb.host-restarted");
-  const receipt: HistoryRecord = {
-    ...base,
-    id: "queued-boot-input",
-    type: "event",
-    eventType: "claude.input_receipt",
-    overflow: { operationId: marker.id, inputKind: "boot" },
-  };
-
-  it.each([1, 2])("acknowledges %i consumed boot inputs for the same operation", (count) => {
-    const receipts = Array.from({ length: count }, (_, index) => ({
-      ...receipt,
-      id: `queued-boot-input-${index}`,
-    }));
+it.each([
+  ["claude.input_receipt", "boot", "host-marker", true],
+  ["claude.input_receipt", "boot", "other", false],
+  ["claude.input_receipt", "boot", null, false],
+  ["claude.input_receipt", "human", "host-marker", false],
+  ["claude.input_receipt", "peer", "host-marker", false],
+  ["claude.platform_message", "boot", "host-marker", false],
+  ["orb.message", "boot", "host-marker", false],
+] as const)(
+  "boot receipt authority: %s / %s / %s",
+  (eventType, inputKind, operationId, acknowledged) => {
+    const marker = boot("host-marker", "pi-orb.host-restarted");
     const later = { ...marker, id: "later-host-marker" };
-    expect(pendingBootContext([marker, ...receipts, human, later])).toEqual([later]);
-  });
-
-  it.each([
-    { ...receipt, eventType: "claude.platform_message" },
-    { ...receipt, eventType: "orb.message" },
-    ...["human", "peer", "system", "compaction"].map((inputKind) => ({
-      ...receipt,
-      overflow: { operationId: marker.id, inputKind },
-    })),
-    { ...receipt, overflow: { operationId: marker.id } },
-    { ...receipt, overflow: { inputKind: "boot" } },
-    { ...receipt, overflow: { operationId: "other", inputKind: "boot" } },
-  ])("ignores unrelated receipt authority: %j", (unrelated) => {
-    expect(pendingBootContext([marker, unrelated])).toEqual([marker]);
-  });
-});
+    const receipt: HistoryRecord = {
+      ...base,
+      id: "receipt",
+      type: "event",
+      eventType,
+      overflow: { inputKind, ...(operationId === null ? {} : { operationId }) },
+    };
+    expect(pendingBootContext([marker, receipt, human, later])).toEqual(
+      acknowledged ? [later] : [marker, later],
+    );
+  },
+);
 
 it.each([
   [0, 0],

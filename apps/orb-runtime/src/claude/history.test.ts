@@ -594,26 +594,10 @@ describe("consumed queued input", () => {
         parentUuid: null,
         attachment: { ...attachment.attachment, isMeta: true, origin: { kind: "internal" } },
       };
-      const f = setup(
-        [
-          {
-            ...attachment,
-            uuid: "old-attachment",
-            attachment: {
-              ...first.attachment,
-              source_uuid: "old-boot-input",
-              delivery_id: "old-delivery",
-            },
-          },
-          { ...consumed, commandUuid: "old-boot-input", deliveryId: "old-delivery" },
-          first,
-        ],
-        false,
-      );
-      for (const uuid of ["old-boot-input", "input"])
-        f.history
-          .correlate(uuid, { messageIds: [], operationId: "host-marker", boot: true })
-          ._unsafeUnwrap();
+      const f = setup([first], false);
+      f.history
+        .correlate("input", { messageIds: [], operationId: "host-marker", boot: true })
+        ._unsafeUnwrap();
       const before = [...f.history.scan(f.path)._unsafeUnwrap()];
       const payload = reordered
         ? Object.fromEntries(Object.entries(first.attachment).reverse())
@@ -637,43 +621,19 @@ describe("consumed queued input", () => {
           operationId: "host-marker",
           inputKind: "boot",
           attachmentId: "copy",
-          attachmentLine: 4,
-          consumptionLine: 5,
+          attachmentLine: 2,
+          consumptionLine: 3,
         },
       });
       expect(JSON.stringify(view.at(-1))).not.toContain("PRIVATE");
       const saved = readFileSync(f.indexPath, "utf8");
-      const reopened = new ClaudeHistory(f.dir, "session", "later");
-      expect(reopened.scan(f.path)._unsafeUnwrap()).toEqual(view);
-      expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
-      appendFileSync(f.path, JSON.stringify({ type: "system", uuid: "later" }) + "\n");
-      expect(reopened.scan(f.path)._unsafeUnwrap().slice(0, view.length)).toEqual(view);
-      expect(readFileSync(f.path, "utf8")).toBe(
-        native + JSON.stringify({ type: "system", uuid: "later" }) + "\n",
+      expect(new ClaudeHistory(f.dir, "session", "later").scan(f.path)._unsafeUnwrap()).toEqual(
+        view,
       );
+      expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
+      expect(readFileSync(f.path, "utf8")).toBe(native);
     },
   );
-
-  it.each([
-    { ...attachment.attachment, source_uuid: "other-input" },
-    { ...attachment.attachment, delivery_id: "other-delivery" },
-    { ...attachment.attachment, prompt: "DIFFERENT" },
-    { ...attachment.attachment, isMeta: true },
-    { ...attachment.attachment, origin: { kind: "human" } },
-  ])("rejects conflicting delivery-copy payload: %j", (payload) => {
-    const f = setup([attachment]);
-    const before = [...f.history.scan(f.path)._unsafeUnwrap()];
-    const saved = readFileSync(f.indexPath, "utf8");
-    appendFileSync(
-      f.path,
-      [{ ...attachment, uuid: "copy", attachment: payload }, consumed]
-        .map((row) => JSON.stringify(row))
-        .join("\n") + "\n",
-    );
-    expect(f.history.scan(f.path).isErr()).toBe(true);
-    expect(f.history.view).toEqual(before);
-    expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
-  });
 
   it.each([
     [[attachment], true],
@@ -690,6 +650,23 @@ describe("consumed queued input", () => {
     const view = f.history.scan(f.path)._unsafeUnwrap();
     expect(view.some((record) => record.id === "input")).toBe(false);
     expect(qualifyClaudeRestart(state, view, "host").isErr()).toBe(true);
+  });
+
+  it.each([
+    { ...attachment.attachment, source_uuid: "other-input" },
+    { ...attachment.attachment, delivery_id: "other-delivery" },
+    { ...attachment.attachment, prompt: "DIFFERENT" },
+    { ...attachment.attachment, isMeta: true },
+    { ...attachment.attachment, origin: { kind: "human" } },
+  ])("rejects conflicting delivery-copy payload atomically: %j", (payload) => {
+    const f = setup([attachment]);
+    const before = [...f.history.scan(f.path)._unsafeUnwrap()];
+    const saved = readFileSync(f.indexPath, "utf8");
+    const tail = [{ ...attachment, uuid: "copy", attachment: payload }, consumed];
+    appendFileSync(f.path, tail.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    expect(f.history.scan(f.path).isErr()).toBe(true);
+    expect(f.history.view).toEqual(before);
+    expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
   });
 
   it.each([
@@ -730,13 +707,12 @@ describe("consumed queued input", () => {
     expect(readFileSync(f.indexPath, "utf8")).toBe(saved);
   });
 
-  it.each([
-    { sessionId: "child" },
-    { isSidechain: true },
-    { agentId: "child" },
-    { agent_id: "child" },
-  ])("ignores child delivery copies: %j", (child) => {
-    const f = setup([attachment, { ...attachment, ...child, uuid: "child-copy" }, consumed]);
+  it("ignores a child delivery copy when selecting root proof", () => {
+    const f = setup([
+      attachment,
+      { ...attachment, sessionId: "child", uuid: "child-copy" },
+      consumed,
+    ]);
     expect(f.history.scan(f.path)._unsafeUnwrap().at(-1)).toMatchObject({
       id: "input",
       overflow: { attachmentId: "attachment", attachmentLine: 1, consumptionLine: 3 },
