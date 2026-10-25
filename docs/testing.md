@@ -1805,3 +1805,11 @@ grid readiness; the new poll stays pending until release. CI's failing viewport 
 unrecorded: this establishes a mechanism, not exact attribution; the UI exception applies.
 Local official Chromium + WebKit pass (2/2). Ignored evidence:
 `.context/pr208-babysit/{e2e-2-first.log,usage-controlled-first.log,usage-controlled-poll-green.log,usage-scoped-green.log}`.
+
+## Broker credential fixture identity (2026-10-25)
+
+[CI 40198723431/job 121185111470](https://github.com/schani/pi-orb/actions/runs/40198723431/job/121185111470)
+exposed changing same-bearer fixture expiry. An advancing-clock RED reproduced the
+missing generation; a stable fixture grant passes unchanged diagnostics assertions.
+No product fix is claimed. Evidence: `.context/ci-second-failure/` and
+`docs/postmortems/2026-10-25-codex-fixture-grant-expiry.md`.
