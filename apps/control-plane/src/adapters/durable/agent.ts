@@ -345,7 +345,7 @@ export class DurableAgent implements AgentSessionFacade {
               ? fenceModels(models, options.checkAdmission, options.ownershipSignal)
               : models,
             registry: options.registry,
-            settings: { steeringMode: "all", followUpMode: "all" },
+            settings: { steeringMode: "all", followUpMode: "all", afterFailedRun: "continue" },
             env: (target) => options.envFor?.(target) ?? options.env,
             ...(options.now === undefined ? {} : { now: options.now }),
             onReport: (error, info) => {

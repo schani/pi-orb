@@ -101,39 +101,6 @@ index d28306e..27d7672 100644
          const kind = `${mimeType}, ${bytes.length} bytes`;
          // A failed write must not discard the result of a script whose calls already ran: it becomes part of the label.
          const saved = await write(`image-${index}${IMAGE_EXTENSIONS[mimeType] ?? ".bin"}`, bytes);
-diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/generation.js b/node_modules/@earendil-works/pi-durable/dist/harness/generation.js
-index d046232..14da10d 100644
---- a/node_modules/@earendil-works/pi-durable/dist/harness/generation.js
-+++ b/node_modules/@earendil-works/pi-durable/dist/harness/generation.js
-@@ -259,7 +259,7 @@ function compactionFailure(outcome) {
- /** Settle the run's inputs `unanswered` with `model_error` and fail with `text`. */
- async function failModelError(runtime, text, context) {
-     await runtime.commit(async (tx) => {
--        const failure = await prepareFailure(tx, runtime);
-+        const failure = await prepareFailure(tx, runtime, "continue");
-         const live = await tx.doc(LiveDoc, runtime.conversationId);
-         await endFailedRun(tx, runtime, live, failure, { status: "unanswered", reason: "model_error", detail: text });
-         return {
-@@ -278,9 +278,8 @@ async function failNoModel(runtime, ref, context) {
-         return { status: "terminal", outcome: { status: "failed", error: { message, detail: { reason: "no_model" } } } };
-     }, context);
- }
--async function prepareFailure(tx, runtime) {
-+async function prepareFailure(tx, runtime, policy = runtime.settings.afterFailedRun) {
-     const settings = runtime.settings;
--    const policy = settings.afterFailedRun;
-     if (policy !== "continue")
-         return { policy };
-     return { policy, boundary: await prepareBoundary(tx, runtime.conversationId, settings) };
-@@ -429,7 +428,7 @@ async function classify(runtime, request, message, context) {
-     const until = retry ? runtime.now() + retryDelayMs(policy, attempt) : 0;
-     await runtime.commit(async (tx) => {
-         // Read before the first table write; only a failure uses it.
--        const failure = retry ? undefined : await prepareFailure(tx, runtime);
-+        const failure = retry ? undefined : await prepareFailure(tx, runtime, "continue");
-         const live = await tx.doc(LiveDoc, conversationId);
-         await appendAssistant(tx, conversationId, message);
-         if (failure === undefined) {
 diff --git a/node_modules/@earendil-works/pi-durable/dist/harness/harness.js b/node_modules/@earendil-works/pi-durable/dist/harness/harness.js
 index 29ef22e..588370a 100644
 --- a/node_modules/@earendil-works/pi-durable/dist/harness/harness.js
