@@ -1,5 +1,13 @@
 # Testing
 
+## Never-ready Stop fixture synchronization (2026-10-25 PDT)
+
+[PR 211 checks attempt 1](https://github.com/schani/pi-orb/actions/runs/40163329243/job/121079249038), source `b8a63514`: original `stop-never-ready-1792903909493-12.json` replay reproduces the stopped-row/running-host assertion. Evidence: `.context/ci-first-failure/`; artifact `12587453839` SHA-256 `f662ae208b28a3a83601df6e1836c405435b9b79bd6a5f7335636843d8f6d164`.
+
+Stop beat the provision-reference CAS; the fixture omitted the orphan sweep responsible for lost-reference cleanup. Wait for the committed reference before testing drain skipping; existing `sweep-lost-host-ref` retains race recovery coverage. Unrelated to secrets/PostgreSQL; no product or timeout change.
+
+Corrected-premise replay diverges at record 35 (wait instead of Stop), not a passing original replay; renaming the wait also changes earlier trace labels. Fresh lifecycle/orphan DST passes **74 tests**. A discarded temporary probe wrongly required one sweep to succeed despite a simulated list deadline; its failed trace and reproducing replay are preserved separately. No production fix claimed; full exact-head hosted qualification remains required.
+
 ## Native PostgreSQL process-host acceptance (2026-10-24, PDT; undeployed)
 
 Implementation `4ca1f973` passed all **10 CI contexts**: [CI](https://github.com/schani/pi-orb/actions/runs/40142994229), [E2E](https://github.com/schani/pi-orb/actions/runs/40142994257), [Durable](https://github.com/schani/pi-orb/actions/runs/40142994228). Those receipts do not qualify the current documentation-only HEAD.
@@ -1797,3 +1805,11 @@ grid readiness; the new poll stays pending until release. CI's failing viewport 
 unrecorded: this establishes a mechanism, not exact attribution; the UI exception applies.
 Local official Chromium + WebKit pass (2/2). Ignored evidence:
 `.context/pr208-babysit/{e2e-2-first.log,usage-controlled-first.log,usage-controlled-poll-green.log,usage-scoped-green.log}`.
+
+## Broker credential fixture identity (2026-10-25)
+
+[CI 40198723431/job 121185111470](https://github.com/schani/pi-orb/actions/runs/40198723431/job/121185111470)
+exposed changing same-bearer fixture expiry. An advancing-clock RED reproduced the
+missing generation; a stable fixture grant passes unchanged diagnostics assertions.
+No product fix is claimed. Evidence: `.context/ci-second-failure/` and
+`docs/postmortems/2026-10-25-codex-fixture-grant-expiry.md`.

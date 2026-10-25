@@ -193,7 +193,9 @@ PUT    /api/v1/projects/:projectId/secrets/:name   { "value": string }
 DELETE /api/v1/projects/:projectId/secrets/:name
 ```
 
-`GET` returns only `{ revision, items: [{ name, updatedAt }] }`; it never returns a value or value-derived fingerprint. `PUT` creates or replaces one name and returns the same complete metadata snapshot, as does `DELETE`, so the Sealed card never needs a follow-up read. The UI always presents replacement as entering a new value—there is no reveal action. Names are validated against `[A-Za-z_][A-Za-z0-9_]*`; `PI_ORB_*`, `HOME`, `PATH`, and the broker/Tailscale names are reserved. Admitted coworkers may change project secrets under the company-wide resource-access policy in `docs/multi-user.md`.
+`GET` returns only `{ revision, items: [{ name, updatedAt }] }`; it never returns a value or value-derived fingerprint. `PUT` creates or replaces one name and returns the same complete metadata snapshot, as does `DELETE`, so the Sealed card never needs a follow-up read. The UI always presents replacement as entering a new value—there is no reveal action. Names are validated against `[A-Za-z_][A-Za-z0-9_]*`; `__proto__`, `PI_ORB_*`, `HOME`, `PATH`, and the broker/Tailscale names are reserved. Admitted coworkers may change project secrets under the company-wide resource-access policy in `docs/multi-user.md`.
+
+**Decision (2026-10-24 PDT):** Reject NUL values before publication and at control-plane/runtime snapshot boundaries: native environment assignment truncates them. Existing NUL values remain listable and replaceable/deletable. Other inherited names remain valid; deleting an absent name is a no-op.
 
 ### Runtime snapshot
 

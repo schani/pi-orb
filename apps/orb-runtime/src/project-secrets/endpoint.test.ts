@@ -38,6 +38,26 @@ describe("project-secret boot snapshot endpoint", () => {
     expect(authorizations.at(-1)).toBe("Bearer runtime-bearer");
   });
 
+  it.each([
+    JSON.parse('{"__proto__":"private-value"}'),
+    { TOKEN: "private-prefix\0private-suffix" },
+  ])("rejects unsafe snapshots terminally before environment use", async (values) => {
+    const request = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ revision: 1, values })));
+    onTestFinished(() => request.mockRestore());
+    const sleep = vi.fn();
+    const result = await fetchProjectSecretSnapshotAtBoot(env, { sleep });
+    expect(result._unsafeUnwrapErr()).toEqual({
+      type: "project_secret_fetch_error",
+      code: "invalid_response",
+      message: "malformed project secret snapshot",
+      retryable: false,
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
   it("retries bounded bootstrap authorization/schema races", async () => {
     let attempts = 0;
     const warming = createServer((_request, response) => {

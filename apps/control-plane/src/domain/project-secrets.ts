@@ -20,6 +20,7 @@ const MAX_ATTEMPTS = 12;
 const POINTER_CHANGED = "project secret pointer changed during mutation";
 const NAME = new RegExp(PROJECT_SECRET_NAME_PATTERN);
 const RESERVED = new Set([
+  "__proto__",
   "HOME",
   "PATH",
   "PI_ORB_RUNTIME_TOKEN",
@@ -125,6 +126,9 @@ export async function getProjectSecretSnapshot(
     ) {
       return err(corruption("project secret bundle identity does not match its pointer"));
     }
+    if (Object.values(payload.value.values).some((value) => value.includes("\0"))) {
+      return err(corruption("project secret bundle contains an invalid value"));
+    }
     return ok({ revision: payload.value.revision, values: { ...payload.value.values } });
   }
   return err(retryable("project secrets changed too frequently to read a stable snapshot"));
@@ -136,6 +140,9 @@ function validateInput(name: string, value: string): ProjectSecretError | null {
   }
   if (!allowedName(name)) {
     return { type: "project_secret_invalid", message: `${name} is reserved by pi-orb` };
+  }
+  if (value.includes("\0")) {
+    return { type: "project_secret_invalid", message: "secret value must not contain NUL" };
   }
   if (value.length === 0) {
     return { type: "project_secret_invalid", message: "secret value must not be empty" };
@@ -207,7 +214,8 @@ async function mutateProjectSecret(
       }
       return err(bundle.error);
     }
-    if (value === null && !(name in bundle.value.values)) return ok(metadata(current.value));
+    if (value === null && !Object.hasOwn(bundle.value.values, name))
+      return ok(metadata(current.value));
 
     const values = { ...bundle.value.values };
     if (value === null) delete values[name];

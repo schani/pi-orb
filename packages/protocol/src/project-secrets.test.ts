@@ -22,13 +22,22 @@ describe("project secrets protocol", () => {
         items: [{ name: "NPM_TOKEN", updatedAt: "2026-08-28T00:00:00.000Z", value: "leak" }],
       }),
     ).toBe(false);
-    expect(Check(PutProjectSecretRequestSchema, { value: "" })).toBe(false);
+    for (const value of ["", "private-prefix\0suffix"]) {
+      expect(Check(PutProjectSecretRequestSchema, { value })).toBe(false);
+    }
     expect(
-      Check(ProjectSecretSnapshotSchema, { revision: 2, values: { NPM_TOKEN: "secret" } }),
+      Check(ProjectSecretSnapshotSchema, {
+        revision: 2,
+        values: { constructor: "secret", toString: " snow\n雪 " },
+      }),
     ).toBe(true);
-    expect(
-      Check(ProjectSecretSnapshotSchema, { revision: 2, values: { "not-a-name": "secret" } }),
-    ).toBe(false);
+    for (const values of [
+      { "not-a-name": "secret" },
+      JSON.parse('{"__proto__":"private-value"}'),
+      { TOKEN: "private-prefix\0suffix" },
+    ]) {
+      expect(Check(ProjectSecretSnapshotSchema, { revision: 2, values })).toBe(false);
+    }
   });
 
   it("validates names and encodes browser paths", () => {
