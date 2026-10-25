@@ -108,7 +108,8 @@ function fixture(
       if (failStartup) return err({ message: "injected startup failure" });
       sdk = new ScheduledClaudeQuery(input, opts, false);
       Object.assign(sdk, {
-        interrupt: async () => undefined,
+        interrupt: async (options) =>
+          options?.cancelQueued ? { still_queued: [], cancelled: [] } : undefined,
         accountInfo: async () => {
           await accountBarrier;
           return account;
@@ -1051,7 +1052,9 @@ it("retains visible SDK error diagnostics across later success and history reope
   const errors = () =>
     f.history.view.filter(
       (record) =>
-        record.type === "event" && /claude\.(assistant|result)_error/.test(record.eventType),
+        record.type === "event" &&
+        record.custom?.display === true &&
+        /claude\.(assistant|result)_error/.test(record.eventType),
     );
   await emit({ ...assistant, parent_tool_use_id: "child" });
   await emit({ ...assistant, error: undefined });

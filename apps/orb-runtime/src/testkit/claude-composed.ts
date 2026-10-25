@@ -185,6 +185,7 @@ export class ScheduledClaudeQuery implements ClaudeQuery {
   readonly input: AsyncIterator<SDKUserMessage>;
   closeRequested = false;
   private outputEnded = false;
+  private outputError: unknown;
   private publicEnded = false;
   private wake = latch();
   private messages: { message: SDKMessage; consumed: ReturnType<typeof latch> }[] = [];
@@ -206,6 +207,8 @@ export class ScheduledClaudeQuery implements ClaudeQuery {
         entry.consumed.release();
       }
     }
+    // The SDK async-iterator contract reports transport failure by rejection after buffered output.
+    if (this.outputError !== undefined) throw this.outputError;
   }
   close() {
     this.publicEnded = true;
@@ -256,6 +259,10 @@ export class ScheduledClaudeQuery implements ClaudeQuery {
   }
   exit() {
     this.processExit.release();
+  }
+  failOutput(error: unknown) {
+    this.outputError = error;
+    this.endOutput();
   }
   endOutput() {
     this.outputEnded = true;

@@ -130,3 +130,58 @@ it("redacts complete credentials before summary, stack and stderr truncation bou
   expect(captured.diagnostics).toContain("stderr:\nacted]");
   expect(JSON.stringify(captured)).not.toContain("opaque");
 });
+
+it.each([
+  {
+    errorClass: "process_exited_nonzero",
+    exitCode: 1,
+    observedCode: 1,
+    signal: null,
+    accepted: true,
+  },
+  {
+    errorClass: "error_result",
+    exitCode: undefined,
+    observedCode: 1,
+    signal: null,
+    accepted: true,
+  },
+  {
+    errorClass: "error_result",
+    exitCode: undefined,
+    observedCode: 2,
+    signal: null,
+    accepted: false,
+  },
+  {
+    errorClass: "error_result",
+    exitCode: undefined,
+    observedCode: null,
+    signal: "SIGTERM",
+    accepted: false,
+  },
+  {
+    errorClass: "process_exited_nonzero",
+    exitCode: 2,
+    observedCode: 1,
+    signal: null,
+    accepted: false,
+  },
+  {
+    errorClass: "process_killed_by_signal",
+    exitCode: 1,
+    observedCode: 1,
+    signal: null,
+    accepted: false,
+  },
+])(
+  "recognizes failed-result exit only from typed SDK error plus observed process status: $errorClass/$exitCode/$observedCode/$signal",
+  ({ errorClass, exitCode, observedCode, signal, accepted }) => {
+    const diagnostics = new ClaudeDiagnostics([]);
+    const error = Object.assign(new Error("arbitrary text"), { errorClass, exitCode });
+    expect(diagnostics.isFailedResultExit(error)).toBe(false);
+    diagnostics.exited(observedCode, signal);
+    expect(diagnostics.isFailedResultExit(error)).toBe(accepted);
+    expect(diagnostics.isFailedResultExit(Object.assign(error, { signal: "SIGKILL" }))).toBe(false);
+  },
+);

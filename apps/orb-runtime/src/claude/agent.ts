@@ -183,13 +183,15 @@ export interface ClaudeQueryProcess {
 export type ClaudeQuery = Pick<
   Query,
   | "close"
-  | "interrupt"
   | "supportedModels"
   | "accountInfo"
   | "setModel"
   | "applyFlagSettings"
   | typeof Symbol.asyncIterator
->;
+> & {
+  // SDK 0.3.310 accepts this option but omits it from Query's declaration.
+  interrupt(options?: { cancelQueued?: boolean }): ReturnType<Query["interrupt"]>;
+};
 interface Delivery {
   uuid: string;
   operationId: string;
@@ -299,6 +301,15 @@ export class ClaudeOrbAgent implements OrbAgent {
   private settings: AgentSettingsEvent | null = null;
   private nativeModels: ModelInfo[] = [];
   private outcome: "completed" | "aborted" | "failed" = "completed";
+  private failureCancellation: {
+    queryId: string;
+    operationId: string;
+    resultId: string | null;
+    subtype: string;
+    isError: boolean;
+    confirmed: boolean;
+  } | null = null;
+  private cancellingFailure: Promise<void> | null = null;
   private operationError: string | undefined;
   private readonly blocks = new Map<
     string,
@@ -964,6 +975,8 @@ export class ClaudeOrbAgent implements OrbAgent {
     const input = new InputQueue();
     this.input = input;
     this.queryId = randomUUID();
+    this.failureCancellation = null;
+    this.cancellingFailure = null;
     this.passiveContextUuids.clear();
     this.lastRootResult = null;
     this.rotationRootWork = null;
@@ -1277,8 +1290,8 @@ export class ClaudeOrbAgent implements OrbAgent {
           stage = "sdk_iteration";
         }
       },
-      (error) =>
-        diagnostics.capture(
+      (error) => ({
+        ...diagnostics.capture(
           error,
           JSON.stringify({
             stage,
@@ -1287,6 +1300,8 @@ export class ClaudeOrbAgent implements OrbAgent {
             operationId: this.activity.operationId,
           }),
         ),
+        failedResultExit: diagnostics.isFailedResultExit(error),
+      }),
     )();
     if (this.queryId !== queryId || this.sdk !== sdk) return;
     if (
@@ -1294,6 +1309,15 @@ export class ClaudeOrbAgent implements OrbAgent {
       this.compaction !== null &&
       this.outcome === "aborted" &&
       this.queryAbort?.signal.aborted
+    ) {
+      this.activity.rootFinished();
+    } else if (
+      result.isErr() &&
+      result.error.failedResultExit &&
+      stage === "sdk_iteration" &&
+      this.failureCancellation?.confirmed === true &&
+      this.failureCancellation.queryId === queryId &&
+      this.closing !== null
     ) {
       this.activity.rootFinished();
     } else if (result.isErr()) {
@@ -1319,8 +1343,12 @@ export class ClaudeOrbAgent implements OrbAgent {
       path === null ? ok([]) : readWorkflowChildTerminals(path, ids, this.files),
     );
   }
-  private reconcileWorkflowChildren(): Result<void, { message: string }> {
-    if (this.closing !== null || this.state === null || this.activity.operationId === null)
+  private reconcileWorkflowChildren(afterDrain = false): Result<void, { message: string }> {
+    if (
+      (this.closing !== null && !afterDrain) ||
+      this.state === null ||
+      this.activity.operationId === null
+    )
       return ok(undefined);
     const ids = Object.keys(this.state.ownedChildren ?? {}).filter(
       (id) => this.workflowAdmissions.get(id) != null,
@@ -1667,11 +1695,16 @@ export class ClaudeOrbAgent implements OrbAgent {
           return;
         }
       }
+      const failedResult = message.is_error || message.subtype !== "success";
+      if (failedResult && this.outcome !== "aborted") {
+        this.outcome = "failed";
+        this.operationError ??= "Claude turn failed.";
+      }
       const previousHandoffs = Object.keys(this.state?.pendingHandoffs ?? {}).sort();
       let completedHandoffs: string[] = [];
       if (this.closing === null) {
         if (this.pendingSteers.size === 0 && (message.queued_turn_count ?? 0) === 0)
-          completedHandoffs = this.activity.rootFinished(message.num_turns > 0);
+          completedHandoffs = this.activity.rootFinished(!failedResult && message.num_turns > 0);
         else this.activity.rootStarted();
         if (previousHandoffs.length > 0) {
           const recorded = this.platformEvent(
@@ -1720,10 +1753,16 @@ export class ClaudeOrbAgent implements OrbAgent {
         if (saved.isErr()) this.fail("claude_handoff_guard_failed", saved.error.message);
         this.publishChildren();
       }
-      if (message.is_error && this.outcome !== "aborted") {
-        this.outcome = "failed";
-        this.operationError = "Claude turn failed.";
-      }
+      if (
+        failedResult &&
+        this.outcome !== "aborted" &&
+        this.pendingSteers.size === 0 &&
+        (message.queued_turn_count ?? 0) === 0 &&
+        this.compaction === null &&
+        this.closing === null &&
+        this.health.status === "ready"
+      )
+        this.cancelFailedOperation(message);
     }
     if (message.type === "system" && message.subtype === "background_tasks_changed") {
       const tasks = message.tasks
@@ -1763,7 +1802,69 @@ export class ClaudeOrbAgent implements OrbAgent {
         return;
       }
     }
-    if (this.activity.canDrain && this.closing === null) void this.drainOperation();
+    if (this.activity.canDrain && this.closing === null && this.failureCancellation === null)
+      void this.drainOperation();
+  }
+  private cancelFailedOperation(message: Extract<SDKMessage, { type: "result" }>): void {
+    const operationId = this.activity.operationId;
+    const sdk = this.sdk;
+    if (this.failureCancellation !== null || operationId === null || sdk === null) return;
+    const cancellation = {
+      queryId: this.queryId,
+      operationId,
+      resultId: message.uuid ?? null,
+      subtype: message.subtype,
+      isError: message.is_error,
+      confirmed: false,
+    };
+    this.failureCancellation = cancellation;
+    this.queryReady = false;
+    this.activity.cancel();
+    this.publishChildren();
+    const recorded = this.platformEvent(
+      "claude.result_error",
+      "Failed-result query cancellation requested.",
+      { ...cancellation, cancellation: "requested" },
+      `claude.failure-cancellation:${this.queryId}:${message.uuid ?? operationId}`,
+      false,
+    );
+    if (recorded.isErr()) {
+      this.fail("history_unavailable", recorded.error.message);
+      void this.drainOperation();
+      return;
+    }
+    this.cancellingFailure = ResultAsync.fromThrowable(
+      () => sdk.interrupt({ cancelQueued: true }),
+      () => ({ message: "Claude failed-result cancellation could not be confirmed." }),
+    )()
+      .andThen((receipt) =>
+        Array.isArray(receipt?.cancelled) &&
+        Array.isArray(receipt.still_queued) &&
+        receipt.still_queued.length === 0
+          ? ok(undefined)
+          : err({ message: "Claude failed-result cancellation could not be confirmed." }),
+      )
+      .match(
+        async () => {
+          cancellation.confirmed = true;
+          this.activity.rootFinished();
+          await this.drainOperation();
+        },
+        async (error) => {
+          const failure = this.platformEvent(
+            "claude.result_error",
+            error.message,
+            { ...cancellation, cancellation: "failed" },
+            `claude.failure-cancellation-failed:${cancellation.queryId}`,
+          );
+          this.fail(
+            failure.isErr() ? "history_unavailable" : "claude_failure_cancellation_failed",
+            failure.isErr() ? failure.error.message : error.message,
+          );
+          await this.drainOperation();
+        },
+      )
+      .then(() => undefined);
   }
   private publishChildren(): void {
     if (this.activity.operationId !== null)
@@ -1808,11 +1909,7 @@ export class ClaudeOrbAgent implements OrbAgent {
       this.fail("history_unavailable", flushed.error.message);
       return;
     }
-    if (
-      this.operationError ===
-        "Native work started during query rotation; the session was stopped." &&
-      this.health.status !== "failed"
-    ) {
+    if (this.rotationRootWork !== null && this.health.status !== "failed") {
       const message =
         "Native root work raced query shutdown; inspect the retained session before recovery.";
       this.fail("claude_rotation_uncertain", message);
@@ -1883,6 +1980,12 @@ export class ClaudeOrbAgent implements OrbAgent {
       {
         operationId,
         outcome: this.outcome,
+        ...(this.failureCancellation === null
+          ? {}
+          : {
+              cancellation: "drained",
+              causeResultId: this.failureCancellation.resultId,
+            }),
         ...(compaction === null ? {} : { work: "compaction" }),
       },
       `claude.operation:${operationId}`,
@@ -1961,8 +2064,19 @@ export class ClaudeOrbAgent implements OrbAgent {
         this.health.status !== "failed" &&
         stdout.isOk() &&
         requested?.isErr() !== true &&
-        closed.isOk()
+        closed.isOk() &&
+        this.rotationRootWork === null
       ) {
+        const workflows = this.reconcileWorkflowChildren(true);
+        if (workflows.isErr()) {
+          this.fail("claude_workflow_child_terminal_failed", workflows.error.message);
+          return;
+        }
+        const interrupted = this.interruptFailedHandoffs();
+        if (interrupted.isErr()) {
+          this.fail("claude_handoff_recovery_failed", interrupted.error.message);
+          return;
+        }
         const handoffs = this.reconcileHandoffs();
         if (handoffs.isErr()) {
           this.fail("claude_handoff_recovery_failed", handoffs.error.message);
@@ -1978,6 +2092,46 @@ export class ClaudeOrbAgent implements OrbAgent {
       }
     });
     return this.closing;
+  }
+  private interruptFailedHandoffs(): Result<void, { message: string }> {
+    const cancellation = this.failureCancellation;
+    const state = this.state;
+    if (cancellation?.confirmed !== true || cancellation.queryId !== this.queryId || state === null)
+      return ok(undefined);
+    for (const taskId of Object.keys(state.pendingHandoffs ?? {}).sort()) {
+      const recorded = this.platformEvent(
+        "claude.handoff_interrupted",
+        "Task continuation interrupted after a failed Claude result.",
+        {
+          queryId: cancellation.queryId,
+          operationId: cancellation.operationId,
+          resultId: cancellation.resultId,
+          taskId,
+          reason: "failed_result",
+          disposition: "interrupted",
+          automaticReplay: false,
+        },
+        `claude.failed-handoff:${cancellation.queryId}:${taskId}`,
+      );
+      if (recorded.isErr()) return err(recorded.error);
+      const pending = state.pendingHandoffs;
+      const terminals = state.handoffTerminals;
+      state.pendingHandoffs = { ...pending };
+      state.handoffTerminals = { ...terminals };
+      delete state.pendingHandoffs[taskId];
+      delete state.handoffTerminals[taskId];
+      const saved = this.saveState();
+      if (saved.isErr()) {
+        if (pending === undefined) delete state.pendingHandoffs;
+        else state.pendingHandoffs = pending;
+        if (terminals === undefined) delete state.handoffTerminals;
+        else state.handoffTerminals = terminals;
+        return err(saved.error);
+      }
+      this.activity.handoffInterrupted(taskId);
+    }
+    this.publishChildren();
+    return ok(undefined);
   }
   private reconcileHandoffs(): Result<string[], HandoffRecoveryError> {
     if (this.state === null || this.history === null) return ok([]);
@@ -2137,7 +2291,8 @@ export class ClaudeOrbAgent implements OrbAgent {
     }
     const flushed = this.flushHistory();
     if (flushed.isErr()) return err({ type: "snapshot_error", message: flushed.error.message });
-    if (this.activity.canDrain && this.closing === null) void this.drainOperation();
+    if (this.activity.canDrain && this.closing === null && this.failureCancellation === null)
+      void this.drainOperation();
     return ok({
       orbId: this.options.orbId,
       runtimeInstanceId: this.runtimeInstanceId,
@@ -2483,6 +2638,12 @@ export class ClaudeOrbAgent implements OrbAgent {
     this.activity.cancel();
     this.outcome = "aborted";
     this.publishChildren();
+    if (this.cancellingFailure !== null)
+      return ResultAsync.fromSafePromise(this.cancellingFailure).andThen(() =>
+        this.health.status === "failed"
+          ? err({ message: this.health.error.message })
+          : ok(undefined),
+      );
     const compaction = this.compaction;
     if (compaction !== null) this.queryAbort?.abort();
     const sdk = this.sdk;
