@@ -14,35 +14,15 @@ const packages = [
     package: "node_modules/@earendil-works/pi-ai",
     version: "1.4.0",
     patch: "@earendil-works+pi-ai+1.4.0.patch",
-    sha: "2f29dcf0d8b9931bfc1a16360ac48686b642fd5ce335731d33ef7755d9e48e44",
+    sha: "a6b44d4207768ed1479a7eef0b25402e241763f5a8265098937d42adb702002e",
     files: {
       "node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js": [
         "339c75c5799ec3baca669114e3779988f819a5479e2b2c43dfa0b0f05b921c92",
         "51051cce5f9ea3b8f896687c0a1a993f253fd890bc7457b441ebddd54fbb3233",
       ],
-      "node_modules/@earendil-works/pi-ai/dist/auth/resolve.js": [
-        "3fcec09018831324d9c7fb02f4aea707e8a9e4fec5a2bdf1b3d84d716fd3091e",
-        "e1b7e3e1559bda8d31e29a7f87e3525f0da07fb07b70dea560cc5920733adbed",
-      ],
       "node_modules/@earendil-works/pi-ai/dist/types.d.ts": [
         "9348589a0c88c61e78e8575539cec4bf4e4fba8bf9029d3535ddeae07cb1c696",
         "0f5d7002f927971e100157d63343c3e32ef25a2b2ec385e6c1433883f75593bf",
-      ],
-    },
-  },
-  {
-    package: "node_modules/@earendil-works/pi-coding-agent",
-    version: "1.4.0",
-    patch: "@earendil-works+pi-coding-agent+1.4.0.patch",
-    sha: "6f0b5e53c1bd021892743b9da101bf32847b8d6423edcf706e65b0165365f381",
-    files: {
-      "node_modules/@earendil-works/pi-coding-agent/dist/core/model-runtime.js": [
-        "44d8017928eff6721d5a56b4e71f98bcafb124f5aa6e7d3f016491e11fcf6461",
-        "9a0f482d3c0443fb91a44b0ab6caa6f700b3443822ce85332ce2ef65f92cf9d0",
-      ],
-      "node_modules/@earendil-works/pi-coding-agent/dist/core/provider-composer.d.ts": [
-        "8b6c292d4e346cb2a45186f2b3784102aa9fa5b5bd2096ef6ec4bbb235ddb504",
-        "c27061ce1ffe9371ef68a2a29397a393e6e39d9c40975d61d78ad0d541330086",
       ],
     },
   },
