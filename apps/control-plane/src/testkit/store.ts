@@ -57,70 +57,6 @@ const BOOT_CONTEXT_STATES: readonly OrbState[] = [
   "archiving",
 ];
 
-export type StoreOperation = Exclude<keyof ControlPlaneStore, "uploads">;
-
-export const STORE_OPERATIONS = {
-  readActivityHeadline: true,
-  readActivityHeadlines: true,
-  putActivityHeadlineIfAbsent: true,
-  getProject: true,
-  listProjects: true,
-  listProjectsByOwner: true,
-  listProjectsInState: true,
-  insertProject: true,
-  updateProject: true,
-  requestProjectDeletion: true,
-  getProjectDeletionProgress: true,
-  finalizeProjectDeletion: true,
-  getOrb: true,
-  getOrbByRuntimeTokenHash: true,
-  listOrbsByProject: true,
-  listOrbsInStates: true,
-  insertOrb: true,
-  getSpawnCaller: true,
-  listSpawnChildren: true,
-  spawnOrb: true,
-  setOrbName: true,
-  claimOrbAutoName: true,
-  failOrbAutoName: true,
-  enqueueOrbMessage: true,
-  listOrbMessages: true,
-  pollOrbMessages: true,
-  scheduleOrbSleep: true,
-  cancelOrbSleep: true,
-  processDueOrbSleep: true,
-  readOrbBootContext: true,
-  claimOrbMessageBacklog: true,
-  claimNextOrbMessageBatch: true,
-  noteOrbMessageDelivery: true,
-  cancelPendingOrbMessage: true,
-  failOrbMessageBatch: true,
-  requestOrbStop: true,
-  casStartOrbForQueuedMessage: true,
-  requestOrbArchive: true,
-  sealOrbArchive: true,
-  finalizeOrbArchive: true,
-  requestOrbDeletion: true,
-  getOrbDeletion: true,
-  recordOrbDeletionError: true,
-  finalizeOrbDeletion: true,
-  failOrbAndRequestComputeDiscard: true,
-  recordHostDiscardStatus: true,
-  finalizeHostDiscard: true,
-  requestHostSpecReplacement: true,
-  casTransition: true,
-  casUpdateFields: true,
-  touchLastBusy: true,
-  claimMintSlot: true,
-  casReenterState: true,
-  ackOrbAlert: true,
-  commitPullBatch: true,
-  initOrVerifySession: true,
-  readHistoryRecord: true,
-  searchHistory: true,
-  readHistorySnapshot: true,
-} satisfies Record<StoreOperation, true>;
-
 interface OrbReplica {
   records: Map<string, HistoryRecord>;
   order: string[];
@@ -310,7 +246,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   private hostDiscardFinalizeFailures = 0;
   /** External replacement provision landed, but committing its ref/token fails. */
   private hostReplacementCommitFailures = 0;
-  private readonly operationFaults = new Map<StoreOperation, StoreError>();
+  readonly observedBoundaries = new Set<string>();
+  private readonly operationFaults = new Map<string, StoreError>();
   /** Gate the next `noteOrbMessageDelivery` until this predicate holds. */
   private noteDeliveryHold: (() => boolean) | null = null;
   private readonly maxLatencyMs: number;
@@ -387,14 +324,14 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
    * Make `operation` fail with an `invariant` store error for the rest of the
    * run: the shape of a wrong-SQL/wrong-parameter bug, which no retry can survive.
    */
-  failWithInvariant(operation: StoreOperation): void {
+  failWithInvariant(operation: string): void {
     this.setOperationFault(
       operation,
-      invariant(operation + ": parameter $3 is a bare JavaScript array"),
+      invariant(`${operation}: parameter $3 is a bare JavaScript array`),
     );
   }
 
-  setOperationFault(operation: StoreOperation, fault: StoreError | null): void {
+  setOperationFault(operation: string, fault: StoreError | null): void {
     if (fault === null) this.operationFaults.delete(operation);
     else this.operationFaults.set(operation, fault);
   }
@@ -423,8 +360,11 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     });
   }
 
-  private injectedFault(task: SimulationTask, fault: StoreError): ResultAsync<never, StoreError> {
-    return ResultAsync.fromPromise(task.checkpoint("store operation fault", fault.code), (error) =>
+  private boundary(task: SimulationTask, reason: string): ResultAsync<void, StoreError> {
+    this.observedBoundaries.add(reason);
+    const fault = this.operationFaults.get(reason);
+    if (fault === undefined) return okAsync(undefined);
+    return ResultAsync.fromPromise(task.checkpoint("store fault", reason), (error) =>
       task.abortSimulation(error),
     ).andThen(() => errAsync(fault));
   }
@@ -440,13 +380,12 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       await task.failpoint(failpoint, reason);
       return f();
     };
-    return ResultAsync.fromPromise(run(), (error) => {
-      if (error instanceof ApplicationFailure) {
-        const fault = unavailable(`${reason}: ${error.message}`);
-        return fault;
-      }
-      return task.abortSimulation(error);
-    });
+    return this.boundary(task, reason).andThen(() =>
+      ResultAsync.fromPromise(run(), (error) => {
+        if (error instanceof ApplicationFailure) return unavailable(`${reason}: ${error.message}`);
+        return task.abortSimulation(error);
+      }),
+    );
   }
 
   /** Deterministic gate for a scripted hold; a no-op when nothing is held. */
@@ -488,8 +427,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     ref: ActivityHeadlineRef,
   ): ResultAsync<StoredActivityHeadline | null, StoreError> {
-    const fault = this.operationFaults.get("readActivityHeadline");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeRead, "read activity headline", () => {
       const value = this.activityHeadlines.get(this.activityHeadlineKey(ref));
       return value ? { ...value } : null;
@@ -501,8 +438,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     orbId: string,
     sessionId: string,
   ): ResultAsync<StoredActivityHeadline[], StoreError> {
-    const fault = this.operationFaults.get("readActivityHeadlines");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeRead, "read activity headlines", () =>
       [...this.activityHeadlines.values()]
         .filter((value) => value.orbId === orbId && value.sessionId === sessionId)
@@ -514,8 +449,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     value: StoredActivityHeadline,
   ): ResultAsync<StoredActivityHeadline | null, StoreError> {
-    const fault = this.operationFaults.get("putActivityHeadlineIfAbsent");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "put activity headline if absent", () => {
       const orb = this.orbs.get(value.orbId);
       if (
@@ -534,16 +467,12 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   }
 
   getProject(task: SimulationTask, projectId: string): ResultAsync<ProjectRow | null, StoreError> {
-    const fault = this.operationFaults.get("getProject");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeRead, "get project", () => {
       return this.projects.get(projectId) ?? null;
     });
   }
 
   listProjects(task: SimulationTask): ResultAsync<ProjectRow[], StoreError> {
-    const fault = this.operationFaults.get("listProjects");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeRead, "list projects", () => [
       ...this.projects.values(),
     ]);
@@ -553,8 +482,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     ownerUserId: string,
   ): ResultAsync<ProjectRow[], StoreError> {
-    const fault = this.operationFaults.get("listProjectsByOwner");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeRead, "list projects by owner", () =>
       [...this.projects.values()].filter((project) => project.ownerUserId === ownerUserId),
     );
@@ -564,16 +491,12 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     state: "deleting",
   ): ResultAsync<ProjectRow[], StoreError> {
-    const fault = this.operationFaults.get("listProjectsInState");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeRead, "list deleting projects", () =>
       [...this.projects.values()].filter((project) => project.state === state),
     );
   }
 
   insertProject(task: SimulationTask, project: ProjectRow) {
-    const fault = this.operationFaults.get("insertProject");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "insert project", () => {
       const existing = this.projects.get(project.id);
       if (existing !== undefined)
@@ -607,8 +530,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: { projectId: string; name: string; repositoryUrl: string | null; now: number },
   ) {
-    const fault = this.operationFaults.get("updateProject");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "update project", () => {
       const project = this.projects.get(params.projectId);
       if (project === undefined || project.state !== "active") return { kind: "missing" as const };
@@ -643,8 +564,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     { project: ProjectRow; orbs: OrbRow[]; newlyRequested: boolean; repaired: number },
     StoreError | ProjectConflict
   > {
-    const fault = this.operationFaults.get("requestProjectDeletion");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "request project deletion", () => {
       const project = this.projects.get(params.projectId);
       if (project === undefined) return { conflict: "not_found" as const };
@@ -731,8 +650,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     projectId: string,
   ): ResultAsync<import("../domain/orb.ts").ProjectDeletionProgress, StoreError | ProjectConflict> {
-    const fault = this.operationFaults.get("getProjectDeletionProgress");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeRead, "get project deletion progress", () => {
       const project = this.projects.get(projectId);
       if (project === undefined) return { conflict: "not_found" as const };
@@ -757,8 +674,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: { projectId: string; expectedStateVersion: number },
   ): ResultAsync<void, StoreError | ProjectConflict> {
-    const fault = this.operationFaults.get("finalizeProjectDeletion");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "finalize project deletion", () => {
       const project = this.projects.get(params.projectId);
       if (project === undefined) return { conflict: null };
@@ -781,8 +696,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   }
 
   getOrb(task: SimulationTask, orbId: string): ResultAsync<OrbRow | null, StoreError> {
-    const fault = this.operationFaults.get("getOrb");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeRead, "get orb", () => this.orbs.get(orbId) ?? null);
   }
 
@@ -790,8 +703,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     tokenHash: string,
   ): ResultAsync<OrbRow | null, StoreError> {
-    const fault = this.operationFaults.get("getOrbByRuntimeTokenHash");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeRead, "get orb by token hash", () => {
       for (const orb of this.orbs.values()) {
         if (orb.runtimeTokenHash === tokenHash) return orb;
@@ -804,8 +715,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     projectId: string,
   ): ResultAsync<OrbListRow[], StoreError> {
-    const fault = this.operationFaults.get("listOrbsByProject");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeRead, "list orbs by project", () =>
       [...this.orbs.values()]
         .filter((orb) => orb.projectId === projectId)
@@ -823,16 +732,12 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     states: readonly OrbState[],
   ): ResultAsync<OrbRow[], StoreError> {
-    const fault = this.operationFaults.get("listOrbsInStates");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeRead, "list orbs in states", () =>
       [...this.orbs.values()].filter((orb) => states.includes(orb.state)),
     );
   }
 
   insertOrb(task: SimulationTask, orb: OrbRow): ResultAsync<OrbRow, StoreError | ProjectConflict> {
-    const fault = this.operationFaults.get("insertOrb");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "insert orb", () => {
       const project = this.projects.get(orb.projectId);
       if (project === undefined) return { conflict: "not_found" as const };
@@ -848,8 +753,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   }
 
   getSpawnCaller(task: SimulationTask, orbId: string): ResultAsync<string | null, StoreError> {
-    const fault = this.operationFaults.get("getSpawnCaller");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(
       task,
       FAILPOINTS.storeRead,
@@ -862,8 +765,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     callerOrbId: string,
   ): ResultAsync<Pick<OrbRow, "id" | "name">[], StoreError> {
-    const fault = this.operationFaults.get("listSpawnChildren");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeRead, "list spawn children", () =>
       [...this.orbs.values()]
         .filter((orb) => this.spawns.get(orb.id)?.callerOrbId === callerOrbId)
@@ -876,8 +777,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: SpawnOrbParams,
   ): ResultAsync<{ duplicate: boolean }, StoreError | SpawnConflict> {
-    const fault = this.operationFaults.get("spawnOrb");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "spawn orb", () => {
       const caller = this.orbs.get(params.callerOrbId);
       if (
@@ -951,8 +850,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: { orbId: string; name: string; now: number; onlyIfNull: boolean },
   ): ResultAsync<OrbRow | null, StoreError> {
-    const fault = this.operationFaults.get("setOrbName");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "set orb name", () => {
       const orb = this.orbs.get(params.orbId);
       if (
@@ -978,8 +875,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: { orbId: string; now: number; leaseUntil: number },
   ): ResultAsync<"claimed" | "already_named" | "in_progress" | "backoff", StoreError> {
-    const fault = this.operationFaults.get("claimOrbAutoName");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "claim orb auto name", () => {
       const orb = this.orbs.get(params.orbId);
       if (
@@ -1008,8 +903,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: { orbId: string; now: number; nextAttemptAt: number },
   ): ResultAsync<void, StoreError> {
-    const fault = this.operationFaults.get("failOrbAutoName");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "fail orb auto name", () => {
       const orb = this.orbs.get(params.orbId);
       if (
@@ -1036,8 +929,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     { message: OrbMessageRow; orb: OrbRow; duplicate: boolean },
     StoreError | StateConflict | OrbMessageTargetNotFound
   > {
-    const fault = this.operationFaults.get("enqueueOrbMessage");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     const targetId = params.orbId.toLowerCase();
     return this.access(task, FAILPOINTS.storeWrite, "enqueue orb message", () => {
       const sender = params.sender;
@@ -1134,8 +1025,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   }
 
   listOrbMessages(task: SimulationTask, orbId: string): ResultAsync<OrbMessageRow[], StoreError> {
-    const fault = this.operationFaults.get("listOrbMessages");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeRead, "list orb messages", () => [
       ...(this.messages.get(orbId) ?? []),
     ]);
@@ -1146,8 +1035,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     orbId: string,
     selector: { afterOrdinal: number; trackedIds: readonly string[] },
   ): ResultAsync<OrbMessagePoll, StoreError> {
-    const fault = this.operationFaults.get("pollOrbMessages");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeRead, "poll orb messages", () => {
       const rows = (this.messages.get(orbId) ?? []).filter(
         (row) => row.ordinal > selector.afterOrdinal || selector.trackedIds.includes(row.messageId),
@@ -1205,8 +1092,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       durationSeconds: number;
     },
   ) {
-    const fault = this.operationFaults.get("scheduleOrbSleep");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "schedule orb sleep", () => {
       const now = task.wallNow();
       const sleepUntil = now + params.durationSeconds * 1_000;
@@ -1237,8 +1122,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: { orbId: string; expectedStateVersion: number; now: number },
   ) {
-    const fault = this.operationFaults.get("cancelOrbSleep");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "cancel orb sleep", () => {
       const orb = this.orbs.get(params.orbId);
       if (orb === undefined || orb.stateVersion !== params.expectedStateVersion) return null;
@@ -1263,8 +1146,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: { orbId: string; sleepId: string; expectedStateVersion: number; now: number },
   ) {
-    const fault = this.operationFaults.get("processDueOrbSleep");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "process due orb sleep", () => {
       const orb = this.orbs.get(params.orbId);
       if (
@@ -1322,8 +1203,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: { orbId: string; caller: { runtimeTokenHash: string; hostIncarnation: number } },
   ) {
-    const fault = this.operationFaults.get("readOrbBootContext");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "read orb boot context", () => {
       const orb = this.orbs.get(params.orbId);
       if (
@@ -1356,14 +1235,10 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   }
 
   claimOrbMessageBacklog(task: SimulationTask, params: { orbId: string; now: number }) {
-    const fault = this.operationFaults.get("claimOrbMessageBacklog");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.claimOrbMessages(task, params, true);
   }
 
   claimNextOrbMessageBatch(task: SimulationTask, params: { orbId: string; now: number }) {
-    const fault = this.operationFaults.get("claimNextOrbMessageBatch");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.claimOrbMessages(task, params, false);
   }
 
@@ -1434,8 +1309,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       now: number;
     },
   ): ResultAsync<void, StoreError> {
-    const fault = this.operationFaults.get("noteOrbMessageDelivery");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     const hold = this.noteDeliveryHold;
     this.noteDeliveryHold = null;
     return this.holdUntil(task, hold, "note orb message delivery hold").andThen(() =>
@@ -1476,8 +1349,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       now: number;
     },
   ): ResultAsync<"cancelled" | "active" | "missing", StoreError | StateConflict> {
-    const fault = this.operationFaults.get("cancelPendingOrbMessage");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "cancel pending orb message", () => {
       const orb = this.orbs.get(params.orbId);
       if (
@@ -1533,8 +1404,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       now: number;
     },
   ): ResultAsync<void, StoreError> {
-    const fault = this.operationFaults.get("failOrbMessageBatch");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "fail orb message batch", () => {
       const messageIds = new Set(params.messageIds);
       const rows = this.messages.get(params.orbId) ?? [];
@@ -1561,8 +1430,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: { orbId: string; expectedStateVersion: number; now: number },
   ) {
-    const fault = this.operationFaults.get("requestOrbStop");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeClearMessageAutoStart, "request orb stop", () => {
       if (this.clearAutoStartFailures > 0) {
         this.clearAutoStartFailures -= 1;
@@ -1617,8 +1484,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: { orbId: string; expectedStateVersion: number; now: number },
   ): ResultAsync<OrbRow | null, StoreError | StateConflict> {
-    const fault = this.operationFaults.get("casStartOrbForQueuedMessage");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "start orb for queued message", () => {
       const orb = this.orbs.get(params.orbId);
       if (
@@ -1672,8 +1537,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: RequestOrbArchiveParams,
   ): ResultAsync<OrbRow, StoreError | StateConflict> {
-    const fault = this.operationFaults.get("requestOrbArchive");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "request orb archive", () => {
       const orb = this.orbs.get(params.orbId);
       if (
@@ -1731,8 +1594,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       headId: string | null;
     },
   ): ResultAsync<void, StoreError | StateConflict> {
-    const fault = this.operationFaults.get("sealOrbArchive");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "seal orb archive", () => {
       const orb = this.orbs.get(params.orbId);
       const intent = this.deletions.get(params.orbId);
@@ -1766,8 +1627,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: { orbId: string; expectedStateVersion: number; now: number },
   ): ResultAsync<OrbRow, StoreError | StateConflict> {
-    const fault = this.operationFaults.get("finalizeOrbArchive");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "finalize orb archive", () => {
       const orb = this.orbs.get(params.orbId);
       const intent = this.deletions.get(params.orbId);
@@ -1812,8 +1671,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: RequestOrbDeletionParams,
   ): ResultAsync<OrbRow, StoreError | StateConflict> {
-    const fault = this.operationFaults.get("requestOrbDeletion");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "request orb deletion", () => {
       const orb = this.orbs.get(params.orbId);
       if (
@@ -1864,8 +1721,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     orbId: string,
   ): ResultAsync<OrbDeletionRow | null, StoreError> {
-    const fault = this.operationFaults.get("getOrbDeletion");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(
       task,
       FAILPOINTS.storeRead,
@@ -1878,8 +1733,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: { orbId: string; message: string | null; now: number },
   ): ResultAsync<void, StoreError> {
-    const fault = this.operationFaults.get("recordOrbDeletionError");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "record orb deletion error", () => {
       const deletion = this.deletions.get(params.orbId);
       if (deletion !== undefined) {
@@ -1904,8 +1757,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: { orbId: string; expectedStateVersion: number },
   ): ResultAsync<void, StoreError | StateConflict> {
-    const fault = this.operationFaults.get("finalizeOrbDeletion");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "finalize orb deletion", () => {
       const orb = this.orbs.get(params.orbId);
       if (
@@ -1935,8 +1786,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: FailOrbAndRequestComputeDiscardParams,
   ): ResultAsync<OrbRow, StoreError | StateConflict> {
-    const fault = this.operationFaults.get("failOrbAndRequestComputeDiscard");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "fail orb and request compute discard", () => {
       const orb = this.orbs.get(params.orbId);
       if (orb === undefined || orb.stateVersion !== params.expectedStateVersion) {
@@ -1998,8 +1847,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: RecordHostDiscardStatusParams,
   ): ResultAsync<void, StoreError> {
-    const fault = this.operationFaults.get("recordHostDiscardStatus");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeDiscardStatus, "record host discard status", () => {
       const orb = this.orbs.get(params.orbId);
       if (orb === undefined || orb.hostDiscardThroughIncarnation !== params.throughIncarnation) {
@@ -2018,8 +1865,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: FinalizeHostDiscardParams,
   ): ResultAsync<OrbRow, StoreError | StateConflict> {
-    const fault = this.operationFaults.get("finalizeHostDiscard");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     // The scripted counter runs inside `access`, after its failpoint, so a
     // probability-armed storeDiscardFinalize failpoint is never shadowed.
     return this.access(task, FAILPOINTS.storeDiscardFinalize, "finalize host discard", () => {
@@ -2086,8 +1931,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     import("../domain/ports.ts").HostSpecReplacementOutcome,
     StoreError | StateConflict
   > {
-    const fault = this.operationFaults.get("requestHostSpecReplacement");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "request host spec replacement", () => {
       const orb = this.orbs.get(params.orbId);
       if (orb === undefined || orb.stateVersion !== params.expectedStateVersion) {
@@ -2134,8 +1977,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: CasTransitionParams,
   ): ResultAsync<OrbRow, StoreError | StateConflict> {
-    const fault = this.operationFaults.get("casTransition");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, `cas transition to ${params.toState}`, () => {
       const orb = this.orbs.get(params.orbId);
       const uploading =
@@ -2221,8 +2062,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: CasUpdateFieldsParams,
   ): ResultAsync<OrbRow, StoreError | StateConflict> {
-    const fault = this.operationFaults.get("casUpdateFields");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     if (this.hostReplacementCommitFailures > 0 && this.isReplacementCommit(params)) {
       this.hostReplacementCommitFailures -= 1;
       return errAsync(unavailable("replacement host commit: scripted store failure"));
@@ -2277,8 +2116,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: { orbId: string; now: number },
   ): ResultAsync<void, StoreError> {
-    const fault = this.operationFaults.get("touchLastBusy");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     // Same monotone, CAS-free semantics as the pg adapter (docs/lifecycle.md).
     return this.access(task, FAILPOINTS.storeWrite, "touch last busy", () => {
       const orb = this.orbs.get(params.orbId);
@@ -2296,8 +2133,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: { orbId: string; at: number; minIntervalMs: number },
   ): ResultAsync<MintSlotClaim, StoreError> {
-    const fault = this.operationFaults.get("claimMintSlot");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     // The decision and the write are one indivisible step here, exactly as the
     // pg adapter's conditional UPDATE is (docs/workload-identity.md): every
     // interleaving happens in `access`, never inside this body.
@@ -2324,8 +2159,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: { orbId: string; expectedStateVersion: number; now: number },
   ): ResultAsync<OrbRow, StoreError | StateConflict> {
-    const fault = this.operationFaults.get("casReenterState");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "cas reenter state", () => {
       const orb = this.orbs.get(params.orbId);
       if (orb === undefined || orb.stateVersion !== params.expectedStateVersion) {
@@ -2380,8 +2213,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     string | null,
     StoreError | { type: "alert_not_replicated" } | { type: "orb_not_found" }
   > {
-    const fault = this.operationFaults.get("ackOrbAlert");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     const run = async () => {
       await task.sleep(
         1 + task.random("store latency: ack alert") * this.maxLatencyMs,
@@ -2401,18 +2232,21 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       await task.failpoint(FAILPOINTS.storeAckAfter, orbId);
       return { pointer: pointer === recordId ? null : pointer };
     };
-    return ResultAsync.fromPromise(run(), (error) => {
-      if (error instanceof ApplicationFailure) return unavailable(`ack alert: ${error.message}`);
-      return task.abortSimulation(error);
-    }).andThen((outcome) => ("pointer" in outcome ? okAsync(outcome.pointer) : errAsync(outcome)));
+    return this.boundary(task, "ack alert")
+      .andThen(() =>
+        ResultAsync.fromPromise(run(), (error) => {
+          if (error instanceof ApplicationFailure)
+            return unavailable(`ack alert: ${error.message}`);
+          return task.abortSimulation(error);
+        }),
+      )
+      .andThen((outcome) => ("pointer" in outcome ? okAsync(outcome.pointer) : errAsync(outcome)));
   }
 
   commitPullBatch(
     task: SimulationTask,
     params: CommitPullBatchParams,
   ): ResultAsync<OrbRow, CommitPullError> {
-    const fault = this.operationFaults.get("commitPullBatch");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     type Staged = { kind: "error"; error: CommitPullError } | { kind: "committed"; row: OrbRow };
     const stage = (): Staged => {
       const orb = this.orbs.get(params.orbId);
@@ -2549,17 +2383,19 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       }
       return outcome;
     };
-    return ResultAsync.fromPromise(run(), (error): CommitPullError => {
-      if (error instanceof ApplicationFailure) {
-        const fault = unavailable(`commit pull batch: ${error.message}`);
-        return fault;
-      }
-      return task.abortSimulation(error);
-    }).andThen((outcome) =>
-      outcome.kind === "error"
-        ? errAsync<OrbRow, CommitPullError>(outcome.error)
-        : okAsync(outcome.row),
-    );
+    return this.boundary(task, "commit pull batch")
+      .andThen(() =>
+        ResultAsync.fromPromise(run(), (error): CommitPullError => {
+          if (error instanceof ApplicationFailure)
+            return unavailable(`commit pull batch: ${error.message}`);
+          return task.abortSimulation(error);
+        }),
+      )
+      .andThen((outcome) =>
+        outcome.kind === "error"
+          ? errAsync<OrbRow, CommitPullError>(outcome.error)
+          : okAsync(outcome.row),
+      );
   }
 
   initOrVerifySession(
@@ -2567,8 +2403,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     orbId: string,
     session: HarnessSessionMetadata,
   ): ResultAsync<void, StoreError | ReplicationIntegrityError> {
-    const fault = this.operationFaults.get("initOrVerifySession");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeWrite, "init or verify session", () => {
       const orb = this.orbs.get(orbId);
       if (orb === undefined) return null;
@@ -2596,8 +2430,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     sessionId: string,
     recordId: string,
   ): ResultAsync<HistoryRecord | null, StoreError> {
-    const fault = this.operationFaults.get("readHistoryRecord");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeRead, "read history record", () => {
       const orb = this.orbs.get(orbId);
       if (orb === undefined || orb.state === "deleting" || orb.harnessSessionId !== sessionId)
@@ -2607,11 +2439,9 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   }
 
   searchHistory(
-    task: SimulationTask,
+    _task: SimulationTask,
     _params: import("../domain/ports.ts").HistorySearchParams,
   ): ResultAsync<import("../domain/ports.ts").HistorySearchPage, StoreError> {
-    const fault = this.operationFaults.get("searchHistory");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return okAsync({ hits: [], documentCount: 0, candidateCount: 0 });
   }
 
@@ -2628,8 +2458,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     },
     StoreError
   > {
-    const fault = this.operationFaults.get("readHistorySnapshot");
-    if (fault !== undefined) return this.injectedFault(task, fault);
     return this.access(task, FAILPOINTS.storeRead, "read history snapshot", () => {
       const orb = this.orbs.get(orbId);
       if (orb === undefined || orb.state === "deleting") {

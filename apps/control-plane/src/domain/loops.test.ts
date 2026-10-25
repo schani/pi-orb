@@ -41,7 +41,7 @@ describe("loop handling of a store invariant", () => {
     const harness = makeHarness();
     harness.store.seedProject(makeProjectRow("project-park"));
     harness.store.seedOrb(makeOrbRow("orb-park", "project-park", "stopped"));
-    harness.store.failWithInvariant("getOrb");
+    harness.store.failWithInvariant("get orb");
 
     await reconcileAllOnce(task, harness.deps);
     expect(harness.deps.control.getNextAttemptAt("reconcile:orb-park")).toBe(
@@ -64,7 +64,7 @@ describe("loop handling of a store invariant", () => {
     const harness = makeHarness();
     harness.store.seedProject(makeProjectRow("project-poll"));
     harness.store.seedOrb(makeOrbRow("orb-poll", "project-poll", "running"));
-    harness.store.failWithInvariant("getOrb");
+    harness.store.failWithInvariant("get orb");
 
     await pollAllOnce(task, harness.deps);
     expect(harness.deps.control.getNextAttemptAt("poll:orb-poll")).toBe(Number.POSITIVE_INFINITY);
