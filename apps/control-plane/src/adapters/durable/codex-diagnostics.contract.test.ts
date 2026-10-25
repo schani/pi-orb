@@ -434,9 +434,8 @@ async function websocketRuntime(fallback: boolean) {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("no server address");
-  const token = vi.fn(() =>
-    okAsync({ accessToken: apiKey, generation: 4, expiresAt: Date.now() + 3600000 }),
-  );
+  const grant = { accessToken: apiKey, generation: 4, expiresAt: Date.now() + 3600000 };
+  const token = vi.fn(() => okAsync(grant));
   const runtime = (
     await createDurableModels({ token, inferenceBaseUrl: `http://127.0.0.1:${address.port}` })
   )._unsafeUnwrap();
@@ -493,6 +492,8 @@ it("sanitizes WS close diagnostics and keeps a later structured auth failure sep
 });
 
 it("keeps pre-start WS fallback distinct from the final SSE failure", async () => {
+  let now = Date.now();
+  vi.spyOn(Date, "now").mockImplementation(() => now++);
   const fixture = await websocketRuntime(true);
   try {
     const result = await fixture.runtime.complete(fixture.model, context, { transport: "auto" });
