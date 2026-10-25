@@ -10,7 +10,6 @@ export interface ClaudeQueryError {
 export class ClaudeDiagnostics {
   private tail = "";
   private exit = "";
-  private processExit: { code: number | null; signal: string | null } | null = null;
   private readonly secrets: readonly string[];
   constructor(secrets: readonly string[]) {
     this.secrets = secrets;
@@ -27,27 +26,7 @@ export class ClaudeDiagnostics {
   }
 
   exited(code: number | null, signal: string | null): void {
-    this.processExit = { code, signal };
     this.exit = `exitCode=${code ?? "null"} signal=${signal ?? "none"}`;
-  }
-
-  isFailedResultExit(error: unknown): boolean {
-    if (this.processExit?.code !== 1 || this.processExit.signal !== null) return false;
-    return Result.fromThrowable(
-      () => {
-        const value = error as {
-          errorClass?: unknown;
-          exitCode?: unknown;
-          signal?: unknown;
-        } | null;
-        return (
-          value?.signal == null &&
-          ((value?.errorClass === "process_exited_nonzero" && value.exitCode === 1) ||
-            value?.errorClass === "error_result")
-        );
-      },
-      () => false,
-    )().unwrapOr(false);
   }
 
   private redact(text: string): string {
