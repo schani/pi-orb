@@ -5,7 +5,7 @@ const closed = { additionalProperties: false } as const;
 export const PROJECT_SECRET_NAME_PATTERN = "^[A-Za-z_][A-Za-z0-9_]*$";
 export const PROJECT_SECRET_MAX_NAMES = 100;
 export const PROJECT_SECRET_MAX_VALUE_BYTES = 64 * 1024;
-export const PROJECT_SECRET_MAX_BUNDLE_BYTES = 256 * 1024;
+export const PROJECT_SECRET_MAX_BUNDLE_BYTES = 64 * 1024;
 
 export const ProjectSecretNameSchema = Type.String({
   minLength: 1,

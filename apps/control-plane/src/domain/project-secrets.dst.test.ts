@@ -1,6 +1,6 @@
 import { NoSimulationTask } from "determined";
 import { ResultAsync } from "neverthrow";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const outsideTask = new NoSimulationTask("project secrets assertions", false);
 
@@ -334,6 +334,38 @@ describe("project secrets (DST)", () => {
 
 describe("project secret validation", () => {
   const task = outsideTask;
+  it.each([
+    ["ASCII", ""],
+    ["UTF-8 and JSON escaping", '雪🙂"\\\n'.repeat(100)],
+  ])("caps the complete serialized %s bundle at 64 KiB before writes", async (_, prefix) => {
+    const h = makeProjectSecretsHarness(PROJECT);
+    const payloadSize = (value: string) =>
+      Buffer.byteLength(
+        JSON.stringify({ projectId: PROJECT, revision: 1, values: { TOKEN: value } }),
+      );
+    const value = prefix + "a".repeat(64 * 1024 - payloadSize(prefix));
+    expect(payloadSize(value)).toBe(64 * 1024);
+    expect(
+      (await putProjectSecret(task, h.deps, PROJECT, "TOKEN", value))._unsafeUnwrap().revision,
+    ).toBe(1);
+    const before = h.pointers.snapshot(PROJECT);
+    const snapshot = (await getProjectSecretSnapshot(task, h.deps, PROJECT))._unsafeUnwrap();
+    const versions = h.secrets.liveVersions("project-secrets");
+    const write = vi.spyOn(h.secrets, "writeSecret");
+    const commit = vi.spyOn(h.pointers, "casWriteProjectSecretPointer");
+
+    expect(payloadSize(`${value}a`)).toBe(64 * 1024 + 1);
+    const rejected = await putProjectSecret(task, h.deps, PROJECT, "TOKEN", `${value}a`);
+    expect(rejected._unsafeUnwrapErr().type).toBe("project_secret_invalid");
+    expect(write).not.toHaveBeenCalled();
+    expect(commit).not.toHaveBeenCalled();
+    expect(h.pointers.snapshot(PROJECT)).toEqual(before);
+    expect((await getProjectSecretSnapshot(task, h.deps, PROJECT))._unsafeUnwrap()).toEqual(
+      snapshot,
+    );
+    expect(h.secrets.liveVersions("project-secrets")).toEqual(versions);
+  });
+
   it.each([
     ["__proto__", "private-value"],
     ["TOKEN", "private-prefix\0suffix"],
