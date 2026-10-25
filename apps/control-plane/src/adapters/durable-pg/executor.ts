@@ -24,38 +24,9 @@ export interface SqlDatabase extends SqlExecutor {
   close(): Promise<void>;
 }
 
-/** Only the fixed, vendored storage SQL crosses this translator. All values stay bound. */
-export function scopedSql(sql: string): string {
-  let statement = sql;
-  const tables =
-    "durable_metadata|record_ids|conversations|entries|tasks|submissions|documents|document_revisions";
-  if (statement.trimStart().startsWith("SELECT")) {
-    statement = statement.replace(
-      new RegExp(`FROM (${tables})\\b`, "g"),
-      (_, table: string) =>
-        `FROM (SELECT * FROM durable_pg_${table} WHERE orb_id = $1) AS ${table}`,
-    );
-  } else if (statement.trimStart().startsWith("INSERT")) {
-    const ignore = statement.includes("INSERT OR IGNORE");
-    statement = statement.replace("INSERT OR IGNORE", "INSERT");
-    statement = statement.replace(
-      new RegExp(`INTO (${tables})\\s+\\(`),
-      "INTO durable_pg_$1 (orb_id, ",
-    );
-    statement = statement.replace("VALUES (", "VALUES ($1, ");
-    statement = statement.replace(/ON CONFLICT\(id\)/g, "ON CONFLICT(orb_id, id)");
-    if (ignore) statement += " ON CONFLICT DO NOTHING";
-  } else if (/^\s*(UPDATE|DELETE)/.test(statement)) {
-    statement = statement.replace(new RegExp(`(UPDATE|FROM) (${tables})\\b`), "$1 durable_pg_$2");
-    statement = statement.replace("WHERE ", "WHERE orb_id = $1 AND ");
-  } else rejectStorage("Unsupported durable SQL operation");
-  let parameter = 1;
-  return statement.replace(/\?/g, () => `$${++parameter}`);
-}
-
 export function executor(query: Query, orbId: string): SqlExecutor {
   const all = async <T>(sql: string, ...values: SqlValue[]): Promise<T[]> => {
-    const result = await query(scopedSql(sql), [orbId, ...values]);
+    const result = await query(sql, [orbId, ...values]);
     if (result.isErr()) rejectStorage("Durable database operation failed", { cause: result.error });
     // bigint is textual in pg but numeric in PGlite; normalize only the listed bigint columns.
     return result.value.rows.map((row) =>

@@ -1,5 +1,5 @@
-// Vendored from @earendil-works/pi-durable 1.1.0 src/storage/sqlite/storage.ts and src/storage/scan.ts, MIT.
-// Adapted executor, PostgreSQL allocation and atomic public publication.
+// PostgreSQL implementation adapted from @earendil-works/pi-durable 1.1.0 storage and scan semantics.
+// Upstream portions copyright (c) 2025 Mario Zechner, MIT; see LICENSE.
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { apply, type Op } from "@earendil-works/chord/delta";
 import { rejectStorage, rejectStorageRequest, StorageFailure } from "./storage-boundary.ts";
@@ -98,10 +98,15 @@ const scanStart = (
     rejectStorageRequest(`The cursor continues a ${order} scan; the query asks for ${requested}`);
   return { order, after };
 };
+const bind = (params: SqlValue[], value: SqlValue): string => {
+  params.push(value);
+  return `$${params.length + 1}`;
+};
+
 const scanSql = (start: ScanStart) =>
   start.order === "ascending"
-    ? { clause: "id > ?", param: start.after ?? -1, direction: "ASC" }
-    : { clause: "id < ?", param: start.after ?? Number.MAX_SAFE_INTEGER, direction: "DESC" };
+    ? { clause: "id > $2", param: start.after ?? -1, direction: "ASC" }
+    : { clause: "id < $2", param: start.after ?? Number.MAX_SAFE_INTEGER, direction: "DESC" };
 
 const page = <T extends { readonly id: Id<string> }>(
   values: readonly T[],
@@ -181,7 +186,7 @@ export class PgStorage implements Storage {
   static async open(db: SqlDatabase): Promise<PgStorage> {
     try {
       const metadata = await db.get<MetadataRow>(
-        "SELECT next_id, next_seq FROM durable_metadata WHERE singleton = 1",
+        "SELECT next_id, next_seq FROM durable_pg_durable_metadata WHERE orb_id = $1 AND singleton = 1",
       );
       if (metadata === undefined) rejectStorage("Durable PostgreSQL metadata is missing");
       return new PgStorage(db, Number(metadata.next_id));
@@ -204,7 +209,7 @@ export class PgStorage implements Storage {
     const candidateNextId = this.candidateNextId(writes);
     const seq = await this.db.transaction(async (transaction) => {
       const metadata = await transaction.get<MetadataRow>(
-        "SELECT next_id, next_seq FROM durable_metadata WHERE singleton = 1",
+        "SELECT next_id, next_seq FROM durable_pg_durable_metadata WHERE orb_id = $1 AND singleton = 1",
       );
       if (metadata === undefined) rejectStorage("Durable PostgreSQL metadata is missing");
       const committedSeq = seqFromNumber(metadata.next_seq);
@@ -215,7 +220,7 @@ export class PgStorage implements Storage {
       for (const write of writes) {
         if (write.type !== "submission" || write.value.type !== "input") continue;
         const row = await transaction.get<JsonRow>(
-          "SELECT record FROM submissions WHERE id = ?",
+          "SELECT record FROM durable_pg_submissions WHERE orb_id = $1 AND id = $2",
           write.value.id,
         );
         const prior = row === undefined ? undefined : parseJson<SubmissionRecord>(row.record);
@@ -229,7 +234,7 @@ export class PgStorage implements Storage {
       for (const write of writes) await this.applyTableWrite(transaction, write, committedSeq);
       await this.applyDocumentActions(transaction, documentActions, committedSeq);
       await transaction.run(
-        "UPDATE durable_metadata SET next_id = ?, next_seq = ? WHERE singleton = 1",
+        "UPDATE durable_pg_durable_metadata SET next_id = $2, next_seq = $3 WHERE orb_id = $1 AND singleton = 1",
         String(Math.max(Number(metadata.next_id), candidateNextId)),
         committedSeq + 1,
       );
@@ -253,7 +258,10 @@ export class PgStorage implements Storage {
     _context: Context,
   ): Promise<ConversationRecord | undefined> {
     this.assertOpen();
-    const row = await this.db.get<JsonRow>("SELECT record FROM conversations WHERE id = ?", id);
+    const row = await this.db.get<JsonRow>(
+      "SELECT record FROM durable_pg_conversations WHERE orb_id = $1 AND id = $2",
+      id,
+    );
     return row === undefined ? undefined : parseJson<ConversationRecord>(row.record);
   }
 
@@ -266,19 +274,17 @@ export class PgStorage implements Storage {
     this.assertOpen();
     const start = scanStart(query.order, cursor, "ascending");
     const scan = scanSql(start);
-    const clauses = [scan.clause];
+    const clauses = ["orb_id = $1", scan.clause];
     const params: SqlValue[] = [scan.param];
     if (query.ownerConversationId !== undefined) {
-      clauses.push("owner_conversation_id = ?");
-      params.push(query.ownerConversationId);
+      clauses.push(`owner_conversation_id = ${bind(params, query.ownerConversationId)}`);
     }
     if (query.ownerTaskId !== undefined) {
-      clauses.push("owner_task_id = ?");
-      params.push(query.ownerTaskId);
+      clauses.push(`owner_task_id = ${bind(params, query.ownerTaskId)}`);
     }
-    params.push(limit + 1);
+    const take = bind(params, limit + 1);
     const rows = await this.db.all<JsonRow>(
-      `SELECT record FROM conversations WHERE ${clauses.join(" AND ")} ORDER BY id ${scan.direction} LIMIT ?`,
+      `SELECT record FROM durable_pg_conversations WHERE ${clauses.join(" AND ")} ORDER BY id ${scan.direction} LIMIT ${take}`,
       ...params,
     );
     return page(
@@ -342,7 +348,7 @@ export class PgStorage implements Storage {
         rejectStorageRequest(`Unknown conversation: ${conversationId}`);
     }
     const row = await this.db.get<EntryJsonRow>(
-      "SELECT record, commit_seq FROM entries WHERE id = ?",
+      "SELECT record, commit_seq FROM durable_pg_entries WHERE orb_id = $1 AND id = $2",
       id,
     );
     if (row === undefined) return undefined;
@@ -370,11 +376,11 @@ export class PgStorage implements Storage {
       const row =
         upper === undefined
           ? await this.db.get<JsonRow>(
-              "SELECT record FROM entries WHERE conversation_id = ? AND head IS NOT NULL ORDER BY id DESC LIMIT 1",
+              "SELECT record FROM durable_pg_entries WHERE orb_id = $1 AND conversation_id = $2 AND head IS NOT NULL ORDER BY id DESC LIMIT 1",
               conversation.id,
             )
           : await this.db.get<JsonRow>(
-              "SELECT record FROM entries WHERE conversation_id = ? AND head IS NOT NULL AND id <= ? ORDER BY id DESC LIMIT 1",
+              "SELECT record FROM durable_pg_entries WHERE orb_id = $1 AND conversation_id = $2 AND head IS NOT NULL AND id <= $3 ORDER BY id DESC LIMIT 1",
               conversation.id,
               upper,
             );
@@ -400,19 +406,17 @@ export class PgStorage implements Storage {
     if (after !== undefined) upper = Math.min(upper ?? Number.MAX_SAFE_INTEGER, after - 1);
     const values: EntryRecord[] = [];
     while (true) {
-      const clauses = ["conversation_id = ?"];
+      const clauses = ["orb_id = $1", "conversation_id = $2"];
       const params: SqlValue[] = [conversation.id];
       if (query.minEntryId !== undefined) {
-        clauses.push("id >= ?");
-        params.push(query.minEntryId);
+        clauses.push(`id >= ${bind(params, query.minEntryId)}`);
       }
       if (upper !== undefined) {
-        clauses.push("id <= ?");
-        params.push(upper);
+        clauses.push(`id <= ${bind(params, upper)}`);
       }
-      params.push(limit + 1 - values.length);
+      const take = bind(params, limit + 1 - values.length);
       const rows = await this.db.all<JsonRow>(
-        `SELECT record FROM entries WHERE ${clauses.join(" AND ")} ORDER BY id DESC LIMIT ?`,
+        `SELECT record FROM durable_pg_entries WHERE ${clauses.join(" AND ")} ORDER BY id DESC LIMIT ${take}`,
         ...params,
       );
       values.push(...rows.map((row) => parseJson<EntryRecord>(row.record)));
@@ -451,19 +455,17 @@ export class PgStorage implements Storage {
     if (after !== undefined) lower = Math.max(lower ?? after + 1, after + 1);
     const values: EntryRecord[] = [];
     for (const segment of segments.reverse()) {
-      const clauses = ["conversation_id = ?"];
+      const clauses = ["orb_id = $1", "conversation_id = $2"];
       const params: SqlValue[] = [segment.conversationId];
       if (lower !== undefined) {
-        clauses.push("id >= ?");
-        params.push(lower);
+        clauses.push(`id >= ${bind(params, lower)}`);
       }
       if (segment.upper !== undefined) {
-        clauses.push("id <= ?");
-        params.push(segment.upper);
+        clauses.push(`id <= ${bind(params, segment.upper)}`);
       }
-      params.push(limit + 1 - values.length);
+      const take = bind(params, limit + 1 - values.length);
       const rows = await this.db.all<JsonRow>(
-        `SELECT record FROM entries WHERE ${clauses.join(" AND ")} ORDER BY id ASC LIMIT ?`,
+        `SELECT record FROM durable_pg_entries WHERE ${clauses.join(" AND ")} ORDER BY id ASC LIMIT ${take}`,
         ...params,
       );
       values.push(...rows.map((row) => parseJson<EntryRecord>(row.record)));
@@ -474,7 +476,10 @@ export class PgStorage implements Storage {
 
   async task(id: TaskId, _context: Context): Promise<StoredTask | undefined> {
     this.assertOpen();
-    const row = await this.db.get<JsonRow>("SELECT record FROM tasks WHERE id = ?", id);
+    const row = await this.db.get<JsonRow>(
+      "SELECT record FROM durable_pg_tasks WHERE orb_id = $1 AND id = $2",
+      id,
+    );
     return row === undefined ? undefined : parseJson<StoredTask>(row.record);
   }
 
@@ -487,31 +492,26 @@ export class PgStorage implements Storage {
     this.assertOpen();
     const start = scanStart(query.order, cursor, "ascending");
     const scan = scanSql(start);
-    const clauses = [scan.clause];
+    const clauses = ["orb_id = $1", scan.clause];
     const params: SqlValue[] = [scan.param];
     if (query.conversationId !== undefined) {
-      clauses.push("conversation_id = ?");
-      params.push(query.conversationId);
+      clauses.push(`conversation_id = ${bind(params, query.conversationId)}`);
     }
     if (query.kind !== undefined) {
-      clauses.push("kind = ?");
-      params.push(encodeIndexedString(query.kind));
+      clauses.push(`kind = ${bind(params, encodeIndexedString(query.kind))}`);
     }
     if (query.status !== undefined) {
-      clauses.push("status = ?");
-      params.push(query.status);
+      clauses.push(`status = ${bind(params, query.status)}`);
     }
     if (query.abortRequested !== undefined) {
-      clauses.push("abort_requested = ?");
-      params.push(query.abortRequested ? 1 : 0);
+      clauses.push(`abort_requested = ${bind(params, query.abortRequested ? 1 : 0)}`);
     }
     if (query.background !== undefined) {
-      clauses.push("background = ?");
-      params.push(query.background ? 1 : 0);
+      clauses.push(`background = ${bind(params, query.background ? 1 : 0)}`);
     }
-    params.push(limit + 1);
+    const take = bind(params, limit + 1);
     const rows = await this.db.all<JsonRow>(
-      `SELECT record FROM tasks WHERE ${clauses.join(" AND ")} ORDER BY id ${scan.direction} LIMIT ?`,
+      `SELECT record FROM durable_pg_tasks WHERE ${clauses.join(" AND ")} ORDER BY id ${scan.direction} LIMIT ${take}`,
       ...params,
     );
     return page(
@@ -523,7 +523,10 @@ export class PgStorage implements Storage {
 
   async submission(id: SubmissionId, _context: Context): Promise<SubmissionRecord | undefined> {
     this.assertOpen();
-    const row = await this.db.get<JsonRow>("SELECT record FROM submissions WHERE id = ?", id);
+    const row = await this.db.get<JsonRow>(
+      "SELECT record FROM durable_pg_submissions WHERE orb_id = $1 AND id = $2",
+      id,
+    );
     return row === undefined ? undefined : parseJson<SubmissionRecord>(row.record);
   }
 
@@ -536,19 +539,17 @@ export class PgStorage implements Storage {
     this.assertOpen();
     const start = scanStart(query.order, cursor, "ascending");
     const scan = scanSql(start);
-    const clauses = [scan.clause];
+    const clauses = ["orb_id = $1", scan.clause];
     const params: SqlValue[] = [scan.param];
     if (query.conversationId !== undefined) {
-      clauses.push("conversation_id = ?");
-      params.push(query.conversationId);
+      clauses.push(`conversation_id = ${bind(params, query.conversationId)}`);
     }
     if (query.status !== undefined) {
-      clauses.push("status = ?");
-      params.push(query.status);
+      clauses.push(`status = ${bind(params, query.status)}`);
     }
-    params.push(limit + 1);
+    const take = bind(params, limit + 1);
     const rows = await this.db.all<JsonRow>(
-      `SELECT record FROM submissions WHERE ${clauses.join(" AND ")} ORDER BY id ${scan.direction} LIMIT ?`,
+      `SELECT record FROM durable_pg_submissions WHERE ${clauses.join(" AND ")} ORDER BY id ${scan.direction} LIMIT ${take}`,
       ...params,
     );
     return page(
@@ -565,7 +566,7 @@ export class PgStorage implements Storage {
   ): Promise<SubmissionRecord | undefined> {
     this.assertOpen();
     const row = await this.db.get<JsonRow>(
-      "SELECT record FROM submissions WHERE conversation_id = ? AND request_id = ?",
+      "SELECT record FROM durable_pg_submissions WHERE orb_id = $1 AND conversation_id = $2 AND request_id = $3",
       conversationId,
       encodeIndexedString(requestId),
     );
@@ -581,12 +582,12 @@ export class PgStorage implements Storage {
     const parts = addressParts(address);
     const sql =
       at === "current"
-        ? `SELECT record FROM documents
-					WHERE kind = ? AND scope_kind = ? AND owner_id = ? AND family = ? AND key_value = ?
+        ? `SELECT record FROM durable_pg_documents
+					WHERE orb_id = $1 AND kind = $2 AND scope_kind = $3 AND owner_id = $4 AND family = $5 AND key_value = $6
 					AND retired_at IS NULL ORDER BY created_at DESC LIMIT 1`
-        : `SELECT record FROM documents
-					WHERE kind = ? AND scope_kind = ? AND owner_id = ? AND family = ? AND key_value = ?
-					AND created_at <= ? AND (retired_at IS NULL OR retired_at > ?)
+        : `SELECT record FROM durable_pg_documents
+					WHERE orb_id = $1 AND kind = $2 AND scope_kind = $3 AND owner_id = $4 AND family = $5 AND key_value = $6
+					AND created_at <= $7 AND (retired_at IS NULL OR retired_at > $8)
 					ORDER BY created_at DESC LIMIT 1`;
     const params: SqlValue[] = [
       parts.kind,
@@ -618,21 +619,22 @@ export class PgStorage implements Storage {
   ): Promise<Page<DocumentRecord, Cursor>> {
     this.assertOpen();
     const scope = scopeColumns(query.scope);
-    const clauses = ["scope_kind = ?", "owner_id = ?", "id > ?"];
+    const clauses = ["orb_id = $1", "scope_kind = $2", "owner_id = $3", "id > $4"];
     const params: SqlValue[] = [scope.scopeKind, scope.ownerId, cursorId(cursor) ?? -1];
     if (query.kind !== undefined) {
-      clauses.push("kind = ?");
-      params.push(encodeIndexedString(query.kind));
+      clauses.push(`kind = ${bind(params, encodeIndexedString(query.kind))}`);
     }
     if (query.at === "current") {
       clauses.push("retired_at IS NULL");
     } else {
-      clauses.push("created_at <= ?", "(retired_at IS NULL OR retired_at > ?)");
-      params.push(query.at, query.at);
+      clauses.push(
+        `created_at <= ${bind(params, query.at)}`,
+        `(retired_at IS NULL OR retired_at > ${bind(params, query.at)})`,
+      );
     }
-    params.push(limit + 1);
+    const take = bind(params, limit + 1);
     const rows = await this.db.all<JsonRow>(
-      `SELECT record FROM documents WHERE ${clauses.join(" AND ")} ORDER BY id LIMIT ?`,
+      `SELECT record FROM durable_pg_documents WHERE ${clauses.join(" AND ")} ORDER BY id LIMIT ${take}`,
       ...params,
     );
     return page(
@@ -673,7 +675,10 @@ export class PgStorage implements Storage {
   }
 
   private async readConversation(id: ConversationId): Promise<ConversationRecord | undefined> {
-    const row = await this.db.get<JsonRow>("SELECT record FROM conversations WHERE id = ?", id);
+    const row = await this.db.get<JsonRow>(
+      "SELECT record FROM durable_pg_conversations WHERE orb_id = $1 AND id = $2",
+      id,
+    );
     return row === undefined ? undefined : parseJson<ConversationRecord>(row.record);
   }
 
@@ -682,7 +687,10 @@ export class PgStorage implements Storage {
     id: DocumentId,
     at: DocumentPoint,
   ): Promise<StoredDocument | undefined> {
-    const row = await executor.get<JsonRow>("SELECT record FROM documents WHERE id = ?", id);
+    const row = await executor.get<JsonRow>(
+      "SELECT record FROM durable_pg_documents WHERE orb_id = $1 AND id = $2",
+      id,
+    );
     if (row === undefined) return undefined;
     const record = parseJson<DocumentRecord>(row.record);
     if (at !== "current" && isCurrentOnly(record)) {
@@ -691,16 +699,16 @@ export class PgStorage implements Storage {
     if (!isAliveAt(record, at)) return undefined;
     const upper = at === "current" ? Number.MAX_SAFE_INTEGER : at;
     const base = await executor.get<RevisionRow>(
-      `SELECT seq, kind, version, content FROM document_revisions
-				WHERE document_id = ? AND kind = 'base' AND seq <= ? ORDER BY seq DESC LIMIT 1`,
+      `SELECT seq, kind, version, content FROM durable_pg_document_revisions
+				WHERE orb_id = $1 AND document_id = $2 AND kind = 'base' AND seq <= $3 ORDER BY seq DESC LIMIT 1`,
       id,
       upper,
     );
     if (base === undefined) rejectStorage(`Document ${id} is missing a required base`);
     let value = parseJson<JsonObject>(base.content);
     const tail = await executor.all<RevisionRow>(
-      `SELECT seq, kind, version, content FROM document_revisions
-				WHERE document_id = ? AND seq > ? AND seq <= ? ORDER BY seq`,
+      `SELECT seq, kind, version, content FROM durable_pg_document_revisions
+				WHERE orb_id = $1 AND document_id = $2 AND seq > $3 AND seq <= $4 ORDER BY seq`,
       id,
       base.seq,
       upper,
@@ -734,7 +742,10 @@ export class PgStorage implements Storage {
       const table: TableName = document ? "document" : write.type;
       const id = document ? write.record.id : write.value.id;
       const existing = (
-        await executor.get<RecordIdRow>("SELECT record_type FROM record_ids WHERE id = ?", id)
+        await executor.get<RecordIdRow>(
+          "SELECT record_type FROM durable_pg_record_ids WHERE orb_id = $1 AND id = $2",
+          id,
+        )
       )?.record_type;
       const earlier = claimed.get(id);
       if (table === "conversation" || table === "entry" || table === "document") {
@@ -817,7 +828,10 @@ export class PgStorage implements Storage {
       if (action.copy !== undefined && actions.has(action.copy.id)) {
         rejectStorage(`Document copy ${id} source is changed in the copy batch`);
       }
-      const row = await executor.get<JsonRow>("SELECT record FROM documents WHERE id = ?", id);
+      const row = await executor.get<JsonRow>(
+        "SELECT record FROM durable_pg_documents WHERE orb_id = $1 AND id = $2",
+        id,
+      );
       const existing = row === undefined ? undefined : parseJson<DocumentRecord>(row.record);
       if (action.create === undefined && existing === undefined)
         rejectStorage(`Unknown document: ${id}`);
@@ -826,7 +840,7 @@ export class PgStorage implements Storage {
       if (existing?.retiredAt !== undefined) rejectStorage(`Document ${id} is retired`);
       if (action.content?.kind === "delta") {
         const previous = await executor.get<{ readonly version: number }>(
-          "SELECT version FROM document_revisions WHERE document_id = ? ORDER BY seq DESC LIMIT 1",
+          "SELECT version FROM durable_pg_document_revisions WHERE orb_id = $1 AND document_id = $2 ORDER BY seq DESC LIMIT 1",
           id,
         );
         if (previous === undefined) rejectStorage(`Document ${id} delta has no base`);
@@ -855,8 +869,8 @@ export class PgStorage implements Storage {
     const parts = addressParts(address);
     const id = (
       await executor.get<IdRow>(
-        `SELECT id FROM documents
-				WHERE kind = ? AND scope_kind = ? AND owner_id = ? AND family = ? AND key_value = ? AND retired_at IS NULL
+        `SELECT id FROM durable_pg_documents
+				WHERE orb_id = $1 AND kind = $2 AND scope_kind = $3 AND owner_id = $4 AND family = $5 AND key_value = $6 AND retired_at IS NULL
 				LIMIT 1`,
         parts.kind,
         parts.scopeKind,
@@ -877,7 +891,7 @@ export class PgStorage implements Storage {
       case "conversation":
         await this.claimId(executor, write.value.id, "conversation");
         await executor.run(
-          "INSERT INTO conversations (id, owner_conversation_id, owner_task_id, record) VALUES (?, ?, ?, ?)",
+          "INSERT INTO durable_pg_conversations (orb_id, id, owner_conversation_id, owner_task_id, record) VALUES ($1, $2, $3, $4, $5)",
           write.value.id,
           write.value.owner?.conversationId ?? null,
           write.value.owner?.taskId ?? null,
@@ -887,7 +901,7 @@ export class PgStorage implements Storage {
       case "entry":
         await this.claimId(executor, write.value.id, "entry");
         await executor.run(
-          "INSERT INTO entries (id, conversation_id, head, commit_seq, record) VALUES (?, ?, ?, ?, ?)",
+          "INSERT INTO durable_pg_entries (orb_id, id, conversation_id, head, commit_seq, record) VALUES ($1, $2, $3, $4, $5, $6)",
           write.value.id,
           write.value.conversationId,
           write.value.head ?? null,
@@ -898,9 +912,9 @@ export class PgStorage implements Storage {
       case "task":
         await this.claimId(executor, write.value.id, "task");
         await executor.run(
-          `INSERT INTO tasks (id, conversation_id, kind, status, abort_requested, background, record)
-						VALUES (?, ?, ?, ?, ?, ?, ?)
-						ON CONFLICT(id) DO UPDATE SET conversation_id = excluded.conversation_id, kind = excluded.kind,
+          `INSERT INTO durable_pg_tasks (orb_id, id, conversation_id, kind, status, abort_requested, background, record)
+						VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+						ON CONFLICT (orb_id, id) DO UPDATE SET conversation_id = excluded.conversation_id, kind = excluded.kind,
 						status = excluded.status, abort_requested = excluded.abort_requested,
 						background = excluded.background, record = excluded.record`,
           write.value.id,
@@ -915,8 +929,8 @@ export class PgStorage implements Storage {
       case "submission":
         await this.claimId(executor, write.value.id, "submission");
         await executor.run(
-          `INSERT INTO submissions (id, conversation_id, request_id, status, record) VALUES (?, ?, ?, ?, ?)
-						ON CONFLICT(id) DO UPDATE SET conversation_id = excluded.conversation_id,
+          `INSERT INTO durable_pg_submissions (orb_id, id, conversation_id, request_id, status, record) VALUES ($1, $2, $3, $4, $5, $6)
+						ON CONFLICT (orb_id, id) DO UPDATE SET conversation_id = excluded.conversation_id,
 						request_id = excluded.request_id, status = excluded.status, record = excluded.record`,
           write.value.id,
           write.value.conversationId,
@@ -935,7 +949,7 @@ export class PgStorage implements Storage {
 
   private async claimId(executor: SqlExecutor, id: Id<string>, table: TableName): Promise<void> {
     await executor.run(
-      "INSERT OR IGNORE INTO record_ids (id, record_type) VALUES (?, ?)",
+      "INSERT INTO durable_pg_record_ids (orb_id, id, record_type) VALUES ($1, $2, $3) ON CONFLICT (orb_id, id) DO NOTHING",
       id,
       table,
     );
@@ -982,9 +996,9 @@ export class PgStorage implements Storage {
         const parts = addressParts(record);
         await this.claimId(executor, id, "document");
         await executor.run(
-          `INSERT INTO documents
-						(id, kind, family, key_value, scope_kind, owner_id, created_at, retired_at, record)
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO durable_pg_documents
+						(orb_id, id, kind, family, key_value, scope_kind, owner_id, created_at, retired_at, record)
+						VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
           id,
           parts.kind,
           parts.family,
@@ -996,18 +1010,24 @@ export class PgStorage implements Storage {
           encodeJson(record),
         );
       } else {
-        const row = (await executor.get<JsonRow>("SELECT record FROM documents WHERE id = ?", id))!;
+        const row = (await executor.get<JsonRow>(
+          "SELECT record FROM durable_pg_documents WHERE orb_id = $1 AND id = $2",
+          id,
+        ))!;
         record = parseJson<DocumentRecord>(row.record);
       }
 
       if (content !== undefined) {
         if (content.kind === "base" && isCurrentOnly(record)) {
-          await executor.run("DELETE FROM document_revisions WHERE document_id = ?", id);
+          await executor.run(
+            "DELETE FROM durable_pg_document_revisions WHERE orb_id = $1 AND document_id = $2",
+            id,
+          );
         }
         const encodedContent =
           content.kind === "base" ? encodeJson(content.value) : encodeJson(content.ops);
         await executor.run(
-          "INSERT INTO document_revisions (document_id, seq, kind, version, content) VALUES (?, ?, ?, ?, ?)",
+          "INSERT INTO durable_pg_document_revisions (orb_id, document_id, seq, kind, version, content) VALUES ($1, $2, $3, $4, $5, $6)",
           id,
           seq,
           content.kind,
@@ -1020,14 +1040,17 @@ export class PgStorage implements Storage {
         if (action.create === undefined) {
           record = { ...record, retiredAt: seq };
           await executor.run(
-            "UPDATE documents SET retired_at = ?, record = ? WHERE id = ?",
+            "UPDATE durable_pg_documents SET retired_at = $2, record = $3 WHERE orb_id = $1 AND id = $4",
             seq,
             encodeJson(record),
             id,
           );
         }
         if (isCurrentOnly(record)) {
-          await executor.run("DELETE FROM document_revisions WHERE document_id = ?", id);
+          await executor.run(
+            "DELETE FROM durable_pg_document_revisions WHERE orb_id = $1 AND document_id = $2",
+            id,
+          );
         }
       }
     }
