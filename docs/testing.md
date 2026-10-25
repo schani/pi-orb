@@ -1,5 +1,23 @@
 # Testing
 
+## Native PostgreSQL process-host acceptance (2026-10-24, PDT; undeployed)
+
+Implementation `4ca1f973` passed all **10 CI contexts**: [CI](https://github.com/schani/pi-orb/actions/runs/40142994229), [E2E](https://github.com/schani/pi-orb/actions/runs/40142994257), [Durable](https://github.com/schani/pi-orb/actions/runs/40142994228). Those receipts do not qualify the current documentation-only HEAD.
+
+Local acceptance used the pinned local fake and owned PostgreSQL 16 for both URLs:
+
+```sh
+PI_ORB_E2E_BACKEND=process PI_ORB_TEST_DATABASE_URL="$TEST_PG_URL" PI_ORB_DURABLE_PG_TEST_URL="$TEST_PG_URL" node scripts/local-fake-provider.mjs -- npm run test:e2e -- --project process --project provider --project postgres
+```
+
+**142 passed / 1 skipped** (Docker cross-axis leg); suite and fake cleanup exited 0.
+
+Separately, the real web UI/main control plane, process host and network PostgreSQL 16 exercised native code-mode store, bash workspace files and PTY execution with synthetic inference. Stop → graceful control-plane restart → fresh browser preserved the same history and lazy tool details while stopped. Start restored store and workspace-file access. Archive retained public history and purged private authority. Owned database-fixture cleanup verified zero remaining owned data; application/relay/mock processes exited 0.
+
+Local evidence: `.context/native-pg-process-acceptance/`, including snapshots, SQL checks, manifests and cleanup receipts. Operator CLI errors and an `about:blank` navigation were tooling issues; diagnostics are retained.
+
+This qualifies synthetic-inference process acceptance, not live-provider inference/billing, crash recovery, database failover or deployment.
+
 ## First-party security refresh (2026-10-24, PDT; local, undeployed)
 
 Clean `npm ci` applies four unchanged sealed patches. Retained graph, patch-application, native provider, auth/DST, MCP security, worker and Mermaid configuration checks pass **102 tests / 13 files**; installer contracts pass **27/27**, including zero patched files in the loaded guest closure. Full/production audits and `npm ls --all` pass; typecheck and lint pass. The prior production build passed with large-chunk warnings.
