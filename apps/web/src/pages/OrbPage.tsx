@@ -155,6 +155,8 @@ interface OrbPageState {
     requestId: string;
     kind: "message" | "abort" | "settings" | "compact";
     submittedText?: string;
+    submittedMode?: ComposerMode;
+    submittedImages?: ComposerImage[];
   } | null;
   requestError: { code: string; message: string } | null;
   serverError: { code: string; message: string } | null;
@@ -336,6 +338,18 @@ function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageSta
   }
 }
 
+function clearSubmittedComposer(state: OrbPageState): OrbPageState {
+  const submitted = state.pendingRequest;
+  if (
+    submitted?.kind !== "message" ||
+    state.composerText !== submitted.submittedText ||
+    state.composerMode !== submitted.submittedMode ||
+    state.composerImages !== submitted.submittedImages
+  )
+    return state;
+  return { ...state, composerText: "", composerMode: "message", composerImages: [] };
+}
+
 function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
   switch (frame.type) {
     case "server.welcome":
@@ -441,14 +455,10 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
         };
       }
       if (frame.result.type === "accepted") {
-        const clearComposer = state.pendingRequest.kind !== "abort";
         return {
-          ...state,
+          ...clearSubmittedComposer(state),
           pendingRequest: null,
           requestError: null,
-          composerText: clearComposer ? "" : state.composerText,
-          composerMode: clearComposer ? "message" : state.composerMode,
-          composerImages: clearComposer ? [] : state.composerImages,
         };
       }
       return {
@@ -761,6 +771,8 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
           requestId: action.requestId,
           kind: action.kind,
           submittedText: state.composerText,
+          submittedMode: state.composerMode,
+          submittedImages: state.composerImages,
         },
         requestError: null,
         notice: null,
@@ -785,12 +797,9 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
     case "message_enqueued":
       if (state.pendingRequest?.requestId !== action.requestId) return state;
       return {
-        ...state,
+        ...clearSubmittedComposer(state),
         pendingRequest: null,
         requestError: null,
-        composerText: "",
-        composerMode: "message",
-        composerImages: [],
         notice: null,
       };
     case "message_enqueue_failed":

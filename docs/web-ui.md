@@ -1,5 +1,9 @@
 # Web UI
 
+## Composer acknowledgement ownership (decided 2026-10-25 PDT)
+
+HTTP message enqueue and WebSocket acceptance clear the composer only when its text, mode and immutable attachment list still match the submitted snapshot. Otherwise the entire current draft survives; an unchanged submitted draft still clears. Existing queue/history and request errors expose delivery outcomes. This browser-local rule adds no persistence or telemetry.
+
 ## Dashboard masonry (decided and implemented locally 2026-10-24; not deployed)
 
 **Decision (2026-10-24):** project boxes use Pinterest-style masonry. Each project remains one unbroken vertical box; boxes keep `orderProjects` order and each goes to the currently shortest column, leftmost on ties. The board fits `max(1, floor(width / 316))` equal whole-pixel columns, so columns widen to fill the board instead of leaving a right gutter; below 632px one column fills the width. New Project remains the final box. Motivation: a grid row took the height of its tallest project, so one long project pushed every later project below the fold while short columns held empty paper.
