@@ -82,6 +82,11 @@ export type DeliverMessageScript =
   | { readonly kind: "enqueue_without_persist" }
   | { readonly kind: "persist_without_ack" };
 
+export type HealthOverride =
+  | Pick<Extract<RuntimeHealth, { status: "failed" }>, "status" | "error">
+  | Pick<Extract<RuntimeHealth, { status: "initializing" }>, "status" | "phase">
+  | RuntimeClientError;
+
 export interface FakeOrbConfig {
   /** Time from the end of any setup hold until the runtime becomes ready. */
   initDurationMs?: number;
@@ -257,6 +262,7 @@ export function fakeTokenHash(token: string): string {
 
 interface OrbWorldState {
   config: ResolvedOrbConfig;
+  healthOverride: HealthOverride | null;
   filesystem: FakeFilesystem;
   host: FakeHost | null;
   runtimeInstanceCounter: number;
@@ -362,6 +368,7 @@ export class FakeWorld {
   configureOrb(orbId: string, config: FakeOrbConfig = {}): void {
     this.orbs.set(orbId, {
       config: { ...DEFAULT_CONFIG, ...config, hooks: { ...DEFAULT_HOOKS, ...config.hooks } },
+      healthOverride: null,
       filesystem: {
         sessionId: null,
         header: null,
@@ -393,6 +400,10 @@ export class FakeWorld {
   }
 
   // -- test drivers ---------------------------------------------------------
+
+  setHealth(orbId: string, health: HealthOverride | null): void {
+    this.orbState(orbId).healthOverride = health;
+  }
 
   failNextComputeDiscards(count: number): void {
     this.computeDiscardFailuresRemaining = count;
@@ -1223,6 +1234,8 @@ export class FakeWorld {
     if (host === null || host.runtime === null) throw new Error("runtimeHealth on dead runtime");
     const runtime = host.runtime;
     const orbId = state.reportOrbId ?? host.orbId;
+    if (state.healthOverride !== null && "status" in state.healthOverride)
+      return { v: 1, orbId, runtimeInstanceId: runtime.instanceId, ...state.healthOverride };
     const elapsed = task.monotonicNow() - runtime.startedAtMonotonic;
     const fs = state.filesystem;
     // The repository's `.agents/setup` runs before the session is loaded and
@@ -1658,6 +1671,8 @@ export class FakeRuntimeClient implements OrbRuntimeClient {
     return this.req(task, FAILPOINTS.runtimeHealth, "health", context, () => {
       const state = this.world.resolveRuntime(baseUrl, task);
       if (state === null) return errAsync(clientError("unreachable", "no runtime", true));
+      if (state.healthOverride !== null && "type" in state.healthOverride)
+        return errAsync(state.healthOverride);
       return okAsync(this.world.runtimeHealth(task, state));
     });
   }

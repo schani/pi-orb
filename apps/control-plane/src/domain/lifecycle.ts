@@ -1414,6 +1414,18 @@ async function reconcileRunning(
     if (health?.isOk() || (health?.isErr() && health.error.answered))
       deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
     if (health === null) deps.control.noteRuntimeRequestStarted(orb.id, task.monotonicNow());
+    if (health?.isOk() && health.value.status === "failed") {
+      const status = health.value;
+      return failOrb(
+        task,
+        deps,
+        orb,
+        "runtime_failed",
+        status.orbId === orb.id
+          ? `${status.error.code}: ${status.error.message}`
+          : `runtime identity mismatch: expected ${orb.id}, got ${status.orbId}`,
+      );
+    }
   }
   // Liveness is fed by history pulls (and, for central agents, the health probe
   // above) and judged on every `running` pass, ahead of any inbox work: a
@@ -1806,21 +1818,6 @@ async function reconcileStopping(
     return transitionTo(task, deps, orb, "stopped", { reason: "drain_skipped" });
   }
 
-  // A drain stuck longer than the create/start deadline cannot be completed
-  // by waiting: the runtime cannot be restored to ready (docs/lifecycle.md).
-  if (
-    orb.stopReason !== "sleep" &&
-    task.wallNow() - orb.stateChangedAt > deps.constants.createStartDeadlineMs
-  ) {
-    return failOrb(
-      task,
-      deps,
-      orb,
-      "drain_runtime_unrecoverable",
-      "history drain could not complete within the create/start deadline",
-    );
-  }
-
   // The unreachable-runtime restart applies during stopping too, so a pending
   // drain is never stranded behind a dead runtime process (docs/lifecycle.md).
   // The drain must stay in `stopping`, so unlike `running` this cannot hand
@@ -1948,19 +1945,6 @@ async function reconcileStopping(
       if (deps.control.getDrainStatus(orb.id)?.retrying !== true)
         logOrbEvent(task, orb.id, "idle-stop-prepare-blocked", { message: prepared.error.message });
       const drain = deps.control.getDrainStatus(orb.id);
-      if (
-        orb.stopReason === "sleep" &&
-        drain?.startedAt !== undefined &&
-        task.wallNow() - drain.startedAt > deps.constants.createStartDeadlineMs
-      ) {
-        return failOrb(
-          task,
-          deps,
-          orb,
-          "drain_runtime_unrecoverable",
-          "history drain could not complete within the create/start deadline after sleep preparation",
-        );
-      }
       deps.control.setDrainStatus(orb.id, {
         retrying: true,
         message: prepared.error.message,
@@ -2053,29 +2037,16 @@ async function reconcileStopping(
       // The stop must not proceed; the host stays running while we retry. A
       // blocked drain re-enters this branch every reconcile tick, so only the
       // edge into "retrying" is logged (docs/lifecycle.md noise rule).
-      if (deps.control.getDrainStatus(orb.id)?.retrying !== true) {
+      if (outcome.invariant !== true && deps.control.getDrainStatus(orb.id)?.retrying !== true) {
         logOrbEvent(task, orb.id, "drain-blocked", { message: outcome.message });
       }
       const drain = deps.control.getDrainStatus(orb.id);
-      if (
-        orb.stopReason === "sleep" &&
-        drain?.startedAt !== undefined &&
-        task.wallNow() - drain.startedAt > deps.constants.createStartDeadlineMs
-      ) {
-        return failOrb(
-          task,
-          deps,
-          orb,
-          "drain_runtime_unrecoverable",
-          "history drain could not complete within the create/start deadline after sleep preparation",
-        );
-      }
       deps.control.setDrainStatus(orb.id, {
-        retrying: true,
+        retrying: outcome.invariant !== true,
         message: outcome.message,
         ...(drain?.startedAt === undefined ? {} : { startedAt: drain.startedAt }),
       });
-      return waiting("drain_blocked");
+      return outcome.invariant === true ? retryable(outcome) : waiting("drain_blocked");
     }
     case "integrity":
       // The poll atomically failed the orb and requested shared compute disposal.
