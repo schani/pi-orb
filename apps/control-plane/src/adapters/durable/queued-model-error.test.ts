@@ -48,6 +48,7 @@ it.each(["terminal", "duplicate", "reopen"] as const)(
     const models = createModels();
     models.setProvider(faux.provider);
     let effects = 0;
+    const settlements: string[] = [];
     faux.setResponses([
       fauxAssistantMessage(fauxToolCall("effect", {}), { stopReason: "toolUse" }),
       async () => {
@@ -76,7 +77,24 @@ it.each(["terminal", "duplicate", "reopen"] as const)(
     let storage!: Storage;
     let conversation!: Harness["conversation"];
     const open = async (options: Pick<DurableAgentOptions, "resume" | "admitRecovery"> = {}) => {
-      storage = (await authority.openOrb("orb", false))._unsafeUnwrap().storage;
+      const native = (await authority.openOrb("orb", false))._unsafeUnwrap().storage;
+      storage = new Proxy(native, {
+        get(target, key) {
+          if (key === "commit")
+            return async (...args: Parameters<Storage["commit"]>) => {
+              const seq = await target.commit(...args);
+              for (const write of args[0])
+                if (
+                  write.type === "submission" &&
+                  ["done", "unanswered"].includes(write.value.status)
+                )
+                  settlements.push(write.value.requestId ?? "missing-request-id");
+              return seq;
+            };
+          const value = Reflect.get(target, key);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
       return DurableAgent.open({
         orbId: "orb",
         storage,
@@ -175,9 +193,10 @@ it.each(["terminal", "duplicate", "reopen"] as const)(
       (await agent.waitForIdle())._unsafeUnwrap();
       expect(faux.state.callCount).toBe(3);
       expect((await submission("queued"))?.id).toBe(queuedId);
+      expect(settlements.toSorted()).toEqual(["inbox:failed", "inbox:queued"]);
     } finally {
       release.resolve();
-      await agent.close();
+      (await agent.close())._unsafeUnwrap();
       await authority.close();
     }
   },

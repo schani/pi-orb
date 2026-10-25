@@ -379,7 +379,12 @@ it("starts queued input after declined overflow compaction without replaying fai
     {
       models,
       registry,
-      settings: { steeringMode: "all", followUpMode: "all", compaction: { keepRecentTokens: 1 } },
+      settings: {
+        steeringMode: "all",
+        followUpMode: "all",
+        afterFailedRun: "continue",
+        compaction: { keepRecentTokens: 1 },
+      },
     },
     ctx,
   );

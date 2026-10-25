@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
@@ -100,6 +101,23 @@ describe("Pi dependency patch installation", () => {
     expect(native).toContain("{ args: call.args }");
     expect(native).toContain("tx.doc(CodemodeRunDoc, api.taskId)");
     expect(native).toContain("tx.doc(CodemodeJournalDoc, api.taskId)");
+  });
+
+  it("configures failed-run continuation through the native Harness setting", () => {
+    const adapter = read("apps/control-plane/src/adapters/durable/agent.ts");
+    expect(
+      adapter
+        .slice(adapter.indexOf("harness = await Harness.open("))
+        .match(/settings: \{[^}]*\}/)?.[0],
+    ).toContain('afterFailedRun: "continue"');
+    const patch = read("patches/@earendil-works+pi-durable+1.4.0.patch");
+    expect(patch).not.toContain("dist/harness/generation.js");
+    const native = read("node_modules/@earendil-works/pi-durable/dist/harness/generation.js");
+    expect(createHash("sha256").update(native).digest("hex")).toBe(
+      "b7b8c610e23f100edd9cde336c28f70ae8c82f6e988f4b4564e1a732a2e1b531",
+    );
+    expect(native).toContain("const policy = settings.afterFailedRun;");
+    expect(native).not.toContain('prepareFailure(tx, runtime, "continue")');
   });
 
   it("decodes native image saves with a bounded portable byte loop", () => {
