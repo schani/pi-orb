@@ -14,6 +14,7 @@ import {
   formatProjectOrbAge,
   type OrbOrderCache,
   projectOrbGlyph,
+  projectOrbShelf,
   splitProjectOrbs,
 } from "../lib/project-orbs.ts";
 import { useAddressedProject } from "../lib/use-addressed-project.ts";
@@ -306,7 +307,7 @@ export function OrbIndex({
       window.clearInterval(timer);
     };
   }, []);
-  // A project appears only with its list, so it never pushes down a header already shown.
+  // Wait for each project's first settled list.
   const shown =
     visibleProjects?.flatMap((project) => {
       const list = visibleLists[project.id];
@@ -314,6 +315,9 @@ export function OrbIndex({
         ? []
         : [{ project, list }];
     }) ?? [];
+  const hasWorking = (list: OrbList) =>
+    list.items?.some((orb) => projectOrbShelf(orb.state) === "working") ?? false;
+  shown.sort((left, right) => Number(hasWorking(right.list)) - Number(hasWorking(left.list)));
   const loading = visibleProjects === null ? error === null : shown.length < visibleProjects.length;
   const currentName = visibleProjects?.find((project) => project.id === projectId)?.name ?? null;
   useEffect(() => {

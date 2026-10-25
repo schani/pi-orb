@@ -103,6 +103,68 @@ it.each(["/", "/orbs/missing-orb"])(
   },
 );
 
+it("keeps projects with working orbs first in the sidebar across polls", async () => {
+  const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
+  const page = await browser.newPage();
+  await page.clock.install();
+  const projects: ProjectView[] = ["Archive", "Stopped", "Empty", "Idle", "Live", "Failed"].map(
+    (name) => ({
+      id: name.toLowerCase(),
+      name,
+      state: "active",
+      repositoryUrl: "https://github.com/example/ordering",
+      createdAt: "2026-10-01T00:00:00Z",
+      updatedAt: "2026-10-01T00:00:00Z",
+    }),
+  );
+  const makeOrb = (projectId: string, state: OrbView["state"]): OrbView => ({
+    id: `${projectId}-${state}`,
+    projectId,
+    harness: "pi",
+    name: `${projectId} ${state}`,
+    state,
+    stateVersion: 1,
+    stateChangedAt: "2026-10-01T00:00:00Z",
+    createdAt: "2026-10-01T00:00:00Z",
+    updatedAt: "2026-10-01T00:00:00Z",
+  });
+  let incoming = projects;
+  const lists: Record<string, OrbView[]> = {
+    archive: (["archived", "archiving", "deleting"] as const).map((s) => makeOrb("archive", s)),
+    stopped: [{ ...makeOrb("stopped", "stopped"), sleepUntil: "2100-01-01T00:00:00Z" }],
+    empty: [],
+    idle: [{ ...makeOrb("idle", "running"), activity: "idle" }],
+    live: (["creating", "starting", "stopping"] as const).map((s) => makeOrb("live", s)),
+    failed: [makeOrb("failed", "failed")],
+  };
+  try {
+    await page.route("**/api/v1/projects", (route) => route.fulfill({ json: { items: incoming } }));
+    await page.route("**/api/v1/projects/*/orbs", (route) => {
+      const id = route.request().url().split("/").at(-2) ?? "";
+      return route.fulfill({ json: { items: lists[id] ?? [] } });
+    });
+    await page.goto(`${origin}/orbs/missing-orb`);
+    const sections = page.locator(".orb-index .ix-project");
+    const names = sections.locator(".project-name");
+    await expectPage(names).toHaveText(["Stopped", "Idle", "Live", "Failed", "Archive", "Empty"]);
+    const stoppedSection = await sections.filter({ hasText: "Stopped" }).elementHandle();
+    incoming = [...projects].reverse();
+    lists.archive = [makeOrb("archive", "stopped")];
+    lists.stopped = [makeOrb("stopped", "archived")];
+    lists.idle = [];
+    await page.clock.runFor(2000);
+    await expectPage(names).toHaveText(["Archive", "Live", "Failed", "Stopped", "Empty", "Idle"]);
+    expect(await stoppedSection?.evaluate((node) => node.isConnected)).toBe(true);
+    lists.stopped = [makeOrb("stopped", "stopped")];
+    lists.idle = [{ ...makeOrb("idle", "running"), activity: "busy" }];
+    await page.clock.runFor(2000);
+    await expectPage(names).toHaveText(["Archive", "Stopped", "Idle", "Live", "Failed", "Empty"]);
+  } finally {
+    await page.unrouteAll({ behavior: "wait" });
+    await page.close();
+  }
+});
+
 it("freezes dashboard project order after list loading, while polling metadata and resetting on reload", async () => {
   const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
   const page = await browser.newPage();
