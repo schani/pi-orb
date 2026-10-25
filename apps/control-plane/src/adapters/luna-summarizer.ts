@@ -1,5 +1,4 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage, Models } from "@earendil-works/pi-ai";
 import { completeLuna } from "@pi-orb/luna";
 import { err, ResultAsync } from "neverthrow";
 import {
@@ -23,13 +22,13 @@ const summaryPrompt = (input: TurnSummaryInput): string =>
 
 /** A separate inference call: it never touches AgentSession or Pi history. */
 export class LunaTurnSummarizer implements TurnSummarizer {
-  private readonly runtime: ModelRuntime;
-  private readonly modelTemplate: Parameters<ModelRuntime["completeSimple"]>[0];
+  private readonly runtime: Models;
+  private readonly modelTemplate: Parameters<Models["completeSimple"]>[0];
   private readonly onResponse: ((response: AssistantMessage) => void) | undefined;
 
   constructor(
-    runtime: ModelRuntime,
-    modelTemplate: Parameters<ModelRuntime["completeSimple"]>[0],
+    runtime: Models,
+    modelTemplate: Parameters<Models["completeSimple"]>[0],
     onResponse?: (response: AssistantMessage) => void,
   ) {
     this.runtime = runtime;
@@ -41,10 +40,13 @@ export class LunaTurnSummarizer implements TurnSummarizer {
     input: TurnSummaryInput,
     context: { readonly signal: AbortSignal },
   ): ResultAsync<string, TurnSummaryError> {
-    return ResultAsync.fromPromise(this.runtime.getAuth(this.modelTemplate), (cause) => ({
-      type: "turn_summary_error" as const,
-      message: cause instanceof Error ? cause.message : String(cause),
-    }))
+    return ResultAsync.fromPromise(
+      this.runtime.getAuth(this.modelTemplate, { signal: context.signal }),
+      (cause) => ({
+        type: "turn_summary_error" as const,
+        message: cause instanceof Error ? cause.message : String(cause),
+      }),
+    )
       .andThen((auth) => {
         if (auth === undefined) {
           return err({

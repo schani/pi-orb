@@ -54,7 +54,6 @@ function sealedFixture(root = fixture()) {
   cpSync(join(repository, "patches"), join(root, "patches"), { recursive: true });
   for (const patch of [
     "@earendil-works+pi-ai+1.4.0.patch",
-    "@earendil-works+pi-coding-agent+1.4.0.patch",
     "@earendil-works+pi-codemode+1.4.0.patch",
     "@earendil-works+pi-durable+1.4.0.patch",
   ]) {
@@ -95,7 +94,7 @@ function sealedCli(root) {
     });
 }
 
-for (const name of ["pi-ai", "pi-coding-agent", "pi-codemode", "pi-durable"]) {
+for (const name of ["pi-ai", "pi-codemode", "pi-durable"]) {
   test(`refuses missing ${name} before modifying another package`, () => {
     const root = sealedFixture();
     const run = sealedCli(root);
@@ -263,27 +262,13 @@ for (const nested of [false, true]) {
     const root = sealedFixture(nested ? nestedFixture().root : fixture());
     const result = applyDependencyPatches(root);
     assert.equal(result.isOk(), true, JSON.stringify(result.error));
-    assert.equal(result.value.length, 4);
+    assert.equal(result.value.length, 3);
     assert.ok(result.value.every(({ status }) => status === "applied"));
     assert.ok(
       applyDependencyPatches(root).value.every(({ status }) => status === "already_applied"),
     );
   });
 }
-
-test("coding-agent patch covers only central provider diagnostics", () => {
-  const patch = readFileSync(
-    join(repository, "patches/@earendil-works+pi-coding-agent+1.4.0.patch"),
-    "utf8",
-  );
-  assert.deepEqual(
-    [...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map((match) => match[1]),
-    [
-      "node_modules/@earendil-works/pi-coding-agent/dist/core/model-runtime.js",
-      "node_modules/@earendil-works/pi-coding-agent/dist/core/provider-composer.d.ts",
-    ],
-  );
-});
 
 test("guest execution and Claude load no patched dependency files", () => {
   const result = spawnSync(
@@ -385,7 +370,7 @@ test("Pi release inputs align on stable 1.4.0 with a scoped Undici security over
   });
 });
 
-for (const patch of ["pi-ai", "pi-coding-agent", "pi-codemode", "pi-durable"]) {
+for (const patch of ["pi-ai", "pi-codemode", "pi-durable"]) {
   test(`CLI seals every ${patch} file before applying any patch`, () => {
     const source = readFileSync(
       join(repository, `patches/@earendil-works+${patch}+1.4.0.patch`),
