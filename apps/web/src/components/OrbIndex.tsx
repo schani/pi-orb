@@ -14,7 +14,6 @@ import {
   formatProjectOrbAge,
   type OrbOrderCache,
   projectOrbGlyph,
-  projectOrbShelf,
   splitProjectOrbs,
 } from "../lib/project-orbs.ts";
 import { useAddressedProject } from "../lib/use-addressed-project.ts";
@@ -315,9 +314,13 @@ export function OrbIndex({
         ? []
         : [{ project, list }];
     }) ?? [];
-  const hasWorking = (list: OrbList) =>
-    list.items?.some((orb) => projectOrbShelf(orb.state) === "working") ?? false;
-  shown.sort((left, right) => Number(hasWorking(right.list)) - Number(hasWorking(left.list)));
+  const priority = (list: OrbList) =>
+    list.items?.some((orb) => orb.state === "running")
+      ? 0
+      : list.items?.some((orb) => orb.state === "stopped" && orb.sleepUntil != null)
+        ? 1
+        : 2;
+  shown.sort((left, right) => priority(left.list) - priority(right.list));
   const loading = visibleProjects === null ? error === null : shown.length < visibleProjects.length;
   const currentName = visibleProjects?.find((project) => project.id === projectId)?.name ?? null;
   useEffect(() => {
