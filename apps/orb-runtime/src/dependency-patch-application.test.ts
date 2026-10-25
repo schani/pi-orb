@@ -18,7 +18,6 @@ const root = join(import.meta.dirname, "../../..");
 const helper = join(root, "scripts/apply-dependency-patches.mjs");
 const names = [
   "@earendil-works+pi-ai+1.4.0.patch",
-  "@earendil-works+pi-coding-agent+1.4.0.patch",
   "@earendil-works+pi-codemode+1.4.0.patch",
   "@earendil-works+pi-durable+1.4.0.patch",
 ];
@@ -261,8 +260,7 @@ describe("sealed dependency patch application", () => {
     expect(sha(target)).toBe(before);
   });
   it("preserves every shipped patch checksum", () => {
-    const evidence = `2f29dcf0d8b9931bfc1a16360ac48686b642fd5ce335731d33ef7755d9e48e44  patches/@earendil-works+pi-ai+1.4.0.patch
- 6f0b5e53c1bd021892743b9da101bf32847b8d6423edcf706e65b0165365f381  patches/@earendil-works+pi-coding-agent+1.4.0.patch
+    const evidence = `a6b44d4207768ed1479a7eef0b25402e241763f5a8265098937d42adb702002e  patches/@earendil-works+pi-ai+1.4.0.patch
  1558d89f7352b7bea216a090fdbbaa50deb0e778bb65f4c0ae9aa785757d8978  patches/@earendil-works+pi-codemode+1.4.0.patch
  3326dd20ce27c8b1679fa98a136fa6f18df6441f289011aae7b35c664cbf070f  patches/@earendil-works+pi-durable+1.4.0.patch`;
     for (const line of evidence.trim().split("\n")) {

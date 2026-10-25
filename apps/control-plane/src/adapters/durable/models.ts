@@ -1,5 +1,5 @@
-import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { createModels, type Models, type Provider } from "@earendil-works/pi-ai";
+import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { ResultAsync } from "neverthrow";
 import type { RuntimeClientError } from "../../domain/errors.ts";
 import { durableError } from "./manager.ts";
@@ -15,55 +15,74 @@ export interface DurableModelsOptions {
   readonly inferenceBaseUrl?: string;
 }
 
-/** Owner-scoped broker credentials; no ambient auth path, environment mutation or real refresh token. */
+/** Owner-scoped broker credentials; no ambient auth or real refresh token. */
 export function createDurableModels(
   options: DurableModelsOptions,
-): ResultAsync<ModelRuntime, RuntimeClientError> {
-  const diagnostics = new Map<string, { brokerGeneration?: number; tokenExpiresAt: number }>();
+): ResultAsync<Models, RuntimeClientError> {
+  type Diagnostics = { brokerGeneration?: number; tokenExpiresAt: number };
+  const diagnostics = new Map<string, Diagnostics | undefined>();
+  let diagnosticsExhausted = false;
   const resolve = async (signal?: AbortSignal) => {
     const result = await options.token(signal);
-    // The provider OAuth callback requires rejection on failure; neverthrow is restored at our outer boundary.
-    // A cancelled refresh must not publish a late grant: the SDK persists whatever the callback returns.
+    // Pi's auth resolver requires rejection; Models converts it to a typed auth error.
     if (result.isErr() || signal?.aborted)
       return Promise.reject(new Error("owner model credential unavailable"));
     const grant = result.value;
-    diagnostics.set(grant.accessToken, {
-      tokenExpiresAt: grant.expiresAt,
-      ...(grant.generation === undefined ? {} : { brokerGeneration: grant.generation }),
-    });
-    if (diagnostics.size > 32) diagnostics.delete(diagnostics.keys().next().value as string);
+    if (!diagnosticsExhausted && !diagnostics.has(grant.accessToken) && diagnostics.size === 32) {
+      // Forgetting bearer history could misattribute a request delayed before provider dispatch.
+      diagnostics.clear();
+      diagnosticsExhausted = true;
+    }
+    if (!diagnosticsExhausted) {
+      const metadata = {
+        tokenExpiresAt: grant.expiresAt,
+        ...(grant.generation === undefined ? {} : { brokerGeneration: grant.generation }),
+      };
+      const previous = diagnostics.get(grant.accessToken);
+      diagnostics.set(
+        grant.accessToken,
+        diagnostics.has(grant.accessToken) &&
+          (previous?.brokerGeneration !== metadata.brokerGeneration ||
+            previous?.tokenExpiresAt !== metadata.tokenExpiresAt)
+          ? undefined
+          : metadata,
+      );
+    }
     return {
-      type: "oauth" as const,
-      access: grant.accessToken,
-      refresh: "pi-orb-broker",
-      expires: grant.expiresAt,
+      auth: {
+        apiKey: grant.accessToken,
+        ...(options.inferenceBaseUrl === undefined ? {} : { baseUrl: options.inferenceBaseUrl }),
+      },
+      source: "owner broker",
     };
+  };
+  const requestDiagnostics = (apiKey?: string) => {
+    const metadata = apiKey ? diagnostics.get(apiKey) : undefined;
+    return metadata ? { codexBrokerDiagnostics: metadata } : {};
   };
   return ResultAsync.fromPromise(
     (async () => {
-      const credentials = new InMemoryCredentialStore();
-      await credentials.modify("openai-codex", () => resolve(options.signal));
-      const runtime = await ModelRuntime.create({
-        credentials,
-        modelsPath: null,
-        allowModelNetwork: false,
-      });
-      runtime.registerProvider("openai-codex", {
-        name: "OpenAI Codex (central broker)",
-        ...(options.inferenceBaseUrl === undefined ? {} : { baseUrl: options.inferenceBaseUrl }),
-        getRequestDiagnostics: (bearer) => diagnostics.get(bearer),
-        oauth: {
-          name: "pi-orb broker",
-          login: (callbacks) => resolve(callbacks.signal),
-          refreshToken: (_credential, signal) => resolve(signal),
-          getApiKey: (credential) => credential.access,
+      await resolve(options.signal);
+      const models = createModels();
+      const provider = openaiCodexProvider();
+      const brokerProvider: Provider<"openai-codex-responses"> = {
+        ...provider,
+        auth: {
+          apiKey: { name: "owner broker", resolve: ({ signal }) => resolve(signal) },
         },
-      });
-      await runtime.getAvailable(
-        "openai-codex",
-        options.signal === undefined ? {} : { signal: options.signal },
-      );
-      return runtime;
+        stream: (model, context, requestOptions) =>
+          provider.stream<"openai-codex-responses">(model, context, {
+            ...requestOptions,
+            ...requestDiagnostics(requestOptions?.apiKey),
+          }),
+        streamSimple: (model, context, requestOptions) =>
+          provider.streamSimple(model, context, {
+            ...requestOptions,
+            ...requestDiagnostics(requestOptions?.apiKey),
+          }),
+      };
+      models.setProvider(brokerProvider);
+      return models;
     })(),
     () => durableError("owner model runtime initialization failed", true),
   );

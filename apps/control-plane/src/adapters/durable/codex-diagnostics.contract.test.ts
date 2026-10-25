@@ -1,12 +1,12 @@
 import { createServer } from "node:http";
-import { normalizeContext } from "@earendil-works/pi-ai";
+import { createModels, normalizeContext } from "@earendil-works/pi-ai";
 import {
   closeOpenAICodexWebSocketSessions,
   stream,
 } from "@earendil-works/pi-ai/api/openai-codex-responses";
 import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
-import { okAsync } from "neverthrow";
-import { afterEach, expect, it, vi } from "vitest";
+import { okAsync, ResultAsync } from "neverthrow";
+import { afterEach, assert, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { createDurableModels } from "./models.ts";
 
@@ -110,26 +110,66 @@ it("finishes the original HTTP failure despite throwing request-ID lookup", asyn
   expect(fetch).toHaveBeenCalledOnce();
 });
 
-it("does not let a throwing ModelRuntime diagnostic callback block inference or leak secrets", async () => {
-  const runtime = (
-    await createDurableModels({
-      token: () => okAsync({ accessToken: apiKey, expiresAt: Date.now() + 3600000 }),
-    })
-  )._unsafeUnwrap();
-  runtime.registerProvider("openai-codex", {
-    getRequestDiagnostics: () => {
-      throw new Error("diagnostic callback secret");
-    },
-  });
-  const fetch = vi.fn(async () => unauthorized());
-  const result = await runtime.complete(model, context, { apiKey, transport: "sse", fetch });
-  expect(result.stopReason).toBe("error");
-  expect(result.diagnostics, JSON.stringify(result)).toContainEqual(
-    expect.objectContaining({ type: "codex_failure", status: 401 }),
-  );
-  expect(JSON.stringify(result)).not.toContain("diagnostic callback secret");
-  expect(fetch).toHaveBeenCalledOnce();
-});
+it.each([false, true])(
+  "attributes only the effective request bearer with native provider injection (simple=%s)",
+  async (simple) => {
+    const runtime = (
+      await createDurableModels({
+        token: () =>
+          okAsync({ accessToken: apiKey, generation: 4, expiresAt: Date.now() + 3600000 }),
+      })
+    )._unsafeUnwrap();
+    const models = createModels();
+    const provider = runtime.getProvider("openai-codex");
+    assert(provider);
+    models.setProvider(provider);
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => unauthorized());
+    const complete = simple ? models.completeSimple.bind(models) : models.complete.bind(models);
+    const result = await complete(model, context, {
+      apiKey: `${apiKey}other`,
+      transport: "sse",
+      fetch,
+    });
+    expect(result.stopReason).toBe("error");
+    const failure = result.diagnostics?.find((item) => item.type === "codex_failure");
+    expect(failure).toMatchObject({ type: "codex_failure", status: 401 });
+    expect(failure).not.toHaveProperty("brokerGeneration");
+    expect(failure).not.toHaveProperty("tokenExpiresAt");
+    expect(new Headers(fetch.mock.calls[0]?.[1]?.headers).get("authorization")).toBe(
+      `Bearer ${apiKey}other`,
+    );
+    expect(fetch).toHaveBeenCalledOnce();
+  },
+);
+
+it.each([false, true])(
+  "converts native transport TypeError into the terminal provider failure (simple=%s)",
+  async (simple) => {
+    const expiry = Date.now() + 3600000;
+    const runtime = (
+      await createDurableModels({
+        token: () => okAsync({ accessToken: apiKey, generation: 4, expiresAt: expiry }),
+      })
+    )._unsafeUnwrap();
+    const fetch = vi.fn<typeof globalThis.fetch>(() =>
+      Promise.reject(new TypeError("native transport canary")),
+    );
+    const complete = simple ? runtime.completeSimple.bind(runtime) : runtime.complete.bind(runtime);
+    const result = await complete(model, context, { transport: "sse", maxRetries: 0, fetch });
+    expect(result.stopReason).toBe("error");
+    expect(result.errorMessage).toContain("native transport canary");
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        type: "codex_failure",
+        transport: "sse",
+        phase: "before_message_stream_start",
+        brokerGeneration: 4,
+        tokenExpiresAt: expiry,
+      }),
+    );
+    expect(fetch).toHaveBeenCalledOnce();
+  },
+);
 
 it("does not attribute a previous HTTP response to a later transport failure", async () => {
   const fetch = vi
@@ -163,10 +203,12 @@ it("does not attribute a previous HTTP response to a later transport failure", a
 });
 
 it("binds broker metadata to the actual bearer when failures finish out of order", async () => {
-  const now = vi.spyOn(Date, "now").mockReturnValue(1000000);
   const expiry = Date.now() + 3600000;
   const token = vi
     .fn()
+    .mockImplementationOnce(() =>
+      okAsync({ accessToken: apiKey, generation: 1, expiresAt: expiry }),
+    )
     .mockImplementationOnce(() =>
       okAsync({ accessToken: apiKey, generation: 1, expiresAt: expiry }),
     )
@@ -192,7 +234,6 @@ it("binds broker metadata to the actual bearer when failures finish out of order
   const first = runtime.complete(model, context, { transport: "sse", maxRetries: 0, fetch });
   try {
     await entered;
-    now.mockReturnValue(expiry - 1000);
     const second = await runtime.complete(model, context, {
       transport: "sse",
       maxRetries: 0,
@@ -221,9 +262,146 @@ it("binds broker metadata to the actual bearer when failures finish out of order
     );
     expect(bearers).toEqual([`Bearer ${apiKey}`, `Bearer ${apiKey}2`]);
     expect(JSON.stringify([original.diagnostics, second.diagnostics])).not.toContain(apiKey);
-    expect(token).toHaveBeenCalledTimes(2);
+    expect(token).toHaveBeenCalledTimes(3);
   } finally {
     release(unauthorized());
+    await first;
+  }
+});
+
+it("does not publish diagnostic metadata from a cancelled late broker grant", async () => {
+  const grant = { accessToken: apiKey, generation: 1, expiresAt: Date.now() + 3600000 };
+  const token = vi.fn(() => okAsync(grant));
+  const runtime = (await createDurableModels({ token }))._unsafeUnwrap();
+  let arrive = () => {};
+  const entered = new Promise<void>((resolve) => {
+    arrive = resolve;
+  });
+  let release = (_grant: typeof grant) => {};
+  const held = new Promise<typeof grant>((resolve) => {
+    release = resolve;
+  });
+  const broker = ResultAsync.fromSafePromise(held);
+  token.mockImplementationOnce(() => {
+    arrive();
+    return broker;
+  });
+  const controller = new AbortController();
+  const cancelled = runtime.getAuth("openai-codex", { signal: controller.signal }).then(
+    () => false,
+    () => true,
+  );
+  try {
+    await entered;
+    controller.abort();
+    release({ ...grant, generation: 2 });
+    await broker;
+    expect(await cancelled).toBe(true);
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => unauthorized());
+    const result = await runtime.completeSimple(model, context, { transport: "sse", fetch });
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ brokerGeneration: 1, tokenExpiresAt: grant.expiresAt }),
+    );
+  } finally {
+    release(grant);
+    await cancelled;
+  }
+});
+
+it("omits ambiguous same-bearer metadata across delayed native dispatch", async () => {
+  const expiry = Date.now() + 3600000;
+  const token = vi.fn(() => okAsync({ accessToken: apiKey, generation: 1, expiresAt: expiry }));
+  const runtime = (await createDurableModels({ token }))._unsafeUnwrap();
+  let arrive = () => {};
+  const entered = new Promise<void>((resolve) => {
+    arrive = resolve;
+  });
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => unauthorized());
+  const first = runtime.complete(model, context, {
+    transport: "sse",
+    fetch,
+    transformHeaders: async (headers) => {
+      arrive();
+      await held;
+      return headers;
+    },
+  });
+  try {
+    await entered;
+    token.mockImplementation(() =>
+      okAsync({ accessToken: apiKey, generation: 2, expiresAt: expiry + 1000 }),
+    );
+    const second = await runtime.complete(model, context, { transport: "sse", fetch });
+    release();
+    const original = await first;
+    for (const result of [original, second]) {
+      const failure = result.diagnostics?.find((item) => item.type === "codex_failure");
+      expect(failure).toMatchObject({ status: 401 });
+      expect(failure).not.toHaveProperty("brokerGeneration");
+      expect(failure).not.toHaveProperty("tokenExpiresAt");
+    }
+    const again = await runtime.complete(model, context, { transport: "sse", fetch });
+    expect(again.diagnostics?.find((item) => item.type === "codex_failure")).not.toHaveProperty(
+      "brokerGeneration",
+    );
+  } finally {
+    release();
+    await first;
+  }
+});
+
+it("never attributes a reintroduced bearer to an older request held through map eviction", async () => {
+  const expiry = Date.now() + 3600000;
+  const token = vi.fn(() => okAsync({ accessToken: apiKey, generation: 1, expiresAt: expiry }));
+  const runtime = (await createDurableModels({ token }))._unsafeUnwrap();
+  let arrive = () => {};
+  const entered = new Promise<void>((resolve) => {
+    arrive = resolve;
+  });
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => unauthorized());
+  const first = runtime.complete(model, context, {
+    transport: "sse",
+    fetch,
+    transformHeaders: async (headers) => {
+      arrive();
+      await held;
+      return headers;
+    },
+  });
+  try {
+    await entered;
+    token.mockImplementation(() =>
+      okAsync({ accessToken: apiKey, generation: 2, expiresAt: expiry + 1000 }),
+    );
+    await runtime.getAuth("openai-codex");
+    for (let i = 0; i < 32; i++) {
+      token.mockImplementationOnce(() =>
+        okAsync({ accessToken: `${apiKey}${i}`, generation: i, expiresAt: expiry }),
+      );
+      await runtime.getAuth("openai-codex");
+    }
+    await runtime.getAuth("openai-codex");
+    release();
+    const original = await first;
+    const failure = original.diagnostics?.find((item) => item.type === "codex_failure");
+    expect(failure).toMatchObject({ transport: "sse", status: 401 });
+    expect(failure).not.toHaveProperty("brokerGeneration");
+    expect(failure).not.toHaveProperty("tokenExpiresAt");
+    const later = await runtime.completeSimple(model, context, { transport: "sse", fetch });
+    const laterFailure = later.diagnostics?.find((item) => item.type === "codex_failure");
+    expect(laterFailure).toMatchObject({ transport: "sse", status: 401 });
+    expect(laterFailure).not.toHaveProperty("brokerGeneration");
+    expect(laterFailure).not.toHaveProperty("tokenExpiresAt");
+  } finally {
+    release();
     await first;
   }
 });
@@ -308,7 +486,7 @@ it("sanitizes WS close diagnostics and keeps a later structured auth failure sep
     expect(first.content.filter((item) => item.type === "toolCall")).toEqual([]);
     expect(second.content.filter((item) => item.type === "toolCall")).toEqual([]);
     expect(fixture.requests()).toBe(2);
-    expect(fixture.token).toHaveBeenCalledOnce();
+    expect(fixture.token).toHaveBeenCalledTimes(3);
   } finally {
     await fixture.close();
   }
@@ -334,7 +512,7 @@ it("keeps pre-start WS fallback distinct from the final SSE failure", async () =
     ]);
     expect(JSON.stringify(result.diagnostics)).not.toContain("raw-secret");
     expect(fixture.requests()).toBe(1);
-    expect(fixture.token).toHaveBeenCalledOnce();
+    expect(fixture.token).toHaveBeenCalledTimes(2);
   } finally {
     await fixture.close();
   }

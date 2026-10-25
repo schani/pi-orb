@@ -22,7 +22,6 @@ const json = (
 
 const piVersion = "1.4.0";
 const helperPath = "scripts/apply-dependency-patches.mjs";
-const patchPath = `patches/@earendil-works+pi-coding-agent+${piVersion}.patch`;
 
 describe("Pi dependency patch installation", () => {
   it("uses Iron's bundled declarations", () => {
@@ -65,12 +64,37 @@ describe("Pi dependency patch installation", () => {
     expect(installed.version).toBe("5.0.12");
   });
 
-  it("carries the exact versioned patch", () => {
-    expect(existsSync(join(root, patchPath))).toBe(true);
-    const patch = read(patchPath);
-    expect(patch).toContain("dist/core/model-runtime.js");
-    expect(patch).toContain("dist/core/provider-composer.d.ts");
-    expect(patch).toContain("codexBrokerDiagnostics: requestDiagnostics");
+  it("keeps coding-agent and OAuth cancellation on pristine upstream contracts", () => {
+    expect(
+      existsSync(join(root, `patches/@earendil-works+pi-coding-agent+${piVersion}.patch`)),
+    ).toBe(false);
+    for (const [path, expected] of [
+      [
+        "node_modules/@earendil-works/pi-ai/dist/auth/resolve.js",
+        "3fcec09018831324d9c7fb02f4aea707e8a9e4fec5a2bdf1b3d84d716fd3091e",
+      ],
+      [
+        "node_modules/@earendil-works/pi-coding-agent/dist/core/model-runtime.js",
+        "44d8017928eff6721d5a56b4e71f98bcafb124f5aa6e7d3f016491e11fcf6461",
+      ],
+      [
+        "node_modules/@earendil-works/pi-coding-agent/dist/core/provider-composer.d.ts",
+        "8b6c292d4e346cb2a45186f2b3784102aa9fa5b5bd2096ef6ec4bbb235ddb504",
+      ],
+    ] as const)
+      expect(createHash("sha256").update(read(path)).digest("hex")).toBe(expected);
+    const resolve = read("node_modules/@earendil-works/pi-ai/dist/auth/resolve.js");
+    expect(resolve).toContain(
+      "oauth.refresh(current, AbortSignal.timeout(DEFAULT_OAUTH_REFRESH_TIMEOUT_MS))",
+    );
+    expect(resolve).not.toContain("AbortSignal.any([signal");
+    expect(
+      read("node_modules/@earendil-works/pi-coding-agent/dist/core/model-runtime.js"),
+    ).not.toContain("getRequestDiagnostics");
+    expect(read(helperPath)).not.toContain(
+      'package: "node_modules/@earendil-works/pi-coding-agent"',
+    );
+    expect(read("apps/control-plane/Dockerfile")).not.toContain("pi-coding-agent+1.4.0.patch");
   });
 
   it("keeps native Durable journals, namespace discovery and previews on the public contract", () => {
@@ -188,7 +212,6 @@ describe("Pi dependency patch installation", () => {
       "@earendil-works+pi-ai+1.4.0.patch",
       "@earendil-works+pi-codemode+1.4.0.patch",
       "@earendil-works+pi-durable+1.4.0.patch",
-      "@earendil-works+pi-coding-agent+1.4.0.patch",
     ];
     expect(
       readdirSync(join(root, "patches"))

@@ -1,12 +1,13 @@
+import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import type { Result } from "neverthrow";
 import { errAsync, ok, okAsync, ResultAsync } from "neverthrow";
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import type { RuntimeClientError } from "../../domain/errors.ts";
 import { durableError } from "./manager.ts";
-import type { DurableModelToken } from "./models.ts";
+import type { DurableModelsOptions, DurableModelToken } from "./models.ts";
 import { createDurableModels } from "./models.ts";
 
-describe("central broker ModelRuntime", () => {
+describe("central broker native Models", () => {
   it("forwards initialization admission cancellation before seeding credentials", async () => {
     const operation = new AbortController();
     operation.abort();
@@ -17,11 +18,53 @@ describe("central broker ModelRuntime", () => {
         return errAsync(durableError("cancelled", true));
       },
     });
-    expect(runtime.isErr()).toBe(true);
+    expect(runtime._unsafeUnwrapErr()).toEqual(
+      durableError("owner model runtime initialization failed", true),
+    );
   });
-  it("forwards pinned SDK refresh cancellation without cancelling another runtime", async () => {
-    const now = vi.spyOn(Date, "now").mockReturnValue(1000000);
-    const controllers = [new AbortController(), new AbortController()];
+
+  it("rejects a late initialization grant after admission cancellation", async () => {
+    const operation = new AbortController();
+    const runtime = createDurableModels({
+      signal: operation.signal,
+      token: (signal) => {
+        expect(signal).toBe(operation.signal);
+        operation.abort();
+        return okAsync({ accessToken: "late-bearer", expiresAt: Date.now() + 3600000 });
+      },
+    });
+    expect((await runtime).isErr()).toBe(true);
+  });
+
+  it("resolves every request through the broker, without an OAuth store or ambient fallback", async () => {
+    const before = process.env["PI_CODING_AGENT_DIR"];
+    const token = vi.fn<DurableModelsOptions["token"]>(() =>
+      okAsync({ accessToken: "owner-bearer", generation: 4, expiresAt: Date.now() + 3600000 }),
+    );
+    const runtime = (await createDurableModels({ token }))._unsafeUnwrap();
+    expect(token).toHaveBeenCalledOnce();
+    expect(runtime.getProviders().map(({ id }) => id)).toEqual(["openai-codex"]);
+    expect(
+      await runtime.getAuth("anthropic", { env: { ANTHROPIC_API_KEY: "ambient-canary" } }),
+    ).toBeUndefined();
+    expect(runtime.getProvider("openai-codex")?.auth.oauth).toBeUndefined();
+    expect(runtime.getProvider("openai-codex")?.auth.apiKey?.resolve).toBeTypeOf("function");
+    expect((await runtime.getAuth("openai-codex"))?.auth.apiKey).toBe("owner-bearer");
+    expect((await runtime.getAuth("openai-codex"))?.auth.apiKey).toBe("owner-bearer");
+    expect(token).toHaveBeenCalledTimes(3);
+    token.mockImplementationOnce(() => errAsync(durableError("unavailable", true)));
+    await expect(
+      runtime.getAuth("openai-codex", {
+        apiKey: "ambient-canary",
+        env: { OPENAI_API_KEY: "secret" },
+      }),
+    ).rejects.toMatchObject({ code: "auth" });
+    expect(process.env["PI_CODING_AGENT_DIR"]).toBe(before);
+    expect(runtime.getModels("openai-codex")).toEqual(openaiCodexProvider().getModels());
+  });
+
+  it("forwards request cancellation without cancelling another owner or publishing a late bearer", async () => {
+    const controller = new AbortController();
     let enter = () => {};
     const entered = new Promise<void>((resolve) => {
       enter = resolve;
@@ -30,52 +73,68 @@ describe("central broker ModelRuntime", () => {
     const held = new Promise<Result<DurableModelToken, RuntimeClientError>>((resolve) => {
       release = resolve;
     });
-    let calls = 0;
     let received: AbortSignal | undefined;
-    const token = (signal?: AbortSignal) => {
-      calls++;
-      if (calls !== 3)
-        return okAsync({ accessToken: `owner-bearer-${calls}`, expiresAt: Date.now() + 3600000 });
+    const token = vi.fn<DurableModelsOptions["token"]>(() =>
+      okAsync({ accessToken: "first-owner", expiresAt: Date.now() + 3600000 }),
+    );
+    const first = (await createDurableModels({ token }))._unsafeUnwrap();
+    expect(first.getProvider("openai-codex")?.auth.apiKey?.resolve).toBeTypeOf("function");
+    const otherToken = vi.fn(() =>
+      okAsync({ accessToken: "other-owner", expiresAt: Date.now() + 3600000 }),
+    );
+    const other = (await createDurableModels({ token: otherToken }))._unsafeUnwrap();
+    token.mockImplementationOnce((signal?: AbortSignal) => {
       received = signal;
       enter();
       return ResultAsync.fromSafePromise(held).andThen((result) => result);
-    };
-    try {
-      const first = (await createDurableModels({ token }))._unsafeUnwrap();
-      const other = (await createDurableModels({ token }))._unsafeUnwrap();
-      now.mockReturnValue(1000000 + 56 * 60000);
-      const cancelled = first
-        .getAuth("openai-codex", { signal: controllers[0]!.signal })
-        .catch(() => undefined);
-      await entered;
-      try {
-        expect(received).toBeDefined();
-        controllers[0]!.abort();
-        expect(received?.aborted).toBe(true);
-        expect(controllers[1]!.signal.aborted).toBe(false);
-      } finally {
-        release(ok({ accessToken: "late-bearer", expiresAt: Date.now() + 3600000 }));
-        await cancelled;
-      }
-      expect(await cancelled).toBeUndefined();
-      expect(
-        (await other.getAuth("openai-codex", { signal: controllers[1]!.signal }))?.auth.apiKey,
-      ).toBe("owner-bearer-4");
-      expect((await first.getAuth("openai-codex"))?.auth.apiKey).toBe("owner-bearer-5");
-      expect(calls).toBe(5);
-    } finally {
-      now.mockRestore();
-    }
-  });
-  it("resolves owner credentials without changing process agent directory", async () => {
-    const before = process.env["PI_CODING_AGENT_DIR"];
-    const runtime = await createDurableModels({
-      token: () =>
-        okAsync({ accessToken: "owner-bearer", generation: 4, expiresAt: Date.now() + 3600000 }),
     });
-    expect(runtime.isOk()).toBe(true);
-    const auth = await runtime._unsafeUnwrap().getAuth("openai-codex");
-    expect(auth?.auth.apiKey).toBe("owner-bearer");
-    expect(process.env["PI_CODING_AGENT_DIR"]).toBe(before);
+    const cancelled = first.getAuth("openai-codex", { signal: controller.signal });
+    const rejected = expect(cancelled).rejects.toBeDefined();
+    await entered;
+    controller.abort();
+    expect(received?.aborted).toBe(true);
+    release(ok({ accessToken: "late-bearer", expiresAt: Date.now() + 3600000 }));
+    await rejected;
+    expect((await other.getAuth("openai-codex"))?.auth.apiKey).toBe("other-owner");
+    expect((await first.getAuth("openai-codex"))?.auth.apiKey).toBe("first-owner");
+    expect(token).toHaveBeenCalledTimes(3);
+    expect(otherToken).toHaveBeenCalledTimes(2);
   });
+
+  it.each([false, true])(
+    "applies broker auth and resolved endpoint on native inference (simple=%s)",
+    async (simple) => {
+      const runtime = (
+        await createDurableModels({
+          token: () =>
+            okAsync({
+              accessToken:
+                "header.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoidGVzdCJ9fQ.signature",
+              expiresAt: Date.now() + 3600000,
+            }),
+          inferenceBaseUrl: "https://broker-test.invalid/backend-api",
+        })
+      )._unsafeUnwrap();
+      const model = runtime.getModel("openai-codex", "gpt-6.1-sol");
+      assert(model);
+      const fetch = vi.fn<typeof globalThis.fetch>(
+        async () => new Response('{"error":{"code":"invalid_api_key"}}', { status: 401 }),
+      );
+      const complete = simple
+        ? runtime.completeSimple.bind(runtime)
+        : runtime.complete.bind(runtime);
+      const result = await complete(
+        model,
+        { messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+        { transport: "sse", maxRetries: 0, fetch },
+      );
+      expect(result.stopReason).toBe("error");
+      expect(fetch).toHaveBeenCalledOnce();
+      const request = fetch.mock.calls[0];
+      assert(request);
+      const [url, init] = request;
+      expect(String(url)).toBe("https://broker-test.invalid/backend-api/codex/responses");
+      expect(new Headers(init?.headers).get("authorization")).toContain("Bearer header.");
+    },
+  );
 });
