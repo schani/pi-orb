@@ -126,6 +126,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-25-claude-input-receipt-conflict.md](docs/postmortems/2026-10-25-claude-input-receipt-conflict.md) — queued-copy receipt conflict, correction and containment
 - [docs/postmortems/2026-10-25-codex-fixture-grant-expiry.md](docs/postmortems/2026-10-25-codex-fixture-grant-expiry.md) — changing fixture expiry suppressed ambiguous broker diagnostics
 - [docs/postmortems/2026-10-24-native-image-capture-502.md](docs/postmortems/2026-10-24-native-image-capture-502.md) — native image insert succeeded while gcloud failed with 502; cleanup and unchanged production verified
 - [docs/postmortems/2026-10-23-google-signed-out-login-500.md](docs/postmortems/2026-10-23-google-signed-out-login-500.md) — Google signed-out login 500; optional domain hint removed

@@ -221,9 +221,48 @@ describe("Claude uses Pi's boot decision", () => {
   });
 });
 
-it.each([0, 1])(
-  "early passive acknowledgement preserves the human turn (%i turns)",
-  async (numTurns) => {
+describe("passive boot context consumption", () => {
+  const marker = boot("host-marker", "pi-orb.host-restarted");
+  const receipt: HistoryRecord = {
+    ...base,
+    id: "queued-boot-input",
+    type: "event",
+    eventType: "claude.input_receipt",
+    overflow: { operationId: marker.id, inputKind: "boot" },
+  };
+
+  it.each([1, 2])("acknowledges %i consumed boot inputs for the same operation", (count) => {
+    const receipts = Array.from({ length: count }, (_, index) => ({
+      ...receipt,
+      id: `queued-boot-input-${index}`,
+    }));
+    const later = { ...marker, id: "later-host-marker" };
+    expect(pendingBootContext([marker, ...receipts, human, later])).toEqual([later]);
+  });
+
+  it.each([
+    { ...receipt, eventType: "claude.platform_message" },
+    { ...receipt, eventType: "orb.message" },
+    ...["human", "peer", "system", "compaction"].map((inputKind) => ({
+      ...receipt,
+      overflow: { operationId: marker.id, inputKind },
+    })),
+    { ...receipt, overflow: { operationId: marker.id } },
+    { ...receipt, overflow: { inputKind: "boot" } },
+    { ...receipt, overflow: { operationId: "other", inputKind: "boot" } },
+  ])("ignores unrelated receipt authority: %j", (unrelated) => {
+    expect(pendingBootContext([marker, unrelated])).toEqual([marker]);
+  });
+});
+
+it.each([
+  [0, 0],
+  [1, 0],
+  [1, 1],
+  [1, 2],
+])(
+  "early passive acknowledgement preserves the human turn (%i turns, %i copies)",
+  async (numTurns, copies) => {
     const f = new ComposedClaudeFixture();
     const input = async () => {
       const next = await f.query.input.next();
@@ -280,7 +319,30 @@ it.each([0, 1])(
       expect(f.agent.getHealth()).toMatchObject({ status: "ready" });
       expect(f.query.closeRequested).toBe(false);
       expect(pendingBootContext(f.history.view)).toEqual([marker]);
-      f.receipt(context);
+      if (copies === 0) f.receipt(context);
+      else {
+        for (let index = 0; index < copies; index++)
+          f.append({
+            type: "attachment",
+            uuid: `boot-attachment-${index}`,
+            sessionId: f.state.id,
+            attachment: {
+              type: "queued_command",
+              source_uuid: context.uuid,
+              delivery_id: "boot-delivery",
+              prompt: context.message.content,
+              isMeta: true,
+            },
+          });
+        f.append({
+          type: "queue-operation",
+          operation: "remove",
+          reason: "absorbed_mid_turn",
+          commandUuid: context.uuid,
+          deliveryId: "boot-delivery",
+          sessionId: f.state.id,
+        });
+      }
       f.receipt(human);
       await f.query.emitUnscheduled({
         ...rootResult,

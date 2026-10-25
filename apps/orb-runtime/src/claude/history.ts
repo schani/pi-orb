@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import {
   type ContentBlock,
   type HistoryRecord,
@@ -300,10 +301,10 @@ export class ClaudeHistory {
         : [],
     );
     const additions: HistoryRecord[] = [];
-    const conflict = (): Result<never, ClaudeHistoryError> =>
+    const conflict = (reason: string): Result<never, ClaudeHistoryError> =>
       err({
         type: "claude_history_error",
-        message: "Consumed Claude input receipt proof conflicts.",
+        message: `Consumed Claude input receipt proof conflicts: ${reason}.`,
       });
     for (const attachment of attachments) {
       const provenance = this.provenance[attachment.inputUuid];
@@ -324,7 +325,7 @@ export class ClaudeHistory {
           ].includes(existing.eventType)
         )
       )
-        return conflict();
+        return conflict("input identity");
       const related = removals.filter(
         (removal) =>
           removal.inputUuid === attachment.inputUuid ||
@@ -335,18 +336,29 @@ export class ClaudeHistory {
           item.inputUuid === attachment.inputUuid && item.deliveryId === attachment.deliveryId,
       );
       if (removal === undefined) continue;
+      const copies = attachments.filter(
+        (other) =>
+          other.inputUuid === attachment.inputUuid || other.deliveryId === attachment.deliveryId,
+      );
+      if (related.length !== 1) return conflict("multiple removals");
       if (
-        related.length !== 1 ||
-        attachments.some(
+        copies.some(
           (other) =>
-            other !== attachment &&
-            (other.inputUuid === attachment.inputUuid ||
-              other.deliveryId === attachment.deliveryId),
+            other.inputUuid !== attachment.inputUuid ||
+            other.deliveryId !== attachment.deliveryId ||
+            !isDeepStrictEqual(
+              natives[other.index]?.attachment,
+              natives[attachment.index]?.attachment,
+            ),
         )
       )
-        return conflict();
+        return conflict("delivery copies differ");
+      if (copies.length > 1 && copies.some((copy) => copy.index >= removal.index))
+        return conflict("delivery copy follows consumption");
+      // The SDK assigns a single consumption removal to the last delivery copy.
+      if (attachment !== copies.at(-1)) continue;
       if (!boundedIdentifier(this.session) || !boundedIdentifier(provenance.operationId))
-        return conflict();
+        return conflict("invalid identity");
       if (removal.index <= attachment.index) continue;
       const record: HistoryRecord = {
         id,
@@ -382,7 +394,7 @@ export class ClaudeHistory {
           JSON.stringify(existing.overflow) !== JSON.stringify(record.overflow) ||
           JSON.stringify(existing.inboxMessageIds) !== JSON.stringify(record.inboxMessageIds)
         )
-          return conflict();
+          return conflict("committed receipt differs");
       }
     }
     return ok(additions);
