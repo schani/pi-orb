@@ -2059,7 +2059,7 @@ describe("runtime broker routes", () => {
       // A deterministic bug of ours must never be advertised as retryable
       // (docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md).
       seedOrb("running");
-      store.failWithInvariant("getOrbByRuntimeTokenHash");
+      store.failWithInvariant("get orb by token hash");
       const response = await mint({ audience: "urn:example:service" });
 
       expect(response.statusCode).toBe(500);

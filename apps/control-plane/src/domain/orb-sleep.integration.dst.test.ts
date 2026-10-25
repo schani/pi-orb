@@ -21,7 +21,7 @@ describe("scheduled sleep integration (DST)", () => {
                 sleepUntil: task.wallNow() + 1_000,
               }),
             );
-            harness.store.failWithInvariant("getOrb");
+            harness.store.failWithInvariant("get orb");
             await reconcileAllOnce(task, harness.deps);
             await task.checkpoint("invariant parked before sleep deadline");
             expect(harness.deps.control.getNextAttemptAt(`reconcile:${ORB}`)).toBe(

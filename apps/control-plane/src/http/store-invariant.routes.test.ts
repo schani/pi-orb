@@ -29,7 +29,7 @@ describe("store invariant HTTP mapping", () => {
   });
 
   it("answers a non-retryable 500 when enqueue hits a store invariant", async () => {
-    harness.store.failWithInvariant("enqueueOrbMessage");
+    harness.store.failWithInvariant("enqueue orb message");
     const response = await app.inject({
       method: "PUT",
       url: `/api/v1/orbs/orb-invariant/messages/${MESSAGE_ID}`,
@@ -41,7 +41,7 @@ describe("store invariant HTTP mapping", () => {
   });
 
   it("answers a non-retryable 500 when a plain read hits a store invariant", async () => {
-    harness.store.failWithInvariant("getOrb");
+    harness.store.failWithInvariant("get orb");
     const response = await app.inject({ method: "GET", url: "/api/v1/orbs/orb-invariant" });
     expect(response.statusCode).toBe(500);
     expect(response.json().error.code).toBe("internal");

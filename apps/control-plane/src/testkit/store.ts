@@ -57,8 +57,6 @@ const BOOT_CONTEXT_STATES: readonly OrbState[] = [
   "archiving",
 ];
 
-export type InvariantOperation = "getOrb" | "getOrbByRuntimeTokenHash" | "enqueueOrbMessage";
-
 interface OrbReplica {
   records: Map<string, HistoryRecord>;
   order: string[];
@@ -248,7 +246,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   private hostDiscardFinalizeFailures = 0;
   /** External replacement provision landed, but committing its ref/token fails. */
   private hostReplacementCommitFailures = 0;
-  private readonly invariantOperations = new Set<InvariantOperation>();
+  readonly observedBoundaries = new Set<string>();
+  private readonly operationFaults = new Map<string, StoreError>();
   /** Gate the next `noteOrbMessageDelivery` until this predicate holds. */
   private noteDeliveryHold: (() => boolean) | null = null;
   private readonly maxLatencyMs: number;
@@ -325,8 +324,20 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
    * Make `operation` fail with an `invariant` store error for the rest of the
    * run: the shape of a wrong-SQL/wrong-parameter bug, which no retry can survive.
    */
-  failWithInvariant(operation: InvariantOperation): void {
-    this.invariantOperations.add(operation);
+  failWithInvariant(operation: string): void {
+    this.setOperationFault(
+      operation,
+      invariant(`${operation}: parameter $3 is a bare JavaScript array`),
+    );
+  }
+
+  setOperationFault(operation: string, fault: StoreError | null): void {
+    if (fault === null) this.operationFaults.delete(operation);
+    else this.operationFaults.set(operation, fault);
+  }
+
+  clearOperationFaults(): void {
+    this.operationFaults.clear();
   }
 
   /**
@@ -349,10 +360,13 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     });
   }
 
-  private scriptedInvariant(operation: InvariantOperation): StoreError | null {
-    return this.invariantOperations.has(operation)
-      ? invariant(`${operation}: parameter $3 is a bare JavaScript array`)
-      : null;
+  private boundary(task: SimulationTask, reason: string): ResultAsync<void, StoreError> {
+    this.observedBoundaries.add(reason);
+    const fault = this.operationFaults.get(reason);
+    if (fault === undefined) return okAsync(undefined);
+    return ResultAsync.fromPromise(task.checkpoint("store fault", reason), (error) =>
+      task.abortSimulation(error),
+    ).andThen(() => errAsync(fault));
   }
 
   private access<T>(
@@ -366,10 +380,12 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       await task.failpoint(failpoint, reason);
       return f();
     };
-    return ResultAsync.fromPromise(run(), (error) => {
-      if (error instanceof ApplicationFailure) return unavailable(`${reason}: ${error.message}`);
-      return task.abortSimulation(error);
-    });
+    return this.boundary(task, reason).andThen(() =>
+      ResultAsync.fromPromise(run(), (error) => {
+        if (error instanceof ApplicationFailure) return unavailable(`${reason}: ${error.message}`);
+        return task.abortSimulation(error);
+      }),
+    );
   }
 
   /** Deterministic gate for a scripted hold; a no-op when nothing is held. */
@@ -680,8 +696,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   }
 
   getOrb(task: SimulationTask, orbId: string): ResultAsync<OrbRow | null, StoreError> {
-    const scripted = this.scriptedInvariant("getOrb");
-    if (scripted !== null) return errAsync(scripted);
     return this.access(task, FAILPOINTS.storeRead, "get orb", () => this.orbs.get(orbId) ?? null);
   }
 
@@ -689,8 +703,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     tokenHash: string,
   ): ResultAsync<OrbRow | null, StoreError> {
-    const scripted = this.scriptedInvariant("getOrbByRuntimeTokenHash");
-    if (scripted !== null) return errAsync(scripted);
     return this.access(task, FAILPOINTS.storeRead, "get orb by token hash", () => {
       for (const orb of this.orbs.values()) {
         if (orb.runtimeTokenHash === tokenHash) return orb;
@@ -918,8 +930,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     StoreError | StateConflict | OrbMessageTargetNotFound
   > {
     const targetId = params.orbId.toLowerCase();
-    const scripted = this.scriptedInvariant("enqueueOrbMessage");
-    if (scripted !== null) return errAsync(scripted);
     return this.access(task, FAILPOINTS.storeWrite, "enqueue orb message", () => {
       const sender = params.sender;
       if (sender !== undefined) {
@@ -2222,10 +2232,15 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       await task.failpoint(FAILPOINTS.storeAckAfter, orbId);
       return { pointer: pointer === recordId ? null : pointer };
     };
-    return ResultAsync.fromPromise(run(), (error) => {
-      if (error instanceof ApplicationFailure) return unavailable(`ack alert: ${error.message}`);
-      return task.abortSimulation(error);
-    }).andThen((outcome) => ("pointer" in outcome ? okAsync(outcome.pointer) : errAsync(outcome)));
+    return this.boundary(task, "ack alert")
+      .andThen(() =>
+        ResultAsync.fromPromise(run(), (error) => {
+          if (error instanceof ApplicationFailure)
+            return unavailable(`ack alert: ${error.message}`);
+          return task.abortSimulation(error);
+        }),
+      )
+      .andThen((outcome) => ("pointer" in outcome ? okAsync(outcome.pointer) : errAsync(outcome)));
   }
 
   commitPullBatch(
@@ -2368,16 +2383,19 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       }
       return outcome;
     };
-    return ResultAsync.fromPromise(run(), (error): CommitPullError => {
-      if (error instanceof ApplicationFailure) {
-        return unavailable(`commit pull batch: ${error.message}`);
-      }
-      return task.abortSimulation(error);
-    }).andThen((outcome) =>
-      outcome.kind === "error"
-        ? errAsync<OrbRow, CommitPullError>(outcome.error)
-        : okAsync(outcome.row),
-    );
+    return this.boundary(task, "commit pull batch")
+      .andThen(() =>
+        ResultAsync.fromPromise(run(), (error): CommitPullError => {
+          if (error instanceof ApplicationFailure)
+            return unavailable(`commit pull batch: ${error.message}`);
+          return task.abortSimulation(error);
+        }),
+      )
+      .andThen((outcome) =>
+        outcome.kind === "error"
+          ? errAsync<OrbRow, CommitPullError>(outcome.error)
+          : okAsync(outcome.row),
+      );
   }
 
   initOrVerifySession(
