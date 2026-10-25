@@ -183,13 +183,15 @@ export interface ClaudeQueryProcess {
 export type ClaudeQuery = Pick<
   Query,
   | "close"
-  | "interrupt"
   | "supportedModels"
   | "accountInfo"
   | "setModel"
   | "applyFlagSettings"
   | typeof Symbol.asyncIterator
->;
+> & {
+  // SDK 0.3.310 accepts this option but omits it from Query's declaration.
+  interrupt(options?: { cancelQueued?: boolean }): ReturnType<Query["interrupt"]>;
+};
 interface Delivery {
   uuid: string;
   operationId: string;
@@ -345,8 +347,12 @@ export class ClaudeOrbAgent implements OrbAgent {
     };
   }
   private fail(code: string, message: string, retryable = false, diagnostics?: string): void {
-    // Cleanup/history failures must not replace the initiating stream exception.
-    if (this.health.status === "failed" && this.health.error.code === "claude_stream_failed")
+    // Cleanup/history failures must not replace the initiating stream or rate-limit failure.
+    if (
+      this.health.status === "failed" &&
+      (this.health.error.code === "claude_stream_failed" ||
+        this.health.error.code === "claude_rate_limit")
+    )
       return;
     this.accepting = false;
     this.outcome = "failed";
@@ -1666,6 +1672,31 @@ export class ClaudeOrbAgent implements OrbAgent {
           this.fail("claude_steering_persistence_failed", recorded.error.message);
           return;
         }
+      }
+      if (
+        message.subtype === "success" &&
+        message.is_error &&
+        message.api_error_status === 429 &&
+        this.outcome !== "aborted" &&
+        this.pendingSteers.size === 0 &&
+        (message.queued_turn_count ?? 0) === 0 &&
+        this.compaction === null &&
+        this.closing === null &&
+        this.health.status === "ready"
+      ) {
+        this.fail(
+          "claude_rate_limit",
+          "Claude rate limit reached. Wait for the limit to reset, then restart this orb manually.",
+        );
+        const sdk = this.sdk;
+        if (sdk !== null)
+          void ResultAsync.fromThrowable(
+            () => sdk.interrupt({ cancelQueued: true }),
+            () => ({ code: "claude_interrupt_failed" as const }),
+          )().mapErr((error) => this.cleanupFailed(error.code));
+        // Establish closing now; cleanup must not await its own message consumer.
+        void this.closeExtensions();
+        return;
       }
       const previousHandoffs = Object.keys(this.state?.pendingHandoffs ?? {}).sort();
       let completedHandoffs: string[] = [];

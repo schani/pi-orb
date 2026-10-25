@@ -279,11 +279,13 @@ it.each(["chromium", "webkit"] as const)(
             )
             .toBe(true);
         }
-        expect(
-          await page
-            .locator("html")
-            .evaluate((n) => n.scrollWidth <= (n.ownerDocument.defaultView?.innerWidth ?? 0)),
-        ).toBe(true);
+        await expect
+          .poll(() =>
+            page
+              .locator("html")
+              .evaluate((n) => n.scrollWidth <= (n.ownerDocument.defaultView?.innerWidth ?? 0)),
+          )
+          .toBe(true);
         await page.screenshot({
           path: "/tmp/usage-layout-" + engine + "-" + width + ".png",
           fullPage: true,
