@@ -15,7 +15,13 @@ export const ProjectSecretNameSchema = Type.String({
 export type ProjectSecretName = Static<typeof ProjectSecretNameSchema>;
 
 export const PutProjectSecretRequestSchema = Type.Object(
-  { value: Type.String({ minLength: 1, maxLength: PROJECT_SECRET_MAX_VALUE_BYTES }) },
+  {
+    value: Type.String({
+      minLength: 1,
+      maxLength: PROJECT_SECRET_MAX_VALUE_BYTES,
+      pattern: "^[^\\u0000]*$",
+    }),
+  },
   closed,
 );
 export type PutProjectSecretRequest = Static<typeof PutProjectSecretRequestSchema>;
@@ -40,7 +46,10 @@ export const ProjectSecretSnapshotSchema = Type.Object(
     revision: Type.Integer({ minimum: 0 }),
     values: Type.Unsafe<Record<string, string>>({
       type: "object",
-      patternProperties: { [PROJECT_SECRET_NAME_PATTERN]: { type: "string" } },
+      propertyNames: { not: { const: "__proto__" } },
+      patternProperties: {
+        [PROJECT_SECRET_NAME_PATTERN]: { type: "string", pattern: "^[^\\u0000]*$" },
+      },
       additionalProperties: false,
     }),
   },

@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -289,6 +289,71 @@ test("boot fails with git_identity_unavailable when the identity cannot be read"
       await expect(readFile(join(root, "home", ".gitconfig"), "utf8")).rejects.toThrow();
     },
   );
+});
+
+test("unsafe snapshots fail boot before native environment assignment or resume", () => {
+  const child = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+    import assert from "node:assert/strict";
+    import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
+    import { tmpdir } from "node:os";
+    import { join } from "node:path";
+    import { ExecutionBoot } from ${JSON.stringify(new URL("./boot.ts", import.meta.url).href)};
+    const root = mkdtempSync(join(tmpdir(), "unsafe-secret-boot-"));
+    const name = "PROJECT_SECRET_NATIVE_NUL_TEST";
+    const original = "unchanged";
+    const unsafe = "private-prefix" + String.fromCharCode(0) + "private-suffix";
+    // Establish the native hazard, not acceptable application behavior.
+    process.env[name] = unsafe;
+    assert.equal(process.env[name], "private-prefix");
+    const valuesToReject = [
+      { [name]: unsafe, PROJECT_SECRET_NATIVE_SAFE_TEST: "must-not-apply" },
+      JSON.parse('{"__proto__":"private-value"}'),
+    ];
+    try {
+      for (const [index, values] of valuesToReject.entries()) {
+        process.env[name] = original;
+        delete process.env.PROJECT_SECRET_NATIVE_SAFE_TEST;
+        delete process.env.__proto__;
+        const workDir = join(root, String(index));
+        const hooks = join(workDir, "repo", ".agents");
+        mkdirSync(hooks, { recursive: true });
+        const resumed = join(workDir, "resumed");
+        writeFileSync(join(hooks, "resume"), '#!/bin/sh\\n touch "' + resumed + '"\\n', { mode: 0o755 });
+        const requests = [];
+        globalThis.fetch = async (url) => {
+          requests.push(url);
+          return new Response(JSON.stringify({ revision: 1, values }));
+        };
+        const boot = new ExecutionBoot({
+          orbId: "test", workDir, repositoryUrl: null, incarnation: "3",
+          environment: process.env,
+          broker: { controlPlaneUrl: "http://control.test", runtimeToken: "private" },
+        });
+        try {
+          const result = await boot.boot();
+          assert.equal(process.env[name], original);
+          assert.equal(process.env.PROJECT_SECRET_NATIVE_SAFE_TEST, undefined);
+          assert.equal(Object.hasOwn(process.env, "__proto__"), false);
+          assert.equal(result.isErr(), true);
+          assert.equal(result.error.code, "project_secrets_unavailable");
+          assert.equal(boot.health().status, "failed");
+          assert.equal(boot.snapshot, null);
+          assert.equal(existsSync(resumed), false);
+          assert.deepEqual(requests, ["http://control.test/runtime/v1/project-secrets"]);
+        } finally { boot.shutdown(); }
+      }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  `,
+    ],
+    { encoding: "utf8", timeout: 20_000 },
+  );
+  expect(child.error).toBeUndefined();
+  expect(child.status, child.stderr).toBe(0);
 });
 
 test("repository-free execution readies without fetching or validating a Git pin", async () => {

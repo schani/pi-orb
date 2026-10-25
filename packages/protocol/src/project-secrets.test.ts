@@ -31,6 +31,24 @@ describe("project secrets protocol", () => {
     ).toBe(false);
   });
 
+  it("rejects NUL writes and unsafe runtime snapshots", () => {
+    expect(Check(PutProjectSecretRequestSchema, { value: "private-prefix\0suffix" })).toBe(false);
+    for (const values of [
+      JSON.parse('{"__proto__":"private-value"}'),
+      { TOKEN: "private-prefix\0suffix" },
+      { "BAD\0NAME": "private-value" },
+    ]) {
+      expect(Check(ProjectSecretSnapshotSchema, { revision: 1, values })).toBe(false);
+    }
+    expect(
+      Check(ProjectSecretSnapshotSchema, {
+        revision: 1,
+        values: { constructor: "value", toString: " snow\n雪 " },
+      }),
+    ).toBe(true);
+    expect(Check(PutProjectSecretRequestSchema, { value: " snow\n雪 " })).toBe(true);
+  });
+
   it("validates names and encodes browser paths", () => {
     const pattern = new RegExp(PROJECT_SECRET_NAME_PATTERN);
     expect(pattern.test("NPM_TOKEN")).toBe(true);
