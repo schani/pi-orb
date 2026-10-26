@@ -83,7 +83,7 @@ export type DeliverMessageScript =
   | { readonly kind: "persist_without_ack" };
 
 export type HealthOverride =
-  | Pick<Extract<RuntimeHealth, { status: "failed" }>, "status" | "error">
+  | Pick<Extract<RuntimeHealth, { status: "failed" }>, "status" | "error" | "recovery">
   | Pick<Extract<RuntimeHealth, { status: "initializing" }>, "status" | "phase">
   | RuntimeClientError;
 
