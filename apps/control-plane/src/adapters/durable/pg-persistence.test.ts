@@ -8,6 +8,7 @@ import { expect, it, vi } from "vitest";
 import { reconcileOrbOnce, requestOrbArchive } from "../../domain/lifecycle.ts";
 import { pollOrbUntilCaughtUp } from "../../domain/replication.ts";
 import { makeHarness, makeOrbRow, makeProjectRow, seedTestUser } from "../../testkit/fixtures.ts";
+import { openOrbSqlFixture } from "../../testkit/sql-fixture.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
 import type { PostgreSQLClient } from "../pg/client.ts";
 import { PGliteClient } from "../pg/pglite-client.ts";
@@ -277,11 +278,10 @@ it.each(["expired", "unavailable"] as const)(
 );
 
 it("preserves empty passive reads, native session adoption and never-opened archival", async () => {
-  const db = new PGliteClient();
-  const database = composeControlPlaneDatabase(db);
-  const task = new NoSimulationTask("history identity authority", false);
-  const project = makeProjectRow(randomUUID());
-  const orb = makeOrbRow(randomUUID(), project.id, "running");
+  const { database, task, project, orb } = await openOrbSqlFixture(
+    "history identity authority",
+    "running",
+  );
   let opens = 0;
   const plane = (
     await DurableAgentPlane.create({
@@ -299,10 +299,6 @@ it("preserves empty passive reads, native session adoption and never-opened arch
     })
   )._unsafeUnwrap();
   try {
-    (await database.migrate())._unsafeUnwrap();
-    (await seedTestUser(task, database.users))._unsafeUnwrap();
-    (await database.store.insertProject(task, project))._unsafeUnwrap();
-    (await database.store.insertOrb(task, orb))._unsafeUnwrap();
     const deps = { ...makeHarness().deps, store: database.store, agentPlane: plane };
     expect(await pollOrbUntilCaughtUp(task, deps, orb.id)).toMatchObject({ type: "caught_up" });
     const unopened = (await database.store.getOrb(task, orb.id))._unsafeUnwrap();
@@ -347,6 +343,6 @@ it("preserves empty passive reads, native session adoption and never-opened arch
     expect(opens).toBe(1);
   } finally {
     await plane.close();
-    await database.close();
+    (await database.agentPersistence.close())._unsafeUnwrap();
   }
 });

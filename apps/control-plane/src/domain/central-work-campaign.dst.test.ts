@@ -196,12 +196,38 @@ for (const mode of ["running", "idle", "database-stalls", "database-visibility"]
               f: async (simulationTask) => {
                 const task = nativeDeadlineTask(simulationTask);
                 await ready.promise;
+                let initialState: Awaited<ReturnType<Harness["inspect"]>> | undefined;
                 const observe = (state: Awaited<ReturnType<Harness["inspect"]>>) => {
                   observations.push(state);
                   if (observations.length > 12) observations.shift();
-                  return h.complete(state);
+                  const done = h.complete(state);
+                  if (visibility && initialState) {
+                    expect(
+                      logs.matching("to=failed"),
+                      "healthy dependencies never fail execution",
+                    ).toEqual([]);
+                    expect(
+                      logs.matching("compute-discard-requested"),
+                      "healthy dependencies never authorize disposal",
+                    ).toEqual([]);
+                    expect(
+                      historyOutcomes,
+                      "healthy source never reports integrity failure",
+                    ).not.toContainEqual(expect.objectContaining({ type: "integrity" }));
+                    expect(state.orb?.state, "healthy dependencies cannot fail the orb").not.toBe(
+                      "failed",
+                    );
+                    expect(
+                      state.orb?.runtimeTokenHash,
+                      "healthy dependencies preserve authorization",
+                    ).toBe(initialState.orb?.runtimeTokenHash);
+                    expect(
+                      state.orb?.hostDiscardThroughIncarnation,
+                      "healthy dependencies cannot authorize disposal",
+                    ).toBeNull();
+                  }
+                  return done;
                 };
-                let observeHealthy = observe;
                 try {
                   await h.initialize(task, owner);
                   if (idle) {
@@ -221,40 +247,11 @@ for (const mode of ["running", "idle", "database-stalls", "database-visibility"]
                   const initial = await execute(task, owner, h, "submit");
                   expect(initial.accepted.length, "campaign has accepted work").toBeGreaterThan(0);
                   observe(initial);
-                  const token = initial.orb?.runtimeTokenHash;
-                  observeHealthy = (state: Awaited<ReturnType<Harness["inspect"]>>) => {
-                    const done = observe(state);
-                    if (visibility) {
-                      expect(
-                        logs.matching("to=failed"),
-                        "healthy dependencies never fail execution",
-                      ).toEqual([]);
-                      expect(
-                        logs.matching("compute-discard-requested"),
-                        "healthy dependencies never authorize disposal",
-                      ).toEqual([]);
-                      expect(
-                        historyOutcomes,
-                        "healthy source never reports integrity failure",
-                      ).not.toContainEqual(expect.objectContaining({ type: "integrity" }));
-                      expect(state.orb?.state, "healthy dependencies cannot fail the orb").not.toBe(
-                        "failed",
-                      );
-                      expect(
-                        state.orb?.runtimeTokenHash,
-                        "healthy dependencies preserve authorization",
-                      ).toBe(token);
-                      expect(
-                        state.orb?.hostDiscardThroughIncarnation,
-                        "healthy dependencies cannot authorize disposal",
-                      ).toBeNull();
-                    }
-                    return done;
-                  };
+                  initialState = initial;
                   environmentStart.resolve();
                   for (const command of commands) {
                     const state = await execute(task, owner, h, command);
-                    observeHealthy(state);
+                    observe(state);
                   }
                   await modelDone.promise;
                   h.finishDatabaseLatency();
@@ -264,11 +261,11 @@ for (const mode of ["running", "idle", "database-stalls", "database-visibility"]
                   h.release();
                   // Covers an outstanding 60s lease plus normal loop retries.
                   const deadline = task.monotonicNow() + (faults ? 90_000 : 15_000);
-                  completed = observeHealthy(await h.inspect(task));
+                  completed = observe(await h.inspect(task));
                   while (task.monotonicNow() < deadline && !completed) {
                     await h.tick(task);
                     await task.sleep(500, "fair suffix");
-                    completed = observeHealthy(await h.inspect(task));
+                    completed = observe(await h.inspect(task));
                   }
                   if (faults) {
                     expect(observations.at(-1)).toMatchObject({ generation: 0 });
@@ -299,10 +296,9 @@ for (const mode of ["running", "idle", "database-stalls", "database-visibility"]
                     }
                     if (completed) {
                       if (finalState)
-                        expect(
-                          observeHealthy(finalState),
-                          "joined workers preserve completed work",
-                        ).toBe(true);
+                        expect(observe(finalState), "joined workers preserve completed work").toBe(
+                          true,
+                        );
                       expect(cleanup, "healthy cleanup").toEqual({
                         plane: null,
                         persistence: null,

@@ -2401,8 +2401,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   initOrVerifySession(
     task: SimulationTask,
     orbId: string,
-    session: HarnessSessionMetadata,
     expectedCursor: string | null,
+    session: HarnessSessionMetadata,
   ): ResultAsync<void, CommitPullError> {
     return this.access(task, FAILPOINTS.storeWrite, "init or verify session", () => {
       const orb = this.orbs.get(orbId);

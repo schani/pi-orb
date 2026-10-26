@@ -515,38 +515,48 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
     if (context.signal.aborted)
       return errAsync({ ...durableError("history read cancelled"), code: "cancelled" as const });
     const agent = this.manager.get(orb.id);
-    const committed = () =>
-      this.options.persistence.snapshot(task, orb).andThen((snapshot) => {
-        const index =
-          request.after === null
-            ? -1
-            : snapshot.records.findIndex((record) => record.id === request.after);
-        if (request.after !== null && index < 0)
-          return errAsync({
-            ...durableError("unknown history cursor"),
-            code: "cursor_not_found" as const,
-          });
-        const records = snapshot.records.slice(
-          index + 1,
-          index + 1 + Math.max(1, Math.min(500, request.limit)),
+    if (agent)
+      return agent
+        .pullHistory(request.after, request.limit)
+        .orElse((error) =>
+          error.code === "cursor_not_found"
+            ? this.readCommittedHistory(task, orb, request)
+            : errAsync(error),
         );
-        const cursor = records.at(-1)?.id ?? request.after;
-        return okAsync({
-          v: 1 as const,
-          orbId: orb.id,
-          runtimeInstanceId: snapshot.runtimeInstanceId,
-          session: snapshot.session,
-          activity: "idle" as const,
-          records,
-          cursor,
-          headId: cursor,
+    return this.readCommittedHistory(task, orb, request);
+  }
+
+  private readCommittedHistory(
+    task: SimulationTask,
+    orb: OrbRow,
+    request: PullHistoryClientRequest,
+  ) {
+    return this.options.persistence.snapshot(task, orb).andThen((snapshot) => {
+      const index =
+        request.after === null
+          ? -1
+          : snapshot.records.findIndex((record) => record.id === request.after);
+      if (request.after !== null && index < 0)
+        return errAsync({
+          ...durableError("unknown history cursor"),
+          code: "cursor_not_found" as const,
         });
+      const records = snapshot.records.slice(
+        index + 1,
+        index + 1 + Math.max(1, Math.min(500, request.limit)),
+      );
+      const cursor = records.at(-1)?.id ?? request.after;
+      return okAsync({
+        v: 1 as const,
+        orbId: orb.id,
+        runtimeInstanceId: snapshot.runtimeInstanceId,
+        session: snapshot.session,
+        activity: "idle" as const,
+        records,
+        cursor,
+        headId: cursor,
       });
-    return agent
-      ? agent
-          .pullHistory(request.after, request.limit)
-          .orElse((error) => (error.code === "cursor_not_found" ? committed() : errAsync(error)))
-      : committed();
+    });
   }
 
   suspend(

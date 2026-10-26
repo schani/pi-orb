@@ -83,35 +83,32 @@ export async function centralWorkHarness() {
     return waiting.promise;
   };
   let clock: SimulationTask;
-  const faultClient: PostgreSQLClient = {
-    query: (sql, values) => {
-      const id = operation++;
-      const waiting = stall;
-      if (waiting) blocked++;
-      return ResultAsync.fromSafePromise(waiting?.promise ?? Promise.resolve())
+  const delayed = <T, E>(
+    run: () => ResultAsync<T, E>,
+    completed?: (value: T, id: number) => void,
+  ): ResultAsync<T, E> => {
+    const id = operation++;
+    const waiting = stall;
+    if (waiting) blocked++;
+    return (
+      ResultAsync.fromSafePromise(waiting?.promise ?? Promise.resolve())
         .andThen(() => ResultAsync.fromSafePromise(boundary("admission", id)))
-        .andThen(() => client.query(sql, values))
-        .andThen((value) =>
-          ResultAsync.fromSafePromise(boundary("completion", id)).map(() => value),
-        );
-    },
-    transaction: (f) => {
-      const id = operation++;
-      const waiting = stall;
-      if (waiting) blocked++;
-      return (
-        ResultAsync.fromSafePromise(waiting?.promise ?? Promise.resolve())
-          .andThen(() => ResultAsync.fromSafePromise(boundary("admission", id)))
-          .andThen(() => client.transaction(f))
-          // The transaction has released PGlite's lock before delivery is delayed.
-          .andThen((value) => {
-            history.push(
-              `${clock?.wallNow()}:database:transaction-completed:${id}:${typeof value}`,
-            );
-            return ResultAsync.fromSafePromise(boundary("completion", id)).map(() => value);
-          })
-      );
-    },
+        .andThen(run)
+        // Successful SQL has resolved and released PGlite's lock before this hold.
+        .andThen((value) => {
+          completed?.(value, id);
+          return ResultAsync.fromSafePromise(boundary("completion", id)).map(() => value);
+        })
+    );
+  };
+  const faultClient: PostgreSQLClient = {
+    query: (sql, values) => delayed(() => client.query(sql, values)),
+    transaction: (f) =>
+      delayed(
+        () => client.transaction(f),
+        (value, id) =>
+          history.push(`${clock?.wallNow()}:database:transaction-completed:${id}:${typeof value}`),
+      ),
     end: () => client.end(),
   };
   const observer = new PostgreSQLControlPlaneStore(client);

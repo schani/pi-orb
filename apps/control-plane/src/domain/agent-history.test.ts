@@ -1,6 +1,6 @@
 import { NoSimulationTask } from "determined";
-import { ResultAsync } from "neverthrow";
-import { describe, expect, it } from "vitest";
+import { okAsync } from "neverthrow";
+import { describe, expect, it, vi } from "vitest";
 import { makeHarness, makeOrbRow, seedRunningOrb } from "../testkit/fixtures.ts";
 import { commitAgentHistory } from "./agent-history.ts";
 import { pollOrbUntilCaughtUp } from "./replication.ts";
@@ -36,45 +36,31 @@ for (const consumer of ["poll", "fixed central snapshot"] as const) {
     if (!cursor || !session) throw new Error("missing committed source");
     const stale = { id: session.id, overflow: {} };
     const verify = h.store.initOrVerifySession.bind(h.store);
-    let advance = true;
-    h.store.initOrVerifySession = (...args) =>
-      new ResultAsync(
-        (async () => {
-          if (advance) {
-            advance = false;
-            (
-              await h.store.commitPullBatch(task, {
-                orbId: "orb",
-                expectedCursor: null,
-                session,
-                records,
-                nextCursor: cursor,
-                nextHeadId: cursor,
-              })
-            )._unsafeUnwrap();
-          }
-          return verify(...args);
-        })(),
-      );
+    vi.spyOn(h.store, "initOrVerifySession").mockImplementationOnce((...args) =>
+      h.store
+        .commitPullBatch(task, {
+          orbId: "orb",
+          expectedCursor: null,
+          session,
+          records,
+          nextCursor: cursor,
+          nextHeadId: cursor,
+        })
+        .andThen(() => verify(...args)),
+    );
     if (consumer === "poll") {
-      const pull = h.deps.runtimeClient.pullHistory.bind(h.deps.runtimeClient);
-      let first = true;
-      h.deps.runtimeClient.pullHistory = (...args) => {
-        if (!first) return pull(...args);
-        first = false;
-        return ResultAsync.fromSafePromise(
-          Promise.resolve({
-            v: 1 as const,
-            orbId: "orb",
-            runtimeInstanceId: "runtime",
-            session: stale,
-            activity: "idle" as const,
-            records: [],
-            cursor: null,
-            headId: null,
-          }),
-        );
-      };
+      vi.spyOn(h.deps.runtimeClient, "pullHistory").mockImplementationOnce(() =>
+        okAsync({
+          v: 1 as const,
+          orbId: "orb",
+          runtimeInstanceId: "runtime",
+          session: stale,
+          activity: "idle" as const,
+          records: [],
+          cursor: null,
+          headId: null,
+        }),
+      );
       expect(await pollOrbUntilCaughtUp(task, h.deps, "orb")).toMatchObject({ type: "caught_up" });
     } else {
       const result = await commitAgentHistory(task, h.deps, {
@@ -88,6 +74,7 @@ for (const consumer of ["poll", "fixed central snapshot"] as const) {
       expect(result._unsafeUnwrapErr()).toMatchObject({
         code: "history_unavailable",
         retryable: true,
+        message: "central history cursor is absent from authority",
       });
     }
     expect(h.store.orbSnapshot("orb")).toMatchObject({

@@ -98,15 +98,10 @@ it
           return verdict;
         });
         await checked.promise;
-        const publishing = other.store.initOrVerifySession(
-          task,
-          orb.id,
-          {
-            id: "host-sdk-session",
-            overflow: {},
-          },
-          null,
-        );
+        const publishing = other.store.initOrVerifySession(task, orb.id, null, {
+          id: "host-sdk-session",
+          overflow: {},
+        });
         release.resolve();
         const owner = (await acquiring)._unsafeUnwrap();
         (await publishing)._unsafeUnwrap();

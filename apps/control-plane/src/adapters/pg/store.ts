@@ -2409,8 +2409,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   initOrVerifySession(
     _task: SimulationTask,
     orbId: string,
-    session: HarnessSessionMetadata,
     expectedCursor: string | null,
+    session: HarnessSessionMetadata,
   ): ResultAsync<void, CommitPullError> {
     return this.db.transaction<void, CommitPullError>(async (query) => {
       const orbResult = await query(

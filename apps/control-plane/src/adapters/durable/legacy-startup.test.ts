@@ -116,15 +116,10 @@ it.each(["header", "cursor", "partial", "keyed"] as const)(
         (await authority.release(owner))._unsafeUnwrap();
       }
       (
-        await f.database.store.initOrVerifySession(
-          f.task,
-          f.orb.id,
-          {
-            id: "host-sdk-session",
-            overflow: {},
-          },
-          null,
-        )
+        await f.database.store.initOrVerifySession(f.task, f.orb.id, null, {
+          id: "host-sdk-session",
+          overflow: {},
+        })
       )._unsafeUnwrap();
       if (kind === "cursor")
         (
@@ -172,15 +167,10 @@ it("permits fresh central headers and valid native reopen, but rejects missing n
   let agent: DurableAgent | undefined;
   try {
     (
-      await f.database.store.initOrVerifySession(
-        f.task,
-        f.orb.id,
-        {
-          id: `conversation:${f.orb.id}`,
-          overflow: { harness: "pi-durable" },
-        },
-        null,
-      )
+      await f.database.store.initOrVerifySession(f.task, f.orb.id, null, {
+        id: `conversation:${f.orb.id}`,
+        overflow: { harness: "pi-durable" },
+      })
     )._unsafeUnwrap();
     const open = async () => {
       const lease = (
@@ -248,15 +238,10 @@ it("preserves the typed terminal rejection through the real SDK when legacy publ
       await f.database.agentPersistence.open(f.task, f.orb, operation)
     )._unsafeUnwrap();
     (
-      await f.database.store.initOrVerifySession(
-        f.task,
-        f.orb.id,
-        {
-          id: "host-sdk-session",
-          overflow: {},
-        },
-        null,
-      )
+      await f.database.store.initOrVerifySession(f.task, f.orb.id, null, {
+        id: "host-sdk-session",
+        overflow: {},
+      })
     )._unsafeUnwrap();
     const before = await f.snapshot();
     const result = await DurableAgent.open({
@@ -338,15 +323,10 @@ it.each(["malformed", "header-conflict", "head-without-cursor", "custom-session"
       await harness.close(context);
       (await authority.release(owner))._unsafeUnwrap();
       (
-        await f.database.store.initOrVerifySession(
-          f.task,
-          f.orb.id,
-          {
-            id: "actual-native-session",
-            overflow: kind === "custom-session" ? { "\u0000\udfff": "\u0000\ud800" } : {},
-          },
-          null,
-        )
+        await f.database.store.initOrVerifySession(f.task, f.orb.id, null, {
+          id: "actual-native-session",
+          overflow: kind === "custom-session" ? { "\u0000\udfff": "\u0000\ud800" } : {},
+        })
       )._unsafeUnwrap();
       if (kind === "header-conflict") {
         (
@@ -536,7 +516,7 @@ it("preserves SDK terminal startup failure even when lease cleanup fails", async
         open: (...args) =>
           f.database.agentPersistence.open(...args).andThen((lease) =>
             f.database.store
-              .initOrVerifySession(f.task, f.orb.id, { id: "host-sdk-session", overflow: {} }, null)
+              .initOrVerifySession(f.task, f.orb.id, null, { id: "host-sdk-session", overflow: {} })
               .mapErr(() => ({
                 type: "runtime_client_error" as const,
                 code: "history_unavailable" as const,
@@ -623,15 +603,10 @@ it("returns the terminal Start error through authenticated HTTP backed by actual
   );
   try {
     (
-      await f.database.store.initOrVerifySession(
-        f.task,
-        f.orb.id,
-        {
-          id: "host-sdk-session",
-          overflow: {},
-        },
-        null,
-      )
+      await f.database.store.initOrVerifySession(f.task, f.orb.id, null, {
+        id: "host-sdk-session",
+        overflow: {},
+      })
     )._unsafeUnwrap();
     const before = await f.snapshot();
     const response = await app.inject({ method: "POST", url: `/api/v1/orbs/${f.orb.id}/start` });
@@ -670,15 +645,10 @@ it("does not prepare resources for rejected startup or passive history and termi
   )._unsafeUnwrap();
   try {
     (
-      await f.database.store.initOrVerifySession(
-        f.task,
-        f.orb.id,
-        {
-          id: "host-sdk-session",
-          overflow: {},
-        },
-        null,
-      )
+      await f.database.store.initOrVerifySession(f.task, f.orb.id, null, {
+        id: "host-sdk-session",
+        overflow: {},
+      })
     )._unsafeUnwrap();
     const handle = (await plane.readSession(f.task, f.orb, operation))._unsafeUnwrap();
     expect((await handle.readSnapshot!())._unsafeUnwrap().session.id).toBe("host-sdk-session");

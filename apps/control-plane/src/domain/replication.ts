@@ -292,8 +292,8 @@ export async function pollOrbUntilCaughtUp(
       const verified = await deps.store.initOrVerifySession(
         task,
         orbId,
-        response.session,
         orb.replicationCursor,
+        response.session,
       );
       if (verified.isErr()) {
         const error = verified.error;
