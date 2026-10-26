@@ -4,12 +4,14 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import { MemoryStorage, type ToolExecutionApi } from "@earendil-works/pi-durable";
 import { NoSimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
+import { fetch as localFetch, MockAgent } from "undici";
 import { describe, expect, it, vi } from "vitest";
 import { DurableAgent } from "./adapters/durable/agent.ts";
 import { durableError } from "./adapters/durable/manager.ts";
 import * as durableModels from "./adapters/durable/models.ts";
 import { RemoteExecutionEnv } from "./adapters/execution-client/env.ts";
 import * as brokerDomain from "./domain/broker.ts";
+import { putProjectSecret } from "./domain/project-secrets.ts";
 import {
   admitProcessTools,
   closeProcessAgentResources,
@@ -21,6 +23,7 @@ import {
   scopedMcpHeaders,
 } from "./process-agent-composition.ts";
 import { makeHarness, makeOrbRow, makeProjectRow, TEST_USER_ID } from "./testkit/fixtures.ts";
+import { FakeProjectSecretPointerStore } from "./testkit/project-secrets.ts";
 
 function createProcessAgentContext(
   ...args: Parameters<typeof productionCreateProcessAgentContext>
@@ -623,3 +626,155 @@ it("activates MCP without input and publishes healthy tools before held discover
     vi.unstubAllEnvs();
   }
 });
+
+it.each([307, 308, 200])(
+  "keeps project MCP secrets on the configured origin (%i)",
+  async (status) => {
+    const dispatcher = new MockAgent();
+    dispatcher.disableNetConnect();
+    const destination: Array<{ method: string; key: string | null; rpc: string }> = [];
+    const sourceKeys: Array<string | null> = [];
+    dispatcher
+      .get("https://unconfigured.test")
+      .intercept({ path: "/capture", method: "POST" })
+      .reply((request) => {
+        destination.push({
+          method: request.method,
+          key: new Headers(request.headers).get("X-Api-Key"),
+          rpc: JSON.parse(String(request.body)).method,
+        });
+        return { statusCode: 503, data: "PRIVATE_REDIRECT_BODY" };
+      })
+      .persist();
+    const source = dispatcher.get("https://configured.test");
+    source
+      .intercept({ path: "/mcp", method: "POST" })
+      .reply((request) => {
+        sourceKeys.push(new Headers(request.headers).get("X-Api-Key"));
+        if (status !== 200)
+          return {
+            statusCode: status,
+            responseOptions: { headers: { location: "https://unconfigured.test/capture" } },
+          };
+        const message = JSON.parse(String(request.body));
+        if (message.id === undefined) return { statusCode: 202 };
+        const result =
+          message.method === "initialize"
+            ? {
+                protocolVersion: message.params.protocolVersion,
+                capabilities: { tools: {} },
+                serverInfo: { name: "fixture", version: "1" },
+              }
+            : { tools: [{ name: "ping", inputSchema: { type: "object" } }] };
+        return {
+          statusCode: 200,
+          data: JSON.stringify({ jsonrpc: "2.0", id: message.id, result }),
+          responseOptions: { headers: { "content-type": "application/json" } },
+        };
+      })
+      .persist();
+    source.intercept({ path: "/mcp", method: "GET" }).reply(405).persist();
+    const network = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(((input, init) =>
+        localFetch(input as string, { ...init, dispatcher } as never)) as typeof fetch);
+    const models = vi
+      .spyOn(durableModels, "createDurableModels")
+      .mockReturnValue(okAsync({ getModel: () => undefined } as never));
+    const h = makeHarness();
+    const orb = makeOrbRow("redirect-mcp", "project", "running");
+    h.store.seedProject(makeProjectRow("project"));
+    h.store.seedOrb(orb);
+    const deps = {
+      ...h.deps,
+      projectSecrets: {
+        ...h.deps.projectSecrets,
+        pointers: new FakeProjectSecretPointerStore(orb.projectId),
+      },
+    };
+    const task = new NoSimulationTask("MCP redirect isolation", false);
+    const logs = vi.spyOn(task, "log").mockImplementation(() => {});
+    const completed = barrier();
+    const appendAlert = vi.fn<DurableAgent["appendAlert"]>(() => {
+      completed.resolve();
+      return okAsync({ recordId: "alert", duplicate: false });
+    });
+    try {
+      (
+        await putProjectSecret(
+          task,
+          deps.projectSecrets,
+          orb.projectId,
+          "MCP_KEY",
+          "SYNTHETIC_PROJECT_KEY",
+        )
+      )._unsafeUnwrap();
+      const open = createProcessAgentContext(deps, {
+        mcp: {
+          read: () =>
+            okAsync({
+              servers: [
+                {
+                  name: "fixture",
+                  url: "https://configured.test/mcp",
+                  headers: { "X-Api-Key": { secret: "MCP_KEY" } },
+                },
+              ],
+            }),
+        },
+      } as never);
+      const composed = (
+        await open(task, orb, { signal: new AbortController().signal })
+      )._unsafeUnwrap();
+      const unsubscribe = composed.registry.subscribe(() => {
+        if (
+          status === 200 &&
+          composed.registry
+            .snapshot()
+            .tools()
+            .some(({ tool }) => tool.name === "mcp__fixture__ping")
+        )
+          completed.resolve();
+      });
+      try {
+        expect(composed.activateResources).toBeTypeOf("function");
+        composed.activateResources?.(appendAlert);
+        await completed.promise;
+        expect(destination, "redirect destination must receive neither request nor secret").toEqual(
+          [],
+        );
+        expect(sourceKeys.length).toBeGreaterThan(0);
+        expect(sourceKeys.every((key) => key === "SYNTHETIC_PROJECT_KEY")).toBe(true);
+        const visible = JSON.stringify(
+          composed.registry
+            .snapshot()
+            .tools()
+            .map(({ tool }) => tool.description),
+        );
+        if (status === 200) {
+          expect(visible).toContain("MCP fixture: available");
+          expect(appendAlert).not.toHaveBeenCalled();
+        } else {
+          expect(visible).toContain("MCP fixture: unavailable");
+          expect(appendAlert.mock.calls.map(([, message]) => message)).toEqual([
+            "MCP fixture: unavailable.",
+          ]);
+          expect(
+            logs.mock.calls.filter(([line]) => String(line).includes("durable.mcp_unavailable")),
+          ).toHaveLength(1);
+        }
+        expect(JSON.stringify([visible, logs.mock.calls, appendAlert.mock.calls])).not.toMatch(
+          /SYNTHETIC_PROJECT_KEY|PRIVATE_REDIRECT_BODY/,
+        );
+      } finally {
+        unsubscribe();
+        await composed.closeResources?.();
+      }
+    } finally {
+      logs.mockRestore();
+      models.mockRestore();
+      network.mockRestore();
+      await dispatcher.close();
+    }
+  },
+);
