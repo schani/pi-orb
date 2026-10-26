@@ -18,6 +18,9 @@ import {
   missingMcpSecrets,
   type OrbMessageView,
   type OrbView,
+  OWNER_SECRETS_PATH,
+  OWNER_SKILL_NAME_PATTERN,
+  OWNER_SKILLS_PATH,
   PERSONAL_INSTRUCTIONS_PATH,
   type PersonalInstructions,
   PollOrbMessagesRequestSchema,
@@ -95,6 +98,7 @@ interface MockState {
   mcpGrants: Set<string>;
   personalInstructions: PersonalInstructions;
   gitIdentity: GitIdentity;
+  ownerSkills: Map<string, { content: string; description: string; updatedAt: string }>;
   projectInstructions: Map<string, ProjectInstructions>;
 }
 
@@ -859,7 +863,15 @@ function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
     liveSessions: new Map(),
     lazyRunning: new Map(),
     startupTimers: new Map(),
+    // Owner secrets share the project route under the "owner" key.
     projectSecrets: new Map([
+      [
+        "owner",
+        new Map([
+          ["DATADOG_API_KEY", { value: "fixture-datadog-secret", updatedAt: createdAt }],
+          ["GITHUB_TOKEN", { value: "fixture-github-secret", updatedAt: createdAt }],
+        ]),
+      ],
       [
         PROJECT_ID,
         new Map([
@@ -903,6 +915,19 @@ function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
     ]),
     personalInstructions: { content: "", revision: 0 },
     gitIdentity: { name: "", email: "" },
+    ownerSkills: new Map(
+      Object.entries({
+        "release-notes": "Draft release notes from merged PRs since the last tag.",
+        "pg-migrations": "Write PostgreSQL migrations that are safe on a live database.",
+      }).map(([name, description]) => [
+        name,
+        {
+          content: `---\nname: ${name}\ndescription: ${description}\n---\n`,
+          description,
+          updatedAt: createdAt,
+        },
+      ]),
+    ),
     projectInstructions: new Map(),
     mcpGrants: new Set([
       `${PROJECT_ID}/10000000-0000-4000-8000-000000000001`,
@@ -1419,6 +1444,51 @@ async function handleApi(
     return true;
   }
 
+  const ownerSkillRoute = new RegExp(`^${OWNER_SKILLS_PATH}(?:/([^/]+))?$`).exec(path);
+  if (ownerSkillRoute !== null) {
+    const target = ownerSkillRoute[1] === undefined ? null : decodeURIComponent(ownerSkillRoute[1]);
+    const collection = method === "GET" || method === "POST";
+    if (collection !== (target === null) || (target !== null && !state.ownerSkills.has(target))) {
+      notFound(response);
+      return true;
+    }
+    if (method === "DELETE") state.ownerSkills.delete(target ?? "");
+    else if (method !== "GET") {
+      // Frontend-only stand-in for the control plane's SKILL.md checks.
+      const body = await readJson(request);
+      const content =
+        body !== null && typeof body === "object" && "content" in body ? `${body.content}` : "";
+      const frontmatter = /^---\n([\s\S]*?)\n---/.exec(content)?.[1] ?? "";
+      const field = (key: string) =>
+        new RegExp(`^${key}: *(.*)$`, "m").exec(frontmatter)?.[1]?.trim() ?? "";
+      const name = field("name");
+      const description = field("description");
+      const problem = !new RegExp(OWNER_SKILL_NAME_PATTERN).test(name)
+        ? "frontmatter name is invalid"
+        : description === ""
+          ? "frontmatter description is required"
+          : ["charts", "codemode"].includes(name)
+            ? `${name} is a bundled skill`
+            : name !== target && state.ownerSkills.has(name)
+              ? `Skill ${name} already exists`
+              : null;
+      if (problem !== null) {
+        sendJson(response, 400, {
+          error: { code: "invalid_request", message: problem, retryable: false },
+        });
+        return true;
+      }
+      if (target !== null) state.ownerSkills.delete(target);
+      state.ownerSkills.set(name, { content, description, updatedAt: now() });
+    }
+    sendJson(response, 200, {
+      items: [...state.ownerSkills]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([name, skill]) => ({ name, ...skill })),
+    });
+    return true;
+  }
+
   if (path === GIT_IDENTITY_PATH && (method === "GET" || method === "PUT")) {
     response.setHeader("cache-control", "no-store");
     if (method === "PUT") {
@@ -1558,17 +1628,19 @@ async function handleApi(
     return true;
   }
 
-  const projectSecretsRoute = /^\/api\/v1\/projects\/([^/]+)\/secrets(?:\/([^/]+))?$/.exec(path);
+  const projectSecretsRoute = new RegExp(
+    `^(?:/api/v1/projects/([^/]+)/secrets|${OWNER_SECRETS_PATH})(?:/([^/]+))?$`,
+  ).exec(path);
   if (projectSecretsRoute !== null) {
-    const projectId = decodeURIComponent(projectSecretsRoute[1] ?? "");
+    const projectId = decodeURIComponent(projectSecretsRoute[1] ?? "owner");
     const secretName =
       projectSecretsRoute[2] === undefined ? null : decodeURIComponent(projectSecretsRoute[2]);
     const project = state.projects.get(projectId);
-    if (project === undefined) {
+    if (project === undefined && projectId !== "owner") {
       notFound(response);
       return true;
     }
-    if (project.state === "deleting" && method !== "GET") {
+    if (project?.state === "deleting" && method !== "GET") {
       sendJson(response, 409, {
         error: {
           code: "conflict",

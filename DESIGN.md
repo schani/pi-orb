@@ -106,6 +106,7 @@ Subsystem designs:
 - [docs/transcript-cache.md](docs/transcript-cache.md) — bounded browser transcript caching, ownership/freshness rules, compact transport measurements and qualification
 - [docs/agent-settings.md](docs/agent-settings.md) — implemented lifecycle-cluster header, model/thinking authority, persistence, mutation and DST qualification
 - [docs/personal-instructions.md](docs/personal-instructions.md) — account-wide `AGENTS.md`, Home gear editor, next-start adoption and test-first qualification
+- [docs/owner-skills-secrets.md](docs/owner-skills-secrets.md) — owner-level skills and secrets applying to all projects; five configuration proposals
 - [docs/git-identity.md](docs/git-identity.md) — account-wide git `user.name`/`user.email`: selected Settings Git tab, user-keyed store and boot delivery to git's XDG config
 - [docs/project-instructions.md](docs/project-instructions.md) — additional per-project instructions, Config tab, additive virtual context and next-start adoption
 - [docs/workspace-uploads.md](docs/workspace-uploads.md) — streaming browser uploads into orb-local files, inbox notifications, idle protection, and recovery

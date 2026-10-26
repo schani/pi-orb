@@ -1215,7 +1215,6 @@ button.personal-instructions-gear {
   padding: 0 42px 0 10px;
   border-bottom: 1px solid var(--k);
 }
-.personal-instructions-dialog form,
 .project-instructions-editor {
   display: flex;
   flex-direction: column;
@@ -1271,6 +1270,24 @@ button.personal-instructions-gear {
   .personal-instructions-dialog .claude-auth-panel input {
     font-size: 16px;
   }
+  .personal-instructions-dialog .project-mcp-connection > summary {
+    min-height: 48px;
+  }
+  /* Keeps the underline on the word while the hit area fills a 48px row. */
+  .personal-instructions-dialog .mcp-add-area {
+    display: flex;
+    min-height: 48px;
+    align-items: center;
+    margin-top: 0;
+  }
+  .personal-instructions-dialog .mcp-add-area > .text-action {
+    position: relative;
+  }
+  .personal-instructions-dialog .mcp-add-area > .text-action::before {
+    position: absolute;
+    inset: -16px -8px;
+    content: "";
+  }
 }
 @media (max-width: 600px) {
   .dashboard-totals {
@@ -1314,6 +1331,17 @@ button.personal-instructions-gear {
   .personal-instructions-feedback button {
     min-height: 44px;
   }
+}
+
+/* Owner skills: a SKILL.md editor inside the MCP disclosure body. */
+.skill-editor textarea {
+  height: 260px;
+  min-height: 120px;
+  border: 1px solid var(--g2);
+}
+.reasoning-body .skill-editor .personal-instructions-feedback {
+  border-top: 0;
+  padding: 6px 0 2px;
 }
 
 /* Safari zooms focused fields below 16px; include touch tablets at desktop widths. */
@@ -3580,6 +3608,10 @@ button.orb-phone-menu {
   flex-wrap: wrap;
   gap: 8px;
   width: 100%;
+}
+.personal-instructions-dialog .claude-auth-panel form {
+  flex-direction: column;
+  min-height: 0;
 }
 .claude-auth-panel input {
   width: 100%;

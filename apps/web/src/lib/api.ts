@@ -23,6 +23,11 @@ import {
   OrbMessageViewSchema,
   type OrbView,
   OrbViewSchema,
+  OWNER_SECRETS_PATH,
+  OWNER_SKILLS_PATH,
+  OwnerSkillListSchema,
+  ownerSecretPath,
+  ownerSkillPath,
   PERSONAL_INSTRUCTIONS_PATH,
   PersonalInstructionsSchema,
   ProjectInstructionsSchema,
@@ -148,6 +153,28 @@ export function savePersonalInstructions(content: string) {
     method: "PUT",
     headers: jsonHeaders,
     body: JSON.stringify({ content }),
+    signal: AbortSignal.timeout(15_000),
+  });
+}
+
+export function listOwnerSkills() {
+  return apiFetch(OwnerSkillListSchema, OWNER_SKILLS_PATH, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
+  });
+}
+/** `null` creates; otherwise replaces `name`, which the frontmatter name may rename. */
+export function saveOwnerSkill(name: string | null, content: string) {
+  return apiFetch(OwnerSkillListSchema, name === null ? OWNER_SKILLS_PATH : ownerSkillPath(name), {
+    method: name === null ? "POST" : "PUT",
+    headers: jsonHeaders,
+    body: JSON.stringify({ content }),
+    signal: AbortSignal.timeout(15_000),
+  });
+}
+export function deleteOwnerSkill(name: string) {
+  return apiFetch(OwnerSkillListSchema, ownerSkillPath(name), {
+    method: "DELETE",
     signal: AbortSignal.timeout(15_000),
   });
 }
@@ -374,18 +401,24 @@ export function deleteProject(projectId: string): Promise<Result<ProjectView, Ap
   });
 }
 
+/** `null` is owner scope: secrets for every project. */
+const secretsPath = (projectId: string | null) =>
+  projectId === null ? OWNER_SECRETS_PATH : projectSecretsPath(projectId);
+const secretPath = (projectId: string | null, name: string) =>
+  projectId === null ? ownerSecretPath(name) : projectSecretPath(projectId, name);
+
 export function listProjectSecrets(
-  projectId: string,
+  projectId: string | null,
 ): Promise<Result<ProjectSecretList, ApiError>> {
-  return apiFetch(ProjectSecretListSchema, projectSecretsPath(projectId), { cache: "no-store" });
+  return apiFetch(ProjectSecretListSchema, secretsPath(projectId), { cache: "no-store" });
 }
 
 export function putProjectSecret(
-  projectId: string,
+  projectId: string | null,
   name: string,
   value: string,
 ): Promise<Result<ProjectSecretList, ApiError>> {
-  return apiFetch(ProjectSecretListSchema, projectSecretPath(projectId, name), {
+  return apiFetch(ProjectSecretListSchema, secretPath(projectId, name), {
     method: "PUT",
     headers: jsonHeaders,
     body: JSON.stringify({ value }),
@@ -393,10 +426,10 @@ export function putProjectSecret(
 }
 
 export function deleteProjectSecret(
-  projectId: string,
+  projectId: string | null,
   name: string,
 ): Promise<Result<ProjectSecretList, ApiError>> {
-  return apiFetch(ProjectSecretListSchema, projectSecretPath(projectId, name), {
+  return apiFetch(ProjectSecretListSchema, secretPath(projectId, name), {
     method: "DELETE",
   });
 }

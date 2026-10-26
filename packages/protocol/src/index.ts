@@ -23,6 +23,7 @@ export * from "./orb-messaging.ts";
 export * from "./orb-naming.ts";
 export * from "./orb-sleep.ts";
 export * from "./orb-spawn.ts";
+export * from "./owner-skills.ts";
 export * from "./personal-instructions.ts";
 export * from "./project-instructions.ts";
 export * from "./project-secrets.ts";

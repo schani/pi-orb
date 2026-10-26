@@ -8,10 +8,12 @@ import type { UserStore } from "../domain/identity.ts";
 import type { McpStore } from "../domain/mcp.ts";
 import type { McpOAuthStore } from "../domain/mcp-oauth.ts";
 import type { ModelUsageLedger } from "../domain/model-usage.ts";
+import type { OwnerSkillStore } from "../domain/owner-skills.ts";
 import type { PersonalInstructionsStore } from "../domain/personal-instructions.ts";
 import type {
   ControlPlaneStore,
   CredentialPointerStoreFactory,
+  OwnerSecretsDeps,
   ProjectSecretPointerStore,
   SigningKeyStore,
 } from "../domain/ports.ts";
@@ -27,6 +29,7 @@ import { PostgreSQLMcpStore } from "./pg/mcp.ts";
 import { PostgreSQLMcpOAuthStore } from "./pg/mcp-oauth.ts";
 import { type MigrationOptions, runMigrations } from "./pg/migrate.ts";
 import { PostgreSQLModelUsageLedger } from "./pg/model-usage.ts";
+import { PostgreSQLOwnerSkillStore } from "./pg/owner-skills.ts";
 import { PostgreSQLPersonalInstructionsStore } from "./pg/personal-instructions.ts";
 import { PGliteClient } from "./pg/pglite-client.ts";
 import { PostgreSQLProjectInstructionsStore } from "./pg/project-instructions.ts";
@@ -34,6 +37,7 @@ import { PostgreSQLProjectSecretPointerStore } from "./pg/project-secrets.ts";
 import { PgResourceGate } from "./pg/resource-gate.ts";
 import { PostgreSQLSigningKeyStore } from "./pg/signing-keys.ts";
 import { PostgreSQLControlPlaneStore } from "./pg/store.ts";
+import { PostgreSQLUserSecretPointerStore } from "./pg/user-secrets.ts";
 import { PostgreSQLUserStore } from "./pg/users.ts";
 
 export interface ControlPlaneDatabase {
@@ -42,6 +46,8 @@ export interface ControlPlaneDatabase {
   resourceGate(source: ResourceSource): PgResourceGate;
   readonly pointers: CredentialPointerStoreFactory;
   readonly projectSecrets: ProjectSecretPointerStore;
+  readonly ownerSecrets: OwnerSecretsDeps["pointers"];
+  readonly ownerSkills: OwnerSkillStore;
   readonly personalInstructions: PersonalInstructionsStore;
   readonly gitIdentity: GitIdentityStore;
   readonly projectInstructions: ProjectInstructionsStore;
@@ -70,6 +76,8 @@ export function composeControlPlaneDatabase(client: PostgreSQLClient): ControlPl
     resourceGate: (source) => new PgResourceGate(client, source),
     pointers: new PostgreSQLCredentialPointerStore(client),
     projectSecrets: new PostgreSQLProjectSecretPointerStore(client),
+    ownerSecrets: new PostgreSQLUserSecretPointerStore(client),
+    ownerSkills: new PostgreSQLOwnerSkillStore(client),
     personalInstructions: new PostgreSQLPersonalInstructionsStore(client),
     gitIdentity: new PostgreSQLGitIdentityStore(client),
     projectInstructions: new PostgreSQLProjectInstructionsStore(client),

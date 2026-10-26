@@ -343,7 +343,9 @@ describe("minted tokens verify against the served JWKS", () => {
       nameGenerator,
       nameLeaseMs: 30_000,
       projectSecrets: { pointers: new FakeProjectSecretPointerStore(PROJECT), secrets },
+      ownerSecrets: makeHarness().deps.ownerSecrets,
       personalInstructions: makeHarness().deps.personalInstructions,
+      ownerSkills: makeHarness().deps.ownerSkills.store,
       gitIdentity: makeHarness().deps.gitIdentity,
       projectInstructions: makeHarness().deps.projectInstructions,
       mint: {

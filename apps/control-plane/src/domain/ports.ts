@@ -817,14 +817,15 @@ export interface AuthGate {
 // ---------------------------------------------------------------------------
 // Project secrets (docs/credentials.md)
 
+/** Project bundles carry `projectId`; owner bundles carry `userId` instead. */
 export interface StoredProjectSecretBundle {
-  readonly projectId: string;
+  readonly projectId?: string;
+  readonly userId?: string;
   readonly revision: number;
   readonly values: Readonly<Record<string, string>>;
 }
 
 export interface ProjectSecretPointerRow {
-  readonly projectId: string;
   readonly rowVersion: number;
   readonly revision: number;
   /** Name -> wall-clock ms of the latest write. Contains no values. */
@@ -836,12 +837,12 @@ export interface ProjectSecretPointerRow {
 export type ProjectSecretPointerWrite = Omit<ProjectSecretPointerRow, "projectId" | "rowVersion">;
 
 export interface ProjectSecretPointerStore {
-  readProjectSecretPointer(
+  readSecretPointer(
     task: SimulationTask,
     projectId: string,
   ): ResultAsync<ProjectSecretPointerRow | null, StoreError | ProjectConflict>;
   /** Active-project CAS; atomically refuses removal of names referenced by the current MCP catalog. */
-  casWriteProjectSecretPointer(
+  casWriteSecretPointer(
     task: SimulationTask,
     projectId: string,
     expectedRowVersion: number | null,
@@ -859,6 +860,12 @@ export interface ProjectSecretPointerStore {
 
 export interface ProjectSecretsDeps {
   readonly pointers: ProjectSecretPointerStore;
+  readonly secrets: CredentialSecretStore;
+}
+
+/** Owner secrets reuse the project-secret engine with a user-keyed pointer (docs/owner-skills-secrets.md). */
+export interface OwnerSecretsDeps {
+  readonly pointers: Pick<ProjectSecretPointerStore, "readSecretPointer" | "casWriteSecretPointer">;
   readonly secrets: CredentialSecretStore;
 }
 
@@ -1257,7 +1264,9 @@ export interface ControlPlaneDeps {
   readonly control: import("./control-state.ts").ControlState;
   readonly constants: import("./constants.ts").LifecycleConstants;
   readonly projectSecrets: ProjectSecretsDeps;
+  readonly ownerSecrets: OwnerSecretsDeps;
   readonly hosting: import("./hosting-ports.ts").HostingDeps;
+  readonly ownerSkills: import("./owner-skills.ts").OwnerSkillsDeps;
   readonly personalInstructions: import("./personal-instructions.ts").PersonalInstructionsStore;
   readonly gitIdentity: import("./git-identity.ts").GitIdentityStore;
   readonly projectInstructions: import("./project-instructions.ts").ProjectInstructionsStore;

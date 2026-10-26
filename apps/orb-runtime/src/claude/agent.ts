@@ -61,6 +61,7 @@ import { NodeHookSpawner } from "../hooks/spawner.ts";
 import { fetchMcpCatalog } from "../mcp/boot.ts";
 import { triggerOrbName } from "../naming/client.ts";
 import { readRootReadme } from "../naming/context.ts";
+import { fetchOwnerSkills } from "../owner-skills/endpoint.ts";
 import { fetchPersonalInstructions } from "../personal-instructions/endpoint.ts";
 import { fetchProjectInstructions } from "../project-instructions/endpoint.ts";
 import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts";
@@ -84,6 +85,7 @@ import {
 } from "./model-usage.ts";
 import { DEFAULT_CLAUDE_MODEL, findClaudeModel, latestClaudeModels } from "./models.ts";
 import { findNativeClaudeTranscript } from "./native-path.ts";
+import { materializeOwnerSkills } from "./owner-skills.ts";
 import {
   type ClaudeHandoffTerminal,
   claudeRecoveryEpisode,
@@ -512,6 +514,18 @@ export class ClaudeOrbAgent implements OrbAgent {
     const project = await fetchProjectInstructions(broker);
     if (project.isErr()) {
       this.fail("project_instructions_unavailable", project.error.message, project.error.retryable);
+      return;
+    }
+    const ownerSkills = await fetchOwnerSkills(broker).then((fetched) =>
+      fetched.andThen((snapshot) =>
+        materializeOwnerSkills(
+          join(this.options.workDir, "claude", "config"),
+          snapshot.skills,
+        ).mapErr((error) => ({ ...error, retryable: false })),
+      ),
+    );
+    if (ownerSkills.isErr()) {
+      this.fail("owner_skills_unavailable", ownerSkills.error.message, ownerSkills.error.retryable);
       return;
     }
     const context = await fetchBootContext(broker);

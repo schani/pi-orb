@@ -11,7 +11,7 @@ const file = (path: string, text: string) => ({
   bytes: Buffer.from(text),
   sha256: createHash("sha256").update(text).digest("hex"),
 });
-function fixture() {
+function fixture(skills: Array<{ name: string; content: string }> = []) {
   let repo: ResourceSnapshot | null = null;
   let platform: PersistedPlatformContext | null = null;
   let revision = 1;
@@ -58,6 +58,7 @@ function fixture() {
       okAsync({
         personal: { content: `personal ${revision}`, revision },
         project: { content: "project", revision },
+        skills,
       }),
     platformStore: {
       get: () => okAsync(platform),
@@ -219,4 +220,23 @@ it("loads valid repository siblings despite malformed YAML, while platform remai
   });
   expect(result.isOk()).toBe(true);
   if (result.isOk()) expect(result.value.skills.map((s) => s.name)).toEqual(["good", "hosting"]);
+});
+
+it("ranks platform over owner over repository skills; owner skills read at their own path", async () => {
+  const owner = (name: string) => ({
+    name,
+    content: `---\nname: ${name}\ndescription: owner\n---\nowner ${name}`,
+  });
+  const f = fixture([owner("x"), owner("hosting"), owner("mine")]);
+  const value = (await prepareResourceContext(f.options))._unsafeUnwrap();
+  expect(value.skills.map((skill) => [skill.name, skill.description])).toEqual([
+    ["mine", "owner"],
+    ["x", "owner"],
+    ["hosting", "platform skill"],
+  ]);
+  const path = "/opt/pi-orb/owner-skills/mine/SKILL.md";
+  expect(Buffer.from((await value.reader.read(path))._unsafeUnwrap()).toString()).toBe(
+    owner("mine").content,
+  );
+  expect(value.reader.contains("/opt/pi-orb/owner-skills/hosting/SKILL.md")).toBe(false);
 });

@@ -11,6 +11,7 @@ it("stores managed revisions and bundled resources together, separately from imm
     await context.save(platform, {
       personal: { revision: 1, content: "one" },
       project: { revision: 2, content: "project" },
+      skills: [],
     })
   )._unsafeUnwrap();
   expect((await context.platform())._unsafeUnwrap()).toEqual(platform);
@@ -18,6 +19,7 @@ it("stores managed revisions and bundled resources together, separately from imm
     await context.save(platform, {
       personal: { revision: 3, content: "latest" },
       project: { revision: 2, content: "project" },
+      skills: [],
     })
   )._unsafeUnwrap();
   expect(

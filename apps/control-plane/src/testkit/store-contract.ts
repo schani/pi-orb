@@ -1,13 +1,19 @@
 import assert from "node:assert/strict";
-import type { HarnessSessionMetadata, HistoryRecord } from "@pi-orb/protocol";
+import {
+  type HarnessSessionMetadata,
+  type HistoryRecord,
+  OWNER_SKILL_MAX_COUNT,
+} from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
-import { err, ok } from "neverthrow";
+import { err, ok, type ResultAsync } from "neverthrow";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ControlPlaneDatabase } from "../adapters/database.ts";
 import { jsonParam, type PostgreSQLClient } from "../adapters/pg/client.ts";
+import { PostgreSQLOwnerSkillStore } from "../adapters/pg/owner-skills.ts";
 import type { StoreError } from "../domain/errors.ts";
 import { messageBatchId } from "../domain/message-batch.ts";
 import type { OrbRow, ProjectRow } from "../domain/orb.ts";
+import type { OwnerSkillStore } from "../domain/owner-skills.ts";
 import type {
   CentralAgentCaller,
   ControlPlaneStore,
@@ -3847,20 +3853,19 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
 
     it("implements project-secret pointer CAS and the deletion fence", async () => {
       expect((await store.insertProject(task, project)).isOk()).toBe(true);
-      const inserted = await projectSecrets.casWriteProjectSecretPointer(task, project.id, null, {
+      const inserted = await projectSecrets.casWriteSecretPointer(task, project.id, null, {
         revision: 1,
         entries: { NPM_TOKEN: 2_000 },
         secretVersion: "v1",
         updatedAt: 2_000,
       });
       expect(inserted.isOk() && inserted.value).toMatchObject({
-        projectId: project.id,
         rowVersion: 1,
         revision: 1,
         entries: { NPM_TOKEN: 2_000 },
         secretVersion: "v1",
       });
-      const stale = await projectSecrets.casWriteProjectSecretPointer(task, project.id, null, {
+      const stale = await projectSecrets.casWriteSecretPointer(task, project.id, null, {
         revision: 2,
         entries: { NPM_TOKEN: 3_000 },
         secretVersion: "v2",
@@ -3873,9 +3878,59 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
         cleanupAfter: 5_000,
       });
       expect(deleting.isOk()).toBe(true);
-      const readFenced = await projectSecrets.readProjectSecretPointer(task, project.id);
+      const readFenced = await projectSecrets.readSecretPointer(task, project.id);
       expect(readFenced.isErr() && readFenced.error.type).toBe("project_conflict");
       expect((await projectSecrets.deleteProjectSecretPointer(task, project.id)).isOk()).toBe(true);
+    });
+
+    it("implements user-secret pointer CAS", async () => {
+      const write = (revision: number) => ({
+        revision,
+        entries: {},
+        secretVersion: `v${revision}`,
+        updatedAt: revision,
+      });
+      const secrets = database.ownerSecrets;
+      expect((await secrets.readSecretPointer(task, OWNER))._unsafeUnwrap()).toBeNull();
+      expect((await secrets.casWriteSecretPointer(task, OWNER, null, write(1))).isOk()).toBe(true);
+      const stale = await secrets.casWriteSecretPointer(task, OWNER, null, write(2));
+      expect(stale._unsafeUnwrapErr().type).toBe("project_secret_pointer_conflict");
+      const updated = (
+        await secrets.casWriteSecretPointer(task, OWNER, 1, write(2))
+      )._unsafeUnwrap();
+      expect(updated).toMatchObject({ rowVersion: 2, revision: 2, secretVersion: "v2" });
+      expect((await secrets.readSecretPointer(task, OWNER))._unsafeUnwrap()).toEqual(updated);
+    });
+
+    it("serializes owner skill commands per user: renames and the count cap", async () => {
+      const skills = database.ownerSkills;
+      const other = new PostgreSQLOwnerSkillStore(client);
+      const skill = (name: string) => ({
+        name,
+        content: `---\nname: ${name}\ndescription: d\n---\n`,
+      });
+      const create = (store: OwnerSkillStore, name: string) =>
+        store.apply(task, OWNER, { kind: "create", skill: skill(name) });
+      const names = async (result: ResultAsync<Array<{ name: string }>, unknown>) =>
+        (await result)._unsafeUnwrap().map((record) => record.name);
+      expect(await names(create(skills, "b"))).toEqual(["b"]);
+      expect(await names(create(skills, "a"))).toEqual(["a", "b"]);
+      // A concurrent rename and create of the same name: exactly one wins.
+      const [renamed, created] = await Promise.all([
+        skills.apply(task, OWNER, { kind: "replace", name: "b", skill: skill("c") }),
+        create(other, "c"),
+      ]);
+      expect(renamed.isOk()).not.toBe(created.isOk());
+      expect(await names(skills.list(task, OWNER))).toEqual(
+        renamed.isOk() ? ["a", "c"] : ["a", "b", "c"],
+      );
+      const room = OWNER_SKILL_MAX_COUNT - (await names(skills.list(task, OWNER))).length;
+      for (let i = 0; i < room - 2; i++) (await create(skills, `s-${i}`))._unsafeUnwrap();
+      const racing = await Promise.all(
+        ["w", "x", "y", "z"].map((name, i) => create(i % 2 ? other : skills, name)),
+      );
+      expect(racing.filter((result) => result.isOk())).toHaveLength(2);
+      expect(await names(skills.list(task, OWNER))).toHaveLength(OWNER_SKILL_MAX_COUNT);
     });
 
     it("implements credential pointer CAS", async () => {

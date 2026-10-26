@@ -85,7 +85,7 @@ export class FakeProjectSecretPointerStore implements ProjectSecretPointerStore 
     }
   }
 
-  readProjectSecretPointer(
+  readSecretPointer(
     task: SimulationTask,
     projectId: string,
   ): ResultAsync<ProjectSecretPointerRow | null, StoreError | ProjectConflict> {
@@ -105,7 +105,7 @@ export class FakeProjectSecretPointerStore implements ProjectSecretPointerStore 
     });
   }
 
-  casWriteProjectSecretPointer(
+  casWriteSecretPointer(
     task: SimulationTask,
     projectId: string,
     expectedRowVersion: number | null,
@@ -145,7 +145,6 @@ export class FakeProjectSecretPointerStore implements ProjectSecretPointerStore 
           ],
         });
       const row: ProjectSecretPointerRow = {
-        projectId,
         rowVersion: (current?.rowVersion ?? 0) + 1,
         ...next,
       };

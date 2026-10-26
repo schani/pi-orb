@@ -51,6 +51,7 @@ it("DST fences old-context platform publication across Stop ABA and archive", as
               okAsync({
                 personal: { content: "", revision: 0 },
                 project: { content: "", revision: 0 },
+                skills: [],
               }),
             platformStore: {
               get: () => okAsync(stored),

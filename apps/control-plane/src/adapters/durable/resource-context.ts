@@ -15,7 +15,10 @@ import { snapshotPromptResources } from "../git-resources/prompt.ts";
 export interface ManagedResourceInstructions {
   personal: { content: string; revision: number };
   project: { content: string; revision: number };
+  /** Owner skills (docs/owner-skills-secrets.md), adopted fresh at every context open. */
+  skills: Array<{ name: string; content: string }>;
 }
+const OWNER_SKILL_ROOT = "/opt/pi-orb/owner-skills";
 /** Private native application document. Store implementation uses the fenced authority UOW. */
 export interface PersistedPlatformContext {
   version: string;
@@ -133,8 +136,27 @@ export function prepareResourceContext(options: {
                 files: platformFiles,
               });
               if (platform.isErr()) return errAsync(platform.error);
-              const combined = [...(repository?.files ?? []), ...platformFiles];
-              const names = [...project.value.skills, ...platform.value.skills].map(
+              // Precedence: platform > owner > repository. Owner names are checked against
+              // platform names at save, so a clash means a newer platform skill took the name.
+              const platformNames = new Set(platform.value.skills.map((skill) => skill.name));
+              const ownerFiles = managed.skills
+                .filter((skill) => !platformNames.has(skill.name))
+                .map((skill) => {
+                  const bytes = Buffer.from(skill.content, "utf8");
+                  const path = `${OWNER_SKILL_ROOT}/${skill.name}/SKILL.md`;
+                  return { path, bytes, sha256: digest(bytes) };
+                });
+              const owner = snapshotPromptResources(
+                { instructionPath: null, skillRoot: OWNER_SKILL_ROOT, files: ownerFiles },
+                { invalidSkills: "warn" },
+              );
+              if (owner.isErr()) return errAsync(owner.error);
+              const ownerNames = new Set(owner.value.skills.map((skill) => skill.name));
+              const repositorySkills = project.value.skills.filter(
+                (skill) => !ownerNames.has(skill.name),
+              );
+              const combined = [...(repository?.files ?? []), ...ownerFiles, ...platformFiles];
+              const names = [...repositorySkills, ...platform.value.skills].map(
                 (skill) => skill.name,
               );
               if (new Set(names).size !== names.length)
@@ -145,7 +167,7 @@ export function prepareResourceContext(options: {
                 commitSha: repository?.commitSha ?? null,
                 managed,
                 instructions: project.value.instructions,
-                skills: [...project.value.skills, ...platform.value.skills],
+                skills: [...repositorySkills, ...owner.value.skills, ...platform.value.skills],
                 reader: new SnapshotResourceReader({ files: combined }),
                 resourceHash: digest(
                   Buffer.from(JSON.stringify(combined.map((file) => [file.path, file.sha256]))),

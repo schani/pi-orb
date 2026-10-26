@@ -5,6 +5,8 @@ import {
   CreateProjectRequestSchema,
   EnqueueOrbMessageRequestSchema,
   GIT_IDENTITY_PATH,
+  OWNER_SECRETS_PATH,
+  OWNER_SKILLS_PATH,
   PERSONAL_INSTRUCTIONS_PATH,
   PollOrbMessagesRequestSchema,
   PROJECT_NAME_MAX_CHARS,
@@ -18,7 +20,7 @@ import {
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { ok, Result } from "neverthrow";
+import { errAsync, ok, Result, type ResultAsync } from "neverthrow";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { enrichActivityHeadlines } from "../domain/activity-headlines.ts";
@@ -44,14 +46,22 @@ import { ackOrbAlert } from "../domain/orb-alerts.ts";
 import { normalizeOrbName, setOrbName } from "../domain/orb-naming.ts";
 import { readOrb, readProjectOrbs } from "../domain/orb-read.ts";
 import {
+  describeOwnerSkills,
+  type OwnerSkillError,
+  writeOwnerSkill,
+} from "../domain/owner-skills.ts";
+import {
   readPersonalInstructions,
   savePersonalInstructions,
 } from "../domain/personal-instructions.ts";
 import type { ControlPlaneDeps, SigningKeyDeps, SigningKeyRow } from "../domain/ports.ts";
 import { type ProjectCommandError, requestProjectDeletion } from "../domain/project-deletion.ts";
 import {
+  deleteOwnerSecret,
   deleteProjectSecret,
+  listOwnerSecrets,
   listProjectSecrets,
+  putOwnerSecret,
   putProjectSecret,
 } from "../domain/project-secrets.ts";
 import {
@@ -156,6 +166,14 @@ function sendProjectWriteConflict(
         false,
       ),
     );
+}
+
+function sendOwnerSkillError(reply: FastifyReply, error: OwnerSkillError): FastifyReply {
+  const status = { invalid: 400, not_found: 404, conflict: 409, unavailable: 503, internal: 500 };
+  const code = error.code === "invalid" ? "invalid_request" : error.code;
+  return reply
+    .status(status[error.code])
+    .send(httpError(code, error.message, error.code === "unavailable"));
 }
 
 function sendProjectSecretError(reply: FastifyReply, error: ProjectSecretError): FastifyReply {
@@ -361,6 +379,57 @@ export function registerRoutes(
     const result = await saveGitIdentity(task, deps.gitIdentity, user.id, request.body);
     return sendGitIdentity(reply, result);
   });
+
+  /** Owner-scoped like personal instructions (docs/owner-skills-secrets.md). */
+  type Named = FastifyRequest<{ Params: { name: string } }>;
+  const owned =
+    <E>(send: (reply: FastifyReply, error: E) => FastifyReply) =>
+    (run: (userId: string, request: Named) => ResultAsync<unknown, E>) =>
+    async (request: Named, reply: FastifyReply) => {
+      reply.header("cache-control", "no-store");
+      const user = await selectedUser(request, reply, task, deps);
+      if (user === null) return;
+      const result = await run(user.id, request);
+      return result.isErr() ? send(reply, result.error) : reply.send(result.value);
+    };
+  const { ownerSecrets, ownerSkills } = deps;
+  const secrets = owned(sendProjectSecretError);
+  const skills = owned(sendOwnerSkillError);
+  app.get(
+    OWNER_SECRETS_PATH,
+    secrets((user) => listOwnerSecrets(task, ownerSecrets, user)),
+  );
+  app.put(
+    `${OWNER_SECRETS_PATH}/:name`,
+    secrets((user, { params, body }) =>
+      Check(PutProjectSecretRequestSchema, body)
+        ? putOwnerSecret(task, ownerSecrets, user, params.name, body.value)
+        : errAsync({ type: "project_secret_invalid" as const, message: "invalid secret body" }),
+    ),
+  );
+  app.delete(
+    `${OWNER_SECRETS_PATH}/:name`,
+    secrets((user, { params }) => deleteOwnerSecret(task, ownerSecrets, user, params.name)),
+  );
+  const { store } = ownerSkills;
+  app.get(
+    OWNER_SKILLS_PATH,
+    skills((user) => describeOwnerSkills(store.list(task, user))),
+  );
+  app.post(
+    OWNER_SKILLS_PATH,
+    skills((user, { body }) => writeOwnerSkill(task, ownerSkills, user, null, body)),
+  );
+  app.put(
+    `${OWNER_SKILLS_PATH}/:name`,
+    skills((user, { params, body }) => writeOwnerSkill(task, ownerSkills, user, params.name, body)),
+  );
+  app.delete(
+    `${OWNER_SKILLS_PATH}/:name`,
+    skills((user, { params }) =>
+      describeOwnerSkills(store.apply(task, user, { kind: "delete", name: params.name })),
+    ),
+  );
 
   if (signingKeys !== undefined) {
     app.post("/api/v1/issuer/signing-keys/publish", async (_request, reply) => {

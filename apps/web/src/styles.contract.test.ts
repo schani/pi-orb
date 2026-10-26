@@ -464,3 +464,10 @@ describe("orb workspace layout contract", () => {
     );
   });
 });
+
+it("gives owner skill disclosures and the add action phone touch targets", () => {
+  const phone = media("(max-width: 600px)");
+  const dialog = ".personal-instructions-dialog";
+  expect(rule(`${dialog} .project-mcp-connection > summary`, phone)).toContain("min-height: 48px");
+  expect(rule(`${dialog} .mcp-add-area > .text-action::before`, phone)).toContain("inset: -16px");
+});

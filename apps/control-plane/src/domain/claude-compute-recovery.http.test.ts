@@ -9,6 +9,7 @@ import {
   GIT_IDENTITY_RUNTIME_PATH,
   MCP_RUNTIME_PATH,
   ORB_BOOT_CONTEXT_PATH,
+  OWNER_SKILLS_RUNTIME_PATH,
   PERSONAL_INSTRUCTIONS_RUNTIME_PATH,
   PROJECT_INSTRUCTIONS_RUNTIME_PATH,
   PROJECT_SECRETS_RUNTIME_PATH,
@@ -48,6 +49,7 @@ it.each(["ready", "missing-lifetime", "repeated-guard", "stop"] as const)(
       [MCP_RUNTIME_PATH]: { revision: 0, servers: [] },
       [PERSONAL_INSTRUCTIONS_RUNTIME_PATH]: { revision: 0, content: "" },
       [PROJECT_INSTRUCTIONS_RUNTIME_PATH]: { revision: 0, content: "" },
+      [OWNER_SKILLS_RUNTIME_PATH]: { skills: [] },
       [ORB_BOOT_CONTEXT_PATH]: { v: 1, context: null, userTimeZone: null },
       [runtimeClaudeSubscriptionPath]: { token: "synthetic-no-inference", generation: 1 },
     };

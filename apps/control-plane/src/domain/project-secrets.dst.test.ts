@@ -71,10 +71,10 @@ describe("project secrets (DST)", () => {
       async (sim) => {
         const h = makeProjectSecretsHarness(PROJECT);
         (await putProjectSecret(outsideTask, h.deps, PROJECT, "TOKEN", "private"))._unsafeUnwrap();
-        const commit = h.pointers.casWriteProjectSecretPointer.bind(h.pointers);
+        const commit = h.pointers.casWriteSecretPointer.bind(h.pointers);
         let staged = false;
         let attached = false;
-        h.pointers.casWriteProjectSecretPointer = (...args) =>
+        h.pointers.casWriteSecretPointer = (...args) =>
           new ResultAsync(
             (async () => {
               staged = true;
@@ -193,8 +193,8 @@ describe("project secrets (DST)", () => {
         const snapshots: Record<string, string>[] = [];
         let writerStaged = false;
         let readDuringRotation = false;
-        const commit = harness.pointers.casWriteProjectSecretPointer.bind(harness.pointers);
-        harness.pointers.casWriteProjectSecretPointer = (...args) =>
+        const commit = harness.pointers.casWriteSecretPointer.bind(harness.pointers);
+        harness.pointers.casWriteSecretPointer = (...args) =>
           new ResultAsync(
             (async () => {
               writerStaged = true;
@@ -352,7 +352,7 @@ describe("project secret validation", () => {
     const snapshot = (await getProjectSecretSnapshot(task, h.deps, PROJECT))._unsafeUnwrap();
     const versions = h.secrets.liveVersions("project-secrets");
     const write = vi.spyOn(h.secrets, "writeSecret");
-    const commit = vi.spyOn(h.pointers, "casWriteProjectSecretPointer");
+    const commit = vi.spyOn(h.pointers, "casWriteSecretPointer");
 
     expect(payloadSize(`${value}a`)).toBe(64 * 1024 + 1);
     const rejected = await putProjectSecret(task, h.deps, PROJECT, "TOKEN", `${value}a`);
@@ -414,7 +414,7 @@ describe("project secret validation", () => {
         values: { TOKEN: "private-\0value", KEEP: "preserved" },
       });
       (
-        await h.pointers.casWriteProjectSecretPointer(task, PROJECT, null, {
+        await h.pointers.casWriteSecretPointer(task, PROJECT, null, {
           revision: 1,
           entries: { TOKEN: 1, KEEP: 1 },
           secretVersion,

@@ -20,10 +20,9 @@ function toMs(value: unknown): number {
   return Number(value);
 }
 
-function mapRow(row: PgRow): ProjectSecretPointerRow {
+export function mapRow(row: PgRow): ProjectSecretPointerRow {
   const raw = (row["entries"] ?? {}) as Record<string, unknown>;
   return {
-    projectId: String(row["project_id"]),
     rowVersion: Number(row["row_version"]),
     revision: Number(row["revision"]),
     entries: Object.fromEntries(Object.entries(raw).map(([name, at]) => [name, Number(at)])),
@@ -45,7 +44,7 @@ export class PostgreSQLProjectSecretPointerStore implements ProjectSecretPointer
     this.db = db;
   }
 
-  readProjectSecretPointer(
+  readSecretPointer(
     _task: SimulationTask,
     projectId: string,
   ): ResultAsync<ProjectSecretPointerRow | null, StoreError | ProjectConflict> {
@@ -68,7 +67,7 @@ export class PostgreSQLProjectSecretPointerStore implements ProjectSecretPointer
     return new ResultAsync(run());
   }
 
-  casWriteProjectSecretPointer(
+  casWriteSecretPointer(
     _task: SimulationTask,
     projectId: string,
     expectedRowVersion: number | null,

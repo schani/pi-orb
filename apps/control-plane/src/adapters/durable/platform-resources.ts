@@ -1,8 +1,15 @@
 import { createHash } from "node:crypto";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { err, ok, ResultAsync } from "neverthrow";
 import { type ResourceError, type ResourceFile, resourceError } from "../../domain/resources.ts";
+import { snapshotPromptResources } from "../git-resources/prompt.ts";
+
+/** The bundled platform skills shipped with the runtime (`/opt/pi-orb/skills` in orbs). */
+export const PLATFORM_SKILLS_ROOT = fileURLToPath(
+  new URL("../../../../orb-runtime/skills/", import.meta.url),
+);
 
 /** Adapter-only configured application directory, never supplied by model code or host HOME. */
 export function loadPlatformResources(root: string): ResultAsync<ResourceFile[], ResourceError> {
@@ -49,3 +56,11 @@ export function loadPlatformResources(root: string): ResultAsync<ResourceFile[],
   };
   return ResultAsync.fromSafePromise(run()).andThen((result) => result);
 }
+
+/** Skill names Pi loads from the bundled platform skills; owner skills may not take them. */
+export const bundledPlatformSkillNames = (): ResultAsync<ReadonlySet<string>, ResourceError> =>
+  loadPlatformResources(PLATFORM_SKILLS_ROOT)
+    .andThen((files) =>
+      snapshotPromptResources({ instructionPath: null, skillRoot: "/opt/pi-orb/skills", files }),
+    )
+    .map(({ skills }) => new Set(skills.map((skill) => skill.name)));

@@ -12,6 +12,7 @@ const ContextSnapshot = defineDoc<{
   managed: {
     personal: { content: string; revision: number };
     project: { content: string; revision: number };
+    skills: Array<{ name: string; content: string }>;
   } | null;
 }>({
   kind: "orb.resource-context",
@@ -56,7 +57,11 @@ export class NativeResourceContext {
             version: platform.version,
             files: platform.files.map((file) => ({ ...file })),
           };
-          doc.managed = { personal: { ...managed.personal }, project: { ...managed.project } };
+          doc.managed = {
+            personal: { ...managed.personal },
+            project: { ...managed.project },
+            skills: managed.skills.map((skill) => ({ ...skill })),
+          };
         }, BACKGROUND_CONTEXT),
         () => resourceError("storage", "Private resource context commit failed"),
       ),
