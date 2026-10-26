@@ -219,7 +219,6 @@ export class McpTools {
     ctx: Context,
     fn: (client: McpClient) => Promise<T>,
     diagnostics?: McpDiscoveryDiagnostics,
-    namespacePublication: "initialize" | "deferred" = "initialize",
   ): ResultAsync<T, ToolError> {
     if (this.closed) return errAsync({ code: "unavailable", message: "MCP tools closed" });
     if (ctx.abortSignal?.aborted) return errAsync({ code: "cancelled", message: "MCP cancelled" });
@@ -295,14 +294,12 @@ export class McpTools {
               () => {
                 if (this.closed || ctx.abortSignal?.aborted)
                   return errAsync<T, ToolError>({ code: "cancelled", message: "MCP cancelled" });
-                if (namespacePublication === "initialize") {
-                  const description = endpoint.description ?? client.serverInfo?.name;
-                  this.catalog.namespace({
-                    name: `mcp__${endpoint.name}`,
-                    ...(description ? { description } : {}),
-                    ...(client.instructions ? { instructions: client.instructions } : {}),
-                  });
-                }
+                const description = endpoint.description ?? client.serverInfo?.name;
+                this.catalog.namespace({
+                  name: `mcp__${endpoint.name}`,
+                  ...(description ? { description } : {}),
+                  ...(client.instructions ? { instructions: client.instructions } : {}),
+                });
                 stage("list_tools");
                 return ResultAsync.fromThrowable(() => fn(client), failed)();
               },
@@ -343,25 +340,21 @@ export class McpTools {
           description: endpoint.description ?? client.serverInfo?.name,
         }),
         this.diagnostics,
-        "deferred",
       ).andThen((value) => {
         const namespace = `mcp__${endpoint.name}`;
         const names = value.tools.map((tool) => `${namespace}__${tool.name}`);
         const identifiers = names.map(toCodemodeIdentifier);
-        const occupied = this.catalog.registeredNames().map((name) => ({
-          name,
-          identifier: toCodemodeIdentifier(name),
-          namespace: this.catalog.metadata(name).namespace?.name,
-        }));
+        const occupied = this.catalog
+          .registeredNames()
+          .map((name) => [name, toCodemodeIdentifier(name)] as const);
         if (
-          new Set(names).size !== names.length ||
           new Set(identifiers).size !== identifiers.length ||
           // Exact raw name and namespace identify the original endpoint/tool on retry.
           names.some((name, index) =>
             occupied.some(
-              (entry) =>
-                (entry.name === name || entry.identifier === identifiers[index]) &&
-                (entry.name !== name || entry.namespace !== namespace),
+              ([other, identifier]) =>
+                identifier === identifiers[index] &&
+                (other !== name || this.catalog.metadata(other).namespace?.name !== namespace),
             ),
           )
         )
