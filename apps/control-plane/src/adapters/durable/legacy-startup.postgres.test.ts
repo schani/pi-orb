@@ -98,7 +98,7 @@ it
           return verdict;
         });
         await checked.promise;
-        const publishing = other.store.initOrVerifySession(task, orb.id, {
+        const publishing = other.store.initOrVerifySession(task, orb.id, null, {
           id: "host-sdk-session",
           overflow: {},
         });

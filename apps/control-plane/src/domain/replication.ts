@@ -289,9 +289,18 @@ export async function pollOrbUntilCaughtUp(
     }
 
     if (response.records.length === 0) {
-      const verified = await deps.store.initOrVerifySession(task, orbId, response.session);
+      const verified = await deps.store.initOrVerifySession(
+        task,
+        orbId,
+        orb.replicationCursor,
+        response.session,
+      );
       if (verified.isErr()) {
         const error = verified.error;
+        if (error.type === "cursor_conflict") {
+          await task.checkpoint("cursor conflict: repolling from fresh cursor");
+          continue;
+        }
         if (error.type === "replication_integrity") {
           if (!(await failOrbForIntegrity(task, deps, orbId, error, maxAttempts)))
             return { type: "retryable", message: "integrity failure could not be persisted" };

@@ -2401,11 +2401,13 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   initOrVerifySession(
     task: SimulationTask,
     orbId: string,
+    expectedCursor: string | null,
     session: HarnessSessionMetadata,
-  ): ResultAsync<void, StoreError | ReplicationIntegrityError> {
+  ): ResultAsync<void, CommitPullError> {
     return this.access(task, FAILPOINTS.storeWrite, "init or verify session", () => {
       const orb = this.orbs.get(orbId);
       if (orb === undefined) return null;
+      if (orb.replicationCursor !== expectedCursor) return { type: "cursor_conflict" as const };
       const sessionCheck = this.verifySession(orb, session);
       if (sessionCheck !== null && "type" in sessionCheck) return sessionCheck;
       if (sessionCheck !== null) {
@@ -2419,8 +2421,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       return null;
     }).andThen((integrity) =>
       integrity === null
-        ? okAsync<void, ReplicationIntegrityError>(undefined)
-        : errAsync<void, ReplicationIntegrityError>(integrity),
+        ? okAsync<void, CommitPullError>(undefined)
+        : errAsync<void, CommitPullError>(integrity),
     );
   }
 

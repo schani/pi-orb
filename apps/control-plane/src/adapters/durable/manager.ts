@@ -515,7 +515,22 @@ export class DurableAgentPlane implements AgentPlane, AgentAlertWriter {
     if (context.signal.aborted)
       return errAsync({ ...durableError("history read cancelled"), code: "cancelled" as const });
     const agent = this.manager.get(orb.id);
-    if (agent) return agent.pullHistory(request.after, request.limit);
+    if (agent)
+      return agent
+        .pullHistory(request.after, request.limit)
+        .orElse((error) =>
+          error.code === "cursor_not_found"
+            ? this.readCommittedHistory(task, orb, request)
+            : errAsync(error),
+        );
+    return this.readCommittedHistory(task, orb, request);
+  }
+
+  private readCommittedHistory(
+    task: SimulationTask,
+    orb: OrbRow,
+    request: PullHistoryClientRequest,
+  ) {
     return this.options.persistence.snapshot(task, orb).andThen((snapshot) => {
       const index =
         request.after === null

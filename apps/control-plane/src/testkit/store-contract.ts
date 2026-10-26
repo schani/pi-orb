@@ -126,6 +126,32 @@ export function storeSemanticsContractTests(
   open: () => Promise<StoreSemanticsSubject>,
 ): void {
   describe(`${name} store contract`, () => {
+    it("rejects stale empty-session verification before checking changed headers", async () => {
+      await seed();
+      (await store.initOrVerifySession(task, orb.id, null, session))._unsafeUnwrap();
+      const committed = { ...session, timestamp: "2026-01-01T00:00:00.000Z" };
+      (
+        await store.commitPullBatch(task, {
+          orbId: orb.id,
+          expectedCursor: null,
+          session: committed,
+          records: [first],
+          nextCursor: first.id,
+          nextHeadId: first.id,
+        })
+      )._unsafeUnwrap();
+      expect(
+        (await store.initOrVerifySession(task, orb.id, null, session))._unsafeUnwrapErr(),
+      ).toEqual({ type: "cursor_conflict" });
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.harnessSessionHeader).toEqual(
+        committed,
+      );
+      expect(
+        (await store.initOrVerifySession(task, orb.id, first.id, session))._unsafeUnwrapErr(),
+      ).toMatchObject({ type: "replication_integrity", reason: "session_mismatch" });
+      (await store.initOrVerifySession(task, orb.id, first.id, committed))._unsafeUnwrap();
+    });
+
     let subject: StoreSemanticsSubject;
     let store: ControlPlaneStore;
 
@@ -3676,7 +3702,7 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
         )
       )._unsafeUnwrap();
       (
-        await store.initOrVerifySession(task, orb.id, { id: "new-session", overflow: {} })
+        await store.initOrVerifySession(task, orb.id, null, { id: "new-session", overflow: {} })
       )._unsafeUnwrap();
       expect((await store.readActivityHeadline(task, value))._unsafeUnwrap()).toBeNull();
       expect((await store.putActivityHeadlineIfAbsent(task, value))._unsafeUnwrap()).toBeNull();
@@ -3777,7 +3803,7 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
       });
       expect(duplicate.isOk() && duplicate.value.duplicate).toBe(true);
       const header = { ...session, overflow: unicodeOverflow };
-      (await store.initOrVerifySession(task, orb.id, header))._unsafeUnwrap();
+      (await store.initOrVerifySession(task, orb.id, null, header))._unsafeUnwrap();
       const committed = (
         await store.commitPullBatch(task, {
           orbId: orb.id,

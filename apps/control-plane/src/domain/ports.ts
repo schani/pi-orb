@@ -543,8 +543,9 @@ export interface ControlPlaneStore extends ActivityHeadlineStore {
   initOrVerifySession(
     task: SimulationTask,
     orbId: string,
+    expectedCursor: string | null,
     session: HarnessSessionMetadata,
-  ): ResultAsync<void, StoreError | import("./errors.ts").ReplicationIntegrityError>;
+  ): ResultAsync<void, import("./errors.ts").CommitPullError>;
 
   /** One committed record, fenced to the current replica session; no transcript materialization. */
   readHistoryRecord(
