@@ -17,7 +17,7 @@ This reverses the earlier Pi resource-scope decision that user-level skills are 
 
 ## Five configuration proposals (2026-10-26)
 
-Interactive study: [`design-prototypes/global-skills-secrets/index.html`](../design-prototypes/global-skills-secrets/index.html) ([hosted](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/6e16dc75-2326-4f5a-bbfd-853e5ce5fcd0/design/global-skills-secrets/index.html)). It links a snapshot of `apps/web/src/styles.css` and reuses captured production markup: dashboard totals/masonry columns, the 560px Settings/Config frame and tabs, the MCP workbench disclosure and the Secrets pane. State is in memory only.
+Interactive study: [hosted](https://files---pi-orb-issuer-1077475695242.us-central1.run.app/s/6e16dc75-2326-4f5a-bbfd-853e5ce5fcd0/design/global-skills-secrets/index.html). It links a snapshot of `apps/web/src/styles.css` and reuses captured production markup: dashboard totals/masonry columns, the 560px Settings/Config frame and tabs, the MCP workbench disclosure and the Secrets pane. State is in memory only.
 
 1. **Settings tabs.** The dashboard gear's Settings gains Skills and Secrets tabs (Instructions · Skills · Secrets · Git · Claude). Skills reuse the MCP disclosure, one row per skill expanding to its `SKILL.md`; Secrets is the project Secrets pane unchanged. Smallest; long skills are edited in 560px and five tabs are tight on a phone.
 2. **Inherited in project Config.** No owner-level entry point. Each project's Config shows the effective set: own secrets, then "all projects" secrets, struck through where overridden. The secret form gains a scope choice; a Skills tab lists owner skills. Shows exactly what an orb receives; repeats the scope confusion rejected for personal instructions.
