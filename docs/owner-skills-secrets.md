@@ -2,7 +2,7 @@
 
 **Requirement (2026-10-26):** the owner adds skills (single `SKILL.md` files for now) and secrets outside any project; they apply to all of the owner's projects.
 
-**Status (2026-10-26): Settings tabs selected (question 83); implemented locally, not deployed.**
+**Status (2026-10-26): Settings tabs selected (question 83); deployed 2026-10-26 (Deploy run 40277646564, `c812b034`).**
 
 ## Decisions (2026-10-26)
 
