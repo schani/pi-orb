@@ -4,7 +4,7 @@ import { RUNTIME_SUBPROTOCOL, TERMINAL_SUBPROTOCOL } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
 import { ok, okAsync, ResultAsync } from "neverthrow";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AgentPlane } from "../domain/agent-ports.ts";
 import type { OrbHostProvider } from "../domain/ports.ts";
@@ -38,6 +38,166 @@ async function closeWebSocketServer(server: WebSocketServer): Promise<void> {
 
 afterEach(async () => {
   await Promise.all(openServers.splice(0).map((server) => server.close()));
+});
+
+describe.each([
+  ["live", RUNTIME_SUBPROTOCOL],
+  ["terminal", TERMINAL_SUBPROTOCOL],
+])("%s upstream close recovery", (path, protocol) => {
+  async function connect() {
+    const runtime = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    openServers.push({ close: () => closeWebSocketServer(runtime) });
+    await once(runtime, "listening");
+    const runtimeAddress = runtime.address() as AddressInfo;
+    const connected = once(runtime, "connection");
+    runtime.on("connection", (socket) => {
+      socket.on("message", (data, isBinary) => socket.send(data, { binary: isBinary }));
+    });
+    const harness = makeHarness();
+    const orbId = "orb-close-recovery";
+    harness.store.seedOrb(makeOrbRow(orbId, "project-a", "running", { hostRef: "host-a" }));
+    const originalUnregister = harness.deps.control.unregisterBrowserConnection.bind(
+      harness.deps.control,
+    );
+    const unregister = vi.spyOn(harness.deps.control, "unregisterBrowserConnection");
+    let unregistered!: () => void;
+    const removed = new Promise<void>((resolve) => {
+      unregistered = resolve;
+    });
+    unregister.mockImplementation((...args) => {
+      originalUnregister(...args);
+      unregistered();
+    });
+    const app = Fastify({ logger: false });
+    openServers.push({ close: () => app.close() });
+    const task = new NoSimulationTask("close recovery", true);
+    const log = vi.spyOn(task, "log");
+    const edges = () =>
+      log.mock.calls.filter(
+        ([message]) => typeof message === "string" && message.startsWith("lifecycle:"),
+      );
+    await registerLiveProxy(app, task, {
+      ...harness.deps,
+      hostProvider: delegatingProvider(harness.deps.hostProvider, {
+        observe: (_task, ref) =>
+          okAsync({
+            ref,
+            orbId,
+            incarnation: 0,
+            specFingerprint: null,
+            state: "running" as const,
+            runtimeAddress: { baseUrl: `http://127.0.0.1:${runtimeAddress.port}` },
+          }),
+      }),
+    });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address() as AddressInfo;
+    const browser = new WebSocket(
+      `ws://127.0.0.1:${address.port}/api/v1/orbs/${orbId}/${path}`,
+      protocol,
+    );
+    openServers.push({
+      close: async () => {
+        if (browser.readyState === WebSocket.CLOSED) return;
+        const closed = once(browser, "close");
+        browser.terminate();
+        await closed;
+      },
+    });
+    await once(browser, "open");
+    const [upstream] = (await connected) as [WebSocket];
+    const echo = once(browser, "message");
+    browser.send("bridge-ready");
+    expect((await echo)[0].toString()).toBe("bridge-ready");
+    const proxyBrowser = [...app.websocketServer.clients][0] ?? expect.fail("proxy peer missing");
+    return { browser, proxyBrowser, upstream, log, edges, unregister, removed, orbId };
+  }
+
+  it.each([1005, 1006, 1011])(
+    "closes the browser when an established runtime ends with %i",
+    async (code) => {
+      const { browser, proxyBrowser, upstream, log, edges, unregister, removed, orbId } =
+        await connect();
+      const expected = code === 1005 || code === 1006 ? 1013 : code;
+      let attempted!: () => void;
+      const forwarding = new Promise<void>((resolve) => {
+        attempted = resolve;
+      });
+      const originalClose = proxyBrowser.close.bind(proxyBrowser);
+      const close = vi.spyOn(proxyBrowser, "close").mockImplementation((...args) => {
+        attempted();
+        return originalClose(...args);
+      });
+      const browserClosed = once(browser, "close");
+      const upstreamClosed = once(upstream, "close");
+      if (code === 1005) upstream.close();
+      else if (code === 1006) upstream.terminate();
+      else upstream.close(code, "external-close-reason");
+      await forwarding;
+      // Assert before awaiting closure: the old implementation stays pingable indefinitely.
+      expect(close).toHaveBeenCalledWith(
+        expected,
+        code === 1005 || code === 1006 ? "" : "external-close-reason",
+      );
+      const [browserCode, browserReason] = await browserClosed;
+      await upstreamClosed;
+      await removed;
+      expect(browserCode).toBe(expected);
+      expect(browserReason.toString()).toBe(
+        code === 1005 || code === 1006 ? "" : "external-close-reason",
+      );
+      expect(browser.readyState).toBe(WebSocket.CLOSED);
+      expect(upstream.readyState).toBe(WebSocket.CLOSED);
+      expect(unregister).toHaveBeenCalledOnce();
+      if (expected !== code) {
+        expect(edges()).toEqual([
+          [
+            expect.stringMatching(
+              new RegExp(
+                `^lifecycle: orb=${orbId} websocket-close-normalized connectionId=(browser|terminal)-[0-9]+ path=${path} originalCode=${code} forwardedCode=${expected}$`,
+              ),
+            ),
+          ],
+        ]);
+      } else expect(edges()).toEqual([]);
+      expect(JSON.stringify(log.mock.calls)).not.toContain("external-close-reason");
+    },
+  );
+
+  it("terminates the real browser transport if close serialization throws", async () => {
+    const { browser, proxyBrowser, upstream, log, edges, removed, orbId } = await connect();
+    const originalClose = proxyBrowser.close.bind(proxyBrowser);
+    let forwarded!: () => void;
+    const attempted = new Promise<void>((resolve) => {
+      forwarded = resolve;
+    });
+    // Exercise the installed ws serializer's throw on this owned socket only.
+    vi.spyOn(proxyBrowser, "close").mockImplementationOnce((code) => {
+      forwarded();
+      originalClose(code, "private-fault-reason".repeat(10));
+    });
+    const terminate = vi.spyOn(proxyBrowser, "terminate");
+    const browserClosed = once(browser, "close");
+    const upstreamClosed = once(upstream, "close");
+    upstream.close(1011, "external-close-reason");
+    await attempted;
+    expect(terminate).toHaveBeenCalledOnce();
+    await upstreamClosed;
+    expect((await browserClosed)[0]).toBe(1006);
+    await removed;
+    expect(edges()).toEqual([
+      [
+        expect.stringMatching(
+          new RegExp(
+            `^lifecycle: orb=${orbId} websocket-close-terminated connectionId=(browser|terminal)-[0-9]+ path=${path} originalCode=1011 forwardedCode=1011$`,
+          ),
+        ),
+      ],
+    ]);
+    expect(JSON.stringify(log.mock.calls)).not.toMatch(
+      /external-close-reason|private-fault-reason/,
+    );
+  });
 });
 
 describe("live proxy", () => {

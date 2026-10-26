@@ -11,6 +11,7 @@ import { Check } from "typebox/value";
 import { WebSocket } from "ws";
 import { withDeadline } from "../domain/dst.ts";
 import { agentPlacement } from "../domain/harness-agent-plane.ts";
+import { logOrbEvent } from "../domain/log.ts";
 import type { ControlPlaneDeps } from "../domain/ports.ts";
 import { attachCentralLive } from "./central-live.ts";
 import { type SessionExpiryScheduler, watchSessionExpiry } from "./session-expiry.ts";
@@ -21,6 +22,13 @@ const UNSUPPORTED_DATA = 1003;
 const TERMINAL_PROXY_BUFFER_BYTES = 1024 * 1024;
 
 let connectionCounter = 0;
+
+function isWireCloseCode(code: number): boolean {
+  return (
+    (code >= 1000 && code <= 1014 && code !== 1004 && code !== 1005 && code !== 1006) ||
+    (code >= 3000 && code <= 4999)
+  );
+}
 
 /**
  * Live routing (docs/runtime-protocol.md/docs/history-replication.md): host-native
@@ -256,13 +264,14 @@ export async function registerLiveProxy(
         browserSocket.send(data.toString());
       });
       runtimeSocket.on("close", (code, reason) => {
+        const forwardedCode = isWireCloseCode(code) ? code : TRY_AGAIN_LATER;
+        const fields = { connectionId, path: "live", originalCode: code, forwardedCode };
+        if (forwardedCode !== code) logOrbEvent(task, orbId, "websocket-close-normalized", fields);
         try {
-          browserSocket.close(
-            code >= 1000 && code < 5000 ? code : TRY_AGAIN_LATER,
-            reason.toString(),
-          );
+          browserSocket.close(forwardedCode, reason.toString());
         } catch {
-          // Already closed.
+          logOrbEvent(task, orbId, "websocket-close-terminated", fields);
+          browserSocket.terminate();
         }
       });
       runtimeSocket.on("error", () => {
@@ -457,13 +466,14 @@ export async function registerLiveProxy(
         }
       });
       runtimeSocket.on("close", (code, reason) => {
+        const forwardedCode = isWireCloseCode(code) ? code : TRY_AGAIN_LATER;
+        const fields = { connectionId, path: "terminal", originalCode: code, forwardedCode };
+        if (forwardedCode !== code) logOrbEvent(task, orbId, "websocket-close-normalized", fields);
         try {
-          browserSocket.close(
-            code >= 1000 && code < 5000 ? code : TRY_AGAIN_LATER,
-            reason.toString(),
-          );
+          browserSocket.close(forwardedCode, reason.toString());
         } catch {
-          /* already closed */
+          logOrbEvent(task, orbId, "websocket-close-terminated", fields);
+          browserSocket.terminate();
         }
       });
       runtimeSocket.on("error", () => closeBoth(TRY_AGAIN_LATER, "runtime connection failed"));

@@ -89,6 +89,8 @@ Deployed stages 1–2 authenticate the browser WebSocket request before this han
 
 A connection race or unavailable runtime closes with `1013 Try Again Later`; the browser reconnects. Binary frames are not accepted.
 
+**Native close forwarding (2026-10-25 PDT; implemented locally):** live and terminal proxies forward only ws-compatible wire codes: 1000–1014 except 1004/1005/1006, or 3000–4999. Other observations, including status-less 1005 and abnormal 1006, close the browser with 1013. If close forwarding throws, terminate the browser transport. Normalization/termination edges use the existing `logOrbEvent`/production `task.log` Cloud Logging boundary with orb, connection, path and original/forwarded codes; no peer reason or exception text. Valid closes are quiet. Browser closure enables the live client's existing cursor-based reconnect; successful recovery still requires connectivity and an available conversation. Central Pi live does not use these bridges; terminal recovery remains explicit (`docs/terminal.md`).
+
 This makes the runtime's `client.hello` the first application frame and avoids two nested handshakes or mixed control-plane/runtime frame namespaces. Authentication can later be added at the HTTP/WebSocket upgrade and control-plane-to-runtime connection without changing agent frames.
 
 ## Handshake and synchronization
