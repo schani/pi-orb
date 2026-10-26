@@ -1940,8 +1940,12 @@ async function reconcileStopping(
         agentPlacement(deps.agentPlane, orb) !== "central" &&
         "answered" in prepared.error &&
         prepared.error.answered === true
-      )
+      ) {
+        const inspected = await inspectFailedRuntime(task, deps, orb, baseUrl);
+        if (inspected.isErr()) return retryable(inspected.error);
+        if (inspected.value) return { type: "progressed" };
         deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
+      }
       if (deps.control.getDrainStatus(orb.id)?.retrying !== true)
         logOrbEvent(task, orb.id, "idle-stop-prepare-blocked", { message: prepared.error.message });
       const drain = deps.control.getDrainStatus(orb.id);
