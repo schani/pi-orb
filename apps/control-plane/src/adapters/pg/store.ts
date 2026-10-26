@@ -2410,8 +2410,9 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     _task: SimulationTask,
     orbId: string,
     session: HarnessSessionMetadata,
-  ): ResultAsync<void, StoreError | ReplicationIntegrityError> {
-    return this.db.transaction<void, StoreError | ReplicationIntegrityError>(async (query) => {
+    expectedCursor: string | null,
+  ): ResultAsync<void, CommitPullError> {
+    return this.db.transaction<void, CommitPullError>(async (query) => {
       const orbResult = await query(
         "SELECT harness_session_id, harness_session_header, replication_cursor FROM orbs WHERE id = $1 FOR UPDATE",
         [orbId],
@@ -2419,14 +2420,15 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       if (orbResult.isErr()) return err(orbResult.error);
       const row = orbResult.value.rows[0];
       if (row === undefined) return ok(undefined);
+      const storedCursor =
+        row["replication_cursor"] === null ? null : String(row["replication_cursor"]);
+      if (storedCursor !== expectedCursor) return err({ type: "cursor_conflict" });
       const normalized = normalizeHistory(session);
       if (normalized.isErr()) return err(historyMappingFailure(normalized.error.message));
       if (normalized.value?.id !== session.id)
         return err(historyMappingFailure("serialized session identity mismatch"));
       const storedSessionId =
         row["harness_session_id"] === null ? null : String(row["harness_session_id"]);
-      const storedCursor =
-        row["replication_cursor"] === null ? null : String(row["replication_cursor"]);
       if (
         storedSessionId === null ||
         // An empty replica pins nothing (docs/history-replication.md): with no committed

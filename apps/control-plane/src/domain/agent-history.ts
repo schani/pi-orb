@@ -29,10 +29,18 @@ export function commitAgentHistory(
         return err(failure("central history cursor is absent from authority"));
       const records = snapshot.records.slice(index + 1);
       const last = records.at(-1);
-      if (last === undefined)
-        return (await deps.store.initOrVerifySession(task, snapshot.orbId, snapshot.session))
-          .map(() => undefined)
-          .mapErr((error) => failure(error.message));
+      if (last === undefined) {
+        const verified = await deps.store.initOrVerifySession(
+          task,
+          snapshot.orbId,
+          snapshot.session,
+          cursor,
+        );
+        if (verified.isOk()) return ok(undefined);
+        if (verified.error.type !== "cursor_conflict") return err(failure(verified.error.message));
+        await task.checkpoint("central history cursor conflict", snapshot.orbId);
+        continue;
+      }
       const committed = await deps.store.commitPullBatch(task, {
         orbId: snapshot.orbId,
         expectedCursor: cursor,

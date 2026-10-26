@@ -17,6 +17,7 @@ import { ControlState } from "../domain/control-state.ts";
 import { enqueueOrbMessage } from "../domain/lifecycle.ts";
 import { pollAllOnce, reconcileAllOnce } from "../domain/loops.ts";
 import type { ControlPlaneDeps } from "../domain/ports.ts";
+import { pollOrbUntilCaughtUp } from "../domain/replication.ts";
 import {
   makeHarness,
   makeOrbRow,
@@ -61,24 +62,54 @@ export async function centralWorkHarness() {
   // Finish WASM/filesystem initialization before entering determined. Subsequent
   // in-memory SQL executes through microtasks; no network or filesystem backend.
   const client = new PGliteClient();
+  const history: string[] = [];
   // A stalled request waits before entering PGlite, never while holding its lock.
   // The environment actor owns time; database callers only await this gate.
   let stall: ReturnType<typeof deferred> | undefined;
   let blocked = 0;
+  type Latency = { phase: "admission" | "completion"; ms: number } | null;
+  let latencyPlan: readonly Latency[] = [];
+  let operation = 0;
+  let deliveryWake = deferred();
+  let deliveryFinished = false;
+  const deliveries: { due: number; waiting: ReturnType<typeof deferred>; id: number }[] = [];
+  const boundary = (phase: "admission" | "completion", id: number) => {
+    const latency = latencyPlan[id % latencyPlan.length];
+    if (!latency || latency.phase !== phase) return Promise.resolve();
+    const waiting = deferred();
+    history.push(`${clock.wallNow()}:database:hold:${id}:${phase}`);
+    deliveries.push({ due: clock.monotonicNow() + latency.ms, waiting, id });
+    deliveryWake.resolve();
+    return waiting.promise;
+  };
   let clock: SimulationTask;
   const faultClient: PostgreSQLClient = {
     query: (sql, values) => {
+      const id = operation++;
       const waiting = stall;
       if (waiting) blocked++;
-      return ResultAsync.fromSafePromise(waiting?.promise ?? Promise.resolve()).andThen(() =>
-        client.query(sql, values),
-      );
+      return ResultAsync.fromSafePromise(waiting?.promise ?? Promise.resolve())
+        .andThen(() => ResultAsync.fromSafePromise(boundary("admission", id)))
+        .andThen(() => client.query(sql, values))
+        .andThen((value) =>
+          ResultAsync.fromSafePromise(boundary("completion", id)).map(() => value),
+        );
     },
     transaction: (f) => {
+      const id = operation++;
       const waiting = stall;
       if (waiting) blocked++;
-      return ResultAsync.fromSafePromise(waiting?.promise ?? Promise.resolve()).andThen(() =>
-        client.transaction(f),
+      return (
+        ResultAsync.fromSafePromise(waiting?.promise ?? Promise.resolve())
+          .andThen(() => ResultAsync.fromSafePromise(boundary("admission", id)))
+          .andThen(() => client.transaction(f))
+          // The transaction has released PGlite's lock before delivery is delayed.
+          .andThen((value) => {
+            history.push(
+              `${clock?.wallNow()}:database:transaction-completed:${id}:${typeof value}`,
+            );
+            return ResultAsync.fromSafePromise(boundary("completion", id)).map(() => value);
+          })
       );
     },
     end: () => client.end(),
@@ -155,7 +186,7 @@ export async function centralWorkHarness() {
   let plane: DurableAgentPlane | undefined;
   let deps: ControlPlaneDeps;
   const accepted = new Map<string, string | null>();
-  const history: string[] = [];
+  const committedRecords = new Map<string, string>();
 
   async function replace(ownerTask: SimulationTask) {
     if (plane) {
@@ -258,6 +289,22 @@ export async function centralWorkHarness() {
     const orb = (await observer.getOrb(task, CENTRAL_WORK_ORB))._unsafeUnwrap();
     const messages = (await observer.listOrbMessages(task, CENTRAL_WORK_ORB))._unsafeUnwrap();
     const snapshot = (await observer.readHistorySnapshot(task, CENTRAL_WORK_ORB))._unsafeUnwrap();
+    expect(
+      new Set(snapshot.records.map((record) => record.id)).size,
+      "unique committed record identities",
+    ).toBe(snapshot.records.length);
+    if (snapshot.cursor !== null)
+      expect(
+        snapshot.records.map((record) => record.id),
+        "committed cursor belongs to authoritative history",
+      ).toContain(snapshot.cursor);
+    for (const record of snapshot.records) {
+      const bytes = JSON.stringify(record);
+      expect(committedRecords.get(record.id) ?? bytes, "committed records are immutable").toBe(
+        bytes,
+      );
+      committedRecords.set(record.id, bytes);
+    }
     const native = (
       await client.query(
         "SELECT id,request_id,status,record FROM durable_pg_submissions WHERE orb_id=$1 ORDER BY id",
@@ -361,6 +408,18 @@ export async function centralWorkHarness() {
     return outcomes.every(Boolean);
   }
 
+  function deliverDatabaseReplies(finish = false) {
+    for (let i = deliveries.length - 1; i >= 0; i--) {
+      const delivery = deliveries[i];
+      if (delivery && (finish || delivery.due <= clock.monotonicNow())) {
+        deliveries.splice(i, 1);
+        history.push(`${clock.wallNow()}:database:delivered:${delivery.id}`);
+        delivery.waiting.resolve();
+      }
+    }
+    if (finish) latencyPlan = [];
+  }
+
   return {
     initialize,
     restart: replace,
@@ -371,6 +430,28 @@ export async function centralWorkHarness() {
     inspect,
     complete,
     command: (value: string) => history.push(`${clock?.wallNow()}:${value}`),
+    finishDatabaseLatency: () => {
+      deliveryFinished = true;
+      deliveryWake.resolve();
+    },
+    deliverDatabaseReplies,
+    serveDatabaseReplies: async (task: SimulationTask) => {
+      while (!deliveryFinished) {
+        if (deliveries.length === 0) await deliveryWake.promise;
+        deliveryWake = deferred();
+        if (deliveries.length > 0) {
+          await task.sleep(25, "database reply delivery");
+          deliverDatabaseReplies();
+        }
+      }
+      deliverDatabaseReplies(true);
+    },
+    databaseLatencyPlan: (plan: readonly Latency[]) => {
+      latencyPlan = plan;
+      operation = 0;
+    },
+    historyIntervalMs: host.deps.constants.historyPullIntervalMs,
+    pollHistory: (task: SimulationTask) => pollOrbUntilCaughtUp(task, deps, CENTRAL_WORK_ORB),
     databaseStall: (stalled: boolean) => {
       history.push(`${clock?.wallNow()}:database:${stalled ? "stalled" : "healthy"}`);
       if (stalled) stall ??= deferred();

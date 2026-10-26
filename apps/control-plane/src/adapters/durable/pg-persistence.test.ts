@@ -1,11 +1,17 @@
 import { randomUUID } from "node:crypto";
+import { createModels } from "@earendil-works/pi-ai/models";
+import { createRegistry } from "@earendil-works/pi-durable";
+import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { NoSimulationTask } from "determined";
-import { errAsync } from "neverthrow";
-import { expect, it } from "vitest";
-import { makeOrbRow, makeProjectRow, seedTestUser } from "../../testkit/fixtures.ts";
+import { errAsync, okAsync } from "neverthrow";
+import { expect, it, vi } from "vitest";
+import { reconcileOrbOnce, requestOrbArchive } from "../../domain/lifecycle.ts";
+import { pollOrbUntilCaughtUp } from "../../domain/replication.ts";
+import { makeHarness, makeOrbRow, makeProjectRow, seedTestUser } from "../../testkit/fixtures.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
 import type { PostgreSQLClient } from "../pg/client.ts";
 import { PGliteClient } from "../pg/pglite-client.ts";
+import { DurableAgentPlane } from "./manager.ts";
 import { PgAgentPersistence } from "./pg-persistence.ts";
 
 it("fences an open lease when admission authority changes and reads public history passively", async () => {
@@ -269,3 +275,78 @@ it.each(["expired", "unavailable"] as const)(
     }
   },
 );
+
+it("preserves empty passive reads, native session adoption and never-opened archival", async () => {
+  const db = new PGliteClient();
+  const database = composeControlPlaneDatabase(db);
+  const task = new NoSimulationTask("history identity authority", false);
+  const project = makeProjectRow(randomUUID());
+  const orb = makeOrbRow(randomUUID(), project.id, "running");
+  let opens = 0;
+  const plane = (
+    await DurableAgentPlane.create({
+      persistence: database.agentPersistence,
+      openContext: () => {
+        opens++;
+        return okAsync({
+          models: createModels(),
+          registry: createRegistry(),
+          env: new NodeExecutionEnv({ cwd: "/tmp" }),
+          checkoutCommit: null,
+          instructions: "",
+        });
+      },
+    })
+  )._unsafeUnwrap();
+  try {
+    (await database.migrate())._unsafeUnwrap();
+    (await seedTestUser(task, database.users))._unsafeUnwrap();
+    (await database.store.insertProject(task, project))._unsafeUnwrap();
+    (await database.store.insertOrb(task, orb))._unsafeUnwrap();
+    const deps = { ...makeHarness().deps, store: database.store, agentPlane: plane };
+    expect(await pollOrbUntilCaughtUp(task, deps, orb.id)).toMatchObject({ type: "caught_up" });
+    const unopened = (await database.store.getOrb(task, orb.id))._unsafeUnwrap();
+    expect(unopened).toMatchObject({
+      harnessSessionId: `conversation:${orb.id}`,
+      harnessSessionHeader: { id: `conversation:${orb.id}`, overflow: { harness: "pi-durable" } },
+      replicationCursor: null,
+    });
+    expect((await database.agentPersistence.snapshot(task, orb))._unsafeUnwrap()).toMatchObject({
+      records: [],
+      session: { id: `conversation:${orb.id}` },
+    });
+    expect(opens).toBe(0);
+    const context = { signal: new AbortController().signal };
+    (await plane.health(task, orb, context))._unsafeUnwrap();
+    const committed = (await database.store.getOrb(task, orb.id))._unsafeUnwrap();
+    expect(committed?.harnessSessionHeader?.timestamp).toEqual(expect.any(String));
+    expect(
+      (
+        await plane.pullHistory(task, orb, { baseUrl: "central", after: null, limit: 500 }, context)
+      )._unsafeUnwrap().session,
+    ).toEqual(committed?.harnessSessionHeader);
+    expect(await pollOrbUntilCaughtUp(task, deps, orb.id)).toMatchObject({ type: "caught_up" });
+    const empty = makeOrbRow(randomUUID(), project.id, "stopped", { hostRef: null });
+    (await database.store.insertOrb(task, empty))._unsafeUnwrap();
+    (await requestOrbArchive(task, deps, empty.id))._unsafeUnwrap();
+    await reconcileOrbOnce(task, deps, empty.id);
+    const sealed = (await database.store.getOrbDeletion(task, empty.id))._unsafeUnwrap();
+    expect(sealed).toMatchObject({
+      historySealedAt: expect.any(Number),
+      sealedCursor: null,
+      sealedHeadId: null,
+    });
+    if (!sealed) throw new Error("missing archive intent");
+    const clock = vi.spyOn(task, "wallNow").mockReturnValue(sealed.cleanupAfter);
+    try {
+      await reconcileOrbOnce(task, deps, empty.id);
+      expect((await database.store.getOrb(task, empty.id))._unsafeUnwrap()?.state).toBe("archived");
+    } finally {
+      clock.mockRestore();
+    }
+    expect(opens).toBe(1);
+  } finally {
+    await plane.close();
+    await database.close();
+  }
+});
