@@ -20,8 +20,7 @@ export async function handleFailedRuntime(
   if (
     health.status !== "failed" ||
     health.orbId !== orb.id ||
-    !["running", "starting"].includes(orb.state) ||
-    orb.sleepId !== null ||
+    !["running", "starting", "stopping"].includes(orb.state) ||
     orb.hostDiscardThroughIncarnation !== null ||
     deps.hostProvider.specGeneration < (orb.hostSpecGeneration ?? 0)
   )
@@ -31,6 +30,8 @@ export async function handleFailedRuntime(
       ? health.recovery?.episode
       : undefined;
   const recoverable =
+    orb.state !== "stopping" &&
+    orb.sleepId === null &&
     deps.hostProvider.verifiesWholeComputeDisposal === true &&
     episode !== undefined &&
     /^[a-f0-9]{64}$/.test(episode);

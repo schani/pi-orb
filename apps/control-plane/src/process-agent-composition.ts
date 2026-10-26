@@ -538,6 +538,7 @@ export function createProcessAgentContext(
                       return new Response(null, { status: 403 });
                     const response = await fetch(input, {
                       ...init,
+                      redirect: "error",
                       headers,
                       signal:
                         ctx.abortSignal && init?.signal

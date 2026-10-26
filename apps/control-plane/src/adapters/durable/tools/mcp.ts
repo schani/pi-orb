@@ -1,5 +1,6 @@
 import { type Context, isJsonValue, type JsonValue } from "@earendil-works/chord";
 import { type TSchema, Type } from "@earendil-works/pi-ai";
+import { toCodemodeIdentifier } from "@earendil-works/pi-codemode";
 import {
   defineTool,
   type ToolExecutionResult,
@@ -339,7 +340,27 @@ export class McpTools {
           description: endpoint.description ?? client.serverInfo?.name,
         }),
         this.diagnostics,
-      );
+      ).andThen((value) => {
+        const namespace = `mcp__${endpoint.name}`;
+        const names = value.tools.map((tool) => `${namespace}__${tool.name}`);
+        const identifiers = names.map(toCodemodeIdentifier);
+        const occupied = this.catalog
+          .registeredNames()
+          .map((name) => [name, toCodemodeIdentifier(name)] as const);
+        if (
+          new Set(identifiers).size !== identifiers.length ||
+          // Exact raw name and namespace identify the original endpoint/tool on retry.
+          names.some((name, index) =>
+            occupied.some(
+              ([other, identifier]) =>
+                identifier === identifiers[index] &&
+                (other !== name || this.catalog.metadata(other).namespace?.name !== namespace),
+            ),
+          )
+        )
+          return err({ code: "unavailable" as const, message: "MCP tool name collision" });
+        return ok(value);
+      });
       if (discovered.isErr()) {
         if (discovered.error.code === "cancelled") return err(discovered.error);
         const status: McpServerStatus = {

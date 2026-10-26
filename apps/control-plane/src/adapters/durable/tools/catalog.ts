@@ -176,6 +176,10 @@ export class CallableCatalog {
         },
       });
   }
+  /** Shared occupancy, including entries hidden from this view. */
+  registeredNames(): readonly string[] {
+    return [...this.entries.keys()];
+  }
   definitions(): readonly ToolRegistration[] {
     return [...this.entries.values()].filter((tool) => !this.hidden.has(tool.name));
   }
