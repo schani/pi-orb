@@ -25,6 +25,7 @@ import type {
   SigningKeyConflict,
   StateConflict,
   StoreError,
+  UserNotFound,
 } from "./errors.ts";
 import type {
   OrbDeletionRow,
@@ -861,6 +862,38 @@ export interface ProjectSecretsDeps {
   readonly secrets: CredentialSecretStore;
 }
 
+/** Owner secrets apply to every project of the user (docs/owner-skills-secrets.md). */
+export interface StoredUserSecretBundle {
+  readonly userId: string;
+  readonly revision: number;
+  readonly values: Readonly<Record<string, string>>;
+}
+
+export type UserSecretPointerRow = Omit<ProjectSecretPointerRow, "projectId"> & {
+  readonly userId: string;
+};
+
+export interface UserSecretPointerStore {
+  readUserSecretPointer(
+    task: SimulationTask,
+    userId: string,
+  ): ResultAsync<UserSecretPointerRow | null, StoreError | UserNotFound>;
+  casWriteUserSecretPointer(
+    task: SimulationTask,
+    userId: string,
+    expectedRowVersion: number | null,
+    next: ProjectSecretPointerWrite,
+  ): ResultAsync<
+    UserSecretPointerRow,
+    StoreError | UserNotFound | { readonly type: "project_secret_pointer_conflict" }
+  >;
+}
+
+export interface OwnerSecretsDeps {
+  readonly pointers: UserSecretPointerStore;
+  readonly secrets: CredentialSecretStore;
+}
+
 // ---------------------------------------------------------------------------
 // Credential broker (docs/credentials.md)
 
@@ -945,6 +978,7 @@ export type StoredSecret =
   | StoredCredential
   | StoredSigningKey
   | StoredProjectSecretBundle
+  | StoredUserSecretBundle
   | StoredClaudeSubscriptionCredential;
 
 export interface CredentialSecretStore {
@@ -1256,7 +1290,9 @@ export interface ControlPlaneDeps {
   readonly control: import("./control-state.ts").ControlState;
   readonly constants: import("./constants.ts").LifecycleConstants;
   readonly projectSecrets: ProjectSecretsDeps;
+  readonly ownerSecrets: OwnerSecretsDeps;
   readonly hosting: import("./hosting-ports.ts").HostingDeps;
+  readonly ownerSkills: import("./owner-skills.ts").OwnerSkillsDeps;
   readonly personalInstructions: import("./personal-instructions.ts").PersonalInstructionsStore;
   readonly gitIdentity: import("./git-identity.ts").GitIdentityStore;
   readonly projectInstructions: import("./project-instructions.ts").ProjectInstructionsStore;

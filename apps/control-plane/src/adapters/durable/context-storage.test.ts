@@ -11,6 +11,7 @@ it("stores managed revisions and bundled resources together, separately from imm
     await context.save(platform, {
       personal: { revision: 1, content: "one" },
       project: { revision: 2, content: "project" },
+      skills: [],
     })
   )._unsafeUnwrap();
   expect((await context.platform())._unsafeUnwrap()).toEqual(platform);
@@ -18,10 +19,14 @@ it("stores managed revisions and bundled resources together, separately from imm
     await context.save(platform, {
       personal: { revision: 3, content: "latest" },
       project: { revision: 2, content: "project" },
+      skills: [{ name: "mine", content: "---\nname: mine\ndescription: d\n---\n" }],
     })
   )._unsafeUnwrap();
-  expect(
-    (await new NativeResourceContext(storage, () => okAsync(undefined)).managed())._unsafeUnwrap()
-      ?.personal,
-  ).toEqual({ revision: 3, content: "latest" });
+  const managed = (
+    await new NativeResourceContext(storage, () => okAsync(undefined)).managed()
+  )._unsafeUnwrap();
+  expect(managed?.personal).toEqual({ revision: 3, content: "latest" });
+  expect(managed?.skills).toEqual([
+    { name: "mine", content: "---\nname: mine\ndescription: d\n---\n" },
+  ]);
 });

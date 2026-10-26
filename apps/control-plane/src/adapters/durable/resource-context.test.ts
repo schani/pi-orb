@@ -18,6 +18,7 @@ function fixture() {
   let sourceCalls = 0;
   let platformCalls = 0;
   let admitted = true;
+  let ownerSkills: Array<{ name: string; content: string }> = [];
   const acquisition = new ResourceAcquisition(
     {
       get: () => okAsync(repo),
@@ -58,6 +59,7 @@ function fixture() {
       okAsync({
         personal: { content: `personal ${revision}`, revision },
         project: { content: "project", revision },
+        skills: ownerSkills,
       }),
     platformStore: {
       get: () => okAsync(platform),
@@ -92,8 +94,15 @@ function fixture() {
     revoke: () => {
       admitted = false;
     },
+    setOwnerSkills: (skills: Array<{ name: string; content: string }>) => {
+      ownerSkills = skills;
+    },
   };
 }
+const ownerSkill = (name: string, description = "owner skill") => ({
+  name,
+  content: `---\nname: ${name}\ndescription: ${description}\n---\nowner ${name}`,
+});
 describe("prepared resource context", () => {
   it("fences no-repository platform publication after revoked admission", async () => {
     const f = fixture();
@@ -219,4 +228,63 @@ it("loads valid repository siblings despite malformed YAML, while platform remai
   });
   expect(result.isOk()).toBe(true);
   if (result.isOk()) expect(result.value.skills.map((s) => s.name)).toEqual(["good", "hosting"]);
+});
+
+describe("owner skills", () => {
+  it("adds owner skills at their virtual path, readable from the snapshot", async () => {
+    const f = fixture();
+    f.setOwnerSkills([ownerSkill("release-notes")]);
+    const value = (await prepareResourceContext(f.options))._unsafeUnwrap();
+    const path = "/opt/pi-orb/owner-skills/release-notes/SKILL.md";
+    const skill = value.skills.find((item) => item.name === "release-notes");
+    expect(skill).toMatchObject({ description: "owner skill", filePath: path });
+    expect(Buffer.from((await value.reader.read(path))._unsafeUnwrap()).toString()).toBe(
+      ownerSkill("release-notes").content,
+    );
+    expect(value.managed.skills).toEqual([ownerSkill("release-notes")]);
+  });
+
+  it("replaces a same-named repository skill silently", async () => {
+    const f = fixture();
+    f.setOwnerSkills([ownerSkill("x", "owner wins")]);
+    const value = (await prepareResourceContext(f.options))._unsafeUnwrap();
+    expect(value.skills.filter((item) => item.name === "x")).toEqual([
+      expect.objectContaining({
+        description: "owner wins",
+        filePath: "/opt/pi-orb/owner-skills/x/SKILL.md",
+      }),
+    ]);
+    // The repository file stays readable; it is only absent from the skill inventory.
+    expect(value.reader.contains(".pi/skills/x/SKILL.md")).toBe(true);
+  });
+
+  it("drops an owner skill whose name a platform skill later takes", async () => {
+    const f = fixture();
+    f.setOwnerSkills([ownerSkill("hosting", "stale owner copy"), ownerSkill("kept")]);
+    const value = (await prepareResourceContext(f.options))._unsafeUnwrap();
+    expect(value.skills.filter((item) => item.name === "hosting")).toEqual([
+      expect.objectContaining({ description: "platform skill" }),
+    ]);
+    expect(value.reader.contains("/opt/pi-orb/owner-skills/hosting/SKILL.md")).toBe(false);
+    expect(value.skills.map((item) => item.name)).toContain("kept");
+  });
+
+  it("refreshes owner skills per open while restoring repository and platform offline", async () => {
+    const f = fixture();
+    f.setOwnerSkills([ownerSkill("first")]);
+    const first = (await prepareResourceContext(f.options))._unsafeUnwrap();
+    f.setOwnerSkills([ownerSkill("second")]);
+    const second = (await prepareResourceContext(f.options))._unsafeUnwrap();
+    expect(second.skills.map((item) => item.name)).toEqual(["x", "second", "hosting"]);
+    expect(second.reader.contains("/opt/pi-orb/owner-skills/first/SKILL.md")).toBe(false);
+    expect(second.resourceHash).not.toBe(first.resourceHash);
+    expect(f.counts()).toEqual({ sourceCalls: 1, platformCalls: 1 });
+  });
+
+  it("skips an owner skill Pi cannot load instead of failing the context", async () => {
+    const f = fixture();
+    f.setOwnerSkills([{ name: "broken", content: "no frontmatter" }, ownerSkill("fine")]);
+    const value = (await prepareResourceContext(f.options))._unsafeUnwrap();
+    expect(value.skills.map((item) => item.name)).toEqual(["x", "fine", "hosting"]);
+  });
 });

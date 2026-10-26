@@ -14,6 +14,7 @@ const server = createServer((request, response) => {
     if (request.method === "GET" && request.url === "/runtime/v1/project-secrets" && body === "") return json(response, 200, { revision: 0, values: {} });
     if (request.method === "GET" && request.url === "/runtime/v1/mcp" && body === "") return json(response, 200, { revision: 0, servers: [] });
     if (request.method === "GET" && (request.url === "/runtime/v1/personal-instructions" || request.url === "/runtime/v1/project-instructions") && body === "") return json(response, 200, { content: "", revision: 0 });
+    if (request.method === "GET" && request.url === "/runtime/v1/owner-skills" && body === "") return json(response, 200, { skills: [] });
     if (request.method === "GET" && request.url === "/runtime/v1/git-identity" && body === "") return json(response, 200, { name: "", email: "" });
     if (request.method === "POST" && request.url === "/runtime/v1/orb/boot-context") {
       let parsed;

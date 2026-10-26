@@ -16,6 +16,7 @@ import { ClaudePtyAuthTransport } from "./adapters/claude-auth-pty.ts";
 import { openControlPlaneDatabase } from "./adapters/database.ts";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
 import { DurableAgentPlane } from "./adapters/durable/manager.ts";
+import { bundledPlatformSkillNames } from "./adapters/durable/platform-resources.ts";
 import { RestGceApiTransport } from "./adapters/gce/api.ts";
 import { readGceImageIdentity } from "./adapters/gce/image-pin.ts";
 import { GceOrbHostProvider } from "./adapters/gce/provider.ts";
@@ -528,6 +529,8 @@ export async function main(
     control: new ControlState(),
     constants: lifecycleConstantsForHost(hostProvider.kind),
     projectSecrets: { pointers: database.projectSecrets, secrets },
+    ownerSecrets: { pointers: database.ownerSecrets, secrets },
+    ownerSkills: { store: database.ownerSkills, platformSkillNames: bundledPlatformSkillNames },
     personalInstructions: database.personalInstructions,
     gitIdentity: database.gitIdentity,
     modelUsage: database.modelUsage,
@@ -903,7 +906,9 @@ export async function main(
     nameGenerator: deps.nameGenerator,
     nameLeaseMs: deps.nameLeaseMs,
     projectSecrets: deps.projectSecrets,
+    ownerSecrets: deps.ownerSecrets,
     personalInstructions: deps.personalInstructions,
+    ownerSkills: deps.ownerSkills.store,
     gitIdentity: deps.gitIdentity,
     projectInstructions: deps.projectInstructions,
     mcp: database.mcp,

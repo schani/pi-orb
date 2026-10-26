@@ -6,6 +6,8 @@ import { ClaudeAuthSettings } from "./ClaudeAuth.tsx";
 import { ConfigTabs } from "./ConfigTabs.tsx";
 import { GitIdentityPane, useGitIdentity } from "./GitIdentitySettings.tsx";
 import { Icon } from "./Icons.tsx";
+import { OwnerSkillsPane, useOwnerSkills } from "./OwnerSkillsSettings.tsx";
+import { ProjectSecretsSettings } from "./ProjectSecretsSettings.tsx";
 import { TextFieldFrame } from "./TextFieldFrame.tsx";
 
 /** Account scope lives with home, never inside a project header. Drafts stay in memory only. */
@@ -22,6 +24,14 @@ export function PersonalInstructionsButton() {
   const dialog = useRef<HTMLElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const git = useGitIdentity(dialog);
+  const skills = useOwnerSkills(dialog);
+  const [secretsSaving, updateSecretsSaving] = useState(false);
+  const setSecretsSaving = (next: boolean) => {
+    // An explicit mutation may disable every control; keep keyboard focus inside the dialog.
+    if (next) dialog.current?.focus();
+    updateSecretsSaving(next);
+  };
+  const busy = saving || git.saving || skills.saving || secretsSaving;
   const epoch = useRef(0);
   const writePending = useRef(false);
   useEffect(
@@ -53,9 +63,11 @@ export function PersonalInstructionsButton() {
     setDraft(result.value.content);
   };
   const close = () => {
-    if (writePending.current || git.writePending.current) return;
+    const pending = writePending.current || git.writePending.current || skills.writePending.current;
+    if (pending || secretsSaving) return;
     epoch.current++;
     git.cancel();
+    skills.cancel();
     setOpen(false);
     setLoading(false);
     gear.current?.focus();
@@ -93,6 +105,7 @@ export function PersonalInstructionsButton() {
           setOpen(true);
           if (!dirty) void load();
           if (!git.dirty) void git.load();
+          void skills.load();
         }}
       >
         <Icon name="gear" />
@@ -145,6 +158,7 @@ export function PersonalInstructionsButton() {
               <header className="project-secrets-header">
                 <div>
                   <h2 id="personal-instructions-title">Settings</h2>
+                  {tab === 2 && <p>Changes apply on next start</p>}
                 </div>
                 <button
                   ref={closeButton}
@@ -152,7 +166,7 @@ export function PersonalInstructionsButton() {
                   aria-label="Close settings"
                   title="Close settings"
                   type="button"
-                  disabled={saving || git.saving}
+                  disabled={busy}
                   onClick={close}
                 >
                   <Icon name="x" />
@@ -161,10 +175,10 @@ export function PersonalInstructionsButton() {
               <ConfigTabs
                 id="owner-settings"
                 label="Settings"
-                names={["Instructions", "Git", "Claude"]}
+                names={["Instructions", "Skills", "Secrets", "Git", "Claude"]}
                 selected={tab}
                 onSelect={setTab}
-                disabled={saving || git.saving}
+                disabled={busy}
               />
               <div
                 role="tabpanel"
@@ -173,6 +187,7 @@ export function PersonalInstructionsButton() {
                 hidden={tab !== 0}
               >
                 <form
+                  className="project-instructions-editor"
                   onSubmit={(event) => {
                     event.preventDefault();
                     void save();
@@ -234,7 +249,7 @@ export function PersonalInstructionsButton() {
                 aria-labelledby="owner-settings-tab-1"
                 hidden={tab !== 1}
               >
-                <GitIdentityPane git={git} />
+                <OwnerSkillsPane skills={skills} />
               </div>
               <div
                 role="tabpanel"
@@ -242,7 +257,27 @@ export function PersonalInstructionsButton() {
                 aria-labelledby="owner-settings-tab-2"
                 hidden={tab !== 2}
               >
-                <ClaudeAuthSettings active={tab === 2} />
+                <ProjectSecretsSettings
+                  project={null}
+                  saving={secretsSaving}
+                  setSaving={setSecretsSaving}
+                />
+              </div>
+              <div
+                role="tabpanel"
+                id="owner-settings-panel-3"
+                aria-labelledby="owner-settings-tab-3"
+                hidden={tab !== 3}
+              >
+                <GitIdentityPane git={git} />
+              </div>
+              <div
+                role="tabpanel"
+                id="owner-settings-panel-4"
+                aria-labelledby="owner-settings-tab-4"
+                hidden={tab !== 4}
+              >
+                <ClaudeAuthSettings active={tab === 4} />
               </div>
             </section>
           </div>,

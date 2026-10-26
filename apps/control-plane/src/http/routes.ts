@@ -5,6 +5,7 @@ import {
   CreateProjectRequestSchema,
   EnqueueOrbMessageRequestSchema,
   GIT_IDENTITY_PATH,
+  OWNER_SECRETS_PATH,
   PERSONAL_INSTRUCTIONS_PATH,
   PollOrbMessagesRequestSchema,
   PROJECT_NAME_MAX_CHARS,
@@ -50,8 +51,11 @@ import {
 import type { ControlPlaneDeps, SigningKeyDeps, SigningKeyRow } from "../domain/ports.ts";
 import { type ProjectCommandError, requestProjectDeletion } from "../domain/project-deletion.ts";
 import {
+  deleteOwnerSecret,
   deleteProjectSecret,
+  listOwnerSecrets,
   listProjectSecrets,
+  putOwnerSecret,
   putProjectSecret,
 } from "../domain/project-secrets.ts";
 import {
@@ -64,6 +68,7 @@ import { registerActivityHeadlineRoutes } from "./activity-headline-routes.ts";
 import { requirePrincipal } from "./browser-identity.ts";
 import { sendGitIdentity } from "./git-identity.ts";
 import { sendHistoryStream } from "./history-stream.ts";
+import { registerOwnerSkillsRoutes } from "./owner-skills.ts";
 import { registerProjectInstructionsRoutes } from "./project-instructions.ts";
 import { orbView, projectView, type ViewConfig } from "./views.ts";
 
@@ -292,6 +297,9 @@ export function registerRoutes(
   app.get("/api/v1/system", async (_request, reply) => reply.send(system));
 
   registerProjectInstructionsRoutes(app, task, deps.projectInstructions);
+  registerOwnerSkillsRoutes(app, task, deps.ownerSkills, (request, reply) =>
+    selectedUser(request, reply, task, deps),
+  );
   registerActivityHeadlineRoutes(app, task, deps);
 
   app.get(USAGE_PATH, async (request, reply) => {
@@ -361,6 +369,57 @@ export function registerRoutes(
     const result = await saveGitIdentity(task, deps.gitIdentity, user.id, request.body);
     return sendGitIdentity(reply, result);
   });
+
+  app.get(OWNER_SECRETS_PATH, async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const user = await selectedUser(request, reply, task, deps);
+    if (user === null) return;
+    const listed = await listOwnerSecrets(task, deps.ownerSecrets, user.id);
+    return listed.isErr() ? sendProjectSecretError(reply, listed.error) : reply.send(listed.value);
+  });
+
+  app.put<{ Params: { name: string } }>(`${OWNER_SECRETS_PATH}/:name`, async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const user = await selectedUser(request, reply, task, deps);
+    if (user === null) return;
+    if (!Check(ProjectSecretNameSchema, request.params.name)) {
+      return reply.status(400).send(httpError("invalid_request", "invalid secret name", false));
+    }
+    if (!Check(PutProjectSecretRequestSchema, request.body)) {
+      return reply.status(400).send(httpError("invalid_request", "invalid secret body", false));
+    }
+    const written = await putOwnerSecret(
+      task,
+      deps.ownerSecrets,
+      user.id,
+      request.params.name,
+      request.body.value,
+    );
+    return written.isErr()
+      ? sendProjectSecretError(reply, written.error)
+      : reply.send(written.value);
+  });
+
+  app.delete<{ Params: { name: string } }>(
+    `${OWNER_SECRETS_PATH}/:name`,
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      const user = await selectedUser(request, reply, task, deps);
+      if (user === null) return;
+      if (!Check(ProjectSecretNameSchema, request.params.name)) {
+        return reply.status(400).send(httpError("invalid_request", "invalid secret name", false));
+      }
+      const removed = await deleteOwnerSecret(
+        task,
+        deps.ownerSecrets,
+        user.id,
+        request.params.name,
+      );
+      return removed.isErr()
+        ? sendProjectSecretError(reply, removed.error)
+        : reply.send(removed.value);
+    },
+  );
 
   if (signingKeys !== undefined) {
     app.post("/api/v1/issuer/signing-keys/publish", async (_request, reply) => {

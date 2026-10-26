@@ -33,6 +33,7 @@ import {
   OrbSleepRequestSchema,
   type OrbSpawnRequest,
   OrbSpawnRequestSchema,
+  OWNER_SKILLS_RUNTIME_PATH,
   PERSONAL_INSTRUCTIONS_RUNTIME_PATH,
   PROJECT_INSTRUCTIONS_RUNTIME_PATH,
   PROJECT_SECRETS_RUNTIME_PATH,
@@ -64,6 +65,7 @@ import type { OrbRow } from "../domain/orb.ts";
 import type { OrbAgentOperations } from "../domain/orb-agent-operations.ts";
 import { generateOrbName, normalizeOrbName } from "../domain/orb-naming.ts";
 import { getOrbSpawnRelations } from "../domain/orb-spawning.ts";
+import { type OwnerSkillStore, readOwnerSkillsSnapshot } from "../domain/owner-skills.ts";
 import type { PersonalInstructionsStore } from "../domain/personal-instructions.ts";
 import type {
   ArchiveCaller,
@@ -72,17 +74,19 @@ import type {
   GuestAgentCaller,
   MintDeps,
   OrbNameGenerator,
+  OwnerSecretsDeps,
   ProjectSecretsDeps,
   SpawnConflict,
 } from "../domain/ports.ts";
 import type { ProjectInstructionsStore } from "../domain/project-instructions.ts";
-import { getProjectSecretSnapshot } from "../domain/project-secrets.ts";
+import { getOrbSecretSnapshot } from "../domain/project-secrets.ts";
 import type { ResourceError } from "../domain/resources.ts";
 import { mintIdToken } from "../domain/workload-identity.ts";
 import { sendGitIdentity } from "./git-identity.ts";
 import { sendHistoryStream } from "./history-stream.ts";
 import { oauthBinding, sendOAuthError } from "./mcp-oauth-routes.ts";
 import { sendMcpError } from "./mcp-routes.ts";
+import { sendOwnerSkillError } from "./owner-skills.ts";
 import { sendProjectInstructionsError } from "./project-instructions.ts";
 
 export interface RuntimeRouteDeps {
@@ -145,7 +149,9 @@ export interface RuntimeRouteDeps {
   /** Identity issuance (docs/workload-identity.md); its own store lookup. */
   readonly mint: MintDeps;
   readonly projectSecrets: ProjectSecretsDeps;
+  readonly ownerSecrets: OwnerSecretsDeps;
   readonly personalInstructions: PersonalInstructionsStore;
+  readonly ownerSkills: OwnerSkillStore;
   readonly gitIdentity: GitIdentityStore;
   readonly projectInstructions: ProjectInstructionsStore;
   readonly alertWriter?: AgentAlertWriter;
@@ -758,6 +764,26 @@ export function registerRuntimeRoutes(
     return reply.send(result.value);
   });
 
+  app.get(OWNER_SKILLS_RUNTIME_PATH, async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind === "unavailable")
+      return sendOwnerSkillError(reply, {
+        type: "owner_skill_error",
+        code: "unavailable",
+        message: "Owner skills unavailable",
+      });
+    if (auth.kind !== "orb") return sendUnauthorized(reply);
+    const project = await deps.store.getProject(task, auth.orb.projectId);
+    if (project.isErr()) return sendInspectionStoreError(reply, project.error);
+    if (project.value === null)
+      return reply.status(500).send({
+        error: { code: "internal", message: "orb project is missing", retryable: false },
+      });
+    const result = await readOwnerSkillsSnapshot(task, deps.ownerSkills, project.value.ownerUserId);
+    return result.isErr() ? sendOwnerSkillError(reply, result.error) : reply.send(result.value);
+  });
+
   app.get(GIT_IDENTITY_RUNTIME_PATH, async (request, reply) => {
     const auth = await authenticate(request.headers.authorization);
     if (auth.kind === "unavailable")
@@ -787,7 +813,17 @@ export function registerRuntimeRoutes(
       });
     }
     if (auth.kind !== "orb") return sendUnauthorized(reply);
-    const snapshot = await getProjectSecretSnapshot(task, deps.projectSecrets, auth.orb.projectId);
+    const project = await deps.store.getProject(task, auth.orb.projectId);
+    if (project.isErr()) return sendInspectionStoreError(reply, project.error);
+    if (project.value === null)
+      return reply.status(500).send({
+        error: { code: "internal", message: "orb project is missing", retryable: false },
+      });
+    const snapshot = await getOrbSecretSnapshot(
+      task,
+      { project: deps.projectSecrets, owner: deps.ownerSecrets },
+      { projectId: project.value.id, ownerUserId: project.value.ownerUserId },
+    );
     if (snapshot.isErr()) {
       const internal = snapshot.error.type === "project_secret_corruption";
       const conflict = snapshot.error.type === "project_secret_conflict";

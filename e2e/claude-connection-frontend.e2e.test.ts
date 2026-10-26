@@ -186,8 +186,10 @@ describe.each(["chromium", "webkit"] as const)("%s one-click Claude connection",
       await check(text).toBeEnabled();
       await text.fill("unsaved owner instructions");
       await instructions.focus();
-      await f.page.keyboard.press("ArrowRight");
-      await check(settings.getByRole("tab", { name: "Git", exact: true })).toBeFocused();
+      for (const name of ["Skills", "Secrets", "Git"]) {
+        await f.page.keyboard.press("ArrowRight");
+        await check(settings.getByRole("tab", { name, exact: true })).toBeFocused();
+      }
       await f.page.keyboard.press("ArrowRight");
       await check(claude).toBeFocused();
       await check(claude).toHaveAttribute("aria-selected", "true");

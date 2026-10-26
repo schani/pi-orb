@@ -151,6 +151,8 @@ The control plane's own compute access is similarly fenced (decided and applied 
 
 ## Project secrets as orb environment variables (decided and implemented 2026-08-28)
 
+**Owner secrets (decided 2026-10-26; implemented locally, not deployed):** an owner-level scope now exists alongside project scope; the same bundle/pointer design and rules apply, and a project secret wins over a same-named owner secret (`docs/owner-skills-secrets.md`).
+
 The first configurable environment surface supports **project-scoped secrets only**. Every current and future orb of the project receives the same names and values. There are no plain variables, account/user scopes, orb overrides, secret files, external-secret references, setup-time exceptions, or hot updates in this iteration.
 
 A secret protects its value in control-plane storage, browser APIs, UI, logs, and infrastructure metadata; it cannot hide the value from repository code after becoming an environment variable. Every process in the orb can read it. Workload identity (`docs/workload-identity.md`) and capability-specific broker grants remain preferred where available.

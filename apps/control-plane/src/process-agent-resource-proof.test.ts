@@ -20,6 +20,10 @@ import { makeHarness, makeOrbRow, makeProjectRow } from "./testkit/fixtures.ts";
 
 const skillPath = ".agents/skills/proof/SKILL.md";
 const skill = "---\nname: proof\ndescription: composition proof\n---\nPG skill baseline";
+/** Renamed to "proof", the owner's skill replaces the same-named repository skill. */
+const ownerSkillPath = "/opt/pi-orb/owner-skills/proof/SKILL.md";
+const ownerSkill = (version: string, name = "owner-proof") =>
+  `---\nname: ${name}\ndescription: owner proof ${version}\n---\nowner body ${version}`;
 function required<T>(value: T | null | undefined): T {
   assert(value !== null && value !== undefined, "Missing proof fixture capability");
   return value;
@@ -51,6 +55,12 @@ async function fixture(repositoryUrl: string | null = makeProjectRow("project").
     await database.personalInstructions.replace(task, project.ownerUserId, "personal-v1")
   )._unsafeUnwrap();
   (await database.projectInstructions.replace(task, project.id, "project-v1"))._unsafeUnwrap();
+  (
+    await database.ownerSkills.create(task, project.ownerUserId, {
+      name: "owner-proof",
+      content: ownerSkill("v1"),
+    })
+  )._unsafeUnwrap();
   const acquired = barrier(),
     releaseGit = barrier();
   let fetches = 0,
@@ -101,6 +111,7 @@ async function fixture(repositoryUrl: string | null = makeProjectRow("project").
     ...h.deps,
     store: database.store,
     personalInstructions: database.personalInstructions,
+    ownerSkills: { ...h.deps.ownerSkills, store: database.ownerSkills },
     projectInstructions: database.projectInstructions,
     hostProvider: {
       ...h.deps.hostProvider,
@@ -259,6 +270,7 @@ it.each(["manual", "sleep"] as const)(
       first = await opening;
       expect(first.instructions).toContain("immutable Git instructions");
       expect(first.instructions).toContain("personal-v1");
+      expect(first.instructions).toContain("owner proof v1");
       expect(first.checkoutCommit).toBe(f.snapshot.commitSha);
       expect(
         (await new PgResourceSnapshots(f.db).get(f.snapshot.orbId))._unsafeUnwrap()?.commitSha,
@@ -297,6 +309,12 @@ it.each(["manual", "sleep"] as const)(
       (
         await f.database.projectInstructions.replace(f.task, f.project.id, "project-v2")
       )._unsafeUnwrap();
+      (
+        await f.database.ownerSkills.replace(f.task, f.project.ownerUserId, "owner-proof", {
+          name: "proof",
+          content: ownerSkill("v2", "proof"),
+        })
+      )._unsafeUnwrap();
       await f.state("starting");
       await f.reopenLease();
       const nextAdmission = await admission();
@@ -315,6 +333,13 @@ it.each(["manual", "sleep"] as const)(
       )._unsafeUnwrap();
       expect(managed?.personal.content).toBe("personal-v2");
       expect(managed?.project.content).toBe("project-v2");
+      expect(managed?.skills).toEqual([{ name: "proof", content: ownerSkill("v2", "proof") }]);
+      expect(second.instructions).toContain(ownerSkillPath);
+      expect(second.instructions).toContain("owner proof v2");
+      expect(second.instructions).not.toContain("composition proof");
+      expect((await invoke(second, "read", { path: ownerSkillPath })).output).toEqual([
+        { type: "text", text: ownerSkill("v2", "proof") },
+      ]);
       const edges = (
         await f.db.query(
           "SELECT admission_version,phase,commit_sha,error_code FROM orb_resource_events WHERE orb_id=$1 ORDER BY id",

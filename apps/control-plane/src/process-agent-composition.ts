@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
@@ -23,7 +22,10 @@ import { durableError } from "./adapters/durable/manager.ts";
 import { fenceModels } from "./adapters/durable/model-fence.ts";
 import { createDurableModels } from "./adapters/durable/models.ts";
 import type { ParentNotification } from "./adapters/durable/notifications.ts";
-import { loadPlatformResources } from "./adapters/durable/platform-resources.ts";
+import {
+  loadPlatformResources,
+  PLATFORM_SKILLS_ROOT,
+} from "./adapters/durable/platform-resources.ts";
 import { renderPrompt, sectionExtension } from "./adapters/durable/prompt.ts";
 import {
   type PersistedPlatformContext,
@@ -49,6 +51,7 @@ import {
   createCentralOrbAgentOperations,
   type OrbAgentError,
 } from "./domain/orb-agent-operations.ts";
+import { readOwnerSkillsSnapshot } from "./domain/owner-skills.ts";
 import type { BrokerDeps, ControlPlaneDeps } from "./domain/ports.ts";
 import { getProjectSecretSnapshot } from "./domain/project-secrets.ts";
 import { resourceError } from "./domain/resources.ts";
@@ -224,6 +227,8 @@ export function createProcessAgentContext(
       const projectInstructions = await deps.projectInstructions.read(task, orb.projectId);
       if (projectInstructions.isErr())
         return err(durableError(projectInstructions.error.message, true));
+      const ownerSkills = await readOwnerSkillsSnapshot(task, deps.ownerSkills.store, ownerUserId);
+      if (ownerSkills.isErr()) return err(durableError(ownerSkills.error.message, true));
       if (!lease?.artifacts) return err(durableError("Agent resource authority unavailable"));
       const nativeContext = new NativeResourceContext(lease.storage, () =>
         lease.check().mapErr(() => resourceError("cancelled", "Resource ownership revoked")),
@@ -233,7 +238,12 @@ export function createProcessAgentContext(
         signal: operation.signal,
         platformVersion: "pi-orb-platform-1",
         acquisition: { acquire: () => options.resources.acquire(task, orb, operation) },
-        managed: () => okAsync({ personal: personal.value, project: projectInstructions.value }),
+        managed: () =>
+          okAsync({
+            personal: personal.value,
+            project: projectInstructions.value,
+            skills: ownerSkills.value.skills,
+          }),
         platformStore: {
           get: () =>
             nativeContext.platform().map((value) => {
@@ -245,10 +255,7 @@ export function createProcessAgentContext(
             return okAsync(undefined);
           },
         },
-        loadPlatform: () =>
-          loadPlatformResources(
-            fileURLToPath(new URL("../../orb-runtime/skills/", import.meta.url)),
-          ),
+        loadPlatform: () => loadPlatformResources(PLATFORM_SKILLS_ROOT),
         check: () =>
           lease.check().mapErr(() => resourceError("cancelled", "Resource ownership revoked")),
         checkpoint: () =>

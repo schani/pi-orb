@@ -12,6 +12,7 @@ import {
   OrbInspectionListSchema,
   OrbSelfSchema,
   OrbTranscriptSchema,
+  OwnerSkillsSnapshotSchema,
   orbTranscriptPath,
   PROJECT_SECRETS_RUNTIME_PATH,
   ProjectSecretSnapshotSchema,
@@ -38,7 +39,7 @@ import type { OrbAgentOperations } from "../domain/orb-agent-operations.ts";
 import { sendGuestOrbMessage } from "../domain/orb-messaging.ts";
 import { spawnOrb } from "../domain/orb-spawning.ts";
 import type { BrokerDeps, ControlPlaneStore, OrbNameGenerator } from "../domain/ports.ts";
-import { putProjectSecret } from "../domain/project-secrets.ts";
+import { putOwnerSecret, putProjectSecret } from "../domain/project-secrets.ts";
 import { MintDenialLog } from "../domain/workload-identity.ts";
 import {
   FakePointerStore,
@@ -55,9 +56,13 @@ import {
   TEST_USER_ID,
 } from "../testkit/fixtures.ts";
 import { FakeGitIdentityStore } from "../testkit/git-identity.ts";
+import { FakeOwnerSkillStore } from "../testkit/owner-skills.ts";
 import { FakePersonalInstructionsStore } from "../testkit/personal-instructions.ts";
 import { FakeProjectInstructionsStore } from "../testkit/project-instructions.ts";
-import { FakeProjectSecretPointerStore } from "../testkit/project-secrets.ts";
+import {
+  FakeProjectSecretPointerStore,
+  FakeUserSecretPointerStore,
+} from "../testkit/project-secrets.ts";
 import { InMemoryControlPlaneStore } from "../testkit/store.ts";
 import {
   decodeFakeIdToken,
@@ -83,7 +88,9 @@ describe("runtime broker routes", () => {
   let secrets: FakeSecretStore;
   let signer: FakeTokenSigner;
   let projectSecretPointers: FakeProjectSecretPointerStore;
+  let userSecretPointers: FakeUserSecretPointerStore;
   let personalInstructions: FakePersonalInstructionsStore;
+  let ownerSkills: FakeOwnerSkillStore;
   let gitIdentity: FakeGitIdentityStore;
   let projectInstructions: FakeProjectInstructionsStore;
   let brokerUsers: string[];
@@ -501,7 +508,9 @@ describe("runtime broker routes", () => {
       nameGenerator,
       nameLeaseMs: 30_000,
       projectSecrets: { pointers: projectSecretPointers, secrets },
+      ownerSecrets: { pointers: userSecretPointers, secrets },
       personalInstructions,
+      ownerSkills,
       gitIdentity,
       projectInstructions,
       mcp: {
@@ -547,6 +556,11 @@ describe("runtime broker routes", () => {
     secrets = new FakeSecretStore();
     signer = new FakeTokenSigner("route-key-1");
     projectSecretPointers = new FakeProjectSecretPointerStore(PROJECT);
+    userSecretPointers = new FakeUserSecretPointerStore(
+      TEST_USER_ID,
+      "00000000-0000-4000-8000-000000000002",
+    );
+    ownerSkills = new FakeOwnerSkillStore([TEST_USER_ID, "00000000-0000-4000-8000-000000000002"]);
     personalInstructions = new FakePersonalInstructionsStore([
       TEST_USER_ID,
       "00000000-0000-4000-8000-000000000002",
@@ -692,6 +706,67 @@ describe("runtime broker routes", () => {
         })
       ).statusCode,
     ).toBe(404);
+    store.seedOrb(makeOrbRow(ORB, PROJECT, "stopped", { runtimeTokenHash: sha256(TOKEN) }));
+    expect((await request()).statusCode).toBe(401);
+  });
+
+  it("serves the orb project owner's skills, not the viewer's, only to active runtime bearers", async () => {
+    const doc = (name: string, who: string) =>
+      `---\nname: ${name}\ndescription: ${who}\n---\n${who}\n`;
+    const request = (token = TOKEN) =>
+      app.inject({
+        method: "GET",
+        url: "/runtime/v1/owner-skills",
+        headers: { authorization: `Bearer ${token}` },
+      });
+    expect((await request()).statusCode).toBe(401);
+    store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+    const empty = await request();
+    expect(empty.json()).toEqual({ skills: [] });
+    expect(empty.headers["cache-control"]).toBe("no-store");
+    const otherOwner = "00000000-0000-4000-8000-000000000002";
+    ownerSkills.seed(TEST_USER_ID, [
+      { name: "zeta", content: doc("zeta", "owner") },
+      { name: "alpha", content: doc("alpha", "owner") },
+    ]);
+    ownerSkills.seed(otherOwner, [{ name: "alpha", content: doc("alpha", "other") }]);
+    store.seedProject({ ...makeProjectRow("other-project"), ownerUserId: otherOwner });
+    store.seedOrb(
+      makeOrbRow("other-orb", "other-project", "running", {
+        runtimeTokenHash: sha256("other-token"),
+      }),
+    );
+    const read = await request();
+    expect(Check(OwnerSkillsSnapshotSchema, read.json())).toBe(true);
+    expect(read.json()).toEqual({
+      skills: [
+        { name: "alpha", content: doc("alpha", "owner") },
+        { name: "zeta", content: doc("zeta", "owner") },
+      ],
+    });
+    expect((await request("other-token")).json()).toEqual({
+      skills: [{ name: "alpha", content: doc("alpha", "other") }],
+    });
+    expect((await request("stale-token")).statusCode).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: "/runtime/v1/owner-skills",
+          headers: { authorization: `Bearer ${TOKEN}` },
+          payload: { skills: [] },
+        })
+      ).statusCode,
+    ).toBe(404);
+    ownerSkills.list = () =>
+      errAsync({
+        type: "owner_skill_error",
+        code: "unavailable",
+        message: "Owner skills unavailable",
+      });
+    const unavailable = await request();
+    expect(unavailable.statusCode).toBe(503);
+    expect(unavailable.json().error.retryable).toBe(true);
     store.seedOrb(makeOrbRow(ORB, PROJECT, "stopped", { runtimeTokenHash: sha256(TOKEN) }));
     expect((await request()).statusCode).toBe(401);
   });
@@ -1410,6 +1485,39 @@ describe("runtime broker routes", () => {
     expect(response.headers["cache-control"]).toBe("no-store");
     expect(Check(ProjectSecretSnapshotSchema, response.json())).toBe(true);
     expect(response.json()).toEqual({ revision: 1, values: { NPM_TOKEN: "runtime-only-value" } });
+  });
+
+  it("overlays the orb project's owner secrets with project secrets", async () => {
+    seedOrb("running");
+    const owner = { pointers: userSecretPointers, secrets };
+    for (const [userId, name, value] of [
+      [TEST_USER_ID, "SHARED", "owner-value"],
+      [TEST_USER_ID, "OWNER_ONLY", "owner-only"],
+      ["00000000-0000-4000-8000-000000000002", "FOREIGN", "other-user"],
+    ] as const) {
+      (await putOwnerSecret(task, owner, userId, name, value))._unsafeUnwrap();
+    }
+    (
+      await putProjectSecret(
+        task,
+        { pointers: projectSecretPointers, secrets },
+        PROJECT,
+        "SHARED",
+        "project-value",
+      )
+    )._unsafeUnwrap();
+    const response = await app.inject({
+      method: "GET",
+      url: PROJECT_SECRETS_RUNTIME_PATH,
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(Check(ProjectSecretSnapshotSchema, response.json())).toBe(true);
+    expect(response.json()).toEqual({
+      revision: 3,
+      values: { SHARED: "project-value", OWNER_ONLY: "owner-only" },
+    });
   });
 
   it("grants a token to a running orb with a valid bearer", async () => {

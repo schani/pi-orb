@@ -23,6 +23,11 @@ import {
   OrbMessageViewSchema,
   type OrbView,
   OrbViewSchema,
+  OWNER_SECRETS_PATH,
+  OWNER_SKILLS_PATH,
+  OwnerSkillListSchema,
+  ownerSecretPath,
+  ownerSkillPath,
   PERSONAL_INSTRUCTIONS_PATH,
   PersonalInstructionsSchema,
   ProjectInstructionsSchema,
@@ -148,6 +153,36 @@ export function savePersonalInstructions(content: string) {
     method: "PUT",
     headers: jsonHeaders,
     body: JSON.stringify({ content }),
+    signal: AbortSignal.timeout(15_000),
+  });
+}
+
+export function listOwnerSkills() {
+  return apiFetch(OwnerSkillListSchema, OWNER_SKILLS_PATH, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
+  });
+}
+export function createOwnerSkill(content: string) {
+  return apiFetch(OwnerSkillListSchema, OWNER_SKILLS_PATH, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ content }),
+    signal: AbortSignal.timeout(15_000),
+  });
+}
+/** Replaces `name`; the frontmatter name may rename it. */
+export function saveOwnerSkill(name: string, content: string) {
+  return apiFetch(OwnerSkillListSchema, ownerSkillPath(name), {
+    method: "PUT",
+    headers: jsonHeaders,
+    body: JSON.stringify({ content }),
+    signal: AbortSignal.timeout(15_000),
+  });
+}
+export function deleteOwnerSkill(name: string) {
+  return apiFetch(OwnerSkillListSchema, ownerSkillPath(name), {
+    method: "DELETE",
     signal: AbortSignal.timeout(15_000),
   });
 }
@@ -399,6 +434,25 @@ export function deleteProjectSecret(
   return apiFetch(ProjectSecretListSchema, projectSecretPath(projectId, name), {
     method: "DELETE",
   });
+}
+
+export function listOwnerSecrets(): Promise<Result<ProjectSecretList, ApiError>> {
+  return apiFetch(ProjectSecretListSchema, OWNER_SECRETS_PATH, { cache: "no-store" });
+}
+
+export function putOwnerSecret(
+  name: string,
+  value: string,
+): Promise<Result<ProjectSecretList, ApiError>> {
+  return apiFetch(ProjectSecretListSchema, ownerSecretPath(name), {
+    method: "PUT",
+    headers: jsonHeaders,
+    body: JSON.stringify({ value }),
+  });
+}
+
+export function deleteOwnerSecret(name: string): Promise<Result<ProjectSecretList, ApiError>> {
+  return apiFetch(ProjectSecretListSchema, ownerSecretPath(name), { method: "DELETE" });
 }
 
 export function createProject(

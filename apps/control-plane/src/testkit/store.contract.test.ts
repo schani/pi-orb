@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { FakeOwnerSkillStore } from "./owner-skills.ts";
+import { ownerSkillStoreContractTests } from "./owner-skills-contract.ts";
 import { InMemoryControlPlaneStore } from "./store.ts";
 import { signingKeyStoreContractTests, storeSemanticsContractTests } from "./store-contract.ts";
 import { FakeSigningKeyStore } from "./workload-identity.ts";
@@ -16,3 +19,22 @@ signingKeyStoreContractTests("in-memory", async () => ({
   keys: new FakeSigningKeyStore(),
   close: async () => {},
 }));
+
+ownerSkillStoreContractTests("simulation fake", async () => {
+  const store = new FakeOwnerSkillStore();
+  return {
+    store,
+    other: store,
+    user: async () => {
+      const id = randomUUID();
+      store.seedUser(id);
+      return id;
+    },
+    seed: async (userId, names) =>
+      store.seed(
+        userId,
+        names.map((name) => ({ name, content: `---\nname: ${name}\ndescription: seed\n---\n` })),
+      ),
+    close: async () => {},
+  };
+});

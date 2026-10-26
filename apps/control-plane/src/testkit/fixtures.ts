@@ -25,8 +25,10 @@ import { FakeSecretStore } from "./broker.ts";
 import { FAILPOINTS } from "./failpoints.ts";
 import { FakeGitIdentityStore } from "./git-identity.ts";
 import { makeHostingHarness } from "./hosting.ts";
+import { FakeOwnerSkillStore } from "./owner-skills.ts";
 import { FakePersonalInstructionsStore } from "./personal-instructions.ts";
 import { FakeProjectInstructionsStore } from "./project-instructions.ts";
+import { FakeUserSecretPointerStore } from "./project-secrets.ts";
 import { InMemoryControlPlaneStore } from "./store.ts";
 import {
   FakeMintIdSource,
@@ -129,7 +131,15 @@ export function makeHarness(options?: {
     control: new ControlState(),
     constants: { ...TEST_CONSTANTS, ...options?.constants },
     projectSecrets: { pointers: projectSecretPointers, secrets: new FakeSecretStore() },
+    ownerSecrets: {
+      pointers: new FakeUserSecretPointerStore(TEST_USER_ID),
+      secrets: new FakeSecretStore(),
+    },
     hosting: hosting.deps,
+    ownerSkills: {
+      store: new FakeOwnerSkillStore([TEST_USER_ID]),
+      platformSkillNames: () => okAsync(new Set(["charts", "codemode"])),
+    },
     personalInstructions: new FakePersonalInstructionsStore([TEST_USER_ID]),
     gitIdentity: new FakeGitIdentityStore(),
     modelUsage: { read: () => okAsync({ buckets: [], orbs: [] }) },

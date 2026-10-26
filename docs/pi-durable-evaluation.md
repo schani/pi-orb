@@ -138,7 +138,8 @@ Central Durable uses pinned Git resources across process, Docker and GCP executi
 | --- | --- |
 | Skill metadata and on-demand `SKILL.md` reads | Pinned metadata before the first request; bodies read on demand |
 | Bundled and repository skills | Separate bundled resources plus pinned `.pi/skills` (absence-only `.agents/skills` fallback) |
-| User/ancestor skills, additional settings paths/filters, package skills | Outside required resource scope |
+| Owner skills (`docs/owner-skills-secrets.md`, 2026-10-26) | Managed source read at context open; virtual `/opt/pi-orb/owner-skills/`; replaces same-named repository skills |
+| Ancestor skills, additional settings paths/filters, package skills | Outside required resource scope |
 | Skill validation/diagnostics | Strict metadata parsing; repository warnings persist, platform collisions/failures block |
 | Skill helper scripts/references/assets | Pinned files available off-host; explicit repository reads use live workspace when ready |
 | `/skill:name`, prompt-template invocation | Not exposed |

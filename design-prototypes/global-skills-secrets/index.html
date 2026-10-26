@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Skills and secrets for all projects — five proposals</title>
+<!-- product.css is a snapshot of apps/web/src/styles.css (font URLs rewritten), taken 2026-10-26. -->
+<link rel="stylesheet" href="product.css">
+<style>
+/* ---------- study chrome: outside the product frame ---------- */
+body{background:var(--w)}
+.study{padding:12px 16px;border-bottom:1px solid var(--k);font-family:var(--mono)}
+.study h1{margin:0 0 10px}
+.variants{display:flex;gap:8px;flex-wrap:wrap}.variants button[aria-pressed="true"]{background:var(--k);color:var(--w)}
+.study p{margin:10px 0;max-width:980px;color:var(--g3)}
+.study-tools{display:flex;gap:16px;align-items:center;flex-wrap:wrap;color:var(--g3)}
+.study-tools code{color:var(--k)}
+#frame{position:relative;transform:translateZ(0);height:calc(100dvh - 230px);min-height:620px;overflow:hidden;border-bottom:1px solid var(--k)}
+#frame>.app{height:100%;min-height:0;overflow:auto}
+.study-note{padding:10px 16px 24px;color:var(--g3);font-family:var(--mono)}
+.study-note ul{margin:4px 0 0;padding-left:18px;max-width:980px}
+
+/* useMasonry stand-in (layout() below): shortest-column placement, one rule per column. */
+#frame .dashboard{min-height:0;flex:1 0 auto}
+#frame .projects-page{min-height:100%}
+#frame .project-secrets-backdrop{position:absolute}
+
+/* ---------- proposal CSS: what production would add ---------- */
+.skill-editor textarea{border:1px solid var(--g2);height:260px;min-height:120px}
+.reasoning-body .skill-editor .personal-instructions-feedback{border-top:0;padding:6px 0 2px}
+.reasoning-body{white-space:normal}
+.skill-editor.flush textarea{border:0;height:min(440px,55dvh)}
+.skill-list .activity-rail-row>summary{grid-template-columns:2ch minmax(0,1fr)}
+.scope-label{margin:10px 0 2px;color:var(--g3);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--g2)}
+.scope-label:first-child{margin-top:0}
+.project-secret-row.inherited .project-secret-name{font-weight:400}
+.project-secret-row.shadowed .project-secret-name{color:var(--g2);text-decoration:line-through}
+.project-secret-form select{display:block;width:100%;border:1px solid var(--k);height:20px;padding:0 4px}
+.secret-scope{flex:0 0 130px!important}
+/* Production would scope `.personal-instructions-dialog form` to the Instructions editor; until then it must not reach the shared Secrets form. */
+.personal-instructions-dialog .project-secret-form{flex-direction:row;align-items:flex-end;min-height:0}
+
+/* 3 · home box */
+.home-box .home-group{display:flex;align-items:center;height:24px;padding:0 4px 0 10px;color:var(--g3);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--g1);background:var(--g1)}
+.home-box .home-group .icon-button{margin-left:auto;width:24px;height:24px}
+.home-box .orb-entry{border-left-color:var(--k)}
+.home-box button.home-link{border:0;padding:0;background:none;font-size:14px;line-height:22px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;min-width:0;flex:1}
+.home-box .orb-entry:hover button.home-link{background:none;color:inherit}
+.home-box .orb-entry{cursor:pointer}
+.home-box .orb-entry-meta span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.home-box .key{display:inline-flex;width:16px;justify-content:center;color:var(--g3)}.home-box .key svg{width:14px;height:14px}
+
+/* 4 · totals counters */
+button.dashboard-total{border:0;border-right:1px solid var(--k);background:none;font:inherit;line-height:24px;text-align:left;cursor:pointer}
+button.dashboard-total:hover:not(:disabled) span,button.dashboard-total:focus-visible span{color:var(--w)}
+.skills-dialog{width:860px}
+.skills-split{display:grid;grid-template-columns:200px minmax(0,1fr)}
+.skills-index{border-right:1px solid var(--k);padding:6px 0;display:flex;flex-direction:column}
+.skills-index button:not(.text-action){border:0;text-align:left;padding:0 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.skills-index button[aria-pressed="true"]{background:var(--k);color:var(--w)}
+.skills-index .text-action{align-self:flex-start;margin:8px 10px 0}
+.skills-pane .skill-editor textarea,.ap-pane .skill-editor textarea{border:0;height:min(440px,55dvh);resize:vertical}
+.skills-pane .personal-instructions-feedback{border-top:1px solid var(--k)}
+
+/* 5 · all-projects page */
+.ap-page{display:flex;flex-direction:column;min-height:100%}
+.ap-grid{display:grid;grid-template-columns:236px minmax(0,1fr);flex:1;min-height:0}
+.ap-index{border-right:1px solid var(--k)}
+.ap-index .project-head-name .icon-button{margin-left:auto}
+.ap-index button.ap-row{display:flex;width:100%;border:0;border-bottom:1px solid var(--g1);text-align:left;padding:2px 10px;flex-direction:column;align-items:stretch;line-height:20px}
+.ap-index button.ap-row small{font-size:13px;color:var(--g3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ap-index button.ap-row[aria-current="page"]{background:var(--k);color:var(--w)}
+.ap-index button.ap-row[aria-current="page"] small,.ap-index button.ap-row:hover small{color:var(--g2)}
+.ap-pane{min-width:0;display:flex;flex-direction:column}
+.ap-file{display:flex;align-items:center;height:24px;padding:0 10px;border-bottom:1px solid var(--k);font-family:var(--mono);gap:8px}
+.ap-pane .skill-editor{flex:1}
+.ap-pane .skill-editor .text-field-frame{flex:1;display:flex}
+.ap-pane .skill-editor textarea{height:auto;flex:1;min-height:360px;resize:none}
+.ap-pane .personal-instructions-feedback{border-top:1px solid var(--k)}
+.ap-pane .project-secrets-body{max-width:640px}
+.ap-missing{padding:20px 10px}
+
+@media (max-width:600px){
+ .study{padding:10px 12px}.variants{gap:6px}.variants button{min-height:36px}
+ #frame{height:760px}
+  .skills-split,.ap-grid{grid-template-columns:minmax(0,1fr)}
+ .skills-index{border-right:0;border-bottom:1px solid var(--k);flex-direction:row;flex-wrap:wrap;gap:4px;padding:6px 10px}
+ .skills-index button:not(.text-action){border:1px solid var(--k);min-height:36px}
+ .skills-index .text-action{margin:0;align-self:center}
+ .ap-index{border-right:0;border-bottom:1px solid var(--k)}
+ .ap-index button.ap-row{min-height:44px}
+ .home-box .home-group .icon-button{width:44px;height:44px}.home-box .home-group{height:44px}
+ .with-counters.dashboard-totals{height:72px}.with-counters .dashboard-actions{grid-row:1/4}.with-counters .dashboard-actions>.icon-button{height:72px}
+ .with-counters .dashboard-total:nth-child(5){grid-row:3;grid-column:1;border-top:0}.with-counters .dashboard-total:nth-child(6){grid-row:3;grid-column:2}
+ .project-secret-form:has(.secret-scope){flex-wrap:wrap}.secret-scope{flex:1 0 100%!important}
+}
+</style>
+</head>
+<body>
+<svg aria-hidden="true" focusable="false" style="display:none"><symbol id="i-trend" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M2 2v12h12 M4 10l3-4 3 2 4-5"></path></symbol><symbol id="i-back" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M10 3 5 8l5 5"></path></symbol><symbol id="i-plus" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M8 3v10M3 8h10"></path></symbol><symbol id="i-gear" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M6.5 1.5h3l.5 2 1.5 1 2-.5 1.5 2.5-1.5 1.5v1l1.5 1.5-1.5 2.5-2-.5-1.5 1-.5 2h-3l-.5-2-1.5-1-2 .5L1 10.5 2.5 9V8L1 6.5 2.5 4l2 .5 1.5-1z M10.5 8.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 1 1 5 0"></path></symbol><symbol id="i-archive" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M3 6v7h10V6 M2 3h12v3H2z M6 9h4"></path></symbol><symbol id="i-bin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="square"><path d="M4 6h16M9 6V3h6v3M6 9v11h12V9M10 10v6M14 10v6"></path></symbol><symbol id="i-x" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="m4 4 8 8m0-8-8 8"></path></symbol><symbol id="i-layers" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M8 2 2 5l6 3 6-3z M2 8l6 3 6-3 M2 11l6 3 6-3"></path></symbol></svg>
+
+<header class="study">
+<h1>Skills and secrets for all projects / five directions</h1>
+<nav class="variants" aria-label="Design proposals"></nav>
+<p id="rationale"></p>
+<div class="study-tools"><label><input type="checkbox" id="fail-save"> Simulate failed save</label><span id="url"></span><span>Memory only · no real configuration changes</span></div>
+</header>
+<div id="frame" aria-label="Product preview"><div class="app" id="app"></div></div>
+<footer class="study-note">Shared semantics, identical in all five:
+<ul>
+<li>Owner-scoped. Every orb of every project the owner has gets them; adopted at the next orb start, like instructions and project secrets.</li>
+<li>Secrets: write-only env vars, same name rules and limits as project secrets. A project secret with the same name wins in that project; the global row says where it is overridden.</li>
+<li>Skills: one raw <code>SKILL.md</code> each, explicit Save. Name and description come from the frontmatter (no separate name field); renaming the frontmatter renames the skill. A repository skill with the same name wins.</li>
+</ul></footer>
+
+<script>
+const KEY = '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="12" r="4"></circle><path d="M11 12h10M17 12v3M20 12v2"></path></svg>';
+const FAV = '../../apps/web/public/favicons/';
+const PROJECT = 'frontend playground';
+const proposals = [
+ ['Settings tabs', 'The dashboard gear’s Settings gains Skills and Secrets tabs beside Instructions, Git and Claude. Skills reuse the MCP workbench disclosure: one row per skill, expanding to its SKILL.md. Secrets is the project Secrets pane, unchanged. Smallest change: no new entry point, components or geometry. Cost: long skills are edited in a 560px frame, and five tabs are tight on a phone.'],
+ ['Inherited in project Config', 'No global entry point. Every project’s Config shows the effective set: its own secrets, then “all projects” secrets below a rule, struck through where this project overrides them. The secret form gains a scope choice; a Skills tab lists the global skills. You configure where you notice the need and see exactly what an orb of this project receives. Cost: editing global state from inside one project is the scope confusion rejected for personal instructions.'],
+ ['All-projects box', 'A permanent first box on the board, built like a project column: skills (name over description) and secrets (name over override/update), each group with +. Selecting a row opens the familiar 560px sheet. The inventory is always visible, spatially above every project. Cost: one board column, and a box that looks like a project but is not one.'],
+ ['Totals counters', 'The totals strip gains “3 skills” and “4 secrets”. Each count is a button opening a dedicated sheet; Skills gets a wider two-pane sheet (list | editor) with room for real skill files. The count is the whole message, as the former “N secrets” link was. Cost: configuration counts sit beside fleet-state counts, and the phone strip grows to three rows.'],
+ ['All-projects page', 'A layers icon beside Usage opens an addressable page: 236px index (skills, then secrets) and a full-height SKILL.md editor. Each skill has its own URL; a missing one shows a resource-specific message with a dashboard link. Most writing room and linkable from anywhere. Cost: a new route and leaving the board to edit.'],
+];
+
+// ---------- simulated owner state ----------
+const skills = [
+ {name:'release-notes', body:'---\nname: release-notes\ndescription: Draft release notes from merged PRs since the last tag.\n---\n\n# Release notes\n\n1. Find the latest tag: `git describe --tags --abbrev=0`.\n2. List PRs merged since then with `gh pr list --state merged`.\n3. Group by user-visible change; drop internal refactors.\n4. One line per change. No marketing language.\n'},
+ {name:'pg-migrations', body:'---\nname: pg-migrations\ndescription: Write PostgreSQL migrations that are safe on a live database.\n---\n\n# PostgreSQL migrations\n\n- One migration per change; never edit an applied file.\n- Add columns nullable, backfill, then add constraints.\n- Create indexes CONCURRENTLY outside a transaction.\n- Run the migration twice against a scratch database before committing.\n'},
+ {name:'screenshot-review', body:'---\nname: screenshot-review\ndescription: Capture desktop and phone screenshots of a web change and review them.\n---\n\n# Screenshot review\n\nCapture at 1440×900 and 390×844 with `agent-browser`.\nCheck overflow, truncation, focus rings and touch targets.\nAttach both screenshots to the reply.\n'},
+];
+const globalSecrets = [
+ {name:'DATADOG_API_KEY', updated:'10/02/2026'},
+ {name:'GITHUB_TOKEN', updated:'10/21/2026'},
+ {name:'NPM_TOKEN', updated:'09/30/2026'},
+ {name:'OPENAI_API_KEY', updated:'10/12/2026'},
+];
+const projectSecrets = [
+ {name:'MCP_TOKEN', updated:'10/26/2026'},
+ {name:'NPM_TOKEN', updated:'10/26/2026'},
+ {name:'POSTHOG_KEY', updated:'10/26/2026', usedBy:'posthog'},
+ {name:'SENTRY_AUTH_TOKEN', updated:'10/26/2026'},
+];
+const drafts = {};
+const secretForm = {name:'', value:'', scope:'global', error:''};
+let current = Math.max(0, Math.min(4, (Number(location.hash.slice(1)) || 1) - 1));
+let ui;
+function resetUi(){
+ ui = {p1Open:true, p1Tab:1, openSkill:'release-notes', p2Open:true, p2Tab:4, p3Sheet:null, p4Sheet:'skills', sel:'release-notes', p5Page:true};
+ Object.assign(secretForm, {name:'', value:'', scope: current===1 ? 'project' : 'global', error:''});
+}
+
+// ---------- helpers ----------
+const esc = t => String(t).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+const icon = n => `<svg class="ic" aria-hidden="true"><use href="#i-${n}"></use></svg>`;
+const iconButton = (n, label, act, extra='') => `<button type="button" class="icon-button ${extra}" aria-label="${label}" title="${label}" ${act ? `data-act="${act}"` : 'disabled'}>${icon(n)}</button>`;
+const today = '10/26/2026';
+function parse(text, key){
+ const fm = text.match(/^---\n([\s\S]*?)\n---(\n|$)/);
+ if(!fm) return {error:'SKILL.md must start with --- frontmatter.'};
+ const name = fm[1].match(/^name:\s*(.*)$/m)?.[1].trim();
+ const description = fm[1].match(/^description:\s*(.*)$/m)?.[1].trim();
+ if(!name) return {error:'Frontmatter needs name.'};
+ if(!/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) return {error:'name: lowercase letters, digits and hyphens.'};
+ if(!description) return {error:'Frontmatter needs description.'};
+ if(skills.some(s => s.name === name && s.name !== key)) return {error:`A skill named ${name} already exists.`};
+ return {name, description};
+}
+const describe = s => parse(s.body, s.name).description ?? '';
+const skillByName = n => skills.find(s => s.name === n);
+function draft(key){
+ return drafts[key] ??= {text: key === '+new' ? '' : skillByName(key).body, receipt:'', error:''};
+}
+const savedText = key => key === '+new' ? '' : skillByName(key)?.body ?? '';
+
+// ---------- shared pieces ----------
+function skillEditor(key){
+ const d = draft(key), dirty = d.text !== savedText(key);
+ const status = d.error ? `<span role="alert" class="personal-instructions-error">${esc(d.error)}</span>` : `<span role="status">${d.receipt || (dirty ? 'Unsaved' : '')}</span>`;
+ return `<form class="project-instructions-editor skill-editor" data-key="${esc(key)}"><span class="text-field-frame text-field-frame-inset"><textarea aria-label="SKILL.md" spellcheck="false" autocomplete="off">${esc(d.text)}</textarea></span><div class="personal-instructions-feedback">${status}${key === '+new' ? '<button type="button" data-act="cancel-new">cancel</button>' : '<button type="button" class="danger" data-act="remove-skill">remove</button>'}<button type="submit" ${dirty ? '' : 'disabled'}>Save</button></div></form>`;
+}
+function skillDisclosures(){
+ const rows = skills.map(s => `<details class="activity-rail-row project-mcp-connection" name="skills" ${ui.openSkill === s.name ? 'open' : ''} data-skill="${esc(s.name)}"><summary><span class="activity-rail-marker" aria-hidden="true"></span><span class="activity-rail-summary">${esc(s.name)}<span class="activity-rail-headline"> · ${esc(describe(s))}</span></span></summary><div class="reasoning-body">${skillEditor(s.name)}</div></details>`).join('');
+ const add = ui.openSkill === '+new'
+  ? `<details class="activity-rail-row project-mcp-connection" name="skills" open data-skill="+new"><summary><span class="activity-rail-marker" aria-hidden="true"></span><span class="activity-rail-summary">new skill</span></summary><div class="reasoning-body">${skillEditor('+new')}</div></details>`
+  : `<div class="mcp-add-area"><button type="button" class="text-action" data-act="add-skill">add skill</button></div>`;
+ return `<div class="skill-list">${rows}${add}</div>`;
+}
+function secretRow(item, scope, {inherited=false, shadowed=false}={}){
+ const users = item.usedBy ? `used by ${item.usedBy}` : null;
+ const overridden = scope === 'global' && !inherited && projectSecrets.some(p => p.name === item.name) ? `overridden in ${PROJECT}` : null;
+ const note = shadowed ? 'overridden here' : users ?? overridden ?? `updated ${item.updated}`;
+ return `<div class="project-secret-row${inherited ? ' inherited' : ''}${shadowed ? ' shadowed' : ''}"><span class="project-secret-name"><span class="project-secrets-lock">${KEY}</span>${esc(item.name)}</span><span class="project-secret-updated">${esc(note)}</span><span class="project-secret-actions"><button type="button" data-act="replace" data-scope="${scope}" data-name="${esc(item.name)}">replace</button><button type="button" data-act="remove-secret" data-scope="${scope}" data-name="${esc(item.name)}" ${users ? 'disabled' : ''}>remove</button></span></div>`;
+}
+function secretFormHtml(withScope){
+ return `<form class="project-secret-form" data-form="secret"><label>name<span class="text-field-frame"><input name="name" data-1p-ignore="true" autocomplete="off" value="${esc(secretForm.name)}"></span></label><label>secret value<span class="text-field-frame"><input name="value" type="password" autocomplete="new-password" value="${esc(secretForm.value)}"></span></label>${withScope ? `<label class="secret-scope">scope<select name="scope" aria-label="Scope"><option value="project" ${secretForm.scope === 'project' ? 'selected' : ''}>this project</option><option value="global" ${secretForm.scope === 'global' ? 'selected' : ''}>all projects</option></select></label>` : ''}<button type="submit">save secret</button></form>${secretForm.error ? `<div class="banner banner-error" role="alert">${esc(secretForm.error)}</div>` : ''}`;
+}
+function globalSecretsPanel(){
+ return `<div class="project-secrets-body"><div class="project-secrets-list">${globalSecrets.map(s => secretRow(s, 'global')).join('')}</div>${secretFormHtml(false)}</div>`;
+}
+function dialog({title, sub='', body, label, extraClass='', tabs=''}){
+ return `<div class="project-secrets-backdrop"><section class="project-secrets-dialog ${extraClass}" role="dialog" aria-modal="true" aria-label="${esc(label ?? title)}" tabindex="-1"><header class="project-secrets-header"><div><h2>${esc(title)}</h2>${sub ? `<p>${esc(sub)}</p>` : ''}</div><button class="icon-button modal-close" type="button" aria-label="Close" title="Close" data-act="close">${icon('x')}</button></header>${tabs}${body}</section></div>`;
+}
+function tabsHtml(names, selected, attr){
+ return `<div class="project-config-tabs" role="tablist">${names.map((n, i) => `<button type="button" role="tab" aria-selected="${i === selected}" data-${attr}="${i}">${n}</button>`).join('')}</div>`;
+}
+
+// ---------- dashboard ----------
+const fixture = [
+ ['Frontend playground', [['Provider cache audit','stopped','stop','2m'],['Frontend Playground','running','idle','4m'],['Charts and Datadog widgets','busy','busy','12s'],['Mermaid diagrams','running','idle','1h'],['untitled orb','transitional','start','8s']]],
+ ['fieldnotes', [['Offline sync','stopped','stop','1d'],['Editor shortcuts','stopped','stop','3d']]],
+ ['homelab', [['Backup verification','failed','fail','6h']]],
+ ['scratchpad', []],
+];
+function orbEntry([name, fav, state, age]){
+ return `<div class="orb-tree-row" style="--orb-depth:0"><div class="orb-entry orb-entry-${state}"><div class="orb-entry-title"><img class="glyph" width="16" height="16" alt="${fav}" src="${FAV}${fav}.svg"><a class="orb-entry-link" href="#" data-act="noop">${esc(name)}</a></div><div class="orb-entry-meta"><span>${age}</span><span class="orb-entry-actions"><button type="button" class="icon-button" aria-label="Archive ${esc(name)}" title="archive" disabled>${icon('archive')}</button><button type="button" class="icon-button danger" aria-label="Delete ${esc(name)}" title="delete" disabled>${icon('bin')}</button></span></div>${state === 'fail' ? '<div class="orb-entry-detail orb-entry-error">Backup destination is unavailable.</div>' : ''}</div></div>`;
+}
+function projectColumn([name, orbs]){
+ return `<section class="project-column"><div class="project-head"><div class="project-head-line project-head-name"><h2 class="project-name">${esc(name)}</h2><span class="project-head-actions"><button type="button" class="icon-button" aria-label="Configure ${esc(name)}" title="project config" ${current === 1 && name === 'Frontend playground' ? 'data-act="open-config"' : 'disabled'}>${icon('gear')}</button><button type="button" class="icon-button danger" aria-label="Delete ${esc(name)}" title="delete project" disabled>${icon('bin')}</button></span></div></div><div class="orb-tree">${orbs.map(orbEntry).join('')}</div></section>`;
+}
+function homeBox(){
+ const skillRows = skills.map(s => `<div class="orb-entry" data-act="p3-skill" data-name="${esc(s.name)}"><div class="orb-entry-title"><button type="button" class="home-link" data-act="p3-skill" data-name="${esc(s.name)}">${esc(s.name)}</button></div><div class="orb-entry-meta"><span>${esc(describe(s))}</span></div></div>`).join('');
+ const secretRows = globalSecrets.map(s => {
+  const over = projectSecrets.some(p => p.name === s.name);
+  return `<div class="orb-entry" data-act="p3-secret" data-name="${esc(s.name)}"><div class="orb-entry-title"><span class="key">${KEY}</span><button type="button" class="home-link" data-act="p3-secret" data-name="${esc(s.name)}">${esc(s.name)}</button></div><div class="orb-entry-meta"><span>${over ? `overridden in ${PROJECT}` : `updated ${s.updated}`}</span></div></div>`;
+ }).join('');
+ return `<section class="project-column home-box"><div class="project-head"><div class="project-head-line project-head-name"><h2 class="project-name">All projects</h2></div></div><div class="home-group"><span>skills</span>${iconButton('plus','Add skill','p3-add-skill')}</div>${skillRows}<div class="home-group"><span>secrets</span>${iconButton('plus','Add secret','p3-add-secret')}</div>${secretRows}</section>`;
+}
+function dashboard(){
+ const counters = current === 3 ? `<button type="button" class="dashboard-total" data-act="p4-skills"><b>${skills.length}</b><span>${skills.length === 1 ? 'skill' : 'skills'}</span></button><button type="button" class="dashboard-total" data-act="p4-secrets"><b>${globalSecrets.length}</b><span>${globalSecrets.length === 1 ? 'secret' : 'secrets'}</span></button>` : '';
+ const layers = current === 4 ? `<a href="#" class="icon-button" aria-label="All projects" title="All projects" data-act="p5-open">${icon('layers')}</a>` : '';
+ const gearAct = current === 0 ? 'data-act="p1-open"' : 'disabled';
+ return `<main class="projects-page"><div class="dashboard-totals${current === 3 ? ' with-counters' : ''}"><span class="dashboard-total"><b>4</b><span>projects</span></span><span class="dashboard-total"><b>8</b><span>orbs</span></span><span class="dashboard-total"><b>1</b><span>busy</span></span><span class="dashboard-total"><b>1</b><span>failed</span></span>${counters}<div class="dashboard-actions"><a href="#" class="icon-button" aria-label="Token usage" title="Token usage" data-act="noop">${icon('trend')}</a>${layers}<button class="icon-button personal-instructions-gear" type="button" title="Settings" aria-label="Settings" ${gearAct}>${icon('gear')}</button></div></div><div class="dashboard">${current === 2 ? homeBox() : ''}${fixture.map(projectColumn).join('')}<section class="new-project"><h2>New project</h2><form><label>project name<span class="text-field-frame"><input maxlength="80" type="text" disabled></span></label><label>repository URL<span class="text-field-frame"><input type="text" disabled></span></label><button type="submit" disabled>Create project</button></form></section></div><div class="dashboard-footer"><button type="button" disabled>Sign out</button><span>gce host</span><span class="dashboard-footer-separator">·</span><span>postgres</span><span class="dashboard-footer-separator">·</span><span>v0.1.0</span></div></main>`;
+}
+
+// ---------- proposals ----------
+function p1(){
+ if(!ui.p1Open) return '';
+ const names = ['Instructions','Skills','Secrets','Git','Claude'];
+ const panels = [
+  `<form class="project-instructions-editor"><span class="text-field-frame text-field-frame-inset"><textarea aria-label="Personal AGENTS.md" spellcheck="false"># How I work\n\nPrefer the smallest design that solves the problem.\nBe direct. Show the tradeoffs.\n</textarea></span><div class="personal-instructions-feedback"><span role="status"></span><button type="submit" disabled>Save</button></div></form>`,
+  `<div class="project-secrets-body">${skillDisclosures()}</div>`,
+  globalSecretsPanel(),
+  `<div class="project-secrets-body"><form class="project-secret-form project-general-form"><label>name<span class="text-field-frame"><input value="Mark Probst" disabled></span></label><label>email<span class="text-field-frame"><input value="mark@example.com" disabled></span></label><button type="submit" disabled>save</button></form></div>`,
+  `<div class="project-secrets-body"><div class="project-secret-row"><span>connected</span><span class="project-secret-actions" style="margin-left:auto"><button type="button" disabled>reconnect</button><button type="button" disabled>disconnect</button></span></div></div>`,
+ ];
+ return dialog({title:'Settings', sub: ui.p1Tab === 2 ? 'Changes apply on next start' : '', extraClass:'personal-instructions-dialog', tabs: tabsHtml(names, ui.p1Tab, 'p1tab'), body: `<div role="tabpanel">${panels[ui.p1Tab]}</div>`});
+}
+function p2(){
+ if(!ui.p2Open) return '';
+ const names = ['General','Instructions','Skills','MCPs','Secrets'];
+ const own = projectSecrets.map(s => secretRow(s, 'project')).join('');
+ const inherited = globalSecrets.map(s => secretRow(s, 'global', {inherited:true, shadowed: projectSecrets.some(p => p.name === s.name)})).join('');
+ const panels = {
+  2: `<div class="project-secrets-body"><div class="scope-label">all projects</div>${skillDisclosures()}</div>`,
+  4: `<div class="project-secrets-body"><div class="project-secrets-list">${own}<div class="scope-label">all projects</div>${inherited}</div>${secretFormHtml(true)}</div>`,
+ };
+ const body = panels[ui.p2Tab] ?? `<div class="project-secrets-body muted">Unchanged.</div>`;
+ return dialog({title:`Config for ${PROJECT}`, sub: ui.p2Tab === 4 || ui.p2Tab === 2 ? 'Changes apply on next start' : '', tabs: tabsHtml(names, ui.p2Tab, 'p2tab'), body: `<div role="tabpanel">${body}</div>`});
+}
+function p3(){
+ if(!ui.p3Sheet) return '';
+ if(ui.p3Sheet === 'secrets') return dialog({title:'Secrets for all projects', sub:'Changes apply on next start', body: globalSecretsPanel()});
+ const key = ui.p3Sheet;
+ return dialog({title: key === '+new' ? 'New skill' : key, label:'Skill', extraClass:'personal-instructions-dialog', body: skillEditor(key).replace('skill-editor', 'skill-editor flush')});
+}
+function p4(){
+ if(ui.p4Sheet === 'secrets') return dialog({title:'Secrets', sub:'Changes apply on next start', body: globalSecretsPanel()});
+ if(ui.p4Sheet !== 'skills') return '';
+ const key = ui.sel;
+ const index = skills.map(s => `<button type="button" aria-pressed="${s.name === key}" data-act="select" data-name="${esc(s.name)}">${esc(s.name)}</button>`).join('') + (key === '+new' ? '<button type="button" aria-pressed="true">new skill</button>' : '<button type="button" class="text-action" data-act="select" data-name="+new">add skill</button>');
+ return dialog({title:'Skills', extraClass:'skills-dialog', body:`<div class="skills-split"><nav class="skills-index" aria-label="Skills">${index}</nav><div class="skills-pane">${key ? skillEditor(key) : ''}</div></div>`});
+}
+function p5(){
+ const key = ui.sel;
+ const rows = skills.map(s => `<button type="button" class="ap-row" data-act="select" data-name="${esc(s.name)}" ${s.name === key ? 'aria-current="page"' : ''}><span>${esc(s.name)}</span><small>${esc(describe(s))}</small></button>`).join('') + (key === '+new' ? '<button type="button" class="ap-row" aria-current="page"><span>new skill</span></button>' : '');
+ const secretRowIndex = `<button type="button" class="ap-row" data-act="select" data-name="+secrets" ${key === '+secrets' ? 'aria-current="page"' : ''}><span>${globalSecrets.length} secrets</span></button>`;
+ let pane;
+ if(key === '+secrets') pane = `<div class="ap-file">secrets</div>${globalSecretsPanel()}`;
+ else if(key === '+new' || skillByName(key)) pane = `<div class="ap-file">${key === '+new' ? 'new skill' : esc(key) + '/SKILL.md'}</div>${skillEditor(key)}`;
+ else pane = `<div class="ap-missing">Skill ${esc(key)} doesn’t exist. <a href="#" data-act="p5-back">Dashboard</a></div>`;
+ return `<main class="usage-page ap-page"><header class="usage-header"><a class="icon-button" href="#" aria-label="Dashboard" title="Dashboard" data-act="p5-back">${icon('back')}</a><h1>All projects</h1></header><div class="ap-grid"><nav class="ap-index" aria-label="All projects"><div class="project-head"><div class="project-head-line project-head-name"><h2 class="project-name">Skills</h2>${iconButton('plus','Add skill','p5-add')}</div></div>${rows}<div class="project-head"><div class="project-head-line project-head-name"><h2 class="project-name">Secrets</h2></div></div>${secretRowIndex}</nav><section class="ap-pane">${pane}</section></div></main>`;
+}
+
+// ---------- render ----------
+const app = document.querySelector('#app');
+function urlFor(){
+ if(current !== 4 || !ui.p5Page) return '';
+ const path = ui.sel === '+secrets' ? '/all-projects/secrets' : ui.sel === '+new' ? '/all-projects/skills/new' : `/all-projects/skills/${ui.sel}`;
+ return `URL <code>${esc(path)}</code> · <a href="#" data-act="p5-missing">try a missing skill</a>`;
+}
+function render(focus){
+ document.querySelector('.variants').innerHTML = proposals.map(([n], i) => `<button type="button" data-proposal="${i}" aria-pressed="${i === current}">${i + 1}. ${n}</button>`).join('');
+ document.querySelector('#rationale').textContent = proposals[current][1];
+ document.querySelector('#url').innerHTML = urlFor();
+ const scroll = app.scrollTop;
+ app.innerHTML = current === 4 && ui.p5Page ? p5() : dashboard() + [p1, p2, p3, p4, () => ''][current]();
+ app.scrollTop = scroll;
+ layout();
+ if(focus) app.querySelector(focus)?.focus();
+}
+function layout(){
+ const board = app.querySelector('.dashboard'); if(!board) return;
+ const count = Math.max(1, Math.floor(board.clientWidth / 360)), width = count === 1 ? board.clientWidth : 360;
+ const heights = Array(count).fill(0);
+ for(const box of board.children){
+  const col = heights.indexOf(Math.min(...heights));
+  Object.assign(box.style, {width: width + 'px', left: col * width + 'px', top: heights[col] + 'px'});
+  heights[col] += box.offsetHeight;
+ }
+ board.style.height = Math.max(...heights) + 'px';
+ board.style.backgroundImage = heights.map(() => 'linear-gradient(var(--k), var(--k))').join(',');
+ board.style.backgroundPosition = heights.map((_, i) => `${i * width}px 0`).join(',');
+}
+new ResizeObserver(layout).observe(app);
+function selectSkill(name){ ui.sel = name; ui.openSkill = name; }
+
+document.addEventListener('click', e => {
+ const b = e.target.closest('button, a, [data-act]');
+ if(!b) return;
+ if(b.dataset.proposal !== undefined){ current = Number(b.dataset.proposal); location.hash = String(current + 1); resetUi(); render(); return; }
+ if(b.dataset.p1tab){ ui.p1Tab = Number(b.dataset.p1tab); render(`[data-p1tab="${ui.p1Tab}"]`); return; }
+ if(b.dataset.p2tab){ ui.p2Tab = Number(b.dataset.p2tab); render(`[data-p2tab="${ui.p2Tab}"]`); return; }
+ const act = b.dataset.act; if(!act) return;
+ if(b.tagName === 'A') e.preventDefault();
+ const name = b.dataset.name;
+ switch(act){
+  case 'close': ui.p1Open = false; ui.p2Open = false; ui.p3Sheet = null; ui.p4Sheet = null; secretForm.error = ''; render(); break;
+  case 'p1-open': ui.p1Open = true; render('[role=tab][aria-selected=true]'); break;
+  case 'open-config': ui.p2Open = true; render('[role=tab][aria-selected=true]'); break;
+  case 'p3-skill': ui.p3Sheet = name; render('.skill-editor textarea'); break;
+  case 'p3-add-skill': ui.p3Sheet = '+new'; render('.skill-editor textarea'); break;
+  case 'p3-secret': ui.p3Sheet = 'secrets'; Object.assign(secretForm, {name, value:'', error:''}); render('input[name=value]'); break;
+  case 'p3-add-secret': ui.p3Sheet = 'secrets'; Object.assign(secretForm, {name:'', value:'', error:''}); render('input[name=name]'); break;
+  case 'p4-skills': ui.p4Sheet = 'skills'; render('.skills-index [aria-pressed=true]'); break;
+  case 'p4-secrets': ui.p4Sheet = 'secrets'; render('input[name=name]'); break;
+  case 'p5-open': ui.p5Page = true; render('.ap-row[aria-current]'); break;
+  case 'p5-back': ui.p5Page = false; render('[data-act=p5-open]'); break;
+  case 'p5-missing': ui.p5Page = true; ui.sel = 'nightly-triage'; render(); break;
+  case 'p5-add': selectSkill('+new'); render('.skill-editor textarea'); break;
+  case 'select': selectSkill(name); render(name === '+secrets' ? 'input[name=name]' : '.skill-editor textarea'); break;
+  case 'add-skill': ui.openSkill = '+new'; render('.skill-editor textarea'); break;
+  case 'cancel-new': delete drafts['+new']; ui.openSkill = null; if(current === 2) ui.p3Sheet = null; if(ui.sel === '+new') ui.sel = skills[0]?.name ?? null; render(); break;
+  case 'remove-skill': {
+   const key = b.closest('.skill-editor').dataset.key;
+   if(!confirm(`Remove ${key} from every orb on its next start?`)) return;
+   skills.splice(skills.findIndex(s => s.name === key), 1); delete drafts[key];
+   ui.openSkill = null; if(current === 2) ui.p3Sheet = null; if(ui.sel === key) ui.sel = skills[0]?.name ?? '+new';
+   render(); break;
+  }
+  case 'replace': Object.assign(secretForm, {name, value:'', error:'', scope: b.dataset.scope}); render('input[name=value]'); break;
+  case 'remove-secret': {
+   const list = b.dataset.scope === 'global' ? globalSecrets : projectSecrets;
+   const where = b.dataset.scope === 'global' ? 'every orb in every project' : `every ${PROJECT} orb`;
+   if(!confirm(`Remove ${name} from ${where} on its next start?`)) return;
+   list.splice(list.findIndex(s => s.name === name), 1); render(); break;
+  }
+ }
+});
+// Native disclosure: one open at a time, remembered across re-render.
+document.addEventListener('toggle', e => {
+ const d = e.target; if(!d.matches?.('details[data-skill]')) return;
+ if(d.open) ui.openSkill = d.dataset.skill; else if(ui.openSkill === d.dataset.skill) ui.openSkill = null;
+}, true);
+document.addEventListener('input', e => {
+ const t = e.target;
+ const form = t.closest('form');
+ if(form?.classList.contains('skill-editor')){
+  const key = form.dataset.key, d = draft(key);
+  d.text = t.value; d.receipt = ''; d.error = '';
+  const dirty = d.text !== savedText(key);
+  form.querySelector('.personal-instructions-feedback > span').outerHTML = `<span role="status">${dirty ? 'Unsaved' : ''}</span>`;
+  form.querySelector('[type=submit]').disabled = !dirty;
+ }
+ if(form?.dataset.form === 'secret') secretForm[t.name] = t.value;
+});
+document.addEventListener('change', e => { if(e.target.name === 'scope') secretForm.scope = e.target.value; });
+document.addEventListener('submit', e => {
+ e.preventDefault();
+ const form = e.target, fail = document.querySelector('#fail-save').checked;
+ if(form.classList.contains('skill-editor')){
+  const key = form.dataset.key, d = draft(key);
+  const parsed = parse(d.text, key === '+new' ? null : key);
+  if(parsed.error){ d.error = parsed.error; render(`.skill-editor[data-key="${CSS.escape(key)}"] textarea`); return; }
+  if(fail){ d.error = 'Save failed. Draft retained.'; render(`.skill-editor[data-key="${CSS.escape(key)}"] textarea`); return; }
+  if(key === '+new') skills.push({name: parsed.name, body: d.text});
+  else Object.assign(skillByName(key), {name: parsed.name, body: d.text});
+  skills.sort((a, b) => a.name.localeCompare(b.name));
+  delete drafts[key];
+  drafts[parsed.name] = {text: d.text, receipt:'Saved · next orb start', error:''};
+  ui.openSkill = parsed.name; ui.sel = parsed.name; if(current === 2) ui.p3Sheet = parsed.name;
+  render(`.skill-editor[data-key="${CSS.escape(parsed.name)}"] textarea`);
+  return;
+ }
+ if(form.dataset.form === 'secret'){
+  const n = secretForm.name.trim();
+  if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(n)) secretForm.error = 'Use a POSIX environment name such as NPM_TOKEN.';
+  else if(secretForm.value === '') secretForm.error = 'Enter a secret value.';
+  else if(fail) secretForm.error = 'Save failed. Name and value retained.';
+  else {
+   const list = current === 1 && secretForm.scope === 'project' ? projectSecrets : globalSecrets;
+   const existing = list.find(s => s.name === n);
+   if(existing) existing.updated = today; else list.push({name:n, updated:today});
+   list.sort((a, b) => a.name.localeCompare(b.name));
+   Object.assign(secretForm, {name:'', value:'', error:''});
+  }
+  render(secretForm.error ? 'input[name=value]' : 'input[name=name]');
+ }
+});
+document.addEventListener('keydown', e => {
+ if(e.key !== 'Escape') return;
+ if(current === 4 && ui.p5Page) return;
+ if(app.querySelector('.project-secrets-backdrop')){ e.preventDefault(); app.querySelector('[data-act=close]').click(); }
+});
+addEventListener('hashchange', () => { const n = (Number(location.hash.slice(1)) || 1) - 1; if(n !== current){ current = n; resetUi(); render(); } });
+resetUi();
+render();
+</script>
+</body>
+</html>

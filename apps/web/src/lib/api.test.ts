@@ -1,13 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createOwnerSkill,
+  deleteOwnerSecret,
+  deleteOwnerSkill,
   getActivityHeadline,
   getCommittedImage,
   getOrbHistory,
   getSystem,
   listHostedFiles,
   listOrbMessages,
+  listOwnerSecrets,
+  listOwnerSkills,
   logout,
   probeSession,
+  putOwnerSecret,
+  saveOwnerSkill,
 } from "./api.ts";
 import { readBrowserSession, readSessionPrincipal, resetBrowserSessionForTest } from "./session.ts";
 
@@ -525,5 +532,78 @@ describe("API session handling", () => {
     );
     const result = await listHostedFiles("orb/archived");
     expect(result.isOk() && result.value).toEqual(inventory);
+  });
+});
+
+describe("owner skills and secrets HTTP", () => {
+  beforeEach(resetBrowserSessionForTest);
+  afterEach(() => vi.unstubAllGlobals());
+  const content = "---\nname: release-notes\ndescription: Notes.\n---\n";
+  const skills = {
+    items: [{ name: "release-notes", description: "Notes.", content, updatedAt: "2026-10-26" }],
+  };
+  const secrets = { revision: 1, items: [{ name: "NPM_TOKEN", updatedAt: "2026-10-26" }] };
+
+  it("lists, creates, replaces and deletes owner skills on encoded paths", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string, init?: RequestInit) => {
+        calls.push(`${init?.method ?? "GET"} ${path} ${init?.body ?? ""}`);
+        return Response.json(skills);
+      }),
+    );
+    expect((await listOwnerSkills())._unsafeUnwrap()).toEqual(skills);
+    expect((await createOwnerSkill(content))._unsafeUnwrap()).toEqual(skills);
+    expect((await saveOwnerSkill("a b", content))._unsafeUnwrap()).toEqual(skills);
+    expect((await deleteOwnerSkill("a b"))._unsafeUnwrap()).toEqual(skills);
+    const body = JSON.stringify({ content });
+    expect(calls).toEqual([
+      "GET /api/v1/owner-skills ",
+      `POST /api/v1/owner-skills ${body}`,
+      `PUT /api/v1/owner-skills/a%20b ${body}`,
+      "DELETE /api/v1/owner-skills/a%20b ",
+    ]);
+  });
+
+  it("keeps typed skill errors and rejects lists outside the closed schema", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json(
+          { error: { code: "conflict", message: "pg exists", retryable: false } },
+          { status: 409 },
+        ),
+      ),
+    );
+    expect((await createOwnerSkill(content))._unsafeUnwrapErr()).toMatchObject({
+      type: "http",
+      status: 409,
+      code: "conflict",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ items: [{ ...skills.items[0], extra: 1 }] })),
+    );
+    expect((await listOwnerSkills())._unsafeUnwrapErr().type).toBe("invalid_response");
+  });
+
+  it("lists, puts and deletes owner secrets without echoing values", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string, init?: RequestInit) => {
+        calls.push(`${init?.method ?? "GET"} ${path} ${init?.body ?? ""}`);
+        return Response.json(secrets);
+      }),
+    );
+    expect((await listOwnerSecrets())._unsafeUnwrap()).toEqual(secrets);
+    expect((await putOwnerSecret("NPM_TOKEN", "v"))._unsafeUnwrap()).toEqual(secrets);
+    expect((await deleteOwnerSecret("NPM_TOKEN"))._unsafeUnwrap()).toEqual(secrets);
+    expect(calls).toEqual([
+      "GET /api/v1/owner-secrets ",
+      `PUT /api/v1/owner-secrets/NPM_TOKEN ${JSON.stringify({ value: "v" })}`,
+      "DELETE /api/v1/owner-secrets/NPM_TOKEN ",
+    ]);
   });
 });

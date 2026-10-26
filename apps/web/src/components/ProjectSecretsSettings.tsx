@@ -8,17 +8,21 @@ import {
 } from "@pi-orb/protocol";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import {
+  deleteOwnerSecret,
   deleteProjectSecret,
   describeApiError,
   getProjectMcp,
+  listOwnerSecrets,
   listProjectSecrets,
+  putOwnerSecret,
   putProjectSecret,
 } from "../lib/api.ts";
 import { ProjectSecretKeyIcon } from "./ProjectSecretKeyIcon.tsx";
 import { TextFieldFrame } from "./TextFieldFrame.tsx";
 
 export interface ProjectSecretsSettingsProps {
-  readonly project: Pick<ProjectView, "id" | "name">;
+  /** `null` is owner scope: secrets for every project, with no MCP usage to check. */
+  readonly project: Pick<ProjectView, "id" | "name"> | null;
   readonly saving: boolean;
   readonly active?: boolean;
   readonly setSaving: (saving: boolean) => void;
@@ -39,13 +43,14 @@ export function ProjectSecretsSettings({
   const [error, setError] = useState<string | null>(null);
   const [mcp, setMcp] = useState<McpCatalog | null>(null);
   const [usageError, setUsageError] = useState<string | null>(null);
+  const projectId = project?.id ?? null;
   useEffect(() => {
-    if (!active) return;
+    if (!active || projectId === null) return;
     let current = true;
     let request = 0;
     const refresh = () => {
       const revision = ++request;
-      void getProjectMcp(project.id).then((result) => {
+      void getProjectMcp(projectId).then((result) => {
         if (!current || revision !== request) return;
         if (result.isOk()) {
           setMcp(result.value);
@@ -62,7 +67,7 @@ export function ProjectSecretsSettings({
       current = false;
       window.removeEventListener("focus", refresh);
     };
-  }, [active, project.id]);
+  }, [active, projectId]);
   const nameInput = useRef<HTMLInputElement>(null);
   const valueInput = useRef<HTMLInputElement>(null);
   const focusAfterSave = useRef(false);
@@ -75,7 +80,8 @@ export function ProjectSecretsSettings({
 
   useEffect(() => {
     let active = true;
-    void listProjectSecrets(project.id).then((result) => {
+    const read = projectId === null ? listOwnerSecrets() : listProjectSecrets(projectId);
+    void read.then((result) => {
       if (!active) return;
       setLoading(false);
       if (result.isErr()) setError(describeApiError(result.error));
@@ -84,7 +90,7 @@ export function ProjectSecretsSettings({
     return () => {
       active = false;
     };
-  }, [project.id]);
+  }, [projectId]);
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
@@ -100,7 +106,9 @@ export function ProjectSecretsSettings({
     }
     setSaving(true);
     setError(null);
-    const result = await putProjectSecret(project.id, secretName, value);
+    const result = await (projectId === null
+      ? putOwnerSecret(secretName, value)
+      : putProjectSecret(projectId, secretName, value));
     setSaving(false);
     if (result.isErr()) {
       // Deliberately preserve both fields: a network failure must not destroy
@@ -115,12 +123,13 @@ export function ProjectSecretsSettings({
   };
 
   const remove = async (secretName: string) => {
-    if (!window.confirm(`Remove ${secretName} from every ${project.name} orb on its next start?`)) {
-      return;
-    }
+    const orbs = project === null ? "orb" : `${project.name} orb`;
+    if (!window.confirm(`Remove ${secretName} from every ${orbs} on its next start?`)) return;
     setSaving(true);
     setError(null);
-    const result = await deleteProjectSecret(project.id, secretName);
+    const result = await (projectId === null
+      ? deleteOwnerSecret(secretName)
+      : deleteProjectSecret(projectId, secretName));
     setSaving(false);
     if (result.isErr()) setError(describeApiError(result.error));
     else setSnapshot(result.value);
@@ -162,7 +171,7 @@ export function ProjectSecretsSettings({
                   </button>
                   <button
                     type="button"
-                    disabled={saving || mcp === null || users.length > 0}
+                    disabled={saving || (projectId !== null && (mcp === null || users.length > 0))}
                     onClick={() => void remove(item.name)}
                   >
                     remove

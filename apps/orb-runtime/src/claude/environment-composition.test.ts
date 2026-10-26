@@ -1,8 +1,16 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
-import { err, ok, okAsync } from "neverthrow";
+import { err, errAsync, ok, okAsync } from "neverthrow";
 import { expect, it, vi } from "vitest";
 import { environmentPrompt } from "../environment-prompt.ts";
 import { portExposurePrompt } from "../tailscale/prompt.ts";
@@ -26,6 +34,19 @@ vi.mock("../project-secrets/endpoint.ts", () => ({
 vi.mock("../mcp/boot.ts", () => ({ fetchMcpCatalog: () => okAsync({ servers: [] }) }));
 vi.mock("../personal-instructions/endpoint.ts", () => ({
   fetchPersonalInstructions: () => okAsync({ content: "PERSONAL", revision: 1 }),
+}));
+const ownerSkills = vi.hoisted(() => ({
+  reply: (): unknown => ({
+    skills: [{ name: "owner-notes", content: "---\nname: owner-notes\ndescription: d\n---\n" }],
+  }),
+}));
+vi.mock("../owner-skills/endpoint.ts", () => ({
+  fetchOwnerSkills: () => {
+    const reply = ownerSkills.reply();
+    return reply instanceof Error
+      ? errAsync({ type: "owner_skills_fetch_error", message: reply.message, retryable: true })
+      : okAsync(reply);
+  },
 }));
 vi.mock("../project-instructions/endpoint.ts", () => ({
   fetchProjectInstructions: () => okAsync({ content: "PROJECT", revision: 1 }),
@@ -103,6 +124,66 @@ it("boots Claude in a repository-free workspace with managed instructions", asyn
     expect(JSON.stringify(options[0]?.systemPrompt)).toContain("PROJECT");
     expect(existsSync(join(workDir, "repo"))).toBe(true);
     expect(existsSync(join(workDir, "repo", ".git"))).toBe(false);
+  } finally {
+    agent.shutdownHooks();
+    rmSync(workDir, { recursive: true, force: true });
+  }
+});
+
+it("installs the owner's skills as Claude user skills, replacing earlier ones, before the session starts", async () => {
+  const workDir = mkdtempSync(join(tmpdir(), "claude-owner-skills-"));
+  const skills = join(workDir, "claude", "config", "skills");
+  mkdirSync(join(skills, "deleted-since"), { recursive: true });
+  writeFileSync(join(skills, "deleted-since", "SKILL.md"), "stale");
+  let installed: string[] = [];
+  const agent = new ClaudeOrbAgent({
+    orbId: "orb",
+    repositoryUrl: null,
+    workDir,
+    skillsDir: null,
+    broker: { controlPlaneUrl: "http://unused.invalid", runtimeToken: "unused" },
+    sdkFactory: (_input, value) => {
+      installed = readdirSync(skills);
+      expect(value.settingSources).toContain("user");
+      expect(value.env?.["CLAUDE_CONFIG_DIR"]).toBe(join(workDir, "claude", "config"));
+      return err({ message: "No process started." });
+    },
+  });
+  try {
+    await agent.boot();
+    expect(installed).toEqual(["owner-notes"]);
+    expect(readFileSync(join(skills, "owner-notes", "SKILL.md"), "utf8")).toBe(
+      "---\nname: owner-notes\ndescription: d\n---\n",
+    );
+  } finally {
+    agent.shutdownHooks();
+    rmSync(workDir, { recursive: true, force: true });
+  }
+});
+
+it("blocks boot with owner_skills_unavailable when the owner's skills cannot be loaded", async () => {
+  const workDir = mkdtempSync(join(tmpdir(), "claude-owner-skills-failed-"));
+  const sdkFactory = vi.fn(() => err({ message: "must not start" }));
+  ownerSkills.reply = () => new Error("Cannot load owner skills: HTTP 503");
+  const agent = new ClaudeOrbAgent({
+    orbId: "orb",
+    repositoryUrl: null,
+    workDir,
+    skillsDir: null,
+    broker: { controlPlaneUrl: "http://unused.invalid", runtimeToken: "unused" },
+    sdkFactory,
+  });
+  try {
+    await agent.boot();
+    expect(agent.getHealth()).toMatchObject({
+      status: "failed",
+      error: {
+        code: "owner_skills_unavailable",
+        message: "Cannot load owner skills: HTTP 503",
+        retryable: true,
+      },
+    });
+    expect(sdkFactory).not.toHaveBeenCalled();
   } finally {
     agent.shutdownHooks();
     rmSync(workDir, { recursive: true, force: true });

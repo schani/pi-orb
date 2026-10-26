@@ -103,3 +103,25 @@ resource "google_secret_manager_secret_iam_member" "cp_project_secrets_versions"
   role      = "roles/secretmanager.secretVersionManager"
   member    = "serviceAccount:${local.control_plane_email}"
 }
+
+# Shared immutable-version parent for owner (user-scoped) environment-secret
+# bundles (docs/owner-skills-secrets.md). Payloads repeat the user identity;
+# users are never deleted, so there is no deletion finalizer.
+resource "google_secret_manager_secret" "user_secrets" {
+  secret_id = "pi-orb-credential-user-secrets"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_iam_member" "cp_user_secrets_accessor" {
+  secret_id = google_secret_manager_secret.user_secrets.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${local.control_plane_email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "cp_user_secrets_versions" {
+  secret_id = google_secret_manager_secret.user_secrets.id
+  role      = "roles/secretmanager.secretVersionManager"
+  member    = "serviceAccount:${local.control_plane_email}"
+}

@@ -10,6 +10,8 @@ import {
   McpCatalogSchema,
   ORB_BOOT_CONTEXT_PATH,
   OrbBootContextResponseSchema,
+  OWNER_SKILLS_RUNTIME_PATH,
+  OwnerSkillsSnapshotSchema,
   PERSONAL_INSTRUCTIONS_RUNTIME_PATH,
   PersonalInstructionsSchema,
   ProjectSecretSnapshotSchema,
@@ -124,6 +126,11 @@ describe("validation broker", () => {
     const projectInstructions = await request("/runtime/v1/project-instructions");
     expect(projectInstructions.status).toBe(200);
     expect(await projectInstructions.json()).toEqual({ content: "", revision: 0 });
+    const ownerSkills = await request(OWNER_SKILLS_RUNTIME_PATH);
+    expect(ownerSkills.status).toBe(200);
+    const skills = await ownerSkills.json();
+    expect(Check(OwnerSkillsSnapshotSchema, skills)).toBe(true);
+    expect(skills).toEqual({ skills: [] });
     const gitIdentity = await request(GIT_IDENTITY_RUNTIME_PATH);
     expect(gitIdentity.status).toBe(200);
     expect(await gitIdentity.json()).toEqual({ name: "", email: "" });

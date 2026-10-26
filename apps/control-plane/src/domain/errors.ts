@@ -128,6 +128,12 @@ export type ProjectSecretPointerConflict =
       readonly servers: readonly string[];
     };
 
+/** Owner-secret pointer access for a user that does not exist. */
+export interface UserNotFound {
+  readonly type: "user_not_found";
+}
+
+/** Shared by project and owner secrets (docs/owner-skills-secrets.md). */
 export type ProjectSecretError =
   | { readonly type: "project_secret_not_found"; readonly message: string }
   | { readonly type: "project_secret_conflict"; readonly message: string }

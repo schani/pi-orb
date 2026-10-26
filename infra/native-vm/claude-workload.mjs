@@ -328,6 +328,8 @@ async function run() {
             ["/runtime/v1/personal-instructions", "/runtime/v1/project-instructions"].includes(path)
           )
             return json(response, 200, { content: "", revision: 0 });
+          if (request.method === "GET" && path === "/runtime/v1/owner-skills")
+            return json(response, 200, { skills: [] });
           if (request.method === "GET" && path === "/runtime/v1/git-identity")
             return json(response, 200, { name: "", email: "" });
           if (request.method === "POST" && path === "/runtime/v1/orb/boot-context")

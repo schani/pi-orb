@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import type { HarnessSessionMetadata, HistoryRecord } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { err, ok } from "neverthrow";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ControlPlaneDatabase } from "../adapters/database.ts";
 import { jsonParam, type PostgreSQLClient } from "../adapters/pg/client.ts";
+import { PostgreSQLOwnerSkillStore } from "../adapters/pg/owner-skills.ts";
 import type { StoreError } from "../domain/errors.ts";
 import { messageBatchId } from "../domain/message-batch.ts";
 import type { OrbRow, ProjectRow } from "../domain/orb.ts";
@@ -16,6 +18,7 @@ import type {
   SigningKeyRow,
   SigningKeyStore,
 } from "../domain/ports.ts";
+import { ownerSkillStoreContractTests } from "./owner-skills-contract.ts";
 
 const task = new NoSimulationTask("store contract test", false);
 const OWNER = "00000000-0000-4000-8000-000000000099";
@@ -3377,6 +3380,42 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
     };
   });
 
+  ownerSkillStoreContractTests(name, async () => {
+    const subject = await open();
+    expect((await subject.database.migrate()).isOk()).toBe(true);
+    return {
+      store: subject.database.ownerSkills,
+      other: new PostgreSQLOwnerSkillStore(subject.client),
+      user: async () => {
+        const id = randomUUID();
+        expect(
+          (
+            await subject.database.users.resolveUser(
+              task,
+              { issuer: "owner-skill-contract", subject: id, email: null },
+              { id, now: 0 },
+            )
+          ).isOk(),
+        ).toBe(true);
+        return id;
+      },
+      seed: async (userId, names) => {
+        for (const skill of names)
+          expect(
+            (
+              await subject.client.query(
+                "INSERT INTO user_skills (user_id, name, content, updated_at) VALUES ($1, $2, $3, now())",
+                [userId, skill, `---\nname: ${skill}\ndescription: seed\n---\n`],
+              )
+            ).isOk(),
+          ).toBe(true);
+      },
+      close: async () => {
+        expect((await subject.database.close()).isOk()).toBe(true);
+      },
+    };
+  });
+
   signingKeyStoreContractTests(name, async () => {
     const subject = await open();
     const migrated = await subject.database.migrate();
@@ -3850,6 +3889,53 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
       const readFenced = await projectSecrets.readProjectSecretPointer(task, project.id);
       expect(readFenced.isErr() && readFenced.error.type).toBe("project_conflict");
       expect((await projectSecrets.deleteProjectSecretPointer(task, project.id)).isOk()).toBe(true);
+    });
+
+    it("implements user-secret pointer CAS fenced on the user existing", async () => {
+      const ownerSecrets = database.ownerSecrets;
+      expect((await ownerSecrets.readUserSecretPointer(task, OWNER))._unsafeUnwrap()).toBeNull();
+      const inserted = await ownerSecrets.casWriteUserSecretPointer(task, OWNER, null, {
+        revision: 1,
+        entries: { NPM_TOKEN: 2_000 },
+        secretVersion: "v1",
+        updatedAt: 2_000,
+      });
+      expect(inserted._unsafeUnwrap()).toEqual({
+        userId: OWNER,
+        rowVersion: 1,
+        revision: 1,
+        entries: { NPM_TOKEN: 2_000 },
+        secretVersion: "v1",
+        updatedAt: 2_000,
+      });
+      const stale = await ownerSecrets.casWriteUserSecretPointer(task, OWNER, null, {
+        revision: 2,
+        entries: { NPM_TOKEN: 3_000 },
+        secretVersion: "v2",
+        updatedAt: 3_000,
+      });
+      expect(stale._unsafeUnwrapErr().type).toBe("project_secret_pointer_conflict");
+      const updated = await ownerSecrets.casWriteUserSecretPointer(task, OWNER, 1, {
+        revision: 2,
+        entries: {},
+        secretVersion: "v2",
+        updatedAt: 3_000,
+      });
+      expect(updated._unsafeUnwrap()).toMatchObject({ rowVersion: 2, revision: 2, entries: {} });
+      expect((await ownerSecrets.readUserSecretPointer(task, OWNER))._unsafeUnwrap()).toEqual(
+        updated._unsafeUnwrap(),
+      );
+      const stranger = "00000000-0000-4000-8000-000000000098";
+      expect(
+        (await ownerSecrets.readUserSecretPointer(task, stranger))._unsafeUnwrapErr().type,
+      ).toBe("user_not_found");
+      const orphan = await ownerSecrets.casWriteUserSecretPointer(task, stranger, null, {
+        revision: 1,
+        entries: {},
+        secretVersion: "v9",
+        updatedAt: 1,
+      });
+      expect(orphan._unsafeUnwrapErr().type).toBe("user_not_found");
     });
 
     it("implements credential pointer CAS", async () => {

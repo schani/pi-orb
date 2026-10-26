@@ -37,7 +37,13 @@ it.each(["chromium", "webkit"] as const)(
       const gear = page.getByRole("button", { name: "Settings", exact: true });
       await gear.click();
       const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
-      await check(dialog.getByRole("tab")).toHaveText(["Instructions", "Git", "Claude"]);
+      await check(dialog.getByRole("tab")).toHaveText([
+        "Instructions",
+        "Skills",
+        "Secrets",
+        "Git",
+        "Claude",
+      ]);
       await dialog.getByRole("tab", { name: "Git", exact: true }).click();
       const name = dialog.getByRole("textbox", { name: "user.name", exact: true });
       const email = dialog.getByRole("textbox", { name: "user.email", exact: true });
