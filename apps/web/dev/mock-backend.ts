@@ -44,7 +44,7 @@ import {
   validateRepositoryUrl,
   type WorkspaceUpload,
 } from "@pi-orb/protocol";
-import { err, ok, type Result } from "neverthrow";
+import { ok } from "neverthrow";
 import { Check } from "typebox/value";
 import type { Plugin } from "vite";
 import { WebSocket, WebSocketServer } from "ws";
@@ -99,7 +99,6 @@ interface MockState {
   personalInstructions: PersonalInstructions;
   gitIdentity: GitIdentity;
   ownerSkills: Map<string, { content: string; description: string; updatedAt: string }>;
-  ownerSecrets: Map<string, { value: string; updatedAt: string }>;
   projectInstructions: Map<string, ProjectInstructions>;
 }
 
@@ -864,7 +863,15 @@ function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
     liveSessions: new Map(),
     lazyRunning: new Map(),
     startupTimers: new Map(),
+    // Owner secrets share the project route under the "owner" key.
     projectSecrets: new Map([
+      [
+        "owner",
+        new Map([
+          ["DATADOG_API_KEY", { value: "fixture-datadog-secret", updatedAt: createdAt }],
+          ["GITHUB_TOKEN", { value: "fixture-github-secret", updatedAt: createdAt }],
+        ]),
+      ],
       [
         PROJECT_ID,
         new Map([
@@ -909,53 +916,24 @@ function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
     personalInstructions: { content: "", revision: 0 },
     gitIdentity: { name: "", email: "" },
     ownerSkills: new Map(
-      [
-        [
-          "release-notes",
-          "Draft release notes from merged PRs since the last tag.",
-          "# Release notes\n\n1. Find the latest tag: `git describe --tags --abbrev=0`.\n2. List PRs merged since then with `gh pr list --state merged`.\n3. Group by user-visible change; drop internal refactors.\n",
-        ],
-        [
-          "pg-migrations",
-          "Write PostgreSQL migrations that are safe on a live database.",
-          "# PostgreSQL migrations\n\n- One migration per change; never edit an applied file.\n- Add columns nullable, backfill, then add constraints.\n- Create indexes CONCURRENTLY outside a transaction.\n",
-        ],
-      ].map(([name, description, body]) => [
-        name ?? "",
+      Object.entries({
+        "release-notes": "Draft release notes from merged PRs since the last tag.",
+        "pg-migrations": "Write PostgreSQL migrations that are safe on a live database.",
+      }).map(([name, description]) => [
+        name,
         {
-          content: `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}`,
-          description: description ?? "",
+          content: `---\nname: ${name}\ndescription: ${description}\n---\n`,
+          description,
           updatedAt: createdAt,
         },
       ]),
     ),
-    ownerSecrets: new Map([
-      ["DATADOG_API_KEY", { value: "fixture-datadog-secret", updatedAt: createdAt }],
-      ["GITHUB_TOKEN", { value: "fixture-github-secret", updatedAt: createdAt }],
-    ]),
     projectInstructions: new Map(),
     mcpGrants: new Set([
       `${PROJECT_ID}/10000000-0000-4000-8000-000000000001`,
       `${PROJECT_ID}/10000000-0000-4000-8000-000000000002`,
     ]),
   };
-}
-
-/** Frontend-only stand-in for the control plane's SKILL.md checks; bundled names are illustrative. */
-const BUNDLED_SKILLS = new Set(["charts", "codemode"]);
-function ownerSkillFrontmatter(
-  content: string,
-): Result<{ name: string; description: string }, string> {
-  const block = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(content)?.[1];
-  if (block === undefined) return err("SKILL.md must start with --- frontmatter");
-  const field = (key: string) =>
-    new RegExp(`^${key}:[ \t]*(.*)$`, "m").exec(block)?.[1]?.trim() ?? "";
-  const name = field("name");
-  const description = field("description");
-  if (!new RegExp(OWNER_SKILL_NAME_PATTERN).test(name))
-    return err("frontmatter name must be lowercase letters, digits and single hyphens");
-  if (description === "") return err("frontmatter description is required");
-  return ok({ name, description });
 }
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {
@@ -1466,97 +1444,48 @@ async function handleApi(
     return true;
   }
 
-  const ownerSkillRoute =
-    path === OWNER_SKILLS_PATH ? [path] : new RegExp(`^${OWNER_SKILLS_PATH}/([^/]+)$`).exec(path);
+  const ownerSkillRoute = new RegExp(`^${OWNER_SKILLS_PATH}(?:/([^/]+))?$`).exec(path);
   if (ownerSkillRoute !== null) {
-    response.setHeader("cache-control", "no-store");
     const target = ownerSkillRoute[1] === undefined ? null : decodeURIComponent(ownerSkillRoute[1]);
-    const view = () => ({
-      items: [...state.ownerSkills.entries()]
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([name, skill]) => ({ name, ...skill })),
-    });
-    const fail = (status: number, code: string, message: string) =>
-      sendJson(response, status, { error: { code, message, retryable: false } });
-    if (target !== null && method !== "POST" && !state.ownerSkills.has(target)) {
-      fail(404, "not_found", `Skill ${target} doesn't exist`);
+    const collection = method === "GET" || method === "POST";
+    if (collection !== (target === null) || (target !== null && !state.ownerSkills.has(target))) {
+      notFound(response);
       return true;
     }
-    if (method === "GET" && target === null) {
-      sendJson(response, 200, view());
-      return true;
-    }
-    if (method === "DELETE" && target !== null) {
-      state.ownerSkills.delete(target);
-      sendJson(response, 200, view());
-      return true;
-    }
-    if ((method === "POST" && target === null) || (method === "PUT" && target !== null)) {
+    if (method === "DELETE") state.ownerSkills.delete(target ?? "");
+    else if (method !== "GET") {
+      // Frontend-only stand-in for the control plane's SKILL.md checks.
       const body = await readJson(request);
       const content =
-        body !== null && typeof body === "object" && "content" in body ? body.content : null;
-      if (typeof content !== "string") {
-        fail(400, "invalid_request", "content must be a string");
-        return true;
-      }
-      const parsed = ownerSkillFrontmatter(content);
-      if (parsed.isErr()) {
-        fail(400, "invalid_request", parsed.error);
-        return true;
-      }
-      const { name, description } = parsed.value;
-      if (BUNDLED_SKILLS.has(name)) {
-        fail(409, "conflict", `${name} is a bundled skill`);
-        return true;
-      }
-      if (name !== target && state.ownerSkills.has(name)) {
-        fail(409, "conflict", `Skill ${name} already exists`);
+        body !== null && typeof body === "object" && "content" in body ? `${body.content}` : "";
+      const frontmatter = /^---\n([\s\S]*?)\n---/.exec(content)?.[1] ?? "";
+      const field = (key: string) =>
+        new RegExp(`^${key}: *(.*)$`, "m").exec(frontmatter)?.[1]?.trim() ?? "";
+      const name = field("name");
+      const description = field("description");
+      const problem = !new RegExp(OWNER_SKILL_NAME_PATTERN).test(name)
+        ? "frontmatter name is invalid"
+        : description === ""
+          ? "frontmatter description is required"
+          : ["charts", "codemode"].includes(name)
+            ? `${name} is a bundled skill`
+            : name !== target && state.ownerSkills.has(name)
+              ? `Skill ${name} already exists`
+              : null;
+      if (problem !== null) {
+        sendJson(response, 400, {
+          error: { code: "invalid_request", message: problem, retryable: false },
+        });
         return true;
       }
       if (target !== null) state.ownerSkills.delete(target);
       state.ownerSkills.set(name, { content, description, updatedAt: now() });
-      sendJson(response, 200, view());
-      return true;
     }
-    notFound(response);
-    return true;
-  }
-
-  const ownerSecretRoute =
-    path === OWNER_SECRETS_PATH ? [path] : new RegExp(`^${OWNER_SECRETS_PATH}/([^/]+)$`).exec(path);
-  if (ownerSecretRoute !== null) {
-    const secretName =
-      ownerSecretRoute[1] === undefined ? null : decodeURIComponent(ownerSecretRoute[1]);
-    const view = () => ({
-      revision: 1,
-      items: [...state.ownerSecrets.entries()]
-        .map(([name, entry]) => ({ name, updatedAt: entry.updatedAt }))
-        .sort((left, right) => left.name.localeCompare(right.name)),
+    sendJson(response, 200, {
+      items: [...state.ownerSkills]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([name, skill]) => ({ name, ...skill })),
     });
-    if (method === "GET" && secretName === null) {
-      sendJson(response, 200, view());
-      return true;
-    }
-    if (method === "PUT" && secretName !== null) {
-      const body = await readJson(request);
-      const value =
-        body !== null && typeof body === "object" && "value" in body ? body.value : null;
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(secretName) || typeof value !== "string" || !value) {
-        sendJson(response, 400, {
-          error: { code: "invalid_request", message: "invalid secret", retryable: false },
-        });
-        return true;
-      }
-      state.ownerSecrets.set(secretName, { value, updatedAt: now() });
-      sendJson(response, 200, view());
-      return true;
-    }
-    if (method === "DELETE" && secretName !== null) {
-      state.ownerSecrets.delete(secretName);
-      sendJson(response, 200, view());
-      return true;
-    }
-    notFound(response);
     return true;
   }
 
@@ -1699,17 +1628,19 @@ async function handleApi(
     return true;
   }
 
-  const projectSecretsRoute = /^\/api\/v1\/projects\/([^/]+)\/secrets(?:\/([^/]+))?$/.exec(path);
+  const projectSecretsRoute = new RegExp(
+    `^(?:/api/v1/projects/([^/]+)/secrets|${OWNER_SECRETS_PATH})(?:/([^/]+))?$`,
+  ).exec(path);
   if (projectSecretsRoute !== null) {
-    const projectId = decodeURIComponent(projectSecretsRoute[1] ?? "");
+    const projectId = decodeURIComponent(projectSecretsRoute[1] ?? "owner");
     const secretName =
       projectSecretsRoute[2] === undefined ? null : decodeURIComponent(projectSecretsRoute[2]);
     const project = state.projects.get(projectId);
-    if (project === undefined) {
+    if (project === undefined && projectId !== "owner") {
       notFound(response);
       return true;
     }
-    if (project.state === "deleting" && method !== "GET") {
+    if (project?.state === "deleting" && method !== "GET") {
       sendJson(response, 409, {
         error: {
           code: "conflict",

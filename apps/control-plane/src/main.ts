@@ -260,6 +260,12 @@ export async function main(
     return;
   }
   const issuerUrl = configuredIssuerUrl.value;
+  const platformSkillNames = await bundledPlatformSkillNames();
+  if (platformSkillNames.isErr()) {
+    bootTask.error(platformSkillNames.error.message);
+    process.exitCode = 1;
+    return;
+  }
   const migrationOwner = migrationOwnerInput(process.env);
   if (requestIdentity.value.kind === "local" && migrationOwner.isErr()) {
     bootTask.error("migration owner configuration invalid");
@@ -530,7 +536,7 @@ export async function main(
     constants: lifecycleConstantsForHost(hostProvider.kind),
     projectSecrets: { pointers: database.projectSecrets, secrets },
     ownerSecrets: { pointers: database.ownerSecrets, secrets },
-    ownerSkills: { store: database.ownerSkills, platformSkillNames: bundledPlatformSkillNames },
+    ownerSkills: { store: database.ownerSkills, platformSkillNames: platformSkillNames.value },
     personalInstructions: database.personalInstructions,
     gitIdentity: database.gitIdentity,
     modelUsage: database.modelUsage,

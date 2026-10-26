@@ -13,9 +13,9 @@ import type { PersonalInstructionsStore } from "../domain/personal-instructions.
 import type {
   ControlPlaneStore,
   CredentialPointerStoreFactory,
+  OwnerSecretsDeps,
   ProjectSecretPointerStore,
   SigningKeyStore,
-  UserSecretPointerStore,
 } from "../domain/ports.ts";
 import type { ProjectInstructionsStore } from "../domain/project-instructions.ts";
 import type { ResourceSource } from "../domain/resources.ts";
@@ -46,7 +46,7 @@ export interface ControlPlaneDatabase {
   resourceGate(source: ResourceSource): PgResourceGate;
   readonly pointers: CredentialPointerStoreFactory;
   readonly projectSecrets: ProjectSecretPointerStore;
-  readonly ownerSecrets: UserSecretPointerStore;
+  readonly ownerSecrets: OwnerSecretsDeps["pointers"];
   readonly ownerSkills: OwnerSkillStore;
   readonly personalInstructions: PersonalInstructionsStore;
   readonly gitIdentity: GitIdentityStore;

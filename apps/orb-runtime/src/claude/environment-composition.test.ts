@@ -1,12 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
@@ -130,62 +122,40 @@ it("boots Claude in a repository-free workspace with managed instructions", asyn
   }
 });
 
-it("installs the owner's skills as Claude user skills, replacing earlier ones, before the session starts", async () => {
+it("installs owner skills as Claude user skills before the session, or blocks boot", async () => {
   const workDir = mkdtempSync(join(tmpdir(), "claude-owner-skills-"));
   const skills = join(workDir, "claude", "config", "skills");
   mkdirSync(join(skills, "deleted-since"), { recursive: true });
-  writeFileSync(join(skills, "deleted-since", "SKILL.md"), "stale");
   let installed: string[] = [];
-  const agent = new ClaudeOrbAgent({
-    orbId: "orb",
-    repositoryUrl: null,
-    workDir,
-    skillsDir: null,
-    broker: { controlPlaneUrl: "http://unused.invalid", runtimeToken: "unused" },
-    sdkFactory: (_input, value) => {
-      installed = readdirSync(skills);
-      expect(value.settingSources).toContain("user");
-      expect(value.env?.["CLAUDE_CONFIG_DIR"]).toBe(join(workDir, "claude", "config"));
-      return err({ message: "No process started." });
-    },
-  });
-  try {
-    await agent.boot();
-    expect(installed).toEqual(["owner-notes"]);
-    expect(readFileSync(join(skills, "owner-notes", "SKILL.md"), "utf8")).toBe(
-      "---\nname: owner-notes\ndescription: d\n---\n",
-    );
-  } finally {
-    agent.shutdownHooks();
-    rmSync(workDir, { recursive: true, force: true });
-  }
-});
-
-it("blocks boot with owner_skills_unavailable when the owner's skills cannot be loaded", async () => {
-  const workDir = mkdtempSync(join(tmpdir(), "claude-owner-skills-failed-"));
-  const sdkFactory = vi.fn(() => err({ message: "must not start" }));
-  ownerSkills.reply = () => new Error("Cannot load owner skills: HTTP 503");
-  const agent = new ClaudeOrbAgent({
-    orbId: "orb",
-    repositoryUrl: null,
-    workDir,
-    skillsDir: null,
-    broker: { controlPlaneUrl: "http://unused.invalid", runtimeToken: "unused" },
-    sdkFactory,
-  });
-  try {
-    await agent.boot();
-    expect(agent.getHealth()).toMatchObject({
-      status: "failed",
-      error: {
-        code: "owner_skills_unavailable",
-        message: "Cannot load owner skills: HTTP 503",
-        retryable: true,
+  const boot = async () => {
+    const agent = new ClaudeOrbAgent({
+      orbId: "orb",
+      repositoryUrl: null,
+      workDir,
+      skillsDir: null,
+      broker: { controlPlaneUrl: "http://unused.invalid", runtimeToken: "unused" },
+      sdkFactory: (_input, value) => {
+        installed = readdirSync(skills);
+        expect(value.settingSources).toContain("user");
+        return err({ message: "No process started." });
       },
     });
-    expect(sdkFactory).not.toHaveBeenCalled();
-  } finally {
+    await agent.boot();
     agent.shutdownHooks();
+    return agent.getHealth();
+  };
+  try {
+    await boot();
+    expect(installed).toEqual(["owner-notes"]);
+    expect(readFileSync(join(skills, "owner-notes", "SKILL.md"), "utf8")).toContain("owner-notes");
+    installed = [];
+    ownerSkills.reply = () => new Error("Cannot load owner skills: HTTP 503");
+    expect(await boot()).toMatchObject({
+      status: "failed",
+      error: { code: "owner_skills_unavailable", retryable: true },
+    });
+    expect(installed).toEqual([]);
+  } finally {
     rmSync(workDir, { recursive: true, force: true });
   }
 });

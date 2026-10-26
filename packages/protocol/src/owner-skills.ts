@@ -12,12 +12,11 @@ export const OWNER_SKILL_MAX_DESCRIPTION = 1024;
 /** Agent Skills name rule shared by Pi and Claude Code: lowercase, digits, single hyphens, ≤ 64. */
 export const OWNER_SKILL_NAME_PATTERN = "^(?=.{1,64}$)[a-z0-9]+(-[a-z0-9]+)*$";
 
-export const OwnerSkillNameSchema = Type.String({ pattern: OWNER_SKILL_NAME_PATTERN });
+const OwnerSkillNameSchema = Type.String({ pattern: OWNER_SKILL_NAME_PATTERN });
 const ContentSchema = Type.String({ maxLength: OWNER_SKILL_MAX_BYTES, pattern: "^[^\\u0000]*$" });
 
 /** POST creates and PUT replaces; the frontmatter name is authoritative (PUT may rename). */
 export const WriteOwnerSkillRequestSchema = Type.Object({ content: ContentSchema }, closed);
-export type WriteOwnerSkillRequest = Static<typeof WriteOwnerSkillRequestSchema>;
 
 export const OwnerSkillSchema = Type.Object(
   {

@@ -56,9 +56,9 @@ async function fixture(repositoryUrl: string | null = makeProjectRow("project").
   )._unsafeUnwrap();
   (await database.projectInstructions.replace(task, project.id, "project-v1"))._unsafeUnwrap();
   (
-    await database.ownerSkills.create(task, project.ownerUserId, {
-      name: "owner-proof",
-      content: ownerSkill("v1"),
+    await database.ownerSkills.apply(task, project.ownerUserId, {
+      kind: "create",
+      skill: { name: "owner-proof", content: ownerSkill("v1") },
     })
   )._unsafeUnwrap();
   const acquired = barrier(),
@@ -310,9 +310,10 @@ it.each(["manual", "sleep"] as const)(
         await f.database.projectInstructions.replace(f.task, f.project.id, "project-v2")
       )._unsafeUnwrap();
       (
-        await f.database.ownerSkills.replace(f.task, f.project.ownerUserId, "owner-proof", {
-          name: "proof",
-          content: ownerSkill("v2", "proof"),
+        await f.database.ownerSkills.apply(f.task, f.project.ownerUserId, {
+          kind: "replace",
+          name: "owner-proof",
+          skill: { name: "proof", content: ownerSkill("v2", "proof") },
         })
       )._unsafeUnwrap();
       await f.state("starting");

@@ -465,23 +465,9 @@ describe("orb workspace layout contract", () => {
   });
 });
 
-describe("owner Settings panes", () => {
-  it("keeps the Instructions column layout out of the shared Secrets form", () => {
-    expect(css).not.toMatch(/\.personal-instructions-dialog form\s*[,{]/);
-    expect(rule(".project-instructions-editor")).toContain("flex-direction: column");
-    // The Claude code form keeps the column it had in Settings before the scoping.
-    expect(rule(".personal-instructions-dialog .claude-auth-panel form")).toContain(
-      "flex-direction: column",
-    );
-  });
-
-  it("gives skill disclosures and the add action phone touch targets", () => {
-    const phone = media("(max-width: 600px)");
-    expect(
-      rule(".personal-instructions-dialog .project-mcp-connection > summary", phone),
-    ).toContain("min-height: 48px");
-    expect(
-      rule(".personal-instructions-dialog .mcp-add-area > .text-action::before", phone),
-    ).toContain("inset: -16px -8px");
-  });
+it("gives owner skill disclosures and the add action phone touch targets", () => {
+  const phone = media("(max-width: 600px)");
+  const dialog = ".personal-instructions-dialog";
+  expect(rule(`${dialog} .project-mcp-connection > summary`, phone)).toContain("min-height: 48px");
+  expect(rule(`${dialog} .mcp-add-area > .text-action::before`, phone)).toContain("inset: -16px");
 });

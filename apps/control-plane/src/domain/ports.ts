@@ -25,7 +25,6 @@ import type {
   SigningKeyConflict,
   StateConflict,
   StoreError,
-  UserNotFound,
 } from "./errors.ts";
 import type {
   OrbDeletionRow,
@@ -817,14 +816,15 @@ export interface AuthGate {
 // ---------------------------------------------------------------------------
 // Project secrets (docs/credentials.md)
 
+/** Project bundles carry `projectId`; owner bundles carry `userId` instead. */
 export interface StoredProjectSecretBundle {
-  readonly projectId: string;
+  readonly projectId?: string;
+  readonly userId?: string;
   readonly revision: number;
   readonly values: Readonly<Record<string, string>>;
 }
 
 export interface ProjectSecretPointerRow {
-  readonly projectId: string;
   readonly rowVersion: number;
   readonly revision: number;
   /** Name -> wall-clock ms of the latest write. Contains no values. */
@@ -836,12 +836,12 @@ export interface ProjectSecretPointerRow {
 export type ProjectSecretPointerWrite = Omit<ProjectSecretPointerRow, "projectId" | "rowVersion">;
 
 export interface ProjectSecretPointerStore {
-  readProjectSecretPointer(
+  readSecretPointer(
     task: SimulationTask,
     projectId: string,
   ): ResultAsync<ProjectSecretPointerRow | null, StoreError | ProjectConflict>;
   /** Active-project CAS; atomically refuses removal of names referenced by the current MCP catalog. */
-  casWriteProjectSecretPointer(
+  casWriteSecretPointer(
     task: SimulationTask,
     projectId: string,
     expectedRowVersion: number | null,
@@ -862,35 +862,9 @@ export interface ProjectSecretsDeps {
   readonly secrets: CredentialSecretStore;
 }
 
-/** Owner secrets apply to every project of the user (docs/owner-skills-secrets.md). */
-export interface StoredUserSecretBundle {
-  readonly userId: string;
-  readonly revision: number;
-  readonly values: Readonly<Record<string, string>>;
-}
-
-export type UserSecretPointerRow = Omit<ProjectSecretPointerRow, "projectId"> & {
-  readonly userId: string;
-};
-
-export interface UserSecretPointerStore {
-  readUserSecretPointer(
-    task: SimulationTask,
-    userId: string,
-  ): ResultAsync<UserSecretPointerRow | null, StoreError | UserNotFound>;
-  casWriteUserSecretPointer(
-    task: SimulationTask,
-    userId: string,
-    expectedRowVersion: number | null,
-    next: ProjectSecretPointerWrite,
-  ): ResultAsync<
-    UserSecretPointerRow,
-    StoreError | UserNotFound | { readonly type: "project_secret_pointer_conflict" }
-  >;
-}
-
+/** Owner secrets reuse the project-secret engine with a user-keyed pointer (docs/owner-skills-secrets.md). */
 export interface OwnerSecretsDeps {
-  readonly pointers: UserSecretPointerStore;
+  readonly pointers: Pick<ProjectSecretPointerStore, "readSecretPointer" | "casWriteSecretPointer">;
   readonly secrets: CredentialSecretStore;
 }
 
@@ -978,7 +952,6 @@ export type StoredSecret =
   | StoredCredential
   | StoredSigningKey
   | StoredProjectSecretBundle
-  | StoredUserSecretBundle
   | StoredClaudeSubscriptionCredential;
 
 export interface CredentialSecretStore {

@@ -86,7 +86,6 @@ import { sendGitIdentity } from "./git-identity.ts";
 import { sendHistoryStream } from "./history-stream.ts";
 import { oauthBinding, sendOAuthError } from "./mcp-oauth-routes.ts";
 import { sendMcpError } from "./mcp-routes.ts";
-import { sendOwnerSkillError } from "./owner-skills.ts";
 import { sendProjectInstructionsError } from "./project-instructions.ts";
 
 export interface RuntimeRouteDeps {
@@ -768,10 +767,8 @@ export function registerRuntimeRoutes(
     reply.header("cache-control", "no-store");
     const auth = await authenticate(request.headers.authorization);
     if (auth.kind === "unavailable")
-      return sendOwnerSkillError(reply, {
-        type: "owner_skill_error",
-        code: "unavailable",
-        message: "Owner skills unavailable",
+      return reply.status(503).send({
+        error: { code: "unavailable", message: "Owner skills unavailable", retryable: true },
       });
     if (auth.kind !== "orb") return sendUnauthorized(reply);
     const project = await deps.store.getProject(task, auth.orb.projectId);
@@ -781,7 +778,12 @@ export function registerRuntimeRoutes(
         error: { code: "internal", message: "orb project is missing", retryable: false },
       });
     const result = await readOwnerSkillsSnapshot(task, deps.ownerSkills, project.value.ownerUserId);
-    return result.isErr() ? sendOwnerSkillError(reply, result.error) : reply.send(result.value);
+    if (result.isErr()) {
+      const { code, message } = result.error;
+      const retryable = code === "unavailable";
+      return reply.status(retryable ? 503 : 500).send({ error: { code, message, retryable } });
+    }
+    return reply.send(result.value);
   });
 
   app.get(GIT_IDENTITY_RUNTIME_PATH, async (request, reply) => {
@@ -822,7 +824,7 @@ export function registerRuntimeRoutes(
     const snapshot = await getOrbSecretSnapshot(
       task,
       { project: deps.projectSecrets, owner: deps.ownerSecrets },
-      { projectId: project.value.id, ownerUserId: project.value.ownerUserId },
+      project.value,
     );
     if (snapshot.isErr()) {
       const internal = snapshot.error.type === "project_secret_corruption";

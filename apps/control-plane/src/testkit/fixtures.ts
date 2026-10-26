@@ -28,7 +28,6 @@ import { makeHostingHarness } from "./hosting.ts";
 import { FakeOwnerSkillStore } from "./owner-skills.ts";
 import { FakePersonalInstructionsStore } from "./personal-instructions.ts";
 import { FakeProjectInstructionsStore } from "./project-instructions.ts";
-import { FakeUserSecretPointerStore } from "./project-secrets.ts";
 import { InMemoryControlPlaneStore } from "./store.ts";
 import {
   FakeMintIdSource,
@@ -96,9 +95,8 @@ export function makeHarness(options?: {
     generate: (_task, input) => okAsync(`Work on ${input.projectName}`),
   };
   const projectSecretPointers: ProjectSecretPointerStore = {
-    readProjectSecretPointer: () => okAsync(null),
-    casWriteProjectSecretPointer: () =>
-      errAsync({ type: "project_secret_pointer_conflict" as const }),
+    readSecretPointer: () => okAsync(null),
+    casWriteSecretPointer: () => errAsync({ type: "project_secret_pointer_conflict" as const }),
     deleteProjectSecretPointer: () => okAsync(undefined),
   };
   const hosting = makeHostingHarness({
@@ -131,14 +129,11 @@ export function makeHarness(options?: {
     control: new ControlState(),
     constants: { ...TEST_CONSTANTS, ...options?.constants },
     projectSecrets: { pointers: projectSecretPointers, secrets: new FakeSecretStore() },
-    ownerSecrets: {
-      pointers: new FakeUserSecretPointerStore(TEST_USER_ID),
-      secrets: new FakeSecretStore(),
-    },
+    ownerSecrets: { pointers: projectSecretPointers, secrets: new FakeSecretStore() },
     hosting: hosting.deps,
     ownerSkills: {
-      store: new FakeOwnerSkillStore([TEST_USER_ID]),
-      platformSkillNames: () => okAsync(new Set(["charts", "codemode"])),
+      store: new FakeOwnerSkillStore(),
+      platformSkillNames: new Set(["charts", "codemode"]),
     },
     personalInstructions: new FakePersonalInstructionsStore([TEST_USER_ID]),
     gitIdentity: new FakeGitIdentityStore(),

@@ -10,13 +10,10 @@ import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type { ProjectConflict, ProjectSecretError, StoreError } from "./errors.ts";
 import type {
-  CredentialSecretStore,
   OwnerSecretsDeps,
   ProjectSecretPointerRow,
-  ProjectSecretPointerWrite,
   ProjectSecretsDeps,
   StoredProjectSecretBundle,
-  StoredUserSecretBundle,
 } from "./ports.ts";
 
 export const PROJECT_SECRETS_PROVIDER = "project-secrets";
@@ -50,39 +47,23 @@ const conflict = (message: string): ProjectSecretError => ({
   message,
 });
 
-type Label = "project" | "owner";
-type SecretBundle = StoredProjectSecretBundle | StoredUserSecretBundle;
-type SecretPointer = Omit<ProjectSecretPointerRow, "projectId">;
-
-/** How a scope's pointer CAS failed; `refused` is final, `unknown` may have committed. */
-type CasFailure =
-  | { readonly type: "pointer_conflict" }
-  | { readonly type: "refused"; readonly error: ProjectSecretError }
-  | { readonly type: "unknown"; readonly error: StoreError };
-
-/**
- * One bundle owner: a project or a user (docs/owner-skills-secrets.md). The
- * stable read, CAS mutation, caps and orphan handling below are shared; a scope
- * only supplies its pointer store, provider namespace and bundle identity.
- */
-interface SecretScope {
-  readonly label: Label;
+/** Project and owner secrets share this engine; a scope names the bundle owner. */
+interface Scope {
   readonly provider: string;
   readonly key: "projectId" | "userId";
   readonly id: string;
-  readonly secrets: CredentialSecretStore;
-  read(task: SimulationTask): ResultAsync<SecretPointer | null, ProjectSecretError>;
-  cas(
-    task: SimulationTask,
-    expectedRowVersion: number | null,
-    next: ProjectSecretPointerWrite,
-  ): ResultAsync<SecretPointer, CasFailure>;
 }
+const project = (id: string): Scope => ({
+  provider: PROJECT_SECRETS_PROVIDER,
+  key: "projectId",
+  id,
+});
+const owner = (id: string): Scope => ({ provider: OWNER_SECRETS_PROVIDER, key: "userId", id });
 
-function fromStore(error: StoreError, label: Label = "project"): ProjectSecretError {
+function fromStore(error: StoreError): ProjectSecretError {
   return error.code === "corruption" || error.code === "invariant"
-    ? corruption(`${label} secret storage is inconsistent`)
-    : retryable(`${label} secrets are temporarily unavailable`);
+    ? corruption("secret storage is inconsistent")
+    : retryable("secrets are temporarily unavailable");
 }
 
 function fromProjectConflict(error: ProjectConflict): ProjectSecretError {
@@ -95,86 +76,9 @@ function fromPointerReadError(error: StoreError | ProjectConflict): ProjectSecre
   return error.type === "project_conflict" ? fromProjectConflict(error) : fromStore(error);
 }
 
-function projectScope(deps: ProjectSecretsDeps, projectId: string): SecretScope {
-  return {
-    label: "project",
-    provider: PROJECT_SECRETS_PROVIDER,
-    key: "projectId",
-    id: projectId,
-    secrets: deps.secrets,
-    read: (task) =>
-      deps.pointers.readProjectSecretPointer(task, projectId).mapErr(fromPointerReadError),
-    cas: (task, expectedRowVersion, next) =>
-      deps.pointers
-        .casWriteProjectSecretPointer(task, projectId, expectedRowVersion, next)
-        .mapErr((error): CasFailure => {
-          switch (error.type) {
-            case "project_secret_pointer_conflict":
-              return { type: "pointer_conflict" };
-            case "project_conflict":
-              return { type: "refused", error: fromProjectConflict(error) };
-            case "project_secret_in_use":
-              return {
-                type: "refused",
-                error: conflict(
-                  `Cannot delete ${error.secrets.join(", ")}: used by MCP ${error.servers.join(", ")}`,
-                ),
-              };
-            case "store_error":
-              return { type: "unknown", error };
-          }
-        }),
-  };
-}
-
-const userNotFound: ProjectSecretError = {
-  type: "project_secret_not_found",
-  message: "user not found",
-};
-
-/** Users are never deleted, so owner secrets have no deletion fence or MCP references. */
-function ownerScope(deps: OwnerSecretsDeps, userId: string): SecretScope {
-  return {
-    label: "owner",
-    provider: OWNER_SECRETS_PROVIDER,
-    key: "userId",
-    id: userId,
-    secrets: deps.secrets,
-    read: (task) =>
-      deps.pointers
-        .readUserSecretPointer(task, userId)
-        .mapErr((error) =>
-          error.type === "user_not_found" ? userNotFound : fromStore(error, "owner"),
-        ),
-    cas: (task, expectedRowVersion, next) =>
-      deps.pointers
-        .casWriteUserSecretPointer(task, userId, expectedRowVersion, next)
-        .mapErr((error): CasFailure => {
-          switch (error.type) {
-            case "project_secret_pointer_conflict":
-              return { type: "pointer_conflict" };
-            case "user_not_found":
-              return { type: "refused", error: userNotFound };
-            case "store_error":
-              return { type: "unknown", error };
-          }
-        }),
-  };
-}
-
-function bundleOf(
-  scope: SecretScope,
-  revision: number,
-  values: Record<string, string>,
-): SecretBundle {
-  return scope.key === "projectId"
-    ? { projectId: scope.id, revision, values }
-    : { userId: scope.id, revision, values };
-}
-
-function validBundle(value: unknown, key: SecretScope["key"]): value is SecretBundle {
+function validBundle(value: unknown, key: Scope["key"]): value is StoredProjectSecretBundle {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const candidate = value as Partial<StoredProjectSecretBundle & StoredUserSecretBundle>;
+  const candidate = value as Partial<StoredProjectSecretBundle>;
   if (
     typeof candidate[key] !== "string" ||
     !Number.isInteger(candidate.revision) ||
@@ -191,16 +95,7 @@ function validBundle(value: unknown, key: SecretScope["key"]): value is SecretBu
   );
 }
 
-/** The bundle a pointer names: right shape, right owner, right revision. */
-function matches(scope: SecretScope, value: unknown, pointer: SecretPointer): boolean {
-  return (
-    validBundle(value, scope.key) &&
-    (value as Partial<Record<SecretScope["key"], string>>)[scope.key] === scope.id &&
-    value.revision === pointer.revision
-  );
-}
-
-function metadata(pointer: SecretPointer | null): ProjectSecretList {
+function metadata(pointer: ProjectSecretPointerRow | null): ProjectSecretList {
   if (pointer === null) return { revision: 0, items: [] };
   return {
     revision: pointer.revision,
@@ -212,92 +107,74 @@ function metadata(pointer: SecretPointer | null): ProjectSecretList {
 
 async function list(
   task: SimulationTask,
-  scope: SecretScope,
+  deps: OwnerSecretsDeps,
+  scope: Scope,
 ): Promise<Result<ProjectSecretList, ProjectSecretError>> {
-  const pointer = await scope.read(task);
-  return pointer.isErr() ? err(pointer.error) : ok(metadata(pointer.value));
+  const pointer = await deps.pointers.readSecretPointer(task, scope.id);
+  return pointer.isErr() ? err(fromPointerReadError(pointer.error)) : ok(metadata(pointer.value));
 }
 
 /** Stable pointer/version/pointer read: one complete old or new revision, never a mixture. */
 async function snapshot(
   task: SimulationTask,
-  scope: SecretScope,
+  deps: OwnerSecretsDeps,
+  scope: Scope,
 ): Promise<Result<ProjectSecretSnapshot, ProjectSecretError>> {
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const before = await scope.read(task);
-    if (before.isErr()) return err(before.error);
+    const before = await deps.pointers.readSecretPointer(task, scope.id);
+    if (before.isErr()) return err(fromPointerReadError(before.error));
     if (before.value === null) return ok({ revision: 0, values: {} });
-    const payload = await scope.secrets.readSecret<SecretBundle>(
+    const payload = await deps.secrets.readSecret<StoredProjectSecretBundle>(
       task,
       scope.provider,
       before.value.secretVersion,
     );
-    if (payload.isErr()) return err(fromStore(payload.error, scope.label));
-    const after = await scope.read(task);
-    if (after.isErr()) return err(after.error);
+    if (payload.isErr()) return err(fromStore(payload.error));
+    const after = await deps.pointers.readSecretPointer(task, scope.id);
+    if (after.isErr()) return err(fromPointerReadError(after.error));
     if (after.value?.rowVersion !== before.value.rowVersion) continue;
-    if (payload.value === null) return err(corruption(`${scope.label} secret bundle is missing`));
-    if (!matches(scope, payload.value, before.value)) {
-      return err(corruption(`${scope.label} secret bundle identity does not match its pointer`));
+    if (payload.value === null) return err(corruption("secret bundle is missing"));
+    if (
+      !validBundle(payload.value, scope.key) ||
+      payload.value[scope.key] !== scope.id ||
+      payload.value.revision !== before.value.revision
+    ) {
+      return err(corruption("secret bundle identity does not match its pointer"));
     }
     if (Object.values(payload.value.values).some((value) => value.includes("\0"))) {
-      return err(corruption(`${scope.label} secret bundle contains an invalid value`));
+      return err(corruption("secret bundle contains an invalid value"));
     }
     return ok({ revision: payload.value.revision, values: { ...payload.value.values } });
   }
-  return err(retryable(`${scope.label} secrets changed too frequently to read a stable snapshot`));
+  return err(retryable("secrets changed too frequently to read a stable snapshot"));
 }
 
-export function listProjectSecrets(
+export const listProjectSecrets = (task: SimulationTask, deps: ProjectSecretsDeps, id: string) =>
+  list(task, deps, project(id));
+export const listOwnerSecrets = (task: SimulationTask, deps: OwnerSecretsDeps, id: string) =>
+  new ResultAsync(list(task, deps, owner(id)));
+export const getProjectSecretSnapshot = (
   task: SimulationTask,
   deps: ProjectSecretsDeps,
-  projectId: string,
-): Promise<Result<ProjectSecretList, ProjectSecretError>> {
-  return list(task, projectScope(deps, projectId));
-}
-
-export function getProjectSecretSnapshot(
-  task: SimulationTask,
-  deps: ProjectSecretsDeps,
-  projectId: string,
-): Promise<Result<ProjectSecretSnapshot, ProjectSecretError>> {
-  return snapshot(task, projectScope(deps, projectId));
-}
-
-export function listOwnerSecrets(
-  task: SimulationTask,
-  deps: OwnerSecretsDeps,
-  userId: string,
-): Promise<Result<ProjectSecretList, ProjectSecretError>> {
-  return list(task, ownerScope(deps, userId));
-}
-
-export function getOwnerSecretSnapshot(
-  task: SimulationTask,
-  deps: OwnerSecretsDeps,
-  userId: string,
-): Promise<Result<ProjectSecretSnapshot, ProjectSecretError>> {
-  return snapshot(task, ownerScope(deps, userId));
-}
+  id: string,
+) => snapshot(task, deps, project(id));
 
 /**
- * What an orb receives: its project owner's secrets overlaid by its project's
- * (project wins per name). Each bundle is read stably on its own. The runtime
- * ignores `revision`; the sum of both monotonic revisions changes whenever
- * either bundle does.
+ * What an orb receives: its project owner's secrets overlaid by the project's, so a project
+ * secret wins per name. The runtime ignores `revision`; the sum changes whenever either does.
  */
 export async function getOrbSecretSnapshot(
   task: SimulationTask,
   deps: { readonly project: ProjectSecretsDeps; readonly owner: OwnerSecretsDeps },
-  ids: { readonly projectId: string; readonly ownerUserId: string },
+  row: { readonly id: string; readonly ownerUserId: string },
 ): Promise<Result<ProjectSecretSnapshot, ProjectSecretError>> {
-  const owner = await getOwnerSecretSnapshot(task, deps.owner, ids.ownerUserId);
-  if (owner.isErr()) return err(owner.error);
-  const project = await getProjectSecretSnapshot(task, deps.project, ids.projectId);
-  if (project.isErr()) return err(project.error);
+  const base = await snapshot(task, deps.owner, owner(row.ownerUserId));
+  if (base.isErr()) return err(base.error);
+  const own = await snapshot(task, deps.project, project(row.id));
+  if (own.isErr()) return err(own.error);
   return ok({
-    revision: owner.value.revision + project.value.revision,
-    values: { ...owner.value.values, ...project.value.values },
+    revision: base.value.revision + own.value.revision,
+    values: { ...base.value.values, ...own.value.values },
   });
 }
 
@@ -322,36 +199,42 @@ function validateInput(name: string, value: string): ProjectSecretError | null {
 
 async function readBundleForMutation(
   task: SimulationTask,
-  scope: SecretScope,
-  pointer: SecretPointer | null,
-): Promise<Result<SecretBundle, ProjectSecretError>> {
-  if (pointer === null) return ok(bundleOf(scope, 0, {}));
-  const read = await scope.secrets.readSecret<SecretBundle>(
+  deps: OwnerSecretsDeps,
+  scope: Scope,
+  pointer: ProjectSecretPointerRow | null,
+): Promise<Result<StoredProjectSecretBundle, ProjectSecretError>> {
+  if (pointer === null) return ok({ [scope.key]: scope.id, revision: 0, values: {} });
+  const read = await deps.secrets.readSecret<StoredProjectSecretBundle>(
     task,
     scope.provider,
     pointer.secretVersion,
   );
-  if (read.isErr()) return err(fromStore(read.error, scope.label));
+  if (read.isErr()) return err(fromStore(read.error));
   if (read.value === null) {
     // Deletion may have fenced the project and destroyed this version after
     // the writer read its pointer. Re-read through the active-project gate so
     // that race is a conflict, not false corruption.
-    const current = await scope.read(task);
-    if (current.isErr()) return err(current.error);
+    const current = await deps.pointers.readSecretPointer(task, scope.id);
+    if (current.isErr()) return err(fromPointerReadError(current.error));
     if (current.value?.rowVersion !== pointer.rowVersion) {
       return err(retryable(POINTER_CHANGED));
     }
-    return err(corruption(`${scope.label} secret bundle is missing`));
+    return err(corruption("secret bundle is missing"));
   }
-  if (!matches(scope, read.value, pointer)) {
-    return err(corruption(`${scope.label} secret bundle identity does not match its pointer`));
+  if (
+    !validBundle(read.value, scope.key) ||
+    read.value[scope.key] !== scope.id ||
+    read.value.revision !== pointer.revision
+  ) {
+    return err(corruption("secret bundle identity does not match its pointer"));
   }
   return ok(read.value);
 }
 
 async function mutate(
   task: SimulationTask,
-  scope: SecretScope,
+  deps: OwnerSecretsDeps,
+  scope: Scope,
   name: string,
   value: string | null,
 ): Promise<Result<ProjectSecretList, ProjectSecretError>> {
@@ -363,9 +246,9 @@ async function mutate(
   }
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const current = await scope.read(task);
-    if (current.isErr()) return err(current.error);
-    const bundle = await readBundleForMutation(task, scope, current.value);
+    const current = await deps.pointers.readSecretPointer(task, scope.id);
+    if (current.isErr()) return err(fromPointerReadError(current.error));
+    const bundle = await readBundleForMutation(task, deps, scope, current.value);
     if (bundle.isErr()) {
       if (
         bundle.error.type === "project_secret_retryable" &&
@@ -382,57 +265,59 @@ async function mutate(
     if (value === null) delete values[name];
     else values[name] = value;
     if (Object.keys(values).length > PROJECT_SECRET_MAX_NAMES) {
-      return err({
-        type: "project_secret_invalid",
-        message: `${scope.label} has too many secrets`,
-      });
+      return err({ type: "project_secret_invalid", message: "too many secrets" });
     }
     const revision = bundle.value.revision + 1;
-    const nextBundle = bundleOf(scope, revision, values);
+    const nextBundle: StoredProjectSecretBundle = { [scope.key]: scope.id, revision, values };
     if (
       new TextEncoder().encode(JSON.stringify(nextBundle)).byteLength >
       PROJECT_SECRET_MAX_BUNDLE_BYTES
     ) {
-      return err({
-        type: "project_secret_invalid",
-        message: `${scope.label} secret bundle is too large`,
-      });
+      return err({ type: "project_secret_invalid", message: "secret bundle is too large" });
     }
-    const written = await scope.secrets.writeSecret(task, scope.provider, nextBundle);
-    if (written.isErr()) return err(fromStore(written.error, scope.label));
+    const written = await deps.secrets.writeSecret(task, scope.provider, nextBundle);
+    if (written.isErr()) return err(fromStore(written.error));
     const now = task.wallNow();
     const entries = { ...(current.value?.entries ?? {}) };
     if (value === null) delete entries[name];
     else entries[name] = now;
-    const committed = await scope.cas(task, current.value?.rowVersion ?? null, {
-      revision,
-      entries,
-      secretVersion: written.value.version,
-      updatedAt: now,
-    });
+    const committed = await deps.pointers.casWriteSecretPointer(
+      task,
+      scope.id,
+      current.value?.rowVersion ?? null,
+      { revision, entries, secretVersion: written.value.version, updatedAt: now },
+    );
     if (committed.isOk()) {
       if (current.value !== null) {
-        await scope.secrets.destroySecret(task, scope.provider, current.value.secretVersion);
+        await deps.secrets.destroySecret(task, scope.provider, current.value.secretVersion);
       }
       return ok(metadata(committed.value));
     }
-    if (committed.error.type === "refused") {
-      await scope.secrets.destroySecret(task, scope.provider, written.value.version);
-      return err(committed.error.error);
+    if (committed.error.type === "project_conflict") {
+      await deps.secrets.destroySecret(task, scope.provider, written.value.version);
+      return err(fromProjectConflict(committed.error));
     }
-    if (committed.error.type === "pointer_conflict") {
-      await scope.secrets.destroySecret(task, scope.provider, written.value.version);
+    if (committed.error.type === "project_secret_in_use") {
+      await deps.secrets.destroySecret(task, scope.provider, written.value.version);
+      return err(
+        conflict(
+          `Cannot delete ${committed.error.secrets.join(", ")}: used by MCP ${committed.error.servers.join(", ")}`,
+        ),
+      );
+    }
+    if (committed.error.type === "project_secret_pointer_conflict") {
+      await deps.secrets.destroySecret(task, scope.provider, written.value.version);
       continue;
     }
     // The CAS may have committed before its adapter reported failure. Read back
     // by exact version before deciding whether this version is orphaned.
-    const observed = await scope.read(task);
+    const observed = await deps.pointers.readSecretPointer(task, scope.id);
     if (observed.isOk() && observed.value?.secretVersion === written.value.version) {
       return ok(metadata(observed.value));
     }
-    return err(fromStore(committed.error.error, scope.label));
+    return err(fromStore(committed.error));
   }
-  return err(retryable(`${scope.label} secret update conflicted too many times`));
+  return err(retryable("secret update conflicted too many times"));
 }
 
 export function putProjectSecret(
@@ -442,7 +327,7 @@ export function putProjectSecret(
   name: string,
   value: string,
 ): ResultAsync<ProjectSecretList, ProjectSecretError> {
-  return new ResultAsync(mutate(task, projectScope(deps, projectId), name, value));
+  return new ResultAsync(mutate(task, deps, project(projectId), name, value));
 }
 
 export function deleteProjectSecret(
@@ -451,27 +336,23 @@ export function deleteProjectSecret(
   projectId: string,
   name: string,
 ): ResultAsync<ProjectSecretList, ProjectSecretError> {
-  return new ResultAsync(mutate(task, projectScope(deps, projectId), name, null));
+  return new ResultAsync(mutate(task, deps, project(projectId), name, null));
 }
 
-export function putOwnerSecret(
+export const putOwnerSecret = (
   task: SimulationTask,
   deps: OwnerSecretsDeps,
   userId: string,
   name: string,
   value: string,
-): ResultAsync<ProjectSecretList, ProjectSecretError> {
-  return new ResultAsync(mutate(task, ownerScope(deps, userId), name, value));
-}
+) => new ResultAsync(mutate(task, deps, owner(userId), name, value));
 
-export function deleteOwnerSecret(
+export const deleteOwnerSecret = (
   task: SimulationTask,
   deps: OwnerSecretsDeps,
   userId: string,
   name: string,
-): ResultAsync<ProjectSecretList, ProjectSecretError> {
-  return new ResultAsync(mutate(task, ownerScope(deps, userId), name, null));
-}
+) => new ResultAsync(mutate(task, deps, owner(userId), name, null));
 
 /** Project-deletion cleanup after the active-project fence has landed. */
 export function deleteAllProjectSecrets(

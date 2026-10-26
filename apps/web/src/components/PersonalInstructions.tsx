@@ -25,12 +25,7 @@ export function PersonalInstructionsButton() {
   const closeButton = useRef<HTMLButtonElement>(null);
   const git = useGitIdentity(dialog);
   const skills = useOwnerSkills(dialog);
-  const [secretsSaving, updateSecretsSaving] = useState(false);
-  const setSecretsSaving = (next: boolean) => {
-    // An explicit mutation may disable every control; keep keyboard focus inside the dialog.
-    if (next) dialog.current?.focus();
-    updateSecretsSaving(next);
-  };
+  const [secretsSaving, setSecretsSaving] = useState(false);
   const busy = saving || git.saving || skills.saving || secretsSaving;
   const epoch = useRef(0);
   const writePending = useRef(false);
@@ -63,11 +58,9 @@ export function PersonalInstructionsButton() {
     setDraft(result.value.content);
   };
   const close = () => {
-    const pending = writePending.current || git.writePending.current || skills.writePending.current;
-    if (pending || secretsSaving) return;
+    if (writePending.current || git.writePending.current || busy) return;
     epoch.current++;
     git.cancel();
-    skills.cancel();
     setOpen(false);
     setLoading(false);
     gear.current?.focus();
@@ -260,7 +253,11 @@ export function PersonalInstructionsButton() {
                 <ProjectSecretsSettings
                   project={null}
                   saving={secretsSaving}
-                  setSaving={setSecretsSaving}
+                  setSaving={(next) => {
+                    // A write disables every control; keep keyboard focus inside the dialog.
+                    if (next) dialog.current?.focus();
+                    setSecretsSaving(next);
+                  }}
                 />
               </div>
               <div

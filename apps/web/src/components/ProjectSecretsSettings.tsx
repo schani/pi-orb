@@ -8,13 +8,10 @@ import {
 } from "@pi-orb/protocol";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import {
-  deleteOwnerSecret,
   deleteProjectSecret,
   describeApiError,
   getProjectMcp,
-  listOwnerSecrets,
   listProjectSecrets,
-  putOwnerSecret,
   putProjectSecret,
 } from "../lib/api.ts";
 import { ProjectSecretKeyIcon } from "./ProjectSecretKeyIcon.tsx";
@@ -80,8 +77,7 @@ export function ProjectSecretsSettings({
 
   useEffect(() => {
     let active = true;
-    const read = projectId === null ? listOwnerSecrets() : listProjectSecrets(projectId);
-    void read.then((result) => {
+    void listProjectSecrets(projectId).then((result) => {
       if (!active) return;
       setLoading(false);
       if (result.isErr()) setError(describeApiError(result.error));
@@ -106,9 +102,7 @@ export function ProjectSecretsSettings({
     }
     setSaving(true);
     setError(null);
-    const result = await (projectId === null
-      ? putOwnerSecret(secretName, value)
-      : putProjectSecret(projectId, secretName, value));
+    const result = await putProjectSecret(projectId, secretName, value);
     setSaving(false);
     if (result.isErr()) {
       // Deliberately preserve both fields: a network failure must not destroy
@@ -127,9 +121,7 @@ export function ProjectSecretsSettings({
     if (!window.confirm(`Remove ${secretName} from every ${orbs} on its next start?`)) return;
     setSaving(true);
     setError(null);
-    const result = await (projectId === null
-      ? deleteOwnerSecret(secretName)
-      : deleteProjectSecret(projectId, secretName));
+    const result = await deleteProjectSecret(projectId, secretName);
     setSaving(false);
     if (result.isErr()) setError(describeApiError(result.error));
     else setSnapshot(result.value);

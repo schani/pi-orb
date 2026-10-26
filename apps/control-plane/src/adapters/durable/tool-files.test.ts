@@ -15,11 +15,6 @@ function fixture() {
     files: [
       { path: "AGENTS.md", bytes: Buffer.from("one\ntwo\nthree"), sha256: "" },
       { path: "/opt/pi-orb/skills/skill/SKILL.md", bytes: Buffer.from("platform"), sha256: "" },
-      {
-        path: "/opt/pi-orb/owner-skills/mine/SKILL.md",
-        bytes: Buffer.from("owner"),
-        sha256: "",
-      },
       { path: "image.png", bytes: Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]), sha256: "" },
       { path: "invalid.bin", bytes: Uint8Array.from([255]), sha256: "" },
       { path: "large.txt", bytes: Buffer.from("é".repeat(30_000)), sha256: "" },
@@ -69,16 +64,6 @@ describe("scoped agent files", () => {
         await f.files.read({ path: "/opt/pi-orb/skills/skill/SKILL.md" }, api, context)
       )._unsafeUnwrap()?.output,
     ).toEqual([{ type: "text", text: "platform" }]);
-    expect(
-      (
-        await f.files.read({ path: "/opt/pi-orb/owner-skills/x/../mine/SKILL.md" }, api, context)
-      )._unsafeUnwrap()?.output,
-    ).toEqual([{ type: "text", text: "owner" }]);
-    expect(
-      (
-        await f.files.read({ path: "/opt/pi-orb/owner-skills/other/SKILL.md" }, api, context)
-      ).isErr(),
-    ).toBe(true);
   });
   it("returns supported images and rejects invalid UTF8", async () => {
     const f = fixture();

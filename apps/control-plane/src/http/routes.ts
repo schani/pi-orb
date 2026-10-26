@@ -6,6 +6,7 @@ import {
   EnqueueOrbMessageRequestSchema,
   GIT_IDENTITY_PATH,
   OWNER_SECRETS_PATH,
+  OWNER_SKILLS_PATH,
   PERSONAL_INSTRUCTIONS_PATH,
   PollOrbMessagesRequestSchema,
   PROJECT_NAME_MAX_CHARS,
@@ -19,7 +20,7 @@ import {
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { ok, Result } from "neverthrow";
+import { errAsync, ok, Result, type ResultAsync } from "neverthrow";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import { enrichActivityHeadlines } from "../domain/activity-headlines.ts";
@@ -45,6 +46,11 @@ import { ackOrbAlert } from "../domain/orb-alerts.ts";
 import { normalizeOrbName, setOrbName } from "../domain/orb-naming.ts";
 import { readOrb, readProjectOrbs } from "../domain/orb-read.ts";
 import {
+  describeOwnerSkills,
+  type OwnerSkillError,
+  writeOwnerSkill,
+} from "../domain/owner-skills.ts";
+import {
   readPersonalInstructions,
   savePersonalInstructions,
 } from "../domain/personal-instructions.ts";
@@ -68,7 +74,6 @@ import { registerActivityHeadlineRoutes } from "./activity-headline-routes.ts";
 import { requirePrincipal } from "./browser-identity.ts";
 import { sendGitIdentity } from "./git-identity.ts";
 import { sendHistoryStream } from "./history-stream.ts";
-import { registerOwnerSkillsRoutes } from "./owner-skills.ts";
 import { registerProjectInstructionsRoutes } from "./project-instructions.ts";
 import { orbView, projectView, type ViewConfig } from "./views.ts";
 
@@ -161,6 +166,14 @@ function sendProjectWriteConflict(
         false,
       ),
     );
+}
+
+function sendOwnerSkillError(reply: FastifyReply, error: OwnerSkillError): FastifyReply {
+  const status = { invalid: 400, not_found: 404, conflict: 409, unavailable: 503, internal: 500 };
+  const code = error.code === "invalid" ? "invalid_request" : error.code;
+  return reply
+    .status(status[error.code])
+    .send(httpError(code, error.message, error.code === "unavailable"));
 }
 
 function sendProjectSecretError(reply: FastifyReply, error: ProjectSecretError): FastifyReply {
@@ -297,9 +310,6 @@ export function registerRoutes(
   app.get("/api/v1/system", async (_request, reply) => reply.send(system));
 
   registerProjectInstructionsRoutes(app, task, deps.projectInstructions);
-  registerOwnerSkillsRoutes(app, task, deps.ownerSkills, (request, reply) =>
-    selectedUser(request, reply, task, deps),
-  );
   registerActivityHeadlineRoutes(app, task, deps);
 
   app.get(USAGE_PATH, async (request, reply) => {
@@ -370,55 +380,55 @@ export function registerRoutes(
     return sendGitIdentity(reply, result);
   });
 
-  app.get(OWNER_SECRETS_PATH, async (request, reply) => {
-    reply.header("cache-control", "no-store");
-    const user = await selectedUser(request, reply, task, deps);
-    if (user === null) return;
-    const listed = await listOwnerSecrets(task, deps.ownerSecrets, user.id);
-    return listed.isErr() ? sendProjectSecretError(reply, listed.error) : reply.send(listed.value);
-  });
-
-  app.put<{ Params: { name: string } }>(`${OWNER_SECRETS_PATH}/:name`, async (request, reply) => {
-    reply.header("cache-control", "no-store");
-    const user = await selectedUser(request, reply, task, deps);
-    if (user === null) return;
-    if (!Check(ProjectSecretNameSchema, request.params.name)) {
-      return reply.status(400).send(httpError("invalid_request", "invalid secret name", false));
-    }
-    if (!Check(PutProjectSecretRequestSchema, request.body)) {
-      return reply.status(400).send(httpError("invalid_request", "invalid secret body", false));
-    }
-    const written = await putOwnerSecret(
-      task,
-      deps.ownerSecrets,
-      user.id,
-      request.params.name,
-      request.body.value,
-    );
-    return written.isErr()
-      ? sendProjectSecretError(reply, written.error)
-      : reply.send(written.value);
-  });
-
-  app.delete<{ Params: { name: string } }>(
-    `${OWNER_SECRETS_PATH}/:name`,
-    async (request, reply) => {
+  /** Owner-scoped like personal instructions (docs/owner-skills-secrets.md). */
+  type Named = FastifyRequest<{ Params: { name: string } }>;
+  const owned =
+    <E>(send: (reply: FastifyReply, error: E) => FastifyReply) =>
+    (run: (userId: string, request: Named) => ResultAsync<unknown, E>) =>
+    async (request: Named, reply: FastifyReply) => {
       reply.header("cache-control", "no-store");
       const user = await selectedUser(request, reply, task, deps);
       if (user === null) return;
-      if (!Check(ProjectSecretNameSchema, request.params.name)) {
-        return reply.status(400).send(httpError("invalid_request", "invalid secret name", false));
-      }
-      const removed = await deleteOwnerSecret(
-        task,
-        deps.ownerSecrets,
-        user.id,
-        request.params.name,
-      );
-      return removed.isErr()
-        ? sendProjectSecretError(reply, removed.error)
-        : reply.send(removed.value);
-    },
+      const result = await run(user.id, request);
+      return result.isErr() ? send(reply, result.error) : reply.send(result.value);
+    };
+  const { ownerSecrets, ownerSkills } = deps;
+  const secrets = owned(sendProjectSecretError);
+  const skills = owned(sendOwnerSkillError);
+  app.get(
+    OWNER_SECRETS_PATH,
+    secrets((user) => listOwnerSecrets(task, ownerSecrets, user)),
+  );
+  app.put(
+    `${OWNER_SECRETS_PATH}/:name`,
+    secrets((user, { params, body }) =>
+      Check(PutProjectSecretRequestSchema, body)
+        ? putOwnerSecret(task, ownerSecrets, user, params.name, body.value)
+        : errAsync({ type: "project_secret_invalid" as const, message: "invalid secret body" }),
+    ),
+  );
+  app.delete(
+    `${OWNER_SECRETS_PATH}/:name`,
+    secrets((user, { params }) => deleteOwnerSecret(task, ownerSecrets, user, params.name)),
+  );
+  const { store } = ownerSkills;
+  app.get(
+    OWNER_SKILLS_PATH,
+    skills((user) => describeOwnerSkills(store.list(task, user))),
+  );
+  app.post(
+    OWNER_SKILLS_PATH,
+    skills((user, { body }) => writeOwnerSkill(task, ownerSkills, user, null, body)),
+  );
+  app.put(
+    `${OWNER_SKILLS_PATH}/:name`,
+    skills((user, { params, body }) => writeOwnerSkill(task, ownerSkills, user, params.name, body)),
+  );
+  app.delete(
+    `${OWNER_SKILLS_PATH}/:name`,
+    skills((user, { params }) =>
+      describeOwnerSkills(store.apply(task, user, { kind: "delete", name: params.name })),
+    ),
   );
 
   if (signingKeys !== undefined) {

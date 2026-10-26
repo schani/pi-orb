@@ -5,20 +5,15 @@ import type {
   ProjectConflict,
   ProjectSecretPointerConflict,
   StoreError,
-  UserNotFound,
 } from "../domain/errors.ts";
 import type {
-  OwnerSecretsDeps,
   ProjectSecretPointerRow,
   ProjectSecretPointerStore,
   ProjectSecretPointerWrite,
   ProjectSecretsDeps,
   StoredProjectSecretBundle,
-  StoredUserSecretBundle,
-  UserSecretPointerRow,
-  UserSecretPointerStore,
 } from "../domain/ports.ts";
-import { OWNER_SECRETS_PROVIDER, PROJECT_SECRETS_PROVIDER } from "../domain/project-secrets.ts";
+import { PROJECT_SECRETS_PROVIDER } from "../domain/project-secrets.ts";
 import { FakeSecretStore } from "./broker.ts";
 import { FAILPOINTS } from "./failpoints.ts";
 
@@ -90,7 +85,7 @@ export class FakeProjectSecretPointerStore implements ProjectSecretPointerStore 
     }
   }
 
-  readProjectSecretPointer(
+  readSecretPointer(
     task: SimulationTask,
     projectId: string,
   ): ResultAsync<ProjectSecretPointerRow | null, StoreError | ProjectConflict> {
@@ -110,7 +105,7 @@ export class FakeProjectSecretPointerStore implements ProjectSecretPointerStore 
     });
   }
 
-  casWriteProjectSecretPointer(
+  casWriteSecretPointer(
     task: SimulationTask,
     projectId: string,
     expectedRowVersion: number | null,
@@ -150,7 +145,6 @@ export class FakeProjectSecretPointerStore implements ProjectSecretPointerStore 
           ],
         });
       const row: ProjectSecretPointerRow = {
-        projectId,
         rowVersion: (current?.rowVersion ?? 0) + 1,
         ...next,
       };
@@ -203,17 +197,14 @@ export interface ProjectSecretsHarness {
   assertPublishedPointersReadable(task: SimulationTask): Promise<void>;
 }
 
-const secretStore = () =>
-  new FakeSecretStore({
+export function makeProjectSecretsHarness(...projectIds: string[]): ProjectSecretsHarness {
+  const pointers = new FakeProjectSecretPointerStore(...projectIds);
+  const secrets = new FakeSecretStore({
     read: FAILPOINTS.projectSecretRead,
     write: FAILPOINTS.projectSecretWrite,
     destroy: FAILPOINTS.projectSecretDestroy,
     list: FAILPOINTS.projectSecretList,
   });
-
-export function makeProjectSecretsHarness(...projectIds: string[]): ProjectSecretsHarness {
-  const pointers = new FakeProjectSecretPointerStore(...projectIds);
-  const secrets = secretStore();
   const deps = { pointers, secrets };
   return {
     pointers,
@@ -235,112 +226,6 @@ export function makeProjectSecretsHarness(...projectIds: string[]): ProjectSecre
           bundle.value.revision !== pointer.revision
         ) {
           throw new Error(`unreadable published pointer for ${projectId}`);
-        }
-      }
-    },
-  };
-}
-
-/** Owner secrets share the project-secret failpoints: same pointer protocol, other key. */
-export class FakeUserSecretPointerStore implements UserSecretPointerStore {
-  private readonly users: ReadonlySet<string>;
-  private readonly rows = new Map<string, UserSecretPointerRow>();
-  private readonly writes = new Map<string, UserSecretPointerRow[]>();
-
-  constructor(...userIds: string[]) {
-    this.users = new Set(userIds);
-  }
-
-  snapshot(userId: string): UserSecretPointerRow | null {
-    return this.rows.get(userId) ?? null;
-  }
-
-  assertMonotonic(userId: string): void {
-    let revision = 0;
-    for (const row of this.writes.get(userId) ?? []) {
-      if (row.revision <= revision) throw new Error(`revision regressed at ${row.revision}`);
-      revision = row.revision;
-    }
-  }
-
-  readUserSecretPointer(
-    task: SimulationTask,
-    userId: string,
-  ): ResultAsync<UserSecretPointerRow | null, StoreError | UserNotFound> {
-    return gate(task, FAILPOINTS.projectSecretPointerRead, "read user secret pointer", () =>
-      this.users.has(userId) ? (this.rows.get(userId) ?? null) : undefined,
-    ).andThen((row) =>
-      row === undefined ? errAsync({ type: "user_not_found" as const }) : okAsync(row),
-    );
-  }
-
-  casWriteUserSecretPointer(
-    task: SimulationTask,
-    userId: string,
-    expectedRowVersion: number | null,
-    next: ProjectSecretPointerWrite,
-  ): ResultAsync<
-    UserSecretPointerRow,
-    StoreError | UserNotFound | { readonly type: "project_secret_pointer_conflict" }
-  > {
-    return gate(
-      task,
-      FAILPOINTS.projectSecretPointerWriteBefore,
-      "write user secret pointer before",
-      () => undefined,
-    ).andThen(() => {
-      if (!this.users.has(userId)) return errAsync({ type: "user_not_found" as const });
-      const current = this.rows.get(userId) ?? null;
-      if ((current?.rowVersion ?? null) !== expectedRowVersion) {
-        return errAsync({ type: "project_secret_pointer_conflict" as const });
-      }
-      const row: UserSecretPointerRow = {
-        userId,
-        rowVersion: (current?.rowVersion ?? 0) + 1,
-        ...next,
-      };
-      this.rows.set(userId, row);
-      this.writes.set(userId, [...(this.writes.get(userId) ?? []), row]);
-      return gate(
-        task,
-        FAILPOINTS.projectSecretPointerWriteAfter,
-        "write user secret pointer after",
-        () => row,
-      );
-    });
-  }
-}
-
-export interface OwnerSecretsHarness {
-  readonly pointers: FakeUserSecretPointerStore;
-  readonly secrets: FakeSecretStore;
-  readonly deps: OwnerSecretsDeps;
-  assertPublishedPointersReadable(task: SimulationTask): Promise<void>;
-}
-
-export function makeOwnerSecretsHarness(...userIds: string[]): OwnerSecretsHarness {
-  const pointers = new FakeUserSecretPointerStore(...userIds);
-  const secrets = secretStore();
-  return {
-    pointers,
-    secrets,
-    deps: { pointers, secrets },
-    async assertPublishedPointersReadable(task) {
-      for (const userId of userIds) {
-        const pointer = pointers.snapshot(userId);
-        if (pointer === null) continue;
-        const bundle = await secrets.readSecret<StoredUserSecretBundle>(
-          task,
-          OWNER_SECRETS_PROVIDER,
-          pointer.secretVersion,
-        );
-        if (bundle.isErr()) continue;
-        if (
-          bundle.value === null ||
-          bundle.value.userId !== userId ||
-          bundle.value.revision !== pointer.revision
-        ) {
-          throw new Error(`unreadable published pointer for ${userId}`);
         }
       }
     },

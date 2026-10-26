@@ -3,7 +3,6 @@ import { lstat, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { err, ok, ResultAsync } from "neverthrow";
-import type { OwnerSkillError } from "../../domain/owner-skills.ts";
 import { type ResourceError, type ResourceFile, resourceError } from "../../domain/resources.ts";
 import { snapshotPromptResources } from "../git-resources/prompt.ts";
 
@@ -59,17 +58,9 @@ export function loadPlatformResources(root: string): ResultAsync<ResourceFile[],
 }
 
 /** Skill names Pi loads from the bundled platform skills; owner skills may not take them. */
-export function bundledPlatformSkillNames(
-  root = PLATFORM_SKILLS_ROOT,
-): ResultAsync<ReadonlySet<string>, OwnerSkillError> {
-  return loadPlatformResources(root)
+export const bundledPlatformSkillNames = (): ResultAsync<ReadonlySet<string>, ResourceError> =>
+  loadPlatformResources(PLATFORM_SKILLS_ROOT)
     .andThen((files) =>
       snapshotPromptResources({ instructionPath: null, skillRoot: "/opt/pi-orb/skills", files }),
     )
-    .map(({ skills }): ReadonlySet<string> => new Set(skills.map((skill) => skill.name)))
-    .mapErr(() => ({
-      type: "owner_skill_error" as const,
-      code: "internal" as const,
-      message: "Bundled platform skills unavailable",
-    }));
-}
+    .map(({ skills }) => new Set(skills.map((skill) => skill.name)));
