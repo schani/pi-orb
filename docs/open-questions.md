@@ -223,3 +223,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 ## Owner skills and secrets surface — 83
 
 83. **Resolved (2026-10-26; user decision):** Settings tabs (proposal 1). A project secret wins over a same-named owner secret; an owner skill wins over a same-named repository skill; bundled skill names are rejected. Decisions and rejected proposals: `docs/owner-skills-secrets.md`.
+
+## GitHub owner-skill imports — 84
+
+84. **Resolved (2026-10-27, PDT; user decision):** public-GitHub, whole-folder pinned snapshots with no automatic updates; draft-row source mode (proposal 3). Approved persisted support files/source provenance and complete adopted-context snapshots, restricted URL/ref grammar, and limits: 8 MiB decoded/5,000 files per bundle, 64 KiB root, 16 MiB decoded/24 MiB serialized JSON/100 skills per owner. Lists exclude support bytes. Add re-fetches the preview's exact SHA and folder; duplicate Add errors. Manual root edits/renames retain support files and import-origin metadata; no overwrite/reimport UI. No prompt text changes. Decisions/rationale: `docs/owner-skills-secrets.md`; qualification: `TODO.md`.

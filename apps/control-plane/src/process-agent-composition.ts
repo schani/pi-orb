@@ -22,6 +22,8 @@ import { durableError } from "./adapters/durable/manager.ts";
 import { fenceModels } from "./adapters/durable/model-fence.ts";
 import { createDurableModels } from "./adapters/durable/models.ts";
 import type { ParentNotification } from "./adapters/durable/notifications.ts";
+import { ownerSkillBundle } from "./adapters/durable/owner-skill-bundle.ts";
+import { installOwnerSkills } from "./adapters/durable/owner-skill-delivery.ts";
 import {
   loadPlatformResources,
   PLATFORM_SKILLS_ROOT,
@@ -266,8 +268,25 @@ export function createProcessAgentContext(
       });
       if (prepared.isErr() || !platformSnapshot)
         return err(durableError("Required resource context unavailable"));
+      const capturedSkills = ownerSkillBundle(prepared.value.managed.skills);
+      if (capturedSkills.isErr()) return err(durableError(capturedSkills.error.message));
+      const previousManaged = await nativeContext.managed();
+      if (previousManaged.isErr()) return err(durableError(previousManaged.error.message));
+      const previousSkills = previousManaged.value
+        ? ownerSkillBundle(previousManaged.value.skills)
+        : null;
       const saved = await nativeContext.save(platformSnapshot, prepared.value.managed);
       if (saved.isErr()) return err(durableError("Resource context publication unavailable"));
+      if (
+        previousSkills?.isOk()
+          ? previousSkills.value.hash !== capturedSkills.value.hash
+          : capturedSkills.value.files.length > 0
+      )
+        logOrbEvent(task, orb.id, "owner_skills.adopted", {
+          bundle_hash: capturedSkills.value.hash,
+          skills: prepared.value.managed.skills.length,
+          admission_version: orb.agentAdmissionVersion,
+        });
       const instructions = renderPrompt({
         personal: personal.value.content,
         project: projectInstructions.value.content,
@@ -278,11 +297,21 @@ export function createProcessAgentContext(
       const resourcesAbort = new AbortController();
       if (lease?.signal.aborted) resourcesAbort.abort();
       lease?.signal.addEventListener("abort", () => resourcesAbort.abort(), { once: true });
+      let appendResourceAlert: DurableAgent["appendAlert"] | undefined;
+      let skillFailureIncarnation: string | null = null;
       const loadReady = (
         binding: ExecutionBinding & { release?: () => void },
         ctx: Context,
         requireRunning: boolean,
       ) => {
+        const boundContext = withAbortSignal(
+          AbortSignal.any([
+            resourcesAbort.signal,
+            lease.signal,
+            ...(ctx.abortSignal ? [ctx.abortSignal] : []),
+          ]),
+          ctx,
+        );
         const remote = new RemoteExecutionEnv(binding);
         const cleanup = remote.cleanup.bind(remote);
         remote.cleanup = async (cleanupContext) => {
@@ -292,10 +321,13 @@ export function createProcessAgentContext(
             binding.release?.();
           }
         };
-        return ResultAsync.fromSafePromise(remote.ready(ctx))
+        return ResultAsync.fromSafePromise(remote.ready(boundContext))
           .andThen((ready) => {
             if (ready.isErr()) return err(durableError("Execution readiness unavailable."));
-            if (ctx.abortSignal?.aborted || ready.value.incarnation !== binding.incarnation)
+            if (
+              boundContext.abortSignal?.aborted ||
+              ready.value.incarnation !== binding.incarnation
+            )
               return err({
                 ...durableError("execution wait cancelled"),
                 code: "cancelled" as const,
@@ -305,7 +337,7 @@ export function createProcessAgentContext(
               .mapErr(() => durableError("execution admission unavailable"))
               .andThen((current) => {
                 if (
-                  ctx.abortSignal?.aborted ||
+                  boundContext.abortSignal?.aborted ||
                   !current ||
                   (requireRunning
                     ? current.state !== "running" &&
@@ -323,7 +355,65 @@ export function createProcessAgentContext(
                   return err(durableError("execution admission changed"));
                 remote.cwd = ready.value.cwd;
                 env.cwd = ready.value.cwd;
-                return ok(remote);
+                return installOwnerSkills(remote, capturedSkills.value, boundContext, async () => {
+                  await task.checkpoint("owner skills publication", orb.id, binding.incarnation);
+                  return lease
+                    .check()
+                    .mapErr(() => resourceError("cancelled", "Resource ownership revoked"));
+                })
+                  .mapErr((error) => ({
+                    ...durableError(error.message),
+                    ...(error.code === "cancelled" ? { code: "cancelled" as const } : {}),
+                  }))
+                  .orElse((error) => {
+                    const append = appendResourceAlert;
+                    if (
+                      boundContext.abortSignal?.aborted ||
+                      error.code === "cancelled" ||
+                      !append ||
+                      skillFailureIncarnation === binding.incarnation
+                    )
+                      return err(error);
+                    skillFailureIncarnation = binding.incarnation;
+                    return append(randomUUID(), error.message)
+                      .orTee(() => {
+                        skillFailureIncarnation = null;
+                        logOrbEvent(task, orb.id, "owner_skills.alert_failed", {
+                          bundle_hash: capturedSkills.value.hash,
+                          incarnation: binding.incarnation,
+                        });
+                      })
+                      .mapErr(() => error)
+                      .andThen(() => err(error));
+                  })
+                  .andThen((outcome) => {
+                    if (skillFailureIncarnation === binding.incarnation)
+                      skillFailureIncarnation = null;
+                    if (outcome !== "verified")
+                      logOrbEvent(task, orb.id, "owner_skills.installed", {
+                        bundle_hash: capturedSkills.value.hash,
+                        incarnation: binding.incarnation,
+                        outcome,
+                      });
+                    return lease.check().mapErr(() => durableError("Resource ownership revoked"));
+                  })
+                  .andThen(() =>
+                    deps.store
+                      .getOrb(task, orb.id)
+                      .mapErr(() => durableError("execution admission unavailable")),
+                  )
+                  .andThen((latest) =>
+                    !boundContext.abortSignal?.aborted &&
+                    latest &&
+                    latest.agentAdmissionVersion === orb.agentAdmissionVersion &&
+                    String(latest.hostIncarnation) === binding.incarnation &&
+                    latest.stopReason !== "manual" &&
+                    latest.stopReason !== "sleep" &&
+                    latest.state === current.state &&
+                    latest.stateVersion === current.stateVersion
+                      ? ok(remote)
+                      : err(durableError("execution admission changed")),
+                  );
               });
           })
           .orTee(() => binding.release?.());
@@ -431,6 +521,7 @@ export function createProcessAgentContext(
         reader: prepared.value.reader,
         artifacts: lease.artifacts,
         allowSnapshotRead: () => !workspaceReady,
+        workspaceCwd: () => env.cwd,
         check: () =>
           lease
             .check()
@@ -731,6 +822,7 @@ export function createProcessAgentContext(
         registry,
         activateResources: (appendAlert: DurableAgent["appendAlert"]) => {
           appendMcpAlert = appendAlert;
+          appendResourceAlert = appendAlert;
           void tools.ready();
           return () => resourcesAbort.abort();
         },

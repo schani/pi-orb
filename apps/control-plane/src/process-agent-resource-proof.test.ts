@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
@@ -12,6 +12,7 @@ import { buildExecutionServer } from "../../orb-runtime/src/execution/server.ts"
 import { composeControlPlaneDatabase } from "./adapters/database.ts";
 import { NativeResourceContext } from "./adapters/durable/context-storage.ts";
 import * as durableModels from "./adapters/durable/models.ts";
+import { ownerSkillBundle } from "./adapters/durable/owner-skill-bundle.ts";
 import { PGliteClient } from "./adapters/pg/pglite-client.ts";
 import { PgResourceSnapshots } from "./adapters/pg/resource-snapshots.ts";
 import type { ResourceSnapshot } from "./domain/resources.ts";
@@ -21,7 +22,23 @@ import { makeHarness, makeOrbRow, makeProjectRow } from "./testkit/fixtures.ts";
 const skillPath = ".agents/skills/proof/SKILL.md";
 const skill = "---\nname: proof\ndescription: composition proof\n---\nPG skill baseline";
 /** Renamed to "proof", the owner's skill replaces the same-named repository skill. */
-const ownerSkillPath = "/opt/pi-orb/owner-skills/proof/SKILL.md";
+const supportFiles = [
+  { path: "assets/a.png", base64: "iVBORw0KGgoA/w==", executable: false },
+  {
+    path: "scripts/run.sh",
+    base64: Buffer.from("#!/bin/sh\nprintf IMPORTED_SCRIPT").toString("base64"),
+    executable: true,
+  },
+];
+const capturedSkill = (version: string, name = "owner-proof") => ({
+  name,
+  content: ownerSkill(version, name),
+  files: supportFiles,
+  source: null,
+});
+const capturedBundle = (version: string, name = "owner-proof") =>
+  ownerSkillBundle([capturedSkill(version, name)])._unsafeUnwrap();
+const ownerSkillPath = () => `${capturedBundle("v2", "proof").root}/proof/SKILL.md`;
 const ownerSkill = (version: string, name = "owner-proof") =>
   `---\nname: ${name}\ndescription: owner proof ${version}\n---\nowner body ${version}`;
 function required<T>(value: T | null | undefined): T {
@@ -58,7 +75,7 @@ async function fixture(repositoryUrl: string | null = makeProjectRow("project").
   (
     await database.ownerSkills.apply(task, project.ownerUserId, {
       kind: "create",
-      skill: { name: "owner-proof", content: ownerSkill("v1") },
+      skill: capturedSkill("v1"),
     })
   )._unsafeUnwrap();
   const acquired = barrier(),
@@ -89,11 +106,14 @@ async function fixture(repositoryUrl: string | null = makeProjectRow("project").
       return ResultAsync.fromSafePromise(releaseGit.promise).map(() => snapshot);
     },
   });
-  const root = await mkdtemp(join(tmpdir(), "resource-composition-proof-"));
+  const workspace = await mkdtemp(join(tmpdir(), "resource-composition-proof-"));
+  const root = join(workspace, "repo");
   await mkdir(join(root, ".agents/skills/proof"), { recursive: true });
   await writeFile(join(root, skillPath), skill);
   await writeFile(join(root, "AGENTS.md"), "hook-modified instructions");
-  const server = buildExecutionServer({
+  let incarnation = "0";
+  const replacementRoots: string[] = [];
+  let server = buildExecutionServer({
     token: "proof-token",
     incarnation: "0",
     cwd: root,
@@ -104,7 +124,7 @@ async function fixture(repositoryUrl: string | null = makeProjectRow("project").
       checkoutCommit: snapshot.commitSha,
     }),
   });
-  const baseUrl = await server.listen({ host: "127.0.0.1", port: 0 });
+  let baseUrl = await server.listen({ host: "127.0.0.1", port: 0 });
   let readyReads = 0;
   const h = makeHarness();
   const deps = {
@@ -117,7 +137,7 @@ async function fixture(repositoryUrl: string | null = makeProjectRow("project").
       ...h.deps.hostProvider,
       executionBinding: () => {
         bindings++;
-        return okAsync({ baseUrl, token: "proof-token", incarnation: "0", cwd: root });
+        return okAsync({ baseUrl, token: "proof-token", incarnation, cwd: root });
       },
     },
   };
@@ -168,13 +188,38 @@ async function fixture(repositoryUrl: string | null = makeProjectRow("project").
     reopenLease: async () => {
       lease = (await database.agentPersistence.open(task, orb, context))._unsafeUnwrap();
     },
+    replaceHost: async () => {
+      await server.close();
+      const replacementWorkspace = await mkdtemp(join(tmpdir(), "resource-proof-replacement-"));
+      replacementRoots.push(replacementWorkspace);
+      const replacementRoot = join(replacementWorkspace, "repo");
+      await mkdir(replacementRoot);
+      incarnation = "1";
+      server = buildExecutionServer({
+        token: "proof-token",
+        incarnation,
+        cwd: replacementRoot,
+        ready: () => ({
+          cwd: replacementRoot,
+          incarnation,
+          pid: process.pid,
+          checkoutCommit: snapshot.commitSha,
+        }),
+      });
+      baseUrl = await server.listen({ host: "127.0.0.1", port: 0 });
+      (await db.query("UPDATE orbs SET host_incarnation=1 WHERE id=$1", [orb.id]))._unsafeUnwrap();
+      orb = required((await database.store.getOrb(task, orb.id))._unsafeUnwrap());
+      return replacementRoot;
+    },
     close: async () => {
       models.mockRestore();
       await lease.release();
       await server.close();
       await database.agentPersistence.close();
       await database.close();
-      await rm(root, { recursive: true, force: true });
+      await rm(workspace, { recursive: true, force: true });
+      for (const replacement of replacementRoots)
+        await rm(replacement, { recursive: true, force: true });
     },
   };
 }
@@ -313,7 +358,7 @@ it.each(["manual", "sleep"] as const)(
         await f.database.ownerSkills.apply(f.task, f.project.ownerUserId, {
           kind: "replace",
           name: "owner-proof",
-          skill: { name: "proof", content: ownerSkill("v2", "proof") },
+          skill: capturedSkill("v2", "proof"),
         })
       )._unsafeUnwrap();
       await f.state("starting");
@@ -334,11 +379,11 @@ it.each(["manual", "sleep"] as const)(
       )._unsafeUnwrap();
       expect(managed?.personal.content).toBe("personal-v2");
       expect(managed?.project.content).toBe("project-v2");
-      expect(managed?.skills).toEqual([{ name: "proof", content: ownerSkill("v2", "proof") }]);
-      expect(second.instructions).toContain(ownerSkillPath);
+      expect(managed?.skills).toEqual([capturedSkill("v2", "proof")]);
+      expect(second.instructions).toContain(ownerSkillPath());
       expect(second.instructions).toContain("owner proof v2");
       expect(second.instructions).not.toContain("composition proof");
-      expect((await invoke(second, "read", { path: ownerSkillPath })).output).toEqual([
+      expect((await invoke(second, "read", { path: ownerSkillPath() })).output).toEqual([
         { type: "text", text: ownerSkill("v2", "proof") },
       ]);
       const edges = (
@@ -470,6 +515,151 @@ it("executes the first boot-time command under pinned instructions and routes li
     expect(f.fetches()).toBe(1);
   } finally {
     f.releaseGit.resolve();
+    await bundle?.closeResources?.();
+    await f.close();
+  }
+});
+
+it("delivers adopted full bundles through the composed harness before guest tools and on replacement", async () => {
+  const f = await fixture(null);
+  let bundle: Bundle | undefined;
+  try {
+    bundle = await f.openContext();
+    const adopted = capturedBundle("v1");
+    expect(adopted.root).toBe(`../.pi-orb/owner-skills/${adopted.hash}`);
+    expect(bundle.instructions).toContain(`${adopted.root}/owner-proof/SKILL.md`);
+    expect(
+      (await invoke(bundle, "read", { path: `${adopted.root}/owner-proof/SKILL.md` })).output,
+    ).toEqual([{ type: "text", text: ownerSkill("v1") }]);
+    const image = `${adopted.root}/owner-proof/assets/a.png`;
+    const script = `${adopted.root}/owner-proof/scripts/run.sh`;
+    expect((await invoke(bundle, "read", { path: image })).output).toEqual([
+      { type: "image", mimeType: "image/png", data: supportFiles[0]!.base64 },
+    ]);
+    expect(f.bindings()).toBe(0);
+    (
+      await f.database.ownerSkills.apply(f.task, f.project.ownerUserId, {
+        kind: "replace",
+        name: "owner-proof",
+        skill: capturedSkill("latest"),
+      })
+    )._unsafeUnwrap();
+    await f.state("running");
+    const command = `${script} && cp ${image} copied.png && test -x ${script} && test ! -x ${image} && cat ${adopted.root}/owner-proof/SKILL.md`;
+    const first = await invoke(bundle, "bash", { command });
+    expect(first.isError, JSON.stringify(first)).not.toBe(true);
+    expect(JSON.stringify(first.output)).toContain("IMPORTED_SCRIPT");
+    expect(JSON.stringify(first.output)).toContain("owner body v1");
+    expect(JSON.stringify(first.output)).not.toContain("latest");
+    expect((await readFile(join(f.root, "copied.png"))).toString("base64")).toBe(
+      supportFiles[0]!.base64,
+    );
+    expect((await invoke(bundle, "read", { path: join(f.root, image) })).output).toEqual([
+      { type: "image", mimeType: "image/png", data: supportFiles[0]!.base64 },
+    ]);
+    await writeFile(join(f.root, image), "mutable corruption");
+    expect(
+      (await invoke(bundle, "read", { path: `${f.root}/../${f.root.split("/").at(-1)}/${image}` }))
+        .output,
+    ).toEqual([{ type: "image", mimeType: "image/png", data: supportFiles[0]!.base64 }]);
+    const replacement = await f.replaceHost();
+    (await required(bundle.checkExecutionReady)(BACKGROUND_CONTEXT))._unsafeUnwrap();
+    expect(
+      (await readFile(join(replacement, adopted.root, "owner-proof/SKILL.md"))).toString(),
+    ).toBe(ownerSkill("v1"));
+    const replaced = await invoke(bundle, "bash", { command });
+    expect(replaced.isError, JSON.stringify(replaced)).not.toBe(true);
+    expect(JSON.stringify(replaced.output)).toContain("IMPORTED_SCRIPT");
+    expect(JSON.stringify(replaced.output)).toContain("owner body v1");
+    expect(JSON.stringify(replaced.output)).not.toContain("latest");
+    expect((await readFile(join(replacement, "copied.png"))).toString("base64")).toBe(
+      supportFiles[0]!.base64,
+    );
+    await writeFile(join(replacement, image), "replacement corruption");
+    expect((await invoke(bundle, "read", { path: join(replacement, image) })).output).toEqual([
+      { type: "image", mimeType: "image/png", data: supportFiles[0]!.base64 },
+    ]);
+    expect((await invoke(bundle, "read", { path: image })).output).toEqual([
+      { type: "image", mimeType: "image/png", data: supportFiles[0]!.base64 },
+    ]);
+  } finally {
+    await bundle?.closeResources?.();
+    await f.close();
+  }
+});
+
+it("blocks composed guest tools when supporting bundles cannot be installed", async () => {
+  const f = await fixture(null);
+  let bundle: Bundle | undefined;
+  try {
+    bundle = await f.openContext();
+    await symlink(f.root, join(f.root, "../.pi-orb"));
+    await f.state("running");
+    const blocked = await required(bundle.checkExecutionReady)(BACKGROUND_CONTEXT);
+    expect(blocked.isErr() && blocked.error.message).toContain("Cannot install owner skills");
+    const alerts: string[] = [];
+    bundle.activateResources?.((_id, message) => {
+      alerts.push(message);
+      return okAsync({ recordId: "alert", duplicate: false });
+    });
+    const result = await invoke(bundle, "bash", { command: "touch MUST_NOT_EXECUTE" });
+    expect(result.isError).toBe(true);
+    expect((await invoke(bundle, "bash", { command: "touch MUST_NOT_EXECUTE" })).isError).toBe(
+      true,
+    );
+    expect(alerts).toEqual([`Cannot install owner skills at ${capturedBundle("v1").root}.`]);
+    await rm(join(f.root, "../.pi-orb"));
+    expect((await invoke(bundle, "bash", { command: "true" })).isError).not.toBe(true);
+    await writeFile(join(f.root, capturedBundle("v1").root, "owner-proof/assets/a.png"), "corrupt");
+    expect((await invoke(bundle, "bash", { command: "touch MUST_NOT_EXECUTE" })).isError).toBe(
+      true,
+    );
+    expect(alerts).toHaveLength(2);
+    expect(
+      await readFile(join(f.root, "MUST_NOT_EXECUTE")).then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false);
+  } finally {
+    await bundle?.closeResources?.();
+    await f.close();
+  }
+});
+
+it("revoked resource ownership cancels a staged installation before tool admission", async () => {
+  const f = await fixture(null);
+  let bundle: Bundle | undefined;
+  const checkpoint = f.task.checkpoint.bind(f.task);
+  try {
+    bundle = await f.openContext();
+    await f.state("running");
+    const alerts: string[] = [];
+    bundle.activateResources?.((_id, message) => {
+      alerts.push(message);
+      return okAsync({ recordId: "alert", duplicate: false });
+    });
+    vi.spyOn(f.task, "checkpoint").mockImplementation(async (...args) => {
+      if (args[0] === "owner skills publication") await f.lease().release();
+      else await checkpoint(...args);
+    });
+    expect((await invoke(bundle, "bash", { command: "touch MUST_NOT_EXECUTE" })).isError).toBe(
+      true,
+    );
+    expect(
+      await readFile(join(f.root, "MUST_NOT_EXECUTE")).then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false);
+    expect(
+      await readFile(join(f.root, capturedBundle("v1").root, "owner-proof/SKILL.md")).then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false);
+    expect(alerts).toEqual([]);
+  } finally {
     await bundle?.closeResources?.();
     await f.close();
   }

@@ -1344,6 +1344,63 @@ button.personal-instructions-gear {
   padding: 6px 0 2px;
 }
 
+.skill-source-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.skill-url-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.skill-url-form .text-field-frame {
+  flex: 1;
+  min-width: 0;
+}
+.skill-url-form input {
+  width: 100%;
+  min-width: 0;
+}
+.skill-import-source {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 10px 0;
+  font-size: 12px;
+}
+.skill-import-source dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.skill-import-source dt,
+.skill-file-totals {
+  color: var(--g5);
+}
+.skill-file-totals {
+  margin: 6px 0;
+  font-size: 12px;
+}
+.skill-import-review h3 {
+  margin: 12px 0 4px;
+}
+.skill-import-review p {
+  overflow-wrap: anywhere;
+}
+.skill-file-preview,
+.skill-content-preview {
+  margin: 10px 0;
+}
+.skill-file-preview pre,
+.skill-content-preview pre {
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
 /* Safari zooms focused fields below 16px; include touch tablets at desktop widths. */
 @media (max-width: 600px), (any-pointer: coarse) {
   input,

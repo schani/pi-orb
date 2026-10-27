@@ -35,7 +35,21 @@ async function setup() {
   registerRoutes(
     app,
     task,
-    { ...deps, ownerSkills: { ...h.deps.ownerSkills, platformSkillNames } },
+    {
+      ...deps,
+      ownerSkills: {
+        ...h.deps.ownerSkills,
+        platformSkillNames,
+        source: {
+          acquire: (_task, request) =>
+            okAsync({
+              content: doc("example"),
+              files: [{ path: "script.sh", base64: "AP8=", executable: true }],
+              source: { url: request.url, commitSha: request.commitSha ?? "a".repeat(40) },
+            }),
+        },
+      },
+    },
     {},
     TEST_SYSTEM_VIEW,
   );
@@ -94,4 +108,24 @@ it("writes the signed-in owner's secrets without ever returning values", async (
     revision: 2,
     items: [],
   });
+});
+
+it("previews public GitHub bundles and imports only the preview's pin", async () => {
+  const { call } = await setup();
+  const url = "https://github.com/acme/skills/tree/main/example";
+  const preview = await call("POST", "/api/v1/owner-skills/preview", { url });
+  expect(preview.status).toBe(200);
+  expect(preview.body).toMatchObject({
+    name: "example",
+    source: { url, commitSha: "a".repeat(40) },
+  });
+  expect(JSON.stringify(preview.body)).not.toContain("base64");
+  expect((await call("GET", "/api/v1/owner-skills")).body).toEqual({ items: [] });
+  expect((await call("POST", "/api/v1/owner-skills/import", { url })).status).toBe(400);
+  const imported = await call("POST", "/api/v1/owner-skills/import", preview.body.source);
+  expect(imported.status).toBe(200);
+  expect(imported.body.items).toMatchObject([{ name: "example", fileCount: 2 }]);
+  expect(JSON.stringify(imported.body)).not.toContain("base64");
+  expect((await call("POST", "/api/v1/owner-skills/import", preview.body.source)).status).toBe(409);
+  expect((await call("GET", "/api/v1/owner-skills", undefined, "bob")).body).toEqual({ items: [] });
 });

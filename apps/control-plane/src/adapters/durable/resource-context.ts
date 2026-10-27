@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Skill } from "@earendil-works/pi-coding-agent";
+import type { OwnerSkillsSnapshot } from "@pi-orb/protocol";
 import { errAsync, ok, okAsync, type ResultAsync } from "neverthrow";
 import { z } from "zod";
 import {
@@ -11,14 +12,14 @@ import {
   SnapshotResourceReader,
 } from "../../domain/resources.ts";
 import { snapshotPromptResources } from "../git-resources/prompt.ts";
+import { ownerSkillBundle } from "./owner-skill-bundle.ts";
 
 export interface ManagedResourceInstructions {
   personal: { content: string; revision: number };
   project: { content: string; revision: number };
   /** Owner skills (docs/owner-skills-secrets.md), adopted fresh at every context open. */
-  skills: Array<{ name: string; content: string }>;
+  skills: OwnerSkillsSnapshot["skills"];
 }
-const OWNER_SKILL_ROOT = "/opt/pi-orb/owner-skills";
 /** Private native application document. Store implementation uses the fenced authority UOW. */
 export interface PersistedPlatformContext {
   version: string;
@@ -139,15 +140,14 @@ export function prepareResourceContext(options: {
               // Precedence: platform > owner > repository. Owner names are checked against
               // platform names at save, so a clash means a newer platform skill took the name.
               const platformNames = new Set(platform.value.skills.map((skill) => skill.name));
-              const ownerFiles = managed.skills
-                .filter((skill) => !platformNames.has(skill.name))
-                .map((skill) => {
-                  const bytes = Buffer.from(skill.content, "utf8");
-                  const path = `${OWNER_SKILL_ROOT}/${skill.name}/SKILL.md`;
-                  return { path, bytes, sha256: digest(bytes) };
-                });
+              const bundle = ownerSkillBundle(managed.skills);
+              if (bundle.isErr()) return errAsync(bundle.error);
+              const ownerFiles = bundle.value.files.filter(
+                (file) =>
+                  !platformNames.has(file.path.slice(bundle.value.root.length + 1).split("/")[0]!),
+              );
               const owner = snapshotPromptResources(
-                { instructionPath: null, skillRoot: OWNER_SKILL_ROOT, files: ownerFiles },
+                { instructionPath: null, skillRoot: bundle.value.root, files: ownerFiles },
                 { invalidSkills: "warn" },
               );
               if (owner.isErr()) return errAsync(owner.error);

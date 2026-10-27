@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import type { OwnerSkillsSnapshot } from "@pi-orb/protocol";
 import { errAsync, okAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { ResourceAcquisition, type ResourceSnapshot } from "../../domain/resources.ts";
@@ -11,7 +12,7 @@ const file = (path: string, text: string) => ({
   bytes: Buffer.from(text),
   sha256: createHash("sha256").update(text).digest("hex"),
 });
-function fixture(skills: Array<{ name: string; content: string }> = []) {
+function fixture(skills: OwnerSkillsSnapshot["skills"] = []) {
   let repo: ResourceSnapshot | null = null;
   let platform: PersistedPlatformContext | null = null;
   let revision = 1;
@@ -225,6 +226,8 @@ it("loads valid repository siblings despite malformed YAML, while platform remai
 it("ranks platform over owner over repository skills; owner skills read at their own path", async () => {
   const owner = (name: string) => ({
     name,
+    files: [],
+    source: null,
     content: `---\nname: ${name}\ndescription: owner\n---\nowner ${name}`,
   });
   const f = fixture([owner("x"), owner("hosting"), owner("mine")]);
@@ -234,9 +237,32 @@ it("ranks platform over owner over repository skills; owner skills read at their
     ["x", "owner"],
     ["hosting", "platform skill"],
   ]);
-  const path = "/opt/pi-orb/owner-skills/mine/SKILL.md";
+  const path = value.skills.find((s) => s.name === "mine")!.filePath;
   expect(Buffer.from((await value.reader.read(path))._unsafeUnwrap()).toString()).toBe(
     owner("mine").content,
   );
-  expect(value.reader.contains("/opt/pi-orb/owner-skills/hosting/SKILL.md")).toBe(false);
+  expect(value.reader.contains("../.pi-orb/owner-skills/hosting/SKILL.md")).toBe(false);
+});
+
+it("makes complete owner PNG/script bundles readable at the exact guest paths", async () => {
+  const f = fixture([
+    {
+      name: "images",
+      content: "---\nname: images\ndescription: images\n---\n",
+      source: null,
+      files: [
+        { path: "assets/a.png", base64: "iVBORw0KGgoA/w==", executable: false },
+        { path: "scripts/run.sh", base64: "IyEvYmluL3NoCg==", executable: true },
+      ],
+    },
+  ]);
+  const value = (await prepareResourceContext(f.options))._unsafeUnwrap();
+  const root = value.skills.find((s) => s.name === "images")!.baseDir;
+  expect(root).toMatch(/^\.\.\/\.pi-orb\/owner-skills\/[a-f0-9]{64}\/images$/);
+  expect(
+    Buffer.from((await value.reader.read(`${root}/assets/a.png`))._unsafeUnwrap()).toString(
+      "base64",
+    ),
+  ).toBe("iVBORw0KGgoA/w==");
+  expect(value.reader.contains(`${root}/scripts/run.sh`)).toBe(true);
 });

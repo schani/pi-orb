@@ -13,6 +13,11 @@ function fixture() {
   let admitted = true;
   const reader = new SnapshotResourceReader({
     files: [
+      {
+        path: "../.pi-orb/owner-skills/captured/mine/SKILL.md",
+        bytes: Buffer.from("captured"),
+        sha256: "",
+      },
       { path: "AGENTS.md", bytes: Buffer.from("one\ntwo\nthree"), sha256: "" },
       { path: "/opt/pi-orb/skills/skill/SKILL.md", bytes: Buffer.from("platform"), sha256: "" },
       { path: "image.png", bytes: Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]), sha256: "" },
@@ -22,6 +27,7 @@ function fixture() {
   });
   const files = createAgentToolFiles({
     reader,
+    workspaceCwd: () => "/owned/workspace/repo",
     allowSnapshotRead: () => offline,
     check: () =>
       admitted ? okAsync(undefined) : errAsync({ code: "cancelled", message: "revoked" }),
@@ -64,6 +70,47 @@ describe("scoped agent files", () => {
         await f.files.read({ path: "/opt/pi-orb/skills/skill/SKILL.md" }, api, context)
       )._unsafeUnwrap()?.output,
     ).toEqual([{ type: "text", text: "platform" }]);
+  });
+  it("keeps sibling owner-cache aliases authoritative without claiming unrelated absolute paths", async () => {
+    const f = fixture();
+    f.live();
+    for (const path of [
+      "../.pi-orb/owner-skills/captured/mine/SKILL.md",
+      "./../.pi-orb/owner-skills/captured/mine/./SKILL.md",
+      "../../workspace/.pi-orb/owner-skills/captured/mine/SKILL.md",
+      "/owned/workspace/.pi-orb/owner-skills/captured/mine/SKILL.md",
+      "/owned/workspace/repo/../.pi-orb/owner-skills/captured/mine/../mine/SKILL.md",
+    ]) {
+      expect((await f.files.read({ path }, api, context))._unsafeUnwrap()?.output).toEqual([
+        { type: "text", text: "captured" },
+      ]);
+    }
+    expect(
+      (
+        await f.files.read(
+          { path: "/owned/workspace/.pi-orb/owner-skills/missing/SKILL.md" },
+          api,
+          context,
+        )
+      ).isErr(),
+    ).toBe(true);
+    for (const path of [
+      "/other/.pi-orb/owner-skills/captured/mine/SKILL.md",
+      "/owned/workspace/.pi-orb/owner-skills/../../../private.txt",
+      "/owned/workspace/repo/file.txt",
+    ]) {
+      expect((await f.files.read({ path }, api, context))._unsafeUnwrap()).toBeUndefined();
+    }
+    f.revoke();
+    expect(
+      (
+        await f.files.read(
+          { path: "/owned/workspace/.pi-orb/owner-skills/captured/mine/SKILL.md" },
+          api,
+          context,
+        )
+      ).isErr(),
+    ).toBe(true);
   });
   it("returns supported images and rejects invalid UTF8", async () => {
     const f = fixture();

@@ -90,6 +90,7 @@ export function createAgentToolFiles(options: {
   reader: ResourceReader;
   artifacts: AgentArtifacts;
   allowSnapshotRead: () => boolean;
+  workspaceCwd?: () => string;
   check: () => ResultAsync<void, ToolError>;
 }): Required<AgentToolFiles> {
   const check = (ctx: Context) =>
@@ -98,10 +99,21 @@ export function createAgentToolFiles(options: {
       : options.check();
   return {
     read: (request, _api, ctx) => {
+      const cwd = options.workspaceCwd?.();
+      const canonicalCwd = cwd ? posix.normalize(cwd) : "";
+      const canonicalPath = posix.normalize(request.path);
+      const candidate = canonicalCwd ? posix.resolve(canonicalCwd, canonicalPath) : canonicalPath;
+      const relative =
+        canonicalCwd &&
+        candidate.startsWith(`${posix.join(canonicalCwd, "../.pi-orb/owner-skills")}/`)
+          ? posix.relative(canonicalCwd, candidate)
+          : canonicalPath;
+      const ownerPath = posix.normalize(relative).startsWith("../.pi-orb/owner-skills/")
+        ? relative
+        : request.path;
       const artifact = request.path.startsWith("/orb-artifacts/");
-      const platform = ["/opt/pi-orb/skills/", "/opt/pi-orb/owner-skills/"].some(
-        (prefix) =>
-          request.path.startsWith(prefix) || posix.normalize(request.path).startsWith(prefix),
+      const platform = ["/opt/pi-orb/skills/", "../.pi-orb/owner-skills/"].some(
+        (prefix) => ownerPath.startsWith(prefix) || posix.normalize(ownerPath).startsWith(prefix),
       );
       if (
         !artifact &&
@@ -118,9 +130,7 @@ export function createAgentToolFiles(options: {
                 .andThen((bytes) =>
                   bytes ? okAsync(bytes) : errAsync(failure("Private artifact not found")),
                 )
-            : options.reader
-                .read(request.path)
-                .mapErr(() => failure("Snapshot resource not found")),
+            : options.reader.read(ownerPath).mapErr(() => failure("Snapshot resource not found")),
         )
         .andThen((bytes) => check(ctx).andThen(() => content(bytes, request)));
     },

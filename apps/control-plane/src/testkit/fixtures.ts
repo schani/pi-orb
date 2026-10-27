@@ -25,7 +25,7 @@ import { FakeSecretStore } from "./broker.ts";
 import { FAILPOINTS } from "./failpoints.ts";
 import { FakeGitIdentityStore } from "./git-identity.ts";
 import { makeHostingHarness } from "./hosting.ts";
-import { FakeOwnerSkillStore } from "./owner-skills.ts";
+import { FakeOwnerSkillSource, FakeOwnerSkillStore } from "./owner-skills.ts";
 import { FakePersonalInstructionsStore } from "./personal-instructions.ts";
 import { FakeProjectInstructionsStore } from "./project-instructions.ts";
 import { InMemoryControlPlaneStore } from "./store.ts";
@@ -133,6 +133,7 @@ export function makeHarness(options?: {
     hosting: hosting.deps,
     ownerSkills: {
       store: new FakeOwnerSkillStore(),
+      source: new FakeOwnerSkillSource({ content: "", files: [], source: null }),
       platformSkillNames: new Set(["charts", "codemode"]),
     },
     personalInstructions: new FakePersonalInstructionsStore([TEST_USER_ID]),

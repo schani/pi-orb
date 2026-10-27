@@ -47,7 +47,9 @@ import { normalizeOrbName, setOrbName } from "../domain/orb-naming.ts";
 import { readOrb, readProjectOrbs } from "../domain/orb-read.ts";
 import {
   describeOwnerSkills,
+  importOwnerSkill,
   type OwnerSkillError,
+  previewOwnerSkill,
   writeOwnerSkill,
 } from "../domain/owner-skills.ts";
 import {
@@ -419,6 +421,34 @@ export function registerRoutes(
   app.post(
     OWNER_SKILLS_PATH,
     skills((user, { body }) => writeOwnerSkill(task, ownerSkills, user, null, body)),
+  );
+  const acquisition =
+    (
+      run: (
+        user: string,
+        body: unknown,
+        signal: AbortSignal,
+      ) => ResultAsync<unknown, OwnerSkillError>,
+    ) =>
+    async (request: Named, reply: FastifyReply) => {
+      const controller = new AbortController();
+      const cancel = () => controller.abort();
+      request.raw.once("aborted", cancel);
+      reply.raw.once("close", cancel);
+      try {
+        return await skills((user, { body }) => run(user, body, controller.signal))(request, reply);
+      } finally {
+        request.raw.off("aborted", cancel);
+        reply.raw.off("close", cancel);
+      }
+    };
+  app.post(
+    `${OWNER_SKILLS_PATH}/preview`,
+    acquisition((_user, body, signal) => previewOwnerSkill(task, ownerSkills, body, signal)),
+  );
+  app.post(
+    `${OWNER_SKILLS_PATH}/import`,
+    acquisition((user, body, signal) => importOwnerSkill(task, ownerSkills, user, body, signal)),
   );
   app.put(
     `${OWNER_SKILLS_PATH}/:name`,

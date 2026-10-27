@@ -24,8 +24,11 @@ import {
   type OrbView,
   OrbViewSchema,
   OWNER_SECRETS_PATH,
+  OWNER_SKILL_IMPORT_PATH,
+  OWNER_SKILL_PREVIEW_PATH,
   OWNER_SKILLS_PATH,
   OwnerSkillListSchema,
+  OwnerSkillPreviewSchema,
   ownerSecretPath,
   ownerSkillPath,
   PERSONAL_INSTRUCTIONS_PATH,
@@ -161,6 +164,22 @@ export function listOwnerSkills() {
   return apiFetch(OwnerSkillListSchema, OWNER_SKILLS_PATH, {
     cache: "no-store",
     signal: AbortSignal.timeout(15_000),
+  });
+}
+export function previewOwnerSkill(url: string, signal: AbortSignal) {
+  return apiFetch(OwnerSkillPreviewSchema, OWNER_SKILL_PREVIEW_PATH, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ url }),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(190_000)]),
+  });
+}
+export function importOwnerSkill(url: string, commitSha: string) {
+  return apiFetch(OwnerSkillListSchema, OWNER_SKILL_IMPORT_PATH, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ url, commitSha }),
+    signal: AbortSignal.timeout(190_000),
   });
 }
 /** `null` creates; otherwise replaces `name`, which the frontmatter name may rename. */

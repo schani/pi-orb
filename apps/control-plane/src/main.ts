@@ -22,6 +22,7 @@ import { readGceImageIdentity } from "./adapters/gce/image-pin.ts";
 import { GceOrbHostProvider } from "./adapters/gce/provider.ts";
 import { authenticatedGitCredentials } from "./adapters/git-resources/credentials.ts";
 import { GitResourceSource } from "./adapters/git-resources/git.ts";
+import { GitHubOwnerSkillSource } from "./adapters/git-resources/owner-skills.ts";
 import {
   type GithubOAuthConfig,
   GithubOAuthHttpClient,
@@ -536,7 +537,11 @@ export async function main(
     constants: lifecycleConstantsForHost(hostProvider.kind),
     projectSecrets: { pointers: database.projectSecrets, secrets },
     ownerSecrets: { pointers: database.ownerSecrets, secrets },
-    ownerSkills: { store: database.ownerSkills, platformSkillNames: platformSkillNames.value },
+    ownerSkills: {
+      store: database.ownerSkills,
+      source: new GitHubOwnerSkillSource(),
+      platformSkillNames: platformSkillNames.value,
+    },
     personalInstructions: database.personalInstructions,
     gitIdentity: database.gitIdentity,
     modelUsage: database.modelUsage,

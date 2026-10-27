@@ -169,3 +169,245 @@ it.each(["chromium", "webkit"] as const)(
     }
   },
 );
+
+it.each([
+  { engine: "chromium" as const, width: 1440 },
+  { engine: "chromium" as const, width: 390 },
+  { engine: "webkit" as const, width: 390 },
+])(
+  "$engine/$width GitHub draft preview, pinned Add and retained failures",
+  async ({ engine, width }) => {
+    const fixture = await createFrontendFixture(engine, {
+      page: { viewport: { width, height: 900 } },
+    });
+    const { page, origin } = fixture;
+    const url = "https://github.com/example/skills/tree/main/handbook";
+    const sha = "a".repeat(40);
+    const content = skill("handbook", "Write manuals.");
+    const preview = {
+      name: "handbook",
+      description: "Write manuals.",
+      content,
+      source: { url, commitSha: sha },
+      manifest: [
+        { path: "SKILL.md", bytes: content.length, executable: false },
+        { path: "assets/font.ttf", bytes: 7, executable: false },
+        { path: "scripts/render.sh", bytes: 12, executable: true },
+      ],
+      fileCount: 3,
+      totalBytes: content.length + 19,
+    };
+    const listItem = {
+      name: preview.name,
+      description: preview.description,
+      content,
+      source: preview.source,
+      fileCount: preview.fileCount,
+      totalBytes: preview.totalBytes,
+      updatedAt: "2026-10-27T00:00:00Z",
+    };
+    let items: object[] = [];
+    let failPreview = true;
+    let failImport = true;
+    let branchHead = sha;
+    const imports: unknown[] = [];
+    await page.route("**/api/v1/owner-skills**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/preview")) {
+        if (failPreview)
+          return route.fulfill({
+            status: 503,
+            json: {
+              error: { code: "unavailable", message: "GitHub unavailable", retryable: true },
+            },
+          });
+        return route.fulfill({ json: { ...preview, source: { url, commitSha: branchHead } } });
+      }
+      if (path.endsWith("/import")) {
+        const body = route.request().postDataJSON();
+        imports.push(body);
+        if (failImport)
+          return route.fulfill({
+            status: 409,
+            json: {
+              error: { code: "conflict", message: "handbook already exists", retryable: false },
+            },
+          });
+        items = [
+          {
+            ...listItem,
+            source: { url: body.url, commitSha: body.commitSha },
+            updatedAt: "2026-10-27T00:00:00Z",
+          },
+        ];
+      } else if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON();
+        items = [{ ...listItem, content: body.content, updatedAt: "2026-10-27T00:00:00Z" }];
+      }
+      return route.fulfill({ json: { items } });
+    });
+    await gotoFrontendFixture(page, `${origin}/`);
+    const dialog = await openSettings(page, "Skills");
+    const panel = dialog.getByRole("tabpanel", { name: "Skills", exact: true });
+    await button(panel, "add skill").click();
+    const fresh = panel
+      .locator("details")
+      .filter({ has: page.locator(".activity-rail-summary", { hasText: /^new skill$/ }) });
+    const source = fresh.getByRole("combobox", { name: "Draft source" });
+    await check(source).toHaveValue("manual");
+    const raw = skill("manual-draft", "Keep this.");
+    const invalid = "---\nname: manual-draft\n---\n";
+    await editor(fresh).fill(invalid);
+    // This fixture returns a validation error without replacing the draft.
+    await page.route("**/api/v1/owner-skills", (route) =>
+      route.request().method() === "POST"
+        ? route.fulfill({
+            status: 400,
+            json: {
+              error: {
+                code: "invalid_request",
+                message: "frontmatter description is required",
+                retryable: false,
+              },
+            },
+          })
+        : route.fallback(),
+    );
+    await button(fresh, "Save").click();
+    await check(fresh.getByRole("alert")).toContainText("description");
+    await source.selectOption("github");
+    const input = fresh.getByRole("textbox", { name: "GitHub URL", exact: true });
+    await input.fill(url);
+    await check(button(fresh, "Add")).toHaveCount(0);
+    await button(fresh, "Preview").click();
+    await check(fresh.getByRole("alert")).toContainText("GitHub unavailable");
+    await source.selectOption("manual");
+    await check(editor(fresh)).toHaveValue(invalid);
+    await check(fresh.getByRole("alert")).toContainText("description");
+    await editor(fresh).fill(raw);
+    await source.selectOption("github");
+    await check(input).toHaveValue(url);
+    await check(fresh.getByRole("alert")).toContainText("GitHub unavailable");
+    await dialog.getByRole("tab", { name: "Git", exact: true }).click();
+    await page.keyboard.press("Escape");
+    await openSettings(page, "Skills");
+    await check(fresh.getByRole("alert")).toContainText("GitHub unavailable");
+    await check(input).toHaveValue(url);
+    failPreview = false;
+    await button(fresh, "Preview").click();
+    await check(fresh).toContainText(sha);
+    await fresh
+      .locator("summary")
+      .filter({ hasText: /^3 files/ })
+      .click();
+    await check(fresh).toContainText("assets/font.ttf");
+    await check(fresh).toContainText("scripts/render.sh");
+    await fresh
+      .locator("summary")
+      .filter({ hasText: /^SKILL.md$/ })
+      .click();
+    await check(fresh.locator("pre").filter({ hasText: "name: handbook" })).toBeVisible();
+    branchHead = "b".repeat(40);
+    await button(fresh, "Add").click();
+    await check(fresh.getByRole("alert")).toContainText("handbook already exists");
+    await check(input).toHaveValue(url);
+    await check(fresh).toContainText(sha);
+    check(imports).toEqual([{ url, commitSha: sha }]);
+    check(items).toEqual([]);
+    failImport = false;
+    await button(fresh, "Add").click();
+    const saved = panel
+      .locator("details")
+      .filter({ has: page.locator(".activity-rail-summary", { hasText: /^handbook/ }) });
+    await check(saved).toContainText("Saved · next orb start");
+    await check(saved).toContainText("Import origin");
+    await check(saved).toContainText(sha);
+    await check(saved).toContainText(`3 files · ${preview.totalBytes} bytes`);
+    check(imports).toEqual([
+      { url, commitSha: sha },
+      { url, commitSha: sha },
+    ]);
+    await editor(saved).fill(`${content}\nEdited locally.\n`);
+    await button(saved, "Save").click();
+    await check(saved).toContainText("Saved · next orb start");
+    await check(saved).toContainText("Import origin");
+    await check(saved).toContainText(sha);
+    await check(saved).toContainText(`3 files · ${preview.totalBytes} bytes`);
+    check(await dialog.evaluate((root) => root.scrollWidth <= root.clientWidth)).toBe(true);
+    check(await page.locator("html").evaluate((root) => root.scrollWidth <= root.clientWidth)).toBe(
+      true,
+    );
+  },
+);
+
+it("invalidates changed URLs and cancels stale previews across source switch and cancel", async () => {
+  const fixture = await createFrontendFixture("chromium");
+  const { page, origin } = fixture;
+  const url = "https://github.com/example/skills/tree/main/handbook";
+  const content = skill("handbook", "Write manuals.");
+  const preview = {
+    name: "handbook",
+    description: "Write manuals.",
+    content,
+    source: { url, commitSha: "a".repeat(40) },
+    manifest: [{ path: "SKILL.md", bytes: content.length, executable: false }],
+    fileCount: 1,
+    totalBytes: content.length,
+  };
+  let release = () => {};
+  let started = () => {};
+  let finished = () => {};
+  let pending = Promise.resolve();
+  let seen = Promise.resolve();
+  let done = Promise.resolve();
+  const hold = () => {
+    pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    seen = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    done = new Promise<void>((resolve) => {
+      finished = resolve;
+    });
+  };
+  fixture.cleanup(async () => release());
+  await page.route("**/api/v1/owner-skills**", async (route) => {
+    if (route.request().url().endsWith("/preview")) {
+      started();
+      await pending;
+      await route.fulfill({ json: preview });
+      finished();
+    } else await route.fulfill({ json: { items: [] } });
+  });
+  await gotoFrontendFixture(page, `${origin}/`);
+  const dialog = await openSettings(page, "Skills");
+  const panel = dialog.getByRole("tabpanel", { name: "Skills", exact: true });
+  const begin = async () => {
+    await button(panel, "add skill").click();
+    await panel.getByRole("combobox", { name: "Draft source" }).selectOption("github");
+    await panel.getByRole("textbox", { name: "GitHub URL", exact: true }).fill(url);
+  };
+  await begin();
+  await button(panel, "Preview").click();
+  await check(button(panel, "Add")).toBeVisible();
+  await panel.getByRole("textbox", { name: "GitHub URL", exact: true }).fill(`${url}-changed`);
+  await check(button(panel, "Add")).toHaveCount(0);
+  for (const action of ["url", "switch", "cancel"] as const) {
+    hold();
+    await button(panel, "Preview").click();
+    await seen;
+    if (action === "url") {
+      await panel.getByRole("textbox", { name: "GitHub URL", exact: true }).fill(url);
+    } else if (action === "switch") {
+      await panel.getByRole("combobox", { name: "Draft source" }).selectOption("manual");
+    } else await button(panel, "cancel").click();
+    release();
+    await done;
+    if (action === "switch")
+      await panel.getByRole("combobox", { name: "Draft source" }).selectOption("github");
+    if (action === "cancel") await begin();
+    await check(button(panel, "Add")).toHaveCount(0);
+    await check(panel.getByRole("alert")).toHaveCount(0);
+  }
+});

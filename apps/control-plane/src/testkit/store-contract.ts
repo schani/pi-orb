@@ -5,7 +5,7 @@ import {
   OWNER_SKILL_MAX_COUNT,
 } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
-import { err, ok, type ResultAsync } from "neverthrow";
+import { err, ok, okAsync, type ResultAsync } from "neverthrow";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ControlPlaneDatabase } from "../adapters/database.ts";
 import { jsonParam, type PostgreSQLClient } from "../adapters/pg/client.ts";
@@ -13,7 +13,7 @@ import { PostgreSQLOwnerSkillStore } from "../adapters/pg/owner-skills.ts";
 import type { StoreError } from "../domain/errors.ts";
 import { messageBatchId } from "../domain/message-batch.ts";
 import type { OrbRow, ProjectRow } from "../domain/orb.ts";
-import type { OwnerSkillStore } from "../domain/owner-skills.ts";
+import { importOwnerSkill, type OwnerSkillStore } from "../domain/owner-skills.ts";
 import type {
   CentralAgentCaller,
   ControlPlaneStore,
@@ -3908,6 +3908,8 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
       const skill = (name: string) => ({
         name,
         content: `---\nname: ${name}\ndescription: d\n---\n`,
+        files: [],
+        source: null,
       });
       const create = (store: OwnerSkillStore, name: string) =>
         store.apply(task, OWNER, { kind: "create", skill: skill(name) });
@@ -3932,6 +3934,166 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
       expect(racing.filter((result) => result.isOk())).toHaveLength(2);
       expect(await names(skills.list(task, OWNER))).toHaveLength(OWNER_SKILL_MAX_COUNT);
     });
+
+    it("round trips owner bundle bytes and preserves files/source when renaming", async () => {
+      const skills = database.ownerSkills;
+      const source = {
+        url: "https://github.com/acme/skills/tree/main/example",
+        commitSha: "a".repeat(40),
+      };
+      const files = [{ path: "scripts/run.sh", base64: "AP8=", executable: true }];
+      const created = await skills.apply(task, OWNER, {
+        kind: "create",
+        skill: {
+          name: "example",
+          content: "example",
+          files,
+          source,
+        },
+      });
+      expect(created._unsafeUnwrap()).toMatchObject([{ name: "example", files, source }]);
+      const renamed = await skills.apply(task, OWNER, {
+        kind: "replace",
+        name: "example",
+        skill: {
+          name: "renamed",
+          content: "edited",
+        },
+      });
+      expect(renamed._unsafeUnwrap()).toMatchObject([
+        { name: "renamed", content: "edited", files, source },
+      ]);
+      expect((await skills.list(task, OWNER))._unsafeUnwrap()).toEqual(renamed._unsafeUnwrap());
+    });
+
+    it("serializes owner aggregate capacity checks across store instances", async () => {
+      const skills = database.ownerSkills;
+      const other = new PostgreSQLOwnerSkillStore(client);
+      const create = (store: OwnerSkillStore, name: string) =>
+        store.apply(task, OWNER, {
+          kind: "create",
+          skill: {
+            name,
+            content: "root",
+            source: null,
+            files: [
+              {
+                path: "data",
+                base64: Buffer.alloc(6 * 1024 * 1024).toString("base64"),
+                executable: false,
+              },
+            ],
+          },
+        });
+      const replies = await Promise.all([
+        create(skills, "first"),
+        create(other, "second"),
+        create(skills, "third"),
+      ]);
+      expect(replies.filter((reply) => reply.isOk())).toHaveLength(2);
+      expect(
+        replies.filter((reply) => reply.isErr()).map((reply) => reply._unsafeUnwrapErr().code),
+      ).toEqual(["conflict"]);
+      expect((await skills.list(task, OWNER))._unsafeUnwrap()).toHaveLength(2);
+    });
+
+    it("rolls back owner skill import cancelled after its INSERT before commit", async () => {
+      const controller = new AbortController();
+      const wrapped: PostgreSQLClient = {
+        query: client.query.bind(client),
+        end: client.end.bind(client),
+        transaction: (run) =>
+          client.transaction((query, execute) =>
+            run(
+              (sql, values) =>
+                query(sql, values).map((result) => {
+                  if (sql.startsWith("INSERT INTO user_skills")) controller.abort();
+                  return result;
+                }),
+              execute,
+            ),
+          ),
+      };
+      const result = await new PostgreSQLOwnerSkillStore(wrapped).apply(
+        task,
+        OWNER,
+        {
+          kind: "create",
+          skill: { name: "cancelled", content: "root", files: [], source: null },
+        },
+        controller.signal,
+      );
+      expect(result._unsafeUnwrapErr().code).toBe("unavailable");
+      expect((await database.ownerSkills.list(task, OWNER))._unsafeUnwrap()).toEqual([]);
+    });
+
+    it.skipIf(!name.startsWith("node-postgres"))(
+      "cancels owner skill import while its user lock is held",
+      async () => {
+        const barrier = () => {
+          let resolve = () => {};
+          const promise = new Promise<void>((done) => {
+            resolve = done;
+          });
+          return { promise, resolve };
+        };
+        const locked = barrier();
+        const release = barrier();
+        const waiting = barrier();
+        const controller = new AbortController();
+        const held = client.transaction(async (query) => {
+          const result = await query("SELECT 1 FROM users WHERE id=$1 FOR NO KEY UPDATE", [OWNER]);
+          locked.resolve();
+          await release.promise;
+          return result;
+        });
+        await locked.promise;
+        const wrapped: PostgreSQLClient = {
+          query: client.query.bind(client),
+          end: client.end.bind(client),
+          transaction: (run) =>
+            client.transaction((query, execute) =>
+              run((sql, values) => {
+                const result = query(sql, values);
+                if (sql.includes("FOR NO KEY UPDATE")) waiting.resolve();
+                return result;
+              }, execute),
+            ),
+        };
+        const source = {
+          url: "https://github.com/acme/skills/tree/main/example",
+          commitSha: "a".repeat(40),
+        };
+        try {
+          const imported = importOwnerSkill(
+            task,
+            {
+              store: new PostgreSQLOwnerSkillStore(wrapped),
+              platformSkillNames: new Set(),
+              source: {
+                acquire: () =>
+                  okAsync({
+                    content: "---\nname: example\ndescription: d\n---\n",
+                    files: [],
+                    source,
+                  }),
+              },
+            },
+            OWNER,
+            source,
+            controller.signal,
+          );
+          await waiting.promise;
+          controller.abort();
+          release.resolve();
+          expect((await imported)._unsafeUnwrapErr().code).toBe("unavailable");
+          expect((await database.ownerSkills.list(task, OWNER))._unsafeUnwrap()).toEqual([]);
+        } finally {
+          release.resolve();
+          (await held)._unsafeUnwrap();
+        }
+      },
+    );
 
     it("implements credential pointer CAS", async () => {
       const inserted = await pointers.casWritePointer(task, "openai-codex", null, {

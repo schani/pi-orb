@@ -1484,7 +1484,13 @@ async function handleApi(
     sendJson(response, 200, {
       items: [...state.ownerSkills]
         .sort(([left], [right]) => left.localeCompare(right))
-        .map(([name, skill]) => ({ name, ...skill })),
+        .map(([name, skill]) => ({
+          name,
+          ...skill,
+          source: null,
+          fileCount: 1,
+          totalBytes: Buffer.byteLength(skill.content),
+        })),
     });
     return true;
   }

@@ -715,6 +715,8 @@ describe("runtime broker routes", () => {
     const skill = (name: string) => ({
       name,
       content: `---\nname: ${name}\ndescription: d\n---\n`,
+      files: [],
+      source: null,
     });
     ownerSkills.seed(TEST_USER_ID, [skill("zeta"), skill("alpha")]);
     ownerSkills.seed(OTHER_OWNER, [skill("foreign")]);

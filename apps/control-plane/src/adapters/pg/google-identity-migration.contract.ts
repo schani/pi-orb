@@ -29,6 +29,7 @@ const followingMigrations = [
   "049_history_search.sql",
   "050_durable_sleeping.sql",
   "051_owner_skills_secrets.sql",
+  "052_owner_skill_bundles.sql",
 ];
 const first = {
   userId: "00000000-0000-4000-8000-000000000001",
