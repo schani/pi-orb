@@ -1,5 +1,10 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Skill } from "@earendil-works/pi-coding-agent";
+import {
+  type OwnerSkillsSnapshot,
+  ownerSkillCapturePath,
+  validateOwnerSkillsSnapshot,
+} from "@pi-orb/protocol";
 import { errAsync, ok, okAsync, type ResultAsync } from "neverthrow";
 import { z } from "zod";
 import {
@@ -16,9 +21,8 @@ export interface ManagedResourceInstructions {
   personal: { content: string; revision: number };
   project: { content: string; revision: number };
   /** Owner skills (docs/owner-skills-secrets.md), adopted fresh at every context open. */
-  skills: Array<{ name: string; content: string }>;
+  skills: OwnerSkillsSnapshot["skills"];
 }
-const OWNER_SKILL_ROOT = "/opt/pi-orb/owner-skills";
 /** Private native application document. Store implementation uses the fenced authority UOW. */
 export interface PersistedPlatformContext {
   version: string;
@@ -29,6 +33,8 @@ export interface PlatformContextStore {
   put(snapshot: PersistedPlatformContext): ResultAsync<void, ResourceError>;
 }
 export interface PreparedResourceContext {
+  captureId: string;
+  ownerSkillRoot: string;
   commitSha: string | null;
   managed: ManagedResourceInstructions;
   instructions: Array<{ path: string; content: string }>;
@@ -89,6 +95,8 @@ export function prepareResourceContext(options: {
   /** Deterministic scheduling/failpoint seam before private context publication. */
   checkpoint?: () => ResultAsync<void, ResourceError>;
 }): ResultAsync<PreparedResourceContext, ResourceError> {
+  const captureId = randomUUID();
+  const ownerSkillRoot = ownerSkillCapturePath(captureId);
   const check = () =>
     options.signal.aborted
       ? errAsync<void, ResourceError>(resourceError("cancelled", "Resource context cancelled"))
@@ -138,16 +146,27 @@ export function prepareResourceContext(options: {
               if (platform.isErr()) return errAsync(platform.error);
               // Precedence: platform > owner > repository. Owner names are checked against
               // platform names at save, so a clash means a newer platform skill took the name.
+              const validated = validateOwnerSkillsSnapshot({ skills: managed.skills });
+              if (validated.isErr())
+                return errAsync(resourceError("invalid", validated.error.message));
               const platformNames = new Set(platform.value.skills.map((skill) => skill.name));
               const ownerFiles = managed.skills
                 .filter((skill) => !platformNames.has(skill.name))
-                .map((skill) => {
-                  const bytes = Buffer.from(skill.content, "utf8");
-                  const path = `${OWNER_SKILL_ROOT}/${skill.name}/SKILL.md`;
-                  return { path, bytes, sha256: digest(bytes) };
-                });
+                .flatMap((skill) =>
+                  [
+                    { path: "SKILL.md", bytes: Buffer.from(skill.content, "utf8") },
+                    ...skill.files.map((file) => ({
+                      path: file.path,
+                      bytes: Buffer.from(file.base64, "base64"),
+                    })),
+                  ].map(({ path, bytes }) => ({
+                    path: `${ownerSkillRoot}/${skill.name}/${path}`,
+                    bytes,
+                    sha256: digest(bytes),
+                  })),
+                );
               const owner = snapshotPromptResources(
-                { instructionPath: null, skillRoot: OWNER_SKILL_ROOT, files: ownerFiles },
+                { instructionPath: null, skillRoot: ownerSkillRoot, files: ownerFiles },
                 { invalidSkills: "warn" },
               );
               if (owner.isErr()) return errAsync(owner.error);
@@ -164,6 +183,8 @@ export function prepareResourceContext(options: {
                   resourceError("invalid", "Duplicate repository and platform skill names"),
                 );
               return okAsync({
+                captureId,
+                ownerSkillRoot,
                 commitSha: repository?.commitSha ?? null,
                 managed,
                 instructions: project.value.instructions,

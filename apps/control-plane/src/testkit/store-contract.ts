@@ -3902,6 +3902,30 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
       expect((await secrets.readSecretPointer(task, OWNER))._unsafeUnwrap()).toEqual(updated);
     });
 
+    it("preserves owner skill files and pinned source through manual edit and rename", async () => {
+      const skills = database.ownerSkills;
+      const bundle = {
+        name: "science",
+        content: "---\nname: science\ndescription: d\n---\n",
+        files: [{ path: "scripts/run", base64: "AP8B", executable: true }],
+        source: {
+          url: `https://github.com/nasa/science/tree/${"a".repeat(40)}/skills/nasa`,
+          commitSha: "a".repeat(40),
+        },
+      };
+      (await skills.apply(task, OWNER, { kind: "create", skill: bundle }))._unsafeUnwrap();
+      expect((await skills.list(task, OWNER))._unsafeUnwrap()).toEqual([
+        { ...bundle, updatedAt: expect.any(String) },
+      ]);
+      const edited = { name: "renamed", content: "---\nname: renamed\ndescription: edited\n---\n" };
+      (
+        await skills.apply(task, OWNER, { kind: "replace", name: bundle.name, skill: edited })
+      )._unsafeUnwrap();
+      expect((await skills.list(task, OWNER))._unsafeUnwrap()).toEqual([
+        { ...bundle, ...edited, updatedAt: expect.any(String) },
+      ]);
+    });
+
     it("serializes owner skill commands per user: renames and the count cap", async () => {
       const skills = database.ownerSkills;
       const other = new PostgreSQLOwnerSkillStore(client);

@@ -262,6 +262,9 @@ describe("process agent composition", () => {
         logPath: "/home/.cache/pi-orb/logs/setup.log",
       },
     };
+    const install = vi
+      .spyOn(RemoteExecutionEnv.prototype, "installOwnerSkills")
+      .mockReturnValue(okAsync(undefined));
     const ready = vi.spyOn(RemoteExecutionEnv.prototype, "ready").mockResolvedValue(
       ok({
         ...binding,
@@ -295,6 +298,7 @@ describe("process agent composition", () => {
       expect((await result.value.checkExecutionReady?.(BACKGROUND_CONTEXT))?.isErr()).toBe(true);
       await result.value.closeResources?.();
     } finally {
+      install.mockRestore();
       ready.mockRestore();
       models.mockRestore();
     }

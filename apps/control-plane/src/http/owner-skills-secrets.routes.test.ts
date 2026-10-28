@@ -3,6 +3,8 @@ import Fastify from "fastify";
 import { okAsync } from "neverthrow";
 import { afterEach, expect, it } from "vitest";
 import { bundledPlatformSkillNames } from "../adapters/durable/platform-resources.ts";
+import type { OwnerSkillBundle } from "../domain/owner-skills.ts";
+import { readOwnerSkillsSnapshot } from "../domain/owner-skills.ts";
 import { UserScope } from "../domain/user-scope.ts";
 import { makeHarness, TEST_SYSTEM_VIEW } from "../testkit/fixtures.ts";
 import { makeProjectSecretsHarness } from "../testkit/project-secrets.ts";
@@ -16,7 +18,7 @@ afterEach(async () => Promise.all(apps.splice(0).map((app) => app.close())));
 const doc = (name: string, description = `${name} help`) =>
   `---\nname: ${name}\ndescription: ${description}\n---\nSteps.\n`;
 
-async function setup() {
+async function setup(imported?: OwnerSkillBundle) {
   const h = makeHarness();
   const ownerSecrets = makeProjectSecretsHarness(ALICE, BOB).deps;
   const platformSkillNames = (await bundledPlatformSkillNames())._unsafeUnwrap();
@@ -35,7 +37,14 @@ async function setup() {
   registerRoutes(
     app,
     task,
-    { ...deps, ownerSkills: { ...h.deps.ownerSkills, platformSkillNames } },
+    {
+      ...deps,
+      ownerSkills: {
+        ...h.deps.ownerSkills,
+        platformSkillNames,
+        ...(imported ? { acquireGithub: () => okAsync(imported) } : {}),
+      },
+    },
     {},
     TEST_SYSTEM_VIEW,
   );
@@ -45,7 +54,7 @@ async function setup() {
     expect(response.headers["cache-control"]).toBe("no-store");
     return { status: response.statusCode, body: response.json() };
   };
-  return { call };
+  return { call, store: h.deps.ownerSkills.store };
 }
 type Method = "GET" | "POST" | "PUT" | "DELETE";
 const names = (body: { items: Array<{ name: string }> }) => body.items.map((item) => item.name);
@@ -93,5 +102,44 @@ it("writes the signed-in owner's secrets without ever returning values", async (
   expect((await call("DELETE", "/api/v1/owner-secrets/NPM_TOKEN")).body).toEqual({
     revision: 2,
     items: [],
+  });
+});
+
+it("adds an imported bundle atomically, keeps lists light, and preserves its files/source through manual rename", async () => {
+  const imported = {
+    content: doc("nasa"),
+    files: [{ path: "scripts/run", base64: "AP8B", executable: true }],
+    source: {
+      url: `https://github.com/nasa/a/tree/${"a".repeat(40)}/skill`,
+      commitSha: "a".repeat(40),
+    },
+  };
+  const { call, store } = await setup(imported);
+  const created = await call("POST", "/api/v1/owner-skills", {
+    githubUrl: "https://github.com/nasa/a/tree/main/skill",
+  });
+  expect(created.status).toBe(200);
+  expect(created.body.items[0]).toMatchObject({ name: "nasa", source: imported.source });
+  expect(created.body.items[0]).not.toHaveProperty("files");
+  expect(
+    (
+      await call("POST", "/api/v1/owner-skills", {
+        githubUrl: "https://github.com/nasa/a/tree/main/skill",
+      })
+    ).status,
+  ).toBe(409);
+  expect(
+    (await call("POST", "/api/v1/owner-skills", { githubUrl: "x", content: doc("bad") })).status,
+  ).toBe(400);
+  expect((await call("PUT", "/api/v1/owner-skills/nasa", { content: doc("science") })).status).toBe(
+    200,
+  );
+  expect((await readOwnerSkillsSnapshot(task, store, ALICE))._unsafeUnwrap()).toEqual({
+    skills: [{ ...imported, name: "science", content: doc("science") }],
+  });
+  expect((await readOwnerSkillsSnapshot(task, store, BOB))._unsafeUnwrap()).toEqual({ skills: [] });
+  expect((await call("DELETE", "/api/v1/owner-skills/science")).status).toBe(200);
+  expect((await readOwnerSkillsSnapshot(task, store, ALICE))._unsafeUnwrap()).toEqual({
+    skills: [],
   });
 });

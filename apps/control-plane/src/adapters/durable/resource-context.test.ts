@@ -58,7 +58,7 @@ function fixture(skills: Array<{ name: string; content: string }> = []) {
       okAsync({
         personal: { content: `personal ${revision}`, revision },
         project: { content: "project", revision },
-        skills,
+        skills: skills.map((skill) => ({ ...skill, files: [], source: null })),
       }),
     platformStore: {
       get: () => okAsync(platform),
@@ -234,9 +234,9 @@ it("ranks platform over owner over repository skills; owner skills read at their
     ["x", "owner"],
     ["hosting", "platform skill"],
   ]);
-  const path = "/opt/pi-orb/owner-skills/mine/SKILL.md";
+  const path = `${value.ownerSkillRoot}/mine/SKILL.md`;
   expect(Buffer.from((await value.reader.read(path))._unsafeUnwrap()).toString()).toBe(
     owner("mine").content,
   );
-  expect(value.reader.contains("/opt/pi-orb/owner-skills/hosting/SKILL.md")).toBe(false);
+  expect(value.reader.contains(`${value.ownerSkillRoot}/hosting/SKILL.md`)).toBe(false);
 });

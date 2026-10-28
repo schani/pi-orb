@@ -172,6 +172,14 @@ export function saveOwnerSkill(name: string | null, content: string) {
     signal: AbortSignal.timeout(15_000),
   });
 }
+export function importOwnerSkill(githubUrl: string) {
+  return apiFetch(OwnerSkillListSchema, OWNER_SKILLS_PATH, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ githubUrl }),
+    signal: AbortSignal.timeout(75_000),
+  });
+}
 export function deleteOwnerSkill(name: string) {
   return apiFetch(OwnerSkillListSchema, ownerSkillPath(name), {
     method: "DELETE",

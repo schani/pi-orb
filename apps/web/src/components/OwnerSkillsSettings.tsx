@@ -5,6 +5,7 @@ import {
   type ApiError,
   deleteOwnerSkill,
   describeApiError,
+  importOwnerSkill,
   listOwnerSkills,
   saveOwnerSkill,
 } from "../lib/api.ts";
@@ -19,6 +20,9 @@ export function useOwnerSkills(dialog: RefObject<HTMLElement | null>) {
   const [drafts, setDrafts] = useState<Readonly<Record<string, string | undefined>>>({});
   const [open, setOpen] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [newSource, setNewSource] = useState("manual");
+  const [githubUrl, setGithubUrl] = useState("");
+  const writing = useRef(false);
   const [error, setError] = useState<string | null>(null);
   /** The last write's outcome, shown only in its row: `error: null` is the save receipt. */
   const [status, setStatus] = useState<{ key: string; error: string | null } | null>(null);
@@ -35,14 +39,21 @@ export function useOwnerSkills(dialog: RefObject<HTMLElement | null>) {
   };
   const setDraft = (key: string, content?: string) => {
     setDrafts((current) => ({ ...current, [key]: content }));
+    if (key === NEW && content === undefined) {
+      setNewSource("manual");
+      setGithubUrl("");
+    }
     setStatus(null);
   };
   const write = async (key: string, request: () => Promise<Result<OwnerSkillList, ApiError>>) => {
+    if (writing.current) return null;
+    writing.current = true;
     epoch.current++; // supersedes an in-flight list
     dialog.current?.focus();
     setSaving(true);
     setStatus(null);
     const result = await request();
+    writing.current = false;
     setSaving(false);
     if (result.isErr()) setStatus({ key, error: describeApiError(result.error) });
     else setItems(result.value.items);
@@ -51,7 +62,11 @@ export function useOwnerSkills(dialog: RefObject<HTMLElement | null>) {
   const save = async (key: string) => {
     const content = drafts[key];
     if (saving || items === null || content === undefined) return;
-    const after = await write(key, () => saveOwnerSkill(key === NEW ? null : key, content));
+    const after = await write(key, () =>
+      key === NEW && newSource === "github"
+        ? importOwnerSkill(githubUrl)
+        : saveOwnerSkill(key === NEW ? null : key, content),
+    );
     if (after === null) return;
     // A create or rename is the one name the returned list adds.
     const name = after.find((skill) => !items.some((old) => old.name === skill.name))?.name ?? key;
@@ -63,7 +78,29 @@ export function useOwnerSkills(dialog: RefObject<HTMLElement | null>) {
     if (saving || !window.confirm(`Remove ${name} from every orb on its next start?`)) return;
     if ((await write(name, () => deleteOwnerSkill(name))) !== null) setDraft(name);
   };
-  return { items, drafts, open, setOpen, saving, error, status, load, setDraft, save, remove };
+  return {
+    items,
+    drafts,
+    open,
+    setOpen,
+    saving,
+    error,
+    status,
+    load,
+    setDraft,
+    save,
+    remove,
+    newSource,
+    githubUrl,
+    setNewSource: (source: string) => {
+      setNewSource(source);
+      setStatus(null);
+    },
+    setGithubUrl: (url: string) => {
+      setGithubUrl(url);
+      setStatus(null);
+    },
+  };
 }
 export type OwnerSkills = ReturnType<typeof useOwnerSkills>;
 
@@ -77,14 +114,15 @@ export function OwnerSkillsPane({ skills }: { skills: OwnerSkills }) {
   const adding = skills.drafts[NEW] !== undefined;
   const rows = [
     ...(skills.items ?? []),
-    ...(adding ? [{ name: NEW, description: "", content: "" }] : []),
+    ...(adding ? [{ name: NEW, description: "", content: "", source: null }] : []),
   ];
   return (
     <div className="project-secrets-body">
       {skills.items === null && skills.error === null && <span className="muted">loading…</span>}
-      {rows.map(({ name, description, content }) => {
+      {rows.map(({ name, description, content, source }) => {
         const draft = skills.drafts[name] ?? content;
         const status = skills.status?.key === name ? skills.status : null;
+        const github = name === NEW && skills.newSource === "github";
         return (
           <details
             key={name}
@@ -110,16 +148,44 @@ export function OwnerSkillsPane({ skills }: { skills: OwnerSkills }) {
                   void skills.save(name);
                 }}
               >
-                <TextFieldFrame>
-                  <textarea
-                    ref={focusOnMount(name)}
-                    aria-label="SKILL.md"
-                    spellCheck={false}
-                    autoComplete="off"
-                    value={draft}
+                {source && (
+                  <a className="skill-source" href={source.url} target="_blank" rel="noreferrer">
+                    {source.url}
+                  </a>
+                )}
+                {name === NEW && (
+                  <select
+                    aria-label="Source"
+                    value={skills.newSource}
                     disabled={skills.saving}
-                    onChange={(event) => skills.setDraft(name, event.target.value)}
-                  />
+                    onChange={(event) => skills.setNewSource(event.target.value)}
+                  >
+                    <option value="manual">SKILL.md</option>
+                    <option value="github">GitHub URL</option>
+                  </select>
+                )}
+                <TextFieldFrame>
+                  {github ? (
+                    <input
+                      aria-label="GitHub URL"
+                      type="url"
+                      spellCheck={false}
+                      autoComplete="off"
+                      value={skills.githubUrl}
+                      disabled={skills.saving}
+                      onChange={(event) => skills.setGithubUrl(event.target.value)}
+                    />
+                  ) : (
+                    <textarea
+                      ref={focusOnMount(name)}
+                      aria-label="SKILL.md"
+                      spellCheck={false}
+                      autoComplete="off"
+                      value={draft}
+                      disabled={skills.saving}
+                      onChange={(event) => skills.setDraft(name, event.target.value)}
+                    />
+                  )}
                 </TextFieldFrame>
                 <div className="personal-instructions-feedback">
                   {status?.error ? (
@@ -128,7 +194,11 @@ export function OwnerSkillsPane({ skills }: { skills: OwnerSkills }) {
                     </span>
                   ) : (
                     <span role="status">
-                      {status ? "Saved · next orb start" : draft !== content ? "Unsaved" : ""}
+                      {status
+                        ? "Saved · next orb start"
+                        : (github ? skills.githubUrl !== "" : draft !== content)
+                          ? "Unsaved"
+                          : ""}
                     </span>
                   )}
                   {name === NEW ? (
@@ -152,8 +222,13 @@ export function OwnerSkillsPane({ skills }: { skills: OwnerSkills }) {
                       remove
                     </button>
                   )}
-                  <button type="submit" disabled={skills.saving || draft === content}>
-                    Save
+                  <button
+                    type="submit"
+                    disabled={
+                      skills.saving || (github ? !skills.githubUrl.trim() : draft === content)
+                    }
+                  >
+                    {github ? "Add" : "Save"}
                   </button>
                 </div>
               </form>

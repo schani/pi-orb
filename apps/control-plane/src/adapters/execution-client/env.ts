@@ -27,6 +27,7 @@ import {
   ExecutionStreamFrameSchema,
   type ExecutionWireResult,
   ExecutionWireResultSchema,
+  type OwnerSkillsSnapshot,
   type RuntimeHealth,
   RuntimeHealthSchema,
 } from "@pi-orb/protocol";
@@ -98,6 +99,33 @@ export class RemoteExecutionEnv implements ExecutionEnv {
           code: "invalid_response",
           message: "invalid execution RPC response",
         });
+  }
+  installOwnerSkills(
+    captureId: string,
+    snapshot: OwnerSkillsSnapshot,
+    context: Context,
+  ): ResultAsync<void, ExecutionTransportError> {
+    return ResultAsync.fromSafePromise(
+      this.request(
+        EXECUTION_RPC_PATH,
+        {
+          operation: "installOwnerSkills",
+          args: [captureId, snapshot],
+          cwd: this.cwd,
+        },
+        context,
+      ),
+    )
+      .andThen((result) => result)
+      .andThen((reply) =>
+        reply.ok
+          ? ok(undefined)
+          : err({
+              type: "execution_transport_error" as const,
+              code: "unavailable" as const,
+              message: reply.error.message,
+            }),
+      );
   }
   async ready(context: Context): Promise<Result<ExecutionReady, ExecutionTransportError>> {
     return ResultAsync.fromPromise(

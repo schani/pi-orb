@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { posix } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
@@ -278,6 +279,8 @@ export function createProcessAgentContext(
       const resourcesAbort = new AbortController();
       if (lease?.signal.aborted) resourcesAbort.abort();
       lease?.signal.addEventListener("abort", () => resourcesAbort.abort(), { once: true });
+      let appendMcpAlert: DurableAgent["appendAlert"] | undefined;
+      const installed = new Map<string, Promise<Result<void, RuntimeClientError>>>();
       const loadReady = (
         binding: ExecutionBinding & { release?: () => void },
         ctx: Context,
@@ -323,7 +326,81 @@ export function createProcessAgentContext(
                   return err(durableError("execution admission changed"));
                 remote.cwd = ready.value.cwd;
                 env.cwd = ready.value.cwd;
-                return ok(remote);
+                let install = installed.get(binding.incarnation);
+                if (!install) {
+                  install = Promise.resolve(
+                    ResultAsync.fromPromise(
+                      task.checkpoint("owner skills installation", orb.id, binding.incarnation),
+                      () => durableError("Owner skill installation cancelled"),
+                    ).andThen(() =>
+                      remote
+                        .installOwnerSkills(
+                          prepared.value.captureId,
+                          { skills: prepared.value.managed.skills },
+                          withAbortSignal(
+                            AbortSignal.any([operation.signal, resourcesAbort.signal]),
+                            BACKGROUND_CONTEXT,
+                          ),
+                        )
+                        .mapErr((error) => durableError(error.message, true))
+                        .andTee(() => {
+                          if (
+                            !resourcesAbort.signal.aborted &&
+                            deps.control.noteCondition(`owner-skills-install:${orb.id}`, false)
+                          )
+                            logOrbEvent(task, orb.id, "owner-skills-install-recovered", {});
+                        })
+                        .orElse((error) => {
+                          if (
+                            resourcesAbort.signal.aborted ||
+                            operation.signal.aborted ||
+                            !deps.control.noteCondition(`owner-skills-install:${orb.id}`, true)
+                          )
+                            return err(error);
+                          logOrbEvent(task, orb.id, "owner-skills-install-blocked", {
+                            message: error.message,
+                          });
+                          return (
+                            appendMcpAlert?.(
+                              randomUUID(),
+                              `Owner skills unavailable: ${error.message}`,
+                            ).map(() => undefined) ?? okAsync(undefined)
+                          )
+                            .orElse(() => okAsync(undefined))
+                            .andThen(() => err(error));
+                        }),
+                    ),
+                  );
+                  installed.set(binding.incarnation, install);
+                  void install.then((result) => {
+                    if (result.isErr()) installed.delete(binding.incarnation);
+                  });
+                }
+                return ResultAsync.fromSafePromise(install)
+                  .andThen((result) => result)
+                  .andThen(() =>
+                    ctx.abortSignal?.aborted || resourcesAbort.signal.aborted
+                      ? err(durableError("Owner skill installation cancelled"))
+                      : lease
+                          .check()
+                          .mapErr(() => durableError("Owner skill installation admission revoked"))
+                          .andThen(() =>
+                            deps.store
+                              .getOrb(task, orb.id)
+                              .mapErr(() =>
+                                durableError("Owner skill installation admission unavailable"),
+                              ),
+                          )
+                          .andThen((latest) =>
+                            latest &&
+                            String(latest.hostIncarnation) === binding.incarnation &&
+                            latest.agentAdmissionVersion === orb.agentAdmissionVersion &&
+                            latest.stopReason !== "manual" &&
+                            latest.stopReason !== "sleep"
+                              ? ok(remote)
+                              : err(durableError("Owner skill installation admission changed")),
+                          ),
+                  );
               });
           })
           .orTee(() => binding.release?.());
@@ -431,13 +508,21 @@ export function createProcessAgentContext(
         reader: prepared.value.reader,
         artifacts: lease.artifacts,
         allowSnapshotRead: () => !workspaceReady,
+        managedPath: (path) => {
+          const normalized = posix.normalize(path);
+          const root = prepared.value.ownerSkillRoot;
+          if (normalized.startsWith(`${root}/`)) return normalized;
+          const absolute = env.cwd ? posix.resolve(env.cwd, root) : null;
+          return absolute && normalized.startsWith(`${absolute}/`)
+            ? root + normalized.slice(absolute.length)
+            : undefined;
+        },
         check: () =>
           lease
             .check()
             .mapErr((): ToolError => ({ code: "forbidden", message: "Agent ownership revoked" })),
       });
       const notifyParent = options.notifyParent;
-      let appendMcpAlert: DurableAgent["appendAlert"] | undefined;
       const tools = createDurableTools({
         mcpContext: withAbortSignal(resourcesAbort.signal, BACKGROUND_CONTEXT),
         mcpChanged: (status, previous) => {

@@ -134,6 +134,12 @@ export function makeHarness(options?: {
     ownerSkills: {
       store: new FakeOwnerSkillStore(),
       platformSkillNames: new Set(["charts", "codemode"]),
+      acquireGithub: () =>
+        errAsync({
+          type: "owner_skill_error" as const,
+          code: "unavailable" as const,
+          message: "GitHub unavailable",
+        }),
     },
     personalInstructions: new FakePersonalInstructionsStore([TEST_USER_ID]),
     gitIdentity: new FakeGitIdentityStore(),

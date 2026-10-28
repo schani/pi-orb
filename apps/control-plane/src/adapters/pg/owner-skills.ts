@@ -15,12 +15,14 @@ const storeFailure = (error: StoreError): OwnerSkillError =>
   error.code === "unavailable"
     ? failure("unavailable", "Owner skills unavailable")
     : failure("internal", "Owner skill storage is inconsistent");
-const LIST = `SELECT name, content, updated_at FROM user_skills
+const LIST = `SELECT name, content, files, source, updated_at FROM user_skills
   WHERE user_id = $1 ORDER BY name COLLATE "C"`;
 const records = (result: PgQueryResult): OwnerSkillRecord[] =>
   result.rows.map((row) => ({
     name: String(row["name"]),
     content: String(row["content"]),
+    files: row["files"] as OwnerSkillRecord["files"],
+    source: row["source"] as OwnerSkillRecord["source"],
     updatedAt: new Date(row["updated_at"] as string | Date).toISOString(),
   }));
 
@@ -48,8 +50,14 @@ export class PostgreSQLOwnerSkillStore implements OwnerSkillStore {
         // A rename is the same row under its new primary key, in one statement.
         const written = await (command.kind === "create"
           ? query(
-              "INSERT INTO user_skills (user_id, name, content, updated_at) VALUES ($1, $2, $3, now())",
-              [userId, command.skill.name, command.skill.content],
+              "INSERT INTO user_skills (user_id, name, content, files, source, updated_at) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, now())",
+              [
+                userId,
+                command.skill.name,
+                command.skill.content,
+                JSON.stringify(command.skill.files ?? []),
+                JSON.stringify(command.skill.source ?? null),
+              ],
             )
           : command.kind === "replace"
             ? query(

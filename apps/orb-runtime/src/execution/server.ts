@@ -1,4 +1,5 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { resolve } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import type { BinaryReader, TextLineReader } from "@earendil-works/pi-durable/env";
@@ -13,15 +14,18 @@ import {
   type ExecutionReady,
   ExecutionRpcSchema,
   type ExecutionWireResult,
+  ownerSkillCapturePath,
   RUNTIME_ALERT_PATH,
   type RuntimeAlertRequest,
   RuntimeAlertRequestSchema,
   type RuntimeAlertResponse,
   RuntimeHealthSchema,
+  validateOwnerSkillsSnapshot,
 } from "@pi-orb/protocol";
 import Fastify from "fastify";
 import type { ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
+import { materializeOwnerSkills } from "../owner-skills/materialize.ts";
 import { BoundedLineReader } from "./line-reader.ts";
 
 export const executionContext = (abortSignal?: AbortSignal): Context =>
@@ -126,6 +130,23 @@ export function buildExecutionServer(options: ExecutionServerOptions) {
     // Cwd belongs to this invocation, never shared mutable state across calls.
     const callEnv = new NodeExecutionEnv({ cwd });
     try {
+      if (operation === "installOwnerSkills") {
+        const captureId = args[0];
+        if (
+          typeof captureId !== "string" ||
+          !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(captureId)
+        )
+          return failure("invalid", "Invalid owner skills capture ID");
+        const snapshot = validateOwnerSkillsSnapshot(args[1]);
+        if (snapshot.isErr()) return failure("invalid", snapshot.error.message);
+        const result = materializeOwnerSkills(
+          resolve(options.cwd, ownerSkillCapturePath(captureId)),
+          snapshot.value.skills,
+        );
+        return result.isErr()
+          ? failure(result.error.code === "invalid" ? "invalid" : "unknown", result.error.message)
+          : { ok: true };
+      }
       if (operation === "readerRead" || operation === "readerClose") {
         const id = String(args[0]);
         const reader = readers.get(id);

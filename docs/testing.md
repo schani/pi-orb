@@ -2054,3 +2054,11 @@ unchanged three-case process E2E pass without retries or timeout changes. Provid
 succeeds; ports 3210/5173 are free. No new DST failure occurred. Private receipts:
 `$HOME/.local/share/pi-orb/pr231-ci-fix/`; original CI evidence remains in
 `$HOME/.local/share/pi-orb/pr231-babysit/`. Exact-new-head full CI remains required; no deployment.
+
+## GitHub owner-skill folders (2026-10-28; local, undeployed)
+
+Tests precede implementation. Source/materializer tests cover plain/encoded slash refs, literal fragment delimiters, commit-pinned bytes/modes, unsafe/incomplete inputs, snapshot bounds, rate limits/cancellation and typed filesystem diagnostics. Command DST and shared database contracts preserve assets/source through manual edits and rename. The real process-resource proof covers private capture, pre-compute reads, concurrent/cancelled installers, executable/binary delivery outside Git, retry alerts and unchanged captured bytes after owner edits/host replacement.
+
+Final serial local qualification: root typecheck/lint; **188 focused tests / 12 files**; complete PGlite **91 passed / four conditional skips**; scoped network PostgreSQL 16 **two owner contracts** (owned container removed); Chromium/WebKit Settings **6/6**; pinned local-fake Durable process E2E **3/3**, with successful provider cleanup. Only acquisition/error-code mapping changed after browser/process receipts; final focused regression covers those changes. Read-only live NASA acquisition pinned `d14a8e525c6708b5f481661f483aab52b06def02`: **22 files, 2,423,810 decoded bytes, 3,230,256 snapshot JSON bytes**, without owner-store writes.
+
+First failures remain in `.context/github-skills-minimal/`, with final manifests/logs under `qualification/`. The live missing-ref HTTP 422 body is retained; only its exact candidate-specific absence message permits fallback, while unrelated 422 remains terminal. The host-interrupted run is neither a pass nor an assertion failure; its cause is not claimed fixed. Full hosted qualification remains in `TODO.md`.

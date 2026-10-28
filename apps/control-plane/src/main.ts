@@ -27,6 +27,7 @@ import {
   GithubOAuthHttpClient,
   GithubUpstreamRefresher,
 } from "./adapters/github-oauth/client.ts";
+import { acquireGithubOwnerSkill } from "./adapters/github-owner-skill.ts";
 import {
   createGoogleLoginProvider,
   createGoogleMachineVerifier,
@@ -542,7 +543,14 @@ export async function main(
     constants: lifecycleConstantsForHost(hostProvider.kind),
     projectSecrets: { pointers: database.projectSecrets, secrets },
     ownerSecrets: { pointers: database.ownerSecrets, secrets },
-    ownerSkills: { store: database.ownerSkills, platformSkillNames: platformSkillNames.value },
+    ownerSkills: {
+      store: database.ownerSkills,
+      platformSkillNames: platformSkillNames.value,
+      acquireGithub: (url, signal) =>
+        ResultAsync.fromSafePromise(acquireGithubOwnerSkill(url, signal)).andThen(
+          (result) => result,
+        ),
+    },
     personalInstructions: database.personalInstructions,
     gitIdentity: database.gitIdentity,
     modelUsage: database.modelUsage,

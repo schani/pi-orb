@@ -418,7 +418,20 @@ export function registerRoutes(
   );
   app.post(
     OWNER_SKILLS_PATH,
-    skills((user, { body }) => writeOwnerSkill(task, ownerSkills, user, null, body)),
+    skills((user, request) => {
+      const abort = new AbortController();
+      const cancel = () => abort.abort();
+      request.raw.once("aborted", cancel);
+      return writeOwnerSkill(task, ownerSkills, user, null, request.body, abort.signal)
+        .map((value) => {
+          request.raw.off("aborted", cancel);
+          return value;
+        })
+        .mapErr((error) => {
+          request.raw.off("aborted", cancel);
+          return error;
+        });
+    }),
   );
   app.put(
     `${OWNER_SKILLS_PATH}/:name`,

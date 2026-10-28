@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -21,7 +22,22 @@ import { makeHarness, makeOrbRow, makeProjectRow } from "./testkit/fixtures.ts";
 const skillPath = ".agents/skills/proof/SKILL.md";
 const skill = "---\nname: proof\ndescription: composition proof\n---\nPG skill baseline";
 /** Renamed to "proof", the owner's skill replaces the same-named repository skill. */
-const ownerSkillPath = "/opt/pi-orb/owner-skills/proof/SKILL.md";
+const ownerPath = (instructions: string, name: string) =>
+  required(
+    instructions.match(new RegExp(`\\.\\./owner-skills/[a-f0-9-]+/${name}/SKILL\\.md`))?.[0],
+  );
+const ownerFiles = [
+  {
+    path: "scripts/run",
+    base64: Buffer.from("#!/bin/sh\nprintf captured-v1").toString("base64"),
+    executable: true,
+  },
+  { path: "data.bin", base64: "AP8B", executable: false },
+];
+const ownerSource = {
+  url: `https://github.com/a/b/tree/${"a".repeat(40)}/skill`,
+  commitSha: "a".repeat(40),
+};
 const ownerSkill = (version: string, name = "owner-proof") =>
   `---\nname: ${name}\ndescription: owner proof ${version}\n---\nowner body ${version}`;
 function required<T>(value: T | null | undefined): T {
@@ -35,7 +51,14 @@ function barrier() {
   });
   return { promise, resolve };
 }
-async function fixture(repositoryUrl: string | null = makeProjectRow("project").repositoryUrl) {
+async function fixture(
+  repositoryUrl: string | null = makeProjectRow("project").repositoryUrl,
+  installGate?: {
+    entered: ReturnType<typeof barrier>;
+    release: ReturnType<typeof barrier>;
+    failNext?: boolean;
+  },
+) {
   const db = new PGliteClient();
   const database = composeControlPlaneDatabase(db);
   const task = new NoSimulationTask("resource composition proof", false);
@@ -58,7 +81,12 @@ async function fixture(repositoryUrl: string | null = makeProjectRow("project").
   (
     await database.ownerSkills.apply(task, project.ownerUserId, {
       kind: "create",
-      skill: { name: "owner-proof", content: ownerSkill("v1") },
+      skill: {
+        name: "owner-proof",
+        content: ownerSkill("v1"),
+        files: ownerFiles,
+        source: ownerSource,
+      },
     })
   )._unsafeUnwrap();
   const acquired = barrier(),
@@ -89,22 +117,44 @@ async function fixture(repositoryUrl: string | null = makeProjectRow("project").
       return ResultAsync.fromSafePromise(releaseGit.promise).map(() => snapshot);
     },
   });
-  const root = await mkdtemp(join(tmpdir(), "resource-composition-proof-"));
+  const workDir = await mkdtemp(join(tmpdir(), "resource-composition-proof-"));
+  const root = join(workDir, "repo");
   await mkdir(join(root, ".agents/skills/proof"), { recursive: true });
   await writeFile(join(root, skillPath), skill);
   await writeFile(join(root, "AGENTS.md"), "hook-modified instructions");
-  const server = buildExecutionServer({
-    token: "proof-token",
-    incarnation: "0",
-    cwd: root,
-    ready: () => ({
-      cwd: root,
-      incarnation: "0",
-      pid: process.pid,
-      checkoutCommit: snapshot.commitSha,
-    }),
-  });
-  const baseUrl = await server.listen({ host: "127.0.0.1", port: 0 });
+  let incarnation = "0";
+  let executionRoot = root;
+  let installs = 0;
+  const makeServer = () => {
+    const server = buildExecutionServer({
+      token: "proof-token",
+      incarnation,
+      cwd: executionRoot,
+      ready: () => ({
+        cwd: executionRoot,
+        incarnation,
+        pid: process.pid,
+        checkoutCommit: snapshot.commitSha,
+      }),
+    });
+    server.addHook("preHandler", async (request, reply) => {
+      if ((request.body as { operation?: string } | null)?.operation === "installOwnerSkills") {
+        installs++;
+        installGate?.entered.resolve();
+        await installGate?.release.promise;
+        if (installGate?.failNext) {
+          installGate.failNext = false;
+          return reply.send({
+            ok: false,
+            error: { code: "unknown", message: "test install failure" },
+          });
+        }
+      }
+    });
+    return server;
+  };
+  let server = makeServer();
+  let baseUrl = await server.listen({ host: "127.0.0.1", port: 0 });
   let readyReads = 0;
   const h = makeHarness();
   const deps = {
@@ -117,7 +167,7 @@ async function fixture(repositoryUrl: string | null = makeProjectRow("project").
       ...h.deps.hostProvider,
       executionBinding: () => {
         bindings++;
-        return okAsync({ baseUrl, token: "proof-token", incarnation: "0", cwd: root });
+        return okAsync({ baseUrl, token: "proof-token", incarnation, cwd: executionRoot });
       },
     },
   };
@@ -142,6 +192,17 @@ async function fixture(repositoryUrl: string | null = makeProjectRow("project").
     project,
     snapshot,
     root,
+    installs: () => installs,
+    replaceHost: async () => {
+      await server.close();
+      incarnation = "1";
+      executionRoot = join(workDir, "replacement/repo");
+      await mkdir(executionRoot, { recursive: true });
+      (await db.query("UPDATE orbs SET host_incarnation=1 WHERE id=$1", [orb.id]))._unsafeUnwrap();
+      server = makeServer();
+      baseUrl = await server.listen({ host: "127.0.0.1", port: 0 });
+      return executionRoot;
+    },
     resources,
     acquired,
     releaseGit,
@@ -174,7 +235,7 @@ async function fixture(repositoryUrl: string | null = makeProjectRow("project").
       await server.close();
       await database.agentPersistence.close();
       await database.close();
-      await rm(root, { recursive: true, force: true });
+      await rm(workDir, { recursive: true, force: true });
     },
   };
 }
@@ -334,7 +395,15 @@ it.each(["manual", "sleep"] as const)(
       )._unsafeUnwrap();
       expect(managed?.personal.content).toBe("personal-v2");
       expect(managed?.project.content).toBe("project-v2");
-      expect(managed?.skills).toEqual([{ name: "proof", content: ownerSkill("v2", "proof") }]);
+      expect(managed?.skills).toEqual([
+        {
+          name: "proof",
+          content: ownerSkill("v2", "proof"),
+          files: ownerFiles,
+          source: ownerSource,
+        },
+      ]);
+      const ownerSkillPath = ownerPath(second.instructions, "proof");
       expect(second.instructions).toContain(ownerSkillPath);
       expect(second.instructions).toContain("owner proof v2");
       expect(second.instructions).not.toContain("composition proof");
@@ -461,7 +530,9 @@ it("executes the first boot-time command under pinned instructions and routes li
     await f.state("starting");
     await f.reopenLease();
     bundle = await f.openContext();
-    expect(bundle.instructions).toBe(instructions);
+    expect(bundle.instructions.replace(/owner-skills\/[a-f0-9-]+/g, "owner-skills/CAPTURE")).toBe(
+      instructions.replace(/owner-skills\/[a-f0-9-]+/g, "owner-skills/CAPTURE"),
+    );
     const priorBindings = f.bindings();
     expect((await invoke(bundle, "read", { path: skillPath })).output).toEqual([
       { type: "text", text: skill },
@@ -470,6 +541,79 @@ it("executes the first boot-time command under pinned instructions and routes li
     expect(f.fetches()).toBe(1);
   } finally {
     f.releaseGit.resolve();
+    await bundle?.closeResources?.();
+    await f.close();
+  }
+});
+
+it("copies the captured binary/script outside Git, singleflights admission, and reuses captured bytes after replacement", async () => {
+  const gate = { entered: barrier(), release: barrier(), failNext: false };
+  const f = await fixture(undefined, gate);
+  let bundle: Bundle | undefined;
+  try {
+    f.releaseGit.resolve();
+    bundle = await f.openContext();
+    const path = ownerPath(bundle.instructions, "owner-proof");
+    expect((await invoke(bundle, "read", { path })).output).toEqual([
+      { type: "text", text: ownerSkill("v1") },
+    ]);
+    expect(f.bindings()).toBe(0);
+    (
+      await f.database.ownerSkills.apply(f.task, f.project.ownerUserId, {
+        kind: "replace",
+        name: "owner-proof",
+        skill: { name: "owner-proof", content: ownerSkill("v2") },
+      })
+    )._unsafeUnwrap();
+    await f.state("running");
+    const abort = new AbortController();
+    const first = required(bundle.checkExecutionReady)(
+      withAbortSignal(abort.signal, BACKGROUND_CONTEXT),
+    );
+    await gate.entered.promise;
+    const second = required(bundle.checkExecutionReady)(BACKGROUND_CONTEXT);
+    abort.abort();
+    gate.release.resolve();
+    expect((await first).isErr()).toBe(true);
+    expect((await second).isOk()).toBe(true);
+    expect(f.installs()).toBe(1);
+    execFileSync("git", ["init", "-q", f.root]);
+    const before = execFileSync("git", ["-C", f.root, "status", "--porcelain"]).toString();
+    const run = async () => {
+      const output = await invoke(required(bundle), "bash", {
+        command: `${path.replace(/SKILL.md$/, "scripts/run")} && cat ${path}`,
+      });
+      expect(output.isError, JSON.stringify(output)).not.toBe(true);
+      expect(JSON.stringify(output.output)).toContain("captured-v1");
+      expect(JSON.stringify(output.output)).toContain("owner body v1");
+      expect(JSON.stringify(output.output)).not.toContain("owner body v2");
+    };
+    await run();
+    expect(await readFile(join(f.root, path.replace(/SKILL.md$/, "data.bin")))).toEqual(
+      Buffer.from([0, 255, 1]),
+    );
+    expect(execFileSync("git", ["-C", f.root, "status", "--porcelain"]).toString()).toBe(before);
+    expect((await invoke(bundle, "read", { path: join(f.root, path) })).output).toEqual([
+      { type: "text", text: ownerSkill("v1") },
+    ]);
+    const alerts: string[] = [];
+    required(bundle.activateResources)((_id, message) => {
+      alerts.push(message);
+      return okAsync({ recordId: "alert", duplicate: false });
+    });
+    gate.failNext = true;
+    const replacement = await f.replaceHost();
+    const failed = await invoke(bundle, "bash", { command: "printf MUST_NOT_RUN" });
+    expect(failed.isError).toBe(true);
+    expect(alerts).toEqual(["Owner skills unavailable: test install failure"]);
+    (await required(bundle.checkExecutionReady)(BACKGROUND_CONTEXT))._unsafeUnwrap();
+    await run();
+    expect(f.installs()).toBe(3);
+    expect(await readFile(join(replacement, path.replace(/SKILL.md$/, "data.bin")))).toEqual(
+      Buffer.from([0, 255, 1]),
+    );
+  } finally {
+    gate.release.resolve();
     await bundle?.closeResources?.();
     await f.close();
   }

@@ -1339,6 +1339,18 @@ button.personal-instructions-gear {
   min-height: 120px;
   border: 1px solid var(--g2);
 }
+.skill-editor > select,
+.skill-editor input {
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--g2);
+}
+.skill-source {
+  overflow-wrap: anywhere;
+  margin-bottom: 6px;
+}
 .reasoning-body .skill-editor .personal-instructions-feedback {
   border-top: 0;
   padding: 6px 0 2px;

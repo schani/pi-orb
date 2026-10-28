@@ -21,6 +21,7 @@ import {
   OWNER_SECRETS_PATH,
   OWNER_SKILL_NAME_PATTERN,
   OWNER_SKILLS_PATH,
+  type OwnerSkill,
   PERSONAL_INSTRUCTIONS_PATH,
   type PersonalInstructions,
   PollOrbMessagesRequestSchema,
@@ -98,7 +99,7 @@ interface MockState {
   mcpGrants: Set<string>;
   personalInstructions: PersonalInstructions;
   gitIdentity: GitIdentity;
-  ownerSkills: Map<string, { content: string; description: string; updatedAt: string }>;
+  ownerSkills: Map<string, Omit<OwnerSkill, "name">>;
   projectInstructions: Map<string, ProjectInstructions>;
 }
 
@@ -925,6 +926,7 @@ function initialState(timestampChurn: boolean, orbNesting: boolean): MockState {
           content: `---\nname: ${name}\ndescription: ${description}\n---\n`,
           description,
           updatedAt: createdAt,
+          source: null,
         },
       ]),
     ),
@@ -1478,8 +1480,9 @@ async function handleApi(
         });
         return true;
       }
+      const source = target === null ? null : (state.ownerSkills.get(target)?.source ?? null);
       if (target !== null) state.ownerSkills.delete(target);
-      state.ownerSkills.set(name, { content, description, updatedAt: now() });
+      state.ownerSkills.set(name, { content, description, updatedAt: now(), source });
     }
     sendJson(response, 200, {
       items: [...state.ownerSkills]

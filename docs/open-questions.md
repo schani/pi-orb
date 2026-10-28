@@ -231,3 +231,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 ## Native history search prerequisites — 85
 
 85. **Resolved (2026-10-29, PDT):** use **1.3.1**, assuming Google fixed the reported bugs or they are irrelevant; backports remain unverified. The user rejected waiting for patched **1.5.1+** to avoid delay. Use two sequential PR/releases: **deploy** flag-only prerequisite [PR 230](https://github.com/schani/pi-orb/pull/230), including its required restart, **before merging** the replacement feature PR. Keep migrations before full infrastructure apply. A stored projection does not address recycled-page corruption; no projection state or workaround is approved. Findings and qualification: `docs/history-search.md`, `docs/testing.md`; ordering: `docs/deployment.md`.
+
+## GitHub owner-skill folders — 86
+
+86. **Resolved (2026-10-28; user decision):** direct Add acquires a public GitHub folder once at one commit, preserving binary supporting files/executable mode and pinned provenance in the existing skill row. Manual root edits preserve those files/source. One complete 8 MiB / 1000-file owner snapshot serves private capture and gated off-checkout installation; no preview/refetch or broader cache machinery. Contract and rationale: `docs/owner-skills-secrets.md`.
