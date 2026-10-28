@@ -129,6 +129,7 @@ Tracking:
 
 - [docs/postmortems/2026-10-29-pg17-production.md](docs/postmortems/2026-10-29-pg17-production.md) — production upgrade and ANALYZE guard; release validated, rollout monitor failed on headline/deletion overlap
 - [docs/postmortems/2026-10-29-pg17-ci-qualification.md](docs/postmortems/2026-10-29-pg17-ci-qualification.md) — stale release contracts, ambiguous status locator and unmanaged Chromium CHECK; PR and exact-main qualification passed
+- [docs/postmortems/2026-10-28-github-skills-ci-qualification.md](docs/postmortems/2026-10-28-github-skills-ci-qualification.md) — managed-config recovery fixture and Chromium native crash; CI browser pinning
 - [docs/postmortems/2026-10-25-claude-input-receipt-conflict.md](docs/postmortems/2026-10-25-claude-input-receipt-conflict.md) — queued-copy receipt conflict
 - [docs/postmortems/2026-10-25-codex-fixture-grant-expiry.md](docs/postmortems/2026-10-25-codex-fixture-grant-expiry.md) — changing fixture expiry suppressed ambiguous broker diagnostics
 - [docs/postmortems/2026-10-24-native-image-capture-502.md](docs/postmortems/2026-10-24-native-image-capture-502.md) — native image insert succeeded while gcloud failed with 502; cleanup and unchanged production verified
